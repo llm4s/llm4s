@@ -371,6 +371,97 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     }
 
   // ---------------------------------------------------------------------------------------------------------------
+  // Option values are consumed once, in getopt order (#1763)
+
+  it should "check the file after a -t that an earlier sort option took as its value (#1763)" in inWorkspace { fx =>
+    val ws = fx.interface(ReadOnly)
+    sortValueEscapes.foreach { command =>
+      // A Windows runner refuses sort's -t and -T as options first (see `windowsSortRefusal`)
+      if (isWindowsHost) refusesWithAny(ws, fx.expand(command), Set(ArgumentNotAllowed, PathEscape))
+      else refuses(ws, fx.expand(command), PathEscape)
+      refusesWithAny(fx.interface(ReadOnly, windows = true), fx.expand(command), Set(ArgumentNotAllowed, PathEscape))
+    }
+  }
+
+  it should "still take sort's field separator as text when it really is -t's value (#1763)" in inWorkspace { fx =>
+    val ws = fx.interface(ReadOnly)
+    runs(ws, "sort -t / -k1 a.txt").stdout shouldBe "a\na\nb\nc\n"
+    runs(ws, "sort -t: a.txt").stdout shouldBe "a\na\nb\nc\n"
+    runs(ws, "sort -k2,2 -t, a.txt")
+    runs(ws, "sort -T sub -t / -k2 a.txt")
+    runs(ws, "sort -Tsub -t / a.txt")
+    runs(ws, "sort -rT sub -t / a.txt").stdout shouldBe "c\nb\na\na\n"
+    runs(ws, "sort --temporary-directory=sub -t / a.txt")
+    runs(ws, "sort --temp sub --field-separator / a.txt")
+    runs(ws, "sort --field-sep / a.txt")
+    runs(ws, "sort --random-source a.txt -t / a.txt")
+    runs(ws, "sort -k 1 -t / -- a.txt")
+    runs(ws, "sort -t / a.txt b.txt")
+  }
+
+  it should "check sort's -t value when the arguments cannot be parsed exactly (#1763)" in inWorkspace { fx =>
+    val ws = fx.interface(ReadOnly)
+    Seq(
+      // BSD sort rewrites `+POS1 -POS2` before parsing options, so `-1t` may vanish into another option's value
+      "sort -T +0 -1t /",
+      // an option neither GNU nor BSD sort has: the parse after it is a guess
+      "sort --no-such-option -t / a.txt",
+      "sort -x -t / a.txt",
+      // after an operand, a sort run with POSIXLY_CORRECT reads every argument as a file
+      "sort a.txt -t /"
+    ).foreach(command => refuses(ws, command, if (isWindowsHost) ArgumentNotAllowed else PathEscape))
+  }
+
+  it should "check an option-looking argument whole, as a program that reads it as a file opens it (#1763)" in
+    inWorkspace { fx =>
+      link(fx, "-f", fx.outside.resolve("secret.txt"))
+      link(fx, "-d", fx.outside)
+      val ws = fx.interface(ReadWrite)
+      // BSD cat stops reading options at its first operand, so it opens `-f`
+      refuses(ws, "cat a.txt -f", PathEscape)
+      // `-d` is the value of -T and of -t: sort writes its temporary files into it, cp copies into it
+      refuses(ws, "sort -T -d a.txt", PathEscape)
+      refuses(ws, "cp -t -d a.txt", PathEscape)
+      refuses(ws, "cp --target-directory -d a.txt", PathEscape)
+      new String(Files.readAllBytes(fx.outside.resolve("secret.txt")), StandardCharsets.UTF_8) shouldBe "secret\n"
+    }
+
+  it should "see cp's recursive flag after a -- that -S took as its suffix (#1763)" in inWorkspace { fx =>
+    // `dst/src` is a directory inside the workspace holding a link out: a recursive copy of `src` writes through it
+    Files.createDirectories(fx.root.resolve("dst").resolve("src"))
+    link(fx, "dst/src/secret.txt", fx.outside.resolve("secret.txt"))
+    Files.createDirectory(fx.root.resolve("src"))
+    write(fx.root.resolve("src").resolve("secret.txt"), "OVERWRITTEN\n")
+    val ws = fx.interface(ReadWrite)
+    refuses(ws, "cp -R src dst", PathEscape) // the control: seen as recursive
+    refuses(ws, "cp -S -- -R src dst", PathEscape)
+    refuses(ws, "cp --suffix -- -R src dst", PathEscape)
+    refuses(ws, "cp --suf -- -a src dst", PathEscape)
+    new String(Files.readAllBytes(fx.outside.resolve("secret.txt")), StandardCharsets.UTF_8) shouldBe "secret\n"
+  }
+
+  it should "check the name cp --path writes, as it does for --parents (#1763)" in inWorkspace { fx =>
+    Files.createDirectories(fx.root.resolve("dst"))
+    link(fx, "dst/src", fx.outside)
+    Files.createDirectory(fx.root.resolve("src"))
+    write(fx.root.resolve("src").resolve("secret.txt"), "OVERWRITTEN\n")
+    val ws = fx.interface(ReadWrite)
+    refuses(ws, "cp --parents src/secret.txt dst", PathEscape)
+    refuses(ws, "cp --path src/secret.txt dst", PathEscape)
+    refuses(ws, "cp --pat src/secret.txt dst", PathEscape)
+  }
+
+  it should "still run cp with option values in every spelling (#1763)" in inWorkspace { fx =>
+    val ws = fx.interface(ReadWrite)
+    // GNU cp only; BSD cp has no -t
+    passesPolicy(ws, "cp -t sub a.txt")
+    passesPolicy(ws, "cp --target-directory sub b.txt")
+    passesPolicy(ws, "cp -S .bak -- a.txt sub")
+    runs(ws, "cp -R sub sub2")
+    Files.exists(fx.root.resolve("sub2").resolve("Main.scala")) shouldBe true
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
   // Cost of the path check
 
   it should "refuse an over-long argument instead of walking it" in inWorkspace { fx =>
@@ -1216,6 +1307,33 @@ object WorkspaceCommandArgumentsSpec {
     "findstr /S /I x *.txt",
     "type a?.txt",
     "git show HEAD:a.txt"
+  )
+
+  /**
+   * A `sort` whose input `{out}/secret.txt` follows a `-t` (or `--field-separator`) that is not an option: an earlier
+   * option took it as its value, so the next argument is a file sort reads (#1763). BSD sort (macOS) printed the
+   * secret for each form it accepts; GNU sort reads it in the same forms (and through `-y`, which BSD lacks).
+   */
+  val sortValueEscapes: Seq[String] = Seq(
+    "sort -T -t '{out}/secret.txt'",
+    "sort --random-source -t '{out}/secret.txt'",
+    "sort -T-t '{out}/secret.txt'",
+    "sort -rT -t '{out}/secret.txt'",
+    "sort --temporary-directory -t '{out}/secret.txt'",
+    "sort --temp -t '{out}/secret.txt'",
+    "sort --random-sou -t '{out}/secret.txt'",
+    "sort --random-source --field-separator '{out}/secret.txt'",
+    "sort --random-source --field-sep '{out}/secret.txt'",
+    "sort -S -t '{out}/secret.txt'",
+    "sort --buffer-size -t '{out}/secret.txt'",
+    "sort --parallel -t '{out}/secret.txt'",
+    "sort --batch-size -t '{out}/secret.txt'",
+    "sort -k -t '{out}/secret.txt'",
+    "sort --key -t '{out}/secret.txt'",
+    "sort --sort -t '{out}/secret.txt'",
+    "sort -yt '{out}/secret.txt'",
+    "sort -T +0 -1t '{out}/secret.txt'",
+    "sort -t, -T -t '{out}/secret.txt'"
   )
 
   val refusedEnvironment: Seq[(String, String)] = Seq(

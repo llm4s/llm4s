@@ -137,13 +137,13 @@ following links out of the workspace through its own options:
 |---------|---------|
 | `find` | `-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fprint`, `-fprint0`, `-fprintf`, `-fls`, `-files0-from`, `-follow`, `-L` (also in `-HL`) |
 | `git` | any subcommand but `status`, `log`, `show`, `diff`, `ls-files`, `ls-tree`, `grep`, `blame`, `rev-parse`, `branch`; any global option but `--version`, `--no-pager`, `--no-optional-locks`, `--literal-pathspecs`, `--no-replace-objects` (so `-c`, `-C`, `--exec-path`, `--git-dir`, `--work-tree`, `-p`); `--output`, `--ext-diff`, `--textconv`, `--show-signature` on `log`/`show`/`diff`; `-O`, `--open-files-in-pager`, `--textconv` on `grep`; `--textconv` on `blame`; an argument starting with `:` (pathspec magic, index paths); `branch` with anything but listing options, or with a name unless `--list`/`-l` makes it a pattern (the values of `--merged`, `--no-merged`, `--contains`, `--no-contains`, `--points-at`, `--sort` and `--format` are values, not names) |
-| `sort` | `-o`, `--output`, `--compress-program`, `--files0-from`; on Windows also `/O`, `/T`, `-O`, `-T`, `-t`, `--temporary-directory` |
+| `sort` | `-o`, `--output`, `--compress-program`, `--files0-from`; on Windows also `/O`, `/T`, `-O`, `-T`, `-t`, `--temporary-directory`. The value of `-t` / `--field-separator` is not path-checked only when it really is that value: see [Option values](#option-values) |
 | `findstr` (Windows) | a switch with `F` among its letters (`/F:list`), a `/D:` value holding `,` or `;` |
 | `uniq` | a second operand (the output file); every argument after the first operand counts as one, as BSD `uniq` does not reorder its arguments, so write options before the file (`uniq -c a.txt`, not `uniq a.txt -c`) |
 | `wc` | `--files0-from` |
 | `ls` | `-L`, `--dereference` |
 | `grep` | `-R`, `--dereference-recursive`, `-S` (BSD) |
-| `cp` | `-L`, `--dereference`, `-H`, `-s`, `--symbolic-link`; with `-R`, `-r`, `-a`, `-P` or `-d`, two sources with the same name, or several sources and one that names a directory's contents (`src/.`, `src/`) |
+| `cp` | `-L`, `--dereference`, `-H`, `-s`, `--symbolic-link`; with `-R`, `-r`, `-a`, `-P` or `-d` (or their long forms) anywhere in the arguments, two sources with the same name, or several sources and one that names a directory's contents (`src/.`, `src/`) |
 | `chmod` | `-L`, `-H`, `--dereference` |
 | `hostname` | an operand, `-F`, `--file`, `-b`, `--boot` |
 
@@ -166,8 +166,11 @@ Windows) is refused. Only a `..` after a symbolic link makes the two differ. Tha
 - a long option `--name=value`: the whole argument and the value, so `git log --since=2024/01/01`, `--grep=feat/x`,
   `git ls-files --exclude=*/target/*`, `grep --include=sub/*.scala` and `ls --hide=x/y` run, while
   `--exclude-from=../x` or a value through a link out of the workspace is refused;
-- a short option: every tail after its dash, so an attached value at any position (`-f/x`, `-rf/x`) is checked;
-- `sort -t` and `--field-separator` take a separator, not a path: `sort -t/ -k2` and `sort -t / -k2` run;
+- a short option: the whole argument and every tail after its dash, so an attached value at any position (`-f/x`,
+  `-rf/x`) is checked, and so is the name a program opens when it reads the argument as a file (BSD programs stop
+  reading options at their first operand, so `cat a.txt -f` opens `-f`);
+- `sort -t` and `--field-separator` take a separator, not a path: `sort -t/ -k2`, `sort -t / -k2` and
+  `sort --field-separator=/` run (POSIX only; see [Option values](#option-values)).
 - on Windows, the `/X` switches of `dir`, `findstr`, `copy`, `move` and `sort` are switches, not paths, but a value
   after `:` (`findstr /G:file`) is checked;
 - on Windows, a string the platform cannot parse as a path is judged by the part before the first character a path
@@ -216,6 +219,38 @@ What these checks do not cover:
   outside. Paths through it are refused, and so is a recursive `cp` into its directory, but the link is not removed.
 - The checks run before the program starts, so a link made at a checked name by a concurrent command is not seen.
   Windows `copy` gets the path rule but not `cp`'s destination checks.
+
+### Option values
+
+An option that takes a value takes the next argument whatever it is, so the argument after a `-t` is a separator
+only if that `-t` is an option and not another option's value: in `sort -T -t /etc/passwd` and
+`sort --random-source -t /etc/passwd`, `-T` and `--random-source` take `-t`, and `/etc/passwd` is a file sort reads
+([#1763](https://github.com/llm4s/llm4s/issues/1763)). On POSIX the runner therefore parses `sort`'s arguments as
+`getopt` does, each option's value consumed exactly once, for the options of both GNU and BSD sort:
+
+| Takes a value | Short | Long |
+|---------------|-------|------|
+| always | `-k`, `-o`, `-S`, `-t`, `-T` | `--batch-size`, `--buffer-size`, `--compress-program`, `--field-separator`, `--files0-from`, `--key`, `--output`, `--parallel`, `--random-source`, `--sort`, `--temporary-directory` |
+| only after `=` | | `--check` |
+| GNU only: attached, or a next argument of digits | `-y` | |
+
+A value is attached (`-Tdir`, `-rTdir`, `--temporary-directory=dir`) or the next argument (`-T dir`, `-rT dir`,
+`--temporary-directory dir`, and any unambiguous abbreviation such as `--temp dir`); a `--` an option takes as its
+value does not end the options. Every operand and every other option's value is checked whole. The separator is
+left out only when:
+
+- every option is one GNU or BSD sort has, unambiguously abbreviated, with its value where it needs one;
+- no argument starts with `+` (BSD sort rewrites the obsolete `+POS1 -POS2` into `-k` before it reads options, even
+  inside another option's value, so `sort -T +0 -1t /etc/passwd` reads `/etc/passwd`);
+- the `-t` comes before the first operand (with `POSIXLY_CORRECT` in the runner's environment, GNU sort reads every
+  argument after its first operand as a file; write `sort -t / a.txt`, not `sort a.txt -t /`).
+
+Otherwise the separator is checked like any other value, so `-t /` is refused there. `cp` is parsed the same way
+(GNU's `-S` / `--suffix` and `-t` / `--target-directory` take a value; macOS cp takes none and stops at its first
+operand), so a `--` that `-S` takes does not hide a later `-R` (`cp -S -- -R src dst`), and `--path`, GNU's old
+name for `--parents`, gets the `--parents` destination check. `uniq` (its `-f`, `-s`, `-w` values) and `git branch`
+(the values of `--merged`, `--contains`, `--sort`, `--format`, ...) already consume each value once. Windows keeps
+its own `sort` rules (see [On Windows](#on-windows)); there the argument after `--field-separator` is checked.
 
 ### On Windows
 

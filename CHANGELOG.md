@@ -2023,6 +2023,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - workspace runner: an option's value is consumed once, so every file `sort` reads is path-checked**
+  ([#1763](https://github.com/llm4s/llm4s/issues/1763)): the command policy did not check the argument after a bare
+  `sort -t` / `--field-separator`, taking it for the separator, even when an earlier option had already taken that
+  `-t` as its own value. Then the next argument is a file sort reads, and it was never held to the workspace:
+  `sort -T -t /etc/passwd` and `sort --random-source -t /etc/passwd` printed the file, over both the direct
+  `executeCommand` path and the WebSocket executor. On POSIX, `sort`'s arguments are now parsed as `getopt` parses
+  them, with GNU and BSD sort's option tables (`-k`, `-o`, `-S`, `-t`, `-T`, GNU's `-y`, and the long options that
+  take a value, under any unambiguous abbreviation, attached, after `=` or as the next argument, clustered, up to the
+  `--` that ends the options), and every operand and option value is checked; the separator is left out only when it
+  really is `-t`'s value under every parse. It is checked too when an option is unknown or ambiguous, when an argument
+  starts with `+` (BSD sort's obsolete `+POS1 -POS2`, which it rewrites before parsing, made `sort -T +0 -1t file`
+  read `file`), and after the first operand (GNU sort with `POSIXLY_CORRECT` reads every later argument as a file), so
+  `sort a.txt -t /` is now refused; write `sort -t / a.txt`. The same audit found and fixed two more cases: `cp`'s
+  destination checks missed a `-R` after a `--` that `-S` took as its suffix (`cp -S -- -R src dst`), and GNU's
+  `--path` spelling of `--parents`; and a short option such as `-f` was checked only by its tails, not as the whole
+  name a program opens when it reads it as a file (`cat a.txt -f` on BSD, `cp -t -d`, `sort -T -d`). On Windows the
+  argument after `--field-separator` is now checked; the other `sort.exe` rules are unchanged. `uniq`, `git branch`
+  and the shell tool (`llm4s-agent-tools`, which checks the argument after `sort -t` already) needed no change. See
+  [Option values](docs/reference/workspace-sandbox.md#option-values).
 - **Security - `llm4s-agent-tools`: the shell tool checks option values attached to their flag**
   ([#1723](https://github.com/llm4s/llm4s/issues/1723)): under `ShellConfig.pathPolicy`, a value given as its own
   argument (`grep -f lout`) was held to the policy, but one attached to its flag (`grep -flout`, `grep -iflout`,
