@@ -2081,6 +2081,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - workspace runner: a planted git config or attribute cannot make an allowed git command run a
+  program** ([#1721](https://github.com/llm4s/llm4s/issues/1721)): `git` reads the repository's `.git/config`,
+  attributes and hooks, so an agent that could write files - or a repository cloned into the workspace already
+  hostile - made a later `git status`, `git diff`, `git log -p`, `git show`, `git blame` or `git ls-files -m` run a
+  program through `core.fsmonitor`, a `post-index-change` hook (`.git/hooks` or `core.hooksPath`), `diff.external`,
+  a diff driver's `command` or `textconv`, a `clean` / `smudge` / `process` filter named in `.gitattributes` or
+  `.git/info/attributes`, `gpg.program` under `log.showSignature`, a partial clone's lazy fetch through its remote
+  (`ext::`, `core.sshCommand`), or a submodule's own configuration; `$HOME/.gitconfig` and
+  `$XDG_CONFIG_HOME/git/config` applied too. Every `git` the runner starts now has: no system or global
+  configuration or attributes (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL` the null device, `GIT_ATTR_NOSYSTEM`,
+  `HOME` and `XDG_CONFIG_HOME` an empty directory the runner owns), no transport and no lazy fetch
+  (`GIT_ALLOW_PROTOCOL` naming none, `GIT_NO_LAZY_FETCH`), no optional index write, no pager; `-c` overrides
+  `core.fsmonitor=false`, `core.hooksPath` the empty directory, `diff.external` empty, `log.showSignature=false`,
+  `gpg.*.program` a directory, `diff.ignoreSubmodules=all`, `safe.bareRepository=explicit`; `--no-ext-diff`,
+  `--no-textconv` and `--ignore-submodules=all` after `diff` / `log` / `show` (and the two that apply to `status`,
+  `blame`, `grep`); and, from a `git config --list` of the repository taken just before the command, every filter
+  and diff driver it defines blanked. A configuration with an `include.path` / `includeIf`, a `hook.*` key, or a
+  driver name `-c` cannot express is refused (`GIT_CONFIG_NOT_ALLOWED`), as is `--ignore-submodules` from the agent
+  (`ARGUMENT_NOT_ALLOWED`). Writes into `.git` are refused too, in any spelling (`.GIT`, `.git.`, `GIT~1`) and
+  through a link: `writeFile` / `modifyFile` with `PATH_NOT_ALLOWED`, and any program other than the read-only ones
+  (`cp`, `mv`, `rm`, `mkdir`, `touch`, `chmod`, `copy`, `move`, an added program) naming it with
+  `ARGUMENT_NOT_ALLOWED`. The system and global git configuration of whoever runs the runner no longer apply,
+  so a `safe.directory` set there does not either. `GitConfigRoutesSpec` plants each route, shows git run directly
+  runs it, and shows no allowed command run through the runner does.
 - **Security - workspace runner: allowlisted programs start by a trusted absolute path, never from the working
   directory** ([#1790](https://github.com/llm4s/llm4s/issues/1790)): the runner handed `ProcessBuilder` the bare
   program name. On Windows `CreateProcess` then searched the directory of the runner's `java.exe` and the runner's

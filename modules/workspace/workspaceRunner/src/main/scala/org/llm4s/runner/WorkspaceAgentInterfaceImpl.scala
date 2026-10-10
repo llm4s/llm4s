@@ -17,6 +17,7 @@ import scala.collection.mutable.ListBuffer
 import scala.io.Source
 import scala.jdk.CollectionConverters._
 import scala.util.{ Failure, Success, Try, Using }
+import scala.util.chaining._
 
 /**
  * Implementation of WorkspaceAgentInterface that operates on a local filesystem workspace.
@@ -83,6 +84,22 @@ class WorkspaceAgentInterfaceImpl(
     }
 
     normalized
+  }
+
+  /**
+   * Refuses (`PATH_NOT_ALLOWED`) a write to `.git` or a path inside one, as written or through a link: git reads its
+   * configuration, hooks and attributes there and runs the programs they name, and a `.git` file points git at another
+   * repository (#1721).
+   */
+  private def refuseGitMetadata(path: String, resolved: Path): Unit = {
+    val realRoot = Try(rootPath.toRealPath()).getOrElse(rootPath)
+    if (CommandPolicy.namesGitMetadata(resolved, rootPath, realRoot))
+      throw new WorkspaceAgentException(
+        s"Path '$path' names '.git' or a path inside one; git reads its configuration, hooks and attributes there " +
+          "and runs the programs they name, so the file operations may not write it",
+        "PATH_NOT_ALLOWED",
+        None
+      )
   }
 
   /**
@@ -271,8 +288,9 @@ class WorkspaceAgentInterfaceImpl(
     createDirectories: Option[Boolean] = None
   ): WriteFileResponse = {
     val resolvedPath = resolvePath(path)
-    val writeMode    = mode.getOrElse("overwrite")
-    val createDirs   = createDirectories.getOrElse(false)
+    refuseGitMetadata(path, resolvedPath)
+    val writeMode  = mode.getOrElse("overwrite")
+    val createDirs = createDirectories.getOrElse(false)
 
     if (createDirs) {
       Files.createDirectories(resolvedPath.getParent)
@@ -336,6 +354,7 @@ class WorkspaceAgentInterfaceImpl(
     operations: List[FileOperation]
   ): ModifyFileResponse = {
     val resolvedPath = resolvePath(path)
+    refuseGitMetadata(path, resolvedPath)
 
     if (!Files.exists(resolvedPath)) {
       throw new WorkspaceAgentException(
@@ -767,6 +786,10 @@ class WorkspaceAgentInterfaceImpl(
    *                                      from (the workspace, the runner's own
    *                                      working directory, a relative `PATH`
    *                                      entry), or nowhere (#1790)
+   * 11. `GIT_CONFIG_NOT_ALLOWED` / `EXECUTION_FAILED` – `git` only: the repository's configuration holds what the
+   *                                      runner cannot switch off (an include, a configured hook, a driver name `-c`
+   *                                      cannot express), or cannot be listed; otherwise git is started as
+   *                                      [[GitSandbox]] describes, so the repository cannot make it run a program (#1721)
    *
    * Layers 7-9 are [[CommandPolicy]], which documents each program's rules (#1715). Layer 10 is [[ProgramResolver]]:
    * the program is started by the absolute path it resolves, never by its bare name, so neither `CreateProcess` (which
@@ -943,9 +966,35 @@ class WorkspaceAgentInterfaceImpl(
     // cmd.exe searches its current directory - the workspace - for a program a built-in starts (`call x`); this
     // stops it (#1790)
     if (routedThroughCmd) builder.environment().put("NoDefaultCurrentDirectoryInExePath", "1")
-    if (execLower == "git") CommandPolicy.confineGit(builder.environment(), realRoot)
+    if (execLower == "git") {
+      CommandPolicy.confineGit(builder.environment(), realRoot)
+      sandboxGit(builder, finalArgv.head, argv.tail, realRoot)
+    }
 
     PreparedCommand(builder, timeout.getOrElse(config.defaultCommandTimeout))
+  }
+
+  /**
+   * Layer 11 (#1721): `git` runs with the environment, `-c` overrides and options of [[GitSandbox]], and every filter
+   * and diff driver the repository's configuration defines blanked, so neither a configuration the agent wrote nor
+   * one the repository arrived with makes an allowed read command run a program. Refused (`GIT_CONFIG_NOT_ALLOWED`)
+   * when the configuration holds what the overrides cannot cover, or `EXECUTION_FAILED` when it cannot be listed.
+   */
+  private def sandboxGit(builder: java.lang.ProcessBuilder, git: String, args: Seq[String], realRoot: Path): Unit = {
+    def failed(why: String): Nothing =
+      throw new WorkspaceAgentException(s"git was not run: $why.", "EXECUTION_FAILED", None)
+
+    val empty = GitSandbox.checkedEmptyDirectory(realRoot).fold(failed, identity)
+    GitSandbox.environment(builder.environment(), empty)
+    val drivers =
+      if (!GitSandbox.hasSubcommand(args)) Nil
+      else
+        GitSandbox
+          .listConfiguration(builder, git, empty)
+          .fold(failed, identity)
+          .pipe(GitSandbox.driverOverrides)
+          .fold(refused => throw new WorkspaceAgentException(refused.message, refused.code, None), identity)
+    builder.command((git +: GitSandbox.arguments(args, GitSandbox.fixedOverrides(empty) ++ drivers)).asJava)
   }
 
   /**

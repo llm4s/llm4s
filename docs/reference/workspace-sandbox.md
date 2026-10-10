@@ -115,12 +115,16 @@ and run a second command as a second request.
 | An argument holding a NUL character, on Windows one holding `"`, or one whose check fails with an error | `ARGUMENT_NOT_ALLOWED` |
 | On Windows, a cmd.exe built-in's argument holding a character cmd.exe splits or parses (`,` `=` `(` `)` `@` `!`, a control character, a non-ASCII space) | `ARGUMENT_NOT_ALLOWED` |
 | `git` with a `.git` file or link between the working directory and the workspace root | `PATH_ESCAPE_ATTEMPT` |
+| A program other than the read-only ones naming `.git` or a path inside one (see [git's own files](#gits-own-files)) | `ARGUMENT_NOT_ALLOWED` |
 | An argument that names a location outside the workspace (an `rm` / `unlink` operand or `mv` source naming a link itself: its directory, see [Removing a link](#removing-a-link)) | `PATH_ESCAPE_ATTEMPT` |
 | On Windows, a form listed under [On Windows](#on-windows) (a device name, a trailing `.` or space, `@`, `~`, glob syntax) | `ARGUMENT_NOT_ALLOWED` |
 | `cp` only: a name it would write leads outside, or a recursive copy's destination holds a link that does | `PATH_ESCAPE_ATTEMPT` |
 | `mv` or `cp` of several sources: a path goes through a name another source's operation creates, replaces or removes, or `mv` moves the working directory (see [Several sources in one command](#several-sources-in-one-command)) | `ARGUMENT_NOT_ALLOWED` |
 | The program is found only where the runner never starts one from: the workspace, the runner's own working or Java directory, or an empty or relative `PATH` entry (see [Program resolution](#program-resolution)) | `EXECUTABLE_NOT_ALLOWED` |
 | The program is found nowhere the runner looks | `EXECUTABLE_NOT_FOUND` |
+| `git` only: the repository's configuration has an `include.path` / `includeIf`, a `hook.*` key, or a driver name a `-c` override cannot express (see [git's own files](#gits-own-files)) | `GIT_CONFIG_NOT_ALLOWED` |
+
+`writeFile` and `modifyFile` refuse a path naming `.git` or a path inside one with `PATH_NOT_ALLOWED`.
 
 ### Program resolution
 
@@ -254,10 +258,8 @@ following links, for a link that leads outside.
 
 What these checks do not cover:
 
-- `git` reads the repository's own `.git/config` and runs its hooks, so where the agent can write files it can set
-  `core.fsmonitor`, `diff.external` or a filter driver, or add a hook such as `.git/hooks/post-index-change`, that
-  `git status` or `git diff` then runs, or point git at files outside through `core.worktree`, `.git/commondir` or
-  `.git/objects/info/alternates` ([#1721](https://github.com/llm4s/llm4s/issues/1721)).
+- A repository that arrives with a `.git/config` `core.worktree`, a `.git/commondir` or
+  `.git/objects/info/alternates` points git at files outside; see [git's own files](#gits-own-files).
 - `diff -r` follows symbolic links it meets inside the tree it walks; no portable option stops it.
 - A relative link moved or copied to another depth by the read-write list (`mv a/b/rel rel`) can come to point
   outside. Paths through it in a later command are refused, and so is a recursive `cp` into its directory; within
@@ -460,18 +462,79 @@ that point git at another repository or object store (`GIT_DIR`, `GIT_WORK_TREE`
 `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_NAMESPACE`,
 `GIT_DISCOVERY_ACROSS_FILESYSTEM`), add configuration (`GIT_CONFIG_*`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`
 with `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`) or name a program (`GIT_EXEC_PATH`, `GIT_EXTERNAL_DIFF`): a workspace
-without a repository of its own gets `not a git repository`. `GIT_CONFIG_NOSYSTEM` is not set, so the system and
-global git configuration of whoever runs the runner still apply. `GIT_CEILING_DIRECTORIES` is a list split on the
+without a repository of its own gets `not a git repository`. `GIT_CEILING_DIRECTORIES` is a list split on the
 path-list separator (`:` on POSIX, `;` on Windows) with no escaping, so where the workspace root's parent path - as
 configured or with links resolved - holds that character, git is refused (`PATH_ESCAPE_ATTEMPT`) rather than run
 with a ceiling it would misread. On every platform, `git` is also refused (`PATH_ESCAPE_ATTEMPT`) when the nearest
 `.git` between the working directory and the workspace root is not a directory, or is one whose real path lies
 outside the workspace (a `gitdir:` file, a link or a Windows junction points git at a repository elsewhere), and an
 argument starting with `:` is refused (`ARGUMENT_NOT_ALLOWED`): pathspec magic (`:/`, `:(top)`, `:!x`) and index
-paths (`:a.txt`) are resolved from the repository's top level, not the working directory. A repository inside the
-workspace whose `.git` directory points git at files elsewhere through what git reads from it (`core.worktree` in
-`.git/config`, `.git/commondir`, `.git/objects/info/alternates`), or a bare repository written into the workspace,
-is the same class of gap as [#1721](https://github.com/llm4s/llm4s/issues/1721): it needs the agent to write files.
+paths (`:a.txt`) are resolved from the repository's top level, not the working directory.
+
+### git's own files
+
+git reads the repository's `.git/config`, its attributes (`.gitattributes`, `.git/info/attributes`) and its hooks,
+and runs the programs they name. Before [#1721](https://github.com/llm4s/llm4s/issues/1721) an agent that could write
+files, or a repository cloned into the workspace already hostile, made an allowed read run a program:
+
+| Route | Run by | Defence | Test (`GitConfigRoutesSpec`) |
+|-------|--------|---------|------------------------------|
+| `core.fsmonitor` | `status`, `diff`, `ls-files`, `blame` | `-c core.fsmonitor=false` | not run core.fsmonitor |
+| `.git/hooks/post-index-change`, `core.hooksPath` | `status`, `diff` (index refresh) | `-c core.hooksPath=<empty dir>`, `GIT_OPTIONAL_LOCKS=0` | not run a hook |
+| `diff.external`, `diff.<driver>.command` | `diff` | `--no-ext-diff`, `-c diff.external=`, driver blanked | not run diff.external |
+| `diff.<driver>.textconv` | `diff`, `log -p`, `show`, `blame` | `--no-textconv`, driver blanked | not run a textconv driver |
+| `filter.<driver>.clean` / `smudge` / `process` via `.gitattributes` or `.git/info/attributes` | `status`, `diff`, `ls-files -m`, `blame`, `log -p`, `show` | driver blanked (`required=false`) | clean/smudge filter; process filter |
+| `gpg.program` (`log.showSignature`) | `log`, `show` | `-c log.showSignature=false`, `gpg.*.program` a directory | not run gpg.program |
+| Partial clone lazy fetch (`remote.<n>.url` `ext::`, `core.sshCommand`, a remote helper) | `show`, `log -p`, `blame` | `GIT_ALLOW_PROTOCOL` naming none, `GIT_NO_LAZY_FETCH=1` | not fetch a missing object |
+| A submodule's own configuration (`diff.submodule=diff`, a gitlink's drivers) | `status`, `diff`, `log -p`, `show` | `--ignore-submodules=all`, `-c diff.ignoreSubmodules=all`; the agent's `--ignore-submodules` refused | not start git in a submodule |
+| A bare repository written into the workspace | any | `-c safe.bareRepository=explicit` | not use a bare repository |
+| `$HOME/.gitconfig`, `$XDG_CONFIG_HOME/git/config`, system config | any | `GIT_CONFIG_GLOBAL` the null device, `GIT_CONFIG_NOSYSTEM`, `GIT_ATTR_NOSYSTEM`, `HOME` / `XDG_CONFIG_HOME` an empty directory | `GitSandboxUnitSpec` |
+| `core.pager`, `pager.<cmd>` | a terminal only | `--no-pager`, `GIT_PAGER=cat` | every route at once |
+| `include.path` / `includeIf`, `hook.*` | any | refused (`GIT_CONFIG_NOT_ALLOWED`) | refuse a repository whose configuration includes another file |
+
+`core.editor`, `sequence.editor`, `alias.*` (which cannot shadow a built-in subcommand), `credential.helper` and
+`core.askPass` are not reached by the allowed subcommands with no transport; the test with every route planted at
+once includes them. A `%G?` or `%(signature)` format, which would also verify a signature, is refused for its `%`.
+
+So every `git` the runner starts has:
+
+- **Environment**: `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` the null device (`/dev/null`, `NUL` on Windows),
+  `GIT_ATTR_NOSYSTEM=1`, `HOME` and `XDG_CONFIG_HOME` an empty directory the runner made outside the workspace (git is
+  refused, `EXECUTION_FAILED`, if it is not empty or lies inside the workspace), `GIT_TERMINAL_PROMPT=0`,
+  `GIT_PAGER=cat`, `PAGER=cat`, `GIT_OPTIONAL_LOCKS=0`, `GIT_NO_LAZY_FETCH=1` and `GIT_ALLOW_PROTOCOL` naming no
+  transport, which overrides any `protocol.<name>.allow` the repository sets. The system and global configuration of
+  whoever runs the runner no longer apply, so a `safe.directory` set there does not either: run the runner as the
+  workspace's owner.
+- **Before the subcommand**: `--no-pager` and `-c core.fsmonitor=false`, `-c core.hooksPath=<empty dir>`,
+  `-c diff.external=`, `-c log.showSignature=false`, `gpg.program`, `gpg.openpgp.program`, `gpg.x509.program` and
+  `gpg.ssh.program` set to the empty directory (which cannot be run), `-c diff.ignoreSubmodules=all`,
+  `-c safe.bareRepository=explicit`, `-c protocol.allow=never`. Command-line configuration wins over every file.
+- **After the subcommand**: `--no-ext-diff --no-textconv --ignore-submodules=all` for `diff`, `log` and `show`;
+  `--ignore-submodules=all` for `status`; `--no-textconv` for `blame` and `grep`. The agent cannot undo them:
+  `--ext-diff`, `--textconv` and `--ignore-submodules` are refused.
+- **Drivers**: a filter or diff driver is named by an attribute, which can be anywhere in the tree, and defined in
+  the configuration. Just before the command the runner lists that configuration (`git config --list --no-includes
+  --show-scope -z`, same directory and environment) and, for every driver it defines, adds
+  `-c filter.<name>.clean= -c filter.<name>.smudge= -c filter.<name>.process= -c filter.<name>.required=false`
+  (git then passes content through) or `-c diff.<name>.textconv= -c diff.<name>.command=`. An `include.path` or
+  `includeIf` (an included file may sit in the work tree and change after the listing), a `hook.*` key, or a driver
+  name holding `=`, `"` or a control character refuses the command (`GIT_CONFIG_NOT_ALLOWED`); so does a listing
+  that fails, takes more than ten seconds or is over 1 MB (`EXECUTION_FAILED`).
+
+Writes into `.git` are refused as well, which keeps an agent from planting any of this in a repository that is not
+hostile to begin with: `writeFile` and `modifyFile` refuse (`PATH_NOT_ALLOWED`), and every program but the read-only
+ones (`ls`, `cat`, `grep`, `find`, `head`, `tail`, `wc`, `sort`, `uniq`, `diff`, `git`, `dir`, `type`, `findstr`,
+...) is refused (`ARGUMENT_NOT_ALLOWED`) when an argument names `.git` or a path inside one - as written, or where it
+really leads through links. Names are matched as a file system may take them for `.git`: ignoring case and Unicode
+normalisation, the code points HFS+ ignores, an NTFS stream suffix, trailing dots and spaces, and 8.3 short names
+(`GIT~1`); `.gitignore`, `.gitattributes` and `.github` are ordinary names. A `.git` file anywhere (`gitdir:`) is
+refused the same way.
+
+Limits: a repository that arrives with `core.worktree`, `.git/commondir` or `.git/objects/info/alternates` still
+points git at files outside (git reads them, runs nothing). A program added with `WORKSPACE_EXTRA_COMMANDS` that
+writes files without naming them can still write into `.git`; the layers above still keep git from running what it
+writes. The configuration is listed just before the command, so a concurrent command that swaps in another
+repository between the two is not seen.
 
 ## Security Gaps Addressed
 
