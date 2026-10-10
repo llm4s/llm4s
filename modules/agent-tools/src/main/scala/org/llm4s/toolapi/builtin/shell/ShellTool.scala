@@ -396,10 +396,11 @@ object ShellTool {
    * Every argument but `--` is checked both ways: as a flag when it looks like one, and as a path. A `--` may be
    * consumed as an option's argument (see `flagsOf`), and an option's argument may itself be a file
    * (`grep -f -x`), so neither its position nor its leading `-` settles which one the program will take it for.
-   * A flag's attached values (see `attachedValues`) are checked as paths too.
+   * A flag's attached values (see `attachedValues`) are checked as paths too. A repeated argument gets the same
+   * verdict, so it is checked once (`distinct`): a flag repeated many times is not cut into its tails again.
    */
   private def argumentRefusal(program: String, args: Seq[String], checks: PathChecks): Option[String] =
-    args.iterator
+    args.distinct.iterator
       .flatMap { arg =>
         val asFlag = if (isFlag(arg)) flagRefusal(program, arg) else None
         asFlag

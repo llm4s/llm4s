@@ -528,7 +528,7 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
 
   it should "resolve in full a tail that names an existing link, however long its name (#1723)" in {
     val (root, _, config) = attachedValueFixture()
-    // Most file systems allow 255 bytes a name, FUSE on recent Linux 4095: plant the longest link this one holds
+    // Plant the longest of these link names the file system here accepts; the check must not depend on which
     val planted = Seq(3000, 1000, 255).iterator
       .map(length => "l" * length)
       .find(name => Try(Files.createSymbolicLink(root.resolve(name), root.getParent.resolve("elsewhere"))).isSuccess)

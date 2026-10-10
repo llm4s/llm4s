@@ -32,12 +32,12 @@ class SingleNameCheckSpec extends AnyFlatSpec with Matchers {
       "..",
       "a/b",
       "a\\b",
-      "C:x",        // drive-relative on Windows
-      "x:stream",   // an alternate data stream
+      "C:x",      // drive-relative on Windows
+      "x:stream", // an alternate data stream
       "x::$DATA",
-      "x.",         // Windows drops a trailing dot ...
-      "x ",         // ... and a trailing space
-      "CON",        // reserved device names, with or without an extension, in any case
+      "x.",  // Windows drops a trailing dot ...
+      "x ",  // ... and a trailing space
+      "CON", // reserved device names, with or without an extension, in any case
       "nul.txt",
       "com1",
       "Lpt9.log",
@@ -77,8 +77,8 @@ class SingleNameCheckSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "resolve in full a name that exists in either reading, a long one included" in {
-    // A file system may hold names of thousands of bytes (FUSE allows 4095 on recent Linux): an existing long name
-    // is a link as likely as a short one, so it must be resolved
+    // Whether a name this long can exist depends on the file system, so none is assumed: an existing long name may
+    // be a link as well as a short one, and must be resolved
     Seq("lout", "n" * 1000, "n" * 3000, "n" * 4095).foreach { name =>
       withClue(name.take(20)) {
         PathPolicy.childReadings(parent, name, _ => true) shouldBe PathPolicy.Child.Resolve
