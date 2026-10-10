@@ -3,7 +3,7 @@ package org.llm4s.toolapi.builtin.http
 import org.llm4s.core.safety.UsingOps.using
 import org.llm4s.toolapi._
 import org.llm4s.types.Result
-import org.llm4s.util.DurationRounding
+import org.llm4s.util.{ DurationRounding, Redaction }
 import upickle.default._
 
 import java.io.InputStream
@@ -173,9 +173,28 @@ object HTTPTool {
 
   private val ReadChunk = 8192
 
-  /** Headers that must be stripped once a redirect leaves the origin of the original request. */
-  private val SensitiveHeaders: Set[String] =
-    Set("authorization", "cookie", "proxy-authorization")
+  /**
+   * Headers never sent to another origin, even when `HttpConfig.redirectSafeHeaders` lists them. Core's redaction
+   * catches most other credential names (`X-Api-Key`, `X-Auth-Token`, `X-Client-Secret`, ...); these are the ones it
+   * may not.
+   */
+  private val NeverForwarded: Set[String] =
+    Set("authorization", "proxy-authorization", "cookie", "cookie2")
+
+  /**
+   * Header names ending in these (compared with `-` and `_` dropped) are credentials too: `Private-Token`,
+   * `X-Amz-Security-Token`, `X-CSRF-Token`, `Ocp-Apim-Subscription-Key`. Redaction does not match a bare `token`
+   * suffix, because a log is full of `max_tokens` and `next_page_token`; a request header named so is a credential.
+   */
+  private val CredentialHeaderSuffixes: Seq[String] = Seq("token", "key")
+
+  private def headerKey(name: String): String = name.trim.toLowerCase(Locale.ROOT)
+
+  /** Whether header `key` (from `headerKey`) can carry a credential, so that no allowlist may forward it. */
+  private def isCredentialHeader(key: String): Boolean = {
+    val compact = key.filter(_.isLetterOrDigit)
+    NeverForwarded.contains(key) || Redaction.isSensitiveKey(key) || CredentialHeaderSuffixes.exists(compact.endsWith)
+  }
 
   /**
    * The origin of a URL as RFC 6454 defines it: scheme, host and port, with the scheme's default port filled in, so
@@ -191,22 +210,32 @@ object HTTPTool {
   }
 
   /**
-   * The headers to send on a hop to `hop`, and whether sensitive headers are stripped from here on.
+   * The headers to send on a hop to `hop`, and whether caller-set headers are stripped from here on.
    *
-   * Stripping is sticky: once any hop has left `initial` (a different scheme, host or port, which includes a downgrade
-   * from `https` to `http`), `Authorization`, `Cookie` and `Proxy-Authorization` stay stripped for every later hop,
-   * including one that comes back to the original origin.
+   * On a hop that stays on `initial` (the same scheme, host and port) every header is sent. Once any hop has left it
+   * - which includes a downgrade from `https` to `http`, and an upgrade - only the headers named in `safe` (in any
+   * case) are sent, and never one that names a credential: `Authorization`, `Proxy-Authorization`, `Cookie`, any
+   * name `Redaction` treats as sensitive, or one ending in `token` or `key`. `Content-Type` is sent only with a body
+   * (`sendsBody`). Stripping is sticky: it holds for every later hop, including one that comes back to the original
+   * origin.
    */
   private[http] def headersForHop(
     headers: Option[Map[String, String]],
     initial: Origin,
     hop: Origin,
-    alreadyStripped: Boolean
+    alreadyStripped: Boolean,
+    safe: Seq[String] = HttpConfig.DefaultRedirectSafeHeaders,
+    sendsBody: Boolean = false
   ): (Option[Map[String, String]], Boolean) = {
     val strip = alreadyStripped || hop != initial
     val sent =
-      if (strip) headers.map(_.filterNot { case (k, _) => SensitiveHeaders.contains(k.toLowerCase(Locale.ROOT)) })
-      else headers
+      if (strip) {
+        val allowed = safe.map(headerKey).toSet
+        headers.map(_.filter { case (k, _) =>
+          val key = headerKey(k)
+          allowed.contains(key) && !isCredentialHeader(key) && (sendsBody || key != "content-type")
+        })
+      } else headers
     (sent, strip)
   }
 
@@ -306,9 +335,9 @@ object HTTPTool {
      *     the `Location` header, resolve it to an absolute URL, and loop.
      *
      * Security measures applied on each redirect:
-     *  - Sensitive headers (Authorization, Cookie, Proxy-Authorization) are stripped from the first hop that
-     *    leaves the original origin (scheme, host and port) and on every hop after it
-     *  - 301/302 convert POST→GET and drop the request body (per HTTP spec)
+     *  - From the first hop that leaves the original origin (scheme, host and port) and on every hop after it,
+     *    only the caller-set headers on `HttpConfig.redirectSafeHeaders` are sent, never a credential header
+     *  - 301/302 convert POST→GET and drop the request body (per HTTP spec), and with it any `Content-Type`
      *  - 307/308 preserve the original method and body
      */
     def go(
@@ -336,9 +365,18 @@ object HTTPTool {
             else if (deadline.isOverdue())
               Left(timeoutMessage(config))
             else {
-              val hopOrigin             = Origin.of(url)
-              val origin                = initialOrigin.getOrElse(hopOrigin)
-              val (safeHeaders, nowOff) = headersForHop(headers, origin, hopOrigin, stripped)
+              val hopOrigin = Origin.of(url)
+              val origin    = initialOrigin.getOrElse(hopOrigin)
+              val (hopHeaders, nowOff) =
+                headersForHop(headers, origin, hopOrigin, stripped, config.redirectSafeHeaders, currentBody.isDefined)
+              // A Content-Type describes the body: a hop whose body a 301/302 dropped sends none, whatever its
+              // origin, neither a caller-set header nor the tool's own content_type. A request that never had a
+              // body keeps its Content-Type on a same-origin hop; a cross-origin hop sends one only with a body.
+              val bodyDropped = body.isDefined && currentBody.isEmpty
+              val safeHeaders =
+                if (bodyDropped) hopHeaders.map(_.filter { case (k, _) => headerKey(k) != "content-type" })
+                else hopHeaders
+              val hopContentType = if (bodyDropped || (nowOff && currentBody.isEmpty)) None else contentType
 
               executeRequest(
                 url,
@@ -346,7 +384,7 @@ object HTTPTool {
                 currentMethod,
                 safeHeaders,
                 currentBody,
-                contentType,
+                hopContentType,
                 config,
                 deadline
               )
@@ -375,7 +413,8 @@ object HTTPTool {
                           if (
                             Set(301, 302).contains(
                               result.statusCode
-                            ) && currentMethod.toUpperCase != "GET" && currentMethod.toUpperCase != "HEAD"
+                            ) && currentMethod.toUpperCase(Locale.ROOT) != "GET" &&
+                            currentMethod.toUpperCase(Locale.ROOT) != "HEAD"
                           )
                             ("GET", None)
                           else
@@ -418,7 +457,7 @@ object HTTPTool {
     val outcome = connection.flatMap { connection =>
       Try {
         // Configure connection
-        connection.setRequestMethod(method.toUpperCase)
+        connection.setRequestMethod(method.toUpperCase(Locale.ROOT))
         // HttpURLConnection reads 0 as "no timeout": never pass it one.
         val timeoutMillis = math.max(DurationRounding.ceilMillisInt(remaining), 1)
         connection.setConnectTimeout(timeoutMillis)
@@ -433,7 +472,7 @@ object HTTPTool {
 
         // Set content type for requests with body
         val effectiveContentType = contentType.orElse(
-          if (Seq("POST", "PUT", "PATCH").contains(method.toUpperCase)) Some("application/json")
+          if (Seq("POST", "PUT", "PATCH").contains(method.toUpperCase(Locale.ROOT))) Some("application/json")
           else None
         )
         effectiveContentType.foreach(ct => connection.setRequestProperty("Content-Type", ct))
@@ -487,7 +526,7 @@ object HTTPTool {
 
         HTTPResult(
           url = urlStr,
-          method = method.toUpperCase,
+          method = method.toUpperCase(Locale.ROOT),
           statusCode = statusCode,
           statusMessage = statusMessage,
           headers = responseHeaders,

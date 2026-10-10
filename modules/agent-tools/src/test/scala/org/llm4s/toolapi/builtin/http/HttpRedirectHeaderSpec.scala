@@ -13,7 +13,9 @@ import java.nio.charset.StandardCharsets
  * Sensitive headers stay stripped once a redirect leaves the original origin (issue #1408, finding F7). The tool used
  * to compare each hop with the previous one by host alone and forward the original headers, so `127.0.0.1` ->
  * `localhost` -> `localhost` sent `Authorization` again on the third hop, and a hop to another port on the same host
- * kept it. Two in-process servers on loopback give two origins that differ only by port.
+ * kept it. Two in-process servers on loopback give two origins that differ only by port. Since #1734 a cross-origin
+ * hop also drops every other caller-set header not on `HttpConfig.redirectSafeHeaders`, such as `X-Custom` here
+ * (`HttpRedirectAllowlistSpec` covers that rule).
  */
 class HttpRedirectHeaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
@@ -103,7 +105,7 @@ class HttpRedirectHeaderSpec extends AnyFlatSpec with Matchers with BeforeAndAft
     received("auth") shouldBe ""
     received("cookie") shouldBe ""
     received("proxyAuth") shouldBe ""
-    received("custom") shouldBe "keep-me"
+    received("custom") shouldBe "" // not on the redirect allowlist (#1734)
   }
 
   "HTTPTool redirect header stripping" should
@@ -163,7 +165,7 @@ class HttpRedirectHeaderSpec extends AnyFlatSpec with Matchers with BeforeAndAft
       origin("http://h.example:8443/"),
       alreadyStripped = false
     )
-    sent.get.keySet shouldBe Set("X-Custom")
+    sent.get.keySet shouldBe empty
     sticky shouldBe true
   }
 
@@ -174,7 +176,7 @@ class HttpRedirectHeaderSpec extends AnyFlatSpec with Matchers with BeforeAndAft
       origin("https://h.example/"),
       alreadyStripped = false
     )
-    sent.get.keySet shouldBe Set("X-Custom")
+    sent.get.keySet shouldBe empty
   }
 
   it should "keep stripping on a same-origin hop once stripping has started, and match header names in any case" in {
