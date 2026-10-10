@@ -29,7 +29,7 @@
 
 **llm4s** provides a solid foundation for agent-based workflows with:
 - ✅ Single-agent execution with tool calling
-- ✅ Multi-agent orchestration via DAG-based plans (Superseded by [#1330](https://github.com/llm4s/llm4s/issues/1330): DAG orchestration, `PlanRunner` and `TypedAgent` are removed; multi-agent workflows are graphs, see the [multi-agent graph recipe](../examples/cookbook.md#6-several-agents-in-one-graph).)
+- ✅ Multi-agent orchestration via DAG-based plans (Superseded by [#1330](https://github.com/llm4s/llm4s/issues/1330): DAG orchestration, `PlanRunner` and `TypedAgent` are removed; multi-agent workflows are graphs, see the [multi-agent graph recipe](../examples/cookbook/multi-agent-graph.md).)
 - ✅ Type-safe agent composition
 - ✅ Parallel and sequential execution
 - ✅ Result-based error handling

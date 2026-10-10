@@ -1,3 +1,30 @@
+---
+layout: page
+title: Several agents in one graph
+parent: Cookbook
+grand_parent: Examples
+nav_order: 13
+---
+
+# Several agents in one graph
+{: .no_toc }
+
+Ask two specialist agents in parallel, then let an editor agent combine their views once both have answered.
+{: .fs-6 .fw-300 }
+
+## The problem
+
+Some questions are better answered by several agents with different instructions, and an editor who weighs
+their views. The graph runtime runs both specialists in one superstep, applies their updates in task order
+whichever finishes first, and a static join holds the editor until both have committed. This replaces `PlanRunner`
+and `TypedAgent`, removed in [#1330](https://github.com/llm4s/llm4s/issues/1330).
+
+## The program
+
+The whole program, [`MultiAgentGraphRecipe.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/cookbook/MultiAgentGraphRecipe.scala). `script` is the stand-in for a model that answers without a
+network or a key; `demo` runs the recipe and returns what to print.
+
+```scala
 package org.llm4s.samples.cookbook
 
 import org.llm4s.agent.Agent
@@ -149,3 +176,31 @@ object MultiAgentGraphRecipe extends RecipeApp {
         s"Editor: ${review.answer}").mkString("\n")
     }
 }
+```
+
+## Run it
+
+```bash
+sbt "samples/runMain org.llm4s.samples.cookbook.MultiAgentGraphRecipe"          # scripted client, no API key
+sbt "samples/runMain org.llm4s.samples.cookbook.MultiAgentGraphRecipe --live"   # the provider your configuration names
+```
+
+The first command needs nothing but sbt. The second uses the section `llm4s.providers.provider` names; see
+[running the samples](../../getting-started/configuration#running-the-samples). CI runs every recipe against its scripted client, and checks
+that the program on this page is the source file, so what you read here compiles and works.
+
+## Use a real provider
+
+Run with `--live`, or pass your provider's client to `graph`. The agents can use different clients: a cheaper
+model for the specialists and a stronger one for the editor. See
+[multi-agent orchestration](../../guide/patterns/multi-agent-orchestration).
+
+## Pitfalls
+
+- A node that calls `agent.run` blocks its task until the agent's turn ends, so cancelling the graph run cancels
+  that turn. A node that calls `agent.start` and returns without awaiting it leaves the turn running: cancel it
+  yourself.
+- A specialist that fails fails the run before the editor is asked.
+- Parallel specialists mean parallel model calls: mind your provider's rate limit.
+
+[Back to the cookbook](../cookbook)

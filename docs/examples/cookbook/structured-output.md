@@ -1,3 +1,30 @@
+---
+layout: page
+title: Classify text into an enum
+parent: Cookbook
+grand_parent: Examples
+nav_order: 1
+---
+
+# Classify text into an enum
+{: .no_toc }
+
+Turn a customer message into a `Ticket` whose category is one of a fixed set.
+{: .fs-6 .fw-300 }
+
+## The problem
+
+You want a label from a fixed list (an enum) and a couple of fields, not prose: route a support message to
+billing, bug or question, with an urgency. Parsing free text for that is fragile. `completeStructured` sends a JSON
+schema with the request and reads the reply into a case class, so the rest of the program deals in a `Ticket`, and a
+reply that does not fit is a `Left`, not an exception.
+
+## The program
+
+The whole program, [`StructuredOutputRecipe.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/cookbook/StructuredOutputRecipe.scala). `script` is the stand-in for a model that answers without a
+network or a key; `demo` runs the recipe and returns what to print.
+
+```scala
 package org.llm4s.samples.cookbook
 
 import org.llm4s.error.ValidationError
@@ -66,3 +93,41 @@ object StructuredOutputRecipe extends RecipeApp {
   def demo(client: LLMClient): Result[String] =
     classify(client, message).map(t => s"category=${t.category} urgency=${t.urgency} summary=${t.summary}")
 }
+```
+
+## Run it
+
+```bash
+sbt "samples/runMain org.llm4s.samples.cookbook.StructuredOutputRecipe"          # scripted client, no API key
+sbt "samples/runMain org.llm4s.samples.cookbook.StructuredOutputRecipe --live"   # the provider your configuration names
+```
+
+The first command needs nothing but sbt. The second uses the section `llm4s.providers.provider` names; see
+[running the samples](../../getting-started/configuration#running-the-samples). CI runs every recipe against its scripted client, and checks
+that the program on this page is the source file, so what you read here compiles and works.
+
+## Use a real provider
+
+Nothing in `classify` names a provider: pass it the client of your provider. With `--live` the recipe does that
+for you. In your own program, take the client from your configuration:
+
+```scala
+for {
+  providerConfig <- Llm4sConfig.defaultProvider()
+  registry       <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
+  client <- LLMConnect.getClient(providerConfig)
+  ticket <- StructuredOutputRecipe.classify(client, text)
+} yield ticket
+```
+
+More on schemas and how each provider handles them: [Structured output](../../guide/structured-output).
+
+## Pitfalls
+
+- Only some providers enforce a schema while generating (OpenAI and Gemini do; Anthropic gets a best-effort
+  instruction). The recipe checks the category and the urgency again on the way out for that reason.
+- A model may wrap its JSON in a code fence or a sentence; `completeStructured` reads the JSON out of either.
+- Keep the enum short and the labels distinct. Two labels a person would confuse, the model confuses too.
+
+[Back to the cookbook](../cookbook)

@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The cookbook: thirteen runnable recipes, one page each, run offline in CI**
+  ([#1476](https://github.com/llm4s/llm4s/issues/1476)): seven new recipes join the six under
+  `org.llm4s.samples.cookbook` - `EmailExtractionRecipe` (a nested schema, checked against the email),
+  `SummariseRecipe` (map-reduce), `FolderQaRecipe` (the RAG pipeline over a folder of files),
+  `StreamingRecipe` (`streamComplete`), `FallbackRecipe` (`ReliableClient` retries, then a second provider),
+  `CachingRecipe` (`CachingLLMClient`) and `JudgeRecipe` (LLM-as-judge with a rubric) - and `ToolCallingRecipe`
+  now chains two tools, one of its own and the calculator. Each runs with no API key against a scripted client
+  (`--live` for the configured provider); the recipes that embed use `BagOfWordsEmbeddings`, an offline embedding
+  provider registered like a provider module's. Each recipe has its own page under `docs/examples/cookbook/` -
+  the problem, the whole program, how to run it, what to change for a real provider, and the pitfalls - linked
+  from the cookbook index, the examples index and the README. `CookbookDocsSpec` runs every recipe in
+  `sbt test` and fails when a page is missing, lacks a section or sits out of order, or shows a program that is
+  not its source file.
 - **Embeddings from Java** ([#1490](https://github.com/llm4s/llm4s/issues/1490)): `llm4s-java-api`'s
   `Llm4s.createDefaultEmbeddingClient()` creates a `JEmbeddingClient` for the model `llm4s.embeddings.model`
   (`EMBEDDING_MODEL`) names, the route `createDefaultClient()` takes for chat; a missing model, provider or key, or a
@@ -397,6 +410,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `"org.llm4s" %% "llm4s-cohere"`; nothing else changes. HTTP 429 is a `RateLimitError` carrying
   `Retry-After` when Cohere sends it in seconds; other failures are `EmbeddingError` with the status as
   its code.
+- **MCP test: a server that does not answer within the timeout**
+  ([#1006](https://github.com/llm4s/llm4s/issues/1006)): `MCPEmbeddedServerTimeoutSpec` in `llm4s-mcp` runs a tool
+  on an in-process `MCPServer` that does not answer within `MCPServerConfig.timeout`: the call fails as a timed-out
+  tool (not cancelled, not unknown) and the client and registry stay usable. The tool blocks on a latch, so the test
+  uses no fixed sleep.
 - **Cloud speech smoke and integration tests** ([#1011](https://github.com/llm4s/llm4s/issues/1011)):
   `@Cloud` suites in `modules/it` (`org.llm4s.speech`: OpenAI TTS, OpenAI STT, ElevenLabs, Azure
   TTS/STT with a synthesise-then-transcribe round trip), run by `sbt testSmoke` and gated by
@@ -2076,10 +2094,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is refused too. The existing refusal of a link-preserving `cp` of two sources with the same name now compares the
   names as the destination's file system does, ignoring letter case and Unicode normalisation (and, on Windows,
   taking a name with `~` for any): on macOS `cp -P a/b/x c/X d` copied the link `x` into `d` and then wrote `c/X`
-  through it. The comparison repeats NFKC and case mapping until the name stops changing, since one pass
-  left names APFS takes for one apart (`ẞ` and `ß`, `ss` or `SS`; `ΐ` and its decomposed capital): `cp -P a/b/ẞ c/ß d`
-  passed and wrote `c/ß` through the link on macOS. Run one command per source instead. `rm`, `mkdir`, `touch` and `chmod` create no link and are
-  unchanged. See [Several sources in one command](docs/reference/workspace-sandbox.md#several-sources-in-one-command).
+  through it. The comparison repeats NFKC and case mapping until the name stops changing, since one pass left names
+  APFS takes for one apart (`ẞ` and `ß`, `ss` or `SS`; `ΐ` and its decomposed capital): `cp -P a/b/ẞ c/ß d` passed
+  and wrote `c/ß` through the link on macOS. Run one command per source instead. `rm`, `mkdir`, `touch` and `chmod`
+  create no link and are unchanged. See [Several sources in one command](docs/reference/workspace-sandbox.md#several-sources-in-one-command).
 - **Workspace runner: an agent can remove or rename a symbolic link that points out of the workspace**
   ([#1730](https://github.com/llm4s/llm4s/issues/1730)): the command policy resolved every argument through its
   links, so `rm outlink` and `mv outlink x` were refused (`PATH_ESCAPE_ATTEMPT`) although removing or renaming a link
@@ -2098,6 +2116,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inline comments in `WorkspaceAgentInterfaceImpl.prepareCommand` now number the working-directory check layer 6 and
   `CommandPolicy` layers 7-9, as its Scaladoc does; and `WorkspaceConfigSupport.loadSandboxConfig`, which nothing
   called, is removed (see Removed).
+- **MCP: Streamable HTTP notifications carry the `Accept` header the transport requires**
+  ([#1006](https://github.com/llm4s/llm4s/issues/1006)): `StreamableHTTPTransportImpl.sendNotification` posted
+  without `Accept: application/json, text/event-stream`, which the specification requires on every POST to the MCP
+  endpoint, so servers built on the MCP SDKs refused every notification, `notifications/initialized` included, with
+  `406 Not Acceptable`; `initialize()` logged that as a warning and carried on. Found by running the client against
+  the MCP reference server.
 - **Security - redaction: a `key=value` whose value is in backslash-escaped quotes is redacted**
   ([#1684](https://github.com/llm4s/llm4s/issues/1684)): `Redaction` (used by the provider exchange logger, `LLMError`
   messages and error mapping) stopped the value of a `key=value` pair at an escaped quote, so a logfmt line inside a
