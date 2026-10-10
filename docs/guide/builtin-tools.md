@@ -240,6 +240,7 @@ The default blocklist includes `/var`, which on macOS is where the system tempor
 | `blockedDomains` | `localhost`, `127.0.0.1`, `0.0.0.0`, `::1`, the cloud metadata hosts and `169.254.169.254` |
 | `blockInternalIPs` | `true` |
 | `followRedirects` | `false` |
+| `redirectSafeHeaders` | `Accept`, `Accept-Language`, `Accept-Encoding`, `User-Agent`, `Content-Type` (only with a re-sent body): the only caller-set headers a redirect carries to another origin |
 | `timeout` | 30 seconds, for the whole call: connecting, every redirect hop and reading the body |
 | `maxResponseSize` | 10 MB: at most this many bytes of the body are read; the rest is never read, and `truncated` is `true` |
 
@@ -282,13 +283,18 @@ What the controls do, and where they stop:
 - **HTTP** refuses methods outside `allowedMethods`, a scheme other than `http` and `https`, any domain outside
   `allowedDomains`, `localhost`, loopback, the cloud metadata addresses, and private ranges such as `10.x`, `172.16.x`
   and `192.168.x` (and their IPv6 counterparts, such as unique-local `fc00::/7` and IPv6 forms that carry a private
-  IPv4 address), all before sending a request. Redirects are not followed unless you turn that on; when they are,
-  each hop is checked again, and `Authorization`, `Cookie` and `Proxy-Authorization` are dropped from the first hop
-  that leaves the original scheme, host and port, and from every hop after it. `timeout` bounds the whole call, so a
+  IPv4 address, and every other range the IANA special-purpose registries mark as not globally reachable, such as
+  `240.0.0.0/4`, `192.0.0.0/24` and IPv6 outside `2000::/3`), all before sending a request. Redirects are not followed
+  unless you turn that on; when they are, each hop is checked again, and from the first hop that leaves the original
+  scheme, host and port (so a downgrade from `https` to `http` counts), and on every hop after it, only the headers on
+  `redirectSafeHeaders` go with the request: every other header the model set, such as `X-Api-Key` or
+  `X-Auth-Token`, is dropped, and a credential header (`Authorization`, `Cookie`, a name that redaction treats as
+  sensitive, or one ending in `token` or `key`) is dropped even if you list it. `timeout` bounds the whole call, so a
   server that answers a byte at a time cannot hold the tool past it. A `TIMEOUT` releases the caller, not the
   request: one already sent may still be delivered and acted on (a `POST` is not rolled back), and a DNS lookup cannot
-  be interrupted, so the tool's worker thread may outlive the deadline by up to the resolver's own timeout
-  ([#1734](https://github.com/llm4s/llm4s/issues/1734)). The address check resolves the host name, and
+  be interrupted (`InetAddress.getAllByName` waits for the system resolver), so the tool's worker thread may outlive
+  the deadline by up to the resolver's own timeout, typically a few seconds per attempt as `/etc/resolv.conf` or the
+  OS sets it ([#1734](https://github.com/llm4s/llm4s/issues/1734)). The address check resolves the host name, and
   the connection then resolves it again, so a domain whose DNS answer changes in between (DNS rebinding) can pass the check with a public address and connect to a private one. The request still
   goes out from your network, so do not give it to a model that handles untrusted text next to credentials or
   internal services the server can reach; where that matters, also block private ranges at the network level, for

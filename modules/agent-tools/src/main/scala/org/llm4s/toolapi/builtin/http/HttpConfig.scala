@@ -2,6 +2,7 @@ package org.llm4s.toolapi.builtin.http
 
 import org.llm4s.core.safety.NetworkSecurity
 
+import java.util.Locale
 import scala.concurrent.duration.*
 
 /**
@@ -32,6 +33,15 @@ import scala.concurrent.duration.*
  * @param maxRedirects Maximum number of redirects to follow.
  * @param allowedMethods HTTP methods that are allowed (default: GET, HEAD for safety).
  * @param userAgent User-Agent header to use.
+ * @param redirectSafeHeaders The caller-set headers a redirect may carry to another origin (matched in any case).
+ *                        Once a hop leaves the original request's origin - its scheme, host and port, so a downgrade
+ *                        from `https` to `http` counts - every other header the caller set is dropped, on that hop and
+ *                        every later one, including one that comes back. The default is `Accept`, `Accept-Language`,
+ *                        `Accept-Encoding`, `User-Agent` and `Content-Type`, the last only on a hop that re-sends the
+ *                        body (a 307 or 308). A header that names a credential (`Authorization`, `Cookie`,
+ *                        `Proxy-Authorization`, any name core's redaction treats as sensitive, such as `X-Api-Key` or
+ *                        `X-Client-Secret`, and any name ending in `token` or `key`) is dropped even if listed here.
+ *                        `Seq.empty` forwards no caller-set header.
  */
 case class HttpConfig(
   allowedDomains: Option[Seq[String]] = None,
@@ -42,7 +52,8 @@ case class HttpConfig(
   followRedirects: Boolean = false, // Secure default: redirects are followed only when explicitly opted-in.
   maxRedirects: Int = 5,
   allowedMethods: Seq[String] = Seq("GET", "HEAD"), // Safe default: read-only
-  userAgent: String = "llm4s-http-tool/1.0"
+  userAgent: String = "llm4s-http-tool/1.0",
+  redirectSafeHeaders: Seq[String] = HttpConfig.DefaultRedirectSafeHeaders
 ) {
 
   /**
@@ -56,11 +67,12 @@ case class HttpConfig(
    * at request time by the HTTP tool to avoid expensive DNS lookups during validation.
    */
   def isDomainAllowed(domain: String): Boolean = {
-    val normalizedDomain = domain.toLowerCase.stripPrefix("www.")
+    val normalizedDomain = domain.toLowerCase(Locale.ROOT).stripPrefix("www.")
 
     // Check blocked domains first
     val isBlocked = blockedDomains.exists { blocked =>
-      normalizedDomain == blocked.toLowerCase || normalizedDomain.endsWith(s".${blocked.toLowerCase}")
+      val b = blocked.toLowerCase(Locale.ROOT)
+      normalizedDomain == b || normalizedDomain.endsWith(s".$b")
     }
 
     if (isBlocked) false
@@ -69,7 +81,7 @@ case class HttpConfig(
       allowedDomains match {
         case Some(allowed) =>
           allowed.exists { a =>
-            val normalizedAllowed = a.toLowerCase.stripPrefix("www.")
+            val normalizedAllowed = a.toLowerCase(Locale.ROOT).stripPrefix("www.")
             normalizedDomain == normalizedAllowed || normalizedDomain.endsWith(s".$normalizedAllowed")
           }
         case None => true
@@ -95,7 +107,7 @@ case class HttpConfig(
    * Check if a method is allowed.
    */
   def isMethodAllowed(method: String): Boolean =
-    allowedMethods.map(_.toUpperCase).contains(method.toUpperCase)
+    allowedMethods.map(_.toUpperCase(Locale.ROOT)).contains(method.toUpperCase(Locale.ROOT))
 
   /**
    * Create a copy with all HTTP methods enabled.
@@ -118,16 +130,23 @@ case class HttpConfig(
   /**
    * Create a copy with redirect following enabled.
    *
-   * Each redirect hop is re-validated against the SSRF filter; sensitive headers
-   * (Authorization, Cookie, Proxy-Authorization) are stripped from the first hop that leaves
-   * the original origin (scheme, host and port) and on every hop after it; and 301/302
-   * redirects convert POST to GET per the HTTP specification.
+   * Each redirect hop is re-validated against the SSRF filter; from the first hop that leaves
+   * the original origin (scheme, host and port) and on every hop after it, only the caller-set
+   * headers on `redirectSafeHeaders` are sent; and 301/302 redirects convert POST to GET per
+   * the HTTP specification.
    */
   def withRedirectsEnabled: HttpConfig =
     copy(followRedirects = true)
 }
 
 object HttpConfig {
+
+  /**
+   * The caller-set headers a redirect carries to another origin by default: content negotiation and the user agent,
+   * none of which can carry a credential. `Content-Type` goes only with a re-sent body.
+   */
+  val DefaultRedirectSafeHeaders: Seq[String] =
+    Seq("Accept", "Accept-Language", "Accept-Encoding", "User-Agent", "Content-Type")
 
   /**
    * Default blocked domains (hostnames).

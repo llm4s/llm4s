@@ -149,7 +149,12 @@ private[llm4s] object Redaction {
   /** The bare words a container under a sensitive key keeps: JSON's literals, and Python's, since a dict is a container too. */
   private val KeptLiterals: Set[String] = Set("true", "false", "null", "True", "False", "None")
 
-  private def isSensitiveKey(key: String): Boolean = {
+  /**
+   * Whether `key` (a field, header or parameter name) names a credential, by `SensitiveKeyWords` and
+   * `SensitiveKeySuffixes`. `llm4s-agent-tools`' HTTP tool reads it to withhold such headers on a cross-origin
+   * redirect even when they are allowlisted, so the two lists stay one.
+   */
+  private[llm4s] def isSensitiveKey(key: String): Boolean = {
     val normalised = key.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit)
     SensitiveKeyWords.contains(normalised) || SensitiveKeySuffixes.exists(normalised.endsWith)
   }
