@@ -445,6 +445,122 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
     refused(run(config, "grep -e" + ("a" * 5000) + " in.txt")) should include("too long")
   }
 
+  // ---- #1723: the cost of the check. A path check costs file-system lookups, and a command can carry thousands of
+  // flags with thousands of tails each; before the budget, 50 flags of 4096 letters took about 50 s on macOS, all
+  // before the command started, so `ShellConfig.timeout` did not cover it. Every command below ends in `../zz`, so a
+  // refusal naming it shows that everything before it was checked and passed, and nothing is run.
+
+  /** The command's refusal, and how long the tool took to give it. */
+  private def timedRefusal(config: ShellConfig, command: String): (String, Long) = {
+    val started = System.nanoTime()
+    val reason  = refused(run(config, command))
+    (reason, (System.nanoTime() - started) / 1000000)
+  }
+
+  /** Far above the ~0.1 s these take, far below the minutes they took: room for a slow Windows runner. */
+  private def CheapCheckMillis: Long = 5000L
+
+  it should "check many long flags quickly, skipping tails too long to name a file (#1723)" in {
+    val (_, _, config) = attachedValueFixture()
+    val flags          = Seq.fill(200)("-e" + ("a" * 4094)).mkString(" ")
+
+    val (reason, millis) = timedRefusal(config, s"grep $flags in.txt ../zz")
+    reason should include("'../zz' is outside the allowed paths")
+    millis should be < CheapCheckMillis
+  }
+
+  it should "check a repeated short-option cluster once (#1723)" in {
+    val (_, _, config) = attachedValueFixture()
+
+    val (reason, millis) = timedRefusal(config, "ls " + Seq.fill(10000)("-aaaa").mkString(" ") + " ../zz")
+    reason should include("'../zz' is outside the allowed paths")
+    millis should be < CheapCheckMillis
+  }
+
+  it should "refuse a command whose path checks would exceed the lookup budget, quickly (#1723)" in {
+    val (_, _, config) = attachedValueFixture()
+    val clusters       = (1 to 10000).map(i => s"-a$i").mkString(" ")
+    // `~` is not a plain name character, so no tail of these is skipped
+    val tildes = (1 to 200).map(i => "-e" + (s"$i~" * 4094).take(4094)).mkString(" ")
+
+    Seq(s"ls $clusters ../zz", s"grep $tildes in.txt ../zz").foreach { command =>
+      val (reason, millis) = timedRefusal(config, command)
+      withClue(command.take(40)) {
+        reason should include("too long or too many to check against the path policy")
+        reason should include("20000 path lookups")
+        millis should be < CheapCheckMillis
+      }
+    }
+  }
+
+  it should "still check the short tails of a long flag (#1723)" in {
+    val (root, linked, config) = attachedValueFixture()
+    // A blocked file whose name is as long as a name can be, and so is checked
+    val longest = "n" * 255
+    Files.writeString(root.resolve(longest), "OUTSIDE-SECRET\n")
+    val blocking = config.copy(pathPolicy =
+      config.pathPolicy.map(p => p.copy(blockedPaths = p.blockedPaths :+ root.resolve(longest).toString))
+    )
+
+    refused(run(config, "grep -" + ("i" * 4000) + "fblocked.txt in.txt")) should include("outside the allowed paths")
+    refused(run(blocking, "grep -" + ("i" * 3800) + "f" + longest + " in.txt")) should include(
+      "outside the allowed paths"
+    )
+    refused(run(blocking, "grep -e" + longest + " in.txt")) should include("outside the allowed paths")
+    if (linked)
+      refused(run(config, "grep -" + ("i" * 4000) + "flout in.txt")) should include("outside the allowed paths")
+  }
+
+  "The shell tool" should "read the value of sort -t as a separator, not as options or a path (#1723)" in {
+    assume(!isWindows, "on Windows -t is refused, since sort.exe may read it as /T (see the next test)")
+    val (root, _, config) = attachedValueFixture()
+
+    Seq("sort -to in.txt", "sort -rto in.txt", "sort -t/ in.txt", "sort --field-separator=o in.txt", "sort -tT in.txt")
+      .foreach { command =>
+        withClue(command) {
+          (run(config, command).left.toOption.getOrElse("") should not).include("is not allowed")
+          (run(config.copy(pathPolicy = None), command).left.toOption.getOrElse("") should not)
+            .include("is not allowed")
+          (run(config, command).left.toOption.getOrElse("") should not).include("carries a path")
+        }
+      }
+    // An option before the -t is still read: -o, then the separator
+    refused(run(config, "sort -ot in.txt")) should include("is not allowed for 'sort'")
+    // A separator given as the next argument is checked as a path: an option before -t may have taken `-t` itself
+    refused(run(config, "sort -t / in.txt")) should include("outside the allowed paths")
+    Files.exists(root.resolve("o")) shouldBe false
+  }
+
+  it should "refuse sort's o and t, in either case, in a cluster or a / switch, on Windows (#1723)" in {
+    assume(isWindows, "only Windows has sort.exe")
+    val (root, _, config) = attachedValueFixture()
+
+    Seq(
+      "sort -to in.txt",
+      "sort -t/ in.txt",
+      "sort -O in.txt",
+      "sort /O out in.txt",
+      "sort /o out in.txt",
+      "sort /OUTPUT out in.txt",
+      "sort /T . in.txt",
+      "sort /temporary . in.txt"
+    ).foreach { command =>
+      withClue(command) {
+        refused(run(config, command)) should include("is not allowed for 'sort'")
+        refused(run(config.copy(pathPolicy = None), command)) should include("is not allowed for 'sort'")
+      }
+    }
+    Files.exists(root.resolve("out")) shouldBe false
+  }
+
+  it should "run sort with an attached separator (#1723)" in {
+    posixOnly()
+    val (_, _, config) = attachedValueFixture()
+
+    run(config, "sort -tp -k2 in.txt").map(_.exitCode) shouldBe Right(0)
+    run(config, "sort -to in.txt").map(_.exitCode) shouldBe Right(0)
+  }
+
   it should "still run commands whose attached values stay inside the allowed directory" in {
     posixOnly()
     val (_, _, config) = attachedValueFixture()
@@ -475,6 +591,12 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
     "sort --output=out in.txt",
     "sort --out out in.txt",
     "sort --o=out in.txt",
+    "sort -T . in.txt",
+    "sort -T. in.txt",
+    "sort -rT. in.txt",
+    "sort --temporary-directory=. in.txt",
+    "sort --temp . in.txt",
+    "sort --t=. in.txt",
     "sort --compress-program=sh in.txt",
     "sort --compress=sh in.txt"
   )

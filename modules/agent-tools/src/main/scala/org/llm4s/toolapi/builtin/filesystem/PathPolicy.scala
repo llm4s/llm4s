@@ -83,27 +83,46 @@ private[builtin] object PathPolicy {
    * @param blocked roots that neither reading, nor the path's normalised spelling, may be inside; they win over
    *                `allowed`
    */
-  def resolve(path: Path, allowed: Option[Seq[String]], blocked: Seq[String]): Option[Path] = {
+  def resolve(path: Path, allowed: Option[Seq[String]], blocked: Seq[String]): Option[Path] =
+    resolve(path, prepare(allowed, blocked))
+
+  /**
+   * As the `resolve` above, with the configured entries resolved once, by
+   * [[prepare]], for a caller that checks many paths in a row (the arguments of one shell command).
+   */
+  def resolve(path: Path, entries: Entries): Option[Path] = {
     val readings = for {
       physical <- realPath(path)
       lexical  <- lexicalRealPath(path)
     } yield (physical, lexical)
     readings.toOption.collect {
-      case (physical, lexical) if permitted(path.toAbsolutePath.normalize(), physical, lexical, allowed, blocked) =>
+      case (physical, lexical) if permitted(path.toAbsolutePath.normalize(), physical, lexical, entries) =>
         physical
     }
   }
 
-  private def permitted(
-    spelled: Path,
-    physical: Path,
-    lexical: Path,
-    allowed: Option[Seq[String]],
-    blocked: Seq[String]
-  ): Boolean = {
+  /**
+   * The allowed and blocked entries of a policy, each as its absolute form and its real form (an entry that is not
+   * a valid path is left out, so it allows and blocks nothing). They are resolved when this is built: a link
+   * changed afterwards is not seen, so build one for each batch of checks, not once for good.
+   */
+  final class Entries private[PathPolicy] (
+    private[PathPolicy] val allowed: Option[Seq[(Path, Path)]],
+    private[PathPolicy] val blocked: Seq[(Path, Path)]
+  )
+
+  /** The entries of a policy, resolved now (see [[Entries]]). */
+  def prepare(allowed: Option[Seq[String]], blocked: Seq[String]): Entries =
+    new Entries(allowed.map(_.flatMap(entry)), blocked.flatMap(entry))
+
+  private def permitted(spelled: Path, physical: Path, lexical: Path, entries: Entries): Boolean = {
     val locations = Seq(physical, lexical)
-    !blocked.exists(entry => isBlockedBy(entry, spelled +: locations)) &&
-    allowed.forall(roots => locations.forall(location => roots.exists(root => isInside(root, location))))
+    !entries.blocked.exists { case (blockedLexical, blockedReal) =>
+      (spelled +: locations).exists(location => location.startsWith(blockedLexical) || location.startsWith(blockedReal))
+    } &&
+    entries.allowed.forall(roots =>
+      locations.forall(location => roots.exists { case (_, rootReal) => location.startsWith(rootReal) })
+    )
   }
 
   /** A configured entry as its absolute form and its real form. */
@@ -112,12 +131,4 @@ private[builtin] object PathPolicy {
       val lexical = path.toAbsolutePath.normalize()
       (lexical, realPath(path).getOrElse(lexical))
     }
-
-  private def isBlockedBy(configured: String, locations: Seq[Path]): Boolean =
-    entry(configured).exists { case (blockedLexical, blockedReal) =>
-      locations.exists(location => location.startsWith(blockedLexical) || location.startsWith(blockedReal))
-    }
-
-  private def isInside(configured: String, real: Path): Boolean =
-    entry(configured).exists { case (_, rootReal) => real.startsWith(rootReal) }
 }

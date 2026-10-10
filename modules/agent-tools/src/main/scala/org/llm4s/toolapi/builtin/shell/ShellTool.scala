@@ -1,7 +1,7 @@
 package org.llm4s.toolapi.builtin.shell
 
 import org.llm4s.toolapi._
-import org.llm4s.toolapi.builtin.filesystem.FileConfig
+import org.llm4s.toolapi.builtin.filesystem.{ FileConfig, PathPolicy }
 import org.llm4s.types.Result
 import org.llm4s.util.DurationRounding
 import upickle.default._
@@ -11,6 +11,7 @@ import java.nio.file.{ Path, Paths }
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.{ DurationLong, FiniteDuration }
+import scala.collection.mutable
 import scala.util.Try
 
 /**
@@ -64,9 +65,10 @@ object ShellResult {
  * applies it (the link target's parent), and lexically, as Windows applies it (the directory holding the link), and
  * both locations must be allowed. The file tools, which open the path themselves, remove `..` as text first.
  * A value attached to a flag is checked as a path too: the value after `=` of a long option (`--file=x`), and every
- * tail of a short-option cluster (`-fx`, `-ifx`). `file -C`, `-m`, `-M` and `-f`, `date -f` and `-r`,
- * `wc --files0-from`, and `sort -o`, `--output`, `--compress-program` and `--files0-from` (which write a file, run a
- * program or read one the command does not name) are refused whatever the policy: anywhere in a short-option
+ * tail of a short-option cluster (`-fx`, `-ifx`), within a budget of file-system lookups for the whole command.
+ * `file -C`, `-m`, `-M` and `-f`, `date -f` and `-r`, `wc --files0-from`, and `sort -o`, `--output`, `-T`,
+ * `--temporary-directory`, `--compress-program` and `--files0-from` (which write a file, run a program or read one
+ * the command does not name) are refused whatever the policy: anywhere in a short-option
  * cluster, attached value or not, under any abbreviation of the long form, with or without `=value`, wherever they
  * appear, `--` or not before them, and however the program is spelled (`/usr/bin/file`, `FILE`, `file.exe`).
  *
@@ -150,16 +152,60 @@ object ShellTool {
   /**
    * Flags that make an otherwise read-only command write a file, run a program, or read a file it does not name as an
    * argument, by command. `file -M` is Apple's form of `-m` (magic files, whose lines it echoes in warnings). `sort`
-   * is not on the read-only list, but is often added to it: `-o` / `--output` write a file, `--compress-program`
-   * runs a program and `--files0-from` reads the names of the files to sort from a file.
+   * is not on the read-only list, but is often added to it: `-o` / `--output` write a file, `-T` /
+   * `--temporary-directory` write temporary files to a directory of the caller's choosing (which the path policy
+   * would check, but which nothing checks without one), `--compress-program` runs a program and `--files0-from`
+   * reads the names of the files to sort from a file.
    */
-  private val DeniedShortFlags = Map("file" -> Set('C', 'm', 'M', 'f'), "date" -> Set('f', 'r'), "sort" -> Set('o'))
+  private val DeniedShortFlags =
+    Map("file" -> Set('C', 'm', 'M', 'f'), "date" -> Set('f', 'r'), "sort" -> Set('o', 'T'))
   private val DeniedLongFlags = Map(
     "file" -> Set("--compile", "--magic-file", "--files-from"),
     "date" -> Set("--file", "--reference"),
     "wc"   -> Set("--files0-from"),
-    "sort" -> Set("--output", "--compress-program", "--files0-from")
+    "sort" -> Set("--output", "--temporary-directory", "--compress-program", "--files0-from")
   )
+
+  private val OnWindows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows")
+
+  /**
+   * Options whose value is text, never opened as a path, by command: `sort -t` / `--field-separator` take a separator
+   * character. A value attached to one is not read as options or checked as a path (`sort -to` sets the separator to
+   * `o`, and `sort -t/` to `/`). The letters before it in a cluster still are, and so is a value given as the next
+   * argument (`sort -t /`), because an option before `-t` may have taken `-t` as its value and left the next
+   * argument an operand (`sort --random-source -t /etc/passwd` reads `/etc/passwd`).
+   */
+  private val TextShortFlags = if (OnWindows) Map.empty[String, Set[Char]] else Map("sort" -> Set('t'))
+  private val TextLongFlags  = Map("sort" -> Set("--field-separator"))
+
+  /**
+   * On Windows, `sort` may be Windows' own `sort.exe`, which writes its output with `/O[UTPUT] file` and its
+   * temporary files with `/T[EMPORARY] dir`, its switches in either case; or a GNU `sort` found earlier on the
+   * `PATH`. So there a cluster holding `o` or `t` in either case is refused (`-t` included, rather than guessing which
+   * program runs), and so is a `/` switch starting with one, as the workspace runner's command policy does.
+   */
+  private val WindowsDeniedShortFlags = Map("sort" -> Set('o', 'O', 't', 'T'))
+
+  private def windowsSwitch(command: String, args: Seq[String]): Option[String] =
+    WindowsDeniedShortFlags
+      .get(command)
+      .filter(_ => OnWindows)
+      .flatMap(denied => args.find(arg => arg.length > 1 && arg.startsWith("/") && denied.contains(arg.charAt(1))))
+
+  /**
+   * The part of a flag that the option rules read: a short-option cluster up to and including a text option
+   * (`-rto` gives `-rt`), and a text long option's name without its value (`--field-separator=o`).
+   */
+  private def optionPart(program: String, flag: String): String =
+    if (flag.startsWith("--")) {
+      val name = flag.takeWhile(_ != '=')
+      if (TextLongFlags.getOrElse(program, Set.empty[String]).exists(option => namesLongOption(name, option))) name
+      else flag
+    } else {
+      val text = TextShortFlags.getOrElse(program, Set.empty[Char])
+      val at   = flag.indexWhere(text.contains, 1)
+      if (at < 0) flag else flag.substring(0, at + 1)
+    }
 
   /** Endings Windows adds to a program name when it looks one up (`file` runs `file.exe`). */
   private val ExecutableSuffixes = Seq(".exe", ".com", ".bat", ".cmd")
@@ -184,6 +230,7 @@ object ShellTool {
     val executable = Try(Paths.get(command).getFileName.toString).getOrElse(command)
     val program    = programName(command)
     deniedFlag(program, args)
+      .orElse(windowsSwitch(program, args))
       .map(flag => s"Flag '$flag' is not allowed for '$command'")
       .orElse(config.pathPolicy.flatMap(policy => pathRefusal(executable, program, args, config, policy)))
   }
@@ -198,11 +245,13 @@ object ShellTool {
     args.filter(arg => arg != "--" && arg.startsWith("-") && arg.length > 1)
 
   private def deniedFlag(command: String, args: Seq[String]): Option[String] = {
-    val shortDenied = DeniedShortFlags.getOrElse(command, Set.empty[Char])
-    val longDenied  = DeniedLongFlags.getOrElse(command, Set.empty[String])
+    val shortDenied = DeniedShortFlags.getOrElse(command, Set.empty[Char]) ++
+      (if (OnWindows) WindowsDeniedShortFlags.getOrElse(command, Set.empty[Char]) else Set.empty[Char])
+    val longDenied = DeniedLongFlags.getOrElse(command, Set.empty[String])
     flagsOf(args).find { flag =>
-      if (flag.startsWith("--")) longDenied.exists(denied => namesLongOption(flag, denied))
-      else flag.drop(1).exists(shortDenied.contains)
+      val part = optionPart(command, flag)
+      if (part.startsWith("--")) longDenied.exists(denied => namesLongOption(part, denied))
+      else part.drop(1).exists(shortDenied.contains)
     }
   }
 
@@ -224,6 +273,7 @@ object ShellTool {
   /**
    * Hold the file-like arguments of a command to the path policy: the working directory, every argument and every
    * value attached to a flag must be allowed, and a flag that carries a path, or makes `ls` follow links, is refused.
+   * The checks share one `PathChecks`, so the whole command costs at most `MaxPathSteps` lookups.
    */
   private def pathRefusal(
     executable: String,
@@ -235,21 +285,98 @@ object ShellTool {
     // Not normalised: the policy reads a `..` after a link both as POSIX (physical) and as Windows (lexical) does
     val base = Try(config.workingDirectory.fold(Paths.get(""))(Paths.get(_)).toAbsolutePath).toOption
     base match {
-      case None =>
-        Some("Invalid working directory")
-      case Some(dir) if !policy.isPathAllowed(dir) =>
-        Some("The working directory is outside the allowed paths")
-      case Some(_) if NoFileArguments.contains(executable) => None
+      case None => Some("Invalid working directory")
       case Some(dir) =>
-        argumentRefusal(program, args.filter(_ != "--"), dir, policy)
+        val checks = new PathChecks(dir, policy.entries)
+        checks.check(dir) match {
+          case Unchecked => Some(tooCostly(program))
+          case Refused   => Some("The working directory is outside the allowed paths")
+          case Allowed if NoFileArguments.contains(executable) => None
+          case Allowed =>
+            if (args.exists(_.length > MaxArgumentLength)) Some(tooCostly(program))
+            else argumentRefusal(program, args.filter(_ != "--"), checks)
+        }
     }
   }
 
+  /** The longest argument checked against the path policy; a longer one is refused rather than walked (`PATH_MAX`). */
+  private val MaxArgumentLength = 4096
+
   /**
-   * The longest flag whose attached values are checked one by one; a longer one is refused under a path policy
-   * rather than walked (`PATH_MAX` on Linux).
+   * The file-system lookups (about two per path component, one for each reading of `..`) the path policy may spend
+   * on one command, as the workspace runner's command policy allows. An ordinary command spends a few hundred; the
+   * cap stops a crafted one (thousands of options, each with thousands of tails to check) from holding the caller
+   * for minutes before the command starts, which `ShellConfig.timeout` would not cover.
    */
-  private val MaxCheckedFlagLength = 4096
+  private val MaxPathSteps = 20000
+
+  private def tooCostly(program: String): String =
+    s"The arguments of '$program' are too long or too many to check against the path policy " +
+      s"(at most $MaxArgumentLength characters an argument and $MaxPathSteps path lookups a command)"
+
+  /**
+   * The longest name a path component can have on a supported file system: 255 bytes on Linux file systems and APFS,
+   * 255 UTF-16 code units on NTFS and HFS+ (`NAME_MAX`).
+   */
+  private val MaxNameLength = 255
+
+  /** Characters no supported file system or path parser treats specially, and that no other spelling folds to. */
+  private def isPlainNameChar(c: Char): Boolean =
+    (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || "-_+=,@".indexOf(c.toInt) >= 0
+
+  /**
+   * For each start in `value`, whether `value.substring(start)` cannot name anything, so need not be checked: it
+   * holds no separator (`/` or `\`), so it is one path component, and it begins with at least `MaxNameLength + 2`
+   * ASCII letters, digits and `-_+=,@` (a combining character after them may join the last one to it). Each of those
+   * takes one byte and one UTF-16 code unit, so the name is over
+   * every supported file system's limit for a component in either unit, whatever follows them. No shorter name can
+   * stand for it: Windows changes none of these characters (it drops a trailing `.` or space, reads `:` as a stream
+   * and `~` in short names, all after them), and a name
+   * that a case-insensitive or normalisation-insensitive file system matches to them is no shorter in the unit that
+   * file system counts (`ß`, two bytes in UTF-8, folds to `ss`; the Kelvin sign, three bytes, to `k`; NTFS and HFS+
+   * fold one UTF-16 unit to one). So the program cannot open it, and it can lead nowhere. Checking it would cost
+   * lookups like any other value, and a flag of 4096 letters has thousands of such tails (#1723). Computed once a
+   * value, so that a long flag is not scanned again for each of its tails.
+   */
+  private def unnameable(value: String): Int => Boolean = {
+    val lastSeparator = value.lastIndexWhere(c => c == '/' || c == '\\')
+    // How many plain characters run from each index
+    val plainRun = value.scanRight(0)((c, run) => if (isPlainNameChar(c)) run + 1 else 0)
+    start => start > lastSeparator && plainRun(start) > MaxNameLength + 1
+  }
+
+  /** What a check of one path found. */
+  sealed private trait Verdict
+  private case object Allowed   extends Verdict
+  private case object Refused   extends Verdict // outside the allowed paths, or not a valid path
+  private case object Unchecked extends Verdict // the command's lookup budget ran out first
+
+  /**
+   * The path checks of one command: against `entries`, resolved once for the command, from `base`, each distinct
+   * value checked once, and all of them within `MaxPathSteps` lookups.
+   */
+  final private class PathChecks(base: Path, entries: PathPolicy.Entries) {
+    private var remaining = MaxPathSteps
+    private val seen      = mutable.HashMap.empty[String, Verdict]
+
+    def check(path: Path): Verdict = {
+      // Two readings (physical and lexical), each a lookup per component and one for the root
+      remaining -= 2 * (path.getNameCount + 1)
+      if (remaining < 0) Unchecked
+      else if (PathPolicy.resolve(path, entries).isDefined) Allowed
+      else Refused
+    }
+
+    /** `value` resolved against the working directory, as the program will open it. */
+    def checkValue(value: String): Verdict =
+      seen.getOrElse(
+        value, {
+          val verdict = Try(base.resolve(value)).toOption.fold[Verdict](Refused)(check)
+          if (verdict != Unchecked) seen.update(value, verdict)
+          verdict
+        }
+      )
+  }
 
   private def isFlag(arg: String): Boolean = arg.startsWith("-") && arg.length > 1
 
@@ -257,66 +384,75 @@ object ShellTool {
    * Every argument but `--` is checked both ways: as a flag when it looks like one, and as a path. A `--` may be
    * consumed as an option's argument (see `flagsOf`), and an option's argument may itself be a file
    * (`grep -f -x`), so neither its position nor its leading `-` settles which one the program will take it for.
-   * A flag's attached values (see [[attachedValues]]) are checked as paths too.
+   * A flag's attached values (see `attachedValues`) are checked as paths too.
    */
-  private def argumentRefusal(command: String, args: Seq[String], base: Path, policy: FileConfig): Option[String] =
+  private def argumentRefusal(program: String, args: Seq[String], checks: PathChecks): Option[String] =
     args.iterator
       .flatMap { arg =>
-        if (isFlag(arg) && arg.length > MaxCheckedFlagLength)
-          Some(s"Flag '${arg.take(32)}...' is too long to check against the path policy")
-        else {
-          val asFlag = if (isFlag(arg)) flagRefusal(command, arg) else None
-          asFlag
-            .orElse(pathArgumentRefusal(arg, base, policy))
-            .orElse(attachedValues(arg).flatMap(value => attachedValueRefusal(arg, value, base, policy)).nextOption())
-        }
+        val asFlag = if (isFlag(arg)) flagRefusal(program, arg) else None
+        asFlag
+          .orElse(valueRefusal(program, arg, None, Iterator.single(0).filterNot(unnameable(arg)), checks))
+          .orElse(valueRefusal(program, arg, Some(arg), attachedValues(program, arg), checks))
       }
       .nextOption()
 
   /**
-   * The values a flag may carry attached to it, which the program may open as a path (#1723), without modelling
-   * which options take a value:
+   * The first refusal among the values of `arg` that start at `starts`: `arg` itself as an argument (`flag` empty),
+   * or the values attached to the flag `arg`.
+   */
+  private def valueRefusal(
+    program: String,
+    arg: String,
+    flag: Option[String],
+    starts: Iterator[Int],
+    checks: PathChecks
+  ): Option[String] =
+    starts
+      .map { start =>
+        val value = arg.substring(start)
+        (value, checks.checkValue(value))
+      }
+      .collectFirst {
+        case (_, Unchecked) => tooCostly(program)
+        case (value, Refused) =>
+          flag.fold(s"Argument '$value' is outside the allowed paths, or not a valid path")(f =>
+            s"Flag '$f' carries the value '$value', which is outside the allowed paths, or not a valid path"
+          )
+      }
+
+  /**
+   * Where the values a flag may carry attached to it start, which the program may open as a path (#1723), without
+   * modelling which options take a value:
    *
    *  - a long option contributes the value after its `=` (`--file=lout`, and under any abbreviation, `--fil=lout`);
    *  - a short option contributes every tail of its cluster after the dash (`-iflout` gives `iflout`, `flout`, `lout`,
    *    ...), since any letter in it may be an option that takes the rest as its value (`-f lout` attached as
    *    `-flout`, after other options as `-iflout`).
    *
-   * A tail that names nothing stays inside the working directory and passes, so the check refuses only a tail that
-   * reaches outside the allowed paths: a link out, a blocked file, or `..`. A value that is text to the program
-   * (`grep -e..`) is refused when it happens to name such a file; that over-blocking is the price of not modelling
-   * each program's options.
+   * The value of a text option (see `TextShortFlags`) is left out, and so is a tail that cannot name anything (see
+   * `unnameable`). A tail that names nothing stays inside the working directory and passes, so the check refuses
+   * only a tail that reaches outside the allowed paths: a link out, a blocked file, or `..`. A value that is text to
+   * the program (`grep -e..`) is refused when it happens to name such a file; that over-blocking is the price of not
+   * modelling each program's options.
    */
-  private def attachedValues(arg: String): Iterator[String] =
+  private def attachedValues(program: String, arg: String): Iterator[Int] =
     if (!isFlag(arg)) Iterator.empty
     else if (arg.startsWith("--")) {
-      val at = arg.indexOf('=')
-      if (at < 0 || at == arg.length - 1) Iterator.empty else Iterator.single(arg.substring(at + 1))
-    } else Iterator.range(1, arg.length).map(arg.substring)
-
-  private def attachedValueRefusal(flag: String, value: String, base: Path, policy: FileConfig): Option[String] =
-    Try(base.resolve(value)).toOption match {
-      case None => Some(s"Flag '$flag' carries the value '$value', which is not a valid path")
-      case Some(path) if !policy.isPathAllowed(path) =>
-        Some(s"Flag '$flag' carries the value '$value', which is outside the allowed paths")
-      case Some(_) => None
+      val part = optionPart(program, arg)
+      val at   = part.indexOf('=')
+      if (at < 0 || at == arg.length - 1 || unnameable(arg)(at + 1)) Iterator.empty else Iterator.single(at + 1)
+    } else {
+      Iterator.range(1, optionPart(program, arg).length).filterNot(unnameable(arg))
     }
 
   private def flagRefusal(command: String, flag: String): Option[String] =
-    if (flag.contains("/") || flag.contains("\\"))
+    if (optionPart(command, flag).exists(c => c == '/' || c == '\\'))
       Some(s"Flag '$flag' carries a path, which the path policy cannot check")
     else if (command == "ls" && LsDereferenceOptions.exists(option => namesLongOption(flag, option)))
       Some(s"Flag '$flag' follows links, which the path policy does not allow")
     else if (command == "ls" && !flag.startsWith("--") && flag.drop(1).exists(c => c == 'L' || c == 'H'))
       Some(s"Flag '$flag' follows links, which the path policy does not allow")
     else None
-
-  private def pathArgumentRefusal(arg: String, base: Path, policy: FileConfig): Option[String] =
-    Try(base.resolve(arg)).toOption match {
-      case None                                      => Some(s"Invalid path argument '$arg'")
-      case Some(path) if !policy.isPathAllowed(path) => Some(s"Argument '$arg' is outside the allowed paths")
-      case Some(_)                                   => None
-    }
 
   private def runProcess(
     tokens: Seq[String],

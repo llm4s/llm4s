@@ -24,8 +24,15 @@ import scala.concurrent.duration.*
  * a path as well, since the program may open it: the value after `=` of a long option (`--file=lout`) and every tail
  * of a short-option cluster after the dash (`-iflout` gives `iflout`, `flout`, `lout`, ...), so a link out of the
  * allowed directory, a blocked file or `..` given that way is refused. Which options take a value is not modelled,
- * so a text value that happens to name such a file (`grep -e..`) is refused too; a flag longer than 4096 characters
- * is refused rather than checked tail by tail. `--` is not taken as the end of the
+ * so a text value that happens to name such a file (`grep -e..`) is refused too. `sort -t`'s separator is the
+ * exception: a value attached to it (`sort -to`, `sort -t/`) is text, not checked (except on Windows, where `-t` is
+ * refused; see below). A value or tail that cannot name a file is not checked: one with no separator that begins
+ * with over 256 ASCII letters, digits or `-_+=,@` (255 is the longest name a file system allows), which no file
+ * system or Windows rule can read as a shorter name. The checks are bounded by the command, not by each argument: an
+ * argument longer than 4096 characters is refused, each distinct path is checked once, and a command whose checks
+ * would take more than 20000 file-system lookups (about two per path component) is refused as too costly to check,
+ * so a command of thousands of flags is refused in well under a second instead of being checked for minutes before
+ * it starts. `--` is not taken as the end of the
  * options, since a program may read it as the argument of the option before it: every argument is checked as a
  * path, and also as a flag when it starts with `-`. The working directory is checked for every command. A hard
  * link inside an allowed directory to a file elsewhere passes, as it does for the file tools: no path check can
@@ -37,8 +44,10 @@ import scala.concurrent.duration.*
  * Whatever the policy, the options that make an otherwise read-only command write a file, run a program or read a
  * file it does not name as an argument are refused: `file -C`, `-m`, `-M`, `-f` (`--compile`, `--magic-file`,
  * `--files-from`), `date -f`, `-r` (`--file`, `--reference`), `wc --files0-from`, and, for an allowlist that adds
- * `sort`, `sort -o` (`--output`), `--compress-program` and `--files0-from`. A short option is refused anywhere in a
- * cluster, with its value attached or not (`-bC`, `-Mmagic`, `-roout`). Long options are matched on any prefix of at
+ * `sort`, `sort -o` (`--output`), `-T` (`--temporary-directory`), `--compress-program` and `--files0-from`; on
+ * Windows, where `sort` may be `sort.exe`, also `sort -t` and any `sort` switch starting with `/O` or `/T`, in either
+ * case. A short option is refused anywhere in a cluster, with its value attached or not (`-bC`, `-Mmagic`,
+ * `-roout`), but not in the value of `sort -t` (`sort -to` sets the separator to `o`). Long options are matched on any prefix of at
  * least one letter, since GNU programs accept an unambiguous abbreviation (`date --fil`), with or without `=value`, and
  * wherever they appear, after a `--` too (`file -F -- -f list` reads `-f list` as an option). These rules match the
  * program by its file name, ignoring case and a Windows executable suffix, so `/usr/bin/file -C`, `FILE -C` and
@@ -99,8 +108,10 @@ object ShellConfig {
    *
    * The programs on this list are ones whose ordinary use only reads, but this is an allowlist of program
    * names, not read-only execution: most options pass through unchecked, so `date -s` sets the clock when
-   * the process may. The options that write a file or read one the command does not name are refused (`file -C`,
-   * `-m`, `-M`, `-f`, `date -f`, `-r` and `wc --files0-from`; see the class documentation). `env` is deliberately absent: with arguments it runs the
+   * the process may. The options that write a file, run a program or read one the command does not name are refused
+   * in every spelling (`file -C`, `-m`, `-M`, `-f`, `date -f`, `-r`, `wc --files0-from`, and for an allowlist that
+   * adds `sort`, `sort -o`, `-T`, `--compress-program` and `--files0-from`; see "Refused options" in the class
+   * documentation). `env` is deliberately absent: with arguments it runs the
    * program that follows it (`env sh -c ...`), so allowing it allows every program, and without them
    * it prints the process environment, which is where API keys live. The allowlist checks the program
    * a command starts with, not the programs that program starts - keep that in mind before adding a

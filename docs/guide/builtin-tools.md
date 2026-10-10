@@ -307,8 +307,10 @@ What the controls do, and where they stop:
     but most options are passed through unchecked: `date -s` sets the clock when the process is allowed to. The
     options that write a file, run a program or read one the command does not name are refused (`file -C`, `-m`,
     `-M` and `-f`, `date -f` and `-r`, `wc --files0-from`, and, for an allowlist that adds `sort`, `sort -o`,
-    `--output`, `--compress-program` and `--files0-from`) in every spelling: anywhere in a cluster of short options,
-    with the value attached or not (`-bC`, `-Mmagic`, `-roout`), under any abbreviation of the long form
+    `--output`, `-T`, `--temporary-directory`, `--compress-program` and `--files0-from`, plus on Windows, where
+    `sort` may be `sort.exe`, `sort -t` and the `/O` and `/T` switches) in every spelling: anywhere in a cluster of
+    short options, with the value attached or not (`-bC`, `-Mmagic`, `-roout`), but not inside the value of
+    `sort -t` (`sort -to` sets the separator to `o`), under any abbreviation of the long form
     (`date --fil`), with or without `=value`, after a `--`, which an option taking an argument can consume, and
     whatever the case of the program's name or a Windows `.exe` (`FILE -C`, `file.exe -C`)
     ([#1723](https://github.com/llm4s/llm4s/issues/1723)).
@@ -320,7 +322,12 @@ What the controls do, and where they stop:
     `=` of a long option (`grep --file=x`) and every tail of a short-option cluster (`grep -fx`, `grep -ifx`), so a
     link out of the allowed directory, a blocked file or `..` cannot be passed that way
     ([#1723](https://github.com/llm4s/llm4s/issues/1723)). Which options take a value is not modelled, so text that
-    happens to name such a file (`grep -e..`) is refused too, and so is a flag longer than 4096 characters. A hard
+    happens to name such a file (`grep -e..`) is refused too. A value with no separator that begins with over 256 ASCII
+    letters, digits or `-_+=,@` is not checked, since no file system allows a name that long. The cost of the checks
+    is bounded per command: an argument longer than 4096 characters is refused, each distinct path is checked once,
+    and a command whose checks would take more than 20000 file-system lookups is refused as too costly to check,
+    rather than holding the agent for minutes before the command starts (the shell `timeout` covers only the
+    command's run). A hard
     link to a file outside passes, as it does for the file tools. A command that walks directories itself (`ls -R`,
     `grep -r`, `find`) is checked only at the path it starts from.
   - `development()` is not a sandbox: `sbt`, `make`, `npm`, `git`, `find` and `env` can run arbitrary programs, so a
