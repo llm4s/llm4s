@@ -214,6 +214,36 @@ class HttpRedirectAllowlistSpec extends AnyFlatSpec with Matchers with BeforeAnd
     }
   }
 
+  it should "keep a Content-Type, set either way, on a same-origin hop of a request that never had a body" in {
+    val cfg = config.withAllMethods
+    val ways = Seq(
+      "header"       -> ((Map("Content-Type" -> "text/plain"), None)),
+      "content_type" -> ((Map.empty[String, String], Some("text/plain")))
+    )
+    // A bodiless POST through a 301/302 arrives as a GET: no body was dropped, so nothing changes the Content-Type.
+    val cases = Seq(301, 302, 307, 308).map("GET" -> _) ++ Seq(301, 302).map("POST" -> _)
+    for {
+      (method, status)              <- cases
+      (way, (headers, contentType)) <- ways
+    } withClue(s"$way on a bodiless $method through a same-origin $status: ") {
+      val (received, body) =
+        echoed(via(originA, s"$originA/echo", status), headers, cfg, method, None, contentType)
+      received.get("content-type") shouldBe Some("text/plain")
+      body shouldBe ""
+    }
+  }
+
+  it should "send no Content-Type, set either way, on a cross-origin hop of a request that never had a body" in {
+    val ways = Seq(
+      "header"       -> ((Map("Content-Type" -> "text/plain"), None)),
+      "content_type" -> ((Map.empty[String, String], Some("text/plain")))
+    )
+    for ((way, (headers, contentType)) <- ways) withClue(s"$way: ") {
+      val (received, _) = echoed(via(originA, s"$originB/echo"), headers, config, "GET", None, contentType)
+      received.get("content-type") shouldBe None
+    }
+  }
+
   it should "keep stripping when a later hop returns to the original origin" in {
     val (received, _) = echoed(via(originA, via(originB, s"$originA/echo")), credentials ++ safe)
     credentials.keySet.map(_.toLowerCase(Locale.ROOT)).intersect(received.keySet) shouldBe empty

@@ -369,12 +369,14 @@ object HTTPTool {
               val origin    = initialOrigin.getOrElse(hopOrigin)
               val (hopHeaders, nowOff) =
                 headersForHop(headers, origin, hopOrigin, stripped, config.redirectSafeHeaders, currentBody.isDefined)
-              // A Content-Type describes the body: a redirect hop that dropped the body sends none, whatever its
-              // origin, neither a caller-set header nor the tool's own content_type.
-              val bodyDropped = initialOrigin.isDefined && currentBody.isEmpty
+              // A Content-Type describes the body: a hop whose body a 301/302 dropped sends none, whatever its
+              // origin, neither a caller-set header nor the tool's own content_type. A request that never had a
+              // body keeps its Content-Type on a same-origin hop; a cross-origin hop sends one only with a body.
+              val bodyDropped = body.isDefined && currentBody.isEmpty
               val safeHeaders =
                 if (bodyDropped) hopHeaders.map(_.filter { case (k, _) => headerKey(k) != "content-type" })
                 else hopHeaders
+              val hopContentType = if (bodyDropped || (nowOff && currentBody.isEmpty)) None else contentType
 
               executeRequest(
                 url,
@@ -382,7 +384,7 @@ object HTTPTool {
                 currentMethod,
                 safeHeaders,
                 currentBody,
-                if (bodyDropped) None else contentType,
+                hopContentType,
                 config,
                 deadline
               )
