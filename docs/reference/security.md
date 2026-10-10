@@ -152,14 +152,27 @@ links out of the workspace, and any path argument can name a file outside it
   run in place of the real one. A program found only there is refused (`EXECUTABLE_NOT_ALLOWED`); built-ins run
   through the system directory's `cmd.exe`. On Windows the allowlist matches names ignoring case and a `.exe` /
   `.com` extension, so an entry `sort.exe` gets `sort`'s rules.
+- `git` cannot be made to run a program by its repository ([#1721](https://github.com/llm4s/llm4s/issues/1721)),
+  whether the agent wrote the configuration or the repository arrived with it. Every `git` the runner starts reads no
+  system or global configuration or attributes (`HOME` and `XDG_CONFIG_HOME` are an empty directory the runner owns),
+  may use no transport (so no lazy fetch of a partial clone, `core.sshCommand` or credential helper), and gets `-c`
+  overrides that switch off `core.fsmonitor`, hooks (`core.hooksPath`), `diff.external`, `log.showSignature` and
+  `gpg.*.program`, submodule recursion and implicit bare repositories, plus `--no-ext-diff`, `--no-textconv` and
+  `--ignore-submodules=all` where the subcommand takes them. Filter and diff drivers are named by attributes, so the
+  runner lists the repository's configuration just before the command and blanks every driver it defines; a
+  configuration it cannot account for (an include, a configured hook) refuses the command
+  (`GIT_CONFIG_NOT_ALLOWED`). Writes into `.git` - in any spelling a file system may take for it, and through a
+  link - are refused: `writeFile` / `modifyFile` with `PATH_NOT_ALLOWED`, any program other than the read-only ones
+  with `ARGUMENT_NOT_ALLOWED`.
 - The runner normally runs in a Docker container, an additional OS-level boundary.
 
 **Not covered:**
-- `git` reads the repository's own `.git/config` and runs its hooks. Where the agent can write files (the
-  `writeFile` operation, or the read-write allowlist) it can set `core.fsmonitor`, `diff.external` or a filter driver,
-  or add a hook such as `.git/hooks/post-index-change`, which a later `git status` or `git diff` runs, or point git
-  at files outside through `core.worktree`, `.git/commondir` or `.git/objects/info/alternates`
-  ([#1721](https://github.com/llm4s/llm4s/issues/1721)).
+- A repository that arrives in the workspace with a `.git/config` `core.worktree`, a `.git/commondir` or a
+  `.git/objects/info/alternates` still points git at files outside; git reads them but runs nothing from them. A
+  program added with `WORKSPACE_EXTRA_COMMANDS` that writes files without naming them (a script, an archive tool) can
+  still write into `.git`, which git then reads without running what it names. The runner lists a repository's
+  configuration just before running git, so a concurrent command that swaps in another repository between the two is
+  not seen.
 - `diff -r` follows symbolic links it meets inside the tree it walks, and no portable option stops it.
 - A link that the read-write list moves or copies to another depth (`mv a/b/rel rel`) can come to point outside.
   Path arguments through it are refused, in the same command or a later one, and a later recursive `cp` into its

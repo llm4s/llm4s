@@ -84,12 +84,12 @@ import scala.util.{ Try, Using }
  * '''Limits.''' The checks cover what a command is given, not what a program reads by itself. A recursive walk
  * (`ls -R`, `grep -r`, `find`, `diff -r`) is checked where it starts; `ls -L`, `grep -R`/`-S`, `find -L`,
  * `cp -L`/`-H` and `chmod -L`/`-H`, which follow links they meet, are refused, but `diff -r` follows links inside the
- * tree it walks. `git` reads the repository's own configuration and runs its hooks, so a repository whose
- * `.git/config` sets `core.fsmonitor`, `diff.external` or a filter or textconv driver, or whose `.git/hooks` has a
- * `post-index-change` hook, makes `git status` or `git diff` run that program; where the agent can write files (the
- * `writeFile` operation, or `cp`/`mv` in [[org.llm4s.shared.WorkspaceSandboxConfig.ReadWriteCommands]]) it can write
- * them (#1721), as it can a `.git/config` `core.worktree`, a `.git/commondir` or a `.git/objects/info/alternates` that
- * points git at files outside. The checks run before the program starts and do not see a link a concurrent command makes.
+ * tree it walks. `git` reads the repository's own configuration, attributes and hooks; a program other than the
+ * read-only ones may not name `.git` or a path inside one ([[gitMetadataRefusal]], #1721), and [[GitSandbox]] runs
+ * every `git` so that what a repository already holds (`core.fsmonitor`, `diff.external`, a filter or textconv driver,
+ * a hook) cannot make it run a program. A repository that arrives in the workspace with a `.git/config`
+ * `core.worktree`, a `.git/commondir` or a `.git/objects/info/alternates` still points git at files outside. The
+ * checks run before the program starts and do not see a link a concurrent command makes.
  */
 private[runner] object CommandPolicy {
 
@@ -179,16 +179,19 @@ private[runner] object CommandPolicy {
   val GitReadSubcommands: Set[String] =
     Set("status", "log", "show", "diff", "ls-files", "ls-tree", "grep", "blame", "rev-parse", "branch")
 
-  // `--output` writes a file; `--ext-diff`, `--textconv` and `--show-signature` run a program.
+  // `--output` writes a file; `--ext-diff`, `--textconv` and `--show-signature` run a program; `--ignore-submodules`
+  // would undo the runner's `--ignore-submodules=all`, letting git start itself in a submodule, whose configuration
+  // the runner has not read (#1721, see GitSandbox).
   private val GitDiffOptions = Options(
-    long = Set("--output", "--ext-diff", "--textconv", "--show-signature"),
+    long = Set("--output", "--ext-diff", "--textconv", "--show-signature", "--ignore-submodules"),
     longAllowed = Set("--text")
   )
 
   private val GitSubcommandOptions: Map[String, Options] = Map(
-    "log"  -> GitDiffOptions,
-    "show" -> GitDiffOptions,
-    "diff" -> GitDiffOptions,
+    "log"    -> GitDiffOptions,
+    "show"   -> GitDiffOptions,
+    "diff"   -> GitDiffOptions,
+    "status" -> Options(long = Set("--ignore-submodules")),
     // `-O` / `--open-files-in-pager` runs a pager program.
     "grep" -> Options(short = Set('O'), long = Set("--open-files-in-pager", "--textconv"), longAllowed = Set("--text")),
     "blame" -> Options(long = Set("--textconv"))
@@ -264,6 +267,9 @@ private[runner] object CommandPolicy {
         )
         .orElse(pathRefusal(program, args, isWindows, Bases(workDir, spelledWorkDir.getOrElse(workDir)), realRoot))
         .orElse(if (isWindows) windowsFormRefusal(program, args) else None)
+        .orElse(
+          gitMetadataRefusal(program, args, isWindows, Bases(workDir, spelledWorkDir.getOrElse(workDir)), realRoot)
+        )
     }.fold(
       e =>
         Some(
@@ -709,7 +715,13 @@ private[runner] object CommandPolicy {
           GitSubcommandOptions
             .get(subcommand)
             .flatMap(options => firstRefused(options, subArgs))
-            .map(notAllowed(s"git $subcommand", _, "it writes a file or runs another program."))
+            .map(
+              notAllowed(
+                s"git $subcommand",
+                _,
+                "it writes a file, runs another program, or lets git run in a submodule."
+              )
+            )
     }
   }
 
@@ -725,9 +737,8 @@ private[runner] object CommandPolicy {
    * `GIT_DISCOVERY_ACROSS_FILESYSTEM`), adds configuration (`GIT_CONFIG`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`,
    * `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT` with `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`) or names a program to
    * run (`GIT_EXEC_PATH`, `GIT_EXTERNAL_DIFF`, `GIT_PAGER`). None is needed by the read subcommands the policy allows,
-   * so all are removed rather than listed. `GIT_CONFIG_NOSYSTEM` is not set: the system and global configuration
-   * belong to whoever runs the runner, not to the agent, and a container image may need them (`safe.directory`).
-   * Names are matched ignoring case, as Windows does.
+   * so all are removed rather than listed. [[GitSandbox.environment]] then sets the variables the runner's `git` is
+   * always started with (no system or global configuration, #1721). Names are matched ignoring case, as Windows does.
    */
   def confineGit(environment: java.util.Map[String, String], realRoot: Path): Unit = {
     val names = environment.keySet.asScala.toList
@@ -817,6 +828,115 @@ private[runner] object CommandPolicy {
         )
       )
   }
+
+  // ---- git's own files (#1721)
+
+  /** The programs that only read, so may name a file inside `.git` (`cat .git/config`); every other one may not. */
+  private val ReadPrograms: Set[String] =
+    Set(
+      "ls",
+      "cat",
+      "grep",
+      "pwd",
+      "echo",
+      "git",
+      "find",
+      "head",
+      "tail",
+      "wc",
+      "sort",
+      "uniq",
+      "diff",
+      "whoami",
+      "hostname",
+      "dir",
+      "type",
+      "findstr"
+    )
+
+  /** Code points HFS+ ignores in a name, so `.g‌it` is `.git` there. */
+  private def hfsIgnorable(c: Char): Boolean =
+    (c >= '‌' && c <= '‏') || (c >= '‪' && c <= '‮') || (c >= '⁪' && c <= '⁯') ||
+      c == '﻿'
+
+  private val ShortGitName = "git~[0-9]+".r
+
+  /**
+   * Whether a file system may take `name` for git's `.git`: ignoring letter case and Unicode normalisation
+   * ([[folded]]), the code points HFS+ ignores, an NTFS stream suffix (`.git::$INDEX_ALLOCATION`), trailing dots and
+   * spaces (which Win32 removes), and an 8.3 short name (`GIT~1`). Erring towards a match.
+   */
+  private[runner] def isGitMetadataName(name: String): Boolean = {
+    val visible = name.takeWhile(_ != ':').filterNot(hfsIgnorable)
+    val trimmed = visible.reverse.dropWhile(c => c == '.' || c == ' ').reverse
+    val key     = folded(trimmed).getOrElse(trimmed.toLowerCase(Locale.ROOT))
+    key == ".git" || ShortGitName.matches(key)
+  }
+
+  /**
+   * Whether `arg` names `.git` or a path inside one, as written or where it really leads (links followed, letter case
+   * and short names settled), anywhere in the workspace. `Left` when the check runs out of budget.
+   */
+  private def namesGitMetadata(base: Bases, arg: String, realRoot: Path, budget: Budget): Either[Verdict, Boolean] =
+    if (arg.split(Array('/', '\\')).exists(isGitMetadataName)) Right(true)
+    else {
+      val readings = Seq(physicalPath(base.physical, arg, budget), lexicalPath(base.lexical, arg)).flatten
+      if (readings.contains(Left(TooCostly))) Left(TooCostly)
+      else {
+        val real = readings.flatMap(_.toOption).map(canonical(_, budget))
+        if (real.contains(None)) Left(TooCostly)
+        else
+          Right(real.flatten.exists { p =>
+            p.startsWith(realRoot) && realRoot.relativize(p).iterator.asScala.exists(c => isGitMetadataName(c.toString))
+          })
+      }
+    }
+
+  /**
+   * A program that may write (anything but the [[ReadPrograms]]: `cp`, `mv`, `rm`, `mkdir`, `touch`, `chmod`, `copy`,
+   * `move`, a program added with `WORKSPACE_EXTRA_COMMANDS`) may not name `.git` or a path inside one, in any
+   * argument, as written or through a link. git reads its configuration, hooks and attributes there and runs the
+   * programs they name (#1721); a `.git` file elsewhere (`gitdir: path`) points git at another repository. What a
+   * program writes without naming it (an archive's members, a script's output) is not seen; [[GitSandbox]] holds git
+   * itself to what it runs whatever the files say.
+   */
+  private def gitMetadataRefusal(
+    program: String,
+    args: Seq[String],
+    isWindows: Boolean,
+    base: Bases,
+    realRoot: Path
+  ): Option[Refusal] =
+    if (ReadPrograms.contains(program)) None
+    else {
+      val budget   = new Budget(MaxPathSteps)
+      val switches = isWindows && WindowsSwitchPrograms.contains(program)
+      indexedCandidates(args, ProgramOptions.getOrElse(program, Options()), switches)
+        .map { case (_, arg, candidate) => arg -> namesGitMetadata(base, candidate, realRoot, budget) }
+        .collectFirst {
+          case (_, Left(_))       => tooCostly(program)
+          case (arg, Right(true)) => gitMetadataNotWritable(program, arg)
+        }
+    }
+
+  private def gitMetadataNotWritable(program: String, arg: String): Refusal =
+    notAllowed(
+      program,
+      arg,
+      "it names '.git' or a path inside one. git reads its configuration, hooks and attributes there and runs the " +
+        "programs they name, so only git's read commands and the read-only programs may touch it."
+    )
+
+  /**
+   * Whether a file operation's path (absolute, inside the workspace) names `.git` or a path inside one, as written or
+   * where it really leads. Fails closed: a path that cannot be checked counts as one.
+   *
+   * @param spelledRoot the workspace root as configured, links not resolved
+   * @param realRoot    the workspace root's real path
+   */
+  def namesGitMetadata(path: Path, spelledRoot: Path, realRoot: Path): Boolean =
+    Try(namesGitMetadata(Bases(realRoot, spelledRoot), path.toString, realRoot, new Budget(MaxPathSteps)))
+      .fold(_ => true, _.fold(_ => true, identity))
 
   // ---- paths
 
