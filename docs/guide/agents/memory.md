@@ -95,14 +95,27 @@ the manager you get back. This prints:
 - Prefers Scala over Java
 ```
 
-The in-memory store searches by **keyword**: it splits the query on whitespace and returns a memory
-whose text contains one of the resulting terms as a substring. "Prefers Scala over Java" contains the
-term "scala" from the query, so it is returned; the Anthropic fact contains none of the terms, so it is
-not. A question such as "What does the user prefer?" would have returned nothing here, because its terms
-are `what`, `does`, `the`, `user` and `prefer?`, and the question mark stays attached to the last one, so
-`prefer?` is not found in "Prefers Scala over Java" (see
-[#1594](https://github.com/llm4s/llm4s/issues/1594)). To retrieve by meaning, use a vector store (see
-[Vector Store](#vector-store)).
+The in-memory store searches by **keyword**: it splits the query into phrases - its whitespace-separated
+pieces, each of whose words must appear next to each other and in order - and returns the memories that
+contain at least one of them as whole words, best first. A memory's score is the share of the query's
+distinct phrases it contains, not of its words. "Prefers Scala over Java" contains the phrase "scala" from
+the query, so it is returned; the Anthropic fact contains none, so it is not. A word never matches inside
+a longer one, so `i` matches the word "I" but not "Berlin", and `prefer` does not match "Prefers" - there
+is no stemming. Words are split and compared exactly as the SQLite stores' FTS5 index (`unicode61`) does,
+so both kinds of store find the same memories for a query
+([#1594](https://github.com/llm4s/llm4s/issues/1594)):
+
+- A word is a run of letters, digits and private-use characters in any script. Anything else separates
+  words: punctuation (`java?` is the word `java`), and also combining marks such as Devanagari vowel
+  signs, so "मुझे" is the two words "म" and "झ".
+- Case is ignored, and so is the accent of a Latin letter that has exactly one (`ECOLE` matches
+  `école`). Other accents are kept: `αθηνα` does not match "Αθήνα", `живет` does not match "Живёт",
+  `мои` does not match "Мой", and `viet` does not match Vietnamese "Việt", whose `ệ` has two.
+- A query word with punctuation inside is a phrase: `berlin-based` matches "Berlin-based" but not
+  "based in Berlin".
+
+The two kinds of store rank the memories they find differently (the SQLite store uses BM25). To retrieve
+by meaning, use a vector store (see [Vector Store](#vector-store)).
 
 ---
 
