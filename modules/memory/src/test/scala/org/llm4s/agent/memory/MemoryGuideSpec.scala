@@ -644,14 +644,16 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       squeezed.linesIterator.count(_.startsWith("- ")) should be < 10
     }
 
-    // The guide says a very small maxTokens can leave a heading with nothing under it. When that is
-    // fixed this starts failing: promote it and drop the sentence from the guide.
-    "never leave a section heading without an entry when maxTokens is tiny" in pendingUntilFixed {
+    // #1580: a heading is written only with an entry under it, and nothing at all when no entry fits.
+    "never leave a section heading without an entry when maxTokens is tiny" in {
       val manager = SimpleMemoryManager.empty.recordKnowledge("Scala 3 has opaque types", "docs")
       val context = manager.flatMap(_.getRelevantContext("Scala", maxTokens = 5)).value
       val lines   = context.linesIterator.toList
       lines.count(_.startsWith("## ")) shouldBe lines.count(_.startsWith("- "))
-      lines.count(_.startsWith("- ")) should be >= 1
+      context shouldBe "" // 5 tokens is about 20 characters: too few for the heading and its one entry
+
+      val justEnough = manager.flatMap(_.getRelevantContext("Scala", maxTokens = 17)).value
+      justEnough shouldBe "# Retrieved Context\n## Relevant Knowledge\n- Scala 3 has opaque types"
     }
 
     "delete old, low-importance memories and keep the rest" in {
