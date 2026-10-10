@@ -15,7 +15,9 @@ import scala.util.{ Try, Using }
  * (`core.fsmonitor`), hooks (`.git/hooks`, `core.hooksPath`), an external diff (`diff.external`,
  * `diff.<driver>.command`), a textconv driver (`diff.<driver>.textconv`), a filter driver (`filter.<driver>.clean`,
  * `smudge`, `process`) named by `.gitattributes` or `.git/info/attributes`, a signature verifier (`gpg.program`, run by
- * `log.showSignature` or a `%G?` / `%(signature)` format), the transport a partial clone fetches a missing object with
+ * `log.showSignature` or a `%G?` / `%(signature)` format), a merge driver (`merge.<driver>.driver`, named by a
+ * `merge` attribute or `merge.default`, which `git log` and `git show` run when they re-merge a merge commit for
+ * `--remerge-diff`, `--diff-merges=remerge`, or `-m` with `log.diffMerges=remerge`), the transport a partial clone fetches a missing object with
  * (`remote.<name>.url` with `ext::`, `core.sshCommand`, a remote helper), or a submodule's own `git`, which reads that
  * submodule's configuration. `git status`, `git diff`, `git log -p`, `git show`, `git blame` and `git ls-files -m` run
  * them; an agent that can write files could plant them, and a repository cloned into the workspace can arrive with them.
@@ -31,15 +33,19 @@ import scala.util.{ Try, Using }
  *  2. '''Fixed overrides''' ([[fixedOverrides]]), given as `-c` before the subcommand, where they win over any file:
  *     `core.fsmonitor=false`, `core.hooksPath` the empty directory, `diff.external` empty, `log.showSignature=false`,
  *     every `gpg.*.program` the empty directory (which cannot be run), `diff.ignoreSubmodules=all` (no `git` started
- *     in a submodule), `safe.bareRepository=explicit` (a bare repository written into the workspace is not used), and
- *     `--no-pager`; and after the subcommand ([[SubcommandOptions]]) `--no-ext-diff`, `--no-textconv` and
- *     `--ignore-submodules=all` where it takes them. The policy refuses the options that would undo them, and
- *     `git status -v` / `--verbose`, whose staged diff runs textconv drivers and which takes no `--no-textconv`.
- *  3. '''Drivers''' ([[driverOverrides]]): a filter or diff driver is named by an attribute and defined in the
+ *     in a submodule), `safe.bareRepository=explicit` (a bare repository written into the workspace is not used),
+ *     `log.diffMerges=separate` (git's default, so `-m` and `--diff-merges=on` never re-merge) and `merge.default`
+ *     empty (a path with no `merge` attribute uses the built-in merge), and `--no-pager`; and after the subcommand
+ *     ([[SubcommandOptions]]) `--no-ext-diff`, `--no-textconv` and `--ignore-submodules=all` where it takes them. The
+ *     policy refuses the options that would undo them, `--remerge-diff` and `--diff-merges` (which re-merge, running
+ *     merge drivers), and `git status -v` / `--verbose`, whose staged diff runs textconv drivers and which takes no
+ *     `--no-textconv`.
+ *  3. '''Drivers''' ([[driverOverrides]]): a filter, diff or merge driver is named by an attribute and defined in the
  *     configuration, so it cannot be listed in advance. Before the command, the runner lists the configuration the
  *     command will read (`git config --list --no-includes`, with layers 1 and 2) and blanks every driver it defines:
  *     `filter.<name>.clean`, `smudge` and `process` empty and `required=false` (git then passes content through), and
- *     `diff.<name>.textconv` and `command` empty. Configuration it cannot account for refuses the command
+ *     `diff.<name>.textconv` and `command` empty, and `merge.<name>.driver` empty (git then cannot start it, and keeps
+ *     its own side of the merge). Configuration it cannot account for refuses the command
  *     ([[GitConfigNotAllowed]]): an `include.path` or `includeIf` (an included file may lie in the work tree and change
  *     after the listing), a `hook.*` key (configuration-defined hooks), or a driver name that `-c` cannot express
  *     exactly. The listing is read as bytes, and a `filter`, `diff` or `merge` subsection is blanked only when every
@@ -47,6 +53,11 @@ import scala.util.{ Try, Using }
  *     (`[filter "\xE9vil"]`), any non-ASCII character, a space or a control character - could reach git as a different
  *     name once decoded and re-encoded for the command line (as U+FFFD, or in the JVM's `sun.jnu.encoding`), leaving the
  *     driver `.gitattributes` names untouched, so it refuses the command instead.
+ *
+ * Nothing else an allowed subcommand reads names a program it runs: `difftool` and `mergetool` are not allowed;
+ * `credential.*`, `url.*`, `remote.*`, `http.*` and `core.sshCommand` are reached only by a transport, which layer 1
+ * refuses; the pager is switched off; `submodule.<name>.update` is read only by `git submodule`; and the
+ * `trailer.<token>.command` programs are run by `git interpret-trailers`, never by a `%(trailers)` format.
  *
  * '''Limits.''' The listing runs just before the command, from the same directory: a concurrent command that replaces
  * the repository between the two (an `mv` of whole repositories, the read-write list) is not seen. What git reads but
@@ -95,7 +106,9 @@ private[runner] object GitSandbox {
     "gpg.ssh.program"       -> empty.toString,
     "diff.ignoreSubmodules" -> "all",
     "safe.bareRepository"   -> "explicit",
-    "protocol.allow"        -> "never"
+    "protocol.allow"        -> "never",
+    "log.diffMerges"        -> "separate",
+    "merge.default"         -> ""
   )
 
   /** Options given after the subcommand: `git diff`, `log` and `show` run textconv and external diffs by default. */
@@ -148,7 +161,7 @@ private[runner] object GitSandbox {
   def hasSubcommand(args: Seq[String]): Boolean = args.dropWhile(_.startsWith("-")).nonEmpty
 
   /**
-   * The `-c` overrides that blank every filter and diff driver a configuration listing defines, or the refusal when the
+   * The `-c` overrides that blank every filter, diff and merge driver a configuration listing defines, or the refusal when the
    * listing holds what they cannot cover.
    *
    * @param bytes the output of `git config --list --no-includes --show-scope -z`, as git wrote it: a scope, NUL, the
@@ -207,8 +220,10 @@ private[runner] object GitSandbox {
         val diffs = parsed.collect {
           case (_, ("diff", Some(name), key)) if key == "textconv" || key == "command" => name
         }.distinct
-        if (filters.size + diffs.size > MaxDrivers)
-          refuse(s"${filters.size + diffs.size} drivers", s"more than $MaxDrivers filter and diff drivers.")
+        val merges = parsed.collect { case (_, ("merge", Some(name), _)) => name }.distinct
+        val count  = filters.size + diffs.size + merges.size
+        if (count > MaxDrivers)
+          refuse(s"$count drivers", s"more than $MaxDrivers filter, diff and merge drivers.")
         else
           Right(
             filters.flatMap { name =>
@@ -218,7 +233,8 @@ private[runner] object GitSandbox {
                 s"filter.$name.process"  -> "",
                 s"filter.$name.required" -> "false"
               )
-            } ++ diffs.flatMap(name => Seq(s"diff.$name.textconv" -> "", s"diff.$name.command" -> ""))
+            } ++ diffs.flatMap(name => Seq(s"diff.$name.textconv" -> "", s"diff.$name.command" -> "")) ++
+              merges.map(name => s"merge.$name.driver" -> "")
           )
     }
   }

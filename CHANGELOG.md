@@ -2087,21 +2087,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hostile - made a later `git status`, `git diff`, `git log -p`, `git show`, `git blame` or `git ls-files -m` run a
   program through `core.fsmonitor`, a `post-index-change` hook (`.git/hooks` or `core.hooksPath`), `diff.external`,
   a diff driver's `command` or `textconv`, a `clean` / `smudge` / `process` filter named in `.gitattributes` or
-  `.git/info/attributes`, `gpg.program` under `log.showSignature`, a partial clone's lazy fetch through its remote
+  `.git/info/attributes`, a merge driver (`merge.<driver>.driver`, by a `merge` attribute or `merge.default`) that
+  `git log` / `git show` ran to re-merge a merge commit for `--remerge-diff`, `--diff-merges=remerge`, or `-m` with
+  `log.diffMerges=remerge`, `gpg.program` under `log.showSignature`, a partial clone's lazy fetch through its remote
   (`ext::`, `core.sshCommand`), or a submodule's own configuration; `$HOME/.gitconfig` and
   `$XDG_CONFIG_HOME/git/config` applied too. Every `git` the runner starts now has: no system or global
   configuration or attributes (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL` the null device, `GIT_ATTR_NOSYSTEM`,
   `HOME` and `XDG_CONFIG_HOME` an empty directory the runner owns), no transport and no lazy fetch
   (`GIT_ALLOW_PROTOCOL` naming none, `GIT_NO_LAZY_FETCH`), no optional index write, no pager; `-c` overrides
   `core.fsmonitor=false`, `core.hooksPath` the empty directory, `diff.external` empty, `log.showSignature=false`,
-  `gpg.*.program` a directory, `diff.ignoreSubmodules=all`, `safe.bareRepository=explicit`; `--no-ext-diff`,
+  `gpg.*.program` a directory, `diff.ignoreSubmodules=all`, `safe.bareRepository=explicit`,
+  `log.diffMerges=separate`, `merge.default` empty; `--no-ext-diff`,
   `--no-textconv` and `--ignore-submodules=all` after `diff` / `log` / `show` (and the two that apply to `status`,
-  `blame`, `grep`); and, from a `git config --list` of the repository taken just before the command, every filter
-  and diff driver it defines blanked. The listing is read as bytes, and a configuration with an `include.path` /
+  `blame`, `grep`); and, from a `git config --list` of the repository taken just before the command, every filter,
+  diff and merge driver it defines blanked. The listing is read as bytes, and a configuration with an `include.path` /
   `includeIf`, a `hook.*` key, or a `filter` / `diff` / `merge` driver name holding any byte but printable ASCII
   (0x21-0x7E, not `=` or `"`) is refused (`GIT_CONFIG_NOT_ALLOWED`): a name that is not UTF-8 (`[filter "\xE9vil"]`)
   would otherwise be blanked as U+FFFD while git ran the real driver, and a non-ASCII one could be re-encoded in the
-  JVM's `sun.jnu.encoding`. `--ignore-submodules` from the agent is refused (`ARGUMENT_NOT_ALLOWED`), as is
+  JVM's `sun.jnu.encoding`. `--ignore-submodules`, `--remerge-diff` and `--diff-merges` from the agent are refused
+  (`ARGUMENT_NOT_ALLOWED`; `-m`, `-c` and `--cc` stay), as is
   `git status -v` / `-vv` / `--verbose`, whose staged diff runs textconv drivers and which takes no `--no-textconv`. Writes into `.git` are refused too, in any spelling (`.GIT`, `.git.`, `GIT~1`) and
   through a link: `writeFile` / `modifyFile` with `PATH_NOT_ALLOWED`, and any program other than the read-only ones
   (`cp`, `mv`, `rm`, `mkdir`, `touch`, `chmod`, `copy`, `move`, an added program) naming it with

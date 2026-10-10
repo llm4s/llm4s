@@ -76,7 +76,10 @@ class GitConfigRoutesSpec extends AnyFlatSpec with Matchers {
     "git diff HEAD",
     "git diff --stat",
     "git log -p",
+    "git log -p -m",
+    "git log -m -1 --stat",
     "git show",
+    "git show -m HEAD",
     "git show HEAD:a.txt",
     "git blame a.txt",
     "git grep -n a",
@@ -85,6 +88,30 @@ class GitConfigRoutesSpec extends AnyFlatSpec with Matchers {
     "git ls-tree HEAD",
     "git rev-parse HEAD",
     "git branch -v"
+  )
+
+  /** The re-merging options the policy refuses: each runs the merge driver when git is run directly. */
+  private val remerges = Seq(
+    "git show --remerge-diff HEAD",
+    "git log --remerge-diff -1",
+    "git log --diff-merges=r -1",
+    "git show --diff-merges=remerge HEAD",
+    "git log --diff-merges=on -1",
+    "git log -p --diff-merges remerge -1",
+    "git log --remerge -1"
+  )
+
+  /** Merge-commit reads the policy allows, which with `log.diffMerges` pinned diff against the parents only. */
+  private val mergeReads = Seq(
+    "git log -p -m -1",
+    "git show -m HEAD",
+    "git log -m -1 --stat",
+    "git log -p -c -1",
+    "git log -p --cc -1",
+    "git log -p --dd -1",
+    "git log -p --no-diff-merges -1",
+    "git show HEAD",
+    "git show --first-parent HEAD"
   )
 
   /** Rewrites `a.txt` with new content of the same size and a later time, so git must read the file to compare it. */
@@ -334,6 +361,52 @@ class GitConfigRoutesSpec extends AnyFlatSpec with Matchers {
       }
   }
 
+  it should "not run a merge driver named in .git/info/attributes when a merge commit is re-merged" in inRepo { repo =>
+    repo.mergeCommit()
+    Files.createDirectories(repo.root.resolve(".git/info"))
+    write(repo.root.resolve(".git/info/attributes"), "* merge=evil\n")
+    setup(repo, "config", "merge.evil.driver", s"${repo.marker} driver %A %O %B")
+    controlRuns(repo, repo.root, "show", "--remerge-diff", "HEAD")
+    controlRuns(repo, repo.root, "log", "--remerge-diff", "-1")
+    controlRuns(repo, repo.root, "log", "--diff-merges=r", "-1")
+    controlRuns(repo, repo.root, "show", "--diff-merges=remerge", "HEAD")
+    neverRuns(repo, reads ++ mergeReads ++ remerges: _*)
+    // The same driver named by .gitattributes, under an upper-case subsection, and through a recursive driver
+    Files.delete(repo.root.resolve(".git/info/attributes"))
+    write(repo.root.resolve(".gitattributes"), "* merge=Evil\n")
+    setup(repo, "config", "merge.Evil.driver", s"${repo.marker} driver %A")
+    setup(repo, "config", "merge.Evil.recursive", "evil")
+    controlRuns(repo, repo.root, "show", "--remerge-diff", "HEAD")
+    neverRuns(repo, reads ++ mergeReads ++ remerges: _*)
+    remerges.foreach { command =>
+      val ex = the[WorkspaceAgentException] thrownBy repo.ws.executeCommand(command, None, Some(30.seconds), None)
+      withClue(command)(ex.code shouldBe CommandPolicy.ArgumentNotAllowed)
+    }
+    mergeReads.foreach { command =>
+      val r = repo.ws.executeCommand(command, None, Some(30.seconds), None)
+      withClue(s"$command: ${r.stderr}")(r.exitCode shouldBe 0)
+    }
+  }
+
+  it should "not run merge.default's driver for -m when the configuration asks for re-merged diffs" in inRepo { repo =>
+    repo.mergeCommit()
+    // No attribute at all: log.diffMerges makes -m (and --diff-merges=on) re-merge, merge.default picks the driver
+    setup(repo, "config", "log.diffMerges", "remerge")
+    setup(repo, "config", "merge.default", "evil")
+    setup(repo, "config", "merge.evil.driver", s"${repo.marker} default %A %O %B")
+    controlRuns(repo, repo.root, "log", "-p", "-m", "-1")
+    controlRuns(repo, repo.root, "show", "-m", "HEAD")
+    controlRuns(repo, repo.root, "log", "-m", "-1", "--stat")
+    controlRuns(repo, repo.root, "log", "--diff-merges=on", "-1")
+    neverRuns(repo, reads ++ mergeReads ++ remerges: _*)
+    // -m still shows the merge's diff against each parent
+    val shown = repo.ws.executeCommand("git log -p -m -1", None, Some(30.seconds), None)
+    shown.exitCode shouldBe 0
+    shown.stdout should include("+main")
+    shown.stdout should include("+side")
+    (shown.stdout should not).include("remerge")
+  }
+
   it should "not use a bare repository written into the workspace" in inRepo { repo =>
     repo.signedCommit()
     val bare = repo.root.resolve("bare")
@@ -560,6 +633,46 @@ class GitSandboxUnitSpec extends AnyFlatSpec with Matchers {
     )
     keys("diff.ignoreSubmodules") shouldBe "all"
     keys("safe.bareRepository") shouldBe "explicit"
+    keys("log.diffMerges") shouldBe "separate"
+    keys("merge.default") shouldBe ""
+  }
+
+  it should "refuse the options that re-merge a merge commit, on every host, and keep -m, -c and --cc" in {
+    val root = Files.createTempDirectory("git-remerge-unit")
+    val ws = new WorkspaceAgentInterfaceImpl(
+      root.toString,
+      GitConfigRoutesSpec.isWindowsHost,
+      Some(WorkspaceSandboxConfig.Permissive)
+    )
+    Seq(
+      "git log --remerge-diff",
+      "git show --remerge-diff HEAD",
+      "git diff --remerge-diff",
+      "git log --remerge",
+      "git log --diff-merges=r",
+      "git log --diff-merges=remerge",
+      "git show --diff-merges=on HEAD",
+      "git log --diff-merges remerge",
+      "git log --diff-m=r"
+    ).foreach { command =>
+      val ex = the[WorkspaceAgentException] thrownBy ws.executeCommand(command, None, Some(5.seconds), None)
+      withClue(command)(ex.code shouldBe CommandPolicy.ArgumentNotAllowed)
+    }
+    Seq("git log -m", "git show -m HEAD", "git log -c", "git log --cc", "git log --dd", "git log --no-diff-merges")
+      .foreach { command =>
+        withClue(command)(
+          CommandPolicy
+            .refusal(
+              "git",
+              command.split(' ').toSeq.drop(1),
+              GitConfigRoutesSpec.isWindowsHost,
+              root.toRealPath(),
+              root.toRealPath(),
+              Map.empty
+            )
+            .map(_.code) should not be Some(CommandPolicy.ArgumentNotAllowed)
+        )
+      }
   }
 
   private def listing(entries: (String, String)*): Array[Byte] =
@@ -577,7 +690,13 @@ class GitSandboxUnitSpec extends AnyFlatSpec with Matchers {
         "local"   -> "diff.python.xfuncname\n^def",
         "local"   -> "diff.external\n/x",
         "local"   -> "filter.flag",
-        "command" -> "filter.ours.clean\n"
+        "local"   -> "merge.evil.driver\n/x %A",
+        "local"   -> "merge.Other.name\nother",
+        "local"   -> "merge.a.b.recursive\nevil",
+        "local"   -> "merge.default\nevil",
+        "local"   -> "merge.renormalize\ntrue",
+        "command" -> "filter.ours.clean\n",
+        "command" -> "merge.cmd.driver\n"
       )
     )
     out.map(_.toSet) shouldBe Right(
@@ -597,7 +716,10 @@ class GitSandboxUnitSpec extends AnyFlatSpec with Matchers {
         "diff.evil.textconv"   -> "",
         "diff.evil.command"    -> "",
         "diff.other.textconv"  -> "",
-        "diff.other.command"   -> ""
+        "diff.other.command"   -> "",
+        "merge.evil.driver"    -> "",
+        "merge.Other.driver"   -> "",
+        "merge.a.b.driver"     -> ""
       )
     )
     GitSandbox.driverOverrides(Array.emptyByteArray) shouldBe Right(Nil)
@@ -610,6 +732,8 @@ class GitSandboxUnitSpec extends AnyFlatSpec with Matchers {
       "hook.evil.command\n/x",
       "filter.a=b.clean\n/x",
       "diff.a\"b.textconv\n/x",
+      "merge.a b.driver\n/x",
+      "merge..driver\n/x",
       "filter.a\tb.clean\n/x",
       "filter.a b.clean\n/x",
       "filter..clean\n/x",
@@ -714,6 +838,21 @@ object GitConfigRoutesSpec {
     val rw = new WorkspaceAgentInterfaceImpl(root.toString, isWindowsHost, Some(WorkspaceSandboxConfig.Permissive))
 
     private var tick = 10L
+
+    /**
+     * A merge commit at `HEAD` joining a change to `a.txt`'s first line with one to its last, which merges cleanly
+     * with git's built-in merge, so a re-merge reaches the merge driver of `a.txt` without a conflict to stop it.
+     */
+    def mergeCommit(): Unit = {
+      val identity = Seq("-c", "user.name=t", "-c", "user.email=t@example.com")
+      run(root, "checkout", "-q", "-b", "side")
+      write(root.resolve("a.txt"), "a\nb\nb\nside\n")
+      run(root, identity ++ Seq("commit", "-q", "-a", "-m", "side"): _*)
+      run(root, "checkout", "-q", "-")
+      write(root.resolve("a.txt"), "main\nb\nb\nc\n")
+      run(root, identity ++ Seq("commit", "-q", "-a", "-m", "main"): _*)
+      run(root, identity ++ Seq("merge", "-q", "--no-edit", "side"): _*)
+    }
 
     /** Moves `p`'s modification time forward, so git must look at it again. */
     def later(p: Path): Unit = {

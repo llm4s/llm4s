@@ -86,8 +86,8 @@ import scala.util.{ Try, Using }
  * `cp -L`/`-H` and `chmod -L`/`-H`, which follow links they meet, are refused, but `diff -r` follows links inside the
  * tree it walks. `git` reads the repository's own configuration, attributes and hooks; a program other than the
  * read-only ones may not name `.git` or a path inside one ([[gitMetadataRefusal]], #1721), and [[GitSandbox]] runs
- * every `git` so that what a repository already holds (`core.fsmonitor`, `diff.external`, a filter or textconv driver,
- * a hook) cannot make it run a program. A repository that arrives in the workspace with a `.git/config`
+ * every `git` so that what a repository already holds (`core.fsmonitor`, `diff.external`, a filter, textconv or
+ * merge driver, a hook) cannot make it run a program. A repository that arrives in the workspace with a `.git/config`
  * `core.worktree`, a `.git/commondir` or a `.git/objects/info/alternates` still points git at files outside. The
  * checks run before the program starts and do not see a link a concurrent command makes.
  */
@@ -179,11 +179,21 @@ private[runner] object CommandPolicy {
   val GitReadSubcommands: Set[String] =
     Set("status", "log", "show", "diff", "ls-files", "ls-tree", "grep", "blame", "rev-parse", "branch")
 
-  // `--output` writes a file; `--ext-diff`, `--textconv` and `--show-signature` run a program; `--ignore-submodules`
-  // would undo the runner's `--ignore-submodules=all`, letting git start itself in a submodule, whose configuration
-  // the runner has not read (#1721, see GitSandbox).
+  // `--output` writes a file; `--ext-diff`, `--textconv` and `--show-signature` run a program; `--remerge-diff` and
+  // `--diff-merges` (any value: `r`, `remerge`, or `on` with `log.diffMerges`) re-merge a merge commit, which runs the
+  // merge driver an attribute names; `--ignore-submodules` would undo the runner's `--ignore-submodules=all`, letting
+  // git start itself in a submodule, whose configuration the runner has not read (#1721, see GitSandbox). `-m`, `-c`
+  // and `--cc` stay: with `log.diffMerges` pinned to `separate` they diff against the parents and merge nothing.
   private val GitDiffOptions = Options(
-    long = Set("--output", "--ext-diff", "--textconv", "--show-signature", "--ignore-submodules"),
+    long = Set(
+      "--output",
+      "--ext-diff",
+      "--textconv",
+      "--show-signature",
+      "--ignore-submodules",
+      "--remerge-diff",
+      "--diff-merges"
+    ),
     longAllowed = Set("--text")
   )
 

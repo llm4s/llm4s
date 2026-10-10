@@ -486,6 +486,7 @@ files, or a repository cloned into the workspace already hostile, made an allowe
 | `diff.<driver>.textconv` on the staged diff | `status -v` / `-vv` / `--verbose` (no `--no-textconv`) | `-v` / `--verbose` refused for `status` (`ARGUMENT_NOT_ALLOWED`) | refuse git status -v |
 | A driver whose name is not printable ASCII (`[filter "\xE9vil"]`, `[diff "é"]`), which a `-c` override could miss | `status`, `diff`, `ls-files -m`, `blame`, `status -v` | refused (`GIT_CONFIG_NOT_ALLOWED`) | refuse a filter or textconv driver whose name is not printable ASCII |
 | `filter.<driver>.clean` / `smudge` / `process` via `.gitattributes` or `.git/info/attributes` | `status`, `diff`, `ls-files -m`, `blame`, `log -p`, `show` | driver blanked (`required=false`) | clean/smudge filter; process filter |
+| `merge.<driver>.driver` via a `merge` attribute (`.gitattributes`, `.git/info/attributes`), or `merge.default` | `log` / `show` re-merging a merge commit: `--remerge-diff`, `--diff-merges=r` / `remerge`, or `-m` / `--diff-merges=on` with `log.diffMerges=remerge` | driver blanked (`-c merge.<name>.driver=`), `-c merge.default=`, `-c log.diffMerges=separate`; `--remerge-diff` and `--diff-merges` refused (`ARGUMENT_NOT_ALLOWED`) | not run a merge driver; not run merge.default's driver |
 | `gpg.program` (`log.showSignature`) | `log`, `show` | `-c log.showSignature=false`, `gpg.*.program` a directory | not run gpg.program |
 | Partial clone lazy fetch (`remote.<n>.url` `ext::`, `core.sshCommand`, a remote helper) | `show`, `log -p`, `blame` | `GIT_ALLOW_PROTOCOL` naming none, `GIT_NO_LAZY_FETCH=1` | not fetch a missing object |
 | A submodule's own configuration (`diff.submodule=diff`, a gitlink's drivers) | `status`, `diff`, `log -p`, `show` | `--ignore-submodules=all`, `-c diff.ignoreSubmodules=all`; the agent's `--ignore-submodules` refused | not start git in a submodule |
@@ -496,7 +497,10 @@ files, or a repository cloned into the workspace already hostile, made an allowe
 
 `core.editor`, `sequence.editor`, `alias.*` (which cannot shadow a built-in subcommand), `credential.helper` and
 `core.askPass` are not reached by the allowed subcommands with no transport; the test with every route planted at
-once includes them. A `%G?` or `%(signature)` format, which would also verify a signature, is refused for its `%`.
+once includes them. Nothing else the allowed subcommands read names a program they run: `difftool` and `mergetool`
+are not allowed; `credential.*`, `url.*`, `remote.*`, `http.*` and `core.sshCommand` are reached only by a transport;
+`submodule.<name>.update` is read only by `git submodule`; and `trailer.<token>.command` runs only in
+`git interpret-trailers`, never for a `%(trailers)` format. A `%G?` or `%(signature)` format, which would also verify a signature, is refused for its `%`.
 
 So every `git` the runner starts has:
 
@@ -510,17 +514,22 @@ So every `git` the runner starts has:
 - **Before the subcommand**: `--no-pager` and `-c core.fsmonitor=false`, `-c core.hooksPath=<empty dir>`,
   `-c diff.external=`, `-c log.showSignature=false`, `gpg.program`, `gpg.openpgp.program`, `gpg.x509.program` and
   `gpg.ssh.program` set to the empty directory (which cannot be run), `-c diff.ignoreSubmodules=all`,
-  `-c safe.bareRepository=explicit`, `-c protocol.allow=never`. Command-line configuration wins over every file.
+  `-c safe.bareRepository=explicit`, `-c protocol.allow=never`, `-c log.diffMerges=separate` (git's default, so `-m`
+  and `--diff-merges=on` diff a merge against its parents rather than re-merging it) and `-c merge.default=` (a path
+  with no `merge` attribute uses the built-in merge). Command-line configuration wins over every file.
 - **After the subcommand**: `--no-ext-diff --no-textconv --ignore-submodules=all` for `diff`, `log` and `show`;
   `--ignore-submodules=all` for `status`; `--no-textconv` for `blame` and `grep`. The agent cannot undo them:
-  `--ext-diff`, `--textconv` and `--ignore-submodules` are refused. `git status -v` (`-vv`, `--verbose`, `-sv`) is
+  `--ext-diff`, `--textconv` and `--ignore-submodules` are refused, and so are `--remerge-diff` and `--diff-merges`
+  (any value), which re-merge a merge commit and run the merge driver its attributes name; `-m`, `-c`, `--cc`,
+  `--dd` and `--no-diff-merges` stay allowed. `git status -v` (`-vv`, `--verbose`, `-sv`) is
   refused too: its staged diff runs textconv drivers and `status` takes no `--no-textconv`, while a blanked
   `textconv=` would make it fail rather than skip the conversion.
-- **Drivers**: a filter or diff driver is named by an attribute, which can be anywhere in the tree, and defined in
+- **Drivers**: a filter, diff or merge driver is named by an attribute, which can be anywhere in the tree, and defined in
   the configuration. Just before the command the runner lists that configuration (`git config --list --no-includes
   --show-scope -z`, same directory and environment) and, for every driver it defines, adds
   `-c filter.<name>.clean= -c filter.<name>.smudge= -c filter.<name>.process= -c filter.<name>.required=false`
-  (git then passes content through) or `-c diff.<name>.textconv= -c diff.<name>.command=`. An `include.path` or
+  (git then passes content through), `-c diff.<name>.textconv= -c diff.<name>.command=`, or
+  `-c merge.<name>.driver=` (git cannot start an empty command, and keeps its own side of the merge). An `include.path` or
   `includeIf` (an included file may sit in the work tree and change after the listing), a `hook.*` key, or a
   `filter`, `diff` or `merge` driver name with any byte other than printable ASCII (0x21-0x7E) or with `=` or `"`
   refuses the command (`GIT_CONFIG_NOT_ALLOWED`). The listing is read as bytes, so a name that is not UTF-8
