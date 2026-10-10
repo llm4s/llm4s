@@ -2013,6 +2013,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - redaction: `Proxy-Authorization`, `Cookie`, `Set-Cookie` and `X-Amz-Security-Token` are treated as
+  sensitive** ([#1686](https://github.com/llm4s/llm4s/issues/1686)): `Redaction` (used by the provider exchange
+  logger, `LLMError` messages and error mapping) matched `authorization` as a whole key only, so a JSON field or header
+  map `{"Proxy-Authorization": "Negotiate ..."}`, its escaped form inside a string, `proxy_authorization=...` and a
+  `Digest`, `Negotiate` or raw proxy credential there were written in the clear; cookies were not covered in any shape,
+  so a session id in a `Cookie` or `Set-Cookie` header line, JSON field, cookie list or `key=value` pair leaked. They
+  are now sensitive keys in every shape the redactor reads (a header line, also after a prefix, a JSON or escaped-JSON
+  field, a single-quoted dict, a container, `key=value`, a query parameter), and a cookie header's whole value is
+  replaced. `X-Amz-Security-Token` (suffix `securitytoken`) joins `X-Api-Key`, `Api-Key`, `X-Goog-Api-Key` and
+  `X-Auth-Token`, already covered. `cookie` is a whole word, not a substring: `cookie_policy`, `cookie_consent` and
+  `max_cookie_age` are left alone. The key list in `Redaction` is core's one list of sensitive names.
 - **Workspace runner: a command that reads standard input gets end-of-file at once instead of hanging until the
   timeout** ([#1728](https://github.com/llm4s/llm4s/issues/1728)): `executeCommand` left the child's standard input an
   open pipe that nothing wrote to or closed, so `cat` with no operands, `cat -`, `sort`, `uniq`, `wc`, `head`,

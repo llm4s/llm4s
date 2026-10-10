@@ -157,7 +157,8 @@ on it.
 
 The file sink changes `request_body`, `response_body` and `error_message` before writing them:
 
-- **Redaction.** It replaces, with `[REDACTED]`: an `Authorization` header and bearer tokens, URL query
+- **Redaction.** It replaces, with `[REDACTED]`: an `Authorization`, `Proxy-Authorization`, `Cookie` or
+  `Set-Cookie` header (the whole value: every name and value of a cookie), bearer tokens, URL query
   parameters with sensitive names (`api_key`, `token`, `password` and similar), JSON fields with sensitive
   names (also when the JSON sits inside a prompt or response string with escaped quotes,
   `\"api_key\": \"...\"`, or is single-quoted, or is cut off before its closing quote, as a truncated
@@ -187,11 +188,14 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   `spring.datasource.password=...`, `PASSWORD="..."`), `key: value` header lines (for example
   `x-api-key: ...`), and strings shaped like known provider API keys (for example `sk-` keys). A quoted
   value is redacted whole, escaped quotes included. A key is sensitive when its whole name, lower-cased
-  with `_` and `-` dropped, is `token`, `authorization` or `credential(s)`, or ends in `apikey`, `secret`,
-  `password`, `passwd`, `privatekey`, `accesstoken`, `refreshtoken`, `idtoken`, `authtoken`,
-  `sessiontoken` or `bearertoken`: `client_secret`, `x-api-key`, `refresh_token` and `db_password` are
-  redacted; `max_tokens`, `prompt_tokens`, `token_count` and `next_page_token` are not, because the match
-  is never on a substring.
+  with `_` and `-` dropped, is `token`, `authorization`, `proxyauthorization`, `credential(s)`,
+  `cookie(s)` or `setcookie`, or ends in `apikey`, `secret`, `password`, `passwd`, `privatekey`,
+  `accesstoken`, `refreshtoken`, `idtoken`, `authtoken`, `sessiontoken`, `securitytoken` or
+  `bearertoken`: `client_secret`, `x-api-key`, `api-key`, `x-goog-api-key`, `x-auth-token`,
+  `x-amz-security-token`, `refresh_token`, `db_password`, `Proxy-Authorization`, `Cookie` and
+  `Set-Cookie` are redacted, as a header line, a JSON field or header map (escaped too) and a
+  `key=value` pair; `max_tokens`, `prompt_tokens`, `token_count`, `next_page_token`, `cookie_policy` and
+  `cookie_consent` are not, because the match is never on a substring.
 - **Truncation.** It keeps the first 1000 characters, after redaction, and appends
   `... [truncated, N chars omitted]` with the count it dropped. Redact the full text before you cut it, as
   this sink and every other llm4s call site do: redaction of text that is already cut off is weaker. An

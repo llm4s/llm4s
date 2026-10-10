@@ -13,7 +13,7 @@ import scala.util.matching.Regex
  *
  * Pattern-based redaction automatically detects and masks:
  *  - API keys (OpenAI, Anthropic, Google, Voyage, Langfuse)
- *  - Bearer tokens and Authorization headers
+ *  - Bearer tokens and credential headers: Authorization, Proxy-Authorization, Cookie and Set-Cookie
  *  - URL query parameters with sensitive keys
  *  - Sensitive fields, whatever the shape: JSON (also inside a string, single-quoted, with a number value, or with
  *    an array or object value, whose every leaf - string, number or bare word - is replaced), `key=value` pairs and
@@ -128,8 +128,18 @@ private[llm4s] object Redaction {
    * as `client_secret`, `refresh_token` and `db_password`. The match is on the whole normalised key, never on a
    * substring: `max_tokens`, `prompt_tokens`, `token_count` and `next_page_token` are not credentials and appear in
    * every provider exchange, so redacting them would destroy the logs.
+   *
+   * The credential-bearing HTTP headers are keys too, read by every shape the passes handle (a header line, a JSON or
+   * escaped-JSON field, a header map in JSON, `key=value`): `Authorization` and `Proxy-Authorization`, which carries
+   * the same `Basic`, `Bearer`, `Digest` or `Negotiate` credential for a proxy (#1686); `Cookie` and `Set-Cookie`,
+   * whose whole value is replaced, since a cookie holds a session token; `X-Api-Key`, `Api-Key` and `X-Goog-Api-Key`
+   * (suffix `apikey`), `X-Auth-Token` (`authtoken`) and `X-Amz-Security-Token` (`securitytoken`). `cookie` is a whole
+   * word, never a suffix or a substring: `cookie_policy`, `cookie_consent` and `max_cookie_age` name settings, not
+   * cookies. This is the one list of sensitive names in core; a list of headers to withhold (the HTTP tool's redirect
+   * stripping) should read the same names.
    */
-  private val SensitiveKeyWords: Set[String] = Set("token", "authorization", "credential", "credentials")
+  private val SensitiveKeyWords: Set[String] =
+    Set("token", "authorization", "proxyauthorization", "credential", "credentials", "cookie", "cookies", "setcookie")
 
   private val SensitiveKeySuffixes: Seq[String] = Seq(
     "apikey",
@@ -143,6 +153,7 @@ private[llm4s] object Redaction {
     "idtoken",
     "authtoken",
     "sessiontoken",
+    "securitytoken",
     "bearertoken"
   )
 
@@ -582,8 +593,13 @@ private[llm4s] object Redaction {
    */
   private val JsonAuthorization: Regex = """(?is)("Authorization"\s*:\s*")((?:[^"\\]|\\.?)++)("|\z)""".r
 
-  /** `Authorization: ...` in a header. */
-  private val HeaderAuthorization: Regex = """(?i)(Authorization:\s*)([^\n\r]+)""".r
+  /**
+   * `Authorization: ...` (`Proxy-Authorization: ...` too), `Cookie: ...` or `Set-Cookie: ...` in a header, anywhere in
+   * a line: the header-line field pass reads only a header at the start of a line, and a log line often writes the
+   * headers after a prefix. A cookie's whole value is replaced, every name and value of it, since any may be the
+   * session token (#1686). `Cookie` starts a word, so that a longer name ending in it is left to the field passes.
+   */
+  private val HeaderAuthorization: Regex = """(?i)((?:Authorization|\bCookie):\s*)([^\n\r]+)""".r
 
   /** A standalone Bearer token. */
   private val BearerToken: Regex = """(?i)\bBearer\s+([a-zA-Z0-9\-_\.]+)""".r
