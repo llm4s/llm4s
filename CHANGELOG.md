@@ -2050,6 +2050,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   <file>` for a non-zero exit, `cat <present> <missing>` for stderr, `tail -f <file>` for the timeout), and
   `WorkspaceCommandsSpec` runs each command string they and the workspace samples send through the runner's
   WebSocket executor on every PR.
+- **Memory: `getRelevantContext` no longer writes a section heading with nothing under it** ([#1580](https://github.com/llm4s/llm4s/issues/1580)):
+  under a tight `maxTokens` the context assembly wrote a section heading such as `## Relevant Knowledge`
+  before checking whether its first memory fitted, so the result could be headings with no entries,
+  and the `# Retrieved Context` line was not counted, so the text could run past `maxTokens * 4`
+  characters. A heading is now written only together with its first memory, a section whose first
+  memory does not fit is left out, the result is `""` when no memory fits, and the whole text stays
+  within the budget. With a budget that fits everything the output is unchanged.
 - **Workspace runner: a command that reads standard input gets end-of-file at once instead of hanging until the
   timeout** ([#1728](https://github.com/llm4s/llm4s/issues/1728)): `executeCommand` left the child's standard input an
   open pipe that nothing wrote to or closed, so `cat` with no operands, `cat -`, `sort`, `uniq`, `wc`, `head`,
