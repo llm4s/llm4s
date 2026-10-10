@@ -129,7 +129,9 @@ final case class InMemoryStore private (
   }
 
   /**
-   * Keyword search: a memory's score is the share of the query's distinct phrases that occur in it as whole words.
+   * Keyword search: a memory's score is the share of the query's distinct phrases that occur in it as whole words. A
+   * phrase is a whitespace-separated piece of the query, whose words must appear adjacent and in order, so the score
+   * counts phrases, not words.
    *
    * The query is split into phrases and query and memory text into words by [[KeywordTokens]], the way
    * `SQLiteMemoryStore` and its FTS5 index split them, so both stores find the same memories: `java?` matches `Java`,

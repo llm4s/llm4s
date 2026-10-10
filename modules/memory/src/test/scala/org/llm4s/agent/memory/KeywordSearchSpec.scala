@@ -4,7 +4,6 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.sql.DriverManager
 import java.util.Locale
 import scala.util.Using
 
@@ -269,7 +268,7 @@ class KeywordSearchSpec extends AnyFlatSpec with Matchers {
 
   // ===== Scoring =====
 
-  it should "score by the share of distinct query words found, best first" in {
+  it should "score by the share of the query's distinct phrases found, not words, best first" in {
     val store  = storeOf(fact("both", "Scala runs on the JVM"), fact("one", "Scala is functional"))
     val scored = right(store.search("Scala scala JVM?", topK = 10))
     scored.map(_.memory.id.value) shouldBe Seq("both", "one")
@@ -280,39 +279,41 @@ class KeywordSearchSpec extends AnyFlatSpec with Matchers {
 
   /** The words FTS5 `unicode61` (SQLiteMemoryStore's tokenizer) splits each text into, in order. */
   private def fts5Words(texts: IndexedSeq[String]): IndexedSeq[Vector[String]] =
-    Using
-      .Manager { use =>
-        val connection = use(DriverManager.getConnection("jdbc:sqlite::memory:"))
-        val statement  = use(connection.createStatement())
-        statement.execute("CREATE VIRTUAL TABLE t USING fts5(id UNINDEXED, content)")
-        statement.execute("CREATE VIRTUAL TABLE v USING fts5vocab(t, instance)")
-        connection.setAutoCommit(false)
-        val insert = use(connection.prepareStatement("INSERT INTO t(rowid, id, content) VALUES (?, '', ?)"))
-        texts.zipWithIndex.foreach { case (text, i) =>
-          insert.setInt(1, i)
-          insert.setString(2, text)
-          insert.addBatch()
-          if (i % 10000 == 0) insert.executeBatch()
-        }
-        insert.executeBatch()
-        connection.commit()
-        val words = Array.fill(texts.size)(Vector.newBuilder[String])
-        val rows  = use(statement.executeQuery("SELECT doc, term FROM v ORDER BY doc, offset"))
-        while (rows.next()) words(rows.getInt(1)) += rows.getString(2)
-        words.toIndexedSeq.map(_.result())
-      }
-      .fold(e => fail(e), identity)
+    KeywordTokensTables.fts5Words(texts).fold(e => fail(e), identity)
+
+  /** `a<code point>b` for every code point, and FTS5's words for each. */
+  private lazy val probes: KeywordTokensTables.Probes = KeywordTokensTables.probes().fold(e => fail(e), identity)
+
+  private def regenerate: String =
+    s"sqlite-jdbc's FTS5 tokenizer changed (was ${KeywordTokensTables.GeneratedWith}); regenerate the tables in " +
+      s"KeywordTokens with ${KeywordTokensTables.Command}"
 
   "KeywordTokens" should "split and fold every code point the way FTS5 unicode61 does" in {
     // Each code point between two ASCII letters shows whether FTS5 counts it as part of a word, drops it, or
     // separates words at it, and what it folds to
-    val codePoints = (1 to Character.MAX_CODE_POINT).filterNot(cp => cp >= 0xd800 && cp <= 0xdfff)
-    val texts      = codePoints.map(cp => "a" + new String(Character.toChars(cp)) + "b")
-    val expected   = fts5Words(texts)
-    val mismatches = texts.indices.filter(i => KeywordTokens.words(texts(i)) != expected(i))
-    withClue(mismatches.take(10).map(i => f"U+${codePoints(i)}%04X: FTS5 ${expected(i)}").mkString("\n")) {
-      mismatches shouldBe empty
+    val mismatches = probes.texts.indices.filter(i => KeywordTokens.words(probes.texts(i)) != probes.fts5(i))
+    val shown      = 20
+    def describe(i: Int): String = {
+      val cp   = probes.codePoints(i)
+      val name = Option(Character.getName(cp)).fold("")(n => s" $n")
+      f"U+$cp%04X$name: FTS5 ${probes.fts5(i)}, KeywordTokens ${KeywordTokens.words(probes.texts(i))}"
     }
+    if (mismatches.nonEmpty)
+      fail(
+        (mismatches.take(shown).map(describe) ++
+          Option.when(mismatches.size > shown)(s"... and ${mismatches.size - shown} more") ++
+          Seq(s"${mismatches.size} code points differ: $regenerate")).mkString("\n")
+      )
+  }
+
+  it should "have the tables KeywordTokensTables generates from FTS5" in {
+    val generated = KeywordTokensTables.tables(probes).fold(e => fail(e), identity)
+    val differing = Seq(
+      "SeparatorTable" -> (generated.separators == KeywordTokens.SeparatorTable),
+      "AccentTable"    -> (generated.accents == KeywordTokens.AccentTable),
+      "CaseTable"      -> (generated.cases == KeywordTokens.CaseTable)
+    ).collect { case (table, false) => table }
+    if (differing.nonEmpty) fail(s"${differing.mkString(", ")} differ from what FTS5 gives: $regenerate")
   }
 
   it should "split text the way FTS5 does where a code point's neighbours matter" in {

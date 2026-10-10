@@ -95,13 +95,14 @@ the manager you get back. This prints:
 - Prefers Scala over Java
 ```
 
-The in-memory store searches by **keyword**: it splits the query and each memory into words and returns
-the memories that share at least one whole word with the query, best first (a memory's score is the share
-of the query's distinct words it contains). "Prefers Scala over Java" shares the word "scala" with the
-query, so it is returned; the Anthropic fact shares none, so it is not. A word never matches inside a
-longer one, so `i` matches the word "I" but not "Berlin", and `prefer` does not match "Prefers" - there
-is no stemming. Words are split and compared exactly as the SQLite stores' FTS5 index (`unicode61`)
-does, so both kinds of store find the same memories for a query
+The in-memory store searches by **keyword**: it splits the query into phrases - its whitespace-separated
+pieces, each of whose words must appear next to each other and in order - and returns the memories that
+contain at least one of them as whole words, best first. A memory's score is the share of the query's
+distinct phrases it contains, not of its words. "Prefers Scala over Java" contains the phrase "scala" from
+the query, so it is returned; the Anthropic fact contains none, so it is not. A word never matches inside
+a longer one, so `i` matches the word "I" but not "Berlin", and `prefer` does not match "Prefers" - there
+is no stemming. Words are split and compared exactly as the SQLite stores' FTS5 index (`unicode61`) does,
+so both kinds of store find the same memories for a query
 ([#1594](https://github.com/llm4s/llm4s/issues/1594)):
 
 - A word is a run of letters, digits and private-use characters in any script. Anything else separates
