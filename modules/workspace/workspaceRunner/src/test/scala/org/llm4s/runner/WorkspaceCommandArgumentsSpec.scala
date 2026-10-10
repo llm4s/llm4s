@@ -566,7 +566,11 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
         "\u0390" -> "\u0399\u0308\u0301", // ΐ, Ι with diaeresis and acute
         "\u03B0" -> "\u03A5\u0308\u0301", // ΰ, Υ with diaeresis and acute
         "\u1FD3" -> "\u0399\u0308\u0301",
-        "\u1FE7" -> "\u03A5\u0308\u0342"
+        "\u1FE7" -> "\u03A5\u0308\u0342",
+        // APFS decomposes before it case-folds, putting the iota subscript after a following mark, where NFKC kept it
+        // composed and upper-casing put `\u0399` before the mark: `cp -P a/b/z\u1FBC\u0342 c/z\u1FB7 d` wrote through the link on macOS
+        "\u1FBC\u0342" -> "\u1FB7",            // \u1FBC and a perispomeni, \u1FB7
+        "\u1FB3\u0303" -> "\u03B1\u0303\u03B9" // \u1FB3 and a tilde, \u03B1 with a tilde and \u03B9
       )
       Seq("a/b", "c", "d").foreach(dir => Files.createDirectories(fx.root.resolve(dir)))
       val ws = fx.interface(ReadWrite)

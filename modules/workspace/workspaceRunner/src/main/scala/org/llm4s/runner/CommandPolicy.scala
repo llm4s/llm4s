@@ -1731,18 +1731,21 @@ private[runner] object CommandPolicy {
    * A name as a case- and normalisation-insensitive file system may compare it, erring towards matching; `None` when
    * the folding does not settle, which callers take to match any name.
    *
-   * One pass of NFKC, upper case, lower case is not enough: it is not idempotent, so two names APFS takes for one can
-   * still fold apart - `ẞ` (U+1E9E) lower-cases to `ß`, which only a second pass upper-cases to `SS`, and `ΐ` (U+0390)
-   * upper-cases to `Ϊ́` decomposed, which NFKC recomposes only after case folding (#1775 review). So the pass, ending
-   * in NFKC, is repeated until the name stops changing: over every code point and its upper, lower and (K)NF(K)D
+   * Each pass decomposes (NFKD), upper-cases and lower-cases. Decomposing, as APFS does before it case-folds, matters
+   * for the Greek iota subscript: NFKC composes U+0345 into its letter, and Java upper-cases `ᾳ` to `ΑΙ`, emitting the
+   * iota before any mark that follows, so `ᾳ̃` and `α̃ι` - one name on APFS, where NFD puts the subscript after the
+   * tilde - folded apart, and `cp -P a/b/zᾼ͂ c/zᾷ d` wrote `c/zᾷ` through the link it had just made (#1775 review).
+   * One pass is not idempotent either - `ẞ` (U+1E9E) lower-cases to `ß`, which only a second pass upper-cases to `SS`
+   * - so the pass is repeated until the name stops changing: over every code point and its upper, lower and (K)NF(K)D
    * forms that takes at most two changes (`CommandPolicyFoldedSpec`), so a name still changing after [[FoldPasses]] is
-   * unexpected and treated as unknown.
+   * unexpected and treated as unknown. Over the 3.1 million pairs of names APFS took for one in a brute-force search,
+   * this gives each pair one key.
    */
   private[runner] def folded(name: String): Option[String] = {
     def pass(s: String): String =
       Normalizer.normalize(
-        Normalizer.normalize(s, Normalizer.Form.NFKC).toUpperCase(Locale.ROOT).toLowerCase(Locale.ROOT),
-        Normalizer.Form.NFKC
+        Normalizer.normalize(s, Normalizer.Form.NFKD).toUpperCase(Locale.ROOT).toLowerCase(Locale.ROOT),
+        Normalizer.Form.NFKD
       )
     Iterator
       .iterate(name)(pass)

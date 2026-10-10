@@ -288,8 +288,8 @@ source's operation is taken to change:
 Every other path argument (the other sources, the destination, a `-t` value) is walked as the path rule walks it,
 under both readings, links' targets included, and the command is refused (`ARGUMENT_NOT_ALLOWED`) when the walk looks
 up one of those entries. Names are compared without regard to letter case or Unicode normalisation, as on macOS and
-Windows file systems (NFKC and case mapping repeated until the name stops changing, so `ẞ`, `ß`, `ss` and `SS` are
-one name, as on APFS), and directories by identity, so another spelling of the destination (`alias/evil/...` with
+Windows file systems (NFKD decomposition, as APFS decomposes before it case-folds, then case mapping, repeated until
+the name stops changing, so `ẞ`, `ß`, `ss` and `SS` are one name, as are `ᾳ̃` and `α̃ι`, as on APFS), and directories by identity, so another spelling of the destination (`alias/evil/...` with
 `alias` -> `d`) is caught. Windows also takes `x.` and `x ` (trailing dots and spaces) for `x`; these are not folded,
 which matters only for a native Win32 `cp`. An `mv` is also refused when the working directory lies inside a source it moves, since a
 relative path's `..` then climbs from the source's new place. Argument order is not modelled: a path through a name a
