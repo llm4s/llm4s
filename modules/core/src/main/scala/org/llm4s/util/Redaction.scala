@@ -319,7 +319,10 @@ private[llm4s] object Redaction {
    * over an escaped `&`, into the key of the field after it. So there every pass also reads the input as it was given,
    * and what any pass replaces, in sequence or alone, is replaced: the edits are merged where they overlap or meet
    * and made once, and no pass can take the key or the quote of a field from the pass that reads it. An input that
-   * holds no such escape is redacted by the passes in sequence alone, exactly as before.
+   * holds no such escape is redacted by the passes in sequence, and where it holds a `'` the passes that read fields
+   * under a single-quoted key (`'apiKey': ...`) also read the input as it was given (#1697): a double-quoted value
+   * before such a field (`'see "password": " here', 'apiKey': [...]`) may run over its key, and what they replace
+   * there is added where the passes in sequence replaced nothing, so every replacement those make is still made.
    *
    * Redacting the output a second time usually changes nothing, but that is not guaranteed: where quotes are
    * unbalanced or stray, the text a first pass replaced can change how a second pass pairs the quotes, and the
@@ -331,29 +334,70 @@ private[llm4s] object Redaction {
    * @return The input with sensitive data redacted
    */
   def redact(input: String, placeholder: String = RedactionPlaceholder): String =
-    if (input == null || input.isEmpty) {
-      input
-    } else {
-      val escaped = holdsSeparatorOrQuoteEscape(input)
-      val passes  = redactionPasses(placeholder, input.count(_ == '\''), escaped)
-      if (escaped) {
-        // Every pass also reads the input as it was given, and what any of them replaces is merged with what the
-        // passes in sequence replace, and written once: no pass can take the key or the quote of a field from
-        // another pass's reading (#1676). Each pass runs twice and the edits are sorted once.
-        val alone = passes.flatMap(pass => pass(input).edits)
-        applyEdits(input, mergeEdits(sequenceEdits(input, passes) ++ alone, placeholder))
-      } else {
-        passes.foldLeft(input)((text, pass) => pass(text).result)
-      }
-    }
+    if (input == null || input.isEmpty) input else redaction(input, placeholder, singleQuotedFromInput = true)._1
 
   /**
-   * What the passes replace when each reads the text the one before left, as edits of the input. Each character of
-   * a text is traced to the character of the input it was copied from, or to none where a pass wrote it (a
-   * placeholder, or a quote around one); the edits are the runs of the input that no character of the last text is
-   * traced to, with the text written in their place.
+   * What [[redact]] makes of a non-empty `input`, and the ranges of the input it replaces; with
+   * `singleQuotedFromInput = false`, without the single-quoted field passes' reading of the input as it was given
+   * (#1697), so that a test can check that reading only adds to what is replaced.
    */
-  private def sequenceEdits(input: String, passes: Vector[String => Rewrite]): Vector[Edit] = {
+  private[util] def redactedWithRanges(input: String, singleQuotedFromInput: Boolean): (String, Vector[(Int, Int)]) = {
+    val (text, edits) = redaction(input, RedactionPlaceholder, singleQuotedFromInput)
+    (text, edits.map(edit => (edit.start, edit.end)))
+  }
+
+  /** The redacted text of a non-empty `input`, and the edits that make it of the input. */
+  private def redaction(input: String, placeholder: String, singleQuotedFromInput: Boolean): (String, Vector[Edit]) = {
+    val escaped = holdsSeparatorOrQuoteEscape(input)
+    val quotes  = input.count(_ == '\'')
+    val passes  = redactionPasses(placeholder, quotes, escaped)
+    if (escaped) {
+      // Every pass also reads the input as it was given, and what any of them replaces is merged with what the
+      // passes in sequence replace, and written once: no pass can take the key or the quote of a field from
+      // another pass's reading (#1676). Each pass runs twice and the edits are sorted once. The single-quoted
+      // field passes are among them, so the reading #1697 adds below is made here already.
+      val alone = passes.flatMap(pass => pass(input).edits)
+      val edits = mergeEdits(sequenceEdits(input, passes)._2 ++ alone, placeholder)
+      (applyEdits(input, edits), edits)
+    } else {
+      // A pass that reads a double-quoted value can run it over the key of a single-quoted field after it - a
+      // `"password": "` that a Python string only mentions takes the rest of that string and `'apiKey': [` up to
+      // the next `"` - and the passes after it then never see that field (#1697). So the single-quoted field passes
+      // also read the input as it was given, and what they replace there is added where no pass in sequence
+      // replaced anything: every edit of the passes in sequence is made as before, so the output masks all it did.
+      val (text, sequenced) = sequenceEdits(input, passes)
+      val added =
+        if (!singleQuotedFromInput || quotes == 0) Vector.empty
+        else disjointFrom(sequenced, sequenceEdits(input, singleQuotedFieldPasses(placeholder, quotes))._2)
+      if (added.isEmpty) (text, sequenced)
+      else {
+        val edits = (sequenced ++ added).sortBy(_.start)
+        (applyEdits(input, edits), edits)
+      }
+    }
+  }
+
+  /**
+   * The edits of `extra` that neither overlap nor touch any edit of `kept`, both sorted and each free of overlaps:
+   * made together, every edit of `kept` is made as it would be alone. One sweep of both.
+   */
+  private def disjointFrom(kept: Vector[Edit], extra: Vector[Edit]): Vector[Edit] = {
+    val out = Vector.newBuilder[Edit]
+    var k   = 0
+    extra.foreach { e =>
+      while (k < kept.length && kept(k).end < e.start) k += 1
+      if (k >= kept.length || kept(k).start > e.end) out += e
+    }
+    out.result()
+  }
+
+  /**
+   * The text the passes leave when each reads the text the one before left, and what they replace, as edits of the
+   * input. Each character of a text is traced to the character of the input it was copied from, or to none where a
+   * pass wrote it (a placeholder, or a quote around one); the edits are the runs of the input that no character of
+   * the last text is traced to, with the text written in their place.
+   */
+  private def sequenceEdits(input: String, passes: Vector[String => Rewrite]): (String, Vector[Edit]) = {
     var text   = input
     var origin = Array.range(0, input.length)
     passes.foreach { pass =>
@@ -391,7 +435,7 @@ private[llm4s] object Redaction {
       i += 1
     }
     record(input.length, text.length)
-    found.result()
+    (text, found.result())
   }
 
   /** What a character of a text is traced to when a pass wrote it: a placeholder, or the text around one. */
@@ -1173,7 +1217,7 @@ private[llm4s] object Redaction {
     // they have replaced no `'` of the input - one inside a value they redacted, or the closing quote of a credential
     // that a pattern ran over - and the placeholder writes none of its own. Where every pass reads the input itself,
     // the text is the input, and its quotes are all there.
-    def quotesKept(text: String): Boolean = !placeholder.contains('\'') && text.count(_ == '\'') >= inputQuotes
+    def quotesKept(text: String): Boolean = quotesAllKept(text, placeholder, inputQuotes)
     val pairs                             = pairStarts(escaped)
     Vector(
       (text: String) =>
@@ -1213,6 +1257,35 @@ private[llm4s] object Redaction {
         redactEscapedQuoted(pairs.escapedQuote, text, placeholder, key = 1, slashes = 2, hex = 3, pair = true)
     )
   }
+
+  /** Whether `text` holds every `'` of an input that held `inputQuotes`, and the placeholder writes none of its own. */
+  private def quotesAllKept(text: String, placeholder: String, inputQuotes: Int): Boolean =
+    !placeholder.contains('\'') && text.count(_ == '\'') >= inputQuotes
+
+  /**
+   * The passes that read a field under a single-quoted key - a string in either quote, a number, a container and its
+   * leaves - in the order [[redact]] runs them, which also run over the input as it was given (#1697). A pass before
+   * them that reads a double-quoted value can run it over such a key, `'see "password": " here', 'apiKey': [`, and
+   * they would not find it in the text it leaves.
+   */
+  private def singleQuotedFieldPasses(placeholder: String, inputQuotes: Int): Vector[String => Rewrite] =
+    Vector(
+      (text: String) =>
+        redactQuoted(
+          SingleQuotedStart,
+          text,
+          placeholder,
+          ValueEnd.Quote('\''),
+          endsWithString = quotesAllKept(text, placeholder, inputQuotes)
+        ),
+      (text: String) =>
+        redactQuoted(SingleQuotedKeyEscapedStringStart, text, placeholder, ValueEnd.EscapedQuote, asValue = true),
+      (text: String) =>
+        redactQuoted(SingleQuotedKeyStringStart, text, placeholder, ValueEnd.Quote('"'), asValue = true),
+      (text: String) => redactPairs(SingleQuotedNumberField, text, placeholder, wrap = "'"),
+      (text: String) =>
+        redactContainers(SingleQuotedContainerStart, text, placeholder, ValueEnd.Quote('\''), leaves = true)
+    )
 
   /**
    * A quoted key, `:` and the opening quote of a string value, where each quote is a JSON escape - backslashes, `u00`
