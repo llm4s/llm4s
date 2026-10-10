@@ -2081,6 +2081,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - redaction: four more shapes no longer leave a credential readable**
+  ([#1695](https://github.com/llm4s/llm4s/issues/1695)): `Redaction` (used by the provider exchange logger,
+  `LLMError` messages and error mapping) left these readable. (1) A `key=value` pair in a log that Gson or another
+  serialiser wrote into a JSON string, where the key follows the escape of a line break or a tab: `\n` ends in a
+  letter, so the key read as `ntoken` and `{"log":"user\u003dbob\ntoken\u003dabc"}` kept `abc`; also `\u000a`
+  and the same log one string deeper. The issue's own Gson repros (`password\u003dhunter2\u0026...`) were already
+  redacted by #1676's reading of the escaped `=`. (2) A literal `&` in an unquoted value: `password=p&ssW0rd` kept
+  `ssW0rd`; the rest of the value after an `&` that no other pair follows is now replaced too
+  (`password=[REDACTED]&[REDACTED]`). (3) A query value written right before JSON ran over the key of the next
+  field: `?a=1&token=abc,{\"api_key\":\"S\"}` kept `S`. (4) `Bearer password=x` replaced `Bearer password` and
+  kept `x`. Each is closed by a reading of the input as it was given whose replacements are added only where no
+  other pass replaced anything, touching none of them, so every replacement made before is made exactly as before
+  and only more is replaced: the passes again with a query value that ends at a `,` before `{`, `[` or a quote and
+  with a scheme word that is no longer taken where it is the key of a sensitive pair; the `key=value` passes with a
+  key right after such an escape; and the tail of a value after a literal `&`. Each reading takes time linear in
+  the input, and the first runs only where the input holds such a `,` or a scheme word.
 - **Security - redaction: a `"password": "` that a single-quoted string mentions no longer hides the next field's
   key** ([#1697](https://github.com/llm4s/llm4s/issues/1697)): `Redaction` (used by the provider exchange logger,
   `LLMError` messages and error mapping) read a JSON-style field that a Python dict's string merely mentions as a
