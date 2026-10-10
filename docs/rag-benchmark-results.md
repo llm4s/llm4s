@@ -8,8 +8,8 @@ This document describes the RAG benchmarking harness and provides actual benchma
 > `([.!?])(\s+)([A-Z])` with `Regex.split`. That deleted the punctuation, the whitespace **and the first letter of
 > the next sentence** at every sentence boundary, glued the pieces back together and so almost never split:
 > `"Paris is the capital and largest city of France. It is located in ..."` was indexed and embedded as
-> `"Paris is the capital and largest city of Francet is located in ..."`, and a document's final `.` was dropped
-> too. Since #1724 sentences are cut from the input itself, every character is kept, and the sentences in a chunk
+> `"Paris is the capital and largest city of Francet is located in ..."`, and a document's final `.` was
+> sometimes dropped too (when its last word ended like an abbreviation, e.g. `processed.`). Since #1724 sentences are cut from the input itself, every character is kept, and the sentences in a chunk
 > keep the whitespace that separated them.
 >
 > **Which rows are affected:** every experiment whose chunking strategy is `sentence`. That is the default
