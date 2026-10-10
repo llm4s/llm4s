@@ -72,9 +72,7 @@ public final class JavaInteropCheck {
       Conversation conv =
           ConversationBuilder.create().system("be brief").user("hi").assistant("hello").user("2+2").build();
       log.add("conv:" + c.complete(conv).get());
-      // NOTE: complete(Conversation, CompletionOptions) is intentionally not driven here:
-      // CompletionOptions cannot be built from Java without scala.Option/scala.Seq arguments
-      // (known gap, see the PR review).
+      // complete(Conversation, JCompletionOptions) is driven from Java by CompletionOptionsCheck (#1488).
     }
     return log;
   }

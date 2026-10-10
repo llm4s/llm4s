@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Completion options from Java** ([#1488](https://github.com/llm4s/llm4s/issues/1488)): `llm4s-java-api`'s
+  `JCompletionOptions.builder()` sets `temperature`, `topP`, `maxTokens`, `presencePenalty`, `frequencyPenalty`,
+  `reasoning` (the Java enum `JReasoningEffort`: `NONE`, `LOW`, `MEDIUM`, `HIGH`) and `budgetTokens`, and
+  `JLlmClient.complete(Conversation, JCompletionOptions)` sends them. A value that may be absent is read as an
+  `Optional` / `OptionalInt` and can be cleared with an empty one, so no `scala.Option` is involved. The builder is
+  immutable, `toBuilder()` starts one from existing options, and a value no provider accepts (a negative or
+  non-finite temperature, a top-p outside `0..1`, a token count below 1) throws `IllegalArgumentException` when it
+  is set. The options map onto core's `CompletionOptions` through its `apply` and `with*` methods only. The
+  `complete(Conversation, CompletionOptions)` overload stays. The Java guide has a
+  [Completion options](docs/guide/java.md#completion-options) section, and the `gradle-java` sample uses the builder.
 - **Cookbook recipe: several agents in one graph** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   `MultiAgentGraphRecipe` runs two specialist agents in one superstep and an editor agent behind a static join,
   and its spec checks update order, the barrier, step boundaries and cancellation with no API key.
@@ -2033,6 +2043,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the files to sort from a file the command does not name) join them, for allowlists that add `sort`, in every
   spelling (`-roout`, `--out=x`, `--files0=x`, after a consumed `--`), with or without a path policy; on Windows,
   where `sort` may be `sort.exe`, so do `sort -t` and the `/O` and `/T` switches.
+- **Memory: `getRelevantContext` no longer writes a section heading with nothing under it** ([#1580](https://github.com/llm4s/llm4s/issues/1580)):
+  under a tight `maxTokens` the context assembly wrote a section heading such as `## Relevant Knowledge`
+  before checking whether its first memory fitted, so the result could be headings with no entries,
+  and the `# Retrieved Context` line was not counted, so the text could run past `maxTokens * 4`
+  characters. A heading is now written only together with its first memory, a section whose first
+  memory does not fit is left out, the result is `""` when no memory fits, and the whole text stays
+  within the budget. With a budget that fits everything the output is unchanged.
 - **Workspace runner: a command that reads standard input gets end-of-file at once instead of hanging until the
   timeout** ([#1728](https://github.com/llm4s/llm4s/issues/1728)): `executeCommand` left the child's standard input an
   open pipe that nothing wrote to or closed, so `cat` with no operands, `cat -`, `sort`, `uniq`, `wc`, `head`,

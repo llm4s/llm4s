@@ -59,11 +59,30 @@ final class JLlmClient private[javaapi] (private[javaapi] val underlying: LLMCli
     else guarded(underlying.complete(conversation))
 
   /**
-   * Full access: send a conversation with explicit [[CompletionOptions]],
-   * returning the raw text content. Blocks and reports an interrupt as `complete(String)` does: a
-   * `CancelledError` result, the interrupt flag left set, never an `InterruptedException`.
+   * Sends a conversation with the options a [[JCompletionOptions]] builder made - temperature, token limit,
+   * reasoning - and returns the assistant's text response. A `null` argument yields a failed [[LlmResult]].
+   * Blocks and reports an interrupt as `complete(String)` does: a `CancelledError` result, the interrupt flag
+   * left set, never an `InterruptedException`.
+   *
+   * {{{
+   * JCompletionOptions options = JCompletionOptions.builder().temperature(0.2).maxTokens(512).build();
+   * LlmResult<String> answer = client.complete(conversation, options);
+   * }}}
+   */
+  def complete(conversation: Conversation, options: JCompletionOptions): LlmResult[String] =
+    if (options == null) completing(conversation, null)
+    else completing(conversation, options.underlying)
+
+  /**
+   * Full access: send a conversation with core's Scala [[CompletionOptions]], returning the raw text
+   * content; from Java, [[JCompletionOptions]] builds the same options without Scala types. Blocks and
+   * reports an interrupt as `complete(String)` does: a `CancelledError` result, the interrupt flag left
+   * set, never an `InterruptedException`.
    */
   def complete(conversation: Conversation, options: CompletionOptions): LlmResult[String] =
+    completing(conversation, options)
+
+  private def completing(conversation: Conversation, options: CompletionOptions): LlmResult[String] =
     if (conversation == null) nullArgument("conversation")
     else if (options == null) nullArgument("options")
     else guarded(underlying.complete(conversation, options))

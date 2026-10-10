@@ -603,9 +603,9 @@ val context = manager.getRelevantContext(query, maxTokens = 500)
 ```
 
 `getRelevantContext` stops adding memories once the next one would take the text past
-`maxTokens * 4` characters; the section headings count towards that, the `# Retrieved Context` line
-does not. A very small `maxTokens` can therefore leave a heading with nothing under it. The default
-is 2000 tokens, and `MemoryManagerConfig.contextTokenBudget` is not consulted.
+`maxTokens * 4` characters; the section headings and the `# Retrieved Context` line count towards
+that. A heading is written only with at least one memory under it, so a `maxTokens` too small for
+any memory gives an empty string. The default is 2000 tokens, and `MemoryManagerConfig.contextTokenBudget` is not consulted.
 
 ### 4. Clean Up Old Memories
 
