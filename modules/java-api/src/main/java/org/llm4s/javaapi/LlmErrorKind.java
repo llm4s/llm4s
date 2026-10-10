@@ -6,8 +6,10 @@ package org.llm4s.javaapi;
  * configuration without importing {@code org.llm4s.error}.
  *
  * <p>Each of the error classes in {@code org.llm4s.error} maps to exactly one kind, and a test fails when a class is
- * added there without a kind. An error the library does not know - one from another llm4s module, such as an
- * embedding or speech error, or one your own code implements - is {@link #OTHER}.
+ * added there without a kind. An embedding provider's error response ({@code EmbeddingError}, from
+ * {@link JEmbeddingClient}) has the kind of its HTTP status, as a {@code ServiceError} does, and is {@link #OTHER} when
+ * it has none. An error the library does not know - one from another llm4s module, such as a speech error, or one
+ * your own code implements - is {@link #OTHER}.
  *
  * <p>The kind says what went wrong; {@link LlmException#isRecoverable()} says separately whether trying again may
  * help, so a {@link #SERVICE} error can be either.
@@ -28,7 +30,10 @@ public enum LlmErrorKind {
   /** The provider could not be reached, so no response arrived ({@code NetworkError}). */
   NETWORK,
 
-  /** The provider answered with an error ({@code ServiceError}, {@code APIError}); see {@code getStatusCode()}. */
+  /**
+   * The provider answered with an error ({@code ServiceError}, {@code APIError}, or an {@code EmbeddingError} with a
+   * status); see {@code getStatusCode()}.
+   */
   SERVICE,
 
   /** The request itself is wrong: a missing or invalid argument or field ({@code ValidationError}, {@code InvalidInputError}). */

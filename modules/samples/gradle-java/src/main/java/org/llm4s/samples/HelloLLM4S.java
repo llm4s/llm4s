@@ -11,6 +11,8 @@ import org.llm4s.javaapi.Answer;
 import org.llm4s.javaapi.ConversationBuilder;
 import org.llm4s.javaapi.JCompletion;
 import org.llm4s.javaapi.JCompletionOptions;
+import org.llm4s.javaapi.JEmbeddingClient;
+import org.llm4s.javaapi.JEmbeddings;
 import org.llm4s.javaapi.JAgent;
 import org.llm4s.javaapi.JAgentResult;
 import org.llm4s.javaapi.JAgentStatus;
@@ -54,7 +56,8 @@ public final class HelloLLM4S {
             boolean first = oneQuestion(client);
             boolean second = aConversation(client);
             boolean third = aStreamedAgentTurn(client);
-            return first && second && third ? 0 : 1;
+            boolean fourth = twoSentencesCompared();
+            return first && second && third && fourth ? 0 : 1;
         } catch (Exception e) {
             System.err.println("Closing the client failed: " + e.getMessage());
             return 1;
@@ -101,6 +104,33 @@ public final class HelloLLM4S {
             return false;
         }
         System.out.println(answer.get());
+        return true;
+    }
+
+    /**
+     * Embeddings: two sentences turned into vectors with the embedding model {@code application.conf} names, and
+     * how similar they are, from {@code -1} to {@code 1}. Creating the client fails, as a value, when no embedding model
+     * is configured or its provider's key is missing.
+     */
+    private static boolean twoSentencesCompared() {
+        System.out.println("== Two sentences compared");
+        LlmResult<JEmbeddingClient> created = Llm4s.createDefaultEmbeddingClient();
+        if (created.isFailure()) {
+            System.err.println("Could not create an embedding client: " + created.getError().getMessage());
+            return false;
+        }
+        LlmResult<JEmbeddings> embedded = created.get().embed(List.of(
+            "The cat sat on the mat.",
+            "A kitten was sitting on the rug."));
+        if (embedded.isFailure()) {
+            System.err.println("The call failed (" + embedded.getError().getKind() + "): "
+                + embedded.getError().getMessage());
+            return false;
+        }
+        List<float[]> vectors = embedded.get().vectors();
+        double similarity = JEmbeddings.cosineSimilarity(vectors.get(0), vectors.get(1));
+        System.out.println(embedded.get().model() + ", " + embedded.get().dimensions() + " dimensions: similarity "
+            + similarity);
         return true;
     }
 

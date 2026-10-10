@@ -13,7 +13,7 @@ import scala.util.matching.Regex
  *
  * Pattern-based redaction automatically detects and masks:
  *  - API keys (OpenAI, Anthropic, Google, Voyage, Langfuse)
- *  - Bearer tokens and Authorization headers
+ *  - Bearer tokens and credential headers: Authorization, Proxy-Authorization, Cookie and Set-Cookie
  *  - URL query parameters with sensitive keys
  *  - Sensitive fields, whatever the shape: JSON (also inside a string, single-quoted, with a number value, or with
  *    an array or object value, whose every leaf - string, number or bare word - is replaced), `key=value` pairs and
@@ -128,8 +128,19 @@ private[llm4s] object Redaction {
    * as `client_secret`, `refresh_token` and `db_password`. The match is on the whole normalised key, never on a
    * substring: `max_tokens`, `prompt_tokens`, `token_count` and `next_page_token` are not credentials and appear in
    * every provider exchange, so redacting them would destroy the logs.
+   *
+   * The credential-bearing HTTP headers are keys too, read by every shape the passes handle (a header line, a JSON or
+   * escaped-JSON field, a header map in JSON, `key=value`): `Authorization` and `Proxy-Authorization`, which carries
+   * the same `Basic`, `Bearer`, `Digest` or `Negotiate` credential for a proxy (#1686); `Cookie` and `Set-Cookie`,
+   * whose whole value is replaced, since a cookie holds a session token; `X-Api-Key`, `Api-Key` and `X-Goog-Api-Key`
+   * (suffix `apikey`), `X-Auth-Token` (`authtoken`) and `X-Amz-Security-Token` (`securitytoken`). `cookie` is a whole
+   * word, never a suffix or a substring: `cookie_policy`, `cookie_consent` and `max_cookie_age` name settings, not
+   * cookies. With `SensitiveKeySuffixes`, this is core's one list of sensitive key names for fields, header lines and
+   * `key=value` pairs; URL query parameters are also matched, by substring, against `SensitiveQueryParams`. A list of
+   * headers to withhold (the HTTP tool's redirect stripping) should read the same names.
    */
-  private val SensitiveKeyWords: Set[String] = Set("token", "authorization", "credential", "credentials")
+  private val SensitiveKeyWords: Set[String] =
+    Set("token", "authorization", "proxyauthorization", "credential", "credentials", "cookie", "cookies", "setcookie")
 
   private val SensitiveKeySuffixes: Seq[String] = Seq(
     "apikey",
@@ -143,6 +154,7 @@ private[llm4s] object Redaction {
     "idtoken",
     "authtoken",
     "sessiontoken",
+    "securitytoken",
     "bearertoken"
   )
 
@@ -157,6 +169,21 @@ private[llm4s] object Redaction {
   private[llm4s] def isSensitiveKey(key: String): Boolean = {
     val normalised = key.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit)
     SensitiveKeyWords.contains(normalised) || SensitiveKeySuffixes.exists(normalised.endsWith)
+  }
+
+  /**
+   * Whether a header line's name is sensitive and not one `CookieHeaderStart` reads (`Cookie`, `Set-Cookie`): the
+   * header-line field pass leaves a cookie header to `redactCookieHeaders`, so that, like every pass but that one, it
+   * reads and writes the text as it would were cookies not sensitive (#1686). `Cookies:` and `Set_Cookie:`, which
+   * the cookie pass does not read, are the field pass's.
+   */
+  private def isSensitiveHeaderNotCookie(name: String): Boolean = {
+    val lower = name.toLowerCase(Locale.ROOT)
+    val cookieHeader = lower.endsWith("cookie") && (lower.length == 6 || {
+      val before = lower.charAt(lower.length - 7)
+      !(before.isLetterOrDigit || before == '_')
+    })
+    isSensitiveKey(name) && !cookieHeader
   }
 
   // A key is a letter followed by at most 63 letters, digits, `_` or `-`. The bound keeps matching linear on long
@@ -283,6 +310,7 @@ private[llm4s] object Redaction {
    * 2. Sensitive URL query parameters
    * 3. Sensitive JSON fields
    * 4. Known API key patterns
+   * 5. Cookie and Set-Cookie headers
    *
    * The passes run in that order, each over the text the one before left. Where the input holds the JSON escape of
    * `&`, `=`, `?`, `'` or `"` (backslashes, `u00` and the hex digits), which Go's `encoding/json`, System.Text.Json,
@@ -390,14 +418,23 @@ private[llm4s] object Redaction {
   /**
    * The passes of [[redact]], in the order they run over an input that holds no JSON escape of a separator or a
    * quote: the authorization patterns, the query parameters, the fields (containers, quoted values, numbers,
-   * `key=value` pairs and header lines), the API-key patterns, and the leaves of containers.
+   * `key=value` pairs and header lines), the API-key patterns, the leaves of containers, and last the cookie headers.
+   *
+   * The cookie pass is last so that it can only add to what the others replace (#1686). Its value runs over quotes
+   * in a malformed line (`msg="GET /" Cookie: theme="dark"; sid=abc`), and a pass after it would pair the quotes
+   * left on the line differently, and could read past the key of a field on a later line and leave its value
+   * readable. Run last, it changes no text another pass reads: every other pass reads what it would were cookie
+   * headers not redacted at all (the header-line pass leaves `Cookie:` and `Set-Cookie:` lines to it), and the cookie
+   * pass replaces only more of what they left. A value it reads may hold their placeholders already; it replaces them
+   * with the rest of the value, and never writes back text they replaced.
    */
   private def redactionPasses(placeholder: String, inputQuotes: Int, escaped: Boolean): Vector[String => Rewrite] =
     authHeaderPasses(placeholder) ++
       Vector((text: String) => redactQueryParams(text, placeholder)) ++
       jsonFieldPasses(placeholder, inputQuotes, escaped) ++
       SecretPatterns.SecretType.default.toVector.map(t => (text: String) => regexPass(t.pattern, text, placeholder)) ++
-      containerLeafPasses(placeholder)
+      containerLeafPasses(placeholder) :+
+      ((text: String) => redactCookieHeaders(text, placeholder))
 
   /**
    * Whether the input holds the JSON escape of `&`, `=`, `?`, `'` or `"` (backslashes, `u00` and `26`, `3d`, `3f`,
@@ -587,8 +624,29 @@ private[llm4s] object Redaction {
    */
   private val JsonAuthorization: Regex = """(?is)("Authorization"\s*:\s*")((?:[^"\\]|\\.?)++)("|\z)""".r
 
-  /** `Authorization: ...` in a header. */
+  /**
+   * `Authorization: ...` (`Proxy-Authorization: ...` too) in a header, anywhere in a line, the value running to the
+   * end of the line: the header-line field pass reads only a header at the start of a line, and a log line often
+   * writes the headers after a prefix. Unlike a cookie's (`CookieHeaderStart`), the value does not stop where a JSON
+   * string around the header ends: a Digest or other auth-param credential holds quoted strings and commas
+   * (`username="u", response="..."`), and where the quotes around the header are not escaped, a quote followed by
+   * `,` is no sure end of a string, so stopping there could leave the rest of the credential readable.
+   */
   private val HeaderAuthorization: Regex = """(?i)(Authorization:\s*)([^\n\r]+)""".r
+
+  /**
+   * `Cookie:` or `Set-Cookie:` in a header, anywhere in a line, and the whitespace after it, written or escaped
+   * (`\n`, `\r`, `\t`): the value follows, read by `cookieValueEnd`. `Cookie` starts a word, so that a longer name
+   * ending in it (`MyCookie`, `my_cookie`) is left to the field passes; it starts one after any JSON escape too - of a
+   * line break, a tab, a form feed, a backspace, a quote or a `>` (`\r\nCookie:`, `\fCookie:`, `\bCookie:`,
+   * `\u000aCookie:`, `\u0022Cookie:`, `\u003eCookie:`, as HTML-safe serialisers write them) - whose last character is
+   * a letter or a digit but which mostly stands for whitespace or punctuation; the rare escaped letter before
+   * `Cookie:` costs only a value redacted that need not be. Only JSON's escape letters count, in lower case
+   * (`b`, `f`, `n`, `r`, `t`, `u`): a backslash and any other letter (`\N`, `\X`) is no JSON escape, and `Cookie`
+   * there continues a word. Possessive, so the whitespace is read once.
+   */
+  private val CookieHeaderStart: Regex =
+    """(?i)(?:(?<![A-Za-z0-9_])|(?<=\\(?-i:[bfnrtu]))|(?<=\\(?-i:u)[0-9a-f]{4}))Cookie:(?:\s|\\++(?-i:[nrt]))*+""".r
 
   /** A standalone Bearer token. */
   private val BearerToken: Regex = """(?i)\bBearer\s+([a-zA-Z0-9\-_\.]+)""".r
@@ -615,10 +673,10 @@ private[llm4s] object Redaction {
 
   /**
    * `"Authorization": "..."` in JSON, then `Authorization: ...` in headers, then standalone Bearer and Basic tokens,
-   * keyword and all. A token after the escape of a separator is read by a pass of its own, so that a match there
-   * cannot take the keyword of a token the plain pattern reads (`Basic`, the escape of `=`, `Basic Basic 9K29`). The
-   * placeholder is the caller's and is written as it is: it is appended, never read as a replacement string, where a
-   * `$` or `\` would be a group reference or an escape.
+   * keyword and all (a `Cookie:` header is read by `redactCookieHeaders`, the last pass of all). A token after the escape of a separator is read by a pass of its own, so that a
+   * match there cannot take the keyword of a token the plain pattern reads (`Basic`, the escape of `=`,
+   * `Basic Basic 9K29`). The placeholder is the caller's and is written as it is: it is appended, never read as a
+   * replacement string, where a `$` or `\` would be a group reference or an escape.
    */
   private def authHeaderPasses(placeholder: String): Vector[String => Rewrite] =
     Vector(
@@ -655,6 +713,184 @@ private[llm4s] object Redaction {
         copied = matcher.end(group)
       }
     out.finish(copied)
+  }
+
+  /**
+   * Replaces the value of every `Cookie:` and `Set-Cookie:` header (`CookieHeaderStart`) - the whole value, every
+   * name and value of it, since any may be the session token (#1686) - to where `cookieValueEnd` ends it in the
+   * header's context. An empty value is left as it is. The matches come in increasing order, so the one forward scan
+   * of `EnclosingQuotes` serves them all, and the search goes on after each value: linear in the input.
+   *
+   * It runs after every other pass (`redactionPasses`), so what it replaces - quotes of a malformed line included -
+   * is read by no pass after it, and it writes nothing but the placeholder: a value that runs to the end of a
+   * malformed line takes the quotes on it (`msg="Cookie: theme="dark" sid=abc"` becomes `msg="Cookie: [REDACTED]`).
+   * The text it reads is the others' output: the default placeholder holds no quote, backslash or line break, so it never
+   * moves where a value ends, and a value that holds one is replaced whole.
+   */
+  private def redactCookieHeaders(input: String, placeholder: String): Rewrite = {
+    val matcher   = CookieHeaderStart.pattern.matcher(input)
+    val out       = new Rewrite(input, placeholder)
+    val enclosing = new EnclosingQuotes(input)
+
+    def contextOf(quote: Char): HeaderContext =
+      if (quote == EnclosingQuotes.NoQuote || !enclosing.openedOnItsLine) HeaderContext.Raw
+      else if (quote == '\'') HeaderContext.InSingleQuotes
+      else if (enclosing.inEscapedString) HeaderContext.InEscapedString
+      else HeaderContext.InString
+
+    @tailrec def loop(searchFrom: Int, copiedTo: Int): Int =
+      if (searchFrom >= input.length || !matcher.find(searchFrom)) copiedTo
+      else {
+        val valueStart = matcher.end
+        val valueEnd   = cookieValueEnd(input, valueStart, contextOf(enclosing.enclosingAt(matcher.start)))
+        if (valueEnd > valueStart) {
+          out.copy(copiedTo, valueStart)
+          out.mask()
+          loop(valueEnd, valueEnd)
+        } else loop(valueStart, copiedTo)
+      }
+
+    out.finish(loop(0, 0))
+  }
+
+  /**
+   * Where a header sits, as `EnclosingQuotes` reads it, which decides where its value ends (`cookieValueEnd`). A
+   * string counts only when it opened on the header's own line: a JSON string never holds a line break, and a quote
+   * left open on an earlier line is more likely a stray one than the start of a string around the header.
+   */
+  private enum HeaderContext {
+
+    /** In no string: plain header text. */
+    case Raw
+
+    /** In a double-quoted string, JSON's or a log line's. */
+    case InString
+
+    /** In a string escaped within a double-quoted string, after an odd number of `\"` in it: JSON inside JSON. */
+    case InEscapedString
+
+    /** In a single-quoted string: a Python repr, a shell argument. */
+    case InSingleQuotes
+  }
+
+  /**
+   * The index where the value of a cookie header starting at `from` ends: always at a line break, and, inside a string
+   * (`context`), at the escape of one or where the string ends, so that the rest of the string and the fields after it
+   * are kept and JSON stays JSON. Plain header text - a request dump, `Cookie: sid="abc"; x=y` - is read to the end
+   * of its line, quotes, backslashes and all, as it always was.
+   *
+   *  - The escape of a line break is a run of backslashes and `n`, `r`, `u000a` or `u000d` of odd length, since an
+   *    even run is escaped backslashes and the letter after them is text. In a string escaped within a string, a run
+   *    of two (or six), the inner string's escaped escape (`\\n`), ends the value too, but only where a header name
+   *    and `:` follow it (`headerNameAfter`): an odd count of `\"` before the header does not prove the string is
+   *    JSON inside JSON (`he said \"Cookie: ...`), and where it is not, the run is a backslash and a letter of the
+   *    value, so a value ends there only where the text after it reads as the next header. A cookie value holds no
+   *    backslash (RFC 6265), so reading one as the end of the value can only end it early where a non-standard cookie
+   *    holds `\n` itself.
+   *  - Inside a double-quoted string, the first `"` after an even run of backslashes (none, or escaped backslashes)
+   *    is where the string ends in well-formed JSON, so the value ends there when what follows it is what follows the
+   *    end of a JSON string (`endsJsonStringAt`). An escaped quote (`\"`) is part of the value, so a quoted cookie
+   *    value in JSON (`sid=\"abc\"`) is replaced whole; inside a string escaped within a string, only the outer
+   *    string's `"` ends the value, which keeps the outer JSON whole. This is a heuristic for well-formed JSON
+   *    strings: where that first `"` is followed by anything else, the text is not well-formed JSON (a stray quote
+   *    earlier on the line, `size 5" Cookie: a="b"; c=d`, or a quoted cookie value in a log line,
+   *    `msg="Cookie: a="x", sid=...`), and the value runs on to the end of its line, as plain header text does; no
+   *    later quote is searched for, since a quote in a value that is not JSON ends nothing. A `'` never ends a value:
+   *    it is a legal cookie character, and outside a JSON string a value running on to the end of its line can only
+   *    hide more, never break the JSON around it.
+   *
+   * A loop that reads each character a bounded number of times.
+   */
+  private def cookieValueEnd(input: String, from: Int, context: HeaderContext): Int = {
+    val length = input.length
+    val inDoubleQuotes =
+      context == HeaderContext.InString || context == HeaderContext.InEscapedString
+    def isLineBreak(c: Char): Boolean = c == '\n' || c == '\r'
+    def lineEnd(at: Int): Int = {
+      var i = at
+      while (i < length && !isLineBreak(input.charAt(i))) i += 1
+      i
+    }
+    // The index after the line break `n`, `r`, `u000a` or `u000d` that an escape starting at `at` stands for, or -1.
+    def afterLineBreakEscape(at: Int): Int =
+      if (at >= length) -1
+      else if (input.charAt(at) == 'n' || input.charAt(at) == 'r') at + 1
+      else if (at + 4 < length && input.startsWith("u000", at) && "aAdD".indexOf(input.charAt(at + 4).toInt) >= 0)
+        at + 5
+      else -1
+    def endsLine(slashes: Int, after: Int): Boolean =
+      slashes                                                % 2 == 1 ||
+        (context == HeaderContext.InEscapedString && slashes % 4 == 2 && headerNameAfter(input, after))
+    var i   = from
+    var end = -1
+    while (end < 0 && i < length) {
+      val c = input.charAt(i)
+      if (isLineBreak(c)) end = i
+      else if (c == '\\' && context != HeaderContext.Raw) {
+        val next    = afterBackslashes(input, i)
+        val slashes = next - i
+        val after   = afterLineBreakEscape(next)
+        if (after >= 0 && endsLine(slashes, after)) end = i
+        else if (slashes % 2 == 1 && next < length && !isLineBreak(input.charAt(next))) i = next + 1
+        else i = next
+      } else if (c == '"' && inDoubleQuotes) end = if (endsJsonStringAt(input, i + 1)) i else lineEnd(i)
+      else i += 1
+    }
+    if (end < 0) length else end
+  }
+
+  /**
+   * Whether the text at `from`, right after the escape of a line break in a string escaped within a string, starts
+   * the next header line: a header name - letters, digits and `-`, at most 64 - and a `:`, after at most one more
+   * escaped escape of a line break (`\\r\\n`). At most 70 characters are read.
+   */
+  private def headerNameAfter(input: String, from: Int): Boolean = {
+    val length = input.length
+    def isEscapedBreak(at: Int): Boolean =
+      at + 2 < length && input.charAt(at) == '\\' && input.charAt(at + 1) == '\\' &&
+        (input.charAt(at + 2) == 'n' || input.charAt(at + 2) == 'r') && (at + 3 == length || input.charAt(
+          at + 3
+        ) != '\\')
+    val start = if (isEscapedBreak(from)) from + 3 else from
+    var i     = start
+    while (i < length && i - start < 64 && (input.charAt(i).isLetterOrDigit || input.charAt(i) == '-')) i += 1
+    i > start && i < length && input.charAt(i) == ':'
+  }
+
+  /**
+   * Whether the text from `from` on is what follows the end of a JSON string: past whitespace, the end of the input, a
+   * `,` before the next value - a string, an object, an array, a number, `true`, `false` or `null` - or a run of `}`
+   * and `]` (and spaces) that is itself followed by the end of the input, a line break or such a `,`, as the end of a
+   * JSON container is. Looser than `endsString`, which wants a key after the `,`, since a header is as often an element
+   * of an array (`["Cookie: ...", "Accept: ..."]`, `["Cookie: ...", 1]`); a `,` before any other word (`a="x", b="y"`,
+   * a Set-Cookie header folded onto one line) is not taken for one, nor a `}` before a word (`x="}SID`), which is a
+   * quote and a brace in a cookie value. A `:` before a value ends a string too: the header is the key of an object
+   * (`{"Cookie: sid=...": 1}`). Whitespace, closing brackets and at most six characters after a `,` or `:` are read.
+   */
+  private def endsJsonStringAt(input: String, from: Int): Boolean = {
+    val length = input.length
+    def skipSpace(at: Int): Int = {
+      var i = at
+      while (i < length && Character.isWhitespace(input.charAt(i))) i += 1
+      i
+    }
+    // Whether a JSON value follows the `,` or `:` at `separator`.
+    def valueAfter(separator: Int): Boolean = {
+      val j = skipSpace(separator + 1)
+      def literalAt(word: String): Boolean =
+        input.startsWith(word, j) && (j + word.length == length || !input.charAt(j + word.length).isLetterOrDigit)
+      j < length && ("\"{[-0123456789".indexOf(input.charAt(j).toInt) >= 0 ||
+        literalAt("true") || literalAt("false") || literalAt("null"))
+    }
+    val i = skipSpace(from)
+    i == length || (input.charAt(i) match {
+      case '}' | ']' =>
+        var j = i
+        while (j < length && "}] \t".indexOf(input.charAt(j).toInt) >= 0) j += 1
+        j == length || input.charAt(j) == '\n' || input.charAt(j) == '\r' || (input.charAt(j) == ',' && valueAfter(j))
+      case ',' | ':' => valueAfter(i)
+      case _         => false
+    })
   }
 
   private def isSensitiveQueryKey(key: String): Boolean = {
@@ -970,7 +1206,8 @@ private[llm4s] object Redaction {
       (text: String) => redactPairs(JsonNumberField, text, placeholder, wrap = "\""),
       (text: String) => redactPairs(SingleQuotedNumberField, text, placeholder, wrap = "'"),
       (text: String) => redactEqualsPairs(text, placeholder, escaped),
-      (text: String) => redactPairs(HeaderLine, text, placeholder),
+      // A `Cookie:` or `Set-Cookie:` header line is left to `redactCookieHeaders`, which runs after every other pass.
+      (text: String) => redactPairs(HeaderLine, text, placeholder, sensitive = isSensitiveHeaderNotCookie),
       (text: String) => redactEscapedQuoted(EscapedQuoteFieldStart, text, placeholder, key = 3, slashes = 1, hex = 2),
       (text: String) =>
         redactEscapedQuoted(pairs.escapedQuote, text, placeholder, key = 1, slashes = 2, hex = 3, pair = true)
@@ -1327,6 +1564,8 @@ private[llm4s] object Redaction {
     private var pos: Int           = 0
     private var open: Char         = EnclosingQuotes.NoQuote
     private var inEscaped: Boolean = false
+    private var openedAt: Int      = -1 // where the open string opened
+    private var lineStart: Int     = 0  // the index after the last line break passed
 
     /** The quote of the string that is open just before `index`, or `NoQuote`. */
     def enclosingAt(index: Int): Char = {
@@ -1334,7 +1573,11 @@ private[llm4s] object Redaction {
         val c = input.charAt(pos)
         if (c == '\\') {
           if (open == '"' && pos + 1 < input.length && input.charAt(pos + 1) == '"') inEscaped = !inEscaped
+          if (pos + 1 < input.length && (input.charAt(pos + 1) == '\n' || input.charAt(pos + 1) == '\r'))
+            lineStart = pos + 2
           pos += 1
+        } else if (c == '\n' || c == '\r') {
+          lineStart = pos + 1
         } else if (open != EnclosingQuotes.NoQuote) {
           if (c == open && !isApostrophe(pos)) {
             open = EnclosingQuotes.NoQuote
@@ -1342,11 +1585,18 @@ private[llm4s] object Redaction {
           }
         } else if ((c == '"' || c == '\'') && !isApostrophe(pos)) {
           open = c
+          openedAt = pos
         }
         pos += 1
       }
       open
     }
+
+    /**
+     * Whether, at the position `enclosingAt` was last asked about, the string open there opened on the same line: no
+     * line break character (the escape `\n` is not one) lies between its opening quote and the position.
+     */
+    def openedOnItsLine: Boolean = open != EnclosingQuotes.NoQuote && openedAt >= lineStart
 
     /**
      * Whether, at the position `enclosingAt` was last asked about, an odd number of `\"` has passed since the
@@ -1775,9 +2025,10 @@ private[llm4s] object Redaction {
     pattern: Regex,
     input: String,
     placeholder: String,
-    wrap: String = ""
+    wrap: String = "",
+    sensitive: String => Boolean = isSensitiveKey
   ): Rewrite =
-    regexPass(pattern, input, placeholder, group = 3, wrap = wrap, replaces = m => isSensitiveKey(m.group(2)))
+    regexPass(pattern, input, placeholder, group = 3, wrap = wrap, replaces = m => sensitive(m.group(2)))
 
   /**
    * Replaces the value of every `key=value` pair whose key is sensitive. The value, which `PairStarts.equals` finds the
@@ -1811,6 +2062,12 @@ private[llm4s] object Redaction {
    * every depth as it was, and the document parses at every depth as it did. Only backslashes are kept, never a
    * character of the value that is not one. A run before anything but a quote, and an even run, which escapes
    * nothing, are replaced whole, as they were. A value cut at an escaped `&` keeps nothing: no quote follows it.
+   *
+   * A sensitive key's value that opens with a quote escaped by backslashes (`\"` or `\'`, at any depth: a logfmt
+   * line inside a JSON string, `password=\"hunter2\"`) is a quoted value, as `password="..."` is for the pass for
+   * quoted values: its content, up to the same quote escaped as deep (`backslashQuotedValueEnd`), is replaced, and the
+   * escaped quotes around it are kept, so the document still parses (#1684). Before, the value stopped at the escaped
+   * quote and the content after it was written in the clear.
    */
   private def redactEqualsPairs(input: String, placeholder: String, escaped: Boolean): Rewrite = {
     val matcher = pairStarts(escaped).equals.pattern.matcher(input)
@@ -1823,6 +2080,22 @@ private[llm4s] object Redaction {
         // A key that is not sensitive and whose `=` is an escape: the text after the escape is read for pairs, as the
         // text the escape stands for would be (see `afterEscapedEquals`).
         loop(matcher.end, copiedTo)
+      } else if (isSensitiveKey(matcher.group(2)) && backslashQuoteDepth(input, matcher.end) > 0) {
+        // A value in quotes escaped with backslashes (`password=\"hunter2\"`, a logfmt line inside a JSON string):
+        // its content is replaced, and the escaped quotes around it are kept (#1684).
+        val contentStart = afterBackslashes(input, matcher.end) + 1
+        val (contentEnd, next) =
+          backslashQuotedValueEnd(
+            input,
+            contentStart,
+            input.charAt(contentStart - 1),
+            backslashQuoteDepth(input, matcher.end)
+          )
+        if (contentEnd > contentStart) {
+          out.copy(copiedTo, contentStart)
+          out.mask()
+          loop(next, contentEnd)
+        } else loop(next, copiedTo)
       } else {
         val valueStart = matcher.end
         val sensitive  = isSensitiveKey(matcher.group(2))
@@ -1866,6 +2139,49 @@ private[llm4s] object Redaction {
 
     val copiedTo = loop(0, 0)
     out.finish(copiedTo)
+  }
+
+  /** The number of trailing one bits of `n`: the depth of the escape a run of `n` backslashes before a quote writes. */
+  private def escapeDepth(n: Int): Int = Integer.numberOfTrailingZeros(~n)
+
+  /**
+   * Where a run of backslashes at `at` escapes the `"` or `'` right after it, the depth of that escape (see
+   * `escapeDepth`: 1 for `\"`, 2 for `\\\"`, the quote of a string inside a string inside a string), or 0 where no
+   * backslash or no quote is there, or the run is even and so escapes nothing.
+   */
+  private def backslashQuoteDepth(input: String, at: Int): Int = {
+    val run = afterBackslashes(input, at)
+    if (run == at || run >= input.length || (input.charAt(run) != '"' && input.charAt(run) != '\'')) 0
+    else escapeDepth(run - at)
+  }
+
+  /**
+   * The end of the content of a `key=` value that opens with `quote` escaped `depth` deep, which starts at `from`,
+   * and the index to read on from (#1684). The value closes at the same quote escaped as deep: a run of backslashes
+   * whose `escapeDepth` is `depth`, so that a backslash of the value escaped before it (`\"ab\\\\\"`, the value
+   * `ab\`) is the value's, and a quote escaped deeper (`\"ab\\\"cd\"`, the value `ab"cd`) is too. The same quote
+   * escaped less deep, or bare, ends the string the pair sits in, and a line break ends the line: the value is not
+   * closed and ends there, and so does an input that ends first. The backslashes that escape the quote it ends at
+   * are not content (`quoteEscape`), so they are kept, and the document still parses at every depth. The other quote
+   * is content at any depth. A loop that reads each character once.
+   */
+  private def backslashQuotedValueEnd(input: String, from: Int, quote: Char, depth: Int): (Int, Int) = {
+    var i      = from
+    var result = (-1, -1)
+    while (result._1 < 0 && i < input.length) {
+      val c = input.charAt(i)
+      if (c == '\\') {
+        val run = afterBackslashes(input, i)
+        if (run < input.length && input.charAt(run) == quote) {
+          val d = escapeDepth(run - i)
+          if (d == depth) result = (run - quoteEscape(input, from, run).length, run + 1)
+          else if (d < depth) result = (run - quoteEscape(input, from, run).length, run)
+          else i = run + 1
+        } else i = run
+      } else if (c == quote || c == '\n' || c == '\r') result = (i, i)
+      else i += 1
+    }
+    if (result._1 < 0) (input.length, input.length) else result
   }
 
   /**

@@ -1,5 +1,6 @@
 package org.llm4s.util
 
+import org.llm4s.testutil.LinearTime
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -113,6 +114,107 @@ class RedactionEqualsPairSpec extends AnyFlatSpec with Matchers {
   it should "leave a key=value whose value ends in backslashes before no quote as it was" in {
     Redaction.redact("token=abc\\ next") shouldBe s"token=$R next"
     Redaction.redact("token=abc\\") shouldBe s"token=$R"
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // A logfmt value in quotes escaped with backslashes (#1684)
+  // ---------------------------------------------------------------------------------------------
+
+  /** `value` as logfmt writes a quoted value: in `"`, with its `\` and `"` escaped. */
+  private def logfmtQuoted(value: String): String =
+    "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+  "Redaction.redact" should "redact a logfmt value in quotes inside a JSON string, at depths 1 to 3 (#1684)" in {
+    Seq(1, 2, 3).foreach { depth =>
+      withClue(s"depth $depth: ") {
+        val input = nested(depth, "message" -> """login user=bob password="hunter2" ok""")
+        val inner = innerAfterRedact(depth, input)
+        inner("message").str shouldBe s"""login user=bob password="$R" ok"""
+        (Redaction.redact(input) should not).include("hunter2")
+      }
+    }
+    Redaction.redact("""{"message": "login user=bob password=\"hunter2\" ok"}""") shouldBe
+      s"""{"message": "login user=bob password=\\"$R\\" ok"}"""
+  }
+
+  it should "redact a value in quotes escaped with backslashes in plain text, double or single (#1684)" in {
+    Redaction.redact("""login user=bob token=\"abc def\" ok""") shouldBe s"""login user=bob token=\\"$R\\" ok"""
+    Redaction.redact("""login password=\'hunter2 x\' ok""") shouldBe s"""login password=\\'$R\\' ok"""
+    Redaction.redact("""'login password=\'hunter2\' ok'""") shouldBe s"""'login password=\\'$R\\' ok'"""
+    // A value escaped twice, in Python's repr of a string that already holds one.
+    Redaction.redact("""x='a password=\\\'hunter2\\\' b'""") shouldBe s"""x='a password=\\\\\\'$R\\\\\\' b'"""
+  }
+
+  it should "run a value whose escaped quote is never closed to the end of its string, and keep the JSON valid" in {
+    Redaction.redact("""{"message": "login password=\"hunter2 and more", "x": "y"}""") shouldBe
+      s"""{"message": "login password=\\"$R", "x": "y"}"""
+    Seq(1, 2, 3).foreach { depth =>
+      withClue(s"depth $depth: ") {
+        val input = nested(depth, "message" -> "login password=\"hunter2 and more", "x" -> "y")
+        val inner = innerAfterRedact(depth, input)
+        inner("message").str shouldBe s"login password=\"$R"
+        inner("x").str shouldBe "y"
+      }
+    }
+    // Plain text: to the end of the line, or of the input.
+    Redaction.redact("token=\\\"abc def\nnext=1") shouldBe s"token=\\\"$R\nnext=1"
+    Redaction.redact("token=\\\"abc def") shouldBe s"token=\\\"$R"
+  }
+
+  it should "redact every pair of a line whose values are in escaped quotes, and keep the others" in {
+    Seq(1, 2).foreach { depth =>
+      withClue(s"depth $depth: ") {
+        val line  = """level=info token="a b" user="bob" client_secret="c, d" note="x=y" api_key=plain"""
+        val inner = innerAfterRedact(depth, nested(depth, "log" -> line, "x" -> "y"))
+        inner("log").str shouldBe
+          s"""level=info token="$R" user="bob" client_secret="$R" note="x=y" api_key=$R"""
+        inner("x").str shouldBe "y"
+      }
+    }
+  }
+
+  it should "read a backslash or a quote escaped inside the value as the value's, at depths 1 and 2" in {
+    Seq("ab\\", "ab\"cd", "\\", "\"", "a\\\"b", "\\\\x\"\"", "it's").foreach { value =>
+      Seq(1, 2).foreach { depth =>
+        withClue(s"value $value, depth $depth: ") {
+          val secret = s"Zq${value}Wx"
+          val input  = nested(depth, "log" -> s"login password=${logfmtQuoted(secret)} ok", "x" -> "y")
+          val inner  = innerAfterRedact(depth, input)
+          inner("log").str shouldBe s"""login password="$R" ok"""
+          inner("x").str shouldBe "y"
+        }
+      }
+    }
+  }
+
+  it should "leave a value in escaped quotes under a key that is not sensitive, and an empty one, as they are" in {
+    Seq(
+      """{"message": "login user=\"bob\" ok"}""",
+      """{"message": "login password=\"\" ok"}""",
+      """login user=\'bob\' ok"""
+    ).foreach(input => withClue(input)(Redaction.redact(input) shouldBe input))
+  }
+
+  it should "read a value after an even run of backslashes and a quote as before: the run escapes no quote" in {
+    // `\\` is an escaped backslash, and the quote after it ends the string.
+    val input = "{\"message\": \"login password=\\\\\", \"x\": \"hunter2\"}"
+    val out   = Redaction.redact(input)
+    out shouldBe s"""{"message": "login password=$R", "x": "hunter2"}"""
+    parses(out) shouldBe true
+  }
+
+  it should "read values in escaped quotes in time linear in the input" in {
+    val shapes: Seq[(String, Int => String)] = Seq(
+      "many never closed"             -> (n => "password=\\\"a " * n),
+      "many never closed in a string" -> (n => "{\"m\":\"" + "token=\\\"x " * n + "\"}"),
+      "a long backslash run"          -> (n => "password=\\\"" + "\\" * (n * 10) + "x\\\""),
+      "quotes escaped deeper"         -> (n => "secret=\\\"" + "a\\\\\\\"b" * n),
+      "quotes escaped less deep"      -> (n => "secret=\\\\\\\"a\\\"" * n),
+      "closed, many times"            -> (n => "token=\\'a b\\' " * n)
+    )
+    shapes.foreach { case (name, build) =>
+      LinearTime.assertLinear(name, build(5000), build(20000))(Redaction.redact(_))
+    }
   }
 
   // As in RedactionShapesSpec: a deliberately small stack, so that a pattern or a scan that recurses per character

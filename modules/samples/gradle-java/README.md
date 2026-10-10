@@ -8,8 +8,8 @@ an `Optional<String>`, `messages()` a `java.util.List`, and `status().kind()` a 
 
 | File | What it shows |
 |---|---|
-| [`HelloLLM4S.java`](src/main/java/org/llm4s/samples/HelloLLM4S.java) | create a client, one question read as a `JCompletion` (the text, the model and the token usage), a conversation with a system message sent with `JCompletionOptions` (temperature and a token limit), an agent turn whose text streams to a lambda listener, its result read with a `switch` over `status().kind()`, approving what a suspended turn waits for (`status().pending()`, `Answer.approve`, `resume`), error handling with `getKind()` and `isRecoverable()`, closing the client |
-| [`application.conf`](src/main/resources/application.conf) | the provider, as a named section |
+| [`HelloLLM4S.java`](src/main/java/org/llm4s/samples/HelloLLM4S.java) | create a client, one question read as a `JCompletion` (the text, the model and the token usage), a conversation with a system message sent with `JCompletionOptions` (temperature and a token limit), an agent turn whose text streams to a lambda listener, its result read with a `switch` over `status().kind()`, approving what a suspended turn waits for (`status().pending()`, `Answer.approve`, `resume`), error handling with `getKind()` and `isRecoverable()`, closing the client, then two sentences embedded with `JEmbeddingClient` and compared with `JEmbeddings.cosineSimilarity` |
+| [`application.conf`](src/main/resources/application.conf) | the provider, as a named section, and the embedding model |
 | [`build.gradle.kts`](build.gradle.kts) | the one dependency: `org.llm4s:llm4s-java-api_3` |
 
 It needs a JDK (17 or newer) and [Gradle](https://gradle.org/install/) 8 or newer. No Gradle wrapper is
@@ -48,6 +48,9 @@ JAVA_OPTS="-Dllm4s.providers.openai-main.model=gpt-4o" build/install/hello-llm4s
 A provider's key comes from its own environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...); see the
 [configuration guide](https://llm4s.org/getting-started/configuration). With no key the sample says which
 variable to set and exits with status 1, as it does when a call fails.
+
+The embedding model is separate, `llm4s.embeddings.model` in the same file (or `EMBEDDING_MODEL`), because not every
+chat provider has one: with Anthropic for chat, point it at another, such as `ollama/nomic-embed-text`.
 
 ## Why `llm4s-java-api` and not `llm4s-core`
 

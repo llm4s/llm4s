@@ -157,7 +157,10 @@ on it.
 
 The file sink changes `request_body`, `response_body` and `error_message` before writing them:
 
-- **Redaction.** It replaces, with `[REDACTED]`: an `Authorization` header and bearer tokens, URL query
+- **Redaction.** It replaces, with `[REDACTED]`: an `Authorization`, `Proxy-Authorization`, `Cookie` or
+  `Set-Cookie` header, from after the `:` and the whitespace after it to the end of its line (for a
+  cookie, every name and value of it; see below for where a cookie header's value ends inside a string),
+  bearer tokens, URL query
   parameters with sensitive names (`api_key`, `token`, `password` and similar), JSON fields with sensitive
   names (also when the JSON sits inside a prompt or response string with escaped quotes,
   `\"api_key\": \"...\"`, or is single-quoted, or is cut off before its closing quote, as a truncated
@@ -184,14 +187,44 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   under a single-quoted key inside a string ends the container, since it may be the end of a string
   inside it), `key=value` pairs and quoted
   `KEY="value"` / `KEY='value'` assignments outside a query string (for example `password=...`,
-  `spring.datasource.password=...`, `PASSWORD="..."`), `key: value` header lines (for example
+  `spring.datasource.password=...`, `PASSWORD="..."`), also with the quotes escaped by backslashes, as a
+  logfmt line inside a JSON string writes them (`{"message": "login password=\"...\" ok"}`, `\'...\'`, and
+  `\\\"...\\\"` one string deeper: the content is replaced and the escaped quotes kept, so the JSON still
+  parses; an escaped quote never closed ends where the enclosing string or the line does), `key: value` header lines (for example
   `x-api-key: ...`), and strings shaped like known provider API keys (for example `sk-` keys). A quoted
   value is redacted whole, escaped quotes included. A key is sensitive when its whole name, lower-cased
-  with `_` and `-` dropped, is `token`, `authorization` or `credential(s)`, or ends in `apikey`, `secret`,
-  `password`, `passwd`, `privatekey`, `accesstoken`, `refreshtoken`, `idtoken`, `authtoken`,
-  `sessiontoken` or `bearertoken`: `client_secret`, `x-api-key`, `refresh_token` and `db_password` are
-  redacted; `max_tokens`, `prompt_tokens`, `token_count` and `next_page_token` are not, because the match
-  is never on a substring.
+  with `_` and `-` dropped, is `token`, `authorization`, `proxyauthorization`, `credential(s)`,
+  `cookie(s)` or `setcookie`, or ends in `apikey`, `secret`, `password`, `passwd`, `privatekey`,
+  `accesstoken`, `refreshtoken`, `idtoken`, `authtoken`, `sessiontoken`, `securitytoken` or
+  `bearertoken`: `client_secret`, `x-api-key`, `api-key`, `x-goog-api-key`, `x-auth-token`,
+  `x-amz-security-token`, `refresh_token`, `db_password`, `Proxy-Authorization`, `Cookie` and
+  `Set-Cookie` are redacted, as a header line, a JSON field or header map (escaped too) and a
+  `key=value` pair; `max_tokens`, `prompt_tokens`, `token_count`, `next_page_token`, `cookie_policy` and
+  `cookie_consent` are not, because the match is never on a substring. URL query parameters are also
+  matched against a second, substring list (`key`, `token`, `secret`, `password`, `auth` and similar), so
+  `?x_api_key_id=` is redacted too.
+- **Where a cookie header's value ends.** Outside any string (a raw request dump, a log line), at the end
+  of its line, quotes, apostrophes and backslashes included: `Cookie: sid="abc"; x=y` becomes
+  `Cookie: [REDACTED]`. Inside a string that opened on the same line - a JSON string, a header in a JSON
+  array, an HTTP exchange logged inside JSON, a Python repr - earlier: at the escape of a line break
+  (`\r`, `\n`, `\u000a`, `\u000d`, and `\\r`, `\\n` before the next header in JSON inside a JSON
+  string) or, in a double-quoted string, at the unescaped `"` that ends the string. So
+  `{"log":"GET / HTTP/1.1\r\nCookie: sid=...\r\nAccept: */*"}` becomes
+  `{"log":"GET / HTTP/1.1\r\nCookie: [REDACTED]\r\nAccept: */*"}`, and
+  `["Cookie: sid=...", "Accept: */*"]` keeps its second element; the JSON still parses. An escaped quote
+  (`sid=\"abc\"`) is part of the value. Ending at the quote is a heuristic for well-formed JSON
+  strings, where the first unescaped `"` ends the string: when that quote is not followed by what follows
+  the end of a JSON string (`}`, `]`, or `,` and a value, then the end of the line; or `:` and a value,
+  where the header is an object's key), the line is not well-formed JSON - a stray quote earlier on it,
+  `size 5" Cookie: sid="abc"; x=y`, or quoted cookie values in a log line - and the value runs to the
+  end of the line, quotes and all, as outside a string: `msg="Cookie: theme="dark" sid=abc"` becomes
+  `msg="Cookie: [REDACTED]`. Cookie headers are redacted last, after every other pattern, so they only
+  add to what is redacted: a cookie value that takes a quote of a malformed line cannot change how the
+  field patterns read the quotes around it, and a `password="..."` or `{'password': "..."}` field later
+  on that line or the next is still redacted. An `Authorization` or `Proxy-Authorization` header's value
+  always runs to the end of its line, inside a string too, taking the rest of that string and the fields
+  after it on the same line: a Digest credential holds quoted strings and commas, so a quote is no sure
+  end of it.
 - **Truncation.** It keeps the first 1000 characters, after redaction, and appends
   `... [truncated, N chars omitted]` with the count it dropped. Redact the full text before you cut it, as
   this sink and every other llm4s call site do: redaction of text that is already cut off is weaker. An

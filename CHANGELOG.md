@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Embeddings from Java** ([#1490](https://github.com/llm4s/llm4s/issues/1490)): `llm4s-java-api`'s
+  `Llm4s.createDefaultEmbeddingClient()` creates a `JEmbeddingClient` for the model `llm4s.embeddings.model`
+  (`EMBEDDING_MODEL`) names, the route `createDefaultClient()` takes for chat; a missing model, provider or key, or a
+  model whose dimensions its provider module does not declare, is a failed result of kind `CONFIGURATION`.
+  `embed(List<String>)` and `embed(List<String>, JEmbeddingPurpose)` send the texts in one request and return an
+  `LlmResult<JEmbeddings>`: `vectors()` as a `List<float[]>` (a fresh copy on each call), one per text and in order,
+  with the `model()` the provider named and their `dimensions()`. The Java enum `JEmbeddingPurpose` (`DOCUMENT`, the
+  default as in core, or `QUERY`) becomes core's `InputPurpose`. An empty list returns no vectors without a request; a
+  `null` list, text or purpose is a failed result of kind `VALIDATION`; a reply that is not one vector per text of one
+  length is refused. The static `JEmbeddings.cosineSimilarity(float[], float[])` gives `0` for a zero vector and throws
+  `IllegalArgumentException` for vectors of different lengths. `LlmException.getKind()` now reads an embedding
+  provider's `EmbeddingError` by its HTTP status, as it reads a `ServiceError` (`401`/`403` `AUTHENTICATION`, `429`
+  `RATE_LIMIT`, `400` `VALIDATION`, any other `SERVICE`, with `getStatusCode()`), and as `OTHER` when it has none; it
+  was always `OTHER` before. The Java guide has an [Embeddings](docs/guide/java.md#embeddings) section, and the
+  `gradle-java` sample compares two sentences.
 - **Java completions with usage, model and tool calls, and a typed error kind**
   ([#1487](https://github.com/llm4s/llm4s/issues/1487)): `llm4s-java-api`'s `JLlmClient.completion(String)`,
   `completion(Conversation)` and `completion(Conversation, JCompletionOptions)` return an
@@ -2081,6 +2096,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inline comments in `WorkspaceAgentInterfaceImpl.prepareCommand` now number the working-directory check layer 6 and
   `CommandPolicy` layers 7-9, as its Scaladoc does; and `WorkspaceConfigSupport.loadSandboxConfig`, which nothing
   called, is removed (see Removed).
+- **Security - redaction: a `key=value` whose value is in backslash-escaped quotes is redacted**
+  ([#1684](https://github.com/llm4s/llm4s/issues/1684)): `Redaction` (used by the provider exchange logger, `LLMError`
+  messages and error mapping) stopped the value of a `key=value` pair at an escaped quote, so a logfmt line inside a
+  JSON string, `{"message": "login user=bob password=\"hunter2\" ok"}`, became
+  `password=[REDACTED]\"hunter2\" ok` and the password stayed readable. A sensitive key's value that opens with a quote
+  escaped by backslashes - `\"` or `\'`, at any depth of nesting (`\\\"` in JSON inside JSON) - is now read as a quoted
+  value, as `password="..."` is: it runs to the same quote escaped as deep, and its content is replaced while the
+  escaped quotes around it are kept, so the output is `password=\"[REDACTED]\" ok` and the JSON still parses. A
+  backslash or a quote escaped inside the value (`\"ab\\\\\"`, the value `ab\`; `\"ab\\\"cd\"`, the value `ab"cd`) is
+  the value's. A value whose escaped quote is never closed runs to the quote that ends the enclosing string (the same
+  quote, escaped less deep or bare), to the end of the line or to the end of the input; the escape of that quote is
+  kept. The same shape in plain text (`token=\"abc def\"`, item 2 of
+  [#1765](https://github.com/llm4s/llm4s/issues/1765)) is redacted too. Values under keys that are not sensitive, an
+  empty value (`password=\"\"`) and a value after an even run of backslashes, which escapes no quote, read as before.
+- **Security - redaction: `Proxy-Authorization`, `Cookie`, `Set-Cookie` and `X-Amz-Security-Token` are treated as
+  sensitive** ([#1686](https://github.com/llm4s/llm4s/issues/1686)): `Redaction` (used by the provider exchange
+  logger, `LLMError` messages and error mapping) matched `authorization` as a whole key only, so a JSON field or header
+  map `{"Proxy-Authorization": "Negotiate ..."}`, its escaped form inside a string, `proxy_authorization=...` and a
+  `Digest`, `Negotiate` or raw proxy credential there were written in the clear; cookies were not covered in any shape,
+  so a session id in a `Cookie` or `Set-Cookie` header line, JSON field, cookie list or `key=value` pair leaked. They
+  are now sensitive keys in every shape the redactor reads (a header line, also after a prefix, a JSON or escaped-JSON
+  field, a single-quoted dict, a container, `key=value`, a query parameter), and a cookie header's whole value is
+  replaced - every name and value of it, from after `Cookie:` or `Set-Cookie:` and the whitespace after it (escaped
+  `\n`, `\r` and `\t` included) to the end of its line. Where the header sits inside a string that opened on the same
+  line - a JSON string, a header in a JSON array, a log line inside JSON, a Python repr - the value ends earlier: at
+  the escape of a line break (`\r`, `\n`, `\u000a`, `\u000d`; `\\r\\n` before the next header in JSON inside JSON)
+  or, in a double-quoted string, at the unescaped `"` that ends the string, so the headers and fields after it are
+  kept and the JSON still parses. An escaped quote (`sid=\"abc\"`) is part of the value. Ending at the quote is a
+  heuristic for well-formed JSON strings: where the first unescaped `"` in the value is not followed by what follows
+  the end of a JSON string, the line is malformed (a stray quote earlier on it, quoted cookie values in a log line)
+  and the value runs to the end of the line, its quotes with it (`msg="Cookie: theme="dark" sid=abc"` becomes
+  `msg="Cookie: [REDACTED]`). Outside a string, quotes, apostrophes and backslashes are part of the value, so a raw
+  `Cookie: sid="abc"; x=y` is replaced to the end of the line. The cookie pass runs after every other pass, so it
+  only adds to what they redact: the field, pair and dict passes read the text exactly as they would were cookie
+  headers not read (the header-line pass leaves `Cookie:` and `Set-Cookie:` lines to it), and a value that takes a
+  quote of a malformed line can no longer change how a later pass pairs quotes and leave a `password="..."` or
+  `{'password': "..."}` field on that or a later line readable. `Authorization` and
+  `Proxy-Authorization` header values run to the end of the line in every context, as before: a Digest credential
+  holds quoted strings and commas, so a quote is no sure end of it. `X-Amz-Security-Token` (suffix `securitytoken`)
+  joins `X-Api-Key`, `Api-Key`, `X-Goog-Api-Key` and `X-Auth-Token`, already covered. `cookie` is a whole word, not a
+  substring: `cookie_policy`, `cookie_consent` and `max_cookie_age` are left alone. `SensitiveKeyWords` and
+  `SensitiveKeySuffixes` in `Redaction` are core's one list of sensitive key names for fields, header lines and
+  `key=value` pairs; URL query parameters are also matched, by substring, against `SensitiveQueryParams`.
 - **Security - `llm4s-agent-tools` / `llm4s-core`: the HTTP tool forwards only safe headers across origins and
   refuses the remaining special-purpose address ranges** ([#1734](https://github.com/llm4s/llm4s/issues/1734)):
   on a redirect that left the original origin, `HTTPTool` stripped only `Authorization`, `Cookie` and
@@ -2378,6 +2436,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the semantic fallback all use this chunker. **Migration:** chunk text changes for any input with a sentence
   boundary, and chunk sizes with it; indexes built with `SentenceChunker` hold corrupted text and should be
   re-chunked and re-embedded.
+- **Docs: the RAG benchmark results say which rows predate the `SentenceChunker` fix**
+  ([#1725](https://github.com/llm4s/llm4s/issues/1725)): every number in `docs/rag-benchmark-results.md` was
+  measured in December 2025 with the chunker #1718 fixed, and sentence chunking is the benchmark default, so all
+  fusion and embedding rows and the three `sentence-*` chunking rows were indexed with corrupted text. The page now
+  says so at the top and beside each table, marks the "Expected Results", sample output and conclusions as resting
+  on those rows, and gives the commands that regenerate them. The suites need an LLM judge and embedding API keys,
+  so they have not been re-run.
 - **`llm4s-openai`: OpenAI embeddings reach `/v1/embeddings` with the default base URL**
   ([#1413](https://github.com/llm4s/llm4s/pull/1413)): the default `llm4s.embeddings.openai.baseUrl` is
   `https://api.openai.com/v1`, the versioned root the chat provider uses too, but `OpenAIEmbeddingProvider`

@@ -1,14 +1,17 @@
 package org.llm4s.javaapi;
 
 import java.util.Arrays;
-import java.util.List;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 import org.llm4s.javaapi.ConversationBuilder;
 import org.llm4s.javaapi.JCompletion;
 import org.llm4s.javaapi.JCompletionOptions;
+import org.llm4s.javaapi.JEmbeddingClient;
+import org.llm4s.javaapi.JEmbeddingPurpose;
+import org.llm4s.javaapi.JEmbeddings;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.JReasoningEffort;
 import org.llm4s.javaapi.JToolCall;
@@ -23,7 +26,7 @@ import org.llm4s.llmconnect.model.Conversation;
 /**
  * The fragments of {@code docs/guide/java.md}, compiled, and run by {@code JavaGuideSpec} against a client the
  * spec supplies. Each method holds one block of the guide, word for word (the spec checks that); the lines that
- * only exist for the spec come after the block. The imports from {@code java.util.Optional} down are the guide's
+ * only exist for the spec come after the block. The imports from {@code java.util.List} down are the guide's
  * "imports" block.
  */
 final class GuideSnippets {
@@ -131,5 +134,43 @@ final class GuideSnippets {
         JAgentResult next = agent.continueConversation(result, "And 3+3?").get();
 
         return next;
+    }
+
+    /** The first "Embeddings" block: an embedding client for the model application.conf configures. */
+    static JEmbeddingClient defaultEmbedder() {
+        LlmResult<JEmbeddingClient> created = Llm4s.createDefaultEmbeddingClient();
+        created.ifFailure(error -> System.err.println("Could not create an embedding client: " + error.getMessage()));
+        JEmbeddingClient embedder = created.getOrNull();   // null when it failed
+
+        return embedder;
+    }
+
+    /** The "Embeddings" block that embeds two sentences and prints how similar they are. */
+    static double twoSentences(JEmbeddingClient embedder) {
+        JEmbeddings embeddings = embedder.embed(List.of(
+            "The cat sat on the mat.",
+            "A kitten was sitting on the rug.")).get();
+
+        List<float[]> vectors = embeddings.vectors();
+        double similarity = JEmbeddings.cosineSimilarity(vectors.get(0), vectors.get(1));
+        System.out.println(embeddings.model() + ", " + embeddings.dimensions() + " dimensions: similarity " + similarity);
+
+        return similarity;
+    }
+
+    /** The "Embeddings" block that embeds documents and a query, each for its purpose, and finds the closest. */
+    static String closest(JEmbeddingClient embedder, List<String> texts) {
+        List<float[]> documents = embedder.embed(texts, JEmbeddingPurpose.DOCUMENT).get().vectors();
+        float[] query = embedder.embed(List.of("Where did the cat sit?"), JEmbeddingPurpose.QUERY).get().vectors().get(0);
+
+        int best = 0;
+        for (int i = 1; i < documents.size(); i++) {
+            if (JEmbeddings.cosineSimilarity(query, documents.get(i)) > JEmbeddings.cosineSimilarity(query, documents.get(best))) {
+                best = i;
+            }
+        }
+        System.out.println("closest: " + texts.get(best));
+
+        return texts.get(best);
     }
 }
