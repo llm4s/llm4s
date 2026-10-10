@@ -2042,7 +2042,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirection, `;`, `&&`, `$(...)`, backquotes and variable expansion are refused rather than interpreted, and only
   programs on the runner's allowlist run. Write each command as one program and its arguments (`grep -rn TODO src`,
   not `cd src && grep -rn TODO . | head`), quoting an argument that holds spaces; send a second command as a second
-  request, use `workingDirectory` instead of `cd`, and `writeFile` instead of redirection.
+  request, use `workingDirectory` instead of `cd`, and `writeFile` instead of redirection. A program the agent needs
+  that is not on the profile's list, such as a build tool, is added with the runner's new `WORKSPACE_EXTRA_COMMANDS`
+  (`ContainerisedWorkspace` and `CodeWorker` take it as `extraAllowedCommands`; `WorkspaceSandboxConfig.withExtraCommands`
+  parses it and refuses shells and launchers such as `env` and `xargs`); `CodeGenExample` adds `sbt` this way and
+  asks for `sbt compile` and `sbt run` as separate commands. The `@Workspace` suites now send argv commands (`grep zzz
+  <file>` for a non-zero exit, `cat <present> <missing>` for stderr, `tail -f <file>` for the timeout), and
+  `WorkspaceCommandsSpec` runs each command string they and the workspace samples send through the runner's
+  WebSocket executor on every PR.
 - **Workspace runner: a command that reads standard input gets end-of-file at once instead of hanging until the
   timeout** ([#1728](https://github.com/llm4s/llm4s/issues/1728)): `executeCommand` left the child's standard input an
   open pipe that nothing wrote to or closed, so `cat` with no operands, `cat -`, `sort`, `uniq`, `wc`, `head`,

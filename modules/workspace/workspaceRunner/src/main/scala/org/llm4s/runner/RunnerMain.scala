@@ -38,7 +38,25 @@ object RunnerMain extends cask.MainRoutes {
   // - If WORKSPACE_SANDBOX_PROFILE is not set or empty -> default to permissive (backwards compatible)
   // - If set to a known profile name -> use that profile (validated)
   // - If set to an unknown name -> log error and fail fast (do NOT silently weaken sandbox)
+  // - WORKSPACE_EXTRA_COMMANDS, when set, adds programs to that profile's allowlist; a name that is not a bare
+  //   program name, or is a shell or launcher, fails fast too
   private val sandboxConfig: Option[WorkspaceSandboxConfig] = {
+    val rawExtra = Option(System.getenv(WorkspaceSandboxConfig.ExtraCommandsEnvVar)).map(_.trim).filter(_.nonEmpty)
+    rawExtra match {
+      case None => profileConfig
+      case Some(names) =>
+        profileConfig.getOrElse(WorkspaceSandboxConfig.Permissive).withExtraCommands(names) match {
+          case Right(cfg) =>
+            logger.info(s"${WorkspaceSandboxConfig.ExtraCommandsEnvVar} adds to the allowlist: $names")
+            Some(cfg)
+          case Left(msg) =>
+            logger.error(s"Invalid ${WorkspaceSandboxConfig.ExtraCommandsEnvVar} value: $msg")
+            throw new IllegalArgumentException(msg)
+        }
+    }
+  }
+
+  private def profileConfig: Option[WorkspaceSandboxConfig] = {
     val rawProfile = Option(System.getenv("WORKSPACE_SANDBOX_PROFILE")).map(_.trim)
 
     rawProfile match {

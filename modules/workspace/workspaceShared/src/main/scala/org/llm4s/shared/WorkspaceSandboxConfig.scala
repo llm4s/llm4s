@@ -37,9 +37,76 @@ final case class WorkspaceSandboxConfig(
   allowedPaths: List[String] = Nil,
   networkAllowed: Boolean = false,
   allowedCommands: Set[String] = WorkspaceSandboxConfig.ReadOnlyCommands
-)
+) {
+
+  /**
+   * This config with more programs on its allowlist, as the runner's `WORKSPACE_EXTRA_COMMANDS` adds them.
+   *
+   * Each name must be a bare program name (letters, digits, `.`, `_`, `+`, `-`) and not one of
+   * [[WorkspaceSandboxConfig.NeverAllowedCommands]]. An added program is held to the same checks as the built-in
+   * ones (no shell, forbidden characters, path arguments inside the workspace, the environment allowlist), but it has
+   * no per-program option rules, so it can do whatever its own arguments let it: add only what the agent needs.
+   *
+   * @param names program names separated by commas or whitespace
+   * @return the widened config, or why a name was refused
+   */
+  def withExtraCommands(names: String): Either[String, WorkspaceSandboxConfig] =
+    WorkspaceSandboxConfig.parseCommandNames(names).map(extra => copy(allowedCommands = allowedCommands ++ extra))
+}
 
 object WorkspaceSandboxConfig {
+
+  /**
+   * The runner's environment variable naming programs to add to its profile's allowlist, separated by commas or
+   * whitespace (for example `sbt`); see [[WorkspaceSandboxConfig.withExtraCommands]].
+   */
+  val ExtraCommandsEnvVar: String = "WORKSPACE_EXTRA_COMMANDS"
+
+  /**
+   * Programs [[WorkspaceSandboxConfig.withExtraCommands]] refuses to add: shells, and launchers that run another
+   * program named in their arguments. Either would let a command run anything, which is what running commands
+   * without a shell prevents (#1756).
+   */
+  val NeverAllowedCommands: Set[String] = Set(
+    "sh",
+    "bash",
+    "zsh",
+    "dash",
+    "ksh",
+    "csh",
+    "tcsh",
+    "fish",
+    "busybox",
+    "cmd",
+    "cmd.exe",
+    "powershell",
+    "powershell.exe",
+    "pwsh",
+    "pwsh.exe",
+    "env",
+    "xargs",
+    "sudo",
+    "su",
+    "nohup",
+    "nice",
+    "timeout",
+    "exec",
+    "eval"
+  )
+
+  private val CommandName = "[A-Za-z0-9._+-]+".r
+
+  private def parseCommandNames(names: String): Either[String, Set[String]] = {
+    val parsed = Option(names).getOrElse("").split("[,\\s]+").toSeq.map(_.trim).filter(_.nonEmpty)
+    parsed
+      .collectFirst {
+        case name if !CommandName.matches(name) || name.startsWith(".") || name.startsWith("-") =>
+          s"'$name' is not a bare program name"
+        case name if NeverAllowedCommands.contains(name.toLowerCase) =>
+          s"'$name' runs other programs, so it cannot be added to the allowlist"
+      }
+      .toLeft(parsed.toSet)
+  }
 
   /**
    * Read-only command allowlist: safe, non-destructive commands suitable for

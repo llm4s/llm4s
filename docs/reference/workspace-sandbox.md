@@ -29,8 +29,27 @@ When running the workspace runner (e.g. in Docker):
 |----------|-------------|---------|
 | `WORKSPACE_PATH` | Workspace root directory | `/workspace` |
 | `WORKSPACE_SANDBOX_PROFILE` | Sandbox profile: `permissive` or `locked`; any other value stops the runner | `permissive` |
+| `WORKSPACE_EXTRA_COMMANDS` | Programs added to the profile's `allowedCommands`, separated by commas or whitespace (for example `sbt`); a name that is not a bare program name, or is a shell or launcher, stops the runner | none |
 
-This variable is the only thing that decides what the runner enforces.
+These two variables are the only things that decide what the runner enforces.
+
+### Adding programs to the allowlist
+
+A program the agent needs that is not on the profile's list, such as a build tool, is added with
+`WORKSPACE_EXTRA_COMMANDS`. `ContainerisedWorkspace` (and `CodeWorker`) take it as `extraAllowedCommands` and start
+the container with it; `CodeGenExample` adds `sbt` this way so its agent can run `sbt compile` and `sbt run`:
+
+```scala
+new ContainerisedWorkspace(workspaceDir, imageName, hostPort, extraAllowedCommands = Set("sbt"))
+// docker run ... -e WORKSPACE_EXTRA_COMMANDS=sbt ...
+```
+
+An added program is held to every check below (no shell, forbidden characters, path arguments inside the workspace,
+the environment allowlist), but it has no per-program option rules, so it can do anything its own arguments allow:
+`sbt run` runs the project's code. Add only what the agent needs. Shells (`sh`, `bash`, `cmd`, `pwsh`, ...) and
+launchers that run a program named in their arguments (`env`, `xargs`, `sudo`, `nohup`, `timeout`, ...) are refused
+(`WorkspaceSandboxConfig.NeverAllowedCommands`), as either would bring back the shell
+[#1756](https://github.com/llm4s/llm4s/issues/1756) removed.
 
 ### Profiles
 
@@ -85,7 +104,7 @@ and run a second command as a second request.
 | Check | Code |
 |-------|------|
 | Shell turned off (`shellAllowed = false`) | `SHELL_DISABLED` |
-| Working directory outside the workspace, or not a directory | `PATH_ESCAPE_ATTEMPT`, `INVALID_DIRECTORY` |
+| Working directory, as written, outside the workspace, or not a directory | `PATH_ESCAPE_ATTEMPT`, `INVALID_DIRECTORY` |
 | Command with no words | `EMPTY_COMMAND` |
 | Executable given as a path | `EXECUTABLE_PATH_NOT_ALLOWED` |
 | Executable not in `allowedCommands` | `EXECUTABLE_NOT_ALLOWED` |

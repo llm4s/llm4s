@@ -13,11 +13,24 @@ import org.llm4s.error.ValidationError
  * CodeWorker combines a workspace environment with an LLM agent to handle
  * tasks involving code base understanding, modification, and generation.
  *
- * @param sourceDirectory The directory containing the codebase to work with
+ * The agent's commands run in the container without a shell, and only programs on the runner's allowlist run
+ * (#1756); a build tool the task needs, such as `sbt`, goes in `extraAllowedCommands`.
+ *
+ * @param sourceDirectory      The directory containing the codebase to work with
+ * @param imageName            The workspace-runner image
+ * @param hostPort             The host port for the container
+ * @param client               The LLM that drives the agent
+ * @param extraAllowedCommands Programs the runner may run besides its default allowlist, for example `Set("sbt")`
  */
-class CodeWorker(sourceDirectory: String, imageName: String, hostPort: Int, client: LLMClient) extends AutoCloseable {
+class CodeWorker(
+  sourceDirectory: String,
+  imageName: String,
+  hostPort: Int,
+  client: LLMClient,
+  extraAllowedCommands: Set[String] = Set.empty
+) extends AutoCloseable {
   private val logger    = LoggerFactory.getLogger(getClass)
-  private val workspace = new ContainerisedWorkspace(sourceDirectory, imageName, hostPort)
+  private val workspace = new ContainerisedWorkspace(sourceDirectory, imageName, hostPort, extraAllowedCommands)
 
   // Custom tool definitions for working with code
   private val toolRegistryResult: Result[ToolRegistry] = for {
