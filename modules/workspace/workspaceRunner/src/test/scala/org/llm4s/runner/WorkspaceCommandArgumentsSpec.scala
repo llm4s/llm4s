@@ -420,7 +420,8 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
       // BSD cat stops reading options at its first operand, so it opens `-f`
       refuses(ws, "cat a.txt -f", PathEscape)
       // `-d` is the value of -T and of -t: sort writes its temporary files into it, cp copies into it
-      refuses(ws, "sort -T -d a.txt", PathEscape)
+      // (a Windows runner refuses sort -T itself first, see `windowsSortRefusal`)
+      refuses(ws, "sort -T -d a.txt", if (isWindowsHost) ArgumentNotAllowed else PathEscape)
       refuses(ws, "cp -t -d a.txt", PathEscape)
       refuses(ws, "cp --target-directory -d a.txt", PathEscape)
       new String(Files.readAllBytes(fx.outside.resolve("secret.txt")), StandardCharsets.UTF_8) shouldBe "secret\n"
