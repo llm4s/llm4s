@@ -7,6 +7,8 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.nio.file.{ Files, Path }
+import scala.concurrent.{ Await, ExecutionContext, Future }
+import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.*
 import scala.util.{ Failure, Success, Try }
 
@@ -449,47 +451,104 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
   // flags with thousands of tails each; before the budget, 50 flags of 4096 letters took about 50 s on macOS, all
   // before the command started, so `ShellConfig.timeout` did not cover it. Every command below ends in `../zz`, so a
   // refusal naming it shows that everything before it was checked and passed, and nothing is run.
+  //
+  // These count the work instead of timing it (#1770): a wall-clock limit tight enough to mean anything failed on a
+  // slow Windows runner (8.6 s against 5 s), so the lookups are counted through `ShellTool.checkCommand` and bounded
+  // by what the budget, the de-duplication and the one-lookup check of a plain name promise. A generous backstop on
+  // its own thread catches only a real hang.
 
-  /** The command's refusal, and how long the tool took to give it. */
-  private def timedRefusal(config: ShellConfig, command: String): (String, Long) = {
-    val started = System.nanoTime()
-    val reason  = refused(run(config, command))
-    (reason, (System.nanoTime() - started) / 1000000)
+  /** Far above anything the counted checks need, even on a slow runner: it catches a hang, not slowness. */
+  private def Backstop = 120.seconds
+
+  /** `body`, on a thread of its own, failing the test if it has not finished within `Backstop`. */
+  private def withinBackstop[A](body: => A): A = {
+    val ownThread = ExecutionContext.fromExecutor { task =>
+      val thread = new Thread(task, "shell-containment-backstop")
+      thread.setDaemon(true)
+      thread.start()
+    }
+    Await.result(Future(body)(ownThread), Backstop)
   }
 
-  /** Far above the ~0.1 s these take, far below the minutes they took: room for a slow Windows runner. */
-  private def CheapCheckMillis: Long = 5000L
+  /** The command's verdict, without running it, and what its path checks cost. */
+  private def checked(config: ShellConfig, command: String): (Option[String], ShellTool.PathCheckCost) =
+    withinBackstop(ShellTool.checkCommand(command, config))
 
-  it should "check many long flags quickly, one lookup for each distinct tail that names nothing (#1723)" in {
+  /** The lookup budget of one command, as `ShellTool` states it in its refusal. */
+  private def Budget: Int = 20000
+
+  /** The values a flag's attached tails give: the argument itself and each tail after the dash. */
+  private def valuesOf(flag: String): Int = flag.length
+
+  /**
+   * A plain-name value costs one probe, two when the working directory's readings differ; anything else, and a name
+   * that exists, is resolved in full. So for distinct plain names the probes are at most twice their number.
+   */
+  private def probeBound(distinctValues: Int): Int = 2 * distinctValues
+
+  "ShellTool.checkCommand" should "refuse as the tool does, and count nothing when no path is checked (#1770)" in {
     val (_, _, config) = attachedValueFixture()
-    val flags          = Seq.fill(200)("-e" + ("a" * 4094)).mkString(" ")
+    val none           = ShellTool.PathCheckCost(0, 0, 0)
 
-    val (reason, millis) = timedRefusal(config, s"grep $flags in.txt ../zz")
-    reason should include("'../zz' is outside the allowed paths")
-    millis should be < CheapCheckMillis
+    checked(config, "") shouldBe ((Some("Command cannot be empty"), none))
+    checked(config, "rm x") shouldBe ((Some("Command 'rm' is not allowed"), none))
+    checked(config, "grep 'open") shouldBe ((Some("Unclosed single quote in command"), none))
+    checked(config, "file -C") shouldBe ((Some("Flag '-C' is not allowed for 'file'"), none))
+    checked(config.copy(pathPolicy = None), "grep -e x in.txt") shouldBe ((None, none))
+    // The working directory and in.txt, which exists, resolved in full; -ex, ex and x probed
+    val (verdict, cost) = checked(config, "grep -ex in.txt")
+    verdict shouldBe None
+    cost.resolutions shouldBe 2
+    cost.probes should ((be >= 4).and(be <= probeBound(4)))
+    cost.spent should be > 0
+  }
+
+  "The path policy" should "check many long flags cheaply, one lookup for each distinct tail that names nothing (#1723)" in {
+    val (_, _, config) = attachedValueFixture()
+    val flag           = "-e" + ("a" * 4094)
+    val flags          = Seq.fill(200)(flag).mkString(" ")
+
+    val (verdict, cost) = checked(config, s"grep $flags in.txt ../zz")
+    // The 200 copies are one flag: its values once, then in.txt and ../zz; nothing resolved in full but those and the
+    // working directory
+    cost.probes should be <= probeBound(valuesOf(flag) + 1)
+    cost.resolutions should be <= 3
+    cost.spent should be <= Budget
+    verdict.getOrElse(fail("expected a refusal")) should include("'../zz' is outside the allowed paths")
   }
 
   it should "run a command with one 4094-character pattern, its tails checked cheaply (#1723)" in {
-    posixOnly()
     val (_, _, config) = attachedValueFixture()
-    val started        = System.nanoTime()
+    val pattern        = "-e" + ("a" * 4094)
+    val mixedPattern   = "-ie" + new scala.util.Random(1723).alphanumeric.take(4093).mkString
 
-    val result = run(config, "grep -e" + ("a" * 4094) + " in.txt").fold(e => fail(e), identity)
-    (System.nanoTime() - started) / 1000000 should be < CheapCheckMillis
-    result.exitCode shouldBe 1 // ran, and found no match
-    val mixed = run(config, "grep -ie" + new scala.util.Random(1723).alphanumeric.take(4093).mkString + " in.txt")
-    mixed.fold(e => fail(e), _.exitCode) shouldBe 1
+    Seq(pattern, mixedPattern).foreach { flag =>
+      val (verdict, cost) = checked(config, s"grep $flag in.txt")
+      withClue(flag.take(10)) {
+        verdict shouldBe None
+        // A probe for each value; only the working directory and in.txt, which exists, resolved in full
+        cost.probes should be <= probeBound(valuesOf(flag) + 1)
+        cost.resolutions should be <= 2
+      }
+    }
+
+    if (!isWindows) {                                                        // the run itself needs a POSIX grep
+      run(config, s"grep $pattern in.txt").map(_.exitCode) shouldBe Right(1) // ran, and found no match
+      run(config, s"grep $mixedPattern in.txt").map(_.exitCode) shouldBe Right(1)
+    }
   }
 
   it should "check a repeated short-option cluster once (#1723)" in {
     val (_, _, config) = attachedValueFixture()
 
-    val (reason, millis) = timedRefusal(config, "ls " + Seq.fill(10000)("-aaaa").mkString(" ") + " ../zz")
-    reason should include("'../zz' is outside the allowed paths")
-    millis should be < CheapCheckMillis
+    val (verdict, cost) = checked(config, "ls " + Seq.fill(10000)("-aaaa").mkString(" ") + " ../zz")
+    // -aaaa, aaaa, aaa, aa, a: five values, however many times the cluster is repeated
+    cost.probes should be <= probeBound(valuesOf("-aaaa"))
+    cost.resolutions should be <= 2
+    verdict.getOrElse(fail("expected a refusal")) should include("'../zz' is outside the allowed paths")
   }
 
-  it should "refuse a command whose path checks would exceed the lookup budget, quickly (#1723)" in {
+  it should "refuse a command whose path checks would exceed the lookup budget, within it (#1723)" in {
     val (_, _, config) = attachedValueFixture()
     val clusters       = (1 to 10000).map(i => s"-a$i").mkString(" ")
     // `~` is not a plain name character, so no tail of these is skipped
@@ -498,11 +557,16 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
     val letters = (1 to 200).map(i => "-e" + new scala.util.Random(i).alphanumeric.take(4094).mkString).mkString(" ")
 
     Seq(s"ls $clusters ../zz", s"grep $tildes in.txt ../zz", s"grep $letters in.txt ../zz").foreach { command =>
-      val (reason, millis) = timedRefusal(config, command)
+      val (verdict, cost) = checked(config, command)
       withClue(command.take(40)) {
+        // No more lookups than the budget allows were done ...
+        cost.spent should be <= Budget
+        cost.probes should be <= Budget
+        cost.resolutions should be <= Budget / 2
+        // ... and the command was refused for running out of it
+        val reason = verdict.getOrElse(fail("expected a refusal"))
         reason should include("too long or too many to check against the path policy")
-        reason should include("20000 path lookups")
-        millis should be < CheapCheckMillis
+        reason should include(s"$Budget path lookups")
       }
     }
   }

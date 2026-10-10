@@ -141,7 +141,7 @@ object ShellTool {
         case Some(baseCommand) if !config.isCommandAllowed(baseCommand) =>
           Left(s"Command '$baseCommand' is not allowed. Allowed: ${config.allowedCommands.mkString(", ")}")
         case Some(baseCommand) =>
-          refusal(baseCommand.trim, tokens.drop(1), config) match {
+          refusal(baseCommand.trim, tokens.drop(1), config, _ => ()) match {
             case Some(reason) => Left(reason)
             case None         => runProcess(tokens, command, config)
           }
@@ -226,15 +226,42 @@ object ShellTool {
       .fold(trimmed)(suffix => trimmed.dropRight(suffix.length))
   }
 
-  /** Why the command may not run, or `None`. */
-  private def refusal(command: String, args: Seq[String], config: ShellConfig): Option[String] = {
+  /**
+   * The file-system work the path policy did for one command: `probes` existence lookups of a plain name, `resolutions`
+   * paths resolved in full, and `spent` lookups charged to the command's budget (at most `MaxPathSteps`).
+   */
+  final private[builtin] case class PathCheckCost(probes: Int, resolutions: Int, spent: Int)
+
+  /**
+   * Why the command may not run, or `None`, decided without running it, and what its path checks cost (all zero
+   * when nothing was checked against a path policy). Lets a test bound the work the checks do by counting it,
+   * rather than timing it (#1770).
+   */
+  private[builtin] def checkCommand(command: String, config: ShellConfig): (Option[String], PathCheckCost) = {
+    var cost = PathCheckCost(0, 0, 0)
+    val verdict = CommandTokenizer.tokenize(command) match {
+      case Left(reason)                                           => Some(reason)
+      case Right(tokens) if tokens.isEmpty                        => Some("Command cannot be empty")
+      case Right(tokens) if !config.isCommandAllowed(tokens.head) => Some(s"Command '${tokens.head}' is not allowed")
+      case Right(tokens) => refusal(tokens.head.trim, tokens.drop(1), config, spent => cost = spent)
+    }
+    (verdict, cost)
+  }
+
+  /** Why the command may not run, or `None`; `observe` is given what the path checks cost, when there were any. */
+  private def refusal(
+    command: String,
+    args: Seq[String],
+    config: ShellConfig,
+    observe: PathCheckCost => Unit
+  ): Option[String] = {
     // As spelled: only an exact name is exempt from the path policy (`ECHO` may be another program)
     val executable = Try(Paths.get(command).getFileName.toString).getOrElse(command)
     val program    = programName(command)
     deniedFlag(program, args)
       .orElse(windowsSwitch(program, args))
       .map(flag => s"Flag '$flag' is not allowed for '$command'")
-      .orElse(config.pathPolicy.flatMap(policy => pathRefusal(executable, program, args, config, policy)))
+      .orElse(config.pathPolicy.flatMap(policy => pathRefusal(executable, program, args, config, policy, observe)))
   }
 
   /**
@@ -282,7 +309,8 @@ object ShellTool {
     program: String,
     args: Seq[String],
     config: ShellConfig,
-    policy: FileConfig
+    policy: FileConfig,
+    observe: PathCheckCost => Unit
   ): Option[String] = {
     // Not normalised: the policy reads a `..` after a link both as POSIX (physical) and as Windows (lexical) does
     val base = Try(config.workingDirectory.fold(Paths.get(""))(Paths.get(_)).toAbsolutePath).toOption
@@ -290,7 +318,7 @@ object ShellTool {
       case None => Some("Invalid working directory")
       case Some(dir) =>
         val checks = new PathChecks(dir, policy.entries)
-        checks.checkBase() match {
+        val verdict = checks.checkBase() match {
           case Unchecked => Some(tooCostly(program))
           case Refused   => Some("The working directory is outside the allowed paths")
           case Allowed if NoFileArguments.contains(executable) => None
@@ -298,6 +326,8 @@ object ShellTool {
             if (args.exists(_.length > MaxArgumentLength)) Some(tooCostly(program))
             else argumentRefusal(program, args.filter(_ != "--"), checks)
         }
+        observe(checks.cost)
+        verdict
     }
   }
 
@@ -341,16 +371,29 @@ object ShellTool {
     private var remaining                                 = MaxPathSteps
     private val seen                                      = mutable.HashMap.empty[String, Verdict]
     private var baseReadings: Option[PathPolicy.Readings] = None
+    private var probes                                    = 0
+    private var resolutions                               = 0
+    private var spent                                     = 0
 
     private def charge(lookups: Int): Boolean = {
       remaining -= lookups
+      if (remaining >= 0) spent += lookups
       remaining >= 0
+    }
+
+    /** What the checks have cost so far. */
+    def cost: PathCheckCost = PathCheckCost(probes, resolutions, spent)
+
+    private def probe(path: Path): Boolean = {
+      probes += 1
+      PathPolicy.entryExists(path)
     }
 
     /** Check the working directory, and keep its readings for the values resolved against it. */
     def checkBase(): Verdict =
       if (!charge(fullCost(base))) Unchecked
       else {
+        resolutions += 1
         baseReadings = PathPolicy.readings(base).filter(PathPolicy.permits(_, entries))
         if (baseReadings.isDefined) Allowed else Refused
       }
@@ -360,8 +403,10 @@ object ShellTool {
 
     private def fullCheck(path: Path): Verdict =
       if (!charge(fullCost(path))) Unchecked
-      else if (PathPolicy.resolve(path, entries).isDefined) Allowed
-      else Refused
+      else {
+        resolutions += 1
+        if (PathPolicy.resolve(path, entries).isDefined) Allowed else Refused
+      }
 
     private def check(value: String): Verdict =
       baseReadings match {
@@ -369,7 +414,7 @@ object ShellTool {
         case Some(parent) if PathPolicy.isSingleName(value) =>
           if (!charge(parent.probes)) Unchecked
           else
-            PathPolicy.childReadings(parent, value) match {
+            PathPolicy.childReadings(parent, value, probe) match {
               case PathPolicy.Child.Absent(readings) => if (PathPolicy.permits(readings, entries)) Allowed else Refused
               case PathPolicy.Child.Resolve          => resolveInFull(value)
             }
