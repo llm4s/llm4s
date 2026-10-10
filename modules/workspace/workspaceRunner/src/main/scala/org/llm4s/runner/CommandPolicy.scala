@@ -1423,9 +1423,12 @@ private[runner] object CommandPolicy {
 
     // As the destination's file system compares them: `x` and `X`, or `café` composed and decomposed, are one name
     // on macOS and Windows (#1775 review); on Windows a `~` may make a name another's short name.
-    val names = operands.flatMap(lastName)
+    val names       = operands.flatMap(lastName)
+    val foldedNames = names.map(folded)
     val sameName =
-      names.map(folded).distinct.size < names.size || (isWindows && names.size >= 2 && names.exists(_.contains('~')))
+      foldedNames.distinct.size < names.size ||
+        (names.size >= 2 && foldedNames.contains(None)) ||
+        (isWindows && names.size >= 2 && names.exists(_.contains('~')))
     val clash =
       command.keepsLinks && operands.size >= 3 && (sameName || operands.exists(copiesContents))
 
@@ -1724,9 +1727,32 @@ private[runner] object CommandPolicy {
     (directory, Option.when(name.nonEmpty && name != "." && name != "..")(name))
   }
 
-  /** A name as a case- and normalisation-insensitive file system may compare it, erring towards matching. */
-  private def folded(name: String): String =
-    Normalizer.normalize(name, Normalizer.Form.NFKC).toUpperCase(Locale.ROOT).toLowerCase(Locale.ROOT)
+  /**
+   * A name as a case- and normalisation-insensitive file system may compare it, erring towards matching; `None` when
+   * the folding does not settle, which callers take to match any name.
+   *
+   * One pass of NFKC, upper case, lower case is not enough: it is not idempotent, so two names APFS takes for one can
+   * still fold apart - `ẞ` (U+1E9E) lower-cases to `ß`, which only a second pass upper-cases to `SS`, and `ΐ` (U+0390)
+   * upper-cases to `Ϊ́` decomposed, which NFKC recomposes only after case folding (#1775 review). So the pass, ending
+   * in NFKC, is repeated until the name stops changing: over every code point and its upper, lower and (K)NF(K)D
+   * forms that takes at most two changes (`CommandPolicyFoldedSpec`), so a name still changing after [[FoldPasses]] is
+   * unexpected and treated as unknown.
+   */
+  private[runner] def folded(name: String): Option[String] = {
+    def pass(s: String): String =
+      Normalizer.normalize(
+        Normalizer.normalize(s, Normalizer.Form.NFKC).toUpperCase(Locale.ROOT).toLowerCase(Locale.ROOT),
+        Normalizer.Form.NFKC
+      )
+    Iterator
+      .iterate(name)(pass)
+      .sliding(2)
+      .take(FoldPasses)
+      .collectFirst { case Seq(before, after) if before == after => after }
+  }
+
+  /** The most passes [[folded]] makes before giving up on a name. */
+  private val FoldPasses = 4
 
   /**
    * `mv` and `cp` handle several sources one at a time, so each operation changes the file system the next one
@@ -1793,9 +1819,11 @@ private[runner] object CommandPolicy {
       }
 
       def matches(change: Changed, dir: Path, name: String): Boolean = {
-        val looked = folded(name)
         val named = change.name.forall { n =>
-          if (change.prefix) looked.startsWith(folded(n)) else looked == folded(n)
+          (folded(name), folded(n)) match {
+            case (Some(looked), Some(entry)) => if (change.prefix) looked.startsWith(entry) else looked == entry
+            case _                           => true // a name that does not fold settles nothing: take it to match
+          }
         } || (isWindows && (name.contains('~') || change.name.exists(_.contains('~'))))
         named && Try(Files.isSameFile(dir, change.dir)).getOrElse(false)
       }

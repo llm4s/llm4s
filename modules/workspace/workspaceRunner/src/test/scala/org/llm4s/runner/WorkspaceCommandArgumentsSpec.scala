@@ -554,6 +554,38 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
       outsideIntact(fx)
     }
 
+  it should "refuse a link-preserving cp of sources whose names one pass of case folding leaves apart" in
+    inWorkspace { fx =>
+      // APFS takes each pair for one name, but NFKC, upper and lower case once does not: `ẞ` lower-cases to `ß`, which
+      // only a second pass makes `ss`, and `ΐ` upper-cases to a decomposed `Ϊ́` that NFKC recomposes only afterwards.
+      // So `cp -P a/b/ẞ c/ß d` passed the policy, made the link `d/ẞ` and macOS cp wrote `c/ß` through it (#1775 review).
+      val pairs = Seq(
+        "\u1E9E" -> "\u00DF",             // ẞ, ß
+        "\u1E9E" -> "ss",
+        "\u1E9E" -> "SS",
+        "\u0390" -> "\u0399\u0308\u0301", // ΐ, Ι with diaeresis and acute
+        "\u03B0" -> "\u03A5\u0308\u0301", // ΰ, Υ with diaeresis and acute
+        "\u1FD3" -> "\u0399\u0308\u0301",
+        "\u1FE7" -> "\u03A5\u0308\u0342"
+      )
+      Seq("a/b", "c", "d").foreach(dir => Files.createDirectories(fx.root.resolve(dir)))
+      val ws = fx.interface(ReadWrite)
+      pairs.zipWithIndex.foreach { case ((linked, written), i) =>
+        val (l, w) = (s"$i$linked", s"$i$written")
+        link(fx, s"a/b/$l", Paths.get("../../outside/secret.txt"))
+        write(fx.root.resolve("c").resolve(w), "OVERWRITTEN\n")
+        refuses(ws, s"cp -P a/b/$l c/$w d", ArgumentNotAllowed)
+        refuses(ws, s"cp -P c/$w a/b/$l d", ArgumentNotAllowed) // either first
+        refuses(ws, s"cp -R a/b/$l c/$w d", ArgumentNotAllowed)
+        nothingPulledIn(fx, s"d/$l", s"d/$w")
+      }
+      // A longer name ending in `ss` is another name: the link still copies beside it
+      write(fx.root.resolve("c").resolve("0glass"), "g\n")
+      runs(ws, "cp -P a/b/0\u1E9E c/0glass d")
+      isLink(fx.root.resolve("d").resolve("0\u1E9E")) shouldBe true
+      outsideIntact(fx)
+    }
+
   it should "refuse a cp from a working directory inside a destination an earlier source merges into" in
     inWorkspace { fx =>
       // From `d/sub`, `cp -R ../../src/sub l/secret.txt ../../d` first merges `src/sub` into `d/sub`, making

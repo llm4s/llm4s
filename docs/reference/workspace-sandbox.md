@@ -288,8 +288,10 @@ source's operation is taken to change:
 Every other path argument (the other sources, the destination, a `-t` value) is walked as the path rule walks it,
 under both readings, links' targets included, and the command is refused (`ARGUMENT_NOT_ALLOWED`) when the walk looks
 up one of those entries. Names are compared without regard to letter case or Unicode normalisation, as on macOS and
-Windows file systems, and directories by identity, so another spelling of the destination (`alias/evil/...` with
-`alias` -> `d`) is caught. An `mv` is also refused when the working directory lies inside a source it moves, since a
+Windows file systems (NFKC and case mapping repeated until the name stops changing, so `ẞ`, `ß`, `ss` and `SS` are
+one name, as on APFS), and directories by identity, so another spelling of the destination (`alias/evil/...` with
+`alias` -> `d`) is caught. Windows also takes `x.` and `x ` (trailing dots and spaces) for `x`; these are not folded,
+which matters only for a native Win32 `cp`. An `mv` is also refused when the working directory lies inside a source it moves, since a
 relative path's `..` then climbs from the source's new place. Argument order is not modelled: a path through a name a
 later source creates is refused too. Run one command per source instead; each is then checked against the file
 system the previous one left.
@@ -300,6 +302,7 @@ mv evil d/evil/secret.txt d       # refused, also through another name for d, or
 mv sub sub/Main.scala d           # refused: sub/Main.scala goes through the sub the first move removes
 cp -P sub/l l/secret.txt .        # refused: GNU cp reads l/secret.txt through the copied link
 cp -P a/b/x c/X d                 # refused: on macOS d/X is the link d/x, and cp writes c/X through it
+cp -P a/b/ẞ c/ss d                # refused: the same on macOS, where ẞ and ss are one name
 mv a.txt b.txt d                  # runs
 mv outlink dangling d/            # runs: several links moved, nothing reached through them
 ```

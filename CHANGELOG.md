@@ -2076,7 +2076,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is refused too. The existing refusal of a link-preserving `cp` of two sources with the same name now compares the
   names as the destination's file system does, ignoring letter case and Unicode normalisation (and, on Windows,
   taking a name with `~` for any): on macOS `cp -P a/b/x c/X d` copied the link `x` into `d` and then wrote `c/X`
-  through it. Run one command per source instead. `rm`, `mkdir`, `touch` and `chmod` create no link and are
+  through it. The comparison repeats NFKC and case mapping until the name stops changing, since one pass
+  left names APFS takes for one apart (`ẞ` and `ß`, `ss` or `SS`; `ΐ` and its decomposed capital): `cp -P a/b/ẞ c/ß d`
+  passed and wrote `c/ß` through the link on macOS. Run one command per source instead. `rm`, `mkdir`, `touch` and `chmod` create no link and are
   unchanged. See [Several sources in one command](docs/reference/workspace-sandbox.md#several-sources-in-one-command).
 - **Workspace runner: an agent can remove or rename a symbolic link that points out of the workspace**
   ([#1730](https://github.com/llm4s/llm4s/issues/1730)): the command policy resolved every argument through its
