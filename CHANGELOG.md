@@ -2070,6 +2070,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - redaction: a `"password": "` that a single-quoted string mentions no longer hides the next field's
+  key** ([#1697](https://github.com/llm4s/llm4s/issues/1697)): `Redaction` (used by the provider exchange logger,
+  `LLMError` messages and error mapping) read a JSON-style field that a Python dict's string merely mentions as a
+  real one and ran its value to the next `"`, over the key of the next field, so the credential under that key stayed
+  readable: `{'note': 'see "password": " here', 'apiKey': ["7YJ1VSFPX'}", -9935758]}` kept `7YJ1VSFPX` and
+  `-9935758`. A double-quoted value whose key sits inside a single-quoted string now ends at its own quote or at the
+  `'` that ends that string - one followed by `,`, `}`, `]`, `)` or the end of the input, and not escaped as Python
+  escapes it (`\'`, `\\'` inside a JSON string) - where that string opened as a Python value does (after `{`, `[`,
+  `(`, `,`, `:` or `=`), so that a stray `'` before a credential ends nothing; the output is
+  `{'note': 'see "password": "[REDACTED]', 'apiKey': ["[REDACTED]", '[REDACTED]']}`. The same holds for
+  `password="`, `"Authorization": "`, and for `\"password\": \"` and `password=\"` in a Python dict inside a JSON
+  string. A value the string's end leaves empty (`'see "password": "', 'token': ...`) is empty. A double-quoted field
+  closed inside the string (`'{"password": "..."}'`) and any field outside a single-quoted string read as before.
 - **Security - redaction: a `key=value` whose value is in backslash-escaped quotes is redacted**
   ([#1684](https://github.com/llm4s/llm4s/issues/1684)): `Redaction` (used by the provider exchange logger, `LLMError`
   messages and error mapping) stopped the value of a `key=value` pair at an escaped quote, so a logfmt line inside a

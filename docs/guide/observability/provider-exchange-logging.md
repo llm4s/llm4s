@@ -179,7 +179,13 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   `'password': '` there ends where the string ends rather than taking the rest of the document - but only
   where no `'` that could close it follows anywhere in the input, and not where that end would leave the
   value empty (`'password': '",`); otherwise it runs to the next `'`, or to the end of the input, as it
-  does outside a string, so a credential that holds a `"` (`'Qx"]]9secret'`) is redacted whole; outside
+  does outside a string, so a credential that holds a `"` (`'Qx"]]9secret'`) is redacted whole; the
+  other way round, a double-quoted field that a single-quoted string mentions - a Python dict's message,
+  `{'note': 'see "password": " here', 'apiKey': [...]}`, also inside a JSON string, and `password="`,
+  `"Authorization": "` or `\"password\": \"` there - ends at its own quote or at the `'` that ends that
+  string (one followed by `,`, `}`, `]`, `)` or the end of the input, and not escaped, `\'`, where the string
+  opened after `{`, `[`, `(`, `,`, `:` or `=`, as a Python value does), so it does not take the key of the
+  next field, whose value is redacted; outside
   any string, the bare words after an unclosed `'token': [` are replaced to the end of the input, since nothing tells them from leaves; under
   a single-quoted key a single-quoted leaf that stands where a value does is replaced whatever it holds,
   a connection string `'postgres://u:...@h/db'` or a `'k=v'` token included, and so is a `\"`-quoted leaf
