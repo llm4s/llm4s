@@ -65,7 +65,11 @@ object LinearTime {
     def name: String
     def nanos(): Long
 
-    /** The size of the clock's step, as observed: the largest of a few successive changes in its reading. */
+    /**
+     * The size of the clock's step, as observed: the smallest of a few successive changes in its reading. A
+     * single change can span several steps - the thread was charged two ticks between two reads (#1771) - but
+     * never less than one, so the smallest is the closest to the step itself.
+     */
     lazy val granularity: FiniteDuration = observedGranularity(this)
   }
 
@@ -86,28 +90,34 @@ object LinearTime {
     if (threads.isCurrentThreadCpuTimeSupported && threads.isThreadCpuTimeEnabled && CpuClock.nanos() >= 0) CpuClock
     else WallClock
 
-  private val GranularitySteps  = 3
-  private val GranularityBudget = 1.second
-  private val MinTarget         = 5.millis
-  private val TicksPerSample    = 8
-  private val MaxTarget         = 1.second
-  private val StopChecks        = 16L
+  private[testutil] val GranularitySteps = 5
+  private val GranularityBudget          = 1.second
+  private val MinTarget                  = 5.millis
+  private val TicksPerSample             = 8
+  private val MaxTarget                  = 1.second
+  private val StopChecks                 = 16L
 
+  /**
+   * The smallest of up to [[GranularitySteps]] successive changes in `clock`'s reading, observed within one
+   * second of wall time. Taking the largest, or a single change, let one change that spanned two ticks of
+   * Windows's 15.6 ms clock read as a 31.2 ms step (#1771), doubling the calibration target and every
+   * repeat count calibrated to it.
+   */
   private[testutil] def observedGranularity(clock: Clock): FiniteDuration = {
     val deadline = System.nanoTime() + GranularityBudget.toNanos
-    var largest  = 1L
+    var smallest = Long.MaxValue
     var steps    = 0
     var last     = clock.nanos()
     while (steps < GranularitySteps && System.nanoTime() < deadline) {
       val now = clock.nanos()
       if (now != last) {
-        largest = math.max(largest, now - last)
+        smallest = math.min(smallest, math.max(1L, now - last))
         last = now
         steps += 1
       }
     }
     // a clock that never moved within the budget is at least that coarse
-    if (steps == 0) GranularityBudget else largest.nanos
+    if (steps == 0) GranularityBudget else smallest.nanos
   }
 
   /** The least a sample of the small input should cost on `clock`: eight of its ticks, at least 5 ms. */
