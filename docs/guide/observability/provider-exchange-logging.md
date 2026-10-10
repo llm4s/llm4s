@@ -158,7 +158,9 @@ on it.
 The file sink changes `request_body`, `response_body` and `error_message` before writing them:
 
 - **Redaction.** It replaces, with `[REDACTED]`: an `Authorization`, `Proxy-Authorization`, `Cookie` or
-  `Set-Cookie` header (the whole value: every name and value of a cookie), bearer tokens, URL query
+  `Set-Cookie` header, from after the `:` and the whitespace after it to the end of its line (for a
+  cookie, every name and value of it; see below for where a cookie header's value ends inside a string),
+  bearer tokens, URL query
   parameters with sensitive names (`api_key`, `token`, `password` and similar), JSON fields with sensitive
   names (also when the JSON sits inside a prompt or response string with escaped quotes,
   `\"api_key\": \"...\"`, or is single-quoted, or is cut off before its closing quote, as a truncated
@@ -195,7 +197,22 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   `x-amz-security-token`, `refresh_token`, `db_password`, `Proxy-Authorization`, `Cookie` and
   `Set-Cookie` are redacted, as a header line, a JSON field or header map (escaped too) and a
   `key=value` pair; `max_tokens`, `prompt_tokens`, `token_count`, `next_page_token`, `cookie_policy` and
-  `cookie_consent` are not, because the match is never on a substring.
+  `cookie_consent` are not, because the match is never on a substring. URL query parameters are also
+  matched against a second, substring list (`key`, `token`, `secret`, `password`, `auth` and similar), so
+  `?x_api_key_id=` is redacted too.
+- **Where a cookie header's value ends.** Outside any string (a raw request dump, a log line), at the end
+  of its line, quotes, apostrophes and backslashes included: `Cookie: sid="abc"; x=y` becomes
+  `Cookie: [REDACTED]`. Inside a string that opened on the same line - a JSON string, a header in a JSON
+  array, an HTTP exchange logged inside JSON, a Python repr - earlier: at the escape of a line break
+  (`\r`, `\n`, `\u000a`, `\u000d`, and `\\r`, `\\n` in JSON inside a JSON string) or, in a
+  double-quoted string, at the unescaped `"` that ends the string. So
+  `{"log":"GET / HTTP/1.1\r\nCookie: sid=...\r\nAccept: */*"}` becomes
+  `{"log":"GET / HTTP/1.1\r\nCookie: [REDACTED]\r\nAccept: */*"}`, and
+  `["Cookie: sid=...", "Accept: */*"]` keeps its second element; the JSON still parses. An escaped quote
+  (`sid=\"abc\"`) is part of the value. An `Authorization` or `Proxy-Authorization` header's value
+  always runs to the end of its line, inside a string too, taking the rest of that string and the fields
+  after it on the same line: a Digest credential holds quoted strings and commas, so a quote is no sure
+  end of it.
 - **Truncation.** It keeps the first 1000 characters, after redaction, and appends
   `... [truncated, N chars omitted]` with the count it dropped. Redact the full text before you cut it, as
   this sink and every other llm4s call site do: redaction of text that is already cut off is weaker. An

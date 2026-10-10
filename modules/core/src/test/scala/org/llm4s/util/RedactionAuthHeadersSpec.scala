@@ -61,6 +61,80 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
   }
 
   // ---------------------------------------------------------------------------------------------
+  // Where a cookie header's value ends
+  // ---------------------------------------------------------------------------------------------
+
+  private def assertJson(out: String): Unit =
+    withClue(out)(noException should be thrownBy ujson.read(out))
+
+  it should "end a cookie header's value at an escaped line break in a JSON string" in {
+    val crlf = s"""{"log":"GET / HTTP/1.1\\r\\nCookie: sid=$session; x=y\\r\\nAccept: */*\\r\\n","next":"keepme"}"""
+    Redaction.redact(crlf) shouldBe
+      s"""{"log":"GET / HTTP/1.1\\r\\nCookie: $R\\r\\nAccept: */*\\r\\n","next":"keepme"}"""
+    val lf = s"""{"log":"x\\nCookie: sid=$session\\nAccept: keep","n":1}"""
+    Redaction.redact(lf) shouldBe s"""{"log":"x\\nCookie: $R\\nAccept: keep","n":1}"""
+    val set = s"""{"log":"HTTP/1.1 200 OK\\nSet-Cookie: sid=$session; Path=/\\nX: keep","n":1}"""
+    Redaction.redact(set) shouldBe s"""{"log":"HTTP/1.1 200 OK\\nSet-Cookie: $R\\nX: keep","n":1}"""
+    val unicode = s"""{"log":"x\\u000aCookie: sid=$session\\u000dAccept: keep","n":1}"""
+    Redaction.redact(unicode) shouldBe s"""{"log":"x\\u000aCookie: $R\\u000dAccept: keep","n":1}"""
+    Seq(crlf, lf, set, unicode).foreach(in => assertJson(Redaction.redact(in)))
+  }
+
+  it should "end a cookie header's value at an escaped line break in JSON inside a JSON string" in {
+    val in  = s"""{"outer":"{\\"log\\":\\"Cookie: sid=$session\\\\r\\\\nAccept: x\\"}","k":"keep"}"""
+    val out = Redaction.redact(in)
+    out shouldBe s"""{"outer":"{\\"log\\":\\"Cookie: $R\\\\r\\\\nAccept: x\\"}","k":"keep"}"""
+    ujson.read(ujson.read(out)("outer").str)("log").str shouldBe s"Cookie: $R\r\nAccept: x"
+  }
+
+  it should "end a cookie header's value where the JSON string around it ends" in {
+    val array = s"""["Cookie: sid=$session; t=1", "Accept: */*", "X: keep"]"""
+    Redaction.redact(array) shouldBe s"""["Cookie: $R", "Accept: */*", "X: keep"]"""
+    val multiline = s"""[\n  "Cookie: sid=$session",\n  "Accept: keep"\n]"""
+    Redaction.redact(multiline) shouldBe s"""[\n  "Cookie: $R",\n  "Accept: keep"\n]"""
+    val curl = s"""{"request":"curl -H 'Cookie: sid=$session' https://x","status":200}"""
+    Redaction.redact(curl) shouldBe s"""{"request":"curl -H 'Cookie: $R","status":200}"""
+    val nested = s"""{"outer":"{\\"log\\":\\"Cookie: sid=$session\\"}","k":"keep"}"""
+    Redaction.redact(nested) shouldBe s"""{"outer":"{\\"log\\":\\"Cookie: $R","k":"keep"}"""
+    val last = s"""{"headers":["Accept: */*","Set-Cookie: sid=$session"]}"""
+    Redaction.redact(last) shouldBe s"""{"headers":["Accept: */*","Set-Cookie: $R"]}"""
+    val beforeNumber = s"""["Cookie: sid=$session", 1, "Cookie: sid=$session", null]"""
+    Redaction.redact(beforeNumber) shouldBe s"""["Cookie: $R", 1, "Cookie: $R", null]"""
+    val inArrayString = s"""["[\\"debug Cookie: sid=$session; lang=en\\",1]",1]"""
+    Redaction.redact(inArrayString) shouldBe s"""["[\\"debug Cookie: $R",1]"""
+    Seq(array, multiline, curl, nested, last, beforeNumber, inArrayString).foreach(in =>
+      assertJson(Redaction.redact(in))
+    )
+  }
+
+  it should "redact the whole of a quoted or backslashed cookie value inside a JSON string" in {
+    val quoted = s"""{"log":"Cookie: sid=\\"$session\\"; x=y","n":1}"""
+    Redaction.redact(quoted) shouldBe s"""{"log":"Cookie: $R","n":1}"""
+    // An even run of backslashes and `n` is an escaped backslash and a letter, not a line break.
+    val backslash = s"""{"log":"Cookie: a=b\\\\n$session","n":1}"""
+    Redaction.redact(backslash) shouldBe s"""{"log":"Cookie: $R","n":1}"""
+    val afterBreak = s"""{"log":"Cookie:\\n sid=$session","n":1}"""
+    Redaction.redact(afterBreak) shouldBe s"""{"log":"Cookie:\\n $R","n":1}"""
+    val python = s"""{'log': 'Cookie: sid=$session\\r\\nAccept: x', 'k': 'keep'}"""
+    Redaction.redact(python) shouldBe s"""{'log': 'Cookie: $R\\r\\nAccept: x', 'k': 'keep'}"""
+    // After the escape of a quote, as HTML-safe serialisers write it.
+    val unicodeQuote = s"""{"o":"\\u0022Cookie: sid=$session\\u0022","k":"keep"}"""
+    Redaction.redact(unicodeQuote) shouldBe s"""{"o":"\\u0022Cookie: $R","k":"keep"}"""
+  }
+
+  it should "read a cookie header outside a JSON string to the end of its line, quotes and all" in {
+    Redaction.redact(s"""Cookie: sid="$session"; x=y""") shouldBe s"Cookie: $R"
+    Redaction.redact(s"""Set-Cookie: a="x", b="$session"\nX: keep""") shouldBe s"Set-Cookie: $R\nX: keep"
+    // A quote that opened on the line, around the header, unescaped: its quoted values do not end it.
+    Redaction.redact(s"""msg="Set-Cookie: a="x", b="$session"; Path=/" user=ann""") shouldBe s"""msg="Set-Cookie: $R"""
+    Redaction.redact(s"""log "Cookie: sid="$session"; x=y" done""") shouldBe s"""log "Cookie: $R"""
+    // A quote left open on an earlier line is not a string around the header.
+    Redaction.redact(s"""say "hi\nCookie: a="x", b="$session"""") shouldBe s"""say "hi\nCookie: $R"""
+    // Backslashes outside a string are part of the value.
+    Redaction.redact(s"""Cookie: a=b\\r\\n$session""") shouldBe s"Cookie: $R"
+  }
+
+  // ---------------------------------------------------------------------------------------------
   // JSON fields and header maps
   // ---------------------------------------------------------------------------------------------
 
@@ -161,8 +235,28 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
       "x Cookie:\n",
       s"""{"Proxy-Authorization": "$negotiate"}, """,
       "cookie_policy=strict&Cookie",
-      "CookieCookieCookie:"
+      "CookieCookieCookie:",
+      """{"log":"Cookie: a\r\nCookie: b\"c\"", "x": 1}, """,
+      """["Cookie: x", "y"], "Cookie:\n\r\t """ + "\\u000a\"\n"
     )
     units.foreach(unit => LinearTime.assertLinear(s"unit $unit", unit * 5000, unit * 20000)(Redaction.redact(_)))
+  }
+
+  it should "read one long cookie value in time linear in its length" in {
+    // One value each, which nothing ends early: no line break, quotes that end no string, runs of backslashes.
+    val open = """{"log":"Cookie: """
+    val shapes: Seq[(String, Int => String)] = Seq(
+      "plain, no line break"      -> (n => "Cookie: " + "a=b; " * n),
+      "in a string, never closed" -> (n => open + "a=b; " * n),
+      "backslash runs"            -> (n => open + """\\\\n\\""" * n),
+      "escaped quotes"            -> (n => open + """\" , [x""" * n),
+      "quotes before a word"      -> (n => open + ("\"" + " " * 20 + "," + " " * 20 + "x") * n),
+      "quotes and commas"         -> (n => open + """" , x""" * n),
+      "string in a string"        -> (n => """{"o":"{\"l\":\"Cookie: """ + """\\\\n\"x""" * n),
+      "a quote open on each line" -> (n => "\"Cookie: a\"b\n" * n)
+    )
+    shapes.foreach { case (name, build) =>
+      LinearTime.assertLinear(name, build(5000), build(20000))(Redaction.redact(_))
+    }
   }
 }

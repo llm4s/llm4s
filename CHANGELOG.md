@@ -2021,9 +2021,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so a session id in a `Cookie` or `Set-Cookie` header line, JSON field, cookie list or `key=value` pair leaked. They
   are now sensitive keys in every shape the redactor reads (a header line, also after a prefix, a JSON or escaped-JSON
   field, a single-quoted dict, a container, `key=value`, a query parameter), and a cookie header's whole value is
-  replaced. `X-Amz-Security-Token` (suffix `securitytoken`) joins `X-Api-Key`, `Api-Key`, `X-Goog-Api-Key` and
-  `X-Auth-Token`, already covered. `cookie` is a whole word, not a substring: `cookie_policy`, `cookie_consent` and
-  `max_cookie_age` are left alone. The key list in `Redaction` is core's one list of sensitive names.
+  replaced - every name and value of it, from after `Cookie:` or `Set-Cookie:` and the whitespace after it (escaped
+  `\n`, `\r` and `\t` included) to the end of its line. Where the header sits inside a string that opened on the same
+  line - a JSON string, a header in a JSON array, a log line inside JSON, a Python repr - the value ends earlier: at
+  the escape of a line break (`\r`, `\n`, `\u000a`, `\u000d`; `\\r\\n` in JSON inside JSON) or, in a double-quoted
+  string, at the unescaped `"` that ends the string, so the headers and fields after it are kept and the JSON still
+  parses. An escaped quote (`sid=\"abc\"`) is part of the value; outside a string, quotes, apostrophes and backslashes
+  are part of the value, so a raw `Cookie: sid="abc"; x=y` is replaced to the end of the line. `Authorization` and
+  `Proxy-Authorization` header values run to the end of the line in every context, as before: a Digest credential
+  holds quoted strings and commas, so a quote is no sure end of it. `X-Amz-Security-Token` (suffix `securitytoken`)
+  joins `X-Api-Key`, `Api-Key`, `X-Goog-Api-Key` and `X-Auth-Token`, already covered. `cookie` is a whole word, not a
+  substring: `cookie_policy`, `cookie_consent` and `max_cookie_age` are left alone. `SensitiveKeyWords` and
+  `SensitiveKeySuffixes` in `Redaction` are core's one list of sensitive key names for fields, header lines and
+  `key=value` pairs; URL query parameters are also matched, by substring, against `SensitiveQueryParams`.
 - **Workspace runner: a command that reads standard input gets end-of-file at once instead of hanging until the
   timeout** ([#1728](https://github.com/llm4s/llm4s/issues/1728)): `executeCommand` left the child's standard input an
   open pipe that nothing wrote to or closed, so `cat` with no operands, `cat -`, `sort`, `uniq`, `wc`, `head`,
