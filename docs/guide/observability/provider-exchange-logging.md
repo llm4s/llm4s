@@ -183,9 +183,12 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   other way round, a double-quoted field that a single-quoted string mentions - a Python dict's message,
   `{'note': 'see "password": " here', 'apiKey': [...]}`, also inside a JSON string, and `password="`,
   `"Authorization": "` or `\"password\": \"` there - ends at its own quote or at the `'` that ends that
-  string (one followed by `,`, `}`, `]`, `)` or the end of the input, and not escaped, `\'`, where the string
-  opened after `{`, `[`, `(`, `,`, `:` or `=`, as a Python value does), so it does not take the key of the
-  next field, whose value is redacted; outside
+  string (the first `'` that is not escaped, `\'`, doubled, `''`, or an apostrophe, where the dict, list or
+  tuple goes on after it: past any `}`, `]` or `)`, the end of the input, or a `,` and the end of the line or
+  the next item; where the string opened on the key's line after `{`, `[`, `(`, `,`, `:` or `=`, as a Python
+  value does), so it does not take the key of the
+  next field, whose value is redacted, while a real field that a stray quote only seems to enclose
+  (`body='{"password": "Ab3'),9xQ"}'`) is redacted whole; outside
   any string, the bare words after an unclosed `'token': [` are replaced to the end of the input, since nothing tells them from leaves; under
   a single-quoted key a single-quoted leaf that stands where a value does is replaced whatever it holds,
   a connection string `'postgres://u:...@h/db'` or a `'k=v'` token included, and so is a `\"`-quoted leaf

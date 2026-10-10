@@ -1064,6 +1064,116 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "read a credential in a JSON field whole however a stray quote before it reads (#1697)" in {
+    // A `'` that seems to open a string around a real field - an SQL literal, a shell argument, a log prefix - ends
+    // the field's value only where a Python container goes on after it. A credential holding `'),` or `']` was cut
+    // there, and the rest written out in the clear.
+    Seq(
+      """body: '{"password":"Ab3')9xQ","user":"bob"}'"""    -> s"""body: '{"password":"$R","user":"bob"}'""",
+      """INFO request body='{"password":"Ab3'),9xQ"}'"""    -> s"""INFO request body='{"password":"$R"}'""",
+      """'{"password": "SEKone'), x"}"""                    -> s"""'{"password": "$R"}""",
+      """[1, '{"token": "x'] y"}']"""                       -> s"""[1, '{"token": "$R"}']""",
+      """[ '{"password": "SEKone', 'rest'"} ]"""            -> s"""[ '{"password": "$R"} ]""",
+      """{'h': '{"password": "ab\\'), cd"}'}"""             -> s"""{'h': '{"password": "$R"}'}""",
+      """{"m": "it's: 'see \"password\": \"ab', cd\" x"}""" -> s"""{"m": "it's: 'see \\"password\\": \\"$R\\" x"}""",
+      """{"m": "user said: 'see \"password\": \"SEKone', ok\" end"}""" ->
+        s"""{"m": "user said: 'see \\"password\\": \\"$R\\" end"}"""
+    ).foreach { case (input, expected) =>
+      withClue(s"input $input: ")(redactedOnceAndTwice(input) shouldBe expected)
+    }
+  }
+
+  it should "read a quote doubled as SQL escapes it as part of the value (#1697)" in {
+    redactedOnceAndTwice("""statement: INSERT INTO cfg VALUES ('{"api_key": "ab''),cd"}')""") shouldBe
+      s"""statement: INSERT INTO cfg VALUES ('{"api_key": "$R"}')"""
+    redactedOnceAndTwice("""statement: INSERT INTO cfg VALUES ('{"api_key": "ab''cd"}', 'x')""") shouldBe
+      s"""statement: INSERT INTO cfg VALUES ('{"api_key": "$R"}', 'x')"""
+  }
+
+  it should "take no quote on an earlier line for a string a field sits in (#1697)" in {
+    // A Python string does not run over a line break: a quote that opens a line of prose ends nothing on the next.
+    Seq(
+      "'tis the season\n{\"password\": \"hunter2'),xyz\"}" -> s"'tis the season\n{\"password\": \"$R\"}",
+      "note: 'draft\n{\"password\": \"hunter2'),xyz\"}"    -> s"note: 'draft\n{\"password\": \"$R\"}",
+      "'90s music\n{\"api_key\": \"k9'}Qz\"}"              -> s"'90s music\n{\"api_key\": \"$R\"}",
+      "', weird\n{\"msg\":\"it's fine\",\"password\":\"Zq1{Kd4}5Zg'}Zq2\",\"note\":\"'tis the season\"}" ->
+        s"', weird\n{\"msg\":\"it's fine\",\"password\":\"$R\",\"note\":\"'tis the season\"}",
+      "[' bracket\n{\"msg\":\"it's fine\",\"api_key\":\"Zq1i=hM}`D7')?LPPZq2\"}" ->
+        s"[' bracket\n{\"msg\":\"it's fine\",\"api_key\":\"$R\"}",
+      // a quote left open on an earlier line that a later one closes
+      "the users' settings\n{\"msg\":\"the users'\",\"token\":\"ab!'}Bq\"}\n{\"msg\":\"a: 'b\",\"password\":\"c'}, ]KQk\"}" ->
+        s"the users' settings\n{\"msg\":\"the users'\",\"token\":\"$R\"}\n{\"msg\":\"a: 'b\",\"password\":\"$R\"}",
+      // and a mention on a line of its own still ends where its string does
+      "a: b\n{'note': 'see \"password\": \" here', 'apiKey': 'SEKone'}" ->
+        s"a: b\n{'note': 'see \"password\": \"$R', 'apiKey': '$R'}"
+    ).foreach { case (input, expected) =>
+      withClue(s"input $input: ")(redactedOnceAndTwice(input) shouldBe expected)
+    }
+  }
+
+  it should "redact JSON lines among prose with apostrophes whole, as if no quote were near (#1697)" in {
+    // Lines of JSON and lines of English with apostrophes - contractions, possessives, a quote that opens or ends a
+    // line - and no single-quoted string on a JSON line: every credential, whatever quotes and brackets it holds, is
+    // replaced whole and the rest of the line is kept, as it is with no apostrophe anywhere. Deterministic.
+    val rnd       = new scala.util.Random(16971)
+    val printable = (33 to 126).map(_.toChar).filter(c => c != '"' && c != '\\')
+    val prose = Vector(
+      "it's fine",
+      "the users' settings were reset",
+      "O'Brien logged in",
+      "'tis the season",
+      "'90s music",
+      "a: 'b",
+      "note: 'draft",
+      "', weird",
+      "[' bracket",
+      "trailing quote '",
+      "ends with the users'",
+      "don't retry (we'll see)",
+      "values ['a', 'b']",
+      "Charles' book, Mark's pen"
+    )
+    val inWords = Vector("It's a test:", "O'Brien said", "don't log", "Mark's request")
+    val keys    = Vector("password", "api_key", "token", "secret", "apiKey", "client_secret", "Authorization")
+    val quoted  = Vector("'", "')", "'),", "', ", "']", "'}", "''", "', '", "'}, ", "') ")
+    def secret(): String = {
+      val chars = Vector.fill(16)(printable(rnd.nextInt(printable.length))).mkString
+      val at    = rnd.nextInt(chars.length)
+      chars.take(at) + quoted(rnd.nextInt(quoted.length)) + chars.drop(at)
+    }
+    (1 to 1500).foreach { _ =>
+      val lines = Vector.fill(1 + rnd.nextInt(4)) {
+        if (rnd.nextInt(3) == 0) {
+          val text = prose(rnd.nextInt(prose.length))
+          (text, text)
+        } else {
+          val key    = keys(rnd.nextInt(keys.length))
+          val sec    = secret()
+          val msg    = prose(rnd.nextInt(prose.length))
+          val prefix = if (rnd.nextBoolean()) inWords(rnd.nextInt(inWords.length)) + " " else ""
+          val line   = prefix + ujson.Obj("msg" -> msg, key -> sec, "n" -> 1).render()
+          (line, prefix + ujson.Obj("msg" -> msg, key -> R, "n" -> 1).render())
+        }
+      }
+      val input = lines.map(_._1).mkString("\n")
+      withClue(s"input $input: ")(Redaction.redact(input) shouldBe lines.map(_._2).mkString("\n"))
+    }
+  }
+
+  it should "end values at a doubled or followed quote in time linear in the input (#1697)" in {
+    val shapes = Seq(
+      ("{'n': '\"password\": \"", "x', 'yyyyyyyy' z ", ""),
+      ("{'n': '\"password\": \"", "x', \"yyyyyyyy\" z ", ""),
+      ("{\"m\": \"{'n': '\\\"password\\\": \\\"", "x', \\\"yyyyyyy\\\" z ", "\"}"),
+      ("('{\"api_key\": \"", "ab''), ", "\"}')"),
+      ("'tis\n", "{\"password\": \"a'), b\"}\n", "")
+    )
+    shapes.foreach { case (prefix, unit, suffix) =>
+      def input(repeats: Int): String = prefix + (unit * repeats) + suffix
+      LinearTime.assertLinear(s"unit $unit", input(5000), input(20000))(Redaction.redact(_))
+    }
+  }
+
   it should "redact a document of many JSON strings that mention 'token': [ in time linear in its length" in {
     // One forward scan decides which string, if any, encloses each container, so the cost does not grow with the
     // square of the length: a document four times as long takes about four times as long, never sixteen.

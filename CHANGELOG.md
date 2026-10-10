@@ -2076,10 +2076,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   real one and ran its value to the next `"`, over the key of the next field, so the credential under that key stayed
   readable: `{'note': 'see "password": " here', 'apiKey': ["7YJ1VSFPX'}", -9935758]}` kept `7YJ1VSFPX` and
   `-9935758`. A double-quoted value whose key sits inside a single-quoted string now ends at its own quote or at the
-  `'` that ends that string - one followed by `,`, `}`, `]`, `)` or the end of the input, and not escaped as Python
-  escapes it (`\'`, `\\'` inside a JSON string) - where that string opened as a Python value does (after `{`, `[`,
-  `(`, `,`, `:` or `=`), so that a stray `'` before a credential ends nothing; the output is
-  `{'note': 'see "password": "[REDACTED]', 'apiKey': ["[REDACTED]", '[REDACTED]']}`. The same holds for
+  `'` that ends that string: the first `'` in the value that is not escaped (`\'`, `\\'` inside a JSON string),
+  doubled as SQL does (`''`) or an apostrophe, where a Python dict, list or tuple goes on after it - past any `}`, `]`
+  or `)`, the end of the input (or of the JSON string the dict is in), or a `,` and then the end of the line or an item
+  (a quoted string that closes on the line, a number, `None`, `True` or `False`, after any `{`, `[` or `(`) followed the
+  same way or by `:` - and where that string opened as a Python value does (after `{`, `[`, `(`, `,`, `:` or `=`, or
+  at the start of the line) on the same line as the key; where that first `'` is followed by anything else, the value
+  is read as it is outside a string. The output is
+  `{'note': 'see "password": "[REDACTED]', 'apiKey': ["[REDACTED]", '[REDACTED]']}`. A real field that a stray quote
+  only seems to enclose - an SQL literal (`('{"api_key": "ab''),cd"}')`), a log prefix (`body='{"password":
+  "Ab3'),9xQ"}'`), a quote on an earlier line (`'tis the season`) - is redacted whole, as before. The same holds for
   `password="`, `"Authorization": "`, and for `\"password\": \"` and `password=\"` in a Python dict inside a JSON
   string. A value the string's end leaves empty (`'see "password": "', 'token': ...`) is empty. A double-quoted field
   closed inside the string (`'{"password": "..."}'`) and any field outside a single-quoted string read as before.
