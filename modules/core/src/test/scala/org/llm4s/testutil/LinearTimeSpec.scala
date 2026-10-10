@@ -63,10 +63,110 @@ class LinearTimeSpec extends AnyFlatSpec with Matchers {
     sink = x
   }
 
-  "LinearTime" should "observe the step of a coarse clock and sample well above it" in {
+  /**
+   * A clock that advances one `tick` every `readsPerTick` reads, except that the change numbered `jumpAt`
+   * (from 0) spans two ticks: a read that landed late, as when the thread was charged two ticks of
+   * Windows's CPU clock between two reads (#1771).
+   */
+  final private class JumpingClock(tick: FiniteDuration, readsPerTick: Int, jumpAt: Int) extends LinearTime.Clock {
+    private var reads   = 0
+    private var changes = 0
+    private var reading = 0L
+    val name            = s"jumping, ${tick.toMicros} us ticks"
+    def nanos(): Long = {
+      reads += 1
+      if (reads % readsPerTick == 0) {
+        reading += (if (changes == jumpAt) 2L else 1L) * tick.toNanos
+        changes += 1
+      }
+      reading
+    }
+  }
+
+  /**
+   * A clock that advances every `readsPerTick` reads, its changes in turn the given `changes` and one `tick`
+   * each after them: a change of less than a tick is a stray sub-tick read, as when Windows's timer
+   * resolution is briefly raised, and one of more is a late read (#1771).
+   */
+  final private class ScriptedClock(tick: FiniteDuration, readsPerTick: Int, changes: Seq[FiniteDuration])
+      extends LinearTime.Clock {
+    private var reads   = 0
+    private var changed = 0
+    private var reading = 0L
+    val name            = s"scripted, ${tick.toMicros} us ticks"
+    def nanos(): Long = {
+      reads += 1
+      if (reads % readsPerTick == 0) {
+        reading += changes.lift(changed).getOrElse(tick).toNanos
+        changed += 1
+      }
+      reading
+    }
+  }
+
+  /** The `GranularitySteps` changes of one tick each, but `outliers` at their positions. */
+  private def ticksWith(outliers: (Int, FiniteDuration)*): Seq[FiniteDuration] =
+    (0 until LinearTime.GranularitySteps).map(i => outliers.toMap.getOrElse(i, SimulatedTick))
+
+  "LinearTime" should "observe one tick as a clock's step, however many ticks a single change in its reading spans" in {
+    // Before #1771 the step was the largest change observed, so a two-tick change read as the step wherever it fell.
+    (0 until LinearTime.GranularitySteps).foreach { jumpAt =>
+      withClue(s"two-tick change at $jumpAt: ") {
+        val clock = new JumpingClock(SimulatedTick, readsPerTick = 3, jumpAt = jumpAt)
+        LinearTime.observedGranularity(clock) shouldBe SimulatedTick
+        LinearTime.targetFor(clock) shouldBe SimulatedTick * 8L
+      }
+    }
+  }
+
+  it should "observe one tick as a clock's step, wherever a single change in its reading is less than a tick" in {
+    // The smallest change taken as the step read one stray 1 ms change as a 1 ms clock, and a target of 8 ms.
+    (0 until LinearTime.GranularitySteps).foreach { at =>
+      withClue(s"1 ms change at $at: ") {
+        val clock = new ScriptedClock(SimulatedTick, readsPerTick = 3, ticksWith(at -> 1.milli))
+        LinearTime.observedGranularity(clock) shouldBe SimulatedTick
+        LinearTime.targetFor(clock) shouldBe SimulatedTick * 8L
+      }
+    }
+  }
+
+  it should "observe one tick as a clock's step with one change of two ticks and one of less than a tick" in {
+    for {
+      high <- 0 until LinearTime.GranularitySteps
+      low  <- 0 until LinearTime.GranularitySteps if low != high
+    } withClue(s"two-tick change at $high, 1 ms change at $low: ") {
+      val clock =
+        new ScriptedClock(SimulatedTick, readsPerTick = 3, ticksWith(high -> SimulatedTick * 2L, low -> 1.milli))
+      LinearTime.observedGranularity(clock) shouldBe SimulatedTick
+    }
+  }
+
+  it should "take the upper middle change as the step when it observed an even number of them" in {
+    // fewer than GranularitySteps changes within the budget: the median of those, erring toward the larger step
+    val tick = SimulatedTick.toNanos
+    LinearTime.medianStep(Seq(tick, 1.milli.toNanos)) shouldBe SimulatedTick
+    LinearTime.medianStep(Seq(2 * tick, tick, 1.milli.toNanos, tick)) shouldBe SimulatedTick
+    LinearTime.medianStep(Seq(tick)) shouldBe SimulatedTick
+  }
+
+  it should "observe the step of a coarse clock and sample well above it" in {
+    // The real clock, read in 15.6 ms steps: a change can span several steps however rarely, and the
+    // median of several is one step on any healthy runner. Assert only what holds for any number of them.
     val clock = quantised(WindowsTick)
-    clock.granularity.toNanos shouldBe WindowsTick.toNanos +- 1.milli.toNanos
-    LinearTime.targetFor(clock) should be >= WindowsTick * 8L - 1.milli
+    val step  = clock.granularity
+    withClue(s"observed step $step: ") {
+      step should be > Duration.Zero
+      (step.toNanos % WindowsTick.toNanos) shouldBe 0L
+      step should be <= WindowsTick * 4L
+    }
+    LinearTime.targetFor(clock) should be >= WindowsTick * 8L
+  }
+
+  it should "observe a positive, bounded step on the real clock" in {
+    val step = LinearTime.currentClock().granularity
+    step should be > Duration.Zero
+    // one tick of the coarsest clock this runs on, Windows's 15.6 ms, with room for a run of late reads
+    step should be <= WindowsTick * 4L
   }
 
   it should "pass a linear workload of microseconds a run on a clock with 15.6 ms ticks" in {

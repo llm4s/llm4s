@@ -65,7 +65,12 @@ object LinearTime {
     def name: String
     def nanos(): Long
 
-    /** The size of the clock's step, as observed: the largest of a few successive changes in its reading. */
+    /**
+     * The size of the clock's step, as observed: the median of a few successive changes in its reading. A
+     * single change can span several steps - the thread was charged two ticks between two reads (#1771) - or,
+     * where the clock's resolution changes for a moment, less than one; the median absorbs a stray change
+     * either way.
+     */
     lazy val granularity: FiniteDuration = observedGranularity(this)
   }
 
@@ -86,29 +91,50 @@ object LinearTime {
     if (threads.isCurrentThreadCpuTimeSupported && threads.isThreadCpuTimeEnabled && CpuClock.nanos() >= 0) CpuClock
     else WallClock
 
-  private val GranularitySteps  = 3
-  private val GranularityBudget = 1.second
-  private val MinTarget         = 5.millis
-  private val TicksPerSample    = 8
-  private val MaxTarget         = 1.second
-  private val StopChecks        = 16L
+  private[testutil] val GranularitySteps = 5
+  private val GranularityBudget          = 1.second
+  private val MinTarget                  = 5.millis
+  private val TicksPerSample             = 8
+  private val MaxTarget                  = 1.second
+  private val StopChecks                 = 16L
 
+  /**
+   * The median of up to [[GranularitySteps]] successive changes in `clock`'s reading, observed within one
+   * second of wall time; see [[medianStep]]. A clock that never moved within that second is at least that
+   * coarse.
+   */
   private[testutil] def observedGranularity(clock: Clock): FiniteDuration = {
     val deadline = System.nanoTime() + GranularityBudget.toNanos
-    var largest  = 1L
+    val changes  = Vector.newBuilder[Long]
     var steps    = 0
     var last     = clock.nanos()
     while (steps < GranularitySteps && System.nanoTime() < deadline) {
       val now = clock.nanos()
       if (now != last) {
-        largest = math.max(largest, now - last)
+        changes += math.max(1L, now - last)
         last = now
         steps += 1
       }
     }
-    // a clock that never moved within the budget is at least that coarse
-    if (steps == 0) GranularityBudget else largest.nanos
+    if (steps == 0) GranularityBudget else medianStep(changes.result())
   }
+
+  /**
+   * The clock's step from the observed, non-empty `changes` in its reading: their median, the upper of the
+   * two middle ones for an even count.
+   *
+   * Any one change can be off either way, and the step is shared by every suite in the test JVM. A change
+   * can span two ticks - the thread was charged two ticks between two reads - and the largest, or a single
+   * change, read Windows's 15.6 ms clock as a 31.2 ms step, doubling the calibration target and every repeat
+   * count calibrated to it (#1771). A change can also be less than a tick - Windows's timer resolution raised
+   * for a moment by `timeBeginPeriod` - and the smallest read a 1 ms step among 15.6 ms ones: a target of
+   * 8 ms, one tick of the real clock, which a small sample could meet at one tick, voiding the eight-tick
+   * margins. The median of five absorbs two outliers in either direction, or one of each. With an even count
+   * the upper middle is taken: a step read too large only makes samples longer, one read too small lets
+   * the bound be applied to samples of too few ticks.
+   */
+  private[testutil] def medianStep(changes: Seq[Long]): FiniteDuration =
+    changes.sorted.apply(changes.size / 2).nanos
 
   /** The least a sample of the small input should cost on `clock`: eight of its ticks, at least 5 ms. */
   private[testutil] def targetFor(clock: Clock): FiniteDuration =

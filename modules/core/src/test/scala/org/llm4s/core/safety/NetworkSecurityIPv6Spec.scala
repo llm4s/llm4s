@@ -124,13 +124,12 @@ class NetworkSecurityIPv6Spec extends AnyFlatSpec with Matchers {
       a <- Seq(
         "2606:4700:4700::1111",
         "2001:4860:4860::8888",
-        "fbff:ffff::1",     // just below fc00::/7
-        "2001:1::1",        // next to Teredo
+        // "fbff:ffff::1", "100:0:0:1::1" and "64:ff9b:2::1" used to be listed here; they lie outside global unicast
+        // 2000::/3 and are blocked since #1734 (NetworkSecuritySpecialPurposeSpec)
+        "2001:1::1",        // next to Teredo: PCP anycast, globally reachable
         "2001:db9::1",      // next to documentation
-        "2001:3::1",        // next to benchmarking
+        "2001:3::1",        // next to benchmarking: AMT, globally reachable
         "3fff:1000::1",     // just past 3fff::/20
-        "100:0:0:1::1",     // just past 100::/64
-        "64:ff9b:2::1",     // past local-use NAT64
         "64:ff9b::808:808", // NAT64 of 8.8.8.8
         "2002:808:808::1"   // 6to4 of 8.8.8.8
       )
