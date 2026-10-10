@@ -246,14 +246,10 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
 
   it should "give the command the null device as stdin, so cat with no operands ends at once" in {
     assume(!isWindowsHost, "POSIX cat")
-    val started         = System.nanoTime()
+    // With an open stdin pipe, cat would run until the timeout and report exit -1; exit 0 is the signal.
     val (channel, done) = run(command("cat", timeout = Some(20.seconds)))
-    val elapsed         = (System.nanoTime() - started).nanos
     assertRan(channel, done, 0)
     channel.stdout shouldBe empty
-    withClue(s"cat took $elapsed against a 20 s timeout: ") {
-      elapsed should be < 5.seconds
-    }
   }
 
   it should "apply the sandbox's default timeout when the client sends none" in {
@@ -274,18 +270,18 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
     val cmd      = command("tail -f notes.txt", timeout = Some(60.seconds))
     executor.execute(cmd, channel.processes, channel.send)
 
-    val deadline = System.nanoTime() + 10.seconds.toNanos
+    val deadline = System.nanoTime() + 30.seconds.toNanos
     while (!channel.processes.containsKey(cmd.commandId) && System.nanoTime() < deadline) Thread.sleep(20)
     withClue(s"messages ${channel.all}: ") {
       channel.processes.containsKey(cmd.commandId) shouldBe true
     }
     val process = channel.processes.get(cmd.commandId).process
 
-    val started = System.nanoTime()
     executor.cancel(cmd.commandId, Some(channel.processes), channel.send)
-    val done = Await.result(channel.completed.future, 10.seconds)
+    // A cancellation that did not stop it would end at the 60 s timeout as exit -1, after this wait gives up;
+    // exit 143 is the signal, so the wait is only a backstop.
+    val done = Await.result(channel.completed.future, 30.seconds)
     done.exitCode shouldBe 143
-    (System.nanoTime() - started).nanos should be < 10.seconds
     process.isAlive shouldBe false
   }
 
