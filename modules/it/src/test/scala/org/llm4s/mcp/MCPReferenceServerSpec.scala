@@ -25,15 +25,18 @@ import scala.util.{ Try, Using }
  * error results, notifications, and an [[Agent]] calling a discovered tool, against a
  * third-party implementation.
  *
- * The CI `integration-tests` job runs the server in a container, pinned to one release:
+ * The CI `integration-tests` job runs the server in a container. The server (2026.8.31) and its
+ * whole dependency tree are pinned by `modules/it/mcp-reference-server/package-lock.json` and
+ * installed with install scripts disabled; the image is pinned by digest in the workflow. From
+ * the repository root:
  * {{{
- * docker run -d -p 3001:3001 node:22-alpine \
- *   npx -y @modelcontextprotocol/server-everything@2026.8.31 streamableHttp
+ * docker run -d -p 3001:3001 -v "$PWD/modules/it/mcp-reference-server:/src:ro" \
+ *   node:22-alpine@sha256:<digest from .github/workflows/ci.yml> sh /src/run.sh
  * export MCP_SERVER_URL=http://localhost:3001/mcp
  * sbt "it/testOnly org.llm4s.mcp.MCPReferenceServerSpec"
  * }}}
- * (`PORT=3001 npx -y @modelcontextprotocol/server-everything@2026.8.31 streamableHttp` works
- * without Docker.) Without `MCP_SERVER_URL`, or with nothing listening there, each test is
+ * (`MCP_SERVER_SRC=modules/it/mcp-reference-server sh modules/it/mcp-reference-server/run.sh`
+ * works without Docker.) Without `MCP_SERVER_URL`, or with nothing listening there, each test is
  * cancelled - or fails, under `LLM4S_IT_STRICT=true`.
  */
 @Docker

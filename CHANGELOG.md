@@ -397,16 +397,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `"org.llm4s" %% "llm4s-cohere"`; nothing else changes. HTTP 429 is a `RateLimitError` carrying
   `Retry-After` when Cohere sends it in seconds; other failures are `EmbeddingError` with the status as
   its code.
-- **MCP tests against the official reference server and a non-answering server**
+- **MCP tests against the official reference server**
   ([#1006](https://github.com/llm4s/llm4s/issues/1006)): `MCPReferenceServerSpec`, a `@Docker` suite in
   `modules/it`, runs the MCP client, `MCPToolRegistry` and an `Agent` with a scripted LLM against
   `@modelcontextprotocol/server-everything` (pinned to 2026.8.31, over Streamable HTTP at `MCP_SERVER_URL`), a
   server llm4s did not write: handshake without SSE fallback, discovery of `echo` and `get-sum` with the server's own
   JSON schemas, invocation, `structuredContent`, the server's validation and unknown-tool errors, accepted
   notifications, and an agent turn that feeds the server's result back. The `integration-tests` CI job starts the
-  server. `MCPEmbeddedServerTimeoutSpec` in `llm4s-mcp` covers a tool the server does not answer within
-  `MCPServerConfig.timeout`: the call fails as a timed-out tool (not cancelled, not unknown) and the client and
-  registry stay usable. The embedded-server round trips and the `@Local` agent suite came in #1041.
+  server in a `node:22-alpine` container pinned by digest; the server's whole dependency tree is pinned by
+  `modules/it/mcp-reference-server/package-lock.json` and installed with `npm ci --ignore-scripts`. The
+  embedded-server round trips and the `@Local` agent suite came in #1041.
 - **Cloud speech smoke and integration tests** ([#1011](https://github.com/llm4s/llm4s/issues/1011)):
   `@Cloud` suites in `modules/it` (`org.llm4s.speech`: OpenAI TTS, OpenAI STT, ElevenLabs, Azure
   TTS/STT with a synthesise-then-transcribe round trip), run by `sbt testSmoke` and gated by
@@ -2067,12 +2067,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
-- **MCP: Streamable HTTP notifications carry the `Accept` header the transport requires**
-  ([#1006](https://github.com/llm4s/llm4s/issues/1006)): `StreamableHTTPTransportImpl.sendNotification` posted
-  without `Accept: application/json, text/event-stream`, which the specification requires on every POST to the MCP
-  endpoint, so servers built on the MCP SDKs refused every notification, `notifications/initialized` included, with
-  `406 Not Acceptable`; `initialize()` logged that as a warning and carried on. Found by the new reference-server
-  suite.
 - **Security - redaction: a `key=value` whose value is in backslash-escaped quotes is redacted**
   ([#1684](https://github.com/llm4s/llm4s/issues/1684)): `Redaction` (used by the provider exchange logger, `LLMError`
   messages and error mapping) stopped the value of a `key=value` pair at an escaped quote, so a logfmt line inside a

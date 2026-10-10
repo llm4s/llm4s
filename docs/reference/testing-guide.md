@@ -213,7 +213,7 @@ to say which tier does run it.
 | Tag | Needs | Command | CI |
 |---|---|---|---|
 | `@Local` | nothing external | `sbt test` | every PR |
-| `@Docker` | Postgres/pgvector, Qdrant, Neo4j or the MCP reference server | `sbt testIntegration` | every PR (service containers) |
+| `@Docker` | Postgres/pgvector, Qdrant, Neo4j or the MCP reference server | `sbt testIntegration` | every PR (service containers; the MCP reference server in a container started in a CI step) |
 | `@Workspace` | Docker + a built `workspace-runner` image | `sbt testWorkspace` | pushes to `main` |
 | `@Ollama` | a local Ollama with `qwen2.5:0.5b` pulled | `sbt testOllama` | pushes to `main` |
 | `@Cloud` | live provider API keys (real money) | `sbt testSmoke` | manual `workflow_dispatch` |
@@ -253,8 +253,8 @@ really executes:
 docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg16
 docker run -d -p 6333:6333 qdrant/qdrant
 docker run -d -p 7687:7687 -e NEO4J_AUTH=neo4j/llm4stest neo4j:5
-docker run -d -p 3001:3001 node:22-alpine \
-  npx -y @modelcontextprotocol/server-everything@2026.8.31 streamableHttp
+docker run -d -p 3001:3001 -v "$PWD/modules/it/mcp-reference-server:/src:ro" \
+  node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 sh /src/run.sh
 
 export PGVECTOR_TEST_URL=jdbc:postgresql://localhost:5432/postgres
 export PGVECTOR_USER=postgres PGVECTOR_PASSWORD=postgres

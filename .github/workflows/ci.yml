@@ -714,11 +714,18 @@ jobs:
 
       # The official MCP reference server, for MCPReferenceServerSpec (#1006). Started here rather
       # than as a service container because a service cannot be given a command, and the server
-      # picks its transport from one. Pinned to one server release.
+      # picks its transport from one. Everything it runs is pinned: the image by digest (node
+      # 22.23.3 on Alpine), and the server, 2026.8.31, with its whole dependency tree by
+      # modules/it/mcp-reference-server/package-lock.json. run.sh installs that tree with
+      # `npm ci --ignore-scripts`, from a read-only mount. The container gets no secrets and no
+      # environment from the job. It does need registry.npmjs.org and Docker Hub: if either is
+      # down, this step fails the job.
       - name: Start the MCP reference server
         run: |
-          docker run -d --name mcp-everything -p 3001:3001 node:22-alpine \
-            npx -y @modelcontextprotocol/server-everything@2026.8.31 streamableHttp
+          docker run -d --name mcp-everything -p 3001:3001 \
+            -v "$GITHUB_WORKSPACE/modules/it/mcp-reference-server:/src:ro" \
+            node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 \
+            sh /src/run.sh
           for _ in $(seq 1 60); do
             if curl -s -o /dev/null http://localhost:3001/mcp; then echo "MCP reference server is ready"; exit 0; fi
             sleep 2
