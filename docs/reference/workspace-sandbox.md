@@ -16,7 +16,8 @@ The LLM4S workspace subsystem provides powerful capabilities (read/write files, 
   `permissive`; an unknown profile name makes `RunnerMain` fail and the runner stop. Only a known profile that fails
   validation (which the built-in profiles cannot) is logged and replaced by `permissive`
 - **Enforcement**: Runner enforces limits and shell allowance; file path boundaries are enforced via `resolvePath`;
-  `executeCommand` checks each command's executable, options, path arguments and environment (see [Command policy](#command-policy))
+  `executeCommand` checks each command's executable, options, path arguments and environment (see [Command policy](#command-policy)),
+  whether it arrives over the WebSocket protocol (`ContainerisedWorkspace`) or through a direct call
 
 ## Configuration
 
@@ -28,8 +29,27 @@ When running the workspace runner (e.g. in Docker):
 |----------|-------------|---------|
 | `WORKSPACE_PATH` | Workspace root directory | `/workspace` |
 | `WORKSPACE_SANDBOX_PROFILE` | Sandbox profile: `permissive` or `locked`; any other value stops the runner | `permissive` |
+| `WORKSPACE_EXTRA_COMMANDS` | Programs added to the profile's `allowedCommands`, separated by commas or whitespace (for example `sbt`); a name that is not a bare program name, or is a shell or launcher, stops the runner | none |
 
-This variable is the only thing that decides what the runner enforces.
+These two variables are the only things that decide what the runner enforces.
+
+### Adding programs to the allowlist
+
+A program the agent needs that is not on the profile's list, such as a build tool, is added with
+`WORKSPACE_EXTRA_COMMANDS`. `ContainerisedWorkspace` (and `CodeWorker`) take it as `extraAllowedCommands` and start
+the container with it; `CodeGenExample` adds `sbt` this way so its agent can run `sbt compile` and `sbt run`:
+
+```scala
+new ContainerisedWorkspace(workspaceDir, imageName, hostPort, extraAllowedCommands = Set("sbt"))
+// docker run ... -e WORKSPACE_EXTRA_COMMANDS=sbt ...
+```
+
+An added program is held to every check below (no shell, forbidden characters, path arguments inside the workspace,
+the environment allowlist), but it has no per-program option rules, so it can do anything its own arguments allow:
+`sbt run` runs the project's code. Add only what the agent needs. Shells (`sh`, `bash`, `cmd`, `pwsh`, ...) and
+launchers that run a program named in their arguments (`env`, `xargs`, `sudo`, `nohup`, `timeout`, ...) are refused
+(`WorkspaceSandboxConfig.NeverAllowedCommands`), as either would bring back the shell
+[#1756](https://github.com/llm4s/llm4s/issues/1756) removed.
 
 ### Profiles
 
@@ -65,11 +85,27 @@ example below). An unknown profile name makes `loadSandboxConfig` return a `Left
 
 ## Command policy
 
+The policy applies to every command the runner executes, by either path: a direct `executeCommand` on
+`WorkspaceAgentInterfaceImpl`, and the WebSocket protocol's `ExecuteCommandCommand`, which is how
+`ContainerisedWorkspace.executeCommand` and `executeCommandWithStreaming` reach the runner in its container. Both go
+through one function, so they share the checks, the codes and the way the program is started
+([#1756](https://github.com/llm4s/llm4s/issues/1756)). Before that fix, the WebSocket path ran the raw command string
+through `sh -c` (`cmd.exe /c` on Windows) with the client's environment copied in, and none of the checks below
+applied to it.
+
+No shell is involved on either path. The command is split into words (single and double quotes group a word, a
+backslash escapes the next character), the first word names the program, and the program is started with the other
+words as its arguments. Pipes, redirection, `;`, `&&`, `$(...)`, backquotes and variable expansion are not
+interpreted; a word holding one of their characters is refused. Write each command as one program and its arguments,
+and run a second command as a second request.
+
 `executeCommand` runs a command only when every check passes, in this order, and otherwise fails with the code shown:
 
 | Check | Code |
 |-------|------|
 | Shell turned off (`shellAllowed = false`) | `SHELL_DISABLED` |
+| Working directory, as written, outside the workspace, or not a directory | `PATH_ESCAPE_ATTEMPT`, `INVALID_DIRECTORY` |
+| Command with no words | `EMPTY_COMMAND` |
 | Executable given as a path | `EXECUTABLE_PATH_NOT_ALLOWED` |
 | Executable not in `allowedCommands` | `EXECUTABLE_NOT_ALLOWED` |
 | A shell metacharacter (`&`, `\|`, `<`, `>`, `^`, `;`, `` ` ``, `$`, `%`) in any word | `FORBIDDEN_CHARACTERS` |
@@ -83,6 +119,11 @@ example below). An unknown profile name makes `loadSandboxConfig` return a `Left
 | An argument that names a location outside the workspace | `PATH_ESCAPE_ATTEMPT` |
 | On Windows, a form listed under [On Windows](#on-windows) (a device name, a trailing `.` or space, `@`, `~`, glob syntax) | `ARGUMENT_NOT_ALLOWED` |
 | `cp` only: a name it would write leads outside, or a recursive copy's destination holds a link that does | `PATH_ESCAPE_ATTEMPT` |
+
+Over the WebSocket protocol a refused command gets a `WorkspaceAgentErrorResponse` carrying the code above, then a
+`CommandCompletedMessage` with exit code 1, and no `CommandStartedMessage` or output; `ContainerisedWorkspace`
+throws it as a `WorkspaceAgentException` whose message begins with the code. A command that runs streams its output
+as before, and is stopped at its timeout, or at the sandbox's `defaultCommandTimeout` when the request sets none.
 
 A command that passes every check runs with its standard input read from the null device (`/dev/null`, or `NUL`
 on Windows), as nothing can write to it: a program that reads standard input when given no file (`cat`, `cat -`,

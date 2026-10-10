@@ -725,8 +725,8 @@ class WorkspaceAgentInterfaceImpl(
   }
 
   /**
-   * Execute a command in the workspace using direct argument-vector execution
-   * (no shell interpolation).  The first token of the command must appear in
+   * Check a command and build the process that runs it, using direct argument-vector
+   * execution (no shell interpolation).  The first token of the command must appear in
    * `config.allowedCommands` (see [[WorkspaceSandboxConfig.allowedCommands]]);
    * absolute/relative paths to executables are rejected so the lookup always
    * goes through PATH.
@@ -759,14 +759,36 @@ class WorkspaceAgentInterfaceImpl(
    * command string).  The forbidden-character check runs before this routing
    * step, so no dangerous token ever reaches cmd.exe.
    *
-   * When sandbox config has shellAllowed=false, throws WorkspaceAgentException.
+   * The command's standard input is the null device (#1728), so a program that reads it ends at once.
+   *
+   * Both ways a command reaches the runner go through this one function: [[executeCommand]] (the direct path)
+   * and the WebSocket protocol's `ExecuteCommandCommand` (`WebSocketCommandExecutor`, #1756), which streams the
+   * process's output instead of collecting it. Neither runs a shell over the command string.
+   *
+   * @return the process to start and the timeout that applies to it, or the refusal, carrying the code above
    */
-  override def executeCommand(
+  private[runner] def prepareCommand(
     command: String,
-    workingDirectory: Option[String] = None,
-    timeout: Option[FiniteDuration] = None,
-    environment: Option[Map[String, String]] = None
-  ): ExecuteCommandResponse = {
+    workingDirectory: Option[String],
+    timeout: Option[FiniteDuration],
+    environment: Option[Map[String, String]]
+  ): Either[WorkspaceAgentException, PreparedCommand] =
+    Try(prepareCommandOrThrow(command, workingDirectory, timeout, environment)).toEither.left.map {
+      case refused: WorkspaceAgentException => refused
+      case other =>
+        new WorkspaceAgentException(
+          Option(other.getMessage).getOrElse("Failed to prepare command"),
+          "EXECUTION_FAILED",
+          None
+        )
+    }
+
+  private def prepareCommandOrThrow(
+    command: String,
+    workingDirectory: Option[String],
+    timeout: Option[FiniteDuration],
+    environment: Option[Map[String, String]]
+  ): PreparedCommand = {
     if (!config.shellAllowed) {
       throw new WorkspaceAgentException(
         "Shell execution is disabled by sandbox config (shellAllowed=false)",
@@ -787,8 +809,7 @@ class WorkspaceAgentInterfaceImpl(
       )
     }
 
-    val timeoutMs = org.llm4s.shared.WireDurations.toWholeMillis(timeout.getOrElse(config.defaultCommandTimeout))
-    val env       = environment.getOrElse(Map.empty)
+    val env = environment.getOrElse(Map.empty)
 
     // --- Security fix (Issue #787): direct argument-vector execution ----------
     // Tokenize without involving any shell so metacharacters are inert.
@@ -886,6 +907,24 @@ class WorkspaceAgentInterfaceImpl(
     builder.redirectInput(java.lang.ProcessBuilder.Redirect.from(nullDevice))
     env.foreach { case (k, v) => builder.environment().put(k, v) }
     if (execLower == "git") CommandPolicy.confineGit(builder.environment(), realRoot)
+
+    PreparedCommand(builder, timeout.getOrElse(config.defaultCommandTimeout))
+  }
+
+  /**
+   * Execute a command in the workspace and collect its output. The command is checked and built by
+   * [[prepareCommand]]; a refusal is thrown as a WorkspaceAgentException carrying its code.
+   */
+  override def executeCommand(
+    command: String,
+    workingDirectory: Option[String] = None,
+    timeout: Option[FiniteDuration] = None,
+    environment: Option[Map[String, String]] = None
+  ): ExecuteCommandResponse = {
+    val prepared =
+      prepareCommand(command, workingDirectory, timeout, environment).fold(refused => throw refused, identity)
+    val builder   = prepared.builder
+    val timeoutMs = org.llm4s.shared.WireDurations.toWholeMillis(prepared.timeout)
 
     val stdout    = new StringBuilder
     val stderr    = new StringBuilder
@@ -985,3 +1024,12 @@ class WorkspaceAgentInterfaceImpl(
       limits = defaultLimits
     )
 }
+
+/**
+ * A command that passed every check of [[WorkspaceAgentInterfaceImpl.prepareCommand]].
+ *
+ * @param builder the process to start: the command's argument vector (never a shell over the command string), its
+ *                working directory, its checked environment and the null device as standard input
+ * @param timeout the caller's timeout, else the sandbox's `defaultCommandTimeout`
+ */
+final private[runner] case class PreparedCommand(builder: java.lang.ProcessBuilder, timeout: FiniteDuration)
