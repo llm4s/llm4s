@@ -16,6 +16,7 @@ import java.util.regex.Pattern
 import scala.collection.mutable.ListBuffer
 import scala.io.Source
 import scala.jdk.CollectionConverters._
+import scala.jdk.OptionConverters._
 import scala.util.{ Failure, Success, Try, Using }
 
 /**
@@ -645,13 +646,31 @@ class WorkspaceAgentInterfaceImpl(
    */
   private val WindowsBuiltins: Set[String] = CommandPolicy.WindowsBuiltins
 
+  /** Whether the runner really runs on Windows, whatever `isWindows` says (tests set it on other hosts). */
+  private val windowsHost: Boolean = System.getProperty("os.name", "").startsWith("Windows")
+
   /**
    * The null device every command reads its standard input from (#1728): `NUL` on Windows, `/dev/null` elsewhere.
    * Chosen by the host the runner runs on, not by `isWindows`, which tests set to exercise the Windows checks on
    * another host; on that host `NUL` would name a missing file and the command would fail to start.
    */
   private val nullDevice: java.io.File =
-    new java.io.File(if (System.getProperty("os.name", "").startsWith("Windows")) "NUL" else "/dev/null")
+    new java.io.File(if (windowsHost) "NUL" else "/dev/null")
+
+  /**
+   * The directories `CreateProcess` searches for a bare executable name before the system directory (#1738): the
+   * one the runner's own executable (`java.exe`) was loaded from, and the runner's current directory. See
+   * [[CommandPolicy.shadowedToolRefusal]].
+   */
+  private def executableSearchedBeforeSystem: Seq[Path] =
+    ProcessHandle
+      .current()
+      .info()
+      .command()
+      .toScala
+      .flatMap(command => Try(Paths.get(command).getParent).toOption.flatMap(Option(_)))
+      .orElse(Option(System.getProperty("java.home")).map(home => Paths.get(home, "bin")))
+      .toSeq ++ Option(System.getProperty("user.dir")).map(Paths.get(_)).toSeq
 
   /**
    * Shell metacharacters that must be rejected in every argument token, even
@@ -758,7 +777,9 @@ class WorkspaceAgentInterfaceImpl(
    *                                      source's operation changes, is refused
    *                                      with `ARGUMENT_NOT_ALLOWED` (#1776)
    *
-   * Layers 7-9 are [[CommandPolicy]], which documents each program's rules (#1715).
+   * Layers 7-9 are [[CommandPolicy]], which documents each program's rules (#1715). On a Windows host, `sort` and
+   * `findstr` are then refused with `EXECUTABLE_NOT_ALLOWED` when `CreateProcess` would run a build other than the
+   * system directory's (#1738, [[CommandPolicy.shadowedToolRefusal]]).
    *
    * On Windows, if the first token is a [[WindowsBuiltins]] built-in that has
    * no standalone `.exe`, `cmd.exe /c` is prepended to the already-tokenized
@@ -892,6 +913,13 @@ class WorkspaceAgentInterfaceImpl(
     CommandPolicy
       .refusal(execLower, argv.tail, isWindows, realWorkDir, realRoot, env, Some(workDir.toPath), Some(rootPath))
       .foreach(refused => throw new WorkspaceAgentException(refused.message, refused.code, None))
+    // #1738: the policy reads `sort` / `findstr` arguments as the system directory's builds read them, so on a
+    // Windows host refuse them when CreateProcess would find another build first. Only the real host's directories
+    // can be searched, so a runner told it is on Windows on another host (tests) skips this.
+    if (isWindows && windowsHost)
+      CommandPolicy
+        .shadowedToolRefusal(execLower, executableSearchedBeforeSystem)
+        .foreach(refused => throw new WorkspaceAgentException(refused.message, refused.code, None))
 
     // On Windows, built-in commands (echo, dir, type, …) live inside cmd.exe
     // and cannot be launched as standalone processes.  We prepend "cmd.exe /c"

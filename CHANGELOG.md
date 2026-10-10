@@ -2081,6 +2081,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - workspace runner: on Windows, `sort` and `findstr` accept only their native switches**
+  ([#1738](https://github.com/llm4s/llm4s/issues/1738)): the command policy read every argument starting with `/`
+  to `sort` or `findstr` as a switch, path-checked only the text after the slash, and exempted both programs from the
+  refusal of a leading `/`. So `sort /secret.txt` passed, and a GNU / MSYS2 `sort` or `findstr` - which reads
+  `/c/Users/...` as `C:\Users\...` and `/x` from its own root - could read outside the workspace. Now, on Windows, an
+  argument starting with `/` must be, ignoring case, exactly a switch of the native tool, or it is refused
+  (`ARGUMENT_NOT_ALLOWED`): for `sort.exe` `/R[EVERSE]`, `/+n`, `/L[OCALE]`, `/M[EMORY]`, `/REC[ORD_MAXIMUM]`,
+  `/C[ASE_SENSITIVE]`, `/UNIQUE` (`/O` and `/T` stay refused); for `findstr.exe` the flags `/B /E /L /R /S /I /X /V
+  /N /M /O /P` (combinable), `/OFF[LINE]`, `/C:`, `/G:`, `/D:` and `/A:` (`/F` and a `/D:` list stay refused), the
+  values of `/G:` and `/D:` held to the workspace as before. A path candidate of the form `/x/...` is also judged as
+  drive `x:`'s path, as MSYS2 reads it. And on a Windows host the runner refuses `sort` and `findstr`
+  (`EXECUTABLE_NOT_ALLOWED`) when a `sort.exe` / `findstr.exe` sits in the runner's Java or current directory, the two
+  places `CreateProcess` searches before the system directory, so the native builds are the ones that run.
 - **Security - workspace runner: an `mv` or `cp` of several sources cannot reach outside through a name an earlier
   source's operation makes** ([#1776](https://github.com/llm4s/llm4s/issues/1776)): the command policy checked every
   path against the file system as it was before the command ran, but `mv` and `cp` handle their sources one at a time.

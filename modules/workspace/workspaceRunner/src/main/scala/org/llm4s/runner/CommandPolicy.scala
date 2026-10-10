@@ -69,7 +69,10 @@ import scala.util.{ Try, Using }
  * [[findstrRefusal]], [[windowsSortRefusal]]): device names and components with a trailing `.` or space; for
  * programs that are not built-ins, a leading `@` or `~`, the characters `{ } [ ] ' ( )`, a leading `/`, and wildcards
  * anywhere but in a last component with a literal character; `findstr /F` and a `/D:` list; `sort` `/O`, `/T`,
- * `-o`, `-T`. Over-blocking there is accepted.
+ * `-o`, `-T`; and an argument to `sort` or `findstr` starting with `/` that is not exactly a switch of the native
+ * tool (#1738). A path candidate of the form `/x/...` is also judged as drive `x:`'s path, as MSYS2 reads it, and
+ * on a Windows host `sort` and `findstr` are refused when a build outside the system directory would run (see
+ * [[shadowedToolRefusal]]). Over-blocking there is accepted.
  *
  * '''git.''' git searches upwards for its repository, so the runner confines it to the workspace
  * ([[confineGit]]), a `.git` that is not a directory inside the workspace is refused ([[gitRepositoryRefusal]]), and so
@@ -398,7 +401,8 @@ private[runner] object CommandPolicy {
    *  - Programs that are not built-ins, which may run under a runtime that expands their command line (MSYS2,
    *    Cygwin, Git for Windows): a leading `@` (a response file) or `~` (a home directory); any of `{ } [ ] ' ( )`;
    *    a string the program might open as a path starting with `/` (the runtime's own root, not the workspace
-   *    drive's), except for the `/X` switches of `findstr` and `sort`; and a wildcard anywhere but in the last
+   *    drive's), except for the `/X` switches of `findstr` and `sort` (which [[optionRefusal]] has already held to
+   *    the native tool's switches, #1738); and a wildcard anywhere but in the last
    *    component, in an absolute string or one with a `..` component, or in a last component with no literal
    *    character but `.` (`*`, `.*`, `??`, `*.*` can match `..`, which `FindFirstFile` and a runtime's glob may
    *    return).
@@ -543,17 +547,70 @@ private[runner] object CommandPolicy {
         (arg.length > 3 && arg.startsWith("--") && "--temporary-directory".startsWith(arg.takeWhile(_ != '=')))
       }
       .map(notAllowed("sort", _, "it writes the output or temporary files to a file or directory."))
+      .orElse(
+        args
+          .find(arg => arg.startsWith("/") && !isNativeSortSwitch(arg))
+          .map(notAllowed("sort", _, notANativeSwitch("sort.exe", NativeSortSwitches)))
+      )
+
+  /**
+   * The switches of the native Windows `sort.exe`, matched whole and ignoring case (#1738). Documented in the Windows
+   * Commands reference (https://learn.microsoft.com/windows-server/administration/windows-commands/sort) and in
+   * `sort /?`: `/R[EVERSE]`, `/+n`, `/L[OCALE] locale`, `/M[EMORY] kilobytes`, `/REC[ORD_MAXIMUM] characters`,
+   * `/T[EMPORARY] dir` and `/O[UTPUT] file` (both refused by [[windowsSortRefusal]]); and two that `sort.exe` accepts
+   * but does not document, `/C[ASE_SENSITIVE]` and `/UNIQUE` (https://ss64.com/nt/sort.html). The value of `/L`, `/M`
+   * and `/REC` is the next argument, which is judged as any other argument.
+   */
+  private val NativeSortSwitches: Seq[String] =
+    "/R /REVERSE /+n /L /LOCALE /M /MEMORY /REC /RECORD_MAXIMUM /C /CASE_SENSITIVE /UNIQUE".split(' ').toSeq
+
+  private val NativeSortSwitchNames: Set[String] = NativeSortSwitches.filter(_ != "/+n").map(_.drop(1)).toSet
+
+  private def isNativeSortSwitch(arg: String): Boolean = {
+    val name = arg.drop(1).toUpperCase(java.util.Locale.ROOT)
+    NativeSortSwitchNames.contains(name) ||
+    (name.length > 1 && name.charAt(0) == '+' && name.drop(1).forall(c => c >= '0' && c <= '9'))
+  }
+
+  /**
+   * The native Windows `findstr.exe`'s switches (https://learn.microsoft.com/windows-server/administration/windows-commands/findstr):
+   * the flags `/B /E /L /R /S /I /X /V /N /M /O /P`, which may be combined (`/SIN`), `/OFF[LINE]`, and the switches
+   * that take a value after `:` - `/C:string`, `/G:file`, `/D:dir`, `/A:color` and `/F:file` (refused by
+   * [[findstrRefusal]]) - which may follow flags (`/IC:x`).
+   */
+  private val FindstrFlags: Set[Char] = "BELRSIXVNMOP".toSet
+
+  private val FindstrValueSwitches: Set[Char] = "CGDAF".toSet
+
+  private def isNativeFindstrSwitch(arg: String): Boolean = {
+    val body    = arg.drop(1).toUpperCase(java.util.Locale.ROOT)
+    val letters = body.takeWhile(_ != ':')
+    if (body == "OFF" || body == "OFFLINE") true
+    else if (letters.isEmpty) false
+    else if (letters.length == body.length) letters.forall(FindstrFlags.contains)
+    else
+      letters.init.forall(FindstrFlags.contains) && FindstrValueSwitches.contains(letters.last) &&
+      (letters.last != 'A' || body.drop(letters.length + 1).matches("[0-9A-F]{1,2}"))
+  }
+
+  private def notANativeSwitch(tool: String, switches: Seq[String]): String =
+    s"on Windows an argument starting with '/' must be a switch of the native $tool (${switches.mkString(" ")}); " +
+      "another build of the program earlier on the PATH (MSYS2, Cygwin, Git for Windows) may open it as a path from " +
+      "its own root (`/c/...` is C:\\...)."
 
   /**
    * Windows `findstr` takes switches after `/` or `-`, several letters to a switch (`/SIN`). `/F:file` reads the
    * list of files to search from a file, which the path rule cannot see into, so a switch with `F` in its letters is
    * refused (bar `/OFF[LINE]`). `/D:dir1;dir2` searches a list of directories, so a `/D:` value holding a list
-   * separator is refused; a single directory is held to the workspace by the path rule.
+   * separator is refused; a single directory is held to the workspace by the path rule. An argument starting with `/`
+   * that is not one of the native switches ([[isNativeFindstrSwitch]]) is refused (#1738): the path rule judges only
+   * the tails of a switch, and a non-native `findstr` may open `/c/...` as `C:\...`.
    */
   private def findstrRefusal(args: Seq[String]): Option[Refusal] =
     args.iterator
       .flatMap { arg =>
-        if (arg.length < 2 || !(arg.startsWith("/") || arg.startsWith("-"))) None
+        if (arg.length < 2 || !(arg.startsWith("/") || arg.startsWith("-")))
+          Option.when(arg == "/")(notAllowed("findstr", arg, notANativeSwitch("findstr.exe", FindstrSwitchList)))
         else {
           val letters = arg.drop(1).takeWhile(_ != ':').toUpperCase(java.util.Locale.ROOT)
           val value   = arg.dropWhile(_ != ':').drop(1)
@@ -562,10 +619,47 @@ private[runner] object CommandPolicy {
             Some(notAllowed("findstr", arg, "/F reads the names of the files to search from a file."))
           else if (letters.contains('D') && (value.contains(',') || value.contains(';')))
             Some(notAllowed("findstr", arg, "/D takes a list of directories; give it a single directory."))
+          else if (arg.startsWith("/") && !isNativeFindstrSwitch(arg))
+            Some(notAllowed("findstr", arg, notANativeSwitch("findstr.exe", FindstrSwitchList)))
           else None
         }
       }
       .nextOption()
+
+  private val FindstrSwitchList: Seq[String] =
+    "/B /E /L /R /S /I /X /V /N /M /O /P /OFF[LINE] /C:string /G:file /D:dir /A:color".split(' ').toSeq
+
+  /**
+   * The programs whose native Windows build is in the system directory and whose `/` arguments the policy reads as
+   * that build's switches (#1738), with the executable file `CreateProcess` looks for (it appends `.exe` to a name
+   * with no extension and does not consult `PATHEXT`).
+   */
+  val NativeSwitchTools: Map[String, String] = Map("sort" -> "sort.exe", "findstr" -> "findstr.exe")
+
+  /**
+   * On a Windows host, a refusal when `program` would not run the system directory's build (#1738). `ProcessBuilder`
+   * hands a bare name to `CreateProcess` with no application name, which searches, in order, the directory the
+   * runner's own executable (`java.exe`) was loaded from, the runner's current directory, the system directory, the
+   * 16-bit system directory, the Windows directory and then `PATH`
+   * (https://learn.microsoft.com/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw). So a build
+   * earlier on `PATH` (MSYS2, Cygwin) does not run while the system directory has the tool, but one in either of the
+   * first two directories (`searchedBefore`) does, and its `/c/...` arguments would be paths. A host whose system
+   * directory lacks the tool (some minimal images) reaches `PATH`; the switch checks still hold there, since every
+   * `/` argument must be a native switch.
+   */
+  def shadowedToolRefusal(program: String, searchedBefore: Seq[Path]): Option[Refusal] =
+    NativeSwitchTools.get(program).flatMap { file =>
+      searchedBefore
+        .map(_.resolve(file))
+        .find(candidate => Try(Files.exists(candidate)).getOrElse(true))
+        .map(found =>
+          Refusal(
+            "EXECUTABLE_NOT_ALLOWED",
+            s"'$program' would run '$found' rather than the Windows system directory's build, whose switches the " +
+              "workspace policy checks; remove it from the runner's Java or working directory."
+          )
+        )
+    }
 
   private def hostnameRefusal(args: Seq[String]): Option[Refusal] =
     args.find(arg => !arg.startsWith("-")).map(notAllowed("hostname", _, "with an operand it sets the host name."))
@@ -825,6 +919,9 @@ private[runner] object CommandPolicy {
           val judged =
             verdict(workDir, candidate, realRoot, budget)
               .orElse(unparseableVerdict(workDir, candidate, isWindows, realRoot, budget))
+              .orElse(
+                if (isWindows) msysDrivePath(candidate).flatMap(verdict(workDir, _, realRoot, budget)) else None
+              )
           (arg, candidate, judged)
         }
         .collectFirst {
@@ -896,6 +993,20 @@ private[runner] object CommandPolicy {
       all().map(candidate => (i, arg, candidate))
     }
   }
+
+  /**
+   * The Windows path an MSYS2 / Cygwin runtime reads `candidate` as when it has the form `/x` or `/x/rest`: drive
+   * `x`'s root (`/c/Users` is `c:/Users`), not a root-relative path on the working directory's drive (#1738). On
+   * Windows such a candidate is judged under both readings, so a program built on such a runtime cannot open a
+   * path the root-relative reading kept inside.
+   */
+  private[runner] def msysDrivePath(candidate: String): Option[String] =
+    Option.when(
+      candidate.length >= 2 && candidate.charAt(0) == '/' && isAsciiLetter(candidate.charAt(1)) &&
+        (candidate.length == 2 || candidate.charAt(2) == '/')
+    )(s"${candidate.charAt(1)}:/${candidate.drop(3)}")
+
+  private def isAsciiLetter(c: Char): Boolean = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 
   /** Every tail of `arg` after its first character (`-rf/x` gives `rf/x`, `f/x`, `/x`, `x`). */
   private def tails(arg: String): Iterator[String] = Iterator.range(1, arg.length).map(arg.substring)

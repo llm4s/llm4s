@@ -137,8 +137,8 @@ following links out of the workspace through its own options:
 |---------|---------|
 | `find` | `-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fprint`, `-fprint0`, `-fprintf`, `-fls`, `-files0-from`, `-follow`, `-L` (also in `-HL`) |
 | `git` | any subcommand but `status`, `log`, `show`, `diff`, `ls-files`, `ls-tree`, `grep`, `blame`, `rev-parse`, `branch`; any global option but `--version`, `--no-pager`, `--no-optional-locks`, `--literal-pathspecs`, `--no-replace-objects` (so `-c`, `-C`, `--exec-path`, `--git-dir`, `--work-tree`, `-p`); `--output`, `--ext-diff`, `--textconv`, `--show-signature` on `log`/`show`/`diff`; `-O`, `--open-files-in-pager`, `--textconv` on `grep`; `--textconv` on `blame`; an argument starting with `:` (pathspec magic, index paths); `branch` with anything but listing options, or with a name unless `--list`/`-l` makes it a pattern (the values of `--merged`, `--no-merged`, `--contains`, `--no-contains`, `--points-at`, `--sort` and `--format` are values, not names) |
-| `sort` | `-o`, `--output`, `--compress-program`, `--files0-from`; on Windows also `/O`, `/T`, `-O`, `-T`, `-t`, `--temporary-directory`. The value of `-t` / `--field-separator` is not path-checked only when it really is that value: see [Option values](#option-values) |
-| `findstr` (Windows) | a switch with `F` among its letters (`/F:list`), a `/D:` value holding `,` or `;` |
+| `sort` | `-o`, `--output`, `--compress-program`, `--files0-from`; on Windows also `/O`, `/T`, `-O`, `-T`, `-t`, `--temporary-directory`, and any argument starting with `/` that is not a native `sort.exe` switch (see [On Windows](#on-windows)). The value of `-t` / `--field-separator` is not path-checked only when it really is that value: see [Option values](#option-values) |
+| `findstr` (Windows) | a switch with `F` among its letters (`/F:list`), a `/D:` value holding `,` or `;`, any argument starting with `/` that is not a native `findstr.exe` switch (see [On Windows](#on-windows)) |
 | `uniq` | a second operand (the output file); every argument after the first operand counts as one, as BSD `uniq` does not reorder its arguments, so write options before the file (`uniq -c a.txt`, not `uniq a.txt -c`) |
 | `wc` | `--files0-from` |
 | `ls` | `-L`, `--dereference` |
@@ -172,7 +172,8 @@ Windows) is refused. Only a `..` after a symbolic link makes the two differ. Tha
 - `sort -t` and `--field-separator` take a separator, not a path: `sort -t/ -k2`, `sort -t / -k2` and
   `sort --field-separator=/` run (POSIX only; see [Option values](#option-values)).
 - on Windows, the `/X` switches of `dir`, `findstr`, `copy`, `move` and `sort` are switches, not paths, but a value
-  after `:` (`findstr /G:file`) is checked;
+  after `:` (`findstr /G:file`) is checked, and for `findstr` and `sort` only the native tool's switches are
+  accepted (see [On Windows](#on-windows));
 - on Windows, a string the platform cannot parse as a path is judged by the part before the first character a path
   cannot hold (`HEAD:src/x` by `HEAD`, `..\*` by `..\`); one that starts with `\` or `/` and has no such part
   (`\\?\C:\x`, `\??\C:\x`) is refused, and so is a drive-relative path on a drive other than the workspace's
@@ -367,17 +368,41 @@ are supported. Each rule runs after the path rule, so an argument that leads out
   - an argument holding `{`, `}`, `[`, `]`, `'`, `(` or `)` (glob and quoting syntax): `grep [ab] a.txt` is refused
     on Windows, so the `[/]api` form suggested below for a pattern starting with `/` is not available there;
   - a string the program might open as a path that starts with `/` (`/sub/a.txt`, `-f/x`, `--file=/x`), which such a
-    runtime reads from its own root rather than the workspace's drive; `findstr` and `sort` keep their `/X` switches;
+    runtime reads from its own root rather than the workspace's drive; `findstr` and `sort` keep their native
+    switches (see below), and on Windows a path of the form `/x/...` is also judged as drive `x:`'s path
+    (`/c/Users` as `C:\Users`), as such a runtime reads it;
   - a wildcard (`*`, `?`) anywhere but the last component (`*/a.txt`, `--exclude=*/target/*`), in an absolute string
     or one with a `..` component, or in a last component with no literal character other than `.` (`*`, `.*`, `??`,
     `*.*`), which can match `..`. `grep x *.txt`, `grep x sub/*.scala` and `findstr /S /I x *.txt` run. The
     built-ins `dir` and `type` keep the wildcard rule above (`dir *` runs).
 - **`findstr`**: a switch with `F` among its letters (`/F:list`, `-F:list`, `/SIF:list`; `/OFF[LINE]` is allowed),
   which reads the names of the files to search from a file the path rule cannot see into; and a `/D:` value holding
-  `,` or `;` (a directory list). `/D:dir` with a single directory is held to the workspace like any path.
+  `,` or `;` (a directory list). `/D:dir` with a single directory is held to the workspace like any path. An
+  argument starting with `/` must be a switch of the native `findstr.exe`
+  ([reference](https://learn.microsoft.com/windows-server/administration/windows-commands/findstr)), ignoring case:
+  the flags `/B /E /L /R /S /I /X /V /N /M /O /P`, alone or combined (`/SIN`), `/OFF[LINE]`, and `/C:string`,
+  `/G:file`, `/D:dir`, `/A:color` (one or two hex digits), which may follow flags (`/IC:x`). The value of `/G:` and
+  `/D:` is held to the workspace like any path. Anything else starting with `/` is refused (`findstr x /etc`,
+  `findstr /c:foo /c/x/secret`, `/C` without `:`) ([#1738](https://github.com/llm4s/llm4s/issues/1738)).
 - **`sort`**: `/O[UTPUT]`, `/T[EMPORARY]` (any switch whose letter is `O` or `T`), a short-option cluster holding `o`,
   `O`, `t` or `T`, and `--temporary-directory`, which write the output or temporary files (a GNU `sort` earlier on
-  the `PATH` takes `-t` as its field separator; it is refused rather than guessed).
+  the `PATH` takes `-t` as its field separator; it is refused rather than guessed). An argument starting with `/`
+  must be, whole and ignoring case, a switch of the native `sort.exe`
+  ([reference](https://learn.microsoft.com/windows-server/administration/windows-commands/sort)): `/R`, `/REVERSE`,
+  `/+n` (digits), `/L` or `/LOCALE`, `/M` or `/MEMORY`, `/REC` or `/RECORD_MAXIMUM` (each of these three takes the
+  next argument as its value), and the undocumented `/C`, `/CASE_SENSITIVE` and `/UNIQUE`
+  ([ss64](https://ss64.com/nt/sort.html)). Anything else starting with `/` is refused: `sort /secret.txt`,
+  `sort /c/Users/me/outside/secret.txt`, `sort /M:100` ([#1738](https://github.com/llm4s/llm4s/issues/1738)).
+- **Which `sort` and `findstr` run** ([#1738](https://github.com/llm4s/llm4s/issues/1738)). The `/` rules above
+  read arguments as the native tools in the system directory read them; a GNU or MSYS2 build would open
+  `/c/Users/...` as `C:\Users\...`. The runner starts a program by its bare name, and `CreateProcess`
+  ([reference](https://learn.microsoft.com/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw))
+  looks for `<name>.exe` in the directory of the runner's own `java.exe`, then the runner's current directory, then
+  the system directory, and only after the Windows directory in `PATH` - it does not use `PATHEXT`. So a build earlier
+  on `PATH` does not run while the system directory has the tool, and on a Windows host the runner refuses `sort`
+  and `findstr` (`EXECUTABLE_NOT_ALLOWED`) when a `sort.exe` or `findstr.exe` sits in either of the first two
+  directories. On a host whose system directory lacks them (some minimal images), `PATH` is reached; the switch rules
+  still hold there.
 - **Not refused, by reasoning**:
   - *8.3 short names* (`PROGRA~1`). A short name aliases an entry of the directory it is in, so it cannot climb out
     of that directory, and the path rule's final step resolves the existing part of a path with `toRealPath`, which
