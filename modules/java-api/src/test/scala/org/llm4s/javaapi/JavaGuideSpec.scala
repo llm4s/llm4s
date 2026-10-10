@@ -119,6 +119,26 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
     }
   }
 
+  "The completion-options block" should {
+
+    "send the temperature, token limit and reasoning it sets, and print the answer" in {
+      val options = ArrayBuffer.empty[CompletionOptions]
+      val capturing = new Recording("Briefly.") {
+        override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
+          options += o
+          super.complete(c, o)
+        }
+      }
+      val conversation = ConversationBuilder.create().user("What is a monad?").build()
+
+      captured(GuideSnippets.completionOptions(client(capturing), conversation)) shouldBe Printed("Briefly.\n", "")
+      options.toList shouldBe List(
+        CompletionOptions(temperature = 0.2, maxTokens = Some(512), reasoning = Some(ReasoningEffort.Medium))
+      )
+      capturing.sent.toList shouldBe List(conversation)
+    }
+  }
+
   "The reading-a-result block" should {
 
     "give the same value through get, getOrNull, toOptional, map and toCompletableFuture" in {
@@ -193,6 +213,7 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
       Seq(
         "Llm4s.createDefaultClient()",
         "ConversationBuilder.create()",
+        "JCompletionOptions.builder()",
         "result.toCompletableFuture()",
         "catch (LlmException e)",
         "OllamaConfig.apply(",

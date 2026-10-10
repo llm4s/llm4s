@@ -20,9 +20,10 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
   // internal (documented as such) and allowlisted by declaring class and name, so any NEW Scala type
   // in a signature fails here - a `from` or `underlying` on another class included.
   private val internalByDesign: Set[(Class[?], String)] = Set(
-    classOf[LlmResult[?]] -> "from",
-    classOf[JLlmClient]   -> "underlying",
-    classOf[Answer]       -> "underlying"
+    classOf[LlmResult[?]]       -> "from",
+    classOf[JLlmClient]         -> "underlying",
+    classOf[Answer]             -> "underlying",
+    classOf[JCompletionOptions] -> "underlying"
   )
 
   private def isInternal(m: Method): Boolean = internalByDesign(m.getDeclaringClass -> m.getName)
@@ -154,6 +155,9 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
   private def facade: List[Class[_]] = List(
     classOf[LlmResult[_]],
     classOf[JLlmClient],
+    classOf[JCompletionOptions],
+    classOf[JCompletionOptions.Builder],
+    classOf[JReasoningEffort],
     classOf[JAgent],
     Class.forName("org.llm4s.javaapi.Llm4s"),
     classOf[ConversationBuilder],
@@ -193,7 +197,7 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     "org.llm4s.error.LLMError" ->
       "LlmException.error(): the error taxonomy, matched with instanceof; its Java view is #1487",
     "org.llm4s.llmconnect.model.Conversation" ->
-      "ConversationBuilder.build(): handed back to JLlmClient.complete, not read; the client's inputs are #1488",
+      "ConversationBuilder.build(): handed back to JLlmClient.complete, not read",
     "org.llm4s.agent.graph.StreamEvent" ->
       "AgentStreamListener.onEvent: read with StreamEvents.decode and instanceof, as the streaming guide shows"
   )
