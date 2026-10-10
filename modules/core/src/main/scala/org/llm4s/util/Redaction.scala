@@ -608,13 +608,15 @@ private[llm4s] object Redaction {
    * `Cookie:` or `Set-Cookie:` in a header, anywhere in a line, and the whitespace after it, written or escaped
    * (`\n`, `\r`, `\t`): the value follows, read by `cookieValueEnd`. `Cookie` starts a word, so that a longer name
    * ending in it (`MyCookie`, `my_cookie`) is left to the field passes; it starts one after any JSON escape too - of a
-   * line break, a tab, a form feed, a quote or a `>` (`\r\nCookie:`, `\fCookie:`, `\u000aCookie:`,
-   * `\u0022Cookie:`, `\u003eCookie:`, as HTML-safe serialisers write them) - whose last character is a letter or a
-   * digit but which mostly stands for whitespace or punctuation; the rare escaped letter before `Cookie:` costs only a
-   * value redacted that need not be. Possessive, so the whitespace is read once.
+   * line break, a tab, a form feed, a backspace, a quote or a `>` (`\r\nCookie:`, `\fCookie:`, `\bCookie:`,
+   * `\u000aCookie:`, `\u0022Cookie:`, `\u003eCookie:`, as HTML-safe serialisers write them) - whose last character is
+   * a letter or a digit but which mostly stands for whitespace or punctuation; the rare escaped letter before
+   * `Cookie:` costs only a value redacted that need not be. Only JSON's escape letters count, in lower case
+   * (`b`, `f`, `n`, `r`, `t`, `u`): a backslash and any other letter (`\N`, `\X`) is no JSON escape, and `Cookie`
+   * there continues a word. Possessive, so the whitespace is read once.
    */
   private val CookieHeaderStart: Regex =
-    """(?i)(?:(?<![A-Za-z0-9_])|(?<=\\[a-z])|(?<=\\(?-i:u)[0-9a-f]{4}))Cookie:(?:\s|\\++(?-i:[nrt]))*+""".r
+    """(?i)(?:(?<![A-Za-z0-9_])|(?<=\\(?-i:[bfnrtu]))|(?<=\\(?-i:u)[0-9a-f]{4}))Cookie:(?:\s|\\++(?-i:[nrt]))*+""".r
 
   /** A standalone Bearer token. */
   private val BearerToken: Regex = """(?i)\bBearer\s+([a-zA-Z0-9\-_\.]+)""".r
@@ -695,27 +697,87 @@ private[llm4s] object Redaction {
     val out       = new Rewrite(input, placeholder)
     val enclosing = new EnclosingQuotes(input)
 
-    def contextAt(start: Int): HeaderContext = {
-      val quote = enclosing.enclosingAt(start)
+    def contextOf(quote: Char): HeaderContext =
       if (quote == EnclosingQuotes.NoQuote || !enclosing.openedOnItsLine) HeaderContext.Raw
       else if (quote == '\'') HeaderContext.InSingleQuotes
       else if (enclosing.inEscapedString) HeaderContext.InEscapedString
       else HeaderContext.InString
+
+    // A forward scan, shared by every match, for whether an unescaped `"` precedes a position on its line.
+    var scanned   = 0
+    var lastQuote = -1
+    var lineStart = 0
+    def quoteEarlierOnLine(at: Int): Boolean = {
+      while (scanned < at) {
+        val c = input.charAt(scanned)
+        if (c == '\\') {
+          val next = afterBackslashes(input, scanned)
+          if ((next - scanned) % 2 == 1 && next < at) {
+            val escaped = input.charAt(next)
+            if (escaped == '\n' || escaped == '\r') lineStart = next + 1
+            scanned = next + 1
+          } else scanned = next
+        } else {
+          if (c == '\n' || c == '\r') lineStart = scanned + 1
+          else if (c == '"') lastQuote = scanned
+          scanned += 1
+        }
+      }
+      lastQuote >= lineStart
     }
 
     @tailrec def loop(searchFrom: Int, copiedTo: Int): Int =
       if (searchFrom >= input.length || !matcher.find(searchFrom)) copiedTo
       else {
         val valueStart = matcher.end
-        val valueEnd   = cookieValueEnd(input, valueStart, contextAt(matcher.start))
+        val quote      = enclosing.enclosingAt(matcher.start)
+        val readEnd    = cookieValueEnd(input, valueStart, contextOf(quote))
+        val quoted     = quote == '"' || quoteEarlierOnLine(matcher.start)
+        val closeAt    = if (quoted) closingQuoteKept(input, valueStart, readEnd) else readEnd
+        val writeQuote = closeAt < 0
+        val valueEnd   = if (writeQuote) readEnd else closeAt
         if (valueEnd > valueStart) {
           out.copy(copiedTo, valueStart)
           out.mask()
+          if (writeQuote) out.text("\"")
           loop(valueEnd, valueEnd)
         } else loop(valueStart, copiedTo)
       }
 
     out.finish(loop(0, 0))
+  }
+
+  /**
+   * Where the replaced value of a cookie header read from `from` to `to`, after a `"` that opened before it (on its
+   * line, or still open from an earlier one), should end so that a quote is left to close that `"` (#1686): `to`
+   * itself where the value holds no unescaped `"`. A value that runs on to the end of a malformed line
+   * (`msg="Cookie: theme="dark" sid=abc"`) can take the quote that closed the `key="` value around the header, and the
+   * `key="value"` pass after it would then read that value on into the next lines, over the key of a field there
+   * (`password="..."`), and leave its value readable. Where the last unescaped `"` of the value ends the line, but
+   * for whitespace, the value ends before it, and the line reads `msg="Cookie: [REDACTED]"`; otherwise the result is
+   * `-1`: the whole value is replaced and a `"` is written after the placeholder (`msg="Cookie: a="b` reads
+   * `msg="Cookie: [REDACTED]"`). Escaped quotes (after an odd run of backslashes) are part of a string and are not
+   * counted. A loop over the value.
+   */
+  private def closingQuoteKept(input: String, from: Int, to: Int): Int = {
+    var last = -1
+    var i    = from
+    while (i < to) {
+      val c = input.charAt(i)
+      if (c == '\\') {
+        val next = math.min(afterBackslashes(input, i), to)
+        i = if ((next - i) % 2 == 1 && next < to) next + 1 else next
+      } else {
+        if (c == '"') last = i
+        i += 1
+      }
+    }
+    if (last < 0) to
+    else {
+      var end = to
+      while (end > from && Character.isWhitespace(input.charAt(end - 1))) end -= 1
+      if (end - 1 == last) last else -1
+    }
   }
 
   /**

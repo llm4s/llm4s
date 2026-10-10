@@ -126,8 +126,8 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
     Redaction.redact(s"""Cookie: sid="$session"; x=y""") shouldBe s"Cookie: $R"
     Redaction.redact(s"""Set-Cookie: a="x", b="$session"\nX: keep""") shouldBe s"Set-Cookie: $R\nX: keep"
     // A quote that opened on the line, around the header, unescaped: its quoted values do not end it.
-    Redaction.redact(s"""msg="Set-Cookie: a="x", b="$session"; Path=/" user=ann""") shouldBe s"""msg="Set-Cookie: $R"""
-    Redaction.redact(s"""log "Cookie: sid="$session"; x=y" done""") shouldBe s"""log "Cookie: $R"""
+    Redaction.redact(s"""msg="Set-Cookie: a="x", b="$session"; Path=/" user=ann""") shouldBe s"""msg="Set-Cookie: $R""""
+    Redaction.redact(s"""log "Cookie: sid="$session"; x=y" done""") shouldBe s"""log "Cookie: $R""""
     // A quote left open on an earlier line is not a string around the header.
     Redaction.redact(s"""say "hi\nCookie: a="x", b="$session"""") shouldBe s"""say "hi\nCookie: $R"""
     // Backslashes outside a string are part of the value.
@@ -136,17 +136,18 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
 
   it should "read a cookie value to the end of its line where the first quote in it does not end a JSON string" in {
     // A quote opened earlier on the line, unescaped quotes in the value: not well-formed JSON, so no later quote is
-    // searched for and every cookie after the first quote is replaced too.
-    Redaction.redact(s"""x="a Cookie: p={"t":"d"}; sid=$session"""") shouldBe s"""x="a Cookie: $R"""
-    Redaction.redact(s"""5" disk Cookie: sid="abc", "$session"""") shouldBe s"""5" disk Cookie: $R"""
-    Redaction.redact(s"""msg="Set-Cookie: a="x", 2fa=$session; Path=/""") shouldBe s"""msg="Set-Cookie: $R"""
-    Redaction.redact(s"""log ["Cookie: a="b"] sid=$session""") shouldBe s"""log ["Cookie: $R"""
-    Redaction.redact(s"""size 5" Cookie: prefs="{"}" sid=$session""") shouldBe s"""size 5" Cookie: $R"""
-    Redaction.redact(s"""msg="Cookie: a="x", "$session"""") shouldBe s"""msg="Cookie: $R"""
+    // searched for and every cookie after the first quote is replaced too. After a quote opened before the header,
+    // a quote is kept or written back after the placeholder to close it, as the value's first quote did.
+    Redaction.redact(s"""x="a Cookie: p={"t":"d"}; sid=$session"""") shouldBe s"""x="a Cookie: $R""""
+    Redaction.redact(s"""5" disk Cookie: sid="abc", "$session"""") shouldBe s"""5" disk Cookie: $R""""
+    Redaction.redact(s"""msg="Set-Cookie: a="x", 2fa=$session; Path=/""") shouldBe s"""msg="Set-Cookie: $R""""
+    Redaction.redact(s"""log ["Cookie: a="b"] sid=$session""") shouldBe s"""log ["Cookie: $R""""
+    Redaction.redact(s"""size 5" Cookie: prefs="{"}" sid=$session""") shouldBe s"""size 5" Cookie: $R""""
+    Redaction.redact(s"""msg="Cookie: a="x", "$session"""") shouldBe s"""msg="Cookie: $R""""
     // A quote and a closing bracket before a word end no JSON string, wherever the quote is in the value.
-    Redaction.redact(s"""msg="req Cookie: x="}$session; y=z""") shouldBe s"""msg="req Cookie: $R"""
-    Redaction.redact(s"""msg="req Cookie: "}$session""") shouldBe s"""msg="req Cookie: $R"""
-    Redaction.redact(s"""msg="req Cookie: "} $session\nX: keep""") shouldBe s"""msg="req Cookie: $R\nX: keep"""
+    Redaction.redact(s"""msg="req Cookie: x="}$session; y=z""") shouldBe s"""msg="req Cookie: $R""""
+    Redaction.redact(s"""msg="req Cookie: "}$session""") shouldBe s"""msg="req Cookie: $R""""
+    Redaction.redact(s"""msg="req Cookie: "} $session\nX: keep""") shouldBe s"""msg="req Cookie: $R"\nX: keep"""
     // Well-formed JSON still ends the value at its string's end, an empty value is still left as it is.
     val empty = """{"h":"Cookie: "}"""
     Redaction.redact(empty) shouldBe empty
@@ -155,6 +156,26 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
     val pretty = s"""{\n  "h": [\n    "Cookie: sid=$session"\n  ],\n  "n": 1\n}"""
     Redaction.redact(pretty) shouldBe s"""{\n  "h": [\n    "Cookie: $R"\n  ],\n  "n": 1\n}"""
     Seq(empty, pretty).foreach(in => assertJson(Redaction.redact(in)))
+  }
+
+  it should "leave a quote to close the string around a cookie value that runs to the end of its line" in {
+    // The value takes the quote that closed the `key="` value around the header; without one put back, the
+    // `key="value"` pass would read that value on into the next lines, over the key of a field there.
+    Redaction.redact(s"""level=info msg="Cookie: theme="dark" sid=$session"\npassword="SEKH1"""") shouldBe
+      s"""level=info msg="Cookie: $R"\npassword="$R""""
+    val threeLines = s"""a=1\nmsg="req Cookie: t="d"; sid=$session" ok=1\nb=2 secret="SEKH9" c=3"""
+    Redaction.redact(threeLines) shouldBe s"""a=1\nmsg="req Cookie: $R"\nb=2 secret="$R" c=3"""
+    // The last quote is not at the end of the line: one is written after the placeholder.
+    Redaction.redact(s"""msg="Cookie: a="b$session\nconfig password="SEKD5" x""") shouldBe
+      s"""msg="Cookie: $R"\nconfig password="$R" x"""
+    // A quote opened earlier on the line, closed before the header, still has one written back.
+    Redaction.redact(s"""a" msg="Cookie: x=" y\npassword="SEKH2"""") shouldBe s"""a" msg="Cookie: $R"\npassword="$R""""
+    // A quote left open on an earlier line: the quote it closed on is still left to it.
+    Redaction.redact(
+      s"""x="hi\nCookie: a="b$session\npassword="SEKH3""""
+    ) shouldBe s"""x="hi\nCookie: $R\npassword="$R""""
+    // Outside any string, the quotes of the value are replaced with it.
+    Redaction.redact(s"""Cookie: sid="$session"\npassword="SEKH8"""") shouldBe s"""Cookie: $R\npassword="$R""""
   }
 
   it should "end a cookie value at an escaped escape of a line break only where the next header follows it" in {
@@ -172,6 +193,13 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
       withClue(escape) {
         val in = s"""{"log":"x${escape}Cookie: sid=$session","n":1}"""
         Redaction.redact(in) shouldBe s"""{"log":"x${escape}Cookie: $R","n":1}"""
+      }
+    }
+    // A backslash and a letter that starts no JSON escape: `Cookie` there continues a word.
+    Seq("\\N", "\\X", "\\x").foreach { notEscape =>
+      withClue(notEscape) {
+        val in = s"""{"log":"x${notEscape}Cookie: sid=$session","n":1}"""
+        Redaction.redact(in) shouldBe in
       }
     }
   }
