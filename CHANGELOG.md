@@ -2361,6 +2361,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the semantic fallback all use this chunker. **Migration:** chunk text changes for any input with a sentence
   boundary, and chunk sizes with it; indexes built with `SentenceChunker` hold corrupted text and should be
   re-chunked and re-embedded.
+- **Docs: the RAG benchmark results say which rows predate the `SentenceChunker` fix**
+  ([#1725](https://github.com/llm4s/llm4s/issues/1725)): every number in `docs/rag-benchmark-results.md` was
+  measured in December 2025 with the chunker #1718 fixed, and sentence chunking is the benchmark default, so all
+  fusion and embedding rows and the three `sentence-*` chunking rows were indexed with corrupted text. The page now
+  says so at the top and beside each table, marks the "Expected Results", sample output and conclusions as resting
+  on those rows, and gives the commands that regenerate them. The suites need an LLM judge and embedding API keys,
+  so they have not been re-run.
 - **`llm4s-openai`: OpenAI embeddings reach `/v1/embeddings` with the default base URL**
   ([#1413](https://github.com/llm4s/llm4s/pull/1413)): the default `llm4s.embeddings.openai.baseUrl` is
   `https://api.openai.com/v1`, the versioned root the chat provider uses too, but `OpenAIEmbeddingProvider`

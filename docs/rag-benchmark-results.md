@@ -2,6 +2,38 @@
 
 This document describes the RAG benchmarking harness and provides actual benchmark results from running the system.
 
+> **Results predate the `SentenceChunker` fix ([#1718](https://github.com/llm4s/llm4s/issues/1718),
+> fixed by [#1724](https://github.com/llm4s/llm4s/pull/1724)); see [#1725](https://github.com/llm4s/llm4s/issues/1725).**
+> Every number on this page was produced in December 2025, when `SentenceChunker` split on
+> `([.!?])(\s+)([A-Z])` with `Regex.split`. That deleted the punctuation, the whitespace **and the first letter of
+> the next sentence** at every sentence boundary, glued the pieces back together and so almost never split:
+> `"Paris is the capital and largest city of France. It is located in ..."` was indexed and embedded as
+> `"Paris is the capital and largest city of Francet is located in ..."`, and a document's final `.` was dropped
+> too. Since #1724 sentences are cut from the input itself, every character is kept, and the sentences in a chunk
+> keep the whitespace that separated them.
+>
+> **Which rows are affected:** every experiment whose chunking strategy is `sentence`. That is the default
+> (`RAGExperimentConfig.chunkingStrategy`), so it covers **all six fusion rows, all four embedding rows, and the
+> `sentence-default`, `sentence-large` and `sentence-small` chunking rows**. Only `simple-default` and
+> `markdown-default` were chunked by an unaffected chunker, and they are ranked against corrupted rows. The
+> "Expected Results", "Sample Console Output" and "JSON Report Format" blocks are illustrative, not measured,
+> and use the same configurations. Treat the rankings and the findings drawn from them as unverified until the
+> suites are re-run.
+>
+> **To regenerate** (needs an LLM provider for the RAGAS judge and an embedding API key, so it has not been
+> re-run yet; see [Running the Benchmarks](#running-the-benchmarks) for the configuration):
+>
+> ```bash
+> ./scripts/download-datasets.sh ragbench
+> sbt "samples/runMain org.llm4s.samples.rag.BenchmarkExample --suite chunking --quick"
+> sbt "samples/runMain org.llm4s.samples.rag.BenchmarkExample --suite fusion --quick"
+> sbt "samples/runMain org.llm4s.samples.rag.BenchmarkExample --suite embedding --quick"
+> ```
+>
+> The December 2025 run used a 5-question RAGBench sample; `--quick` limits each suite to 5 samples, and
+> dropping it runs the whole dataset. Each run writes
+> `data/results/<suite-name>-<timestamp>.json`.
+
 ## Actual Benchmark Results (December 15, 2025)
 
 ### Test Configuration
@@ -15,6 +47,9 @@ This document describes the RAG benchmarking harness and provides actual benchma
 ## Fusion Strategy Benchmark Results
 
 The fusion comparison benchmark compares different hybrid search strategies:
+
+> **Predates the `SentenceChunker` fix (#1718, #1724):** all six rows used sentence chunking (800 / 1200 / 150,
+> the defaults), so every row was indexed with corrupted text. Not yet re-run.
 
 ```
 ======================================================================
@@ -56,6 +91,11 @@ WINNER: rrf-20 (RAGAS: 0.911)
 
 ## Chunking Strategy Benchmark Results
 
+> **Predates the `SentenceChunker` fix (#1718, #1724):** `sentence-small`, `sentence-large` and
+> `sentence-default` (ranks 1-3) were measured on corrupted, rarely split chunks. `markdown-default` and
+> `simple-default` were not chunked by `SentenceChunker`, but their ranks are relative to those rows. The
+> finding that sentence chunking beats simple chunking rests on the corrupted rows. Not yet re-run.
+
 ```
 ======================================================================
 BENCHMARK RESULTS: chunking-comparison
@@ -94,6 +134,9 @@ WINNER: sentence-small (RAGAS: 0.910)
 ---
 
 ## Embedding Provider Benchmark Results
+
+> **Predates the `SentenceChunker` fix (#1718, #1724):** every row used sentence chunking (the default); the one
+> row that ran (`openai-text-embedding-3-small`) embedded corrupted chunks. Not yet re-run.
 
 ```
 ======================================================================
@@ -168,6 +211,9 @@ Compares different document chunking approaches with their impact on RAG perform
 
 ### Expected Results (Typical Performance)
 
+> **Illustrative, and predates the `SentenceChunker` fix (#1718, #1724):** these figures were not measured. The
+> three `sentence-*` configurations chunk with `SentenceChunker`; see the note at the top.
+
 ```
 ======================================================================
 BENCHMARK RESULTS: chunking-comparison
@@ -241,6 +287,9 @@ Compares hybrid search fusion algorithms combining vector and keyword search.
 | keyword-only | KeywordOnly | - |
 
 ### Expected Results (Typical Performance)
+
+> **Illustrative, and predates the `SentenceChunker` fix (#1718, #1724):** these figures were not measured. Every
+> configuration here chunks with `SentenceChunker` (the default); see the note at the top.
 
 ```
 ======================================================================
@@ -319,6 +368,9 @@ Compares different embedding model providers.
 | ollama-nomic | Ollama | nomic-embed-text | 768 |
 
 ### Expected Results (Typical Performance)
+
+> **Illustrative, and predates the `SentenceChunker` fix (#1718, #1724):** these figures were not measured. Every
+> configuration here chunks with `SentenceChunker` (the default); see the note at the top.
 
 ```
 ======================================================================
@@ -408,6 +460,9 @@ Harmonic mean of all metrics, providing a single quality score.
 ---
 
 ## Sample Console Output
+
+> **Illustrative:** an example of the report format, not a measured run. Its `sentence-*` rows predate the
+> `SentenceChunker` fix (#1718, #1724).
 
 ```
 ======================================================================
@@ -562,6 +617,10 @@ val customConfig = RAGExperimentConfig(
 ## Conclusion
 
 The RAG benchmarking harness enables systematic comparison of different configurations to optimize retrieval-augmented generation quality. Key findings from actual benchmarks:
+
+> **Predates the `SentenceChunker` fix (#1718, #1724):** every finding below comes from runs that chunked with
+> the corrupting `SentenceChunker` (findings 1-3 directly; finding 4 was not measured). Re-run the suites with the
+> commands at the top of this page before relying on them.
 
 1. **Chunking**: Sentence-based chunking with smaller chunks (400 tokens) performs best for focused queries
 2. **Fusion**: RRF with k=20 outperforms all other strategies including pure vector search
