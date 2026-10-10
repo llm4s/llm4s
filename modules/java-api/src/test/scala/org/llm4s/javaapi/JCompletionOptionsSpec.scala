@@ -196,8 +196,10 @@ class JCompletionOptionsSpec extends AnyFlatSpec with Matchers {
       "JCompletionOptions(temperature=0.2, topP=0.9, maxTokens=512, presencePenalty=0.5, frequencyPenalty=-0.5, " +
       "reasoning=HIGH, budgetTokens=4096)"
     JCompletionOptions.builder().build().toString shouldBe
-      "JCompletionOptions(temperature=0.7, topP=1.0, maxTokens=none, presencePenalty=0.0, frequencyPenalty=0.0, " +
-      "reasoning=none, budgetTokens=none)"
+      "JCompletionOptions(temperature=0.7, topP=1.0, maxTokens=unset, presencePenalty=0.0, frequencyPenalty=0.0, " +
+      "reasoning=unset, budgetTokens=unset)"
+    // an unset level does not print like the level NONE
+    JCompletionOptions.builder().reasoning(JReasoningEffort.NONE).build().toString should include("reasoning=NONE,")
   }
 
   "JLlmClient.complete(Conversation, JCompletionOptions)" should "fail, not throw, for a null argument" in {

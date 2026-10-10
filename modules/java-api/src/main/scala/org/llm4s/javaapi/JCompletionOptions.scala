@@ -45,7 +45,10 @@ final class JCompletionOptions private (private[javaapi] val underlying: Complet
   def reasoning: Optional[JReasoningEffort] =
     underlying.reasoning.fold(Optional.empty[JReasoningEffort]())(e => Optional.of(JCompletionOptions.toJava(e)))
 
-  /** The explicit thinking-token budget (Anthropic), or empty to derive one from [[reasoning]]. */
+  /**
+   * The explicit thinking-token budget, or empty to derive one from [[reasoning]]. Read by the providers that take a
+   * budget - Anthropic, and OpenRouter for Claude models - and set alone it turns thinking on with no reasoning level.
+   */
   def budgetTokens: OptionalInt = JCompletionOptions.optionalInt(underlying.budgetTokens)
 
   /** A builder that starts from these options. */
@@ -61,10 +64,11 @@ final class JCompletionOptions private (private[javaapi] val underlying: Complet
   override def toString: String =
     s"JCompletionOptions(temperature=$temperature, topP=$topP, maxTokens=${text(maxTokens)}, " +
       s"presencePenalty=$presencePenalty, frequencyPenalty=$frequencyPenalty, " +
-      s"reasoning=${reasoning.map[String](_.name).orElse("none")}, budgetTokens=${text(budgetTokens)})"
+      s"reasoning=${reasoning.map[String](_.name).orElse("unset")}, budgetTokens=${text(budgetTokens)})"
 
+  // "unset", not "none": `NONE` is a reasoning level, and an unset one must not print like it
   private def text(value: OptionalInt): String =
-    if (value.isPresent) value.getAsInt.toString else "none"
+    if (value.isPresent) value.getAsInt.toString else "unset"
 }
 
 object JCompletionOptions {
@@ -114,7 +118,11 @@ object JCompletionOptions {
         )
       )
 
-    /** Sets an explicit thinking-token budget (Anthropic), overriding the one [[reasoning]] implies; at least `1`. */
+    /**
+     * Sets an explicit thinking-token budget, overriding the one [[reasoning]] implies; at least `1`. Anthropic, and
+     * OpenRouter for Claude models, raise a budget below `1024` to `1024` and keep it below the token limit; set
+     * without [[reasoning]], it still turns thinking on.
+     */
     def budgetTokens(value: Int): Builder = next(options.withBudgetTokens(positive(value, "budgetTokens")))
 
     /** Sets the value as the thinking-token budget, or clears it when it is empty. */

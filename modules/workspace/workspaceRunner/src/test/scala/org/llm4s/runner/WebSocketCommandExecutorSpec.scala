@@ -170,6 +170,24 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
     assertRefused(command("ls ../"), "PATH_ESCAPE_ATTEMPT")
   }
 
+  it should "refuse a sort input file that follows a -t an earlier option took as its value (#1763)" in {
+    assume(!isWindowsHost, "a POSIX absolute path; a Windows runner refuses sort -T and -t as options")
+    val outside = Files.createTempFile("ws-command-executor-secret", ".txt")
+    try {
+      Files.write(outside, "secret\n".getBytes(StandardCharsets.UTF_8))
+      assertRefused(command(s"sort -T -t '$outside'"), "PATH_ESCAPE_ATTEMPT", ReadOnly)
+      assertRefused(command(s"sort --random-source -t '$outside'"), "PATH_ESCAPE_ATTEMPT", ReadOnly)
+      assertRefused(command(s"sort --random-source --field-separator '$outside'"), "PATH_ESCAPE_ATTEMPT", ReadOnly)
+    } finally Files.deleteIfExists(outside)
+  }
+
+  it should "still sort with a separator given as -t's next argument" in {
+    assume(!isWindowsHost, "POSIX sort")
+    val (channel, done) = run(command("sort -t / -k1 notes.txt"), ReadOnly)
+    assertRan(channel, done, 0)
+    channel.stdout shouldBe "alpha\nbeta\n"
+  }
+
   it should "refuse a working directory outside the workspace with the direct path's code" in {
     assertRefused(command("ls", workingDirectory = Some("../")), "PATH_ESCAPE_ATTEMPT")
   }

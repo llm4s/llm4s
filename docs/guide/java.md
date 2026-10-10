@@ -26,8 +26,9 @@ LLM4S is written in Scala. Its core API returns Scala types (`Either`, `Option`,
 model, `ConversationBuilder` builds a conversation, and every call returns an `LlmResult`, a result type modelled on
 `java.util.Optional` and `CompletableFuture`. A failed call is a value you check, not an exception you have to catch.
 
-It does not hide every Scala type. `Conversation`, `ProviderConfig` and `LLMError` are Scala classes that still appear
-in its signatures, and so does core's `CompletionOptions`, in an overload that [`JCompletionOptions`](#completion-options)
+It does not hide every Scala type. `Conversation` and `ProviderConfig` are Scala classes that still appear in its
+signatures, as does `LLMError` behind `LlmException.error()`, though [its kind](#handling-a-failure) reads as a Java
+enum, and so does core's `CompletionOptions`, in an overload that [`JCompletionOptions`](#completion-options)
 makes unnecessary. [What is not here yet](#what-is-not-here-yet) says which of them gets in
 your way.
 
@@ -195,12 +196,12 @@ The snippets below leave out their imports. Together they use these:
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
-import org.llm4s.error.LLMError;
-import org.llm4s.error.RecoverableError;
 import org.llm4s.javaapi.ConversationBuilder;
+import org.llm4s.javaapi.JCompletion;
 import org.llm4s.javaapi.JCompletionOptions;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.JReasoningEffort;
+import org.llm4s.javaapi.JToolCall;
 import org.llm4s.javaapi.Llm4s;
 import org.llm4s.javaapi.LlmException;
 import org.llm4s.javaapi.LlmResult;
@@ -243,8 +244,10 @@ System.out.println(answer.get());
 ```
 
 The builder has `temperature`, `topP`, `maxTokens`, `presencePenalty`, `frequencyPenalty`, `reasoning` (the Java enum
-`JReasoningEffort`: `NONE`, `LOW`, `MEDIUM` or `HIGH`) and `budgetTokens`, an explicit thinking budget for Anthropic
-models that overrides the one the reasoning level implies. A setting you leave out keeps the library's default:
+`JReasoningEffort`: `NONE`, `LOW`, `MEDIUM` or `HIGH`) and `budgetTokens`, an explicit thinking budget that overrides
+the one the reasoning level implies. The providers that take a budget are Anthropic, and OpenRouter for Claude models:
+both raise a budget below `1024` to `1024` and keep it below the token limit, and a budget set with no reasoning level
+still turns thinking on. A setting you leave out keeps the library's default:
 temperature `0.7`, top-p `1.0`, no penalties, and no token limit, reasoning level or thinking budget. The built options
 have an accessor of the same name for each setting. `maxTokens()` and `budgetTokens()` return an `OptionalInt` and
 `reasoning()` an `Optional<JReasoningEffort>`, empty when unset. Their setters also take an `OptionalInt` or `Optional`,
@@ -256,10 +259,41 @@ non-finite temperature, a top-p outside `0` to `1`, a non-finite penalty, or a t
 `NullPointerException`. A value only some models reject, such as a temperature above `1` for some models, is left to
 the provider. A model that does not reason ignores `reasoning`. Tools and response formats are not options here yet.
 
+## The whole reply
+
+`complete` returns the reply's text. `completion` takes the same arguments - a query, a conversation, or a conversation
+and `JCompletionOptions` - and returns the whole reply as a `JCompletion`: the model that answered, the tokens it used,
+its estimated cost and the tool calls it asked for, alongside the text:
+
+```java
+JCompletion reply = client.completion(conversation).get();
+
+System.out.println(reply.model() + ": " + reply.content());
+reply.usage().ifPresent(usage ->
+    System.out.println(usage.promptTokens() + " tokens in, " + usage.completionTokens() + " out"));
+reply.estimatedCost().ifPresent(cost -> System.out.println("about $" + cost.toPlainString()));
+for (JToolCall call : reply.toolCalls()) {
+    System.out.println("wants " + call.name() + " " + call.argumentsJson());
+}
+```
+
+`model()` is the model as the provider names it, which can be more specific than the one you configured. `usage()` is a
+`JTokenUsage` with `promptTokens()`, `completionTokens()`, `totalTokens()` and `thinkingTokens()`, and the prompt-cache
+counts `cachedTokens()` (input read from the provider's prompt cache, billed at the cheaper cache-read rate) and
+`cacheCreationTokens()` (input written into it, typically billed above the normal input rate) - each an `int`, zero when
+the model reported none - or empty when the provider reported no usage. `estimatedCost()` is a `java.math.BigDecimal` in USD, empty
+when the cost is not known; it is the figure an agent adds to its `usage().totalCost()`. `toolCalls()` lists `JToolCall`s,
+the same type an agent's messages use, with the arguments as JSON text; `thinking()` is the model's reasoning text when
+it reported one. A `JCompletion` is a value with `equals`, `hashCode` and a `toString` that prints the full text.
+
+The method is `completion`, a noun, because it returns the reply rather than performs a request for its text; `complete`
+keeps returning a `String`. There is no `completion` overload for core's Scala `CompletionOptions`, so
+`client.completion(conversation, null)` compiles, and returns a failed result like any other `null` argument.
+
 ## Reading a result
 
-Every call returns an `LlmResult<String>`. There are several ways to take the value out, depending on how you want to
-treat a failure:
+Every `complete` call returns an `LlmResult<String>`, and every `completion` call an `LlmResult<JCompletion>`. There
+are several ways to take the value out, depending on how you want to treat a failure:
 
 ```java
 LlmResult<String> result = client.complete("What is 2+2?");
@@ -280,30 +314,58 @@ makes a result fit an API that expects a future, and does not make the call asyn
 
 A call that fails does not throw. `JLlmClient` turns a failure of the provider, the network or the library into a failed
 `LlmResult`, and a `null` argument into a failed result too. Only `get()` throws, and it throws `LlmException`, an
-unchecked exception that carries the llm4s error:
+unchecked exception that says what went wrong in Java types:
 
 ```java
 try {
     String text = client.complete("What is 2+2?").get();
     System.out.println(text);
 } catch (LlmException e) {
-    LLMError error = e.error();                // the llm4s error: a Scala type
-    System.err.println(error.message());       // the same text as e.getMessage()
-    System.err.println(error.formatted());     // the message plus its code and context
-    if (error instanceof RecoverableError) {
+    System.err.println(e.getMessage());
+    switch (e.getKind()) {
+        case AUTHENTICATION, CONFIGURATION -> System.err.println("check the API key and the provider section");
+        case RATE_LIMIT -> System.err.println("rate limited; wait "
+            + e.getRetryAfter().map(d -> d.toSeconds() + " s").orElse("a while"));
+        case SERVICE -> System.err.println("the provider answered HTTP "
+            + (e.getStatusCode().isPresent() ? e.getStatusCode().getAsInt() : "?"));
+        default -> { }
+    }
+    if (e.isRecoverable()) {
         System.err.println("a retry may succeed");
     }
 }
 ```
 
-`LLMError` is a Scala trait, but `message()` and `formatted()` are plain methods you can call from Java. If the error
-carries a `Throwable`, it is the exception's `getCause()`.
+`getKind()` is the Java enum `LlmErrorKind`:
 
-Errors are classes you can test with `instanceof`. The ones that may succeed if tried again, perhaps after you do
-something first, implement `RecoverableError`: `RateLimitError`, `TimeoutError`, `NetworkError`, `APIError` and
-`ServiceError` among them. `AuthenticationError`, `ConfigurationError` and `ValidationError` implement
-`NonRecoverableError`: retrying the same request will not help. The [error handling guide](error-handling) has the full
-list and the recovery tools, written for Scala.
+| Kind | The failure | Recoverable |
+|---|---|---|
+| `AUTHENTICATION` | the provider rejected the API key | no, unless it is a provider's `401` or `403` reported as a service error |
+| `RATE_LIMIT` | the provider, or a local limiter, refused the call for now | yes |
+| `TIMEOUT` | the call did not finish in time | yes |
+| `NETWORK` | the provider could not be reached | yes |
+| `SERVICE` | the provider answered with an error | yes |
+| `VALIDATION` | the request is wrong: a missing or invalid argument | no, unless it is a provider's `400` reported as a service error |
+| `CONFIGURATION` | a setting is missing or invalid | no |
+| `CANCELLED` | the call was cancelled, for example by an interrupt | no |
+| `OTHER` | anything else, including an error from another llm4s module or your own code | depends on the error |
+
+A provider's error response with status `400`, `401`/`403` or `429` has the kind that status means (`VALIDATION`,
+`AUTHENTICATION`, `RATE_LIMIT`) even when a provider client reported it as a generic service error. Such an error keeps
+the recoverability of its class: a `ServiceError` or an `APIError` is recoverable whatever its status, so a `403`
+reported as one reads as `AUTHENTICATION` and `isRecoverable()` is `true`. The table's column is what the kind's own
+error classes say; to decide whether to try again, always call `isRecoverable()` rather than infer it from the kind.
+Every error class in `org.llm4s.error` has a kind, and a test fails when a new one is added without one.
+
+`isRecoverable()` says whether the call may succeed if tried again, perhaps after you do something first: wait out a rate
+limit, or correct a request the provider rejected. `getRetryAfter()` is the `Optional<Duration>` the provider asked you
+to wait (its `Retry-After` header), empty when it did not say, and `getStatusCode()` the `OptionalInt` HTTP status of a
+provider's error response. If the error carries a `Throwable`, it is the exception's `getCause()`.
+
+`e.error()` is still the llm4s error itself, a Scala `LLMError` whose `message()` and `formatted()` (the message plus its
+code and context) are plain methods, and whose classes - `RateLimitError`, `ServiceError` and the rest - you can test
+with `instanceof` for a detail the kind does not carry. The [error handling guide](error-handling) has the full list
+and the recovery tools, written for Scala.
 
 If the thread blocked in `complete` is interrupted, the call returns a failed result whose error is a `CancelledError`,
 with the thread's interrupt flag still set. `InterruptedException` is never thrown, so the method does not declare it
@@ -350,7 +412,7 @@ call's arguments, an answer or a guardrail's reason - as the Scala types do, so 
 
 ## What is not here yet
 
-`llm4s-java-api` covers a client and a conversation. These are not available from Java yet, each with the issue that
+`llm4s-java-api` covers a client, a conversation, the whole reply and the kind of a failure. These are not available from Java yet, each with the issue that
 tracks it:
 
 | You may expect | State today |
