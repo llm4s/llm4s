@@ -1,30 +1,194 @@
 package org.llm4s.agent.memory
 
-import java.text.Normalizer
-import java.util.Locale
+import java.util.Arrays
 
 /**
- * The words keyword search compares: what `InMemoryStore` splits a query and a memory into.
+ * The words keyword search compares: how `InMemoryStore` splits a query and a memory, exactly as `SQLiteMemoryStore`'s
+ * FTS5 index does with its default tokenizer, `unicode61` with `remove_diacritics=1`, so that both stores find the
+ * same memories for a query.
  *
- * It follows the SQLite stores' FTS5 index (the `unicode61` tokenizer), so the stores agree on what a word is:
- *  - a word is a run of letters and digits in any script (with the combining marks that belong to them), and
- *    anything else - spaces, punctuation, symbols - separates words, so `java?` is the word `java`;
- *  - words are compared case-insensitively, folded with `Locale.ROOT` so the result does not depend on the JVM's
- *    default locale;
- *  - Latin accents are ignored (`cafe` matches `café`), written precomposed or decomposed;
- *  - there is no minimum length and no stop-word list: `I` matches the word `I`, never the `i` inside `Berlin`.
+ * What a word is, per code point and with no normalization of the text:
+ *  - A word is a run of letters, digits and private-use characters, which FTS5 calls token characters; anything else
+ *    separates words, so `java?` is the word `java`. Combining marks are separators too, so Devanagari `मुझे` is the
+ *    two words `म` and `झ` (its vowel signs separate them), except for the 25 combining accents of Latin letters
+ *    (U+0300-U+0331, those that occur as a Latin letter's single accent), which are dropped inside a word and
+ *    separate words elsewhere.
+ *  - Case is folded per code point, so it does not depend on the JVM's default locale, and the Greek final sigma `ς`
+ *    folds to `σ` like `Σ`.
+ *  - An accent is removed only from a Latin letter that carries exactly one: `école` and `ECOLE` match, but Greek
+ *    `ά` and Cyrillic `ё` and `й` keep theirs (`αθηνα` does not match `Αθήνα`, `мои` does not match `мой`), and
+ *    Vietnamese `ệ`, which carries two, keeps both (`viet` does not match `Việt`). Text in decomposed form is folded
+ *    per code point too, so a Latin accent written as a combining mark is dropped from any base letter.
+ *  - There is no minimum length and no stop-word list: `I` matches the word `I`, never the `i` inside `Berlin`.
+ *
+ * FTS5 classifies code points with the Unicode tables compiled into SQLite, which are older than the JVM's, so the
+ * tables below are SQLite's, read back from `sqlite-jdbc` by tokenizing every code point, not the JVM's `Character`
+ * data. The two differ for characters assigned in later Unicode versions: FTS5 counts every code point its tables do
+ * not know (recent scripts and emoji) as a token character, and does not fold case pairs added later (Cherokee).
+ * `KeywordSearchSpec` checks every code point against FTS5, and the two stores against each other.
  */
 private[memory] object KeywordTokens {
 
-  /** Separates words: anything that is not a letter, a digit or a combining mark. */
-  private val Separator = "[^\\p{L}\\p{N}\\p{M}]+".r
+  /**
+   * The phrases of a query, as `SQLiteMemoryStore` passes them to FTS5: the query's whitespace-separated pieces after
+   * removing `"` and `*` and treating `:`, `(` and `)` as spaces. Each phrase matches a memory that contains its words
+   * consecutively, so `berlin-based` matches "Berlin-based team" but not "based in Berlin".
+   */
+  def queryPhrases(query: String): Seq[String] =
+    query
+      .replace("\"", "")
+      .replace("*", "")
+      .replace(":", " ")
+      .replace("(", " ")
+      .replace(")", " ")
+      .split("\\s+")
+      .filter(_.nonEmpty)
+      .toSeq
 
-  /** The combining accents of Latin, Greek and Cyrillic letters, which FTS5's `unicode61` removes. */
-  private val Accents = "[\\u0300-\\u036f]".r
+  /** The words of `text` in order, folded as FTS5 `unicode61` folds them. */
+  def words(text: String): Vector[String] = {
+    val out = Vector.newBuilder[String]
+    var i   = 0
+    while (i < text.length) {
+      val start = text.codePointAt(i)
+      i += Character.charCount(start)
+      if (isTokenChar(start)) {
+        val word = new java.lang.StringBuilder().appendCodePoint(fold(start))
+        var more = true
+        while (more && i < text.length) {
+          val cp = text.codePointAt(i)
+          if (isTokenChar(cp)) word.appendCodePoint(fold(cp))
+          else if (!isDroppedAccent(cp)) more = false
+          if (more) i += Character.charCount(cp)
+        }
+        out += word.toString
+      }
+    }
+    out.result()
+  }
 
-  /** The distinct words of `text`, case- and accent-folded. */
-  def of(text: String): Set[String] = {
-    val folded = Accents.replaceAllIn(Normalizer.normalize(text.toLowerCase(Locale.ROOT), Normalizer.Form.NFD), "")
-    Separator.split(folded).iterator.filter(_.nonEmpty).toSet
+  private def isTokenChar(cp: Int): Boolean =
+    if (cp < 0x80) Character.isLetterOrDigit(cp)
+    else {
+      val at = Arrays.binarySearch(SeparatorStarts, cp)
+      !(at >= 0 || (at < -1 && cp <= SeparatorEnds(-at - 2)))
+    }
+
+  /** The combining accents FTS5 drops inside a word (`sqlite3Fts5UnicodeIsdiacritic`). */
+  private def isDroppedAccent(cp: Int): Boolean = cp >= 0x300 && cp <= 0x331 && DroppedAccents.contains(cp)
+
+  private def fold(cp: Int): Int =
+    if (cp < 0x80) Character.toLowerCase(cp) else Folds.getOrElse(cp, cp)
+
+  private def hex(s: String): Int = Integer.parseInt(s, 16)
+
+  /** Code points in a list of `hex` and `hex-hex` ranges. */
+  private def codePoints(ranges: Array[String]): Iterator[Int] =
+    ranges.iterator.flatMap { range =>
+      val bounds = range.split('-')
+      hex(bounds.head).to(hex(bounds.last)).iterator
+    }
+
+  private val DroppedAccents: Set[Int] =
+    codePoints("300-304 306-30c 30f 311 31b 323-328 32d-32e 330-331".split(' ')).toSet
+
+  // The tables below are FTS5's, generated by tokenizing every code point with sqlite-jdbc 3.53 (SQLite's
+  // fts5_unicode2.c); KeywordSearchSpec fails if they no longer match the sqlite-jdbc on the classpath.
+
+  /** The non-ASCII code points that are not token characters, as `hex` and `hex-hex` ranges. */
+  private val SeparatorTable: String =
+    "80-a9 ab-b1 b4 b6-b8 bb bf d7 f7 2c2-2c5 2d2-2df 2e5-2eb 2ed 2ef-36f 375 37e 384-385 387 3f6 482-489 " +
+      "55a-55f 589-58a 58f 591-5c7 5f3-5f4 600-604 606-61b 61e-61f 64b-65f 66a-66d 670 6d4 6d6-6e4 6e7-6ed " +
+      "6fd-6fe 700-70d 70f 711 730-74a 7a6-7b0 7eb-7f3 7f6-7f9 816-819 81b-823 825-827 829-82d 830-83e " +
+      "859-85b 85e 8e4-8fe 900-903 93a-93c 93e-94f 951-957 962-965 970 981-983 9bc 9be-9c4 9c7-9c8 9cb-9cd " +
+      "9d7 9e2-9e3 9f2-9f3 9fa-9fb a01-a03 a3c a3e-a42 a47-a48 a4b-a4d a51 a70-a71 a75 a81-a83 abc abe-ac5 " +
+      "ac7-ac9 acb-acd ae2-ae3 af0-af1 b01-b03 b3c b3e-b44 b47-b48 b4b-b4d b56-b57 b62-b63 b70 b82 bbe-bc2 " +
+      "bc6-bc8 bca-bcd bd7 bf3-bfa c01-c03 c3e-c44 c46-c48 c4a-c4d c55-c56 c62-c63 c7f c82-c83 cbc cbe-cc4 " +
+      "cc6-cc8 cca-ccd cd5-cd6 ce2-ce3 d02-d03 d3e-d44 d46-d48 d4a-d4d d57 d62-d63 d79 d82-d83 dca dcf-dd4 " +
+      "dd6 dd8-ddf df2-df4 e31 e34-e3a e3f e47-e4f e5a-e5b eb1 eb4-eb9 ebb-ebc ec8-ecd f01-f1f f34-f3f " +
+      "f71-f87 f8d-f97 f99-fbc fbe-fcc fce-fda 102b-103e 104a-104f 1056-1059 105e-1060 1062-1064 1067-106d " +
+      "1071-1074 1082-108d 108f 109a-109f 10fb 135d-1368 1390-1399 1400 166d-166e 1680 169b-169c 16eb-16ed " +
+      "1712-1714 1732-1736 1752-1753 1772-1773 17b4-17d6 17d8-17db 17dd 1800-180e 18a9 1920-192b 1930-193b " +
+      "1940 1944-1945 19b0-19c0 19c8-19c9 19de-19ff 1a17-1a1b 1a1e-1a1f 1a55-1a5e 1a60-1a7c 1a7f 1aa0-1aa6 " +
+      "1aa8-1aad 1b00-1b04 1b34-1b44 1b5a-1b7c 1b80-1b82 1ba1-1bad 1be6-1bf3 1bfc-1bff 1c24-1c37 1c3b-1c3f " +
+      "1c7e-1c7f 1cc0-1cc7 1cd0-1ce8 1ced 1cf2-1cf4 1dc0-1de6 1dfc-1dff 1fbd 1fbf-1fc1 1fcd-1fcf 1fdd-1fdf " +
+      "1fed-1fef 1ffd-1ffe 2000-2064 206a-206f 207a-207e 208a-208e 20a0-20b9 20d0-20f0 2100-2101 2103-2106 " +
+      "2108-2109 2114 2116-2118 211e-2123 2125 2127 2129 212e 213a-213b 2140-2144 214a-214d 214f 2190-23f3 " +
+      "2400-2426 2440-244a 249c-24e9 2500-26ff 2701-2775 2794-2b4c 2b50-2b59 2ce5-2cea 2cef-2cf1 2cf9-2cfc " +
+      "2cfe-2cff 2d70 2d7f 2de0-2e2e 2e30-2e3b 2e80-2e99 2e9b-2ef3 2f00-2fd5 2ff0-2ffb 3000-3004 3008-3020 " +
+      "302a-3030 3036-3037 303d-303f 3099-309c 30a0 30fb 3190-3191 3196-319f 31c0-31e3 3200-321e 322a-3247 " +
+      "3250 3260-327f 328a-32b0 32c0-32fe 3300-33ff 4dc0-4dff a490-a4c6 a4fe-a4ff a60d-a60f a66f-a67e a69f " +
+      "a6f0-a6f7 a700-a716 a720-a721 a789-a78a a802 a806 a80b a823-a82b a836-a839 a874-a877 a880-a881 " +
+      "a8b4-a8c4 a8ce-a8cf a8e0-a8f1 a8f8-a8fa a926-a92f a947-a953 a95f a980-a983 a9b3-a9cd a9de-a9df " +
+      "aa29-aa36 aa43 aa4c-aa4d aa5c-aa5f aa77-aa79 aa7b aab0 aab2-aab4 aab7-aab8 aabe-aabf aac1 aade-aadf " +
+      "aaeb-aaf1 aaf5-aaf6 abe3-abed d800-dfff fb1e fb29 fbb2-fbc1 fd3e-fd3f fdfc-fdfd fe00-fe19 fe20-fe26 " +
+      "fe30-fe52 fe54-fe66 fe68-fe6b feff ff01-ff0f ff1a-ff20 ff3b-ff40 ff5b-ff65 ffe0-ffe6 ffe8-ffee " +
+      "fff9-ffff 10100-10102 10137-1013f 10179-10189 10190-1019b 101d0-101fd 1039f 103d0 10857 1091f 1093f " +
+      "10a01-10a03 10a05-10a06 10a0c-10a0f 10a38-10a3a 10a3f 10a50-10a58 10a7f 10b39-10b3f 11000-11002 " +
+      "11038-1104d 11080-11082 110b0-110c1 11100-11102 11127-11134 11140-11143 11180-11182 111b3-111c0 " +
+      "111c5-111c8 116ab-116b7 12470-12473 16f51-16f7e 16f8f-16f92 1d000-1d0f5 1d100-1d126 1d129-1d1dd " +
+      "1d200-1d245 1d300-1d356 1d6c1 1d6db 1d6fb 1d715 1d735 1d74f 1d76f 1d789 1d7a9 1d7c3 1eef0-1eef1 " +
+      "1f000-1f02b 1f030-1f093 1f0a0-1f0ae 1f0b1-1f0be 1f0c1-1f0cf 1f0d1-1f0df 1f110-1f12e 1f130-1f16b " +
+      "1f170-1f19a 1f1e6-1f202 1f210-1f23a 1f240-1f248 1f250-1f251 1f300-1f320 1f330-1f335 1f337-1f37c " +
+      "1f380-1f393 1f3a0-1f3c4 1f3c6-1f3ca 1f3e0-1f3f0 1f400-1f43e 1f440 1f442-1f4f7 1f4f9-1f4fc " +
+      "1f500-1f53d 1f540-1f543 1f550-1f567 1f5fb-1f640 1f645-1f64f 1f680-1f6c5 1f700-1f773 e0001 " +
+      "e0020-e007f e0100-e01ef"
+
+  /** Latin letters with one accent, which fold to the ASCII letter before `=`. */
+  private val AccentTable: String =
+    "a=c0-c5,e0-e5,100-105,1cd-1ce,200-203,226-227,1e00-1e01,1ea0-1ea3,212b b=1e02-1e07 c=c7,e7,106-10d " +
+      "d=10e-10f,1e0a-1e13 e=c8-cb,e8-eb,112-11b,204-207,228-229,1e18-1e1b,1eb8-1ebd f=1e1e-1e1f " +
+      "g=11c-123,1e6-1e7,1f4-1f5,1e20-1e21 h=124-125,21e-21f,1e22-1e2b,1e96 " +
+      "i=cc-cf,ec-ef,128-130,1cf-1d0,208-20b,1e2c-1e2d,1ec8-1ecb j=134-135,1f0 " +
+      "k=136-137,1e8-1e9,1e30-1e35,212a l=139-13e,1e36-1e37,1e3a-1e3d m=1e3e-1e43 " +
+      "n=d1,f1,143-148,1f8-1f9,1e44-1e4b " +
+      "o=d2-d6,f2-f6,14c-151,1a0-1a1,1d1-1d2,1ea-1eb,20c-20f,22e-22f,1ecc-1ecf p=1e54-1e57 " +
+      "r=154-159,210-213,1e58-1e5b,1e5e-1e5f s=15a-161,17f,218-219,1e60-1e63,1e9b " +
+      "t=162-165,21a-21b,1e6a-1e71,1e97 u=d9-dc,f9-fc,168-173,1af-1b0,1d3-1d4,214-217,1e72-1e77,1ee4-1ee7 " +
+      "v=1e7c-1e7f w=174-175,1e80-1e89,1e98 x=1e8a-1e8d y=dd,fd,ff,176-178,232-233,1e8e-1e8f,1e99,1ef2-1ef9 " +
+      "z=179-17e,1e90-1e95"
+
+  /**
+   * The other case folds: `start[+count[/2]]:delta`, mapping `count` code points from `start` (every other one with
+   * `/2`) to the code point `delta` (hex, may be negative) away.
+   */
+  private val CaseTable: String =
+    "b5:307 c6:20 d0:20 d8:20 de:20 110:1 126:1 132:1 13f+2/2:1 14a:1 152:1 166:1 181:d2 182+2/2:1 186:ce " +
+      "187:1 189+2:cd 18b:1 18e:4f 18f:ca 190:cb 191:1 193:cd 194:cf 196:d3 197:d1 198:1 19c:d3 19d:d5 " +
+      "19f:d6 1a2+2/2:1 1a6:da 1a7:1 1a9:da 1ac:1 1ae:da 1b1+2:d9 1b3+2/2:1 1b7:db 1b8:1 1bc:1 1c4:2 1c5:1 " +
+      "1c7:2 1c8:1 1ca:2 1cb:1 1d5+4/2:1 1de+4/2:1 1ec+2/2:1 1f1:2 1f2:1 1f6:-61 1f7:-38 1fa+3/2:1 21c:1 " +
+      "220:-82 222+2/2:1 22a+2/2:1 230:1 23a:2a2b 23b:1 23d:-a3 23e:2a28 241:1 243:-c3 244:45 245:47 " +
+      "246+5/2:1 370+2/2:1 376:1 386:26 388+3:25 38c:40 38e+2:3f 391+17:20 3a3+9:20 3c2:1 3cf:8 3d0:-1e " +
+      "3d1:-19 3d5:-f 3d6:-16 3d8+12/2:1 3f0:-36 3f1:-30 3f4:-3c 3f5:-40 3f7:1 3f9:-7 3fa:1 3fd+3:-82 " +
+      "400+16:50 410+32:20 460+17/2:1 48a+27/2:1 4c0:f 4c1+7/2:1 4d0+44/2:1 531+38:30 10a0+38:1c60 " +
+      "10c7:1c60 10cd:1c60 1e08:1 1e14+2/2:1 1e1c:1 1e2e:1 1e38:1 1e4c+4/2:1 1e5c:1 1e64+3/2:1 1e78+2/2:1 " +
+      "1e9e:-1dbf 1ea4+10/2:1 1ebe+5/2:1 1ed0+10/2:1 1ee8+5/2:1 1efa+3/2:1 1f08+8:-8 1f18+6:-8 1f28+8:-8 " +
+      "1f38+8:-8 1f48+6:-8 1f59+4/2:-8 1f68+8:-8 1f88+8:-8 1f98+8:-8 1fa8+8:-8 1fb8+2:-8 1fba+2:-4a 1fbc:-9 " +
+      "1fbe:-1c05 1fc8+4:-56 1fcc:-9 1fd8+2:-8 1fda+2:-64 1fe8+2:-8 1fea+2:-70 1fec:-7 1ff8+2:-80 " +
+      "1ffa+2:-7e 1ffc:-9 2126:-1d5d 2132:1c 2160+16:10 2183:1 2c00+47:30 2c60:1 2c62:-29f7 2c63:-ee6 " +
+      "2c64:-29e7 2c67+3/2:1 2c6d:-2a1c 2c6e:-29fd 2c6f:-2a1f 2c70:-2a1e 2c72:1 2c75:1 2c7e+2:-2a3f " +
+      "2c80+50/2:1 2ceb+2/2:1 2cf2:1 a640+23/2:1 a680+12/2:1 a722+7/2:1 a732+31/2:1 a779+2/2:1 a77d:-8a04 " +
+      "a77e+5/2:1 a78b:1 a78d:-a528 a790+2/2:1 a7a0+5/2:1 a7aa:-a544 ff21+26:20 10400+40:28"
+
+  private val separatorRanges: Array[Array[String]] = SeparatorTable.split(' ').map(_.split('-'))
+  private val SeparatorStarts: Array[Int]           = separatorRanges.map(r => hex(r.head))
+  private val SeparatorEnds: Array[Int]             = separatorRanges.map(r => hex(r.last))
+
+  private val Folds: Map[Int, Int] = {
+    val accents = AccentTable.split(' ').iterator.flatMap { entry =>
+      codePoints(entry.drop(2).split(',')).map(_ -> entry.head.toInt)
+    }
+    val cases = CaseTable.split(' ').iterator.flatMap { entry =>
+      val colon = entry.indexOf(':')
+      val run   = entry.take(colon)
+      val delta = entry.drop(colon + 1)
+      val shift = if (delta.startsWith("-")) -hex(delta.drop(1)) else hex(delta)
+      val step  = if (run.endsWith("/2")) 2 else 1
+      val plus  = run.indexOf('+')
+      val start = hex(if (plus < 0) run else run.take(plus))
+      val count = if (plus < 0) 1 else run.drop(plus + 1).stripSuffix("/2").toInt
+      Iterator.tabulate(count)(k => start + k * step).map(cp => cp -> (cp + shift))
+    }
+    (accents ++ cases).toMap
   }
 }

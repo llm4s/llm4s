@@ -129,24 +129,25 @@ final case class InMemoryStore private (
   }
 
   /**
-   * Keyword search: a memory's score is the share of the query's distinct words that occur in it as whole words.
+   * Keyword search: a memory's score is the share of the query's distinct phrases that occur in it as whole words.
    *
-   * Query and memory text are split into words by [[KeywordTokens]], the way the SQLite stores' FTS5 index splits
-   * them, so `java?` matches `Java`, and `or` does not match `works`.
+   * The query is split into phrases and query and memory text into words by [[KeywordTokens]], the way
+   * `SQLiteMemoryStore` and its FTS5 index split them, so both stores find the same memories: `java?` matches `Java`,
+   * and `or` does not match `works`. They rank them differently (FTS5 ranks by bm25).
    */
   private def keywordSearch(
     query: String,
     memories: Seq[Memory],
     topK: Int
   ): Result[Seq[ScoredMemory]] = {
-    val queryTerms = KeywordTokens.of(query)
+    val phrases = KeywordTokens.queryPhrases(query).map(KeywordTokens.words).filter(_.nonEmpty).distinct
 
-    if (queryTerms.isEmpty) Right(Seq.empty)
+    if (phrases.isEmpty) Right(Seq.empty)
     else {
       val scored = memories.map { memory =>
-        val words        = KeywordTokens.of(memory.content)
-        val matchedTerms = queryTerms.count(words.contains)
-        ScoredMemory(memory, matchedTerms.toDouble / queryTerms.size)
+        val words   = KeywordTokens.words(memory.content)
+        val matched = phrases.count(phrase => words.containsSlice(phrase))
+        ScoredMemory(memory, matched.toDouble / phrases.size)
       }
 
       Right(

@@ -2017,14 +2017,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#1594](https://github.com/llm4s/llm4s/issues/1594)): the store split the query on whitespace and tested each piece
   with `String.contains`, so short words matched inside longer ones - `i` in "Berlin", `or` in "works", `do` in
   "doing" - and punctuation stayed on the query's words, so "Which language do I prefer, Scala or Java?" returned
-  "Works in the Berlin office" and `java?` never matched "Java". Query and memory are now split into words (runs of
-  letters and digits in any script, case-folded with `Locale.ROOT`, Latin accents ignored), and a memory scores the
-  share of the query's distinct words it contains as whole words - the words the SQLite stores' FTS5 index sees, which a
-  new spec checks query by query. **Behaviour change:** `InMemoryStore.search`, `EmbeddingMemoryStore`'s keyword
-  fallback and `SimpleMemoryManager.getRelevantContext` return fewer memories: a query word must now be a whole word
-  of the memory, so `scala` no longer matches "scalability" and `prefer` no longer matches "Prefers" (there is no
-  stemming). Case folding no longer depends on the JVM's default locale. The cookbook's `MemoryRecipe` no longer strips
-  short words and punctuation from the question (`contentWords` is gone); it passes the question as it is.
+  "Works in the Berlin office" and `java?` never matched "Java". Query and memory are now split into words exactly as
+  `SQLiteMemoryStore`'s FTS5 index (`unicode61`, `remove_diacritics=1`) splits them - the two stores now find the same
+  memories for a query (ranked differently), which a new spec checks for every code point and query by query - and a
+  memory scores the share of the query's distinct words it contains as whole words. A word is a run of letters, digits
+  and private-use characters in any script; case is ignored (per code point, so the Greek final sigma matches `σ`), and
+  an accent only on a Latin letter that has exactly one (`ecole` matches "école"; `αθηνα` does not match "Αθήνα", `мои`
+  does not match "Мой", `viet` does not match "Việt"); other combining marks separate words (Devanagari "मुझे" is "म"
+  and "झ"); and a query word with punctuation inside is a phrase (`berlin-based` does not match "based in Berlin").
+  **Behaviour change:** `InMemoryStore.search`, `EmbeddingMemoryStore`'s keyword fallback and
+  `SimpleMemoryManager.getRelevantContext` return fewer memories: a query word must now be a whole word of the memory,
+  so `scala` no longer matches "scalability" and `prefer` no longer matches "Prefers" (there is no stemming). Case
+  folding no longer depends on the JVM's default locale. The cookbook's `MemoryRecipe` no longer strips short words and
+  punctuation from the question (`contentWords` is gone); it passes the question as it is.
 - **Security - workspace runner: allowlisted commands can no longer write, delete or run other programs through their
   arguments** ([#1715](https://github.com/llm4s/llm4s/issues/1715)): `executeCommand` checked only the executable
   name against `allowedCommands` and a set of shell metacharacters, so programs on `WorkspaceSandboxConfig.ReadOnlyCommands`

@@ -98,12 +98,23 @@ the manager you get back. This prints:
 The in-memory store searches by **keyword**: it splits the query and each memory into words and returns
 the memories that share at least one whole word with the query, best first (a memory's score is the share
 of the query's distinct words it contains). "Prefers Scala over Java" shares the word "scala" with the
-query, so it is returned; the Anthropic fact shares none, so it is not. Words are runs of letters and
-digits in any script: punctuation separates them (`java?` is the word `java`), case and Latin accents are
-ignored (`ECOLE` matches `école`), and a word never matches inside a longer one, so `i` matches the word
-"I" but not "Berlin", and `prefer` does not match "Prefers" - there is no stemming. This is how the SQLite
-stores' FTS5 index reads text too ([#1594](https://github.com/llm4s/llm4s/issues/1594)). To retrieve by
-meaning, use a vector store (see [Vector Store](#vector-store)).
+query, so it is returned; the Anthropic fact shares none, so it is not. A word never matches inside a
+longer one, so `i` matches the word "I" but not "Berlin", and `prefer` does not match "Prefers" - there
+is no stemming. Words are split and compared exactly as the SQLite stores' FTS5 index (`unicode61`)
+does, so both kinds of store find the same memories for a query
+([#1594](https://github.com/llm4s/llm4s/issues/1594)):
+
+- A word is a run of letters, digits and private-use characters in any script. Anything else separates
+  words: punctuation (`java?` is the word `java`), and also combining marks such as Devanagari vowel
+  signs, so "मुझे" is the two words "म" and "झ".
+- Case is ignored, and so is the accent of a Latin letter that has exactly one (`ECOLE` matches
+  `école`). Other accents are kept: `αθηνα` does not match "Αθήνα", `живет` does not match "Живёт",
+  `мои` does not match "Мой", and `viet` does not match Vietnamese "Việt", whose `ệ` has two.
+- A query word with punctuation inside is a phrase: `berlin-based` matches "Berlin-based" but not
+  "based in Berlin".
+
+The two kinds of store rank the memories they find differently (the SQLite store uses BM25). To retrieve
+by meaning, use a vector store (see [Vector Store](#vector-store)).
 
 ---
 

@@ -78,11 +78,14 @@ val context = for {
 ```
 
 `SimpleMemoryManager.empty` keeps everything in an `InMemoryStore`. The in-memory store searches by
-keyword: it returns the memories that share at least one whole word with the query, best first. Words are
-runs of letters and digits in any script, compared without regard to case or Latin accents, so `java?`
-matches "Java", while `i` does not match "Berlin" and `prefer` does not match "Prefers" (no stemming) -
-the same words the SQLite stores' FTS5 index sees (see
-[#1594](https://github.com/llm4s/llm4s/issues/1594)).
+keyword: it returns the memories that share at least one whole word with the query, best first, so `java?`
+matches "Java", while `i` does not match "Berlin" and `prefer` does not match "Prefers" (no stemming). It
+splits and compares words exactly as `SQLiteMemoryStore`'s FTS5 index (`unicode61`) does, so the two find
+the same memories (they rank them differently): a word is a run of letters, digits and private-use
+characters in any script, case is ignored, and an accent is ignored only on a Latin letter that has exactly
+one - `ecole` matches "école", but `αθηνα` does not match "Αθήνα", `мои` does not match "Мой" and `viet`
+does not match "Việt". Combining marks other than those Latin accents separate words, so Devanagari "मुझे"
+is the words "म" and "झ" (see [#1594](https://github.com/llm4s/llm4s/issues/1594)).
 
 ### Remembering across restarts
 
