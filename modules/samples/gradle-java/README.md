@@ -8,7 +8,7 @@ an `Optional<String>`, `messages()` a `java.util.List`, and `status().kind()` a 
 
 | File | What it shows |
 |---|---|
-| [`HelloLLM4S.java`](src/main/java/org/llm4s/samples/HelloLLM4S.java) | create a client, one question, a conversation with a system message, an agent turn whose text streams to a lambda listener, its result read with a `switch` over `status().kind()`, approving what a suspended turn waits for (`status().pending()`, `Answer.approve`, `resume`), error handling, closing the client |
+| [`HelloLLM4S.java`](src/main/java/org/llm4s/samples/HelloLLM4S.java) | create a client, one question, a conversation with a system message sent with `JCompletionOptions` (temperature and a token limit), an agent turn whose text streams to a lambda listener, its result read with a `switch` over `status().kind()`, approving what a suspended turn waits for (`status().pending()`, `Answer.approve`, `resume`), error handling, closing the client |
 | [`application.conf`](src/main/resources/application.conf) | the provider, as a named section |
 | [`build.gradle.kts`](build.gradle.kts) | the one dependency: `org.llm4s:llm4s-java-api_3` |
 
@@ -53,7 +53,8 @@ variable to set and exits with status 1, as it does when a call fails.
 
 `llm4s-core` is the Scala API. From Java it works, but you meet Scala's types directly: you unwrap an `Either`,
 build `CompletionOptions` with `Option.empty()` and `Nil$.MODULE$`, and pass the model registry around yourself.
-`llm4s-java-api` hides all of that behind `Llm4s`, `JLlmClient`, `ConversationBuilder` and `LlmResult`, and its
+`llm4s-java-api` hides all of that behind `Llm4s`, `JLlmClient`, `ConversationBuilder`, `JCompletionOptions` and
+`LlmResult`, and its
 POM brings the provider modules and the Scala 3 library at the right version, so this project pins none of them.
 
 CI builds this project against the library on every pull request (the `Kotlin API` job does both), so it does

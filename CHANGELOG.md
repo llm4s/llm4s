@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Completion options from Java** ([#1488](https://github.com/llm4s/llm4s/issues/1488)): `llm4s-java-api`'s
+  `JCompletionOptions.builder()` sets `temperature`, `topP`, `maxTokens`, `presencePenalty`, `frequencyPenalty`,
+  `reasoning` (the Java enum `JReasoningEffort`: `NONE`, `LOW`, `MEDIUM`, `HIGH`) and `budgetTokens`, and
+  `JLlmClient.complete(Conversation, JCompletionOptions)` sends them. A value that may be absent is read as an
+  `Optional` / `OptionalInt` and can be cleared with an empty one, so no `scala.Option` is involved. The builder is
+  immutable, `toBuilder()` starts one from existing options, and a value no provider accepts (a negative or
+  non-finite temperature, a top-p outside `0..1`, a token count below 1) throws `IllegalArgumentException` when it
+  is set. The options map onto core's `CompletionOptions` through its `apply` and `with*` methods only. The
+  `complete(Conversation, CompletionOptions)` overload stays. The Java guide has a
+  [Completion options](docs/guide/java.md#completion-options) section, and the `gradle-java` sample uses the builder.
 - **Cookbook recipe: several agents in one graph** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   `MultiAgentGraphRecipe` runs two specialist agents in one superstep and an editor agent behind a static join,
   and its spec checks update order, the barrier, step boundaries and cancellation with no API key.
@@ -2030,6 +2040,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so `scala` no longer matches "scalability" and `prefer` no longer matches "Prefers" (there is no stemming). Case
   folding no longer depends on the JVM's default locale. The cookbook's `MemoryRecipe` no longer strips short words and
   punctuation from the question (`contentWords` is gone); it passes the question as it is.
+- **Workspace runner: a command that reads standard input gets end-of-file at once instead of hanging until the
+  timeout** ([#1728](https://github.com/llm4s/llm4s/issues/1728)): `executeCommand` left the child's standard input an
+  open pipe that nothing wrote to or closed, so `cat` with no operands, `cat -`, `sort`, `uniq`, `wc`, `head`,
+  `tail` or `grep x` with no file (and `sort` or `findstr x` on Windows) blocked until the command timeout (10 s
+  under the locked profile, 30 s under permissive) and failed with `TIMEOUT`, holding a runner thread meanwhile.
+  The child's standard input is now the null device (`/dev/null`, or `NUL` on Windows, chosen by the host the runner
+  runs on), so such a command sees an empty input and returns its normal result.
 - **Security - workspace runner: allowlisted commands can no longer write, delete or run other programs through their
   arguments** ([#1715](https://github.com/llm4s/llm4s/issues/1715)): `executeCommand` checked only the executable
   name against `allowedCommands` and a set of shell metacharacters, so programs on `WorkspaceSandboxConfig.ReadOnlyCommands`
