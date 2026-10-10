@@ -2081,6 +2081,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - redaction: a `"password": "` that a single-quoted string mentions no longer hides the next field's
+  key** ([#1697](https://github.com/llm4s/llm4s/issues/1697)): `Redaction` (used by the provider exchange logger,
+  `LLMError` messages and error mapping) read a JSON-style field that a Python dict's string merely mentions as a
+  real one and ran its value to the next `"`, over the key of the next field, so no later pass found that field and
+  its credential stayed readable: `{'note': 'see "password": " here', 'apiKey': ["7YJ1VSFPX'}", -9935758]}` kept
+  `7YJ1VSFPX` and `-9935758`. The passes that read a field under a single-quoted key (a string in either quote, a
+  number, a list or dict and its leaves) now also read the input as it was given, and what they replace there is
+  added wherever the other passes replaced nothing. Every value is still read as before, so everything redacted
+  before is redacted exactly as before, and only more is replaced: the example becomes
+  `{'note': 'see "password": "[REDACTED]"[REDACTED]", '[REDACTED]']}`. The same holds when the value that runs over
+  the key is `password="`, `"Authorization": "` or `\"password\": \"`, and for such a dict inside a JSON string.
+  The extra reading is made only where the input holds a `'`, and takes time linear in the input.
 - **Security - workspace runner: allowlisted programs start by a trusted absolute path, never from the working
   directory** ([#1790](https://github.com/llm4s/llm4s/issues/1790)): the runner handed `ProcessBuilder` the bare
   program name. On Windows `CreateProcess` then searched the directory of the runner's `java.exe` and the runner's

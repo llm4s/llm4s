@@ -179,7 +179,11 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   `'password': '` there ends where the string ends rather than taking the rest of the document - but only
   where no `'` that could close it follows anywhere in the input, and not where that end would leave the
   value empty (`'password': '",`); otherwise it runs to the next `'`, or to the end of the input, as it
-  does outside a string, so a credential that holds a `"` (`'Qx"]]9secret'`) is redacted whole; outside
+  does outside a string, so a credential that holds a `"` (`'Qx"]]9secret'`) is redacted whole; a field
+  under a single-quoted key is also read in the input as it was given, so that a double-quoted value before
+  it that runs over its key - a `"password": "` that a Python dict's message only mentions, `{'note': 'see
+  "password": " here', 'apiKey': [...]}` - cannot hide it: what that reading replaces is added where
+  nothing else was replaced, and every other replacement is made as before; outside
   any string, the bare words after an unclosed `'token': [` are replaced to the end of the input, since nothing tells them from leaves; under
   a single-quoted key a single-quoted leaf that stands where a value does is replaced whatever it holds,
   a connection string `'postgres://u:...@h/db'` or a `'k=v'` token included, and so is a `\"`-quoted leaf
