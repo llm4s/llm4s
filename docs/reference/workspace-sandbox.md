@@ -29,7 +29,7 @@ When running the workspace runner (e.g. in Docker):
 |----------|-------------|---------|
 | `WORKSPACE_PATH` | Workspace root directory | `/workspace` |
 | `WORKSPACE_SANDBOX_PROFILE` | Sandbox profile: `permissive` or `locked`; any other value stops the runner | `permissive` |
-| `WORKSPACE_EXTRA_COMMANDS` | Programs added to the profile's `allowedCommands`, separated by commas or whitespace (for example `sbt`); a name that is not a bare program name, or is a shell or launcher (with or without `.exe` / `.com`), stops the runner | none |
+| `WORKSPACE_EXTRA_COMMANDS` | Programs added to the profile's `allowedCommands`, separated by commas or whitespace (for example `sbt`); a name that is not a bare program name, is a `.bat` / `.cmd` batch file, or is a shell, interpreter or launcher (in any case, with or without `.exe` / `.com` or a version), stops the runner, as does any name with the `locked` profile, which runs no command | none |
 
 These two variables are the only things that decide what the runner enforces.
 
@@ -44,16 +44,29 @@ new ContainerisedWorkspace(workspaceDir, imageName, hostPort, extraAllowedComman
 // docker run ... -e WORKSPACE_EXTRA_COMMANDS=sbt ...
 ```
 
-An added program is held to every check below (no shell, forbidden characters, path arguments inside the workspace,
-the environment allowlist), but it has no per-program option rules, so it can do anything its own arguments allow:
-`sbt run` runs the project's code. Add only what the agent needs. In particular, the policy does not model a program
+**An added program means trusted code execution.** It is held to every check below (no shell, forbidden characters,
+path arguments inside the workspace, the environment allowlist), but it has no per-program option rules, so it can do
+anything its own arguments allow: `sbt run` runs the project's code, and so can the agent that wrote it. Add only what
+the agent needs, and only a program you would let run any code in the container. In particular, the policy does not model a program
 that makes links or unpacks an archive (`ln`, `tar`, `unzip`, `rsync`, `install`): each of its arguments is checked
 against the file system as it is before the command runs, but not the link text it writes, the names in an archive,
 or a later argument that goes through a name an earlier one of its operations made (see
-[Several sources in one command](#several-sources-in-one-command)). Shells (`sh`, `bash`, `cmd`, `pwsh`, ...) and
-launchers that run a program named in their arguments (`env`, `xargs`, `sudo`, `nohup`, `timeout`, ...) are refused
-(`WorkspaceSandboxConfig.NeverAllowedCommands`), as either would bring back the shell
-[#1756](https://github.com/llm4s/llm4s/issues/1756) removed.
+[Several sources in one command](#several-sources-in-one-command)). Shells (`sh`, `bash`, `cmd`, `pwsh`, `busybox`, ...),
+interpreters (`python`, `perl`, `ruby`, `node`, `php`, `lua`, `awk`, `java`, `jshell`, `make`, `expect`, ...),
+launchers that run a program named in their arguments (`env`, `xargs`, `sudo`, `nohup`, `timeout`, `setsid`,
+`stdbuf`, `flock`, `script`, `time`, `systemd-run`, `parallel`, ...), debuggers and remote or container tools
+(`gdb`, `strace`, `ssh`, `docker`, `podman`), privilege and namespace tools (`runuser`, `doas`, `pkexec`, `nsenter`,
+`unshare`, `taskset`, `chrt`), Windows script hosts (`wsl`, `cscript`, `wscript`, `mshta`, `rundll32`) and the cmd.exe
+built-ins `call` and `start` are refused (`WorkspaceSandboxConfig.NeverAllowedCommands`), as any of them would bring
+back the shell [#1756](https://github.com/llm4s/llm4s/issues/1756) removed
+([#1761](https://github.com/llm4s/llm4s/issues/1761), [#1792](https://github.com/llm4s/llm4s/issues/1792)). A name is
+matched ignoring case, a `.exe` / `.com` extension and a trailing version (`Python3.12.EXE` is `python`). A `.bat` or
+`.cmd` name is refused too: Windows runs a batch file through cmd.exe, outside the runner's cmd.exe checks. **The list
+is a speed bump, not a boundary**: no list names every program that can run another, which is why an added program
+must be one you trust to run any code.
+
+With `WORKSPACE_SANDBOX_PROFILE=locked`, which refuses every command, any `WORKSPACE_EXTRA_COMMANDS` name stops the
+runner with a message saying so, rather than logging programs added that could never run.
 
 ### Profiles
 
@@ -156,16 +169,25 @@ and never:
 
 A program found only in one of those places is refused with `EXECUTABLE_NOT_ALLOWED`, and the message names where it
 was found; one found nowhere with `EXECUTABLE_NOT_FOUND`. A cmd.exe built-in (`echo`, `dir`, `type`, ...) runs through
-the system directory's `cmd.exe`, by its absolute path and never one from `PATH`, with
-`NoDefaultCurrentDirectoryInExePath=1`, and is named to it without an extension, so cmd.exe never looks a program up
-in the working directory. The `PATH` the runner was started with is the one searched; a command cannot set `PATH`
+the system directory's `cmd.exe`, by its absolute path and never one from `PATH`, as `cmd /d /c` (`/d`: no AutoRun
+command from the registry runs first, [#1792](https://github.com/llm4s/llm4s/issues/1792)), and is named to it without
+an extension. The `PATH` the runner was started with is the one searched; a command cannot set `PATH`
 (`ENVIRONMENT_NOT_ALLOWED`).
+
+The program the runner starts may itself start another by name - a `#!/usr/bin/env x` script, `sbt` starting `java`,
+`git` a helper - searching the `PATH` it inherits from the workspace as its working directory. So the command's
+process gets only the `PATH` entries the runner itself would search: an empty or relative entry, an entry inside the
+workspace (as written or after following links) and the runner's own working directory are dropped, the rest kept in
+order; with none left the process has no `PATH` at all, since an empty one is read as the current directory
+([#1792](https://github.com/llm4s/llm4s/issues/1792)). On Windows every command, not only a built-in, runs with
+`NoDefaultCurrentDirectoryInExePath=1`, so neither cmd.exe nor `CreateProcess` in a child looks a program up in the
+working directory.
 
 On Windows a command's first word and the allowlist's entries are matched by program name: ignoring case and a
 `.exe` or `.com` extension, so `git.exe status` runs `git`, an allowlist entry `sort.exe` allows `sort`, and either is
 held to `sort`'s rules below (an entry spelled with the extension used to escape them,
-[#1761](https://github.com/llm4s/llm4s/issues/1761)). `WORKSPACE_EXTRA_COMMANDS` refuses a shell or launcher under
-either spelling (`bash.exe`, `CMD.COM`).
+[#1761](https://github.com/llm4s/llm4s/issues/1761)). `WORKSPACE_EXTRA_COMMANDS` refuses a shell, interpreter or
+launcher under either spelling (`bash.exe`, `CMD.COM`, `wsl.exe`).
 
 Over the WebSocket protocol a refused command gets a `WorkspaceAgentErrorResponse` carrying the code above, then a
 `CommandCompletedMessage` with exit code 1, and no `CommandStartedMessage` or output; `ContainerisedWorkspace`
@@ -233,7 +255,7 @@ Windows) is refused. Only a `..` after a symbolic link makes the two differ. Tha
   runtime's argument parser and cmd.exe delete `"` as a quote, so `"..\outside\f` opens `..\outside\f` and
   `"C:\outside\f` an absolute path, and a Windows file name cannot hold one. Quote an argument in the command string
   instead (`findstr "/C:two words" a.txt`): that quoting is removed before the checks;
-- on Windows, the built-ins the runner starts through `cmd.exe /c` (`dir`, `type`, `copy`, `move`, `echo`, ...)
+- on Windows, the built-ins the runner starts through `cmd.exe /d /c` (`dir`, `type`, `copy`, `move`, `echo`, ...)
   refuse (`ARGUMENT_NOT_ALLOWED`) an argument holding `,`, `=`, `(`, `)`, `@`, `!`, a control character (VT, FF, a
   line feed) or a space other than U+0020 (NBSP, U+00FF): `ProcessBuilder` quotes an argument only for a space, a
   tab, `"`, `<` or `>`, and cmd.exe splits a built-in's arguments on `,`, `;`, `=`, VT, FF and 0xFF as well, so

@@ -259,12 +259,104 @@ class ProgramResolverSpec extends AnyFlatSpec with Matchers {
       val search = ProgramSearch(windows = true, Seq(d.system32, d.windowsDir), None, Some(d.runnerCwd), None)
       val ws     = new WorkspaceAgentInterfaceImpl(d.workspace.toString, true, Some(ReadOnly), search)
       val argv   = ws.prepareCommand("ECHO.EXE hello", None, None, None).fold(e => fail(e.error), identity)
-      argv.builder.command().asScala.toSeq shouldBe Seq(cmd.toString, "/c", "echo", "hello")
+      // `/d`: cmd.exe runs no AutoRun command from the registry first (#1792)
+      argv.builder.command().asScala.toSeq shouldBe Seq(cmd.toString, "/d", "/c", "echo", "hello")
       argv.builder.environment().get("NoDefaultCurrentDirectoryInExePath") shouldBe "1"
       // No cmd.exe in the system directory: refused, never one from PATH or the current directory
       Files.delete(cmd)
       d.program(d.runnerCwd, "cmd.exe")
       ws.prepareCommand("dir", None, None, None).left.map(_.code) shouldBe Left("EXECUTABLE_NOT_ALLOWED")
+    }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // The child's PATH (#1792): only the entries the runner itself would search
+
+  "ProgramResolver.childPath" should "drop empty, relative and in-workspace entries, keeping the rest in order" in
+    inDirs { d =>
+      val tools = Files.createDirectories(d.workspace.resolve("tools"))
+      val path  = Seq(d.trusted1, "", ".", "bin", tools, d.workspace, d.trusted2, "..", d.trusted1)
+      ProgramResolver.childPath(posix(path), d.roots) shouldBe
+        Some(Seq(d.trusted1, d.trusted2).mkString(File.pathSeparator))
+    }
+
+  it should "drop an entry that leads into the workspace through a link, and the runner's own directory" in
+    inDirs { d =>
+      val tools = Files.createDirectories(d.workspace.resolve("tools"))
+      val links = d.link(d.base.resolve("tools-link"), tools).toSeq
+      val path  = links ++ Seq(d.runnerCwd, d.trusted1)
+      ProgramResolver.childPath(posix(path, cwd = Some(d.runnerCwd)), d.roots) shouldBe Some(d.trusted1.toString)
+    }
+
+  it should "give no PATH at all when no entry is kept, never an empty one (read as the current directory)" in
+    inDirs { d =>
+      ProgramResolver.childPath(posix(Seq("", ".", "bin", d.workspace)), d.roots) shouldBe None
+      ProgramResolver.childPath(ProgramSearch(false, Nil, None, None, None), d.roots) shouldBe None
+    }
+
+  it should "keep Windows' double quotes around an entry that holds the separator" in inDirs { d =>
+    val search = windows(d, Seq("\"" + d.trusted1 + "\"", ".", d.workspace, d.trusted2))
+    ProgramResolver.childPath(search, d.roots) shouldBe Some(Seq(d.trusted1, d.trusted2).mkString(File.pathSeparator))
+  }
+
+  "The runner" should "give the command the sanitised PATH, or none, and keep NoDefaultCurrentDirectoryInExePath " +
+    "for every Windows command (#1792)" in inDirs { d =>
+      d.program(d.system32, "whoami.exe")
+      val path = Seq(".", "", "bin", d.workspace, d.trusted1)
+      val search = ProgramSearch(
+        windows = true,
+        Seq(d.system32, d.windowsDir),
+        Some(path.mkString(File.pathSeparator)),
+        Some(d.runnerCwd),
+        None
+      )
+      val ws  = new WorkspaceAgentInterfaceImpl(d.workspace.toString, true, Some(ReadOnly), search)
+      val env = ws.prepareCommand("whoami", None, None, None).fold(e => fail(e.error), _.builder.environment())
+      env.get("PATH") shouldBe d.trusted1.toString
+      // not only for cmd.exe: CreateProcess in any child searches its current directory, the workspace, otherwise
+      env.get("NoDefaultCurrentDirectoryInExePath") shouldBe "1"
+
+      val onlyWorkspace = ProgramSearch(windows = true, Seq(d.system32, d.windowsDir), Some("."), None, None)
+      val bare          = new WorkspaceAgentInterfaceImpl(d.workspace.toString, true, Some(ReadOnly), onlyWorkspace)
+      val bareEnv = bare.prepareCommand("whoami", None, None, None).fold(e => fail(e.error), _.builder.environment())
+      bareEnv.containsKey("PATH") shouldBe false
+    }
+
+  it should "leave NoDefaultCurrentDirectoryInExePath alone off Windows" in inDirs { d =>
+    val cat = d.program(d.trusted1, "cat")
+    val ws  = new WorkspaceAgentInterfaceImpl(d.workspace.toString, false, Some(ReadOnly), posix(Seq(d.trusted1)))
+    val p   = ws.prepareCommand("cat x", None, None, None).fold(e => fail(e.error), identity)
+    p.builder.command().get(0) shouldBe cat.toString
+    p.builder.environment().get("PATH") shouldBe d.trusted1.toString
+    // left as the runner's own environment has it (unset, bar a host that sets it itself)
+    val inherited = new java.lang.ProcessBuilder().environment().get("NoDefaultCurrentDirectoryInExePath")
+    p.builder.environment().get("NoDefaultCurrentDirectoryInExePath") shouldBe inherited
+  }
+
+  it should "not let a #!/usr/bin/env script run a workspace program that a relative PATH entry would find" in
+    inDirs { d =>
+      assume(!isWindowsHost, "a #! script is a POSIX notion")
+      assume(Files.isExecutable(Paths.get("/usr/bin/env")), "the script's interpreter is /usr/bin/env")
+      val marker = d.base.resolve("workspace-fake-ran")
+      // The allowlisted program, in a trusted directory, looks `fake` up on its PATH
+      d.script(d.trusted1, "prog", "#!/usr/bin/env fake\n")
+      // The agent's `fake`, where the relative entry `bin`, `.`, an empty entry or an in-workspace entry lead
+      val fake = s"#!/bin/sh\necho workspace > '$marker'\necho workspace\n"
+      Files.createDirectories(d.workspace.resolve("bin"))
+      d.script(d.workspace.resolve("bin"), "fake", fake)
+      d.script(d.workspace, "fake", fake)
+      // The real `fake`, in a trusted directory after them
+      d.script(d.trusted2, "fake", "#!/bin/sh\necho trusted\n")
+      val withProg = ReadOnly.copy(allowedCommands = ReadOnly.allowedCommands + "prog")
+      Seq("bin", ".", "", d.workspace.toString).foreach { untrusted =>
+        withClue(s"PATH entry '$untrusted'") {
+          val path   = Seq(untrusted, d.trusted1, d.trusted2, "/usr/bin", "/bin").mkString(File.pathSeparator)
+          val search = ProgramSearch(windows = false, Nil, Some(path), Some(d.runnerCwd), None)
+          val ws     = new WorkspaceAgentInterfaceImpl(d.workspace.toString, false, Some(withProg), search)
+          val out    = ws.executeCommand("prog", None, Some(30.seconds), None)
+          out.stdout shouldBe "trusted\n"
+          Files.exists(marker) shouldBe false
+        }
+      }
     }
 
   // ---------------------------------------------------------------------------------------------------------------
