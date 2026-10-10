@@ -27,9 +27,10 @@ import scala.concurrent.duration.*
  * so a text value that happens to name such a file (`grep -e..`) is refused too. `sort -t`'s separator is the
  * exception: a value attached to it (`sort -to`, `sort -t/`) is text, not checked (except on Windows, where `-t` is
  * refused; see below). A value or tail that cannot name a file is not checked: one with no separator that begins
- * with over 256 ASCII letters, digits or `-_+=,@` (255 is the longest name a file system allows), which no file
- * system or Windows rule can read as a shorter name. The checks are bounded by the command, not by each argument: an
- * argument longer than 4096 characters is refused, each distinct path is checked once, and a command whose checks
+ * with at least 1025 ASCII letters, digits or `-_+=,@`, which no file system or Windows rule can read as a shorter
+ * name. This assumes that no supported file system (ext4, APFS, NTFS, HFS+, ZFS including `longname`, FUSE) allows a
+ * single name of more than 1024 bytes or UTF-16 code units. The checks are bounded by the command, not by each
+ * argument: an argument longer than 4096 characters is refused, each distinct path is checked once, and a command whose checks
  * would take more than 20000 file-system lookups (about two per path component) is refused as too costly to check,
  * so a command of thousands of flags is refused in well under a second instead of being checked for minutes before
  * it starts. `--` is not taken as the end of the

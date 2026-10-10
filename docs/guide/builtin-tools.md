@@ -322,8 +322,9 @@ What the controls do, and where they stop:
     `=` of a long option (`grep --file=x`) and every tail of a short-option cluster (`grep -fx`, `grep -ifx`), so a
     link out of the allowed directory, a blocked file or `..` cannot be passed that way
     ([#1723](https://github.com/llm4s/llm4s/issues/1723)). Which options take a value is not modelled, so text that
-    happens to name such a file (`grep -e..`) is refused too. A value with no separator that begins with over 256 ASCII
-    letters, digits or `-_+=,@` is not checked, since no file system allows a name that long. The cost of the checks
+    happens to name such a file (`grep -e..`) is refused too. A value with no separator that begins with at least 1025
+    ASCII letters, digits or `-_+=,@` is not checked, on the assumption that no supported file system (ext4, APFS,
+    NTFS, HFS+, ZFS including `longname`, FUSE) allows a single name of more than 1024 bytes or UTF-16 code units. The cost of the checks
     is bounded per command: an argument longer than 4096 characters is refused, each distinct path is checked once,
     and a command whose checks would take more than 20000 file-system lookups is refused as too costly to check,
     rather than holding the agent for minutes before the command starts (the shell `timeout` covers only the

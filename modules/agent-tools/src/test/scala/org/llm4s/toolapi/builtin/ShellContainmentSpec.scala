@@ -495,7 +495,8 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
 
   it should "still check the short tails of a long flag (#1723)" in {
     val (root, linked, config) = attachedValueFixture()
-    // A blocked file whose name is as long as a name can be, and so is checked
+    // A blocked file whose name is as long as ext4, APFS and NTFS allow; longer tails, up to the 1024 FUSE allows, are
+    // checked too (UnnameableTailSpec), but cannot be created here
     val longest = "n" * 255
     Files.writeString(root.resolve(longest), "OUTSIDE-SECRET\n")
     val blocking = config.copy(pathPolicy =

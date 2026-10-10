@@ -315,10 +315,19 @@ object ShellTool {
       s"(at most $MaxArgumentLength characters an argument and $MaxPathSteps path lookups a command)"
 
   /**
-   * The longest name a path component can have on a supported file system: 255 bytes on Linux file systems and APFS,
-   * 255 UTF-16 code units on NTFS and HFS+ (`NAME_MAX`).
+   * The longest single name (path component) any supported file system allows, in its own unit: 255 bytes on ext4,
+   * XFS, Btrfs and APFS, 255 UTF-16 code units on NTFS and HFS+, 1023 bytes on OpenZFS 2.3+ with `longname=on`, and
+   * 1024 bytes on Linux FUSE (rclone, s3fs, virtiofs; `FUSE_NAME_MAX`). The assumption the skip below rests on is that
+   * no supported file system allows a single name of more than this many bytes or UTF-16 code units.
    */
-  private val MaxNameLength = 255
+  private[shell] val MaxNameLength = 1024
+
+  /**
+   * How many plain name characters a tail must begin with to be skipped: one over [[MaxNameLength]]. A combining
+   * character after the run may compose with its last character, but never into nothing, so the name keeps at least
+   * `MaxNameLength + 1` units in every encoding and normal form.
+   */
+  private[shell] val MinUnnameableRun = MaxNameLength + 1
 
   /** Characters no supported file system or path parser treats specially, and that no other spelling folds to. */
   private def isPlainNameChar(c: Char): Boolean =
@@ -326,23 +335,22 @@ object ShellTool {
 
   /**
    * For each start in `value`, whether `value.substring(start)` cannot name anything, so need not be checked: it
-   * holds no separator (`/` or `\`), so it is one path component, and it begins with at least `MaxNameLength + 2`
-   * ASCII letters, digits and `-_+=,@` (a combining character after them may join the last one to it). Each of those
-   * takes one byte and one UTF-16 code unit, so the name is over
-   * every supported file system's limit for a component in either unit, whatever follows them. No shorter name can
-   * stand for it: Windows changes none of these characters (it drops a trailing `.` or space, reads `:` as a stream
-   * and `~` in short names, all after them), and a name
-   * that a case-insensitive or normalisation-insensitive file system matches to them is no shorter in the unit that
-   * file system counts (`ß`, two bytes in UTF-8, folds to `ss`; the Kelvin sign, three bytes, to `k`; NTFS and HFS+
-   * fold one UTF-16 unit to one). So the program cannot open it, and it can lead nowhere. Checking it would cost
-   * lookups like any other value, and a flag of 4096 letters has thousands of such tails (#1723). Computed once a
-   * value, so that a long flag is not scanned again for each of its tails.
+   * holds no separator (`/` or `\`), so it is one path component, and it begins with at least `MinUnnameableRun`
+   * ASCII letters, digits and `-_+=,@`. Each of those takes one byte and one UTF-16 code unit, so the name is over
+   * every supported file system's limit for a component ([[MaxNameLength]]) in either unit, whatever follows them. No
+   * shorter name can stand for it: Windows changes none of these characters (it drops a trailing `.` or space, reads
+   * `:` as a stream and `~` in short names, all after them), and a name that a case-insensitive or
+   * normalisation-insensitive file system matches to them is no shorter in the unit that file system counts (`ß`, two
+   * bytes in UTF-8, folds to `ss`; the Kelvin sign, three bytes, to `k`; NTFS and HFS+ fold one UTF-16 unit to one).
+   * So the program cannot open it, and it can lead nowhere. Checking it would cost lookups like any other value, and
+   * a flag of 4096 letters has thousands of such tails (#1723). Computed once a value, so that a long flag is not
+   * scanned again for each of its tails.
    */
-  private def unnameable(value: String): Int => Boolean = {
+  private[shell] def unnameable(value: String): Int => Boolean = {
     val lastSeparator = value.lastIndexWhere(c => c == '/' || c == '\\')
     // How many plain characters run from each index
     val plainRun = value.scanRight(0)((c, run) => if (isPlainNameChar(c)) run + 1 else 0)
-    start => start > lastSeparator && plainRun(start) > MaxNameLength + 1
+    start => start > lastSeparator && plainRun(start) >= MinUnnameableRun
   }
 
   /** What a check of one path found. */
