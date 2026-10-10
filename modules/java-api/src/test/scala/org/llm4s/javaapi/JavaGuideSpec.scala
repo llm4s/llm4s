@@ -10,9 +10,11 @@ import org.llm4s.error.{
   ServiceError,
   ValidationError
 }
-import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.config.{ AnthropicConfig, OllamaConfig, OpenAIConfig }
+import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
+import org.llm4s.llmconnect.config.{ AnthropicConfig, EmbeddingModelConfig, OllamaConfig, OpenAIConfig }
 import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.testutil.MockLLMClients.{ FailingMock, SimpleMock }
 import org.llm4s.types.Result
 import org.scalatest.matchers.should.Matchers
@@ -188,6 +190,73 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
     }
   }
 
+  /** An embedding client whose provider records each request and embeds each text as `vectors` maps it. */
+  private class Embedding(vectors: Map[String, Seq[Double]]) extends EmbeddingProvider {
+    val sent: ArrayBuffer[EmbeddingRequest] = ArrayBuffer.empty
+    def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
+      sent += request
+      Right(EmbeddingResponse(request.input.map(vectors), metadata = Map("model" -> "text-embedding-3-small")))
+    }
+    def client: JEmbeddingClient =
+      new JEmbeddingClient(
+        new EmbeddingClient(this)(using ModelRegistryService.fromModels(Nil)),
+        EmbeddingModelConfig("text-embedding-3-small", 1536)
+      )
+  }
+
+  "The embeddings blocks" should {
+
+    "create the client for the model application.conf names, printing nothing" in {
+      var embedder: JEmbeddingClient = null
+      captured { embedder = GuideSnippets.defaultEmbedder() } shouldBe Printed("", "")
+      // this module's test application.conf names core's canned fixture model
+      (embedder.model, embedder.dimensions) shouldBe (("fixture-embed-small", 256))
+    }
+
+    "embed the two sentences as documents in one request and print the model, dimensions and similarity" in {
+      val provider = new Embedding(
+        Map("The cat sat on the mat." -> Seq(3.0, 4.0), "A kitten was sitting on the rug." -> Seq(4.0, 3.0))
+      )
+      var similarity = 0.0
+      captured { similarity = GuideSnippets.twoSentences(provider.client) } shouldBe
+        Printed("text-embedding-3-small, 2 dimensions: similarity 0.96\n", "")
+      similarity shouldBe 0.96
+      provider.sent.map(r => (r.input, r.purpose)) shouldBe
+        Seq((Seq("The cat sat on the mat.", "A kitten was sitting on the rug."), InputPurpose.Document))
+    }
+
+    "run against the configured default, end to end" in {
+      captured(GuideSnippets.twoSentences(GuideSnippets.defaultEmbedder())) shouldBe
+        Printed("fixture-embed-small, 4 dimensions: similarity 1.0\n", "")
+    }
+
+    "embed the documents as documents and the query as a query, and print the closest document" in {
+      val texts = List("Stocks fell sharply.", "The cat sat on the mat.", "Dogs bark at night.")
+      val provider = new Embedding(
+        Map(
+          "Stocks fell sharply."    -> Seq(0.0, 1.0),
+          "The cat sat on the mat." -> Seq(0.9, 0.1),
+          "Dogs bark at night."     -> Seq(0.5, 0.5),
+          "Where did the cat sit?"  -> Seq(1.0, 0.0)
+        )
+      )
+      var closest = ""
+      captured { closest = GuideSnippets.closest(provider.client, texts.asJava) } shouldBe
+        Printed("closest: The cat sat on the mat.\n", "")
+      closest shouldBe "The cat sat on the mat."
+      provider.sent.map(r => (r.input, r.purpose)) shouldBe Seq(
+        (texts, InputPurpose.Document),
+        (Seq("Where did the cat sit?"), InputPurpose.Query)
+      )
+    }
+
+    "keep the first document when it is the closest" in {
+      val provider =
+        new Embedding(Map("a" -> Seq(1.0, 0.0), "b" -> Seq(0.0, 1.0), "Where did the cat sit?" -> Seq(1.0, 0.1)))
+      captured(GuideSnippets.closest(provider.client, List("a", "b").asJava)) shouldBe Printed("closest: a\n", "")
+    }
+  }
+
   "The reading-a-result block" should {
 
     "give the same value through get, getOrNull, toOptional, map and toCompletableFuture" in {
@@ -286,6 +355,9 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
         "catch (LlmException e)",
         "e.getKind()",
         "client.completion(conversation)",
+        "Llm4s.createDefaultEmbeddingClient()",
+        "JEmbeddings.cosineSimilarity(vectors.get(0), vectors.get(1))",
+        "JEmbeddingPurpose.QUERY",
         "OllamaConfig.apply(",
         "import org.llm4s.llmconnect.model.Conversation;"
       ).foreach(marker => all should include(marker))

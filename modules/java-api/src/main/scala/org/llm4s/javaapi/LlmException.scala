@@ -1,6 +1,7 @@
 package org.llm4s.javaapi
 
 import org.llm4s.error.*
+import org.llm4s.llmconnect.model.EmbeddingError
 
 import java.time.Duration
 import java.util.{ Optional, OptionalInt }
@@ -46,8 +47,9 @@ final class LlmException(val error: LLMError) extends RuntimeException(error.mes
 
   /**
    * The HTTP status of the provider's error response, or empty when the error carries none. Present for a provider's
-   * error response that kept its status (a `ServiceError`, or an `APIError` that has one), whose kind is `SERVICE` -
-   * or, for `400`, `401`, `403` and `429`, the kind that status means (see [[getKind]]).
+   * error response that kept its status (a `ServiceError`, an `APIError` that has one, or an embedding provider's
+   * `EmbeddingError` whose code is a status), whose kind is `SERVICE` - or, for `400`, `401`, `403` and `429`, the kind
+   * that status means (see [[getKind]]).
    */
   def getStatusCode: OptionalInt = LlmErrorKinds.statusCode(error).fold(OptionalInt.empty())(OptionalInt.of)
 }
@@ -67,7 +69,8 @@ object LlmException {
  *
  * Every concrete error class in `org.llm4s.error` has an entry in [[byClass]], and `LlmErrorKindSpec` scans that
  * package and fails when one has not, so a new error class is given a kind on purpose rather than falling to
- * [[LlmErrorKind.OTHER]] by accident.
+ * [[LlmErrorKind.OTHER]] by accident. Outside that package, only core's `EmbeddingError` has a kind of its own, the one
+ * its status means, since `JEmbeddingClient` hands it to Java callers.
  */
 private[javaapi] object LlmErrorKinds {
 
@@ -99,8 +102,13 @@ private[javaapi] object LlmErrorKinds {
    * `401`/`403` an `AuthenticationError`, `429` a `RateLimitError`, `400` a `ValidationError` - has that class's kind
    * even when a client reported it as a `ServiceError` or an `APIError`.
    */
-  def of(error: LLMError): LlmErrorKind =
-    statusCode(error).flatMap(byStatus).getOrElse(byClass.getOrElse(error.getClass, LlmErrorKind.OTHER))
+  def of(error: LLMError): LlmErrorKind = error match {
+    // an embedding provider's error response, which the embedding clients report as an `EmbeddingError` carrying the
+    // status as its code, reads as a chat provider's `ServiceError` with that status does; one with no status (a
+    // request that never reached the provider, a reply that could not be parsed) is `OTHER`
+    case e: EmbeddingError => statusCode(e).fold(LlmErrorKind.OTHER)(s => byStatus(s).getOrElse(LlmErrorKind.SERVICE))
+    case _ => statusCode(error).flatMap(byStatus).getOrElse(byClass.getOrElse(error.getClass, LlmErrorKind.OTHER))
+  }
 
   private def byStatus(status: Int): Option[LlmErrorKind] = status match {
     case 401 | 403 => Some(LlmErrorKind.AUTHENTICATION)
@@ -111,9 +119,10 @@ private[javaapi] object LlmErrorKinds {
 
   /** The HTTP status of a provider's error response. */
   def statusCode(error: LLMError): Option[Int] = error match {
-    case e: ServiceError => Some(e.httpStatus)
-    case e: APIError     => e.statusCode
-    case _               => None
+    case e: ServiceError   => Some(e.httpStatus)
+    case e: APIError       => e.statusCode
+    case e: EmbeddingError => e.code.flatMap(_.trim.toIntOption).filter(s => s >= 100 && s <= 599)
+    case _                 => None
   }
 
   /** The delay the provider asked for, not the library's default backoff. */

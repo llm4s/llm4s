@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Embeddings from Java** ([#1490](https://github.com/llm4s/llm4s/issues/1490)): `llm4s-java-api`'s
+  `Llm4s.createDefaultEmbeddingClient()` creates a `JEmbeddingClient` for the model `llm4s.embeddings.model`
+  (`EMBEDDING_MODEL`) names, the route `createDefaultClient()` takes for chat; a missing model, provider or key, or a
+  model whose dimensions its provider module does not declare, is a failed result of kind `CONFIGURATION`.
+  `embed(List<String>)` and `embed(List<String>, JEmbeddingPurpose)` send the texts in one request and return an
+  `LlmResult<JEmbeddings>`: `vectors()` as a `List<float[]>` (a fresh copy on each call), one per text and in order,
+  with the `model()` the provider named and their `dimensions()`. The Java enum `JEmbeddingPurpose` (`DOCUMENT`, the
+  default as in core, or `QUERY`) becomes core's `InputPurpose`. An empty list returns no vectors without a request; a
+  `null` list, text or purpose is a failed result of kind `VALIDATION`; a reply that is not one vector per text of one
+  length is refused. The static `JEmbeddings.cosineSimilarity(float[], float[])` gives `0` for a zero vector and throws
+  `IllegalArgumentException` for vectors of different lengths. `LlmException.getKind()` now reads an embedding
+  provider's `EmbeddingError` by its HTTP status, as it reads a `ServiceError` (`401`/`403` `AUTHENTICATION`, `429`
+  `RATE_LIMIT`, `400` `VALIDATION`, any other `SERVICE`, with `getStatusCode()`), and as `OTHER` when it has none; it
+  was always `OTHER` before. The Java guide has an [Embeddings](docs/guide/java.md#embeddings) section, and the
+  `gradle-java` sample compares two sentences.
 - **Java completions with usage, model and tool calls, and a typed error kind**
   ([#1487](https://github.com/llm4s/llm4s/issues/1487)): `llm4s-java-api`'s `JLlmClient.completion(String)`,
   `completion(Conversation)` and `completion(Conversation, JCompletionOptions)` return an

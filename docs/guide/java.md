@@ -193,12 +193,16 @@ complete Gradle project.
 The snippets below leave out their imports. Together they use these:
 
 ```java
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 import org.llm4s.javaapi.ConversationBuilder;
 import org.llm4s.javaapi.JCompletion;
 import org.llm4s.javaapi.JCompletionOptions;
+import org.llm4s.javaapi.JEmbeddingClient;
+import org.llm4s.javaapi.JEmbeddingPurpose;
+import org.llm4s.javaapi.JEmbeddings;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.JReasoningEffort;
 import org.llm4s.javaapi.JToolCall;
@@ -341,10 +345,10 @@ try {
 | Kind | The failure | Recoverable |
 |---|---|---|
 | `AUTHENTICATION` | the provider rejected the API key | no, unless it is a provider's `401` or `403` reported as a service error |
-| `RATE_LIMIT` | the provider, or a local limiter, refused the call for now | yes |
+| `RATE_LIMIT` | the provider, or a local limiter, refused the call for now | yes, unless it is an embedding provider's error |
 | `TIMEOUT` | the call did not finish in time | yes |
 | `NETWORK` | the provider could not be reached | yes |
-| `SERVICE` | the provider answered with an error | yes |
+| `SERVICE` | the provider answered with an error | yes, unless it is an embedding provider's error |
 | `VALIDATION` | the request is wrong: a missing or invalid argument | no, unless it is a provider's `400` reported as a service error |
 | `CONFIGURATION` | a setting is missing or invalid | no |
 | `CANCELLED` | the call was cancelled, for example by an interrupt | no |
@@ -356,6 +360,8 @@ the recoverability of its class: a `ServiceError` or an `APIError` is recoverabl
 reported as one reads as `AUTHENTICATION` and `isRecoverable()` is `true`. The table's column is what the kind's own
 error classes say; to decide whether to try again, always call `isRecoverable()` rather than infer it from the kind.
 Every error class in `org.llm4s.error` has a kind, and a test fails when a new one is added without one.
+An [embedding](#embeddings) provider's error response has the kind of its HTTP status in the same way, but llm4s does
+not call any embedding error recoverable, so `isRecoverable()` is `false` for it whatever its kind.
 
 `isRecoverable()` says whether the call may succeed if tried again, perhaps after you do something first: wait out a rate
 limit, or correct a request the provider rejected. `getRetryAfter()` is the `Optional<Duration>` the provider asked you
@@ -410,10 +416,87 @@ literal), and the `toolCallId()` a tool message answers. `usage()` counts tokens
 These types are values, but not `Serializable`. Their `toString` prints the full text - a message's content, a tool
 call's arguments, an answer or a guardrail's reason - as the Scala types do, so mind what you log.
 
+## Embeddings
+
+An embedding model turns a text into a vector, a `float[]`, and texts that mean similar things get vectors that point
+in similar directions: the basis of semantic search. `Llm4s.createDefaultEmbeddingClient()` creates a
+`JEmbeddingClient` for the model `application.conf` names, as `createDefaultClient()` does for chat. The model is
+`provider/model` under `llm4s.embeddings`, or the `EMBEDDING_MODEL` environment variable:
+
+```hocon
+llm4s {
+  embeddings {
+    model = "openai/text-embedding-3-small"   # or set EMBEDDING_MODEL
+  }
+}
+```
+
+The key comes from the vendor's variable, `OPENAI_API_KEY` here, as a chat section's does. The embedding providers
+`llm4s-java-api` brings are `openai` and `ollama`; Voyage, Jina and Cohere come with their own modules
+(`llm4s-voyage`, `llm4s-jina`, `llm4s-cohere`). Creating the client sends no request, and does not throw:
+
+```java
+LlmResult<JEmbeddingClient> created = Llm4s.createDefaultEmbeddingClient();
+created.ifFailure(error -> System.err.println("Could not create an embedding client: " + error.getMessage()));
+JEmbeddingClient embedder = created.getOrNull();   // null when it failed
+```
+
+No model configured, a provider that is not on the classpath, a missing key, or a model whose provider module does
+not declare its dimensions is a failed result of kind `CONFIGURATION`, whose message says what to set.
+`embedder.model()` and `embedder.dimensions()` are the model and its vector length as configured.
+
+`embed` takes a `java.util.List<String>` and returns a `JEmbeddings`: one vector per text, in the order of the texts,
+from a single request. `JEmbeddings.cosineSimilarity` compares two of them:
+
+```java
+JEmbeddings embeddings = embedder.embed(List.of(
+    "The cat sat on the mat.",
+    "A kitten was sitting on the rug.")).get();
+
+List<float[]> vectors = embeddings.vectors();
+double similarity = JEmbeddings.cosineSimilarity(vectors.get(0), vectors.get(1));
+System.out.println(embeddings.model() + ", " + embeddings.dimensions() + " dimensions: similarity " + similarity);
+```
+
+`model()` is the model as the provider named it in its reply, and `dimensions()` the length of every vector.
+`vectors()` returns a new unmodifiable list of new arrays on each call, so changing one changes nothing; call it once and
+keep the list. A `JEmbeddings` is a value, with `equals` and `hashCode` over its vectors' components. Core's vectors
+are `double`s; these are their nearest `float`s, the precision vector stores keep.
+
+`cosineSimilarity` goes from `-1` (opposite) through `0` (unrelated) to `1` (the same direction). A zero vector has no
+direction, so its similarity to anything is `0`. Two vectors of different lengths, which come from different models,
+throw `IllegalArgumentException`, and a `null` throws `NullPointerException`.
+
+Several embedding models embed a search query differently from the documents it searches, and comparing a query
+embedded as a document quietly finds worse matches. Say which side a text is on with `JEmbeddingPurpose`:
+
+```java
+List<float[]> documents = embedder.embed(texts, JEmbeddingPurpose.DOCUMENT).get().vectors();
+float[] query = embedder.embed(List.of("Where did the cat sit?"), JEmbeddingPurpose.QUERY).get().vectors().get(0);
+
+int best = 0;
+for (int i = 1; i < documents.size(); i++) {
+    if (JEmbeddings.cosineSimilarity(query, documents.get(i)) > JEmbeddings.cosineSimilarity(query, documents.get(best))) {
+        best = i;
+    }
+}
+System.out.println("closest: " + texts.get(best));
+```
+
+`embed(texts)` without a purpose embeds documents. Voyage and Cohere send the purpose as `input_type` and Jina as
+`task`; OpenAI and Ollama embed both alike and ignore it, so code that says which side it is on works with any of them.
+
+Like `complete`, `embed` blocks and never throws: an empty list returns no vectors without a request, a `null` list,
+text or purpose is a failed result of kind `VALIDATION`, and an interrupt one of kind `CANCELLED`. A provider's error
+response has the kind of its HTTP status - `401` reads as `AUTHENTICATION`, `429` as `RATE_LIMIT`, `400` as
+`VALIDATION`, any other as `SERVICE`, with `getStatusCode()` - and one with no status, such as a provider that could not
+be reached, is `OTHER`. A vector store to keep the vectors in and search them is
+[#1491](https://github.com/llm4s/llm4s/issues/1491).
+
 ## What is not here yet
 
-`llm4s-java-api` covers a client, a conversation, the whole reply and the kind of a failure. These are not available from Java yet, each with the issue that
-tracks it:
+`llm4s-java-api` covers a client, a conversation, the whole reply, the kind of a failure and embeddings. These are not
+available from Java yet, each with the issue that tracks it:
 
 | You may expect | State today |
 |---|---|
@@ -422,7 +505,7 @@ tracks it:
 | Structured output into a Java record | [#1486](https://github.com/llm4s/llm4s/issues/1486) |
 | Defining tools | an agent takes a Scala `ToolRegistry`: [#1484](https://github.com/llm4s/llm4s/issues/1484) |
 | Agents beyond a turn | [An agent turn](#an-agent-turn) reads a result; the agent guide covers [streaming a turn](agents/streaming#java-and-kotlin) and [suspended turns](agents/#suspended-turns-from-java-and-kotlin) from Java. Tools still need a Scala `ToolRegistry` (row above) |
-| Embeddings and RAG | [#1490](https://github.com/llm4s/llm4s/issues/1490), [#1491](https://github.com/llm4s/llm4s/issues/1491) |
+| A vector store and RAG | [Embeddings](#embeddings) are here; storing and searching them is [#1491](https://github.com/llm4s/llm4s/issues/1491) |
 | A fake client for your own tests | [#1497](https://github.com/llm4s/llm4s/issues/1497) |
 
 ## Where next

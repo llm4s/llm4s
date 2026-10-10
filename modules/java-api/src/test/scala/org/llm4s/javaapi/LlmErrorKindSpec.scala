@@ -23,6 +23,7 @@ import scala.util.Using
  * deciding so.
  */
 class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
+  import LlmErrorKindSpec.SpeechLikeError
 
   /** The names of the class files directly in `org/llm4s/error`, from a classes directory or a jar. */
   private def errorPackageClassNames: List[String] = {
@@ -133,8 +134,42 @@ class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "read an error from outside org.llm4s.error, or one implemented in Java, as OTHER" in {
-    new LlmException(EmbeddingError(Some("500"), "boom", "openai")).getKind shouldBe LlmErrorKind.OTHER
+  it should "read an embedding provider's error response by its status, as a ServiceError with that status reads" in {
+    def kind(code: String): LlmErrorKind = new LlmException(EmbeddingError(Some(code), "x", "voyage")).getKind
+
+    Seq("401", "403").foreach(kind(_) shouldBe LlmErrorKind.AUTHENTICATION)
+    kind("429") shouldBe LlmErrorKind.RATE_LIMIT
+    kind("400") shouldBe LlmErrorKind.VALIDATION
+    Seq("404", "500", "503", " 502 ").foreach(kind(_) shouldBe LlmErrorKind.SERVICE)
+    Seq("401", "429", "500").foreach(code =>
+      new LlmException(EmbeddingError(Some(code), "x", "jina")).getKind shouldBe
+        new LlmException(ServiceError(code.toInt, "jina", "x")).getKind
+    )
+  }
+
+  it should "read an embedding error with no status - an unreachable provider, an unparsable reply - as OTHER" in {
+    def error(code: Option[String]): LlmException =
+      new LlmException(EmbeddingError(code, "HTTP request failed", "openai"))
+
+    // no code, a code that is not a number, and numbers that are not HTTP statuses
+    Seq(None, Some("timeout"), Some(""), Some("99"), Some("600"), Some("-1")).foreach { code =>
+      withClue(code) {
+        error(code).getKind shouldBe LlmErrorKind.OTHER
+        error(code).getStatusCode shouldBe OptionalInt.empty()
+      }
+    }
+    Seq("100", "599").foreach(code => error(Some(code)).getStatusCode shouldBe OptionalInt.of(code.toInt))
+  }
+
+  it should "leave an embedding error's recoverability to core, which calls none recoverable" in {
+    val limited = new LlmException(EmbeddingError(Some("429"), "slow down", "cohere"))
+    CompletionCheck.failure(limited).asScala.toList shouldBe
+      List("kind:rate-limit", "recoverable:false", "retryAfter:none", "status:429")
+    LLMError.isRecoverable(EmbeddingError(Some("503"), "x", "p")) shouldBe false
+  }
+
+  it should "read an error from another module, or one implemented in Java, as OTHER" in {
+    new LlmException(SpeechLikeError("no voice")).getKind shouldBe LlmErrorKind.OTHER
     val javaError = new JavaInteropCheck.JavaError("from Java")
     new LlmException(javaError).getKind shouldBe LlmErrorKind.OTHER
     new LlmException(javaError).isRecoverable shouldBe false
@@ -202,20 +237,31 @@ class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
         .toMap
     recoverableColumn.keySet shouldBe LlmErrorKind.values.toSet
 
-    (oneOfEach.map(_._1) ++ remapped).foreach { error =>
-      val e    = new LlmException(error)
-      val cell = recoverableColumn(e.getKind)
+    val embedding = (None :: List(400, 401, 403, 429, 500).map(s => Some(s.toString)))
+      .map(code => EmbeddingError(code, "x", "voyage"))
+    (oneOfEach.map(_._1) ++ remapped ++ embedding).foreach { error =>
+      val e         = new LlmException(error)
+      val cell      = recoverableColumn(e.getKind)
+      val embedding = error.isInstanceOf[EmbeddingError]
       withClue(s"$error reads as ${e.getKind}, whose row says '$cell': ") {
         cell match {
-          case "yes"                        => e.isRecoverable shouldBe true
-          case "no"                         => e.isRecoverable shouldBe false
-          case c if c.startsWith("depends") => succeed
+          case "yes"                                             => e.isRecoverable shouldBe true
+          case "yes, unless it is an embedding provider's error" => e.isRecoverable shouldBe !embedding
+          case "no"                                              => e.isRecoverable shouldBe false
+          case c if c.startsWith("depends")                      => succeed
           case c =>
             c should startWith("no, unless it is a provider's ")
-            // recoverable exactly when it is one of the statuses the row names
-            e.isRecoverable shouldBe LlmErrorKinds.statusCode(error).exists(s => c.contains(s"`$s`"))
+            c should endWith(" reported as a service error")
+            // recoverable exactly when it is a service error with one of the statuses the row names
+            e.isRecoverable shouldBe (!embedding && LlmErrorKinds.statusCode(error).exists(s => c.contains(s"`$s`")))
         }
       }
     }
   }
+}
+
+object LlmErrorKindSpec {
+
+  /** An error of the kind another llm4s module defines outside `org.llm4s.error`, as `llm4s-speech` does. */
+  final case class SpeechLikeError(message: String) extends LLMError
 }
