@@ -831,7 +831,7 @@ private[runner] object CommandPolicy {
           case (arg, candidate, Some(Outside)) => escape(program, arg, candidate)
           case (_, _, Some(TooCostly))         => tooCostly(program)
         }
-        .orElse(if (program == "cp") cpDestinationRefusal(args, workDir, realRoot, budget) else None)
+        .orElse(if (program == "cp") cpDestinationRefusal(args, isWindows, workDir, realRoot, budget) else None)
         .orElse(sequenceRefusal(program, args, isWindows, workDir, budget))
     }
 
@@ -1402,13 +1402,18 @@ private[runner] object CommandPolicy {
    *    following links, for a link that leads outside.
    *  - A copy that keeps links (`-R`, `-a`, `-P`, `-d`) of several sources could copy a link from one source and
    *    then write a file of the same name from another through it, so such a copy may not have two sources with
-   *    the same name, nor several sources and one that names a directory's contents.
+   *    the same name, nor several sources and one that names a directory's contents. "The same name" is the name
+   *    the destination's file system sees: names are compared after case folding and Unicode normalisation
+   *    ([[folded]]), as macOS (APFS, HFS+) and Windows (NTFS) compare them - there `cp -P a/b/x c/X d` makes the link
+   *    `d/x`, and macOS cp then opens `d/X`, which is that link, and writes `c/X` through it to where it points. On
+   *    Windows a name holding `~`, which may be another name's 8.3 short name, matches any.
    *
    * These checks run before `cp` starts; a link made at a destination name while it runs (by another command) is
    * not seen.
    */
   private def cpDestinationRefusal(
     args: Seq[String],
+    isWindows: Boolean,
     workDir: Bases,
     realRoot: Path,
     budget: Budget
@@ -1416,9 +1421,13 @@ private[runner] object CommandPolicy {
     val command  = cpCommand(args)
     val operands = command.operands.toVector
 
+    // As the destination's file system compares them: `x` and `X`, or `café` composed and decomposed, are one name
+    // on macOS and Windows (#1775 review); on Windows a `~` may make a name another's short name.
     val names = operands.flatMap(lastName)
+    val sameName =
+      names.map(folded).distinct.size < names.size || (isWindows && names.size >= 2 && names.exists(_.contains('~')))
     val clash =
-      command.keepsLinks && operands.size >= 3 && (names.distinct.size < names.size || operands.exists(copiesContents))
+      command.keepsLinks && operands.size >= 3 && (sameName || operands.exists(copiesContents))
 
     lazy val destinations: Vector[String] =
       (for {
@@ -1436,7 +1445,8 @@ private[runner] object CommandPolicy {
       Some(
         Refusal(
           ArgumentNotAllowed,
-          "A cp that copies links (-R, -a, -P, -d) may not have two sources with the same name, or several sources " +
+          "A cp that copies links (-R, -a, -P, -d) may not have two sources with the same name (letter case and " +
+            "Unicode normalisation ignored, as macOS and Windows file systems compare names), or several sources " +
             "and one that names a directory's contents: one source's link and another's file would land at one name, " +
             "and cp would write the file through the link. Copy them one at a time."
         )
@@ -1790,7 +1800,17 @@ private[runner] object CommandPolicy {
         named && Try(Files.isSameFile(dir, change.dir)).getOrElse(false)
       }
 
-      /** The entries the program looks up to reach `arg`, under both readings; `Left` when out of budget. */
+      /**
+       * The entries the program looks up to reach `arg`, under both readings; `Left` when out of budget.
+       *
+       * The lexical reading is walked from the root (`split(absolute, absolute)`), not from the working directory, so
+       * it looks up every directory above the working directory too. That is what refuses a relative path from a
+       * working directory that an earlier operation writes into: from `d/sub`, `cp -R ../../src/sub l/secret.txt
+       * ../../d` first merges `src/sub` - holding `l` -> outside - into `d/sub`, and GNU cp then reads `l/secret.txt`
+       * through the copied link. The physical walk of `l/secret.txt` starts at the working directory and never looks
+       * up `sub` in `d`; the lexical walk does, and `sub` in `d` is a name the first operation creates. Keep this walk
+       * starting at the root (the spec pins it).
+       */
       def lookups(arg: String): Either[Verdict, Seq[(Path, String)]] = {
         val seen     = scala.collection.mutable.ListBuffer.empty[(Path, String)]
         val visit    = (dir: Path, name: String) => { seen += (dir -> name); () }

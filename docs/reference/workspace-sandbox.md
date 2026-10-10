@@ -143,7 +143,7 @@ following links out of the workspace through its own options:
 | `wc` | `--files0-from` |
 | `ls` | `-L`, `--dereference` |
 | `grep` | `-R`, `--dereference-recursive`, `-S` (BSD) |
-| `cp` | `-L`, `--dereference`, `-H`, `-s`, `--symbolic-link`; with `-R`, `-r`, `-a`, `-P` or `-d` (or their long forms) anywhere in the arguments, two sources with the same name, or several sources and one that names a directory's contents (`src/.`, `src/`) |
+| `cp` | `-L`, `--dereference`, `-H`, `-s`, `--symbolic-link`; with `-R`, `-r`, `-a`, `-P` or `-d` (or their long forms) anywhere in the arguments, two sources with the same name (letter case and Unicode normalisation ignored; on Windows a name with `~` matches any), or several sources and one that names a directory's contents (`src/.`, `src/`) |
 | `chmod` | `-L`, `-H`, `--dereference` |
 | `hostname` | an operand, `-F`, `--file`, `-b`, `--boot` |
 
@@ -299,6 +299,7 @@ mv sub/l l/secret.txt .           # refused: l/secret.txt goes through the ./l t
 mv evil d/evil/secret.txt d       # refused, also through another name for d, or d/EVIL, or d/evil~
 mv sub sub/Main.scala d           # refused: sub/Main.scala goes through the sub the first move removes
 cp -P sub/l l/secret.txt .        # refused: GNU cp reads l/secret.txt through the copied link
+cp -P a/b/x c/X d                 # refused: on macOS d/X is the link d/x, and cp writes c/X through it
 mv a.txt b.txt d                  # runs
 mv outlink dangling d/            # runs: several links moved, nothing reached through them
 ```

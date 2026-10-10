@@ -2058,7 +2058,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--backup`) and, for `mv`, its own entry; every other path argument is walked, links followed, and the command is
   refused (`ARGUMENT_NOT_ALLOWED`) when it looks up one of those entries, comparing names case- and
   normalisation-insensitively and directories by identity. An `mv` that moves a source holding the working directory
-  is refused too. Run one command per source instead. `rm`, `mkdir`, `touch` and `chmod` create no link and are
+  is refused too. The existing refusal of a link-preserving `cp` of two sources with the same name now compares the
+  names as the destination's file system does, ignoring letter case and Unicode normalisation (and, on Windows,
+  taking a name with `~` for any): on macOS `cp -P a/b/x c/X d` copied the link `x` into `d` and then wrote `c/X`
+  through it. Run one command per source instead. `rm`, `mkdir`, `touch` and `chmod` create no link and are
   unchanged. See [Several sources in one command](docs/reference/workspace-sandbox.md#several-sources-in-one-command).
 - **Workspace runner: an agent can remove or rename a symbolic link that points out of the workspace**
   ([#1730](https://github.com/llm4s/llm4s/issues/1730)): the command policy resolved every argument through its

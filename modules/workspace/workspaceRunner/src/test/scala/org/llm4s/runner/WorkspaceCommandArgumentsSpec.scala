@@ -514,6 +514,74 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
       nothingPulledIn(fx, "l", "secret.txt", "d/l", "d/secret.txt", "d/sub")
     }
 
+  it should "refuse a link-preserving cp of sources whose names differ only in letter case or Unicode normalisation" in
+    inWorkspace { fx =>
+      // `a/b/x` -> ../../outside/secret.txt names the workspace's own (missing) `outside` while in `a/b`; copied into
+      // `d` it names the real one. On macOS and Windows `x` and `X` are one name, so `cp -P a/b/x c/X d` makes the
+      // link `d/x`, then opens `d/X` - that link - and writes `c/X` through it (macOS cp, #1775 review).
+      val nfc = "café"  // é composed
+      val nfd = "café" // e and a combining acute accent: the same name on APFS and NTFS
+      Seq("a/b", "c", "d", "e/B").foreach(dir => Files.createDirectories(fx.root.resolve(dir)))
+      link(fx, "a/b/x", Paths.get("../../outside/secret.txt"))
+      link(fx, s"a/b/$nfc", Paths.get("../../outside/secret.txt"))
+      write(fx.root.resolve("c").resolve("X"), "OVERWRITTEN\n")
+      write(fx.root.resolve("c").resolve(nfd), "OVERWRITTEN\n")
+      write(fx.root.resolve("c").resolve("y"), "y\n")
+      write(fx.root.resolve("e").resolve("B").resolve("x"), "OVERWRITTEN\n")
+      val ws = fx.interface(ReadWrite)
+      Seq(
+        "cp -P a/b/x c/X d",
+        "cp -R a/b/x c/X d",
+        "cp -a a/b/x c/X d/",
+        "cp -d a/b/x c/X d", // GNU's -d
+        "cp -P -t d a/b/x c/X",
+        s"cp -P a/b/$nfc c/$nfd d",
+        s"cp -P a/b/$nfd c/$nfc d", // either spelling first
+        "cp -R a/b e/B d" // directories: `d/b/x` is the link, and `e/B/x` is then written into `d/B`, which is `d/b`
+      ).foreach(refuses(ws, _, ArgumentNotAllowed))
+      nothingPulledIn(fx, "d/x", "d/X", s"d/$nfc", "d/b")
+      // A copy that follows links (no -P, -R, -a, -d) makes no link, so one name twice is only overwritten
+      runs(ws, "cp c/X e/B/x d")
+      // Distinct names still copy, directories and links included
+      runs(ws, "cp -R c e/B d")
+      Files.exists(fx.root.resolve("d").resolve("c").resolve("X")) shouldBe true
+      val f = Files.createDirectory(fx.root.resolve("f"))
+      runs(ws, "cp -P a/b/x c/y f")
+      isLink(f.resolve("x")) shouldBe true
+      new String(Files.readAllBytes(f.resolve("y")), StandardCharsets.UTF_8) shouldBe "y\n"
+      // mv renames over a link rather than writing through it: on macOS `c/X` replaces the link `f/x` itself
+      runs(ws, "mv a/b/x c/X f")
+      outsideIntact(fx)
+    }
+
+  it should "refuse a cp from a working directory inside a destination an earlier source merges into" in
+    inWorkspace { fx =>
+      // From `d/sub`, `cp -R ../../src/sub l/secret.txt ../../d` first merges `src/sub` into `d/sub`, making
+      // `d/sub/l` -> outside, and GNU cp then reads `l/secret.txt` through it. The walk of `l/secret.txt` from the
+      // working directory never looks up `sub` in `d`; the lexical walk from `/` does (#1775 review).
+      Seq("src/sub", "d/sub").foreach(dir => Files.createDirectories(fx.root.resolve(dir)))
+      link(fx, "src/sub/l", fx.outside)
+      val ws = fx.interface(ReadWrite)
+      refuses(ws, "cp -R ../../src/sub l/secret.txt ../../d", ArgumentNotAllowed, workingDirectory = Some("d/sub"))
+      refuses(ws, "cp -a ../../src/sub l/secret.txt ../../d", ArgumentNotAllowed, workingDirectory = Some("d/sub"))
+      nothingPulledIn(fx, "d/sub/l", "d/secret.txt", "d/sub/secret.txt")
+    }
+
+  it should "on Windows, take a name holding '~' in a link-preserving cp of several sources for any name" in
+    inWorkspace { fx =>
+      // `LONGNA~1` may be the 8.3 short name of `longname.txt`: one entry under two names
+      val root = fx.root.toRealPath()
+      def refusal(windows: Boolean, args: String*) =
+        CommandPolicy.refusal("cp", args, isWindows = windows, root, root, Map.empty).map(_.code)
+      refusal(windows = true, "-P", "a/LONGNA~1", "c/longname.txt", "d") shouldBe Some(ArgumentNotAllowed)
+      refusal(windows = true, "-R", "a/longname.txt", "c/LONGNA~1", "d") shouldBe Some(ArgumentNotAllowed)
+      refusal(windows = true, "-P", "a/x", "c/X", "d") shouldBe Some(ArgumentNotAllowed)
+      // controls: distinct names, a copy that keeps no link, and the same names judged as a POSIX runner would
+      refusal(windows = true, "-P", "a/x", "c/y", "d") shouldBe None
+      refusal(windows = true, "a/LONGNA~1", "c/longname.txt", "d") shouldBe None
+      refusal(windows = false, "-P", "a/LONGNA~1", "c/longname.txt", "d") shouldBe None
+    }
+
   it should "still move and copy several sources that do not reach through each other, links included" in
     inWorkspace { fx =>
       linksOut(fx)
