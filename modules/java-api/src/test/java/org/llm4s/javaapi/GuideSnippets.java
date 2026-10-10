@@ -9,7 +9,9 @@ import java.util.concurrent.CompletableFuture;
 import org.llm4s.error.LLMError;
 import org.llm4s.error.RecoverableError;
 import org.llm4s.javaapi.ConversationBuilder;
+import org.llm4s.javaapi.JCompletionOptions;
 import org.llm4s.javaapi.JLlmClient;
+import org.llm4s.javaapi.JReasoningEffort;
 import org.llm4s.javaapi.Llm4s;
 import org.llm4s.javaapi.LlmException;
 import org.llm4s.javaapi.LlmResult;
@@ -45,6 +47,18 @@ final class GuideSnippets {
             .build();
 
         LlmResult<String> answer = client.complete(conversation);
+        System.out.println(answer.get());
+    }
+
+    /** The "Completion options" block: temperature, a token limit and reasoning, set with the builder. */
+    static void completionOptions(JLlmClient client, Conversation conversation) {
+        JCompletionOptions options = JCompletionOptions.builder()
+            .temperature(0.2)
+            .maxTokens(512)
+            .reasoning(JReasoningEffort.MEDIUM)
+            .build();
+
+        LlmResult<String> answer = client.complete(conversation, options);
         System.out.println(answer.get());
     }
 

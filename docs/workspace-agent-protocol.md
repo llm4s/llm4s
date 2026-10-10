@@ -273,7 +273,10 @@ searchFiles({
 
 ### 6. `executeCommand`
 
-**Description**: Executes a shell command in the workspace.
+**Description**: Runs one program with its arguments in the workspace. The runner does not use a shell: it splits
+`command` into words and starts the program directly, so pipes, redirection, `;`, `&&` and `$(...)` are refused, as
+is anything else the sandbox's [command policy](reference/workspace-sandbox#command-policy) forbids. A refusal is
+a `WorkspaceAgentErrorResponse` carrying the policy's code (for example `FORBIDDEN_CHARACTERS`).
 
 **Parameters**:
 ```typescript
@@ -298,15 +301,15 @@ searchFiles({
 
 **Usage Examples**:
 ```
-// Run tests in a specific directory
+// List a directory
 executeCommand({
-  command: "npm test",
+  command: "ls -la",
   workingDirectory: "packages/frontend"
 })
 
-// Install a dependency
+// Search the sources: one program and its arguments, no pipe
 executeCommand({
-  command: "npm install lodash --save",
+  command: "grep -rn TODO src",
   timeout: 60
 })
 ```

@@ -9,6 +9,7 @@ import org.llm4s.agent.graph.StreamEvent;
 import org.llm4s.javaapi.AgentStream;
 import org.llm4s.javaapi.Answer;
 import org.llm4s.javaapi.ConversationBuilder;
+import org.llm4s.javaapi.JCompletionOptions;
 import org.llm4s.javaapi.JAgent;
 import org.llm4s.javaapi.JAgentResult;
 import org.llm4s.javaapi.JAgentStatus;
@@ -71,15 +72,19 @@ public final class HelloLLM4S {
         return answer.isSuccess();
     }
 
-    /** A conversation with a system message, built with {@link ConversationBuilder}. */
+    /**
+     * A conversation with a system message, built with {@link ConversationBuilder}, sent with options built with
+     * {@link JCompletionOptions}: a low temperature and a token limit.
+     */
     private static boolean aConversation(JLlmClient client) {
         System.out.println("== A conversation");
         Conversation conversation = ConversationBuilder.create()
             .system("You answer in one short sentence.")
             .user("What is a monad?")
             .build();
+        JCompletionOptions options = JCompletionOptions.builder().temperature(0.2).maxTokens(200).build();
 
-        LlmResult<String> answer = client.complete(conversation);
+        LlmResult<String> answer = client.complete(conversation, options);
         if (answer.isFailure()) {
             System.err.println("The call failed: " + answer.getError().getMessage());
             return false;

@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Completion options from Java** ([#1488](https://github.com/llm4s/llm4s/issues/1488)): `llm4s-java-api`'s
+  `JCompletionOptions.builder()` sets `temperature`, `topP`, `maxTokens`, `presencePenalty`, `frequencyPenalty`,
+  `reasoning` (the Java enum `JReasoningEffort`: `NONE`, `LOW`, `MEDIUM`, `HIGH`) and `budgetTokens`, and
+  `JLlmClient.complete(Conversation, JCompletionOptions)` sends them. A value that may be absent is read as an
+  `Optional` / `OptionalInt` and can be cleared with an empty one, so no `scala.Option` is involved. The builder is
+  immutable, `toBuilder()` starts one from existing options, and a value no provider accepts (a negative or
+  non-finite temperature, a top-p outside `0..1`, a token count below 1) throws `IllegalArgumentException` when it
+  is set. The options map onto core's `CompletionOptions` through its `apply` and `with*` methods only. The
+  `complete(Conversation, CompletionOptions)` overload stays. The Java guide has a
+  [Completion options](docs/guide/java.md#completion-options) section, and the `gradle-java` sample uses the builder.
 - **Cookbook recipe: several agents in one graph** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   `MultiAgentGraphRecipe` runs two specialist agents in one superstep and an editor agent behind a static join,
   and its spec checks update order, the barrier, step boundaries and cancellation with no API key.
@@ -2034,6 +2044,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   substring: `cookie_policy`, `cookie_consent` and `max_cookie_age` are left alone. `SensitiveKeyWords` and
   `SensitiveKeySuffixes` in `Redaction` are core's one list of sensitive key names for fields, header lines and
   `key=value` pairs; URL query parameters are also matched, by substring, against `SensitiveQueryParams`.
+- **Security - workspace runner: WebSocket commands go through the command policy, not a shell**
+  ([#1756](https://github.com/llm4s/llm4s/issues/1756)): `RunnerMain` served the WebSocket protocol's
+  `ExecuteCommandCommand`, the path `ContainerisedWorkspace.executeCommand` and `executeCommandWithStreaming` take, by
+  running the raw command string through `sh -c` (`cmd.exe /c` on Windows) with the client's `environment` copied into
+  the child unfiltered. Only `shellAllowed` was checked, so the `allowedCommands` allowlist, the forbidden shell
+  characters, the per-program option, path, git and Windows rules of #1715, the environment allowlist and the
+  null-device standard input of #1728 applied only to direct calls on `WorkspaceAgentInterfaceImpl`, and an agent
+  driving a containerised workspace could run any program (`ls; cat /etc/passwd`, `cat a | sh`, `echo $(id)`,
+  `find . -delete`, `LD_PRELOAD`). Both paths now share one function that tokenizes the command, applies every check
+  and builds the process from the argument vector; the WebSocket path keeps its stdout/stderr streaming,
+  cancellation and exit-code and duration reporting, and refuses with a `WorkspaceAgentErrorResponse` carrying the
+  direct path's code (`FORBIDDEN_CHARACTERS`, `EXECUTABLE_NOT_ALLOWED`, `ARGUMENT_NOT_ALLOWED`,
+  `PATH_ESCAPE_ATTEMPT`, `ENVIRONMENT_NOT_ALLOWED`, ...) followed by `CommandCompletedMessage` with exit code 1. The
+  protocol is unchanged. A working directory outside the workspace is now `PATH_ESCAPE_ATTEMPT` rather than
+  `INVALID_DIRECTORY`, and a WebSocket command sent with no timeout stops at the sandbox's `defaultCommandTimeout`
+  instead of running until it ends. **Migration:** WebSocket commands no longer go through a shell, so pipes,
+  redirection, `;`, `&&`, `$(...)`, backquotes and variable expansion are refused rather than interpreted, and only
+  programs on the runner's allowlist run. Write each command as one program and its arguments (`grep -rn TODO src`,
+  not `cd src && grep -rn TODO . | head`), quoting an argument that holds spaces; send a second command as a second
+  request, use `workingDirectory` instead of `cd`, and `writeFile` instead of redirection. A program the agent needs
+  that is not on the profile's list, such as a build tool, is added with the runner's new `WORKSPACE_EXTRA_COMMANDS`
+  (`ContainerisedWorkspace` and `CodeWorker` take it as `extraAllowedCommands`; `WorkspaceSandboxConfig.withExtraCommands`
+  parses it and refuses shells and launchers such as `env` and `xargs`); `CodeGenExample` adds `sbt` this way and
+  asks for `sbt compile` and `sbt run` as separate commands. The `@Workspace` suites now send argv commands (`grep zzz
+  <file>` for a non-zero exit, `cat <present> <missing>` for stderr, `tail -f <file>` for the timeout), and
+  `WorkspaceCommandsSpec` runs each command string they and the workspace samples send through the runner's
+  WebSocket executor on every PR.
+- **Memory: `getRelevantContext` no longer writes a section heading with nothing under it** ([#1580](https://github.com/llm4s/llm4s/issues/1580)):
+  under a tight `maxTokens` the context assembly wrote a section heading such as `## Relevant Knowledge`
+  before checking whether its first memory fitted, so the result could be headings with no entries,
+  and the `# Retrieved Context` line was not counted, so the text could run past `maxTokens * 4`
+  characters. A heading is now written only together with its first memory, a section whose first
+  memory does not fit is left out, the result is `""` when no memory fits, and the whole text stays
+  within the budget. With a budget that fits everything the output is unchanged.
 - **Workspace runner: a command that reads standard input gets end-of-file at once instead of hanging until the
   timeout** ([#1728](https://github.com/llm4s/llm4s/issues/1728)): `executeCommand` left the child's standard input an
   open pipe that nothing wrote to or closed, so `cat` with no operands, `cat -`, `sort`, `uniq`, `wc`, `head`,

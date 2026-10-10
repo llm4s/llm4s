@@ -105,13 +105,19 @@ links out of the workspace, and any path argument can name a file outside it
 ([#1715](https://github.com/llm4s/llm4s/issues/1715)).
 
 **Mitigation (implemented):**
+- Every check below applies to both ways a command reaches the runner: a direct `executeCommand`, and the WebSocket
+  protocol that `ContainerisedWorkspace` uses, which until [#1756](https://github.com/llm4s/llm4s/issues/1756) ran the
+  raw command string through `sh -c` with the client's environment and skipped all of them. Both now share one
+  function that checks the command and builds its process, and refuse with the same codes.
 - The command is split into words and started directly, without a shell, and shell metacharacters (`&`, `|`, `<`, `>`,
-  `^`, `;`, `` ` ``, `$`, `%`) are refused in every word.
+  `^`, `;`, `` ` ``, `$`, `%`) are refused in every word. Its standard input is the null device.
 - The executable must be a bare name in `WorkspaceSandboxConfig.allowedCommands`; a path to an executable is
-  refused. What is enforced is decided by the runner's `WORKSPACE_SANDBOX_PROFILE` alone: unset, the runner uses
-  the `permissive` profile, whose list is `ReadWriteCommands` (`ReadOnlyCommands` plus `cp`, `mv`, `rm`, `mkdir`,
-  `touch`, `chmod`, `copy` and `move`); `locked` (`shellAllowed = false`) refuses every command; an unknown name stops
-  the runner. `ReadOnlyCommands` is the field default, for a `WorkspaceSandboxConfig` constructed directly. The
+  refused. What is enforced is decided by the runner's environment alone. `WORKSPACE_SANDBOX_PROFILE` picks the
+  profile: unset, the runner uses `permissive`, whose list is `ReadWriteCommands` (`ReadOnlyCommands` plus `cp`, `mv`,
+  `rm`, `mkdir`, `touch`, `chmod`, `copy` and `move`); `locked` (`shellAllowed = false`) refuses every command; an
+  unknown name stops the runner. `WORKSPACE_EXTRA_COMMANDS` adds bare program names to the profile's list (set by
+  `ContainerisedWorkspace`'s `extraAllowedCommands`); a shell or a launcher such as `env` or `xargs` cannot be added,
+  and an added program has no per-program option rules, so add only what the agent needs. `ReadOnlyCommands` is the field default, for a `WorkspaceSandboxConfig` constructed directly. The
   workspace client's `llm4s.workspace.sandbox.profile` does not reach the container. On Windows, built-ins such as
   `echo`, `dir`, `type`, `copy` and `move` run through `cmd.exe /c`, after the forbidden-character check and the
   checks below.
