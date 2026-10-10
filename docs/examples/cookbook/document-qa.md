@@ -1,3 +1,29 @@
+---
+layout: page
+title: Answer questions with keyword search
+parent: Cookbook
+grand_parent: Examples
+nav_order: 11
+---
+
+# Answer questions with keyword search
+{: .no_toc }
+
+Chunk some text, put it in an in-memory keyword index (BM25), retrieve the best passage and answer from it.
+{: .fs-6 .fw-300 }
+
+## The problem
+
+Sometimes you want retrieval with no embedding model at all: a small set of documents, exact terms (product
+names, error codes), or nowhere to send text to be embedded. A keyword index (SQLite FTS5, BM25 ranking) finds the
+passage that shares the most words with the question; only that passage goes into the prompt.
+
+## The program
+
+The whole program, [`DocumentQaRecipe.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/cookbook/DocumentQaRecipe.scala). `script` is the stand-in for a model that answers without a
+network or a key; `demo` runs the recipe and returns what to print.
+
+```scala
 package org.llm4s.samples.cookbook
 
 import org.llm4s.chunking.{ ChunkerFactory, ChunkingConfig }
@@ -93,3 +119,30 @@ object DocumentQaRecipe extends RecipeApp {
   def demo(client: LLMClient): Result[String] =
     answer(client, handbook, question).map(a => s"${a.text}\n(source: ${a.sources.mkString(", ")})")
 }
+```
+
+## Run it
+
+```bash
+sbt "samples/runMain org.llm4s.samples.cookbook.DocumentQaRecipe"          # scripted client, no API key
+sbt "samples/runMain org.llm4s.samples.cookbook.DocumentQaRecipe --live"   # the provider your configuration names
+```
+
+The first command needs nothing but sbt. The second uses the section `llm4s.providers.provider` names; see
+[running the samples](../../getting-started/configuration#running-the-samples). CI runs every recipe against its scripted client, and checks
+that the program on this page is the source file, so what you read here compiles and works.
+
+## Use a real provider
+
+Pass your provider's client to `answer`, or run with `--live`. Nothing else changes: the index needs no
+provider. For documents on disk, see the [folder recipe](folder-qa), which reads files and adds vector search.
+
+## Pitfalls
+
+- A keyword index matches words, not meaning. A question as written must contain every one of its words to
+  match, so the recipe turns it into an OR of its content words.
+- A question of only stop words has no content words; FTS5 rejects an empty query, so the recipe answers "not
+  found" without searching.
+- When nothing matches, say so instead of asking the model: it would answer from what it knows.
+
+[Back to the cookbook](../cookbook)

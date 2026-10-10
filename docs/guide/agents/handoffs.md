@@ -327,7 +327,7 @@ The stored history is the same either way: `preserveContext = false` changes onl
 | Simple delegation | **Handoffs** |
 | Type-safe data flow | **Graph** |
 
-For complex workflows, see the [multi-agent graph recipe](../../examples/cookbook.html#6-several-agents-in-one-graph): agents as nodes of a typed graph, run in parallel and joined.
+For complex workflows, see the [multi-agent graph recipe](../../examples/cookbook/multi-agent-graph.html): agents as nodes of a typed graph, run in parallel and joined.
 
 ---
 

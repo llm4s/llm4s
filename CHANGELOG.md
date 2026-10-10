@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The cookbook: thirteen runnable recipes, one page each, run offline in CI**
+  ([#1476](https://github.com/llm4s/llm4s/issues/1476)): seven new recipes join the six under
+  `org.llm4s.samples.cookbook` - `EmailExtractionRecipe` (a nested schema, checked against the email),
+  `SummariseRecipe` (map-reduce), `FolderQaRecipe` (the RAG pipeline over a folder of files),
+  `StreamingRecipe` (`streamComplete`), `FallbackRecipe` (`ReliableClient` retries, then a second provider),
+  `CachingRecipe` (`CachingLLMClient`) and `JudgeRecipe` (LLM-as-judge with a rubric) - and `ToolCallingRecipe`
+  now chains two tools, one of its own and the calculator. Each runs with no API key against a scripted client
+  (`--live` for the configured provider); the recipes that embed use `BagOfWordsEmbeddings`, an offline embedding
+  provider registered like a provider module's. Each recipe has its own page under `docs/examples/cookbook/` -
+  the problem, the whole program, how to run it, what to change for a real provider, and the pitfalls - linked
+  from the cookbook index, the examples index and the README. `CookbookDocsSpec` runs every recipe in
+  `sbt test` and fails when a page is missing, lacks a section or sits out of order, or shows a program that is
+  not its source file.
 - **Embeddings from Java** ([#1490](https://github.com/llm4s/llm4s/issues/1490)): `llm4s-java-api`'s
   `Llm4s.createDefaultEmbeddingClient()` creates a `JEmbeddingClient` for the model `llm4s.embeddings.model`
   (`EMBEDDING_MODEL`) names, the route `createDefaultClient()` takes for chat; a missing model, provider or key, or a
