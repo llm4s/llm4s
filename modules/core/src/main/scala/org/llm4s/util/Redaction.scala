@@ -173,7 +173,7 @@ private[llm4s] object Redaction {
    * the cookie pass does not read, are the field pass's.
    */
   private def isSensitiveHeaderNotCookie(name: String): Boolean = {
-    val lower        = name.toLowerCase(Locale.ROOT)
+    val lower = name.toLowerCase(Locale.ROOT)
     val cookieHeader = lower.endsWith("cookie") && (lower.length == 6 || {
       val before = lower.charAt(lower.length - 7)
       !(before.isLetterOrDigit || before == '_')
@@ -884,7 +884,7 @@ private[llm4s] object Redaction {
         while (j < length && "}] \t".indexOf(input.charAt(j).toInt) >= 0) j += 1
         j == length || input.charAt(j) == '\n' || input.charAt(j) == '\r' || (input.charAt(j) == ',' && valueAfter(j))
       case ',' | ':' => valueAfter(i)
-      case _   => false
+      case _         => false
     })
   }
 

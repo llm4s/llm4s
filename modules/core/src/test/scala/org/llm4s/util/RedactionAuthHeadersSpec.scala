@@ -171,7 +171,9 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
     Redaction.redact(s"""msg="Cookie: a="b$session\nconfig password="SEKD5" x""") shouldBe
       s"""msg="Cookie: $R\nconfig password="$R" x"""
     Redaction.redact(s"""a" msg="Cookie: x=" y\npassword="SEKH2"""") shouldBe s"""a" msg="Cookie: $R\npassword="$R""""
-    Redaction.redact(s"""x="hi\nCookie: a="b$session\npassword="SEKH3"""") shouldBe s"""x="hi\nCookie: $R\npassword="$R""""
+    Redaction.redact(
+      s"""x="hi\nCookie: a="b$session\npassword="SEKH3""""
+    ) shouldBe s"""x="hi\nCookie: $R\npassword="$R""""
     Redaction.redact(s"""Cookie: sid="$session"\npassword="SEKH8"""") shouldBe s"""Cookie: $R\npassword="$R""""
     // A string closed before the header, quoted cookie values after it, a Python repr on the next line.
     val closedBefore =
@@ -204,9 +206,9 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
     // unbalanced cookie values, escaped quotes - followed by fields under main's keys in logfmt, JSON and Python repr
     // shapes. Reading the cookie headers must only add to what is redacted (#1686): every secret the passes redact
     // when no cookie header is read stays redacted. Deterministic.
-    val rnd       = new scala.util.Random(1686)
-    var id        = 0
-    def secret(): String = { id += 1; f"Zq$id%05dWx" }
+    val rnd                    = new scala.util.Random(1686)
+    var id                     = 0
+    def secret(): String       = { id += 1; f"Zq$id%05dWx" }
     def pick[A](xs: Seq[A]): A = xs(rnd.nextInt(xs.length))
     val prefixes = Seq(
       "",
@@ -256,10 +258,10 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
       s => s"""  "auth_token": "$s",""",
       s => s"""x-api-key: $s"""
     )
-    val noise     = Seq("k=\"v\"", "\"", "it's", "\\\"", "ok", "{'a': 'b'}")
-    val breaks    = Seq("\n", "\r\n", "\n\n", " ")
-    var redacted  = 0
-    var leaks     = Vector.empty[String]
+    val noise    = Seq("k=\"v\"", "\"", "it's", "\\\"", "ok", "{'a': 'b'}")
+    val breaks   = Seq("\n", "\r\n", "\n\n", " ")
+    var redacted = 0
+    var leaks    = Vector.empty[String]
     (1 to 2000).foreach { _ =>
       val lines = Vector.fill(2 + rnd.nextInt(4)) {
         rnd.nextInt(3) match {
