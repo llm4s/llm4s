@@ -516,7 +516,10 @@ So every `git` the runner starts has:
   `gpg.ssh.program` set to the empty directory (which cannot be run), `-c diff.ignoreSubmodules=all`,
   `-c safe.bareRepository=explicit`, `-c protocol.allow=never`, `-c log.diffMerges=separate` (git's default, so `-m`
   and `--diff-merges=on` diff a merge against its parents rather than re-merging it) and `-c merge.default=` (a path
-  with no `merge` attribute uses the built-in merge). Command-line configuration wins over every file.
+  with no `merge` attribute uses the built-in merge). The empty name is used because no driver name is safe by
+  itself: a repository's `[merge "text"]` replaces git's built-in `text` driver (and `union`, `binary`) just as it
+  defines any other, while a `[merge ""]` it could select is refused (below). Command-line configuration wins over
+  every file.
 - **After the subcommand**: `--no-ext-diff --no-textconv --ignore-submodules=all` for `diff`, `log` and `show`;
   `--ignore-submodules=all` for `status`; `--no-textconv` for `blame` and `grep`. The agent cannot undo them:
   `--ext-diff`, `--textconv` and `--ignore-submodules` are refused, and so are `--remerge-diff` and `--diff-merges`
@@ -532,7 +535,8 @@ So every `git` the runner starts has:
   `-c merge.<name>.driver=` (git cannot start an empty command, and keeps its own side of the merge). An `include.path` or
   `includeIf` (an included file may sit in the work tree and change after the listing), a `hook.*` key, or a
   `filter`, `diff` or `merge` driver name with any byte other than printable ASCII (0x21-0x7E) or with `=` or `"`
-  refuses the command (`GIT_CONFIG_NOT_ALLOWED`). The listing is read as bytes, so a name that is not UTF-8
+  refuses the command (`GIT_CONFIG_NOT_ALLOWED`), as do more than 200 filter, diff and merge drivers together, which
+  bounds the command line the runner builds. The listing is read as bytes, so a name that is not UTF-8
   (`\xE9vil`) is not decoded into U+FFFD and blanked under a name git does not use, and a non-ASCII name is never
   re-encoded for the command line in the JVM's `sun.jnu.encoding`; only a name that reaches git byte for byte is
   blanked. A listing that fails, takes more than ten seconds or is over 1 MB refuses it too (`EXECUTION_FAILED`).

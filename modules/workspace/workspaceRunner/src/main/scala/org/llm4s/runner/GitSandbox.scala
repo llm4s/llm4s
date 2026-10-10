@@ -35,7 +35,8 @@ import scala.util.{ Try, Using }
  *     every `gpg.*.program` the empty directory (which cannot be run), `diff.ignoreSubmodules=all` (no `git` started
  *     in a submodule), `safe.bareRepository=explicit` (a bare repository written into the workspace is not used),
  *     `log.diffMerges=separate` (git's default, so `-m` and `--diff-merges=on` never re-merge) and `merge.default`
- *     empty (a path with no `merge` attribute uses the built-in merge), and `--no-pager`; and after the subcommand
+ *     empty (a path with no `merge` attribute uses the built-in merge; a `[merge ""]` the empty name would select is
+ *     refused by layer 3), and `--no-pager`; and after the subcommand
  *     ([[SubcommandOptions]]) `--no-ext-diff`, `--no-textconv` and `--ignore-submodules=all` where it takes them. The
  *     policy refuses the options that would undo them, `--remerge-diff` and `--diff-merges` (which re-merge, running
  *     merge drivers), and `git status -v` / `--verbose`, whose staged diff runs textconv drivers and which takes no
@@ -48,7 +49,7 @@ import scala.util.{ Try, Using }
  *     its own side of the merge). Configuration it cannot account for refuses the command
  *     ([[GitConfigNotAllowed]]): an `include.path` or `includeIf` (an included file may lie in the work tree and change
  *     after the listing), a `hook.*` key (configuration-defined hooks), or a driver name that `-c` cannot express
- *     exactly. The listing is read as bytes, and a `filter`, `diff` or `merge` subsection is blanked only when every
+ *     exactly, or more than [[MaxDrivers]] drivers. The listing is read as bytes, and a `filter`, `diff` or `merge` subsection is blanked only when every
  *     byte is printable ASCII other than `=` and `"` (0x21-0x7E): a name with any other byte - one that is not UTF-8
  *     (`[filter "\xE9vil"]`), any non-ASCII character, a space or a control character - could reach git as a different
  *     name once decoded and re-encoded for the command line (as U+FFFD, or in the JVM's `sun.jnu.encoding`), leaving the
@@ -71,9 +72,14 @@ private[runner] object GitSandbox {
   /** How long listing the configuration may take; a `.git/config` that is a FIFO would otherwise block. */
   val ListingTimeout: Long = 10000L
 
-  /** The most output the listing may produce, and the most drivers a command may blank. */
+  /** The most output the listing may produce. */
   private val MaxListing = 1 << 20
-  private val MaxDrivers = 200
+
+  /**
+   * The most filter, diff and merge drivers a command may blank: each adds up to four `-c` arguments, so this bounds
+   * the command line the runner builds. A configuration that defines more refuses the command.
+   */
+  private[runner] val MaxDrivers = 200
 
   /**
    * An empty directory the runner made outside any workspace, for `HOME`, `XDG_CONFIG_HOME`, `core.hooksPath` and the
@@ -108,7 +114,10 @@ private[runner] object GitSandbox {
     "safe.bareRepository"   -> "explicit",
     "protocol.allow"        -> "never",
     "log.diffMerges"        -> "separate",
-    "merge.default"         -> ""
+    // Empty, not a built-in name: git looks a name up among the repository's own drivers before its built-in ones, so
+    // a `[merge "text"]` (or "union", "binary") in .git/config would replace `text`. An empty name selects only a
+    // `[merge ""]`, which driverOverrides refuses (isExpressible), and otherwise falls through to the built-in merge.
+    "merge.default" -> ""
   )
 
   /** Options given after the subcommand: `git diff`, `log` and `show` run textconv and external diffs by default. */

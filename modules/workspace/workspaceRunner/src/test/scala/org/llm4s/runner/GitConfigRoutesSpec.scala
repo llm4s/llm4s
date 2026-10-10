@@ -407,6 +407,85 @@ class GitConfigRoutesSpec extends AnyFlatSpec with Matchers {
     (shown.stdout should not).include("remerge")
   }
 
+  it should "refuse a merge driver with an empty name, which the runner's empty merge.default would select" in inRepo {
+    repo =>
+      repo.mergeCommit()
+      setup(repo, "config", "log.diffMerges", "remerge")
+      val config   = repo.root.resolve(".git/config")
+      val original = Files.readAllBytes(config)
+      def plant(name: String): Unit =
+        Files.write(
+          config,
+          original ++ s"[merge \"$name\"]\n\tdriver = ${repo.marker} driver %A\n".getBytes(StandardCharsets.UTF_8)
+        )
+      // A built-in driver's name is no safer: a repository's own `[merge "text"]` (or "union", "binary") replaces it,
+      // so `merge.default=text` would select the repository's driver, which the runner then has to blank
+      plant("text")
+      controlRuns(repo, repo.root, "-c", "merge.default=text", "log", "-p", "-m", "-1")
+      neverRuns(repo, reads ++ mergeReads: _*)
+      // The runner gives `merge.default` empty, which selects a `[merge ""]` driver when git is run with it directly...
+      plant("")
+      controlRuns(repo, repo.root, "-c", "merge.default=", "log", "-p", "-m", "-1")
+      // ...so a repository that defines one is refused outright, never run with it blanked
+      neverRuns(repo, reads ++ mergeReads: _*)
+      (reads.filterNot(_ == "git status -v") ++ mergeReads).foreach { command =>
+        val ex = the[WorkspaceAgentException] thrownBy repo.ws.executeCommand(command, None, Some(30.seconds), None)
+        withClue(command)(ex.code shouldBe GitSandbox.GitConfigNotAllowed)
+      }
+      // Without it, the empty default is git's built-in merge, and -m diffs against each parent
+      Files.write(config, original)
+      val shown = repo.ws.executeCommand("git log -p -m -1", None, Some(30.seconds), None)
+      withClue(shown.stderr)(shown.exitCode shouldBe 0)
+      shown.stdout should include("+main")
+      repo.marks shouldBe empty
+  }
+
+  it should "blank up to 200 filter, diff and merge drivers, and refuse a repository that defines more" in inRepo {
+    repo =>
+      val config   = repo.root.resolve(".git/config")
+      val original = Files.readAllBytes(config)
+      // The attributes name the first filter and the first diff driver, so whichever is planted is a live route
+      write(repo.root.resolve(".gitattributes"), "* filter=f0 diff=d0 merge=m0\n")
+      def plant(filters: Int, diffs: Int, merges: Int): Unit = {
+        val drivers =
+          (0 until filters).map(i => s"[filter \"f$i\"]\n\tclean = ${repo.marker} clean\n") ++
+            (0 until diffs).map(i => s"[diff \"d$i\"]\n\ttextconv = ${repo.marker} textconv\n") ++
+            (0 until merges).map(i => s"[merge \"m$i\"]\n\tdriver = ${repo.marker} driver %A\n")
+        Files.write(config, original ++ drivers.mkString.getBytes(StandardCharsets.UTF_8))
+        ()
+      }
+      def refused(control: String): Unit = {
+        touchA(repo)
+        controlRuns(repo, repo.root, control)
+        touchA(repo, "y\nb\nb\nc\n")
+        neverRuns(repo, reads: _*)
+        reads.filterNot(_ == "git status -v").foreach { command =>
+          val ex = the[WorkspaceAgentException] thrownBy repo.ws.executeCommand(command, None, Some(30.seconds), None)
+          withClue(command)(ex.code shouldBe GitSandbox.GitConfigNotAllowed)
+          withClue(command)(ex.getMessage should include("201 drivers"))
+        }
+      }
+
+      // 200, the most a command may blank: every one is blanked and the command runs
+      plant(67, 67, 66)
+      touchA(repo)
+      controlRuns(repo, repo.root, "status")
+      controlRuns(repo, repo.root, "diff")
+      touchA(repo, "y\nb\nb\nc\n")
+      neverRuns(repo, reads: _*)
+      Seq("git status", "git diff", "git log -p", "git blame a.txt", "git ls-files -m").foreach { command =>
+        val r = repo.ws.executeCommand(command, None, Some(30.seconds), None)
+        withClue(s"$command: ${r.stderr}")(r.exitCode shouldBe 0)
+      }
+      repo.marks shouldBe empty
+
+      // 201 of any kind are refused
+      plant(67, 67, 67)
+      refused("status")
+      plant(0, 1, 200)
+      refused("diff")
+  }
+
   it should "not use a bare repository written into the workspace" in inRepo { repo =>
     repo.signedCommit()
     val bare = repo.root.resolve("bare")
