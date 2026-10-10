@@ -2013,6 +2013,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - `llm4s-agent-tools`: the shell tool checks option values attached to their flag**
+  ([#1723](https://github.com/llm4s/llm4s/issues/1723)): under `ShellConfig.pathPolicy`, a value given as its own
+  argument (`grep -f lout`) was held to the policy, but one attached to its flag (`grep -flout`, `grep -iflout`,
+  `grep --file=lout`, `grep --fil=lout`, `sort --random-source=lout`) was refused only if it held a `/` or `\`, so a
+  link out of the allowed directory, a blocked file in the working directory, or `..` passed. Every attached value is
+  now resolved and checked as a path, like the workspace runner's command policy does (#1720): the value after `=` of
+  a long option, and every tail of a short-option cluster, since any letter in it may take the rest as its value. A
+  text value that happens to name such a file (`grep -e..`) is refused too, and so is a flag over 4096 characters.
+  The refused options (`file -C`/`-m`/`-M`/`-f`, `date -f`/`-r`, `wc --files0-from`) are now also matched whatever the
+  case of the program name or a Windows executable suffix (`FILE -C`, `file.exe -C`, which run `file -C` on Windows
+  and on macOS's default file system), and `sort -o`, `--output`, `--compress-program` and `--files0-from` (which
+  write a file, run a program, or read the names of the files to sort from a file the command does not name) join
+  them, for allowlists that add `sort`, in every spelling (`-roout`, `--out=x`, `--files0=x`, after a consumed
+  `--`), with or without a path policy.
 - **Workspace runner: a command that reads standard input gets end-of-file at once instead of hanging until the
   timeout** ([#1728](https://github.com/llm4s/llm4s/issues/1728)): `executeCommand` left the child's standard input an
   open pipe that nothing wrote to or closed, so `cat` with no operands, `cat -`, `sort`, `uniq`, `wc`, `head`,

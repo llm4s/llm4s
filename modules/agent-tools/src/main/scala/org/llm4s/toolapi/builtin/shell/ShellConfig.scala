@@ -20,7 +20,12 @@ import scala.concurrent.duration.*
  * argument is resolved against the working directory and judged as the program will hand it to the OS: a `..`
  * after a link is read both as POSIX applies it (`linksub/..` is the parent of the link's target) and as Windows
  * does (`linksub/..` is the working directory), and both locations must be allowed, the working directory itself must
- * be allowed, and a flag that carries a path (`-f/etc/passwd`) is refused. `--` is not taken as the end of the
+ * be allowed, and a flag that carries a path (`-f/etc/passwd`) is refused. A value attached to a flag is checked as
+ * a path as well, since the program may open it: the value after `=` of a long option (`--file=lout`) and every tail
+ * of a short-option cluster after the dash (`-iflout` gives `iflout`, `flout`, `lout`, ...), so a link out of the
+ * allowed directory, a blocked file or `..` given that way is refused. Which options take a value is not modelled,
+ * so a text value that happens to name such a file (`grep -e..`) is refused too; a flag longer than 4096 characters
+ * is refused rather than checked tail by tail. `--` is not taken as the end of the
  * options, since a program may read it as the argument of the option before it: every argument is checked as a
  * path, and also as a flag when it starts with `-`. The working directory is checked for every command. A hard
  * link inside an allowed directory to a file elsewhere passes, as it does for the file tools: no path check can
@@ -29,12 +34,15 @@ import scala.concurrent.duration.*
  * when a policy is set.
  *
  * == Refused options ==
- * Whatever the policy, the options that make an otherwise read-only command write a file or read a file it does
- * not name as an argument are refused: `file -C`, `-m`, `-M`, `-f` (`--compile`, `--magic-file`, `--files-from`),
- * `date -f`, `-r` (`--file`, `--reference`) and `wc --files0-from`. Long options are matched on any prefix of at
- * least one letter, since GNU programs accept an unambiguous abbreviation (`date --fil`), and wherever they appear,
- * after a `--` too (`file -F -- -f list` reads `-f list` as an option). These rules match the
- * program by its file name, so `/usr/bin/file -C` is refused as `file -C` is. A command that walks directories by itself (`ls -R`,
+ * Whatever the policy, the options that make an otherwise read-only command write a file, run a program or read a
+ * file it does not name as an argument are refused: `file -C`, `-m`, `-M`, `-f` (`--compile`, `--magic-file`,
+ * `--files-from`), `date -f`, `-r` (`--file`, `--reference`), `wc --files0-from`, and, for an allowlist that adds
+ * `sort`, `sort -o` (`--output`), `--compress-program` and `--files0-from`. A short option is refused anywhere in a
+ * cluster, with its value attached or not (`-bC`, `-Mmagic`, `-roout`). Long options are matched on any prefix of at
+ * least one letter, since GNU programs accept an unambiguous abbreviation (`date --fil`), with or without `=value`, and
+ * wherever they appear, after a `--` too (`file -F -- -f list` reads `-f list` as an option). These rules match the
+ * program by its file name, ignoring case and a Windows executable suffix, so `/usr/bin/file -C`, `FILE -C` and
+ * `file.exe -C` are refused as `file -C` is. A command that walks directories by itself (`ls -R`,
  * `grep -r`, `find`) is checked at its starting point only.
  *
  * @param allowedCommands List of allowed command names (e.g., "ls", "cat", "echo").

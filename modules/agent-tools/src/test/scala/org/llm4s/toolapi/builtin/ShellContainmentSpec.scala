@@ -365,4 +365,153 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
     run(config, "wc -w a.txt").map(_.stdout.trim.startsWith("2")) shouldBe Right(true)
     run(config, "file -b a.txt").map(_.exitCode) shouldBe Right(0)
   }
+
+  // ---- #1723: option values attached to their flag
+
+  /**
+   * A root holding `in.txt`, `pats` (a pattern file), a link `lout` to `outside/secret.txt` (`None` where links
+   * cannot be made) and `blocked.txt`, which the returned policy blocks. Returns (root, link made, config) with
+   * `grep` and `sort` added to the read-only allowlist.
+   */
+  private def attachedValueFixture(): (Path, Boolean, ShellConfig) = {
+    val root    = newRoot()
+    val outside = newRoot()
+    Files.writeString(outside.resolve("secret.txt"), "OUTSIDE-SECRET\n")
+    Files.writeString(root.resolve("in.txt"), "alpha\nOUTSIDE-SECRET\nbeta\n")
+    Files.writeString(root.resolve("pats"), "alpha\n")
+    Files.writeString(root.resolve("blocked.txt"), "OUTSIDE-SECRET\n")
+    val linked = Try(Files.createSymbolicLink(root.resolve("lout"), outside.resolve("secret.txt"))).isSuccess
+    val policy = FileConfig(
+      allowedPaths = Some(Seq(root.toString)),
+      blockedPaths = Seq(root.resolve("blocked.txt").toString)
+    )
+    val base = ShellConfig.readOnlyWithin(policy, Some(root.toString))
+    (root, linked, base.copy(allowedCommands = base.allowedCommands ++ Seq("grep", "sort")))
+  }
+
+  /**
+   * Every spelling of an option value the program opens as a file; `<v>` is replaced by the file. Each one is its own
+   * test, for a link out of the allowed directory and for a blocked file.
+   */
+  private def attachedSpellings: Seq[String] = Seq(
+    "grep -f<v> in.txt",               // short option, value attached
+    "grep -if<v> in.txt",              // clustered short options, value attached to the last
+    "grep -inf<v> in.txt",             // longer cluster
+    "grep --file=<v> in.txt",          // long option with =value
+    "grep --fil=<v> in.txt",           // abbreviated long option (getopt_long prefix) with =value
+    "grep --f=<v> in.txt",             // shortest abbreviation
+    "grep -e -- -f<v> in.txt",         // after a -- that -e consumed as its value
+    "sort --random-source=<v> in.txt", // another program's file-valued long option
+    "sort --random-s=<v> in.txt"
+  )
+
+  attachedSpellings.foreach { spelling =>
+    val viaLink = spelling.replace("<v>", "lout")
+    "The path policy" should s"refuse `$viaLink`, a link out of the allowed directory attached to its flag (#1723)" in {
+      val (_, linked, config) = attachedValueFixture()
+      if (!linked) cancel("symbolic links cannot be created here")
+
+      refused(run(config, viaLink)) should include("outside the allowed paths")
+    }
+
+    val viaBlocked = spelling.replace("<v>", "blocked.txt")
+    it should s"refuse `$viaBlocked`, a blocked file attached to its flag (#1723)" in {
+      val (_, _, config) = attachedValueFixture()
+
+      refused(run(config, viaBlocked)) should include("outside the allowed paths")
+    }
+  }
+
+  "The path policy" should "still refuse the value given as a separate argument (the control)" in {
+    val (_, linked, config) = attachedValueFixture()
+    if (!linked) cancel("symbolic links cannot be created here")
+
+    refused(run(config, "grep -f lout in.txt")) should include("outside the allowed paths")
+    refused(run(config, "grep --file lout in.txt")) should include("outside the allowed paths")
+    refused(run(config, "grep -f blocked.txt in.txt")) should include("outside the allowed paths")
+  }
+
+  Seq("grep -f.. in.txt", "grep -if.. in.txt", "grep --file=.. in.txt").foreach { command =>
+    it should s"refuse `$command`, an attached .. that leads out of the allowed directory" in {
+      val (_, _, config) = attachedValueFixture()
+
+      refused(run(config, command)) should include("outside the allowed paths")
+    }
+  }
+
+  it should "refuse a flag too long to check value by value" in {
+    val (_, _, config) = attachedValueFixture()
+
+    refused(run(config, "grep -e" + ("a" * 5000) + " in.txt")) should include("too long")
+  }
+
+  it should "still run commands whose attached values stay inside the allowed directory" in {
+    posixOnly()
+    val (_, _, config) = attachedValueFixture()
+
+    run(config, "grep -fpats in.txt").map(_.stdout.trim) shouldBe Right("alpha")
+    run(config, "grep --file=pats in.txt").map(_.stdout.trim) shouldBe Right("alpha")
+    run(config, "grep -iealpha in.txt").map(_.stdout.trim) shouldBe Right("alpha")
+    run(config, "grep -e -- -x in.txt").map(_.exitCode) shouldBe Right(1) // no match, but it ran
+    run(config, "head -n1 in.txt").map(_.stdout.trim) shouldBe Right("alpha")
+    run(config, "sort -r -k1 in.txt").map(_.exitCode) shouldBe Right(0)
+    run(config, "ls -la").map(_.exitCode) shouldBe Right(0)
+    run(config, "wc -l in.txt").map(_.stdout.trim.startsWith("3")) shouldBe Right(true)
+  }
+
+  /** sort's refused options in every spelling: they write a file, run a program or read a list of files. */
+  private def sortRefusals: Seq[String] = Seq(
+    "sort --files0-from=lout",
+    "sort --files0-from=blocked.txt",
+    "sort --files0-from=pats",
+    "sort --files0-from pats",
+    "sort --files0=pats",
+    "sort --fil=pats",
+    "sort -k -- --files0-from=pats",
+    "sort -o out in.txt",
+    "sort -oout in.txt",
+    "sort -roout in.txt",
+    "sort -k -- -oout in.txt",
+    "sort --output=out in.txt",
+    "sort --out out in.txt",
+    "sort --o=out in.txt",
+    "sort --compress-program=sh in.txt",
+    "sort --compress=sh in.txt"
+  )
+
+  sortRefusals.foreach { command =>
+    "The shell tool" should s"refuse `$command`, with or without a path policy (#1723)" in {
+      val (root, _, config) = attachedValueFixture()
+
+      refused(run(config, command)) should include("is not allowed for 'sort'")
+      refused(run(config.copy(pathPolicy = None), command)) should include("is not allowed for 'sort'")
+      Files.exists(root.resolve("out")) shouldBe false
+    }
+  }
+
+  /** A program spelled as Windows or a case-insensitive file system still finds it, and the rest of the command. */
+  private def programSpellings: Seq[(String, String)] = Seq(
+    "FILE"                -> "-C",
+    "File"                -> "-m magic x",
+    "file.exe"            -> "-C",
+    "FILE.EXE"            -> "--compile",
+    "file.cmd"            -> "-C",
+    "file.exe."           -> "-C",
+    "C:\\tools\\File.exe" -> "-C",
+    "SORT"                -> "-oout",
+    "Date.exe"            -> "--ref=x",
+    "WC"                  -> "--files0-from=x"
+  )
+
+  programSpellings.foreach { case (program, rest) =>
+    it should s"refuse `$program $rest`: denied options match the program whatever its case or .exe" in {
+      val root   = newRoot()
+      val config = ShellConfig(allowedCommands = Seq(program), workingDirectory = Some(root.toString))
+
+      // Single quotes keep the backslashes of a Windows path
+      refused(run(config, s"'$program' $rest")) should include("is not allowed for")
+      Files.exists(root.resolve("magic.mgc")) shouldBe false
+      Files.exists(root.resolve("out")) shouldBe false
+    }
+  }
 }
