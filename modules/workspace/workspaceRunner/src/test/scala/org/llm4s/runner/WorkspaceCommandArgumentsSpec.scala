@@ -260,6 +260,169 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
   }
 
   // ---------------------------------------------------------------------------------------------------------------
+  // A link that points out of the workspace can be removed or renamed itself (#1730)
+
+  /**
+   * `outfile` -> outside/secret.txt, `outdir` -> outside, `dangling` -> outside/missing, and the chain
+   * `chain` -> `hop` -> outside, `hop` itself a link in the workspace.
+   */
+  private def linksOut(fx: Fixture): Unit = {
+    link(fx, "outfile", fx.outside.resolve("secret.txt"))
+    link(fx, "outdir", fx.outside)
+    link(fx, "dangling", fx.outside.resolve("missing"))
+    link(fx, "hop", fx.outside)
+    link(fx, "chain", fx.root.resolve("hop").getFileName)
+    ()
+  }
+
+  private def isLink(p: Path): Boolean = Files.isSymbolicLink(p)
+
+  /** Nothing outside was touched: the directory and its file are still there. */
+  private def outsideIntact(fx: Fixture): Unit = {
+    Files.isDirectory(fx.outside, java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe true
+    new String(Files.readAllBytes(fx.outside.resolve("secret.txt")), StandardCharsets.UTF_8) shouldBe "secret\n"
+  }
+
+  "rm, mv and unlink" should "remove or rename a link that points out of the workspace, and only the link" in
+    inWorkspace { fx =>
+      linksOut(fx)
+      val ws = fx.interface(ReadWrite.withExtraCommands("unlink").fold(fail(_), identity))
+      runs(ws, "rm outfile")
+      Files.exists(fx.root.resolve("outfile"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      runs(ws, "rm -f outdir")
+      Files.exists(fx.root.resolve("outdir"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      runs(ws, "rm -- dangling")
+      Files.exists(fx.root.resolve("dangling"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      // A link to a link: only the first goes
+      runs(ws, "rm chain")
+      Files.exists(fx.root.resolve("chain"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      isLink(fx.root.resolve("hop")) shouldBe true
+      outsideIntact(fx)
+
+      // mv renames the link, not its target, into a name or a directory inside
+      runs(ws, "mv hop renamed")
+      isLink(fx.root.resolve("renamed")) shouldBe true
+      Files.readSymbolicLink(fx.root.resolve("renamed")) shouldBe fx.outside
+      runs(ws, "mv -f renamed sub/")
+      isLink(fx.root.resolve("sub").resolve("renamed")) shouldBe true
+      // by a path through a directory inside, and from another working directory
+      runs(ws, "mv sub/renamed sub/again")
+      runs(ws, "rm ../sub/again", workingDirectory = Some("sub"))
+      Files.exists(fx.root.resolve("sub").resolve("again"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+
+      link(fx, "viaunlink", fx.outside)
+      runs(ws, "unlink viaunlink")
+      Files.exists(fx.root.resolve("viaunlink"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      outsideIntact(fx)
+    }
+
+  it should "refuse such a link written with a trailing '/' or '/.', which makes the program follow it" in
+    inWorkspace { fx =>
+      linksOut(fx)
+      val ws = fx.interface(ReadWrite.withExtraCommands("unlink").fold(fail(_), identity))
+      // `mv outdir/ x` moves the directory outdir points to; `rm -r outdir/` empties it
+      Seq(
+        "rm outdir/",
+        "rm -f outdir/.",
+        "rm -r outdir/",
+        "rm -rf outdir/.",
+        "rm outdir//",
+        "mv outdir/ moved",
+        "mv outdir/. moved",
+        "mv outfile/ moved",
+        "unlink outdir/"
+      ).foreach(refuses(ws, _, PathEscape))
+      isLink(fx.root.resolve("outdir")) shouldBe true
+      Files.exists(fx.root.resolve("moved"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      outsideIntact(fx)
+    }
+
+  it should "refuse a recursive rm of such a link" in inWorkspace { fx =>
+    linksOut(fx)
+    val ws = fx.interface(ReadWrite)
+    Seq("rm -r outdir", "rm -R outdir", "rm -rf outdir", "rm -fR outdir", "rm --recursive outdir", "rm --rec outdir")
+      .foreach(refuses(ws, _, PathEscape))
+    isLink(fx.root.resolve("outdir")) shouldBe true
+    outsideIntact(fx)
+  }
+
+  it should "still hold the destination of mv to the path rule, links followed" in inWorkspace { fx =>
+    linksOut(fx)
+    val ws = fx.interface(ReadWrite)
+    Seq(
+      "mv a.txt outdir", // moves a.txt into the directory outdir points to
+      "mv a.txt outdir/",
+      "mv a.txt outdir/a.txt",
+      "mv a.txt outfile",
+      "mv outfile outdir", // a link source into a link destination
+      "mv b.txt hop",
+      "mv -t outdir a.txt",
+      "mv --target-directory=outdir a.txt",
+      "mv a.txt -t outdir",
+      "mv -f a.txt ../outside/a.txt"
+    ).foreach(refuses(ws, _, PathEscape))
+    Files.exists(fx.root.resolve("a.txt")) shouldBe true
+    Files.exists(fx.outside.resolve("a.txt")) shouldBe false
+    outsideIntact(fx)
+  }
+
+  it should "refuse a link whose directory is outside the workspace, or is so under one reading of the path" in
+    inWorkspace { fx =>
+      linksOut(fx)
+      Files.createSymbolicLink(fx.outside.resolve("lnk"), fx.outside.resolve("secret.txt"))
+      link(fx, "escape", fx.outside)
+      // `l` -> a/b/c, and a/b/x -> outside: physically `l/../x` is a/b/x, textually the workspace's `x`
+      Files.createDirectories(fx.root.resolve("a").resolve("b").resolve("c"))
+      link(fx, "l", fx.root.resolve("a").resolve("b").resolve("c"))
+      link(fx, "a/b/x", fx.outside)
+      val ws = fx.interface(ReadWrite)
+      Seq(
+        "rm escape/lnk",
+        "rm ../outside/lnk",
+        fx.expand("rm '{out}/lnk'"),
+        "mv escape/lnk moved",
+        "rm l/../x",
+        "rm .."
+      ).foreach(refuses(ws, _, PathEscape))
+      isLink(fx.outside.resolve("lnk")) shouldBe true
+      isLink(fx.root.resolve("a").resolve("b").resolve("x")) shouldBe true
+      outsideIntact(fx)
+    }
+
+  it should "keep the link refused under a form macOS or GNU would parse differently" in inWorkspace { fx =>
+    linksOut(fx)
+    val ws = fx.interface(ReadWrite)
+    // GNU-only options (macOS rm and mv have no long options, -t or -T), and GNU mv's -S taking the link as its value
+    Seq(
+      "rm --force outfile",
+      "mv -T outfile moved",
+      "mv -t sub outfile",
+      "mv --verbose outfile moved",
+      "mv -S outfile a.txt sub"
+    ).foreach(refuses(ws, _, PathEscape))
+    isLink(fx.root.resolve("outfile")) shouldBe true
+  }
+
+  it should "keep such a link refused on Windows, where the policy does not model removing a link" in inWorkspace {
+    fx =>
+      linksOut(fx)
+      val root = fx.root.toRealPath()
+      Seq("rm" -> "outfile", "mv" -> "outdir", "del" -> "outfile").foreach { case (program, arg) =>
+        CommandPolicy.refusal(program, Seq(arg, "x"), isWindows = true, root, root, Map.empty).map(_.code) shouldBe
+          Some(PathEscape)
+      }
+      CommandPolicy.refusal("rm", Seq("outfile"), isWindows = false, root, root, Map.empty) shouldBe None
+  }
+
+  it should "leave other programs' handling of the link unchanged" in inWorkspace { fx =>
+    linksOut(fx)
+    val ws = fx.interface(ReadWrite)
+    Seq("cat outfile", "cp outfile copied", "chmod 600 outfile", "touch outfile", "ls outdir", "mkdir outdir/x")
+      .foreach(refuses(ws, _, PathEscape))
+    outsideIntact(fx)
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
   // Links met inside a tree: options that follow them, and writes through a link already in the destination
 
   /** `d/innerout` -> outside, the shape a recursive command meets inside the tree it walks. */

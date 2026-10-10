@@ -56,19 +56,14 @@ launchers that run a program named in their arguments (`env`, `xargs`, `sudo`, `
 - **permissive**: Current behavior—shell allowed with the read-write command allowlist (`ReadWriteCommands`), standard limits (1MB file size, 500 dir entries, 30s command timeout)
 - **locked**: Shell disabled; strict limits (10s timeout). File writes and modifications remain allowed; this profile does not enforce a read-only filesystem.
 
-### HOCON (Client)
+### Client configuration
 
-`WorkspaceConfigSupport.loadSandboxConfig()` reads a profile from the client's configuration:
-
-```hocon
-llm4s.workspace.sandbox {
-  profile = "locked"  # or "permissive"
-}
-```
-
-This does not control enforcement: the client does not pass it to the container, and nothing but tests calls
-`loadSandboxConfig`. To lock a runner down, start its container with `WORKSPACE_SANDBOX_PROFILE=locked` (see the
-example below). An unknown profile name makes `loadSandboxConfig` return a `Left`.
+The workspace client has no sandbox setting: what the runner enforces is decided only by the two variables above,
+set on the runner's container. `WorkspaceConfigSupport.loadSandboxConfig()`, which read an
+`llm4s.workspace.sandbox.profile` that nothing passed to the container, was removed
+([#1730](https://github.com/llm4s/llm4s/issues/1730)). To lock a runner down, start its container with
+`WORKSPACE_SANDBOX_PROFILE=locked` (see the example below); to turn a profile name into a config in your own code,
+use `WorkspaceSandboxConfig.fromProfileName`.
 
 ## WorkspaceSandboxConfig Structure
 
@@ -116,7 +111,7 @@ and run a second command as a second request.
 | An argument holding a NUL character, on Windows one holding `"`, or one whose check fails with an error | `ARGUMENT_NOT_ALLOWED` |
 | On Windows, a cmd.exe built-in's argument holding a character cmd.exe splits or parses (`,` `=` `(` `)` `@` `!`, a control character, a non-ASCII space) | `ARGUMENT_NOT_ALLOWED` |
 | `git` with a `.git` file or link between the working directory and the workspace root | `PATH_ESCAPE_ATTEMPT` |
-| An argument that names a location outside the workspace | `PATH_ESCAPE_ATTEMPT` |
+| An argument that names a location outside the workspace (an `rm` / `unlink` operand or `mv` source naming a link itself: its directory, see [Removing a link](#removing-a-link)) | `PATH_ESCAPE_ATTEMPT` |
 | On Windows, a form listed under [On Windows](#on-windows) (a device name, a trailing `.` or space, `@`, `~`, glob syntax) | `ARGUMENT_NOT_ALLOWED` |
 | `cp` only: a name it would write leads outside, or a recursive copy's destination holds a link that does | `PATH_ESCAPE_ATTEMPT` |
 
@@ -148,7 +143,7 @@ following links out of the workspace through its own options:
 | `hostname` | an operand, `-F`, `--file`, `-b`, `--boot` |
 
 `mv`, `rm`, `mkdir` and `touch` have no option that follows a link out of the workspace, so they get the path rule
-only.
+only (with the exception for a link itself under [Removing a link](#removing-a-link)).
 
 Every argument is scanned for these options, including those after `--`, because an option that takes a value can
 consume the `--` itself. A short option is refused anywhere in a cluster (`sort -ro out`), and a long one under any
@@ -216,9 +211,52 @@ What these checks do not cover:
   `.git/objects/info/alternates` ([#1721](https://github.com/llm4s/llm4s/issues/1721)).
 - `diff -r` follows symbolic links it meets inside the tree it walks; no portable option stops it.
 - A relative link moved or copied to another depth by the read-write list (`mv a/b/rel rel`) can come to point
-  outside. Paths through it are refused, and so is a recursive `cp` into its directory, but the link is not removed.
+  outside. Paths through it are refused, and so is a recursive `cp` into its directory; the agent can remove it
+  (`rm rel`, see [Removing a link](#removing-a-link)), but the runner does not.
 - The checks run before the program starts, so a link made at a checked name by a concurrent command is not seen.
   Windows `copy` gets the path rule but not `cp`'s destination checks.
+
+### Removing a link
+
+Removing or renaming a symbolic link never touches what it points to: `rm` reads its operand without following a
+link at its last component, `unlink` and `rename` act on the name itself. So on POSIX, an operand of `rm` or `unlink`,
+or a source of `mv`, whose last component is itself a symbolic link is judged by the directory holding it rather than
+by where the link leads, and an agent can clean up a link that points out of the workspace, a dangling one, or the
+first of a chain of links ([#1730](https://github.com/llm4s/llm4s/issues/1730)):
+
+```text
+rm outlink            # removes the link; its target is untouched
+rm -f outlink         # likewise
+mv outlink sub/       # moves the link itself to sub/outlink
+mv outlink renamed
+unlink outlink        # where unlink is added with WORKSPACE_EXTRA_COMMANDS
+```
+
+Such an operand is allowed only when all of these hold; otherwise it gets the path rule, which follows the link and
+refuses it:
+
+- **Its last component is a name with no trailing `/`** (not `outlink/`, `outlink/.`, `.` or `..`). With a trailing
+  slash the kernel follows the link: `mv outlink/ x` moves the directory the link points to, and `rm -r outlink/`
+  deletes what is in it.
+- **The directory holding it is inside the workspace** under both readings of the path rule (the kernel's, following
+  links, and the one that removes `..` as text), and both name the same directory: `rm escape/link` with `escape` a
+  link out of the workspace, `rm ../outside/link` and `rm l/../link` with `l` a link to a deeper directory are
+  refused.
+- **In that directory, the last component is a symbolic link**, read without following it.
+- **`rm` is not recursive** (`-r`, `-R`, `--recursive`). GNU and BSD `rm -r` remove a link operand and not its target,
+  but not every implementation has been checked, and removing a link needs no `-r`.
+- **For `mv`, it is a source, not the destination.** The destination keeps the path rule, links followed:
+  `mv a.txt outlink` moves `a.txt` into the directory the link points to and is refused, as are `mv -t outlink a.txt`
+  and `mv --target-directory=outlink a.txt`.
+- **The arguments read the same to every `rm` / `mv` / `unlink`**: they are parsed by GNU's option table (with and
+  without `POSIXLY_CORRECT`) and by macOS / FreeBSD's, and every parse must know every option and agree on which
+  arguments are operands and which is the destination. An option only GNU has (`rm --force`, `mv -T`, `mv -t dir`,
+  any long option) or only BSD has (`mv -h`) keeps the link refused; write `rm -f outlink`, `mv outlink dir/`. An
+  operand starting with `-` is never exempted.
+
+On Windows a link or junction is not exempted: the policy does not model how `del`, `rd`, `move` or an MSYS `rm`
+treat them, so such an operand keeps the path rule and is refused when it leads outside. `cp` is unchanged: it
+copies what a link points to unless told otherwise, so its sources keep the path rule.
 
 ### Option values
 

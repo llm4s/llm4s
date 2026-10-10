@@ -170,6 +170,42 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
     assertRefused(command("ls ../"), "PATH_ESCAPE_ATTEMPT")
   }
 
+  it should "remove or rename a link that points out of the workspace, and refuse the forms that follow it (#1730)" in {
+    assume(!isWindowsHost, "POSIX rm and mv; Windows keeps refusing such a link")
+    val outside = Files.createTempDirectory("ws-command-executor-outside")
+    try {
+      Files.write(outside.resolve("secret.txt"), "secret\n".getBytes(StandardCharsets.UTF_8))
+      val made = Try {
+        Files.createSymbolicLink(root.resolve("ws-outlink"), outside)
+        Files.createSymbolicLink(root.resolve("ws-outlink2"), outside)
+      }
+      assume(made.isSuccess, "cannot create a symbolic link here")
+
+      assertRefused(command("rm ws-outlink/"), "PATH_ESCAPE_ATTEMPT")
+      assertRefused(command("rm -r ws-outlink"), "PATH_ESCAPE_ATTEMPT")
+      assertRefused(command("mv ws-outlink/ moved"), "PATH_ESCAPE_ATTEMPT")
+      assertRefused(command("mv notes.txt ws-outlink"), "PATH_ESCAPE_ATTEMPT")
+      Files.isSymbolicLink(root.resolve("ws-outlink")) shouldBe true
+
+      val (removed, removedDone) = run(command("rm ws-outlink"))
+      assertRan(removed, removedDone, 0)
+      Files.exists(root.resolve("ws-outlink"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+
+      val (renamed, renamedDone) = run(command("mv ws-outlink2 ws-renamed"))
+      assertRan(renamed, renamedDone, 0)
+      Files.readSymbolicLink(root.resolve("ws-renamed")) shouldBe outside
+      Files.delete(root.resolve("ws-renamed"))
+
+      Files.isDirectory(outside) shouldBe true
+      Files.exists(outside.resolve("secret.txt")) shouldBe true
+      Files.exists(root.resolve("notes.txt")) shouldBe true
+    } finally {
+      Seq("ws-outlink", "ws-outlink2", "ws-renamed").foreach(n => Files.deleteIfExists(root.resolve(n)))
+      Files.deleteIfExists(outside.resolve("secret.txt"))
+      Files.deleteIfExists(outside)
+    }
+  }
+
   it should "refuse a sort input file that follows a -t an earlier option took as its value (#1763)" in {
     assume(!isWindowsHost, "a POSIX absolute path; a Windows runner refuses sort -T and -t as options")
     val outside = Files.createTempFile("ws-command-executor-secret", ".txt")

@@ -36,7 +36,10 @@ import scala.util.{ Try, Using }
  *     reading Win32 uses - `.` and `..` removed as text first, then the links of the result resolved - so with
  *     `l` -> `a/b`, `l/../../x` (`a/x` physically, `../x` textually) is refused on every platform. An argument that
  *     does not name an existing file is judged the same way, so `../x` and `/tmp/x` are refused even when they do not
- *     exist yet. Programs that only
+ *     exist yet. On POSIX, an operand of `rm` or `unlink`, or a source of `mv`, whose last component is itself a
+ *     symbolic link is judged by the directory holding it instead, so an agent can remove or rename a link that points
+ *     out of the workspace; the destination of `mv` is not, and neither is an operand with a trailing `/` (see
+ *     [[linkOperands]] and [[namesLinkItself]]). Programs that only
  *     print their arguments (`echo`, `pwd`, `whoami`, `hostname`) are not checked. For `cp`, which writes through
  *     a link it finds at the name it writes, the names it will write are checked too (see [[cpDestinationRefusal]]).
  *     An argument over [[MaxArgumentLength]] characters, or paths costing more than [[MaxPathSteps]] lookups, are
@@ -806,8 +809,13 @@ private[runner] object CommandPolicy {
       val options  = ProgramOptions.getOrElse(program, Options())
       val switches = isWindows && WindowsSwitchPrograms.contains(program)
       val strings =
-        if (program == "sort" && !isWindows) sortCandidates(args) else candidates(args, options, switches)
+        if (program == "sort" && !isWindows) sortCandidates(args) else indexedCandidates(args, options, switches)
+      // An operand that names a link itself is judged by the directory holding it, not by where the link leads.
+      val links: Set[Int] =
+        if (isWindows) Set.empty
+        else linkOperands(program, args).filter(i => namesLinkItself(workDir, args(i), realRoot, budget))
       strings
+        .collect { case (i, arg, candidate) if !links.contains(i) => (arg, candidate) }
         .map { case (arg, candidate) =>
           val judged =
             verdict(workDir, candidate, realRoot, budget)
@@ -838,7 +846,15 @@ private[runner] object CommandPolicy {
    * No argument is exempt here: an option's value given as the next argument is a plain argument, whatever the
    * option. POSIX `sort`, whose `-t` value is a separator, is parsed instead by [[sortCandidates]] (#1763).
    */
-  private def candidates(args: Seq[String], options: Options, switches: Boolean): Iterator[(String, String)] = {
+  private def candidates(args: Seq[String], options: Options, switches: Boolean): Iterator[(String, String)] =
+    indexedCandidates(args, options, switches).map { case (_, arg, candidate) => (arg, candidate) }
+
+  /** [[candidates]], each with the index in `args` of the argument it came from. */
+  private def indexedCandidates(
+    args: Seq[String],
+    options: Options,
+    switches: Boolean
+  ): Iterator[(Int, String, String)] = {
     // In `/G:file` the `G:` names the switch, so the first tail `G:file` is not a path on drive G: (`file`, the
     // next-but-one tail, is checked; so is `D:file` in `/G:D:file`).
     def plain(arg: String): Iterator[String] =
@@ -849,29 +865,29 @@ private[runner] object CommandPolicy {
 
     @tailrec
     def loop(
-      rest: List[String],
+      rest: List[(String, Int)],
       afterDashes: Boolean,
-      found: List[(String, () => Iterator[String])]
-    ): List[(String, () => Iterator[String])] =
+      found: List[(Int, String, () => Iterator[String])]
+    ): List[(Int, String, () => Iterator[String])] =
       rest match {
-        case Nil          => found.reverse
-        case "--" :: tail => loop(tail, afterDashes = true, found)
-        case arg :: tail if afterDashes =>
+        case Nil               => found.reverse
+        case ("--", _) :: tail => loop(tail, afterDashes = true, found)
+        case (arg, i) :: tail if afterDashes =>
           val all = () => plain(arg) ++ (if (arg.startsWith("-")) tails(arg) else Iterator.empty)
-          loop(tail, afterDashes, (arg, all) :: found)
-        case arg :: tail if arg.startsWith("--") && arg.length > 2 =>
+          loop(tail, afterDashes, (i, arg, all) :: found)
+        case (arg, i) :: tail if arg.startsWith("--") && arg.length > 2 =>
           val name     = arg.takeWhile(_ != '=')
           val hasValue = arg.length > name.length
           val value    = if (hasValue && !textLong(name)) Iterator.single(arg.drop(name.length + 1)) else Iterator.empty
           val all      = () => Iterator.single(arg) ++ value.filter(_.nonEmpty)
-          loop(tail, afterDashes, (arg, all) :: found)
-        case arg :: tail if arg.length > 1 && arg.startsWith("-") =>
-          loop(tail, afterDashes, (arg, () => tails(arg) ++ Iterator.single(arg)) :: found)
-        case arg :: tail => loop(tail, afterDashes, (arg, () => plain(arg)) :: found)
+          loop(tail, afterDashes, (i, arg, all) :: found)
+        case (arg, i) :: tail if arg.length > 1 && arg.startsWith("-") =>
+          loop(tail, afterDashes, (i, arg, () => tails(arg) ++ Iterator.single(arg)) :: found)
+        case (arg, i) :: tail => loop(tail, afterDashes, (i, arg, () => plain(arg)) :: found)
       }
 
-    loop(args.toList, afterDashes = false, Nil).iterator.flatMap { case (arg, all) =>
-      all().map(arg -> _)
+    loop(args.toList.zipWithIndex, afterDashes = false, Nil).iterator.flatMap { case (i, arg, all) =>
+      all().map(candidate => (i, arg, candidate))
     }
   }
 
@@ -1055,7 +1071,7 @@ private[runner] object CommandPolicy {
    * remove the `-t` an exact parse found (`sort -T +0 -1t /etc/passwd`). Otherwise the separator is checked too, and
    * an operand that looks like an option contributes its tails, as after `--`.
    */
-  private def sortCandidates(args: Seq[String]): Iterator[(String, String)] = {
+  private def sortCandidates(args: Seq[String]): Iterator[(Int, String, String)] = {
     val argv = args.toVector
     val parses = for {
       spec    <- Seq(GnuSort, BsdSort)
@@ -1079,7 +1095,7 @@ private[runner] object CommandPolicy {
     }
 
     argv.indices.iterator.flatMap { i =>
-      parses.map(_.roles(i)).distinct.iterator.flatMap(ofRole(argv(i), _)).distinct.map(argv(i) -> _)
+      parses.map(_.roles(i)).distinct.iterator.flatMap(ofRole(argv(i), _)).distinct.map(c => (i, argv(i), c))
     }
   }
 
@@ -1475,5 +1491,138 @@ private[runner] object CommandPolicy {
       }
 
     loop(List(dir))
+  }
+
+  // ---- rm, mv, unlink: removing or renaming a link that points out of the workspace (#1730)
+
+  /** GNU rm (and uutils): no option takes a separate value; `--interactive` and `--preserve-root` take one after `=`. */
+  private val GnuRm = Getopt(
+    valueShort = Set.empty,
+    flagShort = "dfiIrRv".toSet,
+    long = Seq("dir", "force", "one-file-system", "no-preserve-root", "recursive", "verbose", "help", "version")
+      .map(_ -> (NoValue: Arity))
+      .toMap ++ Seq("interactive", "preserve-root").map(_ -> OptionalValue)
+  )
+
+  /** macOS and FreeBSD rm: no long options, and `getopt` stops at the first operand. */
+  private val BsdRm =
+    Getopt(valueShort = Set.empty, flagShort = "dfiIPRrvWx".toSet, long = Map.empty, permute = false)
+
+  /** GNU mv: `-S` / `--suffix` and `-t` / `--target-directory` take a value. */
+  private val GnuMv = Getopt(
+    valueShort = Set('S', 't'),
+    flagShort = "bfinTuvZ".toSet,
+    long = Seq(
+      "context",
+      "debug",
+      "exchange",
+      "force",
+      "interactive",
+      "no-clobber",
+      "no-copy",
+      "no-target-directory",
+      "strip-trailing-slashes",
+      "verbose",
+      "help",
+      "version"
+    ).map(_ -> (NoValue: Arity)).toMap ++
+      Seq("suffix", "target-directory").map(_ -> RequiredValue) ++
+      Seq("backup", "update").map(_ -> OptionalValue)
+  )
+
+  /** macOS and FreeBSD mv: no option takes a value, no long options, and `getopt` stops at the first operand. */
+  private val BsdMv = Getopt(valueShort = Set.empty, flagShort = "fhinv".toSet, long = Map.empty, permute = false)
+
+  /** GNU unlink has only `--help` and `--version`; macOS unlink takes no option, only a `--`. */
+  private val GnuUnlink =
+    Getopt(valueShort = Set.empty, flagShort = Set.empty, long = Map("help" -> NoValue, "version" -> NoValue))
+  private val BsdUnlink = Getopt(valueShort = Set.empty, flagShort = Set.empty, long = Map.empty, permute = false)
+
+  /**
+   * The indices of the arguments of `rm`, `mv` or `unlink` that the program removes or renames as names, without
+   * following a link at their last component: every operand of `rm` and `unlink`, every source of `mv`. `rm`, `mv`
+   * and `unlink` act on a link itself (`unlink(2)`, `rename(2)`; `rm` reads the operand with `lstat`), so such an
+   * operand may name a link that points out of the workspace; [[namesLinkItself]] decides whether it does.
+   *
+   * Erring towards the existing refusal, nothing is returned unless the arguments are parsed exactly by every
+   * implementation's option table - GNU's (with and without `POSIXLY_CORRECT`) and macOS / FreeBSD's
+   * ([[parseOptions]]) - and each of those parses agrees the argument is an operand and, for `mv`, not the
+   * destination. So a GNU-only form (`rm --force`, `mv -t dir`, `mv -T`, `mv --target-directory=dir`) keeps the
+   * link refused, as does an option a table lacks. An argument starting with `-` is never returned. Nothing is
+   * returned for a recursive `rm` (`-r`, `-R`, any abbreviation of `--recursive`): GNU and BSD `rm -r` remove the
+   * link and not what it points to, but not every implementation has been verified to, and removing a link needs no
+   * `-r`.
+   *
+   * The destination of `mv` is never returned: `mv a outlink` moves `a` into the directory the link points to, so the
+   * destination stays held to the path rule, which follows the link. In each parse it is the last operand, or there is
+   * none when a target directory is given (and then the target directory is an option value, checked as a path).
+   */
+  private def linkOperands(program: String, args: Seq[String]): Set[Int] = {
+    val specs = program match {
+      case "rm"     => Seq(GnuRm, BsdRm)
+      case "mv"     => Seq(GnuMv, BsdMv)
+      case "unlink" => Seq(GnuUnlink, BsdUnlink)
+      case _        => Seq.empty
+    }
+    val argv = args.toVector
+    val parses = for {
+      spec    <- specs
+      permute <- if (spec.permute) Seq(true, false) else Seq(false)
+    } yield parseOptions(argv, spec.copy(permute = permute))
+
+    def recursive: Boolean =
+      argv.exists { arg =>
+        if (arg.startsWith("--")) {
+          val name = arg.takeWhile(_ != '=')
+          name.length > 2 && "--recursive".startsWith(name)
+        } else arg.length > 1 && arg.startsWith("-") && arg.drop(1).exists(c => c == 'r' || c == 'R')
+      }
+
+    /** The operands `program` acts on as names in one parse: for `mv`, the sources. */
+    def named(parse: Parse): Set[Int] = {
+      val operands = argv.indices.filter(i => parse.roles(i) == Operand)
+      if (program != "mv") operands.toSet
+      else {
+        val targetDirectory = argv.indices.exists { i =>
+          parse.roles(i) match {
+            case OptionValue("-t" | "--target-directory")      => true
+            case ShortOptions(Some(at))                        => argv(i).charAt(at) == 't'
+            case LongOption(Some("target-directory"), Some(_)) => true
+            case _                                             => false
+          }
+        }
+        if (targetDirectory) operands.toSet else operands.dropRight(1).toSet
+      }
+    }
+
+    if (parses.isEmpty || !parses.forall(_.exact) || (program == "rm" && recursive)) Set.empty
+    else parses.map(named).reduce(_ intersect _).filterNot(i => argv(i).startsWith("-"))
+  }
+
+  /**
+   * Whether `arg` names a symbolic link itself, in a directory inside the workspace, so that removing or renaming it
+   * touches only the link wherever it points (a dangling link, a link to a link, or a link out of the workspace):
+   *
+   *  - its last component is a name, not `.` or `..`, and it has no trailing `/`: with one (`outlink/`, `outlink/.`)
+   *    the kernel follows the link, so `mv outlink/ x` moves the directory it points to and `rm -r outlink/` empties it;
+   *  - the directory holding it - the argument without its last component, or the working directory - resolves inside
+   *    the workspace under both readings of the path rule (the kernel's, following links, and the lexical one, `..`
+   *    removed as text), and both readings name the same real directory;
+   *  - in that real directory, the last component is a symbolic link (`lstat`, not following it).
+   *
+   * Only called on POSIX: on Windows a link or junction is removed by `del` or `rd`, which the policy does not model,
+   * so there such an operand keeps the path rule and is refused when it leads outside.
+   */
+  private def namesLinkItself(workDir: Bases, arg: String, realRoot: Path, budget: Budget): Boolean = {
+    val cut    = arg.lastIndexOf('/')
+    val name   = arg.substring(cut + 1)
+    val parent = if (cut < 0) "." else if (cut == 0) "/" else arg.substring(0, cut)
+    def real(reading: Option[Either[Verdict, Path]]): Option[Path] =
+      reading.flatMap(_.toOption).flatMap(canonical(_, budget))
+    name.nonEmpty && name != "." && name != ".." && {
+      val physical = real(physicalPath(workDir.physical, parent, budget))
+      physical.nonEmpty && physical == real(lexicalPath(workDir.lexical, parent)) &&
+      physical.exists(dir => dir.startsWith(realRoot) && Files.isSymbolicLink(dir.resolve(name)))
+    }
   }
 }

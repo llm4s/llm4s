@@ -1893,6 +1893,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `org.llm4s.toolapi.ToolHints` in `llm4s-core` (`@Experimental`), because `llm4s-mcp` cannot depend on the agent runtime.
 
 ### Removed
+- **`WorkspaceConfigSupport.loadSandboxConfig`** ([#1730](https://github.com/llm4s/llm4s/issues/1730)): it read a
+  sandbox profile from the client's `llm4s.workspace.sandbox.profile`, which nothing passed to the runner and nothing
+  called, so it suggested a client setting that enforced nothing. What the runner enforces is decided only by its own
+  `WORKSPACE_SANDBOX_PROFILE` and `WORKSPACE_EXTRA_COMMANDS`. **Migration:** set `WORKSPACE_SANDBOX_PROFILE` on the
+  runner's container (`ContainerisedWorkspace` starts it), and use `WorkspaceSandboxConfig.fromProfileName` and
+  `WorkspaceSandboxConfig.validate` to turn a profile name into a config in your own code.
 - **Orchestration: `PlanRunner`, `DAG`, `TypedAgent`, `Policies`, `OrchestrationError` and `CancellationToken`**
   ([#1330](https://github.com/llm4s/llm4s/issues/1330)): `org.llm4s.agent.orchestration` is deleted, with
   `org.llm4s.types.PlanId` and `org.llm4s.types.AgentId` from `llm4s-core` (`org.llm4s.agent.AgentId` is the agent's
@@ -2042,6 +2048,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Workspace runner: an agent can remove or rename a symbolic link that points out of the workspace**
+  ([#1730](https://github.com/llm4s/llm4s/issues/1730)): the command policy resolved every argument through its
+  links, so `rm outlink` and `mv outlink x` were refused (`PATH_ESCAPE_ATTEMPT`) although removing or renaming a link
+  never touches what it points to, and an agent could not clean such a link up. On POSIX, an operand of `rm` or
+  `unlink`, or a source of `mv`, whose last component is itself a symbolic link is now judged by the directory holding
+  it (`lstat` semantics), over both the direct `executeCommand` path and the WebSocket executor, when: it has no
+  trailing `/` (`mv outlink/ x` moves the directory the link points to, `rm -r outlink/` empties it); the directory
+  holding it is inside the workspace under both readings of the path rule and they name the same directory; `rm` is
+  not recursive; for `mv`, it is not the destination, which still follows links (`mv a.txt outlink`,
+  `mv -t outlink a.txt` stay refused); and GNU's and macOS / FreeBSD's option tables both parse the arguments exactly
+  and agree on the operands, so a GNU-only form (`rm --force outlink`, `mv -T`, `mv -t dir outlink`) keeps the link
+  refused. A dangling link and the first link of a chain can be removed too. Windows is unchanged: there a link or
+  junction keeps the path rule. `cp` is unchanged. See
+  [Removing a link](docs/reference/workspace-sandbox.md#removing-a-link). The same issue's follow-ups to #1720: the
+  inline comments in `WorkspaceAgentInterfaceImpl.prepareCommand` now number the working-directory check layer 6 and
+  `CommandPolicy` layers 7-9, as its Scaladoc does; and `WorkspaceConfigSupport.loadSandboxConfig`, which nothing
+  called, is removed (see Removed).
 - **Security - workspace runner: an option's value is consumed once, so every file `sort` reads is path-checked**
   ([#1763](https://github.com/llm4s/llm4s/issues/1763)): the command policy did not check the argument after a bare
   `sort -t` / `--field-separator`, taking it for the separator, even when an earlier option had already taken that
@@ -2233,6 +2256,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parent path holds `:` (POSIX) or `;` (Windows); on Windows, the forms listed
   above; and `environment` variables outside the list. Run writes through the
   `writeFile` / `modifyFile` operations or the read-write allowlist's own programs instead.
+
+  The same change corrected four statements in `docs/reference/security.md` and `workspace-sandbox.md`
+  ([#1716](https://github.com/llm4s/llm4s/issues/1716)): the residual-risk example `git -c core.pager=...` runs nothing
+  (git starts a pager only on a terminal), so the pages use `git -c alias.x='!cmd' x` and `-c core.fsmonitor=...`; the
+  client's sandbox profile does not control enforcement, only the runner's `WORKSPACE_SANDBOX_PROFILE` does; an
+  unknown profile name stops the runner (and makes the client loader return a `Left`) rather than falling back to
+  `permissive`; and `SQLiteMemoryStore.inMemory()` is called as it is, not given `":memory:"`.
 - **A subscription receives every live event sent after `subscribe` returns** ([#1731](https://github.com/llm4s/llm4s/issues/1731)):
   `GraphRuntime.subscribe` returned before its dispatcher joined the event hub's live set, which it
   did only after replaying the log, so live events (`RunContext.progress`, `StreamEvent.Live`) sent in
