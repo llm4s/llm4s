@@ -79,7 +79,11 @@ trait AgentZ {
 
 object AgentZ {
 
-  /** Events buffered between the turn's subscription and the stream's consumer. */
+  /**
+   * Events buffered between the turn's subscription and the stream's consumer. Larger than
+   * LLMClientZ's StreamBufferSize because each slot is lightweight event metadata, not a provider
+   * payload, so a bigger buffer costs little and absorbs bursts like tool-call argument deltas.
+   */
   private val StreamBufferSize = 256
 
   /** Wraps an already-constructed [[Agent]]. */

@@ -53,7 +53,11 @@ object LLMClientZ {
   /** Wraps an already-constructed [[LLMClient]]. Does not manage its lifecycle. */
   def apply(underlying: LLMClient): LLMClientZ = new Impl(underlying)
 
-  /** Capacity of the bounded buffer between the provider thread and the consumer. */
+  /**
+   * Capacity of the bounded buffer between the provider thread and the consumer. Kept small because
+   * each slot holds a full chunk's content; AgentZ's StreamBufferSize is larger because its events
+   * are lightweight metadata, not provider payloads.
+   */
   private val StreamBufferSize = 64
 
   /**

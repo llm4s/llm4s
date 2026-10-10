@@ -4,6 +4,7 @@ import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 
 import org.llm4s.agent.AgentStatus
+import org.llm4s.agent.testkit.Fixtures
 import org.llm4s.error.CancelledError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{

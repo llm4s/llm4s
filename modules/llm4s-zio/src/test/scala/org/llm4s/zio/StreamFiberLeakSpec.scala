@@ -1,5 +1,6 @@
 package org.llm4s.zio
 
+import org.llm4s.agent.testkit.Fixtures
 import zio.{ Fiber, Promise, ZIO, durationInt }
 import zio.test.*
 

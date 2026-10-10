@@ -6,6 +6,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.llm4s.agent.{ AgentBuilder, AgentStatus }
+import org.llm4s.agent.testkit.Fixtures
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
