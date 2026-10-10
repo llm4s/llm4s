@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The cookbook: thirteen runnable recipes, one page each, run offline in CI**
+  ([#1476](https://github.com/llm4s/llm4s/issues/1476)): seven new recipes join the six under
+  `org.llm4s.samples.cookbook` - `EmailExtractionRecipe` (a nested schema, checked against the email),
+  `SummariseRecipe` (map-reduce), `FolderQaRecipe` (the RAG pipeline over a folder of files),
+  `StreamingRecipe` (`streamComplete`), `FallbackRecipe` (`ReliableClient` retries, then a second provider),
+  `CachingRecipe` (`CachingLLMClient`) and `JudgeRecipe` (LLM-as-judge with a rubric) - and `ToolCallingRecipe`
+  now chains two tools, one of its own and the calculator. Each runs with no API key against a scripted client
+  (`--live` for the configured provider); the recipes that embed use `BagOfWordsEmbeddings`, an offline embedding
+  provider registered like a provider module's. Each recipe has its own page under `docs/examples/cookbook/` -
+  the problem, the whole program, how to run it, what to change for a real provider, and the pitfalls - linked
+  from the cookbook index, the examples index and the README. `CookbookDocsSpec` runs every recipe in
+  `sbt test` and fails when a page is missing, lacks a section or sits out of order, or shows a program that is
+  not its source file.
 - **Embeddings from Java** ([#1490](https://github.com/llm4s/llm4s/issues/1490)): `llm4s-java-api`'s
   `Llm4s.createDefaultEmbeddingClient()` creates a `JEmbeddingClient` for the model `llm4s.embeddings.model`
   (`EMBEDDING_MODEL`) names, the route `createDefaultClient()` takes for chat; a missing model, provider or key, or a
@@ -407,6 +420,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server in a `node:22-alpine` container pinned by digest; the server's whole dependency tree is pinned by
   `modules/it/mcp-reference-server/package-lock.json` and installed with `npm ci --ignore-scripts`. The
   embedded-server round trips and the `@Local` agent suite came in #1041.
+- **MCP test: a server that does not answer within the timeout**
+  ([#1006](https://github.com/llm4s/llm4s/issues/1006)): `MCPEmbeddedServerTimeoutSpec` in `llm4s-mcp` runs a tool
+  on an in-process `MCPServer` that does not answer within `MCPServerConfig.timeout`: the call fails as a timed-out
+  tool (not cancelled, not unknown) and the client and registry stay usable. The tool blocks on a latch, so the test
+  uses no fixed sleep.
 - **Cloud speech smoke and integration tests** ([#1011](https://github.com/llm4s/llm4s/issues/1011)):
   `@Cloud` suites in `modules/it` (`org.llm4s.speech`: OpenAI TTS, OpenAI STT, ElevenLabs, Azure
   TTS/STT with a synthesise-then-transcribe round trip), run by `sbt testSmoke` and gated by
@@ -2067,6 +2085,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **MCP: Streamable HTTP notifications carry the `Accept` header the transport requires**
+  ([#1006](https://github.com/llm4s/llm4s/issues/1006)): `StreamableHTTPTransportImpl.sendNotification` posted
+  without `Accept: application/json, text/event-stream`, which the specification requires on every POST to the MCP
+  endpoint, so servers built on the MCP SDKs refused every notification, `notifications/initialized` included, with
+  `406 Not Acceptable`; `initialize()` logged that as a warning and carried on. Found by running the client against
+  the MCP reference server.
 - **Security - redaction: a `key=value` whose value is in backslash-escaped quotes is redacted**
   ([#1684](https://github.com/llm4s/llm4s/issues/1684)): `Redaction` (used by the provider exchange logger, `LLMError`
   messages and error mapping) stopped the value of a `key=value` pair at an escaped quote, so a logfmt line inside a

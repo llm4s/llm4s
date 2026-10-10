@@ -1,3 +1,31 @@
+---
+layout: page
+title: An agent that calls two tools
+parent: Cookbook
+grand_parent: Examples
+nav_order: 5
+---
+
+# An agent that calls two tools
+{: .no_toc }
+
+Give an agent an exchange-rate tool of its own and the built-in calculator, and let the model chain them.
+{: .fs-6 .fw-300 }
+
+## The problem
+
+The model cannot know today's exchange rate, and is unreliable at arithmetic. Give it tools: it asks for the
+rate, the agent runs the tool and shows the model the result, then the model asks the calculator to multiply, and
+answers from that. `ToolBuilder` defines a tool from a name, a description, a parameter schema and a handler that
+returns `Either[String, A]`; the calculator comes from `llm4s-agent-tools`. The agent loops until the model answers
+without asking for a tool.
+
+## The program
+
+The whole program, [`ToolCallingRecipe.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/cookbook/ToolCallingRecipe.scala). `script` is the stand-in for a model that answers without a
+network or a key; `demo` runs the recipe and returns what to print.
+
+```scala
 package org.llm4s.samples.cookbook
 
 import org.llm4s.agent.{ Agent, AgentResult }
@@ -63,3 +91,34 @@ object ToolCallingRecipe extends RecipeApp {
   def demo(client: LLMClient): Result[String] =
     run(client, question).flatMap(AgentResults.requireCompleted)
 }
+```
+
+## Run it
+
+```bash
+sbt "samples/runMain org.llm4s.samples.cookbook.ToolCallingRecipe"          # scripted client, no API key
+sbt "samples/runMain org.llm4s.samples.cookbook.ToolCallingRecipe --live"   # the provider your configuration names
+```
+
+The first command needs nothing but sbt. The second uses the section `llm4s.providers.provider` names; see
+[running the samples](../../getting-started/configuration#running-the-samples). CI runs every recipe against its scripted client, and checks
+that the program on this page is the source file, so what you read here compiles and works.
+
+## Use a real provider
+
+Run with `--live`, or build the agent on your provider's client. Tool calling needs a model that supports it
+(GPT-4o, Claude, Gemini and most current models do; small local models often do not). Give the agent a step limit in
+production with `Agent.builder(...).withMaxSteps(n)` so that a model that keeps asking for tools stops.
+
+## Pitfalls
+
+- The description and parameter descriptions are all the model knows about a tool. Say what it returns and in
+  what units.
+- A handler's `Left` is shown to the model as the tool's error, not raised: the model can try again or explain.
+  The spec checks this for a currency pair with no rate.
+- Tools run with your program's permissions. Validate arguments in the handler; never pass them to a shell or a
+  query unchecked.
+- Each tool round trip is another model call, with the whole thread so far: a chain of tools costs more than one
+  answer.
+
+[Back to the cookbook](../cookbook)
