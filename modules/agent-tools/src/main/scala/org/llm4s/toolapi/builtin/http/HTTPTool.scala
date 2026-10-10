@@ -337,7 +337,7 @@ object HTTPTool {
      * Security measures applied on each redirect:
      *  - From the first hop that leaves the original origin (scheme, host and port) and on every hop after it,
      *    only the caller-set headers on `HttpConfig.redirectSafeHeaders` are sent, never a credential header
-     *  - 301/302 convert POST→GET and drop the request body (per HTTP spec)
+     *  - 301/302 convert POST→GET and drop the request body (per HTTP spec), and with it any `Content-Type`
      *  - 307/308 preserve the original method and body
      */
     def go(
@@ -367,8 +367,14 @@ object HTTPTool {
             else {
               val hopOrigin = Origin.of(url)
               val origin    = initialOrigin.getOrElse(hopOrigin)
-              val (safeHeaders, nowOff) =
+              val (hopHeaders, nowOff) =
                 headersForHop(headers, origin, hopOrigin, stripped, config.redirectSafeHeaders, currentBody.isDefined)
+              // A Content-Type describes the body: a redirect hop that dropped the body sends none, whatever its
+              // origin, neither a caller-set header nor the tool's own content_type.
+              val bodyDropped = initialOrigin.isDefined && currentBody.isEmpty
+              val safeHeaders =
+                if (bodyDropped) hopHeaders.map(_.filter { case (k, _) => headerKey(k) != "content-type" })
+                else hopHeaders
 
               executeRequest(
                 url,
@@ -376,7 +382,7 @@ object HTTPTool {
                 currentMethod,
                 safeHeaders,
                 currentBody,
-                contentType,
+                if (bodyDropped) None else contentType,
                 config,
                 deadline
               )

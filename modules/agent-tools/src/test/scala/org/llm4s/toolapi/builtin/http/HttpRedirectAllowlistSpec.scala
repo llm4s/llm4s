@@ -115,7 +115,8 @@ class HttpRedirectAllowlistSpec extends AnyFlatSpec with Matchers with BeforeAnd
     headers: Map[String, String],
     cfg: HttpConfig = config,
     method: String = "GET",
-    body: Option[String] = None
+    body: Option[String] = None,
+    contentType: Option[String] = None
   ): (Map[String, String], String) = {
     val params = ujson.Obj(
       "url"     -> url,
@@ -123,6 +124,7 @@ class HttpRedirectAllowlistSpec extends AnyFlatSpec with Matchers with BeforeAnd
       "headers" -> ujson.Obj.from(headers.map { case (k, v) => k -> ujson.Str(v) })
     )
     body.foreach(b => params("body") = b)
+    contentType.foreach(ct => params("content_type") = ct)
     val result =
       HTTPTool.createSafe(cfg).fold(e => fail(e.formatted), identity).handler(SafeParameterExtractor(params))
     val json = ujson.read(result.fold(e => fail(e), _.body))
@@ -189,6 +191,27 @@ class HttpRedirectAllowlistSpec extends AnyFlatSpec with Matchers with BeforeAnd
       echoed(via(originA, s"$originB/echo", 302), headers, cfg, method = "DELETE", body = Some("payload"))
     dropped.get("content-type") shouldBe None
     droppedBody shouldBe ""
+  }
+
+  it should "send a Content-Type, set either way, only on a hop that carries the body, on either origin" in {
+    val cfg = config.withAllMethods
+    val ways = Seq(
+      "header"       -> ((Map("Content-Type" -> "text/plain"), None)),
+      "content_type" -> ((Map.empty[String, String], Some("text/plain")))
+    )
+    for {
+      target                        <- Seq(s"$originA/echo", s"$originB/echo")
+      (way, (headers, contentType)) <- ways
+    } withClue(s"$way to $target: ") {
+      val (kept, keptBody) =
+        echoed(via(originA, target, 307), headers, cfg, "DELETE", Some("payload"), contentType)
+      kept.get("content-type") shouldBe Some("text/plain")
+      keptBody shouldBe "payload"
+      val (dropped, droppedBody) =
+        echoed(via(originA, target, 302), headers, cfg, "DELETE", Some("payload"), contentType)
+      dropped.get("content-type") shouldBe None
+      droppedBody shouldBe ""
+    }
   }
 
   it should "keep stripping when a later hop returns to the original origin" in {
@@ -265,6 +288,13 @@ class HttpRedirectAllowlistSpec extends AnyFlatSpec with Matchers with BeforeAnd
       cfg.isDomainAllowed("api.example.com") shouldBe true
       cfg.isDomainAllowed("WWW.API.EXAMPLE.COM") shouldBe true
     }
+
+  it should "block a blocked domain in any case when no allowlist is set" in underTurkish {
+    HttpConfig(blockedDomains = Seq("internal.example")).isDomainAllowed("INTERNAL.example") shouldBe false
+    HttpConfig(blockedDomains = Seq("internal.example")).isDomainAllowed("x.INTERNAL.EXAMPLE") shouldBe false
+    HttpConfig(blockedDomains = Seq("INTERNAL.EXAMPLE")).isDomainAllowed("internal.example") shouldBe false
+    HttpConfig(blockedDomains = Seq("INTERNAL.EXAMPLE")).isDomainAllowed("x.internal.example") shouldBe false
+  }
 
   it should "match methods with an I in them" in underTurkish {
     val cfg = HttpConfig().withAllMethods

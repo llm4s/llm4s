@@ -2031,7 +2031,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   downgrade from `https` to `http` counts) and on every later hop, only the caller-set headers on the new
   `HttpConfig.redirectSafeHeaders` are sent (default `Accept`, `Accept-Language`, `Accept-Encoding`, `User-Agent`,
   and `Content-Type` with a re-sent body), and a credential header - one of those three, a name core's `Redaction`
-  treats as sensitive, or one ending in `token` or `key` - never is, even if listed. Same-origin hops are unchanged.
+  treats as sensitive, or one ending in `token` or `key` - never is, even if listed. Same-origin hops keep every
+  header, except that a hop whose body a `301` or `302` dropped, on any origin, sends no `Content-Type`, neither a
+  caller-set one nor the tool's `content_type` parameter.
   **Migration:** a custom header that must follow a cross-origin redirect now has to be listed in
   `redirectSafeHeaders`. `NetworkSecurity.isBlockedIP` now also refuses `240.0.0.0/4` (with `255.255.255.255`),
   `192.0.0.0/24` and `192.88.99.0/24`, in every IPv6 form that carries them; every IPv6 address outside global

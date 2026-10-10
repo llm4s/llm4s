@@ -289,7 +289,10 @@ What the controls do, and where they stop:
   scheme, host and port (so a downgrade from `https` to `http` counts), and on every hop after it, only the headers on
   `redirectSafeHeaders` go with the request: every other header the model set, such as `X-Api-Key` or
   `X-Auth-Token`, is dropped, and a credential header (`Authorization`, `Cookie`, a name that redaction treats as
-  sensitive, or one ending in `token` or `key`) is dropped even if you list it. `timeout` bounds the whole call, so a
+  sensitive, or one ending in `token` or `key`) is dropped even if you list it. A hop that drops the body (a `301` or `302` after a `POST`, `PUT`, `PATCH` or
+  `DELETE`), on either origin, sends no `Content-Type`, neither a caller-set header nor the tool's own `content_type`. An IPv6 address
+  inside a global prefix is not judged by the IPv4 address its interface identifier may embed (ISATAP-style
+  `...:5efe:a.b.c.d`), so such an address is allowed whatever IPv4 address it names. `timeout` bounds the whole call, so a
   server that answers a byte at a time cannot hold the tool past it. A `TIMEOUT` releases the caller, not the
   request: one already sent may still be delivered and acted on (a `POST` is not rolled back), and a DNS lookup cannot
   be interrupted (`InetAddress.getAllByName` waits for the system resolver), so the tool's worker thread may outlive
