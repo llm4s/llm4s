@@ -46,7 +46,11 @@ new ContainerisedWorkspace(workspaceDir, imageName, hostPort, extraAllowedComman
 
 An added program is held to every check below (no shell, forbidden characters, path arguments inside the workspace,
 the environment allowlist), but it has no per-program option rules, so it can do anything its own arguments allow:
-`sbt run` runs the project's code. Add only what the agent needs. Shells (`sh`, `bash`, `cmd`, `pwsh`, ...) and
+`sbt run` runs the project's code. Add only what the agent needs. In particular, the policy does not model a program
+that makes links or unpacks an archive (`ln`, `tar`, `unzip`, `rsync`, `install`): each of its arguments is checked
+against the file system as it is before the command runs, but not the link text it writes, the names in an archive,
+or a later argument that goes through a name an earlier one of its operations made (see
+[Several sources in one command](#several-sources-in-one-command)). Shells (`sh`, `bash`, `cmd`, `pwsh`, ...) and
 launchers that run a program named in their arguments (`env`, `xargs`, `sudo`, `nohup`, `timeout`, ...) are refused
 (`WorkspaceSandboxConfig.NeverAllowedCommands`), as either would bring back the shell
 [#1756](https://github.com/llm4s/llm4s/issues/1756) removed.
@@ -56,19 +60,14 @@ launchers that run a program named in their arguments (`env`, `xargs`, `sudo`, `
 - **permissive**: Current behavior—shell allowed with the read-write command allowlist (`ReadWriteCommands`), standard limits (1MB file size, 500 dir entries, 30s command timeout)
 - **locked**: Shell disabled; strict limits (10s timeout). File writes and modifications remain allowed; this profile does not enforce a read-only filesystem.
 
-### HOCON (Client)
+### Client configuration
 
-`WorkspaceConfigSupport.loadSandboxConfig()` reads a profile from the client's configuration:
-
-```hocon
-llm4s.workspace.sandbox {
-  profile = "locked"  # or "permissive"
-}
-```
-
-This does not control enforcement: the client does not pass it to the container, and nothing but tests calls
-`loadSandboxConfig`. To lock a runner down, start its container with `WORKSPACE_SANDBOX_PROFILE=locked` (see the
-example below). An unknown profile name makes `loadSandboxConfig` return a `Left`.
+The workspace client has no sandbox setting: what the runner enforces is decided only by the two variables above,
+set on the runner's container. `WorkspaceConfigSupport.loadSandboxConfig()`, which read an
+`llm4s.workspace.sandbox.profile` that nothing passed to the container, was removed
+([#1730](https://github.com/llm4s/llm4s/issues/1730)). To lock a runner down, start its container with
+`WORKSPACE_SANDBOX_PROFILE=locked` (see the example below); to turn a profile name into a config in your own code,
+use `WorkspaceSandboxConfig.fromProfileName`.
 
 ## WorkspaceSandboxConfig Structure
 
@@ -116,9 +115,10 @@ and run a second command as a second request.
 | An argument holding a NUL character, on Windows one holding `"`, or one whose check fails with an error | `ARGUMENT_NOT_ALLOWED` |
 | On Windows, a cmd.exe built-in's argument holding a character cmd.exe splits or parses (`,` `=` `(` `)` `@` `!`, a control character, a non-ASCII space) | `ARGUMENT_NOT_ALLOWED` |
 | `git` with a `.git` file or link between the working directory and the workspace root | `PATH_ESCAPE_ATTEMPT` |
-| An argument that names a location outside the workspace | `PATH_ESCAPE_ATTEMPT` |
+| An argument that names a location outside the workspace (an `rm` / `unlink` operand or `mv` source naming a link itself: its directory, see [Removing a link](#removing-a-link)) | `PATH_ESCAPE_ATTEMPT` |
 | On Windows, a form listed under [On Windows](#on-windows) (a device name, a trailing `.` or space, `@`, `~`, glob syntax) | `ARGUMENT_NOT_ALLOWED` |
 | `cp` only: a name it would write leads outside, or a recursive copy's destination holds a link that does | `PATH_ESCAPE_ATTEMPT` |
+| `mv` or `cp` of several sources: a path goes through a name another source's operation creates, replaces or removes, or `mv` moves the working directory (see [Several sources in one command](#several-sources-in-one-command)) | `ARGUMENT_NOT_ALLOWED` |
 
 Over the WebSocket protocol a refused command gets a `WorkspaceAgentErrorResponse` carrying the code above, then a
 `CommandCompletedMessage` with exit code 1, and no `CommandStartedMessage` or output; `ContainerisedWorkspace`
@@ -143,12 +143,12 @@ following links out of the workspace through its own options:
 | `wc` | `--files0-from` |
 | `ls` | `-L`, `--dereference` |
 | `grep` | `-R`, `--dereference-recursive`, `-S` (BSD) |
-| `cp` | `-L`, `--dereference`, `-H`, `-s`, `--symbolic-link`; with `-R`, `-r`, `-a`, `-P` or `-d` (or their long forms) anywhere in the arguments, two sources with the same name, or several sources and one that names a directory's contents (`src/.`, `src/`) |
+| `cp` | `-L`, `--dereference`, `-H`, `-s`, `--symbolic-link`; with `-R`, `-r`, `-a`, `-P` or `-d` (or their long forms) anywhere in the arguments, two sources with the same name (letter case and Unicode normalisation ignored; on Windows a name with `~` matches any), or several sources and one that names a directory's contents (`src/.`, `src/`) |
 | `chmod` | `-L`, `-H`, `--dereference` |
 | `hostname` | an operand, `-F`, `--file`, `-b`, `--boot` |
 
 `mv`, `rm`, `mkdir` and `touch` have no option that follows a link out of the workspace, so they get the path rule
-only.
+only (with the exception for a link itself under [Removing a link](#removing-a-link)).
 
 Every argument is scanned for these options, including those after `--`, because an option that takes a value can
 consume the `--` itself. A short option is refused anywhere in a cluster (`sort -ro out`), and a long one under any
@@ -216,9 +216,104 @@ What these checks do not cover:
   `.git/objects/info/alternates` ([#1721](https://github.com/llm4s/llm4s/issues/1721)).
 - `diff -r` follows symbolic links it meets inside the tree it walks; no portable option stops it.
 - A relative link moved or copied to another depth by the read-write list (`mv a/b/rel rel`) can come to point
-  outside. Paths through it are refused, and so is a recursive `cp` into its directory, but the link is not removed.
+  outside. Paths through it in a later command are refused, and so is a recursive `cp` into its directory; within
+  the same command, see [Several sources in one command](#several-sources-in-one-command). The agent can remove it
+  (`rm rel`, see [Removing a link](#removing-a-link)), but the runner does not.
 - The checks run before the program starts, so a link made at a checked name by a concurrent command is not seen.
   Windows `copy` gets the path rule but not `cp`'s destination checks.
+
+### Removing a link
+
+Removing or renaming a symbolic link never touches what it points to: `rm` reads its operand without following a
+link at its last component, `unlink` and `rename` act on the name itself. So on POSIX, an operand of `rm` or `unlink`,
+or a source of `mv`, whose last component is itself a symbolic link is judged by the directory holding it rather than
+by where the link leads, and an agent can clean up a link that points out of the workspace, a dangling one, or the
+first of a chain of links ([#1730](https://github.com/llm4s/llm4s/issues/1730)):
+
+```text
+rm outlink            # removes the link; its target is untouched
+rm -f outlink         # likewise
+mv outlink sub/       # moves the link itself to sub/outlink
+mv outlink renamed
+unlink outlink        # where unlink is added with WORKSPACE_EXTRA_COMMANDS
+```
+
+Such an operand is allowed only when all of these hold; otherwise it gets the path rule, which follows the link and
+refuses it:
+
+- **Its last component is a name with no trailing `/`** (not `outlink/`, `outlink/.`, `.` or `..`). With a trailing
+  slash the kernel follows the link: `mv outlink/ x` moves the directory the link points to, and `rm -r outlink/`
+  deletes what is in it.
+- **The directory holding it is inside the workspace** under both readings of the path rule (the kernel's, following
+  links, and the one that removes `..` as text), and both name the same directory: `rm escape/link` with `escape` a
+  link out of the workspace, `rm ../outside/link` and `rm l/../link` with `l` a link to a deeper directory are
+  refused.
+- **In that directory, the last component is a symbolic link**, read without following it.
+- **`rm` is not recursive** (`-r`, `-R`, `--recursive`). GNU and BSD `rm -r` remove a link operand and not its target,
+  but not every implementation has been checked, and removing a link needs no `-r`.
+- **For `mv`, it is a source, not the destination.** The destination keeps the path rule, links followed:
+  `mv a.txt outlink` moves `a.txt` into the directory the link points to and is refused, as are `mv -t outlink a.txt`
+  and `mv --target-directory=outlink a.txt`.
+- **The arguments read the same to every `rm` / `mv` / `unlink`**: they are parsed by GNU's option table (with and
+  without `POSIXLY_CORRECT`) and by macOS / FreeBSD's, and every parse must know every option and agree on which
+  arguments are operands and which is the destination. An option only GNU has (`rm --force`, `mv -T`, `mv -t dir`,
+  any long option) or only BSD has (`mv -h`) keeps the link refused; write `rm -f outlink`, `mv outlink dir/`. An
+  operand starting with `-` is never exempted.
+
+On Windows a link or junction is not exempted: the policy does not model how `del`, `rd`, `move` or an MSYS `rm`
+treat them, so such an operand keeps the path rule and is refused when it leads outside. `cp` is unchanged: it
+copies what a link points to unless told otherwise, so its sources keep the path rule.
+
+A link moved by an `mv` of several sources cannot be used by a later source of the same command:
+`mv evil d/evil/secret.txt d`, with `evil` a link out of the workspace and `d` empty, is refused, since once `evil`
+is in `d`, `d/evil/secret.txt` names the file outside ([#1776](https://github.com/llm4s/llm4s/issues/1776)). Move
+the link on its own: `mv evil d`.
+
+### Several sources in one command
+
+`mv` and `cp` handle several sources one at a time, so each operation changes the file system the next resolves its
+paths in, but every path is checked before the command starts. With `sub/l` -> `../outside`, which names a missing
+entry of the workspace while the link sits in `sub`, `mv sub/l l/secret.txt .` first moves the link to `./l`, where
+it names the real directory outside, and then moves `outside/secret.txt` into the workspace
+([#1776](https://github.com/llm4s/llm4s/issues/1776)). GNU `cp -P`, `-d`, `-R` and `-a` likewise copy a link as a link
+and then read a later source through the copy.
+
+So for an `mv` or `cp` of two sources or more (under any of the GNU and macOS / FreeBSD parses of its options), each
+source's operation is taken to change:
+
+- in the destination directory, the source's last name and any name starting with it (`--backup` keeps a replaced
+  entry as `name~` or `name.~1~`), or any name at all when that is not known (`src/.`, `cp --parents`);
+- for `mv`, the source's own entry in the directory holding it.
+
+Every other path argument (the other sources, the destination, a `-t` value) is walked as the path rule walks it,
+under both readings, links' targets included, and the command is refused (`ARGUMENT_NOT_ALLOWED`) when the walk looks
+up one of those entries. Names are compared without regard to letter case or Unicode normalisation, as on macOS and
+Windows file systems (NFKD decomposition, as APFS decomposes before it case-folds, then case mapping, repeated until
+the name stops changing, so `ẞ`, `ß`, `ss` and `SS` are one name, as are `ᾳ̃` and `α̃ι`, as on APFS), and directories by identity, so another spelling of the destination (`alias/evil/...` with
+`alias` -> `d`) is caught. Windows also takes `x.` and `x ` (trailing dots and spaces) for `x`; these are not folded,
+which matters only for a native Win32 `cp`. An `mv` is also refused when the working directory lies inside a source it moves, since a
+relative path's `..` then climbs from the source's new place. Argument order is not modelled: a path through a name a
+later source creates is refused too. Run one command per source instead; each is then checked against the file
+system the previous one left.
+
+```text
+mv sub/l l/secret.txt .           # refused: l/secret.txt goes through the ./l the first move makes
+mv evil d/evil/secret.txt d       # refused, also through another name for d, or d/EVIL, or d/evil~
+mv sub sub/Main.scala d           # refused: sub/Main.scala goes through the sub the first move removes
+cp -P sub/l l/secret.txt .        # refused: GNU cp reads l/secret.txt through the copied link
+cp -P a/b/x c/X d                 # refused: on macOS d/X is the link d/x, and cp writes c/X through it
+cp -P a/b/ẞ c/ss d                # refused: the same on macOS, where ẞ and ss are one name
+mv a.txt b.txt d                  # runs
+mv outlink dangling d/            # runs: several links moved, nothing reached through them
+```
+
+The other programs of the lists need no such rule: `rm` (and `unlink`) only remove entries, so a later operand
+through one fails rather than leading elsewhere; `mkdir` and `touch` make directories and files, never links, and the
+path rule already takes a missing component as a directory to be made; `chmod` changes no name; the read-only programs
+and the read subcommands of `git` change nothing; Windows `copy` and `move` take one source argument (a wildcard's
+matches go into the destination, which no other argument goes through, and `copy a+b dest` concatenates into one
+file; the `,` of `move a,b dest` is refused). A program added with `WORKSPACE_EXTRA_COMMANDS` is not modelled (see
+[Adding programs to the allowlist](#adding-programs-to-the-allowlist)).
 
 ### Option values
 

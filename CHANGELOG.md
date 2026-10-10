@@ -1926,6 +1926,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `org.llm4s.toolapi.ToolHints` in `llm4s-core` (`@Experimental`), because `llm4s-mcp` cannot depend on the agent runtime.
 
 ### Removed
+- **`WorkspaceConfigSupport.loadSandboxConfig`** ([#1730](https://github.com/llm4s/llm4s/issues/1730)): it read a
+  sandbox profile from the client's `llm4s.workspace.sandbox.profile`, which nothing passed to the runner and nothing
+  called, so it suggested a client setting that enforced nothing. What the runner enforces is decided only by its own
+  `WORKSPACE_SANDBOX_PROFILE` and `WORKSPACE_EXTRA_COMMANDS`. **Migration:** set `WORKSPACE_SANDBOX_PROFILE` on the
+  runner's container (`ContainerisedWorkspace` starts it), and use `WorkspaceSandboxConfig.fromProfileName` and
+  `WorkspaceSandboxConfig.validate` to turn a profile name into a config in your own code.
 - **Orchestration: `PlanRunner`, `DAG`, `TypedAgent`, `Policies`, `OrchestrationError` and `CancellationToken`**
   ([#1330](https://github.com/llm4s/llm4s/issues/1330)): `org.llm4s.agent.orchestration` is deleted, with
   `org.llm4s.types.PlanId` and `org.llm4s.types.AgentId` from `llm4s-core` (`org.llm4s.agent.AgentId` is the agent's
@@ -2098,6 +2104,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `password="`, `"Authorization": "`, and for `\"password\": \"` and `password=\"` in a Python dict inside a JSON
   string. A value the string's end leaves empty (`'see "password": "', 'token': ...`) is empty. A double-quoted field
   closed inside the string (`'{"password": "..."}'`) and any field outside a single-quoted string read as before.
+- **Security - workspace runner: an `mv` or `cp` of several sources cannot reach outside through a name an earlier
+  source's operation makes** ([#1776](https://github.com/llm4s/llm4s/issues/1776)): the command policy checked every
+  path against the file system as it was before the command ran, but `mv` and `cp` handle their sources one at a time.
+  With `sub/l` -> `../outside` (inside the workspace while in `sub`), `mv sub/l l/secret.txt .` moved the link to
+  `./l`, where it points out, and then moved `outside/secret.txt` into the workspace; GNU `cp -P` / `-d` / `-R` / `-a`
+  could copy such a link and read a later source through the copy. Now, for an `mv` or `cp` of two sources or more,
+  each source is taken to change its name in the destination directory (and any name starting with it, for
+  `--backup`) and, for `mv`, its own entry; every other path argument is walked, links followed, and the command is
+  refused (`ARGUMENT_NOT_ALLOWED`) when it looks up one of those entries, comparing names case- and
+  normalisation-insensitively and directories by identity. An `mv` that moves a source holding the working directory
+  is refused too. The existing refusal of a link-preserving `cp` of two sources with the same name now compares the
+  names as the destination's file system does, ignoring letter case and Unicode normalisation (and, on Windows,
+  taking a name with `~` for any): on macOS `cp -P a/b/x c/X d` copied the link `x` into `d` and then wrote `c/X`
+  through it. The comparison repeats NFKD decomposition and case mapping until the name stops changing, since one pass
+  left names APFS takes for one apart (`ẞ` and `ß`, `ss` or `SS`; `ΐ` and its decomposed capital): `cp -P a/b/ẞ c/ß d`
+  passed and wrote `c/ß` through the link on macOS. It decomposes, as APFS does before it case-folds, rather than
+  composing with NFKC, which kept a Greek iota subscript composed and so, after a further mark, apart from the same
+  name spelt with `ι` (`ᾳ̃` and `α̃ι`, `ᾼ͂` and `ᾷ`): `cp -P a/b/zᾼ͂ c/zᾷ d` wrote `c/zᾷ` through the link on macOS. Run one command per source instead. `rm`, `mkdir`, `touch` and `chmod`
+  create no link and are unchanged. See [Several sources in one command](docs/reference/workspace-sandbox.md#several-sources-in-one-command).
+- **Workspace runner: an agent can remove or rename a symbolic link that points out of the workspace**
+  ([#1730](https://github.com/llm4s/llm4s/issues/1730)): the command policy resolved every argument through its
+  links, so `rm outlink` and `mv outlink x` were refused (`PATH_ESCAPE_ATTEMPT`) although removing or renaming a link
+  never touches what it points to, and an agent could not clean such a link up. On POSIX, an operand of `rm` or
+  `unlink`, or a source of `mv`, whose last component is itself a symbolic link is now judged by the directory holding
+  it (`lstat` semantics), over both the direct `executeCommand` path and the WebSocket executor, when: it has no
+  trailing `/` (`mv outlink/ x` moves the directory the link points to, `rm -r outlink/` empties it); the directory
+  holding it is inside the workspace under both readings of the path rule and they name the same directory; `rm` is
+  not recursive; for `mv`, it is not the destination, which still follows links (`mv a.txt outlink`,
+  `mv -t outlink a.txt` stay refused); and GNU's and macOS / FreeBSD's option tables both parse the arguments exactly
+  and agree on the operands, so a GNU-only form (`rm --force outlink`, `mv -T`, `mv -t dir outlink`) keeps the link
+  refused. A dangling link and the first link of a chain can be removed too. A link moved by an `mv` of several
+  sources cannot be reached through by a later source of the same command (`mv evil d/evil/secret.txt d` is refused,
+  see the #1776 entry above). Windows is unchanged: there a link or junction keeps the path rule. `cp` is unchanged. See
+  [Removing a link](docs/reference/workspace-sandbox.md#removing-a-link). The same issue's follow-ups to #1720: the
+  inline comments in `WorkspaceAgentInterfaceImpl.prepareCommand` now number the working-directory check layer 6 and
+  `CommandPolicy` layers 7-9, as its Scaladoc does; and `WorkspaceConfigSupport.loadSandboxConfig`, which nothing
+  called, is removed (see Removed).
 - **MCP: Streamable HTTP notifications carry the `Accept` header the transport requires**
   ([#1006](https://github.com/llm4s/llm4s/issues/1006)): `StreamableHTTPTransportImpl.sendNotification` posted
   without `Accept: application/json, text/event-stream`, which the specification requires on every POST to the MCP
@@ -2359,6 +2402,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parent path holds `:` (POSIX) or `;` (Windows); on Windows, the forms listed
   above; and `environment` variables outside the list. Run writes through the
   `writeFile` / `modifyFile` operations or the read-write allowlist's own programs instead.
+
+  The same change corrected four statements in `docs/reference/security.md` and `workspace-sandbox.md`
+  ([#1716](https://github.com/llm4s/llm4s/issues/1716)): the residual-risk example `git -c core.pager=...` runs nothing
+  (git starts a pager only on a terminal), so the pages use `git -c alias.x='!cmd' x` and `-c core.fsmonitor=...`; the
+  client's sandbox profile does not control enforcement, only the runner's `WORKSPACE_SANDBOX_PROFILE` does; an
+  unknown profile name stops the runner (and makes the client loader return a `Left`) rather than falling back to
+  `permissive`; and `SQLiteMemoryStore.inMemory()` is called as it is, not given `":memory:"`.
 - **A subscription receives every live event sent after `subscribe` returns** ([#1731](https://github.com/llm4s/llm4s/issues/1731)):
   `GraphRuntime.subscribe` returned before its dispatcher joined the event hub's live set, which it
   did only after replaying the log, so live events (`RunContext.progress`, `StreamEvent.Live`) sent in

@@ -749,7 +749,14 @@ class WorkspaceAgentInterfaceImpl(
    *                                      `sort -o`, `git -c`, a git subcommand that
    *                                      is not a read, a second `uniq` operand)
    *  9. `PATH_ESCAPE_ATTEMPT`         – an argument names a location outside the
-   *                                      workspace, links followed
+   *                                      workspace, links followed (on POSIX, an
+   *                                      `rm` / `unlink` operand or `mv` source
+   *                                      naming a link itself is judged by the
+   *                                      directory holding it, #1730); and an `mv`
+   *                                      or `cp` of several sources, one of whose
+   *                                      paths goes through a name another
+   *                                      source's operation changes, is refused
+   *                                      with `ARGUMENT_NOT_ALLOWED` (#1776)
    *
    * Layers 7-9 are [[CommandPolicy]], which documents each program's rules (#1715).
    *
@@ -865,11 +872,8 @@ class WorkspaceAgentInterfaceImpl(
       }
     }
 
-    // Layers 6-8 (#1715): the allowlist names programs, but an allowed program can
-    // still write, delete or run another one through its own options (`find -exec`,
-    // `git -c`, `sort -o`), its environment (`GIT_EXTERNAL_DIFF`), or reach outside
-    // the workspace through a path argument (`cat /etc/passwd`). The working
-    // directory and every path argument are judged by where they really lead.
+    // Layer 6 (#1715): the working directory is judged by where it really leads, so
+    // a symbolic link out of the workspace is refused.
     val realRoot    = Try(rootPath.toRealPath()).getOrElse(rootPath)
     val realWorkDir = Try(workDir.toPath.toRealPath()).getOrElse(workDir.toPath)
     if (!realWorkDir.startsWith(realRoot)) {
@@ -879,6 +883,12 @@ class WorkspaceAgentInterfaceImpl(
         None
       )
     }
+    // Layers 7-9 (#1715): the allowlist names programs, but an allowed program can
+    // still write, delete or run another one through its environment
+    // (`GIT_EXTERNAL_DIFF`) or its own options (`find -exec`, `git -c`, `sort -o`),
+    // or reach outside the workspace through a path argument (`cat /etc/passwd`).
+    // CommandPolicy checks them in that order, judging each path argument by where
+    // it really leads.
     CommandPolicy
       .refusal(execLower, argv.tail, isWindows, realWorkDir, realRoot, env, Some(workDir.toPath), Some(rootPath))
       .foreach(refused => throw new WorkspaceAgentException(refused.message, refused.code, None))

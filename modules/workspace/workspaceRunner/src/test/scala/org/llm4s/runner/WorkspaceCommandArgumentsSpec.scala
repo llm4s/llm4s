@@ -5,7 +5,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.nio.charset.StandardCharsets
-import java.nio.file.{ Files, Path }
+import java.nio.file.{ Files, LinkOption, Path, Paths }
 import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
 import scala.util.{ Try, Using }
@@ -258,6 +258,387 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     Files.exists(fx.outside.resolve("secret.txt")) shouldBe true
     Files.exists(fx.root.resolve("victim.txt")) shouldBe true
   }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // A link that points out of the workspace can be removed or renamed itself (#1730)
+
+  /**
+   * `outfile` -> outside/secret.txt, `outdir` -> outside, `dangling` -> outside/missing, and the chain
+   * `chain` -> `hop` -> outside, `hop` itself a link in the workspace.
+   */
+  private def linksOut(fx: Fixture): Unit = {
+    link(fx, "outfile", fx.outside.resolve("secret.txt"))
+    link(fx, "outdir", fx.outside)
+    link(fx, "dangling", fx.outside.resolve("missing"))
+    link(fx, "hop", fx.outside)
+    link(fx, "chain", fx.root.resolve("hop").getFileName)
+    ()
+  }
+
+  private def isLink(p: Path): Boolean = Files.isSymbolicLink(p)
+
+  /** Nothing outside was touched: the directory and its file are still there. */
+  private def outsideIntact(fx: Fixture): Unit = {
+    Files.isDirectory(fx.outside, java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe true
+    new String(Files.readAllBytes(fx.outside.resolve("secret.txt")), StandardCharsets.UTF_8) shouldBe "secret\n"
+  }
+
+  "rm, mv and unlink" should "remove or rename a link that points out of the workspace, and only the link" in
+    inWorkspace { fx =>
+      linksOut(fx)
+      val ws = fx.interface(ReadWrite.withExtraCommands("unlink").fold(fail(_), identity))
+      runs(ws, "rm outfile")
+      Files.exists(fx.root.resolve("outfile"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      runs(ws, "rm -f outdir")
+      Files.exists(fx.root.resolve("outdir"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      runs(ws, "rm -- dangling")
+      Files.exists(fx.root.resolve("dangling"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      // A link to a link: only the first goes
+      runs(ws, "rm chain")
+      Files.exists(fx.root.resolve("chain"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      isLink(fx.root.resolve("hop")) shouldBe true
+      outsideIntact(fx)
+
+      // mv renames the link, not its target, into a name or a directory inside
+      runs(ws, "mv hop renamed")
+      isLink(fx.root.resolve("renamed")) shouldBe true
+      Files.readSymbolicLink(fx.root.resolve("renamed")) shouldBe fx.outside
+      runs(ws, "mv -f renamed sub/")
+      isLink(fx.root.resolve("sub").resolve("renamed")) shouldBe true
+      // by a path through a directory inside, and from another working directory
+      runs(ws, "mv sub/renamed sub/again")
+      runs(ws, "rm ../sub/again", workingDirectory = Some("sub"))
+      Files.exists(fx.root.resolve("sub").resolve("again"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+
+      link(fx, "viaunlink", fx.outside)
+      runs(ws, "unlink viaunlink")
+      Files.exists(fx.root.resolve("viaunlink"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      outsideIntact(fx)
+    }
+
+  it should "refuse such a link written with a trailing '/' or '/.', which makes the program follow it" in
+    inWorkspace { fx =>
+      linksOut(fx)
+      val ws = fx.interface(ReadWrite.withExtraCommands("unlink").fold(fail(_), identity))
+      // `mv outdir/ x` moves the directory outdir points to; `rm -r outdir/` empties it
+      Seq(
+        "rm outdir/",
+        "rm -f outdir/.",
+        "rm -r outdir/",
+        "rm -rf outdir/.",
+        "rm outdir//",
+        "mv outdir/ moved",
+        "mv outdir/. moved",
+        "mv outfile/ moved",
+        "unlink outdir/"
+      ).foreach(refuses(ws, _, PathEscape))
+      isLink(fx.root.resolve("outdir")) shouldBe true
+      Files.exists(fx.root.resolve("moved"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      outsideIntact(fx)
+    }
+
+  it should "refuse a recursive rm of such a link" in inWorkspace { fx =>
+    linksOut(fx)
+    val ws = fx.interface(ReadWrite)
+    Seq("rm -r outdir", "rm -R outdir", "rm -rf outdir", "rm -fR outdir", "rm --recursive outdir", "rm --rec outdir")
+      .foreach(refuses(ws, _, PathEscape))
+    isLink(fx.root.resolve("outdir")) shouldBe true
+    outsideIntact(fx)
+  }
+
+  it should "still hold the destination of mv to the path rule, links followed" in inWorkspace { fx =>
+    linksOut(fx)
+    val ws = fx.interface(ReadWrite)
+    Seq(
+      "mv a.txt outdir", // moves a.txt into the directory outdir points to
+      "mv a.txt outdir/",
+      "mv a.txt outdir/a.txt",
+      "mv a.txt outfile",
+      "mv outfile outdir", // a link source into a link destination
+      "mv b.txt hop",
+      "mv -t outdir a.txt",
+      "mv --target-directory=outdir a.txt",
+      "mv a.txt -t outdir",
+      "mv -f a.txt ../outside/a.txt"
+    ).foreach(refuses(ws, _, PathEscape))
+    Files.exists(fx.root.resolve("a.txt")) shouldBe true
+    Files.exists(fx.outside.resolve("a.txt")) shouldBe false
+    outsideIntact(fx)
+  }
+
+  it should "refuse a link whose directory is outside the workspace, or is so under one reading of the path" in
+    inWorkspace { fx =>
+      linksOut(fx)
+      Files.createSymbolicLink(fx.outside.resolve("lnk"), fx.outside.resolve("secret.txt"))
+      link(fx, "escape", fx.outside)
+      // `l` -> a/b/c, and a/b/x -> outside: physically `l/../x` is a/b/x, textually the workspace's `x`
+      Files.createDirectories(fx.root.resolve("a").resolve("b").resolve("c"))
+      link(fx, "l", fx.root.resolve("a").resolve("b").resolve("c"))
+      link(fx, "a/b/x", fx.outside)
+      val ws = fx.interface(ReadWrite)
+      Seq(
+        "rm escape/lnk",
+        "rm ../outside/lnk",
+        fx.expand("rm '{out}/lnk'"),
+        "mv escape/lnk moved",
+        "rm l/../x",
+        "rm .."
+      ).foreach(refuses(ws, _, PathEscape))
+      isLink(fx.outside.resolve("lnk")) shouldBe true
+      isLink(fx.root.resolve("a").resolve("b").resolve("x")) shouldBe true
+      outsideIntact(fx)
+    }
+
+  it should "keep the link refused under a form macOS or GNU would parse differently" in inWorkspace { fx =>
+    linksOut(fx)
+    val ws = fx.interface(ReadWrite)
+    // GNU-only options (macOS rm and mv have no long options, -t or -T), and GNU mv's -S taking the link as its value
+    Seq(
+      "rm --force outfile",
+      "mv -T outfile moved",
+      "mv -t sub outfile",
+      "mv --verbose outfile moved",
+      "mv -S outfile a.txt sub"
+    ).foreach(refuses(ws, _, PathEscape))
+    isLink(fx.root.resolve("outfile")) shouldBe true
+  }
+
+  it should "keep such a link refused on Windows, where the policy does not model removing a link" in inWorkspace {
+    fx =>
+      linksOut(fx)
+      val root = fx.root.toRealPath()
+      Seq("rm" -> "outfile", "mv" -> "outdir", "del" -> "outfile").foreach { case (program, arg) =>
+        CommandPolicy.refusal(program, Seq(arg, "x"), isWindows = true, root, root, Map.empty).map(_.code) shouldBe
+          Some(PathEscape)
+      }
+      CommandPolicy.refusal("rm", Seq("outfile"), isWindows = false, root, root, Map.empty) shouldBe None
+  }
+
+  it should "leave other programs' handling of the link unchanged" in inWorkspace { fx =>
+    linksOut(fx)
+    val ws = fx.interface(ReadWrite)
+    Seq("cat outfile", "cp outfile copied", "chmod 600 outfile", "touch outfile", "ls outdir", "mkdir outdir/x")
+      .foreach(refuses(ws, _, PathEscape))
+    outsideIntact(fx)
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Several sources in one mv or cp: an earlier operation changes what a later path names (#1776)
+
+  /** Nothing outside was moved, removed or changed, and none of `names` appeared in the workspace. */
+  private def nothingPulledIn(fx: Fixture, names: String*): Unit = {
+    outsideIntact(fx)
+    names.foreach { name =>
+      withClue(s"$name: ")(Files.exists(fx.root.resolve(name), LinkOption.NOFOLLOW_LINKS) shouldBe false)
+    }
+  }
+
+  "mv and cp of several sources" should "refuse a path through a relative link an earlier source moves (#1776)" in
+    inWorkspace { fx =>
+      // While `sub/l` -> ../outside sits in `sub` it names the workspace's own (missing) `outside`; moved to the root
+      // it names the real outside directory, so `mv sub/l l/secret.txt .` would move outside/secret.txt in.
+      link(fx, "sub/l", Paths.get("../outside"))
+      val ws = fx.interface(ReadWrite)
+      Seq(
+        "mv sub/l l/secret.txt .",
+        "mv -f sub/l l/secret.txt ./",
+        "mv -t . sub/l l/secret.txt",
+        "mv sub/l l/../l/secret.txt .",
+        "mv sub/l L/secret.txt ." // a case-insensitive file system
+      ).foreach(refuses(ws, _, ArgumentNotAllowed))
+      refuses(ws, "mv l ../l/secret.txt ..", ArgumentNotAllowed, workingDirectory = Some("sub"))
+      isLink(fx.root.resolve("sub").resolve("l")) shouldBe true
+      nothingPulledIn(fx, "l", "secret.txt")
+    }
+
+  it should "refuse a path through a link out of the workspace that an earlier source moves (#1730's exemption)" in
+    inWorkspace { fx =>
+      // `evil` may be moved itself (#1730); moved into the empty `d`, `d/evil/secret.txt` is outside/secret.txt
+      link(fx, "evil", fx.outside)
+      val d = Files.createDirectory(fx.root.resolve("d"))
+      link(fx, "alias", d)
+      val ws = fx.interface(ReadWrite)
+      // On Windows `evil` is not exempted (#1730), so the path rule refuses it before this rule is reached
+      val refusedWith = if (isWindowsHost) PathEscape else ArgumentNotAllowed
+      Seq(
+        "mv evil d/evil/secret.txt d",
+        "mv evil alias/evil/secret.txt d", // the destination under another name
+        "mv evil d/evil/secret.txt alias",
+        "mv evil d/EVIL/secret.txt d",
+        "mv evil d/evil~/secret.txt d", // the name --backup would keep a replaced entry under
+        "mv evil d/evil.~1~/secret.txt d",
+        "mv d/evil/secret.txt evil d" // order is not modelled
+      ).foreach(refuses(ws, _, refusedWith))
+      // On a case-insensitive file system (macOS, Windows), `D` is `d`: the same directory under another spelling
+      if (Files.isDirectory(fx.root.resolve("D"))) refuses(ws, "mv evil D/evil/secret.txt d", refusedWith)
+      isLink(fx.root.resolve("evil")) shouldBe true
+      Using.resource(Files.list(d))(_.count()) shouldBe 0L
+      nothingPulledIn(fx, "secret.txt")
+    }
+
+  it should "refuse a path through a source the same mv moves away, and an mv of the working directory's tree" in
+    inWorkspace { fx =>
+      Files.createDirectories(fx.root.resolve("a").resolve("b").resolve("w"))
+      Files.createDirectory(fx.root.resolve("d"))
+      val ws = fx.interface(ReadWrite)
+      refuses(ws, "mv sub sub/Main.scala d", ArgumentNotAllowed)
+      // From a/b/w, ../../outside is the workspace's own a/outside; once w is moved to the root, the working
+      // directory moves with it and ../../outside is the real outside directory.
+      refuses(
+        ws,
+        s"mv ../w ../../outside/secret.txt '${fx.root}'",
+        ArgumentNotAllowed,
+        workingDirectory = Some("a/b/w")
+      )
+      Files.isDirectory(fx.root.resolve("a").resolve("b").resolve("w")) shouldBe true
+      Files.isDirectory(fx.root.resolve("sub")) shouldBe true
+      nothingPulledIn(fx, "w", "secret.txt", "d/sub")
+    }
+
+  it should "refuse a cp whose later source is read through a link an earlier source copies as a link" in
+    inWorkspace { fx =>
+      link(fx, "sub/l", Paths.get("../outside"))
+      Files.createDirectory(fx.root.resolve("d"))
+      val ws = fx.interface(ReadWrite)
+      Seq(
+        "cp -P sub/l l/secret.txt .",
+        "cp -R sub/l l/secret.txt .",
+        "cp -a sub/l l/secret.txt .",
+        "cp -P sub/l d/l/secret.txt d",
+        "cp -R sub/l d/l/secret.txt d",
+        "cp -a sub/l d/l/secret.txt d/",
+        "cp -d sub/l d/l/secret.txt d", // GNU's -d
+        "cp -P -t d sub/l d/l/secret.txt",
+        "cp -R sub d/sub/l/secret.txt d" // a directory copied, then read through what it holds
+      ).foreach(refuses(ws, _, ArgumentNotAllowed))
+      nothingPulledIn(fx, "l", "secret.txt", "d/l", "d/secret.txt", "d/sub")
+    }
+
+  it should "refuse a link-preserving cp of sources whose names differ only in letter case or Unicode normalisation" in
+    inWorkspace { fx =>
+      // `a/b/x` -> ../../outside/secret.txt names the workspace's own (missing) `outside` while in `a/b`; copied into
+      // `d` it names the real one. On macOS and Windows `x` and `X` are one name, so `cp -P a/b/x c/X d` makes the
+      // link `d/x`, then opens `d/X` - that link - and writes `c/X` through it (macOS cp, #1775 review).
+      val nfc = "café"  // é composed
+      val nfd = "café" // e and a combining acute accent: the same name on APFS and NTFS
+      Seq("a/b", "c", "d", "e/B").foreach(dir => Files.createDirectories(fx.root.resolve(dir)))
+      link(fx, "a/b/x", Paths.get("../../outside/secret.txt"))
+      link(fx, s"a/b/$nfc", Paths.get("../../outside/secret.txt"))
+      write(fx.root.resolve("c").resolve("X"), "OVERWRITTEN\n")
+      write(fx.root.resolve("c").resolve(nfd), "OVERWRITTEN\n")
+      write(fx.root.resolve("c").resolve("y"), "y\n")
+      write(fx.root.resolve("e").resolve("B").resolve("x"), "OVERWRITTEN\n")
+      val ws = fx.interface(ReadWrite)
+      Seq(
+        "cp -P a/b/x c/X d",
+        "cp -R a/b/x c/X d",
+        "cp -a a/b/x c/X d/",
+        "cp -d a/b/x c/X d", // GNU's -d
+        "cp -P -t d a/b/x c/X",
+        s"cp -P a/b/$nfc c/$nfd d",
+        s"cp -P a/b/$nfd c/$nfc d", // either spelling first
+        "cp -R a/b e/B d" // directories: `d/b/x` is the link, and `e/B/x` is then written into `d/B`, which is `d/b`
+      ).foreach(refuses(ws, _, ArgumentNotAllowed))
+      nothingPulledIn(fx, "d/x", "d/X", s"d/$nfc", "d/b")
+      // A copy that follows links (no -P, -R, -a, -d) makes no link, so one name twice is only overwritten
+      runs(ws, "cp c/X e/B/x d")
+      // Distinct names still copy, directories and links included
+      runs(ws, "cp -R c e/B d")
+      Files.exists(fx.root.resolve("d").resolve("c").resolve("X")) shouldBe true
+      val f = Files.createDirectory(fx.root.resolve("f"))
+      runs(ws, "cp -P a/b/x c/y f")
+      isLink(f.resolve("x")) shouldBe true
+      new String(Files.readAllBytes(f.resolve("y")), StandardCharsets.UTF_8) shouldBe "y\n"
+      // mv renames over a link rather than writing through it: on macOS `c/X` replaces the link `f/x` itself
+      runs(ws, "mv a/b/x c/X f")
+      outsideIntact(fx)
+    }
+
+  it should "refuse a link-preserving cp of sources whose names one pass of case folding leaves apart" in
+    inWorkspace { fx =>
+      // APFS takes each pair for one name, but NFKC, upper and lower case once does not: `ẞ` lower-cases to `ß`, which
+      // only a second pass makes `ss`, and `ΐ` upper-cases to a decomposed `Ϊ́` that NFKC recomposes only afterwards.
+      // So `cp -P a/b/ẞ c/ß d` passed the policy, made the link `d/ẞ` and macOS cp wrote `c/ß` through it (#1775 review).
+      val pairs = Seq(
+        "\u1E9E" -> "\u00DF",             // ẞ, ß
+        "\u1E9E" -> "ss",
+        "\u1E9E" -> "SS",
+        "\u0390" -> "\u0399\u0308\u0301", // ΐ, Ι with diaeresis and acute
+        "\u03B0" -> "\u03A5\u0308\u0301", // ΰ, Υ with diaeresis and acute
+        "\u1FD3" -> "\u0399\u0308\u0301",
+        "\u1FE7" -> "\u03A5\u0308\u0342",
+        // APFS decomposes before it case-folds, putting the iota subscript after a following mark, where NFKC kept it
+        // composed and upper-casing put `\u0399` before the mark: `cp -P a/b/z\u1FBC\u0342 c/z\u1FB7 d` wrote through the link on macOS
+        "\u1FBC\u0342" -> "\u1FB7",            // \u1FBC and a perispomeni, \u1FB7
+        "\u1FB3\u0303" -> "\u03B1\u0303\u03B9" // \u1FB3 and a tilde, \u03B1 with a tilde and \u03B9
+      )
+      Seq("a/b", "c", "d").foreach(dir => Files.createDirectories(fx.root.resolve(dir)))
+      val ws = fx.interface(ReadWrite)
+      pairs.zipWithIndex.foreach { case ((linked, written), i) =>
+        val (l, w) = (s"$i$linked", s"$i$written")
+        link(fx, s"a/b/$l", Paths.get("../../outside/secret.txt"))
+        write(fx.root.resolve("c").resolve(w), "OVERWRITTEN\n")
+        refuses(ws, s"cp -P a/b/$l c/$w d", ArgumentNotAllowed)
+        refuses(ws, s"cp -P c/$w a/b/$l d", ArgumentNotAllowed) // either first
+        refuses(ws, s"cp -R a/b/$l c/$w d", ArgumentNotAllowed)
+        nothingPulledIn(fx, s"d/$l", s"d/$w")
+      }
+      // A longer name ending in `ss` is another name: the link still copies beside it
+      write(fx.root.resolve("c").resolve("0glass"), "g\n")
+      runs(ws, "cp -P a/b/0\u1E9E c/0glass d")
+      isLink(fx.root.resolve("d").resolve("0\u1E9E")) shouldBe true
+      outsideIntact(fx)
+    }
+
+  it should "refuse a cp from a working directory inside a destination an earlier source merges into" in
+    inWorkspace { fx =>
+      // From `d/sub`, `cp -R ../../src/sub l/secret.txt ../../d` first merges `src/sub` into `d/sub`, making
+      // `d/sub/l` -> outside, and GNU cp then reads `l/secret.txt` through it. The walk of `l/secret.txt` from the
+      // working directory never looks up `sub` in `d`; the lexical walk from `/` does (#1775 review).
+      Seq("src/sub", "d/sub").foreach(dir => Files.createDirectories(fx.root.resolve(dir)))
+      link(fx, "src/sub/l", fx.outside)
+      val ws = fx.interface(ReadWrite)
+      refuses(ws, "cp -R ../../src/sub l/secret.txt ../../d", ArgumentNotAllowed, workingDirectory = Some("d/sub"))
+      refuses(ws, "cp -a ../../src/sub l/secret.txt ../../d", ArgumentNotAllowed, workingDirectory = Some("d/sub"))
+      nothingPulledIn(fx, "d/sub/l", "d/secret.txt", "d/sub/secret.txt")
+    }
+
+  it should "on Windows, take a name holding '~' in a link-preserving cp of several sources for any name" in
+    inWorkspace { fx =>
+      // `LONGNA~1` may be the 8.3 short name of `longname.txt`: one entry under two names
+      val root = fx.root.toRealPath()
+      def refusal(windows: Boolean, args: String*) =
+        CommandPolicy.refusal("cp", args, isWindows = windows, root, root, Map.empty).map(_.code)
+      refusal(windows = true, "-P", "a/LONGNA~1", "c/longname.txt", "d") shouldBe Some(ArgumentNotAllowed)
+      refusal(windows = true, "-R", "a/longname.txt", "c/LONGNA~1", "d") shouldBe Some(ArgumentNotAllowed)
+      refusal(windows = true, "-P", "a/x", "c/X", "d") shouldBe Some(ArgumentNotAllowed)
+      // controls: distinct names, a copy that keeps no link, and the same names judged as a POSIX runner would
+      refusal(windows = true, "-P", "a/x", "c/y", "d") shouldBe None
+      refusal(windows = true, "a/LONGNA~1", "c/longname.txt", "d") shouldBe None
+      refusal(windows = false, "-P", "a/LONGNA~1", "c/longname.txt", "d") shouldBe None
+    }
+
+  it should "still move and copy several sources that do not reach through each other, links included" in
+    inWorkspace { fx =>
+      linksOut(fx)
+      val d  = Files.createDirectory(fx.root.resolve("d"))
+      val ws = fx.interface(ReadWrite)
+      runs(ws, "mv a.txt b.txt d")
+      Files.exists(d.resolve("a.txt")) shouldBe true
+      Files.exists(d.resolve("b.txt")) shouldBe true
+      runs(ws, "mv d/a.txt d/b.txt .")
+      runs(ws, "cp a.txt b.txt d/")
+      Files.exists(d.resolve("b.txt")) shouldBe true
+      // several links moved at once, each the link itself (#1730)
+      runs(ws, "mv outdir dangling d/")
+      Files.readSymbolicLink(d.resolve("outdir")) shouldBe fx.outside
+      isLink(d.resolve("dangling")) shouldBe true
+      runs(ws, "mv outfile sub")
+      isLink(fx.root.resolve("sub").resolve("outfile")) shouldBe true
+      runs(ws, "rm sub/outfile d/outdir")
+      Files.exists(d.resolve("outdir"), LinkOption.NOFOLLOW_LINKS) shouldBe false
+      outsideIntact(fx)
+    }
 
   // ---------------------------------------------------------------------------------------------------------------
   // Links met inside a tree: options that follow them, and writes through a link already in the destination

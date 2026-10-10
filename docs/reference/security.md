@@ -120,7 +120,7 @@ links out of the workspace, and any path argument can name a file outside it
   unknown name stops the runner. `WORKSPACE_EXTRA_COMMANDS` adds bare program names to the profile's list (set by
   `ContainerisedWorkspace`'s `extraAllowedCommands`); a shell or a launcher such as `env` or `xargs` cannot be added,
   and an added program has no per-program option rules, so add only what the agent needs. `ReadOnlyCommands` is the field default, for a `WorkspaceSandboxConfig` constructed directly. The
-  workspace client's `llm4s.workspace.sandbox.profile` does not reach the container. On Windows, built-ins such as
+  workspace client has no sandbox setting of its own. On Windows, built-ins such as
   `echo`, `dir`, `type`, `copy` and `move` run through `cmd.exe /c`, after the forbidden-character check and the
   checks below.
 - Each program's arguments are checked (`ARGUMENT_NOT_ALLOWED`): options that delete, write, run another program,
@@ -134,8 +134,14 @@ links out of the workspace, and any path argument can name a file outside it
 - Every path argument, and the working directory, must really lie inside the workspace (`PATH_ESCAPE_ATTEMPT`):
   it is resolved the way the kernel resolves it, following symbolic links component by component. For `cp`, so are
   the names it will write, since `cp` writes through a link it finds there, and a recursive `cp` refuses a destination
-  directory that holds a link leading outside. An argument longer than 4096 characters, or a command whose paths need
-  more than 20000 lookups, is refused rather than walked.
+  directory that holds a link leading outside. On POSIX, an `rm` or `unlink` operand or an `mv` source that names a
+  symbolic link itself (no trailing `/`, no `rm -r`) is judged by the directory holding it, so a link out of the
+  workspace can be removed or renamed without touching what it points to. An `mv` or `cp` of several sources runs one
+  operation after another while every path is checked before the first, so it is refused (`ARGUMENT_NOT_ALLOWED`)
+  when one of its paths goes through a name another source's operation creates, replaces or removes, or when `mv`
+  moves the working directory: `mv sub/l l/secret.txt .` would otherwise move a relative link to where it points out
+  and then move a file in through it ([#1776](https://github.com/llm4s/llm4s/issues/1776)). An argument longer than
+  4096 characters, or a command whose paths need more than 20000 lookups, is refused rather than walked.
 - `environment` may set only locale and display variables (`ENVIRONMENT_NOT_ALLOWED`), so `GIT_*`, `PAGER`,
   `LD_PRELOAD`, `PATH` and `HOME` cannot redirect a program.
 - The runner normally runs in a Docker container, an additional OS-level boundary.
@@ -148,8 +154,11 @@ links out of the workspace, and any path argument can name a file outside it
   ([#1721](https://github.com/llm4s/llm4s/issues/1721)).
 - `diff -r` follows symbolic links it meets inside the tree it walks, and no portable option stops it.
 - A link that the read-write list moves or copies to another depth (`mv a/b/rel rel`) can come to point outside.
-  Path arguments through it are refused, and a later recursive `cp` into its directory is refused, but the link
-  itself is not.
+  Path arguments through it are refused, in the same command or a later one, and a later recursive `cp` into its
+  directory is refused, but the runner does not remove the link itself (the agent can, with `rm rel`).
+- A program added with `WORKSPACE_EXTRA_COMMANDS` that makes links or unpacks an archive (`ln`, `tar`, `unzip`) is not
+  modelled: its arguments are checked, not the link text it writes, the names in an archive, or a later argument
+  that goes through a name an earlier operation of the same command made.
 - The checks run before the program starts; a link made at a checked name by a concurrent command is not seen.
   Windows `copy` has the path rule but not `cp`'s destination checks.
 - A path rule cannot tell a path from text, so an argument or option value that is absolute or climbs out with `..`
