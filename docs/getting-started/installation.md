@@ -615,6 +615,20 @@ explicit registration and the config-to-client round trip. It requires JDK 21: i
 and its local test server run on virtual threads. See
 [Writing a provider](../guide/writing-a-provider#testing).
 
+### For testing agent and tool code (a scriptable LLMClient)
+
+{: .note }
+> Not yet published. `llm4s-testkit` exists in the build as of
+> [#1796](https://github.com/llm4s/llm4s/issues/1796) but ships in the next release.
+
+```scala
+// same version as llm4s-core; test scope only
+libraryDependencies += "org.llm4s" %% "llm4s-testkit" % llm4sVersion % Test
+```
+
+`ScriptedLLMClient`, a scriptable `LLMClient` test double for unit-testing agent and tool code
+against `llm4s-effect` or `llm4s-zio` without a real provider. Depends on `llm4s-core` only.
+
 ### For Workspace (Containerized Execution)
 
 ```scala

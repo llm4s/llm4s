@@ -72,6 +72,8 @@ object PomDescriptions {
       "Speech-to-text and text-to-speech for LLM4S.",
     "llm4s-spring-boot-starter" ->
       "Spring Boot auto-configuration for the LLM4S Java client.",
+    "llm4s-testkit" ->
+      "A scriptable LLMClient test double for unit-testing agent and tool code built on LLM4S.",
     "llm4s-voyage" ->
       "Voyage AI embedding provider for LLM4S.",
     "llm4s-watsonx" ->

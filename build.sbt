@@ -263,6 +263,7 @@ lazy val llm4s = (project in file("."))
     cohere,
     watsonx,
     providerTestkit,
+    testkit,
     llm4sEffect,
     llm4sZio,
     javaApi,
@@ -404,7 +405,7 @@ lazy val media = (project in file("modules/media"))
   )
 
 lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
-  .dependsOn(core, agent)
+  .dependsOn(core, agent, testkit % Test)
   .settings(
     name := "llm4s-effect",
     commonSettings,
@@ -420,7 +421,7 @@ lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
   )
 
 lazy val llm4sZio = (project in file("modules/llm4s-zio"))
-  .dependsOn(core, agent)
+  .dependsOn(core, agent, testkit % Test)
   .settings(
     name := "llm4s-zio",
     commonSettings,
@@ -989,6 +990,22 @@ lazy val providerTestkit = (project in file("modules/provider-testkit"))
     )
   )
 
+// `llm4s-testkit` (#1796) is a scriptable `LLMClient` test double
+// (`ScriptedLLMClient`) for app authors unit-testing their own agent and tool code against
+// `llm4s-effect` and `llm4s-zio`, without a real provider or core's test-only
+// `testutil.FixtureChatProvider`. Depends on core only, like `llm4s-provider-testkit`; neither
+// depends on the other, and this module answers a different audience (app authors, not
+// provider authors proving an `Llm4sProviderModule`).
+lazy val testkit = (project in file("modules/testkit"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-testkit",
+    commonSettings,
+    // Measured 96.00% statement coverage (`sbt coverage testkit/test testkit/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95)
+  )
+
 // The OpenAI family carves fourth, split by shared client: OpenAI, Azure and Requesty all run
 // on `OpenAIClient`, so they move together and took the SDK out of core - after this core has
 // no vendor SDK at all. That SDK was Microsoft's `azure-ai-openai`, since deprecated; the
@@ -1501,6 +1518,7 @@ lazy val docs = (project in file("modules/docs"))
     cohere,
     watsonx,
     providerTestkit,
+    testkit,
     workspaceShared,
     workspaceClient,
     observability,
@@ -1543,6 +1561,7 @@ lazy val docs = (project in file("modules/docs"))
         (cohere / Compile / sources).value ++
         (watsonx / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
+        (testkit / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (observability / Compile / sources).value ++

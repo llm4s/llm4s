@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`llm4s-testkit`, a scriptable `LLMClient` for testing agent and tool code**
+  ([#1796](https://github.com/llm4s/llm4s/issues/1796)): `org.llm4s.testkit.client.ScriptedLLMClient`
+  answers each call with the next completion from a script, in order, so an app's own agent and tool
+  code can be unit-tested against `llm4s-effect` or `llm4s-zio` without a real provider. `returning`
+  and `returningText` build a client from completions or plain strings, `respondingWith` scripts a mix
+  of successes and failures for error-handling tests, `remaining` reports how much script is left, and
+  `requests` records every conversation sent to it, in call order. `complete` and `streamComplete` draw
+  from the same script position; once the script is exhausted, further calls fail with a `SimpleError`
+  rather than looping or repeating. Depends on `llm4s-core` only.
 - **The cookbook: thirteen runnable recipes, one page each, run offline in CI**
   ([#1476](https://github.com/llm4s/llm4s/issues/1476)): seven new recipes join the six under
   `org.llm4s.samples.cookbook` - `EmailExtractionRecipe` (a nested schema, checked against the email),
