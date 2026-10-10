@@ -186,7 +186,9 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   string (the first `'` that is not escaped, `\'`, doubled, `''`, or an apostrophe, where the dict, list or
   tuple goes on after it: past any `}`, `]` or `)`, the end of the input, or a `,` and the end of the line or
   the next item; where the string opened on the key's line after `{`, `[`, `(`, `,`, `:` or `=`, as a Python
-  value does), so it does not take the key of the
+  value does; and, where another `'` follows on the line, where the text up to the last one reads as Python and
+  the string that last quote closes holds no `"` followed by it or by a `,`, so that the closing quote of a
+  wrapper, `data: '{"password": "Ab3',5:xyz"}'`, ends nothing), so it does not take the key of the
   next field, whose value is redacted, while a real field that a stray quote only seems to enclose
   (`body='{"password": "Ab3'),9xQ"}'`) is redacted whole; outside
   any string, the bare words after an unclosed `'token': [` are replaced to the end of the input, since nothing tells them from leaves; under

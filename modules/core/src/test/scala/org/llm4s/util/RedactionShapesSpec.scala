@@ -1083,6 +1083,68 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "read a credential whole in a JSON document that a single-quoted string on its line wraps (#1697)" in {
+    // The wrapper's own closing quote closes a string too, so a credential holding `','`, `',5:` or `', None, '` read
+    // as the end of the wrapper and a Python item after it, and the rest was written out in the clear.
+    Seq(
+      """INFO payload: '{"secret":"[K/T6nHA`O;e1b_S%W]','G","user":"bob"}'""" ->
+        s"""INFO payload: '{"secret":"$R","user":"bob"}'""",
+      """data: '{"password": "Ab3',5:xyz"}'"""       -> s"""data: '{"password": "$R"}'""",
+      """{'body': '{"secret":"',1:r$jaz?4ZBkG"}'}""" -> s"""{'body': '{"secret":"$R"}'}""",
+      """json=['{"api_key": "k1', True, 'z"}']"""    -> s"""json=['{"api_key": "$R"}']""",
+      """args=('{"secret": "s3', None, 'q"}',)"""    -> s"""args=('{"secret": "$R"}',)""",
+      """msg='{"token": "t0k', ('x"}'"""             -> s"""msg='{"token": "$R"}'""",
+      """{"m": "x='{\"secret\":\"Zz9'], 'y\"}'"}"""  -> s"""{"m": "x='{\\"secret\\":\\"$R\\"}'"}""",
+      // curl, its body single-quoted where a value opens: in an argv list or tuple, after `=`, in a JSON string
+      """run: ['curl', '-d', '{"password": "Ab3', 'x"}']""" -> s"""run: ['curl', '-d', '{"password": "$R"}']""",
+      """cmd=('curl', '-X', 'POST', '-d', '{"user":"bob","password":"p4ss','w0rd"}')""" ->
+        s"""cmd=('curl', '-X', 'POST', '-d', '{"user":"bob","password":"$R"}')""",
+      """curl --data='{"client_secret":"a1',2,'b2","grant_type":"x"}'""" ->
+        s"""curl --data='{"client_secret":"$R","grant_type":"x"}'""",
+      """exec curl -d='{"api_key": "k9', None, 'z"}'""" -> s"""exec curl -d='{"api_key": "$R"}'""",
+      """{"argv": "['curl', '-d', '{\"password\": \"Ab3', 'x\"}']"}""" ->
+        s"""{"argv": "['curl', '-d', '{\\"password\\": \\"$R\\"}']"}""",
+      // and after `-d `, where no value opens, as it was
+      """curl -d '{"password": "Ab3', 'x"}'""" -> s"""curl -d '{"password": "$R"}'"""
+    ).foreach { case (input, expected) =>
+      withClue(s"input $input: ")(redactedOnceAndTwice(input) shouldBe expected)
+    }
+  }
+
+  it should "read whole any credential in a JSON document that a single-quoted string wraps (#1697)" in {
+    // Random printable credentials, some holding what follows the end of a Python string, in JSON wrapped by an
+    // unescaped single-quoted string on the same line: each is replaced whole. Deterministic.
+    val rnd       = new scala.util.Random(16972)
+    val printable = (33 to 126).map(_.toChar).filter(c => c != '"' && c != '\\')
+    val keys      = Vector("password", "api_key", "token", "secret", "client_secret", "access_token")
+    val wraps =
+      Vector(
+        "data: '%s'",
+        "msg='%s'",
+        "{'body': '%s'}",
+        "json=['%s']",
+        "INFO payload: '%s'",
+        "args=('%s',)",
+        "run: ['curl', '-d', '%s']"
+      )
+    val inserts = Vector("',", "', ", "',1", "', 'a", "'],", "'},", "', None", "',True,", "',(", "':", "',5:", "','")
+    (1 to 3000).foreach { _ =>
+      val chars  = Vector.fill(8 + rnd.nextInt(17))(printable(rnd.nextInt(printable.length))).mkString
+      val at     = rnd.nextInt(chars.length)
+      val secret = chars.take(at) + inserts(rnd.nextInt(inserts.length)) + chars.drop(at)
+      val key    = keys(rnd.nextInt(keys.length))
+      val user   = rnd.nextBoolean()
+      val wrap   = wraps(rnd.nextInt(wraps.length))
+      def doc(value: String): String = {
+        val o = ujson.Obj(key -> value)
+        if (user) o("user") = "bob"
+        wrap.format(ujson.write(o))
+      }
+      val input = doc(secret)
+      withClue(s"input $input: ")(Redaction.redact(input) shouldBe doc(R))
+    }
+  }
+
   it should "read a quote doubled as SQL escapes it as part of the value (#1697)" in {
     redactedOnceAndTwice("""statement: INSERT INTO cfg VALUES ('{"api_key": "ab''),cd"}')""") shouldBe
       s"""statement: INSERT INTO cfg VALUES ('{"api_key": "$R"}')"""
@@ -1166,7 +1228,9 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
       ("{'n': '\"password\": \"", "x', \"yyyyyyyy\" z ", ""),
       ("{\"m\": \"{'n': '\\\"password\\\": \\\"", "x', \\\"yyyyyyy\\\" z ", "\"}"),
       ("('{\"api_key\": \"", "ab''), ", "\"}')"),
-      ("'tis\n", "{\"password\": \"a'), b\"}\n", "")
+      ("'tis\n", "{\"password\": \"a'), b\"}\n", ""),
+      ("data: '{", "\"password\": \"a', 'x\", ", "\"n\": 1}'"),
+      ("{\"m\": \"x='{", "\\\"password\\\": \\\"a', 'x\\\", ", "\\\"n\\\": 1}'\"}")
     )
     shapes.foreach { case (prefix, unit, suffix) =>
       def input(repeats: Int): String = prefix + (unit * repeats) + suffix

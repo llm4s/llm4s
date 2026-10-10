@@ -2086,8 +2086,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or `)`, the end of the input (or of the JSON string the dict is in), or a `,` and then the end of the line or an item
   (a quoted string that closes on the line, a number, `None`, `True` or `False`, after any `{`, `[` or `(`) followed the
   same way or by `:` - and where that string opened as a Python value does (after `{`, `[`, `(`, `,`, `:` or `=`, or
-  at the start of the line) on the same line as the key; where that first `'` is followed by anything else, the value
-  is read as it is outside a string. The output is
+  at the start of the line) on the same line as the key. Where another `'` follows on the line, the text up to the last
+  one must read as Python too - punctuation, quoted strings and literals, through that last quote - and the string that
+  quote closes must not hold a `"` followed by it or by a `,`: otherwise the last quote is the closing quote of a
+  wrapper around a JSON document (`data: '{"password": "Ab3',5:xyz"}'`, `['curl', '-d', '{"password": "p4ss','w0rd"}']`)
+  and the `'` a credential's own. Where that first `'` is followed by anything else, the value is read as it is
+  outside a string. The output is
   `{'note': 'see "password": "[REDACTED]', 'apiKey': ["[REDACTED]", '[REDACTED]']}`. A real field that a stray quote
   only seems to enclose - an SQL literal (`('{"api_key": "ab''),cd"}')`), a log prefix (`body='{"password":
   "Ab3'),9xQ"}'`), a quote on an earlier line (`'tis the season`) - is redacted whole, as before. The same holds for
