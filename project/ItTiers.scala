@@ -75,7 +75,7 @@ object ItTiers {
            |Every suite in modules/it must be annotated with exactly one tier tag, or nothing
            |runs it. Add ONE of the following above the class declaration:
            |  @Local      // needs nothing external; runs in the default `sbt test`
-           |  @Docker     // needs Postgres/pgvector, Qdrant or Neo4j; `sbt testIntegration`
+           |  @Docker     // needs a containerised service (Postgres, Qdrant, Neo4j, MCP); `sbt testIntegration`
            |  @Workspace  // needs a built workspace-runner image; `sbt testWorkspace`
            |  @Ollama     // needs a local Ollama server;  `sbt testOllama`
            |  @Cloud      // needs live provider API keys;  `sbt testSmoke`

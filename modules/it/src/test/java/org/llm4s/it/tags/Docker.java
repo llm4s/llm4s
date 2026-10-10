@@ -7,10 +7,13 @@ import java.lang.annotation.Target;
 import org.scalatest.TagAnnotation;
 
 /**
- * Tier 2: needs a containerised service - Postgres/pgvector, Qdrant or Neo4j.
+ * Tier 2: needs a containerised service - Postgres/pgvector, Qdrant, Neo4j or the MCP reference
+ * server.
  *
  * <p>Run with {@code sbt testIntegration}; CI runs it on every PR with the services provided as
- * job service containers. Reproducible and secret-free, so it is not behind a manual gate.
+ * job service containers, and the MCP reference server in a container started in a CI step, since
+ * its transport is chosen by a command argument. Reproducible and secret-free, so it is not behind a
+ * manual gate.
  */
 @TagAnnotation
 @Retention(RetentionPolicy.RUNTIME)

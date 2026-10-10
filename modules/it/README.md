@@ -15,7 +15,7 @@ declares no tier or more than one, so a suite cannot end up being run by nothing
 | Tag | Needs | Command | CI |
 |---|---|---|---|
 | `@Local` | nothing external | `sbt test` | every PR |
-| `@Docker` | Postgres/pgvector, Qdrant or Neo4j | `sbt testIntegration` | every PR (service containers) |
+| `@Docker` | Postgres/pgvector, Qdrant, Neo4j or the MCP reference server | `sbt testIntegration` | every PR (service containers; the MCP reference server in a container started in a CI step) |
 | `@Workspace` | Docker + a built `workspace-runner` image | `sbt testWorkspace` | pushes to `main` |
 | `@Ollama` | a local Ollama with `qwen2.5:0.5b` pulled | `sbt testOllama` | pushes to `main` |
 | `@Cloud` | live provider API keys | `sbt testSmoke` | manual `workflow_dispatch` |
@@ -119,12 +119,20 @@ docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg1
 # Start Qdrant:
 docker run --rm -p 6333:6333 qdrant/qdrant
 
+# Start the MCP reference server (Streamable HTTP):
+# (from the repository root; the server and its dependency tree are pinned by
+# modules/it/mcp-reference-server/package-lock.json, installed with install scripts disabled.
+# Without Docker: MCP_SERVER_SRC=modules/it/mcp-reference-server sh modules/it/mcp-reference-server/run.sh)
+docker run --rm -p 3001:3001 -v "$PWD/modules/it/mcp-reference-server:/src:ro" \
+  node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 sh /src/run.sh
+
 export PGVECTOR_TEST_URL=jdbc:postgresql://localhost:5432/postgres
 export PGVECTOR_USER=postgres PGVECTOR_PASSWORD=postgres
 export PGVECTOR_TEST_USER=postgres PGVECTOR_TEST_PASSWORD=postgres
 export POSTGRES_TEST_ENABLED=true POSTGRES_PASSWORD=postgres
 export QDRANT_TEST_URL=http://localhost:6333
 export NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=llm4stest
+export MCP_SERVER_URL=http://localhost:3001/mcp
 
 sbt testIntegration
 ```
@@ -138,6 +146,7 @@ so a service that did not start cannot pass for a suite that did.
 - Neo4j via `NEO4J_URI`, `NEO4J_USER`, and `NEO4J_PASSWORD`
 - PostgreSQL/pgvector via `PGVECTOR_TEST_URL`, `PGVECTOR_TEST_USER`, `PGVECTOR_TEST_PASSWORD`, or the `POSTGRES_*` variables used by memory tests
 - Qdrant via `QDRANT_TEST_URL` and `QDRANT_TEST_API_KEY`
+- The MCP reference server (`@modelcontextprotocol/server-everything`, Streamable HTTP, pinned with its dependency tree in `mcp-reference-server/`) via `MCP_SERVER_URL`
 - Docker-backed workspace tests via `LLM4S_DOCKER_TESTS=true`; the image tag comes from the build as `LLM4S_WORKSPACE_IMAGE`
 - Ollama via a local server at `http://localhost:11434` with `qwen2.5:0.5b` pulled
 - Cloud provider smoke tests via credentials such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`, and `COHERE_API_KEY`. Each `@Cloud` suite reads its own variable with `System.getenv` and builds the provider config directly; the provider modules also bind most of them to `llm4s.credentials.<provider>.apiKey` for applications, but these suites do not go through that

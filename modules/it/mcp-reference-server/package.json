@@ -1,0 +1,9 @@
+{
+  "name": "llm4s-mcp-reference-server",
+  "private": true,
+  "description": "Pins the MCP reference server, and through package-lock.json its whole dependency tree, for MCPReferenceServerSpec (@Docker).",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/server-everything": "2026.8.31"
+  }
+}
