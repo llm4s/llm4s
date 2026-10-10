@@ -43,7 +43,8 @@ final case class WorkspaceSandboxConfig(
    * This config with more programs on its allowlist, as the runner's `WORKSPACE_EXTRA_COMMANDS` adds them.
    *
    * Each name must be a bare program name (letters, digits, `.`, `_`, `+`, `-`) and not one of
-   * [[WorkspaceSandboxConfig.NeverAllowedCommands]]. An added program is held to the same checks as the built-in
+   * [[WorkspaceSandboxConfig.NeverAllowedCommands]], in any case and with or without a `.exe` / `.com` extension
+   * (`BASH.EXE` is `bash`). An added program is held to the same checks as the built-in
    * ones (no shell, forbidden characters, path arguments inside the workspace, the environment allowlist), but it has
    * no per-program option rules, so it can do whatever its own arguments let it: add only what the agent needs.
    *
@@ -102,11 +103,26 @@ object WorkspaceSandboxConfig {
       .collectFirst {
         case name if !CommandName.matches(name) || name.startsWith(".") || name.startsWith("-") =>
           s"'$name' is not a bare program name"
-        case name if NeverAllowedCommands.contains(name.toLowerCase) =>
+        case name if NeverAllowedCommands.contains(programKey(name, windows = true)) =>
           s"'$name' runs other programs, so it cannot be added to the allowlist"
       }
       .toLeft(parsed.toSet)
   }
+
+  /**
+   * The name an allowlist entry or a command's first word is matched by (#1790, #1761). On Windows, case does not
+   * matter and `sort.exe` or `SORT.COM` is `sort`, so the runner's per-program rules for `sort` apply to it;
+   * elsewhere the name is matched as written.
+   */
+  private[llm4s] def programKey(name: String, windows: Boolean): String =
+    if (!windows) name
+    else {
+      val lower = name.toLowerCase(java.util.Locale.ROOT)
+      Seq(".exe", ".com").find(ext => lower.length > ext.length && lower.endsWith(ext)) match {
+        case Some(ext) => lower.dropRight(ext.length)
+        case None      => lower
+      }
+    }
 
   /**
    * Read-only command allowlist: safe, non-destructive commands suitable for

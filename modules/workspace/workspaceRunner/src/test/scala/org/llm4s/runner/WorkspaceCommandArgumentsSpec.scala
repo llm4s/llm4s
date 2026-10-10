@@ -1376,16 +1376,21 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     CommandPolicy.msysDrivePath("/") shouldBe None
   }
 
-  "CommandPolicy.shadowedToolRefusal" should "refuse sort or findstr when CreateProcess would find another build first" in
+  "The program resolver" should "never pick a sort or findstr that CreateProcess would find before the system directory" in
     inWorkspace { fx =>
+      // #1738 refused sort / findstr when a build sat in the runner's Java or current directory; since #1790 the
+      // runner never searches either, so the system directory's build runs and nothing else is ever started
       val before = fx.outside // a directory CreateProcess searches before the system directory
-      CommandPolicy.shadowedToolRefusal("sort", Seq(before)) shouldBe None
-      CommandPolicy.shadowedToolRefusal("findstr", Seq(before)) shouldBe None
+      val system = Files.createDirectories(fx.parent.resolve("Windows").resolve("System32"))
+      val search = ProgramSearch(windows = true, Seq(system), None, Some(before), Some(before))
+      val roots  = Seq(fx.root)
       Seq("sort.exe", "findstr.exe", "cat.exe").foreach(name => write(before.resolve(name), ""))
-      CommandPolicy.shadowedToolRefusal("sort", Seq(fx.root.resolve("missing"), before)).map(_.code) shouldBe
-        Some("EXECUTABLE_NOT_ALLOWED")
-      CommandPolicy.shadowedToolRefusal("findstr", Seq(before)).map(_.code) shouldBe Some("EXECUTABLE_NOT_ALLOWED")
-      CommandPolicy.shadowedToolRefusal("cat", Seq(before)) shouldBe None // its arguments are not read as switches
+      ProgramResolver.resolve("sort", search, roots).left.map(_.code) shouldBe Left("EXECUTABLE_NOT_ALLOWED")
+      ProgramResolver.resolve("findstr", search, roots).left.map(_.code) shouldBe Left("EXECUTABLE_NOT_ALLOWED")
+      ProgramResolver.resolve("cat", search, roots).left.map(_.code) shouldBe Left("EXECUTABLE_NOT_ALLOWED")
+      Seq("sort.exe", "findstr.exe").foreach(name => write(system.resolve(name), ""))
+      ProgramResolver.resolve("sort", search, roots) shouldBe Right(system.resolve("sort.exe"))
+      ProgramResolver.resolve("findstr", search, roots) shouldBe Right(system.resolve("findstr.exe"))
     }
 
   it should "find nothing in front of the system directory on a Windows host's runner" in inWorkspace { fx =>
@@ -1395,7 +1400,9 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
       val refused = Try(ro.executeCommand(command, None, Some(30.seconds), None)).failed.toOption.collect {
         case e: WorkspaceAgentException => e.code
       }
-      withClue(command)(refused.filter(PolicyCodes + "EXECUTABLE_NOT_ALLOWED") shouldBe None)
+      withClue(command)(
+        refused.filter(PolicyCodes ++ Set("EXECUTABLE_NOT_ALLOWED", "EXECUTABLE_NOT_FOUND")) shouldBe None
+      )
     }
   }
 

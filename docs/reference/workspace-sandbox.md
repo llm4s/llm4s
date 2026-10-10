@@ -29,7 +29,7 @@ When running the workspace runner (e.g. in Docker):
 |----------|-------------|---------|
 | `WORKSPACE_PATH` | Workspace root directory | `/workspace` |
 | `WORKSPACE_SANDBOX_PROFILE` | Sandbox profile: `permissive` or `locked`; any other value stops the runner | `permissive` |
-| `WORKSPACE_EXTRA_COMMANDS` | Programs added to the profile's `allowedCommands`, separated by commas or whitespace (for example `sbt`); a name that is not a bare program name, or is a shell or launcher, stops the runner | none |
+| `WORKSPACE_EXTRA_COMMANDS` | Programs added to the profile's `allowedCommands`, separated by commas or whitespace (for example `sbt`); a name that is not a bare program name, or is a shell or launcher (with or without `.exe` / `.com`), stops the runner | none |
 
 These two variables are the only things that decide what the runner enforces.
 
@@ -119,6 +119,49 @@ and run a second command as a second request.
 | On Windows, a form listed under [On Windows](#on-windows) (a device name, a trailing `.` or space, `@`, `~`, glob syntax) | `ARGUMENT_NOT_ALLOWED` |
 | `cp` only: a name it would write leads outside, or a recursive copy's destination holds a link that does | `PATH_ESCAPE_ATTEMPT` |
 | `mv` or `cp` of several sources: a path goes through a name another source's operation creates, replaces or removes, or `mv` moves the working directory (see [Several sources in one command](#several-sources-in-one-command)) | `ARGUMENT_NOT_ALLOWED` |
+| The program is found only where the runner never starts one from: the workspace, the runner's own working or Java directory, or an empty or relative `PATH` entry (see [Program resolution](#program-resolution)) | `EXECUTABLE_NOT_ALLOWED` |
+| The program is found nowhere the runner looks | `EXECUTABLE_NOT_FOUND` |
+
+### Program resolution
+
+The runner never starts a program by its bare name: it looks the program up itself and starts the absolute path it
+finds ([#1790](https://github.com/llm4s/llm4s/issues/1790)). Started by a bare name, a program was looked up by the
+platform in places an agent can reach. On Windows, `CreateProcess`
+([reference](https://learn.microsoft.com/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw))
+searches the directory of the runner's `java.exe` and then the runner's **current directory** before the system
+directory, appending `.exe`, so a `git.exe` or `cat.exe` an agent wrote there - the runner started in the workspace,
+or in any directory the agent could write - ran in place of the allowlisted program. On POSIX the JDK searches `PATH`
+after changing to the command's working directory, so an empty or relative `PATH` entry (`.`, `bin`) - or an entry
+inside the workspace - found a program the agent wrote there.
+
+The runner searches:
+
+| Host | Where, in order | File names |
+|------|-----------------|------------|
+| Windows | the system directory (`%SystemRoot%\System32`), the Windows directory (`%SystemRoot%`), then each `PATH` entry | `<name>.exe`, then `<name>.com` (as `CreateProcess`, it does not use `PATHEXT`: no `.bat` or `.cmd`) |
+| POSIX | each `PATH` entry | `<name>`, a regular file that is executable |
+
+and never:
+
+- the runner's current directory, even when it is on `PATH` (unless it is the system directory, where a Windows
+  service starts);
+- the directory of the runner's `java` executable, unless it is on `PATH`;
+- an empty or relative `PATH` entry, which would be read from the command's working directory;
+- a directory inside the workspace, as written or after following links, nor a file whose real path is inside the
+  workspace (a link from a trusted directory into it).
+
+A program found only in one of those places is refused with `EXECUTABLE_NOT_ALLOWED`, and the message names where it
+was found; one found nowhere with `EXECUTABLE_NOT_FOUND`. A cmd.exe built-in (`echo`, `dir`, `type`, ...) runs through
+the system directory's `cmd.exe`, by its absolute path and never one from `PATH`, with
+`NoDefaultCurrentDirectoryInExePath=1`, and is named to it without an extension, so cmd.exe never looks a program up
+in the working directory. The `PATH` the runner was started with is the one searched; a command cannot set `PATH`
+(`ENVIRONMENT_NOT_ALLOWED`).
+
+On Windows a command's first word and the allowlist's entries are matched by program name: ignoring case and a
+`.exe` or `.com` extension, so `git.exe status` runs `git`, an allowlist entry `sort.exe` allows `sort`, and either is
+held to `sort`'s rules below (an entry spelled with the extension used to escape them,
+[#1761](https://github.com/llm4s/llm4s/issues/1761)). `WORKSPACE_EXTRA_COMMANDS` refuses a shell or launcher under
+either spelling (`bash.exe`, `CMD.COM`).
 
 Over the WebSocket protocol a refused command gets a `WorkspaceAgentErrorResponse` carrying the code above, then a
 `CommandCompletedMessage` with exit code 1, and no `CommandStartedMessage` or output; `ContainerisedWorkspace`
@@ -395,14 +438,10 @@ are supported. Each rule runs after the path rule, so an argument that leads out
   `sort /c/Users/me/outside/secret.txt`, `sort /M:100` ([#1738](https://github.com/llm4s/llm4s/issues/1738)).
 - **Which `sort` and `findstr` run** ([#1738](https://github.com/llm4s/llm4s/issues/1738)). The `/` rules above
   read arguments as the native tools in the system directory read them; a GNU or MSYS2 build would open
-  `/c/Users/...` as `C:\Users\...`. The runner starts a program by its bare name, and `CreateProcess`
-  ([reference](https://learn.microsoft.com/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw))
-  looks for `<name>.exe` in the directory of the runner's own `java.exe`, then the runner's current directory, then
-  the system directory, and only after the Windows directory in `PATH` - it does not use `PATHEXT`. So a build earlier
-  on `PATH` does not run while the system directory has the tool, and on a Windows host the runner refuses `sort`
-  and `findstr` (`EXECUTABLE_NOT_ALLOWED`) when a `sort.exe` or `findstr.exe` sits in either of the first two
-  directories. On a host whose system directory lacks them (some minimal images), `PATH` is reached; the switch rules
-  still hold there.
+  `/c/Users/...` as `C:\Users\...`. The runner searches the system directory before `PATH` and never its own
+  working or Java directory (see [Program resolution](#program-resolution), [#1790](https://github.com/llm4s/llm4s/issues/1790)),
+  so it starts the system directory's `sort.exe` and `findstr.exe` whenever that directory has them. On a host whose
+  system directory lacks them (some minimal images), `PATH` is reached; the switch rules still hold there.
 - **Not refused, by reasoning**:
   - *8.3 short names* (`PROGRA~1`). A short name aliases an entry of the directory it is in, so it cannot climb out
     of that directory, and the path rule's final step resolves the existing part of a path with `toRealPath`, which

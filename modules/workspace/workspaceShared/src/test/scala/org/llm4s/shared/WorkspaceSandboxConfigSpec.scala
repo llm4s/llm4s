@@ -81,10 +81,22 @@ class WorkspaceSandboxConfigSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "refuse a shell or a program launcher, in any case" in {
-    for (name <- Seq("sh", "bash", "Bash", "env", "xargs", "cmd.exe", "pwsh", "sudo"))
+    for (name <- Seq("sh", "bash", "Bash", "env", "xargs", "cmd.exe", "pwsh", "sudo", "bash.exe", "CMD.COM", "Env.Exe"))
       withClue(name) {
         WorkspaceSandboxConfig.Permissive.withExtraCommands(s"sbt,$name") shouldBe
           Left(s"'$name' runs other programs, so it cannot be added to the allowlist")
       }
+  }
+
+  "WorkspaceSandboxConfig.programKey" should "match a Windows name without case or a .exe / .com extension (#1790)" in {
+    WorkspaceSandboxConfig.programKey("sort.exe", windows = true) shouldBe "sort"
+    WorkspaceSandboxConfig.programKey("SORT.COM", windows = true) shouldBe "sort"
+    WorkspaceSandboxConfig.programKey("Git", windows = true) shouldBe "git"
+    WorkspaceSandboxConfig.programKey("git.exe.exe", windows = true) shouldBe "git.exe" // one extension is removed
+    WorkspaceSandboxConfig.programKey(".exe", windows = true) shouldBe ".exe"           // no name left: kept
+    WorkspaceSandboxConfig.programKey("python3.11", windows = true) shouldBe "python3.11"
+    // Elsewhere a name is matched as written
+    WorkspaceSandboxConfig.programKey("sort.exe", windows = false) shouldBe "sort.exe"
+    WorkspaceSandboxConfig.programKey("Git", windows = false) shouldBe "Git"
   }
 }

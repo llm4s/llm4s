@@ -2093,6 +2093,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{'note': 'see "password": "[REDACTED]"[REDACTED]", '[REDACTED]']}`. The same holds when the value that runs over
   the key is `password="`, `"Authorization": "` or `\"password\": \"`, and for such a dict inside a JSON string.
   The extra reading is made only where the input holds a `'`, and takes time linear in the input.
+- **Security - workspace runner: allowlisted programs start by a trusted absolute path, never from the working
+  directory** ([#1790](https://github.com/llm4s/llm4s/issues/1790)): the runner handed `ProcessBuilder` the bare
+  program name. On Windows `CreateProcess` then searched the directory of the runner's `java.exe` and the runner's
+  current directory before the system directory, appending `.exe`, so a `git.exe` or `cat.exe` an agent wrote there
+  ran in place of the allowlisted program; on POSIX the JDK read an empty or relative `PATH` entry (`.`, `bin`) from
+  the command's working directory, inside the workspace. The runner now looks the program up itself and starts the
+  absolute path: on Windows in the system directory, the Windows directory, then `PATH` (`<name>.exe`, then
+  `<name>.com`), on POSIX in `PATH`, never in the runner's current directory, never `java`'s directory unless it is on
+  `PATH`, never through an empty or relative entry, and never inside the workspace (as written or through a link). A
+  program found only there is refused with `EXECUTABLE_NOT_ALLOWED`, one found nowhere with the new
+  `EXECUTABLE_NOT_FOUND` (it used to fail to start, `EXECUTION_FAILED`). cmd.exe built-ins run through the system
+  directory's `cmd.exe` by its absolute path, named without an extension, with `NoDefaultCurrentDirectoryInExePath`
+  set. This replaces #1738's check for a `sort.exe` / `findstr.exe` in those two directories. On Windows the
+  allowlist and a command's first word are matched ignoring case and a `.exe` / `.com` extension, so an entry
+  `sort.exe` or a command `git.exe` gets that program's rules, which it escaped before
+  ([#1761](https://github.com/llm4s/llm4s/issues/1761)), and `WORKSPACE_EXTRA_COMMANDS` refuses `bash.exe` or
+  `CMD.COM` as it refuses `bash` and `cmd`. See
+  [Program resolution](docs/reference/workspace-sandbox.md#program-resolution).
 - **Security - workspace runner: on Windows, `sort` and `findstr` accept only their native switches**
   ([#1738](https://github.com/llm4s/llm4s/issues/1738)): the command policy read every argument starting with `/`
   to `sort` or `findstr` as a switch, path-checked only the text after the slash, and exempted both programs from the

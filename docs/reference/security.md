@@ -144,6 +144,14 @@ links out of the workspace, and any path argument can name a file outside it
   4096 characters, or a command whose paths need more than 20000 lookups, is refused rather than walked.
 - `environment` may set only locale and display variables (`ENVIRONMENT_NOT_ALLOWED`), so `GIT_*`, `PAGER`,
   `LD_PRELOAD`, `PATH` and `HOME` cannot redirect a program.
+- The program is started by an absolute path the runner found itself, never by its bare name
+  ([#1790](https://github.com/llm4s/llm4s/issues/1790)): on Windows the system directory, the Windows directory, then
+  `PATH` (`<name>.exe`, then `<name>.com`); on POSIX `PATH`. It never searches the runner's current directory, which
+  `CreateProcess` searched before the system directory, nor an empty or relative `PATH` entry, which the JDK read from
+  the command's working directory, nor anything inside the workspace, so a `git.exe` or `cat` an agent wrote cannot
+  run in place of the real one. A program found only there is refused (`EXECUTABLE_NOT_ALLOWED`); built-ins run
+  through the system directory's `cmd.exe`. On Windows the allowlist matches names ignoring case and a `.exe` /
+  `.com` extension, so an entry `sort.exe` gets `sort`'s rules.
 - The runner normally runs in a Docker container, an additional OS-level boundary.
 
 **Not covered:**
