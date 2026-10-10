@@ -26,14 +26,16 @@ import scala.concurrent.duration.*
  * allowed directory, a blocked file or `..` given that way is refused. Which options take a value is not modelled,
  * so a text value that happens to name such a file (`grep -e..`) is refused too. `sort -t`'s separator is the
  * exception: a value attached to it (`sort -to`, `sort -t/`) is text, not checked (except on Windows, where `-t` is
- * refused; see below). A value or tail that cannot name a file is not checked: one with no separator that begins
- * with at least 1025 ASCII letters, digits or `-_+=,@`, which no file system or Windows rule can read as a shorter
- * name. This assumes that no supported file system (ext4, APFS, NTFS, HFS+, ZFS including `longname`, FUSE) allows a
- * single name of more than 1024 bytes or UTF-16 code units. The checks are bounded by the command, not by each
- * argument: an argument longer than 4096 characters is refused, each distinct path is checked once, and a command whose checks
- * would take more than 20000 file-system lookups (about two per path component) is refused as too costly to check,
- * so a command of thousands of flags is refused in well under a second instead of being checked for minutes before
- * it starts. `--` is not taken as the end of the
+ * refused; see below). A value or tail that is one plain path component (no `/` or `\`, not `.` or `..`, and none of
+ * what Windows reads specially: `:`, a trailing `.` or space, `*?"<>|`, control characters, a reserved device name)
+ * costs one lookup: whether anything is in the working directory under that name. If nothing is, the policy is
+ * applied to its spelling there with no further lookup, which is exactly what the full check would decide, since a
+ * name that is not there cannot be a link; if something is, it is resolved in full like any other path. No limit on
+ * the length of a file name is assumed. The checks are bounded by the command, not by each argument: an argument
+ * longer than 4096 characters is refused, each distinct path is checked once, and a command whose checks would take
+ * more than 20000 file-system lookups (one per plain component, two per component of a path resolved in full) is
+ * refused as too costly to check, so a command of thousands of distinct long flags is refused in well under a second
+ * instead of being checked for minutes before it starts. `--` is not taken as the end of the
  * options, since a program may read it as the argument of the option before it: every argument is checked as a
  * path, and also as a flag when it starts with `-`. The working directory is checked for every command. A hard
  * link inside an allowed directory to a file elsewhere passes, as it does for the file tools: no path check can

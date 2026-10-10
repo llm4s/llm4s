@@ -2032,11 +2032,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a long option, and every tail of a short-option cluster, since any letter in it may take the rest as its value. A
   text value that happens to name such a file (`grep -e..`) is refused too. The checks run before the command
   starts, outside `ShellConfig.timeout`, so their cost is bounded per command, as the workspace runner's is: an
-  argument over 4096 characters is refused, a value with no separator that begins with at least 1025 ASCII
-  letters, digits or `-_+=,@` is not checked (no supported file system - ext4, APFS, NTFS, HFS+, ZFS including
-  `longname`, FUSE - allows a single name of more than 1024 bytes or UTF-16 code units, so it cannot name a file),
-  each distinct path is checked once, and a command whose checks would take more than 20000 file-system lookups is refused as too costly to check. A command of 200 flags of 4096 letters
-  is checked in well under a second, where it took over three minutes on macOS before these bounds. The value of `sort -t`
+  argument over 4096 characters is refused, a value that is one plain path component costs one lookup (whether
+  anything is in the working directory under that name; if nothing is, it cannot be a link, and the policy is
+  applied to its spelling with no further lookup, which is exactly the full check's verdict, with no assumption about
+  how long a file name can be; if something is, it is resolved in full), each distinct path is checked once, and a
+  command whose checks would take more than 20000 file-system lookups is refused as too costly to check. A command of
+  200 flags of 4096 letters is checked in well under a second, where it took over three minutes on macOS before these
+  bounds, and one of 200 distinct such flags is refused as too costly just as fast. The value of `sort -t`
   is a separator, not options or a path (`sort -to`, `sort -t/` run). The refused options (`file -C`/`-m`/`-M`/`-f`,
   `date -f`/`-r`, `wc --files0-from`) are now also matched whatever the case of the program name or a Windows executable suffix (`FILE -C`, `file.exe -C`, which run `file -C` on Windows
   and on macOS's default file system), and `sort -o`, `--output`, `-T`, `--temporary-directory`,

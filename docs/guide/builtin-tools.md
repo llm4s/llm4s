@@ -322,13 +322,15 @@ What the controls do, and where they stop:
     `=` of a long option (`grep --file=x`) and every tail of a short-option cluster (`grep -fx`, `grep -ifx`), so a
     link out of the allowed directory, a blocked file or `..` cannot be passed that way
     ([#1723](https://github.com/llm4s/llm4s/issues/1723)). Which options take a value is not modelled, so text that
-    happens to name such a file (`grep -e..`) is refused too. A value with no separator that begins with at least 1025
-    ASCII letters, digits or `-_+=,@` is not checked, on the assumption that no supported file system (ext4, APFS,
-    NTFS, HFS+, ZFS including `longname`, FUSE) allows a single name of more than 1024 bytes or UTF-16 code units. The cost of the checks
+    happens to name such a file (`grep -e..`) is refused too. A value that is one plain path component (no `/` or
+    `\`, not `.` or `..`, nothing Windows reads specially such as `:`, a trailing `.` or space, or a device name)
+    costs one lookup, whether anything is in the working directory under that name: if nothing is, it cannot be a
+    link, and the policy is applied to its spelling with no further lookup, which is exactly the full check's verdict;
+    if something is, it is resolved in full. No limit on the length of a file name is assumed. The cost of the checks
     is bounded per command: an argument longer than 4096 characters is refused, each distinct path is checked once,
-    and a command whose checks would take more than 20000 file-system lookups is refused as too costly to check,
-    rather than holding the agent for minutes before the command starts (the shell `timeout` covers only the
-    command's run). A hard
+    and a command whose checks would take more than 20000 file-system lookups (one per plain component, two per
+    component of a path resolved in full) is refused as too costly to check, rather than holding the agent for
+    minutes before the command starts (the shell `timeout` covers only the command's run). A hard
     link to a file outside passes, as it does for the file tools. A command that walks directories itself (`ls -R`,
     `grep -r`, `find`) is checked only at the path it starts from.
   - `development()` is not a sandbox: `sbt`, `make`, `npm`, `git`, `find` and `env` can run arbitrary programs, so a

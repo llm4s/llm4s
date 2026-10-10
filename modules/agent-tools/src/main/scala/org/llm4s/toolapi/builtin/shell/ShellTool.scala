@@ -65,7 +65,9 @@ object ShellResult {
  * applies it (the link target's parent), and lexically, as Windows applies it (the directory holding the link), and
  * both locations must be allowed. The file tools, which open the path themselves, remove `..` as text first.
  * A value attached to a flag is checked as a path too: the value after `=` of a long option (`--file=x`), and every
- * tail of a short-option cluster (`-fx`, `-ifx`), within a budget of file-system lookups for the whole command.
+ * tail of a short-option cluster (`-fx`, `-ifx`), within a budget of file-system lookups for the whole command. A
+ * value that is one plain path component costs one lookup - whether anything is there - and is resolved in full only
+ * when something is; this gives the full check's verdict exactly, with no assumption about name lengths.
  * `file -C`, `-m`, `-M` and `-f`, `date -f` and `-r`, `wc --files0-from`, and `sort -o`, `--output`, `-T`,
  * `--temporary-directory`, `--compress-program` and `--files0-from` (which write a file, run a program or read one
  * the command does not name) are refused whatever the policy: anywhere in a short-option
@@ -288,7 +290,7 @@ object ShellTool {
       case None => Some("Invalid working directory")
       case Some(dir) =>
         val checks = new PathChecks(dir, policy.entries)
-        checks.check(dir) match {
+        checks.checkBase() match {
           case Unchecked => Some(tooCostly(program))
           case Refused   => Some("The working directory is outside the allowed paths")
           case Allowed if NoFileArguments.contains(executable) => None
@@ -303,55 +305,17 @@ object ShellTool {
   private val MaxArgumentLength = 4096
 
   /**
-   * The file-system lookups (about two per path component, one for each reading of `..`) the path policy may spend
-   * on one command, as the workspace runner's command policy allows. An ordinary command spends a few hundred; the
-   * cap stops a crafted one (thousands of options, each with thousands of tails to check) from holding the caller
-   * for minutes before the command starts, which `ShellConfig.timeout` would not cover.
+   * The file-system lookups the path policy may spend on one command, as the workspace runner's command policy
+   * allows: a path resolved in full costs two per component (one for each reading of `..`), a value that is one plain
+   * component costs one (see `PathChecks`). An ordinary command spends a few hundred; the cap stops a crafted one
+   * (thousands of options, each with thousands of distinct tails to check) from holding the caller for minutes before
+   * the command starts, which `ShellConfig.timeout` would not cover. It is refused instead.
    */
   private val MaxPathSteps = 20000
 
   private def tooCostly(program: String): String =
     s"The arguments of '$program' are too long or too many to check against the path policy " +
       s"(at most $MaxArgumentLength characters an argument and $MaxPathSteps path lookups a command)"
-
-  /**
-   * The longest single name (path component) any supported file system allows, in its own unit: 255 bytes on ext4,
-   * XFS, Btrfs and APFS, 255 UTF-16 code units on NTFS and HFS+, 1023 bytes on OpenZFS 2.3+ with `longname=on`, and
-   * 1024 bytes on Linux FUSE (rclone, s3fs, virtiofs; `FUSE_NAME_MAX`). The assumption the skip below rests on is that
-   * no supported file system allows a single name of more than this many bytes or UTF-16 code units.
-   */
-  private[shell] val MaxNameLength = 1024
-
-  /**
-   * How many plain name characters a tail must begin with to be skipped: one over [[MaxNameLength]]. A combining
-   * character after the run may compose with its last character, but never into nothing, so the name keeps at least
-   * `MaxNameLength + 1` units in every encoding and normal form.
-   */
-  private[shell] val MinUnnameableRun = MaxNameLength + 1
-
-  /** Characters no supported file system or path parser treats specially, and that no other spelling folds to. */
-  private def isPlainNameChar(c: Char): Boolean =
-    (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || "-_+=,@".indexOf(c.toInt) >= 0
-
-  /**
-   * For each start in `value`, whether `value.substring(start)` cannot name anything, so need not be checked: it
-   * holds no separator (`/` or `\`), so it is one path component, and it begins with at least `MinUnnameableRun`
-   * ASCII letters, digits and `-_+=,@`. Each of those takes one byte and one UTF-16 code unit, so the name is over
-   * every supported file system's limit for a component ([[MaxNameLength]]) in either unit, whatever follows them. No
-   * shorter name can stand for it: Windows changes none of these characters (it drops a trailing `.` or space, reads
-   * `:` as a stream and `~` in short names, all after them), and a name that a case-insensitive or
-   * normalisation-insensitive file system matches to them is no shorter in the unit that file system counts (`ß`, two
-   * bytes in UTF-8, folds to `ss`; the Kelvin sign, three bytes, to `k`; NTFS and HFS+ fold one UTF-16 unit to one).
-   * So the program cannot open it, and it can lead nowhere. Checking it would cost lookups like any other value, and
-   * a flag of 4096 letters has thousands of such tails (#1723). Computed once a value, so that a long flag is not
-   * scanned again for each of its tails.
-   */
-  private[shell] def unnameable(value: String): Int => Boolean = {
-    val lastSeparator = value.lastIndexWhere(c => c == '/' || c == '\\')
-    // How many plain characters run from each index
-    val plainRun = value.scanRight(0)((c, run) => if (isPlainNameChar(c)) run + 1 else 0)
-    start => start > lastSeparator && plainRun(start) >= MinUnnameableRun
-  }
 
   /** What a check of one path found. */
   sealed private trait Verdict
@@ -360,26 +324,66 @@ object ShellTool {
   private case object Unchecked extends Verdict // the command's lookup budget ran out first
 
   /**
-   * The path checks of one command: against `entries`, resolved once for the command, from `base`, each distinct
-   * value checked once, and all of them within `MaxPathSteps` lookups.
+   * The path checks of one command: against `entries`, resolved once for the command, from `base`, the working
+   * directory, whose readings are resolved once, by `checkBase`; each distinct value checked once, and all of them
+   * within `MaxPathSteps` lookups.
+   *
+   * A value that is one plain path component (`PathPolicy.isSingleName`: no separator, not `.` or `..`, nothing
+   * Windows reads specially) names at most the one entry `base / value`. It costs one lookup (two when the working
+   * directory's physical and lexical readings differ): whether anything is there. When nothing is, its readings are
+   * the working directory's with the name appended, and the policy is applied to them with no further lookup; this
+   * is exactly the verdict of the full check, whatever the length of the name (see `PathPolicy.childReadings`). When
+   * something is there - a file, a directory, a link - or the value is not one plain component, it is resolved in
+   * full, as every path was before. So a flag of thousands of letters whose tails name nothing costs one lookup a
+   * tail, not one or two a component of the whole path for each.
    */
   final private class PathChecks(base: Path, entries: PathPolicy.Entries) {
-    private var remaining = MaxPathSteps
-    private val seen      = mutable.HashMap.empty[String, Verdict]
+    private var remaining                                 = MaxPathSteps
+    private val seen                                      = mutable.HashMap.empty[String, Verdict]
+    private var baseReadings: Option[PathPolicy.Readings] = None
 
-    def check(path: Path): Verdict = {
-      // Two readings (physical and lexical), each a lookup per component and one for the root
-      remaining -= 2 * (path.getNameCount + 1)
-      if (remaining < 0) Unchecked
+    private def charge(lookups: Int): Boolean = {
+      remaining -= lookups
+      remaining >= 0
+    }
+
+    /** Check the working directory, and keep its readings for the values resolved against it. */
+    def checkBase(): Verdict =
+      if (!charge(fullCost(base))) Unchecked
+      else {
+        baseReadings = PathPolicy.readings(base).filter(PathPolicy.permits(_, entries))
+        if (baseReadings.isDefined) Allowed else Refused
+      }
+
+    // Two readings (physical and lexical), each a lookup per component and one for the root
+    private def fullCost(path: Path): Int = 2 * (path.getNameCount + 1)
+
+    private def fullCheck(path: Path): Verdict =
+      if (!charge(fullCost(path))) Unchecked
       else if (PathPolicy.resolve(path, entries).isDefined) Allowed
       else Refused
-    }
+
+    private def check(value: String): Verdict =
+      baseReadings match {
+        case None => Refused // the working directory was refused, so nothing is checked against it
+        case Some(parent) if PathPolicy.isSingleName(value) =>
+          if (!charge(parent.probes)) Unchecked
+          else
+            PathPolicy.childReadings(parent, value) match {
+              case PathPolicy.Child.Absent(readings) => if (PathPolicy.permits(readings, entries)) Allowed else Refused
+              case PathPolicy.Child.Resolve          => resolveInFull(value)
+            }
+        case Some(_) => resolveInFull(value)
+      }
+
+    private def resolveInFull(value: String): Verdict =
+      Try(base.resolve(value)).toOption.fold[Verdict](Refused)(fullCheck)
 
     /** `value` resolved against the working directory, as the program will open it. */
     def checkValue(value: String): Verdict =
       seen.getOrElse(
         value, {
-          val verdict = Try(base.resolve(value)).toOption.fold[Verdict](Refused)(check)
+          val verdict = check(value)
           if (verdict != Unchecked) seen.update(value, verdict)
           verdict
         }
@@ -399,7 +403,7 @@ object ShellTool {
       .flatMap { arg =>
         val asFlag = if (isFlag(arg)) flagRefusal(program, arg) else None
         asFlag
-          .orElse(valueRefusal(program, arg, None, Iterator.single(0).filterNot(unnameable(arg)), checks))
+          .orElse(valueRefusal(program, arg, None, Iterator.single(0), checks))
           .orElse(valueRefusal(program, arg, Some(arg), attachedValues(program, arg), checks))
       }
       .nextOption()
@@ -437,8 +441,7 @@ object ShellTool {
    *    ...), since any letter in it may be an option that takes the rest as its value (`-f lout` attached as
    *    `-flout`, after other options as `-iflout`).
    *
-   * The value of a text option (see `TextShortFlags`) is left out, and so is a tail that cannot name anything (see
-   * `unnameable`). A tail that names nothing stays inside the working directory and passes, so the check refuses
+   * The value of a text option (see `TextShortFlags`) is left out. A tail that names nothing stays inside the working directory and passes, so the check refuses
    * only a tail that reaches outside the allowed paths: a link out, a blocked file, or `..`. A value that is text to
    * the program (`grep -e..`) is refused when it happens to name such a file; that over-blocking is the price of not
    * modelling each program's options.
@@ -448,9 +451,9 @@ object ShellTool {
     else if (arg.startsWith("--")) {
       val part = optionPart(program, arg)
       val at   = part.indexOf('=')
-      if (at < 0 || at == arg.length - 1 || unnameable(arg)(at + 1)) Iterator.empty else Iterator.single(at + 1)
+      if (at < 0 || at == arg.length - 1) Iterator.empty else Iterator.single(at + 1)
     } else {
-      Iterator.range(1, optionPart(program, arg).length).filterNot(unnameable(arg))
+      Iterator.range(1, optionPart(program, arg).length)
     }
 
   private def flagRefusal(command: String, flag: String): Option[String] =

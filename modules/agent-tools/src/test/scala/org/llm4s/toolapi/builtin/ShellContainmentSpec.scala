@@ -460,13 +460,25 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
   /** Far above the ~0.1 s these take, far below the minutes they took: room for a slow Windows runner. */
   private def CheapCheckMillis: Long = 5000L
 
-  it should "check many long flags quickly, skipping tails too long to name a file (#1723)" in {
+  it should "check many long flags quickly, one lookup for each distinct tail that names nothing (#1723)" in {
     val (_, _, config) = attachedValueFixture()
     val flags          = Seq.fill(200)("-e" + ("a" * 4094)).mkString(" ")
 
     val (reason, millis) = timedRefusal(config, s"grep $flags in.txt ../zz")
     reason should include("'../zz' is outside the allowed paths")
     millis should be < CheapCheckMillis
+  }
+
+  it should "run a command with one 4094-character pattern, its tails checked cheaply (#1723)" in {
+    posixOnly()
+    val (_, _, config) = attachedValueFixture()
+    val started        = System.nanoTime()
+
+    val result = run(config, "grep -e" + ("a" * 4094) + " in.txt").fold(e => fail(e), identity)
+    (System.nanoTime() - started) / 1000000 should be < CheapCheckMillis
+    result.exitCode shouldBe 1 // ran, and found no match
+    val mixed = run(config, "grep -ie" + new scala.util.Random(1723).alphanumeric.take(4093).mkString + " in.txt")
+    mixed.fold(e => fail(e), _.exitCode) shouldBe 1
   }
 
   it should "check a repeated short-option cluster once (#1723)" in {
@@ -482,8 +494,10 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
     val clusters       = (1 to 10000).map(i => s"-a$i").mkString(" ")
     // `~` is not a plain name character, so no tail of these is skipped
     val tildes = (1 to 200).map(i => "-e" + (s"$i~" * 4094).take(4094)).mkString(" ")
+    // 200 distinct flags of 4094 letters: about 800000 distinct tails, a lookup each, far over the budget
+    val letters = (1 to 200).map(i => "-e" + new scala.util.Random(i).alphanumeric.take(4094).mkString).mkString(" ")
 
-    Seq(s"ls $clusters ../zz", s"grep $tildes in.txt ../zz").foreach { command =>
+    Seq(s"ls $clusters ../zz", s"grep $tildes in.txt ../zz", s"grep $letters in.txt ../zz").foreach { command =>
       val (reason, millis) = timedRefusal(config, command)
       withClue(command.take(40)) {
         reason should include("too long or too many to check against the path policy")
@@ -495,8 +509,8 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
 
   it should "still check the short tails of a long flag (#1723)" in {
     val (root, linked, config) = attachedValueFixture()
-    // A blocked file whose name is as long as ext4, APFS and NTFS allow; longer tails, up to the 1024 FUSE allows, are
-    // checked too (UnnameableTailSpec), but cannot be created here
+    // A blocked file with a name of 255 characters, which every common file system can hold; existing names longer
+    // still are resolved in full too (SingleNameCheckSpec, and the next test where the file system allows them)
     val longest = "n" * 255
     Files.writeString(root.resolve(longest), "OUTSIDE-SECRET\n")
     val blocking = config.copy(pathPolicy =
@@ -510,6 +524,24 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
     refused(run(blocking, "grep -e" + longest + " in.txt")) should include("outside the allowed paths")
     if (linked)
       refused(run(config, "grep -" + ("i" * 4000) + "flout in.txt")) should include("outside the allowed paths")
+  }
+
+  it should "resolve in full a tail that names an existing link, however long its name (#1723)" in {
+    val (root, _, config) = attachedValueFixture()
+    // Most file systems allow 255 bytes a name, FUSE on recent Linux 4095: plant the longest link this one holds
+    val planted = Seq(3000, 1000, 255).iterator
+      .map(length => "l" * length)
+      .find(name => Try(Files.createSymbolicLink(root.resolve(name), root.getParent.resolve("elsewhere"))).isSuccess)
+    planted match {
+      case None => cancel("symbolic links cannot be created here")
+      case Some(name) =>
+        withClue(s"a link of ${name.length} characters") {
+          refused(run(config, s"grep -e$name in.txt")) should include("outside the allowed paths")
+          refused(run(config, "grep -" + ("i" * (4000 - name.length)) + s"f$name in.txt")) should include(
+            "outside the allowed paths"
+          )
+        }
+    }
   }
 
   "The shell tool" should "read the value of sort -t as a separator, not as options or a path (#1723)" in {
