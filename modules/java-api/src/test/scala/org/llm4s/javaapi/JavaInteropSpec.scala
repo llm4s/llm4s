@@ -269,6 +269,9 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     returns(classOf[LlmException].getMethod("getStatusCode")) shouldBe List(classOf[java.util.OptionalInt])
     returns(classOf[JCompletion].getMethod("usage")) shouldBe List(classOf[java.util.Optional[_]], classOf[JTokenUsage])
     returns(classOf[JCompletion].getMethod("toolCalls")) shouldBe List(classOf[java.util.List[_]], classOf[JToolCall])
+    // every count a Java int, a cache count unreported by the provider reading as zero like thinkingTokens
+    Seq("promptTokens", "completionTokens", "totalTokens", "thinkingTokens", "cachedTokens", "cacheCreationTokens")
+      .foreach(name => withClue(name)(classOf[JTokenUsage].getMethod(name).getReturnType shouldBe Integer.TYPE))
   }
 
   "the agent facade" should "hand Java callers JAgentResult from every turn: run, continue, resume, recover, await, onComplete" in {

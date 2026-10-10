@@ -278,8 +278,10 @@ for (JToolCall call : reply.toolCalls()) {
 ```
 
 `model()` is the model as the provider names it, which can be more specific than the one you configured. `usage()` is a
-`JTokenUsage` with `promptTokens()`, `completionTokens()`, `totalTokens()` and `thinkingTokens()` (zero when the model
-reported none), or empty when the provider reported no usage. `estimatedCost()` is a `java.math.BigDecimal` in USD, empty
+`JTokenUsage` with `promptTokens()`, `completionTokens()`, `totalTokens()` and `thinkingTokens()`, and the prompt-cache
+counts `cachedTokens()` (input read from the provider's prompt cache, billed at the cheaper cache-read rate) and
+`cacheCreationTokens()` (input written into it, typically billed above the normal input rate) - each an `int`, zero when
+the model reported none - or empty when the provider reported no usage. `estimatedCost()` is a `java.math.BigDecimal` in USD, empty
 when the cost is not known; it is the figure an agent adds to its `usage().totalCost()`. `toolCalls()` lists `JToolCall`s,
 the same type an agent's messages use, with the arguments as JSON text; `thinking()` is the model's reasoning text when
 it reported one. A `JCompletion` is a value with `equals`, `hashCode` and a `toString` that prints the full text.
@@ -338,7 +340,7 @@ try {
 
 | Kind | The failure | Recoverable |
 |---|---|---|
-| `AUTHENTICATION` | the provider rejected the API key | no |
+| `AUTHENTICATION` | the provider rejected the API key | no, unless it is a provider's `401` or `403` reported as a service error |
 | `RATE_LIMIT` | the provider, or a local limiter, refused the call for now | yes |
 | `TIMEOUT` | the call did not finish in time | yes |
 | `NETWORK` | the provider could not be reached | yes |
@@ -349,8 +351,11 @@ try {
 | `OTHER` | anything else, including an error from another llm4s module or your own code | depends on the error |
 
 A provider's error response with status `400`, `401`/`403` or `429` has the kind that status means (`VALIDATION`,
-`AUTHENTICATION`, `RATE_LIMIT`) even when a provider client reported it as a generic service error. Every error class in
-`org.llm4s.error` has a kind, and a test fails when a new one is added without one.
+`AUTHENTICATION`, `RATE_LIMIT`) even when a provider client reported it as a generic service error. Such an error keeps
+the recoverability of its class: a `ServiceError` or an `APIError` is recoverable whatever its status, so a `403`
+reported as one reads as `AUTHENTICATION` and `isRecoverable()` is `true`. The table's column is what the kind's own
+error classes say; to decide whether to try again, always call `isRecoverable()` rather than infer it from the kind.
+Every error class in `org.llm4s.error` has a kind, and a test fails when a new one is added without one.
 
 `isRecoverable()` says whether the call may succeed if tried again, perhaps after you do something first: wait out a rate
 limit, or correct a request the provider rejected. `getRetryAfter()` is the `Optional<Duration>` the provider asked you

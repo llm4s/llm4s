@@ -69,6 +69,10 @@ class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
     (UnknownError("what", new RuntimeException("x")), LlmErrorKind.OTHER, false)
   )
 
+  /** Provider error responses whose status gives them a kind other than their class's `SERVICE`. */
+  private val remapped: List[LLMError] =
+    List(401, 403, 400, 429).flatMap(s => List(ServiceError(s, "p", "x"), APIError("p", "x", Some(s))))
+
   "the scan of org.llm4s.error" should "find the error classes, so an empty scan cannot pass the exhaustiveness check" in {
     concreteErrorClasses.size should be >= 19
     (concreteErrorClasses should contain).allOf(classOf[ServiceError], classOf[RateLimitError], classOf[CancelledError])
@@ -111,6 +115,22 @@ class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
     kind(APIError("p", "slow", Some(429))) shouldBe LlmErrorKind.RATE_LIMIT
     kind(APIError("p", "bad", Some(400))) shouldBe LlmErrorKind.VALIDATION
     kind(APIError("p", "down", Some(500))) shouldBe LlmErrorKind.SERVICE
+  }
+
+  it should "keep the error class's recoverability when a status gives it another kind" in {
+    // a provider client may report a rejected key as a plain ServiceError; it reads as AUTHENTICATION, yet a
+    // ServiceError is a RecoverableError, so isRecoverable stays true - the reason the guide says to call it
+    val forbidden = new LlmException(ServiceError(403, "bedrock", "access denied"))
+    (forbidden.getKind, forbidden.isRecoverable) shouldBe ((LlmErrorKind.AUTHENTICATION, true))
+    CompletionCheck.failure(forbidden).asScala.toList shouldBe
+      List("kind:authentication", "recoverable:true", "retryAfter:none", "status:403")
+
+    remapped.foreach { error =>
+      withClue(error) {
+        new LlmException(error).isRecoverable shouldBe true
+        new LlmException(error).getKind should not be LlmErrorKind.SERVICE
+      }
+    }
   }
 
   it should "read an error from outside org.llm4s.error, or one implemented in Java, as OTHER" in {
@@ -170,5 +190,32 @@ class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
     val failed = LlmResult.failure[JCompletion](TimeoutError("slow", 30.seconds, "complete"))
     failed.getError().getKind shouldBe LlmErrorKind.TIMEOUT
     failed.getError().isRecoverable shouldBe true
+  }
+
+  "the kind table of docs/guide/java.md" should "say of each kind what isRecoverable says of its errors" in {
+    val GuideFile = "docs/guide/java.md"
+    val row       = "(?m)^\\| `([A-Z_]+)` \\| [^|]+ \\| ([^|]+) \\|$".r
+    val recoverableColumn: Map[LlmErrorKind, String] =
+      row
+        .findAllMatchIn(GuideDocs.read(GuideFile, GuideFile))
+        .map(m => LlmErrorKind.valueOf(m.group(1)) -> m.group(2).trim)
+        .toMap
+    recoverableColumn.keySet shouldBe LlmErrorKind.values.toSet
+
+    (oneOfEach.map(_._1) ++ remapped).foreach { error =>
+      val e    = new LlmException(error)
+      val cell = recoverableColumn(e.getKind)
+      withClue(s"$error reads as ${e.getKind}, whose row says '$cell': ") {
+        cell match {
+          case "yes"                        => e.isRecoverable shouldBe true
+          case "no"                         => e.isRecoverable shouldBe false
+          case c if c.startsWith("depends") => succeed
+          case c =>
+            c should startWith("no, unless it is a provider's ")
+            // recoverable exactly when it is one of the statuses the row names
+            e.isRecoverable shouldBe LlmErrorKinds.statusCode(error).exists(s => c.contains(s"`$s`"))
+        }
+      }
+    }
   }
 }

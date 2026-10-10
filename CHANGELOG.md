@@ -13,14 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `completion(Conversation)` and `completion(Conversation, JCompletionOptions)` return an
   `LlmResult<JCompletion>`: the reply's `content()`, the `model()` that answered, its `toolCalls()` as the
   `JToolCall`s the agent's messages already use, `usage()` as an `Optional<JTokenUsage>` (`promptTokens()`,
-  `completionTokens()`, `totalTokens()`, `thinkingTokens()`), `estimatedCost()` as an `Optional<BigDecimal>` (the
+  `completionTokens()`, `totalTokens()`, `thinkingTokens()`, and the prompt-cache counts `cachedTokens()` and
+  `cacheCreationTokens()`, each `int` and zero where the provider reports none), `estimatedCost()` as an `Optional<BigDecimal>` (the
   figure an agent turn adds to `JUsageSummary.totalCost()`), `thinking()` and `id()`. The `complete` methods keep
   returning the text. There is one options overload of `completion`, so a literal `null` options compiles and
   fails as a result. `LlmException` gains `getKind()`, the Java enum `LlmErrorKind` (`AUTHENTICATION`,
   `RATE_LIMIT`, `TIMEOUT`, `NETWORK`, `SERVICE`, `VALIDATION`, `CONFIGURATION`, `CANCELLED`, `OTHER`),
   `isRecoverable()`, `getRetryAfter()` as an `Optional<Duration>` and `getStatusCode()` as an `OptionalInt`. A
   provider's `400`, `401`/`403` or `429` reported as a `ServiceError` or `APIError` reads as `VALIDATION`,
-  `AUTHENTICATION` or `RATE_LIMIT`. Every concrete error class in `org.llm4s.error` has a kind, and
+  `AUTHENTICATION` or `RATE_LIMIT` and stays recoverable, as its class is: always call `isRecoverable()` rather
+  than infer it from the kind. Every concrete error class in `org.llm4s.error` has a kind, and
   `LlmErrorKindSpec` scans the package and fails when a new one has none. `JCompletionOptions.toString` now prints
   an unset value as `unset`, so an unset reasoning level no longer reads like `NONE`. The Java guide has
   [The whole reply](docs/guide/java.md#the-whole-reply) and a rewritten

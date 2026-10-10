@@ -59,6 +59,9 @@ final class CompletionCheck {
       int total = u.totalTokens();
       int thinkingTokens = u.thinkingTokens();
       log.add("usage:" + prompt + "/" + completion + "/" + total + "/" + thinkingTokens);
+      int cached = u.cachedTokens();
+      int cacheCreation = u.cacheCreationTokens();
+      log.add("cache:" + cached + "/" + cacheCreation);
     });
     log.add("cost:" + cost.map(BigDecimal::toPlainString).orElse("unknown"));
     log.add("thinking:" + thinking.orElse("none"));

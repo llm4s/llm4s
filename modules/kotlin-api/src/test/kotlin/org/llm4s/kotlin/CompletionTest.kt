@@ -59,7 +59,7 @@ internal fun reply(text: String = "Let me check.", cost: Option<Any> = Option.ap
     Completion.apply(
         "reply-1", 0L, text, "gpt-4o-2024-08-06", AssistantMessage.apply(text),
         scala.jdk.javaapi.CollectionConverters.asScala(listOf(ToolCall("c1", "weather", ujson.Str("Paris")))).toList(),
-        Option.apply(TokenUsage.apply(12, 5, 17, Option.empty(), Option.empty(), Option.empty())),
+        Option.apply(TokenUsage.apply(12, 5, 17, Option.empty(), Option.apply<Any>(8), Option.apply<Any>(3))),
         cost,
         scala.jdk.javaapi.CollectionConverters.asScala(listOf<Citation>()).toList(),
     )
@@ -79,6 +79,7 @@ class CompletionTest {
         assertEquals("gpt-4o-2024-08-06", answer.model())
         val usage = answer.usage().orElseThrow()
         assertEquals(listOf(12, 5, 17, 0), listOf(usage.promptTokens(), usage.completionTokens(), usage.totalTokens(), usage.thinkingTokens()))
+        assertEquals(8 to 3, usage.cachedTokens() to usage.cacheCreationTokens())
         assertEquals(Optional.of(BigDecimal("0.0015")), answer.estimatedCost())
         assertEquals(listOf(Triple("c1", "weather", "\"Paris\"")), answer.toolCalls().map { Triple(it.id(), it.name(), it.argumentsJson()) })
         assertEquals(1, model.sent.size)

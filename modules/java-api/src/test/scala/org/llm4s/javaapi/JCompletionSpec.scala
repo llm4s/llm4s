@@ -26,7 +26,16 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
     model = "gpt-4o-2024-08-06",
     message = AssistantMessage("Let me check.").withThinking("The user wants the weather."),
     toolCalls = List(toolCall, ToolCall("call-2", "clock", ujson.Obj())),
-    usage = Some(TokenUsage(promptTokens = 120, completionTokens = 30, totalTokens = 150, thinkingTokens = Some(7))),
+    usage = Some(
+      TokenUsage(
+        promptTokens = 120,
+        completionTokens = 30,
+        totalTokens = 150,
+        thinkingTokens = Some(7),
+        cachedTokens = Some(80),
+        cacheCreationTokens = Some(25)
+      )
+    ),
     estimatedCost = Some(0.0015)
   )
 
@@ -59,6 +68,7 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
     )
     val usage = reply.usage.get()
     (usage.promptTokens, usage.completionTokens, usage.totalTokens, usage.thinkingTokens) shouldBe (120, 30, 150, 7)
+    (usage.cachedTokens, usage.cacheCreationTokens) shouldBe ((80, 25))
     reply.estimatedCost.get() shouldBe new java.math.BigDecimal("0.0015")
     reply.thinking.get() shouldBe "The user wants the weather."
   }
@@ -71,6 +81,7 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
       """tool:call-1:weather:{"city":"Paris"}""",
       "tool:call-2:clock:{}",
       "usage:120/30/150/7",
+      "cache:80/25",
       "cost:0.0015",
       "thinking:The user wants the weather."
     )
@@ -92,9 +103,20 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  it should "read thinking tokens the provider did not report as zero, as the agent's usage does" in {
-    val noThinking = full.withUsage(TokenUsage(promptTokens = 1, completionTokens = 2, totalTokens = 3))
-    new JLlmClient(replying(noThinking)).completion("q").get().usage.get().thinkingTokens shouldBe 0
+  it should "read thinking and cache tokens the provider did not report as zero, as the agent's usage does" in {
+    val unreported = full.withUsage(TokenUsage(promptTokens = 1, completionTokens = 2, totalTokens = 3))
+    val usage      = new JLlmClient(replying(unreported)).completion("q").get().usage.get()
+    (usage.thinkingTokens, usage.cachedTokens, usage.cacheCreationTokens) shouldBe ((0, 0, 0))
+  }
+
+  it should "read cache reads and cache writes apart, each as the provider reported it" in {
+    def read(cached: Option[Int], creation: Option[Int]): (Int, Int) = {
+      val tokens = TokenUsage(10, 2, 12, cachedTokens = cached, cacheCreationTokens = creation)
+      val usage  = new JLlmClient(replying(full.withUsage(tokens))).completion("q").get().usage.get()
+      (usage.cachedTokens, usage.cacheCreationTokens)
+    }
+    read(Some(6), None) shouldBe ((6, 0))
+    read(None, Some(9)) shouldBe ((0, 9))
   }
 
   it should "give the cost as core's agent usage adds it, so a reply's cost and an agent turn's total agree" in {
@@ -225,7 +247,19 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
     usage.hashCode shouldBe JTokenUsage.of(TokenUsage(promptTokens = 3, completionTokens = 4, totalTokens = 7)).hashCode
     usage should not be JTokenUsage.of(TokenUsage(promptTokens = 3, completionTokens = 4, totalTokens = 8))
     usage.equals("usage") shouldBe false
-    usage.toString shouldBe "JTokenUsage(3 prompt, 4 completion, 7 total, 0 thinking)"
+    usage.toString shouldBe "JTokenUsage(3 prompt, 4 completion, 7 total, 0 thinking, 0 cached, 0 cache creation)"
+    JTokenUsage.of(full.usage.get).toString shouldBe
+      "JTokenUsage(120 prompt, 30 completion, 150 total, 7 thinking, 80 cached, 25 cache creation)"
+  }
+
+  it should "tell apart usages that differ only in their cache counts" in {
+    val plain = TokenUsage(promptTokens = 3, completionTokens = 4, totalTokens = 7)
+    val base  = JTokenUsage.of(plain)
+    JTokenUsage.of(plain.withCachedTokens(2)) should not be base
+    JTokenUsage.of(plain.withCacheCreationTokens(2)) should not be base
+    JTokenUsage.of(plain.withCachedTokens(2)) should not be JTokenUsage.of(plain.withCacheCreationTokens(2))
+    JTokenUsage.of(plain.withCachedTokens(2)) shouldBe JTokenUsage.of(plain.withCachedTokens(2))
+    JTokenUsage.of(plain.withCachedTokens(2)).hashCode shouldBe JTokenUsage.of(plain.withCachedTokens(2)).hashCode
   }
 
   it should "count what an agent turn's usage sums: prompt tokens as input, completion tokens as output" in {

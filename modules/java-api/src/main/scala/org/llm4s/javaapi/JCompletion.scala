@@ -82,15 +82,22 @@ object JCompletion {
  * @param totalTokens the total the provider reported, normally `promptTokens + completionTokens`
  * @param thinkingTokens extended-thinking tokens, billed as output but counted apart from `completionTokens`; zero
  *                       where the provider reports none, as in [[JUsageSummary.thinkingTokens]]
+ * @param cachedTokens input tokens served from the provider's prompt cache (a cache read), billed at the cheaper
+ *                     cache-read rate; zero where the provider reports none
+ * @param cacheCreationTokens input tokens written into the provider's prompt cache, billed at the cache-creation rate,
+ *                            which is typically higher than the normal input rate; zero where the provider reports none
  */
 final class JTokenUsage private (
   val promptTokens: Int,
   val completionTokens: Int,
   val totalTokens: Int,
-  val thinkingTokens: Int
+  val thinkingTokens: Int,
+  val cachedTokens: Int,
+  val cacheCreationTokens: Int
 ) {
 
-  private def fields: List[Int] = List(promptTokens, completionTokens, totalTokens, thinkingTokens)
+  private def fields: List[Int] =
+    List(promptTokens, completionTokens, totalTokens, thinkingTokens, cachedTokens, cacheCreationTokens)
 
   override def equals(other: Any): Boolean = other match {
     case that: JTokenUsage => fields == that.fields
@@ -100,12 +107,20 @@ final class JTokenUsage private (
   override def hashCode: Int = Objects.hash(fields.map(Int.box)*)
 
   override def toString: String =
-    s"JTokenUsage($promptTokens prompt, $completionTokens completion, $totalTokens total, $thinkingTokens thinking)"
+    s"JTokenUsage($promptTokens prompt, $completionTokens completion, $totalTokens total, $thinkingTokens thinking, " +
+      s"$cachedTokens cached, $cacheCreationTokens cache creation)"
 }
 
 object JTokenUsage {
 
-  /** `usage` as Java and Kotlin callers read it. */
+  /** `usage` as Java and Kotlin callers read it: a count the provider did not report is zero. */
   private[javaapi] def of(usage: TokenUsage): JTokenUsage =
-    new JTokenUsage(usage.promptTokens, usage.completionTokens, usage.totalTokens, usage.thinkingTokens.getOrElse(0))
+    new JTokenUsage(
+      usage.promptTokens,
+      usage.completionTokens,
+      usage.totalTokens,
+      usage.thinkingTokens.getOrElse(0),
+      usage.cachedTokens.getOrElse(0),
+      usage.cacheCreationTokens.getOrElse(0)
+    )
 }
