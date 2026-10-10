@@ -342,7 +342,7 @@ sbt test               # Run tests
 sbt scalafmtAll        # Format code
 sbt cov                # Run coverage
 sbt frozenDependencyCheck # no frozen module resolves a parsing, speech, cloud-storage, database, backend or foreign-SDK dependency
-sbt testIntegration    # modules/it @Docker tier (Postgres/pgvector, Qdrant, Neo4j)
+sbt testIntegration    # modules/it @Docker tier (Postgres/pgvector, Qdrant, Neo4j, MCP reference server)
 sbt testWorkspace      # modules/it @Workspace tier (needs a built workspace-runner image)
 sbt testOllama         # modules/it @Ollama tier
 sbt testSmoke          # modules/it @Cloud tier (live API keys)

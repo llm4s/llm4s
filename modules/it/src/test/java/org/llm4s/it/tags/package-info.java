@@ -11,7 +11,7 @@
  * <ul>
  *   <li>{@link org.llm4s.it.tags.Local} - nothing external. Runs in every {@code sbt test}.
  *   <li>{@link org.llm4s.it.tags.Docker} - a containerised service (Postgres/pgvector, Qdrant,
- *       Neo4j). Runs on every PR via CI service containers ({@code sbt testIntegration}).
+ *       Neo4j, the MCP reference server). Runs on every PR in CI ({@code sbt testIntegration}).
  *   <li>{@link org.llm4s.it.tags.Workspace} - a locally built {@code workspace-runner} image
  *       plus a Docker daemon ({@code sbt testWorkspace}).
  *   <li>{@link org.llm4s.it.tags.Ollama} - a local Ollama server ({@code sbt testOllama}).

@@ -202,7 +202,7 @@ if a suite declares none, so a new suite cannot end up being run by nothing:
 | Tag | Needs | Command |
 |---|---|---|
 | `@Local` | nothing external | `sbt test` |
-| `@Docker` | Postgres/pgvector, Qdrant or Neo4j | `sbt testIntegration` |
+| `@Docker` | Postgres/pgvector, Qdrant, Neo4j or the MCP reference server | `sbt testIntegration` |
 | `@Workspace` | Docker + a built `workspace-runner` image | `sbt testWorkspace` |
 | `@Ollama` | a local Ollama server | `sbt testOllama` |
 | `@Cloud` | live provider API keys | `sbt testSmoke` |

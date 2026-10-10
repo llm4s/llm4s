@@ -110,7 +110,7 @@ addCommandAlias(
 // new suite lands in a tier that actually runs instead of matching no `testOnly` pattern.
 //
 //   sbt test             Tier 1 - unit tests plus the `@Local` suites in modules/it
-//   sbt testIntegration  Tier 2 - `@Docker`: needs Postgres/pgvector, Qdrant, Neo4j
+//   sbt testIntegration  Tier 2 - `@Docker`: needs Postgres/pgvector, Qdrant, Neo4j, the MCP reference server
 //   sbt testWorkspace    Tier 2 - `@Workspace`: needs a built workspace-runner image + Docker
 //   sbt testOllama       Tier 3 - `@Ollama`: needs a local Ollama with `qwen2.5:0.5b` pulled
 //   sbt testSmoke        Tier 4 - `@Cloud`: real provider APIs, real money

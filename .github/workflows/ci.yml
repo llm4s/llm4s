@@ -646,10 +646,11 @@ jobs:
           retention-days: 5
 
   # Tier 2: containerised integration tests — pgvector, Qdrant and Neo4j as service
-  # containers. Reproducible and secret-free, so unlike the Ollama and cloud tiers this
-  # runs on every PR. `LLM4S_IT_STRICT=true` makes a suite that cannot reach its service
-  # fail instead of skip: this job promises the services are there, so a skip here would be
-  # the same silent non-execution that #1143 was about.
+  # containers, and the MCP reference server as a container started in a step. Reproducible
+  # and secret-free, so unlike the Ollama and cloud tiers this runs on every PR.
+  # `LLM4S_IT_STRICT=true` makes a suite that cannot reach its service fail instead of skip:
+  # this job promises the services are there, so a skip here would be the same silent
+  # non-execution that #1143 was about.
   integration-tests:
     name: Integration Tests
     needs: quick-checks
@@ -711,6 +712,21 @@ jobs:
           wait_for Qdrant http://localhost:6333/readyz
           wait_for Neo4j http://localhost:7474
 
+      # The official MCP reference server, for MCPReferenceServerSpec (#1006). Started here rather
+      # than as a service container because a service cannot be given a command, and the server
+      # picks its transport from one. Pinned to one server release.
+      - name: Start the MCP reference server
+        run: |
+          docker run -d --name mcp-everything -p 3001:3001 node:22-alpine \
+            npx -y @modelcontextprotocol/server-everything@2026.8.31 streamableHttp
+          for _ in $(seq 1 60); do
+            if curl -s -o /dev/null http://localhost:3001/mcp; then echo "MCP reference server is ready"; exit 0; fi
+            sleep 2
+          done
+          docker logs mcp-everything >&2
+          echo "MCP reference server did not become ready within 120s" >&2
+          exit 1
+
       - name: Run containerised integration tests
         env:
           LLM4S_IT_STRICT: "true"
@@ -729,6 +745,7 @@ jobs:
           NEO4J_URI: bolt://localhost:7687
           NEO4J_USER: neo4j
           NEO4J_PASSWORD: llm4stest
+          MCP_SERVER_URL: http://localhost:3001/mcp
         run: sbt testIntegration
 
       - name: Upload test reports

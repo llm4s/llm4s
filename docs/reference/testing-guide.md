@@ -213,7 +213,7 @@ to say which tier does run it.
 | Tag | Needs | Command | CI |
 |---|---|---|---|
 | `@Local` | nothing external | `sbt test` | every PR |
-| `@Docker` | Postgres/pgvector, Qdrant or Neo4j | `sbt testIntegration` | every PR (service containers) |
+| `@Docker` | Postgres/pgvector, Qdrant, Neo4j or the MCP reference server | `sbt testIntegration` | every PR (service containers) |
 | `@Workspace` | Docker + a built `workspace-runner` image | `sbt testWorkspace` | pushes to `main` |
 | `@Ollama` | a local Ollama with `qwen2.5:0.5b` pulled | `sbt testOllama` | pushes to `main` |
 | `@Cloud` | live provider API keys (real money) | `sbt testSmoke` | manual `workflow_dispatch` |
@@ -253,6 +253,8 @@ really executes:
 docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg16
 docker run -d -p 6333:6333 qdrant/qdrant
 docker run -d -p 7687:7687 -e NEO4J_AUTH=neo4j/llm4stest neo4j:5
+docker run -d -p 3001:3001 node:22-alpine \
+  npx -y @modelcontextprotocol/server-everything@2026.8.31 streamableHttp
 
 export PGVECTOR_TEST_URL=jdbc:postgresql://localhost:5432/postgres
 export PGVECTOR_USER=postgres PGVECTOR_PASSWORD=postgres
@@ -260,6 +262,7 @@ export PGVECTOR_TEST_USER=postgres PGVECTOR_TEST_PASSWORD=postgres
 export POSTGRES_TEST_ENABLED=true POSTGRES_PASSWORD=postgres
 export QDRANT_TEST_URL=http://localhost:6333
 export NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=llm4stest
+export MCP_SERVER_URL=http://localhost:3001/mcp
 export LLM4S_IT_STRICT=true
 
 sbt testIntegration
