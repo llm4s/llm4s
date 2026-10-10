@@ -175,7 +175,10 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     classOf[JMessageRole],
     classOf[JToolCall],
     classOf[JUsageSummary],
-    classOf[JModelUsage]
+    classOf[JModelUsage],
+    classOf[JCompletion],
+    classOf[JTokenUsage],
+    classOf[LlmErrorKind]
   )
 
   "the public Java-visible surface" should "not expose scala.* types outside the allowlisted internals" in {
@@ -195,7 +198,8 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
    */
   private def boundary: Map[String, String] = Map(
     "org.llm4s.error.LLMError" ->
-      "LlmException.error(): the error taxonomy, matched with instanceof; its Java view is #1487",
+      ("LlmException.error(): the error taxonomy, matched with instanceof for detail; its Java view is LlmException's " +
+        "getKind(), isRecoverable(), getRetryAfter() and getStatusCode() (#1487)"),
     "org.llm4s.llmconnect.model.Conversation" ->
       "ConversationBuilder.build(): handed back to JLlmClient.complete, not read",
     "org.llm4s.agent.graph.StreamEvent" ->
@@ -243,6 +247,28 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
 
   "no scala.* or ujson.* type" should "be reachable from any value the Java facade hands a caller" in {
     reachableLeaks(facade, boundary.keySet) shouldBe Nil
+  }
+
+  "the client facade" should "hand Java callers JCompletion from every completion overload, and Java types from LlmException" in {
+    def returns(m: java.lang.reflect.Method): List[Class[_]] = mentioned(m.getGenericReturnType)
+    val completions = List(
+      classOf[JLlmClient].getMethod("completion", classOf[String]),
+      classOf[JLlmClient].getMethod("completion", classOf[Conversation]),
+      classOf[JLlmClient].getMethod("completion", classOf[Conversation], classOf[JCompletionOptions])
+    )
+    completions.foreach(m =>
+      withClue(m.toString)(returns(m) shouldBe List(classOf[LlmResult[_]], classOf[JCompletion]))
+    )
+    // one options overload, so a literal null options needs no cast
+    classOf[JLlmClient].getMethods.count(m => m.getName == "completion" && m.getParameterCount == 2) shouldBe 1
+
+    returns(classOf[LlmException].getMethod("getKind")) shouldBe List(classOf[LlmErrorKind])
+    returns(classOf[LlmException].getMethod("isRecoverable")) shouldBe List(java.lang.Boolean.TYPE)
+    returns(classOf[LlmException].getMethod("getRetryAfter")) shouldBe
+      List(classOf[java.util.Optional[_]], classOf[java.time.Duration])
+    returns(classOf[LlmException].getMethod("getStatusCode")) shouldBe List(classOf[java.util.OptionalInt])
+    returns(classOf[JCompletion].getMethod("usage")) shouldBe List(classOf[java.util.Optional[_]], classOf[JTokenUsage])
+    returns(classOf[JCompletion].getMethod("toolCalls")) shouldBe List(classOf[java.util.List[_]], classOf[JToolCall])
   }
 
   "the agent facade" should "hand Java callers JAgentResult from every turn: run, continue, resume, recover, await, onComplete" in {

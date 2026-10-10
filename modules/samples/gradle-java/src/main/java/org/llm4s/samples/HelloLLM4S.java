@@ -9,6 +9,7 @@ import org.llm4s.agent.graph.StreamEvent;
 import org.llm4s.javaapi.AgentStream;
 import org.llm4s.javaapi.Answer;
 import org.llm4s.javaapi.ConversationBuilder;
+import org.llm4s.javaapi.JCompletion;
 import org.llm4s.javaapi.JCompletionOptions;
 import org.llm4s.javaapi.JAgent;
 import org.llm4s.javaapi.JAgentResult;
@@ -60,15 +61,25 @@ public final class HelloLLM4S {
         }
     }
 
-    /** One question, as a plain string. */
+    /**
+     * One question, with the whole reply: {@code completion} returns a {@link JCompletion} - the text, the model that
+     * answered and the tokens it used - where {@code complete} returns the text alone. A failure is read by its
+     * {@code getKind()}, a Java enum.
+     */
     private static boolean oneQuestion(JLlmClient client) {
         System.out.println("== One question");
-        LlmResult<String> answer = client.complete("Explain the difference between a class and an object in 2 sentences.");
+        LlmResult<JCompletion> answer =
+            client.completion("Explain the difference between a class and an object in 2 sentences.");
 
         // ifSuccess and ifFailure each take a lambda and return the result, so they chain.
         answer
-            .ifSuccess(text -> System.out.println(text))
-            .ifFailure(error -> System.err.println("The call failed: " + error.getMessage()));
+            .ifSuccess(reply -> {
+                System.out.println(reply.content());
+                reply.usage().ifPresent(usage -> System.out.println("(" + reply.model() + ", "
+                    + usage.promptTokens() + " + " + usage.completionTokens() + " tokens)"));
+            })
+            .ifFailure(error -> System.err.println("The call failed (" + error.getKind() + ", "
+                + (error.isRecoverable() ? "worth retrying" : "not worth retrying") + "): " + error.getMessage()));
         return answer.isSuccess();
     }
 

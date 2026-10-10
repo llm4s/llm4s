@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Java completions with usage, model and tool calls, and a typed error kind**
+  ([#1487](https://github.com/llm4s/llm4s/issues/1487)): `llm4s-java-api`'s `JLlmClient.completion(String)`,
+  `completion(Conversation)` and `completion(Conversation, JCompletionOptions)` return an
+  `LlmResult<JCompletion>`: the reply's `content()`, the `model()` that answered, its `toolCalls()` as the
+  `JToolCall`s the agent's messages already use, `usage()` as an `Optional<JTokenUsage>` (`promptTokens()`,
+  `completionTokens()`, `totalTokens()`, `thinkingTokens()`), `estimatedCost()` as an `Optional<BigDecimal>` (the
+  figure an agent turn adds to `JUsageSummary.totalCost()`), `thinking()` and `id()`. The `complete` methods keep
+  returning the text. There is one options overload of `completion`, so a literal `null` options compiles and
+  fails as a result. `LlmException` gains `getKind()`, the Java enum `LlmErrorKind` (`AUTHENTICATION`,
+  `RATE_LIMIT`, `TIMEOUT`, `NETWORK`, `SERVICE`, `VALIDATION`, `CONFIGURATION`, `CANCELLED`, `OTHER`),
+  `isRecoverable()`, `getRetryAfter()` as an `Optional<Duration>` and `getStatusCode()` as an `OptionalInt`. A
+  provider's `400`, `401`/`403` or `429` reported as a `ServiceError` or `APIError` reads as `VALIDATION`,
+  `AUTHENTICATION` or `RATE_LIMIT`. Every concrete error class in `org.llm4s.error` has a kind, and
+  `LlmErrorKindSpec` scans the package and fails when a new one has none. `JCompletionOptions.toString` now prints
+  an unset value as `unset`, so an unset reasoning level no longer reads like `NONE`. The Java guide has
+  [The whole reply](docs/guide/java.md#the-whole-reply) and a rewritten
+  [Handling a failure](docs/guide/java.md#handling-a-failure) section.
 - **Completion options from Java** ([#1488](https://github.com/llm4s/llm4s/issues/1488)): `llm4s-java-api`'s
   `JCompletionOptions.builder()` sets `temperature`, `topP`, `maxTokens`, `presencePenalty`, `frequencyPenalty`,
   `reasoning` (the Java enum `JReasoningEffort`: `NONE`, `LOW`, `MEDIUM`, `HIGH`) and `budgetTokens`, and
