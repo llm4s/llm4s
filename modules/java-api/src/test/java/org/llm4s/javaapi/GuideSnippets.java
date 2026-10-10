@@ -6,12 +6,12 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
-import org.llm4s.error.LLMError;
-import org.llm4s.error.RecoverableError;
 import org.llm4s.javaapi.ConversationBuilder;
+import org.llm4s.javaapi.JCompletion;
 import org.llm4s.javaapi.JCompletionOptions;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.JReasoningEffort;
+import org.llm4s.javaapi.JToolCall;
 import org.llm4s.javaapi.Llm4s;
 import org.llm4s.javaapi.LlmException;
 import org.llm4s.javaapi.LlmResult;
@@ -75,16 +75,37 @@ final class GuideSnippets {
         return Arrays.asList(text, orNull, optional.orElse("none"), String.valueOf(length.get()), future.join());
     }
 
+    /** The "The whole reply" block: the model, token usage, cost and tool calls of one reply. */
+    static JCompletion wholeReply(JLlmClient client, Conversation conversation) {
+        JCompletion reply = client.completion(conversation).get();
+
+        System.out.println(reply.model() + ": " + reply.content());
+        reply.usage().ifPresent(usage ->
+            System.out.println(usage.promptTokens() + " tokens in, " + usage.completionTokens() + " out"));
+        reply.estimatedCost().ifPresent(cost -> System.out.println("about $" + cost.toPlainString()));
+        for (JToolCall call : reply.toolCalls()) {
+            System.out.println("wants " + call.name() + " " + call.argumentsJson());
+        }
+
+        return reply;
+    }
+
     /** The "Handling a failure" block. */
     static void handlingAFailure(JLlmClient client) {
         try {
             String text = client.complete("What is 2+2?").get();
             System.out.println(text);
         } catch (LlmException e) {
-            LLMError error = e.error();                // the llm4s error: a Scala type
-            System.err.println(error.message());       // the same text as e.getMessage()
-            System.err.println(error.formatted());     // the message plus its code and context
-            if (error instanceof RecoverableError) {
+            System.err.println(e.getMessage());
+            switch (e.getKind()) {
+                case AUTHENTICATION, CONFIGURATION -> System.err.println("check the API key and the provider section");
+                case RATE_LIMIT -> System.err.println("rate limited; wait "
+                    + e.getRetryAfter().map(d -> d.toSeconds() + " s").orElse("a while"));
+                case SERVICE -> System.err.println("the provider answered HTTP "
+                    + (e.getStatusCode().isPresent() ? e.getStatusCode().getAsInt() : "?"));
+                default -> { }
+            }
+            if (e.isRecoverable()) {
                 System.err.println("a retry may succeed");
             }
         }

@@ -29,6 +29,7 @@ import scala.util.{ Try, Using }
  *       `git` accept an unambiguous prefix, and with or without `=value`.
  *  3. '''Paths''' (`PATH_ESCAPE_ATTEMPT`, the code the file operations use). Every argument - and the value of a
  *     `--name=value` option and every tail of a short option, so the `/etc/x` in `--file=/etc/x` and `-f/etc/x` -
+ *     bar the separator `sort -t` really takes (parsed as sort parses its options, see [[sortCandidates]]) -
  *     is resolved the way the kernel would resolve it from the real working directory: component by component,
  *     following each symbolic link where it is met, so `link/..` goes to the parent of the link's target, not back
  *     to the directory holding the link. The result must lie inside the real workspace root, and so must the lexical
@@ -94,15 +95,14 @@ private[runner] object CommandPolicy {
    * @param long        long options refused under any abbreviation of at least one letter, with or without `=value`
    * @param exact       arguments refused when they are exactly this (`find`'s single-dash primaries)
    * @param longAllowed long options that are themselves a prefix of a refused one (`--text` of `--textconv`)
-   * @param textShort   short options whose value is text, never opened as a path (`sort -t/`)
-   * @param textLong    long options whose value is text, never opened as a path (`sort --field-separator=/`)
+   * @param textLong    long options whose value after `=` is text, never opened as a path (`sort --field-separator=/`
+   *                    on Windows; on POSIX `sort` is parsed by [[sortCandidates]] instead)
    */
   final private case class Options(
     short: Set[Char] = Set.empty,
     long: Set[String] = Set.empty,
     exact: Set[String] = Set.empty,
     longAllowed: Set[String] = Set.empty,
-    textShort: Set[Char] = Set.empty,
     textLong: Set[String] = Set.empty
   )
 
@@ -130,11 +130,10 @@ private[runner] object CommandPolicy {
     // Reads the names of the files to count from a file.
     "wc" -> Options(long = Set("--files0-from")),
     // Writes a file, runs a program, reads the names of the files to sort from a file.
-    // `-t` / `--field-separator` take a separator character, not a path.
+    // `-t` / `--field-separator` take a separator character, not a path (see `sortCandidates`).
     "sort" -> Options(
       short = Set('o'),
       long = Set("--output", "--compress-program", "--files0-from"),
-      textShort = Set('t'),
       textLong = Set("--field-separator")
     ),
     // Follow links met inside the tree (`-L`, `--dereference`) or on the command line (`-H`) and copy what they
@@ -806,7 +805,9 @@ private[runner] object CommandPolicy {
       val budget   = new Budget(MaxPathSteps)
       val options  = ProgramOptions.getOrElse(program, Options())
       val switches = isWindows && WindowsSwitchPrograms.contains(program)
-      candidates(args, options, switches)
+      val strings =
+        if (program == "sort" && !isWindows) sortCandidates(args) else candidates(args, options, switches)
+      strings
         .map { case (arg, candidate) =>
           val judged =
             verdict(workDir, candidate, realRoot, budget)
@@ -828,17 +829,16 @@ private[runner] object CommandPolicy {
    *  - A long option `--name=value` contributes itself and its value - not the tails of its name, so text such as
    *    `--since=2024/01/01` or `--grep=feat/x` is not read as the absolute path `/01/01`. A value given as the
    *    next argument is a plain argument.
-   *  - A short option contributes every tail after its dash, which covers an attached value at any position
-   *    (`-f/x`, `-rf/x`).
-   *  - A program's text options ([[Options.textShort]], [[Options.textLong]]) contribute no value: `sort -t/` and
-   *    `sort -t /` take a separator, not a path. In a cluster, the tails up to and including the text option are
-   *    still checked, so a value-taking option before it (`-Tt`) is still held to the workspace; the next argument
-   *    is exempt only after a bare `-t`.
+   *  - A short option contributes itself and every tail after its dash, which covers an attached value at any
+   *    position (`-f/x`, `-rf/x`) and a program that opens the whole argument as a file (BSD programs stop reading
+   *    options at their first operand, so `cat a.txt -f` opens `-f`).
    *  - After a bare `--`, every argument contributes itself and all its tails, because an option may have consumed
    *    the `--` as its value, and an operand that looks like an option is opened as a file.
+   *
+   * No argument is exempt here: an option's value given as the next argument is a plain argument, whatever the
+   * option. POSIX `sort`, whose `-t` value is a separator, is parsed instead by [[sortCandidates]] (#1763).
    */
   private def candidates(args: Seq[String], options: Options, switches: Boolean): Iterator[(String, String)] = {
-    def tails(arg: String): Iterator[String] = Iterator.range(1, arg.length).map(arg.substring)
     // In `/G:file` the `G:` names the switch, so the first tail `G:file` is not a path on drive G: (`file`, the
     // next-but-one tail, is checked; so is `D:file` in `/G:D:file`).
     def plain(arg: String): Iterator[String] =
@@ -851,33 +851,235 @@ private[runner] object CommandPolicy {
     def loop(
       rest: List[String],
       afterDashes: Boolean,
-      skipNext: Boolean,
       found: List[(String, () => Iterator[String])]
     ): List[(String, () => Iterator[String])] =
       rest match {
-        case Nil                   => found.reverse
-        case _ :: tail if skipNext => loop(tail, afterDashes, skipNext = false, found)
-        case "--" :: tail          => loop(tail, afterDashes = true, skipNext = false, found)
+        case Nil          => found.reverse
+        case "--" :: tail => loop(tail, afterDashes = true, found)
         case arg :: tail if afterDashes =>
           val all = () => plain(arg) ++ (if (arg.startsWith("-")) tails(arg) else Iterator.empty)
-          loop(tail, afterDashes, skipNext = false, (arg, all) :: found)
+          loop(tail, afterDashes, (arg, all) :: found)
         case arg :: tail if arg.startsWith("--") && arg.length > 2 =>
           val name     = arg.takeWhile(_ != '=')
           val hasValue = arg.length > name.length
-          val text     = textLong(name)
-          val value    = if (hasValue && !text) Iterator.single(arg.drop(name.length + 1)) else Iterator.empty
+          val value    = if (hasValue && !textLong(name)) Iterator.single(arg.drop(name.length + 1)) else Iterator.empty
           val all      = () => Iterator.single(arg) ++ value.filter(_.nonEmpty)
-          loop(tail, afterDashes, skipNext = text && !hasValue, (arg, all) :: found)
+          loop(tail, afterDashes, (arg, all) :: found)
         case arg :: tail if arg.length > 1 && arg.startsWith("-") =>
-          val cluster = arg.drop(1)
-          val textAt  = cluster.indexWhere(options.textShort.contains)
-          val all     = () => if (textAt < 0) tails(arg) else Iterator.range(1, textAt + 2).map(arg.substring)
-          loop(tail, afterDashes, skipNext = cluster.length == 1 && textAt == 0, (arg, all) :: found)
-        case arg :: tail => loop(tail, afterDashes, skipNext = false, (arg, () => plain(arg)) :: found)
+          loop(tail, afterDashes, (arg, () => tails(arg) ++ Iterator.single(arg)) :: found)
+        case arg :: tail => loop(tail, afterDashes, (arg, () => plain(arg)) :: found)
       }
 
-    loop(args.toList, afterDashes = false, skipNext = false, Nil).iterator.flatMap { case (arg, all) =>
+    loop(args.toList, afterDashes = false, Nil).iterator.flatMap { case (arg, all) =>
       all().map(arg -> _)
+    }
+  }
+
+  /** Every tail of `arg` after its first character (`-rf/x` gives `rf/x`, `f/x`, `/x`, `x`). */
+  private def tails(arg: String): Iterator[String] = Iterator.range(1, arg.length).map(arg.substring)
+
+  // ---- getopt: which argument is an option's value, as the program's own parser reads them (#1763)
+
+  /** Whether a long option takes a value: never, always (`--key=2` or `--key 2`), or only after `=` (`--check=quiet`). */
+  sealed private trait Arity
+  private case object NoValue       extends Arity
+  private case object RequiredValue extends Arity
+  private case object OptionalValue extends Arity
+
+  /**
+   * One implementation's options, as its `getopt` / `getopt_long` reads them: a short option that takes a value takes
+   * the rest of its cluster (`-Tdir`, `-rTdir`), or else the next argument, whatever it is (`-T -t`, `-T --`); a long
+   * one that requires a value takes the text after `=`, or else the next argument; a long option may be abbreviated to
+   * any prefix that selects only it.
+   *
+   * @param valueShort short options that take a value
+   * @param flagShort  short options that take none
+   * @param long       long options by name (without `--`)
+   * @param permute    whether options may follow operands (GNU and FreeBSD `getopt_long`); otherwise the first operand
+   *                   ends the options (macOS `getopt`, and GNU programs run with `POSIXLY_CORRECT` set)
+   * @param takesNext  whether a short value option at the end of its cluster takes the next argument (GNU sort's
+   *                   obsolete `-y` takes it only when it is all digits)
+   */
+  final private case class Getopt(
+    valueShort: Set[Char],
+    flagShort: Set[Char],
+    long: Map[String, Arity],
+    permute: Boolean = true,
+    takesNext: (Char, String) => Boolean = (_, _) => true
+  ) {
+
+    /** The long option `name` selects, if exactly one: the exact name, or the only one it abbreviates. */
+    def resolve(name: String): Option[(String, Arity)] =
+      long.get(name).map(name -> _).orElse {
+        val matches = long.filter { case (full, _) => full.startsWith(name) }
+        if (name.nonEmpty && matches.size == 1) matches.headOption else None
+      }
+  }
+
+  /** What one argument is to a program's option parser. */
+  sealed private trait Role
+
+  /** The `--` that ends the options (not one an option took as its value). */
+  private case object EndOfOptions extends Role
+
+  private case object Operand extends Role
+
+  /** A short-option cluster; `valueAt` is the index in the argument of the first letter that takes a value. */
+  final private case class ShortOptions(valueAt: Option[Int]) extends Role
+
+  /** A long option, by its full name when it selects exactly one, with the text after its `=`. */
+  final private case class LongOption(name: Option[String], attached: Option[String]) extends Role
+
+  /** The value of the option before it, given as the next argument; `option` is `-T` or `--temporary-directory`. */
+  final private case class OptionValue(option: String) extends Role
+
+  /**
+   * Each argument's role, and whether the parse is exact: `false` when an option is one the table does not know, is
+   * an ambiguous abbreviation, or is missing its value or given one it does not take. The program stops with an error
+   * then, but a version with an option the table lacks might not, so nothing that depends on the parse is exempted.
+   */
+  final private case class Parse(roles: Vector[Role], exact: Boolean)
+
+  /** `args` as `spec`'s parser reads them, left to right, each option's value consumed exactly once. */
+  private def parseOptions(args: IndexedSeq[String], spec: Getopt): Parse = {
+    @tailrec
+    def loop(i: Int, optionsEnded: Boolean, roles: Vector[Role], exact: Boolean): Parse =
+      if (i >= args.length) Parse(roles, exact)
+      else {
+        val arg  = args(i)
+        val next = args.lift(i + 1)
+        if (optionsEnded) loop(i + 1, optionsEnded, roles :+ Operand, exact)
+        else if (arg == "--") loop(i + 1, optionsEnded = true, roles :+ EndOfOptions, exact)
+        else if (arg.startsWith("--")) {
+          val body     = arg.drop(2)
+          val name     = body.takeWhile(_ != '=')
+          val attached = if (body.length > name.length) Some(body.drop(name.length + 1)) else None
+          spec.resolve(name) match {
+            case Some((full, RequiredValue)) if attached.isEmpty && next.nonEmpty =>
+              loop(i + 2, optionsEnded, roles :+ LongOption(Some(full), None) :+ OptionValue(s"--$full"), exact)
+            case Some((full, arity)) =>
+              val error = (arity == RequiredValue && attached.isEmpty) || (arity == NoValue && attached.nonEmpty)
+              loop(i + 1, optionsEnded, roles :+ LongOption(Some(full), attached), exact && !error)
+            case None => loop(i + 1, optionsEnded, roles :+ LongOption(None, attached), exact = false)
+          }
+        } else if (arg.length > 1 && arg.startsWith("-")) {
+          val valueAt = arg.indexWhere(spec.valueShort.contains, 1)
+          val letters = if (valueAt < 0) arg.drop(1) else arg.substring(1, valueAt)
+          val known   = letters.forall(spec.flagShort.contains)
+          val role    = ShortOptions(Option.when(valueAt >= 0)(valueAt))
+          if (valueAt >= 0 && valueAt == arg.length - 1) {
+            val option = arg.charAt(valueAt)
+            next match {
+              case Some(value) if spec.takesNext(option, value) =>
+                loop(i + 2, optionsEnded, roles :+ role :+ OptionValue(s"-$option"), exact && known)
+              case Some(_) => loop(i + 1, optionsEnded, roles :+ role, exact && known)
+              case None    => loop(i + 1, optionsEnded, roles :+ role, exact = false)
+            }
+          } else loop(i + 1, optionsEnded, roles :+ role, exact && known)
+        } else loop(i + 1, optionsEnded || !spec.permute, roles :+ Operand, exact)
+      }
+
+    loop(0, optionsEnded = false, Vector.empty, exact = true)
+  }
+
+  // ---- sort
+
+  private val SortFlags: Set[Char] = "bcCdfghiMmnRrsuVz".toSet
+
+  /** GNU sort's long options; BSD sort (FreeBSD, macOS) has them all. */
+  private val SortLong: Map[String, Arity] =
+    Seq(
+      "debug",
+      "dictionary-order",
+      "general-numeric-sort",
+      "help",
+      "human-numeric-sort",
+      "ignore-case",
+      "ignore-leading-blanks",
+      "ignore-nonprinting",
+      "merge",
+      "month-sort",
+      "numeric-sort",
+      "random-sort",
+      "reverse",
+      "stable",
+      "unique",
+      "version",
+      "version-sort",
+      "zero-terminated"
+    ).map(_ -> NoValue).toMap ++
+      Seq(
+        "batch-size",
+        "buffer-size",
+        "compress-program",
+        "field-separator",
+        "files0-from",
+        "key",
+        "output",
+        "parallel",
+        "random-source",
+        "sort",
+        "temporary-directory"
+      ).map(_ -> RequiredValue) ++
+      Seq("check" -> OptionalValue)
+
+  /** GNU sort: `-y` (obsolete, ignored) takes a value, but only an attached one or a next argument of digits. */
+  private val GnuSort = Getopt(
+    valueShort = "kSoTty".toSet,
+    flagShort = SortFlags,
+    long = SortLong,
+    takesNext = (option, next) => option != 'y' || next.forall(c => c >= '0' && c <= '9')
+  )
+
+  /** BSD sort has no `-y`, and adds its algorithm options and a literal `--check=silent|quiet`. */
+  private val BsdSort = Getopt(
+    valueShort = "kSoTt".toSet,
+    flagShort = SortFlags,
+    long = SortLong ++ Seq("heapsort", "mergesort", "mmap", "qsort", "radixsort").map(_ -> NoValue) +
+      ("check=silent|quiet" -> OptionalValue)
+  )
+
+  /**
+   * POSIX `sort`'s candidate paths: as [[candidates]], except that the value of `-t` / `--field-separator` is a
+   * separator, not a path, and is not checked - but only when it really is that value (#1763).
+   *
+   * `sort -T -t /etc/passwd` reads `/etc/passwd`: `-T` takes `-t` as its directory, so the next argument is an
+   * operand. So the arguments are parsed as sort parses them, each option's value consumed once ([[parseOptions]]):
+   * attached (`-Tdir`, `-rTdir`), separate (`-T dir`, `--temporary-directory dir`, `--temp dir`) or after `=`
+   * (`--temporary-directory=dir`), up to the `--` that ends the options. They are parsed four ways - by GNU and by
+   * BSD sort's option table, each with and without permutation (`POSIXLY_CORRECT`, which the runner's own environment
+   * may carry, makes GNU sort read every argument after its first operand as a file) - and an argument contributes
+   * the candidates of its role in each. Every operand and every other option's value is checked whole. The separator is
+   * left out only when all four parses are exact ([[Parse.exact]]) and no argument starts with `+`: BSD sort rewrites
+   * the obsolete `+POS1 -POS2` into `-k` before it parses options, even inside another option's value, which can
+   * remove the `-t` an exact parse found (`sort -T +0 -1t /etc/passwd`). Otherwise the separator is checked too, and
+   * an operand that looks like an option contributes its tails, as after `--`.
+   */
+  private def sortCandidates(args: Seq[String]): Iterator[(String, String)] = {
+    val argv = args.toVector
+    val parses = for {
+      spec    <- Seq(GnuSort, BsdSort)
+      permute <- Seq(true, false)
+    } yield parseOptions(argv, spec.copy(permute = permute))
+    val separatorIsText = parses.forall(_.exact) && !argv.exists(a => a.length > 1 && a.startsWith("+"))
+
+    def ofRole(arg: String, role: Role): Iterator[String] = role match {
+      case EndOfOptions => Iterator.empty
+      case Operand =>
+        Iterator.single(arg) ++ (if (!separatorIsText && arg.startsWith("-")) tails(arg) else Iterator.empty)
+      // `-rt/`: the letters up to and including `t` (`rt/`, `t/`), not the separator after it
+      case ShortOptions(Some(at)) if separatorIsText && arg.charAt(at) == 't' =>
+        Iterator.range(1, at + 1).map(arg.substring) ++ Iterator.single(arg)
+      case ShortOptions(_) => tails(arg) ++ Iterator.single(arg)
+      case LongOption(name, attached) =>
+        val separator = separatorIsText && name.contains("field-separator")
+        Iterator.single(arg) ++ attached.filter(value => value.nonEmpty && !separator)
+      case OptionValue("-t" | "--field-separator") if separatorIsText => Iterator.empty
+      case OptionValue(_)                                             => Iterator.single(arg)
+    }
+
+    argv.indices.iterator.flatMap { i =>
+      parses.map(_.roles(i)).distinct.iterator.flatMap(ofRole(argv(i), _)).distinct.map(argv(i) -> _)
     }
   }
 
@@ -1060,49 +1262,88 @@ private[runner] object CommandPolicy {
   /** What `cp`'s options say about how it copies, and its operands (a `-t` / `--target-directory` value included). */
   final private case class CpCommand(operands: List[String], recursive: Boolean, keepsLinks: Boolean, parents: Boolean)
 
+  /** GNU cp: `-S` / `--suffix` and `-t` / `--target-directory` take a value. */
+  private val GnuCp = Getopt(
+    valueShort = Set('S', 't'),
+    flagShort = "abdfHilLnprsTuvxPRZ".toSet,
+    long = Seq(
+      "archive",
+      "attributes-only",
+      "copy-contents",
+      "debug",
+      "dereference",
+      "force",
+      "interactive",
+      "keep-directory-symlink",
+      "link",
+      "no-clobber",
+      "no-dereference",
+      "no-target-directory",
+      "one-file-system",
+      "parents",
+      "path",
+      "recursive",
+      "remove-destination",
+      "strip-trailing-slashes",
+      "symbolic-link",
+      "verbose",
+      "help",
+      "version"
+    ).map(_ -> (NoValue: Arity)).toMap ++
+      Seq("no-preserve", "sparse", "suffix", "target-directory").map(_ -> RequiredValue) ++
+      Seq("backup", "context", "preserve", "reflink", "update").map(_ -> OptionalValue)
+  )
+
+  /** macOS cp: no option takes a value (`-S` is a flag), and its `getopt` stops at the first operand. */
+  private val BsdCp =
+    Getopt(valueShort = Set.empty, flagShort = "acfHiLlNnPpRrSsvXx".toSet, long = Map.empty, permute = false)
+
+  /**
+   * `cp`'s operands and how it copies. The operands - a `-t` / `--target-directory` value included - are those of
+   * either parse, GNU's or macOS's ([[parseOptions]]), so an option's value is consumed once and a `--` it took as
+   * its value (`cp -S -- -R src dst`) does not end the options (#1763). Which flags are set is read from every
+   * argument wherever it stands, operands and values included, which only adds checks: `-R` after a `--` that `-S`
+   * consumed is still seen as recursive.
+   */
   private def cpCommand(args: Seq[String]): CpCommand = {
-    // Any abbreviation of at least one letter: `--t=dst` is `--target-directory=dst`.
+    // Any abbreviation of at least one letter: `--rec` is `--recursive`, `--pat` is `--path` (GNU's `--parents`).
     def long(name: String, full: String): Boolean = name.length > 2 && full.startsWith(name)
 
-    @tailrec
-    def loop(rest: List[String], afterDashes: Boolean, command: CpCommand): CpCommand =
-      rest match {
-        case Nil                        => command.copy(operands = command.operands.reverse)
-        case arg :: tail if afterDashes => loop(tail, afterDashes, command.copy(operands = arg :: command.operands))
-        case "--" :: tail               => loop(tail, afterDashes = true, command)
-        case arg :: tail if arg.startsWith("--") && arg.length > 2 =>
-          val name = arg.takeWhile(_ != '=')
-          val target =
-            if (long(name, "--target-directory") && arg.length > name.length) List(arg.drop(name.length + 1)) else Nil
-          val recursive = long(name, "--recursive") || long(name, "--archive")
-          loop(
-            tail,
-            afterDashes,
-            command.copy(
-              operands = target ++ command.operands,
-              recursive = command.recursive || recursive,
-              keepsLinks = command.keepsLinks || recursive || long(name, "--no-dereference"),
-              parents = command.parents || long(name, "--parents")
-            )
-          )
-        case arg :: tail if arg.length > 1 && arg.startsWith("-") =>
-          val cluster   = arg.drop(1)
-          val targetAt  = cluster.indexOf('t')
-          val target    = if (targetAt >= 0 && targetAt < cluster.length - 1) List(cluster.drop(targetAt + 1)) else Nil
-          val recursive = cluster.exists(c => c == 'R' || c == 'r' || c == 'a')
-          loop(
-            tail,
-            afterDashes,
-            command.copy(
-              operands = target ++ command.operands,
-              recursive = command.recursive || recursive,
-              keepsLinks = command.keepsLinks || recursive || cluster.exists(c => c == 'P' || c == 'd')
-            )
-          )
-        case arg :: tail => loop(tail, afterDashes, command.copy(operands = arg :: command.operands))
+    val argv = args.toVector
+    val operands = Seq(GnuCp, BsdCp)
+      .flatMap { spec =>
+        val roles = parseOptions(argv, spec).roles
+        argv.indices.flatMap { i =>
+          val arg = argv(i)
+          roles(i) match {
+            case Operand                                  => Some(i -> arg)
+            case OptionValue("-t" | "--target-directory") => Some(i -> arg)
+            case ShortOptions(Some(at)) if arg.charAt(at) == 't' && at < arg.length - 1 =>
+              Some(i -> arg.substring(at + 1))
+            case LongOption(Some("target-directory"), Some(dir)) => Some(i -> dir)
+            case _                                               => None
+          }
+        }
       }
+      .distinct
+      .sortBy(_._1)
+      .map(_._2)
+      .toList
 
-    loop(args.toList, afterDashes = false, CpCommand(Nil, recursive = false, keepsLinks = false, parents = false))
+    val flags                   = args.filter(arg => arg.length > 1 && arg.startsWith("-") && arg != "--")
+    val (longFlags, shortFlags) = flags.partition(_.startsWith("--"))
+    val names                   = longFlags.map(_.takeWhile(_ != '='))
+    val clusters                = shortFlags.map(_.drop(1))
+    val recursive =
+      names.exists(n => long(n, "--recursive") || long(n, "--archive")) ||
+        clusters.exists(_.exists(c => c == 'R' || c == 'r' || c == 'a'))
+    CpCommand(
+      operands = operands,
+      recursive = recursive,
+      keepsLinks = recursive || names.exists(long(_, "--no-dereference")) ||
+        clusters.exists(_.exists(c => c == 'P' || c == 'd')),
+      parents = names.exists(n => long(n, "--parents") || long(n, "--path"))
+    )
   }
 
   private def lastName(arg: String): Option[String] =

@@ -1,6 +1,15 @@
 package org.llm4s.javaapi
 
-import org.llm4s.error.{ AuthenticationError, CancelledError, LLMError, NetworkError, ValidationError }
+import org.llm4s.error.{
+  APIError,
+  AuthenticationError,
+  CancelledError,
+  LLMError,
+  NetworkError,
+  RateLimitError,
+  ServiceError,
+  ValidationError
+}
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ AnthropicConfig, OllamaConfig, OpenAIConfig }
 import org.llm4s.llmconnect.model._
@@ -12,6 +21,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import java.io.{ ByteArrayOutputStream, PrintStream }
 import java.util.concurrent.CompletionException
 import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters._
 import scala.util.Using
 
@@ -139,6 +149,45 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
     }
   }
 
+  "The whole-reply block" should {
+
+    "print the model, the text, the usage, the cost and each tool call, and return the reply" in {
+      val replying = new Recording("unused") {
+        override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
+          Right(
+            Completion(
+              id = "r1",
+              created = 0L,
+              content = "Let me look.",
+              model = "gpt-4o-mini-2024-07-18",
+              message = AssistantMessage("Let me look."),
+              toolCalls = List(ToolCall("c1", "weather", ujson.Obj("city" -> "Paris"))),
+              usage = Some(TokenUsage(promptTokens = 12, completionTokens = 5, totalTokens = 17)),
+              estimatedCost = Some(0.00042)
+            )
+          )
+      }
+      val conversation = ConversationBuilder.create().user("Weather in Paris?").build()
+
+      var reply: JCompletion = null
+      val printed            = captured { reply = GuideSnippets.wholeReply(client(replying), conversation) }
+
+      printed shouldBe Printed(
+        "gpt-4o-mini-2024-07-18: Let me look.\n12 tokens in, 5 out\nabout $0.00042\nwants weather {\"city\":\"Paris\"}\n",
+        ""
+      )
+      reply.id shouldBe "r1"
+      reply.usage.get().totalTokens shouldBe 17
+    }
+
+    "print only the model and the text when the provider reported no usage, cost or tool call" in {
+      captured(
+        GuideSnippets.wholeReply(client(new Recording("4")), ConversationBuilder.create().user("q").build())
+      ) shouldBe
+        Printed("m: 4\n", "")
+    }
+  }
+
   "The reading-a-result block" should {
 
     "give the same value through get, getOrNull, toOptional, map and toCompletableFuture" in {
@@ -168,23 +217,42 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
       captured(GuideSnippets.handlingAFailure(client(new SimpleMock("4")))) shouldBe Printed("4\n", "")
     }
 
-    "print the message, the formatted error and the retry hint for a recoverable error" in {
+    "print the message and the retry hint for a recoverable error" in {
       val printed = captured(GuideSnippets.handlingAFailure(client(new FailingMock("network down"))))
 
       printed.out shouldBe ""
-      val lines = printed.err.linesIterator.toList
-      lines.head should include("network down")
-      lines(1) should include("network down")
-      lines.last shouldBe "a retry may succeed"
+      printed.err.linesIterator.toList shouldBe List("network down", "a retry may succeed")
     }
 
-    "not print the retry hint for an error that is not recoverable" in {
+    "point at the key and not print the retry hint for an authentication failure" in {
       val printed = captured(
         GuideSnippets.handlingAFailure(client(failingWith(AuthenticationError("openai", "bad key", "401"))))
       )
 
-      printed.err should include("bad key")
-      (printed.err should not).include("a retry may succeed")
+      printed.err.linesIterator.toList shouldBe List(
+        "Authentication failed for openai: bad key",
+        "check the API key and the provider section"
+      )
+    }
+
+    "print the delay a rate limit asks for, or 'a while' when it gives none" in {
+      captured(
+        GuideSnippets.handlingAFailure(client(failingWith(RateLimitError("openai", 20.seconds))))
+      ).err.linesIterator.toList
+        .drop(1) shouldBe List("rate limited; wait 20 s", "a retry may succeed")
+      captured(GuideSnippets.handlingAFailure(client(failingWith(RateLimitError("openai"))))).err.linesIterator.toList
+        .drop(1) shouldBe List("rate limited; wait a while", "a retry may succeed")
+    }
+
+    "print the HTTP status of a provider's error response, or '?' when it has none" in {
+      captured(
+        GuideSnippets.handlingAFailure(client(failingWith(ServiceError(503, "openai", "overloaded"))))
+      ).err.linesIterator.toList
+        .drop(1) shouldBe List("the provider answered HTTP 503", "a retry may succeed")
+      captured(
+        GuideSnippets.handlingAFailure(client(failingWith(APIError("openai", "odd reply"))))
+      ).err.linesIterator.toList
+        .drop(1) shouldBe List("the provider answered HTTP ?", "a retry may succeed")
     }
   }
 
@@ -216,6 +284,8 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
         "JCompletionOptions.builder()",
         "result.toCompletableFuture()",
         "catch (LlmException e)",
+        "e.getKind()",
+        "client.completion(conversation)",
         "OllamaConfig.apply(",
         "import org.llm4s.llmconnect.model.Conversation;"
       ).foreach(marker => all should include(marker))

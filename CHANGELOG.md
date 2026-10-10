@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Java completions with usage, model and tool calls, and a typed error kind**
+  ([#1487](https://github.com/llm4s/llm4s/issues/1487)): `llm4s-java-api`'s `JLlmClient.completion(String)`,
+  `completion(Conversation)` and `completion(Conversation, JCompletionOptions)` return an
+  `LlmResult<JCompletion>`: the reply's `content()`, the `model()` that answered, its `toolCalls()` as the
+  `JToolCall`s the agent's messages already use, `usage()` as an `Optional<JTokenUsage>` (`promptTokens()`,
+  `completionTokens()`, `totalTokens()`, `thinkingTokens()`, and the prompt-cache counts `cachedTokens()` and
+  `cacheCreationTokens()`, each `int` and zero where the provider reports none), `estimatedCost()` as an `Optional<BigDecimal>` (the
+  figure an agent turn adds to `JUsageSummary.totalCost()`), `thinking()` and `id()`. The `complete` methods keep
+  returning the text. There is one options overload of `completion`, so a literal `null` options compiles and
+  fails as a result. `LlmException` gains `getKind()`, the Java enum `LlmErrorKind` (`AUTHENTICATION`,
+  `RATE_LIMIT`, `TIMEOUT`, `NETWORK`, `SERVICE`, `VALIDATION`, `CONFIGURATION`, `CANCELLED`, `OTHER`),
+  `isRecoverable()`, `getRetryAfter()` as an `Optional<Duration>` and `getStatusCode()` as an `OptionalInt`. A
+  provider's `400`, `401`/`403` or `429` reported as a `ServiceError` or `APIError` reads as `VALIDATION`,
+  `AUTHENTICATION` or `RATE_LIMIT` and stays recoverable, as its class is: always call `isRecoverable()` rather
+  than infer it from the kind. Every concrete error class in `org.llm4s.error` has a kind, and
+  `LlmErrorKindSpec` scans the package and fails when a new one has none. `JCompletionOptions.toString` now prints
+  an unset value as `unset`, so an unset reasoning level no longer reads like `NONE`. The Java guide has
+  [The whole reply](docs/guide/java.md#the-whole-reply) and a rewritten
+  [Handling a failure](docs/guide/java.md#handling-a-failure) section.
 - **Completion options from Java** ([#1488](https://github.com/llm4s/llm4s/issues/1488)): `llm4s-java-api`'s
   `JCompletionOptions.builder()` sets `temperature`, `topP`, `maxTokens`, `presencePenalty`, `frequencyPenalty`,
   `reasoning` (the Java enum `JReasoningEffort`: `NONE`, `LOW`, `MEDIUM`, `HIGH`) and `budgetTokens`, and
@@ -2052,6 +2071,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   substring: `cookie_policy`, `cookie_consent` and `max_cookie_age` are left alone. `SensitiveKeyWords` and
   `SensitiveKeySuffixes` in `Redaction` are core's one list of sensitive key names for fields, header lines and
   `key=value` pairs; URL query parameters are also matched, by substring, against `SensitiveQueryParams`.
+- **Security - workspace runner: an option's value is consumed once, so every file `sort` reads is path-checked**
+  ([#1763](https://github.com/llm4s/llm4s/issues/1763)): the command policy did not check the argument after a bare
+  `sort -t` / `--field-separator`, taking it for the separator, even when an earlier option had already taken that
+  `-t` as its own value. Then the next argument is a file sort reads, and it was never held to the workspace:
+  `sort -T -t /etc/passwd` and `sort --random-source -t /etc/passwd` printed the file, over both the direct
+  `executeCommand` path and the WebSocket executor. On POSIX, `sort`'s arguments are now parsed as `getopt` parses
+  them, with GNU and BSD sort's option tables (`-k`, `-o`, `-S`, `-t`, `-T`, GNU's `-y`, and the long options that
+  take a value, under any unambiguous abbreviation, attached, after `=` or as the next argument, clustered, up to the
+  `--` that ends the options), and every operand and option value is checked; the separator is left out only when it
+  really is `-t`'s value under every parse. It is checked too when an option is unknown or ambiguous, when an argument
+  starts with `+` (BSD sort's obsolete `+POS1 -POS2`, which it rewrites before parsing, made `sort -T +0 -1t file`
+  read `file`), and after the first operand (GNU sort with `POSIXLY_CORRECT` reads every later argument as a file), so
+  `sort a.txt -t /` is now refused; write `sort -t / a.txt`. The same audit found and fixed two more cases: `cp`'s
+  destination checks missed a `-R` after a `--` that `-S` took as its suffix (`cp -S -- -R src dst`), and GNU's
+  `--path` spelling of `--parents`; and a short option such as `-f` was checked only by its tails, not as the whole
+  name a program opens when it reads it as a file (`cat a.txt -f` on BSD, `cp -t -d`, `sort -T -d`). On Windows the
+  argument after `--field-separator` is now checked; the other `sort.exe` rules are unchanged. `uniq`, `git branch`
+  and the shell tool (`llm4s-agent-tools`, which checks the argument after `sort -t` already) needed no change. See
+  [Option values](docs/reference/workspace-sandbox.md#option-values).
 - **Security - `llm4s-agent-tools`: the shell tool checks option values attached to their flag**
   ([#1723](https://github.com/llm4s/llm4s/issues/1723)): under `ShellConfig.pathPolicy`, a value given as its own
   argument (`grep -f lout`) was held to the policy, but one attached to its flag (`grep -flout`, `grep -iflout`,

@@ -8,7 +8,7 @@ an `Optional<String>`, `messages()` a `java.util.List`, and `status().kind()` a 
 
 | File | What it shows |
 |---|---|
-| [`HelloLLM4S.java`](src/main/java/org/llm4s/samples/HelloLLM4S.java) | create a client, one question, a conversation with a system message sent with `JCompletionOptions` (temperature and a token limit), an agent turn whose text streams to a lambda listener, its result read with a `switch` over `status().kind()`, approving what a suspended turn waits for (`status().pending()`, `Answer.approve`, `resume`), error handling, closing the client |
+| [`HelloLLM4S.java`](src/main/java/org/llm4s/samples/HelloLLM4S.java) | create a client, one question read as a `JCompletion` (the text, the model and the token usage), a conversation with a system message sent with `JCompletionOptions` (temperature and a token limit), an agent turn whose text streams to a lambda listener, its result read with a `switch` over `status().kind()`, approving what a suspended turn waits for (`status().pending()`, `Answer.approve`, `resume`), error handling with `getKind()` and `isRecoverable()`, closing the client |
 | [`application.conf`](src/main/resources/application.conf) | the provider, as a named section |
 | [`build.gradle.kts`](build.gradle.kts) | the one dependency: `org.llm4s:llm4s-java-api_3` |
 

@@ -1,12 +1,12 @@
 package org.llm4s.kotlin
 
-import io.mockk.every
-import io.mockk.mockk
 import org.llm4s.javaapi.ConversationBuilder
 import org.llm4s.javaapi.JCompletionOptions
 import org.llm4s.javaapi.JLlmClient
 import org.llm4s.javaapi.JReasoningEffort
-import org.llm4s.javaapi.LlmResult
+import org.llm4s.llmconnect.model.ReasoningEffort
+import scala.Option
+import scala.util.Right
 import java.util.Optional
 import java.util.OptionalInt
 import kotlin.test.Test
@@ -75,12 +75,19 @@ class CompletionOptionsTest {
 
     @Test
     fun `the options are passed to JLlmClient complete`() {
-        val client = mockk<JLlmClient>()
+        val model = RecordingClient(Right(reply("4")))
         val conversation = ConversationBuilder.create().user("hi").build()
-        val result = mockk<LlmResult<String>>()
-        every { result.get() } returns "4"
-        every { client.complete(conversation, everySetting) } returns result
 
-        assertEquals("4", client.complete(conversation, everySetting).get())
+        assertEquals("4", JLlmClient(model).complete(conversation, everySetting).get())
+
+        val (sentConversation, sentOptions) = model.sent.single()
+        assertEquals(conversation, sentConversation)
+        assertEquals(0.2, sentOptions.temperature())
+        assertEquals(0.9, sentOptions.topP())
+        assertEquals(Option.apply<Any>(512), sentOptions.maxTokens())
+        assertEquals(0.5, sentOptions.presencePenalty())
+        assertEquals(-0.5, sentOptions.frequencyPenalty())
+        assertEquals("high", (sentOptions.reasoning().get() as ReasoningEffort).name())
+        assertEquals(Option.apply<Any>(4096), sentOptions.budgetTokens())
     }
 }
