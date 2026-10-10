@@ -458,6 +458,8 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
       val d = Files.createDirectory(fx.root.resolve("d"))
       link(fx, "alias", d)
       val ws = fx.interface(ReadWrite)
+      // On Windows `evil` is not exempted (#1730), so the path rule refuses it before this rule is reached
+      val refusedWith = if (isWindowsHost) PathEscape else ArgumentNotAllowed
       Seq(
         "mv evil d/evil/secret.txt d",
         "mv evil alias/evil/secret.txt d", // the destination under another name
@@ -466,9 +468,9 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
         "mv evil d/evil~/secret.txt d", // the name --backup would keep a replaced entry under
         "mv evil d/evil.~1~/secret.txt d",
         "mv d/evil/secret.txt evil d" // order is not modelled
-      ).foreach(refuses(ws, _, ArgumentNotAllowed))
+      ).foreach(refuses(ws, _, refusedWith))
       // On a case-insensitive file system (macOS, Windows), `D` is `d`: the same directory under another spelling
-      if (Files.isDirectory(fx.root.resolve("D"))) refuses(ws, "mv evil D/evil/secret.txt d", ArgumentNotAllowed)
+      if (Files.isDirectory(fx.root.resolve("D"))) refuses(ws, "mv evil D/evil/secret.txt d", refusedWith)
       isLink(fx.root.resolve("evil")) shouldBe true
       Using.resource(Files.list(d))(_.count()) shouldBe 0L
       nothingPulledIn(fx, "secret.txt")
