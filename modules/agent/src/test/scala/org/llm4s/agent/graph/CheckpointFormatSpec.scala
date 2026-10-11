@@ -137,7 +137,7 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     val migrated = Checkpoint.fromJson(formatTwo).value
     migrated.formatVersion shouldBe Checkpoint.CurrentFormat
     migrated.tenantId shouldBe None
-    migrated shouldBe current.copy(formatVersion = Checkpoint.CurrentFormat)
+    migrated shouldBe current.withFormatVersion(Checkpoint.CurrentFormat)
   }
 
   it should "migrate a format-3 checkpoint, written before the Failed status existed" in {
@@ -155,8 +155,48 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
       graph.snapshot(graph.start(())).value
     )
     val migrated = Checkpoint.fromJson(Checkpoint.toJson(current)).value
-    migrated shouldBe current.copy(formatVersion = 4)
-    Checkpoint.CurrentFormat shouldBe 4
+    migrated shouldBe current.withFormatVersion(Checkpoint.CurrentFormat)
+  }
+
+  it should "migrate a format-4 checkpoint, written before claims, as fenced by no token" in {
+    val b     = GraphBuilder("g", "v1")
+    val start = b.node[Unit]("start")((_, _, _) => continue(Command.empty))
+    val graph = b.compile(start)(_ => Right(())).value
+    val current = Checkpoint(
+      4,
+      "run-1/1",
+      None,
+      "thread",
+      "run-1",
+      CheckpointStatus.Failed,
+      Instant.parse("2026-10-02T12:00:00Z"),
+      graph.snapshot(graph.start(())).value,
+      Some("tenant")
+    )
+    val formatFour = ujson.copy(Checkpoint.toJson(current))
+    formatFour.obj.remove("fencingToken")
+    val migrated = Checkpoint.fromJson(formatFour).value
+    migrated.fencingToken shouldBe None
+    migrated shouldBe current.withFormatVersion(5)
+    Checkpoint.CurrentFormat shouldBe 5
+  }
+
+  it should "round-trip the token of the claim that wrote it" in {
+    val b     = GraphBuilder("g", "v1")
+    val start = b.node[Unit]("start")((_, _, _) => continue(Command.empty))
+    val graph = b.compile(start)(_ => Right(())).value
+    val fenced = Checkpoint(
+      Checkpoint.CurrentFormat,
+      "run-1/1",
+      None,
+      "thread",
+      "run-1",
+      CheckpointStatus.Running,
+      Instant.parse("2026-10-02T12:00:00Z"),
+      graph.snapshot(graph.start(())).value
+    ).withFencingToken(FencingToken(42L))
+    Checkpoint.toJson(fenced)("fencingToken") shouldBe upickle.default.writeJs(Option(42L))
+    Checkpoint.fromJson(Checkpoint.toJson(fenced)).value shouldBe fenced
   }
 
   it should "round-trip the terminal Failed status" in {
@@ -178,8 +218,8 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "refuse a format it does not know" in {
-    val newer = ujson.Obj("formatVersion" -> 5, "id" -> "x")
-    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(5, Checkpoint.CurrentFormat)
+    val newer = ujson.Obj("formatVersion" -> 6, "id" -> "x")
+    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(6, Checkpoint.CurrentFormat)
     Checkpoint.fromJson(ujson.Obj("id" -> "x")).left.value shouldBe
       GraphError.UnsupportedCheckpointFormat(0, Checkpoint.CurrentFormat)
   }

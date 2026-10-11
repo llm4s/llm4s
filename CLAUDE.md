@@ -111,6 +111,7 @@ llm4s/
 │   ├── observability-micrometer/ # Micrometer MetricsCollector writing into a MeterRegistry (published)
 │   ├── agent/                 # Agent runtime: Agent, graph runtime, guardrails, handoffs, streaming; assistant (published)
 │   ├── agent-tools/           # Built-in tools: core utilities, filesystem, HTTP, shell, web search (published)
+│   ├── agent-testkit/         # CheckpointerContract: the suite every Checkpointer store must pass (published)
 │   ├── bom/                   # llm4s-bom: POM-only bill of materials pinning every published artifact, generated (published)
 │   ├── llm4s-effect/          # cats-effect IO / fs2 wrappers over LLMClient and Agent (published)
 │   ├── llm4s-zio/             # ZIO 2 / ZIO Streams wrappers over LLMClient and Agent (published)
