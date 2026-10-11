@@ -1,6 +1,9 @@
 package org.llm4s.runner
 
 import java.io.File
+import java.nio.charset.Charset
+import java.text.Normalizer
+import java.util.Locale
 import java.nio.file.{ Files, LinkOption, Path, Paths }
 import scala.annotation.tailrec
 import scala.jdk.CollectionConverters._
@@ -29,15 +32,22 @@ import scala.util.{ Try, Using }
  *       `git` accept an unambiguous prefix, and with or without `=value`.
  *  3. '''Paths''' (`PATH_ESCAPE_ATTEMPT`, the code the file operations use). Every argument - and the value of a
  *     `--name=value` option and every tail of a short option, so the `/etc/x` in `--file=/etc/x` and `-f/etc/x` -
+ *     bar the separator `sort -t` really takes (parsed as sort parses its options, see [[sortCandidates]]) -
  *     is resolved the way the kernel would resolve it from the real working directory: component by component,
  *     following each symbolic link where it is met, so `link/..` goes to the parent of the link's target, not back
  *     to the directory holding the link. The result must lie inside the real workspace root, and so must the lexical
  *     reading Win32 uses - `.` and `..` removed as text first, then the links of the result resolved - so with
  *     `l` -> `a/b`, `l/../../x` (`a/x` physically, `../x` textually) is refused on every platform. An argument that
  *     does not name an existing file is judged the same way, so `../x` and `/tmp/x` are refused even when they do not
- *     exist yet. Programs that only
+ *     exist yet. On POSIX, an operand of `rm` or `unlink`, or a source of `mv`, whose last component is itself a
+ *     symbolic link is judged by the directory holding it instead, so an agent can remove or rename a link that points
+ *     out of the workspace; the destination of `mv` is not, and neither is an operand with a trailing `/` (see
+ *     [[linkOperands]] and [[namesLinkItself]]). Programs that only
  *     print their arguments (`echo`, `pwd`, `whoami`, `hostname`) are not checked. For `cp`, which writes through
  *     a link it finds at the name it writes, the names it will write are checked too (see [[cpDestinationRefusal]]).
+ *     An `mv` or `cp` of several sources, which runs one operation after another while every path is checked before
+ *     the first, is refused (`ARGUMENT_NOT_ALLOWED`) when one path goes through a name another source's operation
+ *     creates, replaces or removes, or when `mv` moves the working directory (see [[sequenceRefusal]], #1776).
  *     An argument over [[MaxArgumentLength]] characters, or paths costing more than [[MaxPathSteps]] lookups, are
  *     refused with `ARGUMENT_NOT_ALLOWED` rather than walked. Where the platform cannot parse an argument as a path
  *     (Windows: `HEAD:src/x`, `..\*`), the part before the first character a path cannot hold is judged; one that
@@ -60,7 +70,13 @@ import scala.util.{ Try, Using }
  * [[findstrRefusal]], [[windowsSortRefusal]]): device names and components with a trailing `.` or space; for
  * programs that are not built-ins, a leading `@` or `~`, the characters `{ } [ ] ' ( )`, a leading `/`, and wildcards
  * anywhere but in a last component with a literal character; `findstr /F` and a `/D:` list; `sort` `/O`, `/T`,
- * `-o`, `-T`. Over-blocking there is accepted.
+ * `-o`, `-T`; and an argument to `sort` or `findstr` starting with `/` that is not exactly a switch of the native
+ * tool (#1738). A path candidate of the form `/x/...` is also judged as drive `x:`'s path, as MSYS2 reads it. The
+ * runner starts the system directory's `sort.exe` and `findstr.exe` by their absolute paths whenever the system
+ * directory has them, never a build in its own working or Java directory ([[ProgramResolver]], #1790).
+ * Over-blocking there is accepted. Before the option and path checks, an argument, the working directory and an
+ * environment value holding a character a program reading its command line in an ANSI code page may receive as a
+ * different ASCII character (`..／x` as `../x`, "best fit") are refused ([[bestFitRefusal]], [[WindowsBestFit]], #1766).
  *
  * '''git.''' git searches upwards for its repository, so the runner confines it to the workspace
  * ([[confineGit]]), a `.git` that is not a directory inside the workspace is refused ([[gitRepositoryRefusal]]), and so
@@ -71,12 +87,12 @@ import scala.util.{ Try, Using }
  * '''Limits.''' The checks cover what a command is given, not what a program reads by itself. A recursive walk
  * (`ls -R`, `grep -r`, `find`, `diff -r`) is checked where it starts; `ls -L`, `grep -R`/`-S`, `find -L`,
  * `cp -L`/`-H` and `chmod -L`/`-H`, which follow links they meet, are refused, but `diff -r` follows links inside the
- * tree it walks. `git` reads the repository's own configuration and runs its hooks, so a repository whose
- * `.git/config` sets `core.fsmonitor`, `diff.external` or a filter or textconv driver, or whose `.git/hooks` has a
- * `post-index-change` hook, makes `git status` or `git diff` run that program; where the agent can write files (the
- * `writeFile` operation, or `cp`/`mv` in [[org.llm4s.shared.WorkspaceSandboxConfig.ReadWriteCommands]]) it can write
- * them (#1721), as it can a `.git/config` `core.worktree`, a `.git/commondir` or a `.git/objects/info/alternates` that
- * points git at files outside. The checks run before the program starts and do not see a link a concurrent command makes.
+ * tree it walks. `git` reads the repository's own configuration, attributes and hooks; a program other than the
+ * read-only ones may not name `.git` or a path inside one ([[gitMetadataRefusal]], #1721), and [[GitSandbox]] runs
+ * every `git` so that what a repository already holds (`core.fsmonitor`, `diff.external`, a filter, textconv or
+ * merge driver, a hook) cannot make it run a program. A repository that arrives in the workspace with a `.git/config`
+ * `core.worktree`, a `.git/commondir` or a `.git/objects/info/alternates` still points git at files outside. The
+ * checks run before the program starts and do not see a link a concurrent command makes.
  */
 private[runner] object CommandPolicy {
 
@@ -94,15 +110,14 @@ private[runner] object CommandPolicy {
    * @param long        long options refused under any abbreviation of at least one letter, with or without `=value`
    * @param exact       arguments refused when they are exactly this (`find`'s single-dash primaries)
    * @param longAllowed long options that are themselves a prefix of a refused one (`--text` of `--textconv`)
-   * @param textShort   short options whose value is text, never opened as a path (`sort -t/`)
-   * @param textLong    long options whose value is text, never opened as a path (`sort --field-separator=/`)
+   * @param textLong    long options whose value after `=` is text, never opened as a path (`sort --field-separator=/`
+   *                    on Windows; on POSIX `sort` is parsed by [[sortCandidates]] instead)
    */
   final private case class Options(
     short: Set[Char] = Set.empty,
     long: Set[String] = Set.empty,
     exact: Set[String] = Set.empty,
     longAllowed: Set[String] = Set.empty,
-    textShort: Set[Char] = Set.empty,
     textLong: Set[String] = Set.empty
   )
 
@@ -130,11 +145,10 @@ private[runner] object CommandPolicy {
     // Reads the names of the files to count from a file.
     "wc" -> Options(long = Set("--files0-from")),
     // Writes a file, runs a program, reads the names of the files to sort from a file.
-    // `-t` / `--field-separator` take a separator character, not a path.
+    // `-t` / `--field-separator` take a separator character, not a path (see `sortCandidates`).
     "sort" -> Options(
       short = Set('o'),
       long = Set("--output", "--compress-program", "--files0-from"),
-      textShort = Set('t'),
       textLong = Set("--field-separator")
     ),
     // Follow links met inside the tree (`-L`, `--dereference`) or on the command line (`-H`) and copy what they
@@ -168,9 +182,21 @@ private[runner] object CommandPolicy {
   val GitReadSubcommands: Set[String] =
     Set("status", "log", "show", "diff", "ls-files", "ls-tree", "grep", "blame", "rev-parse", "branch")
 
-  // `--output` writes a file; `--ext-diff`, `--textconv` and `--show-signature` run a program.
+  // `--output` writes a file; `--ext-diff`, `--textconv` and `--show-signature` run a program; `--remerge-diff` and
+  // `--diff-merges` (any value: `r`, `remerge`, or `on` with `log.diffMerges`) re-merge a merge commit, which runs the
+  // merge driver an attribute names; `--ignore-submodules` would undo the runner's `--ignore-submodules=all`, letting
+  // git start itself in a submodule, whose configuration the runner has not read (#1721, see GitSandbox). `-m`, `-c`
+  // and `--cc` stay: with `log.diffMerges` pinned to `separate` they diff against the parents and merge nothing.
   private val GitDiffOptions = Options(
-    long = Set("--output", "--ext-diff", "--textconv", "--show-signature"),
+    long = Set(
+      "--output",
+      "--ext-diff",
+      "--textconv",
+      "--show-signature",
+      "--ignore-submodules",
+      "--remerge-diff",
+      "--diff-merges"
+    ),
     longAllowed = Set("--text")
   )
 
@@ -178,6 +204,8 @@ private[runner] object CommandPolicy {
     "log"  -> GitDiffOptions,
     "show" -> GitDiffOptions,
     "diff" -> GitDiffOptions,
+    // `-v` / `--verbose` shows the staged diff, which runs textconv drivers and has no `--no-textconv` (#1721).
+    "status" -> Options(short = Set('v'), long = Set("--ignore-submodules", "--verbose")),
     // `-O` / `--open-files-in-pager` runs a pager program.
     "grep" -> Options(short = Set('O'), long = Set("--open-files-in-pager", "--textconv"), longAllowed = Set("--text")),
     "blame" -> Options(long = Set("--textconv"))
@@ -227,6 +255,8 @@ private[runner] object CommandPolicy {
    *                    which the lexical reading applies `..` as text; `workDir` when not given
    * @param spelledRoot the workspace root as configured (absolute, links not resolved); only its parent's spelling is
    *                    checked, for git (see [[gitCeilingRefusal]])
+   * @param ansiCodePage on Windows, the host's ANSI code page, whose characters must convert exactly (see
+   *                    [[bestFitRefusal]]); the real host's by default, `None` elsewhere
    */
   def refusal(
     program: String,
@@ -236,13 +266,19 @@ private[runner] object CommandPolicy {
     realRoot: Path,
     environment: Map[String, String],
     spelledWorkDir: Option[Path] = None,
-    spelledRoot: Option[Path] = None
+    spelledRoot: Option[Path] = None,
+    ansiCodePage: Option[Charset] = WindowsBestFit.hostAnsiCodePage
   ): Option[Refusal] =
     // Fails closed: a file-system call that throws (a path the platform cannot resolve) refuses the command
     // rather than escaping `executeCommand` as a raw exception.
     Try {
       environmentRefusal(environment, isWindows)
         .orElse(nulRefusal(program, args))
+        .orElse(
+          if (isWindows)
+            bestFitRefusal(program, args, spelledWorkDir.getOrElse(workDir), spelledRoot, environment, ansiCodePage)
+          else None
+        )
         .orElse(if (isWindows) quoteRefusal(program, args) else None)
         .orElse(if (isWindows && WindowsBuiltins.contains(program)) cmdSyntaxRefusal(program, args) else None)
         .orElse(optionRefusal(program, args, isWindows))
@@ -253,6 +289,9 @@ private[runner] object CommandPolicy {
         )
         .orElse(pathRefusal(program, args, isWindows, Bases(workDir, spelledWorkDir.getOrElse(workDir)), realRoot))
         .orElse(if (isWindows) windowsFormRefusal(program, args) else None)
+        .orElse(
+          gitMetadataRefusal(program, args, isWindows, Bases(workDir, spelledWorkDir.getOrElse(workDir)), realRoot)
+        )
     }.fold(
       e =>
         Some(
@@ -270,6 +309,58 @@ private[runner] object CommandPolicy {
     args
       .find(_.contains('\u0000'))
       .map(arg => notAllowed(program, arg.replace("\u0000", "\\0"), "it contains a NUL character."))
+
+  /**
+   * On Windows a program that reads its command line in an ANSI code page may receive a character as a different
+   * ASCII one ("best fit", #1766): `..／..／outside` as `../../outside`, `-ｏ` as `-o`, `¥` as `\` on code page 932.
+   * Every check here reads the arguments as UTF-16, so an argument (`ARGUMENT_NOT_ALLOWED`), the working directory
+   * below the workspace root (`ARGUMENT_NOT_ALLOWED`; the root itself is the operator's) or an environment value
+   * (`ENVIRONMENT_NOT_ALLOWED`) holding such a character is refused, for every program (see [[WindowsBestFit]]).
+   * On a double-byte ANSI host (code pages 932, 936, 950), an argument the JDK puts in quotes is also refused when it
+   * holds a character whose second byte is 0x5C (`\`), which a byte-wise parser reads as escaping the closing quote
+   * (`ARGUMENT_NOT_ALLOWED`, [[WindowsBestFit.quotedTrailByteRefusal]], #1807).
+   */
+  private def bestFitRefusal(
+    program: String,
+    args: Seq[String],
+    workDir: Path,
+    spelledRoot: Option[Path],
+    environment: Map[String, String],
+    ansiCodePage: Option[Charset]
+  ): Option[Refusal] = {
+    def why(value: String, optionLike: Boolean): Option[String] =
+      WindowsBestFit.refusal(value, optionLike, ansiCodePage)
+    val belowRoot = spelledRoot.filter(workDir.startsWith).fold(workDir.toString)(_.relativize(workDir).toString)
+    args.iterator
+      .flatMap(arg =>
+        why(arg, WindowsBestFit.isOptionLike(arg))
+          .orElse(WindowsBestFit.quotedTrailByteRefusal(arg, ansiCodePage))
+          .map(reason => notAllowed(program, arg, s"it holds $reason."))
+      )
+      .nextOption()
+      .orElse(
+        why(belowRoot, optionLike = false).map(reason =>
+          Refusal(
+            ArgumentNotAllowed,
+            s"The working directory '$belowRoot' is not allowed on Windows: it holds $reason."
+          )
+        )
+      )
+      .orElse(
+        environment.toSeq
+          .sortBy(_._1)
+          .iterator
+          .flatMap { case (name, value) =>
+            why(value, optionLike = false).map(reason =>
+              Refusal(
+                EnvironmentNotAllowed,
+                s"The value of the environment variable '$name' is not allowed on Windows: it holds $reason."
+              )
+            )
+          }
+          .nextOption()
+      )
+  }
 
   /**
    * On Windows the C runtime's argv parser and cmd.exe delete `"` as a quote toggle, so the program opens a name
@@ -391,7 +482,8 @@ private[runner] object CommandPolicy {
    *  - Programs that are not built-ins, which may run under a runtime that expands their command line (MSYS2,
    *    Cygwin, Git for Windows): a leading `@` (a response file) or `~` (a home directory); any of `{ } [ ] ' ( )`;
    *    a string the program might open as a path starting with `/` (the runtime's own root, not the workspace
-   *    drive's), except for the `/X` switches of `findstr` and `sort`; and a wildcard anywhere but in the last
+   *    drive's), except for the `/X` switches of `findstr` and `sort` (which [[optionRefusal]] has already held to
+   *    the native tool's switches, #1738); and a wildcard anywhere but in the last
    *    component, in an absolute string or one with a `..` component, or in a last component with no literal
    *    character but `.` (`*`, `.*`, `??`, `*.*` can match `..`, which `FindFirstFile` and a runtime's glob may
    *    return).
@@ -536,17 +628,70 @@ private[runner] object CommandPolicy {
         (arg.length > 3 && arg.startsWith("--") && "--temporary-directory".startsWith(arg.takeWhile(_ != '=')))
       }
       .map(notAllowed("sort", _, "it writes the output or temporary files to a file or directory."))
+      .orElse(
+        args
+          .find(arg => arg.startsWith("/") && !isNativeSortSwitch(arg))
+          .map(notAllowed("sort", _, notANativeSwitch("sort.exe", NativeSortSwitches)))
+      )
+
+  /**
+   * The switches of the native Windows `sort.exe`, matched whole and ignoring case (#1738). Documented in the Windows
+   * Commands reference (https://learn.microsoft.com/windows-server/administration/windows-commands/sort) and in
+   * `sort /?`: `/R[EVERSE]`, `/+n`, `/L[OCALE] locale`, `/M[EMORY] kilobytes`, `/REC[ORD_MAXIMUM] characters`,
+   * `/T[EMPORARY] dir` and `/O[UTPUT] file` (both refused by [[windowsSortRefusal]]); and two that `sort.exe` accepts
+   * but does not document, `/C[ASE_SENSITIVE]` and `/UNIQUE` (https://ss64.com/nt/sort.html). The value of `/L`, `/M`
+   * and `/REC` is the next argument, which is judged as any other argument.
+   */
+  private val NativeSortSwitches: Seq[String] =
+    "/R /REVERSE /+n /L /LOCALE /M /MEMORY /REC /RECORD_MAXIMUM /C /CASE_SENSITIVE /UNIQUE".split(' ').toSeq
+
+  private val NativeSortSwitchNames: Set[String] = NativeSortSwitches.filter(_ != "/+n").map(_.drop(1)).toSet
+
+  private def isNativeSortSwitch(arg: String): Boolean = {
+    val name = arg.drop(1).toUpperCase(java.util.Locale.ROOT)
+    NativeSortSwitchNames.contains(name) ||
+    (name.length > 1 && name.charAt(0) == '+' && name.drop(1).forall(c => c >= '0' && c <= '9'))
+  }
+
+  /**
+   * The native Windows `findstr.exe`'s switches (https://learn.microsoft.com/windows-server/administration/windows-commands/findstr):
+   * the flags `/B /E /L /R /S /I /X /V /N /M /O /P`, which may be combined (`/SIN`), `/OFF[LINE]`, and the switches
+   * that take a value after `:` - `/C:string`, `/G:file`, `/D:dir`, `/A:color` and `/F:file` (refused by
+   * [[findstrRefusal]]) - which may follow flags (`/IC:x`).
+   */
+  private val FindstrFlags: Set[Char] = "BELRSIXVNMOP".toSet
+
+  private val FindstrValueSwitches: Set[Char] = "CGDAF".toSet
+
+  private def isNativeFindstrSwitch(arg: String): Boolean = {
+    val body    = arg.drop(1).toUpperCase(java.util.Locale.ROOT)
+    val letters = body.takeWhile(_ != ':')
+    if (body == "OFF" || body == "OFFLINE") true
+    else if (letters.isEmpty) false
+    else if (letters.length == body.length) letters.forall(FindstrFlags.contains)
+    else
+      letters.init.forall(FindstrFlags.contains) && FindstrValueSwitches.contains(letters.last) &&
+      (letters.last != 'A' || body.drop(letters.length + 1).matches("[0-9A-F]{1,2}"))
+  }
+
+  private def notANativeSwitch(tool: String, switches: Seq[String]): String =
+    s"on Windows an argument starting with '/' must be a switch of the native $tool (${switches.mkString(" ")}); " +
+      "another build of the program earlier on the PATH (MSYS2, Cygwin, Git for Windows) may open it as a path from " +
+      "its own root (`/c/...` is C:\\...)."
 
   /**
    * Windows `findstr` takes switches after `/` or `-`, several letters to a switch (`/SIN`). `/F:file` reads the
    * list of files to search from a file, which the path rule cannot see into, so a switch with `F` in its letters is
    * refused (bar `/OFF[LINE]`). `/D:dir1;dir2` searches a list of directories, so a `/D:` value holding a list
-   * separator is refused; a single directory is held to the workspace by the path rule.
+   * separator is refused; a single directory is held to the workspace by the path rule. An argument starting with `/`
+   * that is not one of the native switches ([[isNativeFindstrSwitch]]) is refused (#1738): the path rule judges only
+   * the tails of a switch, and a non-native `findstr` may open `/c/...` as `C:\...`.
    */
   private def findstrRefusal(args: Seq[String]): Option[Refusal] =
     args.iterator
       .flatMap { arg =>
-        if (arg.length < 2 || !(arg.startsWith("/") || arg.startsWith("-"))) None
+        if (arg.length < 2 || !(arg.startsWith("/") || arg.startsWith("-")))
+          Option.when(arg == "/")(notAllowed("findstr", arg, notANativeSwitch("findstr.exe", FindstrSwitchList)))
         else {
           val letters = arg.drop(1).takeWhile(_ != ':').toUpperCase(java.util.Locale.ROOT)
           val value   = arg.dropWhile(_ != ':').drop(1)
@@ -555,10 +700,15 @@ private[runner] object CommandPolicy {
             Some(notAllowed("findstr", arg, "/F reads the names of the files to search from a file."))
           else if (letters.contains('D') && (value.contains(',') || value.contains(';')))
             Some(notAllowed("findstr", arg, "/D takes a list of directories; give it a single directory."))
+          else if (arg.startsWith("/") && !isNativeFindstrSwitch(arg))
+            Some(notAllowed("findstr", arg, notANativeSwitch("findstr.exe", FindstrSwitchList)))
           else None
         }
       }
       .nextOption()
+
+  private val FindstrSwitchList: Seq[String] =
+    "/B /E /L /R /S /I /X /V /N /M /O /P /OFF[LINE] /C:string /G:file /D:dir /A:color".split(' ').toSeq
 
   private def hostnameRefusal(args: Seq[String]): Option[Refusal] =
     args.find(arg => !arg.startsWith("-")).map(notAllowed("hostname", _, "with an operand it sets the host name."))
@@ -639,7 +789,13 @@ private[runner] object CommandPolicy {
           GitSubcommandOptions
             .get(subcommand)
             .flatMap(options => firstRefused(options, subArgs))
-            .map(notAllowed(s"git $subcommand", _, "it writes a file or runs another program."))
+            .map(
+              notAllowed(
+                s"git $subcommand",
+                _,
+                "it writes a file, runs another program, or lets git run in a submodule."
+              )
+            )
     }
   }
 
@@ -655,9 +811,8 @@ private[runner] object CommandPolicy {
    * `GIT_DISCOVERY_ACROSS_FILESYSTEM`), adds configuration (`GIT_CONFIG`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`,
    * `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT` with `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`) or names a program to
    * run (`GIT_EXEC_PATH`, `GIT_EXTERNAL_DIFF`, `GIT_PAGER`). None is needed by the read subcommands the policy allows,
-   * so all are removed rather than listed. `GIT_CONFIG_NOSYSTEM` is not set: the system and global configuration
-   * belong to whoever runs the runner, not to the agent, and a container image may need them (`safe.directory`).
-   * Names are matched ignoring case, as Windows does.
+   * so all are removed rather than listed. [[GitSandbox.environment]] then sets the variables the runner's `git` is
+   * always started with (no system or global configuration, #1721). Names are matched ignoring case, as Windows does.
    */
   def confineGit(environment: java.util.Map[String, String], realRoot: Path): Unit = {
     val names = environment.keySet.asScala.toList
@@ -748,6 +903,115 @@ private[runner] object CommandPolicy {
       )
   }
 
+  // ---- git's own files (#1721)
+
+  /** The programs that only read, so may name a file inside `.git` (`cat .git/config`); every other one may not. */
+  private val ReadPrograms: Set[String] =
+    Set(
+      "ls",
+      "cat",
+      "grep",
+      "pwd",
+      "echo",
+      "git",
+      "find",
+      "head",
+      "tail",
+      "wc",
+      "sort",
+      "uniq",
+      "diff",
+      "whoami",
+      "hostname",
+      "dir",
+      "type",
+      "findstr"
+    )
+
+  /** Code points HFS+ ignores in a name, so `.g‌it` is `.git` there. */
+  private def hfsIgnorable(c: Char): Boolean =
+    (c >= '‌' && c <= '‏') || (c >= '‪' && c <= '‮') || (c >= '⁪' && c <= '⁯') ||
+      c == '﻿'
+
+  private val ShortGitName = "git~[0-9]+".r
+
+  /**
+   * Whether a file system may take `name` for git's `.git`: ignoring letter case and Unicode normalisation
+   * ([[folded]]), the code points HFS+ ignores, an NTFS stream suffix (`.git::$INDEX_ALLOCATION`), trailing dots and
+   * spaces (which Win32 removes), and an 8.3 short name (`GIT~1`). Erring towards a match.
+   */
+  private[runner] def isGitMetadataName(name: String): Boolean = {
+    val visible = name.takeWhile(_ != ':').filterNot(hfsIgnorable)
+    val trimmed = visible.reverse.dropWhile(c => c == '.' || c == ' ').reverse
+    val key     = folded(trimmed).getOrElse(trimmed.toLowerCase(Locale.ROOT))
+    key == ".git" || ShortGitName.matches(key)
+  }
+
+  /**
+   * Whether `arg` names `.git` or a path inside one, as written or where it really leads (links followed, letter case
+   * and short names settled), anywhere in the workspace. `Left` when the check runs out of budget.
+   */
+  private def namesGitMetadata(base: Bases, arg: String, realRoot: Path, budget: Budget): Either[Verdict, Boolean] =
+    if (arg.split(Array('/', '\\')).exists(isGitMetadataName)) Right(true)
+    else {
+      val readings = Seq(physicalPath(base.physical, arg, budget), lexicalPath(base.lexical, arg)).flatten
+      if (readings.contains(Left(TooCostly))) Left(TooCostly)
+      else {
+        val real = readings.flatMap(_.toOption).map(canonical(_, budget))
+        if (real.contains(None)) Left(TooCostly)
+        else
+          Right(real.flatten.exists { p =>
+            p.startsWith(realRoot) && realRoot.relativize(p).iterator.asScala.exists(c => isGitMetadataName(c.toString))
+          })
+      }
+    }
+
+  /**
+   * A program that may write (anything but the [[ReadPrograms]]: `cp`, `mv`, `rm`, `mkdir`, `touch`, `chmod`, `copy`,
+   * `move`, a program added with `WORKSPACE_EXTRA_COMMANDS`) may not name `.git` or a path inside one, in any
+   * argument, as written or through a link. git reads its configuration, hooks and attributes there and runs the
+   * programs they name (#1721); a `.git` file elsewhere (`gitdir: path`) points git at another repository. What a
+   * program writes without naming it (an archive's members, a script's output) is not seen; [[GitSandbox]] holds git
+   * itself to what it runs whatever the files say.
+   */
+  private def gitMetadataRefusal(
+    program: String,
+    args: Seq[String],
+    isWindows: Boolean,
+    base: Bases,
+    realRoot: Path
+  ): Option[Refusal] =
+    if (ReadPrograms.contains(program)) None
+    else {
+      val budget   = new Budget(MaxPathSteps)
+      val switches = isWindows && WindowsSwitchPrograms.contains(program)
+      indexedCandidates(args, ProgramOptions.getOrElse(program, Options()), switches)
+        .map { case (_, arg, candidate) => arg -> namesGitMetadata(base, candidate, realRoot, budget) }
+        .collectFirst {
+          case (_, Left(_))       => tooCostly(program)
+          case (arg, Right(true)) => gitMetadataNotWritable(program, arg)
+        }
+    }
+
+  private def gitMetadataNotWritable(program: String, arg: String): Refusal =
+    notAllowed(
+      program,
+      arg,
+      "it names '.git' or a path inside one. git reads its configuration, hooks and attributes there and runs the " +
+        "programs they name, so only git's read commands and the read-only programs may touch it."
+    )
+
+  /**
+   * Whether a file operation's path (absolute, inside the workspace) names `.git` or a path inside one, as written or
+   * where it really leads. Fails closed: a path that cannot be checked counts as one.
+   *
+   * @param spelledRoot the workspace root as configured, links not resolved
+   * @param realRoot    the workspace root's real path
+   */
+  def namesGitMetadata(path: Path, spelledRoot: Path, realRoot: Path): Boolean =
+    Try(namesGitMetadata(Bases(realRoot, spelledRoot), path.toString, realRoot, new Budget(MaxPathSteps)))
+      .fold(_ => true, _.fold(_ => true, identity))
+
   // ---- paths
 
   /** The longest argument the path rule resolves; a longer one is refused rather than walked (`PATH_MAX`). */
@@ -806,18 +1070,29 @@ private[runner] object CommandPolicy {
       val budget   = new Budget(MaxPathSteps)
       val options  = ProgramOptions.getOrElse(program, Options())
       val switches = isWindows && WindowsSwitchPrograms.contains(program)
-      candidates(args, options, switches)
+      val strings =
+        if (program == "sort" && !isWindows) sortCandidates(args) else indexedCandidates(args, options, switches)
+      // An operand that names a link itself is judged by the directory holding it, not by where the link leads.
+      val links: Set[Int] =
+        if (isWindows) Set.empty
+        else linkOperands(program, args).filter(i => namesLinkItself(workDir, args(i), realRoot, budget))
+      strings
+        .collect { case (i, arg, candidate) if !links.contains(i) => (arg, candidate) }
         .map { case (arg, candidate) =>
           val judged =
             verdict(workDir, candidate, realRoot, budget)
               .orElse(unparseableVerdict(workDir, candidate, isWindows, realRoot, budget))
+              .orElse(
+                if (isWindows) msysDrivePath(candidate).flatMap(verdict(workDir, _, realRoot, budget)) else None
+              )
           (arg, candidate, judged)
         }
         .collectFirst {
           case (arg, candidate, Some(Outside)) => escape(program, arg, candidate)
           case (_, _, Some(TooCostly))         => tooCostly(program)
         }
-        .orElse(if (program == "cp") cpDestinationRefusal(args, workDir, realRoot, budget) else None)
+        .orElse(if (program == "cp") cpDestinationRefusal(args, isWindows, workDir, realRoot, budget) else None)
+        .orElse(sequenceRefusal(program, args, isWindows, workDir, budget))
     }
 
   /**
@@ -828,17 +1103,24 @@ private[runner] object CommandPolicy {
    *  - A long option `--name=value` contributes itself and its value - not the tails of its name, so text such as
    *    `--since=2024/01/01` or `--grep=feat/x` is not read as the absolute path `/01/01`. A value given as the
    *    next argument is a plain argument.
-   *  - A short option contributes every tail after its dash, which covers an attached value at any position
-   *    (`-f/x`, `-rf/x`).
-   *  - A program's text options ([[Options.textShort]], [[Options.textLong]]) contribute no value: `sort -t/` and
-   *    `sort -t /` take a separator, not a path. In a cluster, the tails up to and including the text option are
-   *    still checked, so a value-taking option before it (`-Tt`) is still held to the workspace; the next argument
-   *    is exempt only after a bare `-t`.
+   *  - A short option contributes itself and every tail after its dash, which covers an attached value at any
+   *    position (`-f/x`, `-rf/x`) and a program that opens the whole argument as a file (BSD programs stop reading
+   *    options at their first operand, so `cat a.txt -f` opens `-f`).
    *  - After a bare `--`, every argument contributes itself and all its tails, because an option may have consumed
    *    the `--` as its value, and an operand that looks like an option is opened as a file.
+   *
+   * No argument is exempt here: an option's value given as the next argument is a plain argument, whatever the
+   * option. POSIX `sort`, whose `-t` value is a separator, is parsed instead by [[sortCandidates]] (#1763).
    */
-  private def candidates(args: Seq[String], options: Options, switches: Boolean): Iterator[(String, String)] = {
-    def tails(arg: String): Iterator[String] = Iterator.range(1, arg.length).map(arg.substring)
+  private def candidates(args: Seq[String], options: Options, switches: Boolean): Iterator[(String, String)] =
+    indexedCandidates(args, options, switches).map { case (_, arg, candidate) => (arg, candidate) }
+
+  /** [[candidates]], each with the index in `args` of the argument it came from. */
+  private def indexedCandidates(
+    args: Seq[String],
+    options: Options,
+    switches: Boolean
+  ): Iterator[(Int, String, String)] = {
     // In `/G:file` the `G:` names the switch, so the first tail `G:file` is not a path on drive G: (`file`, the
     // next-but-one tail, is checked; so is `D:file` in `/G:D:file`).
     def plain(arg: String): Iterator[String] =
@@ -849,35 +1131,251 @@ private[runner] object CommandPolicy {
 
     @tailrec
     def loop(
-      rest: List[String],
+      rest: List[(String, Int)],
       afterDashes: Boolean,
-      skipNext: Boolean,
-      found: List[(String, () => Iterator[String])]
-    ): List[(String, () => Iterator[String])] =
+      found: List[(Int, String, () => Iterator[String])]
+    ): List[(Int, String, () => Iterator[String])] =
       rest match {
-        case Nil                   => found.reverse
-        case _ :: tail if skipNext => loop(tail, afterDashes, skipNext = false, found)
-        case "--" :: tail          => loop(tail, afterDashes = true, skipNext = false, found)
-        case arg :: tail if afterDashes =>
+        case Nil               => found.reverse
+        case ("--", _) :: tail => loop(tail, afterDashes = true, found)
+        case (arg, i) :: tail if afterDashes =>
           val all = () => plain(arg) ++ (if (arg.startsWith("-")) tails(arg) else Iterator.empty)
-          loop(tail, afterDashes, skipNext = false, (arg, all) :: found)
-        case arg :: tail if arg.startsWith("--") && arg.length > 2 =>
+          loop(tail, afterDashes, (i, arg, all) :: found)
+        case (arg, i) :: tail if arg.startsWith("--") && arg.length > 2 =>
           val name     = arg.takeWhile(_ != '=')
           val hasValue = arg.length > name.length
-          val text     = textLong(name)
-          val value    = if (hasValue && !text) Iterator.single(arg.drop(name.length + 1)) else Iterator.empty
+          val value    = if (hasValue && !textLong(name)) Iterator.single(arg.drop(name.length + 1)) else Iterator.empty
           val all      = () => Iterator.single(arg) ++ value.filter(_.nonEmpty)
-          loop(tail, afterDashes, skipNext = text && !hasValue, (arg, all) :: found)
-        case arg :: tail if arg.length > 1 && arg.startsWith("-") =>
-          val cluster = arg.drop(1)
-          val textAt  = cluster.indexWhere(options.textShort.contains)
-          val all     = () => if (textAt < 0) tails(arg) else Iterator.range(1, textAt + 2).map(arg.substring)
-          loop(tail, afterDashes, skipNext = cluster.length == 1 && textAt == 0, (arg, all) :: found)
-        case arg :: tail => loop(tail, afterDashes, skipNext = false, (arg, () => plain(arg)) :: found)
+          loop(tail, afterDashes, (i, arg, all) :: found)
+        case (arg, i) :: tail if arg.length > 1 && arg.startsWith("-") =>
+          loop(tail, afterDashes, (i, arg, () => tails(arg) ++ Iterator.single(arg)) :: found)
+        case (arg, i) :: tail => loop(tail, afterDashes, (i, arg, () => plain(arg)) :: found)
       }
 
-    loop(args.toList, afterDashes = false, skipNext = false, Nil).iterator.flatMap { case (arg, all) =>
-      all().map(arg -> _)
+    loop(args.toList.zipWithIndex, afterDashes = false, Nil).iterator.flatMap { case (i, arg, all) =>
+      all().map(candidate => (i, arg, candidate))
+    }
+  }
+
+  /**
+   * The Windows path an MSYS2 / Cygwin runtime reads `candidate` as when it has the form `/x` or `/x/rest`: drive
+   * `x`'s root (`/c/Users` is `c:/Users`), not a root-relative path on the working directory's drive (#1738). On
+   * Windows such a candidate is judged under both readings, so a program built on such a runtime cannot open a
+   * path the root-relative reading kept inside.
+   */
+  private[runner] def msysDrivePath(candidate: String): Option[String] =
+    Option.when(
+      candidate.length >= 2 && candidate.charAt(0) == '/' && isAsciiLetter(candidate.charAt(1)) &&
+        (candidate.length == 2 || candidate.charAt(2) == '/')
+    )(s"${candidate.charAt(1)}:/${candidate.drop(3)}")
+
+  private def isAsciiLetter(c: Char): Boolean = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+
+  /** Every tail of `arg` after its first character (`-rf/x` gives `rf/x`, `f/x`, `/x`, `x`). */
+  private def tails(arg: String): Iterator[String] = Iterator.range(1, arg.length).map(arg.substring)
+
+  // ---- getopt: which argument is an option's value, as the program's own parser reads them (#1763)
+
+  /** Whether a long option takes a value: never, always (`--key=2` or `--key 2`), or only after `=` (`--check=quiet`). */
+  sealed private trait Arity
+  private case object NoValue       extends Arity
+  private case object RequiredValue extends Arity
+  private case object OptionalValue extends Arity
+
+  /**
+   * One implementation's options, as its `getopt` / `getopt_long` reads them: a short option that takes a value takes
+   * the rest of its cluster (`-Tdir`, `-rTdir`), or else the next argument, whatever it is (`-T -t`, `-T --`); a long
+   * one that requires a value takes the text after `=`, or else the next argument; a long option may be abbreviated to
+   * any prefix that selects only it.
+   *
+   * @param valueShort short options that take a value
+   * @param flagShort  short options that take none
+   * @param long       long options by name (without `--`)
+   * @param permute    whether options may follow operands (GNU and FreeBSD `getopt_long`); otherwise the first operand
+   *                   ends the options (macOS `getopt`, and GNU programs run with `POSIXLY_CORRECT` set)
+   * @param takesNext  whether a short value option at the end of its cluster takes the next argument (GNU sort's
+   *                   obsolete `-y` takes it only when it is all digits)
+   */
+  final private case class Getopt(
+    valueShort: Set[Char],
+    flagShort: Set[Char],
+    long: Map[String, Arity],
+    permute: Boolean = true,
+    takesNext: (Char, String) => Boolean = (_, _) => true
+  ) {
+
+    /** The long option `name` selects, if exactly one: the exact name, or the only one it abbreviates. */
+    def resolve(name: String): Option[(String, Arity)] =
+      long.get(name).map(name -> _).orElse {
+        val matches = long.filter { case (full, _) => full.startsWith(name) }
+        if (name.nonEmpty && matches.size == 1) matches.headOption else None
+      }
+  }
+
+  /** What one argument is to a program's option parser. */
+  sealed private trait Role
+
+  /** The `--` that ends the options (not one an option took as its value). */
+  private case object EndOfOptions extends Role
+
+  private case object Operand extends Role
+
+  /** A short-option cluster; `valueAt` is the index in the argument of the first letter that takes a value. */
+  final private case class ShortOptions(valueAt: Option[Int]) extends Role
+
+  /** A long option, by its full name when it selects exactly one, with the text after its `=`. */
+  final private case class LongOption(name: Option[String], attached: Option[String]) extends Role
+
+  /** The value of the option before it, given as the next argument; `option` is `-T` or `--temporary-directory`. */
+  final private case class OptionValue(option: String) extends Role
+
+  /**
+   * Each argument's role, and whether the parse is exact: `false` when an option is one the table does not know, is
+   * an ambiguous abbreviation, or is missing its value or given one it does not take. The program stops with an error
+   * then, but a version with an option the table lacks might not, so nothing that depends on the parse is exempted.
+   */
+  final private case class Parse(roles: Vector[Role], exact: Boolean)
+
+  /** `args` as `spec`'s parser reads them, left to right, each option's value consumed exactly once. */
+  private def parseOptions(args: IndexedSeq[String], spec: Getopt): Parse = {
+    @tailrec
+    def loop(i: Int, optionsEnded: Boolean, roles: Vector[Role], exact: Boolean): Parse =
+      if (i >= args.length) Parse(roles, exact)
+      else {
+        val arg  = args(i)
+        val next = args.lift(i + 1)
+        if (optionsEnded) loop(i + 1, optionsEnded, roles :+ Operand, exact)
+        else if (arg == "--") loop(i + 1, optionsEnded = true, roles :+ EndOfOptions, exact)
+        else if (arg.startsWith("--")) {
+          val body     = arg.drop(2)
+          val name     = body.takeWhile(_ != '=')
+          val attached = if (body.length > name.length) Some(body.drop(name.length + 1)) else None
+          spec.resolve(name) match {
+            case Some((full, RequiredValue)) if attached.isEmpty && next.nonEmpty =>
+              loop(i + 2, optionsEnded, roles :+ LongOption(Some(full), None) :+ OptionValue(s"--$full"), exact)
+            case Some((full, arity)) =>
+              val error = (arity == RequiredValue && attached.isEmpty) || (arity == NoValue && attached.nonEmpty)
+              loop(i + 1, optionsEnded, roles :+ LongOption(Some(full), attached), exact && !error)
+            case None => loop(i + 1, optionsEnded, roles :+ LongOption(None, attached), exact = false)
+          }
+        } else if (arg.length > 1 && arg.startsWith("-")) {
+          val valueAt = arg.indexWhere(spec.valueShort.contains, 1)
+          val letters = if (valueAt < 0) arg.drop(1) else arg.substring(1, valueAt)
+          val known   = letters.forall(spec.flagShort.contains)
+          val role    = ShortOptions(Option.when(valueAt >= 0)(valueAt))
+          if (valueAt >= 0 && valueAt == arg.length - 1) {
+            val option = arg.charAt(valueAt)
+            next match {
+              case Some(value) if spec.takesNext(option, value) =>
+                loop(i + 2, optionsEnded, roles :+ role :+ OptionValue(s"-$option"), exact && known)
+              case Some(_) => loop(i + 1, optionsEnded, roles :+ role, exact && known)
+              case None    => loop(i + 1, optionsEnded, roles :+ role, exact = false)
+            }
+          } else loop(i + 1, optionsEnded, roles :+ role, exact && known)
+        } else loop(i + 1, optionsEnded || !spec.permute, roles :+ Operand, exact)
+      }
+
+    loop(0, optionsEnded = false, Vector.empty, exact = true)
+  }
+
+  // ---- sort
+
+  private val SortFlags: Set[Char] = "bcCdfghiMmnRrsuVz".toSet
+
+  /** GNU sort's long options; BSD sort (FreeBSD, macOS) has them all. */
+  private val SortLong: Map[String, Arity] =
+    Seq(
+      "debug",
+      "dictionary-order",
+      "general-numeric-sort",
+      "help",
+      "human-numeric-sort",
+      "ignore-case",
+      "ignore-leading-blanks",
+      "ignore-nonprinting",
+      "merge",
+      "month-sort",
+      "numeric-sort",
+      "random-sort",
+      "reverse",
+      "stable",
+      "unique",
+      "version",
+      "version-sort",
+      "zero-terminated"
+    ).map(_ -> NoValue).toMap ++
+      Seq(
+        "batch-size",
+        "buffer-size",
+        "compress-program",
+        "field-separator",
+        "files0-from",
+        "key",
+        "output",
+        "parallel",
+        "random-source",
+        "sort",
+        "temporary-directory"
+      ).map(_ -> RequiredValue) ++
+      Seq("check" -> OptionalValue)
+
+  /** GNU sort: `-y` (obsolete, ignored) takes a value, but only an attached one or a next argument of digits. */
+  private val GnuSort = Getopt(
+    valueShort = "kSoTty".toSet,
+    flagShort = SortFlags,
+    long = SortLong,
+    takesNext = (option, next) => option != 'y' || next.forall(c => c >= '0' && c <= '9')
+  )
+
+  /** BSD sort has no `-y`, and adds its algorithm options and a literal `--check=silent|quiet`. */
+  private val BsdSort = Getopt(
+    valueShort = "kSoTt".toSet,
+    flagShort = SortFlags,
+    long = SortLong ++ Seq("heapsort", "mergesort", "mmap", "qsort", "radixsort").map(_ -> NoValue) +
+      ("check=silent|quiet" -> OptionalValue)
+  )
+
+  /**
+   * POSIX `sort`'s candidate paths: as [[candidates]], except that the value of `-t` / `--field-separator` is a
+   * separator, not a path, and is not checked - but only when it really is that value (#1763).
+   *
+   * `sort -T -t /etc/passwd` reads `/etc/passwd`: `-T` takes `-t` as its directory, so the next argument is an
+   * operand. So the arguments are parsed as sort parses them, each option's value consumed once ([[parseOptions]]):
+   * attached (`-Tdir`, `-rTdir`), separate (`-T dir`, `--temporary-directory dir`, `--temp dir`) or after `=`
+   * (`--temporary-directory=dir`), up to the `--` that ends the options. They are parsed four ways - by GNU and by
+   * BSD sort's option table, each with and without permutation (`POSIXLY_CORRECT`, which the runner's own environment
+   * may carry, makes GNU sort read every argument after its first operand as a file) - and an argument contributes
+   * the candidates of its role in each. Every operand and every other option's value is checked whole. The separator is
+   * left out only when all four parses are exact ([[Parse.exact]]) and no argument starts with `+`: BSD sort rewrites
+   * the obsolete `+POS1 -POS2` into `-k` before it parses options, even inside another option's value, which can
+   * remove the `-t` an exact parse found (`sort -T +0 -1t /etc/passwd`). Otherwise the separator is checked too, and
+   * an operand that looks like an option contributes its tails, as after `--`.
+   */
+  private def sortCandidates(args: Seq[String]): Iterator[(Int, String, String)] = {
+    val argv = args.toVector
+    val parses = for {
+      spec    <- Seq(GnuSort, BsdSort)
+      permute <- Seq(true, false)
+    } yield parseOptions(argv, spec.copy(permute = permute))
+    val separatorIsText = parses.forall(_.exact) && !argv.exists(a => a.length > 1 && a.startsWith("+"))
+
+    def ofRole(arg: String, role: Role): Iterator[String] = role match {
+      case EndOfOptions => Iterator.empty
+      case Operand =>
+        Iterator.single(arg) ++ (if (!separatorIsText && arg.startsWith("-")) tails(arg) else Iterator.empty)
+      // `-rt/`: the letters up to and including `t` (`rt/`, `t/`), not the separator after it
+      case ShortOptions(Some(at)) if separatorIsText && arg.charAt(at) == 't' =>
+        Iterator.range(1, at + 1).map(arg.substring) ++ Iterator.single(arg)
+      case ShortOptions(_) => tails(arg) ++ Iterator.single(arg)
+      case LongOption(name, attached) =>
+        val separator = separatorIsText && name.contains("field-separator")
+        Iterator.single(arg) ++ attached.filter(value => value.nonEmpty && !separator)
+      case OptionValue("-t" | "--field-separator") if separatorIsText => Iterator.empty
+      case OptionValue(_)                                             => Iterator.single(arg)
+    }
+
+    argv.indices.iterator.flatMap { i =>
+      parses.map(_.roles(i)).distinct.iterator.flatMap(ofRole(argv(i), _)).distinct.map(c => (i, argv(i), c))
     }
   }
 
@@ -944,10 +1442,17 @@ private[runner] object CommandPolicy {
    * would create, so a later `..` climbs back and a link met after it is still followed. `None` when `arg` is not a
    * path here; `Left(Outside)` when a link cannot be resolved, `Left(TooCostly)` when the budget runs out.
    */
-  private def physicalPath(base: Path, arg: String, budget: Budget): Option[Either[Verdict, Path]] =
+  private def physicalPath(
+    base: Path,
+    arg: String,
+    budget: Budget,
+    visit: (Path, String) => Unit = NoVisit
+  ): Option[Either[Verdict, Path]] =
     parse(arg) match {
       case Some(path) =>
-        Some(split(base, path).flatMap { case (start, names) => walk(start, names, hops = 0, missing = false, budget) })
+        Some(split(base, path).flatMap { case (start, names) =>
+          walk(start, names, hops = 0, missing = false, budget, visit)
+        })
       // Starts like an absolute path, but the platform cannot parse even its leading part: a Windows device or
       // NT-namespace name (`\\?\C:\x`, `\??\C:\x`) that a program would still open.
       case None if arg.startsWith("/") || arg.startsWith("\\") => Some(Left(Outside))
@@ -1004,9 +1509,13 @@ private[runner] object CommandPolicy {
 
   private val MaxLinkHops = 40
 
+  /** A [[walk]] that records nothing. */
+  private val NoVisit: (Path, String) => Unit = (_, _) => ()
+
   /**
    * `missing` is true once the walk is below a component that does not exist: nothing below it can be a link, so no
-   * file-system call is made until a `..` climbs back.
+   * file-system call is made until a `..` climbs back. `visit` is told of every name looked up in a directory that
+   * exists, as `(directory, name)`, links' targets included (see [[sequenceRefusal]]).
    */
   @tailrec
   private def walk(
@@ -1014,16 +1523,18 @@ private[runner] object CommandPolicy {
     names: List[String],
     hops: Int,
     missing: Boolean,
-    budget: Budget
+    budget: Budget,
+    visit: (Path, String) => Unit
   ): Either[Verdict, Path] =
     names match {
       case Nil                  => Right(current)
       case _ if !budget.spend() => Left(TooCostly)
-      case ("" | ".") :: rest   => walk(current, rest, hops, missing, budget)
+      case ("" | ".") :: rest   => walk(current, rest, hops, missing, budget, visit)
       case ".." :: rest =>
-        walk(Option(current.getParent).getOrElse(current), rest, hops, missing = false, budget)
-      case name :: rest if missing => walk(current.resolve(name), rest, hops, missing, budget)
+        walk(Option(current.getParent).getOrElse(current), rest, hops, missing = false, budget, visit)
+      case name :: rest if missing => walk(current.resolve(name), rest, hops, missing, budget, visit)
       case name :: rest =>
+        visit(current, name)
         val next = current.resolve(name)
         if (Files.isSymbolicLink(next)) {
           if (hops >= MaxLinkHops) Left(Outside)
@@ -1034,10 +1545,10 @@ private[runner] object CommandPolicy {
                 split(current, target) match {
                   case Left(refused) => Left(refused)
                   case Right((start, targetNames)) =>
-                    walk(start, targetNames ++ rest, hops + 1, missing = false, budget)
+                    walk(start, targetNames ++ rest, hops + 1, missing = false, budget, visit)
                 }
             }
-        } else walk(next, rest, hops, missing = !Files.exists(next, LinkOption.NOFOLLOW_LINKS), budget)
+        } else walk(next, rest, hops, missing = !Files.exists(next, LinkOption.NOFOLLOW_LINKS), budget, visit)
     }
 
   /**
@@ -1060,49 +1571,88 @@ private[runner] object CommandPolicy {
   /** What `cp`'s options say about how it copies, and its operands (a `-t` / `--target-directory` value included). */
   final private case class CpCommand(operands: List[String], recursive: Boolean, keepsLinks: Boolean, parents: Boolean)
 
+  /** GNU cp: `-S` / `--suffix` and `-t` / `--target-directory` take a value. */
+  private val GnuCp = Getopt(
+    valueShort = Set('S', 't'),
+    flagShort = "abdfHilLnprsTuvxPRZ".toSet,
+    long = Seq(
+      "archive",
+      "attributes-only",
+      "copy-contents",
+      "debug",
+      "dereference",
+      "force",
+      "interactive",
+      "keep-directory-symlink",
+      "link",
+      "no-clobber",
+      "no-dereference",
+      "no-target-directory",
+      "one-file-system",
+      "parents",
+      "path",
+      "recursive",
+      "remove-destination",
+      "strip-trailing-slashes",
+      "symbolic-link",
+      "verbose",
+      "help",
+      "version"
+    ).map(_ -> (NoValue: Arity)).toMap ++
+      Seq("no-preserve", "sparse", "suffix", "target-directory").map(_ -> RequiredValue) ++
+      Seq("backup", "context", "preserve", "reflink", "update").map(_ -> OptionalValue)
+  )
+
+  /** macOS cp: no option takes a value (`-S` is a flag), and its `getopt` stops at the first operand. */
+  private val BsdCp =
+    Getopt(valueShort = Set.empty, flagShort = "acfHiLlNnPpRrSsvXx".toSet, long = Map.empty, permute = false)
+
+  /**
+   * `cp`'s operands and how it copies. The operands - a `-t` / `--target-directory` value included - are those of
+   * either parse, GNU's or macOS's ([[parseOptions]]), so an option's value is consumed once and a `--` it took as
+   * its value (`cp -S -- -R src dst`) does not end the options (#1763). Which flags are set is read from every
+   * argument wherever it stands, operands and values included, which only adds checks: `-R` after a `--` that `-S`
+   * consumed is still seen as recursive.
+   */
   private def cpCommand(args: Seq[String]): CpCommand = {
-    // Any abbreviation of at least one letter: `--t=dst` is `--target-directory=dst`.
+    // Any abbreviation of at least one letter: `--rec` is `--recursive`, `--pat` is `--path` (GNU's `--parents`).
     def long(name: String, full: String): Boolean = name.length > 2 && full.startsWith(name)
 
-    @tailrec
-    def loop(rest: List[String], afterDashes: Boolean, command: CpCommand): CpCommand =
-      rest match {
-        case Nil                        => command.copy(operands = command.operands.reverse)
-        case arg :: tail if afterDashes => loop(tail, afterDashes, command.copy(operands = arg :: command.operands))
-        case "--" :: tail               => loop(tail, afterDashes = true, command)
-        case arg :: tail if arg.startsWith("--") && arg.length > 2 =>
-          val name = arg.takeWhile(_ != '=')
-          val target =
-            if (long(name, "--target-directory") && arg.length > name.length) List(arg.drop(name.length + 1)) else Nil
-          val recursive = long(name, "--recursive") || long(name, "--archive")
-          loop(
-            tail,
-            afterDashes,
-            command.copy(
-              operands = target ++ command.operands,
-              recursive = command.recursive || recursive,
-              keepsLinks = command.keepsLinks || recursive || long(name, "--no-dereference"),
-              parents = command.parents || long(name, "--parents")
-            )
-          )
-        case arg :: tail if arg.length > 1 && arg.startsWith("-") =>
-          val cluster   = arg.drop(1)
-          val targetAt  = cluster.indexOf('t')
-          val target    = if (targetAt >= 0 && targetAt < cluster.length - 1) List(cluster.drop(targetAt + 1)) else Nil
-          val recursive = cluster.exists(c => c == 'R' || c == 'r' || c == 'a')
-          loop(
-            tail,
-            afterDashes,
-            command.copy(
-              operands = target ++ command.operands,
-              recursive = command.recursive || recursive,
-              keepsLinks = command.keepsLinks || recursive || cluster.exists(c => c == 'P' || c == 'd')
-            )
-          )
-        case arg :: tail => loop(tail, afterDashes, command.copy(operands = arg :: command.operands))
+    val argv = args.toVector
+    val operands = Seq(GnuCp, BsdCp)
+      .flatMap { spec =>
+        val roles = parseOptions(argv, spec).roles
+        argv.indices.flatMap { i =>
+          val arg = argv(i)
+          roles(i) match {
+            case Operand                                  => Some(i -> arg)
+            case OptionValue("-t" | "--target-directory") => Some(i -> arg)
+            case ShortOptions(Some(at)) if arg.charAt(at) == 't' && at < arg.length - 1 =>
+              Some(i -> arg.substring(at + 1))
+            case LongOption(Some("target-directory"), Some(dir)) => Some(i -> dir)
+            case _                                               => None
+          }
+        }
       }
+      .distinct
+      .sortBy(_._1)
+      .map(_._2)
+      .toList
 
-    loop(args.toList, afterDashes = false, CpCommand(Nil, recursive = false, keepsLinks = false, parents = false))
+    val flags                   = args.filter(arg => arg.length > 1 && arg.startsWith("-") && arg != "--")
+    val (longFlags, shortFlags) = flags.partition(_.startsWith("--"))
+    val names                   = longFlags.map(_.takeWhile(_ != '='))
+    val clusters                = shortFlags.map(_.drop(1))
+    val recursive =
+      names.exists(n => long(n, "--recursive") || long(n, "--archive")) ||
+        clusters.exists(_.exists(c => c == 'R' || c == 'r' || c == 'a'))
+    CpCommand(
+      operands = operands,
+      recursive = recursive,
+      keepsLinks = recursive || names.exists(long(_, "--no-dereference")) ||
+        clusters.exists(_.exists(c => c == 'P' || c == 'd')),
+      parents = names.exists(n => long(n, "--parents") || long(n, "--path"))
+    )
   }
 
   private def lastName(arg: String): Option[String] =
@@ -1126,13 +1676,18 @@ private[runner] object CommandPolicy {
    *    following links, for a link that leads outside.
    *  - A copy that keeps links (`-R`, `-a`, `-P`, `-d`) of several sources could copy a link from one source and
    *    then write a file of the same name from another through it, so such a copy may not have two sources with
-   *    the same name, nor several sources and one that names a directory's contents.
+   *    the same name, nor several sources and one that names a directory's contents. "The same name" is the name
+   *    the destination's file system sees: names are compared after case folding and Unicode normalisation
+   *    ([[folded]]), as macOS (APFS, HFS+) and Windows (NTFS) compare them - there `cp -P a/b/x c/X d` makes the link
+   *    `d/x`, and macOS cp then opens `d/X`, which is that link, and writes `c/X` through it to where it points. On
+   *    Windows a name holding `~`, which may be another name's 8.3 short name, matches any.
    *
    * These checks run before `cp` starts; a link made at a destination name while it runs (by another command) is
    * not seen.
    */
   private def cpDestinationRefusal(
     args: Seq[String],
+    isWindows: Boolean,
     workDir: Bases,
     realRoot: Path,
     budget: Budget
@@ -1140,9 +1695,16 @@ private[runner] object CommandPolicy {
     val command  = cpCommand(args)
     val operands = command.operands.toVector
 
-    val names = operands.flatMap(lastName)
+    // As the destination's file system compares them: `x` and `X`, or `café` composed and decomposed, are one name
+    // on macOS and Windows (#1775 review); on Windows a `~` may make a name another's short name.
+    val names       = operands.flatMap(lastName)
+    val foldedNames = names.map(folded)
+    val sameName =
+      foldedNames.distinct.size < names.size ||
+        (names.size >= 2 && foldedNames.contains(None)) ||
+        (isWindows && names.size >= 2 && names.exists(_.contains('~')))
     val clash =
-      command.keepsLinks && operands.size >= 3 && (names.distinct.size < names.size || operands.exists(copiesContents))
+      command.keepsLinks && operands.size >= 3 && (sameName || operands.exists(copiesContents))
 
     lazy val destinations: Vector[String] =
       (for {
@@ -1160,7 +1722,8 @@ private[runner] object CommandPolicy {
       Some(
         Refusal(
           ArgumentNotAllowed,
-          "A cp that copies links (-R, -a, -P, -d) may not have two sources with the same name, or several sources " +
+          "A cp that copies links (-R, -a, -P, -d) may not have two sources with the same name (letter case and " +
+            "Unicode normalisation ignored, as macOS and Windows file systems compare names), or several sources " +
             "and one that names a directory's contents: one source's link and another's file would land at one name, " +
             "and cp would write the file through the link. Copy them one at a time."
         )
@@ -1234,5 +1797,377 @@ private[runner] object CommandPolicy {
       }
 
     loop(List(dir))
+  }
+
+  // ---- rm, mv, unlink: removing or renaming a link that points out of the workspace (#1730)
+
+  /** GNU rm (and uutils): no option takes a separate value; `--interactive` and `--preserve-root` take one after `=`. */
+  private val GnuRm = Getopt(
+    valueShort = Set.empty,
+    flagShort = "dfiIrRv".toSet,
+    long = Seq("dir", "force", "one-file-system", "no-preserve-root", "recursive", "verbose", "help", "version")
+      .map(_ -> (NoValue: Arity))
+      .toMap ++ Seq("interactive", "preserve-root").map(_ -> OptionalValue)
+  )
+
+  /** macOS and FreeBSD rm: no long options, and `getopt` stops at the first operand. */
+  private val BsdRm =
+    Getopt(valueShort = Set.empty, flagShort = "dfiIPRrvWx".toSet, long = Map.empty, permute = false)
+
+  /** GNU mv: `-S` / `--suffix` and `-t` / `--target-directory` take a value. */
+  private val GnuMv = Getopt(
+    valueShort = Set('S', 't'),
+    flagShort = "bfinTuvZ".toSet,
+    long = Seq(
+      "context",
+      "debug",
+      "exchange",
+      "force",
+      "interactive",
+      "no-clobber",
+      "no-copy",
+      "no-target-directory",
+      "strip-trailing-slashes",
+      "verbose",
+      "help",
+      "version"
+    ).map(_ -> (NoValue: Arity)).toMap ++
+      Seq("suffix", "target-directory").map(_ -> RequiredValue) ++
+      Seq("backup", "update").map(_ -> OptionalValue)
+  )
+
+  /** macOS and FreeBSD mv: no option takes a value, no long options, and `getopt` stops at the first operand. */
+  private val BsdMv = Getopt(valueShort = Set.empty, flagShort = "fhinv".toSet, long = Map.empty, permute = false)
+
+  /** GNU unlink has only `--help` and `--version`; macOS unlink takes no option, only a `--`. */
+  private val GnuUnlink =
+    Getopt(valueShort = Set.empty, flagShort = Set.empty, long = Map("help" -> NoValue, "version" -> NoValue))
+  private val BsdUnlink = Getopt(valueShort = Set.empty, flagShort = Set.empty, long = Map.empty, permute = false)
+
+  /**
+   * The indices of the arguments of `rm`, `mv` or `unlink` that the program removes or renames as names, without
+   * following a link at their last component: every operand of `rm` and `unlink`, every source of `mv`. `rm`, `mv`
+   * and `unlink` act on a link itself (`unlink(2)`, `rename(2)`; `rm` reads the operand with `lstat`), so such an
+   * operand may name a link that points out of the workspace; [[namesLinkItself]] decides whether it does.
+   *
+   * Erring towards the existing refusal, nothing is returned unless the arguments are parsed exactly by every
+   * implementation's option table - GNU's (with and without `POSIXLY_CORRECT`) and macOS / FreeBSD's
+   * ([[parseOptions]]) - and each of those parses agrees the argument is an operand and, for `mv`, not the
+   * destination. So a GNU-only form (`rm --force`, `mv -t dir`, `mv -T`, `mv --target-directory=dir`) keeps the
+   * link refused, as does an option a table lacks. An argument starting with `-` is never returned. Nothing is
+   * returned for a recursive `rm` (`-r`, `-R`, any abbreviation of `--recursive`): GNU and BSD `rm -r` remove the
+   * link and not what it points to, but not every implementation has been verified to, and removing a link needs no
+   * `-r`.
+   *
+   * The destination of `mv` is never returned: `mv a outlink` moves `a` into the directory the link points to, so the
+   * destination stays held to the path rule, which follows the link. In each parse it is the last operand, or there is
+   * none when a target directory is given (and then the target directory is an option value, checked as a path).
+   */
+  private def linkOperands(program: String, args: Seq[String]): Set[Int] = {
+    val specs = program match {
+      case "rm"     => Seq(GnuRm, BsdRm)
+      case "mv"     => Seq(GnuMv, BsdMv)
+      case "unlink" => Seq(GnuUnlink, BsdUnlink)
+      case _        => Seq.empty
+    }
+    val argv = args.toVector
+    val parses = for {
+      spec    <- specs
+      permute <- if (spec.permute) Seq(true, false) else Seq(false)
+    } yield parseOptions(argv, spec.copy(permute = permute))
+
+    def recursive: Boolean =
+      argv.exists { arg =>
+        if (arg.startsWith("--")) {
+          val name = arg.takeWhile(_ != '=')
+          name.length > 2 && "--recursive".startsWith(name)
+        } else arg.length > 1 && arg.startsWith("-") && arg.drop(1).exists(c => c == 'r' || c == 'R')
+      }
+
+    /** The operands `program` acts on as names in one parse: for `mv`, the sources. */
+    def named(parse: Parse): Set[Int] = {
+      val operands = argv.indices.filter(i => parse.roles(i) == Operand)
+      if (program != "mv") operands.toSet
+      else {
+        val targetDirectory = argv.indices.exists { i =>
+          parse.roles(i) match {
+            case OptionValue("-t" | "--target-directory")      => true
+            case ShortOptions(Some(at))                        => argv(i).charAt(at) == 't'
+            case LongOption(Some("target-directory"), Some(_)) => true
+            case _                                             => false
+          }
+        }
+        if (targetDirectory) operands.toSet else operands.dropRight(1).toSet
+      }
+    }
+
+    if (parses.isEmpty || !parses.forall(_.exact) || (program == "rm" && recursive)) Set.empty
+    else parses.map(named).reduce(_ intersect _).filterNot(i => argv(i).startsWith("-"))
+  }
+
+  /**
+   * Whether `arg` names a symbolic link itself, in a directory inside the workspace, so that removing or renaming it
+   * touches only the link wherever it points (a dangling link, a link to a link, or a link out of the workspace):
+   *
+   *  - its last component is a name, not `.` or `..`, and it has no trailing `/`: with one (`outlink/`, `outlink/.`)
+   *    the kernel follows the link, so `mv outlink/ x` moves the directory it points to and `rm -r outlink/` empties it;
+   *  - the directory holding it - the argument without its last component, or the working directory - resolves inside
+   *    the workspace under both readings of the path rule (the kernel's, following links, and the lexical one, `..`
+   *    removed as text), and both readings name the same real directory;
+   *  - in that real directory, the last component is a symbolic link (`lstat`, not following it).
+   *
+   * Only called on POSIX: on Windows a link or junction is removed by `del` or `rd`, which the policy does not model,
+   * so there such an operand keeps the path rule and is refused when it leads outside.
+   */
+  private def namesLinkItself(workDir: Bases, arg: String, realRoot: Path, budget: Budget): Boolean = {
+    val cut    = arg.lastIndexOf('/')
+    val name   = arg.substring(cut + 1)
+    val parent = if (cut < 0) "." else if (cut == 0) "/" else arg.substring(0, cut)
+    def real(reading: Option[Either[Verdict, Path]]): Option[Path] =
+      reading.flatMap(_.toOption).flatMap(canonical(_, budget))
+    name.nonEmpty && name != "." && name != ".." && {
+      val physical = real(physicalPath(workDir.physical, parent, budget))
+      physical.nonEmpty && physical == real(lexicalPath(workDir.lexical, parent)) &&
+      physical.exists(dir => dir.startsWith(realRoot) && Files.isSymbolicLink(dir.resolve(name)))
+    }
+  }
+
+  // ---- mv, cp of several sources: one operation changing the names a later one resolves (#1776)
+
+  /**
+   * One operation of an `mv` or `cp` of several sources: the source, by its index in the arguments, and the
+   * destination directory it goes into.
+   */
+  final private case class Transfer(source: Int, sourceArg: String, destination: String)
+
+  /**
+   * A directory entry an operation creates, replaces or removes: `name` in the real directory `dir`. `None` is any
+   * name; with `prefix`, any name that starts with `name` (a backup such as `name~` or `name.~1~`).
+   */
+  final private case class Changed(dir: Path, name: Option[String], prefix: Boolean)
+
+  /**
+   * Every operation of `mv` or `cp` that has two sources or more, under any parse of its arguments (GNU's table, with
+   * and without `POSIXLY_CORRECT`, and macOS / FreeBSD's), and every argument any parse reads as a path - each operand
+   * and each `-t` / `--target-directory` value - with its index. The parses are joined rather than intersected: an
+   * argument that is a source in one parse and the destination in another counts as both, which only adds checks.
+   */
+  private def transfers(program: String, args: Seq[String]): (Seq[Transfer], Seq[(Int, String)]) = {
+    val specs = program match {
+      case "mv" => Seq(GnuMv, BsdMv)
+      case "cp" => Seq(GnuCp, BsdCp)
+      case _    => Seq.empty
+    }
+    val argv = args.toVector
+    val shapes = for {
+      spec    <- specs
+      permute <- if (spec.permute) Seq(true, false) else Seq(false)
+    } yield {
+      val parse    = parseOptions(argv, spec.copy(permute = permute))
+      val operands = argv.indices.filter(i => parse.roles(i) == Operand).map(i => i -> argv(i))
+      val targets = argv.indices.flatMap { i =>
+        val arg = argv(i)
+        parse.roles(i) match {
+          case OptionValue("-t" | "--target-directory") => Some(i -> arg)
+          case ShortOptions(Some(at)) if arg.charAt(at) == 't' && at < arg.length - 1 =>
+            Some(i -> arg.substring(at + 1))
+          case LongOption(Some("target-directory"), Some(dir)) => Some(i -> dir)
+          case _                                               => None
+        }
+      }
+      val (sources, destinations) =
+        if (targets.nonEmpty) (operands, targets) else (operands.dropRight(1), operands.takeRight(1))
+      (sources, destinations, operands ++ targets)
+    }
+    val moves = shapes.filter(_._1.size >= 2).flatMap { case (sources, destinations, _) =>
+      for {
+        (i, source) <- sources
+        (_, dest)   <- destinations
+      } yield Transfer(i, source, dest)
+    }
+    (moves.distinct, shapes.flatMap(_._3).distinct)
+  }
+
+  /**
+   * An argument split into the directory holding its last component and that component's name, a trailing separator
+   * removed; `None` for the name when it is `.` or `..`, which a program would not create.
+   */
+  private def directoryAndName(arg: String, isWindows: Boolean): (String, Option[String]) = {
+    def separator(c: Char): Boolean = c == '/' || (isWindows && c == '\\')
+    val trimmed                     = arg.reverse.dropWhile(separator).reverse
+    val cut                         = trimmed.lastIndexWhere(separator)
+    val name                        = trimmed.substring(cut + 1)
+    val directory = if (cut < 0) "." else if (cut == 0) trimmed.substring(0, 1) else trimmed.substring(0, cut)
+    (directory, Option.when(name.nonEmpty && name != "." && name != "..")(name))
+  }
+
+  /**
+   * A name as a case- and normalisation-insensitive file system may compare it, erring towards matching; `None` when
+   * the folding does not settle, which callers take to match any name.
+   *
+   * Each pass decomposes (NFKD), upper-cases and lower-cases. Decomposing, as APFS does before it case-folds, matters
+   * for the Greek iota subscript: NFKC composes U+0345 into its letter, and Java upper-cases `ᾳ` to `ΑΙ`, emitting the
+   * iota before any mark that follows, so `ᾳ̃` and `α̃ι` - one name on APFS, where NFD puts the subscript after the
+   * tilde - folded apart, and `cp -P a/b/zᾼ͂ c/zᾷ d` wrote `c/zᾷ` through the link it had just made (#1775 review).
+   * One pass is not idempotent either - `ẞ` (U+1E9E) lower-cases to `ß`, which only a second pass upper-cases to `SS`
+   * - so the pass is repeated until the name stops changing: over every code point and its upper, lower and (K)NF(K)D
+   * forms that takes at most two changes (`CommandPolicyFoldedSpec`), so a name still changing after [[FoldPasses]] is
+   * unexpected and treated as unknown. Over the 3.1 million pairs of names APFS took for one in a brute-force search,
+   * this gives each pair one key.
+   */
+  private[runner] def folded(name: String): Option[String] = {
+    def pass(s: String): String =
+      Normalizer.normalize(
+        Normalizer.normalize(s, Normalizer.Form.NFKD).toUpperCase(Locale.ROOT).toLowerCase(Locale.ROOT),
+        Normalizer.Form.NFKD
+      )
+    Iterator
+      .iterate(name)(pass)
+      .sliding(2)
+      .take(FoldPasses)
+      .collectFirst { case Seq(before, after) if before == after => after }
+  }
+
+  /** The most passes [[folded]] makes before giving up on a name. */
+  private val FoldPasses = 4
+
+  /**
+   * `mv` and `cp` handle several sources one at a time, so each operation changes the file system the next one
+   * resolves its paths in, while every path is checked before the command starts (#1776). With `sub/l` -> `../outside`
+   * (inside the workspace while in `sub`), `mv sub/l l/secret.txt .` first moves the link to `./l`, where it points
+   * out, and then moves `outside/secret.txt` in through it; with `evil` -> outside (a link the agent may move, #1730)
+   * and an empty directory `d`, `mv evil d/evil/secret.txt d` does the same. `cp -P`, `-d`, `-R` and `-a` copy a link
+   * as a link and GNU cp then reads a later source through the copy.
+   *
+   * So for an `mv` or `cp` of two sources or more, under any parse of its arguments ([[transfers]]), each source's
+   * operation is taken to change these directory entries:
+   *
+   *  - in the destination directory (both readings of its path, links followed), the source's last name, and any name
+   *    starting with it (`--backup` keeps the entry it replaces as `name~` or `name.~1~`); any name at all when that
+   *    name is not known (`.`, `..`, a `cp -R src/.` that copies a directory's contents, or `cp --parents`);
+   *  - for `mv`, the source's own entry in the directory holding it, which the move removes.
+   *
+   * Every other path argument - each other source, the destination, a `-t` value - is then walked as the path rule
+   * walks it, under both readings, and the command is refused (`ARGUMENT_NOT_ALLOWED`) when that walk looks up, in the
+   * same directory, a name one of those entries matches - including through a link's target, and comparing names
+   * case-insensitively and after Unicode normalisation, as macOS and Windows file systems do (on Windows, a name with
+   * a `~`, which may be a short name, matches any). An `mv` is also refused when the working directory lies inside a
+   * source it moves, since a relative path's `..` would then climb from the source's new place. Order is ignored:
+   * an argument before the source is checked too, which only adds refusals. A command whose destination is not an
+   * existing directory is left to the program, which then refuses to run any operation.
+   *
+   * A path changes meaning between two operations only when one of them changes an entry that path looks up (or moves
+   * the working directory), so this covers the reordering whatever each entry becomes. `rm` only removes entries, so a
+   * later operand through one fails rather than leading elsewhere; `mkdir` and `touch` create directories and files,
+   * never links, and the path rule already treats a missing component as a directory to be made; `chmod` changes no
+   * name. Their operands are checked as before.
+   */
+  private def sequenceRefusal(
+    program: String,
+    args: Seq[String],
+    isWindows: Boolean,
+    workDir: Bases,
+    budget: Budget
+  ): Option[Refusal] = {
+    val (moves, paths) = transfers(program, args)
+    if (moves.isEmpty) None
+    else {
+      def readings(arg: String): Seq[Path] =
+        Seq(physicalPath(workDir.physical, arg, budget), lexicalPath(workDir.lexical, arg))
+          .flatMap(_.flatMap(_.toOption))
+          .flatMap(canonical(_, budget))
+          .distinct
+
+      // `cp --parents` creates the source's whole path under the destination, so its first name is not the last one
+      val parents = program == "cp" && cpCommand(args).parents
+
+      val changed: Seq[(Int, Changed)] = moves.flatMap { move =>
+        val (directory, name) = directoryAndName(move.sourceArg, isWindows)
+        val created = {
+          val unknown = parents || (program == "cp" && copiesContents(move.sourceArg))
+          readings(move.destination)
+            .filter(Files.isDirectory(_))
+            .map(dir => Changed(dir, if (unknown) None else name, prefix = true))
+        }
+        val removed =
+          if (program != "mv") Nil
+          else readings(directory).filter(Files.isDirectory(_)).map(dir => Changed(dir, name, prefix = false))
+        (created ++ removed).map(move.source -> _)
+      }
+
+      def matches(change: Changed, dir: Path, name: String): Boolean = {
+        val named = change.name.forall { n =>
+          (folded(name), folded(n)) match {
+            case (Some(looked), Some(entry)) => if (change.prefix) looked.startsWith(entry) else looked == entry
+            case _                           => true // a name that does not fold settles nothing: take it to match
+          }
+        } || (isWindows && (name.contains('~') || change.name.exists(_.contains('~'))))
+        named && Try(Files.isSameFile(dir, change.dir)).getOrElse(false)
+      }
+
+      /**
+       * The entries the program looks up to reach `arg`, under both readings; `Left` when out of budget.
+       *
+       * The lexical reading is walked from the root (`split(absolute, absolute)`), not from the working directory, so
+       * it looks up every directory above the working directory too. That is what refuses a relative path from a
+       * working directory that an earlier operation writes into: from `d/sub`, `cp -R ../../src/sub l/secret.txt
+       * ../../d` first merges `src/sub` - holding `l` -> outside - into `d/sub`, and GNU cp then reads `l/secret.txt`
+       * through the copied link. The physical walk of `l/secret.txt` starts at the working directory and never looks
+       * up `sub` in `d`; the lexical walk does, and `sub` in `d` is a name the first operation creates. Keep this walk
+       * starting at the root (the spec pins it).
+       */
+      def lookups(arg: String): Either[Verdict, Seq[(Path, String)]] = {
+        val seen     = scala.collection.mutable.ListBuffer.empty[(Path, String)]
+        val visit    = (dir: Path, name: String) => { seen += (dir -> name); () }
+        val physical = physicalPath(workDir.physical, arg, budget, visit)
+        val lexical = lexicalPath(workDir.lexical, arg).flatMap(_.toOption).map { absolute =>
+          split(absolute, absolute).flatMap { case (start, names) =>
+            walk(start, names, hops = 0, missing = false, budget, visit)
+          }
+        }
+        if (Seq(physical, lexical).flatten.contains(Left(TooCostly))) Left(TooCostly) else Right(seen.toList)
+      }
+
+      val movedAround: Option[Refusal] =
+        if (program != "mv") None
+        else
+          moves.iterator.collectFirst {
+            case move
+                if readings(move.sourceArg).exists(moved => workDir.physical.startsWith(moved)) ||
+                  lexicalPath(workDir.lexical, move.sourceArg)
+                    .flatMap(_.toOption)
+                    .exists(moved => workDir.lexical.normalize().startsWith(moved)) =>
+              Refusal(
+                ArgumentNotAllowed,
+                s"'mv' would move '${move.sourceArg}', which holds the working directory, and then resolve its other " +
+                  "paths from the working directory's new place; the paths are checked before the command runs. " +
+                  "Run the command from another working directory, or move one source at a time."
+              )
+          }
+
+      movedAround.orElse {
+        paths.iterator
+          .map { case (j, arg) => (j, arg, lookups(arg)) }
+          .flatMap {
+            case (_, _, Left(_)) => Some(tooCostly(program))
+            case (j, arg, Right(entries)) =>
+              entries.iterator
+                .flatMap { case (dir, name) =>
+                  changed.collectFirst {
+                    case (i, change) if i != j && matches(change, dir, name) =>
+                      Refusal(
+                        ArgumentNotAllowed,
+                        s"'$program' with several sources would reach '$arg' through '${dir.resolve(name)}', a name " +
+                          s"its operation on '${args(i)}' creates, replaces or removes first; the paths are checked " +
+                          s"before the command runs, so the later path could then lead elsewhere. " +
+                          s"Run one '$program' per source."
+                      )
+                  }
+                }
+                .nextOption()
+          }
+          .nextOption()
+      }
+    }
   }
 }

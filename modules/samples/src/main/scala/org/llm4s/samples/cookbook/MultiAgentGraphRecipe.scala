@@ -49,7 +49,6 @@ object MultiAgentGraphRecipe extends RecipeApp {
   /** The thread the recipe runs on. */
   val ReviewThread: ThreadId = ThreadId("review-1")
 
-  // snippet:start
   private val questionKey = StateKey.replace[String]("question", "")
   private val views       = StateKey.appending[View]("views")
   private val answer      = StateKey.replace[String]("answer", "")
@@ -96,7 +95,6 @@ object MultiAgentGraphRecipe extends RecipeApp {
 
   def start(runtime: GraphRuntime, client: LLMClient, question: String): Result[RunHandle[Review]] =
     graph(client).flatMap(g => runtime.start(ReviewThread, g, question))
-  // snippet:end
 
   def run(client: LLMClient, question: String): Result[Review] =
     start(GraphRuntime.inMemory(), client, question).flatMap(_.await()).flatMap(completed)

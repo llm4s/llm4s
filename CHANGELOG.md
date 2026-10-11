@@ -42,6 +42,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   across a close and reopen, and a store that judges expiry by a clock of its own (a database server's) overrides
   `advanceStoreClock` and `exactExpiry`. See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md) and the
   [Stage 2 migration note](docs/reference/migration.md#stage-2-migration-durable-execution).
+- **The cookbook: thirteen runnable recipes, one page each, run offline in CI**
+  ([#1476](https://github.com/llm4s/llm4s/issues/1476)): seven new recipes join the six under
+  `org.llm4s.samples.cookbook` - `EmailExtractionRecipe` (a nested schema, checked against the email),
+  `SummariseRecipe` (map-reduce), `FolderQaRecipe` (the RAG pipeline over a folder of files),
+  `StreamingRecipe` (`streamComplete`), `FallbackRecipe` (`ReliableClient` retries, then a second provider),
+  `CachingRecipe` (`CachingLLMClient`) and `JudgeRecipe` (LLM-as-judge with a rubric) - and `ToolCallingRecipe`
+  now chains two tools, one of its own and the calculator. Each runs with no API key against a scripted client
+  (`--live` for the configured provider); the recipes that embed use `BagOfWordsEmbeddings`, an offline embedding
+  provider registered like a provider module's. Each recipe has its own page under `docs/examples/cookbook/` -
+  the problem, the whole program, how to run it, what to change for a real provider, and the pitfalls - linked
+  from the cookbook index, the examples index and the README. `CookbookDocsSpec` runs every recipe in
+  `sbt test` and fails when a page is missing, lacks a section or sits out of order, or shows a program that is
+  not its source file.
+- **Embeddings from Java** ([#1490](https://github.com/llm4s/llm4s/issues/1490)): `llm4s-java-api`'s
+  `Llm4s.createDefaultEmbeddingClient()` creates a `JEmbeddingClient` for the model `llm4s.embeddings.model`
+  (`EMBEDDING_MODEL`) names, the route `createDefaultClient()` takes for chat; a missing model, provider or key, or a
+  model whose dimensions its provider module does not declare, is a failed result of kind `CONFIGURATION`.
+  `embed(List<String>)` and `embed(List<String>, JEmbeddingPurpose)` send the texts in one request and return an
+  `LlmResult<JEmbeddings>`: `vectors()` as a `List<float[]>` (a fresh copy on each call), one per text and in order,
+  with the `model()` the provider named and their `dimensions()`. The Java enum `JEmbeddingPurpose` (`DOCUMENT`, the
+  default as in core, or `QUERY`) becomes core's `InputPurpose`. An empty list returns no vectors without a request; a
+  `null` list, text or purpose is a failed result of kind `VALIDATION`; a reply that is not one vector per text of one
+  length is refused. The static `JEmbeddings.cosineSimilarity(float[], float[])` gives `0` for a zero vector and throws
+  `IllegalArgumentException` for vectors of different lengths. `LlmException.getKind()` now reads an embedding
+  provider's `EmbeddingError` by its HTTP status, as it reads a `ServiceError` (`401`/`403` `AUTHENTICATION`, `429`
+  `RATE_LIMIT`, `400` `VALIDATION`, any other `SERVICE`, with `getStatusCode()`), and as `OTHER` when it has none; it
+  was always `OTHER` before. The Java guide has an [Embeddings](docs/guide/java.md#embeddings) section, and the
+  `gradle-java` sample compares two sentences.
+- **Java completions with usage, model and tool calls, and a typed error kind**
+  ([#1487](https://github.com/llm4s/llm4s/issues/1487)): `llm4s-java-api`'s `JLlmClient.completion(String)`,
+  `completion(Conversation)` and `completion(Conversation, JCompletionOptions)` return an
+  `LlmResult<JCompletion>`: the reply's `content()`, the `model()` that answered, its `toolCalls()` as the
+  `JToolCall`s the agent's messages already use, `usage()` as an `Optional<JTokenUsage>` (`promptTokens()`,
+  `completionTokens()`, `totalTokens()`, `thinkingTokens()`, and the prompt-cache counts `cachedTokens()` and
+  `cacheCreationTokens()`, each `int` and zero where the provider reports none), `estimatedCost()` as an `Optional<BigDecimal>` (the
+  figure an agent turn adds to `JUsageSummary.totalCost()`), `thinking()` and `id()`. The `complete` methods keep
+  returning the text. There is one options overload of `completion`, so a literal `null` options compiles and
+  fails as a result. `LlmException` gains `getKind()`, the Java enum `LlmErrorKind` (`AUTHENTICATION`,
+  `RATE_LIMIT`, `TIMEOUT`, `NETWORK`, `SERVICE`, `VALIDATION`, `CONFIGURATION`, `CANCELLED`, `OTHER`),
+  `isRecoverable()`, `getRetryAfter()` as an `Optional<Duration>` and `getStatusCode()` as an `OptionalInt`. A
+  provider's `400`, `401`/`403` or `429` reported as a `ServiceError` or `APIError` reads as `VALIDATION`,
+  `AUTHENTICATION` or `RATE_LIMIT` and stays recoverable, as its class is: always call `isRecoverable()` rather
+  than infer it from the kind. Every concrete error class in `org.llm4s.error` has a kind, and
+  `LlmErrorKindSpec` scans the package and fails when a new one has none. `JCompletionOptions.toString` now prints
+  an unset value as `unset`, so an unset reasoning level no longer reads like `NONE`. The Java guide has
+  [The whole reply](docs/guide/java.md#the-whole-reply) and a rewritten
+  [Handling a failure](docs/guide/java.md#handling-a-failure) section.
+- **Completion options from Java** ([#1488](https://github.com/llm4s/llm4s/issues/1488)): `llm4s-java-api`'s
+  `JCompletionOptions.builder()` sets `temperature`, `topP`, `maxTokens`, `presencePenalty`, `frequencyPenalty`,
+  `reasoning` (the Java enum `JReasoningEffort`: `NONE`, `LOW`, `MEDIUM`, `HIGH`) and `budgetTokens`, and
+  `JLlmClient.complete(Conversation, JCompletionOptions)` sends them. A value that may be absent is read as an
+  `Optional` / `OptionalInt` and can be cleared with an empty one, so no `scala.Option` is involved. The builder is
+  immutable, `toBuilder()` starts one from existing options, and a value no provider accepts (a negative or
+  non-finite temperature, a top-p outside `0..1`, a token count below 1) throws `IllegalArgumentException` when it
+  is set. The options map onto core's `CompletionOptions` through its `apply` and `with*` methods only. The
+  `complete(Conversation, CompletionOptions)` overload stays. The Java guide has a
+  [Completion options](docs/guide/java.md#completion-options) section, and the `gradle-java` sample uses the builder.
 - **Cookbook recipe: several agents in one graph** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   `MultiAgentGraphRecipe` runs two specialist agents in one superstep and an editor agent behind a static join,
   and its spec checks update order, the barrier, step boundaries and cancellation with no API key.
@@ -90,6 +147,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Llm4s.createAgent(client, tools, streaming)` and `wrapAgent` match Java's. As in the fs2 and ZIO streams, a consumer too slow for the stream's 256-event buffer loses live
   events and receives a `StreamEvent.LiveGap` with their count - it never cancels the run - and a run that
   ends without a terminal event still ends the stream with its error. The Java sample streams a turn.
+- **`llm4s-pekko`: LLM responses and agent runs as Apache Pekko Streams `Source`s**
+  ([#1457](https://github.com/llm4s/llm4s/issues/1457)): a new Beta module (`modules/llm4s-pekko`, package
+  `org.llm4s.pekko`) that depends on `llm4s-core`, `llm4s-agent` and `pekko-stream` 1.7 (Apache-2.0; Akka is not
+  used). `LLMClientPekko(client).streamComplete(conversation)` is a `Source[StreamedChunk, NotUsed]` and `complete` a
+  `Future`; `AgentPekko(agent).stream`, `streamResume` and `streamRecover` are `Source[AgentStreamItem, NotUsed]` (each
+  event of the turn, then `Done(result)`) and `run`, `continueConversation`, `recover` and `resume` are `Future`s, as
+  `AgentIO` and `AgentZ` offer for fs2 and ZIO. The provider call blocks, so each stream runs it on a daemon thread of its
+  own and hands items over through a bounded buffer: a consumer that lags blocks the provider's thread (nothing is
+  dropped), and cancelling the stream interrupts it. An agent turn is cancelled when its stream is, a slow consumer gets
+  a `StreamEvent.LiveGap` instead of holding the run up, and an `LLMError` is carried by an `LLMException`. A `Future`
+  cannot be cancelled. `FrozenDependencies` now bans `org.apache.pekko` and `com.typesafe.akka` from frozen modules.
+  See [Apache Pekko Integration](docs/guide/pekko.md).
 - **`llm4s-speech`: opt-in MP3 output for cloud TTS** ([#1307](https://github.com/llm4s/llm4s/issues/1307)):
   `TTSOptions(outputFormat = AudioFormat.Mp3)` makes the OpenAI, ElevenLabs and Azure clients request the
   service's MP3 and return its bytes untouched. PCM stays the default. `AudioFormat.Mp3` is a new case
@@ -97,6 +166,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writing, `AudioIO.saveWav` / `saveRawPcm16` and the new `AudioPreprocessing.standardizeForSTT(audio, rate)`
   reject MP3 with a `ValidationError`; Tacotron2 refuses it. A caller with an exhaustive `match` on
   `AudioFormat` needs a case for `Mp3`. The `@Cloud` smoke suites check MP3 magic bytes.
+- **Scala CLI quick start: a first LLM call from one file** ([#1456](https://github.com/llm4s/llm4s/issues/1456)):
+  `modules/samples/scala-cli` holds `hello.scala` (with `//> using jvm 21`), `resources/application.conf` (OpenAI),
+  `resources/ollama.conf` (a local Ollama, no key) and `logback.xml`; `cd modules/samples/scala-cli && scala-cli run .`
+  makes the call, and `scala-cli run . --java-opt -Dconfig.resource=ollama.conf` uses Ollama. The two providers are
+  separate files because 0.4.x validates every provider section when it loads the default one. The page
+  `docs/getting-started/scala-cli.md` (linked from Installation, the Getting Started index and the README) shows the
+  script for the latest release: one `llm4s-core` dependency up to 0.4.x, and the provider modules and a logging
+  backend as well once 0.5.0 is the latest release. The script targets `llm4s-core` 0.4.1 and was run with
+  `scala-cli` against a local fake Ollama. `ScalaCliQuickstartSpec` checks the committed configuration against this
+  branch's API, runs the script's calls end to end against a fake Ollama, renders the page for 0.4.1 and 0.5.0, and
+  fails if the page's code blocks stop matching the files. `scripts/check-doc-versions.sh` now also rejects a
+  literal version in a `//> using dep org.llm4s::...` line.
 - **`llm4s-java-api`: Java interop module** (Beta, `modules/java-api`, package `org.llm4s.javaapi`,
   [#934](https://github.com/llm4s/llm4s/issues/934)): a facade for Java callers over the client and agent API. `Llm4s.createDefaultClient()`
   and `createClient(config)` return an `LlmResult<JLlmClient>`; `JLlmClient` (`AutoCloseable`) offers
@@ -191,6 +272,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that throws fails the run with `GraphError.MiddlewareFailed(middleware, cause)`; a throwing
   `ModelStep` is not reported as a middleware failure. Design:
   `docs/design/typed-agent-runtime-design.md` §4.8.
+- **Workload identity (SPIFFE) for providers**: a named provider section may carry an `auth`
+  block instead of `apiKey` - an `identityTokenFile` (e.g. a JWT-SVID kept by `spiffe-helper`) plus
+  provider keys. `openai-compatible` exchanges it at an RFC 8693 endpoint (`tokenUrl`, `clientId`,
+  `scope`, `audience` - Databricks' `/oidc/v1/token`), caches the token until shortly before
+  expiry and refreshes and retries once on 401; `openai` (`identityProviderId`,
+  `serviceAccountId`, `clientId`) and `anthropic` (`federationRuleId`, `organizationId`,
+  `serviceAccountId`, `workspaceId`) use their SDKs' workload identity federation. New core types
+  in `org.llm4s.llmconnect.auth` (`AuthConfig` and `TokenExchangeConfig`, like the new
+  `OpenAIWorkloadIdentity` and `AnthropicWorkloadIdentity`, are built with `apply` and `with*`
+  setters, with no public `copy`); `ProviderConfigSpec.authExtras` declares a provider's auth keys;
+  `NamedProviderConfig.auth`, `OpenAIConfig.workloadIdentity` and `AnthropicConfig.workloadIdentity`
+  are new fields, `None` by default in the companion `apply` (`OpenAIConfig` and `AnthropicConfig`
+  follow the growth-prone pattern, #1388) and set with `withWorkloadIdentity`, which takes the value or
+  an `Option`; `ApiKeySource` gained `WorkloadIdentity`, reported only for a provider
+  that accepts `auth`. A section with `auth` may not also set `apiKey` or an `Authorization`
+  header. Model listing is not supported for `openai` and `anthropic` sections that use `auth`, and
+  says so. `llm4s-provider-testkit` gains `FakeTokenExchangeServer` and `TestJwt`. (#1354)
+  **The rules hold on every construction path:** `AnthropicConfig.fromValues`, `OpenAIConfig.fromValues`
+  and `OpenAICompatibleConfig.fromValues` apply them, and the named-section path goes through those
+  factories rather than its own copy; a config built with `apply` (including the short `apply(apiKey, model)` Java and Kotlin use) and the `with*` setters that breaks them is refused by its client
+  (`AnthropicClient`, `OpenAIClient`, `OpenRouterClient`, `OpenAICompatibleClient`: `apply` returns a
+  `ConfigurationError`, the constructor throws `IllegalArgumentException`). With workload identity a config
+  may not also set `apiKey`; an `OpenAICompatibleConfig.tokenExchange` refuses an `Authorization` header in
+  any case and a non-https `tokenUrl`; an `AnthropicConfig.workloadIdentity` refuses a non-https
+  `baseUrl`; and an `OpenAIConfig.workloadIdentity` is refused unless the config belongs to `openai`, since
+  a Requesty or OpenRouter config would send the OpenAI token to that provider. An `OpenAICompatibleClient`
+  whose credential is `Dynamic` or `Exchange` refuses a dialect that sets `Authorization`, and a `baseUrl`
+  (or, for `Exchange`, a `tokenUrl`) that is not `https` or loopback `http`. The `openai-compatible` model
+  lister builds its config through the same path as chat (`OpenAICompatibleProvider.buildConfig`), so
+  `Llm4sConfig.listModels` refuses what chat refuses before it exchanges anything.
+  **No client falls back to an empty key:** `OpenRouterClient` refuses an `OpenAIConfig` with
+  `workloadIdentity` (from `apply` as a `ConfigurationError`, from the constructor as an
+  `IllegalArgumentException`) even when `OpenAIConfig.validate` accepts it, rather than drop the identity
+  and send `Authorization: Bearer `. A blank `apiKey` is refused wherever a key is the only credential:
+  `OpenAIConfig` and `AnthropicConfig` without workload identity (and so `OpenAIClient`, `AnthropicClient`
+  and `OpenRouterClient`), `DeepSeekClient`, `ZaiClient`, `MistralClient`, `CohereClient`, an
+  `OpenAICompatibleClient` built with a blank `Credential.Static`, `OpenAIEmbeddingProvider`,
+  `OpenAIImageClient`, `OpenAIVisionClient`, `OpenAITTSClient` and `OpenAISTTClient`. An
+  `OpenAICompatibleConfig` whose `apiKey` is blank is treated as having none (`Credential.Anonymous`), as
+  `fromValues` already did.
+  **Migration:** `OpenAICompatibleConfig` follows the growth-prone data-type pattern: its constructor
+  and `copy` are private; build it with the companion `apply` (defaults unchanged) and adjust it with
+  `withBaseUrl`, `withApiKey`, `withContextWindow`, `withReserveCompletion`, `withHeaders`, `withHeader`,
+  `withStreamUsage`, `withTimeouts` and `withTokenExchange` (the companion `apply` takes `timeouts` before
+  `tokenExchange`). Java and Kotlin, which see no Scala default arguments, use
+  `OpenAICompatibleConfig.apply(model, baseUrl)` and the setters, so a new field no longer breaks them.
+  `OpenAICompatibleClient.Settings.apiKey: Option[String]` became
+  `credential: OpenAICompatibleClient.Credential` (`Anonymous`, `Static(key)`, `Dynamic(provider)`,
+  `Exchange(config)`). An `Exchange` credential exchanges through the client's own HTTP client, which
+  `close()` releases.
+  **The token exchange:** `tokenUrl`, and an `openai-compatible` section's `baseUrl` when it uses
+  `auth`, must be `https`; with `auth`, OpenAI's and Anthropic's `baseUrl` must be `https` to the
+  vendor's own API host - `api.openai.com`, `us.`/`eu.`/`ae.api.openai.com`, or `api.anthropic.com`,
+  an exact, case-insensitive match with no userinfo - because the exchanged token is a vendor
+  credential; plain `http` is accepted only for a loopback host (`localhost`, `127.x.y.z` or
+  `[::1]`, judged on the URL's real host, so `http://localhost@evil.example/` is refused), because
+  the request carries the identity token. `expires_in` is optional: without it the token's lifetime
+  is the access token's `exp` claim when it is a JWT, and otherwise `TokenExchange.DefaultLifetime`
+  (5 minutes). One that is not a finite, non-negative number is an `AuthenticationError`, and a huge
+  one is clamped to `TokenExchange.MaxLifetime` (24 hours). A failed token fetch is shared for 5
+  seconds, so N callers during an outage wait for one attempt, not N in turn, and a caller
+  interrupted while it waits gets a `CancelledError` with its interrupt flag set. Only a 401
+  triggers the refresh-and-retry; a 403 (valid token, missing permission) does not. To tell them
+  apart `HttpErrorMapper` now sets `AuthenticationError.code` to the HTTP status (`"401"` or
+  `"403"`), for every provider. An `identityTokenFile` that is not a valid path is a
+  `ConfigurationError`; with the `openai` SDK, a missing or empty token file is an
+  `AuthenticationError`, as with the other providers. The token file must be a regular file (a
+  symbolic link to one is followed) of at most 64 KiB: a directory, FIFO, device or larger file is an
+  `AuthenticationError` naming the path, never quoting the content, and is never read unbounded.
+  The RFC 8693 request fields `subject_token`, `actor_token`, `assertion` and `client_assertion` are
+  sensitive keys for `Redaction`, in every shape it reads.
 - **`@Stable` and `@Experimental`: the tier of a public type, in the code** ([#1281](https://github.com/llm4s/llm4s/issues/1281),
   `org.llm4s.annotation` in `llm4s-core`): Java annotations with runtime retention, so an IDE, a tool or a
   Java caller can read them. Every top-level public type of `llm4s-core`, `llm4s-openai`,
@@ -351,6 +503,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of always sending the document type. `EmbeddingRequest` becomes a growth-prone type (private
   constructor and `copy`, `with*` setters, `apply` with defaults): construct it with `EmbeddingRequest(...)`
   and change it with `withInput`, `withModel` or `withPurpose`.
+- **`llm4s-bom`: one version for every llm4s artifact** ([#1462](https://github.com/llm4s/llm4s/issues/1462)):
+  `org.llm4s:llm4s-bom` (`modules/bom`) is a POM-only bill of materials whose `dependencyManagement` pins every
+  published `llm4s-*` artifact (`llm4s-core_3`, `llm4s-openai_3`, ...) to the release version, so a Maven or
+  Gradle build that uses several modules states the version once: import it (`<scope>import</scope>`) or use
+  `platform("org.llm4s:llm4s-bom:<version>")`, and declare the modules without versions. The BOM has no Scala
+  suffix and contains no code. It is generated from the same project list as `sbt listPublishedArtifacts`
+  (`project/Bom.scala`), never listed by hand, and `sbt bomCheck` fails when the generated POM disagrees with
+  what the build publishes, or when a module that publishes a jar is missing from it (a name outside `llm4s-*`);
+  `scripts/check-bom-consumers.sh` (CI) builds a Maven and a Gradle project against the published BOM; `listPublishedArtifacts` prints it as a `bom` line, and `scripts/verify-release.sh`
+  checks that its POM is on Maven Central with a `<dependencyManagement>`. It is aggregated by the root project,
+  so `sbt ci-release` publishes it. No frozen module's API changes. Install guide: "Align versions with the BOM".
 - **`llm4s-jina`: Jina AI embedding provider** (`modules/providers/jina`,
   [#1028](https://github.com/llm4s/llm4s/issues/1028), rebuilt from #1060 as an
   `EmbeddingProviderDescriptor`, so `llm4s-core` is untouched). `EMBEDDING_MODEL=jina/jina-embeddings-v3`
@@ -387,6 +550,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `"org.llm4s" %% "llm4s-cohere"`; nothing else changes. HTTP 429 is a `RateLimitError` carrying
   `Retry-After` when Cohere sends it in seconds; other failures are `EmbeddingError` with the status as
   its code.
+- **MCP tests against the official reference server**
+  ([#1006](https://github.com/llm4s/llm4s/issues/1006)): `MCPReferenceServerSpec`, in a new `@McpReference` tier of
+  `modules/it` (`sbt testMcpReference`), runs the MCP client, `MCPToolRegistry` and an `Agent` with a scripted LLM against
+  `@modelcontextprotocol/server-everything` (pinned to 2026.8.31, over Streamable HTTP at `MCP_SERVER_URL`), a
+  server llm4s did not write: handshake without SSE fallback, discovery of `echo` and `get-sum` with the server's own
+  JSON schemas, invocation, `structuredContent`, the server's validation and unknown-tool errors, accepted
+  notifications, and an agent turn that feeds the server's result back. A separate `mcp-reference-integration` CI
+  job, run on pushes to `main` and on manual `workflow_dispatch` but not on PRs (starting the server needs Docker Hub
+  and npm, whose outages should not fail unrelated PRs), starts the server in a `node:22-alpine` container pinned by
+  digest; the server's whole dependency tree is pinned by
+  `modules/it/mcp-reference-server/package-lock.json` and installed with `npm ci --ignore-scripts`. The
+  embedded-server round trips and the `@Local` agent suite came in #1041.
+- **MCP test: a server that does not answer within the timeout**
+  ([#1006](https://github.com/llm4s/llm4s/issues/1006)): `MCPEmbeddedServerTimeoutSpec` in `llm4s-mcp` runs a tool
+  on an in-process `MCPServer` that does not answer within `MCPServerConfig.timeout`: the call fails as a timed-out
+  tool (not cancelled, not unknown) and the client and registry stay usable. The tool blocks on a latch, so the test
+  uses no fixed sleep.
 - **Cloud speech smoke and integration tests** ([#1011](https://github.com/llm4s/llm4s/issues/1011)):
   `@Cloud` suites in `modules/it` (`org.llm4s.speech`: OpenAI TTS, OpenAI STT, ElevenLabs, Azure
   TTS/STT with a synthesise-then-transcribe round trip), run by `sbt testSmoke` and gated by
@@ -448,6 +628,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markers, a stream that ends without a terminal event or with `error`, `cancelled` or `time_limit`
   is a `Left(ServiceError)`, `baseUrl` and `iamUrl` must be `https` (except localhost), the API key
   is trimmed, and setting both `projectId` and `spaceId` is a configuration error.
+- **A MiMa dry run, and MiMa skips `@Experimental` types** ([#1281](https://github.com/llm4s/llm4s/issues/1281)):
+  `scripts/mima-dry-run.sh` shows, before 0.5.0 exists, that setting `mimaBaselineVersion` will work. In a scratch
+  clone of `HEAD` it publishes the build at a throwaway version to a temporary Maven repository (nothing reaches
+  `~/.ivy2`, `~/.m2` or Central), checks for each frozen module that `mimaPreviousArtifacts` names the published
+  artifact, that MiMa resolved `llm4s-<name>_3` and found no problems, then runs a negative control (a baseline
+  with an extra `@Stable` and an extra `@Experimental` class that the code lacks: MiMa must fail on the first and
+  ignore the second). It is a manual release-readiness script (about three minutes), tested offline by
+  `scripts/test-mima-dry-run.sh`. `mimaFrozen` now adds `mimaExcludeAnnotations += "org.llm4s.annotation.Experimental"`,
+  so an `@Experimental` type inside a frozen module is outside the freeze without a hand-written
+  `ProblemFilters.exclude` (a `@Stable` type is still checked; no effect while the baseline is `None`). See
+  [Release readiness](docs/reference/release.md#release-readiness-a-mima-dry-run).
 - **Run API and event dispatch for graph runs** (Experimental, `org.llm4s.agent.graph`,
   [#1277](https://github.com/llm4s/llm4s/issues/1277)): `GraphRuntime.start`/`recover`/`resume`
   admit a run on the caller's thread and return `Result[RunHandle[O]]` once the thread is claimed;
@@ -726,6 +917,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OpenAIConfigKeys.AZURE_API_KEY` is now `AZURE_OPENAI_API_KEY`; the chat and embeddings
   missing-key messages changed. See the
   [migration note](docs/reference/migration.md#vendor-credentials-a-shared-api-key-per-provider).
+- **Upgrading from 0.4.1 to 0.5.0** ([#1281](https://github.com/llm4s/llm4s/issues/1281)): one page,
+  [docs/migrations/0-4-1-to-0-5-0.md](docs/migrations/0-4-1-to-0-5-0.md), for everything a project has to change,
+  grouped by what it uses: the dependencies to add (which provider module carries which provider id), the
+  configuration changes, the agent runtime rewrite, tracing, RAG, memory and the other carved modules, and the
+  error and type changes, the built-in tool and workspace runner refusals (WebSocket commands without a shell,
+  `WORKSPACE_EXTRA_COMMANDS`, the git sandbox, the new error codes, `redirectSafeHeaders`), whole-word memory search,
+  the redaction and Java API changes. `UpgradeGuideSpec` in `llm4s-samples` checks its provider table, its core-only
+  error, explicit registration, the agent snippet, tracing discovery, the `redirectSafeHeaders` snippet and
+  whole-word memory search against the code.
 - **`openai-compatible` takes its context window from the model registry** ([#1217](https://github.com/llm4s/llm4s/issues/1217)):
   without a `contextWindow`, the generic provider used 8192 and never asked the registry, though the registry
   holds the window of most of the popular compatible hosts' models (`groq/`, `together_ai/`, `fireworks_ai/`,
@@ -1913,6 +2113,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `org.llm4s.toolapi.ToolHints` in `llm4s-core` (`@Experimental`), because `llm4s-mcp` cannot depend on the agent runtime.
 
 ### Removed
+- **`WorkspaceConfigSupport.loadSandboxConfig`** ([#1730](https://github.com/llm4s/llm4s/issues/1730)): it read a
+  sandbox profile from the client's `llm4s.workspace.sandbox.profile`, which nothing passed to the runner and nothing
+  called, so it suggested a client setting that enforced nothing. What the runner enforces is decided only by its own
+  `WORKSPACE_SANDBOX_PROFILE` and `WORKSPACE_EXTRA_COMMANDS`. **Migration:** set `WORKSPACE_SANDBOX_PROFILE` on the
+  runner's container (`ContainerisedWorkspace` starts it), and use `WorkspaceSandboxConfig.fromProfileName` and
+  `WorkspaceSandboxConfig.validate` to turn a profile name into a config in your own code.
 - **Orchestration: `PlanRunner`, `DAG`, `TypedAgent`, `Policies`, `OrchestrationError` and `CancellationToken`**
   ([#1330](https://github.com/llm4s/llm4s/issues/1330)): `org.llm4s.agent.orchestration` is deleted, with
   `org.llm4s.types.PlanId` and `org.llm4s.types.AgentId` from `llm4s-core` (`org.llm4s.agent.AgentId` is the agent's
@@ -2062,6 +2268,389 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - ShellTool and the workspace runner: on double-byte Windows hosts, a quoted argument holding a character
+  whose second byte is 0x5C is refused** ([#1807](https://github.com/llm4s/llm4s/issues/1807)): code pages 932, 936
+  and 950 encode some characters with a second byte of 0x5C, the byte of `\` (50, 126 and 126 of the characters they
+  hold, such as `表` 0x95 0x5C and `十` on 932, `功` 0xA5 0x5C on 950). The JDK puts an argument holding a space in
+  quotes, so `a 表` reached the command line as `"a 表"`, whose bytes end `5C 22`, and a program that splits its ANSI
+  command line byte by byte, without knowing the code page's lead bytes, read `\"` as a literal quote and split the
+  arguments after it differently - an operand the checks saw could become an option. On a host whose ANSI code page
+  is 932, 936 or 950, `ShellTool` (`modules/agent-tools`) and the workspace runner's `CommandPolicy` now refuse an
+  argument holding such a character when the JDK may quote it - it is empty or holds a space or whitespace character,
+  `"`, `<`, `>`, `&`, `|` or `^`, the characters for which JDK 21's Windows `ProcessImpl` adds quotes in any of its
+  modes. The runner refuses with `ARGUMENT_NOT_ALLOWED`. The characters are found through the JDK's encoder for the
+  host's code page, not a table. Migration: on such a host, a file name like `表.txt` still works, but `a 表.txt` is
+  refused; rename the file. Other hosts and POSIX are unchanged.
+- **Security - ShellTool and the workspace runner: on Windows, arguments whose characters best-fit to separators or
+  quotes are refused** ([#1766](https://github.com/llm4s/llm4s/issues/1766)): a Windows program that reads its command
+  line in an ANSI code page (`main` rather than `wmain`) gets each argument converted from UTF-16 with "best fit", so a
+  fullwidth solidus or reverse solidus (U+FF0F, U+FF3C), a division slash (U+2215), a yen or won sign (U+00A5, U+20A9 on
+  the Japanese and Korean code pages) or a fullwidth quote (U+FF02) reached it as `/`, `\` or `"`, and `-ｏ` as `-o`,
+  while the separator, path and option checks of `ShellTool` (`modules/agent-tools`) and the workspace runner's
+  `CommandPolicy` read one plain name (the "WorstFit" research, Orange Tsai, 2025). On Windows both now refuse an
+  argument, the working directory (below the workspace root, for the runner) and an environment value holding a
+  character that one of the code pages 874, 932, 936, 949, 950 and 1250 to 1258 best-fits to an ASCII character other
+  than a letter or digit, any best-fitted character in an argument starting with `-` or `/`, and a character the host's
+  own ANSI code page cannot hold (a best fit or `?` to the program). The runner refuses with `ARGUMENT_NOT_ALLOWED`
+  (`ENVIRONMENT_NOT_ALLOWED` for an environment value); `ShellTool` returns a refusal naming the character and what it
+  may become, with or without a path policy. Accented letters such as `é` stay allowed in an operand when the host's
+  code page holds them; POSIX hosts are unchanged. The table (539 characters) is generated from Microsoft's best-fit
+  files by `scripts/generate-windows-best-fit.py`, into one `WindowsBestFit` per module. Migration: on Windows,
+  every `ShellTool` command is refused when the operator-configured `workingDirectory` or an environment value holds a
+  character from the table or one the host's ANSI code page cannot hold, and file names the host's ANSI code page
+  cannot hold are refused as arguments for every program, git included, by both `ShellTool` and the runner.
+- **Security - workspace runner: interpreters and launchers cannot be added as extra commands, a command's child
+  `PATH` holds only trusted entries, and cmd.exe runs with `/d`** ([#1761](https://github.com/llm4s/llm4s/issues/1761),
+  [#1792](https://github.com/llm4s/llm4s/issues/1792)): `WORKSPACE_EXTRA_COMMANDS` refused shells and some launchers,
+  but accepted interpreters that run arbitrary code with no forbidden character (`python3 -c ...`, `perl -e`, `node`,
+  `awk`, `java`, `make`, ...), launchers (`setsid`, `stdbuf`, `flock`, `script`, `time`, `systemd-run`, ...),
+  debuggers and remote or container tools (`gdb`, `strace`, `ssh`, `docker`), privilege and namespace tools
+  (`runuser`, `doas`, `pkexec`, `nsenter`, `unshare`), Windows script hosts (`wsl`, `cscript`, `mshta`, `rundll32`),
+  the cmd.exe built-ins `call` and `start`, and `.bat` / `.cmd` names, which Windows runs through cmd.exe (the
+  BatBadBut class). `WorkspaceSandboxConfig.NeverAllowedCommands` now names them, matched ignoring case, a `.exe` /
+  `.com` extension and a trailing version (`Python3.12.EXE`), and a batch-file name is refused; `sbt` is still
+  accepted. With the `locked` profile, which runs no command, any extra name now stops the runner with a message
+  instead of being logged as added. The docs now say plainly that the denylist is a speed bump, not a boundary, and
+  that an added program means trusted code execution. A started program that looks another one up by name (a
+  `#!/usr/bin/env x` script, `sbt` starting `java`) searched the runner's `PATH` from the workspace, so an empty,
+  relative or in-workspace entry let it run a file the agent wrote: the child's `PATH` now keeps only the entries the
+  runner itself searches (`ProgramResolver.childPath`), and is removed when none is left. On Windows every command
+  runs with `NoDefaultCurrentDirectoryInExePath=1`, not only cmd.exe built-ins, and built-ins run as `cmd /d /c`, so
+  the registry's AutoRun command no longer runs first. `docs/workspace-agent-protocol.md` lists
+  `EXECUTABLE_NOT_ALLOWED`, `EXECUTABLE_NOT_FOUND`, `GIT_CONFIG_NOT_ALLOWED` and `PATH_NOT_ALLOWED`. **Migration:** a
+  `WORKSPACE_EXTRA_COMMANDS` (or `extraAllowedCommands`) naming one of the new names, or any name with
+  `WORKSPACE_SANDBOX_PROFILE=locked`, now stops the runner; a host that really needs such a program in the agent's
+  hands must accept that it runs any code, and run it outside the runner's allowlist.
+- **Security - workspace runner: a planted git config or attribute cannot make an allowed git command run a
+  program** ([#1721](https://github.com/llm4s/llm4s/issues/1721)): `git` reads the repository's `.git/config`,
+  attributes and hooks, so an agent that could write files - or a repository cloned into the workspace already
+  hostile - made a later `git status`, `git diff`, `git log -p`, `git show`, `git blame` or `git ls-files -m` run a
+  program through `core.fsmonitor`, a `post-index-change` hook (`.git/hooks` or `core.hooksPath`), `diff.external`,
+  a diff driver's `command` or `textconv`, a `clean` / `smudge` / `process` filter named in `.gitattributes` or
+  `.git/info/attributes`, a merge driver (`merge.<driver>.driver`, by a `merge` attribute or `merge.default`) that
+  `git log` / `git show` ran to re-merge a merge commit for `--remerge-diff`, `--diff-merges=remerge`, or `-m` with
+  `log.diffMerges=remerge`, `gpg.program` under `log.showSignature`, a partial clone's lazy fetch through its remote
+  (`ext::`, `core.sshCommand`), or a submodule's own configuration; `$HOME/.gitconfig` and
+  `$XDG_CONFIG_HOME/git/config` applied too. Every `git` the runner starts now has: no system or global
+  configuration or attributes (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL` the null device, `GIT_ATTR_NOSYSTEM`,
+  `HOME` and `XDG_CONFIG_HOME` an empty directory the runner owns), no transport and no lazy fetch
+  (`GIT_ALLOW_PROTOCOL` naming none, `GIT_NO_LAZY_FETCH`), no optional index write, no pager; `-c` overrides
+  `core.fsmonitor=false`, `core.hooksPath` the empty directory, `diff.external` empty, `log.showSignature=false`,
+  `gpg.*.program` a directory, `diff.ignoreSubmodules=all`, `safe.bareRepository=explicit`,
+  `log.diffMerges=separate`, `merge.default` empty; `--no-ext-diff`,
+  `--no-textconv` and `--ignore-submodules=all` after `diff` / `log` / `show` (and the two that apply to `status`,
+  `blame`, `grep`); and, from a `git config --list` of the repository taken just before the command, every filter,
+  diff and merge driver it defines blanked. The listing is read as bytes, and a configuration with an `include.path` /
+  `includeIf`, a `hook.*` key, or a `filter` / `diff` / `merge` driver name holding any byte but printable ASCII
+  (0x21-0x7E, not `=` or `"`) is refused (`GIT_CONFIG_NOT_ALLOWED`): a name that is not UTF-8 (`[filter "\xE9vil"]`)
+  would otherwise be blanked as U+FFFD while git ran the real driver, and a non-ASCII one could be re-encoded in the
+  JVM's `sun.jnu.encoding`. `--ignore-submodules`, `--remerge-diff` and `--diff-merges` from the agent are refused
+  (`ARGUMENT_NOT_ALLOWED`; `-m`, `-c` and `--cc` stay), as is
+  `git status -v` / `-vv` / `--verbose`, whose staged diff runs textconv drivers and which takes no `--no-textconv`. Writes into `.git` are refused too, in any spelling (`.GIT`, `.git.`, `GIT~1`) and
+  through a link: `writeFile` / `modifyFile` with `PATH_NOT_ALLOWED`, and any program other than the read-only ones
+  (`cp`, `mv`, `rm`, `mkdir`, `touch`, `chmod`, `copy`, `move`, an added program) naming it with
+  `ARGUMENT_NOT_ALLOWED`. The system and global git configuration of whoever runs the runner no longer apply,
+  so a `safe.directory` set there does not either. `GitConfigRoutesSpec` plants each route, shows git run directly
+  runs it, and shows no allowed command run through the runner does.
+- **Security - redaction: the remaining Python-repr shapes no longer leave a credential readable**
+  ([#1706](https://github.com/llm4s/llm4s/issues/1706)): `Redaction` (used by the provider exchange logger,
+  `LLMError` messages and error mapping) read a Python literal as JSON, so a value under a sensitive key stayed
+  readable in eight shapes: (1) a `pytest` assertion diff, whose next line starts with `E`; (2) a notebook's
+  `text/plain` line array in an `.ipynb` file, where each line is its own JSON string; (3) a dict cut off right
+  after a comma, `{'db_password': "x'y",`; (4) `str(dict)` inside a `repr`'d dict,
+  `{'body': '{\'password\': "it\'s..."}'}`; (5) Python's `\'` inside a JSON string,
+  `{"m": "{'password': 'QQ\\'SECRET\"x'}"}`; (6) a keyword argument holding a list, `Settings(token=['a:b', '...'])`;
+  (7) a `\"` in an earlier single-quoted leaf, which switched off the reading of `\"`-quoted leaves after it; and (8)
+  a `'key': "..."` value followed by a key over 64 characters, a key that is not a string (`1:`, `None:`) or
+  `**extra`. A further reading of the input as it was given now reads the value of a sensitive dict key or keyword
+  argument as Python writes it - a string ending only at its own quote written the way the opening one is, at any
+  depth of escaping, a container over `pprint`'s and `pytest`'s line breaks and from one line of a notebook's array to
+  the next - and replaces each of its strings, numbers and words. It never replaces a `"` that delimits a JSON string,
+  at any depth, and adds only what no other edit covers, so every replacement made before is made exactly as before
+  and JSON that parsed still parses. The reading takes time linear in the input. On a realistic corpus of Python
+  logging, Django and Flask debug output, `pytest` diffs, notebooks and tool-call arguments, the secrets left
+  readable go from 2,728 of 36,280 to none.
+- **Security - redaction: a credential in escaped quotes that holds `&word=` is redacted whole**
+  ([#1707](https://github.com/llm4s/llm4s/issues/1707)):
+  `Redaction` (used by the provider exchange logger, `LLMError` messages and error mapping) read the value of
+  `password=\\'p&ss=QZXJ\\'` - a logfmt or shell line inside a JSON string, standing for `password=\'p&ss=QZXJ\'` -
+  as a query or `key=value` value that ends at the `&`, and a quote behind an even run of backslashes as no quote,
+  so `ss=QZXJ` stayed readable; the same in prose (`login password=\\'p&user=x\\'`), one string deeper, and with
+  `\\"` or `\\\'`. A further reading of the input as it was given now replaces the content of a sensitive key's
+  value in quotes written behind backslashes, or as the JSON escape of a quote, up to the same quote written the same
+  way; it adds only the parts that no other edit covers, so every replacement made before is made exactly as before
+  (`password=[REDACTED]'[REDACTED]&[REDACTED]\\'`). A value that does not close before a line break, a `"` that
+  ends its string, or the end of the input is left as the other passes read it. The reading takes time linear in the
+  input. An empty query value at the end of a JSON string (`{"q":"a=1&token=","n":"x"}`) is still redacted as before,
+  `,` included ([#1800](https://github.com/llm4s/llm4s/issues/1800)).
+- **Security - redaction: four more shapes no longer leave a credential readable**
+  ([#1695](https://github.com/llm4s/llm4s/issues/1695)): `Redaction` (used by the provider exchange logger,
+  `LLMError` messages and error mapping) left these readable. (1) A `key=value` pair in a log that Gson or another
+  serialiser wrote into a JSON string, where the key follows the escape of a line break or a tab: `\n` ends in a
+  letter, so the key read as `ntoken` and `{"log":"user\u003dbob\ntoken\u003dabc"}` kept `abc`; also `\u000a`
+  and the same log one string deeper. The issue's own Gson repros (`password\u003dhunter2\u0026...`) were already
+  redacted by #1676's reading of the escaped `=`. (2) A literal `&` in an unquoted value: `password=p&ssW0rd` kept
+  `ssW0rd`; the rest of the value after an `&` that no other pair follows is now replaced too
+  (`password=[REDACTED]&[REDACTED]`). (3) A query value written right before JSON ran over the key of the next
+  field: `?a=1&token=abc,{\"api_key\":\"S\"}` kept `S`. (4) `Bearer password=x` replaced `Bearer password` and
+  kept `x`. Each is closed by a reading of the input as it was given whose replacements are added only where no
+  other pass replaced anything, touching none of them, so every replacement made before is made exactly as before
+  and only more is replaced: the passes again with a query value that ends at a `,` before `{`, `[` or a quote and
+  with a scheme word that is no longer taken where it is the key of a sensitive pair; the `key=value` passes with a
+  key right after such an escape; and the tail of a value after a literal `&`. Each reading takes time linear in
+  the input, and the first runs only where the input holds such a `,` or a scheme word.
+- **Security - redaction: a `"password": "` that a single-quoted string mentions no longer hides the next field's
+  key** ([#1697](https://github.com/llm4s/llm4s/issues/1697)): `Redaction` (used by the provider exchange logger,
+  `LLMError` messages and error mapping) read a JSON-style field that a Python dict's string merely mentions as a
+  real one and ran its value to the next `"`, over the key of the next field, so no later pass found that field and
+  its credential stayed readable: `{'note': 'see "password": " here', 'apiKey': ["7YJ1VSFPX'}", -9935758]}` kept
+  `7YJ1VSFPX` and `-9935758`. The passes that read a field under a single-quoted key (a string in either quote, a
+  number, a list or dict and its leaves) now also read the input as it was given, and what they replace there is
+  added wherever the other passes replaced nothing. Every value is still read as before, so everything redacted
+  before is redacted exactly as before, and only more is replaced: the example becomes
+  `{'note': 'see "password": "[REDACTED]"[REDACTED]", '[REDACTED]']}`. The same holds when the value that runs over
+  the key is `password="`, `"Authorization": "` or `\"password\": \"`, and for such a dict inside a JSON string.
+  The extra reading is made only where the input holds a `'`, and takes time linear in the input.
+- **Security - workspace runner: allowlisted programs start by a trusted absolute path, never from the working
+  directory** ([#1790](https://github.com/llm4s/llm4s/issues/1790)): the runner handed `ProcessBuilder` the bare
+  program name. On Windows `CreateProcess` then searched the directory of the runner's `java.exe` and the runner's
+  current directory before the system directory, appending `.exe`, so a `git.exe` or `cat.exe` an agent wrote there
+  ran in place of the allowlisted program; on POSIX the JDK read an empty or relative `PATH` entry (`.`, `bin`) from
+  the command's working directory, inside the workspace. The runner now looks the program up itself and starts the
+  absolute path: on Windows in the system directory, the Windows directory, then `PATH` (`<name>.exe`, then
+  `<name>.com`), on POSIX in `PATH`, never in the runner's current directory, never `java`'s directory unless it is on
+  `PATH`, never through an empty or relative entry, and never inside the workspace (as written or through a link). A
+  program found only there is refused with `EXECUTABLE_NOT_ALLOWED`, one found nowhere with the new
+  `EXECUTABLE_NOT_FOUND` (it used to fail to start, `EXECUTION_FAILED`). cmd.exe built-ins run through the system
+  directory's `cmd.exe` by its absolute path, named without an extension, with `NoDefaultCurrentDirectoryInExePath`
+  set. This replaces #1738's check for a `sort.exe` / `findstr.exe` in those two directories. On Windows the
+  allowlist and a command's first word are matched ignoring case and a `.exe` / `.com` extension, so an entry
+  `sort.exe` or a command `git.exe` gets that program's rules, which it escaped before
+  ([#1761](https://github.com/llm4s/llm4s/issues/1761)), and `WORKSPACE_EXTRA_COMMANDS` refuses `bash.exe` or
+  `CMD.COM` as it refuses `bash` and `cmd`. See
+  [Program resolution](docs/reference/workspace-sandbox.md#program-resolution).
+- **Security - workspace runner: on Windows, `sort` and `findstr` accept only their native switches**
+  ([#1738](https://github.com/llm4s/llm4s/issues/1738)): the command policy read every argument starting with `/`
+  to `sort` or `findstr` as a switch, path-checked only the text after the slash, and exempted both programs from the
+  refusal of a leading `/`. So `sort /secret.txt` passed, and a GNU / MSYS2 `sort` or `findstr` - which reads
+  `/c/Users/...` as `C:\Users\...` and `/x` from its own root - could read outside the workspace. Now, on Windows, an
+  argument starting with `/` must be, ignoring case, exactly a switch of the native tool, or it is refused
+  (`ARGUMENT_NOT_ALLOWED`): for `sort.exe` `/R[EVERSE]`, `/+n`, `/L[OCALE]`, `/M[EMORY]`, `/REC[ORD_MAXIMUM]`,
+  `/C[ASE_SENSITIVE]`, `/UNIQUE` (`/O` and `/T` stay refused); for `findstr.exe` the flags `/B /E /L /R /S /I /X /V
+  /N /M /O /P` (combinable), `/OFF[LINE]`, `/C:`, `/G:`, `/D:` and `/A:` (`/F` and a `/D:` list stay refused), the
+  values of `/G:` and `/D:` held to the workspace as before. A path candidate of the form `/x/...` is also judged as
+  drive `x:`'s path, as MSYS2 reads it. And on a Windows host the runner refuses `sort` and `findstr`
+  (`EXECUTABLE_NOT_ALLOWED`) when a `sort.exe` / `findstr.exe` sits in the runner's Java or current directory, the two
+  places `CreateProcess` searches before the system directory, so the native builds are the ones that run.
+- **Security - workspace runner: an `mv` or `cp` of several sources cannot reach outside through a name an earlier
+  source's operation makes** ([#1776](https://github.com/llm4s/llm4s/issues/1776)): the command policy checked every
+  path against the file system as it was before the command ran, but `mv` and `cp` handle their sources one at a time.
+  With `sub/l` -> `../outside` (inside the workspace while in `sub`), `mv sub/l l/secret.txt .` moved the link to
+  `./l`, where it points out, and then moved `outside/secret.txt` into the workspace; GNU `cp -P` / `-d` / `-R` / `-a`
+  could copy such a link and read a later source through the copy. Now, for an `mv` or `cp` of two sources or more,
+  each source is taken to change its name in the destination directory (and any name starting with it, for
+  `--backup`) and, for `mv`, its own entry; every other path argument is walked, links followed, and the command is
+  refused (`ARGUMENT_NOT_ALLOWED`) when it looks up one of those entries, comparing names case- and
+  normalisation-insensitively and directories by identity. An `mv` that moves a source holding the working directory
+  is refused too. The existing refusal of a link-preserving `cp` of two sources with the same name now compares the
+  names as the destination's file system does, ignoring letter case and Unicode normalisation (and, on Windows,
+  taking a name with `~` for any): on macOS `cp -P a/b/x c/X d` copied the link `x` into `d` and then wrote `c/X`
+  through it. The comparison repeats NFKD decomposition and case mapping until the name stops changing, since one pass
+  left names APFS takes for one apart (`ẞ` and `ß`, `ss` or `SS`; `ΐ` and its decomposed capital): `cp -P a/b/ẞ c/ß d`
+  passed and wrote `c/ß` through the link on macOS. It decomposes, as APFS does before it case-folds, rather than
+  composing with NFKC, which kept a Greek iota subscript composed and so, after a further mark, apart from the same
+  name spelt with `ι` (`ᾳ̃` and `α̃ι`, `ᾼ͂` and `ᾷ`): `cp -P a/b/zᾼ͂ c/zᾷ d` wrote `c/zᾷ` through the link on macOS. Run one command per source instead. `rm`, `mkdir`, `touch` and `chmod`
+  create no link and are unchanged. See [Several sources in one command](docs/reference/workspace-sandbox.md#several-sources-in-one-command).
+- **Workspace runner: an agent can remove or rename a symbolic link that points out of the workspace**
+  ([#1730](https://github.com/llm4s/llm4s/issues/1730)): the command policy resolved every argument through its
+  links, so `rm outlink` and `mv outlink x` were refused (`PATH_ESCAPE_ATTEMPT`) although removing or renaming a link
+  never touches what it points to, and an agent could not clean such a link up. On POSIX, an operand of `rm` or
+  `unlink`, or a source of `mv`, whose last component is itself a symbolic link is now judged by the directory holding
+  it (`lstat` semantics), over both the direct `executeCommand` path and the WebSocket executor, when: it has no
+  trailing `/` (`mv outlink/ x` moves the directory the link points to, `rm -r outlink/` empties it); the directory
+  holding it is inside the workspace under both readings of the path rule and they name the same directory; `rm` is
+  not recursive; for `mv`, it is not the destination, which still follows links (`mv a.txt outlink`,
+  `mv -t outlink a.txt` stay refused); and GNU's and macOS / FreeBSD's option tables both parse the arguments exactly
+  and agree on the operands, so a GNU-only form (`rm --force outlink`, `mv -T`, `mv -t dir outlink`) keeps the link
+  refused. A dangling link and the first link of a chain can be removed too. A link moved by an `mv` of several
+  sources cannot be reached through by a later source of the same command (`mv evil d/evil/secret.txt d` is refused,
+  see the #1776 entry above). Windows is unchanged: there a link or junction keeps the path rule. `cp` is unchanged. See
+  [Removing a link](docs/reference/workspace-sandbox.md#removing-a-link). The same issue's follow-ups to #1720: the
+  inline comments in `WorkspaceAgentInterfaceImpl.prepareCommand` now number the working-directory check layer 6 and
+  `CommandPolicy` layers 7-9, as its Scaladoc does; and `WorkspaceConfigSupport.loadSandboxConfig`, which nothing
+  called, is removed (see Removed).
+- **MCP: Streamable HTTP notifications carry the `Accept` header the transport requires**
+  ([#1006](https://github.com/llm4s/llm4s/issues/1006)): `StreamableHTTPTransportImpl.sendNotification` posted
+  without `Accept: application/json, text/event-stream`, which the specification requires on every POST to the MCP
+  endpoint, so servers built on the MCP SDKs refused every notification, `notifications/initialized` included, with
+  `406 Not Acceptable`; `initialize()` logged that as a warning and carried on. Found by running the client against
+  the MCP reference server.
+- **Security - redaction: a `key=value` whose value is in backslash-escaped quotes is redacted**
+  ([#1684](https://github.com/llm4s/llm4s/issues/1684)): `Redaction` (used by the provider exchange logger, `LLMError`
+  messages and error mapping) stopped the value of a `key=value` pair at an escaped quote, so a logfmt line inside a
+  JSON string, `{"message": "login user=bob password=\"hunter2\" ok"}`, became
+  `password=[REDACTED]\"hunter2\" ok` and the password stayed readable. A sensitive key's value that opens with a quote
+  escaped by backslashes - `\"` or `\'`, at any depth of nesting (`\\\"` in JSON inside JSON) - is now read as a quoted
+  value, as `password="..."` is: it runs to the same quote escaped as deep, and its content is replaced while the
+  escaped quotes around it are kept, so the output is `password=\"[REDACTED]\" ok` and the JSON still parses. A
+  backslash or a quote escaped inside the value (`\"ab\\\\\"`, the value `ab\`; `\"ab\\\"cd\"`, the value `ab"cd`) is
+  the value's. A value whose escaped quote is never closed runs to the quote that ends the enclosing string (the same
+  quote, escaped less deep or bare), to the end of the line or to the end of the input; the escape of that quote is
+  kept. The same shape in plain text (`token=\"abc def\"`, item 2 of
+  [#1765](https://github.com/llm4s/llm4s/issues/1765)) is redacted too. Values under keys that are not sensitive, an
+  empty value (`password=\"\"`) and a value after an even run of backslashes, which escapes no quote, read as before.
+- **Security - redaction: `Proxy-Authorization`, `Cookie`, `Set-Cookie` and `X-Amz-Security-Token` are treated as
+  sensitive** ([#1686](https://github.com/llm4s/llm4s/issues/1686)): `Redaction` (used by the provider exchange
+  logger, `LLMError` messages and error mapping) matched `authorization` as a whole key only, so a JSON field or header
+  map `{"Proxy-Authorization": "Negotiate ..."}`, its escaped form inside a string, `proxy_authorization=...` and a
+  `Digest`, `Negotiate` or raw proxy credential there were written in the clear; cookies were not covered in any shape,
+  so a session id in a `Cookie` or `Set-Cookie` header line, JSON field, cookie list or `key=value` pair leaked. They
+  are now sensitive keys in every shape the redactor reads (a header line, also after a prefix, a JSON or escaped-JSON
+  field, a single-quoted dict, a container, `key=value`, a query parameter), and a cookie header's whole value is
+  replaced - every name and value of it, from after `Cookie:` or `Set-Cookie:` and the whitespace after it (escaped
+  `\n`, `\r` and `\t` included) to the end of its line. Where the header sits inside a string that opened on the same
+  line - a JSON string, a header in a JSON array, a log line inside JSON, a Python repr - the value ends earlier: at
+  the escape of a line break (`\r`, `\n`, `\u000a`, `\u000d`; `\\r\\n` before the next header in JSON inside JSON)
+  or, in a double-quoted string, at the unescaped `"` that ends the string, so the headers and fields after it are
+  kept and the JSON still parses. An escaped quote (`sid=\"abc\"`) is part of the value. Ending at the quote is a
+  heuristic for well-formed JSON strings: where the first unescaped `"` in the value is not followed by what follows
+  the end of a JSON string, the line is malformed (a stray quote earlier on it, quoted cookie values in a log line)
+  and the value runs to the end of the line, its quotes with it (`msg="Cookie: theme="dark" sid=abc"` becomes
+  `msg="Cookie: [REDACTED]`). Outside a string, quotes, apostrophes and backslashes are part of the value, so a raw
+  `Cookie: sid="abc"; x=y` is replaced to the end of the line. The cookie pass runs after every other pass, so it
+  only adds to what they redact: the field, pair and dict passes read the text exactly as they would were cookie
+  headers not read (the header-line pass leaves `Cookie:` and `Set-Cookie:` lines to it), and a value that takes a
+  quote of a malformed line can no longer change how a later pass pairs quotes and leave a `password="..."` or
+  `{'password': "..."}` field on that or a later line readable. `Authorization` and
+  `Proxy-Authorization` header values run to the end of the line in every context, as before: a Digest credential
+  holds quoted strings and commas, so a quote is no sure end of it. `X-Amz-Security-Token` (suffix `securitytoken`)
+  joins `X-Api-Key`, `Api-Key`, `X-Goog-Api-Key` and `X-Auth-Token`, already covered. `cookie` is a whole word, not a
+  substring: `cookie_policy`, `cookie_consent` and `max_cookie_age` are left alone. `SensitiveKeyWords` and
+  `SensitiveKeySuffixes` in `Redaction` are core's one list of sensitive key names for fields, header lines and
+  `key=value` pairs; URL query parameters are also matched, by substring, against `SensitiveQueryParams`.
+- **Security - `llm4s-agent-tools` / `llm4s-core`: the HTTP tool forwards only safe headers across origins and
+  refuses the remaining special-purpose address ranges** ([#1734](https://github.com/llm4s/llm4s/issues/1734)):
+  on a redirect that left the original origin, `HTTPTool` stripped only `Authorization`, `Cookie` and
+  `Proxy-Authorization`, so `X-Api-Key`, `Api-Key`, `X-Auth-Token`, `X-Goog-Api-Key` and any other credential header a
+  model put in a call reached the other origin. From the first hop that leaves the origin (scheme, host and port, so a
+  downgrade from `https` to `http` counts) and on every later hop, only the caller-set headers on the new
+  `HttpConfig.redirectSafeHeaders` are sent (default `Accept`, `Accept-Language`, `Accept-Encoding`, `User-Agent`,
+  and `Content-Type` with a re-sent body), and a credential header - one of those three, a name core's `Redaction`
+  treats as sensitive, or one ending in `token` or `key` - never is, even if listed. Same-origin hops keep every
+  header, except that a hop whose body a `301` or `302` dropped, on any origin, sends no `Content-Type`, neither a
+  caller-set one nor the tool's `content_type` parameter.
+  **Migration:** a custom header that must follow a cross-origin redirect now has to be listed in
+  `redirectSafeHeaders`. `NetworkSecurity.isBlockedIP` now also refuses `240.0.0.0/4` (with `255.255.255.255`),
+  `192.0.0.0/24` and `192.88.99.0/24`, in every IPv6 form that carries them; every IPv6 address outside global
+  unicast `2000::/3`, which covers the SIIT form `::ffff:0:a.b.c.d` (`::ffff:0:7f00:1` passed), the dummy prefix
+  `100:0:0:1::/64` and SRv6 `5f00::/16`; and the non-global part of `2001::/23` (deprecated ORCHID and unassigned
+  space), keeping its globally reachable entries, as audited against the IANA IPv4 and IPv6 special-purpose
+  registries. `HttpConfig`, `HTTPTool` and `NetworkSecurity.isBlockedHostname` compare names and methods in
+  `Locale.ROOT`, so under a Turkish default locale `INTERNAL.example` no longer slips past a `blockedDomains` entry
+  `internal.example`. The DNS lookup's uninterruptibility (a worker may outlive the deadline by the resolver's
+  timeout) is documented in `NetworkSecurity` and the built-in tools guide.
+- **Security - workspace runner: an option's value is consumed once, so every file `sort` reads is path-checked**
+  ([#1763](https://github.com/llm4s/llm4s/issues/1763)): the command policy did not check the argument after a bare
+  `sort -t` / `--field-separator`, taking it for the separator, even when an earlier option had already taken that
+  `-t` as its own value. Then the next argument is a file sort reads, and it was never held to the workspace:
+  `sort -T -t /etc/passwd` and `sort --random-source -t /etc/passwd` printed the file, over both the direct
+  `executeCommand` path and the WebSocket executor. On POSIX, `sort`'s arguments are now parsed as `getopt` parses
+  them, with GNU and BSD sort's option tables (`-k`, `-o`, `-S`, `-t`, `-T`, GNU's `-y`, and the long options that
+  take a value, under any unambiguous abbreviation, attached, after `=` or as the next argument, clustered, up to the
+  `--` that ends the options), and every operand and option value is checked; the separator is left out only when it
+  really is `-t`'s value under every parse. It is checked too when an option is unknown or ambiguous, when an argument
+  starts with `+` (BSD sort's obsolete `+POS1 -POS2`, which it rewrites before parsing, made `sort -T +0 -1t file`
+  read `file`), and after the first operand (GNU sort with `POSIXLY_CORRECT` reads every later argument as a file), so
+  `sort a.txt -t /` is now refused; write `sort -t / a.txt`. The same audit found and fixed two more cases: `cp`'s
+  destination checks missed a `-R` after a `--` that `-S` took as its suffix (`cp -S -- -R src dst`), and GNU's
+  `--path` spelling of `--parents`; and a short option such as `-f` was checked only by its tails, not as the whole
+  name a program opens when it reads it as a file (`cat a.txt -f` on BSD, `cp -t -d`, `sort -T -d`). On Windows the
+  argument after `--field-separator` is now checked; the other `sort.exe` rules are unchanged. `uniq`, `git branch`
+  and the shell tool (`llm4s-agent-tools`, which checks the argument after `sort -t` already) needed no change. See
+  [Option values](docs/reference/workspace-sandbox.md#option-values).
+- **Security - `llm4s-agent-tools`: the shell tool checks option values attached to their flag**
+  ([#1723](https://github.com/llm4s/llm4s/issues/1723)): under `ShellConfig.pathPolicy`, a value given as its own
+  argument (`grep -f lout`) was held to the policy, but one attached to its flag (`grep -flout`, `grep -iflout`,
+  `grep --file=lout`, `grep --fil=lout`, `sort --random-source=lout`) was refused only if it held a `/` or `\`, so a
+  link out of the allowed directory, a blocked file in the working directory, or `..` passed. Every attached value is
+  now resolved and checked as a path, like the workspace runner's command policy does (#1720): the value after `=` of
+  a long option, and every tail of a short-option cluster, since any letter in it may take the rest as its value. A
+  text value that happens to name such a file (`grep -e..`) is refused too. The checks run before the command
+  starts, outside `ShellConfig.timeout`, so their cost is bounded per command, as the workspace runner's is: an
+  argument over 4096 characters is refused, a value that is one plain path component costs one lookup (whether
+  anything is in the working directory under that name; if nothing is, it cannot be a link, and the policy is
+  applied to its spelling with no further lookup, which is exactly the full check's verdict, with no assumption about
+  how long a file name can be; if something is, it is resolved in full), each distinct path is checked once, and a
+  command whose checks would take more than 20000 file-system lookups is refused as too costly to check. A command of
+  200 flags of 4096 letters is checked in well under a second, where it took over three minutes on macOS before these
+  bounds, and one of 200 distinct such flags is refused as too costly just as fast. The value of `sort -t`
+  is a separator, not options or a path (`sort -to`, `sort -t/` run). The refused options (`file -C`/`-m`/`-M`/`-f`,
+  `date -f`/`-r`, `wc --files0-from`) are now also matched whatever the case of the program name or a Windows executable suffix (`FILE -C`, `file.exe -C`, which run `file -C` on Windows
+  and on macOS's default file system), and `sort -o`, `--output`, `-T`, `--temporary-directory`,
+  `--compress-program` and `--files0-from` (which write a file or temporary files, run a program, or read the names
+  of the files to sort from a file the command does not name) join them, for allowlists that add `sort`, in every
+  spelling (`-roout`, `--out=x`, `--files0=x`, after a consumed `--`), with or without a path policy; on Windows,
+  where `sort` may be `sort.exe`, so do `sort -t` and the `/O` and `/T` switches.
+- **`InMemoryStore` keyword search matches whole words, not substrings**
+  ([#1594](https://github.com/llm4s/llm4s/issues/1594)): the store split the query on whitespace and tested each piece
+  with `String.contains`, so short words matched inside longer ones - `i` in "Berlin", `or` in "works", `do` in
+  "doing" - and punctuation stayed on the query's words, so "Which language do I prefer, Scala or Java?" returned
+  "Works in the Berlin office" and `java?` never matched "Java". Query and memory are now split into words exactly as
+  `SQLiteMemoryStore`'s FTS5 index (`unicode61`, `remove_diacritics=1`) splits them - the two stores now find the same
+  memories for a query (ranked differently), which a new spec checks for every code point and query by query - and a
+  memory scores the share of the query's distinct phrases (its whitespace-separated pieces, whose words must appear
+  adjacent and in order) it contains, not of its words. A word is a run of letters, digits
+  and private-use characters in any script; case is ignored (per code point, so the Greek final sigma matches `σ`), and
+  an accent only on a Latin letter that has exactly one (`ecole` matches "école"; `αθηνα` does not match "Αθήνα", `мои`
+  does not match "Мой", `viet` does not match "Việt"); other combining marks separate words (Devanagari "मुझे" is "म"
+  and "झ"); and a phrase with punctuation inside needs its words adjacent (`berlin-based` does not match "based in
+  Berlin").
+  **Behaviour change:** `InMemoryStore.search`, `EmbeddingMemoryStore`'s keyword fallback and
+  `SimpleMemoryManager.getRelevantContext` return fewer memories: a query word must now be a whole word of the memory,
+  so `scala` no longer matches "scalability" and `prefer` no longer matches "Prefers" (there is no stemming). Case
+  folding no longer depends on the JVM's default locale. The cookbook's `MemoryRecipe` no longer strips short words and
+  punctuation from the question (`contentWords` is gone); it passes the question as it is.
+- **Security - workspace runner: WebSocket commands go through the command policy, not a shell**
+  ([#1756](https://github.com/llm4s/llm4s/issues/1756)): `RunnerMain` served the WebSocket protocol's
+  `ExecuteCommandCommand`, the path `ContainerisedWorkspace.executeCommand` and `executeCommandWithStreaming` take, by
+  running the raw command string through `sh -c` (`cmd.exe /c` on Windows) with the client's `environment` copied into
+  the child unfiltered. Only `shellAllowed` was checked, so the `allowedCommands` allowlist, the forbidden shell
+  characters, the per-program option, path, git and Windows rules of #1715, the environment allowlist and the
+  null-device standard input of #1728 applied only to direct calls on `WorkspaceAgentInterfaceImpl`, and an agent
+  driving a containerised workspace could run any program (`ls; cat /etc/passwd`, `cat a | sh`, `echo $(id)`,
+  `find . -delete`, `LD_PRELOAD`). Both paths now share one function that tokenizes the command, applies every check
+  and builds the process from the argument vector; the WebSocket path keeps its stdout/stderr streaming,
+  cancellation and exit-code and duration reporting, and refuses with a `WorkspaceAgentErrorResponse` carrying the
+  direct path's code (`FORBIDDEN_CHARACTERS`, `EXECUTABLE_NOT_ALLOWED`, `ARGUMENT_NOT_ALLOWED`,
+  `PATH_ESCAPE_ATTEMPT`, `ENVIRONMENT_NOT_ALLOWED`, ...) followed by `CommandCompletedMessage` with exit code 1. The
+  protocol is unchanged. A working directory outside the workspace is now `PATH_ESCAPE_ATTEMPT` rather than
+  `INVALID_DIRECTORY`, and a WebSocket command sent with no timeout stops at the sandbox's `defaultCommandTimeout`
+  instead of running until it ends. **Migration:** WebSocket commands no longer go through a shell, so pipes,
+  redirection, `;`, `&&`, `$(...)`, backquotes and variable expansion are refused rather than interpreted, and only
+  programs on the runner's allowlist run. Write each command as one program and its arguments (`grep -rn TODO src`,
+  not `cd src && grep -rn TODO . | head`), quoting an argument that holds spaces; send a second command as a second
+  request, use `workingDirectory` instead of `cd`, and `writeFile` instead of redirection. A program the agent needs
+  that is not on the profile's list, such as a build tool, is added with the runner's new `WORKSPACE_EXTRA_COMMANDS`
+  (`ContainerisedWorkspace` and `CodeWorker` take it as `extraAllowedCommands`; `WorkspaceSandboxConfig.withExtraCommands`
+  parses it and refuses shells and launchers such as `env` and `xargs`); `CodeGenExample` adds `sbt` this way and
+  asks for `sbt compile` and `sbt run` as separate commands. The `@Workspace` suites now send argv commands (`grep zzz
+  <file>` for a non-zero exit, `cat <present> <missing>` for stderr, `tail -f <file>` for the timeout), and
+  `WorkspaceCommandsSpec` runs each command string they and the workspace samples send through the runner's
+  WebSocket executor on every PR.
+- **Memory: `getRelevantContext` no longer writes a section heading with nothing under it** ([#1580](https://github.com/llm4s/llm4s/issues/1580)):
+  under a tight `maxTokens` the context assembly wrote a section heading such as `## Relevant Knowledge`
+  before checking whether its first memory fitted, so the result could be headings with no entries,
+  and the `# Retrieved Context` line was not counted, so the text could run past `maxTokens * 4`
+  characters. A heading is now written only together with its first memory, a section whose first
+  memory does not fit is left out, the result is `""` when no memory fits, and the whole text stays
+  within the budget. With a budget that fits everything the output is unchanged.
+- **Workspace runner: a command that reads standard input gets end-of-file at once instead of hanging until the
+  timeout** ([#1728](https://github.com/llm4s/llm4s/issues/1728)): `executeCommand` left the child's standard input an
+  open pipe that nothing wrote to or closed, so `cat` with no operands, `cat -`, `sort`, `uniq`, `wc`, `head`,
+  `tail` or `grep x` with no file (and `sort` or `findstr x` on Windows) blocked until the command timeout (10 s
+  under the locked profile, 30 s under permissive) and failed with `TIMEOUT`, holding a runner thread meanwhile.
+  The child's standard input is now the null device (`/dev/null`, or `NUL` on Windows, chosen by the host the runner
+  runs on), so such a command sees an empty input and returns its normal result.
 - **Security - workspace runner: allowlisted commands can no longer write, delete or run other programs through their
   arguments** ([#1715](https://github.com/llm4s/llm4s/issues/1715)): `executeCommand` checked only the executable
   name against `allowedCommands` and a set of shell metacharacters, so programs on `WorkspaceSandboxConfig.ReadOnlyCommands`
@@ -2151,6 +2740,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parent path holds `:` (POSIX) or `;` (Windows); on Windows, the forms listed
   above; and `environment` variables outside the list. Run writes through the
   `writeFile` / `modifyFile` operations or the read-write allowlist's own programs instead.
+
+  The same change corrected four statements in `docs/reference/security.md` and `workspace-sandbox.md`
+  ([#1716](https://github.com/llm4s/llm4s/issues/1716)): the residual-risk example `git -c core.pager=...` runs nothing
+  (git starts a pager only on a terminal), so the pages use `git -c alias.x='!cmd' x` and `-c core.fsmonitor=...`; the
+  client's sandbox profile does not control enforcement, only the runner's `WORKSPACE_SANDBOX_PROFILE` does; an
+  unknown profile name stops the runner (and makes the client loader return a `Left`) rather than falling back to
+  `permissive`; and `SQLiteMemoryStore.inMemory()` is called as it is, not given `":memory:"`.
 - **A subscription receives every live event sent after `subscribe` returns** ([#1731](https://github.com/llm4s/llm4s/issues/1731)):
   `GraphRuntime.subscribe` returned before its dispatcher joined the event hub's live set, which it
   did only after replaying the log, so live events (`RunContext.progress`, `StreamEvent.Live`) sent in
@@ -2229,12 +2825,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the semantic fallback all use this chunker. **Migration:** chunk text changes for any input with a sentence
   boundary, and chunk sizes with it; indexes built with `SentenceChunker` hold corrupted text and should be
   re-chunked and re-embedded.
+- **Docs: the RAG benchmark results say which rows predate the `SentenceChunker` fix**
+  ([#1725](https://github.com/llm4s/llm4s/issues/1725)): every number in `docs/rag-benchmark-results.md` was
+  measured in December 2025 with the chunker #1718 fixed, and sentence chunking is the benchmark default, so all
+  fusion and embedding rows and the three `sentence-*` chunking rows were indexed with corrupted text. The page now
+  says so at the top and beside each table, marks the "Expected Results", sample output and conclusions as resting
+  on those rows, and gives the commands that regenerate them. The suites need an LLM judge and embedding API keys,
+  so they have not been re-run.
 - **`llm4s-openai`: OpenAI embeddings reach `/v1/embeddings` with the default base URL**
   ([#1413](https://github.com/llm4s/llm4s/pull/1413)): the default `llm4s.embeddings.openai.baseUrl` is
   `https://api.openai.com/v1`, the versioned root the chat provider uses too, but `OpenAIEmbeddingProvider`
   appended `/v1/embeddings` to it and posted to `https://api.openai.com/v1/v1/embeddings`. A base URL ending in
   `/v1` now gets `/embeddings`; one without it (`https://api.openai.com`, a proxy root) still gets
   `/v1/embeddings`, so a base URL that worked before is unchanged.
+- **`llm4s-agent-tools`: `WriteFileTool` and `ReadFileTool` return an error for an unknown encoding instead of throwing**
+  ([#1710](https://github.com/llm4s/llm4s/issues/1710)): `WriteFileTool.writeFile` called
+  `Charset.forName(encodingStr)` outside any `Try`, so a model-supplied encoding such as `utf-9`
+  (`UnsupportedCharsetException`) or `bad name!` (`IllegalCharsetNameException`) escaped as an exception
+  instead of the `Left` error the other failures use. `ReadFileTool.readFile` did the lookup inside its
+  `Try` but reported it as a generic read failure. Both tools now look the charset up first and return
+  `Left("Unsupported encoding: <name>")` for either exception.
 - **`llm4s-rag`: `SimpleChunker` and `ChunkingUtils.chunkText` no longer throw for a very large window**
   ([#1424](https://github.com/llm4s/llm4s/pull/1424)): the window end and the next start were computed in `Int`, so
   a valid configuration such as `ChunkingConfig(targetSize = Int.MaxValue, maxSize = Int.MaxValue,
@@ -2323,6 +2933,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (followed by `,` and the next key, by `}`, or cut off): `{'Authorization': "[REDACTED]"}`; the same holds inside a
   JSON string (`\"it's\"`), and for such a leaf of a single-quoted container there, which used to end the container.
   Double-quoted JSON is redacted as before. No signature changes.
+- **Redaction reads query parameters after a JSON-escaped `&`** ([#1676](https://github.com/llm4s/llm4s/issues/1676)):
+  Go's `encoding/json` writes `&` as `\u0026` by default, and HTML-safe serialisers do the same (some also write `=` as
+  `\u003d` and `?` as `\u003f`). `Redaction.redact` and `redactForLogging` treated the escape as ordinary text, so in
+  `{"url":"https://h/x?a=1\u0026token=SECRETPW"}` the `token` was not read as a parameter and its value was written in
+  the clear. The query pass now reads `\u0026` as `&`, `\u003f` as `?` where a query can start and `\u003d` as the `=` between
+  a key and its value. That includes the doubled-backslash forms in JSON that sits inside a string, and the hex digits
+  in either case. The output keeps the escapes as they were written: `{"url":"https://h/x?a=1\u0026token=[REDACTED]"}`.
+  A query value now ends at `\u0026` as it ends at `&`, so the parameters after a sensitive one stay readable. The
+  `key=value`, `key="..."` and `key='...'` field passes read a key that follows one of these escapes as they read
+  `&key=`. So do the `Bearer` and `Basic` token patterns after an escape, written with a lower-case `u` as JSON
+  writes it. The value of a sensitive `key=value` pair ends at `\u0026` only where another pair, `key=` or
+  `key\u003d`, follows it: a credential that holds an `&`, which these serialisers escape too, is redacted in full,
+  as it was before, so `{"dsn":"host=db password=p\u0026ssW0rd dbname=x"}` becomes
+  `{"dsn":"host=db password=[REDACTED] dbname=x"}`. A query value ends at `\u0026` only while it has held no
+  quote: once a quote has been read, bare or escaped (System.Text.Json writes `'` as `\u0027` and `"` as `\u0022`),
+  the value runs over `\u0026` as it did before, and after an escaped quote over `&` too. So
+  `GET https://h/x?password='p&ss=QZXJ'` as System.Text.Json writes it,
+  `{"msg":"GET https://h/x?password=\u0027p\u0026ss=QZXJ\u0027"}`, becomes
+  `{"msg":"GET https://h/x?password=[REDACTED]"}`, and `x=1\u0026password=\u0027p\u0026ss=QZXJ\u0027 n=1` becomes
+  `x=1\u0026password=[REDACTED] n=1`. A `key=value` value that opens with an escaped quote runs to the matching
+  escaped quote, over whitespace, `&`, `,` and `;` as `key='...'` does, so
+  `client_secret=\u0027a;b\u0027` is redacted whole, which it was not before; and the field passes read `\u003d`
+  as the `=` of a pair, as Gson writes it.
+  Where the input holds one of these escapes, or `\u0027` or `\u0022`, every pass of `redact` also reads the input
+  as it was given, and what any pass replaces - alone, or in sequence as the passes ran before - is merged and
+  replaced once. A pass that reads further than a value, as a query value that holds a quote runs over `\u0026`,
+  can no longer take the key or the opening quote of the field after it from the pass that reads that field:
+  `{"msg":"GET https://h/x?a=1\u0026token=ab'cd\u0026password='correct horse battery'"}`, as Go writes it, becomes
+  `{"msg":"GET https://h/x?a=1\u0026token=[REDACTED]'"}`, where ` horse battery'` was left readable, and so for a
+  `'passwd':'...'` or `\"password\":\"...\"` field after such a value. A `Bearer` or `Basic` token after an
+  escape is read apart from the plain pattern, so it cannot take the keyword of the next token
+  (`Basic \u003DBasic Basic 9K29`). A field of JSON whose quotes System.Text.Json writes as `\u0022` (or a dict's
+  as `\u0027`) is read as `"token": "..."` is, and so is `key=` before a value in escaped quotes, so
+  `{"msg":"{\u0022url\u0022:\u0022https://h/x?token=abc\u0026page=2\u0022,\u0022nested\u0022:{\u0022token\u0022:\u0022NESTEDSECRET\u0022}}"}`
+  keeps `page=2` and redacts both tokens. The value of a `key=value` pair whose key is not sensitive ends at an
+  escaped quote, `<` or `>`, as it ends at the character, so the pair after it is read.
+  In an input that holds one of these escapes, a `key=value` key starts where it would in the text the escapes stand
+  for: never at the `u` of an escape, and right after the escape of a character that ends a word (`'`, `<`,
+  `é`, ...), as after the character. The escape itself was read as a key before, so after `'` and `=`
+  the key `u0027` held `password=...` as its value and the credential was never read.
+  The value of a key that is not sensitive is not skipped where its `=` is `=`: the text after the escape is
+  read for pairs, so `password=password=...` (a key that starts at the escape of `p`) and
+  `abc=password=...` have the credential redacted, as when the `=` is not read as one. A query read through its
+  escapes ends at the escape of whitespace (` `, `\u000a`, ...) as at whitespace, so its key or value cannot run
+  into the field after it, and a `Basic` token runs over `=` as over its `=` padding.
+  An input that holds none of these escapes is redacted exactly as before.
 - **Redaction reads a query parameter only inside a URL, so a `?` in prose no longer mangles the document**
   ([#1667](https://github.com/llm4s/llm4s/issues/1667)): `Redaction.redact` and `redactForLogging`, and so the
   exchange-log sink, read a query parameter as `[?&]`, a key of any characters up to the next `=`, and a value up

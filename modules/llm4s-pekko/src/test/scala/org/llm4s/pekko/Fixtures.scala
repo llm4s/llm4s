@@ -1,4 +1,4 @@
-package org.llm4s.effect.cats
+package org.llm4s.pekko
 
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReference }
@@ -19,8 +19,11 @@ import org.llm4s.llmconnect.model.{
 }
 import org.llm4s.types.Result
 
-/** Shared deterministic fixtures for the concurrency specs: no sleeps, only latches and parking. */
-private[cats] object Fixtures {
+/**
+ * Shared deterministic fixtures for the stream specs: no sleeps, only latches and parking. Adapted from the
+ * `llm4s-effect` and `llm4s-zio` test fixtures, which a test of another module cannot depend on.
+ */
+private[pekko] object Fixtures {
 
   val completion: Completion =
     Completion(id = "id", created = 0L, content = "ok", model = "m", message = AssistantMessage(Some("ok")))
@@ -55,6 +58,13 @@ private[cats] object Fixtures {
       LockSupport.parkNanos(10000000L)
     Thread.currentThread().isInterrupted
   }
+
+  /** Whether `thread` is parked, waiting or blocked, not running: a producer held up by a full buffer is. */
+  def isWaiting(thread: Thread): Boolean =
+    thread != null && (thread.getState match {
+      case Thread.State.WAITING | Thread.State.TIMED_WAITING | Thread.State.BLOCKED => true
+      case _                                                                        => false
+    })
 
   /** A client with a scripted `streamComplete` and `complete`; everything else is fixed. */
   final class Scripted(

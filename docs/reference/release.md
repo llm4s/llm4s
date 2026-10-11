@@ -92,11 +92,15 @@ and does so silently.
 To see exactly what the tagged commit will publish, ask the build:
 
 ```bash
-sbt -error listPublishedArtifacts   # one `artifact <id>` or `stub <id>` per line
+sbt -error listPublishedArtifacts   # one `artifact <id>`, `bom <id>` or `stub <id>` per line
 ```
 
 `sbt publishedArtifactsCheck` (a CI quick check) fails when a published `llm4s-*` artifact has no tier in
 [1.0 Scope](v1-scope) or no install line in the installation guide.
+
+The `bom` line is `llm4s-bom`, a POM-only bill of materials that pins every real artifact to the release
+version. It is generated from the same list as the `artifact` lines, and `sbt bomCheck` (a CI quick check)
+fails when the generated POM disagrees with that list.
 
 ### 4. Do NOT create the GitHub Release by hand
 
@@ -124,14 +128,48 @@ it never overwrites. Write whatever the release deserves once it exists.
   ```
 
   It asks the build which artifacts it publishes (the list above) and checks that each resolves at that
-  version: the POM and the jar for a real artifact, and for each relocation stub (the pre-0.4.0
-  coordinates) a POM that carries a `<relocation>`. It exits non-zero and names each miss. Run against
+  version: the POM and the jar for a real artifact, a POM that carries a `<dependencyManagement>` for the
+  BOM (it has no jar), and for each relocation stub (the pre-0.4.0 coordinates) a POM that carries a
+  `<relocation>`. It exits non-zero and names each miss. Run against
   `0.4.0` with the stub list it reports all five stubs as missing, which is how 0.4.0 shipped
   ([#1150](https://github.com/llm4s/llm4s/issues/1150)); against `0.4.1` it passes.
 
   Maven Central's index can lag a successful publish, so a 404 straight after the job finishes is not
   proof of a miss: re-run before concluding one. A miss that persists cannot be fixed in that version
   ([Re-triggering a failed release](#re-triggering-a-failed-release)); it waits for the next one.
+
+## Release readiness: a MiMa dry run
+
+`mimaBaselineVersion` in `build.sbt` is `None`, so `sbt mimaReportBinaryIssues` compiles the build and checks
+nothing ([The Baseline](api-stability#the-baseline)). 0.5.0 is the release that sets it
+([#1281](https://github.com/llm4s/llm4s/issues/1281)), and MiMa cannot run before a release exists to compare
+with. `scripts/mima-dry-run.sh` does those steps early, against a throwaway version, to show that they will work:
+
+```bash
+scripts/mima-dry-run.sh                 # on JDK 21, from a clean checkout of the commit you want to check
+SBT=/path/to/sbt scripts/mima-dry-run.sh --no-negative-control
+```
+
+It works in a scratch clone of `HEAD` (uncommitted changes are not included; your working tree is not
+touched), sets `mimaBaselineVersion` there, publishes every module to a temporary Maven repository (never
+`~/.ivy2`, `~/.m2` or Central), and then, for each frozen module (read from the `mimaFrozen(...)` call sites in
+`build.sbt`):
+
+- checks that `mimaPreviousArtifacts` names the published artifact, that MiMa resolved `llm4s-<name>_3` and
+  compared it (it prints the coordinates and the problem counts: a silent empty baseline would pass), and that
+  `mimaReportBinaryIssues` finds nothing;
+- runs a **negative control**: a baseline with two extra classes, one `@Stable` and one `@Experimental`, that
+  the code then lacks. MiMa must fail on the `@Stable` one and must not report the `@Experimental` one.
+
+It took about three minutes on a laptop with warm caches (between 156 s and 184 s over three runs; an independent run took 175 s). It proves the wiring: the coordinates, the
+`_3` suffix, resolution, that the check can fail, and that `@Experimental` types are outside the freeze. It does
+**not** prove that any API is compatible with anything: there is no 0.5.0 baseline yet. It is a manual script,
+not a CI job, because it publishes the whole build. `scripts/test-mima-dry-run.sh` tests the script itself
+without sbt.
+
+At the cut: publish 0.5.0, confirm the frozen artifacts are on Central
+([Verify Release](#5-verify-release)), then follow
+[Setting and bumping the baseline](api-stability#setting-and-bumping-the-baseline).
 
 ## Troubleshooting
 
