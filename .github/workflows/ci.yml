@@ -1047,4 +1047,6 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
           BEDROCK_MODEL_ID: ${{ secrets.BEDROCK_MODEL_ID }}
+          # JevSmokeSpec (llm4s-jev): a TypeSafe API key, billed at a few hundred input tokens per test.
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: sbt testSmoke

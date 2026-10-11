@@ -435,6 +435,7 @@ GOOGLE_API_KEY=...                   # llm4s-gemini (gemini); GEMINI_API_KEY whe
 DEEPSEEK_API_KEY=...                 # llm4s-openai-compatible; also ZAI_API_KEY, OPENROUTER_API_KEY, MISTRAL_API_KEY
 COHERE_API_KEY=...                   # llm4s-openai-compatible, llm4s-rag and llm4s-cohere (Cohere chat, reranker, embeddings)
 VOYAGE_API_KEY=pa-...                # llm4s-voyage
+TYPESAFE_API_KEY=...                 # llm4s-jev (Jev decision client, not a provider) -> llm4s.credentials.typesafe.apiKey
 
 # Embeddings (llm4s-core selects; each provider module binds its own block)
 EMBEDDING_MODEL=openai/text-embedding-3-small  # provider/model

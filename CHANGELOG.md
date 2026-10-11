@@ -465,7 +465,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   description, which the API echoes back, nested more than 60 levels deep is refused before the request is sent), and an error body nested
   more than 32 levels deep is not read, so neither can overflow a small thread stack;
   a Score level's legend entry keeps the string, object or array the question gave. Configuration is the
-  `llm4s.jev` block and `TYPESAFE_API_KEY` (bound to `llm4s.credentials.jev.apiKey`), `TYPESAFE_BASE_URL` and
+  `llm4s.jev` block and `TYPESAFE_API_KEY` (bound to `llm4s.credentials.typesafe.apiKey`), `TYPESAFE_BASE_URL` and
   `TYPESAFE_DEFAULT_MODEL`. Failures map onto LLM4S's errors (401/403 `AuthenticationError`, 400/422
   `ValidationError`, 429 `RateLimitError` with the server's `Retry-After` or `retry-after-ms`, 5xx including 529
   `ServiceError`) and transient ones are retried as TypeSafe's SDKs do (two retries, 0.5 s doubling to 5 s with

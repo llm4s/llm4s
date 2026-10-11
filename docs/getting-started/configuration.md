@@ -823,7 +823,7 @@ also set in `application.conf` or with `-D`.
 | `COHERE_API_KEY` | `llm4s.credentials.cohere.apiKey` (Cohere chat, the Cohere reranker and Cohere embeddings) | `llm4s-openai-compatible`, `llm4s-rag`, `llm4s-cohere` |
 | `VOYAGE_API_KEY` | `llm4s.credentials.voyage.apiKey` | `llm4s-voyage` |
 | `JINA_API_KEY` | `llm4s.credentials.jina.apiKey` | `llm4s-jina` |
-| `TYPESAFE_API_KEY` | `llm4s.credentials.jev.apiKey` (the Jev decision client) | `llm4s-jev` |
+| `TYPESAFE_API_KEY` | `llm4s.credentials.typesafe.apiKey` (the Jev decision client) | `llm4s-jev` |
 | `TYPESAFE_BASE_URL`, `TYPESAFE_DEFAULT_MODEL` | `llm4s.jev.baseUrl`, `llm4s.jev.model` | `llm4s-jev` |
 | `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL` | `llm4s.embeddings.openai.*` | `llm4s-openai` |
 | `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_EMBEDDING_MODEL` | `llm4s.embeddings.voyage.*` | `llm4s-voyage` |

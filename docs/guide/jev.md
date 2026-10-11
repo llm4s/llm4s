@@ -53,14 +53,14 @@ llm4s.jev {
     jitter         = 0.25
     budget         = 30 seconds
   }
-  # apiKey  = ...          # wins over llm4s.credentials.jev.apiKey, which TYPESAFE_API_KEY binds
+  # apiKey  = ...          # wins over llm4s.credentials.typesafe.apiKey, which TYPESAFE_API_KEY binds
   # baseUrl = ...          # TYPESAFE_BASE_URL; default https://api.typesafe.ai
 }
 ```
 
 | Setting | Environment variable | Default |
 |---|---|---|
-| `llm4s.credentials.jev.apiKey` (or `llm4s.jev.apiKey`) | `TYPESAFE_API_KEY` | none: required |
+| `llm4s.credentials.typesafe.apiKey` (or `llm4s.jev.apiKey`) | `TYPESAFE_API_KEY` | none: required |
 | `llm4s.jev.baseUrl` | `TYPESAFE_BASE_URL` | `https://api.typesafe.ai` |
 | `llm4s.jev.model` | `TYPESAFE_DEFAULT_MODEL` | `jev-latest` |
 

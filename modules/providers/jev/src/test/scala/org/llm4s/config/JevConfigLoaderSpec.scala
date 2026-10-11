@@ -5,6 +5,7 @@ import org.llm4s.jev.{ JevClient, JevConfig, JevRetryPolicy }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import com.typesafe.config.ConfigFactory
 import pureconfig.ConfigSource
 
 import scala.concurrent.duration.*
@@ -23,7 +24,7 @@ class JevConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValues {
     }
 
   "The Jev config loader" should "read the key from the shared credentials and default everything else" in {
-    val config = load("llm4s.credentials.jev.apiKey = tsk-shared").value
+    val config = load("llm4s.credentials.typesafe.apiKey = tsk-shared").value
 
     config shouldBe JevConfig("tsk-shared")
   }
@@ -34,14 +35,14 @@ class JevConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "prefer the client's own key to the shared one" in {
     load("""
-      llm4s.credentials.jev.apiKey = tsk-shared
+      llm4s.credentials.typesafe.apiKey = tsk-shared
       llm4s.jev.apiKey = tsk-own
     """).value.apiKey shouldBe "tsk-own"
   }
 
   it should "treat a blank own key as unset and fall back to the shared one" in {
     load("""
-      llm4s.credentials.jev.apiKey = tsk-shared
+      llm4s.credentials.typesafe.apiKey = tsk-shared
       llm4s.jev.apiKey = "  "
     """).value.apiKey shouldBe "tsk-shared"
   }
@@ -54,7 +55,7 @@ class JevConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "read every setting" in {
     val config = load("""
-      llm4s.credentials.jev.apiKey = tsk
+      llm4s.credentials.typesafe.apiKey = tsk
       llm4s.jev {
         baseUrl = "https://gw.example/jev"
         model   = "jev-1.13.0"
@@ -82,7 +83,7 @@ class JevConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "keep the default of a retry setting that is not set" in {
     val retry = load("""
-      llm4s.credentials.jev.apiKey = tsk
+      llm4s.credentials.typesafe.apiKey = tsk
       llm4s.jev.retry.maxRetries = 0
     """).value.retry
 
@@ -91,7 +92,7 @@ class JevConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "treat a blank base URL or model, as an unset variable binds, as the default" in {
     val config = load("""
-      llm4s.credentials.jev.apiKey = tsk
+      llm4s.credentials.typesafe.apiKey = tsk
       llm4s.jev { baseUrl = "", model = "  " }
     """).value
 
@@ -101,44 +102,44 @@ class JevConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "refuse a plain-http base URL for a remote host, so the key cannot go out in the clear" in {
     refused("""
-      llm4s.credentials.jev.apiKey = tsk
+      llm4s.credentials.typesafe.apiKey = tsk
       llm4s.jev.baseUrl = "http://evil.example"
     """) should include("must be https")
   }
 
   it should "accept a loopback http base URL, as a local test server needs" in {
     load("""
-      llm4s.credentials.jev.apiKey = tsk
+      llm4s.credentials.typesafe.apiKey = tsk
       llm4s.jev.baseUrl = "http://localhost:8080"
     """).value.baseUrl shouldBe "http://localhost:8080"
   }
 
   it should "refuse a setting that cannot work" in {
     refused("""
-      llm4s.credentials.jev.apiKey = tsk
+      llm4s.credentials.typesafe.apiKey = tsk
       llm4s.jev.retry.jitter = 3
     """) should include("llm4s.jev.retry.jitter")
     refused("""
-      llm4s.credentials.jev.apiKey = tsk
+      llm4s.credentials.typesafe.apiKey = tsk
       llm4s.jev.timeout = 0 seconds
     """) should include("llm4s.jev.timeout")
   }
 
   it should "report an unreadable block with its path, not a stack trace" in {
     refused("""
-      llm4s.credentials.jev.apiKey = tsk
+      llm4s.credentials.typesafe.apiKey = tsk
       llm4s.jev.timeout = "soon"
     """) should (include("llm4s.jev").and(include("timeout")))
   }
 
   it should "build a client from the same source, and fail like the loader without a key" in {
-    load("llm4s.credentials.jev.apiKey = tsk").flatMap(JevClient(_)).isRight shouldBe true
+    load("llm4s.credentials.typesafe.apiKey = tsk").flatMap(JevClient(_)).isRight shouldBe true
     load("llm4s.jev.model = m").flatMap(JevClient(_)).left.value shouldBe a[ConfigurationError]
   }
 
   it should "never put the key in an error about another setting" in {
     (refused("""
-      llm4s.credentials.jev.apiKey = tsk-very-secret
+      llm4s.credentials.typesafe.apiKey = tsk-very-secret
       llm4s.jev.baseUrl = "http://evil.example"
     """) should not).include("tsk-very-secret")
   }
@@ -154,5 +155,18 @@ class JevConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValues {
     text should include("apiKey = ${?TYPESAFE_API_KEY}")
     text should include("baseUrl = ${?TYPESAFE_BASE_URL}")
     text should include("model   = ${?TYPESAFE_DEFAULT_MODEL}")
+  }
+
+  it should "bind TYPESAFE_API_KEY to the vendor's credential, llm4s.credentials.typesafe, which the loader reads" in {
+    val url = getClass.getClassLoader
+      .getResources("reference.conf")
+      .asScala
+      .find(url => Using.resource(Source.fromURL(url))(_.mkString).contains("TYPESAFE_API_KEY"))
+      .getOrElse(fail("no reference.conf binds TYPESAFE_API_KEY"))
+    val resolved = ConfigFactory.parseURL(url).resolveWith(ConfigFactory.parseString("TYPESAFE_API_KEY = tsk-from-env"))
+
+    resolved.getString("llm4s.credentials.typesafe.apiKey") shouldBe "tsk-from-env"
+    resolved.hasPath("llm4s.credentials.jev") shouldBe false
+    JevConfigLoader.load(ConfigSource.fromConfig(resolved)).value.apiKey shouldBe "tsk-from-env"
   }
 }

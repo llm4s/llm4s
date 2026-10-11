@@ -16,8 +16,8 @@ import scala.concurrent.duration.FiniteDuration
  * typed config it returns and reads nothing itself.
  *
  * `llm4s-jev`'s `reference.conf` binds `TYPESAFE_BASE_URL` to `baseUrl` and `TYPESAFE_DEFAULT_MODEL` to `model`
- * (the variables TypeSafe's own SDKs read), and `TYPESAFE_API_KEY` to `llm4s.credentials.jev.apiKey`. The key is
- * `llm4s.jev.apiKey` when that is set and the shared `llm4s.credentials.jev.apiKey` otherwise, so one variable serves
+ * (the variables TypeSafe's own SDKs read), and `TYPESAFE_API_KEY` to `llm4s.credentials.typesafe.apiKey`. The key is
+ * `llm4s.jev.apiKey` when that is set and the shared `llm4s.credentials.typesafe.apiKey` otherwise, so one variable serves
  * every client of the vendor. Everything but the key has a default.
  *
  * {{{
@@ -37,10 +37,11 @@ import scala.concurrent.duration.FiniteDuration
  */
 object JevConfigLoader {
 
-  private val Id: ProviderId = ProviderId("jev")
+  // Credentials belong to the vendor (TypeSafe), not the model: `llm4s.credentials.typesafe`, as TYPESAFE_API_KEY.
+  private val Id: ProviderId = ProviderId("typesafe")
   private val Section        = "llm4s.jev"
 
-  /** The variable this module's `reference.conf` binds to `llm4s.credentials.jev.apiKey`, named in the missing-key error. */
+  /** The variable this module's `reference.conf` binds to `llm4s.credentials.typesafe.apiKey`, named in the missing-key error. */
   val TYPESAFE_API_KEY: String = "TYPESAFE_API_KEY"
 
   final private case class RetrySettings(
