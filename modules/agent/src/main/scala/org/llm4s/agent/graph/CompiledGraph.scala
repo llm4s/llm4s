@@ -491,6 +491,26 @@ final class CompiledGraph[I, O] private[graph] (
       .foldLeft[Result[ThreadState]](Right(execution.state))((state, tr) => state.flatMap(_.applyUpdate(tr._2.update)))
       .map(schedule(execution, completed, _, config))
 
+  /**
+   * `execution` with `update` applied to its committed state, one superstep on, everything scheduled
+   * unchanged: [[GraphRuntime.updateState]]. With `asNode`, the update must stay within that node's
+   * declared write set, as if the node had returned it ([[GraphError.UndeclaredWrite]], task
+   * `updateState`); without it, within the keys this graph registers ([[GraphError.UnknownStateKey]]).
+   * A key's update function that rejects or throws is [[GraphError.StateUpdateFailed]].
+   */
+  private[graph] def edit(execution: Execution, update: StateUpdate, asNode: Option[NodeRef[?]]): Result[Execution] =
+    val node: Result[Option[NodeId]] = asNode match
+      case None                                                        => Right(None)
+      case Some(ref) if (ref.owner eq owner) && nodes.contains(ref.id) => Right(Some(ref.id))
+      case Some(ref) =>
+        Left(ValidationError("asNode", s"node '${ref.id.value}' is not part of graph '$id'"))
+    for
+      _     <- if execution.owner ne owner then Left(GraphError.ForeignExecution(id)) else Right(())
+      n     <- node
+      _     <- n.flatMap(nodeId => undeclaredWrite(Task(TaskId("updateState"), nodeId, (), None), update)).toLeft(())
+      state <- execution.state.applyUpdate(update)
+    yield execution.edited(state, execution.superstep + 1)
+
   /** Completes, suspends or fails an execution with an empty frontier. */
   private[graph] def finish(execution: Execution): RunResult[O] =
     if execution.paused then suspended(execution) else complete(execution)
