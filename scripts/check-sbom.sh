@@ -13,8 +13,8 @@
 #   - a BOM with no components (every module depends on the Scala library, so an empty one means the
 #     dependency resolution did not run), or a component without a name, a version or a `pkg:maven` purl;
 #   - a build-machine path (/Users/, /home/, /private/, /tmp/, a drive letter) anywhere in the file;
-#   - a test framework among the components of a module that does not ship one (llm4s-provider-testkit's
-#     API is built on ScalaTest, so it is allowed to);
+#   - a test framework among the components of a module that does not ship one (the APIs of
+#     llm4s-provider-testkit and llm4s-agent-testkit are built on ScalaTest, so they are allowed to);
 #   - a component the described module does not reach through the BOM's own dependency graph: that is how a
 #     `dependsOn(other % Test)` project showed up before `sbt publishedSboms` pruned it (project/SbomPrune.scala);
 #   - the llm4s-core BOM lacking one of the libraries llm4s-core is known to depend on.
@@ -50,7 +50,7 @@ CORE_REQUIRED = [
     "com.github.pureconfig:pureconfig-core",
 ]
 # Modules that ship a test framework as part of their published API.
-MAY_CONTAIN_TEST_FRAMEWORK = {"llm4s-provider-testkit_3"}
+MAY_CONTAIN_TEST_FRAMEWORK = {"llm4s-provider-testkit_3", "llm4s-agent-testkit_3"}
 TEST_FRAMEWORK = re.compile(r"scalatest|scalamock|scalacheck|junit|mockito|munit|weaver|specs2", re.I)
 BUILD_MACHINE_PATH = re.compile(r"(/Users/|/home/|/private/|/tmp/|[A-Za-z]:\\\\)")
 

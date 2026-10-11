@@ -1059,9 +1059,9 @@ lazy val cohere = (project in file("modules/providers/cohere"))
     )
   )
 
-// `llm4s-watsonx` (#1019): IBM watsonx.ai. Not OpenAI-compatible - its text-generation API takes
-// a flattened `input` string and authenticates by exchanging an IBM Cloud API key for an IAM
-// bearer token - so it is a provider module of its own rather than a dialect in
+// `llm4s-watsonx` (#1019): IBM watsonx.ai. Not OpenAI-compatible - it authenticates by
+// exchanging an IBM Cloud API key for an IAM bearer token and has its own chat request and
+// response shapes - so it is a provider module of its own rather than a dialect in
 // `openai-compatible`. No dependency beyond core.
 
 lazy val watsonx = (project in file("modules/providers/watsonx"))
@@ -1069,9 +1069,10 @@ lazy val watsonx = (project in file("modules/providers/watsonx"))
   .settings(
     name := "llm4s-watsonx",
     commonSettings,
-    // Measured 98.45% statement coverage (`sbt coverage watsonx/test watsonx/coverageReport`).
-    // Floor is the measured value rounded down to the nearest 5. Never lower it. There is no
-    // live suite in `modules/it`: watsonx.ai needs an IBM Cloud account (#1020).
+    // Measured 99.24% statement coverage (`sbt coverage watsonx/test watsonx/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it. The live check is
+    // the `@Cloud` probe suite `WatsonXAssumptionProbeSpec` in `modules/it`, which needs an IBM Cloud
+    // account and has not been run yet (#1314).
     coverageFloor(95),
     Test / fork                     := true,
     Compile / mainClass             := None,
