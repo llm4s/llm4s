@@ -46,16 +46,20 @@ class MemoryRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "remember several facts, show the ones that match and rank the better match first" in {
     val several = Seq("Prefers Scala over Java", "Prefers sbt over Maven", "Works in the Berlin office")
 
-    val result = recall(MemoryRecipe.script, several, "Which build tool do I prefer, sbt or Maven?").value
+    val result = recall(MemoryRecipe.script, several, "Is sbt better than Maven for Scala?").value
 
     (result.context should not).include("Berlin")
     result.context should include("Prefers sbt over Maven")
-    // "prefer" and "maven" match the build-tool fact, only "prefer" matches the language fact
+    result.context should include("Prefers Scala over Java")
+    // "sbt" and "maven" match the build-tool fact, only "scala" matches the language fact
     result.context.indexOf("Prefers sbt over Maven") should be < result.context.indexOf("Prefers Scala over Java")
   }
 
-  "MemoryRecipe.contentWords" should "drop punctuation and short words, which the store would match as substrings" in {
-    MemoryRecipe.contentWords("Which language do I prefer, Scala or Java?") shouldBe "which language prefer scala java"
+  it should "pass the question as it is: short words and punctuation no longer need stripping" in {
+    val result = recall(MemoryRecipe.script, facts, "Do I prefer Java?").value
+
+    result.context should include("Prefers Scala over Java")
+    (result.context should not).include("Berlin")
   }
 
   "MemoryRecipe.demo" should "print the answer and the context the model saw" in {

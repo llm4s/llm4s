@@ -48,6 +48,9 @@ case class FileConfig(
   /** The real path to open when `path` is allowed. The tools open this, not the path they were given. */
   private[builtin] def resolve(path: Path): Option[Path] =
     PathPolicy.resolve(path, allowedPaths, blockedPaths)
+
+  /** The allowed and blocked entries resolved now, for checking many paths in a row (one shell command's). */
+  private[builtin] def entries: PathPolicy.Entries = PathPolicy.prepare(allowedPaths, blockedPaths)
 }
 
 /**
