@@ -184,10 +184,10 @@ class RedactionRemoteBodySpec extends AnyFlatSpec with Matchers {
   // The prose check reads only the value it is asked about: a spaceless value never scans the rest of the input.
   it should "redact many spaceless bare assertion values in time linear in the input (#1818)" in {
     val units: Seq[(String, Int => String)] = Seq(
-      "JSON objects"  -> (n => "[" + "{\"assertion\":\"Q\"}," * n + "1]"),
-      "Python dicts"  -> (n => "[" + "{'assertion':'Q'}," * n + "1]"),
-      "header lines"  -> (n => "Assertion:Q\n" * n),
-      "escaped JSON"  -> (n => "{\"b\":\"" + "{\\\"assertion\\\":\\\"Q\\\"}," * n + "\"}")
+      "JSON objects" -> (n => "[" + "{\"assertion\":\"Q\"}," * n + "1]"),
+      "Python dicts" -> (n => "[" + "{'assertion':'Q'}," * n + "1]"),
+      "header lines" -> (n => "Assertion:Q\n" * n),
+      "escaped JSON" -> (n => "{\"b\":\"" + "{\\\"assertion\\\":\\\"Q\\\"}," * n + "\"}")
     )
     for {
       (name, build)  <- units
@@ -280,7 +280,11 @@ object RedactionRemoteBodySpec {
   // (kind, value, a part of it that must not survive)
   val spacedCredentials: Seq[(String, String, String)] = Seq(
     ("raw XML SAML", samlXml, "MIIC9zCCAd+gAwIBAgIJAKx"),
-    ("raw XML SAML, attributes only", """<saml2:Assertion ID="_a1b2c3" Version="2.0">svc</saml2:Assertion>""", "_a1b2c3"),
+    (
+      "raw XML SAML, attributes only",
+      """<saml2:Assertion ID="_a1b2c3" Version="2.0">svc</saml2:Assertion>""",
+      "_a1b2c3"
+    ),
     ("space-wrapped base64", grants.head._2.grouped(32).mkString(" "), grants.head._2.substring(32, 64)),
     ("PEM armour", s"-----BEGIN PRIVATE KEY----- $pemBody -----END PRIVATE KEY-----", pemBody.substring(8, 40)),
     ("token and a word", "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789 x", "aBcDeFgHiJkLmNoPqRsTuVwXyZ"),
