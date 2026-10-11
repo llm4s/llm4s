@@ -250,7 +250,9 @@ Only data: checkpoints, pending writes and events as JSON, never closures or cla
 any build that knows the graph. Its tables are prefixed `llm4s_checkpoint_`, so the file can hold other tables
 too. It keeps every checkpoint of a thread's history, as the next section describes: `history` pages through it
 newest first by an index, so a long history costs a page, not a scan, and `prune` and `deleteThread` remove from it
-in one transaction each, safely beside other stores writing the file.
+in one transaction each, safely beside other stores writing the file. `prune` reads the thread's whole history and
+event log inside its transaction, so on a very long log it holds the file for a while and other stores' writes wait,
+up to `busyTimeout`; prune regularly, or off-peak, rather than once after months.
 
 ## Checkpoint history, fork and updateState
 

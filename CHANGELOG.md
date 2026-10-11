@@ -34,7 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for another connection's. The schema is versioned and migrated on open, and a file from a newer build is refused. It
   passes `CheckpointerContract` over one connection and over two alternating connections to one file, and a test kills
   a forked JVM mid-run and recovers its thread. It implements #1702's `history`, `checkpoint` and `prune` over a history
-  table paged by its primary key, each write one transaction. The sample `SqliteRestartRecoveryExample` shows a restart
+  table paged by its primary key, each write one transaction; the table is part of schema version 1, since no released
+  build wrote a file without it, and opening a version-1 file from a pre-release build creates it. The sample `SqliteRestartRecoveryExample` shows a restart
   and recovery.
   See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#the-sqlite-store).
 - **Checkpoint history, fork, `updateState` and retention** ([#1702](https://github.com/llm4s/llm4s/issues/1702),
