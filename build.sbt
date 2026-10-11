@@ -112,6 +112,7 @@ addCommandAlias(
 //   sbt test             Tier 1 - unit tests plus the `@Local` suites in modules/it
 //   sbt testIntegration  Tier 2 - `@Docker`: needs Postgres/pgvector, Qdrant, Neo4j
 //   sbt testWorkspace    Tier 2 - `@Workspace`: needs a built workspace-runner image + Docker
+//   sbt testMcpReference Tier 2 - `@McpReference`: needs the MCP reference server at MCP_SERVER_URL
 //   sbt testOllama       Tier 3 - `@Ollama`: needs a local Ollama with `qwen2.5:0.5b` pulled
 //   sbt testSmoke        Tier 4 - `@Cloud`: real provider APIs, real money
 //
@@ -119,6 +120,7 @@ addCommandAlias(
 // to the Local tier; adding a second `-n` would intersect to nothing.
 addCommandAlias("testIntegration", ItTiers.alias(ItTiers.Docker))
 addCommandAlias("testWorkspace", ItTiers.alias(ItTiers.Workspace))
+addCommandAlias("testMcpReference", ItTiers.alias(ItTiers.McpReference))
 addCommandAlias("testOllama", ItTiers.alias(ItTiers.Ollama))
 addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 
@@ -133,9 +135,13 @@ addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 val mimaBaselineVersion: Option[String] = None
 
 // `module` is the artifact name (the project's `name`). Apply this to frozen modules only.
+// A type annotated `@Experimental` (org.llm4s.annotation, a runtime-retained Java annotation) is outside the
+// freeze, so MiMa skips it: no hand-written `ProblemFilters.exclude` per type. scripts/mima-dry-run.sh checks
+// that this works, and that a `@Stable` type is still reported.
 def mimaFrozen(module: String) = Seq(
   mimaPreviousArtifacts := mimaBaselineVersion.map(v => "org.llm4s" %% module % v).toSet,
-  mimaFailOnNoPrevious  := false
+  mimaFailOnNoPrevious  := false,
+  mimaExcludeAnnotations += "org.llm4s.annotation.Experimental"
 )
 
 // ---- shared settings ----
@@ -404,7 +410,7 @@ lazy val media = (project in file("modules/media"))
   )
 
 lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
-  .dependsOn(core, agent)
+  .dependsOn(core, agent, agent % "test->test")
   .settings(
     name := "llm4s-effect",
     commonSettings,
@@ -420,7 +426,7 @@ lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
   )
 
 lazy val llm4sZio = (project in file("modules/llm4s-zio"))
-  .dependsOn(core, agent)
+  .dependsOn(core, agent, agent % "test->test")
   .settings(
     name := "llm4s-zio",
     commonSettings,
