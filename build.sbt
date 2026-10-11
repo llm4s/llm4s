@@ -216,6 +216,15 @@ lazy val bomCheck = taskKey[Unit](
   "Fail the build if the generated llm4s-bom does not list exactly the artifacts the build publishes"
 )
 
+// ---- software bill of materials ----
+// One CycloneDX SBOM per published `llm4s-*` module that ships a jar (samples, `it`, benchmarks, the
+// relocation stubs and any POM-only artifact have none), collected into `target/sboms` of the root
+// project. The release workflow attaches them to the GitHub release and CI builds them on every pull
+// request, so generation cannot silently break. See docs/reference/sbom.md.
+lazy val publishedSboms = taskKey[Seq[File]](
+  "Write a CycloneDX SBOM for every published llm4s-* module into target/sboms and return the files"
+)
+
 // ---- coverage policy check ----
 // Fails the build when a module has neither a coverage floor nor an explicit opt-out.
 // The absence of a decision must be an error, not a silent default.
@@ -271,6 +280,7 @@ lazy val llm4s = (project in file("."))
     voyage,
     bedrock,
     jina,
+    jev,
     cohere,
     watsonx,
     providerTestkit,
@@ -288,6 +298,7 @@ lazy val llm4s = (project in file("."))
     workspaceSamples,
     observability,
     observabilityPrometheus,
+    observabilityMicrometer,
     traceOpentelemetry,
     agent,
     agentTools,
@@ -332,6 +343,36 @@ lazy val llm4s = (project in file("."))
       PublishedArtifacts.boms(projects).foreach(a => println(s"bom $a"))
       stubs.foreach(a => println(s"stub $a"))
     },
+    publishedSboms / aggregate := false,
+    publishedSboms := Def.taskDyn {
+      // A module that publishes a jar gets an SBOM. A POM-only artifact (a relocation stub, or a bill of
+      // materials such as llm4s-bom) has no code and no dependencies of its own to describe.
+      val modules = Def
+        .task(
+          (thisProjectRef.value, name.value, (publish / skip).value, (Compile / packageBin / publishArtifact).value)
+        )
+        .all(ScopeFilter(inAnyProject))
+        .value
+      val refs   = modules.collect { case (ref, name, false, true) if name.startsWith("llm4s-") => ref }
+      val outDir = target.value / "sboms"
+      Def.task {
+        val log  = streams.value.log
+        val boms = makeBom.all(ScopeFilter(inProjects(refs: _*))).value
+        IO.delete(outDir)
+        IO.createDirectory(outDir)
+        // sbt-sbom lists a project that is a `% Test` dependency as a required component; SbomPrune drops those.
+        val written = boms.map { bom =>
+          val (text, dropped) = SbomPrune.prune(IO.read(bom))
+          val copy            = outDir / bom.getName
+          IO.write(copy, text)
+          (copy, dropped)
+        }
+        log.info(
+          s"Wrote ${written.size} SBOMs to $outDir; dropped ${written.map(_._2).sum} test-only components"
+        )
+        written.map(_._1).sortBy(_.getName)
+      }
+    }.value,
     bomCheck / aggregate := false,
     bomCheck := {
       val projects = Def
@@ -969,6 +1010,30 @@ lazy val jina = (project in file("modules/providers/jina"))
     )
   )
 
+// Jev (TypeSafe's System One decision model, #1265): a typed decision client, not a chat or embedding
+// provider. It has no `ProviderDescriptor`, implements neither `LLMClient` nor `EmbeddingProvider`, and
+// returns no `Completion`: Jev takes a state and typed questions (Noul, Choice, Score) and answers each
+// with a probability, a selection or a score. Beta, like the other community modules. No dependency
+// beyond core.
+
+lazy val jev = (project in file("modules/providers/jev"))
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
+  .settings(
+    name := "llm4s-jev",
+    commonSettings,
+    // Measured 98.72% statement coverage (`sbt coverage jev/test jev/coverageReport`). Floor is the
+    // measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 // Cohere embeddings: an embedding provider only, as an `EmbeddingProviderDescriptor` with a typed
 // `CohereInputType` setting. Cohere's native `/v2/embed` is not OpenAI-compatible (`texts`,
 // `input_type`, `embedding_types`, vectors keyed by type), so it is a module of its own and not a
@@ -1229,6 +1294,7 @@ lazy val samples = (project in file("modules//samples"))
     voyage,
     bedrock,
     jina,
+    jev,
     cohere,
     watsonx,
     knowledgegraphNeo4j,
@@ -1373,6 +1439,33 @@ lazy val observabilityPrometheus = (project in file("modules/observability-prome
     )
   )
 
+// `llm4s-observability-micrometer` (#1466) is the Micrometer counterpart of `llm4s-observability-prometheus`: a
+// `MetricsCollector` that writes into a `MeterRegistry` the application already has, so a Spring Boot or
+// Quarkus service sees llm4s request, token, cost and error metrics next to its own with no second metrics
+// stack. It depends on core and `micrometer-core` only. Micrometer stays out of every frozen module
+// (`FrozenDependencies` bans `io.micrometer` there), and it is separate from the Prometheus module so
+// that neither client reaches users who do not use it. The series names match `llm4s-observability-prometheus`
+// (see docs/guide/observability/micrometer), so dashboards carry over.
+lazy val observabilityMicrometer = (project in file("modules/observability-micrometer"))
+  // `observabilityPrometheus % Test` is for `MicrometerPrometheusSeriesSpec`, which feeds the same calls to both
+  // collectors and compares the series they expose. It is not a dependency users get.
+  .dependsOn(core, observabilityPrometheus % Test)
+  .settings(
+    name := "llm4s-observability-micrometer",
+    commonSettings,
+    // Measured 99.49% statement and 97.83% branch coverage (`sbt coverage observabilityMicrometer/test
+    // observabilityMicrometer/coverageReport`). Floor is the measured value rounded down to the nearest 5.
+    // Never lower it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.micrometerCore,
+      Deps.scalatest            % Test,
+      Deps.micrometerPrometheus % Test
+    )
+  )
+
 lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
   // Test depends on core's tests for `ReferenceConfig`, which proves this module's
   // `reference.conf` binds `OTEL_*` under `llm4s.tracing.opentelemetry` (#1133).
@@ -1505,6 +1598,7 @@ lazy val it = (project in file("modules/it"))
     voyage,
     bedrock,
     jina,
+    jev,
     cohere,
     watsonx,
     knowledgegraphNeo4j,
@@ -1583,6 +1677,7 @@ lazy val docs = (project in file("modules/docs"))
     voyage,
     bedrock,
     jina,
+    jev,
     cohere,
     watsonx,
     providerTestkit,
@@ -1591,6 +1686,7 @@ lazy val docs = (project in file("modules/docs"))
     workspaceClient,
     observability,
     observabilityPrometheus,
+    observabilityMicrometer,
     traceOpentelemetry,
     agent,
     agentTools,
@@ -1627,6 +1723,7 @@ lazy val docs = (project in file("modules/docs"))
         (voyage / Compile / sources).value ++
         (bedrock / Compile / sources).value ++
         (jina / Compile / sources).value ++
+        (jev / Compile / sources).value ++
         (cohere / Compile / sources).value ++
         (watsonx / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
@@ -1635,6 +1732,7 @@ lazy val docs = (project in file("modules/docs"))
         (workspaceClient / Compile / sources).value ++
         (observability / Compile / sources).value ++
         (observabilityPrometheus / Compile / sources).value ++
+        (observabilityMicrometer / Compile / sources).value ++
         (traceOpentelemetry / Compile / sources).value ++
         (agent / Compile / sources).value ++
         (agentTools / Compile / sources).value ++
@@ -1672,7 +1770,10 @@ lazy val javaApi = (project in file("modules/java-api"))
   )
 
 lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
-  .dependsOn(javaApi)
+  // `observabilityMicrometer` is provided, like Actuator: `LlmMetricsAutoConfiguration` records into the
+  // application's MeterRegistry only when the application adds `llm4s-observability-micrometer` itself, so the
+  // starter puts no Micrometer jar on a classpath that did not ask for one (#1466).
+  .dependsOn(javaApi, observabilityMicrometer % "provided")
   .settings(
     name := "llm4s-spring-boot-starter",
     commonSettings,
@@ -1686,7 +1787,9 @@ lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
       Deps.scalatest                   % Test,
       Deps.springBootStarterTest       % Test,
       Deps.springBootTestAutoConfigure % Test,
-      Deps.springBootActuator          % Test
+      Deps.springBootActuator          % Test,
+      // MeterRegistry and /actuator/metrics as an application gets them, for LlmMetricsAutoConfigurationSpec.
+      Deps.springBootActuatorAutoConfigure % Test
     )
   )
 

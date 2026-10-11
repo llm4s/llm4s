@@ -132,6 +132,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writing, `AudioIO.saveWav` / `saveRawPcm16` and the new `AudioPreprocessing.standardizeForSTT(audio, rate)`
   reject MP3 with a `ValidationError`; Tacotron2 refuses it. A caller with an exhaustive `match` on
   `AudioFormat` needs a case for `Mp3`. The `@Cloud` smoke suites check MP3 magic bytes.
+- **`llm4s-observability-micrometer`: LLM4S metrics in a Micrometer `MeterRegistry`**
+  ([#1466](https://github.com/llm4s/llm4s/issues/1466)): a new Beta module (`modules/observability-micrometer`) that depends on
+  `llm4s-core` and `micrometer-core`. `new MicrometerMetrics(registry)` is a `MetricsCollector` that records requests,
+  durations, tokens, cost, errors and image generation as `llm4s.*` meters whose Prometheus export has the same series names
+  and duration buckets as `llm4s-observability-prometheus` (`llm4s.requests` is `llm4s_requests_total`), so dashboards carry
+  over; a test compares the two collectors' exposed series and values. It also records retries
+  (`llm4s.retries`), circuit-breaker transitions and `recordError`, which the Prometheus collector leaves as no-ops. Tags are
+  provider, model and fixed sets only (provider and model capped at 64 and 256 distinct values per collector, beyond which
+  they are recorded as `other`), no method throws, and negative or non-finite amounts are ignored. The OpenTelemetry
+  GenAI metric names are not used: they are in Development status and the token metric has already been renamed.
+  `llm4s-spring-boot-starter` wires it with no code: its new `LlmMetricsAutoConfiguration` registers a `MicrometerMetrics`
+  bean (`llm4sMetricsCollector`) when the module and a `MeterRegistry` bean are present, and the client bean reports to
+  every `MetricsCollector` bean, so the meters are on `/actuator/metrics`. The starter declares the module `provided`, like
+  Actuator. `FrozenDependencies` now bans `io.micrometer` from frozen modules, as it does `io.prometheus`. See
+  [Micrometer metrics](docs/guide/observability/micrometer.md).
 - **Scala CLI quick start: a first LLM call from one file** ([#1456](https://github.com/llm4s/llm4s/issues/1456)):
   `modules/samples/scala-cli` holds `hello.scala` (with `//> using jvm 21`), `resources/application.conf` (OpenAI),
   `resources/ollama.conf` (a local Ollama, no key) and `logback.xml`; `cd modules/samples/scala-cli && scala-cli run .`
@@ -569,6 +584,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SpeechConfigLoader`. TTS output is raw 24 kHz 16-bit mono PCM in `GeneratedAudio`, not MP3. HTTP
   failures map as the chat providers' do (`AuthenticationError`, `RateLimitError`, `ValidationError`,
   `ServiceError`). See [docs/guide/speech.md](docs/guide/speech.md#cloud-providers).
+- **`llm4s-jev`: a typed client for TypeSafe's Jev decision model** ([#1265](https://github.com/llm4s/llm4s/issues/1265)):
+  Jev takes a state and named, typed questions and answers each with a typed answer, so it is not a chat model and
+  this is neither an `LLMClient` nor a provider: `JevClient.evaluate(JevRequest(state, questions))` returns a
+  `Result[JevResponse]`. Questions are `JevQuestion.Noul` (probability of yes), `Choice` (the selected option, a
+  distribution and a confidence) and `Score` (a probability-weighted score over 2 to 10 ordered levels, with a
+  confidence); answers are `NoulAnswer`, `ChoiceAnswer` and `ScoreAnswer`, read with `response.noul(id)`,
+  `.choice(id)` and `.score(id)`, with the resolved model, token usage and the request id. A response is checked against
+  its request: one answer per question asked, each of its question's type, a Choice's selected option among the
+  options asked with the highest probability and a probability for every option, a Score with every level asked,
+  each numbered once (canonical level keys) and a score within the levels (a score a rounding error outside them,
+  within 1e-9, is clamped in); a body nested more than 64 levels deep is refused unparsed (so a Score level
+  description, which the API echoes back, nested more than 60 levels deep is refused before the request is sent), and an error body nested
+  more than 32 levels deep is not read, so neither can overflow a small thread stack;
+  a Score level's legend entry keeps the string, object or array the question gave. Configuration is the
+  `llm4s.jev` block and `TYPESAFE_API_KEY` (bound to `llm4s.credentials.typesafe.apiKey`), `TYPESAFE_BASE_URL` and
+  `TYPESAFE_DEFAULT_MODEL`. Failures map onto LLM4S's errors (401/403 `AuthenticationError`, 400/422
+  `ValidationError`, 429 `RateLimitError` with the server's `Retry-After` or `retry-after-ms`, 5xx including 529
+  `ServiceError`) and transient ones are retried as TypeSafe's SDKs do (two retries, 0.5 s doubling to 5 s with
+  jitter, a 30 s budget, `RetryPolicy.isTransient` as the rule). The key is sent only as a bearer token over https
+  (plain http only for a loopback host) and never reaches a log line or `toString`; an error masks it where a
+  server echoed it as written, JSON-escaped or URL-encoded (a partial echo is not recognised). **No idempotency
+  key:** TypeSafe documents none, so none is invented and each retry is a separate billable call; a header the
+  caller adds with `JevRequest.withHeader` is sent unchanged on every attempt. A Beta module under
+  `modules/providers/jev`, no dependency beyond `llm4s-core`; tested against a local fake server built from the
+  published API reference and not yet run against the live API. A `JevTicketTriageExample` sample and
+  `docs/guide/jev.md`.
 - **`scripts/verify-release.sh`: check that a release is on Maven Central** ([#1281](https://github.com/llm4s/llm4s/issues/1281)):
   `scripts/verify-release.sh 0.5.0` asks the build which artifacts it publishes (the new
   `sbt -error listPublishedArtifacts`: 31 artifacts and 5 relocation stubs today) and checks that each
@@ -594,6 +635,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markers, a stream that ends without a terminal event or with `error`, `cancelled` or `time_limit`
   is a `Left(ServiceError)`, `baseUrl` and `iamUrl` must be `https` (except localhost), the API key
   is trimmed, and setting both `projectId` and `spaceId` is a configuration error.
+- **A CycloneDX SBOM per published module, and a dependency scan** ([#1464](https://github.com/llm4s/llm4s/issues/1464)):
+  `sbt publishedSboms` writes one CycloneDX 1.6 JSON SBOM for each published `llm4s-*` module that ships a jar into
+  `target/sboms` (`<module>-<version>.bom.json`; the samples, `it`, benchmarks, the relocation stubs and any POM-only
+  artifact have none), using the `sbt-sbom` build plugin (MIT; it uses the Apache-2.0 `cyclonedx-core-java`), which adds nothing to the published POMs. The
+  release workflow's new `sbom` job attaches them to the GitHub Release after it exists, so a failure there cannot
+  affect Maven Central, the Release, the docs or the image; CI builds and validates them on every pull request
+  (`scripts/check-sbom.sh`, tested by `scripts/test-check-sbom.sh`) and uploads them as an artifact. A new
+  `Dependency scan` workflow runs OSV-Scanner v2.6.0 (Apache-2.0, pinned by SHA-256) over them on pull requests that touch the
+  dependency files and weekly. A pull request fails only when it adds a HIGH or CRITICAL advisory its base does not
+  have (`scripts/osv-new-findings.sh`); advisories already on `main` are reported, a scanner outage is a warning on a
+  pull request, and no secret is used. See `docs/reference/sbom.md`.
 - **A MiMa dry run, and MiMa skips `@Experimental` types** ([#1281](https://github.com/llm4s/llm4s/issues/1281)):
   `scripts/mima-dry-run.sh` shows, before 0.5.0 exists, that setting `mimaBaselineVersion` will work. In a scratch
   clone of `HEAD` it publishes the build at a throwaway version to a temporary Maven repository (nothing reaches
