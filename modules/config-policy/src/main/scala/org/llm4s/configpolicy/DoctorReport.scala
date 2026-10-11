@@ -69,31 +69,44 @@ private[configpolicy] object DoctorUrls {
     else {
       val start = schemeEnd + 3
       val rest  = url.substring(start)
-      // The user info ends at the last '@' before the path, so a password holding '?' or '#' is removed whole.
-      val authority = rest.takeWhile(_ != '/')
-      val hostAndOn = rest.substring(authority.lastIndexOf('@') + 1)
-      url.substring(0, start) + cutQuery(hostAndOn)
+      url.substring(0, start) + cutQuery(rest.substring(userInfoEnd(rest) + 1))
     }
+  }
+
+  /**
+   * Where the user info ends in `rest` (the URL after `scheme://`): the last '@' before the path, so a password
+   * holding '?' or '#' is removed whole; failing that, the last '@' before any '?' or '#', so a password holding
+   * '/' is removed whole too. `-1` when there is none.
+   */
+  private def userInfoEnd(rest: String): Int = {
+    val inAuthority = rest.takeWhile(_ != '/').lastIndexOf('@')
+    if (inAuthority >= 0) inAuthority else cutQuery(rest).lastIndexOf('@')
   }
 
   /** `text` with every URL in it shown as [[display]] shows it. */
   def scrubText(text: String): String =
     InText.replaceAllIn(text, m => scala.util.matching.Regex.quoteReplacement(display(m.matched)))
 
-  /** The parts of `url` that are secret: the user info, its password, the query, each query value and the fragment. */
+  /**
+   * The parts of `url` that are secret: the user info, its password, the query, each query value and the
+   * fragment, and the user info and password URL-decoded, as an error message may print them.
+   */
   def secretsIn(url: String): List[String] = {
     val schemeEnd                  = url.indexOf("://")
     val rest                       = if (schemeEnd < 0) url else url.substring(schemeEnd + 3)
-    val authority                  = rest.takeWhile(_ != '/')
-    val at                         = authority.lastIndexOf('@')
-    val userInfo                   = if (at < 0) "" else authority.substring(0, at)
+    val at                         = userInfoEnd(rest)
+    val userInfo                   = if (at < 0) "" else rest.substring(0, at)
     val password                   = userInfo.dropWhile(_ != ':').drop(1)
     val afterHost                  = rest.substring(at + 1)
     val (beforeFragment, fragment) = afterHost.span(_ != '#')
     val query                      = beforeFragment.dropWhile(_ != '?').drop(1)
     val values                     = query.split('&').toList.map(_.dropWhile(_ != '=').drop(1))
-    (userInfo :: password :: query :: fragment.drop(1) :: values).filter(_.nonEmpty)
+    val decoded = List(userInfo, password).flatMap(decode).filterNot(d => d == userInfo || d == password)
+    (userInfo :: password :: query :: fragment.drop(1) :: values ::: decoded).filter(_.nonEmpty)
   }
+
+  private def decode(text: String): Option[String] =
+    scala.util.Try(java.net.URLDecoder.decode(text, java.nio.charset.StandardCharsets.UTF_8)).toOption
 
   private def cutQuery(text: String): String = text.takeWhile(c => c != '?' && c != '#')
 }

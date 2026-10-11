@@ -381,6 +381,109 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     }
   }
 
+  "Doctor printing a URL whose password holds a slash" should {
+
+    val slashed = "http://u:SLASH/PASS-secret@gw.example.com/v1?k=QV-value-123#FR-frag"
+
+    "show only the host, port and path" in {
+      DoctorUrls.display(slashed) shouldBe "http://gw.example.com/v1"
+      DoctorUrls.display("http://u:p%2Fq@gw.example.com/v1") shouldBe "http://gw.example.com/v1"
+      DoctorUrls.display("https://gw.example.com/v1?mail=a@b.example") shouldBe "https://gw.example.com/v1"
+      DoctorUrls.scrubText(s"refused by $slashed today") shouldBe "refused by http://gw.example.com/v1 today"
+    }
+
+    "list the user info and password among its secrets, as written and URL-decoded" in {
+      DoctorUrls.secretsIn(slashed) should contain.allOf("u:SLASH/PASS-secret", "SLASH/PASS-secret", "QV-value-123")
+      DoctorUrls.secretsIn("http://u:ENC%2FPASS-secret@gw.example.com/v1") should contain.allOf(
+        "ENC%2FPASS-secret",
+        "ENC/PASS-secret",
+        "u:ENC/PASS-secret"
+      )
+    }
+
+    "keep the password out of the report, and hide its decoded form when an error echoes it" in {
+      val echoing = new Probe(live = Left(ServiceError(401, "openai", "user u rejected with password ENC/PASS-secret")))
+      val report = run(
+        openAi(s"""apiKey = "$SecretKey"""", """baseUrl = "http://u:ENC%2FPASS-secret@gw.example.com/v1""""),
+        echoing,
+        DoctorOptions().withLive(true)
+      )
+
+      check(report, "Local server").detail should include("http://gw.example.com/v1 is not a local server")
+      Seq(report.renderText, report.renderJson).foreach { out =>
+        (out should not).include("PASS-secret")
+        (out should not).include("u:ENC")
+      }
+    }
+  }
+
+  "Doctor on a configuration file that cannot be parsed" should {
+
+    // Typesafe Config's messages for these quote the neighbouring values as Quoted("..."),
+    // SimpleConfigObject({...}) and SimpleConfigList([...]).
+    val unparseable = List(
+      "header object beside a string" -> ("""baseUrl = "https://gw" headers { A = "GWHDR-abcdefgh12" }""", "GWHDR"),
+      "object beside an API key"      -> ("""apiKey = "GWAPIKEY-abcdefgh" { x = 1 }""", "GWAPIKEY"),
+      "list holding an API key"       -> ("""apiKey = ["GWAPIKEY-abcdefgh"] "x"""", "GWAPIKEY")
+    )
+
+    def withFile[A](hocon: String)(body: java.nio.file.Path => A): A = {
+      val file = Files.createTempFile("doctor-unparseable", ".conf")
+      Files.writeString(file, hocon)
+      Using.resource(new AutoCloseable { override def close(): Unit = Files.delete(file) })(_ => body(file))
+    }
+
+    unparseable.foreach { case (label, (line, secret)) =>
+      s"print no value, as text or JSON, for: $label" in {
+        val hocon =
+          s"""llm4s.providers {\n  provider = "main"\n  main {\n    provider = "openai"\n    $line\n  }\n}\n"""
+        withFile(hocon) { file =>
+          val (text, textExit) = DoctorCli.execute(Array("--config", file.toString), new Probe().ports)
+          val (json, jsonExit) = DoctorCli.execute(Array("--config", file.toString, "--json"), new Probe().ports)
+
+          textExit shouldBe 2
+          jsonExit shouldBe 2
+          Seq(text, json).foreach { out =>
+            (out should not).include(secret)
+            (out should not).include("abcdefgh")
+            (out should not).include("Quoted(")
+            (out should not).include("SimpleConfig")
+            (out should not).include("https://gw")
+          }
+          text should include("FAIL  Configuration")
+          text should include(s"${file.getFileName}:5")
+          val configuration = ujson.read(json)("checks").arr.find(_("name").str == "Configuration").value
+          configuration("status").str shouldBe "fail"
+          configuration("detail").str should include(s"${file.getFileName}:5")
+        }
+      }
+    }
+
+    "still say where a plain syntax error is, and what kind it is" in {
+      withFile("llm4s {\n  providers {\n    provider = \n") { file =>
+        val (text, _) = DoctorCli.execute(Array("--config", file.toString), new Probe().ports)
+
+        text should include(file.getFileName.toString + ":")
+        text should include("ConfigException.Parse")
+        text should include("HOCON syntax")
+      }
+    }
+
+    "hide every long quoted value of the file, in case a message quotes one" in {
+      withFile("""a = "QUOTED-value-1234" { x = 1 }""") { file =>
+        val failures = ConfigSource.file(file).value().left.toOption.value
+        DoctorConfigErrors.quotedInFiles(failures) should contain("QUOTED-value-1234")
+      }
+    }
+
+    "drop the values from a message that names one" in {
+      DoctorConfigErrors.withoutValues("""Quoted("GWAPIKEY-abcdefgh") and SimpleConfigObject({"x":1})""") should
+        not.include("GWAPIKEY").and(include("expected shape"))
+      DoctorConfigErrors.withoutValues("""Expected type OBJECT, found "GWAPIKEY-abcdefgh" at 'provider'""") shouldBe
+        """Expected type OBJECT, found "..." at 'provider'"""
+    }
+  }
+
   "Doctor hiding header values" should {
 
     "hide every section's header values when a provider echoes them" in {

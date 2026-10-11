@@ -125,7 +125,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (a warning if not). With `--live` it makes one small request and maps an authentication, rate-limit, not-found,
   timeout or network error to its own advice. Without `--local` or `--live` nothing is contacted. The configuration
   is read through `Llm4sConfig`. Every step that fails prints a `fix:` line; the exit code is `0`, `1` (warnings
-  only) or `2`. A URL is printed without its user info, query or fragment. Every API key, every section's header values
+  only) or `2`. A URL is printed without its user info, query or fragment (a password holding `/` included). A
+  configuration file that cannot be parsed is reported by file, line and kind of error only, never with Typesafe
+  Config's message, which quotes the values beside the problem; every quoted value of 8 characters or more in that
+  file is also hidden by value. Every API key, every section's header values
   and the base-URL user info and query values in the configuration are hidden by value in the output (values of 8
   characters or more), in addition to the shape-based redaction. `Doctor.run` and `DoctorPorts` are the same check as a function with the JDK, model probe and live
   request injectable. The module is not published and `Doctor` adds no public API to a published module. See

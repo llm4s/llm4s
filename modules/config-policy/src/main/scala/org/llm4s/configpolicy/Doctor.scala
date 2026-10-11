@@ -11,6 +11,8 @@ import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
 import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.types.Result
 import pureconfig.ConfigSource
+import com.typesafe.config.{ ConfigException, ConfigOrigin }
+import pureconfig.error.{ CannotParse, CannotRead, ConfigReaderFailure, ConfigReaderFailures, ThrowableFailure }
 
 import java.util.Locale
 import java.util.concurrent.{ Executors, ThreadFactory, TimeoutException }
@@ -117,10 +119,12 @@ object Doctor {
     options: DoctorOptions = DoctorOptions(),
     ports: DoctorPorts = DoctorPorts.system
   )(using registry: ProviderRegistry): DoctorReport = {
-    val block   = Llm4sConfig.providerBlock(source)
-    val secrets = knownSecrets(source)
+    val unreadable = source.value().left.toOption
+    val block      = Llm4sConfig.providerBlock(source)
+    val secrets    = knownSecrets(source) ++ unreadable.fold(Set.empty[String])(DoctorConfigErrors.quotedInFiles)
     DoctorReport(
-      (javaCheck(ports.javaFeature()) :: configChecks(source, block, options, ports)).map(_.scrubbed(secrets))
+      (javaCheck(ports.javaFeature()) :: configChecks(source, unreadable, block, options, ports))
+        .map(_.scrubbed(secrets))
     )
   }
 
@@ -177,25 +181,33 @@ object Doctor {
   private def skipped(reason: String, names: List[String]): List[DoctorCheck] =
     names.map(DoctorCheck.skipped(_, reason))
 
+  private def unreadableConfig(detail: String): List[DoctorCheck] =
+    DoctorCheck
+      .fail(ConfigStep, s"the configuration could not be read: $detail")
+      .withFix(
+        "fix application.conf (HOCON) at the place shown, or point --config at a file that exists; " +
+          "the values around the problem are not shown, so open the file to see them"
+      ) :: skipped("needs a readable configuration", AfterConfig)
+
+  // A parse failure's message quotes the values beside the problem (Typesafe Config prints them as
+  // `Quoted("...")`, `SimpleConfigObject({...})`), which is where a key sits; only where and what kind is shown.
   private def configChecks(
     source: ConfigSource,
+    unreadable: Option[ConfigReaderFailures],
     block: Result[(Option[ProviderName], Sections)],
     options: DoctorOptions,
     ports: DoctorPorts
   )(using registry: ProviderRegistry): List[DoctorCheck] =
-    block match {
-      case Left(problem) =>
-        DoctorCheck
-          .fail(ConfigStep, s"the configuration could not be read: ${problem.message}")
-          .withFix("fix the syntax of application.conf (HOCON), or point --config at a file that exists") ::
-          skipped("needs a readable configuration", AfterConfig)
-      case Right((_, sections)) if sections.isEmpty =>
+    (unreadable, block) match {
+      case (Some(failures), _)   => unreadableConfig(DoctorConfigErrors.describe(failures))
+      case (None, Left(problem)) => unreadableConfig(DoctorConfigErrors.withoutValues(problem.message))
+      case (None, Right((_, sections))) if sections.isEmpty =>
         DoctorCheck
           .fail(ConfigStep, "readable, but there is no section under llm4s.providers")
           .withFix(
             """add one to application.conf: llm4s.providers { provider = "main", main { provider = "ollama", model = "llama3" } }"""
           ) :: skipped("needs a provider section", AfterConfig)
-      case Right((selected, sections)) =>
+      case (None, Right((selected, sections))) =>
         val names = sections.keys.map(_.asName).toList.sorted
         val readable = DoctorCheck.pass(
           ConfigStep,
@@ -511,6 +523,99 @@ object Doctor {
   // Daemon threads: a request that outlives its timeout must not keep the JVM alive.
   private lazy val LiveContext: ExecutionContext =
     ExecutionContext.fromExecutor(Executors.newCachedThreadPool(DaemonThreads))
+}
+
+/**
+ * What the doctor says about a configuration that cannot be read. Typesafe Config's messages quote the values
+ * next to the problem (`Quoted("...")`, `SimpleConfigObject({...})`, `SimpleConfigList([...])`), and the
+ * configuration's secrets are not known yet when it cannot be parsed, so a message is never printed: only
+ * where the problem is (file and line), the kind of problem and a fixed description of it.
+ */
+private[configpolicy] object DoctorConfigErrors {
+
+  // Shorter values are left alone, as in the doctor's other by-value hiding.
+  private val MinSecretLength = 8
+
+  /** Each failure as `file:line: kind (what it means)`, with none of the configuration's values. */
+  def describe(failures: ConfigReaderFailures): String =
+    failures.toList.map(describe).distinct.mkString("; ")
+
+  private def describe(failure: ConfigReaderFailure): String = {
+    val (kind, meaning) = failure match {
+      case _: CannotParse => ("ConfigException.Parse", "the HOCON syntax is not valid")
+      case read: CannotRead =>
+        (failure.getClass.getSimpleName, s"${read.sourceName} could not be read")
+      case ThrowableFailure(error, _) => (kindOf(error), meaningOf(error))
+      case other                      => (other.getClass.getSimpleName, "the configuration is not valid")
+    }
+    location(failure).fold(s"$kind ($meaning)")(where => s"$where: $kind ($meaning)")
+  }
+
+  private def kindOf(error: Throwable): String =
+    error.getClass.getName.split('.').last.replace('$', '.')
+
+  private def meaningOf(error: Throwable): String = error match {
+    case _: ConfigException.WrongType =>
+      "a value has the wrong type, for example a string joined to an object or a list on one line"
+    case _: ConfigException.UnresolvedSubstitution => "a ${...} substitution has no value"
+    case _: ConfigException.NotResolved            => "a ${...} substitution was not resolved"
+    case _: ConfigException.BadPath                => "a key is not a valid path"
+    case _: ConfigException.BadValue               => "a value is not valid"
+    case _: ConfigException.Parse                  => "the HOCON syntax is not valid"
+    case _: ConfigException.IO                     => "a file could not be read"
+    case _                                         => "the configuration is not valid"
+  }
+
+  private def originOf(failure: ConfigReaderFailure): Option[ConfigOrigin] = failure match {
+    case ThrowableFailure(error: ConfigException, None) => Option(error.origin)
+    case _                                              => failure.origin
+  }
+
+  /** `file:line`, or the resource or URL the configuration came from; only its location, never its text. */
+  private def location(failure: ConfigReaderFailure): Option[String] =
+    originOf(failure).map { origin =>
+      val where = Option(origin.filename)
+        .orElse(Option(origin.resource))
+        .orElse(Option(origin.url).map(_.toString))
+        .getOrElse("line")
+      if (origin.lineNumber > 0) s"$where:${origin.lineNumber}" else where
+    }
+
+  private val Quoted = "(?s)\"\"\"(.*?)\"\"\"|\"((?:[^\"\\\\\n]|\\\\.)*)\"".r
+
+  /**
+   * Every quoted value of at least 8 characters in the files the failures point at. They cannot be hidden by
+   * key, as the configuration could not be parsed, so every one is hidden by value as well.
+   */
+  def quotedInFiles(failures: ConfigReaderFailures): Set[String] =
+    failures.toList
+      .flatMap(originOf)
+      .flatMap(origin =>
+        Option(origin.filename)
+          .map(java.nio.file.Paths.get(_))
+          .orElse(
+            Option(origin.url)
+              .filter(_.getProtocol == "file")
+              .flatMap(url => Try(java.nio.file.Paths.get(url.toURI)).toOption)
+          )
+      )
+      .distinct
+      .flatMap(path => Try(java.nio.file.Files.readString(path)).toOption)
+      .flatMap(text => Quoted.findAllMatchIn(text).map(m => Option(m.group(1)).getOrElse(m.group(2))))
+      .map(_.trim)
+      .filter(_.length >= MinSecretLength)
+      .toSet
+
+  private val ValueMarker =
+    "(Quoted|Unquoted|ConfigString|ConfigQuotedString|SimpleConfigObject|SimpleConfigList|ConfigConcatenation|ConfigReference|ConfigDelayedMerge\\w*|Config(Int|Long|Double|Boolean|Number|Null))\\(".r
+
+  /**
+   * A configuration error message with no value in it: one that names a Typesafe Config value is replaced
+   * whole, as the value's end cannot be found reliably, and anything in double quotes becomes `"..."`.
+   */
+  def withoutValues(message: String): String =
+    if (ValueMarker.findFirstIn(message).isDefined) "the llm4s.providers block does not have the expected shape"
+    else message.replaceAll("\"[^\"]*\"", "\"...\"")
 }
 
 /**

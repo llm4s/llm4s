@@ -113,13 +113,23 @@ The report shows where a key was found, as a configuration path such as `llm4s.p
 puts a key's value in a message itself. A URL is always printed as `scheme://host:port/path`, without the user
 info, query or fragment where a base URL can carry a password, a signature or a token:
 `https://alice:secret@gw.example.com/v1?sig=...` is shown as `https://gw.example.com/v1`, in the doctor's own
-messages and in any error message that quotes the URL.
+messages and in any error message that quotes the URL. A password that holds a `/` is removed whole too:
+everything up to the last `@` before any `?` or `#` is user info, so `http://u:pa/ss@gw.example.com/v1` is shown as
+`http://gw.example.com/v1`.
+
+A configuration file that cannot be parsed is reported by where the problem is and what kind it is, for example
+`application.conf:5: ConfigException.WrongType (a value has the wrong type, ...)`, never by the parser's own
+message: Typesafe Config's messages quote the values next to the problem (`Quoted("...")`,
+`SimpleConfigObject({...})`, `SimpleConfigList([...])`), and an API key is often one of them. Open the file at that
+line to see the values. As the file could not be parsed, its keys cannot be told apart from other values, so every
+quoted value of 8 characters or more in it is also hidden by value.
 
 Every message that reaches the report is also scrubbed twice, because a provider's or a gateway's error can echo
 what it was sent. First, these values from the configuration are replaced by `***` wherever they appear: every
 shared `llm4s.credentials` key and, from every section under `llm4s.providers` (including one that cannot be read),
 its `apiKey`, each of its `headers` values (and each word of one, so the token of `Bearer <token>` is hidden on its
-own) and the user info, query and query values of its `baseUrl`. Then the text goes through the same shape-based
+own) and the user info, query and query values of its `baseUrl` (the user info and password both as written and
+URL-decoded, since an error can print either). Then the text goes through the same shape-based
 redaction as the exchange logs.
 
 That scrubbing has limits worth knowing:
