@@ -20,7 +20,8 @@ enum CheckStatus:
  *
  * Every string is passed through [[org.llm4s.util.Redaction]] when the check is built, so a message
  * that quotes a configuration error cannot carry a credential into the report. The doctor never
- * reads an API key's value; this is a second line of defence, not the first.
+ * puts an API key's value in a message, and [[Doctor.run]] also hides every key the configuration
+ * holds by value; this shape-based pass is the last line of defence, not the first.
  *
  * @param name   what was checked, e.g. `Provider config`
  * @param status how it ended
@@ -109,18 +110,28 @@ object DoctorReport {
 }
 
 /**
- * What a doctor run may do.
+ * What a doctor run may do. By default it contacts nothing.
  *
- * @param live        make one small request to the configured provider (billed for a hosted one); off by default
- * @param offline     do not contact the configured local model server either
- * @param liveTimeout how long to wait for the live request before reporting it as failed
+ * @param live                 make one small request to the configured provider (billed for a hosted one)
+ * @param local                ask a model server on the loopback interface which models it has
+ * @param liveTimeout          how long to wait for the live request before reporting it as failed
+ * @param applicationClasspath the registry was discovered on the application's classpath (`--classpath`),
+ *                             not the doctor's own, which has every built-in provider module
  */
-final case class DoctorOptions private (live: Boolean, offline: Boolean, liveTimeout: FiniteDuration) {
+final case class DoctorOptions private (
+  live: Boolean,
+  local: Boolean,
+  liveTimeout: FiniteDuration,
+  applicationClasspath: Boolean
+) {
   def withLive(live: Boolean): DoctorOptions                      = copy(live = live)
-  def withOffline(offline: Boolean): DoctorOptions                = copy(offline = offline)
+  def withLocal(local: Boolean): DoctorOptions                    = copy(local = local)
   def withLiveTimeout(liveTimeout: FiniteDuration): DoctorOptions = copy(liveTimeout = liveTimeout)
+  def withApplicationClasspath(applicationClasspath: Boolean): DoctorOptions =
+    copy(applicationClasspath = applicationClasspath)
 }
 
 object DoctorOptions {
-  def apply(): DoctorOptions = new DoctorOptions(live = false, offline = false, liveTimeout = 30.seconds)
+  def apply(): DoctorOptions =
+    new DoctorOptions(live = false, local = false, liveTimeout = 30.seconds, applicationClasspath = false)
 }

@@ -253,6 +253,14 @@ each provider module's `reference.conf` has an example section. See the
 and [running the samples](docs/getting-started/configuration.md#running-the-samples) for the
 samples' own bindings.
 
+To check the whole setup in one run - the JDK, the provider section, its module, its API key (where it was found,
+never its value) and, with `--local`, whether Ollama is running and has the model - run the
+[doctor](docs/reference/doctor.md); each step that fails prints the fix:
+
+```bash
+sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config modules/samples/src/main/resources/application.conf --local"
+```
+
 ### Running the Examples
 
 The quickest start is the [cookbook](docs/examples/cookbook.md): complete, runnable programs that need no API key

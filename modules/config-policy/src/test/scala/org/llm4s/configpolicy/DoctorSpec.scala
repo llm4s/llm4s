@@ -35,11 +35,14 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     val ports: DoctorPorts = DoctorPorts(
       () => java,
       (_, _) => { listCalls.incrementAndGet(); models },
-      _ => { liveCalls.incrementAndGet(); live }
+      (_, _) => { liveCalls.incrementAndGet(); live }
     )
   }
 
   private def source(hocon: String): ConfigSource = ConfigSource.string(hocon)
+
+  // Contacting a local server is opt-in; the tests that are about it ask for it.
+  private val local = DoctorOptions().withLocal(true)
 
   private val localOllama =
     """llm4s.providers {
@@ -73,7 +76,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
   "Doctor on a correct local setup" should {
 
     "pass every step it runs, skip the live call, and exit 0" in {
-      val report = run(localOllama)
+      val report = run(localOllama, options = local)
 
       statuses(report) shouldBe List(
         "JDK"              -> CheckStatus.Pass,
@@ -83,17 +86,19 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
         "API key"          -> CheckStatus.Pass,
         "Provider config"  -> CheckStatus.Pass,
         "Local server"     -> CheckStatus.Pass,
-        "Live call"        -> CheckStatus.Skipped
+        "Live call"        -> CheckStatus.Skipped,
+        "Other sections"   -> CheckStatus.Skipped
       )
       report.exitCode shouldBe 0
       report.verdict shouldBe "pass"
     }
 
     "accept a model the server lists with the :latest tag, and one written with it" in {
-      run(localOllama, new Probe(models = Right(List("llama3:latest")))).exitCode shouldBe 0
+      run(localOllama, new Probe(models = Right(List("llama3:latest"))), local).exitCode shouldBe 0
       run(
         localOllama.replace("\"llama3\"", "\"llama3:latest\""),
-        new Probe(models = Right(List("llama3")))
+        new Probe(models = Right(List("llama3"))),
+        local
       ).exitCode shouldBe 0
     }
   }
@@ -143,7 +148,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
 
     "report a local model server that is down, with the command to start it" in {
       val down   = new Probe(models = Left(NetworkError("connection refused", None, "http://localhost:11434")))
-      val report = run(localOllama, down)
+      val report = run(localOllama, down, local)
 
       check(report, "Local server").status shouldBe CheckStatus.Fail
       check(report, "Local server").detail should include("http://localhost:11434")
@@ -152,7 +157,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     }
 
     "report a model the server does not have, with the pull command" in {
-      val report = run(localOllama, new Probe(models = Right(List("mistral:latest"))))
+      val report = run(localOllama, new Probe(models = Right(List("mistral:latest"))), local)
 
       check(report, "Local server").status shouldBe CheckStatus.Fail
       check(report, "Local server").detail should (include("llama3").and(include("mistral:latest")))
@@ -327,18 +332,20 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
       report.exitCode shouldBe 0
     }
 
-    "leave a local server alone with --offline" in {
+    "leave a local server alone too unless --local is given" in {
       val probe  = new Probe()
-      val report = run(localOllama, probe, DoctorOptions().withOffline(true))
+      val report = run(localOllama, probe)
 
       probe.listCalls.get shouldBe 0
+      probe.liveCalls.get shouldBe 0
       check(report, "Local server").status shouldBe CheckStatus.Skipped
-      check(report, "Local server").detail should include("--offline")
+      check(report, "Local server").detail should include("--local")
+      report.exitCode shouldBe 0
     }
 
-    "ask a local server which models it has, once, by default" in {
+    "ask a local server which models it has, once, with --local" in {
       val probe = new Probe()
-      run(localOllama, probe)
+      run(localOllama, probe, local)
 
       probe.listCalls.get shouldBe 1
       probe.liveCalls.get shouldBe 0
@@ -388,7 +395,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
 
     "report a request that does not answer within the wait" in {
       val release = new CountDownLatch(1)
-      val ports = new Probe().ports.withLive { _ =>
+      val ports = new Probe().ports.withLive { (_, _) =>
         release.await()
         Right("late")
       }
@@ -401,7 +408,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     }
 
     "report a request that throws" in {
-      val ports  = new Probe().ports.withLive(_ => throw new IllegalStateException("boom"))
+      val ports  = new Probe().ports.withLive((_, _) => throw new IllegalStateException("boom"))
       val report = Doctor.run(source(localOllama), live, ports)
 
       check(report, "Live call").status shouldBe CheckStatus.Fail
@@ -454,7 +461,8 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
           "API key",
           "Provider config",
           "Local server",
-          "Live call"
+          "Live call",
+          "Other sections"
         )
       json("checks").arr.map(_("status").str).toList should contain("fail")
       val failed = json("checks").arr.find(_("name").str == "API key").value
@@ -500,7 +508,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
 
     "find the model on a real loopback server" in {
       withStub("""[{"name":"llama3:latest"},{"name":"mistral:latest"}]""") { url =>
-        val report = Doctor.run(source(config(url)), DoctorOptions(), systemPorts)
+        val report = Doctor.run(source(config(url)), local, systemPorts)
 
         check(report, "Local server").status shouldBe CheckStatus.Pass
         check(report, "Local server").detail should include(url)
@@ -510,7 +518,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
 
     "report the models a real server has when the wanted one is missing" in {
       withStub("""[{"name":"mistral:latest"}]""") { url =>
-        val report = Doctor.run(source(config(url)), DoctorOptions(), systemPorts)
+        val report = Doctor.run(source(config(url)), local, systemPorts)
 
         check(report, "Local server").status shouldBe CheckStatus.Fail
         check(report, "Local server").detail should include("mistral:latest")
@@ -519,7 +527,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
 
     "report a server that is not listening" in {
       val url    = withStub("[]")(identity)
-      val report = Doctor.run(source(config(url)), DoctorOptions(), systemPorts)
+      val report = Doctor.run(source(config(url)), local, systemPorts)
 
       check(report, "Local server").status shouldBe CheckStatus.Fail
       check(report, "Local server").detail should include("nothing usable answered")
@@ -529,20 +537,26 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
   "DoctorCli" should {
 
     "read the flags" in {
-      val invocation = DoctorCli.parse(Array("--live", "--offline", "--json", "--config", "app.conf", "--timeout", "7"))
+      val invocation = DoctorCli.parse(
+        Array("--live", "--local", "--json", "--config", "app.conf", "--timeout", "7", "--classpath", "a.jar")
+      )
 
       invocation.options.live shouldBe true
-      invocation.options.offline shouldBe true
+      invocation.options.local shouldBe true
+      invocation.options.applicationClasspath shouldBe true
+      invocation.classpath shouldBe Some("a.jar")
       invocation.options.liveTimeout shouldBe 7.seconds
       invocation.json shouldBe true
       invocation.config shouldBe Some("app.conf")
     }
 
-    "default to no live call, no offline, a 30 second wait, text output and the application's own config" in {
+    "default to contacting nothing, a 30 second wait, text output, and the application's own config" in {
       val invocation = DoctorCli.parse(Array.empty)
 
       invocation.options.live shouldBe false
-      invocation.options.offline shouldBe false
+      invocation.options.local shouldBe false
+      invocation.options.applicationClasspath shouldBe false
+      invocation.classpath shouldBe None
       invocation.options.liveTimeout shouldBe 30.seconds
       invocation.json shouldBe false
       invocation.config shouldBe None
@@ -556,7 +570,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     "check a --config file and return the text and exit code" in {
       val file = Files.createTempFile("doctor", ".conf")
       Files.writeString(file, localOllama)
-      val (output, exitCode) = DoctorCli.execute(Array("--config", file.toString), new Probe().ports)
+      val (output, exitCode) = DoctorCli.execute(Array("--config", file.toString, "--local"), new Probe().ports)
       Files.delete(file)
 
       exitCode shouldBe 0
@@ -576,6 +590,140 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
 
       exitCode shouldBe 2
       ujson.read(output)("verdict").str shouldBe "fail"
+    }
+  }
+
+  "Doctor on the other sections" should {
+
+    "pass when every section besides the default loads" in {
+      val config = localOllama.replace(
+        "\n}",
+        """
+          |  second { provider = "ollama", model = "mistral", baseUrl = "http://localhost:11434" }
+          |}""".stripMargin
+      )
+      val others = check(run(config), "Other sections")
+
+      others.status shouldBe CheckStatus.Pass
+      others.detail should include("second")
+    }
+
+    "warn, naming the section and its problem, when one would fail to load by name" in {
+      val config =
+        localOllama + s"""\nllm4s.providers.billing { provider = "no-such-vendor", model = "m", apiKey = "$SecretKey" }"""
+      val report = run(config)
+      val others = check(report, "Other sections")
+
+      others.status shouldBe CheckStatus.Warn
+      others.detail should (include("'billing'").and(include("no-such-vendor")))
+      others.fix.value should include("llm4s.providers.billing")
+      (report.renderText should not).include(SecretKey)
+      report.exitCode shouldBe 1
+    }
+  }
+
+  "Doctor reading the configuration through Llm4sConfig" should {
+
+    "treat a configuration without a providers block as having no section" in {
+      val report = run("llm4s.tracing.mode = \"none\"")
+
+      check(report, "Configuration").status shouldBe CheckStatus.Fail
+      check(report, "Configuration").detail should include("no section")
+    }
+
+    "report a default section that cannot be read, and skip what needs it" in {
+      val report = run(
+        """llm4s.providers { provider = "main", main { provider = "ollama", model = "m", headers = "not-a-map" } }"""
+      )
+
+      check(report, "Default provider").status shouldBe CheckStatus.Fail
+      check(report, "Default provider").detail should (include("could not be read").and(include("headers")))
+      check(report, "Provider module").status shouldBe CheckStatus.Skipped
+      report.exitCode shouldBe 2
+    }
+  }
+
+  "Doctor on the provider module" should {
+
+    "name the module that supplied the provider, and say the doctor's classpath is not the application's" in {
+      val module = check(run(localOllama), "Provider module")
+
+      module.status shouldBe CheckStatus.Pass
+      module.detail should include("Llm4sOllamaModule")
+      module.detail should include("pass --classpath")
+    }
+
+    "say the module was found on the application's classpath when one was given" in {
+      val module = check(run(localOllama, options = DoctorOptions().withApplicationClasspath(true)), "Provider module")
+
+      module.detail should include("on the given --classpath")
+      (module.detail should not).include("pass --classpath")
+    }
+
+    "make the live request through the run's own registry" in {
+      val ollamaOnly = ProviderRegistry.of(ProviderRegistry.default.find(ProviderId("ollama")).value)
+      val seen       = new java.util.concurrent.atomic.AtomicReference[ProviderRegistry]()
+      val ports = new Probe().ports.withLive { (_, registry) =>
+        seen.set(registry); Right("m")
+      }
+
+      Doctor.run(source(localOllama), DoctorOptions().withLive(true), ports)(using ollamaOnly)
+
+      (seen.get should be).theSameInstanceAs(ollamaOnly)
+    }
+  }
+
+  "DoctorCli with --classpath" should {
+
+    def withClasspath[A](services: Option[String])(body: String => A): A = {
+      val dir = Files.createTempDirectory("doctor-cp")
+      services.foreach { line =>
+        val file = dir.resolve("META-INF/services/org.llm4s.llmconnect.spi.Llm4sProviderModule")
+        Files.createDirectories(file.getParent)
+        Files.writeString(file, line + "\n")
+      }
+      body(dir.toString)
+    }
+
+    def conf(hocon: String): String = {
+      val file = Files.createTempFile("doctor", ".conf")
+      Files.writeString(file, hocon)
+      file.toString
+    }
+
+    val openAiConf = conf(openAi(s"""apiKey = "$SecretKey""""))
+    val ollamaConf = conf(localOllama)
+
+    "report a provider whose module is missing from the application's classpath" in {
+      withClasspath(None) { cp =>
+        val (output, exitCode) = DoctorCli.execute(Array("--config", openAiConf, "--classpath", cp), new Probe().ports)
+
+        exitCode shouldBe 2
+        output should include("FAIL  Provider module")
+        output should include("add the LLM4S module that supplies 'openai'")
+        (output should not).include(SecretKey)
+      }
+    }
+
+    "find only the modules whose service entry is on the application's classpath" in {
+      withClasspath(Some("org.llm4s.llmconnect.provider.Llm4sOllamaModule")) { cp =>
+        val (ollamaOut, ollamaExit) =
+          DoctorCli.execute(Array("--config", ollamaConf, "--classpath", cp), new Probe().ports)
+        val (openAiOut, openAiExit) =
+          DoctorCli.execute(Array("--config", openAiConf, "--classpath", cp), new Probe().ports)
+
+        ollamaExit shouldBe 0
+        ollamaOut should include("on the given --classpath")
+        openAiExit shouldBe 2
+        openAiOut should include("FAIL  Provider module")
+      }
+    }
+
+    "refuse a classpath entry that is not a path" in {
+      val (output, exitCode) = DoctorCli.execute(Array("--classpath", "bad\u0000entry"), new Probe().ports)
+
+      exitCode shouldBe 2
+      output should include("--classpath")
     }
   }
 }

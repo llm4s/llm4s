@@ -1,8 +1,7 @@
 package org.llm4s.configpolicy
 
-import com.typesafe.config.{ Config, ConfigObject }
 import org.llm4s.config.{ Llm4sConfig, SharedCredentials }
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderName, RawNamedProviderSection }
 import org.llm4s.error.*
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.LLMConnect
@@ -17,7 +16,6 @@ import java.util.Locale
 import java.util.concurrent.{ Executors, ThreadFactory, TimeoutException }
 import scala.concurrent.{ Await, ExecutionContext, Future }
 import scala.concurrent.duration.*
-import scala.jdk.CollectionConverters.*
 import scala.util.{ Failure, Success, Try, Using }
 
 /**
@@ -25,17 +23,18 @@ import scala.util.{ Failure, Success, Try, Using }
  *
  * @param javaFeature the running JDK's feature version, e.g. `21`
  * @param listModels  asks a provider's own model lister which models a local server has
- * @param live        makes one small request with the given provider config and returns the model that answered
+ * @param live        makes one small request with the given provider config, through the run's registry,
+ *                    and returns the model that answered
  */
 final case class DoctorPorts private (
   javaFeature: () => Int,
   listModels: (ProviderDescriptor, NamedProviderConfig) => Result[List[String]],
-  live: ProviderConfig => Result[String]
+  live: (ProviderConfig, ProviderRegistry) => Result[String]
 ) {
   def withJavaFeature(javaFeature: () => Int): DoctorPorts = copy(javaFeature = javaFeature)
   def withListModels(listModels: (ProviderDescriptor, NamedProviderConfig) => Result[List[String]]): DoctorPorts =
     copy(listModels = listModels)
-  def withLive(live: ProviderConfig => Result[String]): DoctorPorts = copy(live = live)
+  def withLive(live: (ProviderConfig, ProviderRegistry) => Result[String]): DoctorPorts = copy(live = live)
 }
 
 object DoctorPorts {
@@ -43,7 +42,7 @@ object DoctorPorts {
   def apply(
     javaFeature: () => Int,
     listModels: (ProviderDescriptor, NamedProviderConfig) => Result[List[String]],
-    live: ProviderConfig => Result[String]
+    live: (ProviderConfig, ProviderRegistry) => Result[String]
   ): DoctorPorts = new DoctorPorts(javaFeature, listModels, live)
 
   /** The real thing: the running JVM, the provider's own lister over HTTP, and a one-token request. */
@@ -62,10 +61,12 @@ object DoctorPorts {
         )
     }
 
-  private def systemLive(config: ProviderConfig): Result[String] =
+  // The run's registry, not `ProviderRegistry.default`: a provider registered explicitly (or found on
+  // `--classpath`) must be the one the request goes through.
+  private def systemLive(config: ProviderConfig, registry: ProviderRegistry): Result[String] =
     for {
       service      <- Llm4sConfig.modelRegistryService()
-      client       <- LLMConnect.getClient(config)(using service, ProviderRegistry.default)
+      client       <- LLMConnect.getClient(config)(using service, registry)
       conversation <- Conversation.userOnly("Reply with the single word: ok")
       completion   <- client.complete(conversation, CompletionOptions().withMaxTokens(8))
     } yield completion.model
@@ -75,13 +76,15 @@ object DoctorPorts {
  * Checks a whole LLM4S setup in one run and says what to change when a step fails.
  *
  * The steps, in order: the JDK, the configuration, the default provider, its module on the classpath, its
- * API key, its config, a local model server, and (only with [[DoctorOptions.live]]) one small request.
+ * API key, its config, a local model server (only with [[DoctorOptions.local]]), one small request (only with
+ * [[DoctorOptions.live]]), and the configuration's other provider sections.
  * A step that cannot run because an earlier one failed is reported as skipped, not as failed.
  *
- * By default nothing is sent to a hosted provider. A server on the loopback interface (an Ollama on the
- * same machine) is asked which models it has, because that is the usual first-run problem; turn that off
- * with [[DoctorOptions.offline]]. The API key's value is never read into the report: only the config path
- * it came from is shown.
+ * By default nothing leaves the machine and no server is contacted, not even a local one: the network is
+ * used only when a run asks for it. The configuration is read through `Llm4sConfig`, so its sections, the
+ * default and the shared `llm4s.credentials` mean exactly what they mean to an application. The API key's
+ * value is never put in the report: only the config path it came from is shown, and every key the
+ * configuration holds is hidden by value in every message as well.
  */
 object Doctor {
 
@@ -95,22 +98,29 @@ object Doctor {
   private val Section    = "Provider config"
   private val LocalModel = "Local server"
   private val Live       = "Live call"
+  private val Others     = "Other sections"
+
+  private type Sections = Map[ProviderName, Result[RawNamedProviderSection]]
 
   /**
    * Runs every check against `source`.
    *
-   * @param source  where the configuration comes from (see `CheckPolicies.sourceFor`)
-   * @param options what the run may do
-   * @param ports   the outside world, replaceable in tests
-   * @param registry the providers on the classpath
+   * @param source   where the configuration comes from (see `CheckPolicies.sourceFor`)
+   * @param options  what the run may do
+   * @param ports    the outside world, replaceable in tests
+   * @param registry the providers to check the configuration against: the application's, when the CLI is
+   *                 given `--classpath`
    */
   def run(
     source: ConfigSource,
     options: DoctorOptions = DoctorOptions(),
     ports: DoctorPorts = DoctorPorts.system
   )(using registry: ProviderRegistry): DoctorReport = {
-    val secrets = knownSecrets(source)
-    DoctorReport((javaCheck(ports.javaFeature()) :: configChecks(source, options, ports)).map(_.scrubbed(secrets)))
+    val block   = Llm4sConfig.providerBlock(source)
+    val secrets = knownSecrets(source, block)
+    DoctorReport(
+      (javaCheck(ports.javaFeature()) :: configChecks(source, block, options, ports)).map(_.scrubbed(secrets))
+    )
   }
 
   // Shorter values are left alone: hiding a three-letter "key" would mangle ordinary words in the report.
@@ -121,12 +131,13 @@ object Doctor {
    * Redaction recognises the shapes of known vendors' keys; an error message that echoes a key of
    * another shape (a gateway token, a test key) would otherwise reach the output.
    */
-  private def knownSecrets(source: ConfigSource): Set[String] = {
+  private def knownSecrets(
+    source: ConfigSource,
+    block: Result[(Option[ProviderName], Sections)]
+  ): Set[String] = {
     val shared = SharedCredentials.read(source).entries.values.toList.flatMap(_.toOption)
-    val own = readConfig(source).toOption.toList.flatMap { config =>
-      providerSections(config).values.toList.flatMap(section => value(section, "apiKey"))
-    }
-    (shared ::: own).filter(_.length >= MinSecretLength).toSet
+    val own    = block.toOption.toList.flatMap(_._2.values.toList.flatMap(_.toOption.flatMap(_.apiKey)))
+    (shared ::: own).map(_.trim).filter(_.length >= MinSecretLength).toSet
   }
 
   private def javaCheck(feature: Int): DoctorCheck =
@@ -136,47 +147,48 @@ object Doctor {
         .fail("JDK", s"Java $feature is too old: LLM4S needs $MinimumJava or newer")
         .withFix(s"run with a JDK $MinimumJava or newer (set JAVA_HOME, or choose it in your IDE and build tool)")
 
-  private val AfterConfig = List(Default, Module, Key, Section, LocalModel, Live)
+  private val AfterConfig  = List(Default, Module, Key, Section, LocalModel, Live, Others)
+  private val AfterDefault = List(Module, Key, Section, LocalModel, Live)
 
   private def skipped(reason: String, names: List[String]): List[DoctorCheck] =
     names.map(DoctorCheck.skipped(_, reason))
 
-  private def configChecks(source: ConfigSource, options: DoctorOptions, ports: DoctorPorts)(using
-    registry: ProviderRegistry
-  ): List[DoctorCheck] =
-    readConfig(source) match {
+  private def configChecks(
+    source: ConfigSource,
+    block: Result[(Option[ProviderName], Sections)],
+    options: DoctorOptions,
+    ports: DoctorPorts
+  )(using registry: ProviderRegistry): List[DoctorCheck] =
+    block match {
       case Left(problem) =>
         DoctorCheck
-          .fail(ConfigStep, s"the configuration could not be read: $problem")
+          .fail(ConfigStep, s"the configuration could not be read: ${problem.message}")
           .withFix("fix the syntax of application.conf (HOCON), or point --config at a file that exists") ::
           skipped("needs a readable configuration", AfterConfig)
-      case Right(config) =>
-        val sections = providerSections(config)
-        val names    = sections.keys.toList.sorted
-        if (names.isEmpty) {
-          DoctorCheck
-            .fail(ConfigStep, "readable, but there is no section under llm4s.providers")
-            .withFix(
-              """add one to application.conf: llm4s.providers { provider = "main", main { provider = "ollama", model = "llama3" } }"""
-            ) :: skipped("needs a provider section", AfterConfig)
-        } else {
-          val readable = DoctorCheck.pass(
-            ConfigStep,
-            s"readable; llm4s.providers has ${names.size} section(s): ${names.mkString(", ")}"
-          )
-          readable :: defaultChecks(source, config, sections, names, options, ports)
-        }
+      case Right((_, sections)) if sections.isEmpty =>
+        DoctorCheck
+          .fail(ConfigStep, "readable, but there is no section under llm4s.providers")
+          .withFix(
+            """add one to application.conf: llm4s.providers { provider = "main", main { provider = "ollama", model = "llama3" } }"""
+          ) :: skipped("needs a provider section", AfterConfig)
+      case Right((selected, sections)) =>
+        val names = sections.keys.map(_.asName).toList.sorted
+        val readable = DoctorCheck.pass(
+          ConfigStep,
+          s"readable; llm4s.providers has ${names.size} section(s): ${names.mkString(", ")}"
+        )
+        (readable :: defaultChecks(source, selected, sections, names, options, ports)) :+
+          othersCheck(source, selected, names)
     }
 
   private def defaultChecks(
     source: ConfigSource,
-    config: Config,
-    sections: Map[String, ConfigObject],
+    selected: Option[ProviderName],
+    sections: Sections,
     names: List[String],
     options: DoctorOptions,
     ports: DoctorPorts
-  )(using registry: ProviderRegistry): List[DoctorCheck] = {
-    val selected = text(config, "llm4s.providers.provider")
+  )(using registry: ProviderRegistry): List[DoctorCheck] =
     selected match {
       case None =>
         DoctorCheck
@@ -184,33 +196,42 @@ object Doctor {
           .withFix(
             s"""set llm4s.providers.provider = "${names.head}" in application.conf, or name another section"""
           ) ::
-          skipped("needs a default provider", AfterConfig.drop(1))
-      case Some(name) if !sections.contains(name) =>
-        DoctorCheck
-          .fail(Default, s"llm4s.providers.provider names '$name', but there is no such section")
-          .withFix(
-            s"""set llm4s.providers.provider to one of: ${names.mkString(", ")} (or add a section called '$name')"""
-          ) :: skipped("needs a default provider", AfterConfig.drop(1))
+          skipped("needs a default provider", AfterDefault)
       case Some(name) =>
-        DoctorCheck.pass(Default, s"'$name'") ::
-          moduleChecks(source, name, sections(name), options, ports)
+        sections.get(name) match {
+          case None =>
+            DoctorCheck
+              .fail(Default, s"llm4s.providers.provider names '${name.asName}', but there is no such section")
+              .withFix(
+                s"""set llm4s.providers.provider to one of: ${names.mkString(
+                    ", "
+                  )} (or add a section called '${name.asName}')"""
+              ) :: skipped("needs a default provider", AfterDefault)
+          case Some(Left(error)) =>
+            DoctorCheck
+              .fail(Default, s"'${name.asName}' is the default, but its section could not be read: ${error.message}")
+              .withFix(s"correct llm4s.providers.${name.asName}: each key must have the type the provider expects") ::
+              skipped("needs a readable default section", AfterDefault)
+          case Some(Right(section)) =>
+            DoctorCheck.pass(Default, s"'${name.asName}'") ::
+              moduleChecks(source, name.asName, section, options, ports)
+        }
     }
-  }
 
   private def moduleChecks(
     source: ConfigSource,
     name: String,
-    section: ConfigObject,
+    section: RawNamedProviderSection,
     options: DoctorOptions,
     ports: DoctorPorts
   )(using registry: ProviderRegistry): List[DoctorCheck] = {
     val path = s"llm4s.providers.$name"
-    value(section, "provider") match {
+    section.provider.map(_.trim).filter(_.nonEmpty) match {
       case None =>
         DoctorCheck
           .fail(Module, s"section '$name' has no provider key")
           .withFix(s"""add provider = "<id>" under $path (registered: ${registry.ids.mkString(", ")})""") ::
-          skipped("needs a provider", AfterConfig.drop(2))
+          skipped("needs a provider", AfterDefault.drop(1))
       case Some(raw) =>
         val id = registry.canonicalId(raw)
         registry.find(id) match {
@@ -222,18 +243,34 @@ object Doctor {
               .withFix(
                 s"add the LLM4S module that supplies '${id.asString}' to your build, or use a registered provider: " +
                   registry.ids.mkString(", ")
-              ) :: skipped("needs the provider module", AfterConfig.drop(2))
+              ) :: skipped("needs the provider module", AfterDefault.drop(1))
           case Some(descriptor) =>
-            val found = DoctorCheck.pass(Module, s"'${id.asString}' is registered")
-            found :: keyAndConfigChecks(source, name, section, descriptor, options, ports)
+            moduleFound(id, options) :: keyAndConfigChecks(source, name, section, descriptor, options, ports)
         }
     }
+  }
+
+  /** The module that supplied `id` and where it was loaded from, when the registry was discovered. */
+  private def moduleFound(id: ProviderId, options: DoctorOptions)(using registry: ProviderRegistry): DoctorCheck = {
+    val supplier = registry.report.modules.reverse.find(_.providerIds.contains(id.asString)).map { module =>
+      val where = module.source.map { location =>
+        val trimmed = location.stripSuffix("/")
+        if (trimmed.endsWith(".jar")) trimmed.substring(trimmed.lastIndexOf('/') + 1) else location
+      }
+      s" by ${module.moduleClass}" + where.fold("")(w => s" ($w)")
+    }
+    val scope =
+      if (options.applicationClasspath) " on the given --classpath"
+      else
+        "; this is the doctor's own classpath, which has every built-in provider module, " +
+          "so pass --classpath to check your application's"
+    DoctorCheck.pass(Module, s"'${id.asString}' is registered${supplier.getOrElse("")}$scope")
   }
 
   private def keyAndConfigChecks(
     source: ConfigSource,
     name: String,
-    section: ConfigObject,
+    section: RawNamedProviderSection,
     descriptor: ProviderDescriptor,
     options: DoctorOptions,
     ports: DoctorPorts
@@ -256,14 +293,14 @@ object Doctor {
   private def keyCheck(
     source: ConfigSource,
     name: String,
-    section: ConfigObject,
+    section: RawNamedProviderSection,
     descriptor: ProviderDescriptor
   ): DoctorCheck =
     if (!descriptor.configSpec.requiresApiKey) {
       DoctorCheck.pass(Key, s"'${descriptor.id.asString}' needs no API key")
     } else {
       val ownPath = s"llm4s.providers.$name.apiKey"
-      SharedCredentials.read(source).resolve(value(section, "apiKey"), ownPath, descriptor.id) match {
+      SharedCredentials.read(source).resolve(section.apiKey, ownPath, descriptor.id) match {
         case Right(Some(resolved)) => DoctorCheck.pass(Key, s"found at ${resolved.path} (the value is not shown)")
         case Right(None) =>
           DoctorCheck
@@ -313,7 +350,11 @@ object Doctor {
     val base = section.baseUrl.map(_.asUrl).orElse(descriptor.configSpec.defaultBaseUrl)
     base match {
       case Some(url) if isLoopback(url) =>
-        if (options.offline) DoctorCheck.skipped(LocalModel, s"$url is local, but --offline was given")
+        if (!options.local)
+          DoctorCheck.skipped(
+            LocalModel,
+            s"$url is local; pass --local to ask it whether it is running and has the model"
+          )
         else if (descriptor.modelLister.isEmpty)
           DoctorCheck.skipped(
             LocalModel,
@@ -357,11 +398,11 @@ object Doctor {
     providerConfig: ProviderConfig,
     options: DoctorOptions,
     ports: DoctorPorts
-  ): DoctorCheck =
+  )(using registry: ProviderRegistry): DoctorCheck =
     if (!options.live) {
       DoctorCheck.skipped(Live, "not requested: --live sends one small request, which a hosted provider bills")
     } else {
-      val future = Future(ports.live(providerConfig))(LiveContext)
+      val future = Future(ports.live(providerConfig, registry))(LiveContext)
       Try(Await.result(future, options.liveTimeout)) match {
         case Success(Right(model)) => DoctorCheck.pass(Live, s"the provider answered one small request (model $model)")
         case Success(Left(error))  => liveFailure(name, error)
@@ -370,7 +411,9 @@ object Doctor {
             .fail(Live, s"no answer within ${options.liveTimeout.toMillis} ms")
             .withFix("check the base URL, your network or proxy, and the provider's status page")
         case Failure(other) =>
-          DoctorCheck.fail(Live, s"the request threw ${other.getClass.getSimpleName}")
+          DoctorCheck
+            .fail(Live, s"the request threw ${other.getClass.getSimpleName}")
+            .withFix("run again with logging at DEBUG to see the cause, and report it if it persists")
       }
     }
 
@@ -406,6 +449,32 @@ object Doctor {
     }
   }
 
+  /**
+   * Every section other than the default, validated as an application loading it by name would. A
+   * problem there is a warning: the default works without it, but `Llm4sConfig.provider(name)` would fail.
+   */
+  private def othersCheck(source: ConfigSource, selected: Option[ProviderName], names: List[String])(using
+    registry: ProviderRegistry
+  ): DoctorCheck = {
+    val others = names.filterNot(name => selected.exists(_.asName == name))
+    if (others.isEmpty) DoctorCheck.skipped(Others, "there is no section besides the default")
+    else {
+      val problems = others.flatMap(name => Llm4sConfig.provider(source, name).left.toOption.map(name -> _.message))
+      if (problems.isEmpty) DoctorCheck.pass(Others, s"${others.size} more section(s) load: ${others.mkString(", ")}")
+      else
+        DoctorCheck
+          .warn(
+            Others,
+            s"${problems.size} of ${others.size} other section(s) would fail to load: " +
+              problems.map { case (name, message) => s"'$name': $message" }.mkString("; ")
+          )
+          .withFix(
+            "these are not the default, so they matter only to code that loads them by name; " +
+              s"correct them, or remove them: ${problems.map(p => s"llm4s.providers.${p._1}").mkString(", ")}"
+          )
+    }
+  }
+
   private object DaemonThreads extends ThreadFactory {
     override def newThread(task: Runnable): Thread = {
       val thread = new Thread(task, "llm4s-doctor-live")
@@ -417,60 +486,77 @@ object Doctor {
   // Daemon threads: a request that outlives its timeout must not keep the JVM alive.
   private lazy val LiveContext: ExecutionContext =
     ExecutionContext.fromExecutor(Executors.newCachedThreadPool(DaemonThreads))
-
-  private def readConfig(source: ConfigSource): Either[String, Config] =
-    source
-      .value()
-      .left
-      .map(_.prettyPrint().linesIterator.map(_.trim).filter(_.nonEmpty).mkString(" "))
-      .flatMap {
-        case root: ConfigObject => Right(root.toConfig)
-        case _                  => Left("the top level of the configuration is not an object")
-      }
-
-  private def providerSections(config: Config): Map[String, ConfigObject] =
-    Try(config.getObject("llm4s.providers")).toOption
-      .map(_.asScala.toList.collect { case (name, section: ConfigObject) => name -> section }.toMap)
-      .getOrElse(Map.empty)
-
-  private def text(config: Config, path: String): Option[String] =
-    Try(config.getString(path)).toOption.map(_.trim).filter(_.nonEmpty)
-
-  private def value(section: ConfigObject, key: String): Option[String] =
-    Option(section.get(key))
-      .flatMap(v => Try(v.unwrapped()).toOption)
-      .collect { case s: String => s.trim }
-      .filter(_.nonEmpty)
 }
 
 /**
  * `llm4s doctor` as a command line: `sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli [options]"`.
  *
  * Options: `--config <file>` to check a file layered over every module's `reference.conf` (as
- * `CheckPolicies` does) instead of the application's own configuration, `--live` to make one small
- * request, `--offline` to leave a local server alone, `--timeout <seconds>` for that request, and `--json`.
+ * `CheckPolicies` does) instead of the application's own configuration, `--classpath <path>` to check the
+ * provider modules on an application's classpath instead of the doctor's own, `--local` to ask a model
+ * server on this machine which models it has, `--live` to make one small request, `--timeout <seconds>` for
+ * that request, and `--json`. Without `--local` or `--live` nothing is contacted.
  * Exit code: `0` everything passed, `1` warnings only, `2` something failed.
  */
 object DoctorCli {
 
   /** The command line, parsed. */
-  final private[configpolicy] case class Invocation(options: DoctorOptions, json: Boolean, config: Option[String])
+  final private[configpolicy] case class Invocation(
+    options: DoctorOptions,
+    json: Boolean,
+    config: Option[String],
+    classpath: Option[String]
+  )
 
   private[configpolicy] def parse(args: Array[String]): Invocation = {
-    val timeout = argValue(args, "--timeout").flatMap(_.toIntOption).filter(_ > 0).map(_.seconds)
+    val timeout   = argValue(args, "--timeout").flatMap(_.toIntOption).filter(_ > 0).map(_.seconds)
+    val classpath = argValue(args, "--classpath").map(_.trim).filter(_.nonEmpty)
     val options = timeout.foldLeft(
-      DoctorOptions().withLive(args.contains("--live")).withOffline(args.contains("--offline"))
+      DoctorOptions()
+        .withLive(args.contains("--live"))
+        .withLocal(args.contains("--local"))
+        .withApplicationClasspath(classpath.isDefined)
     )(_.withLiveTimeout(_))
-    Invocation(options, args.contains("--json"), argValue(args, "--config"))
+    Invocation(options, args.contains("--json"), argValue(args, "--config"), classpath)
+  }
+
+  /**
+   * The providers registered on `classpath` (entries separated by the platform's path separator, as
+   * `sbt "export Runtime/fullClasspath"` prints them): only the provider modules whose
+   * `META-INF/services` entry is on that classpath are discovered. Their classes are loaded from the
+   * doctor's own classpath first, so a built-in module is the doctor's copy of it, and from `classpath`
+   * otherwise, so a third-party module is found too.
+   */
+  private[configpolicy] def registryFor(classpath: String): Either[String, ProviderRegistry] = {
+    val entries = classpath.split(java.io.File.pathSeparator).toList.map(_.trim).filter(_.nonEmpty)
+    val urls    = entries.map(entry => Try(java.nio.file.Paths.get(entry).toUri.toURL).toEither.left.map(_ => entry))
+    urls.collect { case Left(bad) => bad } match {
+      case Nil =>
+        val loader =
+          new java.net.URLClassLoader(
+            urls.collect { case Right(url) => url }.toArray,
+            DoctorCli.getClass.getClassLoader
+          ) {
+            // Only this classpath's own service entries: the parent's would list every built-in provider.
+            override def getResources(name: String): java.util.Enumeration[java.net.URL] = findResources(name)
+          }
+        Right(ProviderRegistry.discover(loader))
+      case bad => Left(s"--classpath has entries that are not paths: ${bad.mkString(", ")}")
+    }
   }
 
   /** Runs the doctor for `args` and returns what to print and the exit code. */
   private[configpolicy] def execute(args: Array[String], ports: DoctorPorts = DoctorPorts.system)(using
-    ProviderRegistry
+    default: ProviderRegistry
   ): (String, Int) = {
     val invocation = parse(args)
-    val report     = Doctor.run(CheckPolicies.sourceFor(invocation.config), invocation.options, ports)
-    (if (invocation.json) report.renderJson else report.renderText, report.exitCode)
+    invocation.classpath.fold[Either[String, ProviderRegistry]](Right(default))(registryFor) match {
+      case Left(problem) => (s"llm4s doctor: $problem", 2)
+      case Right(registry) =>
+        val report =
+          Doctor.run(CheckPolicies.sourceFor(invocation.config), invocation.options, ports)(using registry)
+        (if (invocation.json) report.renderJson else report.renderText, report.exitCode)
+    }
   }
 
   def main(args: Array[String]): Unit = {
