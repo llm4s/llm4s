@@ -57,4 +57,60 @@ object RecursionFixtures {
       given SchemaOf[Q] = SchemaOf.string("the Q, as text")
     }
   }
+
+  /**
+   * Field instances that throw what `scala.util.Try` does not catch, so that a guard restored only after a `Try`
+   * would be left on the thread. Each is a field of a derived product, whose build must still restore the guard.
+   */
+  object Throwing {
+    private def throwing[A](name: String, error: () => Throwable): SchemaOf[A] = new SchemaOf[A] {
+      def typeName: String                                                   = name
+      def schema(description: String): org.llm4s.toolapi.SchemaDefinition[A] = throw error()
+    }
+
+    case class Linkage(value: Int)
+    object Linkage {
+      given SchemaOf[Linkage] = throwing("Linkage", () => new ExceptionInInitializerError("thrown by Linkage"))
+    }
+    case class HoldsLinkage(linkage: Linkage) derives SchemaOf
+
+    /** Sets the thread's interrupt flag, as code that is interrupted and passes it on should, then throws. */
+    case class Interrupted(value: Int)
+    object Interrupted {
+      given SchemaOf[Interrupted] = throwing(
+        "Interrupted",
+        () => {
+          Thread.currentThread().interrupt()
+          new InterruptedException("thrown by Interrupted")
+        }
+      )
+    }
+    case class HoldsInterrupted(interrupted: Interrupted) derives SchemaOf
+
+    case class Control(value: Int)
+    object Control {
+      final class Thrown extends scala.util.control.ControlThrowable
+      given SchemaOf[Control] = throwing("Control", () => new Thrown)
+    }
+    case class HoldsControl(control: Control) derives SchemaOf
+
+    /** Its companion's initialiser throws, so summoning its given fails: first with ExceptionInInitializerError. */
+    case class Boom(value: Int)
+    object Boom {
+      private def initialise(): Unit = throw new IllegalArgumentException("Boom's initialiser fails")
+      initialise()
+      given SchemaOf[Boom] = SchemaOf.string("a boom")
+    }
+    case class HoldsBoom(boom: Boom) derives SchemaOf
+  }
+
+  /** One generic class nested in itself: finite, but past 16 levels the run-time guard counts it as recursive. */
+  object Nesting {
+    case class W[A](a: A) derives SchemaOf
+    type W16[A] = W[W[W[W[W[W[W[W[W[W[W[W[W[W[W[W[A]]]]]]]]]]]]]]]]
+    type W17[A] = W[W[W[W[W[W[W[W[W[W[W[W[W[W[W[W[W[A]]]]]]]]]]]]]]]]]
+    // the same nesting spelled out in a field's type, which the compile-time check walks (no `derives` here)
+    case class Holds16(w: W16[Int])
+    case class Holds17(w: W17[Int])
+  }
 }

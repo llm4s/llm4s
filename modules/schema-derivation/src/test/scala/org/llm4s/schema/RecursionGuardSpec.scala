@@ -79,4 +79,61 @@ class RecursionGuardSpec extends AnyFlatSpec with Matchers {
       Await.result(Future.sequence((1 to 16).map(_ => Future(SchemaOf[Fixtures.Nested].toJsonSchema()))), timeout)
     schemas.distinct should have size 1
   }
+
+  "The recursion guard" should "be restored when a field's instance throws an ExceptionInInitializerError" in {
+    import Throwing.*
+    withinTimeout {
+      intercept[ExceptionInInitializerError](SchemaOf[HoldsLinkage].definition)
+      SchemaOf.buildsInProgress shouldBe 0
+      // the same instance on the same thread reports the real error again, not "recursive type HoldsLinkage"
+      intercept[ExceptionInInitializerError](SchemaOf[HoldsLinkage].definition)
+      SchemaOf.buildsInProgress shouldBe 0
+      SchemaOf[Fixtures.Boxes].toJsonSchema()("type").str shouldBe "object"
+    }
+  }
+
+  it should "be restored when a field's companion fails to initialise, and report the real error after it" in {
+    import Throwing.*
+    withinTimeout {
+      val first = intercept[ExceptionInInitializerError](SchemaOf[HoldsBoom].toJsonSchema())
+      first.getCause.getMessage shouldBe "Boom's initialiser fails"
+      SchemaOf.buildsInProgress shouldBe 0
+      // the JVM reports a class whose initialiser failed as NoClassDefFoundError from then on
+      intercept[NoClassDefFoundError](SchemaOf[HoldsBoom].toJsonSchema())
+      SchemaOf.buildsInProgress shouldBe 0
+    }
+  }
+
+  it should "be restored on an InterruptedException, leaving the thread's interrupt flag as the field set it" in {
+    import Throwing.*
+    withinTimeout {
+      intercept[InterruptedException](SchemaOf[HoldsInterrupted].definition)
+      // `interrupted` reads and clears the flag, so the pool thread is not left interrupted
+      Thread.interrupted() shouldBe true
+      SchemaOf.buildsInProgress shouldBe 0
+      intercept[InterruptedException](SchemaOf[HoldsInterrupted].definition)
+      Thread.interrupted() shouldBe true
+      SchemaOf.buildsInProgress shouldBe 0
+    }
+  }
+
+  it should "be restored on a ControlThrowable" in {
+    import Throwing.*
+    withinTimeout {
+      intercept[Control.Thrown](SchemaOf[HoldsControl].definition)
+      SchemaOf.buildsInProgress shouldBe 0
+      intercept[Control.Thrown](SchemaOf[HoldsControl].definition)
+      SchemaOf.buildsInProgress shouldBe 0
+    }
+  }
+
+  "A generic case class nested in itself" should "be described up to 16 levels deep and refused at 17" in {
+    import Nesting.*
+    withinTimeout {
+      val sixteen = SchemaOf[W16[Int]].toJsonSchema()
+      Iterator.iterate(sixteen)((w: ujson.Value) => w("properties")("a")).drop(16).next()("type").str shouldBe "integer"
+      recursionMessage(intercept[IllegalStateException](SchemaOf[W17[Int]].toJsonSchema()).getMessage, "W")
+      SchemaOf.buildsInProgress shouldBe 0
+    }
+  }
 }

@@ -54,6 +54,13 @@ class CompileErrorsSpec extends AnyFlatSpec with Matchers {
     scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.Boxes]") shouldBe Nil
   }
 
+  it should "accept a generic case class nested in itself 16 deep in a field's type, and refuse it 17 deep" in {
+    scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[RecursionFixtures.Nesting.Holds16]") shouldBe Nil
+    messages(
+      scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[RecursionFixtures.Nesting.Holds17]")
+    ) should include("W refers to itself")
+  }
+
   it should "refuse a sealed hierarchy nested in another, whose case names uPickle would not write" in {
     val errors = messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.WithOuter]"))
     errors should include("Middle of Outer is not a singleton")

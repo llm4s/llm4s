@@ -37,6 +37,11 @@ import scala.deriving.Mirror
  * schema (`schema`, `definition`, `toJsonSchema`) throws an `IllegalStateException` naming the recursive type
  * instead, on first use; it never hangs.
  *
+ * A generic case class may be nested in itself at most 16 deep: `W[W[...[Int]]]` with 16 `W`s is described, with 17
+ * it is taken for a recursion. Spelled out in a field's type, the deeper nesting is refused at compile time; reached
+ * through the generic `derives SchemaOf` instance (`SchemaOf[W[...[Int]]]`) it is refused when the schema is built,
+ * with the same `IllegalStateException`.
+ *
  * @tparam A the described type
  */
 @Experimental
@@ -60,7 +65,12 @@ trait SchemaOf[A] {
   /** Whether a field of this type may be absent or `null`: true for `Option`. */
   def isOptional: Boolean = false
 
-  /** The schema, described to the model by `description`. */
+  /**
+   * The schema, described to the model by `description`.
+   *
+   * @throws java.lang.IllegalStateException for a derived instance whose type turns out to be recursive, or nests a
+   *                                         generic case class in itself more than 16 deep (see [[SchemaOf]])
+   */
   def schema(description: String): SchemaDefinition[A]
 
   /** The description of the type when nothing more specific is given. */
@@ -70,6 +80,8 @@ trait SchemaOf[A] {
    * The schema of `A` as core's schema model, described by the type's [[description]] or name: what
    * `completeStructuredOf` sends, and what a tool takes as its parameters
    * (`ToolBuilder[A, R](name, text, SchemaOf[A].definition)`).
+   *
+   * @throws java.lang.IllegalStateException as [[schema]] does
    */
   final def definition: SchemaDefinition[A] = schema(defaultDescription)
 
@@ -78,6 +90,7 @@ trait SchemaOf[A] {
    *
    * @param strict as in `SchemaDefinition.toJsonSchema`: `true` marks every property required, which is what
    *               `completeStructured` sends
+   * @throws java.lang.IllegalStateException as [[schema]] does
    */
   final def toJsonSchema(strict: Boolean = true): ujson.Value = definition.toJsonSchema(strict)
 }
@@ -191,6 +204,9 @@ object SchemaOf {
   // a message instead of recursing until the stack overflows.
   private val building: ThreadLocal[List[(SchemaOf[?], String)]] = ThreadLocal.withInitial(() => Nil)
 
+  /** How many product schemas are being built on this thread: zero outside a build. For the module's tests. */
+  private[schema] def buildsInProgress: Int = building.get.size
+
   private def recursiveType(name: String): Nothing =
     throw new IllegalStateException(
       s"recursive type $name: llm4s-schema-derivation cannot describe recursive types; core's schema model has " +
@@ -219,7 +235,12 @@ object SchemaOf {
       val outer = building.get
       if (outer.exists(_._1 eq self) || outer.count(_._2 == name) >= MaxSameNameDepth) recursiveType(name)
       building.set((self, name) :: outer)
-      val built = scala.util.Try {
+      // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
+      // The guard must be restored whatever a field's instance throws, fatal errors included: `scala.util.Try`
+      // rethrows an `ExceptionInInitializerError`, a `LinkageError`, an `InterruptedException` or a
+      // `ControlThrowable` without running anything after it, which would leave this entry on the thread and make
+      // every later build of the type on it fail as "recursive". The throwable itself is never caught.
+      try {
         val properties =
           fields.zip(fieldSchemas).zip(descriptions).zip(keys).map { case (((field, of), annotated), key) =>
             val written = key.getOrElse(field)
@@ -230,9 +251,8 @@ object SchemaOf {
             )
           }
         ObjectSchema[A](d, properties)
-      }
-      building.set(outer)
-      built.get
+      } finally building.set(outer)
+      // scalafix:on DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
     }
   }
 

@@ -147,6 +147,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   time; building that schema throws an `IllegalStateException` naming the type on first use, and `completeStructuredOf`
   returns it as a `Left` without calling the model (a derived instance looks
   up its fields' instances only when its schema is built, so such givens never deadlock each other's initialisation).
+  The run-time guard is restored whatever a field's instance throws, fatal errors included, so an
+  `ExceptionInInitializerError` or `InterruptedException` is reported as itself on every build, never later as a
+  "recursive type". A generic case class may nest in itself at most 16 deep; a 17th level is refused at compile time
+  when spelled out in a field's type, and when the schema is built when reached through the generic instance.
   `SchemaOf[A].definition` is the same schema as a `SchemaDefinition`, so `ToolBuilder` takes it as a tool's
   parameters. Guide: [Derived Schemas](docs/guide/derived-schemas.md).
 - **`llm4s-pekko`: LLM responses and agent runs as Apache Pekko Streams `Source`s**

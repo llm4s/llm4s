@@ -200,6 +200,8 @@ object Schemas {
 
 This compiles, and making the instances still works: a derived instance does not look up its fields' instances until its schema is built, so two such givens never wait on each other's initialisation. Building the schema (`SchemaOf[P].toJsonSchema()` or `.definition`) throws an `IllegalStateException` on first use, and on every use after it, naming the type: `recursive type P: llm4s-schema-derivation cannot describe recursive types; core's schema model has no $ref. ...`. `completeStructuredOf[P]` returns the same message as a `Left(ValidationError)` without calling the model. It never hangs and never overflows the stack. The same shape is fine when the given that closes the loop describes the type by hand rather than deriving it, for example `given SchemaOf[Q] = SchemaOf.string("...")`; that is why the check cannot refuse every hand-written given that reaches back.
 
+A generic case class may be nested in itself at most 16 deep. `W[W[...[Int]]]` with 16 `W`s is described; with 17 it is taken for a recursion. Spelled out in a field's type, the deeper nesting is refused at compile time; summoned through `W`'s own `derives SchemaOf` instance (`SchemaOf[W[...[Int]]]`), it is refused at run time, when the schema is built, with the same `IllegalStateException` (`recursive type W: ...`).
+
 A derived schema has no length or range constraints. When you need `withRange` or `withLengthConstraints`, build that schema by hand as before; `completeStructured` takes both.
 
 ## Compile time
