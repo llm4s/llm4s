@@ -42,17 +42,33 @@ final case class WorkspaceSandboxConfig(
   /**
    * This config with more programs on its allowlist, as the runner's `WORKSPACE_EXTRA_COMMANDS` adds them.
    *
-   * Each name must be a bare program name (letters, digits, `.`, `_`, `+`, `-`) and not one of
-   * [[WorkspaceSandboxConfig.NeverAllowedCommands]], in any case and with or without a `.exe` / `.com` extension
-   * (`BASH.EXE` is `bash`). An added program is held to the same checks as the built-in
-   * ones (no shell, forbidden characters, path arguments inside the workspace, the environment allowlist), but it has
-   * no per-program option rules, so it can do whatever its own arguments let it: add only what the agent needs.
+   * Each name must be a bare program name (letters, digits, `.`, `_`, `+`, `-`), not a Windows batch file (`.bat`,
+   * `.cmd`, which Windows runs through cmd.exe) and not one of [[WorkspaceSandboxConfig.NeverAllowedCommands]], in any
+   * case, with or without a `.exe` / `.com` extension and with or without a version (`BASH.EXE` is `bash`,
+   * `python3.12` is `python`).
+   *
+   * '''An added program is trusted code execution.''' It is held to the same checks as the built-in ones (no shell,
+   * forbidden characters, path arguments inside the workspace, the environment allowlist), but it has no per-program
+   * option rules, so it can do whatever its own arguments let it - and a build tool such as `sbt` runs the code in the
+   * workspace by design. The denylist only stops the obvious ways to run anything (shells, interpreters, launchers);
+   * it is not a boundary. Add only what the agent needs.
+   *
+   * A config that does not run commands at all (`shellAllowed = false`, the locked profile) refuses any name, rather
+   * than report programs added that can never run (#1761).
    *
    * @param names program names separated by commas or whitespace
    * @return the widened config, or why a name was refused
    */
   def withExtraCommands(names: String): Either[String, WorkspaceSandboxConfig] =
-    WorkspaceSandboxConfig.parseCommandNames(names).map(extra => copy(allowedCommands = allowedCommands ++ extra))
+    WorkspaceSandboxConfig.parseCommandNames(names).flatMap { extra =>
+      if (extra.nonEmpty && !shellAllowed)
+        Left(
+          s"${WorkspaceSandboxConfig.ExtraCommandsEnvVar} names ${extra.toSeq.sorted.mkString(", ")}, but this sandbox " +
+            "does not run commands at all (shellAllowed=false, the locked profile), so they could never run; unset " +
+            s"${WorkspaceSandboxConfig.ExtraCommandsEnvVar} or choose a profile that runs commands"
+        )
+      else Right(copy(allowedCommands = allowedCommands ++ extra))
+    }
 }
 
 object WorkspaceSandboxConfig {
@@ -64,11 +80,16 @@ object WorkspaceSandboxConfig {
   val ExtraCommandsEnvVar: String = "WORKSPACE_EXTRA_COMMANDS"
 
   /**
-   * Programs [[WorkspaceSandboxConfig.withExtraCommands]] refuses to add: shells, and launchers that run another
-   * program named in their arguments. Either would let a command run anything, which is what running commands
-   * without a shell prevents (#1756).
+   * Programs [[WorkspaceSandboxConfig.withExtraCommands]] refuses to add: shells, interpreters, and launchers that run
+   * another program or code named in their arguments (#1756, #1761, #1792). Any of them would let a command run
+   * anything, which is what running commands without a shell prevents.
+   *
+   * A name is matched case-insensitively, without a `.exe` / `.com` extension and without a trailing version
+   * (`Python3.12.EXE` is `python`). The list is a speed bump, not a boundary: no list names every program that can run
+   * another, so every name added with `WORKSPACE_EXTRA_COMMANDS` must be one the host trusts to run any code.
    */
   val NeverAllowedCommands: Set[String] = Set(
+    // Shells
     "sh",
     "bash",
     "zsh",
@@ -78,24 +99,100 @@ object WorkspaceSandboxConfig {
     "tcsh",
     "fish",
     "busybox",
+    "toybox",
     "cmd",
     "cmd.exe",
     "powershell",
     "powershell.exe",
     "pwsh",
     "pwsh.exe",
+    // cmd.exe built-ins that run a program or a batch file (#1792)
+    "call",
+    "start",
+    // Interpreters
+    "python",
+    "python2",
+    "python3",
+    "pythonw",
+    "py",
+    "perl",
+    "ruby",
+    "irb",
+    "node",
+    "nodejs",
+    "deno",
+    "bun",
+    "php",
+    "lua",
+    "tclsh",
+    "wish",
+    "awk",
+    "gawk",
+    "mawk",
+    "nawk",
+    "java",
+    "jshell",
+    "jrunscript",
+    "make",
+    "gmake",
+    "expect",
+    // Launchers: run the program named in their arguments
     "env",
     "xargs",
-    "sudo",
-    "su",
     "nohup",
     "nice",
     "timeout",
     "exec",
-    "eval"
+    "eval",
+    "setsid",
+    "stdbuf",
+    "chroot",
+    "ionice",
+    "flock",
+    "watch",
+    "script",
+    "time",
+    "systemd-run",
+    "parallel",
+    "taskset",
+    "chrt",
+    // Debuggers, remote and container tools
+    "strace",
+    "ltrace",
+    "gdb",
+    "ssh",
+    "docker",
+    "podman",
+    // Privilege and namespace tools
+    "sudo",
+    "su",
+    "runuser",
+    "doas",
+    "pkexec",
+    "nsenter",
+    "unshare",
+    // Windows script and program hosts
+    "wsl",
+    "cscript",
+    "wscript",
+    "mshta",
+    "rundll32"
   )
 
   private val CommandName = "[A-Za-z0-9._+-]+".r
+
+  /** A version a program name may end in (`python3.12`, `perl5.36`, `lua5.4`, `gdb-12`), ignored by the denylist. */
+  private val TrailingVersion = "[-.]?[0-9][0-9.]*$".r
+
+  /** Extensions of the files Windows runs through cmd.exe, outside the runner's cmd.exe checks (BatBadBut, #1761). */
+  private val BatchExtensions = Seq(".bat", ".cmd")
+
+  /** Whether `name` is on [[NeverAllowedCommands]], in any case, with any `.exe` / `.com` extension or version. */
+  private def neverAllowed(name: String): Boolean = {
+    val key         = programKey(name, windows = true)
+    val unversioned = TrailingVersion.replaceFirstIn(key, "")
+    NeverAllowedCommands.contains(key) || (unversioned.nonEmpty && NeverAllowedCommands.contains(unversioned))
+  }
 
   private def parseCommandNames(names: String): Either[String, Set[String]] = {
     val parsed = Option(names).getOrElse("").split("[,\\s]+").toSeq.map(_.trim).filter(_.nonEmpty)
@@ -103,7 +200,9 @@ object WorkspaceSandboxConfig {
       .collectFirst {
         case name if !CommandName.matches(name) || name.startsWith(".") || name.startsWith("-") =>
           s"'$name' is not a bare program name"
-        case name if NeverAllowedCommands.contains(programKey(name, windows = true)) =>
+        case name if BatchExtensions.exists(programKey(name, windows = true).endsWith) =>
+          s"'$name' is a Windows batch file, which Windows runs through cmd.exe, so it cannot be added to the allowlist"
+        case name if neverAllowed(name) =>
           s"'$name' runs other programs, so it cannot be added to the allowlist"
       }
       .toLeft(parsed.toSet)

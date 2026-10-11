@@ -2081,6 +2081,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - workspace runner: interpreters and launchers cannot be added as extra commands, a command's child
+  `PATH` holds only trusted entries, and cmd.exe runs with `/d`** ([#1761](https://github.com/llm4s/llm4s/issues/1761),
+  [#1792](https://github.com/llm4s/llm4s/issues/1792)): `WORKSPACE_EXTRA_COMMANDS` refused shells and some launchers,
+  but accepted interpreters that run arbitrary code with no forbidden character (`python3 -c ...`, `perl -e`, `node`,
+  `awk`, `java`, `make`, ...), launchers (`setsid`, `stdbuf`, `flock`, `script`, `time`, `systemd-run`, ...),
+  debuggers and remote or container tools (`gdb`, `strace`, `ssh`, `docker`), privilege and namespace tools
+  (`runuser`, `doas`, `pkexec`, `nsenter`, `unshare`), Windows script hosts (`wsl`, `cscript`, `mshta`, `rundll32`),
+  the cmd.exe built-ins `call` and `start`, and `.bat` / `.cmd` names, which Windows runs through cmd.exe (the
+  BatBadBut class). `WorkspaceSandboxConfig.NeverAllowedCommands` now names them, matched ignoring case, a `.exe` /
+  `.com` extension and a trailing version (`Python3.12.EXE`), and a batch-file name is refused; `sbt` is still
+  accepted. With the `locked` profile, which runs no command, any extra name now stops the runner with a message
+  instead of being logged as added. The docs now say plainly that the denylist is a speed bump, not a boundary, and
+  that an added program means trusted code execution. A started program that looks another one up by name (a
+  `#!/usr/bin/env x` script, `sbt` starting `java`) searched the runner's `PATH` from the workspace, so an empty,
+  relative or in-workspace entry let it run a file the agent wrote: the child's `PATH` now keeps only the entries the
+  runner itself searches (`ProgramResolver.childPath`), and is removed when none is left. On Windows every command
+  runs with `NoDefaultCurrentDirectoryInExePath=1`, not only cmd.exe built-ins, and built-ins run as `cmd /d /c`, so
+  the registry's AutoRun command no longer runs first. `docs/workspace-agent-protocol.md` lists
+  `EXECUTABLE_NOT_ALLOWED`, `EXECUTABLE_NOT_FOUND`, `GIT_CONFIG_NOT_ALLOWED` and `PATH_NOT_ALLOWED`. **Migration:** a
+  `WORKSPACE_EXTRA_COMMANDS` (or `extraAllowedCommands`) naming one of the new names, or any name with
+  `WORKSPACE_SANDBOX_PROFILE=locked`, now stops the runner; a host that really needs such a program in the agent's
+  hands must accept that it runs any code, and run it outside the runner's allowlist.
 - **Security - workspace runner: a planted git config or attribute cannot make an allowed git command run a
   program** ([#1721](https://github.com/llm4s/llm4s/issues/1721)): `git` reads the repository's `.git/config`,
   attributes and hooks, so an agent that could write files - or a repository cloned into the workspace already

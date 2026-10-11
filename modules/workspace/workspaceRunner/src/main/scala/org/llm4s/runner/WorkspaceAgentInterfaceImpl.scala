@@ -656,7 +656,8 @@ class WorkspaceAgentInterfaceImpl(
   /**
    * Windows `cmd.exe` built-in commands that have no standalone `.exe` on PATH.
    * When [[isWindows]] is `true` and the first argv token is one of these, we
-   * prepend `Seq("cmd.exe", "/c")` so the OS can locate the command.
+   * prepend `Seq("cmd.exe", "/d", "/c")` so the OS can locate the command (`/d`: no AutoRun command from the
+   * registry runs first, #1792).
    * `ProcessBuilder` joins the vector into one command line that cmd.exe
    * parses again, quoting an argument only for a space, tab, `"`, `<` or `>`:
    * cmd.exe still splits on `,`, `;` and `=`, and interprets `&`, `|`, `<`,
@@ -798,13 +799,15 @@ class WorkspaceAgentInterfaceImpl(
    * matched by its program key: case-insensitively and without a `.exe` / `.com` extension.
    *
    * On Windows, if the first token is a [[WindowsBuiltins]] built-in that has
-   * no standalone `.exe`, the system directory's `cmd.exe` (by its absolute path)
-   * and `/c` are prepended to the already-tokenized vector so each argument is
+   * no standalone `.exe`, the system directory's `cmd.exe` (by its absolute path),
+   * `/d` (no AutoRun command) and `/c` are prepended to the already-tokenized vector so each argument is
    * still passed as a distinct string (not a raw command string).  The
    * forbidden-character check runs before this routing step, so no dangerous
    * token ever reaches cmd.exe.
    *
-   * The command's standard input is the null device (#1728), so a program that reads it ends at once.
+   * The command's standard input is the null device (#1728), so a program that reads it ends at once. Its `PATH` keeps
+   * only the entries the runner itself would search ([[ProgramResolver.childPath]]), and on Windows it runs with
+   * `NoDefaultCurrentDirectoryInExePath=1`, so a program it starts by name is never one from the workspace (#1792).
    *
    * Both ways a command reaches the runner go through this one function: [[executeCommand]] (the direct path)
    * and the WebSocket protocol's `ExecuteCommandCommand` (`WebSocketCommandExecutor`, #1756), which streams the
@@ -939,7 +942,8 @@ class WorkspaceAgentInterfaceImpl(
 
     // On Windows, built-in commands (echo, dir, type, …) live inside cmd.exe
     // and cannot be launched as standalone processes.  We prepend the system
-    // directory's cmd.exe and "/c" to the *already-tokenized* vector so each
+    // directory's cmd.exe, "/d" (skip the registry's AutoRun command, #1792)
+    // and "/c" to the *already-tokenized* vector so each
     // argument is still a separate string, and name the built-in by its key
     // (`echo`, never `echo.exe`, which cmd.exe would look for as a program).
     // ProcessBuilder still joins them into one command line that cmd.exe
@@ -948,7 +952,12 @@ class WorkspaceAgentInterfaceImpl(
     val routedThroughCmd = isWindows && WindowsBuiltins.contains(execLower)
     val finalArgv: Seq[String] =
       if (routedThroughCmd)
-        Seq(resolved(ProgramResolver.resolveSystem("cmd", programSearch, untrustedRoots)), "/c", execLower) ++ argv.tail
+        Seq(
+          resolved(ProgramResolver.resolveSystem("cmd", programSearch, untrustedRoots)),
+          "/d",
+          "/c",
+          execLower
+        ) ++ argv.tail
       else
         resolved(ProgramResolver.resolve(execLower, programSearch, untrustedRoots)) +: argv.tail
     // --------------------------------------------------------------------------
@@ -963,9 +972,16 @@ class WorkspaceAgentInterfaceImpl(
     // the command timeout (#1728).
     builder.redirectInput(java.lang.ProcessBuilder.Redirect.from(nullDevice))
     env.foreach { case (k, v) => builder.environment().put(k, v) }
-    // cmd.exe searches its current directory - the workspace - for a program a built-in starts (`call x`); this
-    // stops it (#1790)
-    if (routedThroughCmd) builder.environment().put("NoDefaultCurrentDirectoryInExePath", "1")
+    // The program may start another by name (`#!/usr/bin/env x`, sbt starting java), searching PATH from the
+    // workspace: give it only the PATH entries the runner itself would search (#1792). No entry left: no PATH, since
+    // an empty one is read as the current directory.
+    ProgramResolver.childPath(programSearch, untrustedRoots) match {
+      case Some(path) => builder.environment().put("PATH", path)
+      case None       => builder.environment().remove("PATH")
+    }
+    // On Windows, cmd.exe and CreateProcess search the current directory - the workspace - for a program named
+    // without a path before PATH; this stops it, for every command and anything it starts (#1790, #1792)
+    if (isWindows) builder.environment().put("NoDefaultCurrentDirectoryInExePath", "1")
     if (execLower == "git") {
       CommandPolicy.confineGit(builder.environment(), realRoot)
       sandboxGit(builder, finalArgv.head, argv.tail, realRoot)

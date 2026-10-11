@@ -361,6 +361,12 @@ Common error codes include:
 - `SIZE_LIMIT_EXCEEDED`: Operation exceeded a size or count limit
 - `INVALID_ARGUMENT`: An argument provided is invalid
 - `EXECUTION_FAILED`: Command execution failed
+- `EXECUTABLE_NOT_ALLOWED`: The command's program is not on the runner's allowlist, or is found only where the runner
+  never starts a program from (the workspace, the runner's own working directory, a relative or empty `PATH` entry)
+- `EXECUTABLE_NOT_FOUND`: The command's program was not found in a trusted directory
+- `GIT_CONFIG_NOT_ALLOWED`: The repository's git configuration holds what the runner cannot switch off (an include, a
+  configured hook, a driver it cannot override), so `git` was not run
+- `PATH_NOT_ALLOWED`: The path names `.git` or a path inside one, which the file operations may not write
 - `TIMEOUT`: Operation timed out
 
 ## Recommended System Limits

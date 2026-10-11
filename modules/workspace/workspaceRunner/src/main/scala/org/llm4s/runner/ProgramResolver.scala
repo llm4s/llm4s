@@ -124,6 +124,47 @@ private[runner] object ProgramResolver {
       else trimmed
     }
 
+  /**
+   * The `PATH` a command's process is given (#1792): the runner's, keeping only the entries the runner itself would
+   * search (see [[resolve]]) - absolute, outside the workspace and the command's working directory as written and
+   * after following links, and not the runner's own working directory - in their order.
+   *
+   * The runner starts the program itself by an absolute path, but the program may look another one up by name: a
+   * `#!/usr/bin/env x` script, a launcher such as `sbt` starting `java`, `git` starting a helper. It searches the
+   * `PATH` it inherits, from the workspace as its working directory, so an empty or relative entry, or one inside the
+   * workspace, would let it run a file the agent wrote.
+   *
+   * @return the sanitised `PATH`, or None when the runner has none or none of its entries is kept; the caller then
+   *         removes `PATH` from the child's environment, since an empty `PATH` is itself read as the current directory
+   */
+  def childPath(search: ProgramSearch, untrustedRoots: Seq[Path]): Option[String] = {
+    val trusted = trustedDirectories(search, untrustedRoots)
+    val kept = pathEntries(search).filter(entry => trusted(entry).isDefined).distinct.map { entry =>
+      // Windows reads an entry holding `;` only in double quotes
+      if (search.windows && entry.contains(File.pathSeparator)) "\"" + entry + "\"" else entry
+    }
+    if (kept.isEmpty) None else Some(kept.mkString(File.pathSeparator))
+  }
+
+  /**
+   * Whether a `PATH` entry names a directory the runner may run a program from: the directory, or None when the entry
+   * is empty, relative, unparseable, inside an untrusted root (as written or after following links), or the runner's
+   * own working directory (unless that is a system directory).
+   */
+  private def trustedDirectories(search: ProgramSearch, untrustedRoots: Seq[Path]): String => Option[Path] = {
+    val untrusted = expand(untrustedRoots)
+    val cwd       = expand(search.workingDirectory.toSeq)
+    val system    = search.systemDirectories.map(_.toAbsolutePath.normalize())
+    def insideUntrusted(path: Path): Boolean =
+      expand(Seq(path)).exists(p => untrusted.exists(root => p.startsWith(root)))
+    entry =>
+      Try(Paths.get(entry)).toOption
+        .filter(dir => entry.nonEmpty && dir.isAbsolute)
+        .map(_.normalize())
+        .filterNot(insideUntrusted)
+        .filterNot(dir => !system.contains(dir) && expand(Seq(dir)).exists(cwd.contains))
+  }
+
   private def resolveIn(
     program: String,
     search: ProgramSearch,
@@ -131,20 +172,11 @@ private[runner] object ProgramResolver {
     entries: Seq[String]
   ): Either[CommandPolicy.Refusal, Path] = {
     val untrusted = expand(untrustedRoots)
-    val cwd       = expand(search.workingDirectory.toSeq)
-    val system    = search.systemDirectories.map(_.toAbsolutePath.normalize())
     val names     = fileNames(program, search.windows)
+    val trusted   = trustedDirectories(search, untrustedRoots)
 
     def insideUntrusted(path: Path): Boolean =
       expand(Seq(path)).exists(p => untrusted.exists(root => p.startsWith(root)))
-
-    /** A directory the runner may run a program from, or None (relative, empty, unparseable or untrusted). */
-    def trusted(entry: String): Option[Path] =
-      Try(Paths.get(entry)).toOption
-        .filter(dir => entry.nonEmpty && dir.isAbsolute)
-        .map(_.normalize())
-        .filterNot(insideUntrusted)
-        .filterNot(dir => !system.contains(dir) && expand(Seq(dir)).exists(cwd.contains))
 
     def runnable(file: Path): Boolean =
       Try(Files.isRegularFile(file) && (search.windows || Files.isExecutable(file))).getOrElse(false)
