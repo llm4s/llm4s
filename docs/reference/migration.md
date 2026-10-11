@@ -7,6 +7,9 @@ nav_order: 2
 
 # Migration Guide
 
+Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
+by what you use. The notes below are the per-change detail it links to.
+
 ## Stage 2 migration: durable execution
 
 Not in a release yet. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/1699)) makes agent and graph threads durable and adds human review. One note covers the whole stage; each slice adds its part here as it lands:

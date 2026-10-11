@@ -6,6 +6,7 @@ import cats.effect.{ Deferred, IO }
 import cats.effect.kernel.Outcome
 import cats.effect.unsafe.implicits.global
 import cats.syntax.parallel.*
+import org.llm4s.agent.testkit.Fixtures
 import org.llm4s.error.SimpleError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk }
@@ -19,6 +20,10 @@ import scala.concurrent.duration.*
 /**
  * Real-concurrency behaviour of the streaming bridge. Every wait is a latch, a Deferred or a spin on
  * a condition; the only timeouts are safety nets that a correct implementation never reaches.
+ *
+ * There is no fiber-leak test like ZIO's StreamFiberLeakSpec: cats-effect exposes no fiber registry
+ * to enumerate, so leak detection here relies on the Counting/ParksAfterFirst fixtures' thread-exit
+ * signals, already asserted by the backpressure and early-termination tests below.
  */
 class LLMClientIOConcurrencySpec extends AnyFlatSpec with Matchers {
   import Fixtures.*
