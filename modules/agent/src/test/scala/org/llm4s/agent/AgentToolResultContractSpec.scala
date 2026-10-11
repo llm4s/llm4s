@@ -19,8 +19,10 @@ import org.scalatest.matchers.should.Matchers
 import upickle.default.ReadWriter
 
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
+import java.time.{ Clock, Instant, ZoneId, ZoneOffset }
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReference }
 import java.util.concurrent.{ ConcurrentLinkedQueue, CountDownLatch, TimeUnit }
+import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
 
 /**
@@ -168,12 +170,21 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
   private def wellFormed(result: AgentResult): Unit =
     ToolResultRule.violations(result.messages) shouldBe empty
 
-  /** Records which call-tool pending writes reached the store, and can stop storing anything, as a dying process. */
+  /**
+   * Records which call-tool pending writes reached the store, and can stop storing anything, as a dying process: once
+   * `dead`, it neither commits, renews nor releases, so its run's claim lapses only when the store's clock passes it.
+   */
   final private class ProbeCheckpointer(underlying: Checkpointer) extends Checkpointer {
-    val toolWrites = new AtomicInteger()
-    val dead       = new AtomicBoolean(false)
+    val toolWrites   = new AtomicInteger()
+    val dead         = new AtomicBoolean(false)
+    private def died = Left(ValidationError("store", "the process died"))
+    def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim] = underlying.claim(threadId, request)
+    def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration): Result[RunClaim] =
+      if (dead.get) died else underlying.renew(threadId, token, ttl)
+    def release(threadId: ThreadId, token: FencingToken): Result[Unit] =
+      if (dead.get) died else underlying.release(threadId, token)
     def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] =
-      if (dead.get) Left(ValidationError("store", "the process died"))
+      if (dead.get) died
       else
         underlying.commit(threadId, commit).map { records =>
           toolWrites.addAndGet(commit.pendingWrites.count(_.nodeId.endsWith("/call-tool"))): Unit
@@ -185,6 +196,15 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
       underlying.compactEvents(threadId, beforeSeq)
     def deleteThread(threadId: ThreadId): Result[Unit] = underlying.deleteThread(threadId)
+  }
+
+  /** The store's clock, which the test moves past a dead run's claim. */
+  final private class MovingClock extends Clock {
+    private val current                        = new AtomicReference(Instant.parse("2026-10-11T12:00:00Z"))
+    def instant(): Instant                     = current.get
+    def getZone: ZoneId                        = ZoneOffset.UTC
+    override def withZone(zone: ZoneId): Clock = this
+    def advance(by: FiniteDuration): Unit      = current.updateAndGet(_.plusNanos(by.toNanos)): Unit
   }
 
   private def await(condition: => Boolean): Unit = {
@@ -440,7 +460,8 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
     it should "survive a crash: another runtime recovers, never replaying a completed call" in {
       val keys    = new Keys
       val doneRan = new AtomicInteger()
-      val healthy = new InMemoryCheckpointer
+      val clock   = new MovingClock
+      val healthy = new InMemoryCheckpointer(clock)
       val dying   = new ProbeCheckpointer(healthy)
       val done = tool("done", keys) { (_, _) =>
         doneRan.incrementAndGet()
@@ -467,6 +488,12 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
           val thread = ThreadId(s"crash-${wire.name}")
           agentOver(dying).run(thread, "go").isLeft shouldBe true
           requests() shouldBe 1
+          // the dead process released nothing: its claim holds the thread until it expires by the store's clock
+          agentOver(healthy).recover(thread) match {
+            case Left(_: GraphError.ThreadBusy) => ()
+            case other => fail(s"expected ThreadBusy while the dead run's claim is live, got $other")
+          }
+          clock.advance(ClaimPolicy().ttl + 1.second)
 
           val recovered = agentOver(healthy).recover(thread).value
           recovered.answer shouldBe Some("after the crash")
