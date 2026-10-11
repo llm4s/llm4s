@@ -629,6 +629,19 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     SpringProviderSource.configSecrets(SomeConfig(" ", None, "gpt", 3)) shouldBe Nil
   }
 
+  it should "read nothing from a config that is not a case class" in {
+    final class PlainConfig extends org.llm4s.llmconnect.config.ProviderConfig {
+      def providerId                        = ProviderId("x")
+      def model                             = "gpt"
+      def contextWindow                     = 1
+      def reserveCompletion                 = 0
+      def endpointUrl: Option[String]       = None
+      def withModel(m: String): PlainConfig = this
+      val apiKey                            = "not-read"
+    }
+    SpringProviderSource.configSecrets(new PlainConfig) shouldBe Nil
+  }
+
   "a user-defined client" should "still back off when a providers block is present" in {
     runner
       .withUserConfiguration(classOf[StarterContractSpec.UserBeans])
