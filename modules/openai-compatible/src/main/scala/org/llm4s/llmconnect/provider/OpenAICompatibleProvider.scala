@@ -5,6 +5,7 @@ import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenAICompatibleConfigKeys, OpenAICompatibleModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAICompatibleConfig, ProviderConfig }
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.auth.{ AuthConfig, TokenExchangeConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
@@ -49,6 +50,17 @@ import scala.util.Try
  *
  * {{{
  * llm4s.providers {
+ *   databricks {
+ *     provider = "openai-compatible"
+ *     baseUrl  = "https://ws.cloud.databricks.com/serving-endpoints"
+ *     model    = "databricks-meta-llama-3-3-70b-instruct"
+ *     auth {   // workload identity: no apiKey
+ *       identityTokenFile = "/var/run/secrets/spiffe/svid.jwt"
+ *       tokenUrl          = "https://ws.cloud.databricks.com/oidc/v1/token"
+ *       clientId          = "<service principal UUID>"
+ *       scope             = "all-apis"
+ *     }
+ *   }
  *   groq-main {
  *     provider = "openai-compatible"
  *     baseUrl  = "https://api.groq.com/openai/v1"
@@ -83,6 +95,18 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
 
   /** The key giving the tokens held back for the reply; a field of `NamedProviderConfig` until #1133. */
   val ReserveCompletionKey: String = "reserveCompletion"
+
+  /** `auth` keys: the RFC 8693 token endpoint (required), and the optional exchange parameters. */
+  private[llm4s] val TokenUrlKey: String = "tokenUrl"
+  private[llm4s] val ClientIdKey: String = "clientId"
+  private[llm4s] val ScopeKey: String    = "scope"
+  private[llm4s] val AudienceKey: String = "audience"
+
+  /** Each `tokenExchange` field a config refusal names, as the `auth` key the section spells it with. */
+  private val AuthSectionKeys: Map[String, String] =
+    (Seq(TokenUrlKey, ClientIdKey, ScopeKey, AudienceKey) ++ AuthConfig.ReservedKeys)
+      .map(key => s"${OpenAICompatibleConfig.TokenExchangePrefix}$key" -> s"auth.$key")
+      .toMap
 
   /**
    * The key naming the model registry provider (`groq`, `together_ai`, `fireworks_ai`, `xai`, `perplexity`,
@@ -151,6 +175,19 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
           default = Some("true")
         )
       )
+    ).withAuthExtras(
+      Seq(
+        ProviderConfigKey.required(
+          TokenUrlKey,
+          "the RFC 8693 token endpoint, e.g. https://<workspace>/oidc/v1/token for Databricks"
+        ),
+        ProviderConfigKey.optional(
+          ClientIdKey,
+          "the client id sent with the exchange, e.g. a Databricks service principal's UUID"
+        ),
+        ProviderConfigKey.optional(ScopeKey, "the scope requested, e.g. all-apis for Databricks"),
+        ProviderConfigKey.optional(AudienceKey, "the RFC 8693 audience parameter, if the token endpoint needs one")
+      )
     )
 
   override val modelLister: Option[ProviderModelLister] = Some(OpenAICompatibleModelLister)
@@ -158,23 +195,65 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
   def buildConfig(providerName: String, section: NamedProviderConfig)(using
     ContextWindowResolver
   ): Result[ProviderConfig] =
+    validatedConfig(providerName, section)(baseUrl =>
+      registryWindow(providerName, section.model.asString, baseUrl, section.extra(RegistryProviderKey))
+    )
+
+  /**
+   * The validated [[OpenAICompatibleConfig]] a section describes - through
+   * [[org.llm4s.llmconnect.config.OpenAICompatibleConfig.fromValues]], so every rule of
+   * `OpenAICompatibleConfig.validate` holds. Chat ([[buildConfig]]) and [[OpenAICompatibleModelLister]] both
+   * build their config here, so neither can reach the network with a config the other would refuse; in
+   * particular no token is exchanged, or sent, for a section whose `baseUrl` or `auth.tokenUrl` is not
+   * `https`. `registryWindow` gives the model registry's context window for the resolved base URL, used when
+   * the section sets no `contextWindow`.
+   */
+  private[llm4s] def validatedConfig(providerName: String, section: NamedProviderConfig)(
+    registryWindow: String => Option[Int]
+  ): Result[OpenAICompatibleConfig] =
     for
       baseUrl           <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
       streamUsage       <- parseStreamUsage(providerName, section.extra(StreamUsageKey))
       contextWindow     <- parseCount(providerName, section, ContextWindowKey, min = 1, "a positive whole number")
       reserveCompletion <- parseCount(providerName, section, ReserveCompletionKey, min = 0, "a whole number, 0 or more")
-      config <- OpenAICompatibleConfig.fromValues(
-        model = section.model.asString,
-        baseUrl = baseUrl,
-        apiKey = section.apiKey.map(_.asKey),
-        contextWindow = contextWindow.orElse(
-          registryWindow(providerName, section.model.asString, baseUrl, section.extra(RegistryProviderKey))
-        ),
-        reserveCompletion = reserveCompletion,
-        headers = section.headers,
-        streamUsage = streamUsage
-      )
+      tokenExchange     <- tokenExchangeOf(providerName, section)
+      config <- OpenAICompatibleConfig
+        .fromValues(
+          model = section.model.asString,
+          baseUrl = baseUrl,
+          apiKey = section.apiKey.map(_.asKey),
+          contextWindow = contextWindow.orElse(registryWindow(baseUrl)),
+          reserveCompletion = reserveCompletion,
+          headers = section.headers,
+          streamUsage = streamUsage,
+          tokenExchange = tokenExchange
+        )
+        .left
+        .map(ProviderConfig.inSection(providerName, AuthSectionKeys))
     yield config
+
+  /** The exchange a section's `auth` block describes, if it has one; unvalidated - see [[validatedConfig]]. */
+  private def tokenExchangeOf(
+    providerName: String,
+    section: NamedProviderConfig
+  ): Result[Option[TokenExchangeConfig]] =
+    section.auth match
+      case None       => Right(None)
+      case Some(auth) =>
+        // The https rule on `tokenUrl` is `OpenAICompatibleConfig.validate`'s, applied by `fromValues`.
+        ProviderDescriptor
+          .requireAuthExtra(providerName, auth, TokenUrlKey)
+          .map(tokenUrl =>
+            Some(
+              TokenExchangeConfig(
+                auth.identityToken,
+                tokenUrl,
+                auth.extra(ClientIdKey),
+                auth.extra(ScopeKey),
+                auth.extra(AudienceKey)
+              )
+            )
+          )
 
   // The context window the model registry gives `model`, under the explicit `registryProvider` or, when the
   // section names none, the provider inferred from the `baseUrl` host. `None` when there is no provider to ask,

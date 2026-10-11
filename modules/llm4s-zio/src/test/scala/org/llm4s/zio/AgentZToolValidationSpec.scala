@@ -4,6 +4,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
 import org.llm4s.agent.{ AgentBuilder, AgentStatus }
+import org.llm4s.agent.testkit.Fixtures
 import org.llm4s.error.SimpleError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*

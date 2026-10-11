@@ -87,6 +87,21 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers with ProviderMo
         .map(_.getClass.getSimpleName) shouldBe Right("AnthropicConfig")
     }
 
+    "build a client from an anthropic section with auth" in {
+      given ProviderRegistry = ProviderRegistry.default
+      val section = ProviderTestConfig
+        .loadSection(
+          "wi",
+          """llm4s.providers.wi {
+            |  provider = "anthropic"
+            |  model    = "claude-test"
+            |  auth { identityTokenFile = "/var/run/svid", federationRuleId = "fdrl_1", organizationId = "org_1" }
+            |}""".stripMargin
+        )
+        .fold(error => fail(error.message), identity)
+      assertBuildsClient(AnthropicProvider, section).getClass.getSimpleName shouldBe "AnthropicClient"
+    }
+
     "refuse a config belonging to another provider" in {
       assertRefusesForeignConfig(AnthropicProvider)
     }

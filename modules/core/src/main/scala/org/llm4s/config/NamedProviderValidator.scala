@@ -2,6 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.*
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.auth.AuthConfig
 import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor, ProviderRegistry }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -67,16 +68,29 @@ private[llm4s] object NamedProviderSectionValidator:
       specError(id, spec) match
         case Some(error) => Left(error)
         case None =>
-          val extras   = resolveExtras(name, id, spec, normalized)
-          val problems = missingBuiltins(name, descriptor, normalized) ++ extras.problems
-
-          if problems.nonEmpty then
+          if normalized.auth.isDefined && !spec.supportsAuth then
             Left(
               ConfigurationError(
-                s"Provider '$name' (provider = $id) is missing required fields:\n" + problems.mkString("\n")
+                s"Provider '$name' (provider = $id) does not support workload-identity authentication; " +
+                  s"remove llm4s.providers.$name.auth and set an apiKey"
               )
             )
-          else Right((normalized.withExtras(extras.values), extras.warnings))
+          else
+            val extras = resolveExtras(name, id, spec, normalized)
+            val auth   = normalized.auth.map(a => a -> resolveAuth(name, id, spec, a))
+            val problems =
+              missingBuiltins(name, descriptor, normalized) ++ extras.problems ++ auth.toSeq.flatMap(_._2.problems)
+
+            if problems.nonEmpty then
+              Left(
+                ConfigurationError(
+                  s"Provider '$name' (provider = $id) is missing required fields:\n" + problems.mkString("\n")
+                )
+              )
+            else
+              val withAuth =
+                auth.fold(normalized)((a, resolved) => normalized.withAuth(a.withExtras(resolved.values)))
+              Right((withAuth.withExtras(extras.values), extras.warnings ++ auth.toSeq.flatMap(_._2.warnings)))
 
   /**
    * A descriptor bug rather than a user one: an extra key may not shadow a built-in field, and a
@@ -89,8 +103,12 @@ private[llm4s] object NamedProviderSectionValidator:
       .filter(alias =>
         ProviderConfigSpec.BuiltinKeys.contains(alias) && !ProviderConfigSpec.BuiltinAliasKeys.contains(alias)
       )
+    val reservedAuth = spec.authExtras.map(_.name).filter(AuthConfig.ReservedKeys.contains)
     val problems =
-      Option.when(clashing.nonEmpty)(
+      Option.when(reservedAuth.nonEmpty)(
+        s"declares auth key(s) ${reservedAuth.mkString(", ")}, which are the identity-token keys core reads itself; " +
+          "rename them in its ProviderConfigSpec.authExtras"
+      ) ++ Option.when(clashing.nonEmpty)(
         s"declares provider-specific key(s) ${clashing.mkString(", ")}, which are built-in named-provider fields; " +
           "rename them in its ProviderConfigSpec.extras"
       ) ++ Option.when(badAliases.nonEmpty)(
@@ -107,7 +125,7 @@ private[llm4s] object NamedProviderSectionValidator:
     val spec    = descriptor.configSpec
     val missing = Seq.newBuilder[String]
 
-    if spec.requiresApiKey && normalized.apiKey.isEmpty then
+    if spec.requiresApiKey && normalized.apiKey.isEmpty && normalized.auth.isEmpty then
       // By now the section has already fallen back to the vendor's shared key, so both places are
       // empty. Name the variable the provider's module binds to that shared key - declared by the
       // provider, never guessed from its id - and the section's own key, for a second account.
@@ -135,6 +153,32 @@ private[llm4s] object NamedProviderSectionValidator:
     problems: Seq[String] = Nil,
     warnings: Seq[String] = Nil
   )
+
+  /** The `auth` block's provider keys after defaults, and what is wrong with them. */
+  private def resolveAuth(
+    name: String,
+    id: String,
+    spec: ProviderConfigSpec,
+    auth: AuthConfig
+  ): ResolvedExtras =
+    val path = s"llm4s.providers.$name.auth"
+    val outcomes = spec.authExtras.map { key =>
+      auth.extras.get(key.name).orElse(key.default) match
+        case some @ Some(_) => key.name -> KeyOutcome(some)
+        case None if key.required =>
+          key.name -> KeyOutcome(None, problems = Seq(s"  - auth.${key.name}: ${key.description} (set it under $path)"))
+        case None => key.name -> KeyOutcome(None)
+    }
+    val unknown = auth.extras.keySet.diff(spec.authExtras.map(_.name).toSet).toSeq.sorted
+    val unknownWarning = Option.when(unknown.nonEmpty)(
+      s"$path has unknown key(s) ${unknown.mkString(", ")}, which are ignored; provider = $id accepts " +
+        (AuthConfig.ReservedKeys.toSeq.sorted ++ spec.authExtras.map(_.name)).mkString(", ")
+    )
+    ResolvedExtras(
+      outcomes.flatMap((key, outcome) => outcome.value.map(key -> _)).toMap,
+      outcomes.flatMap(_._2.problems),
+      unknownWarning.toSeq
+    )
 
   private def resolveExtras(
     name: String,
@@ -203,11 +247,13 @@ private[llm4s] object NamedProviderSectionValidator:
     val claimed = spec.extras.flatMap(key => key.name +: key.deprecatedAliases).toSet
     val unknown = normalized.extras.keys.filterNot(claimed.contains).toSeq.sorted
     val unknownWarning = Option.when(unknown.nonEmpty) {
+      // `auth` is a built-in only for a provider that can use it.
+      val builtins = ProviderConfigSpec.BuiltinKeys.toSeq.filter(k => k != "auth" || spec.supportsAuth).sorted
       val accepted =
         if spec.extras.isEmpty then s"provider = $id declares no provider-specific keys"
         else s"provider = $id also accepts ${spec.extras.map(_.name).mkString(", ")}"
       s"$section has unknown key(s) ${unknown.mkString(", ")}, which are ignored. Besides the built-in fields " +
-        s"(${ProviderConfigSpec.BuiltinKeys.toSeq.sorted.mkString(", ")}), $accepted."
+        s"(${builtins.mkString(", ")}), $accepted."
     }
 
     ResolvedExtras(
@@ -241,14 +287,34 @@ private[llm4s] object NamedProviderConfigValidator:
     val sectionPath = s"llm4s.providers.${providerName.asName}"
     for
       normalized <- NamedProviderConfigNormalizer.normalize(providerName, section)
+      _ <- Either.cond(
+        normalized.auth.isEmpty || normalized.apiKey.isEmpty,
+        (),
+        ConfigurationError(s"$sectionPath sets both apiKey and auth; a section authenticates one way - remove one")
+      )
+      // The exchanged token is the request's bearer; a configured Authorization header would replace it
+      // or be sent beside it, depending on the client, so the section is refused rather than guessed at.
+      _ <- Either.cond(
+        normalized.auth.isEmpty || !normalized.headers.keys.exists(_.equalsIgnoreCase("Authorization")),
+        (),
+        ConfigurationError(
+          s"$sectionPath sets both auth and an Authorization header; with auth the request's Authorization is the " +
+            s"exchanged token - remove the header from $sectionPath.headers"
+        )
+      )
       descriptor <- registry.resolve(normalized.provider, Some(s"$sectionPath.provider"))
       // `normalized.provider` is already canonical - an alias such as `google` has become
-      // `gemini` - so an aliased section finds its vendor's shared key.
-      resolved <- credentials.resolve(normalized.apiKey.map(_.asKey), s"$sectionPath.apiKey", normalized.provider)
+      // `gemini` - so an aliased section finds its vendor's shared key. A section that authenticates
+      // with workload identity uses no key at all, so the shared one is not consulted: exporting
+      // OPENAI_API_KEY must not turn a section that uses `auth` into an error.
+      resolved <-
+        if normalized.auth.isDefined then Right(None)
+        else credentials.resolve(normalized.apiKey.map(_.asKey), s"$sectionPath.apiKey", normalized.provider)
       validated <- NamedProviderSectionValidator.validate(
         providerName,
         descriptor,
-        normalized.withApiKey(resolved.map(key => ApiKey(key.value)))
+        if normalized.auth.isDefined then normalized
+        else normalized.withApiKey(resolved.map(key => ApiKey(key.value)))
       )
     yield
       resolved.foreach(SharedCredentials.logSource(sectionPath, _))

@@ -7,6 +7,9 @@ nav_order: 2
 
 # Migration Guide
 
+Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
+by what you use. The notes below are the per-change detail it links to.
+
 ## Stage 2 migration: durable execution
 
 Not in a release yet. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/1699)) makes agent and graph threads durable and adds human review. One note covers the whole stage; each slice adds its part here as it lands:
@@ -140,7 +143,7 @@ Embedding, reranker, MCP, image clients and the Whisper and Tacotron2 speech eng
 
 ### Orchestration removed (#1330)
 
-`org.llm4s.agent.orchestration` is deleted: `PlanRunner`, `Plan`, `Node`, `Edge`, `TypedAgent`, `Policies`, `OrchestrationError` and `CancellationToken`, with `org.llm4s.types.PlanId` and `org.llm4s.types.AgentId` from `llm4s-core` (the agent's id is `org.llm4s.agent.AgentId`). `PlanRunner` passed `Map[String, Any]` between nodes and cast each node to `TypedAgent[Any, Any]`. A typed graph does the same job with checked handles, checkpoints and recovery. The [multi-agent graph recipe](../examples/cookbook#6-several-agents-in-one-graph) is a worked replacement.
+`org.llm4s.agent.orchestration` is deleted: `PlanRunner`, `Plan`, `Node`, `Edge`, `TypedAgent`, `Policies`, `OrchestrationError` and `CancellationToken`, with `org.llm4s.types.PlanId` and `org.llm4s.types.AgentId` from `llm4s-core` (the agent's id is `org.llm4s.agent.AgentId`). `PlanRunner` passed `Map[String, Any]` between nodes and cast each node to `TypedAgent[Any, Any]`. A typed graph does the same job with checked handles, checkpoints and recovery. The [multi-agent graph recipe](../examples/cookbook/multi-agent-graph) is a worked replacement.
 
 | Removed | Use instead |
 |---|---|

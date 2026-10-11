@@ -72,6 +72,10 @@ flags:
     paths:
       - modules/llm4s-zio/src/main/scala
     carryforward: true
+  llm4s-pekko:
+    paths:
+      - modules/llm4s-pekko/src/main/scala
+    carryforward: true
   ollama:
     paths:
       - modules/ollama/src/main/scala

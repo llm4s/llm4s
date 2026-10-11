@@ -29,7 +29,7 @@ The LLM4S Agent Framework provides a production-ready foundation for building LL
 - **Memory** - Short and long-term context with semantic search
 - **Handoffs** - Agent-to-agent delegation for specialist routing
 - **Streaming** - Real-time events for responsive UIs (`agent.stream`, [streaming guide](streaming))
-- **Graphs** - Typed multi-agent workflows on `GraphBuilder`: parallel nodes, joins and checkpoints ([recipe](../../examples/cookbook.html#6-several-agents-in-one-graph))
+- **Graphs** - Typed multi-agent workflows on `GraphBuilder`: parallel nodes, joins and checkpoints ([recipe](../../examples/cookbook/multi-agent-graph.html))
 
 ## Quick Start
 
