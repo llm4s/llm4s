@@ -129,4 +129,34 @@ class Llm4sSpec extends AnyFlatSpec with Matchers {
   it should "refuse a null client at once" in {
     (the[NullPointerException] thrownBy Llm4s.wrapClient(null) should have).message("client must not be null")
   }
+
+  "wrapEmbeddingClient" should "wrap a Scala EmbeddingClient the caller built, asking for the model it names (#1666)" in {
+    import org.llm4s.llmconnect.EmbeddingClient
+    import org.llm4s.llmconnect.config.EmbeddingModelConfig
+    import org.llm4s.llmconnect.provider.EmbeddingProvider
+    import org.llm4s.model.ModelRegistryService
+    val asked = new java.util.concurrent.atomic.AtomicReference[EmbeddingRequest]()
+    val provider = new EmbeddingProvider {
+      override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
+        asked.set(request)
+        Right(EmbeddingResponse(Seq(Vector(1.0, 0.0))))
+      }
+    }
+    val core   = new EmbeddingClient(provider)(using ModelRegistryService.fromModels(Nil))
+    val client = Llm4s.wrapEmbeddingClient(core, EmbeddingModelConfig("mine", 2))
+    (client.model, client.dimensions) shouldBe (("mine", 2))
+    client.embed(java.util.List.of("a")).get().vectors.get(0).toList shouldBe List(1.0f, 0.0f)
+    asked.get.model shouldBe EmbeddingModelConfig("mine", 2)
+  }
+
+  it should "refuse a null client or model at once" in {
+    import org.llm4s.llmconnect.EmbeddingClient
+    import org.llm4s.llmconnect.config.EmbeddingModelConfig
+    import org.llm4s.model.ModelRegistryService
+    val core = new EmbeddingClient(_ => Right(EmbeddingResponse(Seq.empty)))(using ModelRegistryService.fromModels(Nil))
+    (the[NullPointerException] thrownBy Llm4s.wrapEmbeddingClient(null, EmbeddingModelConfig("m", 1)) should
+      have).message("client must not be null")
+    (the[NullPointerException] thrownBy Llm4s.wrapEmbeddingClient(core, null) should have)
+      .message("model must not be null")
+  }
 }

@@ -83,8 +83,21 @@ object Llm4s {
       dimensions <- ModelDimensionRegistry.getDimension(provider, config.model)
       registry   <- Llm4sConfig.modelRegistryService()
       client     <- EmbeddingClient.from(provider, config)(using registry)
-    } yield new JEmbeddingClient(FacadeToken.INSTANCE, client, EmbeddingModelConfig(config.model, dimensions))
+    } yield wrapEmbeddingClient(client, EmbeddingModelConfig(config.model, dimensions))
   }
+
+  /**
+   * Wraps a Scala [[EmbeddingClient]] you built yourself - over your own `EmbeddingProvider`, or a test double - in a
+   * [[JEmbeddingClient]] that asks for `model` and reports its dimensions.
+   *
+   * @throws NullPointerException when either argument is `null`
+   */
+  def wrapEmbeddingClient(client: EmbeddingClient, model: EmbeddingModelConfig): JEmbeddingClient =
+    new JEmbeddingClient(
+      FacadeToken.INSTANCE,
+      Objects.requireNonNull(client, "client must not be null"),
+      Objects.requireNonNull(model, "model must not be null")
+    )
 
   /**
    * Wraps a [[JLlmClient]] in a [[JAgent]] ready to accept natural-language

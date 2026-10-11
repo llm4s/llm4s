@@ -21,7 +21,7 @@ import scala.jdk.CollectionConverters.*
  * }}}
  *
  * Obtain one with [[Llm4s.createDefaultEmbeddingClient]], which reads the model from `llm4s.embeddings.model`
- * (`EMBEDDING_MODEL`).
+ * (`EMBEDDING_MODEL`), or wrap a Scala `EmbeddingClient` you built yourself with [[Llm4s.wrapEmbeddingClient]].
  *
  * Every `embed` sends all its texts to the provider in one request, blocks the calling thread and never throws: a
  * failure - of the provider, the network or an argument - comes back inside the [[LlmResult]], and its

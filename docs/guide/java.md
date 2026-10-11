@@ -40,7 +40,7 @@ builder, `LlmResult.success` and `failure` make a result, and the `Answer` facto
 not for you either: each takes a first parameter of a type only the package can name, and throws
 `UnsupportedOperationException` when called from anywhere else. To call a Scala `LLMClient` you built yourself - a
 `ReliableClient` around a provider's client, your own implementation, a test double - wrap it with
-`Llm4s.wrapClient(client)`.
+`Llm4s.wrapClient(client)`; a Scala `EmbeddingClient`, with `Llm4s.wrapEmbeddingClient(client, model)`.
 
 {: .note }
 > **Not published yet.** `llm4s-java-api` is not on Maven Central: the latest release, `0.4.1`, is a single

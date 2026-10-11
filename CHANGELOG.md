@@ -1205,8 +1205,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AgentStream.start` and `Llm4s.createClient(config, metrics)` are gone from the facade types. `JavaInteropSpec` now
   fails on any public constructor or public static method that is not in its list of intended ones, its companion's
   included, and compiles a Java class in another package that tries to build each value type. New:
-  `Llm4s.wrapClient(LLMClient)`, the counterpart of `wrapAgent`. Migration: `new JLlmClient(client)` from Java or
-  Kotlin becomes `Llm4s.wrapClient(client)`; nothing else had a supported way in.
+  `Llm4s.wrapClient(LLMClient)` and `Llm4s.wrapEmbeddingClient(EmbeddingClient, EmbeddingModelConfig)`, the
+  counterparts of `wrapAgent`. Migration: `new JLlmClient(client)` from Java or Kotlin becomes
+  `Llm4s.wrapClient(client)`, and `new JEmbeddingClient(client, model)` becomes `Llm4s.wrapEmbeddingClient(client,
+  model)`; nothing else had a supported way in.
 - **`Checkpointer` keeps a checkpoint history** ([#1702](https://github.com/llm4s/llm4s/issues/1702), BREAKING,
   `llm4s-agent`): `Checkpointer` gains `history`, `checkpoint` and `prune`, and must keep every superseded checkpoint
   and refuse a checkpoint id already in the history (`InvalidCommit`); `Commit` gains `retractTurn` (defaulted);

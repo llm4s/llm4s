@@ -341,6 +341,7 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
       "createDefaultClient()",
       "createClient(ProviderConfig)",
       "wrapClient(LLMClient)",
+      "wrapEmbeddingClient(EmbeddingClient,EmbeddingModelConfig)",
       "createDefaultEmbeddingClient()",
       "createAgent(JLlmClient)",
       "createAgent(JLlmClient,ToolRegistry)",
