@@ -171,6 +171,23 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
     }
   }
 
+  test("OpenAIVisionClient: a blank apiKey is refused before any request, never sent as an empty bearer") {
+    withTempImageFile { imagePath =>
+      val cfg = org.llm4s.imageprocessing.config.OpenAIVisionConfig(
+        apiKey = " ",
+        baseUrl = s"http://localhost:${closedPort()}",
+        requestTimeout = RequestTimeout,
+        connectTimeout = ConnectTimeout
+      )
+      val error = new org.llm4s.imageprocessing.provider.OpenAIVisionClient(cfg)
+        .analyzeImage(imagePath, Some("p"))
+        .left
+        .getOrElse(fail("expected a failure"))
+      error shouldBe a[org.llm4s.error.ConfigurationError]
+      error.message should include("apiKey")
+    }
+  }
+
   test("AnthropicVisionClient: a refused connection is a Left, never an exception") {
     withTempImageFile { imagePath =>
       val cfg = org.llm4s.imageprocessing.config.AnthropicVisionConfig(

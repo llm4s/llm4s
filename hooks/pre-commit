@@ -110,6 +110,7 @@ map_file_to_project() {
     modules/providers/bedrock/*)          echo "bedrock" ;;
     modules/providers/watsonx/*)          echo "watsonx" ;;
     modules/providers/jina/*)             echo "jina" ;;
+    modules/providers/jev/*)              echo "jev" ;;
     modules/providers/cohere/*)           echo "cohere" ;;
     modules/providers/voyage/*)           echo "voyage" ;;
     modules/gradle-demo/*)                echo "gradleDemo" ;;
@@ -130,6 +131,7 @@ map_file_to_project() {
     modules/image/*)                      echo "image" ;;
     modules/agent/*)                      echo "agent" ;;
     modules/core/*)                       echo "core" ;;
+    modules/bom/*)                        echo "bom" ;;
     modules/rag/*)                        echo "rag" ;;
     modules/mcp/*)                        echo "mcp" ;;
     modules/it/*)                         echo "it" ;;
@@ -230,6 +232,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE bedrock
       set_add DOWNSTREAM_COMPILE watsonx
       set_add DOWNSTREAM_COMPILE jina
+      set_add DOWNSTREAM_COMPILE jev
       set_add DOWNSTREAM_COMPILE cohere
       set_add DOWNSTREAM_COMPILE openai
       set_add DOWNSTREAM_COMPILE workspaceClient
@@ -355,6 +358,10 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
       ;;
+    jev)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
     cohere)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
@@ -437,6 +444,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE bedrock
       set_add DOWNSTREAM_COMPILE watsonx
       set_add DOWNSTREAM_COMPILE jina
+      set_add DOWNSTREAM_COMPILE jev
       set_add DOWNSTREAM_COMPILE cohere
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE springBootStarter

@@ -79,8 +79,10 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `llmconnect/provider` — Cohere embeddings, on Cohere's native `/v2/embed` (Cohere chat is a dialect in `llm4s-openai-compatible`) — **new** | `llm4s-cohere` (`modules/providers/cohere`) | Beta |
 | `llmconnect/provider` — IBM watsonx.ai, on the text-generation endpoints IBM has deprecated (never run against the live service; migration to the chat API is [#1314](https://github.com/llm4s/llm4s/issues/1314)) — **new** | `llm4s-watsonx` (`modules/providers/watsonx`) | Beta |
 | `llmconnect/provider` — other community providers | `llm4s-openai-compatible` dialects, or `modules/providers/<name>` | Beta |
+| `jev` — typed client for TypeSafe's Jev decision model (Noul, Choice, Score); not a chat provider — **new** | `llm4s-jev` (`modules/providers/jev`) | Beta |
 | `testkit` — the checks a provider module's `Llm4s<Name>ModuleSpec` makes (`ProviderModuleChecks`, `ProviderTestConfig`, `CredentialsRoundTrip`, `LocalProviderTestServer`), formerly unpublished helpers in core's test sources — **new** | `llm4s-provider-testkit` (`modules/provider-testkit`), a test-scope dependency; requires JDK 21 (virtual threads) | Beta |
 | `schema` — `SchemaOf`, a JSON schema derived from a case class with `derives`, and `completeStructuredOf`; builds core's `ObjectSchema` and adds no dependency (Map, recursive types and sealed hierarchies with fields are refused at compile time) — **new** | `llm4s-schema-derivation` (`modules/schema-derivation`) | Experimental |
+| build — the bill of materials that pins every published artifact to one version (no code) — **new** | `llm4s-bom` (`modules/bom`) | Beta |
 | `rag`, `vectorstore`, `chunking`, `reranker`, `eval` — **carved** | `llm4s-rag` | Beta |
 | `extract` (consolidated from `rag/extract` + `llmconnect/extractors`) and `rag/embed` (from `llmconnect/encoding`) — **carved** | `llm4s-rag` | Beta |
 | `agent/memory` (excluding `PostgresMemoryStore`) — **carved** | `llm4s-memory` | Beta |
@@ -119,9 +121,20 @@ Notes:
 
 ## Scala and JDK support
 
-1.0 targets **Scala 3 only (3.7.1)**. Scala 2.13 support is deferred to post-1.0 and, if it happens, would target the frozen spine (`llm4s-core`, `llm4s-agent`, and the frozen provider modules) rather than the full tree. The tracing and metrics contracts are part of `llm4s-core`; the observability integration modules are not in the spine. JDK 21 is used in CI. `llm4s-provider-testkit` requires JDK 21: its interruption checks and `LocalProviderTestServer` run on virtual threads ([#1582](https://github.com/llm4s/llm4s/issues/1582)). The minimum JDK for the other artifacts is decided in [#1493](https://github.com/llm4s/llm4s/issues/1493).
+1.0 targets **Scala 3 only (3.7.1)**. Scala 2.13 support is deferred to post-1.0 and, if it happens, would target the frozen spine (`llm4s-core`, `llm4s-agent`, and the frozen provider modules) rather than the full tree. The tracing and metrics contracts are part of `llm4s-core`; the observability integration modules are not in the spine. JDK 21 is used in CI; the JDK each artifact needs is below.
 
 See [#1126](https://github.com/llm4s/llm4s/issues/1126) for the reasoning behind the Scala-3-only decision.
+
+**JDK.** The supported minimum is **JDK 21** for every artifact, and CI runs only JDK 21. For `llm4s-core` and everything that depends on it, which is every artifact but two, JDK 21 is also a hard requirement, for the reasons in the table. Whether some artifacts will get a lower floor before 1.0 is an open decision ([#1493](https://github.com/llm4s/llm4s/issues/1493)); until it is made, this table is what the code needs today.
+
+| Artifacts | Minimum JDK | Tested on | Why |
+|---|---|---|---|
+| `llm4s-agent`, and the modules that depend on it: `llm4s-java-api`, `llm4s-kotlin-api`, `llm4s-spring-boot-starter`, `llm4s-effect`, `llm4s-zio` | 21 | 21 | `llm4s-agent` depends on Ox, whose jars are compiled for JDK 21 (class-file version 65), and it starts virtual threads (`Thread.ofVirtual`). The Java and Kotlin facades start their own as well: `AgentStream` in `llm4s-java-api`, and `AgentKt`'s stream completion in `llm4s-kotlin-api` ([#1678](https://github.com/llm4s/llm4s/pull/1678)) |
+| `llm4s-core` and every module that depends on it | 21 | 21 | `ToolRegistry` starts a virtual thread (`Thread.ofVirtual`), a JDK 21 API, so `llm4s-core` does not compile against an older JDK |
+| `llm4s-provider-testkit` | 21 | 21 | its interruption checks and `LocalProviderTestServer` run on virtual threads ([#1582](https://github.com/llm4s/llm4s/issues/1582)) |
+| `llm4s-media`, `llm4s-workspace-shared` | 21 (supported) | 21 | neither depends on `llm4s-core`: they use no JDK 21 API, and their newest dependency class files are version 55 (uJson), so they may well load on an older JDK, but only JDK 21 is tested and supported |
+
+No build setting pins a bytecode level (no `-release`, `-java-output-version` or `javacOptions` target), so the bytecode level alone does not tell you which JDK you need: the requirement comes from the APIs and the dependencies above. The Scala compiler emits class-file version 52 for the llm4s Scala sources. The few Java sources (the `@Stable` and `@Experimental` annotations in `llm4s-core`, the enums of `llm4s-java-api`) are compiled by `javac` at the level of the JDK that builds them, which is version 65 for artifacts built on CI's JDK 21. The Gradle-built `llm4s-kotlin-api` targets JVM 17 bytecode (version 61) and still needs JDK 21 to run.
 
 ## Programme status
 

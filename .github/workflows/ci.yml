@@ -163,6 +163,11 @@ jobs:
       - name: Check every published artifact is documented
         run: sbt publishedArtifactsCheck
 
+      # Fails when the generated llm4s-bom does not list exactly the artifacts the build publishes
+      # (project/Bom.scala). A release cannot be amended, so a BOM that omits a module stays that way.
+      - name: Check the BOM lists every published artifact
+        run: sbt bomCheck
+
       - name: Compile
         run: sbt compile
 
@@ -284,6 +289,7 @@ jobs:
           voyage/test voyage/coverageReport
           bedrock/test bedrock/coverageReport
           jina/test jina/coverageReport
+          jev/test jev/coverageReport
           cohere/test cohere/coverageReport
           watsonx/test watsonx/coverageReport
           providerTestkit/test providerTestkit/coverageReport
@@ -467,6 +473,12 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/jina/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: jina
+      - name: Upload jev coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/jev/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: jev
       - name: Upload cohere coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
@@ -840,6 +852,13 @@ jobs:
         working-directory: modules/samples/gradle-java
         run: gradle build installDist
 
+      # A Gradle and a Maven project that import llm4s-bom and declare two modules with no version must build
+      # against the library just published, and a Gradle project without the BOM must not (#1462).
+      - name: Build a Gradle and a Maven project against llm4s-bom
+        env:
+          REQUIRE_MAVEN: '1'
+        run: scripts/check-bom-consumers.sh 0.1.0-SNAPSHOT
+
       - name: Upload Kotlin coverage report
         if: always()
         uses: actions/upload-artifact@v7
@@ -1131,4 +1150,6 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
           BEDROCK_MODEL_ID: ${{ secrets.BEDROCK_MODEL_ID }}
+          # JevSmokeSpec (llm4s-jev): a TypeSafe API key, billed at a few hundred input tokens per test.
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: sbt testSmoke
