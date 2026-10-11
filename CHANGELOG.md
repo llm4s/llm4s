@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`sbt pomMetadataCheck`: every published POM carries its metadata** ([#1455](https://github.com/llm4s/llm4s/issues/1455)):
+  a CI quick check that reads the POM sbt generates for each of the 44 published projects (the `llm4s-*` artifacts, the
+  BOM and the relocation stubs) and fails when one lacks a name, a description of its own, an https project URL, a
+  licence with an https URL, a developer, or the `<scm>` Scaladex associates artifacts by
+  (`https://github.com/llm4s/llm4s`, no trailing slash, with an `scm:git:https` connection). Maven Central rejects a
+  POM without these at publish time, after the tag is pushed, and a released POM cannot be amended.
+  `sbt "pomMetadataCheckFiles <pom>..."` runs the same rules on POMs downloaded from Central; on 0.4.1's it reports
+  the three problems fixed since (#1588). The README has a Maven Central badge, and `docs/reference/release.md` has a
+  Discoverability section for maintainers: GitHub topics and description, the homepage, and how to get Scaladex to
+  list `org.llm4s` (it does not yet).
+- **CI runs in a GitHub merge queue** ([#1638](https://github.com/llm4s/llm4s/issues/1638)): `ci.yml`, `dco.yml` and
+  `secret-scan.yml`, the workflows behind `main`'s required checks (`All Tests Pass`, `Check DCO sign-off`, `TruffleHog
+  Secret Scan`), also trigger on `merge_group`, so a maintainer can enable a merge queue that tests each pull request
+  on top of current `main` before it lands. That closes the merge skew that turned `main` red when two independently
+  green pull requests landed together (#1386 with #1417, #1741 with #1585). On a merge group the DCO job reports
+  without re-running `dco-check` (the pull request already passed it to be queued), and the secret scan scans the
+  group's own range. `scripts/test-merge-queue-workflows.sh`, in Quick Checks, keeps it so. Enabling the queue is a
+  repository setting: [docs/reference/merge-queue.md](docs/reference/merge-queue.md). Nothing changes until it is enabled.
+- **A build-only dry run for the docs deploy** ([#1152](https://github.com/llm4s/llm4s/issues/1152)): `pages.yml`
+  takes `-f dry_run=true`, which runs every build step (tag validation and checkout, version, aggregate Scaladoc and its
+  package check, Jekyll, the Pages artifact) and skips the deploy, in a concurrency group of its own so it never
+  displaces a pending real deploy. It works on any branch, so the release path (`--ref main -f ref=<tag> -f
+  dry_run=true`) and a `pages.yml` change can be checked without touching llm4s.org. A run that is neither a dry run nor
+  on `main` now fails in its first step, instead of building for minutes and then being rejected by the `github-pages`
+  environment. The release dispatch never sets it. `docs/reference/release.md` also records that only a tag with the
+  aggregate `docs` project (after v0.4.1) can be built by today's `pages.yml`.
 - **Kotlin `AgentKt.forget(threadId)`** ([#1693](https://github.com/llm4s/llm4s/issues/1693)): a suspend function
   that forgets a conversation by its thread id, delegating to `JAgent.forget(threadId)` and throwing `LLMException`
   on failure, so a Kotlin caller can remove a named conversation whose turn left no result - a failed
