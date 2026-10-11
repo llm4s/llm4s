@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   table paged by its primary key, each write one transaction. The sample `SqliteRestartRecoveryExample` shows a restart
   and recovery.
   See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#the-sqlite-store).
+- **A build-only dry run for the docs deploy** ([#1152](https://github.com/llm4s/llm4s/issues/1152)): `pages.yml`
+  takes `-f dry_run=true`, which runs every build step (tag validation and checkout, version, aggregate Scaladoc and its
+  package check, Jekyll, the Pages artifact) and skips the deploy, in a concurrency group of its own so it never
+  displaces a pending real deploy. It works on any branch, so the release path (`--ref main -f ref=<tag> -f
+  dry_run=true`) and a `pages.yml` change can be checked without touching llm4s.org. A run that is neither a dry run nor
+  on `main` now fails in its first step, instead of building for minutes and then being rejected by the `github-pages`
+  environment. The release dispatch never sets it. `docs/reference/release.md` also records that only a tag with the
+  aggregate `docs` project (after v0.4.1) can be built by today's `pages.yml`.
 - **Kotlin `AgentKt.forget(threadId)`** ([#1693](https://github.com/llm4s/llm4s/issues/1693)): a suspend function
   that forgets a conversation by its thread id, delegating to `JAgent.forget(threadId)` and throwing `LLMException`
   on failure, so a Kotlin caller can remove a named conversation whose turn left no result - a failed
