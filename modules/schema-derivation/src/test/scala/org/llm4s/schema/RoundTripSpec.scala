@@ -41,6 +41,7 @@ class RoundTripSpec extends AnyFlatSpec with Matchers {
     writtenConforms(Defaults(6, Some("x")))
     writtenConforms(Box(42))
     writtenConforms(Box(List("a", "b")))
+    writtenConforms(Boxes(Box(Box(1)), Box(Inner(2))))
   }
 
   it should "use the case name for an enum and a sealed hierarchy of singletons, which the schema lists" in {
@@ -86,6 +87,10 @@ class RoundTripSpec extends AnyFlatSpec with Matchers {
     conformingReads("""{"user_name":"ann","age":30}""", Renamed("ann", 30))
     conformingReads("""{"a":7,"b":null}""", Defaults(7, None))
     conformingReads("""{"value":9}""", Box(9))
+    conformingReads(
+      """{"twice":{"value":{"value":1}},"ofInner":{"value":{"n":2}}}""",
+      Boxes(Box(Box(1)), Box(Inner(2)))
+    )
   }
 
   it should "read into the defaults when a field with a default is absent, though the strict schema requires it" in {

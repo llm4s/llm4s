@@ -25,6 +25,7 @@ val invoice = client.completeStructuredOf[Invoice](conversation)   // Result[Inv
 |---|---|
 | `SchemaOf[A]` | the schema of `A`; `derives SchemaOf` for case classes, enums and sealed hierarchies of singletons |
 | `SchemaOf[A].toJsonSchema(strict)` | the JSON Schema document `completeStructured` sends |
+| `SchemaOf[A].definition` | the same schema as core's `SchemaDefinition`, which `ToolBuilder` takes as a tool's parameters |
 | `@description("...")` | the description the model sees, on a field or a type |
 | `client.completeStructuredOf[A](conversation, options)` | `completeStructured` with the derived schema |
 | `SchemaOf.string`, `SchemaOf.stringEnum` | schemas for types you write as strings yourself |
@@ -46,4 +47,6 @@ compile-time cost.
 
 `sbt schemaDerivation/test`. The golden specs pin the derived JSON for every shape, one of them against the hand-built
 schema of `StructuredOutputExample`; `RoundTripSpec` validates what uPickle writes against the schema and reads
-schema-conformant documents back; `CompileErrorsSpec` pins the refusals; `DerivedSchemasGuideSpec` compiles the guide.
+schema-conformant documents back; `CompileErrorsSpec` pins the refusals (including a recursive type whose type arguments grow, which must still
+terminate); `ExternalUseSpec` derives from a package outside `org.llm4s`, as user code does;
+`DerivedSchemasGuideSpec` compiles the guide.

@@ -27,10 +27,42 @@ class CompileErrorsSpec extends AnyFlatSpec with Matchers {
     )
   }
 
+  it should "refuse a generic type that refers to itself" in {
+    messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.Node[Int]]")) should include(
+      "refers to itself"
+    )
+  }
+
+  it should "refuse, and terminate on, a type that refers to itself with ever larger type arguments" in {
+    // Grow[Int] holds a Grow[List[Int]], which holds a Grow[List[List[Int]]]...: no type repeats, so only the
+    // depth bound stops the walk. Without it this test does not compile, it never finishes compiling.
+    messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.Grow[Int]]")) should include(
+      "refers to itself"
+    )
+  }
+
+  it should "refuse mutually recursive types, and recursion through a generic case class" in {
+    messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.Ping]")) should include(
+      "refers to itself"
+    )
+    messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.Wrapped]")) should include(
+      "refers to itself"
+    )
+  }
+
+  it should "accept a generic case class nested in itself with different type arguments" in {
+    scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.Boxes]") shouldBe Nil
+  }
+
+  it should "refuse a sealed hierarchy nested in another, whose case names uPickle would not write" in {
+    val errors = messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.WithOuter]"))
+    errors should include("Middle of Outer is not a singleton")
+  }
+
   it should "refuse a sealed hierarchy with fields, naming the case that has them" in {
     val errors = messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.WithShape]"))
     errors should include("Circle")
-    errors should include("has fields")
+    errors should include("Circle of Shape is not a singleton")
     errors should include("oneOf")
   }
 

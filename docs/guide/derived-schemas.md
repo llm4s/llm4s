@@ -104,6 +104,38 @@ enum Priority derives SchemaOf, ReadWriter {
 }
 ```
 
+## Tool parameters
+
+A tool's parameters are a schema too. `SchemaOf[A].definition` is the derived schema as `llm4s-core`'s schema model, which `ToolBuilder` takes as it is, and the handler reads the arguments with the same `ReadWriter`:
+
+```scala
+import org.llm4s.schema.*
+import org.llm4s.toolapi.{ ToolBuilder, ToolFunction }
+import org.llm4s.types.Result
+import upickle.default.{ read, ReadWriter }
+
+import scala.util.Try
+
+@description("Where to look up the weather")
+case class WeatherQuery(
+  @description("City name, for example Paris") city: String,
+  @description("Temperature unit; the default is Celsius") unit: Option[TemperatureUnit]
+) derives SchemaOf, ReadWriter
+
+enum TemperatureUnit derives SchemaOf, ReadWriter {
+  case Celsius, Fahrenheit
+}
+
+val weatherTool: Result[ToolFunction[WeatherQuery, String]] =
+  ToolBuilder[WeatherQuery, String]("get_weather", "Current weather in a city", SchemaOf[WeatherQuery].definition)
+    .withHandler { args =>
+      Try(read[WeatherQuery](args.params)).toEither.left.map(_.getMessage).map(query => s"Sunny in ${query.city}")
+    }
+    .buildSafe()
+```
+
+The tool is sent in strict mode, so every parameter is required and `unit` is a property that may be `null`. The module's tests check that the parameters the tool sends are the derived schema, and that the handler reads a call.
+
 ## Descriptions
 
 The model sees a description for every property and for the object. `@description("...")` sets it: on a case class parameter it describes the field, on a case class, enum or sealed trait it describes the type. The text must be a string literal, because the annotation is read at compile time. Without it a field is described by its type's `@description` if it has one, and otherwise by its name, and a type by its name.

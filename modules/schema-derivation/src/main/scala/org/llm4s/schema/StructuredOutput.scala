@@ -23,7 +23,7 @@ extension (client: LLMClient) {
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions()
   )(using schemaOf: SchemaOf[A], reader: upickle.default.Reader[A]): Result[A] =
-    schemaOf.schema(schemaOf.defaultDescription) match {
+    schemaOf.definition match {
       case objectSchema: ObjectSchema[?] =>
         client.completeStructured[A](conversation, objectSchema.asInstanceOf[ObjectSchema[A]], options)
       case _ =>

@@ -59,6 +59,9 @@ object Fixtures {
 
   case class Box[T](value: T) derives SchemaOf, ReadWriter
 
+  /** The same generic class nested in itself with different type arguments is finite, not recursive. */
+  case class Boxes(twice: Box[Box[Int]], ofInner: Box[Inner]) derives SchemaOf, ReadWriter
+
   given SchemaOf[java.time.Instant] = SchemaOf.string("ISO-8601 instant, for example 2026-10-08T09:30:00Z")
 
   case class Event(at: java.time.Instant, @description("when it ends") until: java.time.Instant) derives SchemaOf
@@ -72,5 +75,14 @@ object Fixtures {
   case object Dot                   extends Shape
   case class WithShape(shape: Shape)
   case class WithFunction(f: Int => Int)
+  case class Node[A](value: A, next: Option[Node[A]])
+  case class Grow[A](value: A, next: Option[Grow[List[A]]])
+  case class Ping(pong: Option[Pong])
+  case class Pong(ping: Ping)
+  case class Wrapped(inner: Box[Wrapped])
+  sealed trait Outer
+  sealed trait Middle extends Outer
+  case object Leaf    extends Middle
+  case class WithOuter(outer: Outer)
   class NotACaseClass(val x: Int)
 }

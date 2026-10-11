@@ -7,9 +7,10 @@ import scala.quoted.*
  * annotations, and cannot walk a type to detect recursion or to see whether a sealed hierarchy has fields, so
  * those three things are done here, confined to this object.
  *
- * Internal: it is public only because `inline` code in [[SchemaOf]] expands at the user's call site.
+ * Internal to the module: `inline` code in [[SchemaOf]] expands at the user's call site, and the compiler gives it
+ * the access it needs.
  */
-object SchemaMacros {
+private[schema] object SchemaMacros {
 
   /** The `@description` of each constructor parameter of `A`, in declaration order. */
   inline def fieldDescriptions[A]: List[Option[String]] = ${ fieldAnnotationsImpl[A]("org.llm4s.schema.description") }
@@ -49,29 +50,41 @@ object SchemaMacros {
 
     def fail(message: String): Nothing = report.errorAndAbort(message)
 
+    // How deep one class may nest inside itself, with different type arguments, before it counts as recursive.
+    val maxSameClassDepth = 16
+
     def isSingleton(child: Symbol): Boolean = child.isTerm || child.flags.is(Flags.Module)
 
-    def walk(tpe: TypeRepr, path: List[Symbol]): Unit = {
+    def recursive(name: String): Nothing =
+      fail(
+        s"Cannot derive SchemaOf[${TypeRepr.of[A].show}]: $name refers to itself. A recursive type " +
+          "needs a JSON Schema $ref, which llm4s-core's schema model cannot express."
+      )
+
+    // `path` holds the case class types being walked, outermost last. Recursion is the same *type* again
+    // (`Tree` inside `Tree`, `Node[Int]` inside `Node[Int]`), not the same class: `Box[Box[Int]]` nests `Box`
+    // twice and is finite. A class that keeps reappearing with ever larger type arguments
+    // (`case class W[A](next: Option[W[List[A]]])`) never repeats a type, so the walk also stops once one class
+    // is nested `maxSameClassDepth` deep, which bounds the walk for every input.
+    def walk(tpe: TypeRepr, path: List[TypeRepr]): Unit = {
       val t   = tpe.dealias
       val sym = t.typeSymbol
       t match {
         // List[Tree], Option[Tree] and the like: the type arguments are what matter
         case AppliedType(_, args) if sym.fullName.startsWith("scala.") => args.foreach(walk(_, path))
         case _ =>
-          if (path.contains(sym)) {
-            fail(
-              s"Cannot derive SchemaOf[${TypeRepr.of[A].show}]: ${sym.name} refers to itself. A recursive type " +
-                "needs a JSON Schema $ref, which llm4s-core's schema model cannot express."
-            )
+          if (path.exists(_ =:= t) || path.count(_.typeSymbol == sym) >= maxSameClassDepth) {
+            recursive(sym.name)
           } else if (sym.flags.is(Flags.Case) && sym.isClassDef) {
-            sym.caseFields.foreach(field => walk(t.memberType(field), sym :: path))
+            sym.caseFields.foreach(field => walk(t.memberType(field), t :: path))
           } else if (sym.flags.is(Flags.Sealed)) {
             sym.children.foreach { child =>
               if (!isSingleton(child)) {
                 fail(
-                  s"Cannot derive SchemaOf[${TypeRepr.of[A].show}]: ${child.name} of ${sym.name} has fields. " +
-                    "A sealed hierarchy with fields needs a JSON Schema oneOf, which llm4s-core's schema model " +
-                    "cannot express. Only enums and sealed hierarchies of singletons (case objects) are supported."
+                  s"Cannot derive SchemaOf[${TypeRepr.of[A].show}]: ${child.name} of ${sym.name} is not a " +
+                    "singleton (it has fields, or is itself a hierarchy). A sealed hierarchy with fields needs a " +
+                    "JSON Schema oneOf, which llm4s-core's schema model cannot express. Only enums and sealed " +
+                    "hierarchies of singletons (case objects) are supported."
                 )
               }
             }

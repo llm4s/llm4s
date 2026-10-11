@@ -60,6 +60,35 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  // ---- Tool parameters
+
+  object Tools {
+    import org.llm4s.schema.*
+    import org.llm4s.toolapi.{ ToolBuilder, ToolFunction }
+    import org.llm4s.types.Result
+    import upickle.default.{ read, ReadWriter }
+
+    import scala.util.Try
+
+    @description("Where to look up the weather")
+    case class WeatherQuery(
+      @description("City name, for example Paris") city: String,
+      @description("Temperature unit; the default is Celsius") unit: Option[TemperatureUnit]
+    ) derives SchemaOf,
+          ReadWriter
+
+    enum TemperatureUnit derives SchemaOf, ReadWriter {
+      case Celsius, Fahrenheit
+    }
+
+    val weatherTool: Result[ToolFunction[WeatherQuery, String]] =
+      ToolBuilder[WeatherQuery, String]("get_weather", "Current weather in a city", SchemaOf[WeatherQuery].definition)
+        .withHandler { args =>
+          Try(read[WeatherQuery](args.params)).toEither.left.map(_.getMessage).map(query => s"Sunny in ${query.city}")
+        }
+        .buildSafe()
+  }
+
   // ---- Types the module does not know
 
   object Meetings {
@@ -108,7 +137,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   "The guide's Scala blocks" should "all appear in this spec word for word" in {
     val scalaBlocks = blocks("scala")
-    scalaBlocks should have size 5
+    scalaBlocks should have size 6
     scalaBlocks.foreach(block =>
       withClue(s"This block of the guide is not in the code the spec compiles:\n$block\n") {
         squash(thisSource) should include(squash(block))
@@ -140,6 +169,17 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     contact("properties")("email")("type") shouldBe ujson.Arr("string", "null")
     contact("properties")("tags")("type") shouldBe ujson.Str("array")
     org.llm4s.schema.SchemaOf[Models.Priority].toJsonSchema()("enum") shouldBe ujson.Arr("Low", "Medium", "High")
+  }
+
+  "The tool of the guide" should "send the derived schema as its parameters, and read a call with it" in {
+    val tool = Tools.weatherTool.fold(e => fail(e.toString), identity)
+    tool.toOpenAITool()("function")("parameters") shouldBe org.llm4s.schema.SchemaOf[Tools.WeatherQuery].toJsonSchema()
+    val parameters = tool.toOpenAITool()("function")("parameters")
+    parameters("required") shouldBe ujson.Arr("city", "unit")
+    parameters("properties")("unit")("enum") shouldBe ujson.Arr("Celsius", "Fahrenheit", ujson.Null)
+    tool.execute(ujson.Obj("city" -> "Paris", "unit" -> ujson.Null)) shouldBe Right(ujson.Str("Sunny in Paris"))
+    tool.execute(ujson.Obj("city" -> "Oslo", "unit" -> "Fahrenheit")) shouldBe Right(ujson.Str("Sunny in Oslo"))
+    tool.execute(ujson.Obj("unit" -> "Kelvin")).isLeft shouldBe true
   }
 
   "A type the module does not know" should "be described by the given the guide defines, and round-trip" in {

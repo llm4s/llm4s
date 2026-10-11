@@ -105,6 +105,7 @@ map_file_to_project() {
     modules/trace-opentelemetry/*)        echo "traceOpentelemetry" ;;
     modules/openai-compatible/*)          echo "openaiCompatible" ;;
     modules/provider-testkit/*)           echo "providerTestkit" ;;
+    modules/schema-derivation/*)          echo "schemaDerivation" ;;
     modules/providers/bedrock/*)          echo "bedrock" ;;
     modules/providers/watsonx/*)          echo "watsonx" ;;
     modules/providers/jina/*)             echo "jina" ;;
@@ -238,6 +239,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE knowledgegraphNeo4j
       set_add DOWNSTREAM_COMPILE gradleDemo
       set_add DOWNSTREAM_COMPILE providerTestkit
+      set_add DOWNSTREAM_COMPILE schemaDerivation
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
       set_add DOWNSTREAM_COMPILE javaApi
@@ -437,6 +439,10 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
+      ;;
+    schemaDerivation)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
       ;;
   esac
 }

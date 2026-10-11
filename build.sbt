@@ -998,12 +998,12 @@ lazy val schemaDerivation = (project in file("modules/schema-derivation"))
   .settings(
     name := "llm4s-schema-derivation",
     commonSettings,
-    // Measured 88.63% statement and 80.00% branch coverage (`sbt coverage schemaDerivation/test
-    // schemaDerivation/coverageReport`). Floor is the measured value rounded down to the nearest 5. Never
-    // lower it. What is uncovered is `SchemaMacros`' error paths and annotation reading: macro code runs inside
-    // the compiler, where scoverage cannot see it; `CompileErrorsSpec` and the golden specs exercise it when
-    // they compile.
-    coverageFloor(85),
+    // Measured 98.62% statement and 93.33% branch coverage (`sbt coverage schemaDerivation/test
+    // schemaDerivation/coverageReport`), up from 88.63% when the recursion check and the external-package and
+    // tool specs were added. Floor is the measured value rounded down to the nearest 5. Never lower it. Macro
+    // code runs inside the compiler, where scoverage cannot see all of it; `CompileErrorsSpec` and the golden
+    // specs exercise it when they compile.
+    coverageFloor(95),
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty
   )

@@ -122,8 +122,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   strings) and the tests check that round trip in both directions. `@description("...")` sets a field's or type's
   description. Supported: scalars, `Option`, `List`/`Seq`/`Vector`/`Set`, nested and generic case classes, enums and
   sealed hierarchies of singletons. Refused at compile time with a message naming the type: `Map`, recursive types and
-  sealed hierarchies with fields, because core's schema model cannot express map values, `$ref` or `oneOf`. Guide:
-  [Derived Schemas](docs/guide/derived-schemas.md).
+  sealed hierarchies with fields, because core's schema model cannot express map values, `$ref` or `oneOf`.
+  `SchemaOf[A].definition` is the same schema as a `SchemaDefinition`, so `ToolBuilder` takes it as a tool's
+  parameters. Guide: [Derived Schemas](docs/guide/derived-schemas.md).
 - **`llm4s-speech`: opt-in MP3 output for cloud TTS** ([#1307](https://github.com/llm4s/llm4s/issues/1307)):
   `TTSOptions(outputFormat = AudioFormat.Mp3)` makes the OpenAI, ElevenLabs and Azure clients request the
   service's MP3 and return its bytes untouched. PCM stays the default. `AudioFormat.Mp3` is a new case

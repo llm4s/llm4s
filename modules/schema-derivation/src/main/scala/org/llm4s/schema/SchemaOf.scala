@@ -56,12 +56,19 @@ trait SchemaOf[A] {
   final def defaultDescription: String = typeDescription.getOrElse(typeName)
 
   /**
+   * The schema of `A` as core's schema model, described by the type's [[description]] or name: what
+   * `completeStructuredOf` sends, and what a tool takes as its parameters
+   * (`ToolBuilder[A, R](name, text, SchemaOf[A].definition)`).
+   */
+  final def definition: SchemaDefinition[A] = schema(defaultDescription)
+
+  /**
    * The JSON Schema document.
    *
    * @param strict as in `SchemaDefinition.toJsonSchema`: `true` marks every property required, which is what
    *               `completeStructured` sends
    */
-  final def toJsonSchema(strict: Boolean = true): ujson.Value = schema(defaultDescription).toJsonSchema(strict)
+  final def toJsonSchema(strict: Boolean = true): ujson.Value = definition.toJsonSchema(strict)
 }
 
 @Experimental
