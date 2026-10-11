@@ -264,6 +264,9 @@ class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually
       if (throwOnDelete) throw new NoClassDefFoundError("store driver")
       underlying.deleteThread(threadId)
     }
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: org.llm4s.agent.graph.RetentionPolicy) = underlying.prune(threadId, policy)
   }
 
   /** Records every event; its `AgentRunEnded` is recorded only after `slowEnd`, as a slow tracing backend would. */
