@@ -62,7 +62,9 @@ def best_fits(directory):
     table = {}
     for cp in CODE_PAGES:
         section = None
-        for line in read_code_page(cp, directory).splitlines():
+        # Split on "\n" only: the files are CRLF (strip() drops the "\r"), and splitlines() would also split on bytes
+        # such as 0x85 that, read as Latin-1, are line breaks to Python but appear inside the files' DBCS comments.
+        for line in read_code_page(cp, directory).split("\n"):
             line = line.strip()
             if not line:
                 continue

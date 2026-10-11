@@ -2095,7 +2095,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ENVIRONMENT_NOT_ALLOWED` for an environment value); `ShellTool` returns a refusal naming the character and what it
   may become, with or without a path policy. Accented letters such as `é` stay allowed in an operand when the host's
   code page holds them; POSIX hosts are unchanged. The table (539 characters) is generated from Microsoft's best-fit
-  files by `scripts/generate-windows-best-fit.py`, into one `WindowsBestFit` per module.
+  files by `scripts/generate-windows-best-fit.py`, into one `WindowsBestFit` per module. Migration: on Windows,
+  every `ShellTool` command is refused when the operator-configured `workingDirectory` or an environment value holds a
+  character from the table or one the host's ANSI code page cannot hold, and file names the host's ANSI code page
+  cannot hold are refused as arguments for every program, git included, by both `ShellTool` and the runner.
 - **Security - workspace runner: interpreters and launchers cannot be added as extra commands, a command's child
   `PATH` holds only trusted entries, and cmd.exe runs with `/d`** ([#1761](https://github.com/llm4s/llm4s/issues/1761),
   [#1792](https://github.com/llm4s/llm4s/issues/1792)): `WORKSPACE_EXTRA_COMMANDS` refused shells and some launchers,
