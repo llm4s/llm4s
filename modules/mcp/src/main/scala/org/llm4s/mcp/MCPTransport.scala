@@ -10,7 +10,7 @@ import java.util.concurrent.{ CompletableFuture, ConcurrentHashMap, TimeUnit }
 import java.util.concurrent.locks.ReentrantLock
 import upickle.default._
 import org.slf4j.{ Logger, LoggerFactory }
-import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.http.{ Llm4sHttpClient, StreamingHttpResponse }
 import scala.concurrent.duration._
 import HttpExchanges.flattened
 import PayloadLog.debugPayload
@@ -101,8 +101,18 @@ class StreamableHTTPTransportImpl(
 
   logger.info(s"StreamableHTTPTransport($name) initialized for URL: $url with timeout: $timeout")
 
+  /**
+   * Sends `request` and reads its reply, all within [[timeout]] ([[https://github.com/llm4s/llm4s/issues/1785 #1785]]).
+   *
+   * The HTTP request timeout covers only the wait for response headers, and a server that answers with an
+   * SSE stream sends them at once. The body is therefore read through a [[BoundedResponseBody]] whose deadline
+   * is the same instant: whether the reply is plain JSON or an SSE stream, the whole exchange ends by then, with
+   * a timed-out transport error, and the connection is closed. An SSE reply is read event by event and the
+   * first JSON-RPC response in it is returned at once, without waiting for the server to end the stream.
+   */
   override def sendRequest(request: JsonRpcRequest): Result[JsonRpcResponse] = {
     logger.debug(s"StreamableHTTPTransport($name) sending request to $url: method=${request.method}, id=${request.id}")
+    val deadline = Deadline.now + timeout
 
     Try {
       val requestJson = write(request)
@@ -113,9 +123,9 @@ class StreamableHTTPTransportImpl(
 
       logger.debug(s"StreamableHTTPTransport($name) using URL: '$url'")
 
-      // POST to MCP endpoint (single endpoint, no /sse suffix)
+      // POST to MCP endpoint (single endpoint, no /sse suffix); the body is read below, against the deadline
       httpClient
-        .post(
+        .postStream(
           url = url,
           headers = headers,
           body = requestJson,
@@ -126,80 +136,98 @@ class StreamableHTTPTransportImpl(
           response
         }
     }.flattened match {
-      case Left(cancelled: CancelledError) => Left(cancelled)
-      case Left(error) =>
-        logger.error(s"StreamableHTTPTransport($name) transport error for $url: ${error.message}")
-        Left(SimpleError(s"Transport error: ${error.message}"))
+      case Left(error) => Left(transportFailure(error))
       case Right(response) =>
-        // Handle session management during initialization according to MCP spec : the server may or may not include a session id
-        if (request.method == "initialize" && response.statusCode >= 200 && response.statusCode < 300) {
-          // Look for mcp-session-id header in response (lowercase per spec)
-          val sessionIdOpt = response.headers.get("mcp-session-id").flatMap(_.headOption)
+        val body = new BoundedResponseBody(response.body, deadline, timeout, url)
+        try handleResponse(request, response, body)
+        finally body.close()
+    }
+  }
 
-          sessionIdOpt.foreach { sessionId =>
-            val trimmed = sessionId.trim
-            if (trimmed.nonEmpty) {
-              mcpSessionId = Some(trimmed)
-              logger.info(s"StreamableHTTPTransport($name) established MCP session: $trimmed")
-            }
-          }
+  /** A cancellation stays one; any other failure of the exchange is reported as a transport error. */
+  private def transportFailure(error: LLMError): LLMError = error match {
+    case cancelled: CancelledError => cancelled
+    case other =>
+      logger.error(s"StreamableHTTPTransport($name) transport error for $url: ${other.message}")
+      SimpleError(s"Transport error: ${other.message}")
+  }
 
-          if (sessionIdOpt.isEmpty) {
-            logger.debug(s"StreamableHTTPTransport($name) no session management (server chose not to use sessions)")
-          }
+  private def handleResponse(
+    request: JsonRpcRequest,
+    response: StreamingHttpResponse,
+    body: BoundedResponseBody
+  ): Result[JsonRpcResponse] = {
+    // Handle session management during initialization according to MCP spec : the server may or may not include a session id
+    if (request.method == "initialize" && response.statusCode >= 200 && response.statusCode < 300) {
+      // Look for mcp-session-id header in response (lowercase per spec)
+      val sessionIdOpt = response.headers.get("mcp-session-id").flatMap(_.headOption)
+
+      sessionIdOpt.foreach { sessionId =>
+        val trimmed = sessionId.trim
+        if (trimmed.nonEmpty) {
+          mcpSessionId = Some(trimmed)
+          logger.info(s"StreamableHTTPTransport($name) established MCP session: $trimmed")
         }
+      }
 
-        // Handle session expiration (404 with existing session)
-        if (response.statusCode == 404 && mcpSessionId.isDefined) {
-          logger.warn(s"StreamableHTTPTransport($name) session expired (404), clearing session")
-          mcpSessionId = None
-          Left(SimpleError("Transport error: MCP session expired, client should reinitialize"))
-        } else if (response.statusCode == 405) {
-          // Handle 405 Method Not Allowed (server doesn't support Streamable HTTP)
-          Left(
-            SimpleError("Transport error: Server does not support Streamable HTTP transport (405 Method Not Allowed)")
-          )
-        } else if (response.statusCode >= 400) {
-          // Handle other HTTP errors
-          Left(
-            SimpleError(
-              s"Transport error: HTTP error ${response.statusCode}: ${Redaction.safeBody(response.body)}"
-            )
-          )
-        } else {
-          // Determine response type based on content-type header
-          val responseBody = response.body
-          val contentType  = response.headers.get("content-type").flatMap(_.headOption).map(_.toLowerCase)
-          val isSSE        = contentType.exists(_.contains("text/event-stream"))
+      if (sessionIdOpt.isEmpty) {
+        logger.debug(s"StreamableHTTPTransport($name) no session management (server chose not to use sessions)")
+      }
+    }
 
-          val jsonResponseResult = if (isSSE) {
-            // Server chose to respond with SSE stream
-            logger.debug(s"StreamableHTTPTransport($name) received SSE stream response")
-            parseSSEResponse(responseBody)
-          } else {
-            // Standard JSON response
-            logger.debug(s"StreamableHTTPTransport($name) received JSON response")
-            Try(read[JsonRpcResponse](responseBody)) match {
+    // Handle session expiration (404 with existing session)
+    if (response.statusCode == 404 && mcpSessionId.isDefined) {
+      logger.warn(s"StreamableHTTPTransport($name) session expired (404), clearing session")
+      mcpSessionId = None
+      Left(SimpleError("Transport error: MCP session expired, client should reinitialize"))
+    } else if (response.statusCode == 405) {
+      // Handle 405 Method Not Allowed (server doesn't support Streamable HTTP)
+      Left(
+        SimpleError("Transport error: Server does not support Streamable HTTP transport (405 Method Not Allowed)")
+      )
+    } else if (response.statusCode >= 400) {
+      // Handle other HTTP errors
+      body.readAll() match {
+        case Left(error) => Left(transportFailure(error))
+        case Right(text) =>
+          Left(SimpleError(s"Transport error: HTTP error ${response.statusCode}: ${Redaction.safeBody(text)}"))
+      }
+    } else {
+      // Determine response type based on content-type header
+      val contentType = response.headers.get("content-type").flatMap(_.headOption).map(_.toLowerCase)
+      val isSSE       = contentType.exists(_.contains("text/event-stream"))
+
+      val jsonResponseResult = if (isSSE) {
+        // Server chose to respond with SSE stream
+        logger.debug(s"StreamableHTTPTransport($name) received SSE stream response")
+        readSSEResponse(body)
+      } else {
+        // Standard JSON response
+        logger.debug(s"StreamableHTTPTransport($name) received JSON response")
+        body.readAll() match {
+          case Left(error) => Left(transportFailure(error))
+          case Right(text) =>
+            Try(read[JsonRpcResponse](text)) match {
               case Success(r) => Right(r)
               case Failure(e) => Left(SimpleError(s"Transport error: ${e.getMessage}"))
             }
-          }
-
-          jsonResponseResult.flatMap { jsonResponse =>
-            logger.debug(s"StreamableHTTPTransport($name) parsed JSON response: id=${jsonResponse.id}")
-            jsonResponse.error match {
-              case Some(error) =>
-                val message = Redaction.safeBody(error.message)
-                logger.error(
-                  s"StreamableHTTPTransport($name) JSON-RPC error from $url: code=${error.code}, message=$message"
-                )
-                Left(SimpleError(s"JSON-RPC Error ${error.code}: $message"))
-              case None =>
-                logger.debug(s"StreamableHTTPTransport($name) request successful: id=${jsonResponse.id}")
-                Right(jsonResponse)
-            }
-          }
         }
+      }
+
+      jsonResponseResult.flatMap { jsonResponse =>
+        logger.debug(s"StreamableHTTPTransport($name) parsed JSON response: id=${jsonResponse.id}")
+        jsonResponse.error match {
+          case Some(error) =>
+            val message = Redaction.safeBody(error.message)
+            logger.error(
+              s"StreamableHTTPTransport($name) JSON-RPC error from $url: code=${error.code}, message=$message"
+            )
+            Left(SimpleError(s"JSON-RPC Error ${error.code}: $message"))
+          case None =>
+            logger.debug(s"StreamableHTTPTransport($name) request successful: id=${jsonResponse.id}")
+            Right(jsonResponse)
+        }
+      }
     }
   }
 
@@ -224,61 +252,23 @@ class StreamableHTTPTransportImpl(
     mcpSessionId.fold(headersWithProtocol)(sessionId => headersWithProtocol + ("mcp-session-id" -> sessionId))
   }
 
-  private def parseSSEResponse(sseBody: String): Result[JsonRpcResponse] = {
-    // Parse Server-Sent Events format according to W3C SSE specification
-    // SSE format: event: <type>\ndata: <content>\nid: <id>\n\n
-    val lines = sseBody.split("\n")
-
-    case class SSEEvent(
+  /**
+   * Reads an SSE reply event by event (W3C Server-Sent Events: `event:`, `data:`, `id:` and `retry:` lines,
+   * an empty line ending an event, `:` starting a comment) and returns the first event whose data is a
+   * JSON-RPC response, as soon as it has arrived. Other events - progress notifications, server requests,
+   * `[DONE]` - are skipped. A stream that ends without a response is an error; one that outlasts the
+   * deadline is a timed-out transport error from [[BoundedResponseBody]].
+   */
+  private def readSSEResponse(body: BoundedResponseBody): Result[JsonRpcResponse] = {
+    final case class SSEEvent(
       eventType: Option[String] = None,
       data: StringBuilder = new StringBuilder(),
       id: Option[String] = None
-    )
-
-    val events       = scala.collection.mutable.ListBuffer[SSEEvent]()
-    var currentEvent = SSEEvent()
-
-    // Parse SSE events according to the specification
-    for (line <- lines) {
-      val trimmedLine = line.trim
-
-      if (trimmedLine.isEmpty) {
-        // Empty line signals end of event
-        if (currentEvent.data.nonEmpty || currentEvent.eventType.isDefined || currentEvent.id.isDefined) {
-          events += currentEvent
-          currentEvent = SSEEvent()
-        }
-      } else if (trimmedLine.startsWith("data:")) {
-        // Data line
-        val data = if (trimmedLine.length > 5) trimmedLine.substring(5).trim else ""
-        if (currentEvent.data.nonEmpty) {
-          currentEvent.data.append("\n")
-        }
-        currentEvent.data.append(data)
-      } else if (trimmedLine.startsWith("event:")) {
-        // Event type line
-        val eventType = if (trimmedLine.length > 6) trimmedLine.substring(6).trim else ""
-        currentEvent = currentEvent.copy(eventType = Some(eventType))
-      } else if (trimmedLine.startsWith("id:")) {
-        // Event ID line
-        val id = if (trimmedLine.length > 3) trimmedLine.substring(3).trim else ""
-        currentEvent = currentEvent.copy(id = Some(id))
-      } else if (trimmedLine.startsWith("retry:")) {
-        // Retry line - we ignore this for now
-        logger.debug(s"StreamableHTTPTransport($name) ignoring SSE retry directive: $trimmedLine")
-      } else if (!trimmedLine.startsWith(":")) {
-        // Lines starting with : are comments, ignore others that don't match format
-        logger.debugPayload(s"StreamableHTTPTransport($name) ignoring unrecognized SSE line: ", trimmedLine)
-      }
+    ) {
+      def nonEmpty: Boolean = data.nonEmpty || eventType.isDefined || id.isDefined
     }
 
-    // Add final event if there wasn't a trailing empty line
-    if (currentEvent.data.nonEmpty || currentEvent.eventType.isDefined || currentEvent.id.isDefined) {
-      events += currentEvent
-    }
-
-    // Look for JSON-RPC responses in the parsed events
-    val jsonResponses = events.flatMap { event =>
+    def jsonRpcResponse(event: SSEEvent): Option[JsonRpcResponse] = {
       val dataContent = event.data.toString
       if (dataContent.nonEmpty && dataContent != "[DONE]") {
         Try(read[JsonRpcResponse](dataContent)) match {
@@ -300,16 +290,55 @@ class StreamableHTTPTransportImpl(
       }
     }
 
-    // Return the first valid JSON-RPC response
-    jsonResponses.headOption match {
-      case Some(response) => Right(response)
-      case None =>
-        Left(
-          SimpleError(
-            s"Transport error: No valid JSON-RPC response found in SSE stream. Found ${events.size} events, none contained valid JSON-RPC responses."
-          )
+    def noResponse(events: Int): Result[JsonRpcResponse] =
+      Left(
+        SimpleError(
+          s"Transport error: No valid JSON-RPC response found in SSE stream. Found $events events, none contained valid JSON-RPC responses."
         )
-    }
+      )
+
+    @scala.annotation.tailrec
+    def loop(current: SSEEvent, events: Int): Result[JsonRpcResponse] =
+      body.readLine() match {
+        case Left(error) => Left(transportFailure(error))
+        case Right(None) =>
+          // The stream ended; an event without a trailing empty line still counts
+          if (current.nonEmpty) jsonRpcResponse(current).fold(noResponse(events + 1))(Right(_))
+          else noResponse(events)
+        case Right(Some(line)) =>
+          val trimmedLine = line.trim
+          if (trimmedLine.isEmpty) {
+            // Empty line signals end of event
+            if (current.nonEmpty) {
+              jsonRpcResponse(current) match {
+                case Some(response) => Right(response)
+                case None           => loop(SSEEvent(), events + 1)
+              }
+            } else loop(current, events)
+          } else if (trimmedLine.startsWith("data:")) {
+            val data = if (trimmedLine.length > 5) trimmedLine.substring(5).trim else ""
+            if (current.data.nonEmpty) current.data.append("\n")
+            current.data.append(data)
+            loop(current, events)
+          } else if (trimmedLine.startsWith("event:")) {
+            val eventType = if (trimmedLine.length > 6) trimmedLine.substring(6).trim else ""
+            loop(current.copy(eventType = Some(eventType)), events)
+          } else if (trimmedLine.startsWith("id:")) {
+            val id = if (trimmedLine.length > 3) trimmedLine.substring(3).trim else ""
+            loop(current.copy(id = Some(id)), events)
+          } else if (trimmedLine.startsWith("retry:")) {
+            // Retry line - we ignore this for now
+            logger.debug(s"StreamableHTTPTransport($name) ignoring SSE retry directive: $trimmedLine")
+            loop(current, events)
+          } else {
+            // Lines starting with : are comments; others that don't match the format are ignored
+            if (!trimmedLine.startsWith(":"))
+              logger.debugPayload(s"StreamableHTTPTransport($name) ignoring unrecognized SSE line: ", trimmedLine)
+            loop(current, events)
+          }
+      }
+
+    loop(SSEEvent(), 0)
   }
 
   override def sendNotification(notification: JsonRpcNotification): Result[Unit] = {

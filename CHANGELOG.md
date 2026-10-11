@@ -16,6 +16,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `recordConversation` also run `extractEntities` over each recorded user and assistant message, with its
   conversation id - one extra LLM call per message on `LLMMemoryManager`, nothing on `SimpleMemoryManager`;
   a failed extraction is logged and the message stays recorded. `MemoryManagerConfig.fullFeatured` turns it on.
+- **`sbt pomMetadataCheck`: every published POM carries its metadata** ([#1455](https://github.com/llm4s/llm4s/issues/1455)):
+  a CI quick check that reads the POM sbt generates for each of the 44 published projects (the `llm4s-*` artifacts, the
+  BOM and the relocation stubs) and fails when one lacks a name, a description of its own, an https project URL, a
+  licence with an https URL, a developer, or the `<scm>` Scaladex associates artifacts by
+  (`https://github.com/llm4s/llm4s`, no trailing slash, with an `scm:git:https` connection). Maven Central rejects a
+  POM without these at publish time, after the tag is pushed, and a released POM cannot be amended.
+  `sbt "pomMetadataCheckFiles <pom>..."` runs the same rules on POMs downloaded from Central; on 0.4.1's it reports
+  the three problems fixed since (#1588). The README has a Maven Central badge, and `docs/reference/release.md` has a
+  Discoverability section for maintainers: GitHub topics and description, the homepage, and how to get Scaladex to
+  list `org.llm4s` (it does not yet).
+- **CI runs in a GitHub merge queue** ([#1638](https://github.com/llm4s/llm4s/issues/1638)): `ci.yml`, `dco.yml` and
+  `secret-scan.yml`, the workflows behind `main`'s required checks (`All Tests Pass`, `Check DCO sign-off`, `TruffleHog
+  Secret Scan`), also trigger on `merge_group`, so a maintainer can enable a merge queue that tests each pull request
+  on top of current `main` before it lands. That closes the merge skew that turned `main` red when two independently
+  green pull requests landed together (#1386 with #1417, #1741 with #1585). On a merge group the DCO job reports
+  without re-running `dco-check` (the pull request already passed it to be queued), and the secret scan scans the
+  group's own range. `scripts/test-merge-queue-workflows.sh`, in Quick Checks, keeps it so. Enabling the queue is a
+  repository setting: [docs/reference/merge-queue.md](docs/reference/merge-queue.md). Nothing changes until it is enabled.
+- **A build-only dry run for the docs deploy** ([#1152](https://github.com/llm4s/llm4s/issues/1152)): `pages.yml`
+  takes `-f dry_run=true`, which runs every build step (tag validation and checkout, version, aggregate Scaladoc and its
+  package check, Jekyll, the Pages artifact) and skips the deploy, in a concurrency group of its own so it never
+  displaces a pending real deploy. It works on any branch, so the release path (`--ref main -f ref=<tag> -f
+  dry_run=true`) and a `pages.yml` change can be checked without touching llm4s.org. A run that is neither a dry run nor
+  on `main` now fails in its first step, instead of building for minutes and then being rejected by the `github-pages`
+  environment. The release dispatch never sets it. `docs/reference/release.md` also records that only a tag with the
+  aggregate `docs` project (after v0.4.1) can be built by today's `pages.yml`.
+- **Kotlin `AgentKt.forget(threadId)`** ([#1693](https://github.com/llm4s/llm4s/issues/1693)): a suspend function
+  that forgets a conversation by its thread id, delegating to `JAgent.forget(threadId)` and throwing `LLMException`
+  on failure, so a Kotlin caller can remove a named conversation whose turn left no result - a failed
+  `stream(threadId, ...)` flow - where `forget(previous)` needed one. Forgetting an unknown thread succeeds; a thread
+  whose turn is still running is refused (`ThreadBusy`) and nothing is removed.
 - **Checkpoint history, fork, `updateState` and retention** ([#1702](https://github.com/llm4s/llm4s/issues/1702),
   Stage 2 slice 3 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): a `Checkpointer` keeps every checkpoint a
   thread's runs commit, not only the latest. `GraphRuntime.history(threadId, before, limit)` pages them newest first
@@ -2498,6 +2529,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **MCP: `MCPServerConfig.timeout` now bounds a Streamable HTTP call whose reply is an SSE stream** ([#1785](https://github.com/llm4s/llm4s/issues/1785)):
+  the HTTP request timeout stops counting once the response headers arrive, and a Streamable HTTP server that answers
+  with an SSE stream - as servers built on the MCP SDKs do - sends them at once, so a call to a long-running tool
+  waited for the tool however long it ran (20 s against a 2 s timeout on the MCP reference server).
+  `StreamableHTTPTransportImpl` now reads the reply body against the same deadline as the request: a call ends at the
+  configured timeout whether the reply is plain JSON or an SSE stream, with a transport error saying it timed out (a
+  `ToolCallError.HandlerError` from a tool call), and the connection is closed, so the server sees the client leave.
+  An SSE reply is read event by event and returns as soon as its JSON-RPC response arrives, without waiting for the
+  server to end the stream. An interrupt while reading the stream is still a `CancelledError`. Behaviour change: an
+  MCP tool that runs longer than its server's `timeout` (30 s by default) over Streamable HTTP now fails instead of
+  completing late; raise `timeout` for such a server.
+- **Security - `Redaction`: a keyword argument whose value is a call, and a `"` inside a redacted Python string** ([#1813](https://github.com/llm4s/llm4s/issues/1813)):
+  `Settings(token=SecretStr('...'))`, `password=Wrapper("...")` and `api_key=module.Secret(value='...')` kept the
+  credential readable - `pydantic` masks its own `SecretStr` in a `repr`, a wrapper class of one's own does not - while
+  the same call under a dict key was redacted. The strings, numbers and words of a call under a sensitive keyword
+  argument or dict key are now replaced, the call's own keyword arguments included (`token=[REDACTED]'[REDACTED]')`).
+  A secret holding `'"` in a single-quoted Python string came out as `'[REDACTED][REDACTED]"[REDACTED]'`, which told
+  that it held a `"`, and a second redaction collapsed it: the `"` is now replaced with the rest of the content, a part
+  that meets a placeholder already written is written as nothing, and the output is `'[REDACTED]'`, which a second
+  redaction leaves as it is. A `"` that delimits a JSON string around the value, at any depth, is still kept, so the
+  JSON parses. Like the readings before it, this only adds to what was replaced: `data={'password': pw}` still
+  replaces `pw`, since a bare word there may be the credential.
+- **The Spring Boot starter's health indicator redacts nested credentials and header values** ([#1820](https://github.com/llm4s/llm4s/issues/1820)):
+  the credentials it removes from a failed probe's `error` message were read only from top-level text fields of the
+  resolved provider config, so a credential set outside Spring properties (in `application.conf`, a `reference.conf`
+  default or an environment variable) was missed when it was nested - Bedrock's `credentials` (access key id, secret
+  key, session token) - or held in `headers` under a name that does not look secret. The starter now reads every case
+  class inside the config, through `Option`, `Seq` and `Map` values, treats every `headers` value (and the token after
+  an auth scheme such as `Bearer`) as a credential, and never throws while reading. A field named like a URL
+  (`tokenUrl`) is no longer taken for a credential.
 - **Security - ShellTool and the workspace runner: on double-byte Windows hosts, a quoted argument holding a character
   whose second byte is 0x5C is refused** ([#1807](https://github.com/llm4s/llm4s/issues/1807)): code pages 932, 936
   and 950 encode some characters with a second byte of 0x5C, the byte of `\` (50, 126 and 126 of the characters they

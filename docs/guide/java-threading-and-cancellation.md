@@ -149,7 +149,8 @@ Kotlin matches Java: every `AgentKt` suspend function that runs a turn - `run`, 
 `recover` - cancels the turn when the calling coroutine is cancelled (see
 [Suspended turns from Java and Kotlin](agents/#suspended-turns-from-java-and-kotlin)), waiting up to 5 seconds for the
 turn to end through `AgentStream.cancel()`, and the one-shot `run(query)` forgets the thread of a turn that failed or
-was cancelled once it has ended. One difference remains, as coroutine cancellation requires: a Kotlin cancellation
+was cancelled once it has ended; a conversation you named, for `stream` say, is forgotten with the suspend
+`forget(threadId)`, which throws `LLMException` for a thread whose turn is still running. One difference remains, as coroutine cancellation requires: a Kotlin cancellation
 that loses the race to a turn's commit still throws, though the turn's result is committed.
 
 `ThreadingModelSpec` checks `run`; `JAgentPendingSpec` checks `continueConversation`, `resume`, `recover` and an
