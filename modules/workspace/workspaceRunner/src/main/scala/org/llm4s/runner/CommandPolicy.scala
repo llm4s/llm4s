@@ -316,6 +316,9 @@ private[runner] object CommandPolicy {
    * Every check here reads the arguments as UTF-16, so an argument (`ARGUMENT_NOT_ALLOWED`), the working directory
    * below the workspace root (`ARGUMENT_NOT_ALLOWED`; the root itself is the operator's) or an environment value
    * (`ENVIRONMENT_NOT_ALLOWED`) holding such a character is refused, for every program (see [[WindowsBestFit]]).
+   * On a double-byte ANSI host (code pages 932, 936, 950), an argument the JDK puts in quotes is also refused when it
+   * holds a character whose second byte is 0x5C (`\`), which a byte-wise parser reads as escaping the closing quote
+   * (`ARGUMENT_NOT_ALLOWED`, [[WindowsBestFit.quotedTrailByteRefusal]], #1807).
    */
   private def bestFitRefusal(
     program: String,
@@ -330,7 +333,9 @@ private[runner] object CommandPolicy {
     val belowRoot = spelledRoot.filter(workDir.startsWith).fold(workDir.toString)(_.relativize(workDir).toString)
     args.iterator
       .flatMap(arg =>
-        why(arg, WindowsBestFit.isOptionLike(arg)).map(reason => notAllowed(program, arg, s"it holds $reason."))
+        why(arg, WindowsBestFit.isOptionLike(arg))
+          .orElse(WindowsBestFit.quotedTrailByteRefusal(arg, ansiCodePage))
+          .map(reason => notAllowed(program, arg, s"it holds $reason."))
       )
       .nextOption()
       .orElse(
