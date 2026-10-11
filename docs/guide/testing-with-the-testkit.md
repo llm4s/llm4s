@@ -2,7 +2,7 @@
 layout: page
 title: Testing with the Testkit
 parent: User Guide
-nav_order: 25
+nav_order: 29
 ---
 
 # Testing with the Testkit
