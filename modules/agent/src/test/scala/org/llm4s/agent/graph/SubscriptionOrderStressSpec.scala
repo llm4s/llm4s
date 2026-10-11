@@ -38,8 +38,11 @@ class SubscriptionOrderStressSpec extends AnyFlatSpec with Matchers with EitherV
       if ThreadLocalRandom.current().nextInt(4) > 0 then Thread.sleep(0, ThreadLocalRandom.current().nextInt(800000))
       page
     }
-    def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long)              = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                                = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
   }
 
   /** `steps` nodes in a line, each sending `live` progress events and then one custom event. */

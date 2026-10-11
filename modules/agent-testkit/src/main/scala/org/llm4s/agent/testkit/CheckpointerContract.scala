@@ -30,7 +30,10 @@ import scala.concurrent.duration.*
  *    it ([[GraphError.InvalidCommit]]); events numbered contiguously in commit order and never
  *    reused, also after a refused commit, compaction or `deleteThread`; compaction and
  *    [[GraphError.ReplayUnavailable]]; `deleteThread`; checkpoints, pending writes and events read
- *    back as written; and claims and fencing - one live claim per thread, tokens strictly
+ *    back as written; the checkpoint history - every superseded checkpoint kept, newest first, paged
+ *    and read by id, ids never repeated, a blocked turn retracted (`Commit.retractTurn`), and pruning
+ *    by age, by count and by event count, never the latest checkpoint; and claims and fencing - one
+ *    live claim per thread, tokens strictly
  *    increasing, takeover once a claim has expired by the store's clock, renewal and release by the
  *    current token only, and every commit refused with [[GraphError.StaleClaim]] unless it carries
  *    the current token - including from many threads at once.
@@ -39,7 +42,9 @@ import scala.concurrent.duration.*
  *    not taken over; once a claim expires, the second runtime recovers the thread without re-running
  *    the first run's completed tasks, and the first run's later commits are refused, so it fails
  *    with [[GraphError.CheckpointWriteFailed]] and leaves nothing in the thread; and of several
- *    runtimes recovering one thread at once, exactly one is admitted.
+ *    runtimes recovering one thread at once, exactly one is admitted; `updateState` and `fork` from a
+ *    second runtime are refused while a run is live in the first, and fenced by their own claim; and
+ *    a run a node blocks leaves nothing of its turn in the history.
  *
  * Claim expiry is judged by the store's clock. By default the store under test must use the `clock`
  * it is given for that (and may use it for nothing else), and the suite moves a [[ManualClock]]; it
@@ -131,7 +136,9 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       id: String,
       parent: Option[String],
       token: Option[FencingToken] = None,
-      on: ThreadId = thread
+      on: ThreadId = thread,
+      status: CheckpointStatus = CheckpointStatus.Running,
+      createdAt: Instant = start
     ): Checkpoint =
       Checkpoint(
         Checkpoint.CurrentFormat,
@@ -139,15 +146,28 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
         parent,
         on.value,
         "run",
-        CheckpointStatus.Running,
-        start,
+        status,
+        createdAt,
         GraphSnapshot("g", "v1", "f", 0, Map.empty, Vector.empty, Vector.empty, Vector.empty, Vector.empty, false),
         None,
         token
       )
 
-    def event(name: String): EventDraft =
-      EventDraft("run", None, None, None, start, RunEvent.Custom(name, 1, ujson.Obj("name" -> name)))
+    def event(name: String, checkpointId: Option[String] = None, at: Instant = start): EventDraft =
+      EventDraft("run", checkpointId, None, None, at, RunEvent.Custom(name, 1, ujson.Obj("name" -> name)))
+
+    /** Commits `ids` in order as a chain of new checkpoints, each with one event recorded against it. */
+    def chain(
+      token: FencingToken,
+      ids: Vector[String],
+      status: String => CheckpointStatus = _ => CheckpointStatus.Running
+    ): Unit =
+      ids.foldLeft(latestId()) { (parent, id) =>
+        commit(token, Some(checkpoint(id, parent, status = status(id))), events = Vector(event(id, Some(id)))).value
+        Some(id)
+      }: Unit
+
+    def historyIds(on: ThreadId = thread): Vector[String] = store.history(on, None, 1000).value.map(_.id)
 
     def write(checkpointId: String, taskId: String): PendingWrite =
       PendingWrite(checkpointId, taskId, "n", Vector.empty, Vector.empty)
@@ -606,6 +626,158 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.store.eventsAfter(s.thread, 1L, 10).value.map(_.seq) shouldBe Vector(2L)
   }
 
+  // ---- the checkpoint history ----
+
+  it should "keep every checkpoint a commit superseded, newest first, read back exactly, with writes for the latest only" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.store.history(s.thread, None, 10).value shouldBe empty
+    val c1 = s.checkpoint("c1", None, Some(token))
+    val c2 = s.checkpoint("c2", Some("c1"), Some(token), status = CheckpointStatus.Suspended)
+    val c3 = s.checkpoint("c3", Some("c2"), Some(token), status = CheckpointStatus.Completed)
+    s.commit(token, Some(c1), Vector(s.write("c1", "0.0"))).value
+    s.commit(token, Some(c2), Vector(s.write("c2", "1.0"))).value
+    s.commit(token, Some(c3)).value
+    same(s.store.history(s.thread, None, 10).value, Vector(c3, c2, c1))
+    same(s.store.checkpoint(s.thread, "c2").value, Some(c2))
+    same(s.store.checkpoint(s.thread, "c3").value, Some(c3))
+    s.store.checkpoint(s.thread, "nope").value shouldBe None
+    s.store.checkpoint(newThread(), "c1").value shouldBe None
+    // the latest's pending writes only: superseded checkpoints keep none
+    same(s.store.latest(s.thread).value.value, StoredCheckpoint(c3, Vector.empty))
+  }
+
+  it should "page the history after a checkpoint, at most `limit` at a time, and refuse one it does not hold" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.chain(token, (1 to 5).map(i => s"c$i").toVector)
+    s.store.history(s.thread, None, 2).value.map(_.id) shouldBe Vector("c5", "c4")
+    s.store.history(s.thread, Some("c4"), 2).value.map(_.id) shouldBe Vector("c3", "c2")
+    s.store.history(s.thread, Some("c2"), 2).value.map(_.id) shouldBe Vector("c1")
+    s.store.history(s.thread, Some("c1"), 2).value shouldBe empty
+    s.store.history(s.thread, Some("nope"), 2).refused shouldBe GraphError.CheckpointNotFound(s.thread.value, "nope")
+    s.store.history(newThread(), Some("c1"), 2).refused shouldBe a[GraphError.CheckpointNotFound]
+    s.store.history(s.thread, None, 0).value shouldBe empty
+  }
+
+  it should "refuse a checkpoint whose id is already in the history, applying nothing" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.chain(token, Vector("c1", "c2"))
+    val seqs = s.seqs()
+    s.commit(token, Some(s.checkpoint("c1", Some("c2"))), events = Vector(s.event("dup"))).refused shouldBe
+      a[GraphError.InvalidCommit]
+    s.historyIds() shouldBe Vector("c2", "c1")
+    s.seqs() shouldBe seqs
+  }
+
+  it should "retract a turn back to the newest settled checkpoint with the commit that closes it" in {
+    val s       = Store()
+    val token   = s.claim("run").value.token
+    val settled = Set("done", "failed")
+    s.chain(
+      token,
+      Vector("c1", "done", "c3", "c4"),
+      id => if settled(id) then CheckpointStatus.Completed else CheckpointStatus.Running
+    )
+    val blocked = s.checkpoint("failed", Some("c4"), status = CheckpointStatus.Failed)
+    // a retraction needs the checkpoint that closes the turn, and is fenced like any commit
+    s.store.commit(s.thread, Commit(token, None, retractTurn = true)).refused shouldBe a[GraphError.InvalidCommit]
+    s.store
+      .commit(s.thread, Commit(FencingToken(token.value + 1000), Some(blocked), retractTurn = true))
+      .refused shouldBe
+      a[GraphError.StaleClaim]
+    s.historyIds() shouldBe Vector("c4", "c3", "done", "c1")
+
+    s.store.commit(s.thread, Commit(token, Some(blocked), Vector(s.write("failed", "9.0")), retractTurn = true)).value
+    s.historyIds() shouldBe Vector("failed", "done", "c1")
+    s.store.checkpoint(s.thread, "c3").value shouldBe None
+    s.store.latest(s.thread).value.value.pendingWrites.map(_.taskId) shouldBe Vector("9.0")
+    // with no settled checkpoint left before the turn, all of it goes
+    s.chain(token, Vector("c6", "c7"))
+    s.commit(token, Some(s.checkpoint("next", Some("c7"), status = CheckpointStatus.Failed))).value
+    s.historyIds() shouldBe Vector("next", "c7", "c6", "failed", "done", "c1")
+    val fresh = Store()
+    val t2    = fresh.claim("run").value.token
+    fresh.chain(t2, Vector("a", "b"))
+    fresh.store
+      .commit(
+        fresh.thread,
+        Commit(t2, Some(fresh.checkpoint("x", Some("b"), status = CheckpointStatus.Failed)), retractTurn = true)
+      )
+      .value
+    fresh.historyIds() shouldBe Vector("x")
+  }
+
+  it should "prune by count: keep the latest and the newest, and the events from the oldest kept checkpoint's on" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.chain(token, (1 to 5).map(i => s"c$i").toVector)
+    s.commit(token, None, Vector(s.write("c5", "4.0")), Vector(s.event("tail"))).value
+    s.store.prune(s.thread, RetentionPolicy(maxCheckpoints = Some(2))).value shouldBe (())
+    s.historyIds() shouldBe Vector("c5", "c4")
+    s.store.checkpoint(s.thread, "c3").value shouldBe None
+    // c4's event was the fourth
+    s.store.eventsAfter(s.thread, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(s.thread.value, 4L)
+    s.store.eventsAfter(s.thread, 3L, 10).value.map(_.seq) shouldBe Vector(4L, 5L, 6L)
+    s.store.latest(s.thread).value.value.pendingWrites.map(_.taskId) shouldBe Vector("4.0")
+    s.store.prune(s.thread, RetentionPolicy(maxCheckpoints = Some(1))).value shouldBe (())
+    s.historyIds() shouldBe Vector("c5")
+    s.store.latest(s.thread).value.value.pendingWrites.map(_.taskId) shouldBe Vector("4.0")
+    s.commit(token, events = Vector(s.event("more"))).value.map(_.seq) shouldBe Vector(7L)
+  }
+
+  it should "prune by age by the store's clock, never the latest checkpoint" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    val ages  = Vector("old" -> 0.minutes, "middle" -> 30.minutes, "young" -> 50.minutes)
+    ages.foldLeft(Option.empty[String]) { case (parent, (id, offset)) =>
+      val at = start.plusNanos(offset.toNanos)
+      s.commit(token, Some(s.checkpoint(id, parent, createdAt = at)), events = Vector(s.event(id, Some(id), at))).value
+      Some(id)
+    }
+    s.advance(60.minutes)
+    s.store.prune(s.thread, RetentionPolicy(maxAge = Some(20.minutes))).value shouldBe (())
+    s.historyIds() shouldBe Vector("young")
+    s.store.eventsAfter(s.thread, 2L, 10).value.map(_.seq) shouldBe Vector(3L)
+    s.advance(10.days)
+    s.store.prune(s.thread, RetentionPolicy(maxAge = Some(1.minute))).value shouldBe (())
+    s.historyIds() shouldBe Vector("young")
+    s.store.eventsAfter(s.thread, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(s.thread.value, 4L)
+    s.commit(token, events = Vector(s.event("after"))).value.map(_.seq) shouldBe Vector(4L)
+  }
+
+  it should "prune by event count, never lowering the floor, and accept an unknown thread" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.commit(token, Some(s.checkpoint("c1", None)), events = (1 to 5).map(i => s.event(s"e$i")).toVector).value
+    s.store.prune(s.thread, RetentionPolicy(maxEvents = Some(2))).value shouldBe (())
+    s.store.eventsAfter(s.thread, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(s.thread.value, 4L)
+    s.store.eventsAfter(s.thread, 3L, 10).value.map(_.seq) shouldBe Vector(4L, 5L)
+    s.store.prune(s.thread, RetentionPolicy(maxEvents = Some(10))).value shouldBe (())
+    s.store.eventsAfter(s.thread, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(s.thread.value, 4L)
+    s.store.prune(s.thread, RetentionPolicy(maxEvents = Some(0))).value shouldBe (())
+    s.store.eventsAfter(s.thread, 5L, 10).value shouldBe empty
+    s.historyIds() shouldBe Vector("c1")
+    s.store.prune(newThread(), RetentionPolicy(maxCheckpoints = Some(1), maxEvents = Some(0))).value shouldBe (())
+  }
+
+  it should "delete a thread's whole history, and keep it across a close and reopen" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.chain(token, Vector("c1", "c2", "c3"))
+    s.reopened()
+    s.historyIds() shouldBe Vector("c3", "c2", "c1")
+    s.store.checkpoint(s.thread, "c1").value.map(_.id) shouldBe Some("c1")
+    s.store.deleteThread(s.thread).value shouldBe (())
+    s.historyIds() shouldBe empty
+    s.store.checkpoint(s.thread, "c1").value shouldBe None
+    // a new thread of the same id may use the ids again
+    val again = s.claim("again").value.token
+    s.chain(again, Vector("c1"))
+    s.historyIds() shouldBe Vector("c1")
+  }
+
   // ---- two runtimes over one store ----
 
   /**
@@ -710,6 +882,9 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = s.store.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long)          = s.store.compactEvents(threadId, beforeSeq)
       def deleteThread(threadId: ThreadId)                            = s.store.deleteThread(threadId)
+      def history(threadId: ThreadId, before: Option[String], limit: Int) = s.store.history(threadId, before, limit)
+      def checkpoint(threadId: ThreadId, checkpointId: String)            = s.store.checkpoint(threadId, checkpointId)
+      def prune(threadId: ThreadId, policy: RetentionPolicy)              = s.store.prune(threadId, policy)
     val first   = GraphRuntime(counted, claims = ClaimPolicy(ttl = ttl, renewEvery = 20.millis))
     val second  = GraphRuntime(s.store, claims = neverRenewed)
     val gate    = w.gate("a")
@@ -796,4 +971,61 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     admitted.collect { case Left(error) => error }.foreach(_ shouldBe a[GraphError.ThreadBusy])
     gate.countDown()
     completed(admitted.collectFirst { case Right(handle) => handle }.value) shouldBe Vector("x")
+  }
+
+  it should "refuse updateState and fork into a thread whose run is live in another runtime, then fence them by their own claim" in {
+    val s      = Store()
+    val w      = Workers()
+    val first  = GraphRuntime(s.store, claims = neverRenewed)
+    val second = GraphRuntime(s.store, claims = neverRenewed)
+    completed(first.start(s.thread, w.graph, Vector("a"), config("first")).value) shouldBe Vector("A")
+    val done    = s.latestId().value
+    val gate    = w.gate("b")
+    val target  = newThread()
+    val running = first.start(s.thread, w.graph, Vector("b"), config("second-turn")).value
+    w.awaitEntered("b")
+    val live = s.latestId()
+    second
+      .updateState(s.thread, w.graph, live.value, StateUpdate.update(w.results, "X"), config = config("edit"))
+      .refused shouldBe
+      GraphError.ThreadBusy(s.thread.value, live, Some("second-turn"))
+    // a fork only reads its source, so it may fork a thread that is running
+    val forked = second.fork(s.thread, done, target, config("fork")).value
+    forked.threadId shouldBe target.value
+    gate.countDown()
+    completed(running) shouldBe Vector("A", "B")
+
+    val latest = s.latestId().value
+    val updated =
+      second.updateState(s.thread, w.graph, latest, StateUpdate.update(w.results, "X"), config = config("edit")).value
+    updated.fencingToken shouldBe defined
+    s.store.history(s.thread, None, 1).value.map(_.id) shouldBe Vector(updated.id)
+    // both gave their claims back: runs go on at once on either thread
+    completed(first.start(s.thread, w.graph, Vector("c"), config("third")).value) shouldBe Vector("A", "B", "X", "C")
+    completed(second.start(target, w.graph, Vector("d"), config("on-fork")).value) shouldBe Vector("A", "D")
+  }
+
+  it should "leave nothing of a turn a node blocked in the history, through a runtime" in {
+    val s   = Store()
+    val b   = GraphBuilder("contract-block", "v1")
+    val log = StateKey.appending[String]("log")
+    val guard = b.node[String]("guard", writes = Set(log)) { (input, _, _) =>
+      if input.startsWith("bad") then
+        NodeResult.Block(StateUpdate.update(log, "blocked"), ValidationError("guard", "no"))
+      else NodeResult.Continue(Command.empty.update(log, input))
+    }
+    val draft = b.node[String]("draft", writes = Set(log)) { (input, _, _) =>
+      NodeResult.Continue(Command.empty.update(log, s"draft:$input").send(guard, input))
+    }
+    val graph   = b.compile(draft)(_.get(log)).value
+    val runtime = GraphRuntime(s.store)
+    completed(runtime.start(s.thread, graph, "good", config("one")).value) shouldBe Vector("draft:good", "good")
+    val settled = s.historyIds()
+    outcome(runtime.start(s.thread, graph, "bad", config("two")).value).value shouldBe a[RunResult.Failed]
+    val history = s.store.history(s.thread, None, 1000).value
+    history.map(_.id).tail shouldBe settled
+    history.head.status shouldBe CheckpointStatus.Failed
+    // of the blocked run, only its closing checkpoint is left: its claim and its draft's checkpoint are gone
+    history.map(_.runId).count(_ == "two") shouldBe 1
+    history.tail.flatMap(c => graph.restore(c.snapshot).value.state.get(log).value) should not contain "draft:bad"
   }
