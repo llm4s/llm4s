@@ -2482,6 +2482,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **A multi-megabyte provider error body no longer takes seconds to redact for a log line or an error**
+  ([#1680](https://github.com/llm4s/llm4s/issues/1680)): the internal `safeBody` helper behind the error bodies of
+  #1674 redacted the whole body before truncating it to 2048 characters - about 0.5 s for 1 MB and 3.5 s for a
+  5.75 MB JSON body. A body up to 128 KiB is still redacted whole, with exactly the output it had. A longer one is
+  redacted in a prefix: it ends right before a separator (whitespace or one of `"',;<>{}[]()`), which no credential
+  the patterns read holds, so none is cut in two; it is read as the whole body is (a JSON escape of a separator or a
+  closing `'` past the cut is taken into account); and it runs 16 KiB of redacted text past the characters kept, so
+  a value the cut leaves open is never shown. Where no prefix up to half the body can show that much - one value
+  running over it, or no separator - the body is redacted whole. The 5.75 MB body now takes milliseconds. Behaviour
+  change: for a body over 128 KiB the suffix `(truncated, original length: N)` gives the body's length, as the
+  redacted length is not computed.
 - **Security - ShellTool and the workspace runner: on double-byte Windows hosts, a quoted argument holding a character
   whose second byte is 0x5C is refused** ([#1807](https://github.com/llm4s/llm4s/issues/1807)): code pages 932, 936
   and 950 encode some characters with a second byte of 0x5C, the byte of `\` (50, 126 and 126 of the characters they

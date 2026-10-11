@@ -101,12 +101,79 @@ private[llm4s] object Redaction {
    * replaced already used; `redactForLogging` keeps its 1000-character default, `0` for no limit, a caller's
    * placeholder and its `[truncated, N chars omitted]` suffix, which `safe` and the MCP payload log rely on.
    *
+   * A body longer than `SafeBodyWholeLimit` (128 KiB) - an HTML 5xx page from a proxy, a dumped payload - is not
+   * redacted whole, which takes seconds for a few megabytes (#1680), but in a prefix (`safeBodyWindow`): one that ends
+   * right before a separator, so that no credential straddles the end, read as the whole body would be read, and long
+   * enough that its redaction runs `SafeBodyMargin` (16 KiB) past the `maxLength` characters kept, so that what the
+   * end of the prefix changes - a value cut off there - is never shown. Its truncation suffix gives the body's length,
+   * the redacted length not being known. A body that a prefix of half its length cannot show is redacted whole.
+   *
    * @param body The text to redact and truncate
    * @param maxLength Maximum length of the redacted text before truncation (default: 2048)
    * @return The redacted text, truncated with metadata when it is longer than `maxLength`
    */
   def safeBody(body: String, maxLength: Int = 2048): String =
-    if (body == null) "null" else truncateForLog(redact(body), maxLength)
+    if (body == null) "null"
+    else
+      safeBodyWindow(body, maxLength) match {
+        case Some((_, redacted)) => redacted.take(maxLength) + s"... (truncated, original length: ${body.length})"
+        case None                => truncateForLog(redact(body), maxLength)
+      }
+
+  /** The longest body [[safeBody]] redacts whole, as it always did. */
+  private val SafeBodyWholeLimit: Int = 128 * 1024
+
+  /** How much redacted text the prefix [[safeBody]] reads of a longer body must hold past the characters it keeps. */
+  private val SafeBodyMargin: Int = 16 * 1024
+
+  /** How far back from the end of a window [[safeBody]] looks for a separator to end the prefix before. */
+  private val SafeBodySeparatorReach: Int = 4 * 1024
+
+  /**
+   * Where [[safeBody]] cuts a body longer than `SafeBodyWholeLimit`, and the redaction of the prefix before the cut,
+   * whose first `maxLength` characters it keeps, or `None` where it redacts the body whole (#1680).
+   *
+   * The window starts at twice `maxLength` and `SafeBodyMargin` (32 KiB at least) and doubles until the redacted
+   * prefix holds `SafeBodyMargin` characters past `maxLength`; once it would reach half the body, the body is
+   * redacted whole. The prefix ends right before the last separator in the window's last `SafeBodySeparatorReach`
+   * characters - whitespace or one of `"'`, `,;<>{}[]()` - a character no API key, token or other credential the
+   * patterns read holds, so none is cut in two: cutting at a fixed length left `sk-proj-A1b2`, too short for the
+   * key pattern, and a long value collapsed before it brought it into the kept characters. Where the window holds
+   * no separator there, it doubles.
+   *
+   * The prefix is read as the whole body is: where the body holds the JSON escape of a separator or a quote and the
+   * prefix does not, or a `'` that may close a value runs on past the cut, the prefix is redacted with such an
+   * escape or quote written after it, past every character kept, since either changes how every value before it is
+   * read. A value the cut leaves open runs to the end of the prefix, as a payload cut off in the middle is read; one
+   * that a reading only takes when it closes ends in the margin, which is never shown. The cost is that of
+   * redacting the prefixes, at most twice the last one, or that of the body and half of it again.
+   */
+  private[util] def safeBodyWindow(body: String, maxLength: Int): Option[(Int, String)] =
+    if (maxLength < 0 || body.length <= SafeBodyWholeLimit) None
+    else {
+      val bodyEscaped                 = holdsSeparatorOrQuoteEscape(body)
+      lazy val closing                = lastClosingSingleQuote(body)
+      def separator(c: Char): Boolean = Character.isWhitespace(c) || "\"',;<>{}[]()".indexOf(c.toInt) >= 0
+      @tailrec def attempt(window: Long): Option[(Int, String)] =
+        if (2 * window >= body.length) None
+        else {
+          val end   = window.toInt
+          val floor = math.max(0, end - SafeBodySeparatorReach)
+          var cut   = end
+          while (cut > floor && !separator(body.charAt(cut))) cut -= 1
+          if (cut <= floor) attempt(2 * window)
+          else {
+            val prefix = body.substring(0, cut)
+            val tail =
+              (if (bodyEscaped && !holdsSeparatorOrQuoteEscape(prefix)) "\n\\u0026" else "") +
+                (if (closing >= cut) " '" else "")
+            val redacted = redact(prefix + tail)
+            if (redacted.length.toLong >= maxLength.toLong + SafeBodyMargin + tail.length) Some((cut, redacted))
+            else attempt(2 * window)
+          }
+        }
+      attempt(math.max(32L * 1024, 2L * (maxLength.toLong + SafeBodyMargin)))
+    }
 
   // ============================================================
   // Pattern-based redaction (for log messages)
