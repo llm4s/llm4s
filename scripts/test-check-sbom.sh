@@ -43,7 +43,8 @@ def bom(name, components):
 
 
 boms = {"llm4s-core": bom("llm4s-core_3", CORE), "llm4s-agent": bom("llm4s-agent_3", AGENT),
-        "llm4s-provider-testkit": bom("llm4s-provider-testkit_3", TESTKIT)}
+        "llm4s-provider-testkit": bom("llm4s-provider-testkit_3", TESTKIT),
+        "llm4s-agent-testkit": bom("llm4s-agent-testkit_3", TESTKIT)}
 raw = {}
 
 if mutation == "no-bomformat":
@@ -93,7 +94,7 @@ PY
 }
 
 published_list() {
-  printf '%s\n' "artifact llm4s-core_3" "artifact llm4s-agent_3" "artifact llm4s-provider-testkit_3" "stub core_3" > "$1"
+  printf '%s\n' "artifact llm4s-core_3" "artifact llm4s-agent_3" "artifact llm4s-provider-testkit_3" "artifact llm4s-agent-testkit_3" "stub core_3" > "$1"
 }
 
 # expect_pass NAME DIR [LIST]
@@ -116,7 +117,7 @@ make_fixture "$WORK/good"
 published_list "$WORK/published.txt"
 expect_pass "a good set passes" "$WORK/good"
 expect_pass "a good set passes against the published list (stubs are ignored)" "$WORK/good" "$WORK/published.txt"
-printf '%s\n' "artifact llm4s-core_3" "artifact llm4s-agent_3" "artifact llm4s-provider-testkit_3" "bom llm4s-bom" \
+printf '%s\n' "artifact llm4s-core_3" "artifact llm4s-agent_3" "artifact llm4s-provider-testkit_3" "artifact llm4s-agent-testkit_3" "bom llm4s-bom" \
   "stub core_3" > "$WORK/published-with-bom.txt"
 expect_pass "a POM-only bill of materials (bom line) needs no SBOM" "$WORK/good" "$WORK/published-with-bom.txt"
 
@@ -156,7 +157,7 @@ rm "$WORK/missing-bom/llm4s-agent-0.5.0.bom.json"
 expect_fail "a published artifact without a BOM fails" "no BOM for the published artifact llm4s-agent_3" "$WORK/missing-bom" "$WORK/published.txt"
 
 make_fixture "$WORK/extra-bom"
-printf '%s\n' "artifact llm4s-core_3" "artifact llm4s-provider-testkit_3" > "$WORK/published-short.txt"
+printf '%s\n' "artifact llm4s-core_3" "artifact llm4s-provider-testkit_3" "artifact llm4s-agent-testkit_3" > "$WORK/published-short.txt"
 expect_fail "a BOM for an unpublished module fails" "which is not a published artifact" "$WORK/extra-bom" "$WORK/published-short.txt"
 
 mkdir "$WORK/empty-dir"
