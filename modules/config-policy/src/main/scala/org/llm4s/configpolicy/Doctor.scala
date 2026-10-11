@@ -581,7 +581,9 @@ private[configpolicy] object DoctorConfigErrors {
       if (origin.lineNumber > 0) s"$where:${origin.lineNumber}" else where
     }
 
-  private val Quoted = "(?s)\"\"\"(.*?)\"\"\"|\"((?:[^\"\\\\\n]|\\\\.)*)\"".r
+  // Possessive and unrolled, so a long value (an inline PEM key, a prompt) does not recurse once per character
+  // in java.util.regex and overflow the stack.
+  private val Quoted = "(?s)\"\"\"(.*?)\"\"\"|\"([^\"\\\\\n]*+(?:\\\\.[^\"\\\\\n]*+)*+)\"".r
 
   /**
    * Every quoted value of at least 8 characters in the files the failures point at. They cannot be hidden by

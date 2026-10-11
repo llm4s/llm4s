@@ -476,6 +476,17 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
       }
     }
 
+    "read a long quoted value of a broken file without overflowing the stack" in {
+      val long = "PEM-" + ("A" * 40000) + "\\n" + ("B" * 40000)
+      withFile("a = \"" + long + "\" { x = 1 }") { file =>
+        val failures = ConfigSource.file(file).value().left.toOption.value
+        DoctorConfigErrors.quotedInFiles(failures) should contain(long)
+        val (text, _) = DoctorCli.execute(Array("--config", file.toString), new Probe().ports)
+        text should include(file.getFileName.toString + ":")
+        (text should not).include("PEM-AAAA")
+      }
+    }
+
     "drop the values from a message that names one" in {
       DoctorConfigErrors.withoutValues("""Quoted("GWAPIKEY-abcdefgh") and SimpleConfigObject({"x":1})""") should
         not.include("GWAPIKEY").and(include("expected shape"))
