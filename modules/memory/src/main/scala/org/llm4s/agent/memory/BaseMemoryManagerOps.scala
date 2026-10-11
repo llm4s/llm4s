@@ -35,8 +35,37 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
       .fromConversation(message.content, role, Some(conversationId))
       .copy(importance = importance.orElse(Some(config.defaultImportance)))
 
-    store.store(memory).map(withStore)
+    store.store(memory).map(withStore).map { recorded =>
+      val analysed = message match {
+        case _: UserMessage | _: AssistantMessage => true
+        case _                                    => false
+      }
+      if (config.autoExtractEntities && analysed) extractAfterRecording(recorded, message.content, conversationId)
+      else recorded
+    }
   }
+
+  /**
+   * Best-effort entity extraction for `autoExtractEntities`: the message is already recorded,
+   * so a failed extraction is logged and the manager holding the recorded message is returned.
+   */
+  private def extractAfterRecording(
+    recorded: MemoryManager,
+    content: String,
+    conversationId: String
+  ): MemoryManager =
+    recorded.extractEntities(content, Some(conversationId)) match {
+      case Right(withEntities) => withEntities
+      case Left(error) =>
+        BaseMemoryManagerOps.logger.warn(
+          s"autoExtractEntities: entity extraction failed for conversation $conversationId, " +
+            s"message kept without extracted entities: ${error.message}"
+        )
+        recorded
+    }
+
+  /** The configured `contextTokenBudget`, used by `getRelevantContext` when no `maxTokens` is passed. */
+  override def contextTokenBudget: Int = config.contextTokenBudget
 
   override def recordConversation(
     messages: Seq[Message],
@@ -253,4 +282,8 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
       s"$topHeader${formatted.toString.trim}"
     } else ""
   }
+}
+
+private[memory] object BaseMemoryManagerOps {
+  private val logger = org.slf4j.LoggerFactory.getLogger(classOf[BaseMemoryManagerOps])
 }
