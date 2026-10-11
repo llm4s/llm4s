@@ -56,11 +56,12 @@ object Llm4s {
     createClient(config, MetricsCollector.noop)
 
   /**
-   * [[createClient]] whose client reports every call to `metrics`. Internal: the Spring Boot starter uses it to
-   * attach the application's `MetricsCollector` bean (a Micrometer one when `llm4s-observability-micrometer` and a
-   * `MeterRegistry` are present). A null `metrics` records nothing.
+   * [[createClient]] whose client reports every call (request outcome, duration, tokens and cost) to `metrics`, for
+   * example a `MicrometerMetrics` from `llm4s-observability-micrometer` over the application's `MeterRegistry`, or a
+   * `PrometheusMetrics` from `llm4s-observability-prometheus`. The Spring Boot starter uses it to attach the
+   * application's `MetricsCollector` bean. A null `metrics` records nothing; a null `config` is a failed result.
    */
-  private[llm4s] def createClient(config: ProviderConfig, metrics: MetricsCollector): LlmResult[JLlmClient] =
+  def createClient(config: ProviderConfig, metrics: MetricsCollector): LlmResult[JLlmClient] =
     if (config == null) LlmResult.failure(ValidationError.required("config"))
     else createClientFrom(config, Option(metrics).getOrElse(MetricsCollector.noop))
 

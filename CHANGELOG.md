@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`Llm4s.createClient(ProviderConfig, MetricsCollector)` is public** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
+  the `llm4s-java-api` overload that attaches a `MetricsCollector` (a `MicrometerMetrics` over the application's
+  `MeterRegistry`, say) was `private[llm4s]` for the Spring Boot starter, yet public in the bytecode, so Java callers
+  saw it and Scala callers outside `org.llm4s` could not use it. It is now public and documented
+  ([Using LLM4S from Java](docs/guide/java.md#recording-metrics)), settled before the `llm4s-java-api` MiMa baseline.
 - **Human-review interrupts: static breakpoints and typed middleware questions** ([#1704](https://github.com/llm4s/llm4s/issues/1704),
   part of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `RunConfig.interruptBefore`/`interruptAfter` hold a
   graph node's tasks before they run or after they ran, each as an interrupt of its own keyed by its task id, parked
@@ -2458,6 +2463,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-observability-micrometer` no longer double-counts `llm4s.errors` behind a `ReliableClient`** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
+  `MicrometerMetrics.recordError` fed the same `llm4s.errors` counter that `observeRequest` feeds, so a provider client
+  and the `ReliableClient` around it, sharing one collector, counted each failed attempt and then the final failure
+  again. `recordError` now records `llm4s.reliability.errors` (`llm4s_reliability_errors_total`; tags `provider`,
+  `error_type`), and `llm4s.errors` means what `llm4s_errors_total` means in the Prometheus module: failed requests
+  and failed image generations. **Migration:** a query on `llm4s_errors_total` that relied on `recordError` calls
+  (`ReliableClient`'s local throttle, open circuit, deadline and final failure) reads
+  `llm4s_reliability_errors_total` instead. See [Micrometer metrics](docs/guide/observability/micrometer.md#errors-and-reliableclient).
+- **The Spring Boot starter keeps its metrics ordering on Spring Boot 4** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
+  `LlmMetricsAutoConfiguration` now also orders itself after the `MeterRegistry` auto-configurations at their Boot 4
+  names (`org.springframework.boot.micrometer.metrics.autoconfigure.*`), and a test fails if the names stop resolving
+  on the Boot version the starter is tested against. The `MicrometerMetrics` Scaladoc no longer claims the class holds
+  no mutable state.
 - **Security - ShellTool and the workspace runner: on double-byte Windows hosts, a quoted argument holding a character
   whose second byte is 0x5C is refused** ([#1807](https://github.com/llm4s/llm4s/issues/1807)): code pages 932, 936
   and 950 encode some characters with a second byte of 0x5C, the byte of `\` (50, 126 and 126 of the characters they

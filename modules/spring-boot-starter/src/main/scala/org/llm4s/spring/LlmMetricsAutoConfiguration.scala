@@ -19,13 +19,25 @@ import org.springframework.context.annotation.{ Bean, Configuration }
  * Spring Boot Actuator provides. The starter declares that module `provided`, like Actuator itself, so an application
  * opts in by adding the dependency. A `MetricsCollector` bean of the application's own replaces this one; the client
  * bean reports to every `MetricsCollector` bean there is.
+ *
+ * It runs after the auto-configurations that create the `MeterRegistry`, so `@ConditionalOnBean` sees it. They are
+ * named as strings, because Actuator is optional, and Spring Boot 4 moved them from
+ * `org.springframework.boot.actuate.autoconfigure.metrics` (spring-boot-actuator-autoconfigure) to
+ * `org.springframework.boot.micrometer.metrics.autoconfigure` (spring-boot-micrometer-metrics), so both names are
+ * listed; Spring ignores a name that is not on the classpath. `LlmMetricsAutoConfigurationOrderingSpec` fails if a
+ * Boot 3 name stops resolving on the Boot version the starter is tested against, or if the Boot 4 names are dropped.
  */
 @AutoConfiguration(
   before = Array(classOf[Llm4sAutoConfiguration]),
   afterName = Array(
+    // Spring Boot 3.x
     "org.springframework.boot.actuate.autoconfigure.metrics.MetricsAutoConfiguration",
     "org.springframework.boot.actuate.autoconfigure.metrics.CompositeMeterRegistryAutoConfiguration",
-    "org.springframework.boot.actuate.autoconfigure.metrics.export.simple.SimpleMetricsExportAutoConfiguration"
+    "org.springframework.boot.actuate.autoconfigure.metrics.export.simple.SimpleMetricsExportAutoConfiguration",
+    // Spring Boot 4.x
+    "org.springframework.boot.micrometer.metrics.autoconfigure.MetricsAutoConfiguration",
+    "org.springframework.boot.micrometer.metrics.autoconfigure.CompositeMeterRegistryAutoConfiguration",
+    "org.springframework.boot.micrometer.metrics.autoconfigure.export.simple.SimpleMetricsExportAutoConfiguration"
   )
 )
 @Configuration
