@@ -2134,6 +2134,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ARGUMENT_NOT_ALLOWED`. The system and global git configuration of whoever runs the runner no longer apply,
   so a `safe.directory` set there does not either. `GitConfigRoutesSpec` plants each route, shows git run directly
   runs it, and shows no allowed command run through the runner does.
+- **Security - redaction: the remaining Python-repr shapes no longer leave a credential readable**
+  ([#1706](https://github.com/llm4s/llm4s/issues/1706)): `Redaction` (used by the provider exchange logger,
+  `LLMError` messages and error mapping) read a Python literal as JSON, so a value under a sensitive key stayed
+  readable in eight shapes: (1) a `pytest` assertion diff, whose next line starts with `E`; (2) a notebook's
+  `text/plain` line array in an `.ipynb` file, where each line is its own JSON string; (3) a dict cut off right
+  after a comma, `{'db_password': "x'y",`; (4) `str(dict)` inside a `repr`'d dict,
+  `{'body': '{\'password\': "it\'s..."}'}`; (5) Python's `\'` inside a JSON string,
+  `{"m": "{'password': 'QQ\\'SECRET\"x'}"}`; (6) a keyword argument holding a list, `Settings(token=['a:b', '...'])`;
+  (7) a `\"` in an earlier single-quoted leaf, which switched off the reading of `\"`-quoted leaves after it; and (8)
+  a `'key': "..."` value followed by a key over 64 characters, a key that is not a string (`1:`, `None:`) or
+  `**extra`. A further reading of the input as it was given now reads the value of a sensitive dict key or keyword
+  argument as Python writes it - a string ending only at its own quote written the way the opening one is, at any
+  depth of escaping, a container over `pprint`'s and `pytest`'s line breaks and from one line of a notebook's array to
+  the next - and replaces each of its strings, numbers and words. It never replaces a `"` that delimits a JSON string,
+  at any depth, and adds only what no other edit covers, so every replacement made before is made exactly as before
+  and JSON that parsed still parses. The reading takes time linear in the input. On a realistic corpus of Python
+  logging, Django and Flask debug output, `pytest` diffs, notebooks and tool-call arguments, the secrets left
+  readable go from 2,728 of 36,280 to none.
 - **Security - redaction: a credential in escaped quotes that holds `&word=` is redacted whole**
   ([#1707](https://github.com/llm4s/llm4s/issues/1707)):
   `Redaction` (used by the provider exchange logger, `LLMError` messages and error mapping) read the value of
