@@ -96,6 +96,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `effect.cats` — `LLMClientIO`, `AgentIO` (cats-effect 3, fs2) — **new** | `llm4s-effect` (`modules/llm4s-effect`) | Beta |
 | `zio` — `LLMClientZ`, `AgentZ` (ZIO 2, ZIO Streams) — **new** | `llm4s-zio` (`modules/llm4s-zio`) | Beta |
 | `kotlin` — coroutine API (`LLMClientKt`, `AgentKt`, `AgentStreamItem`); a separate Gradle build, not part of sbt or the MiMa baseline, not yet published — **new** | `modules/kotlin-api` | Experimental |
+| `pekko` — `LLMClientPekko`, `AgentPekko` (Apache Pekko Streams) — **new** | `llm4s-pekko` (`modules/llm4s-pekko`) | Beta |
 
 Notes:
 

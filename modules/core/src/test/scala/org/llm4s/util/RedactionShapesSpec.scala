@@ -998,14 +998,15 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
   it should "replace all it replaces without reading single-quoted fields from the input, and more (#1697)" in {
     // The single-quoted field passes' reading of the input only adds edits where the passes in sequence made none:
     // every range those replace is replaced as before, so nothing redacted without that reading is written out, and
-    // JSON that parses redacted without it still parses. Deterministic.
+    // JSON that parses redacted without it still parses. Without the added readings, which read Python literals
+    // too (#1706) and would close the same credentials on both sides. Deterministic.
     val docs   = new MentionDocs(16973)
     var closed = 0
     (1 to 1500).foreach { _ =>
       val (dict, _, secrets) = docs.dicts()
       val input              = docs.carried(dict)
-      val (out, ranges)      = Redaction.redactedWithRanges(input, singleQuotedFromInput = true)
-      val (base, kept)       = Redaction.redactedWithRanges(input, singleQuotedFromInput = false)
+      val (out, ranges)      = Redaction.redactedWithRanges(input, singleQuotedFromInput = true, addedReadings = false)
+      val (base, kept)       = Redaction.redactedWithRanges(input, singleQuotedFromInput = false, addedReadings = false)
       withClue(s"input $input, output $out, without $base: ") {
         kept.filterNot(ranges.contains) shouldBe empty
         secrets.filterNot(base.contains).filter(out.contains) shouldBe empty
