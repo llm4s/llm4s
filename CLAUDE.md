@@ -110,6 +110,7 @@ llm4s/
 │   ├── agent-tools/           # Built-in tools: core utilities, filesystem, HTTP, shell, web search (published)
 │   ├── llm4s-effect/          # cats-effect IO / fs2 wrappers over LLMClient and Agent (published)
 │   ├── llm4s-zio/             # ZIO 2 / ZIO Streams wrappers over LLMClient and Agent (published)
+│   ├── llm4s-pekko/           # Apache Pekko Streams Sources over LLMClient.streamComplete and Agent runs (published)
 │   ├── java-api/              # Java facade over the client and agent (published)
 │   ├── spring-boot-starter/   # Spring Boot auto-configuration on java-api (published)
 │   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, not published yet
