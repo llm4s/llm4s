@@ -149,8 +149,8 @@ object WriteFileTool {
                     )
                   }.toEither.left.map(e => s"Failed to write file: ${e.getMessage}")
                 }
+              }
             }
-          }
       }
     }
   }
