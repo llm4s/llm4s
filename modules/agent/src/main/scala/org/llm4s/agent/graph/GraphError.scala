@@ -124,6 +124,20 @@ object GraphError:
   final case class InvalidCommit(threadId: String, reason: String) extends GraphError with NonRecoverableError:
     override val message: String = s"Invalid commit to thread '$threadId': $reason"
 
+  /**
+   * The thread has no checkpoint `checkpointId` in its history: it never had one, or retention
+   * ([[Checkpointer.prune]]), a guardrail `Block` (which retracts its turn) or `deleteThread` removed it.
+   * Nothing was changed.
+   */
+  final case class CheckpointNotFound(threadId: String, checkpointId: String)
+      extends GraphError
+      with NonRecoverableError:
+    override val message: String = s"Thread '$threadId' has no checkpoint $checkpointId"
+
+  /** A fork's target thread already exists; a fork only ever creates a new thread. Nothing was changed. */
+  final case class ThreadExists(threadId: String) extends GraphError with NonRecoverableError:
+    override val message: String = s"Thread '$threadId' already exists; fork to a new thread id"
+
   /** Events before `earliestSeq` were compacted away and cannot be replayed. */
   final case class ReplayUnavailable(threadId: String, earliestSeq: Long) extends GraphError with NonRecoverableError:
     override val message: String = s"Thread '$threadId' can replay events from sequence $earliestSeq only"

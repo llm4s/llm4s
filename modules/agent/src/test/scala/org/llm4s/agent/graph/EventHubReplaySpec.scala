@@ -85,6 +85,9 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
       Right(page(n).filter(_.seq > afterSeq).take(limit))
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = underlying.compactEvents(threadId, beforeSeq)
     def deleteThread(threadId: ThreadId): Result[Unit]                   = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int)  = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)             = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)               = underlying.prune(threadId, policy)
 
   "A replaying subscription" should "be in the live set when subscribe returns, and place held live events by commit" in {
     @volatile var log = Vector(record(1), record(2))
