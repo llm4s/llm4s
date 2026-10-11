@@ -321,6 +321,7 @@ those after it do not run; `sequential` stops at the first failure.
 
 ```scala
 import org.llm4s.agent.guardrails.InputGuardrail
+import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
 class KeywordRequirementGuardrail(requiredKeywords: Set[String]) extends InputGuardrail {
@@ -331,7 +332,8 @@ class KeywordRequirementGuardrail(requiredKeywords: Set[String]) extends InputGu
     if (found.nonEmpty) {
       Right(value)
     } else {
-      Left(LLMError.validation(
+      Left(ValidationError.invalid(
+        "input",
         s"Input must contain at least one of: ${requiredKeywords.mkString(", ")}"
       ))
     }
@@ -346,6 +348,8 @@ val guardrail = new KeywordRequirementGuardrail(Set("scala", "java", "kotlin"))
 
 ```scala
 import org.llm4s.agent.guardrails.OutputGuardrail
+import org.llm4s.error.ValidationError
+import org.llm4s.types.Result
 
 class MaxSentenceCountGuardrail(maxSentences: Int) extends OutputGuardrail {
   val name: String = "max-sentence-count"
@@ -355,7 +359,8 @@ class MaxSentenceCountGuardrail(maxSentences: Int) extends OutputGuardrail {
     if (sentenceCount <= maxSentences) {
       Right(value)
     } else {
-      Left(LLMError.validation(
+      Left(ValidationError.invalid(
+        "output",
         s"Response has $sentenceCount sentences, max allowed is $maxSentences"
       ))
     }
@@ -367,22 +372,13 @@ class MaxSentenceCountGuardrail(maxSentences: Int) extends OutputGuardrail {
 
 ```scala
 import org.llm4s.agent.guardrails.LLMGuardrail
+import org.llm4s.llmconnect.LLMClient
 
-class CustomLLMGuardrail(client: LLMClient) extends LLMGuardrail(client) {
-  val name: String = "custom-llm-check"
-
-  override def buildPrompt(content: String): String = {
-    s"""Evaluate if the following content is appropriate for a children's website.
-       |Respond with only "PASS" or "FAIL" followed by a brief explanation.
-       |
-       |Content: $content""".stripMargin
-  }
-
-  override def parseResponse(response: String): Result[Boolean] = {
-    if (response.trim.startsWith("PASS")) Right(true)
-    else if (response.trim.startsWith("FAIL")) Right(false)
-    else Left(LLMError.parsing("Unexpected response format"))
-  }
+class CustomLLMGuardrail(client: LLMClient) extends LLMGuardrail {
+  val name: String             = "custom-llm-check"
+  val llmClient: LLMClient     = client
+  val evaluationPrompt: String = "Rate if this content is appropriate for a children's website (0-1)"
+  override val threshold       = 0.8
 }
 ```
 

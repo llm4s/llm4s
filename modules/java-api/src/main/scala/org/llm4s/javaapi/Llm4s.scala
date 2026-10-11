@@ -10,6 +10,7 @@ import org.llm4s.llmconnect.config.{
   ModelDimensionRegistry,
   ProviderConfig
 }
+import org.llm4s.metrics.MetricsCollector
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
 
@@ -52,13 +53,21 @@ object Llm4s {
    * on environment variables.
    */
   def createClient(config: ProviderConfig): LlmResult[JLlmClient] =
-    if (config == null) LlmResult.failure(ValidationError.required("config"))
-    else createClientFrom(config)
+    createClient(config, MetricsCollector.noop)
 
-  private def createClientFrom(config: ProviderConfig): LlmResult[JLlmClient] = {
+  /**
+   * [[createClient]] whose client reports every call to `metrics`. Internal: the Spring Boot starter uses it to
+   * attach the application's `MetricsCollector` bean (a Micrometer one when `llm4s-observability-micrometer` and a
+   * `MeterRegistry` are present). A null `metrics` records nothing.
+   */
+  private[llm4s] def createClient(config: ProviderConfig, metrics: MetricsCollector): LlmResult[JLlmClient] =
+    if (config == null) LlmResult.failure(ValidationError.required("config"))
+    else createClientFrom(config, Option(metrics).getOrElse(MetricsCollector.noop))
+
+  private def createClientFrom(config: ProviderConfig, metrics: MetricsCollector): LlmResult[JLlmClient] = {
     val result = for {
       registry <- Llm4sConfig.modelRegistryService()
-      client   <- LLMConnect.getClient(config)(using registry)
+      client   <- LLMConnect.getClient(config, metrics)(using registry)
     } yield new JLlmClient(client)
     LlmResult.from(result)
   }

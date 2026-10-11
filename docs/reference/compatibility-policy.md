@@ -72,8 +72,8 @@ What it does **not** cover:
   anything else gets a documented MiMa filter when the baseline is set.
 - Anything `private` or `private[llm4s]`. The latter is internal, may change in any release, and cannot be
   reached from your package; do not declare your code in `org.llm4s` to get around that.
-- `llm4s-provider-testkit` and `llm4s-agent-testkit` (Beta; they require JDK 21, see below), the samples, the workspace runner,
-  `modules/it` and the benchmarks.
+- `llm4s-provider-testkit` and `llm4s-agent-testkit` (Beta; they require JDK 21, see below), `llm4s-testkit` (Beta), the
+  samples, the workspace runner, `modules/it` and the benchmarks.
 - Bug fixes. A fix that changes behaviour to match what the documentation or the types already promised is
   not a compatibility break; it is listed under *Fixed* in the CHANGELOG.
 

@@ -81,7 +81,7 @@ object Checkpoint:
     new Checkpoint(formatVersion, id, parent, threadId, runId, status, createdAt, snapshot, tenantId, fencingToken)
 
   /** The format this build writes. */
-  val CurrentFormat: Int = 5
+  val CurrentFormat: Int = 6
 
   /**
    * Migrations of the checkpoint format itself, keyed by the version they upgrade from.
@@ -90,9 +90,18 @@ object Checkpoint:
    * 3 -> 4: the terminal `Failed` status (#1328); nothing to rewrite, but a build that predates it refuses format 4
    * rather than misread the status.
    * 4 -> 5: run-claim fencing (#1700) records the writing claim's token; earlier checkpoints have none.
+   * 5 -> 6: static breakpoints (#1704) park held tasks and mark their continuations; nothing to rewrite, as
+   * the new fields default to none, but a build that predates them refuses format 6 rather than run a held
+   * task's continuation as an ordinary task.
    */
   private val formatVersion: SchemaVersion =
-    SchemaVersion(5)(1 -> addSuspension, 2 -> addTenant, 3 -> addFailedStatus, 4 -> addFencingToken)
+    SchemaVersion(6)(
+      1 -> addSuspension,
+      2 -> addTenant,
+      3 -> addFailedStatus,
+      4 -> addFencingToken,
+      5 -> addBreakpoints
+    )
 
   private def addSuspension(json: ujson.Value): Result[ujson.Value] =
     Try {
@@ -128,6 +137,13 @@ object Checkpoint:
       val upgraded = ujson.copy(json)
       upgraded("fencingToken") = upickle.default.writeJs(Option.empty[Long])
       upgraded("formatVersion") = 5
+      upgraded
+    }.toResult
+
+  private def addBreakpoints(json: ujson.Value): Result[ujson.Value] =
+    Try {
+      val upgraded = ujson.copy(json)
+      upgraded("formatVersion") = 6
       upgraded
     }.toResult
 

@@ -559,7 +559,7 @@ Contract decisions:
 - **Unsupported constraints are refused when the tool set is built.** `ToolArgumentValidator` has `unsupported(schema)`, the JSON paths of keywords it cannot check, and `validate(schema, arguments)`, every violation prefixed with its JSON path (`$.limit: 500 is above maximum 100`). The default is in-house and supports exactly the subset core's `SchemaDefinition` emits: `type` (a string, or an array such as `["string", "null"]`), `description` (ignored), `properties`, `required`, `additionalProperties` (boolean), `enum`, `minLength`/`maxLength` (in code points), `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf` (exact in decimal, no tolerance), `items`, `minItems`, `maxItems` and `uniqueItems`. A supported keyword with a malformed value - a bound that is not a finite number, a `multipleOf` that is not a positive finite number, a length or count that is not a non-negative whole number, a non-boolean `uniqueItems`, a `required` that is not an array of strings, a non-array `enum`, a non-object `properties` - is unsupported too, at its path. `ToolSet.of(tools*)` and `ToolSet.of(validator, tools*)` report invalid names, duplicate names, an argument schema whose root is not `type: object` (core's clients assume an object) and every unsupported keyword in one `ValidationError`, so no call is checked against a schema whose constraints the validator would skip. `ToolArgumentValidatorSpec` generates a case for each `SchemaDefinition` constructor to prove that every keyword core emits is supported.
 - **Tools reach the provider through core.** Core's clients take tools only as `ToolFunction`s in `CompletionOptions.tools`. `ToolSet.toolFunctions` supplies them in order: a tool made by `AgentTool.fromToolFunction` is its original function; any other is a stand-in with the spec's name, description and schema whose handler refuses to run. `ModelStep.next(messages, tools: ToolSet)` receives the set, and `ModelStep.fromClient` sends `options.withTools(tools.toolFunctions)`.
 - **Questions are typed and declared.** Approval stays built in (`NeedsApproval`, `ToolContext.approved`, the loop's approval node). Any other question needs a tool that extends `AgentTool.Asking[A, Q, Ans](spec)`: it declares the question and answer codecs on its spec, asks with `ask(question: Q)`, and continues in `resume(args, question: Q, answer: Ans, context)`. Only `Asking` can declare a question, so tool authors never see `Any`.
-- **Two failure channels.** `Error` is a tool-level failure: the model sees it and the run continues. `Fatal` is an infrastructure failure: the run fails with `GraphError.ToolFailed(tool, toolCallId, cause)`, reported as `NodeFailed(call-tool, task, ToolFailed(...))` because the graph wraps every node failure. The checkpoint stays `Running`, and `recover` re-runs only that call. A tool that returns `Fatal` after a side effect must be idempotent; `(position.threadId, position.checkpointId, toolCallId)` is the key. A thrown non-fatal exception is an error result (`Tool 'x' failed: ...`), never a run failure.
+- **Two failure channels.** `Error` is a tool-level failure: the model sees it and the run continues. `Fatal` is an infrastructure failure: the run fails with `GraphError.ToolFailed(tool, toolCallId, cause)`, reported as `NodeFailed(call-tool, task, ToolFailed(...))` because the graph wraps every node failure. The checkpoint stays `Running`, and `recover` re-runs only that call. A tool that returns `Fatal` after a side effect must be idempotent; `(position.threadId, position.checkpointId, toolCallId)` is the key (refined by #1703, §4.17: the checkpoint is the issuing model call's, and the key reaches the tool as `ToolContext.idempotencyKey`). A thrown non-fatal exception is an error result (`Tool 'x' failed: ...`), never a run failure.
 - **Core tools adapt.** `AgentTool.fromToolFunction(tool)` takes the function's name, description and schema, so its arguments are validated like any other tool's, and maps `Right(json)` to `Success(json)` and `Left(error)` to `Error(error.getFormattedMessage)`. It writes no state and never asks.
 
 Loop decisions (`ToolLoop`):
@@ -615,7 +615,7 @@ Contract decisions:
 
 - **Four hooks, all pass-through by default.** `beforeAgent` sees the run's input, `afterAgent` its final answer, `wrapModelCall` each model call and `wrapToolCall` each tool call. §5.6's `beforeModel`, `afterModel` and `afterToolCall` are not separate hooks: each is a wrapper that does its work before or after `next`, so there is one way to write each concern and less API to freeze.
 - **A tool wrapper returns a `ToolOutcome`.** No new result type: a wrapper denies with `Error("Denied: ...")`, asks for approval with `NeedsApproval(reason)`, fails the run with `Fatal`, and short-circuits by not calling `next`. It may call `next` more than once (retry), and may transform the outcome `next` returns. `ToolCallRequest(spec, call)` is read-only: a wrapper cannot change a call's arguments, so none can get round argument validation; only an approval `Edit` changes arguments, and those are validated again.
-- **A model wrapper rewrites the request and cannot suspend.** `ModelRequest(messages, tools: ToolSet)`; a wrapper may change either (inject a system note, filter tools), call `next` again (retry, fallback), or return `Left`, which fails the run. Filtering `ModelRequest.tools` shapes what the model is offered and is not a permission control: a tool the model calls anyway still runs through `wrapToolCall`, where denial belongs. Model wrappers do not suspend: the only middleware suspension is approval of a tool call (below). This narrows §5.6 and the §9 entry "model wrappers can suspend"; typed middleware questions are carried forward (§4.9).
+- **A model wrapper rewrites the request and cannot suspend.** `ModelRequest(messages, tools: ToolSet)`; a wrapper may change either (inject a system note, filter tools), call `next` again (retry, fallback), or return `Left`, which fails the run. Filtering `ModelRequest.tools` shapes what the model is offered and is not a permission control: a tool the model calls anyway still runs through `wrapToolCall`, where denial belongs. Model wrappers do not suspend: the only middleware suspension is approval of a tool call (below). This narrows §5.6 and the §9 entry "model wrappers can suspend"; typed middleware questions are carried forward (§4.9). **Amended by #1704 (§4.18):** an `AgentMiddleware.Asking` wrapper suspends by asking its typed question.
 - **Run-boundary hooks transform or fail.** `beforeAgent` and `afterAgent` return the input or answer, possibly changed, or `Left`, which fails the run with that error.
 - **Middleware contributes tools and keys.** A middleware's `tools` join the loop's `ToolSet` and are validated like any other tool's; a name that clashes with another tool is refused. Its `writes` are the keys its `wrapToolCall` may add to a `Success` update. `ToolLoop.build` still refuses a declaration of `ToolLoop.results` or `Messages.key`, from a tool or a middleware.
 - **Tools carry MCP-style hints.** `AgentToolSpec.withHints(ToolHints(readOnly, destructive, idempotent, openWorld))`, with the meanings of MCP tool annotations and their conservative defaults: not read-only, destructive, not idempotent, open-world. `AgentTool.fromToolFunction` gets the defaults. Permissions and timeout are not added: nothing in this slice reads them (§4.9).
@@ -645,7 +645,7 @@ Source breaks, with no shims (the CHANGELOG lists the same):
 
 Limits (owners in §4.9):
 
-- Only tool-call approval suspends; model wrappers and guardrails cannot ask typed questions.
+- ~~Only tool-call approval suspends; model wrappers and guardrails cannot ask typed questions.~~ **Closed by #1704** (§4.18).
 - `llm4s-mcp` reads `ToolHints` from MCP tool annotations since §4.12.
 - The legacy `Agent` still runs guardrails through `GuardrailApplicator`; Stage 1 moves it onto `ToolLoop` and `GuardrailMiddleware`.
 - A guardrail `Block` - any `beforeAgent`/`afterAgent` `Left` - fails the run and leaves the checkpoint `Running`. `start` on the thread then returns `IncompleteRun`, and `recover` replays the same input or answer through the same guardrail, which refuses it again, so the thread cannot continue. An output `Block` also leaves the unguarded assistant answer committed, in thread state and in `RunResult.Failed`'s state. Decided: a `Block` becomes a terminal failure that leaves the thread usable (§9, "Guardrail Block outcome"); Stage 1 implements it.
@@ -656,18 +656,18 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 
 | Item | Left by | Owner |
 |---|---|---|
-| Typed middleware questions (a middleware declaring `Q`/`Ans` like `AgentTool.Asking`), suspension from model wrappers and guardrails (today: tool-call approval only) | #1279 | Stage 2, with output review and missing-information interrupts (§5.3). Not needed in Stage 1: the loop's approvals come from tools and tool wrappers (`ToolOutcome.NeedsApproval`) and its questions from tools (`ToolOutcome.Ask`), while guardrails and model wrappers block or fail |
+| ~~Typed middleware questions (a middleware declaring `Q`/`Ans` like `AgentTool.Asking`), suspension from model wrappers and guardrails (today: tool-call approval only)~~ **closed by #1704** (§4.18: `AgentMiddleware.Asking`, `GuardrailReviewMiddleware`) | #1279 | Stage 2, with output review and missing-information interrupts (§5.3). Not needed in Stage 1: the loop's approvals come from tools and tool wrappers (`ToolOutcome.NeedsApproval`) and its questions from tools (`ToolOutcome.Ask`), while guardrails and model wrappers block or fail |
 | ~~A guardrail Block (any run-boundary `Left`) leaves the thread `Running` with no way forward, and an output Block leaves the blocked answer in state~~ **closed by #1350 and #1328** (§4.13: `CheckpointStatus.Failed`, the blocked turn removed, `AgentStatus.Blocked`) | #1279 | Stage 1 |
 | Tool permissions and timeouts on `AgentToolSpec`, with the ordered deny-if-unmatched permission rules of §5.6 | #1279 | Stage 3 |
 | `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop` and `AgentTool` (**closed by #1328**); `ModelStep` streaming through live progress, `AgentEvent` replaced (**closed by #1329**); `PlanRunner` rebuilt or removed (**closed by #1330**: removed, §4.15) | #1269 | Stage 1 |
 | ~~Delete `CancellationToken` with the `PlanRunner` rebuild~~ **closed by #1330** (§4.15) | #1270 | Stage 1 |
 | Prompt cancellation of SDK client calls on platform threads (today: prompt on virtual threads, where the runtime runs tasks) | #1270 | - |
-| Durable checkpointer backends (SQLite first) and a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`) | #1268, #1269 | Stage 2 |
+| Durable checkpointer backends (SQLite first) and a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`); **the contract suite and idempotency keys closed by #1703** (§4.17) | #1268, #1269 | Stage 2 |
 | ~~Run-claim leases, so `recover` in another process refuses a live run, and fencing tokens on every commit and in `RunPosition`~~ **closed by #1700** (§4.16: `RunClaim`, `FencingToken`, `StaleClaim`, `llm4s-agent-testkit`) | #1268, #1269, #1277 | Stage 2 |
 | Cancelling a run cancels the child runs it started | #1277 | Stage 3 |
 | Store-level change notification (or polling), so a subscription sees live commits made by another `GraphRuntime` or process sharing the checkpointer (today: live delivery only for commits through the subscribing runtime; others by resubscribing and replaying) | #1277 | Stage 2 |
-| ~~Checkpoint history, fork, `updateState`, retention by age or size (today: latest checkpoint only, explicit event compaction). History and fork must never keep or expose a snapshot whose turn a later guardrail `Block` removed (§9, "Guardrail Block outcome"), or the tool loop must guard the answer before its first commit~~ **closed by #1702** (§4.17: `history`, `checkpoint`, `fork`, `updateState`, `prune` and `RetentionPolicy`; a Block's closing commit retracts its turn) | #1268 | Stage 2 |
-| Static `interruptBefore`/`interruptAfter` breakpoints | #1269 | Stage 2 |
+| ~~Checkpoint history, fork, `updateState`, retention by age or size (today: latest checkpoint only, explicit event compaction). History and fork must never keep or expose a snapshot whose turn a later guardrail `Block` removed (§9, "Guardrail Block outcome"), or the tool loop must guard the answer before its first commit~~ **closed by #1702** (§4.19: `history`, `checkpoint`, `fork`, `updateState`, `prune` and `RetentionPolicy`; a Block's closing commit retracts its turn) | #1268 | Stage 2 |
+| ~~Static `interruptBefore`/`interruptAfter` breakpoints~~ **closed by #1704** (§4.18) | #1269 | Stage 2 |
 | Known limits, not planned: a `Subscription` dropped without `cancel()` keeps a parked virtual thread; `cancel()` blocks while a listener ignores its interrupt; the hub lock is runtime-wide; `RunContext` has no dependency accessor (by decision) | #1277 | - |
 | Known limit, not planned: tools reach the provider as core `ToolFunction`s (`ToolSet.toolFunctions`), stand-ins for agent tools, because core's clients take no other form | #1278 | - |
 | Known limit, not planned: the structural fingerprint does not cover node input types; a changed input type is caught when a pending input fails to decode | #1267 | - |
@@ -1067,14 +1067,139 @@ Source breaks, with no shims (the CHANGELOG and the Stage 2 migration note list 
 
 Limits:
 
-- A run that lost its claim keeps running its in-flight tasks until their commits are refused, so their external side effects can happen twice, once for each run; that is the at-least-once boundary of §4.1, and idempotency keys are [#1703](https://github.com/llm4s/llm4s/issues/1703).
+- A run that lost its claim keeps running its in-flight tasks until their commits are refused, so their external side effects can happen twice, once for each run; that is the at-least-once boundary of §4.1, and the idempotency keys of [#1703](https://github.com/llm4s/llm4s/issues/1703) (§4.17) let a tool deduplicate them.
 - A task of an expired holder that finishes after the takeover is run again by the successor: its pending write and its `TaskCompleted` are refused, so the event log records the task once, but its side effects happen in both runs. One that finished before the claim is carried over instead (see admission above). The same at-least-once boundary.
 - A run that lost its claim keeps delivering its tasks' live progress events (`StreamEvent.Live`, which are never stored) to its own runtime's subscribers until it ends. Its durable events are refused with its commits.
 - A process that stops renewing holds its threads for up to `ttl` after it dies; a store that fails to release does the same.
 - Subscriptions still see live only the commits made through their own runtime ([#1705](https://github.com/llm4s/llm4s/issues/1705)).
 - Renewal is timed by the runtime's wall time and expiry by the store's clock; a store whose clock runs much faster than the runtime's can expire a live run's claim between renewals. Keep `renewEvery` well inside `ttl`. An embedded store opened by several hosts has as many clocks as hosts, and their skew changes the effective `ttl` (see the first store decision).
 
-### 4.17 Stage 2 slice 3: checkpoint history, fork, `updateState` and retention ([#1702](https://github.com/llm4s/llm4s/issues/1702))
+### 4.17 Stage 2 slice 4: tool side-effect safety ([#1703](https://github.com/llm4s/llm4s/issues/1703))
+
+Implemented. Slice 4 of [#1699](https://github.com/llm4s/llm4s/issues/1699), independent of the store slices: idempotency keys reach tools, every model request keeps one result per tool call whatever happened to the batch, and a provider contract suite proves it in the OpenAI and Anthropic formats. Nothing in `llm4s-core` changes. The specs are `AgentToolSideEffectSafetySpec`, `AgentToolResultContractSpec` (agent), `ToolResultContractSpec` (testkit), and the tool-result check in `Llm4sOpenAIModuleSpec`, `Llm4sAnthropicModuleSpec` and `Llm4sOpenAICompatibleModuleSpec`.
+
+Decisions:
+
+- **An idempotency key per call, recorded with the call.** `IdempotencyKey` (`org.llm4s.agent.graph`, an opaque string) is `IdempotencyKey.derive(threadId, checkpointId, superstep, taskId, toolCallId)`: the SHA-256 of the five, each length-prefixed after a `llm4s-tool-call-v2` tag, as 64 lowercase hex characters - deterministic, of fixed length, and revealing none of its inputs to the external system it is sent to. The position is that of the **model call that issued the tool call**, not of the task that runs it: `recover` claims a thread with a new checkpoint (§4.5), so the running task's `position.checkpointId` differs between a run and its recovery, while the model call's is fixed once its response is committed. The checkpoint alone does not name a model call on a thread: checkpoint ids are `<runId>/<n>` with `n` counted per run, and a `RunConfig` - so a `RunId` - can serve several runs (`withRunId` is public, and a caller may pass one config to `run` and `continueConversation`), so two turns could share a checkpoint id and, with a provider reusing `call_0`, a key. The superstep counts on across a thread's runs, so it separates turns; the task separates model calls running side by side in one superstep; the checkpoint still separates a model request made again after its response was lost. All three come from the model call's `RunContext.position`, so the checkpoint-id format (#1700) is unchanged, and the runtime still accepts a reused `RunId`. `runMultiTurn` gives each follow-up turn a fresh `RunId`, as a `RunId` names one execution attempt. The model step derives the key and records it in `ToolTask`, `ApprovalRequest` and `ToolQuestionRequest`, and the tool reads it as `ToolContext.idempotencyKey`: one value in every run of the call - a retrying `wrapToolCall`, approval, edit, an answered question, `recover` after a cancellation, `Fatal`, deadline or crash - and a new one for a call of another model request, even when the provider reuses its id (§5.3), including a model request made again because its response was never committed. Recording the key, rather than deriving it where the call runs, also keeps it stable if the derivation ever changes.
+- **At least once, documented.** The runtime runs a tool at least once, never exactly once (§4.1, §8). A finished call's result is stored as the call finishes (`Sync`, the agent's mode) and never run again ("completed pending writes are never replayed"); a call cut short - cancelled, failed with `Fatal`, or lost to a crash between its side effect and that store - runs again under `recover` with the same key. Under `Async` or `OnExit`, finished calls after the last durable commit run again with their keys, and a lost model response is asked for again, so its calls get new keys. An approved, edited or answered call keeps the key it was proposed with, so a tool's first run - before approval or an answer - should have no side effect. The guide (`docs/guide/agents/index.md#tool-side-effects`) states the same.
+- **A call cut short gets no synthetic result.** §4.4 stands: an interrupted task records nothing, and `recover` runs it again. The loop already synthesises a result for every outcome that is final - success, tool error, a throw, invalid arguments, an unknown tool, denial, rejection, a refused handoff batch - and the batch barrier keeps the model from running while any call is unresolved (suspended, cancelled, `Fatal`, crashed), so no request can hold a call without its result. Writing a "cancelled" result instead would end the call's at-least-once execution silently and make `recover` skip work the user may want done; continuing a thread past an abandoned batch is a state edit, which #1702's `updateState` owns.
+- **One rule, checked on what is sent.** `ToolResultRule` (`private[llm4s]`) is positional, as both wire formats are: each call of an assistant message has exactly one `ToolMessage` in the run of tool messages straight after it, that run answers only its calls, and no tool message stands elsewhere. `Message.validateConversation` pairs by id across the whole conversation, so a reused `call_0` could hide a call with no result behind an earlier turn's. The model step checks the request **as every `wrapModelCall` left it**, inside the innermost call, and fails the model call (`NodeFailed(ValidationError)`, the thread `Running`) rather than send a dangling call - an Anthropic client would otherwise drop the call silently (`ToolResultPairing`) and OpenAI reject the request. A model message whose call ids repeat or are blank is refused before it is stored, as a blank answer is, so `recover` asks the model again: no result could answer exactly one of two calls sharing an id, and a repeated id fails the results key's uniqueness check, which used to leave the thread unable to advance. Imported `history` must keep the same rule. Core is unchanged: tightening `validateConversation` would change behaviour for every core user.
+- **The contract suite has two halves.** `llm4s-provider-testkit` gains `ToolResultContract` - `violations(format, requestBody)`, `toolCallCount`, `toolResultCount`, and `cases`, conversations of every shape the loop produces - and `ProviderModuleChecks.assertOneToolResultPerCall(format, response, path)(baseUrl => client)`, which sends each case to a `LocalProviderTestServer` and fails on a violation, or when the body carries fewer calls or native results than the conversation (a client hiding a broken conversation by dropping a call or sending a result as text). `ToolMessageFormat` is `OpenAIChat` or `AnthropicMessages`. The OpenAI, Anthropic and every OpenAI-compatible module spec run it. `AgentToolResultContractSpec` then runs the agent itself through the real `OpenAIClient` and `AnthropicClient` against a scripted local server, through every outcome above plus partial resume, handoffs, reused ids, cancellation, `Fatal` and a crash recovered by another runtime, and checks every request with the same contract; for this `llm4s-agent` has test-only dependencies on `llm4s-openai`, `llm4s-anthropic` and the testkit.
+
+Source breaks, with no shims (the CHANGELOG and migration guide list the same): `ToolContext(run, toolCallId, state, approved)` becomes `ToolContext(run, toolCallId, idempotencyKey, state, approved)`; `ToolTask`, `ApprovalRequest` and `ToolQuestionRequest` gain an `idempotencyKey` field (in `ToolQuestionRequest` before the defaulted `approved`); a model message with repeated or blank tool-call ids fails the model call instead of being stored; imported `history` and every model request are held to the positional rule.
+
+Limits:
+
+- No durable store has shipped, so `ToolTask` and the two requests carry no codec migration for the new field: a checkpoint written before it does not restore (it fails to decode, clearly). The first durable backend (#1701) starts from this format.
+- `CompiledGraph.step` outside a runtime gives every task the checkpoint `""`, so keys there tell model requests apart only by thread, superstep, task and call id.
+- Only `AgentTool`s see the key; tools added through `ToolRegistry` / `AgentTool.fromToolFunction` (built-in, MCP, Java and Kotlin tools) do not yet ([#1740](https://github.com/llm4s/llm4s/issues/1740)).
+- The contract suite covers the OpenAI and Anthropic formats; Gemini, Vertex AI, Ollama and Bedrock speak others and do not run it yet.
+
+### 4.18 Stage 2 slice 5: human-review interrupts ([#1704](https://github.com/llm4s/llm4s/issues/1704))
+
+Slice 5 of [#1699](https://github.com/llm4s/llm4s/issues/1699): static breakpoints, and typed questions from
+middleware. Both are interrupts on the persisted pause/resume path of §4.5, keyed by `InterruptId` and answered with
+the other interrupts of a run, any non-empty subset at a time, which is the "incremental approval" of Stage 2's exit
+criteria (§6) for every kind of interrupt. Independent of the store slices. The specs are `BreakpointSpec` (kernel),
+`AgentBreakpointSpec`, `AgentMiddlewareQuestionSpec`, `JAgentHumanReviewSpec` and `AgentKtHumanReviewTest`.
+
+Breakpoint decisions (kernel):
+
+- **Breakpoints belong to the run.** `RunConfig.interruptBefore` and `interruptAfter` (`Set[NodeId]`) name nodes;
+  each `start`, `resume` and `recover` brings its own, as it brings its budgets, and `CompiledGraph.step` honours
+  them. Admission refuses a node the graph does not have with one `ValidationError` naming every one, before the
+  thread is read, so a mistyped id is not a breakpoint that silently never holds. They are not part of the graph's
+  structural fingerprint: they change when a run pauses, not the graph's shape.
+- **A held task is parked like a suspended one.** Its interrupt id is its task id; its continuation inherits its
+  join slot and origin, so a barrier it belongs to stays closed until the continuation completes, and the run pauses
+  at the end of the superstep while its siblings run and commit (§4.5). A task held *before* its node runs has done
+  nothing and records no pending write: `recover` decides again, under its own config. Its continuation runs the
+  node with the same input and is marked `passedBefore`, so the same breakpoint does not hold it again - also after
+  a crash, a cancel or a failure, since the mark is checkpointed. A task held *after* its node ran has its pending
+  write and its update committed, so the state shows what it did; its routes, static edges and join arrivals are
+  held, and its continuation *replays* them without running the node (`replay`), taking one superstep. A reused
+  pending write is held after again on `recover`, so a node is never run twice to be held. Holds apply to resume
+  nodes too, and a node in both lists is held before, then after.
+- **The answer is `Breakpoint.proceed` (JSON `null`), and only that.** A breakpoint has no question and nothing
+  to decide but to continue; any other answer is `InvalidResume`, the thread unchanged, which leaves room for a
+  typed answer later. A held thread is continued, or forgotten; skipping or editing a held task waits for
+  `updateState` (#1702).
+- **One event vocabulary.** A held task commits no event of its own: `RunSuspended` lists its interrupt and
+  `RunResumed` its answer, as for any interrupt. `PendingInterrupt.breakpoint` (`Before` or `After`) tells a held
+  task from a suspension; `question` is the held task's input (before) or `null` (after), and `resumeNode` its node.
+- **Checkpoint format 6**, an identity migration from 5: `PendingTask` gains `passedBefore` and `replay`,
+  `ParkedContinuation` gains `breakpoint` and `heldRoutes`, all defaulted, so a build that predates them refuses a
+  format-6 checkpoint rather than run a held task's continuation as an ordinary task.
+
+Agent decisions:
+
+- **Agent breakpoints are named by `AgentNode`**: `Model` (`<id>/model`), `Tool` (`<id>/call-tool`, one interrupt
+  per call) and `Finish` (`<id>/finish`), set with `AgentBuilder.withInterruptBefore` / `withInterruptAfter` and
+  added to every run's own; a handoff target's apply to its nodes. Like streaming they are not part of the graph
+  version, so a thread held by one agent is continued by one built without them. A step continued after a review
+  runs at another node: a model call after a `wrapModelCall` question at `<id>/asked/<mw>/wrapModelCall`, a tool
+  call after an approval or a question at `<id>/approval`, `<id>/ask/<tool>` or `<id>/asked/<mw>/wrapToolCall`, an
+  answer after an `afterAgent` question at `<id>/asked/<mw>/afterAgent` (the root's, for a root middleware asking
+  about a handoff target's answer). A breakpoint *after* `Model`, `Tool` or `Finish` holds those nodes too
+  (`ToolLoop.breakpointNodes`), so a gated model call's tool calls, or a result recorded after an approval, cannot
+  slip past it; a breakpoint *before* holds only the step's own node, since a continued step was just reviewed.
+  Each release of an after-hold replays in a superstep of its own, which counts against `maxSupersteps`.
+  `AgentStatus.Suspended` gains
+  `breakpoints: Vector[(InterruptId, BreakpointRequest)]` - the node, the phase and, for a call held before it runs,
+  the call - and `AgentResult.proceed(id)`.
+- **A middleware asks as a tool does.** `AgentMiddleware.Asking[Q: ReadWriter, Ans: ReadWriter]` declares the
+  codecs, as `AgentTool.Asking` does; only it can declare one. A hook asks by returning `ask(q)` - a
+  `Left(MiddlewareAsked)` from `beforeAgent`, `afterAgent` or `wrapModelCall` - or `askAbout(q)`, a `ToolOutcome.Ask`
+  from `wrapToolCall`, attributed to the wrapper that raised it as `NeedsApproval` is (§4.8); a wrapper that is not
+  `Asking` and asks fails the run with `ToolFailed`, as an undeclared tool question does. The question is encoded
+  when it is asked and suspends at a resume node of its own per (agent, middleware, hook),
+  `<agent>/asked/<middleware>/<hook>`, whose answer codec is the middleware's: an answer that does not decode is
+  refused at `resume` with the thread unchanged, unlike a tool's, which becomes the call's error result.
+- **Once answered, the asking task runs again, and the hook's whole stack with it.** Nothing about a stack's
+  position is checkpointed, as for approvals (§4.8), so a rebuilt stack resumes cleanly, and a middleware outside the
+  asking one runs twice. `answered(context)` gives the middleware its question and answer. Answers given earlier in
+  the same stack run are carried (`GivenAnswer`, on the question, `ApprovalRequest` and `ToolQuestionRequest`), so
+  two asking middleware of one stack each ask once, and a tool call's answer survives a later approval or tool
+  question. They are keyed by the asking middleware's agent and id, so a root's and a handoff target's middleware of
+  the same id do not see each other's. What runs again is the task: `beforeAgent` re-runs the turn's input, storing
+  nothing while it waits (a new thread's imported history is imported then); `wrapModelCall` re-runs the model step
+  (a wrapper that asked after calling `next` calls the model again, unless it returns a completion of its own; the
+  model calls it made before asking are counted - their usage is committed with the suspension, and each is
+  announced with `ModelCallCompleted` - so usage and tracing agree); `wrapToolCall` re-runs the call, its arguments checked
+  again, with the approval it had; `afterAgent` guards the stored answer again - a root middleware's question about
+  a handoff target's answer finishes as the target. A question from a tool wrapper while the tool continues after its
+  own question is the call's error result, because running the chain again would lose the tool's answer.
+- **Guardrails suspend through a middleware.** `GuardrailReviewMiddleware(input, output)` runs guardrails as
+  `GuardrailMiddleware` does, and a refusal asks a `GuardrailReview(phase, guardrail, reason, text)`, answered with
+  `GuardrailVerdict.Allow`, `Edit(text)` (not re-checked: the reviewer wrote it) or `Block` (the §4.13 Block). A
+  verdict applies to the text and phase it was asked about, whatever the refusal's reason, and once given the
+  guardrails do not run on that text again, so an LLM judge whose wording varies is asked about once and not called
+  again. `GuardrailMiddleware` itself is unchanged.
+- **`AgentStatus.Suspended` gains `middlewareQuestions: Vector[(InterruptId, MiddlewareQuestionRequest)]`**: the
+  agent and middleware that asked, the hook, the question as JSON (`ToolLoop.middlewareQuestion[Q]` reads it), and
+  what the hook runs again with. `AgentResult.reply` answers it.
+
+Java and Kotlin ([#1662](https://github.com/llm4s/llm4s/pull/1662), [#1665](https://github.com/llm4s/llm4s/pull/1665)
+conventions): `InterruptKind` gains `MIDDLEWARE_QUESTION` and `BREAKPOINT`; `PendingInterrupt` lists them after the
+approvals and tool questions, with `middleware()`, `node()` and `phase()` (Java enum `BreakpointPhase`), and
+`toolName()`/`argumentsJson()` become `Optional`s, since a breakpoint on a model call or a question about an answer
+has no tool call; `Answer.proceed(id)` continues a breakpoint. `AgentKt.pending` reuses the list unchanged. An agent
+with breakpoints or asking middleware is built with `Agent.builder` and wrapped (`Llm4s.wrapAgent`).
+
+Source breaks, with no shims (the CHANGELOG and the Stage 2 migration note list the same): `AgentStatus.Suspended`
+has four fields; the kernel's `PendingInterrupt` gains `breakpoint`; `RunConfig` gains two fields; `ApprovalRequest`
+and `ToolQuestionRequest` gain `answered`; a non-asking wrapper's `ToolOutcome.Ask` fails the run; Java's
+`PendingInterrupt.toolName()`/`argumentsJson()` return `Optional<String>`; `Checkpoint.CurrentFormat` is 6.
+
+Limits:
+
+- A breakpoint takes only `proceed`: skipping a held task or editing what it holds needs `updateState` (#1702).
+- A breakpoint before a node does not hold a step continued after a review at another node.
+- A middleware question re-runs the asking task, so a model wrapper that asks after calling the model pays for that
+  call twice unless it returns its own completion; both calls are counted in usage.
+- `AgentNode` is a Scala 3 enum: from Java or Kotlin its cases are read with `AgentNode.valueOf("Tool")`.
+
+### 4.19 Stage 2 slice 3: checkpoint history, fork, `updateState` and retention ([#1702](https://github.com/llm4s/llm4s/issues/1702))
 
 A store keeps a thread's history, not only its latest checkpoint, and the runtime lets callers read it, branch it, correct it and prune it. It builds on the claim and fencing of §4.16. The specs are `CheckpointHistorySpec` and the updated `GraphRuntimeSpec` and `AgentGuardrailSpec` in `llm4s-agent`, and the history, retraction, pruning, fork and `updateState` cases of `CheckpointerContract` in `llm4s-agent-testkit`.
 
@@ -1094,7 +1219,7 @@ Runtime decisions (`GraphRuntime`):
 - **`updateState` is fenced and held.** It holds the thread in this runtime and claims it in the store, re-reads and re-checks the version under the claim, commits fenced with the claim's token, and releases both, so a live run in any runtime refuses it with `ThreadBusy`.
 - **Completed pending writes are never replayed.** `updateState` carries the latest checkpoint's pending writes over to the new checkpoint, re-keyed, after checking they still rebind, so `recover` reuses them rather than running their tasks again; their updates apply after the edit. History never keeps pending writes, and fork does not copy them (above).
 - **Supersteps keep increasing.** The new checkpoint is one superstep on from `expected`. Tool idempotency keys are derived from the thread, the checkpoint id, the superstep, the task and the call id ([#1703](https://github.com/llm4s/llm4s/issues/1703)); with checkpoint ids counted along the thread and the superstep moving on, no later model call reproduces an earlier key whatever `RunId` is reused. After `deleteThread`, reusing both the thread id and a `RunId` repeats them; the guide says so.
-- **No checkpoint format change.** History, fork and `updateState` add no field to `Checkpoint`; provenance is in the two new durable events, `RunEvent.StateUpdated(fromCheckpoint, asNode, tenantId, principal)` and `RunEvent.ThreadForked(fromThread, fromCheckpoint, tenantId, principal)`. `Checkpoint.CurrentFormat` stays 5.
+- **No checkpoint format change.** History, fork and `updateState` add no field to `Checkpoint`; provenance is in the two new durable events, `RunEvent.StateUpdated(fromCheckpoint, asNode, tenantId, principal)` and `RunEvent.ThreadForked(fromThread, fromCheckpoint, tenantId, principal)`. `Checkpoint.CurrentFormat` stays 6.
 
 Source breaks, with no shims: `Checkpointer` gains `history`, `checkpoint` and `prune`; `Commit` gains `retractTurn` (defaulted in `apply`); `GraphError` gains `CheckpointNotFound` and `ThreadExists`; `RunEvent` gains `StateUpdated` and `ThreadForked`; checkpoint ids of a thread's second and later runs change from `<runId>/1...` to counting along the thread.
 
@@ -1141,7 +1266,7 @@ Tool implementations return content and state effects, never `ToolMessage`s. For
 - The model/tool graph uses the explicit dynamic join barrier in §4: the next model node cannot run until each requested tool call has contributed exactly one result. The runtime, not each tool implementation, creates and correlates result messages. Rejected, denied, and unknown calls receive provider-valid synthetic error results; suspended calls wait for their continuation, and an edited approval updates the source assistant message before execution. This preserves the one-result-per-call invariant for Anthropic and other provider protocols.
 - Support `Sync`, `Async`, and `OnExit` checkpoint durability modes with the replay guarantees in §4.1.
 - Side-effect safety through prepare/approve/execute stages, idempotency keys, and documented at-least-once boundaries.
-- Derive tool idempotency keys from `(RunContext.position.threadId, RunContext.position.checkpointId, toolCallId)`; do not rely on provider tool-call IDs alone when a model request can be regenerated.
+- Derive tool idempotency keys from the issuing model call's `RunContext.position` (thread, checkpoint, superstep, task) and `toolCallId`; do not rely on provider tool-call IDs alone when a model request can be regenerated.
 - Fence checkpoint and per-task pending-write commits with the active run-claim token and expected thread version. A stale worker must be unable to append a pending write after another worker takes over. Introduce this fencing in Stage 2 with durable execution, not later with deployment adapters.
 - Checkpoint retention and state schema migration support.
 
@@ -1243,7 +1368,7 @@ The migration note should give direct replacements for existing state/event/Plan
 | Explicit joins and partial resume | **Accepted.** Static joins wait for declared arrivals; dynamic joins record expected fan-out task IDs. The tool-call batch feeds a barrier, so an approved branch cannot advance the model while other calls are unresolved. Quiescence with parked continuations reports `Suspended`; an impossible join fails explicitly. |
 | Tool-result ownership | **Accepted.** `AgentTool` returns content/effects/outcomes. The runtime creates the correlated provider-valid result message for success, failure, rejection, denial, and unknown tools, and the join enforces one result per call. Edited approvals replace the originating assistant message before execution. |
 | Durable event storage | **Accepted.** The thread checkpointer owns an atomic event log alongside snapshots and pending writes. Lifecycle and state/tool events are durable; token deltas are live-only. Replay has configurable retention/compaction and reports the earliest available sequence. |
-| Middleware and schema contract | **Accepted.** Middleware declares IDs, state keys, tools, and ordering constraints with pass-through hook defaults. Stage 0 has four hooks - `beforeAgent`, `afterAgent`, `wrapModelCall`, `wrapToolCall` - and only tool-call approval suspends; model wrappers rewrite, retry or fail (§4.8). Agent tool specs use core `SchemaDefinition[A]` plus a decoder for the same `A`, with no raw schema field. |
+| Middleware and schema contract | **Accepted.** Middleware declares IDs, state keys, tools, and ordering constraints with pass-through hook defaults. Stage 0 has four hooks - `beforeAgent`, `afterAgent`, `wrapModelCall`, `wrapToolCall` - and only tool-call approval suspends; model wrappers rewrite, retry or fail (§4.8). Agent tool specs use core `SchemaDefinition[A]` plus a decoder for the same `A`, with no raw schema field. **Amended by #1704:** an `AgentMiddleware.Asking[Q, Ans]` suspends from any of the four hooks with a typed question; the hook's stack runs again once it is answered (§4.18). |
 | Concurrent resume and state removal | **Accepted.** A resume against an actively claimed thread returns retryable `ThreadBusy` without consuming its answer. Removing a typed state key clears its stored entry, so reads return its initial value; collection element deletion remains a typed update operation. |
 | Recovery after task failure or process restart | **Accepted.** Add `recover(threadId, graph, config)` for incomplete execution checkpoints. It continues from durable pending writes without accepting a new turn input, retries only failed/unstarted tasks per policy, and rejects threads with pending interrupts (use `resume`). |
 | Tool argument validation | **Accepted.** Validate raw arguments against the exact provider-facing JSON Schema generated from core `SchemaDefinition` before decoding, policy, or side effects. Use an agent-local validator SPI that fails closed for unsupported constraints, then decode and run optional semantic validation; do not change core for this runtime requirement. |

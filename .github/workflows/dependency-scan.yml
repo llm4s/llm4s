@@ -1,0 +1,114 @@
+name: Dependency scan
+
+# Scans the dependencies of every published module for known vulnerabilities (docs/reference/sbom.md).
+#
+# GitHub's own dependency graph cannot do this for llm4s: it does not read sbt builds (the repository's graph
+# lists Ruby gems and GitHub Actions, no Maven package), so `dependency-review-action` would never see a Scala
+# dependency change. Instead the build writes a CycloneDX SBOM per module (`sbt publishedSboms`) and OSV-Scanner
+# matches the Maven coordinates in them against the OSV database.
+#
+# What fails:
+#   - On a pull request, only a HIGH or CRITICAL advisory (CVSS 7.0 or more) that the head's dependencies have
+#     and the base's do not (scripts/osv-new-findings.sh). Advisories main already carries are listed, never
+#     fail a contributor's change, and are fixed in their own pull requests. If the base cannot be scanned (for
+#     example a base without `publishedSboms`), the run is report only.
+#   - If the scanner itself cannot run (the advisory database is unreachable, say), a pull request gets a
+#     warning, not a failure, so an outage never blocks a contributor; the weekly run fails, so it is noticed.
+#   - A scan that finds no package at all always fails: that is a broken setup, not a clean result.
+# No secret is used: the scan reads the public OSV database, and the job has read-only permissions.
+
+on:
+  pull_request:
+    paths:
+      - "project/Dependencies.scala"
+      - "project/plugins.sbt"
+      - "build.sbt"
+      - ".github/workflows/dependency-scan.yml"
+      - "scripts/osv-*.sh"
+      - "scripts/test-osv-scan.sh"
+  schedule:
+    - cron: "17 5 * * 1"  # Mondays 05:17 UTC: new advisories appear without any change here
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  osv-scanner:
+    name: OSV-Scanner
+    runs-on: ubuntu-latest
+    env:
+      OSV_SCANNER: ${{ github.workspace }}/../osv-scanner
+      # Pull requests: a scanner outage is a warning. Weekly and manual runs: it fails.
+      STRICT: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # the base commit, and sbt-dynver's version
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: "temurin"
+          java-version: 21
+          cache: "sbt"
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Test the scan scripts
+        run: scripts/test-osv-scan.sh
+
+      # Pinned release, checked against the SHA-256 that the project publishes in osv-scanner_SHA256SUMS
+      # (and that GitHub reports for the asset). Bump both together.
+      - name: Install OSV-Scanner v2.6.0
+        run: |
+          curl -sSfL --retry 3 -o "$OSV_SCANNER" "https://github.com/google/osv-scanner/releases/download/v2.6.0/osv-scanner_linux_amd64"
+          echo "ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108  $OSV_SCANNER" | sha256sum -c -
+          chmod +x "$OSV_SCANNER"
+
+      - name: Scan this commit
+        run: |
+          sbt -batch publishedSboms
+          set +e
+          scripts/osv-scan-sboms.sh target/sboms "$RUNNER_TEMP/osv-head.json"
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then exit 0; fi
+          if [ "$status" -eq 3 ] || [ "$STRICT" = 1 ]; then exit "$status"; fi
+          rm -f "$RUNNER_TEMP/osv-head.json"
+          echo "::warning title=Dependency scan::OSV-Scanner could not run (status $status); this pull request was not scanned."
+
+      - name: Scan the base of the pull request
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git worktree add "$RUNNER_TEMP/base" "$BASE_SHA"
+          if ! (cd "$RUNNER_TEMP/base" && sbt -batch publishedSboms); then
+            echo "::notice title=Dependency scan::The base ($BASE_SHA) cannot build SBOMs, so this run is report only."
+            exit 0
+          fi
+          scripts/osv-scan-sboms.sh "$RUNNER_TEMP/base/target/sboms" "$RUNNER_TEMP/osv-base.json" \
+            || echo "::notice title=Dependency scan::The base could not be scanned, so this run is report only."
+
+      - name: Report, and fail on a new HIGH or CRITICAL advisory
+        run: |
+          if [ ! -f "$RUNNER_TEMP/osv-head.json" ]; then
+            echo "Not scanned: OSV-Scanner could not run." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          base=()
+          if [ -f "$RUNNER_TEMP/osv-base.json" ]; then base=("$RUNNER_TEMP/osv-base.json"); fi
+          set +e
+          scripts/osv-new-findings.sh "$RUNNER_TEMP/osv-head.json" "${base[@]}" > "$RUNNER_TEMP/osv-report.md"
+          status=$?
+          set -e
+          tee -a "$GITHUB_STEP_SUMMARY" < "$RUNNER_TEMP/osv-report.md"
+          if [ "$status" -eq 1 ]; then
+            echo "::error title=Dependency scan::This change adds a HIGH or CRITICAL advisory; see the job summary."
+          fi
+          exit "$status"

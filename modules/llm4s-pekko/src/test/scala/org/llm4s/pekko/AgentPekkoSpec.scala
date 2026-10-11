@@ -330,8 +330,8 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with Eventually with Befo
       pekko(client)(_.withTools(tools).withMiddleware(new ApprovalMiddleware(r => Some(s"review ${r.call.id}"))))
     val parked = Await.result(agent.run("go"), Patience)
     val ids = parked.status match {
-      case AgentStatus.Suspended(approvals, _) => approvals.map(_._1)
-      case other                               => fail(s"expected Suspended, got $other")
+      case AgentStatus.Suspended(approvals, _, _, _) => approvals.map(_._1)
+      case other                                     => fail(s"expected Suspended, got $other")
     }
     ids should have size 1
     val all = items(agent.streamResume(parked.threadId, Map(parked.approve(ids.head))))
@@ -415,8 +415,8 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with Eventually with Befo
       pekko(client)(_.withTools(tools).withMiddleware(new ApprovalMiddleware(r => Some(s"review ${r.call.id}"))))
     val parked = Await.result(agent.run("go"), Patience)
     val ids = parked.status match {
-      case AgentStatus.Suspended(approvals, _) => approvals.map(_._1)
-      case other                               => fail(s"expected Suspended, got $other")
+      case AgentStatus.Suspended(approvals, _, _, _) => approvals.map(_._1)
+      case other                                     => fail(s"expected Suspended, got $other")
     }
     val done = Await.result(agent.resume(parked.threadId, Map(parked.approve(ids.head))), Patience)
     done.status shouldBe AgentStatus.Completed("shipped")

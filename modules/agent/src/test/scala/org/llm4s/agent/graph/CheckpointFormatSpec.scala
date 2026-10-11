@@ -177,8 +177,10 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     formatFour.obj.remove("fencingToken")
     val migrated = Checkpoint.fromJson(formatFour).value
     migrated.fencingToken shouldBe None
-    migrated shouldBe current.withFormatVersion(5)
-    Checkpoint.CurrentFormat shouldBe 5
+    migrated shouldBe current.withFormatVersion(Checkpoint.CurrentFormat)
+    // and through 5 -> 6, as not held at a breakpoint
+    migrated.snapshot.frontier.head.passedBefore shouldBe false
+    migrated.snapshot.frontier.head.replay shouldBe None
   }
 
   it should "round-trip the token of the claim that wrote it" in {
@@ -197,6 +199,31 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     ).withFencingToken(FencingToken(42L))
     Checkpoint.toJson(fenced)("fencingToken") shouldBe upickle.default.writeJs(Option(42L))
     Checkpoint.fromJson(Checkpoint.toJson(fenced)).value shouldBe fenced
+  }
+
+  it should "migrate a format-5 checkpoint, written before static breakpoints existed" in {
+    val b     = GraphBuilder("g", "v1")
+    val start = b.node[Unit]("start")((_, _, _) => continue(Command.empty))
+    val graph = b.compile(start)(_ => Right(())).value
+    val current = Checkpoint(
+      5,
+      "run-1/1",
+      None,
+      "thread",
+      "run-1",
+      CheckpointStatus.Running,
+      Instant.parse("2026-10-02T12:00:00Z"),
+      graph.snapshot(graph.start(())).value
+    ).withFencingToken(FencingToken(7L))
+    // a format-5 pending task has none of the breakpoint fields: they read as not passed and not replayed
+    val written = Checkpoint.toJson(current)
+    written("snapshot")("frontier")(0).obj.keySet should contain noneOf ("passedBefore", "replay")
+    val migrated = Checkpoint.fromJson(written).value
+    migrated shouldBe current.withFormatVersion(Checkpoint.CurrentFormat)
+    migrated.fencingToken shouldBe Some(FencingToken(7L))
+    migrated.snapshot.frontier.head.passedBefore shouldBe false
+    migrated.snapshot.frontier.head.replay shouldBe None
+    Checkpoint.CurrentFormat shouldBe 6
   }
 
   it should "round-trip the terminal Failed status" in {
@@ -218,8 +245,8 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "refuse a format it does not know" in {
-    val newer = ujson.Obj("formatVersion" -> 6, "id" -> "x")
-    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(6, Checkpoint.CurrentFormat)
+    val newer = ujson.Obj("formatVersion" -> 7, "id" -> "x")
+    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(7, Checkpoint.CurrentFormat)
     Checkpoint.fromJson(ujson.Obj("id" -> "x")).left.value shouldBe
       GraphError.UnsupportedCheckpointFormat(0, Checkpoint.CurrentFormat)
   }

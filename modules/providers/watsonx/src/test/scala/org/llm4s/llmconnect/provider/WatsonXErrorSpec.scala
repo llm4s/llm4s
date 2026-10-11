@@ -107,10 +107,10 @@ class WatsonXErrorSpec extends AnyFunSuite with Matchers:
       .exists(_.isInstanceOf[NetworkError]) shouldBe true
   }
 
-  test("calls use the documented timeouts: 30s for IAM, 120s for generation") {
+  test("calls use the documented timeouts: 30s for IAM, 120s for chat") {
     var seen = List.empty[FiniteDuration]
     val http = new org.llm4s.http.Llm4sHttpClient:
-      private val inner = routed(_ => Right(iamToken()), _ => Right(generation))
+      private val inner = routed(_ => Right(iamToken()), _ => Right(chatReply))
       override def post(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
         seen = seen :+ timeout
         inner.post(url, headers, body, timeout)
@@ -158,14 +158,14 @@ class WatsonXErrorSpec extends AnyFunSuite with Matchers:
   test("neither the api key nor the bearer token appears in any error, whichever step failed") {
     val tokenOk = HttpResponse(200, s"""{"access_token":"$BearerToken","expires_in":3600}""")
     val scenarios: Seq[(String, StubHttp)] = Seq(
-      "IAM 400" -> routed(_ => Right(HttpResponse(400, """{"errorMessage":"bad key"}""")), _ => Right(generation)),
-      "IAM 401 plain text" -> routed(_ => Right(HttpResponse(401, "Unauthorized")), _ => Right(generation)),
-      "IAM 500"            -> routed(_ => Right(HttpResponse(500, "boom")), _ => Right(generation)),
-      "IAM garbage"        -> routed(_ => Right(HttpResponse(200, "<<<")), _ => Right(generation)),
-      "IAM no token"       -> routed(_ => Right(HttpResponse(200, "{}")), _ => Right(generation)),
+      "IAM 400" -> routed(_ => Right(HttpResponse(400, """{"errorMessage":"bad key"}""")), _ => Right(chatReply)),
+      "IAM 401 plain text" -> routed(_ => Right(HttpResponse(401, "Unauthorized")), _ => Right(chatReply)),
+      "IAM 500"            -> routed(_ => Right(HttpResponse(500, "boom")), _ => Right(chatReply)),
+      "IAM garbage"        -> routed(_ => Right(HttpResponse(200, "<<<")), _ => Right(chatReply)),
+      "IAM no token"       -> routed(_ => Right(HttpResponse(200, "{}")), _ => Right(chatReply)),
       "IAM transport" -> routed(
         _ => Left(NetworkError("down", None, "https://iam.example.com")),
-        _ => Right(generation)
+        _ => Right(chatReply)
       ),
       "model 401" -> routed(_ => Right(tokenOk), _ => Right(HttpResponse(401, """{"errors":[{"message":"nope"}]}"""))),
       "model 403" -> routed(_ => Right(tokenOk), _ => Right(HttpResponse(403, "forbidden"))),
@@ -195,7 +195,7 @@ class WatsonXErrorSpec extends AnyFunSuite with Matchers:
     config.toString should include("***")
     (config.copy(model = "x").toString should not).include(ApiKey)
     (config.withModel("y").toString should not).include(ApiKey)
-    (new WatsonXClient(config, httpClient = routed(_ => Right(iamToken()), _ => Right(generation))).toString should not)
+    (new WatsonXClient(config, httpClient = routed(_ => Right(iamToken()), _ => Right(chatReply))).toString should not)
       .include(ApiKey)
   }
 
@@ -205,7 +205,7 @@ class WatsonXErrorSpec extends AnyFunSuite with Matchers:
       override def record(exchange: ProviderExchange): Unit = seen.add(exchange): Unit
     val http = routed(
       _ => Right(HttpResponse(200, s"""{"access_token":"$BearerToken","expires_in":3600}""")),
-      _ => Right(generation)
+      _ => Right(chatReply)
     )
     val c = new WatsonXClient(config, exchangeLogging = ProviderExchangeLogging.enabled(sink), httpClient = http)
     c.complete(hi, CompletionOptions()).isRight shouldBe true

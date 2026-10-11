@@ -209,9 +209,11 @@ private[agent] object AgentRun:
           case TurnOutcome.StepLimitReached => Right(AgentStatus.StepLimitReached)
       case suspended: RunResult.Suspended =>
         for
-          approvals <- loop.requests(suspended)
-          questions <- loop.questions(suspended)
-        yield AgentStatus.Suspended(approvals, questions)
+          approvals   <- loop.requests(suspended)
+          questions   <- loop.questions(suspended)
+          middleware  <- loop.middlewareQuestions(suspended)
+          breakpoints <- loop.breakpoints(suspended)
+        yield AgentStatus.Suspended(approvals, questions, middleware, breakpoints)
       case RunResult.Failed(_, blocked: GuardrailBlocked) if isBlock =>
         Right(AgentStatus.Blocked(blocked.guardrail, blocked.reason))
       case RunResult.Failed(_, error) => Left(error)

@@ -496,7 +496,7 @@ tracing.traceRAGOperation(
 
 Tracing records what happened inside one request. Metrics count what happens across all of them: requests, tokens, cost, errors and latency, per provider and model. They are cheap enough to alert on, and they answer "is a provider failing right now?" faster than a trace search.
 
-The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`, `addTokens` and `recordCost`, plus calls for retries, circuit-breaker transitions, errors and image generation. Every chat client calls the collector it was built with, and collectors are expected not to throw. The default is `MetricsCollector.noop`, so metrics cost nothing until you pass one in. `llm4s-observability-prometheus` provides the implementation, `PrometheusMetrics`, and the HTTP endpoint that serves it, `PrometheusEndpoint`.
+The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`, `addTokens` and `recordCost`, plus calls for retries, circuit-breaker transitions, errors and image generation. Every chat client calls the collector it was built with, and collectors are expected not to throw. The default is `MetricsCollector.noop`, so metrics cost nothing until you pass one in. `llm4s-observability-prometheus` provides the implementation, `PrometheusMetrics`, and the HTTP endpoint that serves it, `PrometheusEndpoint`. If your application already has a Micrometer `MeterRegistry` (Spring Boot Actuator, Quarkus), use `llm4s-observability-micrometer` instead: its `MicrometerMetrics` records the same series into that registry, and the Spring Boot starter wires it with no code. See [Micrometer metrics](micrometer).
 
 ### Add the module
 
