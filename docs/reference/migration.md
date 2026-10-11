@@ -23,20 +23,6 @@ Not in a release yet. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/169
 
 Design: `docs/design/typed-agent-runtime-design.md` §4.16 onwards. Guide: [Durable Checkpointers](../guide/agents/durable-checkpointers.html).
 
-### SQLite checkpointer (#1701)
-
-Nothing changes for existing code: the durable store is a new module, `llm4s-agent-checkpoint-sqlite`, and `llm4s-agent` is unchanged by it. To keep threads across restarts, add the dependency and replace the in-memory store:
-
-```scala
-// before: threads live as long as the process
-val runtime = GraphRuntime.inMemory()
-
-// after: threads live in a file, and `recover` continues a stopped run in the next process
-val runtime = SqliteCheckpointer.open(Path.of("runs.db")).map(store => GraphRuntime(store))
-```
-
-`SqliteCheckpointer` is in `org.llm4s.agent.graph.sqlite`. It brings the SQLite JDBC driver, at the version `llm4s-memory` already uses. Close it with `close()` when the process is done with it. See [Durable Checkpointers](../guide/agents/durable-checkpointers.html#the-sqlite-store).
-
 ### Durable `Checkpointer` contract (#1700)
 
 A run now holds a lease on its thread - a `RunClaim` with an expiry and a `FencingToken` - which it renews while it runs and releases when it ends, and every commit carries the token. Code that only runs agents or graphs on `GraphRuntime` or `Agent` needs no change. Code that implements `Checkpointer`, builds a `Commit`, `Checkpoint` or `RunPosition`, or matches `ThreadBusy` does. Source breaks, with no shims:
@@ -168,6 +154,20 @@ with no shims:
   `fork`.
 
 `Checkpoint.CurrentFormat` stays 6: nothing changes in a checkpoint's JSON.
+
+### SQLite checkpointer (#1701)
+
+Nothing changes for existing code: the durable store is a new module, `llm4s-agent-checkpoint-sqlite`, and `llm4s-agent` is unchanged by it. To keep threads across restarts, add the dependency and replace the in-memory store:
+
+```scala
+// before: threads live as long as the process
+val runtime = GraphRuntime.inMemory()
+
+// after: threads live in a file, and `recover` continues a stopped run in the next process
+val runtime = SqliteCheckpointer.open(Path.of("runs.db")).map(store => GraphRuntime(store))
+```
+
+`SqliteCheckpointer` is in `org.llm4s.agent.graph.sqlite`. It brings the SQLite JDBC driver, at the version `llm4s-memory` already uses. Close it with `close()` when the process is done with it. See [Durable Checkpointers](../guide/agents/durable-checkpointers.html#the-sqlite-store).
 
 ## Stage 1 migration: agent runtime
 
