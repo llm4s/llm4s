@@ -4,115 +4,150 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
 import java.time.Instant
+import java.util.Comparator
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.concurrent.duration.*
+import scala.util.Using
 
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 class ProviderExchangeSinkSpec extends AnyFunSuite with Matchers:
 
+  private def withTempPath[A](path: Path)(body: Path => A): A =
+    Using.resource(new AutoCloseable {
+      override def close(): Unit =
+        Using.resource(Files.walk(path)) { paths =>
+          paths.sorted(Comparator.reverseOrder[Path]()).forEach(Files.delete(_))
+        }
+    })(_ => body(path))
+
+  private def withTempDir[A](prefix: String)(body: Path => A): A =
+    withTempPath(Files.createTempDirectory(prefix))(body)
+
   test("JsonlProviderExchangeSink appends redacted exchange records") {
-    val tempFile = Files.createTempFile("provider-exchange", ".jsonl")
-    val sink     = JsonlProviderExchangeSink(tempFile)
+    withTempPath(Files.createTempFile("provider-exchange", ".jsonl")) { tempFile =>
+      val sink = JsonlProviderExchangeSink(tempFile)
 
-    val exchange = ProviderExchange(
-      exchangeId = "ex-2",
-      provider = "openai",
-      model = Some("gpt-4o"),
-      requestId = None,
-      correlationId = None,
-      startedAt = Instant.parse("2026-03-22T10:10:00Z"),
-      completedAt = Instant.parse("2026-03-22T10:10:01Z"),
-      duration = 1000.millis,
-      outcome = ProviderExchangeOutcome.Error,
-      requestBody = """{"apiKey":"sk-secret","prompt":"hello"}""",
-      responseBody = Some("""{"message":"failed"}"""),
-      errorMessage = Some("Authorization: Bearer sk-secret")
-    )
+      val exchange = ProviderExchange(
+        exchangeId = "ex-2",
+        provider = "openai",
+        model = Some("gpt-4o"),
+        requestId = None,
+        correlationId = None,
+        startedAt = Instant.parse("2026-03-22T10:10:00Z"),
+        completedAt = Instant.parse("2026-03-22T10:10:01Z"),
+        duration = 1000.millis,
+        outcome = ProviderExchangeOutcome.Error,
+        requestBody = """{"apiKey":"sk-secret","prompt":"hello"}""",
+        responseBody = Some("""{"message":"failed"}"""),
+        errorMessage = Some("Authorization: Bearer sk-secret")
+      )
 
-    sink.record(exchange)
+      sink.record(exchange)
 
-    val lines = Files.readAllLines(tempFile)
-    lines.size shouldBe 1
+      val lines = Files.readAllLines(tempFile)
+      lines.size shouldBe 1
 
-    val json = ujson.read(lines.get(0))
-    json("exchange_id").str shouldBe "ex-2"
-    json("provider").str shouldBe "openai"
-    json("outcome").str shouldBe "Error"
-    ujson.write(json("duration_ms")) shouldBe "\"1000\""
-    (json("request_body").str should not).include("sk-secret")
-    (json("error_message").str should not).include("sk-secret")
+      val json = ujson.read(lines.get(0))
+      json("exchange_id").str shouldBe "ex-2"
+      json("provider").str shouldBe "openai"
+      json("outcome").str shouldBe "Error"
+      ujson.write(json("duration_ms")) shouldBe "\"1000\""
+      (json("request_body").str should not).include("sk-secret")
+      (json("error_message").str should not).include("sk-secret")
+    }
   }
-
   test("ProviderExchangeSink.createRunScopedJsonl creates a timestamped file in the directory") {
-    val tempDir   = Files.createTempDirectory("provider-exchange-dir")
-    val startedAt = Instant.parse("2026-03-23T07:15:00Z")
+    withTempDir("provider-exchange-dir") { tempDir =>
+      val startedAt = Instant.parse("2026-03-23T07:15:00Z")
 
-    val result = ProviderExchangeSink.createRunScopedJsonl(tempDir, startedAt)
+      val result = ProviderExchangeSink.createRunScopedJsonl(tempDir, startedAt)
 
-    result.isRight shouldBe true
-    val sink = result.toOption.get
-    sink.path.getParent shouldBe tempDir
-    sink.path.getFileName.toString shouldBe "provider-exchanges-2026-03-23T07-15-00Z.jsonl"
-    Files.exists(sink.path) shouldBe true
+      result.isRight shouldBe true
+      val sink = result.toOption.get
+      sink.path.getParent shouldBe tempDir
+      sink.path.getFileName.toString shouldBe "provider-exchanges-2026-03-23T07-15-00Z.jsonl"
+      Files.exists(sink.path) shouldBe true
+    }
   }
-
   test("ProviderExchangeSink.createRunScopedJsonl creates a collision-safe suffix when the base file exists") {
-    val tempDir   = Files.createTempDirectory("provider-exchange-collision")
-    val startedAt = Instant.parse("2026-03-23T07:15:00Z")
-    val firstPath = tempDir.resolve("provider-exchanges-2026-03-23T07-15-00Z.jsonl")
-    Files.createFile(firstPath)
+    withTempDir("provider-exchange-collision") { tempDir =>
+      val startedAt = Instant.parse("2026-03-23T07:15:00Z")
+      val firstPath = tempDir.resolve("provider-exchanges-2026-03-23T07-15-00Z.jsonl")
+      Files.createFile(firstPath)
 
-    val result = ProviderExchangeSink.createRunScopedJsonl(tempDir, startedAt)
+      val result = ProviderExchangeSink.createRunScopedJsonl(tempDir, startedAt)
 
-    result.isRight shouldBe true
-    val sink = result.toOption.get
-    sink.path.getFileName.toString shouldBe "provider-exchanges-2026-03-23T07-15-00Z-2.jsonl"
-    Files.exists(sink.path) shouldBe true
+      result.isRight shouldBe true
+      val sink = result.toOption.get
+      sink.path.getFileName.toString shouldBe "provider-exchanges-2026-03-23T07-15-00Z-2.jsonl"
+      Files.exists(sink.path) shouldBe true
+    }
   }
-
   test("ProviderExchangeSink.createRunScopedJsonl allocates unique files under parallel contention") {
-    val tempDir   = Files.createTempDirectory("provider-exchange-parallel")
-    val startedAt = Instant.parse("2026-03-23T07:15:00Z")
+    withTempDir("provider-exchange-parallel") { tempDir =>
+      val startedAt = Instant.parse("2026-03-23T07:15:00Z")
 
-    val results = Await.result(
-      Future.sequence((1 to 8).map(_ => Future(ProviderExchangeSink.createRunScopedJsonl(tempDir, startedAt)))),
-      Duration("10s")
-    )
+      val results = Await.result(
+        Future.sequence((1 to 8).map(_ => Future(ProviderExchangeSink.createRunScopedJsonl(tempDir, startedAt)))),
+        Duration("10s")
+      )
 
-    all(results.map(_.isRight)) shouldBe true
-    val paths = results.flatMap(_.toOption.map(_.path))
-    paths.distinct.size shouldBe 8
-    all(paths.map(Files.exists(_))) shouldBe true
+      all(results.map(_.isRight)) shouldBe true
+      val paths = results.flatMap(_.toOption.map(_.path))
+      paths.distinct.size shouldBe 8
+      all(paths.map(Files.exists(_))) shouldBe true
+    }
   }
-
   test("ProviderExchangeSink.createRunScopedJsonl fails when the directory path is an existing file") {
-    val existingFile: Path = Files.createTempFile("provider-exchange-not-dir", ".tmp")
+    withTempPath(Files.createTempFile("provider-exchange-not-dir", ".tmp")) { existingFile =>
 
-    val result = ProviderExchangeSink.createRunScopedJsonl(existingFile, Instant.parse("2026-03-23T07:15:00Z"))
-
-    result.isLeft shouldBe true
-    result.left.toOption.exists(
-      _.message.contains("Failed to create provider exchange log file in directory")
-    ) shouldBe true
-  }
-
-  test("ProviderExchangeSink.createRunScopedJsonl fails with ConfigurationError when the directory is not writable") {
-    val tempDir = Files.createTempDirectory("provider-exchange-read-only")
-    assume(Files.getFileStore(tempDir).supportsFileAttributeView("posix"))
-
-    val originalPermissions = Files.getPosixFilePermissions(tempDir)
-    Files.setPosixFilePermissions(tempDir, PosixFilePermissions.fromString("r-xr-xr-x"))
-
-    try
-      val result = ProviderExchangeSink.createRunScopedJsonl(tempDir, Instant.parse("2026-03-23T07:15:00Z"))
+      val result = ProviderExchangeSink.createRunScopedJsonl(existingFile, Instant.parse("2026-03-23T07:15:00Z"))
 
       result.isLeft shouldBe true
       result.left.toOption.exists(
         _.message.contains("Failed to create provider exchange log file in directory")
       ) shouldBe true
-    finally Files.setPosixFilePermissions(tempDir, originalPermissions)
+    }
+  }
+  test("ProviderExchangeSink.createRunScopedJsonl fails with ConfigurationError when the directory is not writable") {
+    withTempDir("provider-exchange-read-only") { tempDir =>
+      assume(Files.getFileStore(tempDir).supportsFileAttributeView("posix"))
+
+      val originalPermissions = Files.getPosixFilePermissions(tempDir)
+      Files.setPosixFilePermissions(tempDir, PosixFilePermissions.fromString("r-xr-xr-x"))
+
+      try
+        val result = ProviderExchangeSink.createRunScopedJsonl(tempDir, Instant.parse("2026-03-23T07:15:00Z"))
+
+        result.isLeft shouldBe true
+        result.left.toOption.exists(
+          _.message.contains("Failed to create provider exchange log file in directory")
+        ) shouldBe true
+      finally Files.setPosixFilePermissions(tempDir, originalPermissions)
+    }
+  }
+
+  test("temporary resources are deleted recursively when the test body fails") {
+    var tempDir: Option[Path] = None
+    val failure               = new RuntimeException("test body failed")
+
+    intercept[RuntimeException] {
+      withTempDir("provider-exchange-cleanup") { directory =>
+        tempDir = Some(directory)
+        val nested = Files.createDirectory(directory.resolve("nested"))
+        Files.createFile(nested.resolve("exchange.jsonl"))
+        throw failure
+      }
+    } shouldBe failure
+    Files.exists(tempDir.get) shouldBe false
+
+    val tempFile = Files.createTempFile("provider-exchange-cleanup", ".tmp")
+    intercept[RuntimeException] {
+      withTempPath(tempFile)(_ => throw failure)
+    } shouldBe failure
+    Files.exists(tempFile) shouldBe false
   }
