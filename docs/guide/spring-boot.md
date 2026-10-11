@@ -29,6 +29,7 @@ The starter is Spring Boot auto-configuration on top of the [Java API](java). Wh
 | `llm4sTaskExecutor` | the `ExecutorService` behind `completeAsync` and the health probe | defining a bean named `llm4sTaskExecutor` |
 | `llm4sTemplate` | the `LLM4STemplate` you inject | defining a bean of type `LLM4STemplate` |
 | `llmHealthIndicator` | an Actuator `HealthIndicator`, only when Spring Boot Actuator is on the classpath | defining a bean of type `LlmHealthIndicator` |
+| `llm4sMetricsCollector` | a `MicrometerMetrics` over your `MeterRegistry`, only when `llm4s-observability-micrometer` is on the classpath and there is a `MeterRegistry` bean; the client reports every call to it (see [Metrics](#metrics)) | defining a bean of type `MetricsCollector` |
 
 Set `llm4s.enabled=false` to switch all of them off; the beans are also registered when `llm4s.enabled` is absent.
 
@@ -298,6 +299,26 @@ token-like strings removed. A health check whose thread is interrupted while it 
 `DOWN` with `probe=cancelled` and the interrupt flag left set; `health()` never throws `InterruptedException`. A cancelled
 probe is not cached: it says something about that thread, not the provider, so the next check probes again. A probe is a
 billed call: keep the TTL generous.
+
+## Metrics
+
+Add `llm4s-observability-micrometer` next to `spring-boot-starter-actuator`, and the client records request, duration,
+token, cost and error meters (`llm4s.requests`, `llm4s.request.duration`, `llm4s.tokens`, ...) in the application's
+`MeterRegistry`, with no code: they are on `/actuator/metrics` and go wherever your registry exports (Prometheus,
+Datadog, CloudWatch, OTLP). The starter declares the module `provided`, as it does Actuator, so nothing Micrometer reaches
+your classpath unless you add it.
+
+```xml
+<dependency>
+    <groupId>org.llm4s</groupId>
+    <artifactId>llm4s-observability-micrometer_3</artifactId>
+    <version>{{ site.data.project.latest_release }}</version>
+</dependency>
+```
+
+A `MetricsCollector` bean of your own replaces the Micrometer one, and the client reports to every `MetricsCollector` bean
+in the context, so a cost tracker can run next to it. The meters, their tags and the matching Prometheus series are in
+[Micrometer metrics](observability/micrometer).
 
 ## Testing code that uses the template
 

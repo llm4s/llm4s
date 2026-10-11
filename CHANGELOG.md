@@ -132,6 +132,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writing, `AudioIO.saveWav` / `saveRawPcm16` and the new `AudioPreprocessing.standardizeForSTT(audio, rate)`
   reject MP3 with a `ValidationError`; Tacotron2 refuses it. A caller with an exhaustive `match` on
   `AudioFormat` needs a case for `Mp3`. The `@Cloud` smoke suites check MP3 magic bytes.
+- **`llm4s-observability-micrometer`: LLM4S metrics in a Micrometer `MeterRegistry`**
+  ([#1466](https://github.com/llm4s/llm4s/issues/1466)): a new Beta module (`modules/observability-micrometer`) that depends on
+  `llm4s-core` and `micrometer-core`. `new MicrometerMetrics(registry)` is a `MetricsCollector` that records requests,
+  durations, tokens, cost, errors and image generation as `llm4s.*` meters whose Prometheus export has the same series names
+  and duration buckets as `llm4s-observability-prometheus` (`llm4s.requests` is `llm4s_requests_total`), so dashboards carry
+  over; a test compares the two collectors' exposed series and values. It also records retries
+  (`llm4s.retries`), circuit-breaker transitions and `recordError`, which the Prometheus collector leaves as no-ops. Tags are
+  provider, model and fixed sets only (provider and model capped at 64 and 256 distinct values per collector, beyond which
+  they are recorded as `other`), no method throws, and negative or non-finite amounts are ignored. The OpenTelemetry
+  GenAI metric names are not used: they are in Development status and the token metric has already been renamed.
+  `llm4s-spring-boot-starter` wires it with no code: its new `LlmMetricsAutoConfiguration` registers a `MicrometerMetrics`
+  bean (`llm4sMetricsCollector`) when the module and a `MeterRegistry` bean are present, and the client bean reports to
+  every `MetricsCollector` bean, so the meters are on `/actuator/metrics`. The starter declares the module `provided`, like
+  Actuator. `FrozenDependencies` now bans `io.micrometer` from frozen modules, as it does `io.prometheus`. See
+  [Micrometer metrics](docs/guide/observability/micrometer.md).
 - **Scala CLI quick start: a first LLM call from one file** ([#1456](https://github.com/llm4s/llm4s/issues/1456)):
   `modules/samples/scala-cli` holds `hello.scala` (with `//> using jvm 21`), `resources/application.conf` (OpenAI),
   `resources/ollama.conf` (a local Ollama, no key) and `logback.xml`; `cd modules/samples/scala-cli && scala-cli run .`
@@ -263,6 +278,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that throws fails the run with `GraphError.MiddlewareFailed(middleware, cause)`; a throwing
   `ModelStep` is not reported as a middleware failure. Design:
   `docs/design/typed-agent-runtime-design.md` §4.8.
+- **Workload identity (SPIFFE) for providers**: a named provider section may carry an `auth`
+  block instead of `apiKey` - an `identityTokenFile` (e.g. a JWT-SVID kept by `spiffe-helper`) plus
+  provider keys. `openai-compatible` exchanges it at an RFC 8693 endpoint (`tokenUrl`, `clientId`,
+  `scope`, `audience` - Databricks' `/oidc/v1/token`), caches the token until shortly before
+  expiry and refreshes and retries once on 401; `openai` (`identityProviderId`,
+  `serviceAccountId`, `clientId`) and `anthropic` (`federationRuleId`, `organizationId`,
+  `serviceAccountId`, `workspaceId`) use their SDKs' workload identity federation. New core types
+  in `org.llm4s.llmconnect.auth` (`AuthConfig` and `TokenExchangeConfig`, like the new
+  `OpenAIWorkloadIdentity` and `AnthropicWorkloadIdentity`, are built with `apply` and `with*`
+  setters, with no public `copy`); `ProviderConfigSpec.authExtras` declares a provider's auth keys;
+  `NamedProviderConfig.auth`, `OpenAIConfig.workloadIdentity` and `AnthropicConfig.workloadIdentity`
+  are new fields, `None` by default in the companion `apply` (`OpenAIConfig` and `AnthropicConfig`
+  follow the growth-prone pattern, #1388) and set with `withWorkloadIdentity`, which takes the value or
+  an `Option`; `ApiKeySource` gained `WorkloadIdentity`, reported only for a provider
+  that accepts `auth`. A section with `auth` may not also set `apiKey` or an `Authorization`
+  header. Model listing is not supported for `openai` and `anthropic` sections that use `auth`, and
+  says so. `llm4s-provider-testkit` gains `FakeTokenExchangeServer` and `TestJwt`. (#1354)
+  **The rules hold on every construction path:** `AnthropicConfig.fromValues`, `OpenAIConfig.fromValues`
+  and `OpenAICompatibleConfig.fromValues` apply them, and the named-section path goes through those
+  factories rather than its own copy; a config built with `apply` (including the short `apply(apiKey, model)` Java and Kotlin use) and the `with*` setters that breaks them is refused by its client
+  (`AnthropicClient`, `OpenAIClient`, `OpenRouterClient`, `OpenAICompatibleClient`: `apply` returns a
+  `ConfigurationError`, the constructor throws `IllegalArgumentException`). With workload identity a config
+  may not also set `apiKey`; an `OpenAICompatibleConfig.tokenExchange` refuses an `Authorization` header in
+  any case and a non-https `tokenUrl`; an `AnthropicConfig.workloadIdentity` refuses a non-https
+  `baseUrl`; and an `OpenAIConfig.workloadIdentity` is refused unless the config belongs to `openai`, since
+  a Requesty or OpenRouter config would send the OpenAI token to that provider. An `OpenAICompatibleClient`
+  whose credential is `Dynamic` or `Exchange` refuses a dialect that sets `Authorization`, and a `baseUrl`
+  (or, for `Exchange`, a `tokenUrl`) that is not `https` or loopback `http`. The `openai-compatible` model
+  lister builds its config through the same path as chat (`OpenAICompatibleProvider.buildConfig`), so
+  `Llm4sConfig.listModels` refuses what chat refuses before it exchanges anything.
+  **No client falls back to an empty key:** `OpenRouterClient` refuses an `OpenAIConfig` with
+  `workloadIdentity` (from `apply` as a `ConfigurationError`, from the constructor as an
+  `IllegalArgumentException`) even when `OpenAIConfig.validate` accepts it, rather than drop the identity
+  and send `Authorization: Bearer `. A blank `apiKey` is refused wherever a key is the only credential:
+  `OpenAIConfig` and `AnthropicConfig` without workload identity (and so `OpenAIClient`, `AnthropicClient`
+  and `OpenRouterClient`), `DeepSeekClient`, `ZaiClient`, `MistralClient`, `CohereClient`, an
+  `OpenAICompatibleClient` built with a blank `Credential.Static`, `OpenAIEmbeddingProvider`,
+  `OpenAIImageClient`, `OpenAIVisionClient`, `OpenAITTSClient` and `OpenAISTTClient`. An
+  `OpenAICompatibleConfig` whose `apiKey` is blank is treated as having none (`Credential.Anonymous`), as
+  `fromValues` already did.
+  **Migration:** `OpenAICompatibleConfig` follows the growth-prone data-type pattern: its constructor
+  and `copy` are private; build it with the companion `apply` (defaults unchanged) and adjust it with
+  `withBaseUrl`, `withApiKey`, `withContextWindow`, `withReserveCompletion`, `withHeaders`, `withHeader`,
+  `withStreamUsage`, `withTimeouts` and `withTokenExchange` (the companion `apply` takes `timeouts` before
+  `tokenExchange`). Java and Kotlin, which see no Scala default arguments, use
+  `OpenAICompatibleConfig.apply(model, baseUrl)` and the setters, so a new field no longer breaks them.
+  `OpenAICompatibleClient.Settings.apiKey: Option[String]` became
+  `credential: OpenAICompatibleClient.Credential` (`Anonymous`, `Static(key)`, `Dynamic(provider)`,
+  `Exchange(config)`). An `Exchange` credential exchanges through the client's own HTTP client, which
+  `close()` releases.
+  **The token exchange:** `tokenUrl`, and an `openai-compatible` section's `baseUrl` when it uses
+  `auth`, must be `https`; with `auth`, OpenAI's and Anthropic's `baseUrl` must be `https` to the
+  vendor's own API host - `api.openai.com`, `us.`/`eu.`/`ae.api.openai.com`, or `api.anthropic.com`,
+  an exact, case-insensitive match with no userinfo - because the exchanged token is a vendor
+  credential; plain `http` is accepted only for a loopback host (`localhost`, `127.x.y.z` or
+  `[::1]`, judged on the URL's real host, so `http://localhost@evil.example/` is refused), because
+  the request carries the identity token. `expires_in` is optional: without it the token's lifetime
+  is the access token's `exp` claim when it is a JWT, and otherwise `TokenExchange.DefaultLifetime`
+  (5 minutes). One that is not a finite, non-negative number is an `AuthenticationError`, and a huge
+  one is clamped to `TokenExchange.MaxLifetime` (24 hours). A failed token fetch is shared for 5
+  seconds, so N callers during an outage wait for one attempt, not N in turn, and a caller
+  interrupted while it waits gets a `CancelledError` with its interrupt flag set. Only a 401
+  triggers the refresh-and-retry; a 403 (valid token, missing permission) does not. To tell them
+  apart `HttpErrorMapper` now sets `AuthenticationError.code` to the HTTP status (`"401"` or
+  `"403"`), for every provider. An `identityTokenFile` that is not a valid path is a
+  `ConfigurationError`; with the `openai` SDK, a missing or empty token file is an
+  `AuthenticationError`, as with the other providers. The token file must be a regular file (a
+  symbolic link to one is followed) of at most 64 KiB: a directory, FIFO, device or larger file is an
+  `AuthenticationError` naming the path, never quoting the content, and is never read unbounded.
+  The RFC 8693 request fields `subject_token`, `actor_token`, `assertion` and `client_assertion` are
+  sensitive keys for `Redaction`, in every shape it reads.
 - **`@Stable` and `@Experimental`: the tier of a public type, in the code** ([#1281](https://github.com/llm4s/llm4s/issues/1281),
   `org.llm4s.annotation` in `llm4s-core`): Java annotations with runtime retention, so an IDE, a tool or a
   Java caller can read them. Every top-level public type of `llm4s-core`, `llm4s-openai`,
@@ -423,6 +509,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of always sending the document type. `EmbeddingRequest` becomes a growth-prone type (private
   constructor and `copy`, `with*` setters, `apply` with defaults): construct it with `EmbeddingRequest(...)`
   and change it with `withInput`, `withModel` or `withPurpose`.
+- **`llm4s-bom`: one version for every llm4s artifact** ([#1462](https://github.com/llm4s/llm4s/issues/1462)):
+  `org.llm4s:llm4s-bom` (`modules/bom`) is a POM-only bill of materials whose `dependencyManagement` pins every
+  published `llm4s-*` artifact (`llm4s-core_3`, `llm4s-openai_3`, ...) to the release version, so a Maven or
+  Gradle build that uses several modules states the version once: import it (`<scope>import</scope>`) or use
+  `platform("org.llm4s:llm4s-bom:<version>")`, and declare the modules without versions. The BOM has no Scala
+  suffix and contains no code. It is generated from the same project list as `sbt listPublishedArtifacts`
+  (`project/Bom.scala`), never listed by hand, and `sbt bomCheck` fails when the generated POM disagrees with
+  what the build publishes, or when a module that publishes a jar is missing from it (a name outside `llm4s-*`);
+  `scripts/check-bom-consumers.sh` (CI) builds a Maven and a Gradle project against the published BOM; `listPublishedArtifacts` prints it as a `bom` line, and `scripts/verify-release.sh`
+  checks that its POM is on Maven Central with a `<dependencyManagement>`. It is aggregated by the root project,
+  so `sbt ci-release` publishes it. No frozen module's API changes. Install guide: "Align versions with the BOM".
 - **`llm4s-jina`: Jina AI embedding provider** (`modules/providers/jina`,
   [#1028](https://github.com/llm4s/llm4s/issues/1028), rebuilt from #1060 as an
   `EmbeddingProviderDescriptor`, so `llm4s-core` is untouched). `EMBEDDING_MODEL=jina/jina-embeddings-v3`
@@ -512,6 +609,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SpeechConfigLoader`. TTS output is raw 24 kHz 16-bit mono PCM in `GeneratedAudio`, not MP3. HTTP
   failures map as the chat providers' do (`AuthenticationError`, `RateLimitError`, `ValidationError`,
   `ServiceError`). See [docs/guide/speech.md](docs/guide/speech.md#cloud-providers).
+- **`llm4s-jev`: a typed client for TypeSafe's Jev decision model** ([#1265](https://github.com/llm4s/llm4s/issues/1265)):
+  Jev takes a state and named, typed questions and answers each with a typed answer, so it is not a chat model and
+  this is neither an `LLMClient` nor a provider: `JevClient.evaluate(JevRequest(state, questions))` returns a
+  `Result[JevResponse]`. Questions are `JevQuestion.Noul` (probability of yes), `Choice` (the selected option, a
+  distribution and a confidence) and `Score` (a probability-weighted score over 2 to 10 ordered levels, with a
+  confidence); answers are `NoulAnswer`, `ChoiceAnswer` and `ScoreAnswer`, read with `response.noul(id)`,
+  `.choice(id)` and `.score(id)`, with the resolved model, token usage and the request id. A response is checked against
+  its request: one answer per question asked, each of its question's type, a Choice's selected option among the
+  options asked with the highest probability and a probability for every option, a Score with every level asked,
+  each numbered once (canonical level keys) and a score within the levels (a score a rounding error outside them,
+  within 1e-9, is clamped in); a body nested more than 64 levels deep is refused unparsed (so a Score level
+  description, which the API echoes back, nested more than 60 levels deep is refused before the request is sent), and an error body nested
+  more than 32 levels deep is not read, so neither can overflow a small thread stack;
+  a Score level's legend entry keeps the string, object or array the question gave. Configuration is the
+  `llm4s.jev` block and `TYPESAFE_API_KEY` (bound to `llm4s.credentials.typesafe.apiKey`), `TYPESAFE_BASE_URL` and
+  `TYPESAFE_DEFAULT_MODEL`. Failures map onto LLM4S's errors (401/403 `AuthenticationError`, 400/422
+  `ValidationError`, 429 `RateLimitError` with the server's `Retry-After` or `retry-after-ms`, 5xx including 529
+  `ServiceError`) and transient ones are retried as TypeSafe's SDKs do (two retries, 0.5 s doubling to 5 s with
+  jitter, a 30 s budget, `RetryPolicy.isTransient` as the rule). The key is sent only as a bearer token over https
+  (plain http only for a loopback host) and never reaches a log line or `toString`; an error masks it where a
+  server echoed it as written, JSON-escaped or URL-encoded (a partial echo is not recognised). **No idempotency
+  key:** TypeSafe documents none, so none is invented and each retry is a separate billable call; a header the
+  caller adds with `JevRequest.withHeader` is sent unchanged on every attempt. A Beta module under
+  `modules/providers/jev`, no dependency beyond `llm4s-core`; tested against a local fake server built from the
+  published API reference and not yet run against the live API. A `JevTicketTriageExample` sample and
+  `docs/guide/jev.md`.
 - **`scripts/verify-release.sh`: check that a release is on Maven Central** ([#1281](https://github.com/llm4s/llm4s/issues/1281)):
   `scripts/verify-release.sh 0.5.0` asks the build which artifacts it publishes (the new
   `sbt -error listPublishedArtifacts`: 31 artifacts and 5 relocation stubs today) and checks that each

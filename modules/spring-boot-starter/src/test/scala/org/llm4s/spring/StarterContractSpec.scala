@@ -145,12 +145,29 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
       }
   }
 
-  it should "list both auto-configurations in AutoConfiguration.imports, all loadable" in {
+  it should "list every auto-configuration in AutoConfiguration.imports, all loadable" in {
     val names =
       ImportCandidates.load(classOf[org.springframework.boot.autoconfigure.AutoConfiguration], getClass.getClassLoader)
     names.getCandidates.asScala.filter(_.startsWith("org.llm4s.")).toSet shouldBe Set(
       classOf[Llm4sAutoConfiguration].getName,
-      classOf[LlmActuatorAutoConfiguration].getName
+      classOf[LlmActuatorAutoConfiguration].getName,
+      classOf[LlmMetricsAutoConfiguration].getName
+    )
+  }
+
+  "LlmMetricsAutoConfiguration" should "be ordered after Boot's MeterRegistry configurations and before the client" in {
+    // @ConditionalOnBean(MeterRegistry) is only reliable once Boot's metrics auto-configurations have run, and
+    // the collector bean must be defined before Llm4sAutoConfiguration's client asks for it.
+    val meta = classOf[LlmMetricsAutoConfiguration].getAnnotation(
+      classOf[org.springframework.boot.autoconfigure.AutoConfiguration]
+    )
+    meta.before().toSeq should contain(classOf[Llm4sAutoConfiguration])
+    (meta.afterName().toSeq should contain).allOf(
+      classOf[org.springframework.boot.actuate.autoconfigure.metrics.MetricsAutoConfiguration].getName,
+      classOf[org.springframework.boot.actuate.autoconfigure.metrics.CompositeMeterRegistryAutoConfiguration].getName,
+      classOf[
+        org.springframework.boot.actuate.autoconfigure.metrics.`export`.simple.SimpleMetricsExportAutoConfiguration
+      ].getName
     )
   }
 

@@ -93,8 +93,15 @@ llm4s.providers.local.headers.X-Team-Id=team-7
 | `llm4sTaskExecutor` (`ExecutorService`) | defined by name: a bean called `llm4sTaskExecutor` replaces it |
 | `llm4sTemplate` (`LLM4STemplate`) | |
 | `llmHealthIndicator` (`LlmHealthIndicator`, only with Spring Boot Actuator) | |
+| `llm4sMetricsCollector` (`MicrometerMetrics`, only with `llm4s-observability-micrometer` and a `MeterRegistry` bean) | any `MetricsCollector` bean; the client reports to all of them |
 
 Set `llm4s.enabled=false` to switch all of them off.
+
+## Metrics
+
+With `llm4s-observability-micrometer` (declared `provided` here, like Actuator) and a `MeterRegistry` bean, the client
+records `llm4s.*` meters in that registry with no wiring, so they are on `/actuator/metrics`. See the
+[Micrometer metrics guide](../../docs/guide/observability/micrometer.md).
 
 ## `completeAsync`
 
