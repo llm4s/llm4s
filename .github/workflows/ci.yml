@@ -163,6 +163,11 @@ jobs:
       - name: Check every published artifact is documented
         run: sbt publishedArtifactsCheck
 
+      # Fails when the generated llm4s-bom does not list exactly the artifacts the build publishes
+      # (project/Bom.scala). A release cannot be amended, so a BOM that omits a module stays that way.
+      - name: Check the BOM lists every published artifact
+        run: sbt bomCheck
+
       - name: Compile
         run: sbt compile
 
@@ -318,6 +323,7 @@ jobs:
           deployService/test deployService/coverageReport
           llm4sEffect/test llm4sEffect/coverageReport
           llm4sZio/test llm4sZio/coverageReport
+          llm4sPekko/test llm4sPekko/coverageReport
           coverageAggregate
 
       # One upload per measured module, each carrying that module's flag - Codecov attributes
@@ -621,6 +627,16 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      - name: Upload llm4s-pekko coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/llm4s-pekko/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: llm4s-pekko
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
       - name: Upload coverage report artifact
         uses: actions/upload-artifact@v7
         with:
@@ -838,6 +854,13 @@ jobs:
         working-directory: modules/samples/gradle-java
         run: gradle build installDist
 
+      # A Gradle and a Maven project that import llm4s-bom and declare two modules with no version must build
+      # against the library just published, and a Gradle project without the BOM must not (#1462).
+      - name: Build a Gradle and a Maven project against llm4s-bom
+        env:
+          REQUIRE_MAVEN: '1'
+        run: scripts/check-bom-consumers.sh 0.1.0-SNAPSHOT
+
       - name: Upload Kotlin coverage report
         if: always()
         uses: actions/upload-artifact@v7
@@ -1003,6 +1026,69 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: test-reports-workspace
+          path: |
+            modules/it/target/**/test-reports/
+          retention-days: 5
+
+  # Tier 2: the MCP client against the official MCP reference server (@McpReference,
+  # MCPReferenceServerSpec, #1006). Split from `integration-tests` because starting the server
+  # downloads the node image from Docker Hub and the server's pinned dependency tree from npm on
+  # every run; an outage of either would fail unrelated PRs. So, like the Workspace and Ollama
+  # tiers, it runs on pushes to main - and also on manual dispatch, to check a branch on demand.
+  # Not in `all-tests-pass` for the same reason.
+  mcp-reference-integration:
+    name: MCP Reference Server Integration
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      # The official MCP reference server (#1006). Started in a step rather than as a service
+      # container because a service cannot be given a command, and the server picks its
+      # transport from one. Everything it runs is pinned: the image by digest (node
+      # 22.23.3 on Alpine), and the server, 2026.8.31, with its whole dependency tree by
+      # modules/it/mcp-reference-server/package-lock.json. run.sh installs that tree with
+      # `npm ci --ignore-scripts`, from a read-only mount. The container gets no secrets and no
+      # environment from the job. It does need registry.npmjs.org and Docker Hub: if either is
+      # down, this step fails the job - which is why the job is not run on PRs.
+      - name: Start the MCP reference server
+        run: |
+          docker run -d --name mcp-everything -p 3001:3001 \
+            -v "$GITHUB_WORKSPACE/modules/it/mcp-reference-server:/src:ro" \
+            node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 \
+            sh /src/run.sh
+          for _ in $(seq 1 60); do
+            if curl -s -o /dev/null http://localhost:3001/mcp; then echo "MCP reference server is ready"; exit 0; fi
+            sleep 2
+          done
+          docker logs mcp-everything >&2
+          echo "MCP reference server did not become ready within 120s" >&2
+          exit 1
+
+      - name: Run the MCP reference-server tests
+        env:
+          # This job starts the server, so "not reachable" here is a failure, not a reason to skip.
+          LLM4S_IT_STRICT: "true"
+          MCP_SERVER_URL: http://localhost:3001/mcp
+        run: sbt testMcpReference
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-mcp-reference
           path: |
             modules/it/target/**/test-reports/
           retention-days: 5

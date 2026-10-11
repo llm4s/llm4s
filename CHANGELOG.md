@@ -113,6 +113,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Llm4s.createAgent(client, tools, streaming)` and `wrapAgent` match Java's. As in the fs2 and ZIO streams, a consumer too slow for the stream's 256-event buffer loses live
   events and receives a `StreamEvent.LiveGap` with their count - it never cancels the run - and a run that
   ends without a terminal event still ends the stream with its error. The Java sample streams a turn.
+- **`llm4s-pekko`: LLM responses and agent runs as Apache Pekko Streams `Source`s**
+  ([#1457](https://github.com/llm4s/llm4s/issues/1457)): a new Beta module (`modules/llm4s-pekko`, package
+  `org.llm4s.pekko`) that depends on `llm4s-core`, `llm4s-agent` and `pekko-stream` 1.7 (Apache-2.0; Akka is not
+  used). `LLMClientPekko(client).streamComplete(conversation)` is a `Source[StreamedChunk, NotUsed]` and `complete` a
+  `Future`; `AgentPekko(agent).stream`, `streamResume` and `streamRecover` are `Source[AgentStreamItem, NotUsed]` (each
+  event of the turn, then `Done(result)`) and `run`, `continueConversation`, `recover` and `resume` are `Future`s, as
+  `AgentIO` and `AgentZ` offer for fs2 and ZIO. The provider call blocks, so each stream runs it on a daemon thread of its
+  own and hands items over through a bounded buffer: a consumer that lags blocks the provider's thread (nothing is
+  dropped), and cancelling the stream interrupts it. An agent turn is cancelled when its stream is, a slow consumer gets
+  a `StreamEvent.LiveGap` instead of holding the run up, and an `LLMError` is carried by an `LLMException`. A `Future`
+  cannot be cancelled. `FrozenDependencies` now bans `org.apache.pekko` and `com.typesafe.akka` from frozen modules.
+  See [Apache Pekko Integration](docs/guide/pekko.md).
 - **`llm4s-speech`: opt-in MP3 output for cloud TTS** ([#1307](https://github.com/llm4s/llm4s/issues/1307)):
   `TTSOptions(outputFormat = AudioFormat.Mp3)` makes the OpenAI, ElevenLabs and Azure clients request the
   service's MP3 and return its bytes untouched. PCM stays the default. `AudioFormat.Mp3` is a new case
@@ -120,6 +132,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writing, `AudioIO.saveWav` / `saveRawPcm16` and the new `AudioPreprocessing.standardizeForSTT(audio, rate)`
   reject MP3 with a `ValidationError`; Tacotron2 refuses it. A caller with an exhaustive `match` on
   `AudioFormat` needs a case for `Mp3`. The `@Cloud` smoke suites check MP3 magic bytes.
+- **Scala CLI quick start: a first LLM call from one file** ([#1456](https://github.com/llm4s/llm4s/issues/1456)):
+  `modules/samples/scala-cli` holds `hello.scala` (with `//> using jvm 21`), `resources/application.conf` (OpenAI),
+  `resources/ollama.conf` (a local Ollama, no key) and `logback.xml`; `cd modules/samples/scala-cli && scala-cli run .`
+  makes the call, and `scala-cli run . --java-opt -Dconfig.resource=ollama.conf` uses Ollama. The two providers are
+  separate files because 0.4.x validates every provider section when it loads the default one. The page
+  `docs/getting-started/scala-cli.md` (linked from Installation, the Getting Started index and the README) shows the
+  script for the latest release: one `llm4s-core` dependency up to 0.4.x, and the provider modules and a logging
+  backend as well once 0.5.0 is the latest release. The script targets `llm4s-core` 0.4.1 and was run with
+  `scala-cli` against a local fake Ollama. `ScalaCliQuickstartSpec` checks the committed configuration against this
+  branch's API, runs the script's calls end to end against a fake Ollama, renders the page for 0.4.1 and 0.5.0, and
+  fails if the page's code blocks stop matching the files. `scripts/check-doc-versions.sh` now also rejects a
+  literal version in a `//> using dep org.llm4s::...` line.
 - **`llm4s-java-api`: Java interop module** (Beta, `modules/java-api`, package `org.llm4s.javaapi`,
   [#934](https://github.com/llm4s/llm4s/issues/934)): a facade for Java callers over the client and agent API. `Llm4s.createDefaultClient()`
   and `createClient(config)` return an `LlmResult<JLlmClient>`; `JLlmClient` (`AutoCloseable`) offers
@@ -374,6 +398,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of always sending the document type. `EmbeddingRequest` becomes a growth-prone type (private
   constructor and `copy`, `with*` setters, `apply` with defaults): construct it with `EmbeddingRequest(...)`
   and change it with `withInput`, `withModel` or `withPurpose`.
+- **`llm4s-bom`: one version for every llm4s artifact** ([#1462](https://github.com/llm4s/llm4s/issues/1462)):
+  `org.llm4s:llm4s-bom` (`modules/bom`) is a POM-only bill of materials whose `dependencyManagement` pins every
+  published `llm4s-*` artifact (`llm4s-core_3`, `llm4s-openai_3`, ...) to the release version, so a Maven or
+  Gradle build that uses several modules states the version once: import it (`<scope>import</scope>`) or use
+  `platform("org.llm4s:llm4s-bom:<version>")`, and declare the modules without versions. The BOM has no Scala
+  suffix and contains no code. It is generated from the same project list as `sbt listPublishedArtifacts`
+  (`project/Bom.scala`), never listed by hand, and `sbt bomCheck` fails when the generated POM disagrees with
+  what the build publishes, or when a module that publishes a jar is missing from it (a name outside `llm4s-*`);
+  `scripts/check-bom-consumers.sh` (CI) builds a Maven and a Gradle project against the published BOM; `listPublishedArtifacts` prints it as a `bom` line, and `scripts/verify-release.sh`
+  checks that its POM is on Maven Central with a `<dependencyManagement>`. It is aggregated by the root project,
+  so `sbt ci-release` publishes it. No frozen module's API changes. Install guide: "Align versions with the BOM".
 - **`llm4s-jina`: Jina AI embedding provider** (`modules/providers/jina`,
   [#1028](https://github.com/llm4s/llm4s/issues/1028), rebuilt from #1060 as an
   `EmbeddingProviderDescriptor`, so `llm4s-core` is untouched). `EMBEDDING_MODEL=jina/jina-embeddings-v3`
@@ -410,6 +445,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `"org.llm4s" %% "llm4s-cohere"`; nothing else changes. HTTP 429 is a `RateLimitError` carrying
   `Retry-After` when Cohere sends it in seconds; other failures are `EmbeddingError` with the status as
   its code.
+- **MCP tests against the official reference server**
+  ([#1006](https://github.com/llm4s/llm4s/issues/1006)): `MCPReferenceServerSpec`, in a new `@McpReference` tier of
+  `modules/it` (`sbt testMcpReference`), runs the MCP client, `MCPToolRegistry` and an `Agent` with a scripted LLM against
+  `@modelcontextprotocol/server-everything` (pinned to 2026.8.31, over Streamable HTTP at `MCP_SERVER_URL`), a
+  server llm4s did not write: handshake without SSE fallback, discovery of `echo` and `get-sum` with the server's own
+  JSON schemas, invocation, `structuredContent`, the server's validation and unknown-tool errors, accepted
+  notifications, and an agent turn that feeds the server's result back. A separate `mcp-reference-integration` CI
+  job, run on pushes to `main` and on manual `workflow_dispatch` but not on PRs (starting the server needs Docker Hub
+  and npm, whose outages should not fail unrelated PRs), starts the server in a `node:22-alpine` container pinned by
+  digest; the server's whole dependency tree is pinned by
+  `modules/it/mcp-reference-server/package-lock.json` and installed with `npm ci --ignore-scripts`. The
+  embedded-server round trips and the `@Local` agent suite came in #1041.
 - **MCP test: a server that does not answer within the timeout**
   ([#1006](https://github.com/llm4s/llm4s/issues/1006)): `MCPEmbeddedServerTimeoutSpec` in `llm4s-mcp` runs a tool
   on an in-process `MCPServer` that does not answer within `MCPServerConfig.timeout`: the call fails as a timed-out
@@ -776,6 +823,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OpenAIConfigKeys.AZURE_API_KEY` is now `AZURE_OPENAI_API_KEY`; the chat and embeddings
   missing-key messages changed. See the
   [migration note](docs/reference/migration.md#vendor-credentials-a-shared-api-key-per-provider).
+- **Upgrading from 0.4.1 to 0.5.0** ([#1281](https://github.com/llm4s/llm4s/issues/1281)): one page,
+  [docs/migrations/0-4-1-to-0-5-0.md](docs/migrations/0-4-1-to-0-5-0.md), for everything a project has to change,
+  grouped by what it uses: the dependencies to add (which provider module carries which provider id), the
+  configuration changes, the agent runtime rewrite, tracing, RAG, memory and the other carved modules, and the
+  error and type changes, the built-in tool and workspace runner refusals (WebSocket commands without a shell,
+  `WORKSPACE_EXTRA_COMMANDS`, the git sandbox, the new error codes, `redirectSafeHeaders`), whole-word memory search,
+  the redaction and Java API changes. `UpgradeGuideSpec` in `llm4s-samples` checks its provider table, its core-only
+  error, explicit registration, the agent snippet, tracing discovery, the `redirectSafeHeaders` snippet and
+  whole-word memory search against the code.
 - **`openai-compatible` takes its context window from the model registry** ([#1217](https://github.com/llm4s/llm4s/issues/1217)):
   without a `contextWindow`, the generic provider used 8192 and never asked the registry, though the registry
   holds the window of most of the popular compatible hosts' models (`groq/`, `together_ai/`, `fireworks_ai/`,
@@ -2103,6 +2159,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - ShellTool and the workspace runner: on double-byte Windows hosts, a quoted argument holding a character
+  whose second byte is 0x5C is refused** ([#1807](https://github.com/llm4s/llm4s/issues/1807)): code pages 932, 936
+  and 950 encode some characters with a second byte of 0x5C, the byte of `\` (50, 126 and 126 of the characters they
+  hold, such as `表` 0x95 0x5C and `十` on 932, `功` 0xA5 0x5C on 950). The JDK puts an argument holding a space in
+  quotes, so `a 表` reached the command line as `"a 表"`, whose bytes end `5C 22`, and a program that splits its ANSI
+  command line byte by byte, without knowing the code page's lead bytes, read `\"` as a literal quote and split the
+  arguments after it differently - an operand the checks saw could become an option. On a host whose ANSI code page
+  is 932, 936 or 950, `ShellTool` (`modules/agent-tools`) and the workspace runner's `CommandPolicy` now refuse an
+  argument holding such a character when the JDK may quote it - it is empty or holds a space or whitespace character,
+  `"`, `<`, `>`, `&`, `|` or `^`, the characters for which JDK 21's Windows `ProcessImpl` adds quotes in any of its
+  modes. The runner refuses with `ARGUMENT_NOT_ALLOWED`. The characters are found through the JDK's encoder for the
+  host's code page, not a table. Migration: on such a host, a file name like `表.txt` still works, but `a 表.txt` is
+  refused; rename the file. Other hosts and POSIX are unchanged.
 - **Security - ShellTool and the workspace runner: on Windows, arguments whose characters best-fit to separators or
   quotes are refused** ([#1766](https://github.com/llm4s/llm4s/issues/1766)): a Windows program that reads its command
   line in an ANSI code page (`main` rather than `wmain`) gets each argument converted from UTF-16 with "best fit", so a
@@ -2174,6 +2243,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ARGUMENT_NOT_ALLOWED`. The system and global git configuration of whoever runs the runner no longer apply,
   so a `safe.directory` set there does not either. `GitConfigRoutesSpec` plants each route, shows git run directly
   runs it, and shows no allowed command run through the runner does.
+- **Security - redaction: the remaining Python-repr shapes no longer leave a credential readable**
+  ([#1706](https://github.com/llm4s/llm4s/issues/1706)): `Redaction` (used by the provider exchange logger,
+  `LLMError` messages and error mapping) read a Python literal as JSON, so a value under a sensitive key stayed
+  readable in eight shapes: (1) a `pytest` assertion diff, whose next line starts with `E`; (2) a notebook's
+  `text/plain` line array in an `.ipynb` file, where each line is its own JSON string; (3) a dict cut off right
+  after a comma, `{'db_password': "x'y",`; (4) `str(dict)` inside a `repr`'d dict,
+  `{'body': '{\'password\': "it\'s..."}'}`; (5) Python's `\'` inside a JSON string,
+  `{"m": "{'password': 'QQ\\'SECRET\"x'}"}`; (6) a keyword argument holding a list, `Settings(token=['a:b', '...'])`;
+  (7) a `\"` in an earlier single-quoted leaf, which switched off the reading of `\"`-quoted leaves after it; and (8)
+  a `'key': "..."` value followed by a key over 64 characters, a key that is not a string (`1:`, `None:`) or
+  `**extra`. A further reading of the input as it was given now reads the value of a sensitive dict key or keyword
+  argument as Python writes it - a string ending only at its own quote written the way the opening one is, at any
+  depth of escaping, a container over `pprint`'s and `pytest`'s line breaks and from one line of a notebook's array to
+  the next - and replaces each of its strings, numbers and words. It never replaces a `"` that delimits a JSON string,
+  at any depth, and adds only what no other edit covers, so every replacement made before is made exactly as before
+  and JSON that parsed still parses. The reading takes time linear in the input. On a realistic corpus of Python
+  logging, Django and Flask debug output, `pytest` diffs, notebooks and tool-call arguments, the secrets left
+  readable go from 2,728 of 36,280 to none.
 - **Security - redaction: a credential in escaped quotes that holds `&word=` is redacted whole**
   ([#1707](https://github.com/llm4s/llm4s/issues/1707)):
   `Redaction` (used by the provider exchange logger, `LLMError` messages and error mapping) read the value of
