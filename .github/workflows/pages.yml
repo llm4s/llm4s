@@ -37,6 +37,14 @@ on:
         required: false
         default: ''
         type: string
+      dry_run:
+        description: >-
+          Build only: run every build step (tag validation, checkout, version, Scaladoc, Jekyll, the Pages artifact)
+          and skip the deploy. Required on any branch other than `main`, which the `github-pages` environment would
+          reject; on `main` it checks the release path without touching llm4s.org.
+        required: false
+        default: false
+        type: boolean
 
 # Sets permissions of the GITHUB_TOKEN
 permissions:
@@ -44,15 +52,31 @@ permissions:
   pages: write
   id-token: write
 
-# Allow only one concurrent deployment
+# Allow only one concurrent deployment. A build-only run gets a group of its own, per ref: GitHub keeps one pending run
+# per group, so a dry run sharing `pages` could displace (cancel) a real deploy waiting behind the current one.
 concurrency:
-  group: "pages"
+  group: ${{ inputs.dry_run && format('pages-dry-run-{0}', github.ref) || 'pages' }}
   cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # Only a run on `main` can deploy (the `github-pages` environment allows that branch alone). A run started anywhere
+      # else must say it is build-only, so it fails here, in seconds, instead of building for minutes and then being
+      # rejected by the environment, which is how #1152 surfaced.
+      - name: Check where this run may deploy
+        env:
+          DRY_RUN: ${{ inputs.dry_run == true }}
+          RUN_REF: ${{ github.ref }}
+        run: |
+          if [ "$DRY_RUN" = true ]; then
+            echo "::notice::Build-only run (dry_run): the deploy job is skipped and llm4s.org is not changed."
+          elif [ "$RUN_REF" != refs/heads/main ]; then
+            echo "::error::Only a run on main can deploy to the github-pages environment; this one is on $RUN_REF. Dispatch it on main, or pass -f dry_run=true to build without deploying."
+            exit 1
+          fi
+
       # The input reaches the checkout's `ref`, not a shell, but it is still checked first: only a release tag
       # (v1.2.3, v1.2.3-RC1) is accepted, and `refs/tags/` below stops a branch of the same name from being built.
       - name: Validate the requested ref
@@ -184,6 +208,8 @@ jobs:
           path: docs/_site
 
   deploy:
+    # A push has no inputs, so `inputs.dry_run` is empty there and the deploy runs.
+    if: ${{ inputs.dry_run != true }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
