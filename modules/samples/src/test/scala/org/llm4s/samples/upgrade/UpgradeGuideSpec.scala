@@ -1,6 +1,7 @@
 package org.llm4s.samples.upgrade
 
 import org.llm4s.agent.{ Agent, AgentId, AgentStatus }
+import org.llm4s.agent.memory.{ InMemoryStore, Memory, MemoryFilter }
 import org.llm4s.config.PgSearchIndexConfigLoader
 import org.llm4s.error.{ CancelledError, LLMError, RateLimitError }
 import org.llm4s.extract.TikaDocumentExtractor
@@ -8,6 +9,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.{ BedrockProvider, Llm4sOpenAIModule }
 import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.toolapi.builtin.http.HttpConfig
 import org.llm4s.trace.spi.TracingBackends
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
@@ -170,6 +172,34 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     val pg = PgSearchIndexConfigLoader.default().value
     pg.host shouldBe "localhost"
     pg.port shouldBe 5432
+  }
+
+  "Memory keyword search" should "match whole words, not substrings" in {
+    val store = InMemoryStore.empty
+      .store(Memory.userFact("Prefers Scala"))
+      .flatMap(_.store(Memory.userFact("Works on scalability")))
+      .value
+
+    def hits(query: String): Seq[String] = store.search(query, 10, MemoryFilter.All).value.map(_.memory.content)
+
+    // `scala` no longer matches "scalability", and there is no stemming: `prefer` does not match "Prefers".
+    hits("scala") shouldBe Seq("Prefers Scala")
+    hits("prefer") shouldBe empty
+    hits("prefers") shouldBe Seq("Prefers Scala")
+  }
+
+  // ---- built-in tools ----
+
+  "The redirectSafeHeaders snippet" should "add a custom header to the defaults a cross-origin redirect may carry" in {
+    // The snippet of the guide.
+    val http = HttpConfig(
+      followRedirects = true,
+      redirectSafeHeaders = HttpConfig.DefaultRedirectSafeHeaders :+ "X-Request-Id"
+    )
+
+    http.followRedirects shouldBe true
+    (http.redirectSafeHeaders should contain).allOf("Accept", "User-Agent", "X-Request-Id")
+    HttpConfig().redirectSafeHeaders should not contain "X-Request-Id"
   }
 
   // ---- errors, cancellation and types ----

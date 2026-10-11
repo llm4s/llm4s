@@ -758,8 +758,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [docs/migrations/0-4-1-to-0-5-0.md](docs/migrations/0-4-1-to-0-5-0.md), for everything a project has to change,
   grouped by what it uses: the dependencies to add (which provider module carries which provider id), the
   configuration changes, the agent runtime rewrite, tracing, RAG, memory and the other carved modules, and the
-  error and type changes. `UpgradeGuideSpec` in `llm4s-samples` checks its provider table, its core-only error,
-  explicit registration, the agent snippet and tracing discovery against the code.
+  error and type changes, the built-in tool and workspace runner refusals (WebSocket commands without a shell,
+  `WORKSPACE_EXTRA_COMMANDS`, the git sandbox, the new error codes, `redirectSafeHeaders`), whole-word memory search,
+  the redaction and Java API changes. `UpgradeGuideSpec` in `llm4s-samples` checks its provider table, its core-only
+  error, explicit registration, the agent snippet, tracing discovery, the `redirectSafeHeaders` snippet and
+  whole-word memory search against the code.
 - **`openai-compatible` takes its context window from the model registry** ([#1217](https://github.com/llm4s/llm4s/issues/1217)):
   without a `contextWindow`, the generic provider used 8192 and never asked the registry, though the registry
   holds the window of most of the popular compatible hosts' models (`groq/`, `together_ai/`, `fireworks_ai/`,
