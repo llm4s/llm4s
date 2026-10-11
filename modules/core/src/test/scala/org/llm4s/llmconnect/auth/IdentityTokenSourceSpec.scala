@@ -37,6 +37,38 @@ class IdentityTokenSourceSpec extends AnyWordSpec with Matchers with EitherValue
       IdentityTokenSource.file(tempFile("")).fetch().left.value shouldBe an[AuthenticationError]
       IdentityTokenSource.file(tempFile(" \n\t")).fetch().left.value shouldBe an[AuthenticationError]
     }
+    "accept a token of exactly the size limit" in {
+      val token = "a" * IdentityTokenSource.MaxTokenFileBytes
+      IdentityTokenSource.file(tempFile(token)).fetch() shouldBe Right(token)
+    }
+    "refuse a file larger than the size limit, without echoing its content" in {
+      val content = "SECRETCONTENT" + ("a" * IdentityTokenSource.MaxTokenFileBytes)
+      val error   = IdentityTokenSource.file(tempFile(content)).fetch().left.value
+      error shouldBe an[AuthenticationError]
+      error.message should include("larger than")
+      (error.message should not).include("SECRETCONTENT")
+    }
+    "refuse a directory" in {
+      val dir = Files.createTempDirectory("svid-dir")
+      dir.toFile.deleteOnExit()
+      val error = IdentityTokenSource.file(dir).fetch().left.value
+      error shouldBe an[AuthenticationError]
+      error.message should include("not a regular file")
+    }
+    "follow a symbolic link to the token, and to its replacement after a rotation" in {
+      val first  = tempFile("first")
+      val second = tempFile("second")
+      val link   = first.resolveSibling(s"svid-link-${System.nanoTime()}")
+      val made   = scala.util.Try(Files.createSymbolicLink(link, first)).isSuccess
+      // Creating a link needs a privilege on Windows; the read path is the same as for a plain file there.
+      assume(made, "symbolic links unavailable on this platform")
+      link.toFile.deleteOnExit()
+      val source = IdentityTokenSource.file(link)
+      source.fetch() shouldBe Right("first")
+      Files.delete(link)
+      Files.createSymbolicLink(link, second)
+      source.fetch() shouldBe Right("second")
+    }
   }
 
   "IdentityTokenSource.from" should {

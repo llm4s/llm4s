@@ -65,6 +65,30 @@ class RedactionRemoteBodySpec extends AnyFlatSpec with Matchers {
     (pairs should not).include("ac-3")
   }
 
+  it should "redact the RFC 8693 credentials in every shape the general passes read" in {
+    val jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJzcGlmZmU6Ly9leGFtcGxlIn0.c2lnbmF0dXJlLXZhbHVl"
+    val shapes = Seq(
+      // The exchange's own form body, as a transport might log it.
+      s"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token=$jwt" +
+        "&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt&client_assertion=ca-opaque-value-1",
+      s"https://idp.example/token?subject_token=$jwt&actor_token=ac-opaque-value-1",
+      s"""{"subject_token":"$jwt","client_assertion":"ca-opaque-value-1"}""",
+      s"""{"body":"{\\"assertion\\":\\"ca-opaque-value-1\\",\\"subject_token\\":\\"$jwt\\"}"}""",
+      s"""{'subject_token': '$jwt', 'assertion': 'ca-opaque-value-1'}""",
+      "Assertion: ca-opaque-value-1",
+      s"actor_token=ac-opaque-value-1 subject_token=$jwt"
+    )
+    for shape <- shapes do
+      val out = Redaction.redact(shape)
+      withClue(s"$shape -> $out: ") {
+        (out should not).include("ca-opaque-value-1")
+        (out should not).include("ac-opaque-value-1")
+        (out should not).include("c2lnbmF0dXJlLXZhbHVl")
+      }
+    // `subject_token_type` and `grant_type` name token types, not credentials: they stay readable.
+    Redaction.redact("subject_token_type=urn:ietf:params:oauth:token-type:jwt") should include("token-type:jwt")
+  }
+
   it should "redact a field value containing escaped quotes completely" in {
     val out = Redaction.remoteBody("""{"access_token":"ab\"tail-part"}""")
     (out should not).include("tail-part")

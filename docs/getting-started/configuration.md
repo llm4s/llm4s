@@ -199,7 +199,11 @@ A section can authenticate with a workload identity token - typically a SPIFFE J
 API key. Put an `auth` block in the section, with `identityTokenFile` (re-read on every exchange,
 so rotation is picked up) and the keys the provider needs. A relative `identityTokenFile` is
 resolved against the process's working directory when the configuration is loaded, so prefer an
-absolute path. A section sets `apiKey` or `auth`, never both, and a section with `auth` may not set
+absolute path. The path must name a regular file of at most 64 KiB (a symbolic link to one is
+followed, as Kubernetes projected volumes rotate tokens that way); anything else fails the exchange
+with an `AuthenticationError` that names the path but never quotes the file. For `openai-compatible`
+and `openai` llm4s reads the file itself; for `anthropic` the Anthropic SDK reads it. Keep the file
+readable only by the workload where the platform allows it. A section sets `apiKey` or `auth`, never both, and a section with `auth` may not set
 an `Authorization` header either: the exchanged token is the request's bearer. With `auth`, the
 shared `llm4s.credentials.<id>.apiKey` is not used.
 

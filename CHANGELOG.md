@@ -280,7 +280,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   apart `HttpErrorMapper` now sets `AuthenticationError.code` to the HTTP status (`"401"` or
   `"403"`), for every provider. An `identityTokenFile` that is not a valid path is a
   `ConfigurationError`; with the `openai` SDK, a missing or empty token file is an
-  `AuthenticationError`, as with the other providers.
+  `AuthenticationError`, as with the other providers. The token file must be a regular file (a
+  symbolic link to one is followed) of at most 64 KiB: a directory, FIFO, device or larger file is an
+  `AuthenticationError` naming the path, never quoting the content, and is never read unbounded.
+  The RFC 8693 request fields `subject_token`, `actor_token`, `assertion` and `client_assertion` are
+  sensitive keys for `Redaction`, in every shape it reads.
 - **`@Stable` and `@Experimental`: the tier of a public type, in the code** ([#1281](https://github.com/llm4s/llm4s/issues/1281),
   `org.llm4s.annotation` in `llm4s-core`): Java annotations with runtime retention, so an IDE, a tool or a
   Java caller can read them. Every top-level public type of `llm4s-core`, `llm4s-openai`,
