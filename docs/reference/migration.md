@@ -17,7 +17,8 @@ Not in a release yet. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/169
 - [#1700](https://github.com/llm4s/llm4s/issues/1700), the durable `Checkpointer` contract - run-claim leases, fencing tokens and a store contract suite: [below](#durable-checkpointer-contract-1700).
 - [#1703](https://github.com/llm4s/llm4s/issues/1703), tool side-effect safety - idempotency keys and one result per tool call: [below](#tool-side-effect-safety-1703).
 - [#1704](https://github.com/llm4s/llm4s/issues/1704), human-review interrupts - static breakpoints and typed middleware questions: [below](#human-review-interrupts-1704).
-- [#1701](https://github.com/llm4s/llm4s/issues/1701) SQLite checkpointer, [#1702](https://github.com/llm4s/llm4s/issues/1702) history, fork and `updateState`, and [#1705](https://github.com/llm4s/llm4s/issues/1705) live subscriptions across runtimes: not yet landed.
+- [#1702](https://github.com/llm4s/llm4s/issues/1702), checkpoint history, fork, `updateState` and retention: [below](#checkpoint-history-fork-updatestate-and-retention-1702).
+- [#1701](https://github.com/llm4s/llm4s/issues/1701) SQLite checkpointer and [#1705](https://github.com/llm4s/llm4s/issues/1705) live subscriptions across runtimes: not yet landed.
 
 Design: `docs/design/typed-agent-runtime-design.md` §4.16 onwards. Guide: [Durable Checkpointers](../guide/agents/durable-checkpointers.html).
 
@@ -121,6 +122,37 @@ typed question from middleware. Both are interrupts like approvals and tool ques
   (the Java enum `BreakpointPhase`); `Answer` gains `proceed(id)`.
 - **`Checkpoint.CurrentFormat` is 6**, with an identity migration from 5: a build that predates breakpoints refuses a
   format-6 checkpoint rather than run a held task's continuation as an ordinary task.
+
+### Checkpoint history, fork, updateState and retention (#1702)
+
+A store now keeps every checkpoint of a thread, and `GraphRuntime` gains `history`, `checkpoint`, `fork`,
+`updateState` and `prune`. Code that only runs agents or graphs needs no change. Code that implements
+`Checkpointer`, matches `GraphError` or `RunEvent` exhaustively, or relies on checkpoint ids does. Source breaks,
+with no shims:
+
+- **`Checkpointer` gains `history`, `checkpoint` and `prune`**, and its contract grows: keep every checkpoint a
+  commit supersedes (pending writes still for the latest only), refuse a checkpoint id already in the history with
+  `InvalidCommit`, and honour `Commit.retractTurn` by removing every checkpoint after the newest `Completed` or
+  `Failed` one before adding the commit's. `CheckpointerContract` checks all of it. A delegating store forwards them:
+
+  ```scala
+  def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+  def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+  def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
+  ```
+- **`Commit` gains `retractTurn: Boolean`**, defaulted to `false` in `Commit(...)`, with `withRetractTurn`. The
+  runtime sets it on the `Failed` checkpoint that closes a run a node blocked.
+- **`GraphError` gains `CheckpointNotFound(threadId, checkpointId)` and `ThreadExists(threadId)`; `RunEvent` gains
+  `StateUpdated` and `ThreadForked`.** An exhaustive `match` needs the new cases.
+- **Checkpoint ids count along the thread.** They are still `<runId>/<n>`, but `n` is one more than the parent's,
+  so the first run on a thread writes `<runId>/1`, `<runId>/2`, ... as before, and a later run continues the count
+  rather than starting again at 1. Code that built an id such as `s"$runId/1"` for a later run reads it from
+  `history` (or `latest`) instead.
+- **A Block retracts its turn from the history.** The thread's latest checkpoint after a Block is its `Failed`
+  checkpoint, as before; the earlier checkpoints of the blocked turn are gone from `history`, `checkpoint` and
+  `fork`.
+
+`Checkpoint.CurrentFormat` stays 6: nothing changes in a checkpoint's JSON.
 
 ## Stage 1 migration: agent runtime
 

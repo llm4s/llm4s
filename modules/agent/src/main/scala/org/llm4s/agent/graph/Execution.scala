@@ -38,6 +38,10 @@ final class Execution private[graph] (
   ): Execution =
     new Execution(owner, superstep, state, frontier, staticArrivals, dynamicActivations, parked, paused)
 
+  /** This execution with `state` in place of its own, at superstep `at`; everything scheduled stays. */
+  private[graph] def edited(state: ThreadState, at: Int): Execution =
+    new Execution(owner, at, state, frontier, staticArrivals, dynamicActivations, parked, paused)
+
 final private[graph] case class JoinSlot(join: JoinId, fanOutTask: TaskId)
 
 /** The suspended task a continuation stands in for: its join arrivals are made in this name. */
