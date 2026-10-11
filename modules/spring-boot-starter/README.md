@@ -74,12 +74,16 @@ llm4s.providers.local.headers.X-Team-Id=team-7
   section. The flat `llm4s.context-window` keeps working for the three flat providers.
 - **Values are plain text.** Spring resolves `${...}` placeholders as it does everywhere; the value is not read as HOCON
   afterwards, so quotes, `$` and braces stay as written. Environment-variable names such as `LLM4S_PROVIDERS_...` are
-  not read: use properties, YAML or `@TestPropertySource`.
+  not read: use properties, YAML or `@TestPropertySource`, and pass a secret with a placeholder
+  (`api-key: ${MY_KEY}`) or through the vendor's environment variable, which `llm4s.credentials` binds.
+- **Precedence.** Spring's order of property sources applies whatever the spelling: `api-key` on the command line
+  overrides `apiKey` in `application.yml`, and the other way round.
 - **Errors.** An unknown provider id fails startup with llm4s's own message, which names the registered providers and
   the dependency to add. Only the default section is validated, so another section's mistake does not stop the
   application.
 - **Health.** The Actuator indicator reports the provider and model the section resolves to, and keeps every key from
-  `llm4s.providers.*` and `llm4s.credentials.*` out of its messages.
+  `llm4s.providers.*` and `llm4s.credentials.*` out of its messages, as well as the resolved provider's own key
+  wherever it came from (`application.conf`, a vendor's environment variable, ...).
 
 ## Beans
 

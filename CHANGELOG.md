@@ -182,8 +182,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Two things differ in the block: the context window and reserved completion size come from the model registry
   except for the generic `openai-compatible` provider, which reads `context-window` and `reserve-completion` from the
   section; and with any `llm4s.providers.*` property set the flat `llm4s.model`, `llm4s.api-key`, ... are ignored.
+  When two property sources spell one setting differently (`apiKey` in `application.yml`, `api-key` on the command
+  line), the higher-priority source wins, as Spring's precedence says. `LLM4S_PROVIDERS_*` environment variables are
+  not read; secrets come through placeholders or the vendor's variable bound by `llm4s.credentials`.
   The Actuator health indicator reports the resolved provider and model and keeps every credential out of its
-  messages. The flat `llm4s.provider` error for another provider id now names the providers on the classpath and
+  messages, including the resolved provider's own key from a non-Spring source (`application.conf`, a vendor's
+  environment variable). The flat `llm4s.provider` error for another provider id now names the providers on the classpath and
   points to `llm4s.providers.*`. Metadata for the new keys is in `additional-spring-configuration-metadata.json`.
   **Spring Boot support policy**: Spring Boot 3.x from 3.3 on. The starter is built against 3.3.6 and a new CI job,
   `Spring Boot 3.x (latest)`, runs its specs against 3.5.16 (`-Dllm4s.springBootVersion`); Spring Boot 4 is not

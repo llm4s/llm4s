@@ -1,19 +1,28 @@
 package org.llm4s.spring
 
+import org.llm4s.error.APIError
 import org.llm4s.javaapi.JLlmClient
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig }
 import org.llm4s.testkit.LocalProviderTestServer.{ openAICompletion, sendJsonResponse, withServer }
 import org.llm4s.testutil.FixtureChatClient
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.springframework.boot.actuate.health.HealthIndicator
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.test.context.assertj.AssertableApplicationContext
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
-import org.springframework.core.env.{ StandardEnvironment, SystemEnvironmentPropertySource }
+import org.springframework.core.env.{
+  MapPropertySource,
+  SimpleCommandLinePropertySource,
+  StandardEnvironment,
+  SystemEnvironmentPropertySource
+}
 import org.springframework.mock.env.MockEnvironment
 
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
+import scala.jdk.CollectionConverters._
 
 /**
  * Any provider on the classpath through `llm4s.providers.*` properties, with no per-provider Spring code
@@ -35,6 +44,28 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
 
   private def env(properties: (String, String)*): MockEnvironment =
     properties.foldLeft(new MockEnvironment) { case (e, (k, v)) => e.withProperty(k, v) }
+
+  /**
+   * An environment with the given sources, highest priority first, as Spring orders them: a command line over a
+   * profile file over `application.yml`.
+   */
+  private def layered(sources: (String, Seq[(String, String)])*): StandardEnvironment = {
+    val e = new StandardEnvironment
+    sources.reverse.foreach { case (name, props) =>
+      val map: java.util.Map[String, Object] = props.toMap[String, Object].asJava
+      e.getPropertySources.addFirst(new MapPropertySource(name, map))
+    }
+    e
+  }
+
+  private val section = Seq(
+    "llm4s.providers.provider"   -> "o",
+    "llm4s.providers.o.provider" -> "openai",
+    "llm4s.providers.o.model"    -> "gpt-4o"
+  )
+
+  private def openAIKey(e: StandardEnvironment): String =
+    SpringProviderSource.resolve(e, "").get().config.asInstanceOf[OpenAIConfig].apiKey
 
   private val geminiReply =
     """{"candidates":[{"content":{"role":"model","parts":[{"text":"gemini says hello"}]},"finishReason":"STOP"}],
@@ -296,6 +327,22 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       .model shouldBe "model-a"
   }
 
+  it should "not be a vendor of llm4s.credentials that the flat llm4s.provider happens to name" in {
+    // llm4s.provider=openai names no section here; llm4s.credentials.openai is a vendor's key, not a section, so
+    // the default stays what llm4s's own configuration says (this module's application.conf: ollama-local).
+    // Taking the credential for a section made the starter look for a section called openai that does not exist.
+    val result = SpringProviderSource.resolve(
+      env(
+        "llm4s.credentials.openai.api-key" -> "K",
+        "llm4s.providers.main.provider"    -> "openai",
+        "llm4s.providers.main.model"       -> "gpt-4o"
+      ),
+      "openai"
+    )
+    result.isSuccess shouldBe true
+    result.get().config.providerId.asString shouldBe "ollama"
+  }
+
   "a context with both the flat properties and a providers block" should "use the block" in {
     runner
       .withPropertyValues(
@@ -389,6 +436,68 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       .secrets shouldBe Seq("sk-shared")
   }
 
+  // ---- which source wins --------------------------------------------------------------------------
+
+  "a setting spelled differently in two sources" should "take the higher-priority source's value (kebab over camel)" in {
+    val e = layered(
+      "Config resource 'class path resource [application-prod.yml]'" -> Seq("llm4s.providers.o.api-key" -> "HIGH"),
+      "Config resource 'class path resource [application.yml]'" -> (section :+ ("llm4s.providers.o.apiKey" -> "LOW"))
+    )
+    openAIKey(e) shouldBe "HIGH"
+  }
+
+  it should "take the higher-priority source's value (camel over kebab)" in {
+    val e = layered(
+      "Config resource 'class path resource [application-prod.yml]'" -> Seq("llm4s.providers.o.apiKey" -> "HIGH"),
+      "Config resource 'class path resource [application.yml]'" -> (section :+ ("llm4s.providers.o.api-key" -> "LOW"))
+    )
+    openAIKey(e) shouldBe "HIGH"
+  }
+
+  it should "let the command line override application.yml, as Spring does" in {
+    val e = layered(
+      "Config resource 'class path resource [application.yml]'" -> (section :+ ("llm4s.providers.o.apiKey" -> "LOW"))
+    )
+    e.getPropertySources.addFirst(new SimpleCommandLinePropertySource("--llm4s.providers.o.api_key=HIGH"))
+    openAIKey(e) shouldBe "HIGH"
+  }
+
+  it should "apply to a vendor's shared credential too" in {
+    val e = layered(
+      "commandLineArgs" -> Seq("llm4s.credentials.openai.api-key" -> "HIGH"),
+      "application.yml" -> (section :+ ("llm4s.credentials.openai.apiKey" -> "LOW"))
+    )
+    openAIKey(e) shouldBe "HIGH"
+  }
+
+  "a setting spelled the same in two sources" should "still take the higher-priority source's value" in {
+    val e = layered(
+      "commandLineArgs" -> Seq("llm4s.providers.o.api-key" -> "HIGH"),
+      "application.yml" -> (section :+ ("llm4s.providers.o.api-key" -> "LOW"))
+    )
+    openAIKey(e) shouldBe "HIGH"
+  }
+
+  "a context whose application.yml spells a key differently from a higher source" should "use the higher one" in {
+    runner
+      .withInitializer { ctx =>
+        val low: java.util.Map[String, Object] = Map[String, Object](
+          "llm4s.providers.provider"    -> "fx",
+          "llm4s.providers.fx.provider" -> "fixturechat",
+          "llm4s.providers.fx.model"    -> "fixture-model",
+          "llm4s.providers.fx.apiKey"   -> "sk-LOW"
+        ).asJava
+        ctx.getEnvironment.getPropertySources.addLast(new MapPropertySource("application.yml", low))
+      }
+      .withPropertyValues("llm4s.providers.fx.api-key=sk-HIGH")
+      .run { ctx =>
+        ctx.getStartupFailure shouldBe null
+        val settings = HealthSettings.from(ctx.getBean(classOf[Llm4sProperties]), ctx.getEnvironment)
+        settings.secrets should contain("sk-HIGH")
+        settings.secrets should not contain "sk-LOW"
+      }
+  }
+
   // ---- the errors a user sees ---------------------------------------------------------------------
 
   "an unknown provider id in a section" should "fail startup naming the registered providers and the remedy" in {
@@ -472,6 +581,12 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     (settings.toString should not).include("sk-SECRET")
   }
 
+  they should "carry the resolved provider's own key when it comes from application.conf, not a Spring property" in {
+    val settings = HealthSettings.from(new Llm4sProperties, env("llm4s.providers.provider" -> "conf-fixture"))
+    settings.provider shouldBe "fixturechat"
+    settings.secrets should contain("plain-conf-held-credential")
+  }
+
   they should "fall back to the flat properties when the block does not resolve" in {
     val flat = new Llm4sProperties
     flat.provider = "openai"
@@ -482,6 +597,36 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     )
     settings.provider shouldBe "openai"
     settings.model shouldBe "gpt-4o"
+  }
+
+  "the health indicator" should "redact a key that came from application.conf out of a failed probe" in {
+    // The key does not look like a token, so only the resolved config's own key can redact it.
+    val key      = "plain-conf-held-credential"
+    val provider = new AsyncAndHealthSpec.FakeProvider(_ => Left(APIError("fixturechat", s"rejected credential $key")))
+    val settings = HealthSettings
+      .from(new Llm4sProperties, env("llm4s.providers.provider" -> "conf-fixture"))
+      .copy(probe = true, ttl = Duration.ofSeconds(60), timeout = Duration.ofSeconds(5))
+    val error =
+      new LlmHealthIndicator(provider.client, settings, StarterTestSupport.pool)
+        .health()
+        .getDetails
+        .get("error")
+        .toString
+    error should include("rejected credential")
+    (error should not).include(key)
+  }
+
+  "SpringProviderSource.configSecrets" should "read every secret-looking text field of a config, set or optional" in {
+    final case class SomeConfig(apiKey: String, sessionToken: Option[String], model: String, maxTokens: Int)
+        extends org.llm4s.llmconnect.config.ProviderConfig {
+      def providerId                       = ProviderId("x")
+      def contextWindow                    = 1
+      def reserveCompletion                = 0
+      def endpointUrl: Option[String]      = None
+      def withModel(m: String): SomeConfig = copy(model = m)
+    }
+    SpringProviderSource.configSecrets(SomeConfig("k1", Some("t1"), "gpt", 3)) shouldBe Seq("k1", "t1")
+    SpringProviderSource.configSecrets(SomeConfig(" ", None, "gpt", 3)) shouldBe Nil
   }
 
   "a user-defined client" should "still back off when a providers block is present" in {

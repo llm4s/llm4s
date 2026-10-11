@@ -46,7 +46,7 @@ private[spring] object SpringProviderSource {
   final val CredentialsPrefix = "llm4s.credentials"
   private val DefaultPointer  = List("llm4s", "providers", "provider")
 
-  /** The provider llm4s resolved from the properties, and the secret values the properties held. */
+  /** The provider llm4s resolved from the properties, and the secret values to keep out of reports: those the properties held and the resolved config's own. */
   final case class Resolved(config: ProviderConfig, secrets: Seq[String])
 
   /** True when the environment holds at least one `llm4s.providers.*` property, which selects this path. */
@@ -63,7 +63,7 @@ private[spring] object SpringProviderSource {
       prepared = withDefaultPointer(entries, flatProvider)
       source <- toSource(prepared)
       config <- Llm4sConfig.providerFrom(source)(using ProviderRegistry.default)
-    } yield Resolved(config, secrets(prepared))
+    } yield Resolved(config, (secrets(prepared) ++ configSecrets(config)).distinct)
     outcome.fold(error => LlmResult.failure[Resolved](error), resolved => LlmResult.success(resolved))
   }
 
@@ -102,17 +102,31 @@ private[spring] object SpringProviderSource {
       .filter(name => name.startsWith(ProvidersPrefix + ".") || name.startsWith(CredentialsPrefix + "."))
       .distinct
 
-  /** Every provider property with its placeholders resolved; the first one that cannot be is reported. */
+  /**
+   * Every provider property with its placeholders resolved; the first one that cannot be is reported.
+   *
+   * The names come highest-priority source first, so when two sources spell one setting differently
+   * (`apiKey` in `application.yml`, `api-key` on the command line) the first spelling seen is the one
+   * Spring would use, and a later spelling of the same path is skipped rather than allowed to overwrite it.
+   */
   private def collect(env: ConfigurableEnvironment): Either[LLMError, Vector[(List[String], String)]] =
-    propertyNames(env).foldLeft[Either[LLMError, Vector[(List[String], String)]]](Right(Vector.empty)) { (acc, key) =>
-      for {
-        soFar <- acc
-        path  <- hoconPath(key)
-        value <- Try(Option(env.getProperty(key))).toEither.left.map { cause =>
-          ConfigurationError(s"Cannot resolve the value of $key: ${cause.getMessage}", List(key)): LLMError
+    propertyNames(env)
+      .foldLeft[Either[LLMError, (Vector[(List[String], String)], Set[List[String]])]](
+        Right((Vector.empty, Set.empty))
+      ) { (acc, key) =>
+        acc.flatMap { case (soFar, seen) =>
+          hoconPath(key).flatMap { path =>
+            if (seen.contains(path)) Right((soFar, seen))
+            else
+              Try(Option(env.getProperty(key))).toEither.left
+                .map { cause =>
+                  ConfigurationError(s"Cannot resolve the value of $key: ${cause.getMessage}", List(key)): LLMError
+                }
+                .map(value => value.fold((soFar, seen))(v => (soFar :+ (path -> v), seen + path)))
+          }
         }
-      } yield value.fold(soFar)(v => soFar :+ (path -> v))
-    }
+      }
+      .map(_._1)
 
   private def withDefaultPointer(
     entries: Vector[(List[String], String)],
@@ -121,8 +135,10 @@ private[spring] object SpringProviderSource {
     val flat  = Option(flatProvider).map(_.trim).filter(_.nonEmpty)
     val named = entries.exists(_._1 == DefaultPointer)
     flat match {
-      case Some(name) if !named && entries.exists(_._1.slice(2, 3) == List(name)) => entries :+ (DefaultPointer -> name)
-      case _                                                                      => entries
+      // Only a section of llm4s.providers counts: llm4s.credentials.<vendor> is not a section to select.
+      case Some(name) if !named && entries.exists { case (path, _) => path.slice(1, 3) == List("providers", name) } =>
+        entries :+ (DefaultPointer -> name)
+      case _ => entries
     }
   }
 
@@ -174,6 +190,27 @@ private[spring] object SpringProviderSource {
     entries.collect {
       case (path, value) if value.trim.nonEmpty && path.lastOption.exists(looksSecret) => value.trim
     }.distinct
+
+  /**
+   * The credentials of the resolved config itself, wherever they came from: a key the properties do not
+   * hold (one from `application.conf`, a `reference.conf` default or a vendor's environment variable) must be
+   * kept out of reports too. A config is read as the case class it is in practice; one that is not yields none.
+   */
+  private[spring] def configSecrets(config: ProviderConfig): Seq[String] =
+    config match {
+      case product: Product =>
+        product.productElementNames
+          .zip(product.productIterator)
+          .collect {
+            case (name, value: String) if looksSecret(name)       => value
+            case (name, Some(value: String)) if looksSecret(name) => value
+          }
+          .map(_.trim)
+          .filter(_.nonEmpty)
+          .toSeq
+          .distinct
+      case _ => Nil
+    }
 
   private def looksSecret(name: String): Boolean = {
     val lower = name.toLowerCase
