@@ -158,7 +158,7 @@ The schema describes what uPickle's derived `ReadWriter` reads and writes, so a 
 
 ## Types the module does not know
 
-Another type needs a `given SchemaOf` of its own, written next to the `ReadWriter` that reads it. The derivation takes a hand-written given as it is and does not look inside the type, so this also works for a type it would otherwise refuse, such as a sealed hierarchy with fields or a recursive type, as long as the given describes what its `ReadWriter` writes. `SchemaOf.string` describes a type that is written as a JSON string, and `SchemaOf.stringEnum` one that is written as one of a fixed set of strings. The text you pass is what the model sees for a field of that type, unless the field has its own `@description`.
+Another type needs a `given SchemaOf` of its own, written next to the `ReadWriter` that reads it. The derivation takes a hand-written given as it is and does not look inside the type, so this also works for a type it would otherwise refuse, such as a sealed hierarchy with fields or a recursive type, as long as the given describes what its `ReadWriter` writes and does not itself derive a type that leads back to the one being derived (see [Recursion](#recursion)). `SchemaOf.string` describes a type that is written as a JSON string, and `SchemaOf.stringEnum` one that is written as one of a fixed set of strings. The text you pass is what the model sees for a field of that type, unless the field has its own `@description`.
 
 ```scala
 import java.time.Instant
@@ -174,13 +174,31 @@ case class Meeting(title: String, starts: Instant) derives SchemaOf, ReadWriter
 These are refused at compile time, with a message that names the type:
 
 - **`Map`.** `llm4s-core`'s `ObjectSchema` has a fixed set of properties and no way to describe the values of a map.
-- **Recursive types** (a `Tree` with `children: List[Tree]`). They need a JSON Schema `$ref`, which the schema model cannot express.
+- **Recursive types** (a `Tree` with `children: List[Tree]`). They need a JSON Schema `$ref`, which the schema model cannot express. One case is caught only at run time: see [Recursion](#recursion).
 - **Sealed hierarchies with fields** (`Circle(radius)` and `Rectangle(w, h)` under `Shape`). They need `oneOf`, which the schema model cannot express. Enums and sealed hierarchies of singletons are fine.
 - **`Option` directly inside `Option`** (`Option[Option[Int]]`). uPickle writes it as a JSON array (`[]`, `[null]`, `[1]`), not as the value or `null`. An `Option` inside a `List` inside an `Option` is fine.
 - **Tuples** (`(Int, String)`). uPickle writes them as JSON arrays of mixed types. Use a case class with named fields.
+- **Named tuples** (`(a: Int, b: String)`). uPickle has no `ReadWriter` for them, so nothing could read the reply back. Use a case class.
 - **A class that is not a case class**, and a field of a type nothing describes (a function, for instance).
 
 `completeStructuredOf` also needs the type to be a case class, since the model answers with a JSON object: for an enum or another type it returns a `Left` before calling the model.
+
+### Recursion
+
+A recursive type is refused at compile time when the recursion runs through derived instances: a type that refers to itself, directly or through an `Option`, a collection or a generic case class; types that refer to each other and all `derives SchemaOf`; and a type whose own given is written as `SchemaOf.derived` of itself.
+
+The compile-time check does not look inside any other hand-written given, so it cannot see a recursion that passes through one which itself calls `SchemaOf.derived`:
+
+```scala
+case class P(q: Option[Q])
+case class Q(p: List[P])
+object Schemas {
+  given ps: SchemaOf[P] = SchemaOf.derived[P] // compiles: Q's given is hand-written
+  given qs: SchemaOf[Q] = SchemaOf.derived[Q] // compiles: P's given is hand-written
+}
+```
+
+This compiles, and making the instances still works: a derived instance does not look up its fields' instances until its schema is built, so two such givens never wait on each other's initialisation. Building the schema (`SchemaOf[P].toJsonSchema()` or `.definition`) throws an `IllegalStateException` on first use, and on every use after it, naming the type: `recursive type P: llm4s-schema-derivation cannot describe recursive types; core's schema model has no $ref. ...`. `completeStructuredOf[P]` returns the same message as a `Left(ValidationError)` without calling the model. It never hangs and never overflows the stack. The same shape is fine when the given that closes the loop describes the type by hand rather than deriving it, for example `given SchemaOf[Q] = SchemaOf.string("...")`; that is why the check cannot refuse every hand-written given that reaches back.
 
 A derived schema has no length or range constraints. When you need `withRange` or `withLengthConstraints`, build that schema by hand as before; `completeStructured` takes both.
 

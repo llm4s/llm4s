@@ -1122,7 +1122,7 @@ lazy val schemaDerivation = (project in file("modules/schema-derivation"))
     commonSettings,
     // Measured 98.94% statement and 95.24% branch coverage (`sbt coverage schemaDerivation/test
     // schemaDerivation/coverageReport`), up from 88.63% when the recursion check and the external-package and
-    // tool specs were added, and from 98.62% / 93.33% when the case keys and the given-aware check were. Floor is the measured value rounded down to the nearest 5. Never lower it. Macro
+    // tool specs were added, and from 98.62% / 93.33% when the case keys and the given-aware check were; 99.38% / 96.00% with the run-time recursion guard. Floor is the measured value rounded down to the nearest 5. Never lower it. Macro
     // code runs inside the compiler, where scoverage cannot see all of it; `CompileErrorsSpec` and the golden
     // specs exercise it when they compile.
     coverageFloor(95),

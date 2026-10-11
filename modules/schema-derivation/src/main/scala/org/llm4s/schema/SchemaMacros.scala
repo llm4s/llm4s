@@ -28,9 +28,11 @@ private[schema] object SchemaMacros {
   inline def typeDescription[A]: Option[String] = ${ typeDescriptionImpl[A] }
 
   /**
-   * Fails compilation, naming the type, if `A` is a tuple, refers to itself or is (or holds) a sealed hierarchy with
-   * fields. A type with a `given SchemaOf` of its own, other than the one being derived, is not looked into: its
-   * schema is whatever that given says.
+   * Fails compilation, naming the type, if `A` is a tuple or a named tuple, refers to itself or is (or holds) a
+   * sealed hierarchy with fields. A type with a hand-written `given SchemaOf` of its own, other than the one being
+   * derived, is not looked into: its schema is whatever that given says. When that given itself derives a type
+   * that reaches back to `A`, the recursion is not visible here; building the schema then fails at run time
+   * instead (see `SchemaOf.product`).
    */
   inline def check[A]: Unit = ${ checkImpl[A] }
 
@@ -93,6 +95,15 @@ private[schema] object SchemaMacros {
       fail(
         s"Cannot derive SchemaOf[${root.show}]: a tuple is written by uPickle as a JSON array of mixed types, " +
           "which llm4s-core's schema model cannot express. Use a case class with named fields."
+      )
+    }
+
+    // A named tuple, `(a: Int, b: String)`, has a product Mirror whose labels are its names, so without this it
+    // would derive an object schema; uPickle has no ReadWriter for it, so nothing could read the reply back.
+    if (root <:< TypeRepr.of[NamedTuple.AnyNamedTuple] || root.dealias <:< TypeRepr.of[NamedTuple.AnyNamedTuple]) {
+      fail(
+        s"Cannot derive SchemaOf[${root.show}]: a named tuple has no uPickle ReadWriter to read the reply back " +
+          "into. Use a case class with named fields."
       )
     }
 

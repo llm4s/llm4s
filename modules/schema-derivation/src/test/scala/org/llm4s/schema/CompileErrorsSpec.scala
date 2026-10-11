@@ -104,6 +104,13 @@ class CompileErrorsSpec extends AnyFlatSpec with Matchers {
     )
   }
 
+  it should "refuse a named tuple, which would otherwise derive an object nothing reads back" in {
+    val errors = messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[(a: Int, b: String)]"))
+    errors should include("Cannot derive SchemaOf[")
+    errors should include("a named tuple")
+    errors should include("Use a case class with named fields")
+  }
+
   it should "take a hand-written given as it is, even for a sealed hierarchy with fields or a recursive type" in {
     scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.Order]") shouldBe Nil
   }

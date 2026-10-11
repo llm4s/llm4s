@@ -103,6 +103,19 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     case class Meeting(title: String, starts: Instant) derives SchemaOf, ReadWriter
   }
 
+  // ---- Recursion
+
+  object Recursion {
+    import org.llm4s.schema.*
+
+    case class P(q: Option[Q])
+    case class Q(p: List[P])
+    object Schemas {
+      given ps: SchemaOf[P] = SchemaOf.derived[P] // compiles: Q's given is hand-written
+      given qs: SchemaOf[Q] = SchemaOf.derived[Q] // compiles: P's given is hand-written
+    }
+  }
+
   // ---- The guide, read from the repository
 
   private val root: Path =
@@ -137,7 +150,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   "The guide's Scala blocks" should "all appear in this spec word for word" in {
     val scalaBlocks = blocks("scala")
-    scalaBlocks should have size 6
+    scalaBlocks should have size 7
     scalaBlocks.foreach(block =>
       withClue(s"This block of the guide is not in the code the spec compiles:\n$block\n") {
         squash(thisSource) should include(squash(block))
@@ -189,5 +202,17 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     schema("properties")("starts")("description").str should startWith("ISO-8601 instant")
     val meeting = Meeting("Standup", java.time.Instant.parse("2026-10-08T09:30:00Z"))
     upickle.default.read[Meeting](upickle.default.write(meeting)) shouldBe meeting
+  }
+
+  "A recursion through a hand-written given" should "fail on first use with the message the guide quotes, not hang" in {
+    import scala.concurrent.ExecutionContext.Implicits.global
+    import scala.concurrent.duration.*
+    import Recursion.Schemas.given
+    val built = scala.concurrent.Future(scala.util.Try(org.llm4s.schema.SchemaOf[Recursion.P].toJsonSchema()))
+    val error = scala.concurrent.Await.result(built, 30.seconds).failed.get
+    error shouldBe an[IllegalStateException]
+    error.getMessage should startWith(
+      "recursive type P: llm4s-schema-derivation cannot describe recursive types; core's schema model has no $ref."
+    )
   }
 }

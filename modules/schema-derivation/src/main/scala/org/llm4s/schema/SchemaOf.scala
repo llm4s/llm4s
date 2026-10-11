@@ -26,10 +26,16 @@ import scala.deriving.Mirror
  * hierarchies of singletons (as a string with the case names, or a case's `@upickle.implicits.key`). Not supported,
  * and refused at compile time with a message naming the type: `Map` (core's `ObjectSchema` has a fixed set of
  * properties and cannot describe map values), recursive types and sealed hierarchies with fields (both need a JSON
- * Schema construct, `$ref` and `oneOf`, that core's schema model lacks), and `Option` directly inside `Option` and
- * tuples (uPickle writes both as JSON arrays). Other types need a `given SchemaOf` of their own: see
- * [[SchemaOf.string]] and [[SchemaOf.stringEnum]]. A hand-written given is used as it is, so it can also describe a
- * type the derivation would refuse.
+ * Schema construct, `$ref` and `oneOf`, that core's schema model lacks), `Option` directly inside `Option` and
+ * tuples (uPickle writes both as JSON arrays), and named tuples. Other types need a `given SchemaOf` of their own:
+ * see [[SchemaOf.string]] and [[SchemaOf.stringEnum]]. A hand-written given is used as it is, so it can also
+ * describe a type the derivation would refuse.
+ *
+ * A recursion that runs through hand-written givens which themselves call `SchemaOf.derived` (for mutually
+ * recursive `P` and `Q`, `given SchemaOf[P] = SchemaOf.derived[P]` and `given SchemaOf[Q] = SchemaOf.derived[Q]`)
+ * cannot be seen at compile time, because the check does not look inside a hand-written given. Building that
+ * schema (`schema`, `definition`, `toJsonSchema`) throws an `IllegalStateException` naming the recursive type
+ * instead, on first use; it never hangs.
  *
  * @tparam A the described type
  */
@@ -145,6 +151,7 @@ object SchemaOf {
     SchemaMacros.check[A]
     inline m match {
       case p: Mirror.ProductOf[A] =>
+        // `instances` is passed by name: see `product`
         product[A](
           constValue[p.MirroredLabel],
           SchemaMacros.typeDescription[A],
@@ -175,20 +182,58 @@ object SchemaOf {
       case _: (h *: t)   => summonInline[SchemaOf[h]] :: instances[t]
     }
 
+  // How many products of one name may be under construction inside each other, on one thread, before the
+  // schema counts as recursive: the compile-time check's bound on nesting one class inside itself.
+  private val MaxSameNameDepth = 16
+
+  // The product schemas being built on this thread, innermost first, so that a recursion the compile-time check
+  // cannot see (a hand-written given that derives a type which reaches back to the one being built) fails with
+  // a message instead of recursing until the stack overflows.
+  private val building: ThreadLocal[List[(SchemaOf[?], String)]] = ThreadLocal.withInitial(() => Nil)
+
+  private def recursiveType(name: String): Nothing =
+    throw new IllegalStateException(
+      s"recursive type $name: llm4s-schema-derivation cannot describe recursive types; core's schema model has " +
+        s"no $$ref. Describe $name, or the type that refers back to it, with a hand-written given that does not " +
+        "derive it, for example SchemaOf.string."
+    )
+
   // A field's description: its own annotation, else its type's, else its name.
+  //
+  // `fieldSchemas` is by name and evaluated only when the schema is built, never when the instance is made.
+  // Summoning a field's instance can initialise another lazy `given`; were that done while this instance is
+  // itself being initialised, two hand-written givens of mutually recursive types (each deriving its type) would
+  // each wait for the other's initialisation on the same thread, and the program would hang. Deferred, making an
+  // instance touches no other given, and building the schema of a recursive type is refused by the guard below.
   private def product[A](
     name: String,
     described: Option[String],
     fields: List[String],
-    fieldSchemas: List[SchemaOf[?]],
+    fieldSchemas: => List[SchemaOf[?]],
     descriptions: List[Option[String]],
     keys: List[Option[String]]
-  ): SchemaOf[A] = leaf[A](name, described) { d =>
-    val properties = fields.zip(fieldSchemas).zip(descriptions).zip(keys).map { case (((field, of), annotated), key) =>
-      val written = key.getOrElse(field)
-      PropertyDefinition(written, of.schema(annotated.orElse(of.typeDescription).getOrElse(field)), !of.isOptional)
+  ): SchemaOf[A] = new SchemaOf[A] { self =>
+    def typeName: String                         = name
+    override def typeDescription: Option[String] = described
+    def schema(d: String): SchemaDefinition[A] = {
+      val outer = building.get
+      if (outer.exists(_._1 eq self) || outer.count(_._2 == name) >= MaxSameNameDepth) recursiveType(name)
+      building.set((self, name) :: outer)
+      val built = scala.util.Try {
+        val properties =
+          fields.zip(fieldSchemas).zip(descriptions).zip(keys).map { case (((field, of), annotated), key) =>
+            val written = key.getOrElse(field)
+            PropertyDefinition(
+              written,
+              of.schema(annotated.orElse(of.typeDescription).getOrElse(field)),
+              !of.isOptional
+            )
+          }
+        ObjectSchema[A](d, properties)
+      }
+      building.set(outer)
+      built.get
     }
-    ObjectSchema[A](d, properties)
   }
 
   // A case is written as its name, or as its `@upickle.implicits.key` when it has one.

@@ -80,4 +80,18 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
     result.left.toOption.map(_.message).getOrElse("") should include("not a JSON object")
     client.asked.get shouldBe None
   }
+
+  it should "refuse a schema that cannot be built, a recursion through a hand-written given, without calling the model" in {
+    import RecursionFixtures.DerivesAndHelper.P
+    import scala.concurrent.ExecutionContext.Implicits.global
+    import scala.concurrent.duration.*
+    // The model is never called, so the reader is never used.
+    given upickle.default.Reader[P] = upickle.default.reader[ujson.Value].map(_ => P(None))
+    val client                      = new Scripted("{}")
+    val result =
+      scala.concurrent.Await.result(scala.concurrent.Future(client.completeStructuredOf[P](conversation)), 30.seconds)
+    result.left.map(_.getClass) shouldBe Left(classOf[ValidationError])
+    result.left.toOption.map(_.message).getOrElse("") should include("recursive type P")
+    client.asked.get shouldBe None
+  }
 }

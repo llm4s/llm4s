@@ -38,8 +38,10 @@ singletons (with `@upickle.implicits.key` on a case, too).
 
 Refused at compile time, naming the type: `Map`, recursive types, and sealed hierarchies with fields. `llm4s-core`'s
 schema model has a fixed set of properties and no `$ref` or `oneOf`, so it cannot express them. Also refused:
-`Option` directly inside `Option` and tuples, which uPickle writes as JSON arrays. A type with a hand-written
-`given SchemaOf` is taken as that given describes it, even one that would otherwise be refused.
+`Option` directly inside `Option` and tuples, which uPickle writes as JSON arrays, and named tuples, which it cannot
+read. A type with a hand-written `given SchemaOf` is taken as that given describes it, even one that would otherwise be
+refused. A recursion that runs through a hand-written given which itself derives its type is not visible at compile
+time: building that schema throws an `IllegalStateException` naming the type, on first use, and never hangs.
 
 The schema describes what uPickle's derived `ReadWriter` reads and writes, and the tests check that in both
 directions. See the [guide](../../docs/guide/derived-schemas.md) for the details, the strict-mode behaviour and the
@@ -50,5 +52,6 @@ compile-time cost.
 `sbt schemaDerivation/test`. The golden specs pin the derived JSON for every shape, one of them against the hand-built
 schema of `StructuredOutputExample`; `RoundTripSpec` validates what uPickle writes against the schema, reads
 schema-conformant documents back, and reads every sample `SchemaSamples` generates from each golden schema; `CompileErrorsSpec` pins the refusals (including a recursive type whose type arguments grow, which must still
-terminate); `ExternalUseSpec` derives from a package outside `org.llm4s`, as user code does;
+terminate); `RecursionGuardSpec` pins the run-time refusal of a recursion through hand-written givens, under a
+timeout so that a deadlock fails it instead of hanging the build; `ExternalUseSpec` derives from a package outside `org.llm4s`, as user code does;
 `DerivedSchemasGuideSpec` compiles the guide.

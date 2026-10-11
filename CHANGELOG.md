@@ -141,8 +141,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   description. Supported: scalars, `Option`, `List`/`Seq`/`Vector`/`Set`, nested and generic case classes, enums and
   sealed hierarchies of singletons. Refused at compile time with a message naming the type: `Map`, recursive types and
   sealed hierarchies with fields, because core's schema model cannot express map values, `$ref` or `oneOf`; and
-  `Option` directly inside `Option` and tuples, which uPickle writes as arrays. A hand-written `given SchemaOf` is used
-  as it is, so it describes a type the derivation would refuse.
+  `Option` directly inside `Option` and tuples, which uPickle writes as arrays, and named tuples, which uPickle cannot
+  read. A hand-written `given SchemaOf` is used as it is, so it describes a type the derivation would refuse. A
+  recursion that passes through a hand-written given which itself calls `SchemaOf.derived` is not visible at compile
+  time; building that schema throws an `IllegalStateException` naming the type on first use, and `completeStructuredOf`
+  returns it as a `Left` without calling the model (a derived instance looks
+  up its fields' instances only when its schema is built, so such givens never deadlock each other's initialisation).
   `SchemaOf[A].definition` is the same schema as a `SchemaDefinition`, so `ToolBuilder` takes it as a tool's
   parameters. Guide: [Derived Schemas](docs/guide/derived-schemas.md).
 - **`llm4s-pekko`: LLM responses and agent runs as Apache Pekko Streams `Source`s**
