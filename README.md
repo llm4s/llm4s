@@ -177,7 +177,7 @@ To ensure code quality, we use a Git pre-commit hook that automatically checks c
 
 ### Prerequisites
 
-- JDK 21+
+- JDK 21+ (see [supported JDKs](docs/reference/v1-scope.md#scala-and-jdk-support))
 - SBT
 - Docker
 
@@ -260,6 +260,8 @@ never its value) and, with `--local`, whether Ollama is running and has the mode
 ```bash
 sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config modules/samples/src/main/resources/application.conf --local"
 ```
+
+No build tool yet? The [Scala CLI quick start](docs/getting-started/scala-cli.md) makes a first call from a single file.
 
 ### Running the Examples
 

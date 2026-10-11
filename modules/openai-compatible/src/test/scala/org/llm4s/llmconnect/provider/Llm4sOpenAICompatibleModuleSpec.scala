@@ -92,6 +92,22 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
         .map(_.getClass.getSimpleName) shouldBe Right("OpenAICompatibleConfig")
     }
 
+    "build a client from a section with auth" in {
+      given ProviderRegistry = ProviderRegistry.default
+      val section = ProviderTestConfig
+        .loadSection(
+          "dbx",
+          """llm4s.providers.dbx {
+            |  provider = "openai-compatible"
+            |  model    = "m"
+            |  baseUrl  = "https://ws.example/serving-endpoints"
+            |  auth { identityTokenFile = "/var/run/svid", tokenUrl = "https://ws.example/oidc/v1/token" }
+            |}""".stripMargin
+        )
+        .fold(error => fail(error.message), identity)
+      assertBuildsClient(OpenAICompatibleProvider, section).getClass.getSimpleName shouldBe "OpenAICompatibleClient"
+    }
+
     "refuse a config belonging to another provider" in {
       expectations.foreach((descriptor, _, _) => assertRefusesForeignConfig(descriptor))
     }

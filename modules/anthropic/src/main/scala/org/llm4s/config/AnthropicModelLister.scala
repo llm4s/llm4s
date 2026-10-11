@@ -2,7 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.{ BaseUrl, NamedProviderConfig, ProviderId }
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.http.HttpResponse.*
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.AnthropicConfig
@@ -30,7 +30,16 @@ object AnthropicModelLister extends ProviderModelLister:
   def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
     for
       anthropic <- config.requireProvider(ProviderId("anthropic"))
-      apiKey    <- anthropic.requireApiKey
+      _ <- Either.cond(
+        anthropic.auth.isEmpty,
+        (),
+        ConfigurationError(
+          "model listing is not supported with workload identity auth for anthropic (the Anthropic SDK performs " +
+            "the federation exchange only inside a client); " +
+            "list models from a section that sets an apiKey"
+        )
+      )
+      apiKey <- anthropic.requireApiKey
       baseUrl = anthropic.baseUrlOrDefault(AnthropicConfig.DEFAULT_BASE_URL)
       models <- listAnthropicModels(baseUrl, apiKey, httpClient)
     yield models

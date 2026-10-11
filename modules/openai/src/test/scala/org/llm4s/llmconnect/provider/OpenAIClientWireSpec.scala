@@ -197,6 +197,28 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
     }
   }
 
+  it should "not repeat the configured key, or a credential field, from the error body" in {
+    val key = "opaque-openai-key-1"
+    LocalProviderTestServer.withServer("/") { exchange =>
+      exchange.getRequestBody.readAllBytes()
+      LocalProviderTestServer.sendJsonResponse(
+        exchange,
+        401,
+        s"""{"error":{"message":"Incorrect API key provided: $key","type":"invalid_request_error",""" +
+          s""""code":"invalid_api_key"},"access_token":"opaque-access-tok-2"}"""
+      )
+    } { baseUrl =>
+      val client = OpenAIClient(OpenAIConfig.fromValues("gpt-4o", key, None, baseUrl).value).value
+      val result = client.complete(hello, CompletionOptions())
+      client.close()
+
+      result.left.value shouldBe an[AuthenticationError]
+      result.left.value.message should include("Incorrect API key provided")
+      (result.left.value.message should not).include(key)
+      (result.left.value.message should not).include("opaque-access-tok-2")
+    }
+  }
+
   "OpenAIClient for Azure" should "post to the deployment path with an api-key header and api-version" in {
     val seen = new AtomicReference[Seen]()
     LocalProviderTestServer.withServer("/") { exchange =>
