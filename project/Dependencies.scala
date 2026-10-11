@@ -64,8 +64,11 @@ object Versions {
   // review alongside the existing neo4j-harness/Netty compatibility constraint.
   val neo4j = "5.27.0"
 
-  // Spring Boot
-  val springBoot = "3.3.6"
+  // Spring Boot: the starter is built against the oldest supported 3.x release. CI's "Spring Boot 3.x (latest)"
+  // job runs the starter's specs again with `-Dllm4s.springBootVersion=<latest 3.x>`, so the supported range is
+  // tested at both ends; nothing else reads the property.
+  val springBootBaseline = "3.3.6"
+  val springBoot         = sys.props.getOrElse("llm4s.springBootVersion", springBootBaseline)
 }
 
 object Deps {

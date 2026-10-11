@@ -30,8 +30,12 @@ The starter is Spring Boot auto-configuration on top of the [Java API](java). Wh
 | `llm4sTemplate` | the `LLM4STemplate` you inject | defining a bean of type `LLM4STemplate` |
 | `llmHealthIndicator` | an Actuator `HealthIndicator`, only when Spring Boot Actuator is on the classpath | defining a bean of type `LlmHealthIndicator` |
 
-Set `llm4s.enabled=false` to switch all of them off; the beans are also registered when `llm4s.enabled` is absent. It is built
-against Spring Boot 3.3.6.
+Set `llm4s.enabled=false` to switch all of them off; the beans are also registered when `llm4s.enabled` is absent.
+
+**Spring Boot versions.** The starter supports Spring Boot 3.x from 3.3 on. It is built against 3.3.6, and CI runs its
+whole test suite again against the latest 3.x release (3.5.16), so both ends of the range are tested on every change.
+Spring Boot 4 is not supported yet; whether it needs its own artifact, as LangChain4j ships one, is tracked in
+[#1467](https://github.com/llm4s/llm4s/issues/1467).
 
 {: .note }
 > **Not published yet.** `llm4s-spring-boot-starter` is not on Maven Central: the latest release, `0.4.1`, is a single

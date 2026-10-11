@@ -322,6 +322,35 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
     }
   }
 
+  "The Spring Boot versions of the guide" should {
+    def one(text: String, pattern: String, what: String): String = {
+      val found = pattern.r.findAllMatchIn(text).map(_.group(1)).toList.distinct
+      withClue(s"$what: ")(found should have size 1)
+      found.head
+    }
+    lazy val baseline = one(
+      StarterGuideDocs.read(GuideFile, "project/Dependencies.scala"),
+      """springBootBaseline\s*=\s*"([0-9.]+)"""",
+      "the baseline in project/Dependencies.scala"
+    )
+    lazy val latest = one(
+      StarterGuideDocs.read(GuideFile, ".github/workflows/ci.yml"),
+      """-Dllm4s\.springBootVersion=([0-9.]+)""",
+      "the latest 3.x CI tests in .github/workflows/ci.yml"
+    )
+
+    "be the baseline the starter is built against and the latest 3.x CI tests it against" in {
+      one(guide, """built against ([0-9.]+)""", "the guide's baseline") shouldBe baseline
+      one(guide, """latest 3\.x release \(([0-9.]+)\)""", "the guide's latest") shouldBe latest
+      baseline should startWith("3.")
+      latest should startWith("3.")
+    }
+
+    "include the Spring Boot these specs run on, so the CI job really runs the latest 3.x" in {
+      Seq(baseline, latest) should contain(org.springframework.boot.SpringBootVersion.getVersion)
+    }
+  }
+
   "The Java blocks of the guide" should {
 
     "each appear word for word in the Java the spec compiles, except the one marked illustrative" in {

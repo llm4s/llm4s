@@ -1,6 +1,8 @@
 # llm4s-spring-boot-starter
 
 Spring Boot auto-configuration for llm4s (`org.llm4s:llm4s-spring-boot-starter_3`, built on `llm4s-java-api`).
+Supports Spring Boot 3.x from 3.3 on: built against 3.3.6 and tested in CI against the latest 3.x release too. Spring
+Boot 4 is not supported yet ([#1467](https://github.com/llm4s/llm4s/issues/1467)).
 
 ```properties
 # openai | anthropic | ollama
