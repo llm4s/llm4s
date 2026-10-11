@@ -2482,6 +2482,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - `Redaction`: a keyword argument whose value is a call, and a `"` inside a redacted Python string** ([#1813](https://github.com/llm4s/llm4s/issues/1813)):
+  `Settings(token=SecretStr('...'))`, `password=Wrapper("...")` and `api_key=module.Secret(value='...')` kept the
+  credential readable - `pydantic` masks its own `SecretStr` in a `repr`, a wrapper class of one's own does not - while
+  the same call under a dict key was redacted. The strings, numbers and words of a call under a sensitive keyword
+  argument or dict key are now replaced, the call's own keyword arguments included (`token=[REDACTED]'[REDACTED]')`).
+  A secret holding `'"` in a single-quoted Python string came out as `'[REDACTED][REDACTED]"[REDACTED]'`, which told
+  that it held a `"`, and a second redaction collapsed it: the `"` is now replaced with the rest of the content, a part
+  that meets a placeholder already written is written as nothing, and the output is `'[REDACTED]'`, which a second
+  redaction leaves as it is. A `"` that delimits a JSON string around the value, at any depth, is still kept, so the
+  JSON parses. Like the readings before it, this only adds to what was replaced: `data={'password': pw}` still
+  replaces `pw`, since a bare word there may be the credential.
 - **Security - ShellTool and the workspace runner: on double-byte Windows hosts, a quoted argument holding a character
   whose second byte is 0x5C is refused** ([#1807](https://github.com/llm4s/llm4s/issues/1807)): code pages 932, 936
   and 950 encode some characters with a second byte of 0x5C, the byte of `\` (50, 126 and 126 of the characters they
