@@ -2081,6 +2081,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - ShellTool and the workspace runner: on double-byte Windows hosts, a quoted argument holding a character
+  whose second byte is 0x5C is refused** ([#1807](https://github.com/llm4s/llm4s/issues/1807)): code pages 932, 936
+  and 950 encode some characters with a second byte of 0x5C, the byte of `\` (50, 126 and 126 of the characters they
+  hold, such as `表` 0x95 0x5C and `十` on 932, `功` 0xA5 0x5C on 950). The JDK puts an argument holding a space in
+  quotes, so `a 表` reached the command line as `"a 表"`, whose bytes end `5C 22`, and a program that splits its ANSI
+  command line byte by byte, without knowing the code page's lead bytes, read `\"` as a literal quote and split the
+  arguments after it differently - an operand the checks saw could become an option. On a host whose ANSI code page
+  is 932, 936 or 950, `ShellTool` (`modules/agent-tools`) and the workspace runner's `CommandPolicy` now refuse an
+  argument holding such a character when the JDK may quote it - it is empty or holds a space or whitespace character,
+  `"`, `<`, `>`, `&`, `|` or `^`, the characters for which JDK 21's Windows `ProcessImpl` adds quotes in any of its
+  modes. The runner refuses with `ARGUMENT_NOT_ALLOWED`. The characters are found through the JDK's encoder for the
+  host's code page, not a table. Migration: on such a host, a file name like `表.txt` still works, but `a 表.txt` is
+  refused; rename the file. Other hosts and POSIX are unchanged.
 - **Security - ShellTool and the workspace runner: on Windows, arguments whose characters best-fit to separators or
   quotes are refused** ([#1766](https://github.com/llm4s/llm4s/issues/1766)): a Windows program that reads its command
   line in an ANSI code page (`main` rather than `wmain`) gets each argument converted from UTF-16 with "best fit", so a
