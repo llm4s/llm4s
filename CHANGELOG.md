@@ -1238,9 +1238,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Redaction` treated every key ending in `assertion` as a credential, which blanked test-framework lines such as
   `Assertion: expected status 200` and `{"assertion": "response.status == 200"}`. The bare key is still a credential
   in every shape - JSON field, IdP error echo, Python dict, escaped JSON, header line, `key=value` pair, quoted pair,
-  form body and query - but a value under it that holds a space (U+0020) is left readable: a test assertion holds
-  spaces, and an RFC 7521 / 7523 `assertion` grant (a JWT, a base64 or base64url SAML assertion, a hex or opaque
-  token) never does. One rule, read by every pass and by `remoteBody`'s collector. A compound key
+  form body and query - but a value under it that reads as prose is left readable: it holds a space (U+0020), no
+  `<`, and no run of 20 or more characters of `[A-Za-z0-9+/_=-]`. A test assertion (`expected status 200 but got
+  404`, `len(items) > 0`) is words and operators between spaces; an RFC 7521 / 7523 `assertion` grant fails the rule
+  however it is wrapped - a JWT, a base64 or base64url SAML assertion (also wrapped with spaces), a hex or opaque
+  token is one long run, a raw XML SAML assertion holds `<`, a PEM block holds base64 lines - and so does a credential
+  with a word beside it (`ghp_... x`, an AWS key id and its secret). The check reads only the value, so redaction
+  stays linear in the input. One rule, read by every pass and by `remoteBody`'s collector. A compound key
   (`client_assertion`, `saml_assertion`, `jwtAssertion`) and a container under the bare key are redacted whatever
   they hold, and the patterns that read no key (JWTs, bearer tokens, API keys, sensitive pairs) still apply inside a
   readable assertion. An `Assertion` request header is still withheld on a cross-origin redirect by the HTTP tool.
@@ -2544,6 +2548,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now refuses a path that is a directory, a FIFO, a device or larger than 64 KiB, as a `ConfigurationError` naming
   `workloadIdentity.identityTokenFile`; a path that does not exist yet is still accepted. Documented in the
   configuration guide.
+- **Security - `Redaction`: a keyword argument whose value is a call, and a `"` inside a redacted Python string** ([#1813](https://github.com/llm4s/llm4s/issues/1813)):
+  `Settings(token=SecretStr('...'))`, `password=Wrapper("...")` and `api_key=module.Secret(value='...')` kept the
+  credential readable - `pydantic` masks its own `SecretStr` in a `repr`, a wrapper class of one's own does not - while
+  the same call under a dict key was redacted. The strings, numbers and words of a call under a sensitive keyword
+  argument or dict key are now replaced, the call's own keyword arguments included (`token=[REDACTED]'[REDACTED]')`).
+  A secret holding `'"` in a single-quoted Python string came out as `'[REDACTED][REDACTED]"[REDACTED]'`, which told
+  that it held a `"`, and a second redaction collapsed it: the `"` is now replaced with the rest of the content, a part
+  that meets a placeholder already written is written as nothing, and the output is `'[REDACTED]'`, which a second
+  redaction leaves as it is. A `"` that delimits a JSON string around the value, at any depth, is still kept, so the
+  JSON parses. Like the readings before it, this only adds to what was replaced: `data={'password': pw}` still
+  replaces `pw`, since a bare word there may be the credential.
 - **The Spring Boot starter's health indicator redacts nested credentials and header values** ([#1820](https://github.com/llm4s/llm4s/issues/1820)):
   the credentials it removes from a failed probe's `error` message were read only from top-level text fields of the
   resolved provider config, so a credential set outside Spring properties (in `application.conf`, a `reference.conf`
