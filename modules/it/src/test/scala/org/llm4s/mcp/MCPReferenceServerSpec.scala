@@ -2,7 +2,7 @@ package org.llm4s.mcp
 
 import org.llm4s.agent.Agent
 import org.llm4s.it.Tier
-import org.llm4s.it.tags.Docker
+import org.llm4s.it.tags.McpReference
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi._
@@ -25,7 +25,9 @@ import scala.util.{ Try, Using }
  * error results, notifications, and an [[Agent]] calling a discovered tool, against a
  * third-party implementation.
  *
- * The CI `integration-tests` job runs the server in a container. The server (2026.8.31) and its
+ * It is the only `@McpReference` suite (`sbt testMcpReference`). The CI `mcp-reference-integration`
+ * job, which runs on pushes to main and on manual dispatch rather than on every PR because starting
+ * the server needs Docker Hub and npm, runs the server in a container. The server (2026.8.31) and its
  * whole dependency tree are pinned by `modules/it/mcp-reference-server/package-lock.json` and
  * installed with install scripts disabled; the image is pinned by digest in the workflow. From
  * the repository root:
@@ -39,7 +41,7 @@ import scala.util.{ Try, Using }
  * works without Docker.) Without `MCP_SERVER_URL`, or with nothing listening there, each test is
  * cancelled - or fails, under `LLM4S_IT_STRICT=true`.
  */
-@Docker
+@McpReference
 class MCPReferenceServerSpec extends AnyFlatSpec with Matchers {
 
   private val serverUrl: Option[String] = sys.env.get("MCP_SERVER_URL").map(_.trim).filter(_.nonEmpty)

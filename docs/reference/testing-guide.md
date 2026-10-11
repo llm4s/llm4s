@@ -213,8 +213,9 @@ to say which tier does run it.
 | Tag | Needs | Command | CI |
 |---|---|---|---|
 | `@Local` | nothing external | `sbt test` | every PR |
-| `@Docker` | Postgres/pgvector, Qdrant, Neo4j or the MCP reference server | `sbt testIntegration` | every PR (service containers; the MCP reference server in a container started in a CI step) |
+| `@Docker` | Postgres/pgvector, Qdrant or Neo4j | `sbt testIntegration` | every PR (service containers) |
 | `@Workspace` | Docker + a built `workspace-runner` image | `sbt testWorkspace` | pushes to `main` |
+| `@McpReference` | the MCP reference server at `MCP_SERVER_URL` | `sbt testMcpReference` | pushes to `main` and manual `workflow_dispatch` (a container started in a CI step) |
 | `@Ollama` | a local Ollama with `qwen2.5:0.5b` pulled | `sbt testOllama` | pushes to `main` |
 | `@Cloud` | live provider API keys (real money) | `sbt testSmoke` | manual `workflow_dispatch` |
 
@@ -253,8 +254,6 @@ really executes:
 docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg16
 docker run -d -p 6333:6333 qdrant/qdrant
 docker run -d -p 7687:7687 -e NEO4J_AUTH=neo4j/llm4stest neo4j:5
-docker run -d -p 3001:3001 -v "$PWD/modules/it/mcp-reference-server:/src:ro" \
-  node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 sh /src/run.sh
 
 export PGVECTOR_TEST_URL=jdbc:postgresql://localhost:5432/postgres
 export PGVECTOR_USER=postgres PGVECTOR_PASSWORD=postgres
@@ -262,10 +261,25 @@ export PGVECTOR_TEST_USER=postgres PGVECTOR_TEST_PASSWORD=postgres
 export POSTGRES_TEST_ENABLED=true POSTGRES_PASSWORD=postgres
 export QDRANT_TEST_URL=http://localhost:6333
 export NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=llm4stest
-export MCP_SERVER_URL=http://localhost:3001/mcp
 export LLM4S_IT_STRICT=true
 
 sbt testIntegration
+```
+
+The `@McpReference` tier runs the MCP client against the official MCP reference server
+(`@modelcontextprotocol/server-everything`, pinned with its whole dependency tree in
+`modules/it/mcp-reference-server/`). Starting it pulls the `node` image from Docker Hub and the
+server from npm, so CI runs this tier on pushes to `main` and on manual `workflow_dispatch`
+rather than on every PR, where an outage of either service would fail unrelated changes:
+
+```bash
+docker run -d -p 3001:3001 -v "$PWD/modules/it/mcp-reference-server:/src:ro" \
+  node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 sh /src/run.sh
+
+export MCP_SERVER_URL=http://localhost:3001/mcp
+export LLM4S_IT_STRICT=true
+
+sbt testMcpReference
 ```
 
 ---

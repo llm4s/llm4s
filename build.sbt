@@ -110,8 +110,9 @@ addCommandAlias(
 // new suite lands in a tier that actually runs instead of matching no `testOnly` pattern.
 //
 //   sbt test             Tier 1 - unit tests plus the `@Local` suites in modules/it
-//   sbt testIntegration  Tier 2 - `@Docker`: needs Postgres/pgvector, Qdrant, Neo4j, the MCP reference server
+//   sbt testIntegration  Tier 2 - `@Docker`: needs Postgres/pgvector, Qdrant, Neo4j
 //   sbt testWorkspace    Tier 2 - `@Workspace`: needs a built workspace-runner image + Docker
+//   sbt testMcpReference Tier 2 - `@McpReference`: needs the MCP reference server at MCP_SERVER_URL
 //   sbt testOllama       Tier 3 - `@Ollama`: needs a local Ollama with `qwen2.5:0.5b` pulled
 //   sbt testSmoke        Tier 4 - `@Cloud`: real provider APIs, real money
 //
@@ -119,6 +120,7 @@ addCommandAlias(
 // to the Local tier; adding a second `-n` would intersect to nothing.
 addCommandAlias("testIntegration", ItTiers.alias(ItTiers.Docker))
 addCommandAlias("testWorkspace", ItTiers.alias(ItTiers.Workspace))
+addCommandAlias("testMcpReference", ItTiers.alias(ItTiers.McpReference))
 addCommandAlias("testOllama", ItTiers.alias(ItTiers.Ollama))
 addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 

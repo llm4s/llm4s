@@ -1,5 +1,5 @@
 #!/bin/sh
-# Starts the MCP reference server for MCPReferenceServerSpec (@Docker) on Streamable HTTP, port 3001.
+# Starts the MCP reference server for MCPReferenceServerSpec (@McpReference) on Streamable HTTP, port 3001.
 #
 # Installs exactly the tree pinned in package-lock.json (npm ci fails if the lockfile and
 # package.json disagree) with install scripts disabled; no package in the tree declares one. The
