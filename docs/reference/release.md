@@ -88,6 +88,18 @@ The `publish-kotlin` job does, after `publish`, with the same signing key and Ce
 4. `scripts/publish-kotlin-api.sh` zips the version directory into a Central Portal bundle, uploads it with
    `publishingType=AUTOMATIC` (as `sbt ci-release` releases), and waits until the Portal has validated it and is
    publishing. It refuses a snapshot, an unsigned file or a missing sources or javadoc jar before uploading anything.
+   It is safe to re-run: before uploading it asks Maven Central for the POM, then the Portal
+   (`GET /api/v1/publisher/published` and its deployments of `llm4s-kotlin-api-<version>`), and exits 0 without
+   uploading when the version is already published or publishing; a deployment an earlier run left validating is
+   followed rather than uploaded again. If the Portal cannot answer those questions the script fails **without**
+   uploading (fail closed): a duplicate deployment cannot be withdrawn, while a failed check only costs a re-run. The
+   Portal token reaches `curl` in a `0600` header file, never on its command line.
+
+`github-release` waits for `publish-kotlin`, not only for `publish`. That is deliberate: `llm4s-bom` at the release
+version names `llm4s-kotlin-api`, so a Release announced before the Kotlin artifact is on its way would advertise a
+BOM entry, and an install line, that do not resolve. The price is that a `publish-kotlin` failure also holds back the
+GitHub Release, the docs deploy and the SBOMs; [Re-triggering a failed release](#re-triggering-a-failed-release) says
+how to release them by hand.
 
 The artifact has no `_3` suffix, since it is Kotlin, and `llm4s-bom` manages it with every other artifact, so a Gradle
 build that imports the BOM declares `implementation("org.llm4s:llm4s-kotlin-api")`. `sbt listPublishedArtifacts` lists
@@ -242,11 +254,38 @@ help.
   behind as a draft. Delete it too before retrying, or the recreated tag's `github-release`
   job will skip creation.
 
-- **`publish-kotlin` failed** — the sbt artifacts are live, so do **not** re-tag. If it failed before the upload
-  step, re-run the job from the Actions UI once the cause is fixed outside the tag (a missing secret, a Central
-  outage); `github-release` and `docs` then follow. If the upload step reported a FAILED deployment, the Portal's
-  reasons are in the log and nothing reached Central, so a re-run is safe after fixing them; a change to the build
-  that the fix needs waits for the next patch version. A deployment the Portal accepted cannot be uploaded again.
+- **`publish-kotlin` failed** — the sbt artifacts are live, so do **not** re-tag. `github-release`, `docs` and
+  `sbom` wait for `publish-kotlin`, so none of them has run (`docker` has: it needs only `publish`).
+  - **If the cause is outside the tagged commit** (a missing or expired secret, a Portal outage, a FAILED
+    validation whose reasons the log shows and a Portal-side fix clears), fix it and use **Re-run failed jobs** on
+    the run. `publish-kotlin` is safe to re-run at any step: the upload exits 0 without uploading when the version
+    is already published or publishing, and follows a deployment an earlier attempt left validating. When it goes
+    green, `github-release`, then `docs` and `sbom`, run as usual.
+  - **If the fix needs a change to the build** (`modules/kotlin-api`, the workflow, the scripts), it cannot be in
+    version X: the workflow builds the tagged commit, and Maven Central is immutable. Land the fix on `main`;
+    `llm4s-kotlin-api` first ships with the next patch version. Version X then stays without it, and its
+    `llm4s-bom` still lists `org.llm4s:llm4s-kotlin-api:X`, which will never resolve: a Gradle build that imports
+    the X BOM and declares the Kotlin artifact fails, so the X Release notes must say to use the next version for
+    Kotlin. `scripts/verify-release.sh X` reports that one miss and nothing else. Release the rest of X by hand,
+    in the order the workflow would:
+
+    ```bash
+    scripts/verify-release.sh 0.5.0      # every sbt artifact resolves; only llm4s-kotlin-api is missing
+    # The GitHub Release (as the github-release job creates it; add --prerelease for a vX.Y.Z-RC1 tag).
+    gh release create v0.5.0 --verify-tag --title v0.5.0 --generate-notes
+    gh release edit v0.5.0 --notes-file notes.md   # say llm4s-kotlin-api is not in 0.5.0
+    # The docs deploy (what the docs job dispatches), once the Release exists.
+    gh workflow run pages.yml --ref main -f ref=v0.5.0
+    # The SBOMs (what the sbom job does), from a clean checkout of the tag, on JDK 21.
+    git checkout v0.5.0
+    sbt -batch publishedSboms
+    sbt -batch -error listPublishedArtifacts | grep -E '^(artifact|stub) ' > target/published-artifacts.txt
+    scripts/check-sbom.sh target/sboms target/published-artifacts.txt
+    gh release upload v0.5.0 target/sboms/*.bom.json --clobber
+    ```
+
+    This is the one case where the Release is created by hand ([section 4](#4-do-not-create-the-github-release-by-hand)):
+    only after `verify-release.sh` shows the sbt artifacts are on Central.
 
 - **Failed after `publish`** (`github-release`, `docs` or `docker`) — the artifacts are live
   and the release is real. Do **not** re-tag. Re-run the failed job from the Actions UI, or

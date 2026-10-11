@@ -17,8 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `0.1.0-SNAPSHOT`), and its facade dependency moved from `implementation` to `api`, because `AgentKt`'s signatures
   expose the facade's types and `Flow`. A new `publish-kotlin` job in `release.yml`, after `publish` and before
   `github-release`, checks that sbt released the tag's version, builds and signs the publication, checks it
-  (`scripts/check-kotlin-publication.sh`) and uploads it to the Central Portal (`scripts/publish-kotlin-api.sh`). The
-  `Kotlin API` CI job dry-runs it unsigned on every pull request and builds a throwaway project against it.
+  (`scripts/check-kotlin-publication.sh`) and uploads it to the Central Portal (`scripts/publish-kotlin-api.sh`, which
+  is safe to re-run: it uploads nothing when Central or the Portal already has the version, and fails closed when the
+  Portal cannot say). The `Kotlin API` CI job dry-runs it unsigned on every pull request and builds a throwaway project against it.
   `sbt listPublishedArtifacts` prints it as a `gradle` line and `scripts/verify-release.sh` checks it (POM, jar, and the
   facade version), with tests (`scripts/test-verify-release.sh`, `scripts/test-publish-kotlin-api.sh`). See
   [Release Process](docs/reference/release.md#the-kotlin-artifact-llm4s-kotlin-api).
