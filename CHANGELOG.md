@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sbt listPublishedArtifacts` prints it as a `gradle` line and `scripts/verify-release.sh` checks it (POM, jar, and the
   facade version), with tests (`scripts/test-verify-release.sh`, `scripts/test-publish-kotlin-api.sh`). See
   [Release Process](docs/reference/release.md#the-kotlin-artifact-llm4s-kotlin-api).
+- **A build-only dry run for the docs deploy** ([#1152](https://github.com/llm4s/llm4s/issues/1152)): `pages.yml`
+  takes `-f dry_run=true`, which runs every build step (tag validation and checkout, version, aggregate Scaladoc and its
+  package check, Jekyll, the Pages artifact) and skips the deploy, in a concurrency group of its own so it never
+  displaces a pending real deploy. It works on any branch, so the release path (`--ref main -f ref=<tag> -f
+  dry_run=true`) and a `pages.yml` change can be checked without touching llm4s.org. A run that is neither a dry run nor
+  on `main` now fails in its first step, instead of building for minutes and then being rejected by the `github-pages`
+  environment. The release dispatch never sets it. `docs/reference/release.md` also records that only a tag with the
+  aggregate `docs` project (after v0.4.1) can be built by today's `pages.yml`.
 - **Kotlin `AgentKt.forget(threadId)`** ([#1693](https://github.com/llm4s/llm4s/issues/1693)): a suspend function
   that forgets a conversation by its thread id, delegating to `JAgent.forget(threadId)` and throwing `LLMException`
   on failure, so a Kotlin caller can remove a named conversation whose turn left no result - a failed
@@ -2502,6 +2510,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **The Spring Boot starter's health indicator redacts nested credentials and header values** ([#1820](https://github.com/llm4s/llm4s/issues/1820)):
+  the credentials it removes from a failed probe's `error` message were read only from top-level text fields of the
+  resolved provider config, so a credential set outside Spring properties (in `application.conf`, a `reference.conf`
+  default or an environment variable) was missed when it was nested - Bedrock's `credentials` (access key id, secret
+  key, session token) - or held in `headers` under a name that does not look secret. The starter now reads every case
+  class inside the config, through `Option`, `Seq` and `Map` values, treats every `headers` value (and the token after
+  an auth scheme such as `Bearer`) as a credential, and never throws while reading. A field named like a URL
+  (`tokenUrl`) is no longer taken for a credential.
 - **Security - ShellTool and the workspace runner: on double-byte Windows hosts, a quoted argument holding a character
   whose second byte is 0x5C is refused** ([#1807](https://github.com/llm4s/llm4s/issues/1807)): code pages 932, 936
   and 950 encode some characters with a second byte of 0x5C, the byte of `\` (50, 126 and 126 of the characters they
