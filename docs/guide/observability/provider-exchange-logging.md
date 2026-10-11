@@ -224,7 +224,8 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   `key=value` pair; `max_tokens`, `prompt_tokens`, `token_count`, `next_page_token`, `cookie_policy` and
   `cookie_consent` are not, because the match is never on a substring. URL query parameters are also
   matched against a second, substring list (`key`, `token`, `secret`, `password`, `auth` and similar), so
-  `?x_api_key_id=` is redacted too. A query value written right before JSON
+  `?x_api_key_id=` is redacted too. The password of a URL's userinfo is redacted wherever the URL is
+  (`https://alice:[REDACTED]@gw.example.com/v1`, also with JSON's `\/`); the user and the host are kept. A query value written right before JSON
   (`?token=...,{"api_key": "..."}`, also with the quotes escaped) does not hide the field after it.
 - **Where a cookie header's value ends.** Outside any string (a raw request dump, a log line), at the end
   of its line, quotes, apostrophes and backslashes included: `Cookie: sid="abc"; x=y` becomes

@@ -16,7 +16,7 @@ import scala.util.matching.Regex
  * Pattern-based redaction automatically detects and masks:
  *  - API keys (OpenAI, Anthropic, Google, Voyage, Langfuse)
  *  - Bearer tokens and credential headers: Authorization, Proxy-Authorization, Cookie and Set-Cookie
- *  - URL query parameters with sensitive keys
+ *  - URL query parameters with sensitive keys, and the password of a URL's userinfo (`https://user:password@host`)
  *  - Sensitive fields, whatever the shape: JSON (also inside a string, single-quoted, with a number value, or with
  *    an array or object value, whose every leaf - string, number or bare word - is replaced), `key=value` pairs and
  *    `x-api-key: value` header lines (api_key, password, token, client_secret, etc.)
@@ -375,7 +375,8 @@ private[llm4s] object Redaction {
    * backslashes (`password=\\'p&ss=QZXJ\\'`) up to the same quote written the same way, and a fifth (#1706) the
    * strings, numbers and words of the value of a sensitive key of a Python literal, read as Python writes it
    * (`pythonValues`): a `pytest` diff, a notebook's line array, a dict cut off after a comma, `str(dict)` inside a
-   * `repr`, `\'` inside a JSON string, a keyword argument holding a list.
+   * `repr`, `\'` inside a JSON string, a keyword argument holding a list. A sixth (#1816) adds the password of a URL's
+   * userinfo, `https://alice:[REDACTED]@host`, also with the slashes escaped as JSON writes them.
    *
    * Redacting the output a second time usually changes nothing, but that is not guaranteed: where quotes are
    * unbalanced or stray, the text a first pass replaced can change how a second pass pairs the quotes, and the
@@ -500,6 +501,8 @@ private[llm4s] object Redaction {
    * written in `'`, as the leaf walk writes a bare leaf, so that a line of a notebook's array that starts with one
    * still starts with a quote.
    *
+   * Last, the same way, the password of a URL's userinfo (`urlUserinfoPasswords`, #1816).
+   *
    * Each reading is a fixed number of passes over the input, so the cost stays linear.
    */
   private def addedReadingEdits(input: String, placeholder: String, edits: Vector[Edit]): Vector[Edit] = {
@@ -531,7 +534,54 @@ private[llm4s] object Redaction {
         if (added.nonEmpty) kept = (kept ++ added).sortBy(_.start)
       }
     }
+    if (input.indexOf('@') >= 0) {
+      val added = uncoveredEdits(input, kept, urlUserinfoPasswords(input), placeholder)
+      if (added.nonEmpty) kept = (kept ++ added).sortBy(_.start)
+    }
     kept
+  }
+
+  /**
+   * The password of every URL whose authority holds userinfo, `scheme://user:password@host`, as `(start, end)`
+   * spans of the input, sorted and free of overlaps (#1816): a provider `baseUrl`, a proxy or a database URL in a
+   * connection error or a log line. The scheme is a run of letters, digits, `+`, `.` or `-` before `:`, and its two
+   * slashes may be written behind backslashes, as JSON writes them (`https:\/\/`, behind the same run each). The
+   * authority runs from there to the first character no authority holds unencoded in a log line - whitespace, `/`,
+   * `?`, `#`, `\`, `"`, `<`, `>`, `[`, `]`, `{`, `}`, `|`, `^` or a backtick - and its userinfo to its last `@`, as
+   * a browser reads it, so a password that holds `@` unencoded is read whole. The password is the userinfo after its
+   * first `:`; a userinfo with no `:` (`https://alice@host`) has none, and an empty password is left. Only the
+   * password is replaced: `https://alice:[REDACTED]@host` keeps the user and the host. It holds no `"` or backslash,
+   * so a JSON string around the URL still parses. One forward scan: each authority is read once and the search
+   * goes on after it.
+   */
+  private def urlUserinfoPasswords(input: String): Vector[(Int, Int)] = {
+    val length                         = input.length
+    val found                          = Vector.newBuilder[(Int, Int)]
+    def schemeChar(c: Char): Boolean   = c.isLetterOrDigit || c == '+' || c == '.' || c == '-'
+    def endsAuthority(c: Char): Boolean = Character.isWhitespace(c) || "/?#\\\"<>[]{}|^`".indexOf(c.toInt) >= 0
+    var i                              = input.indexOf(':')
+    while (i >= 0) {
+      var next  = i + 1
+      val slash = afterBackslashes(input, i + 1)
+      if (i > 0 && schemeChar(input.charAt(i - 1)) && slash < length && input.charAt(slash) == '/') {
+        val second = afterBackslashes(input, slash + 1)
+        if (second < length && input.charAt(second) == '/' && second - (slash + 1) == slash - (i + 1)) {
+          var j      = second + 1
+          var colon  = -1
+          var lastAt = -1
+          while (j < length && !endsAuthority(input.charAt(j))) {
+            val c = input.charAt(j)
+            if (c == '@') lastAt = j
+            else if (c == ':' && colon < 0) colon = j
+            j += 1
+          }
+          if (colon >= 0 && lastAt > colon + 1) found += ((colon + 1) -> lastAt)
+          next = j
+        }
+      }
+      i = if (next < length) input.indexOf(':', next) else -1
+    }
+    found.result()
   }
 
   /**

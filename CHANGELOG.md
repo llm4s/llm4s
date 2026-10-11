@@ -2458,6 +2458,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - `Redaction`: the password of a URL's userinfo is redacted** ([#1816](https://github.com/llm4s/llm4s/issues/1816)):
+  `https://alice:s3cret@gw.example.com/v1` - a provider `baseUrl`, a proxy or a database URL in a connection error,
+  an HTTP client error or the provider exchange log - came out unchanged. The password of `scheme://user:password@host`
+  is now replaced (`https://alice:[REDACTED]@gw.example.com/v1`), in plain text, inside a JSON string with the slashes
+  escaped or not, at any depth, and as a query value (`?next=https://u:p@h/`). The user, the host, the port and the
+  path are kept; the userinfo ends at the authority's last `@`, so an unencoded `@` in a password is read whole, and a
+  percent-encoded one is read as it is. A URL with no userinfo, a user with no password, an empty password and an `@`
+  in the path, query or fragment are left as they were. Like the readings of #1695, #1706 and #1707, it only adds to
+  what was replaced before.
 - **Security - ShellTool and the workspace runner: on double-byte Windows hosts, a quoted argument holding a character
   whose second byte is 0x5C is refused** ([#1807](https://github.com/llm4s/llm4s/issues/1807)): code pages 932, 936
   and 950 encode some characters with a second byte of 0x5C, the byte of `\` (50, 126 and 126 of the characters they
