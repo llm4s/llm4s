@@ -82,7 +82,8 @@ class RedactionPythonReprSpec extends AnyFlatSpec with Matchers {
   it should "redact a Python value holding \\' inside a JSON string whole (#1706)" in {
     val input = """{"m": "{'password': 'QQ\\'SECRETZZ\"x'}"}"""
     val out   = Redaction.redact(input)
-    out shouldBe s"""{"m": "{'password': '$R$R\\"$R'}"}"""
+    // the secret's `\"` is replaced with the rest of it (#1813): one placeholder, no hint that it held a `"`
+    out shouldBe s"""{"m": "{'password': '$R'}"}"""
     parses(out) shouldBe true
     (Redaction.redact("""{"m": "{'api_key': 'a:b\\'c=d\"QZSECRET', 'n': 1}"}""") should not).include("QZSECRET")
   }
@@ -284,6 +285,122 @@ class RedactionPythonReprSpec extends AnyFlatSpec with Matchers {
       "pytest lines"   -> (n => "E   {'token': ['a',\n" + "E    'b',\n" * n + "E    'c']}"),
       "keyword arguments" -> (n => "Settings(" + "token=['a', " * n),
       "joined strings"    -> (n => "{'password': " + "'a' " * n + "}")
+    )
+    shapes.foreach { case (name, build) =>
+      LinearTime.assertLinear(name, build(1000), build(4000))(Redaction.redact(_))
+    }
+  }
+
+  it should "redact a keyword argument or a dict key whose value is a call (#1813)" in {
+    Redaction.redact("Settings(token=SecretStr('hunter2abc'), user='bob')") shouldBe
+      s"Settings(token=$R'$R'), user='bob')"
+    Redaction.redact("""Settings(password=Wrapper("hunter2abc"), retries=3)""") shouldBe
+      s"""Settings(password=$R"$R"), retries=3)"""
+    Redaction.redact("Client(api_key=pydantic.SecretStr('hunter2abc'))") shouldBe s"Client(api_key=$R'$R'))"
+    // the call's own keyword arguments are leaves of the value too
+    val kw = Redaction.redact("Client(api_key=my_mod.Secret(value='hunter2abc', kind='k1x'), user='bob')")
+    (kw should not).include("hunter2abc")
+    (kw should not).include("k1x")
+    kw should endWith("user='bob')")
+    (Redaction.redact("{'api_key': Secret(value='hunter2abc')}") should not).include("hunter2abc")
+    // inside a JSON string, in either quote
+    val json = Redaction.redact("""{"m": "Settings(token=SecretStr(\"hunter2abc\"), user='bob')"}""")
+    json shouldBe s"""{"m": "Settings(token=$R\\"$R\\"), user='bob')"}"""
+    parses(json) shouldBe true
+  }
+
+  it should "leave a call under a key that is not a credential as it was (#1813)" in {
+    Seq(
+      "Settings(model=Model(name='gpt-4o'), max_tokens=int('5'))",
+      "Config(next_page_token=Token('p2'), token_count=len('abc'))",
+      """{"m": "Settings(model=Model(name='gpt-4o'))"}"""
+    ).foreach(input => Redaction.redact(input) shouldBe input)
+    // a `key=value` value with a `(` in it is no call: the JSON after it is left as the other passes leave it
+    val pair = Redaction.redact("""secret=ab((cd [{"name":"prod","tags":["a","b"]}]""")
+    pair shouldBe s"""secret=$R [{"name":"prod","tags":["a","b"]}]"""
+  }
+
+  it should "replace a \" of a secret in a single-quoted Python string with the rest, and keep a JSON quote (#1813)" in {
+    // Plain, in a JSON string, and one string deeper: one placeholder, no `"` between two, as a second redaction
+    // would make it.
+    Redaction.redact("""{'password': 'ab\'"cd', 'user': 'bob'}""") shouldBe s"""{'password': '$R', 'user': 'bob'}"""
+    val depth1 = """{"m": "{'password': 'ab\\'\"cd', 'user': 'bob'}"}"""
+    Redaction.redact(depth1) shouldBe s"""{"m": "{'password': '$R', 'user': 'bob'}"}"""
+    val depth2 =
+      ujson.write(ujson.Obj("m" -> ujson.write(ujson.Obj("n" -> "{'password': 'ab\\'\"cd', 'user': 'bob'}"))))
+    val out2 = Redaction.redact(depth2)
+    out2 shouldBe ujson.write(ujson.Obj("m" -> ujson.write(ujson.Obj("n" -> s"{'password': '$R', 'user': 'bob'}"))))
+    Seq(depth1, depth2).foreach { input =>
+      val out = Redaction.redact(input)
+      parses(out) shouldBe true
+      Redaction.redact(out) shouldBe out
+    }
+    // a `"` of a string that is no credential's is kept, and so is the JSON string's own
+    Redaction.redact("""{"m": "{'password': 'x', 'note': 'a\"b'}"}""") shouldBe
+      s"""{"m": "{'password': '$R', 'note': 'a\\"b'}"}"""
+  }
+
+  /** Python reprs whose credentials sit in calls or hold a `"`, with the words that must not survive. */
+  private def callDocs(seed: Long, count: Int): Seq[(String, Seq[String])] = {
+    val rnd                    = new Random(seed)
+    def pick[A](xs: Seq[A]): A = xs(rnd.nextInt(xs.length))
+    def py(s: String): String = {
+      val q = if (s.contains('\'') && !s.contains('"')) '"' else '\''
+      q.toString + s.flatMap {
+        case '\\'        => "\\\\"
+        case c if c == q => "\\" + c
+        case c           => c.toString
+      } + q
+    }
+    (1 to count).map { i =>
+      val words  = Seq(s"Qa${i}z", s"Qb${i}z")
+      val name   = pick(Seq("SecretStr", "Wrapper", "pydantic.SecretStr", "_S"))
+      val inside = pick(Seq("", "'\"", "\"", ",", ")", "="))
+      val value = pick(
+        Seq(
+          s"$name(${py(words(0) + inside + words(1))})",
+          s"$name(value=${py(words(0) + inside + words(1))})",
+          s"$name(${py(words(0))}, ${py(words(1))})",
+          s"$name([${py(words(0))}], kind=${py(words(1))})",
+          py(words(0) + "'\"" + words(1))
+        )
+      )
+      val key  = pick(Seq("token", "password", "api_key", "client_secret"))
+      val repr = if (rnd.nextBoolean()) s"Settings($key=$value, user='bob')" else s"{'$key': $value, 'user': 'bob'}"
+      val doc = rnd.nextInt(3) match {
+        case 0 => repr
+        case 1 => ujson.write(ujson.Obj("m" -> repr, "n" -> 1))
+        case _ => ujson.write(ujson.Obj("m" -> ujson.write(ujson.Obj("n" -> repr))))
+      }
+      (doc, words)
+    }
+  }
+
+  it should "redact every call and quote shape whole, as a superset of what it replaced before (#1813)" in {
+    callDocs(1813, 3000).foreach { case (input, words) =>
+      val (out, added) = Redaction.redactedWithRanges(input, singleQuotedFromInput = true)
+      val (base, kept) = Redaction.redactedWithRanges(input, singleQuotedFromInput = true, addedReadings = false)
+      withClue(s"input $input, output $out, without $base: ") {
+        words.filter(out.contains) shouldBe empty
+        kept.filterNot(added.contains) shouldBe empty
+        out should include("'bob'")
+        if (parses(input)) {
+          parses(out) shouldBe true
+          innerDocuments(out).count(identity) should be >= innerDocuments(input).count(identity)
+        }
+        Redaction.redact(out) shouldBe out
+      }
+    }
+  }
+
+  it should "read calls in time linear in the input (#1813)" in {
+    val shapes: Seq[(String, Int => String)] = Seq(
+      "keyword calls"      -> (n => "token=S(" * n),
+      "keyword arguments"  -> (n => "token=S(value=" * n),
+      "calls never closed" -> (n => "token=S(" + "'a', " * n),
+      "dict key calls"     -> (n => "{'token': S(" * n),
+      "long names"         -> (n => ("token=" + "a" * 100 + "(") * n),
+      "quotes in strings"  -> (n => "{'password': 'a\\'\"b', " * n)
     )
     shapes.foreach { case (name, build) =>
       LinearTime.assertLinear(name, build(1000), build(4000))(Redaction.redact(_))
