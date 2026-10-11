@@ -90,7 +90,18 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
     .mkString("\n")
 
   private val runner = new ApplicationContextRunner()
-    .withConfiguration(AutoConfigurations.of(classOf[Llm4sAutoConfiguration], classOf[LlmActuatorAutoConfiguration]))
+    .withConfiguration(
+      AutoConfigurations.of(
+        classOf[Llm4sAutoConfiguration],
+        classOf[LlmActuatorAutoConfiguration],
+        classOf[LlmMetricsAutoConfiguration]
+      )
+    )
+    // The MeterRegistry an Actuator application has, so the guide's `llm4sMetricsCollector` row is checked too.
+    .withBean(
+      classOf[io.micrometer.core.instrument.MeterRegistry],
+      () => new io.micrometer.core.instrument.simple.SimpleMeterRegistry()
+    )
 
   /** The key=value pairs of a .properties block, comments and blank lines left out. */
   private def propertyPairs(block: String): List[String] =
@@ -179,7 +190,13 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
   "The beans table of the guide" should {
     "name the beans the starter registers" in {
       val names = tableRows("## What the starter gives you", "Set `llm4s.enabled=false`").map(row => unquoted(row.head))
-      names.toSet shouldBe Set("llm4sClient", "llm4sTaskExecutor", "llm4sTemplate", "llmHealthIndicator")
+      names.toSet shouldBe Set(
+        "llm4sClient",
+        "llm4sTaskExecutor",
+        "llm4sTemplate",
+        "llmHealthIndicator",
+        "llm4sMetricsCollector"
+      )
 
       val pairs = propertyPairs(blocksIn("properties").head) :+ "OPENAI_API_KEY=sk-from-env"
       runner
@@ -194,6 +211,7 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
         ctx.getBeansOfType(classOf[JLlmClient]).size() shouldBe 0
         ctx.getBeansOfType(classOf[LLM4STemplate]).size() shouldBe 0
         ctx.getBeansOfType(classOf[java.util.concurrent.ExecutorService]).size() shouldBe 0
+        ctx.getBeansOfType(classOf[org.llm4s.metrics.MetricsCollector]).size() shouldBe 0
       }
     }
   }

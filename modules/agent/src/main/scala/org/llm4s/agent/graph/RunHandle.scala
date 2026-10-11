@@ -181,13 +181,17 @@ final private[graph] class DefaultRunHandle[O](
    * Starts the run thread, running `body`. A throwable escaping it becomes `crashed(throwable)`;
    * `release` runs before the result is set, on every exit. With a `deadline` (a `System.nanoTime`
    * value), it then starts a virtual thread named `llm4s-deadline-<threadId>` that stops the run
-   * with [[StopCause.Expired]] when the deadline passes; see [[expireAt]].
+   * with [[StopCause.Expired]] when the deadline passes; see [[expireAt]]. With a `renewal` - an
+   * interval and a renew function that returns whether to go on - it starts a virtual thread named
+   * `llm4s-claim-<threadId>` that calls it every interval until the run ends or it returns `false`;
+   * see [[renewEvery]].
    */
   private[graph] def launch(
     body: () => RunResult[O],
     crashed: Throwable => RunResult[O],
     release: () => Unit,
-    deadline: Option[Long] = None
+    deadline: Option[Long] = None,
+    renewal: Option[(FiniteDuration, () => Boolean)] = None
   ): Unit =
     val thread = Thread.ofVirtual().name(s"llm4s-run-${threadId.value}").unstarted(() => run(body, crashed, release))
     runThread = thread
@@ -196,6 +200,21 @@ final private[graph] class DefaultRunHandle[O](
     deadline.foreach { at =>
       Thread.ofVirtual().name(s"llm4s-deadline-${threadId.value}").start(() => expireAt(at)): Unit
     }
+    renewal.foreach { (interval, renew) =>
+      Thread.ofVirtual().name(s"llm4s-claim-${threadId.value}").start(() => renewEvery(interval, renew)): Unit
+    }
+
+  /**
+   * The claim thread's body: waits for the run's result for `interval` at a time, and calls `renew`
+   * each time the wait times out, until the result is set or `renew` returns `false`. Like the
+   * deadline thread it holds nothing the run needs and ends as soon as the result is set. A `renew`
+   * that throws ends it (the runtime's never does).
+   */
+  @tailrec private def renewEvery(interval: FiniteDuration, renew: () => Boolean): Unit =
+    DefaultRunHandle.guarded(result.get(interval.toNanos, TimeUnit.NANOSECONDS)) match
+      case Left(_: TimeoutException) =>
+        if DefaultRunHandle.guarded(renew()).getOrElse(false) then renewEvery(interval, renew)
+      case _ => ()
 
   /**
    * The deadline thread's body: waits for the run's result until `deadline`, and stops the run if

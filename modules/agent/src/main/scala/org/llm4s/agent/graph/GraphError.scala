@@ -176,15 +176,32 @@ object GraphError:
     override val message: String = s"Thread '$threadId' has no suspended run to resume"
 
   /**
-   * Another run holds the thread: it is still executing in this runtime, or it claimed the thread
-   * between this call reading it and claiming it. Nothing was accepted or discarded - retry once
-   * that run has suspended or completed.
+   * Another run holds the thread: it is still executing in this runtime, another runtime or process
+   * holds a live claim on it ([[RunClaim]]), or it claimed the thread between this call reading it
+   * and claiming it. Nothing was accepted or discarded - retry once that run has suspended or
+   * completed, or once its claim has expired. `holder` is the run id of the claim's holder when it
+   * is known and the caller may see it: it is never named for a thread that has no checkpoint yet in
+   * the store, whose tenant cannot be checked.
    */
-  final case class ThreadBusy(threadId: String, latestCheckpoint: Option[String])
+  final case class ThreadBusy(threadId: String, latestCheckpoint: Option[String], holder: Option[String] = None)
       extends GraphError
       with NonRecoverableError:
     override val message: String =
-      s"Thread '$threadId' is held by another run (now at ${latestCheckpoint.getOrElse("<none>")}); retry"
+      s"Thread '$threadId' is held by ${holder.fold("another run")(h => s"run '$h'")} (now at ${latestCheckpoint
+          .getOrElse("<none>")}); retry"
+
+  /**
+   * A commit, renewal or release presented a fencing token that is not the thread's current claim:
+   * the claim was taken over after it expired, was released, or never existed. A
+   * [[Checkpointer]] refuses such a commit atomically, applying nothing and numbering no event, so a
+   * writer that lost its claim cannot record anything after another run took the thread over.
+   * `current` is the token of the thread's current claim, if there is one.
+   */
+  final case class StaleClaim(threadId: String, token: Long, current: Option[Long])
+      extends GraphError
+      with NonRecoverableError:
+    override val message: String =
+      s"Claim token $token on thread '$threadId' is stale (current: ${current.fold("none")(_.toString)})"
 
   /**
    * An unexpected throwable - such as a `Clock` that threw - refused the run at admission, or

@@ -18,7 +18,7 @@ class WatsonXConfigSpec extends AnyFunSuite with Matchers:
   test("fromValues applies the Dallas endpoint, API version and IAM endpoint by default") {
     val config = build().getOrElse(fail("expected a config"))
     config.baseUrl shouldBe "https://us-south.ml.cloud.ibm.com"
-    config.apiVersion shouldBe "2024-05-31"
+    config.apiVersion shouldBe "2026-09-25"
     config.iamUrl shouldBe "https://iam.cloud.ibm.com/identity/token"
     config.providerId.asString shouldBe "watsonx"
     config.endpointUrl shouldBe Some(config.baseUrl)
