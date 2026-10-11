@@ -23,12 +23,11 @@ object GuardrailsRecipe extends RecipeApp {
 
   val info: RecipeInfo = RecipeInfo(
     id = "guardrails",
-    title = "Guardrails around an agent",
+    title = "A guardrailed chatbot",
     summary = "Reject a bad request before the model sees it, and an over-long answer before the user does.",
     mainClass = "org.llm4s.samples.cookbook.GuardrailsRecipe"
   )
 
-  // snippet:start
   def guardedAgent(client: LLMClient): Result[Agent] =
     Agent
       .builder("guarded-agent", client)
@@ -42,7 +41,6 @@ object GuardrailsRecipe extends RecipeApp {
 
   def ask(client: LLMClient, query: String): Result[AgentResult] =
     guardedAgent(client).flatMap(_.run(query))
-  // snippet:end
 
   /** A short, polite answer to anything it is asked. */
   def script: ScriptedClient = new ScriptedClient((_, _) => Right(AssistantMessage("Our office opens at nine.")))

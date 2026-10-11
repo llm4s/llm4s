@@ -11,6 +11,7 @@ import org.llm4s.agent.graph.{
   StreamEvent,
   ThreadId
 }
+import org.llm4s.agent.testkit.Fixtures
 import org.llm4s.error.{ CancelledError, NetworkError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion }
