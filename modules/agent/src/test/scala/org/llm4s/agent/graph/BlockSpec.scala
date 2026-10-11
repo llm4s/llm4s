@@ -143,7 +143,15 @@ class BlockSpec extends AnyFlatSpec with Matchers with EitherValues with OptionV
       def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] =
         if commit.checkpoint.exists(_.status == CheckpointStatus.Failed) then Left(ValidationError("store", "down"))
         else underlying.commit(threadId, commit)
-      def latest(threadId: ThreadId) = underlying.latest(threadId)
+      def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
+      def renew(
+        threadId: ThreadId,
+        token: org.llm4s.agent.graph.FencingToken,
+        ttl: scala.concurrent.duration.FiniteDuration
+      ) =
+        underlying.renew(threadId, token, ttl)
+      def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+      def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
@@ -167,7 +175,7 @@ class BlockSpec extends AnyFlatSpec with Matchers with EitherValues with OptionV
     val checkpoint = store.latest(thread).value.value.checkpoint
 
     checkpoint.formatVersion shouldBe Checkpoint.CurrentFormat
-    Checkpoint.CurrentFormat shouldBe 4
+    Checkpoint.CurrentFormat shouldBe 5
     Checkpoint.fromJson(Checkpoint.toJson(checkpoint)).value shouldBe checkpoint
   }
 }

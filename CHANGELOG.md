@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Run-claim leases and a store contract suite for `Checkpointer`s** ([#1700](https://github.com/llm4s/llm4s/issues/1700),
+  Stage 2 slice 1 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): runtimes in one process or many can share a
+  checkpoint store. Each run claims its thread in the store before it starts - a `RunClaim` with an expiry, by the
+  store's clock, and a `FencingToken` - renews it while it runs (`ClaimPolicy`, default `ttl` 30 s, renewed every
+  10 s, on a `llm4s-claim-<threadId>` virtual thread) and releases it as it ends. `start`, `recover`, `resume` and
+  `deleteThread` in any runtime are refused a thread whose claim is live with `ThreadBusy`, which now names the
+  holding run; once a claim has expired - its process died - another runtime's `recover` takes the thread over,
+  reusing the pending writes of the tasks that finished. Every commit carries the claim's token, and the store refuses
+  a stale one atomically (`GraphError.StaleClaim`), so a run that lost its claim records nothing after its successor
+  started and ends with `CheckpointWriteFailed`. `RunPosition.fencingToken` gives a node the token. The new
+  **`llm4s-agent-testkit`** publishes `CheckpointerContract`, the contract every store must pass as a ScalaTest
+  suite (atomic commits, conflicts, event numbering, compaction and `ReplayUnavailable`, `deleteThread`, claims and
+  fencing, and two or more `GraphRuntime`s contending over one store), with the `ManualClock` it drives expiry with;
+  `InMemoryCheckpointer` passes it. A durable store overrides `reopen`, so that claims, tokens and fencing are checked
+  across a close and reopen, and a store that judges expiry by a clock of its own (a database server's) overrides
+  `advanceStoreClock` and `exactExpiry`. See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md) and the
+  [Stage 2 migration note](docs/reference/migration.md#stage-2-migration-durable-execution).
 - **The cookbook: thirteen runnable recipes, one page each, run offline in CI**
   ([#1476](https://github.com/llm4s/llm4s/issues/1476)): seven new recipes join the six under
   `org.llm4s.samples.cookbook` - `EmailExtractionRecipe` (a nested schema, checked against the email),
@@ -660,6 +677,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markers, a stream that ends without a terminal event or with `error`, `cancelled` or `time_limit`
   is a `Left(ServiceError)`, `baseUrl` and `iamUrl` must be `https` (except localhost), the API key
   is trimmed, and setting both `projectId` and `spaceId` is a configuration error.
+- **A CycloneDX SBOM per published module, and a dependency scan** ([#1464](https://github.com/llm4s/llm4s/issues/1464)):
+  `sbt publishedSboms` writes one CycloneDX 1.6 JSON SBOM for each published `llm4s-*` module that ships a jar into
+  `target/sboms` (`<module>-<version>.bom.json`; the samples, `it`, benchmarks, the relocation stubs and any POM-only
+  artifact have none), using the `sbt-sbom` build plugin (MIT; it uses the Apache-2.0 `cyclonedx-core-java`), which adds nothing to the published POMs. The
+  release workflow's new `sbom` job attaches them to the GitHub Release after it exists, so a failure there cannot
+  affect Maven Central, the Release, the docs or the image; CI builds and validates them on every pull request
+  (`scripts/check-sbom.sh`, tested by `scripts/test-check-sbom.sh`) and uploads them as an artifact. A new
+  `Dependency scan` workflow runs OSV-Scanner v2.6.0 (Apache-2.0, pinned by SHA-256) over them on pull requests that touch the
+  dependency files and weekly. A pull request fails only when it adds a HIGH or CRITICAL advisory its base does not
+  have (`scripts/osv-new-findings.sh`); advisories already on `main` are reported, a scanner outage is a warning on a
+  pull request, and no secret is used. See `docs/reference/sbom.md`.
 - **A MiMa dry run, and MiMa skips `@Experimental` types** ([#1281](https://github.com/llm4s/llm4s/issues/1281)):
   `scripts/mima-dry-run.sh` shows, before 0.5.0 exists, that setting `mimaBaselineVersion` will work. In a scratch
   clone of `HEAD` it publishes the build at a throwaway version to a temporary Maven repository (nothing reaches
@@ -1054,6 +1082,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **The `Checkpointer` SPI is fenced by run claims** ([#1700](https://github.com/llm4s/llm4s/issues/1700), BREAKING,
+  `llm4s-agent`): `Checkpointer` gains `claim`, `renew` and `release`; `Commit` is `Commit(token, checkpoint,
+  pendingWrites, events)` with a private constructor and `with*` setters, and a store applies it only with the
+  thread's current claim's token; `Checkpoint` and `RunPosition` have private constructors and gain `fencingToken`;
+  `Checkpoint.CurrentFormat` is 5 (format 4 and earlier still read); `GraphError.ThreadBusy` gains `holder`;
+  `InMemoryCheckpointer` takes a `Clock` and `GraphRuntime` a `ClaimPolicy`, both optional; `GraphRuntime.deleteThread`
+  claims the thread first. No shims; see the
+  [Stage 2 migration note](docs/reference/migration.md#durable-checkpointer-contract-1700).
 - **An interrupted `Agent.run`, `continueConversation`, `recover` or `resume` cancels its turn, from Java too** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   the call returns `Left(CancelledError)` with the interrupt flag set, as before, and now also cancels the turn it
   was waiting on instead of leaving it running, returning once that turn has ended (waiting up to 5 seconds for the turn to end), so `recover`
@@ -1169,6 +1205,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `withOrganization`, `withContextWindow`, `withReserveCompletion`, `withExplicitProviderId`); `new OpenAIConfig(...)`
   becomes `OpenAIConfig(...)`; Java and Kotlin call the companion's `apply` - `OpenAIConfig.apply(key, "gpt-4o")
   .withOrganization("org-1")` - instead of the constructor. Pattern matching (`case OpenAIConfig(...)`) is unchanged.
+- **`llm4s-watsonx` moves to the chat endpoints, and tool calling works**
+  ([#1314](https://github.com/llm4s/llm4s/issues/1314), `llm4s-watsonx`): the client called watsonx.ai's
+  text-generation endpoints (`/ml/v1/text/generation` and `/generation_stream`), which IBM deprecated in
+  February 2026; it now calls `/ml/v1/text/chat` and `/ml/v1/text/chat_stream`. The conversation goes as role
+  `messages` instead of one prompt string with `[SYSTEM]:` / `[USER]:` markers, so user content can no longer
+  forge a turn and no stop sequences are sent. `CompletionOptions.tools` are accepted (before, they were rejected
+  with a `ValidationError`): they are sent as `tools` with `tool_choice_option: "auto"`, a reply's `tool_calls`
+  (whole, or streamed in pieces merged by `index`) become `ToolCall`s, and a `ToolMessage` goes back as a `tool`
+  message with its `tool_call_id`. A stream's `event: error` frame is now IBM's error - its `status_code`
+  mapped as an HTTP status would be, its `code` and `message` redacted into the message - instead of the generic
+  "stream ended without a finish_reason". A call interrupted while it waits for another call's IAM token
+  exchange returns `Left(CancelledError)` with the interrupt flag set, instead of throwing
+  `InterruptedException`. The IAM token exchange, the `Result` error mapping, redaction and
+  cancellation are otherwise unchanged, and so are the configuration keys (`WatsonXConfig`, the
+  `llm4s.providers.<name>` keys, `apiVersion`), but the **default `apiVersion` moves from `2024-05-31`, which
+  predates the chat API and tool calling, to `2026-09-25`**, the `version` IBM's Python SDK (`ibm-watsonx-ai`
+  1.8.0) sends; a section that sets `apiVersion` keeps its own. **Not verified against the real service**: there is no watsonx account behind the project, so
+  the wire shapes are those IBM's public pages report, cross-checked against IBM's own open-source clients (the
+  pinned sources are in `WatsonXClient`'s Scaladoc); the `@Cloud` probe suite `WatsonXAssumptionProbeSpec`
+  re-checks them against a real account. The module stays Beta and #1314 stays open until it has been run. **Migration:** a `stop_reason`
+  of the old API is now a `finish_reason` (`stop`, `length`, `tool_calls`; `error`, `cancelled` and `time_limit`
+  are still failures); `WatsonXClient.StopSequences` is gone and `WatsonXClient.ErrorStopReasons` is
+  `WatsonXClient.ErrorFinishReasons`; a model without tool support is answered by the service, not rejected
+  by the client.
 - **`LLMError.isRecoverable` is total** ([#1380](https://github.com/llm4s/llm4s/issues/1380), `llm4s-core`,
   `llm4s-agent`, `llm4s-speech`): it matched only `RecoverableError` and `NonRecoverableError` and threw a
   `MatchError` on any other `LLMError` (`EmbeddingError`, `RerankError`, `EvaluationError`, the orchestration and
