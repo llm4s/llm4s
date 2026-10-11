@@ -2524,6 +2524,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server to end the stream. An interrupt while reading the stream is still a `CancelledError`. Behaviour change: an
   MCP tool that runs longer than its server's `timeout` (30 s by default) over Streamable HTTP now fails instead of
   completing late; raise `timeout` for such a server.
+- **Security - `Redaction`: a keyword argument whose value is a call, and a `"` inside a redacted Python string** ([#1813](https://github.com/llm4s/llm4s/issues/1813)):
+  `Settings(token=SecretStr('...'))`, `password=Wrapper("...")` and `api_key=module.Secret(value='...')` kept the
+  credential readable - `pydantic` masks its own `SecretStr` in a `repr`, a wrapper class of one's own does not - while
+  the same call under a dict key was redacted. The strings, numbers and words of a call under a sensitive keyword
+  argument or dict key are now replaced, the call's own keyword arguments included (`token=[REDACTED]'[REDACTED]')`).
+  A secret holding `'"` in a single-quoted Python string came out as `'[REDACTED][REDACTED]"[REDACTED]'`, which told
+  that it held a `"`, and a second redaction collapsed it: the `"` is now replaced with the rest of the content, a part
+  that meets a placeholder already written is written as nothing, and the output is `'[REDACTED]'`, which a second
+  redaction leaves as it is. A `"` that delimits a JSON string around the value, at any depth, is still kept, so the
+  JSON parses. Like the readings before it, this only adds to what was replaced: `data={'password': pw}` still
+  replaces `pw`, since a bare word there may be the credential.
 - **The Spring Boot starter's health indicator redacts nested credentials and header values** ([#1820](https://github.com/llm4s/llm4s/issues/1820)):
   the credentials it removes from a failed probe's `error` message were read only from top-level text fields of the
   resolved provider config, so a credential set outside Spring properties (in `application.conf`, a `reference.conf`
