@@ -106,6 +106,7 @@ llm4s/
 │   │   └── watsonx/           # IBM watsonx.ai chat provider (Beta; never run against the live service)
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
 │   ├── schema-derivation/     # SchemaOf: a JSON schema derived from a case class (`derives`), for completeStructured (published, experimental)
+│   ├── testkit/               # llm4s-testkit: scriptable fake LLMClient for users' own tests (published)
 │   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
 │   ├── observability-prometheus/ # Prometheus MetricsCollector + /metrics endpoint + Prometheus client (published)
 │   ├── observability-micrometer/ # Micrometer MetricsCollector writing into a MeterRegistry (published)

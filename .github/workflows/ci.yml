@@ -314,6 +314,7 @@ jobs:
           watsonx/test watsonx/coverageReport
           providerTestkit/test providerTestkit/coverageReport
           schemaDerivation/test schemaDerivation/coverageReport
+          testkit/test testkit/coverageReport
           observability/test observability/coverageReport
           observabilityPrometheus/test observabilityPrometheus/coverageReport
           observabilityMicrometer/test observabilityMicrometer/coverageReport
@@ -533,6 +534,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/schema-derivation/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: schema-derivation
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload testkit coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/testkit/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: testkit
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -909,11 +920,34 @@ jobs:
           path: modules/kotlin-api/build/reports/jacoco/
           retention-days: 14
 
+  # The starter is built against the oldest supported Spring Boot 3.x (project/Dependencies.scala); this runs its
+  # specs against the latest 3.x, so the documented range (docs/guide/spring-boot.md) is tested at both ends (#1467).
+  spring-boot-latest:
+    name: Spring Boot 3.x (latest)
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Test the starter against the latest Spring Boot 3.x
+        run: sbt -Dllm4s.springBootVersion=3.5.16 springBootStarter/test
+
   # All tests must pass
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api]
+    needs: [test, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -947,6 +981,10 @@ jobs:
           fi
           if [[ "${{ needs.kotlin-api.result }}" != "success" ]]; then
             echo "Kotlin API tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.spring-boot-latest.result }}" != "success" ]]; then
+            echo "Spring Boot 3.x (latest) tests failed"
             exit 1
           fi
           echo "All tests passed!"

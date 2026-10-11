@@ -88,9 +88,10 @@ final class Agent private[agent] (
 
   /**
    * `first` on a new thread, then each of `followUps` on it, stopping at the first turn whose
-   * status is not `Completed`; returns the last turn's result. A `Left` carries no thread id, so a
-   * conversation whose turn fails - cancelled by an interrupt included - is forgotten once that turn
-   * has ended, as for the one-shot [[run]].
+   * status is not `Completed`; returns the last turn's result. Each turn is its own run: the first
+   * runs with `config`, each follow-up with `config` and a fresh [[RunId]]. A `Left` carries no
+   * thread id, so a conversation whose turn fails - cancelled by an interrupt included - is
+   * forgotten once that turn has ended, as for the one-shot [[run]].
    */
   def runMultiTurn(first: String, followUps: Seq[String], config: RunConfig = RunConfig()): Result[AgentResult] =
     run(first, config).flatMap { opening =>
@@ -98,7 +99,7 @@ final class Agent private[agent] (
         followUps.foldLeft[Result[AgentResult]](Right(opening)) { (previous, query) =>
           previous.flatMap { result =>
             result.status match
-              case AgentStatus.Completed(_) => continueConversation(result, query, config)
+              case AgentStatus.Completed(_) => continueConversation(result, query, config.withRunId(RunId.random()))
               case _                        => Right(result)
           }
         }

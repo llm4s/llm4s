@@ -285,6 +285,7 @@ lazy val llm4s = (project in file("."))
     watsonx,
     providerTestkit,
     schemaDerivation,
+    testkit,
     agentTestkit,
     llm4sEffect,
     llm4sZio,
@@ -480,7 +481,9 @@ lazy val media = (project in file("modules/media"))
   )
 
 lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
-  .dependsOn(core, agent, agent % "test->test")
+  // `testkit % Test`: `ScriptedAgentIOSpec` drives an `AgentIO` end to end from a `ScriptedLLMClient`, the way a
+  // user's tests would; the testing guide shows that code.
+  .dependsOn(core, agent, agent % "test->test", testkit % Test)
   .settings(
     name := "llm4s-effect",
     commonSettings,
@@ -496,7 +499,9 @@ lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
   )
 
 lazy val llm4sZio = (project in file("modules/llm4s-zio"))
-  .dependsOn(core, agent, agent % "test->test")
+  // `testkit % Test`: `ScriptedAgentZSpec` drives an `AgentZ` end to end from a `ScriptedLLMClient`, the way a
+  // user's tests would; the testing guide shows that code.
+  .dependsOn(core, agent, agent % "test->test", testkit % Test)
   .settings(
     name := "llm4s-zio",
     commonSettings,
@@ -1130,6 +1135,27 @@ lazy val schemaDerivation = (project in file("modules/schema-derivation"))
     Compile / discoveredMainClasses := Seq.empty
   )
 
+// `llm4s-testkit` (#1475) is for the people who USE llm4s: a scriptable fake `LLMClient` they can put
+// in their own tests (`% Test`) instead of copying the mocks out of this repository, whose test sources
+// are not published. It is a different audience from `llm4s-provider-testkit` above, which is for the
+// authors of provider modules. Depends on core only, registers no provider, and has no test framework
+// in its API, so it works with ScalaTest, MUnit and the rest.
+lazy val testkit = (project in file("modules/testkit"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-testkit",
+    commonSettings,
+    // Measured 100.00% statement and 100.00% branch coverage (`sbt coverage testkit/test
+    // testkit/coverageReport`). Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(100),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test
+    )
+  )
+
 // The OpenAI family carves fourth, split by shared client: OpenAI, Azure and Requesty all run
 // on `OpenAIClient`, so they move together and took the SDK out of core - after this core has
 // no vendor SDK at all. That SDK was Microsoft's `azure-ai-openai`, since deprecated; the
@@ -1300,7 +1326,9 @@ lazy val samples = (project in file("modules//samples"))
     agentTools,
     llm4sEffect,
     llm4sZio,
-    llm4sPekko
+    llm4sPekko,
+    // Test scope: the guide `docs/guide/testing-with-the-testkit` is run by a spec in this module.
+    testkit % Test
   )
   .settings(
     name := "llm4s-samples",
@@ -1494,8 +1522,12 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
 // agent is built on: `LLMClient`, `ToolRegistry`, `Tracing` and `TraceEvent`.
 //
 // Test depends on core's tests for `MockLLMClient`, `StubLLMClient` and the shared fixtures.
+// Test scope only, `openai`, `anthropic` and `providerTestkit`: `AgentToolResultContractSpec` runs the
+// tool loop through the real OpenAI and Anthropic clients against a local server and checks every
+// request with the testkit's tool-result contract (#1703). Never make either provider a compile
+// dependency: it would put a vendor SDK on every agent user's classpath.
 lazy val agent = (project in file("modules/agent"))
-  .dependsOn(core % "compile->compile;test->test")
+  .dependsOn(core % "compile->compile;test->test", openai % Test, anthropic % Test, providerTestkit % Test)
   .settings(
     name := "llm4s-agent",
     commonSettings,
@@ -1701,6 +1733,7 @@ lazy val docs = (project in file("modules/docs"))
     watsonx,
     providerTestkit,
     schemaDerivation,
+    testkit,
     workspaceShared,
     workspaceClient,
     observability,
@@ -1748,6 +1781,7 @@ lazy val docs = (project in file("modules/docs"))
         (watsonx / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
         (schemaDerivation / Compile / sources).value ++
+        (testkit / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (observability / Compile / sources).value ++
@@ -1791,10 +1825,12 @@ lazy val javaApi = (project in file("modules/java-api"))
   )
 
 lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
+  // core's test classes carry the `fixturechat` provider and its services entry, and the provider testkit a
+  // local HTTP server: the specs for providers other than openai, anthropic and ollama use both (#1467).
   // `observabilityMicrometer` is provided, like Actuator: `LlmMetricsAutoConfiguration` records into the
   // application's MeterRegistry only when the application adds `llm4s-observability-micrometer` itself, so the
   // starter puts no Micrometer jar on a classpath that did not ask for one (#1466).
-  .dependsOn(javaApi, observabilityMicrometer % "provided")
+  .dependsOn(javaApi, observabilityMicrometer % "provided", core % "test->test", providerTestkit % Test)
   .settings(
     name := "llm4s-spring-boot-starter",
     commonSettings,

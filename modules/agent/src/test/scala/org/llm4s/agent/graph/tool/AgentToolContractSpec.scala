@@ -29,6 +29,7 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
       NodeEventSink.none
     ),
     ToolCallId("call-1"),
+    IdempotencyKey("key-1"),
     ThreadState.empty(Map.empty),
     approved = false
   )

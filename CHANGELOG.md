@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Tool idempotency keys, and a provider contract suite for one result per tool call** ([#1703](https://github.com/llm4s/llm4s/issues/1703)):
+  an agent tool reads its call's key as `ToolContext.idempotencyKey` (`org.llm4s.agent.graph.IdempotencyKey`, 64 hex
+  characters) and passes it to the system it calls, so a call the runtime runs again - a retrying `wrapToolCall`,
+  approval, an answered question, `recover` after a cancellation, `Fatal` or crash - does its work once. The key is
+  derived from the thread, where on it the issuing model call ran (checkpoint, superstep and task) and the call id
+  (`IdempotencyKey.derive`), and recorded with the call, so it is the same in every run of the call and new for a call
+  of another model request, even when the provider reuses its id and the turns share one `RunConfig`. `runMultiTurn`
+  gives each follow-up turn a fresh `RunId`. Tools added through `ToolRegistry` (built-in, MCP, Java and Kotlin
+  tools) do not see the key yet ([#1740](https://github.com/llm4s/llm4s/issues/1740)). `ApprovalRequest` and `ToolQuestionRequest` carry it too. Tools still run at
+  least once; the [agents guide](docs/guide/agents/index.md#tool-side-effects) documents the boundaries.
+  `llm4s-provider-testkit` adds `ToolResultContract` (`violations(format, requestBody)`, `toolCallCount`,
+  `toolResultCount`, and `cases`: conversations of every shape an agent's tool loop sends), `ToolMessageFormat`
+  (`OpenAIChat`, `AnthropicMessages`), `ProviderModuleChecks.assertOneToolResultPerCall` and
+  `LocalProviderTestServer.anthropicMessage`; the OpenAI, Anthropic and OpenAI-compatible module specs run it, and
+  `AgentToolResultContractSpec` runs the agent through the real OpenAI and Anthropic clients after every outcome of
+  a call - success, error, throw, unknown tool, invalid arguments, denial, rejection, edit, question, handoffs,
+  reused ids, cancellation, `Fatal` and a crash - checking every request.
 - **Run-claim leases and a store contract suite for `Checkpointer`s** ([#1700](https://github.com/llm4s/llm4s/issues/1700),
   Stage 2 slice 1 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): runtimes in one process or many can share a
   checkpoint store. Each run claims its thread in the store before it starts - a `RunClaim` with an expiry, by the
@@ -153,6 +170,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when spelled out in a field's type, and when the schema is built when reached through the generic instance.
   `SchemaOf[A].definition` is the same schema as a `SchemaDefinition`, so `ToolBuilder` takes it as a tool's
   parameters. Guide: [Derived Schemas](docs/guide/derived-schemas.md).
+- **`llm4s-config-policy`: a setup checker, `DoctorCli`** ([#1481](https://github.com/llm4s/llm4s/issues/1481)):
+  `sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli [--config <file>] [--classpath <path>] [--local] [--live] [--timeout <s>] [--json]"`
+  checks the JDK (21 or newer), that the configuration can be read, that `llm4s.providers.provider` names a section,
+  that the section's provider is registered (and, if not, names the registered ones and says to add the dependency;
+  `--classpath` checks the provider modules on the application's classpath instead of the doctor's own, and layers
+  that classpath's `reference.conf` files, and its `application.conf` when no `--config` is given, so a third-party
+  module's credential binding is seen), that its
+  API key resolves (the config path it came from, never the value), that the section validates, with `--local`, for a
+  server on the loopback interface, that it answers and has the configured model, and that the other sections load
+  (a warning if not). With `--live` it makes one small request and maps an authentication, rate-limit, not-found,
+  timeout or network error to its own advice. Without `--local` or `--live` nothing is contacted. The configuration
+  is read through `Llm4sConfig`. Every step that fails prints a `fix:` line; the exit code is `0`, `1` (warnings
+  only) or `2`. A URL is printed without its user info, query or fragment (a password holding `/` included). A
+  configuration file that cannot be parsed is reported by file, line and kind of error only, never with Typesafe
+  Config's message, which quotes the values beside the problem; every quoted value of 8 characters or more in that
+  file is also hidden by value. Every API key, every section's header values
+  and the base-URL user info and query values in the configuration are hidden by value in the output (values of 8
+  characters or more), in addition to the shape-based redaction. `Doctor.run` and `DoctorPorts` are the same check as a function with the JDK, model probe and live
+  request injectable. The module is not published and `Doctor` adds no public API to a published module. See
+  [Doctor](docs/reference/doctor.md).
 - **`llm4s-pekko`: LLM responses and agent runs as Apache Pekko Streams `Source`s**
   ([#1457](https://github.com/llm4s/llm4s/issues/1457)): a new Beta module (`modules/llm4s-pekko`, package
   `org.llm4s.pekko`) that depends on `llm4s-core`, `llm4s-agent` and `pekko-stream` 1.7 (Apache-2.0; Akka is not
@@ -234,6 +271,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`Locale.ROOT`, aliases such as `google` folded onto `gemini`), and a per-provider cap or pin naming no registered or allowed
   provider is an `unknownProvider` violation instead of being silently ignored. A per-provider pin replaces the environment-wide
   one for that provider, so a loose provider pin weakens a strict global one.
+- **`llm4s-spring-boot-starter`: any provider on the classpath, through `llm4s.providers.*` properties**
+  ([#1467](https://github.com/llm4s/llm4s/issues/1467)): the starter used to map three providers by hand
+  (`llm4s.provider=openai | anthropic | ollama`). The `llm4s.providers.<section>.*` properties now mirror llm4s's
+  own `llm4s.providers` HOCON block (`kebab-case` and `snake_case` names read as the `camelCase` HOCON names, header
+  names under `headers` kept as written), are laid over llm4s's defaults and resolved by the same loader and
+  provider SPI as a HOCON file, so Gemini, Vertex AI, Azure OpenAI, Mistral, OpenRouter, a generic OpenAI-compatible
+  server and any provider module added to the classpath work with their declared extras (`endpoint`, `api-version`,
+  `headers.*`, ...), several sections can coexist, and a vendor's shared `llm4s.credentials.<id>.api-key` applies.
+  `llm4s.providers.provider` names the default section (the flat `llm4s.provider` may name one when it is not set).
+  An unknown provider id fails startup with llm4s's own message, which names the registered providers and the
+  dependency to add. **Backwards compatible**: with no `llm4s.providers.*` property the flat keys of openai,
+  anthropic and ollama are read exactly as before (pinned by `LegacyConfigGoldenSpec`, recorded before the change).
+  Two things differ in the block: the context window and reserved completion size come from the model registry
+  except for the generic `openai-compatible` provider, which reads `context-window` and `reserve-completion` from the
+  section; and with any `llm4s.providers.*` property set the flat `llm4s.model`, `llm4s.api-key`, ... are ignored.
+  When two property sources spell one setting differently (`apiKey` in `application.yml`, `api-key` on the command
+  line), the higher-priority source wins, as Spring's precedence says. An `LLM4S_PROVIDERS_*` environment variable
+  cannot add a setting, only override one a property source declares; secrets come through placeholders or the vendor's variable bound by `llm4s.credentials`.
+  The Actuator health indicator reports the resolved provider and model and keeps every credential out of its
+  messages, including the resolved provider's own key from a non-Spring source (`application.conf`, a vendor's
+  environment variable). The flat `llm4s.provider` error for another provider id now names the providers on the classpath and
+  points to `llm4s.providers.*`. Metadata for the new keys is in `additional-spring-configuration-metadata.json`.
+  **Spring Boot support policy**: Spring Boot 3.x from 3.3 on. The starter is built against 3.3.6 and a new CI job,
+  `Spring Boot 3.x (latest)`, runs its specs against 3.5.16 (`-Dllm4s.springBootVersion`); Spring Boot 4 is not
+  supported yet and stays open in #1467.
 - **`llm4s-spring-boot-starter`: Spring Boot auto-configuration** (Beta, `modules/spring-boot-starter`,
   [#936](https://github.com/llm4s/llm4s/issues/936)): built on `llm4s-java-api`. Properties under `llm4s.*` (`provider`, `model`, `apiKey`,
   `baseUrl`, `organization`, `contextWindow`, `reserveCompletion`) produce a `JLlmClient` and an
@@ -740,6 +802,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case is still a `NonRecoverableError` except `DeadlineExceeded`, which is a `RecoverableError`;
   new `GraphError` and `RunEvent` cases break exhaustive matches. Design:
   `docs/design/typed-agent-runtime-design.md` §4.6, with the Stage 0 carry-forward in §4.8.
+- **`llm4s-testkit`: a scriptable fake `LLMClient` for the tests of code that uses llm4s**
+  ([#1475](https://github.com/llm4s/llm4s/issues/1475), [#1796](https://github.com/llm4s/llm4s/issues/1796)): a new Beta
+  module that depends on `llm4s-core` only and registers no provider. `ScriptedLLMClient.sequence` answers call N with reply
+  N, `respondingTo` chooses the reply from the conversation, and `always` repeats one; a `Reply` is a text answer, one or
+  more tool calls (`Reply.toolCall(name, argumentsJson)`, arguments as a JSON-object string checked when the script is
+  built, chained with `withToolCall`), or a failure with any `LLMError`. Every request is recorded with its conversation
+  and `CompletionOptions` (`calls`, `callCount`, `RecordedCall.lastUserText`), `streamComplete` replays the reply as
+  chunks, a call the script has no reply for returns the typed `UnscriptedCallError` (a `NonRecoverableError` carrying
+  the call number, the reason and the last message), and the client is thread-safe. `llm4s-effect` and `llm4s-zio` test
+  an `AgentIO` and an `AgentZ` with it end to end (`ScriptedAgentIOSpec`, `ScriptedAgentZSpec`): a tool-call turn, the
+  final answer, and the recorded requests offering the tool. Until now the fakes lived in `llm4s-core`'s test sources,
+  which are not published, and the Testing Guide taught users to hand-write eight mocks. See
+  [Testing with the Testkit](docs/guide/testing-with-the-testkit.md). Thanks to @vim89 for #1797, which proposed the
+  module for `llm4s-effect` and `llm4s-zio` users and the test dependency from those modules.
 - **CI re-runs a step that failed on a transient download error, and nothing else**:
   `scripts/retry-on-transient-network.sh` wraps the `Check formatting` step (`scalafmt` fetches scalafmt-core at
   run time) and the MiMa step. It re-runs the command at most twice (`RETRY_MAX`, capped at 5; waits of 15 s and
@@ -1080,6 +1156,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Breaking: no model request holds a tool call without exactly one result straight after it** ([#1703](https://github.com/llm4s/llm4s/issues/1703)):
+  the agent checks each request as every `wrapModelCall` middleware left it, positionally rather than by id (a
+  reused `call_0` can no longer hide a call with no result), and fails the model call with a `ValidationError`
+  instead of sending a dangling call. A model message whose tool-call ids repeat or are blank is refused before it
+  is stored, so `recover` asks the model again; a repeated id used to leave the thread unable to advance. Imported
+  `history` is held to the same rule. `ToolContext(run, toolCallId, state, approved)` becomes
+  `ToolContext(run, toolCallId, idempotencyKey, state, approved)`, and `ToolTask`, `ApprovalRequest` and
+  `ToolQuestionRequest` gain an `idempotencyKey` field. `llm4s-agent` gains test-only dependencies on
+  `llm4s-openai`, `llm4s-anthropic` and `llm4s-provider-testkit`. See the
+  [migration guide](docs/reference/migration.md#tool-side-effect-safety-1703).
 - **The `Checkpointer` SPI is fenced by run claims** ([#1700](https://github.com/llm4s/llm4s/issues/1700), BREAKING,
   `llm4s-agent`): `Checkpointer` gains `claim`, `renew` and `release`; `Commit` is `Commit(token, checkpoint,
   pendingWrites, events)` with a private constructor and `with*` setters, and a store applies it only with the

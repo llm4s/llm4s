@@ -720,6 +720,21 @@ libraryDependencies += "org.llm4s" %% "llm4s-schema-derivation" % llm4sVersion
 `SchemaOf` and `client.completeStructuredOf[A]`: the JSON schema of `completeStructured`, derived from a case class
 with `derives`. It depends on `llm4s-core` only. See [Derived Schemas](../guide/derived-schemas).
 
+### Testing your own code (the testkit)
+
+{: .note }
+> Not yet published. `llm4s-testkit` exists in the build as of
+> [#1475](https://github.com/llm4s/llm4s/issues/1475) but ships in the next release.
+
+```scala
+// same version as llm4s-core; test scope only
+libraryDependencies += "org.llm4s" %% "llm4s-testkit" % llm4sVersion % Test
+```
+
+A scriptable fake `LLMClient` for the tests of code that calls llm4s: canned replies, scripted tool calls,
+injected errors and recorded requests, with no network and no API key. It depends on `llm4s-core` only. See
+[Testing with the Testkit](../guide/testing-with-the-testkit).
+
 ### For provider authors (testing a provider module)
 
 {: .note }
