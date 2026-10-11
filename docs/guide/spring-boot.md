@@ -29,9 +29,14 @@ The starter is Spring Boot auto-configuration on top of the [Java API](java). Wh
 | `llm4sTaskExecutor` | the `ExecutorService` behind `completeAsync` and the health probe | defining a bean named `llm4sTaskExecutor` |
 | `llm4sTemplate` | the `LLM4STemplate` you inject | defining a bean of type `LLM4STemplate` |
 | `llmHealthIndicator` | an Actuator `HealthIndicator`, only when Spring Boot Actuator is on the classpath | defining a bean of type `LlmHealthIndicator` |
+| `llm4sMetricsCollector` | a `MicrometerMetrics` over your `MeterRegistry`, only when `llm4s-observability-micrometer` is on the classpath and there is a `MeterRegistry` bean; the client reports every call to it (see [Metrics](#metrics)) | defining a bean of type `MetricsCollector` |
 
-Set `llm4s.enabled=false` to switch all of them off; the beans are also registered when `llm4s.enabled` is absent. It is built
-against Spring Boot 3.3.6.
+Set `llm4s.enabled=false` to switch all of them off; the beans are also registered when `llm4s.enabled` is absent.
+
+**Spring Boot versions.** The starter supports Spring Boot 3.x from 3.3 on. It is built against 3.3.6, and CI runs its
+whole test suite again against the latest 3.x release (3.5.16), so both ends of the range are tested on every change.
+Spring Boot 4 is not supported yet; whether it needs its own artifact, as LangChain4j ships one, is tracked in
+[#1467](https://github.com/llm4s/llm4s/issues/1467).
 
 {: .note }
 > **Not published yet.** `llm4s-spring-boot-starter` is not on Maven Central: the latest release, `0.4.1`, is a single
@@ -88,7 +93,8 @@ llm4s:
   api-key: ${OPENAI_API_KEY}
 ```
 
-`llm4s.provider` and `llm4s.model` are required, and so is `llm4s.api-key` for OpenAI and Anthropic. A missing one stops
+`llm4s.provider` and `llm4s.model` are required, and so is `llm4s.api-key` for OpenAI and Anthropic. (These flat keys serve
+OpenAI, Anthropic and Ollama; every other provider is configured under `llm4s.providers`, see [Any provider](#any-provider).) A missing one stops
 the application context from starting, with a message that names the property. Put the key in an environment variable or a
 secrets store and refer to it with a placeholder, as above; do not commit it.
 
@@ -97,7 +103,7 @@ secrets store and refer to it with a placeholder, as above; do not commit it.
 | Property | Default | Meaning |
 |---|---|---|
 | `llm4s.enabled` | `true` | `false` registers none of the beans |
-| `llm4s.provider` | empty | required: `openai`, `anthropic` or `ollama` |
+| `llm4s.provider` | empty | required without `llm4s.providers.*`: `openai`, `anthropic` or `ollama` |
 | `llm4s.model` | empty | required: the model name as the provider spells it |
 | `llm4s.api-key` | empty | required for `openai` and `anthropic`; not used by `ollama` |
 | `llm4s.base-url` | empty | overrides the provider's default URL (below) |
@@ -112,7 +118,7 @@ secrets store and refer to it with a placeholder, as above; do not commit it.
 
 ### Which providers
 
-The starter supports three providers:
+The flat `llm4s.provider` key supports three providers:
 
 | `llm4s.provider` | API key | Default `llm4s.base-url` |
 |---|---|---|
@@ -120,11 +126,61 @@ The starter supports three providers:
 | `anthropic` | required | `https://api.anthropic.com` |
 | `ollama` | not used | `http://localhost:11434` |
 
-Any other value stops the context with `Unknown provider: '<name>'. Supported: openai, anthropic, ollama`. Supporting every
-provider is proposed in [#1467](https://github.com/llm4s/llm4s/issues/1467). Until then, for another provider (Gemini,
-Azure, an OpenAI-compatible endpoint and so on) define your own `JLlmClient` bean from an `application.conf`, as the Java guide
-describes. The starter's client backs off, and the template and the health indicator use yours; `llm4s.provider` and the other
-properties are then not needed:
+Any other value stops the context with `Unknown provider: '<name>'. The flat llm4s.provider key supports openai, anthropic
+and ollama; configure any other provider under llm4s.providers.<name>`, followed by the providers on the classpath.
+
+### Any provider
+
+Every other provider (Gemini, Azure OpenAI, Mistral, OpenRouter, a self-hosted OpenAI-compatible server, or a provider
+module you add) is configured under `llm4s.providers`. These properties mirror the `llm4s.providers` block of llm4s's own
+HOCON configuration, so any provider on the classpath works, with the extra keys it declares. `llm4s.providers.provider`
+names the section the starter uses:
+
+```properties
+llm4s.providers.provider=gemini-main
+llm4s.providers.gemini-main.provider=gemini
+llm4s.providers.gemini-main.model=gemini-2.0-flash
+llm4s.providers.gemini-main.api-key=${GOOGLE_API_KEY}
+```
+
+Azure OpenAI takes its resource endpoint and API version as keys of the section:
+
+```properties
+llm4s.providers.provider=azure-main
+llm4s.providers.azure-main.provider=azure
+llm4s.providers.azure-main.model=my-deployment
+llm4s.providers.azure-main.api-key=${AZURE_OPENAI_API_KEY}
+llm4s.providers.azure-main.endpoint=https://my-resource.openai.azure.com
+llm4s.providers.azure-main.api-version=2024-02-01
+```
+
+A server that speaks the OpenAI chat-completions format needs only its URL and model; the generic `openai-compatible`
+provider also reads `context-window`, `reserve-completion` and `headers.*`:
+
+```properties
+llm4s.providers.provider=local
+llm4s.providers.local.provider=openai-compatible
+llm4s.providers.local.model=my-model
+llm4s.providers.local.base-url=http://localhost:8000/v1
+llm4s.providers.local.context-window=32000
+llm4s.providers.local.headers.X-Team-Id=team-7
+```
+
+- `kebab-case` and `snake_case` names in a section are read as the `camelCase` names of the HOCON block (`api-key` is
+  `apiKey`, `api-version` is `apiVersion`); section and header names are kept as written.
+- A section with no `api-key` uses the vendor's shared `llm4s.credentials.<provider>.api-key`, then the vendor's
+  conventional environment variable (`GOOGLE_API_KEY`, `MISTRAL_API_KEY`, ...).
+- An `LLM4S_PROVIDERS_*` environment variable cannot add a setting; it only overrides one already declared in a property
+  source (Spring's relaxed binding). Pass a secret with a placeholder (`api-key=${MY_KEY}`), or leave
+  `api-key` out and set the vendor's environment variable, which reaches the section through `llm4s.credentials`.
+- As soon as any `llm4s.providers.*` property is set, the block is used and the flat `llm4s.model`, `llm4s.api-key`, ...
+  are ignored. With none, the flat keys are read exactly as before.
+- An unknown provider id in a section stops the context with llm4s's own message, which names the registered providers
+  and the dependency to add.
+
+You can also define your own `JLlmClient` bean, for example from an `application.conf` as the Java guide describes. The
+starter's client backs off, and the template and the health indicator use yours; `llm4s.provider` and the other properties
+are then not needed:
 
 ```java
 import org.llm4s.javaapi.JLlmClient;
@@ -244,6 +300,26 @@ token-like strings removed. A health check whose thread is interrupted while it 
 `DOWN` with `probe=cancelled` and the interrupt flag left set; `health()` never throws `InterruptedException`. A cancelled
 probe is not cached: it says something about that thread, not the provider, so the next check probes again. A probe is a
 billed call: keep the TTL generous.
+
+## Metrics
+
+Add `llm4s-observability-micrometer` next to `spring-boot-starter-actuator`, and the client records request, duration,
+token, cost and error meters (`llm4s.requests`, `llm4s.request.duration`, `llm4s.tokens`, ...) in the application's
+`MeterRegistry`, with no code: they are on `/actuator/metrics` and go wherever your registry exports (Prometheus,
+Datadog, CloudWatch, OTLP). The starter declares the module `provided`, as it does Actuator, so nothing Micrometer reaches
+your classpath unless you add it.
+
+```xml
+<dependency>
+    <groupId>org.llm4s</groupId>
+    <artifactId>llm4s-observability-micrometer_3</artifactId>
+    <version>{{ site.data.project.latest_release }}</version>
+</dependency>
+```
+
+A `MetricsCollector` bean of your own replaces the Micrometer one, and the client reports to every `MetricsCollector` bean
+in the context, so a cost tracker can run next to it. The meters, their tags and the matching Prometheus series are in
+[Micrometer metrics](observability/micrometer).
 
 ## Testing code that uses the template
 

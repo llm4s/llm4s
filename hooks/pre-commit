@@ -102,13 +102,16 @@ map_file_to_project() {
     modules/llm4s-pekko/*)                echo "llm4sPekko" ;;
     modules/java-api/*)                   echo "javaApi" ;;
     modules/observability-prometheus/*)   echo "observabilityPrometheus" ;;
+    modules/observability-micrometer/*)   echo "observabilityMicrometer" ;;
     modules/knowledgegraph-neo4j/*)       echo "knowledgegraphNeo4j" ;;
     modules/trace-opentelemetry/*)        echo "traceOpentelemetry" ;;
     modules/openai-compatible/*)          echo "openaiCompatible" ;;
     modules/provider-testkit/*)           echo "providerTestkit" ;;
+    modules/testkit/*)                    echo "testkit" ;;
     modules/providers/bedrock/*)          echo "bedrock" ;;
     modules/providers/watsonx/*)          echo "watsonx" ;;
     modules/providers/jina/*)             echo "jina" ;;
+    modules/providers/jev/*)              echo "jev" ;;
     modules/providers/cohere/*)           echo "cohere" ;;
     modules/providers/voyage/*)           echo "voyage" ;;
     modules/gradle-demo/*)                echo "gradleDemo" ;;
@@ -117,6 +120,7 @@ map_file_to_project() {
     modules/config-policy/*)              echo "configPolicy" ;;
     modules/observability/*)              echo "observability" ;;
     modules/agent-tools/*)                echo "agentTools" ;;
+    modules/agent-testkit/*)              echo "agentTestkit" ;;
     modules/benchmarks/*)                 echo "benchmarks" ;;
     modules/anthropic/*)                  echo "anthropic" ;;
     modules/samples/*)                    echo "samples" ;;
@@ -194,6 +198,9 @@ propagate_downstream() {
     javaApi)
       set_add DOWNSTREAM_COMPILE springBootStarter
       ;;
+    observabilityMicrometer)
+      set_add DOWNSTREAM_COMPILE springBootStarter
+      ;;
     llm4sEffect)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
@@ -230,6 +237,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE bedrock
       set_add DOWNSTREAM_COMPILE watsonx
       set_add DOWNSTREAM_COMPILE jina
+      set_add DOWNSTREAM_COMPILE jev
       set_add DOWNSTREAM_COMPILE cohere
       set_add DOWNSTREAM_COMPILE openai
       set_add DOWNSTREAM_COMPILE workspaceClient
@@ -238,12 +246,15 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE observability
       set_add DOWNSTREAM_COMPILE observabilityPrometheus
+      set_add DOWNSTREAM_COMPILE observabilityMicrometer
       set_add DOWNSTREAM_COMPILE traceOpentelemetry
       set_add DOWNSTREAM_COMPILE agent
+      set_add DOWNSTREAM_COMPILE agentTestkit
       set_add DOWNSTREAM_COMPILE agentTools
       set_add DOWNSTREAM_COMPILE knowledgegraphNeo4j
       set_add DOWNSTREAM_COMPILE gradleDemo
       set_add DOWNSTREAM_COMPILE providerTestkit
+      set_add DOWNSTREAM_COMPILE testkit
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
       set_add DOWNSTREAM_COMPILE javaApi
@@ -354,6 +365,10 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
       ;;
+    jev)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
     cohere)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
@@ -394,6 +409,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE benchmarks
       ;;
     observabilityPrometheus)
+      set_add DOWNSTREAM_COMPILE observabilityMicrometer
       set_add DOWNSTREAM_COMPILE image
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
@@ -403,6 +419,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE it
       ;;
     agent)
+      set_add DOWNSTREAM_COMPILE agentTestkit
       set_add DOWNSTREAM_COMPILE rag
       set_add DOWNSTREAM_COMPILE workspaceClient
       set_add DOWNSTREAM_COMPILE samples
@@ -420,6 +437,11 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
       ;;
+    testkit)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE llm4sEffect
+      set_add DOWNSTREAM_COMPILE llm4sZio
+      ;;
     providerTestkit)
       set_add DOWNSTREAM_COMPILE rag
       set_add DOWNSTREAM_COMPILE samples
@@ -436,6 +458,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE bedrock
       set_add DOWNSTREAM_COMPILE watsonx
       set_add DOWNSTREAM_COMPILE jina
+      set_add DOWNSTREAM_COMPILE jev
       set_add DOWNSTREAM_COMPILE cohere
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE springBootStarter

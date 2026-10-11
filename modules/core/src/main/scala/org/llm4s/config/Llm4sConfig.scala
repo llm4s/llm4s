@@ -155,6 +155,29 @@ object Llm4sConfig {
     org.llm4s.config.ProvidersConfigLoader.loadSections(source).flatMap(_.validated(ProviderName(name)))
 
   /**
+   * The `llm4s.providers` block as read, before any section is validated: the default section's
+   * name (`llm4s.providers.provider`, if set) and each section, or the error reading it.
+   *
+   * For diagnostics that must describe a broken configuration rather than fail on it (the
+   * config-policy doctor). A configuration with no `llm4s.providers` block at all reads as no
+   * default and no sections; one that cannot be parsed, or whose block has the wrong shape, is
+   * a `Left`.
+   */
+  private[llm4s] def providerBlock(source: ConfigSource): Result[
+    (Option[ProviderName], Map[ProviderName, Result[ProvidersConfigModel.RawNamedProviderSection]])
+  ] =
+    source.value() match
+      case Left(failures) =>
+        Left(
+          org.llm4s.error.ConfigurationError(
+            failures.prettyPrint().linesIterator.map(_.trim).filter(_.nonEmpty).mkString(" ")
+          )
+        )
+      case Right(_) if source.at("llm4s.providers").value().isLeft => Right((None, Map.empty))
+      case Right(_) =>
+        org.llm4s.config.ProvidersConfigLoader.loadSections(source).map(s => (s.selectedProvider, s.sections))
+
+  /**
    * Loads the full validated named-providers configuration from `llm4s.providers`.
    *
    * Every section is validated, so this fails if any one of them is invalid - a `${?VAR}` key

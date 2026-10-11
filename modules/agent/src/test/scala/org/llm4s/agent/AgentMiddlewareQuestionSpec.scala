@@ -8,6 +8,7 @@ import org.llm4s.agent.graph.{
   EventRecord,
   GraphError,
   GraphRuntime,
+  IdempotencyKey,
   InMemoryCheckpointer,
   InterruptId,
   RunContext,
@@ -499,16 +500,19 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     given1.withQuestion(ujson.Num(1)).question shouldBe ujson.Num(1)
     given1.withAnswer(ujson.Num(2)).answer shouldBe ujson.Num(2)
 
-    val approval = ApprovalRequest("m1", c, "why", ApprovalSource.Tool)
+    val key      = IdempotencyKey("key-1")
+    val approval = ApprovalRequest("m1", c, "why", ApprovalSource.Tool, key)
     approval.answered shouldBe empty
+    approval.withIdempotencyKey(IdempotencyKey("key-2")).idempotencyKey shouldBe IdempotencyKey("key-2")
     approval.withAssistantMessageId("m2").assistantMessageId shouldBe "m2"
     approval.withCall(call("c2", "deploy")).call.id shouldBe "c2"
     approval.withReason("because").reason shouldBe "because"
     approval.withSource(ApprovalSource.Middleware(mw)).source shouldBe ApprovalSource.Middleware(mw)
     approval.withAnswered(Vector(given1)).answered shouldBe Vector(given1)
 
-    val question = ToolQuestionRequest("m1", c, ujson.Str("q"))
+    val question = ToolQuestionRequest("m1", c, ujson.Str("q"), key)
     (question.approved, question.answered) shouldBe ((false, Vector.empty))
+    question.withIdempotencyKey(IdempotencyKey("key-2")).idempotencyKey shouldBe IdempotencyKey("key-2")
     question.withAssistantMessageId("m2").assistantMessageId shouldBe "m2"
     question.withCall(call("c2", "deploy")).call.id shouldBe "c2"
     question.withQuestion(ujson.Num(3)).question shouldBe ujson.Num(3)
@@ -523,8 +527,8 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     asked.withQuestion(ujson.Num(4)).question shouldBe ujson.Num(4)
     asked.withInput(AgentInput("go")).input.map(_.query) shouldBe Some("go")
     asked.withInput(AgentInput("go")).withInput(None).input shouldBe None
-    asked.withCall(ToolTask("m1", c)).call shouldBe Some(ToolTask("m1", c))
-    asked.withCall(ToolTask("m1", c)).withCall(None).call shouldBe None
+    asked.withCall(ToolTask("m1", c, key)).call shouldBe Some(ToolTask("m1", c, key))
+    asked.withCall(ToolTask("m1", c, key)).withCall(None).call shouldBe None
     asked.withApproved(true).approved shouldBe true
     asked.withAnswered(Vector(given1)).answered shouldBe Vector(given1)
     upickle.default.read[MiddlewareQuestionRequest](upickle.default.write(asked)) shouldBe asked

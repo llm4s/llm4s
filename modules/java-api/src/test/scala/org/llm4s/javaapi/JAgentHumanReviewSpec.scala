@@ -1,7 +1,7 @@
 package org.llm4s.javaapi
 
 import org.llm4s.agent.{ AgentNode, AgentStatus }
-import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, InterruptId, NodeId, RunContext }
+import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, IdempotencyKey, InterruptId, NodeId, RunContext }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ToolCallRequest }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome, ToolSet }
 import org.llm4s.agent.graph.toolloop.{
@@ -119,15 +119,15 @@ class JAgentHumanReviewSpec extends AnyFlatSpec with Matchers {
   "PendingInterrupt.of" should "list approvals, then tool questions, middleware questions and breakpoints" in {
     val c = call("c1", "deploy", "x")
     val status = AgentStatus.Suspended(
-      Vector(InterruptId("a") -> ApprovalRequest("m", c, "why", ApprovalSource.Tool)),
-      Vector(InterruptId("q") -> ToolQuestionRequest("m", c, ujson.Obj("q" -> 1))),
+      Vector(InterruptId("a") -> ApprovalRequest("m", c, "why", ApprovalSource.Tool, IdempotencyKey("k1"))),
+      Vector(InterruptId("q") -> ToolQuestionRequest("m", c, ujson.Obj("q" -> 1), IdempotencyKey("k1"))),
       Vector(
         InterruptId("m") -> MiddlewareQuestionRequest(
           AgentId.unsafe("assistant"),
           MiddlewareId("mw"),
           MiddlewareHook.WrapToolCall,
           ujson.Null,
-          call = Some(ToolTask("m", c))
+          call = Some(ToolTask("m", c, IdempotencyKey("k1")))
         )
       ),
       Vector(InterruptId("b") -> BreakpointRequest(NodeId("assistant/finish"), GraphPhase.Before, None))

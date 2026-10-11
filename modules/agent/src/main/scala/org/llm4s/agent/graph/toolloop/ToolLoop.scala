@@ -29,25 +29,31 @@ enum ApprovalSource derives ReadWriter:
   case Middleware(id: MiddlewareId)
 
 /**
- * The question an approval interrupt asks: one tool call, from one assistant message. `answered` carries
- * the answers middleware questions of the call were given before it asked, so its chain runs again
- * with them once it is approved.
+ * The question an approval interrupt asks: one tool call, from one assistant message, with the
+ * call's [[org.llm4s.agent.graph.IdempotencyKey]], which the call keeps when it is approved or edited.
+ * `answered` carries the answers middleware questions of the call were given before it asked, so its
+ * chain runs again with them once it is approved.
  */
 final case class ApprovalRequest private (
   assistantMessageId: String,
   call: ToolCall,
   reason: String,
   source: ApprovalSource,
+  idempotencyKey: IdempotencyKey,
   answered: Vector[GivenAnswer] = Vector.empty
 ) derives ReadWriter:
   def withAssistantMessageId(id: String): ApprovalRequest =
-    ApprovalRequest(id, call, reason, source, answered)
-  def withCall(c: ToolCall): ApprovalRequest = ApprovalRequest(assistantMessageId, c, reason, source, answered)
-  def withReason(r: String): ApprovalRequest = ApprovalRequest(assistantMessageId, call, r, source, answered)
+    ApprovalRequest(id, call, reason, source, idempotencyKey, answered)
+  def withCall(c: ToolCall): ApprovalRequest =
+    ApprovalRequest(assistantMessageId, c, reason, source, idempotencyKey, answered)
+  def withReason(r: String): ApprovalRequest =
+    ApprovalRequest(assistantMessageId, call, r, source, idempotencyKey, answered)
   def withSource(s: ApprovalSource): ApprovalRequest =
-    ApprovalRequest(assistantMessageId, call, reason, s, answered)
+    ApprovalRequest(assistantMessageId, call, reason, s, idempotencyKey, answered)
+  def withIdempotencyKey(k: IdempotencyKey): ApprovalRequest =
+    ApprovalRequest(assistantMessageId, call, reason, source, k, answered)
   def withAnswered(a: Vector[GivenAnswer]): ApprovalRequest =
-    ApprovalRequest(assistantMessageId, call, reason, source, a)
+    ApprovalRequest(assistantMessageId, call, reason, source, idempotencyKey, a)
 
 object ApprovalRequest:
   def apply(
@@ -55,8 +61,9 @@ object ApprovalRequest:
     call: ToolCall,
     reason: String,
     source: ApprovalSource,
+    idempotencyKey: IdempotencyKey,
     answered: Vector[GivenAnswer] = Vector.empty
-  ): ApprovalRequest = new ApprovalRequest(assistantMessageId, call, reason, source, answered)
+  ): ApprovalRequest = new ApprovalRequest(assistantMessageId, call, reason, source, idempotencyKey, answered)
 
 /** A reviewer's answer. `Edit` runs the call with new arguments, recording them in the assistant message first. */
 enum ApprovalDecision derives ReadWriter:
@@ -64,13 +71,19 @@ enum ApprovalDecision derives ReadWriter:
   case Edit(arguments: ujson.Value)
   case Reject(reason: String)
 
-/** One model-issued tool call, scheduled as its own task. */
-final case class ToolTask(assistantMessageId: String, call: ToolCall) derives ReadWriter
+/**
+ * One model-issued tool call, scheduled as its own task, with the
+ * [[org.llm4s.agent.graph.IdempotencyKey]] the model step derived for it. The key is recorded with
+ * the call rather than derived again where it runs, because `recover` runs the call at a new
+ * checkpoint: every run of the call reads the same key from here.
+ */
+final case class ToolTask(assistantMessageId: String, call: ToolCall, idempotencyKey: IdempotencyKey) derives ReadWriter
 
 /**
  * The question a tool's `Ask` interrupt carries: the call that asked, from one assistant message,
- * the question encoded with the tool's declared question codec, and whether the call was approved
- * before it asked - `resume` sees the same `ToolContext.approved`. Find it with
+ * the question encoded with the tool's declared question codec, the call's
+ * [[org.llm4s.agent.graph.IdempotencyKey]], and whether the call was approved before it asked -
+ * `resume` sees the same `ToolContext.approved` and `ToolContext.idempotencyKey`. Find it with
  * [[ToolLoop.questions]], read its question as the tool's type with [[ToolLoop.question]], and
  * answer it with [[ToolLoop.answer]].
  */
@@ -78,28 +91,33 @@ final case class ToolQuestionRequest private (
   assistantMessageId: String,
   call: ToolCall,
   question: ujson.Value,
+  idempotencyKey: IdempotencyKey,
   approved: Boolean = false,
   answered: Vector[GivenAnswer] = Vector.empty
 ) derives ReadWriter:
   def withAssistantMessageId(id: String): ToolQuestionRequest =
-    ToolQuestionRequest(id, call, question, approved, answered)
+    ToolQuestionRequest(id, call, question, idempotencyKey, approved, answered)
   def withCall(c: ToolCall): ToolQuestionRequest =
-    ToolQuestionRequest(assistantMessageId, c, question, approved, answered)
+    ToolQuestionRequest(assistantMessageId, c, question, idempotencyKey, approved, answered)
   def withQuestion(q: ujson.Value): ToolQuestionRequest =
-    ToolQuestionRequest(assistantMessageId, call, q, approved, answered)
+    ToolQuestionRequest(assistantMessageId, call, q, idempotencyKey, approved, answered)
+  def withIdempotencyKey(k: IdempotencyKey): ToolQuestionRequest =
+    ToolQuestionRequest(assistantMessageId, call, question, k, approved, answered)
   def withApproved(a: Boolean): ToolQuestionRequest =
-    ToolQuestionRequest(assistantMessageId, call, question, a, answered)
+    ToolQuestionRequest(assistantMessageId, call, question, idempotencyKey, a, answered)
   def withAnswered(a: Vector[GivenAnswer]): ToolQuestionRequest =
-    ToolQuestionRequest(assistantMessageId, call, question, approved, a)
+    ToolQuestionRequest(assistantMessageId, call, question, idempotencyKey, approved, a)
 
 object ToolQuestionRequest:
   def apply(
     assistantMessageId: String,
     call: ToolCall,
     question: ujson.Value,
+    idempotencyKey: IdempotencyKey,
     approved: Boolean = false,
     answered: Vector[GivenAnswer] = Vector.empty
-  ): ToolQuestionRequest = new ToolQuestionRequest(assistantMessageId, call, question, approved, answered)
+  ): ToolQuestionRequest =
+    new ToolQuestionRequest(assistantMessageId, call, question, idempotencyKey, approved, answered)
 
 /** The hook a middleware asked its question from. */
 enum MiddlewareHook derives ReadWriter:
@@ -293,7 +311,18 @@ object ModelStep:
  *    leaves the checkpoint `Running`, so `recover` re-runs only that call.
  *  - `collect` runs only when the barrier releases, checks every call of the batch has exactly one
  *    result, and appends the `ToolMessage`s in call order. The model never sees a partial batch.
- *  - The model node re-checks the history with `Message.validateConversation` before every call.
+ *    A call cut short by cancellation, a `Fatal` or a crash records no result, so the batch stays
+ *    open and the thread waits for `recover`, which re-runs only that call (design 4.4, 5.3).
+ *  - Every call carries an [[org.llm4s.agent.graph.IdempotencyKey]], derived by the model step
+ *    from where it ran on the thread (checkpoint, superstep, task) and the call's id, and recorded
+ *    with the call: each run of the call - a retrying wrapper, approval, an answered question,
+ *    `recover` - sees the same key in `ToolContext.idempotencyKey`, and a call of another model
+ *    request a new one, even when the provider reuses its id and the run its `RunId`.
+ *  - The model node re-checks the history with `Message.validateConversation` before every call,
+ *    and refuses to send a request - as every `wrapModelCall` left it - in which a tool call lacks
+ *    exactly one result straight after its message ([[ToolResultRule]]); a model message whose call
+ *    ids repeat or are blank is refused before it is stored, as a blank answer is, and imported
+ *    `history` must keep the same rule.
  *  - Each [[LoopHandoff]] is offered to the agent's model as a stand-in tool `handoff_to_<target>`
  *    ([[HandoffTools]]), which call-tool never runs. When a handoff is an assistant message's only
  *    call, `<id>/model` stores the message and `ToolMessage("Transferred to <target>")`, makes the
@@ -772,7 +801,7 @@ object ToolLoop:
     else if history.exists { case _: SystemMessage => true; case _ => false } then
       Left(ValidationError("history", "system messages are not imported; prompts belong to agents"))
     else
-      Message.validateConversation(history.toList).map { _ =>
+      Message.validateConversation(history.toList).flatMap(_ => ToolResultRule.check(history)).map { _ =>
         history.zipWithIndex.foldLeft(Command.empty) { case (command, (message, i)) =>
           command.update(Messages.key, MessageUpdate.Append(StoredMessage(s"$taskId/history/$i", message)))
         }
@@ -801,7 +830,7 @@ object ToolLoop:
 
     b.implement(nodes.approval.node, writes = callWrites) { (resumed, state, context) =>
       val request = resumed.question
-      val task    = ToolTask(request.assistantMessageId, request.call)
+      val task    = ToolTask(request.assistantMessageId, request.call, request.idempotencyKey)
       resumed.answer match
         case ApprovalDecision.Approve        => pipeline.approved(task, request.call, state, context, request.answered)
         case ApprovalDecision.Reject(reason) => pipeline.rejected(task, reason, context)
@@ -864,7 +893,7 @@ object ToolLoop:
       calls.filter(c => handoffs.contains(c.name)) match
         case none if none.isEmpty =>
           if calls.isEmpty then appended.goto(nodes.finish)
-          else appended.fanOut(nodes.batch, nodes.callTool, calls.map(ToolTask(stored.id, _)))
+          else appended.fanOut(nodes.batch, nodes.callTool, calls.map(issued(stored.id, _, context)))
         case Vector(transfer) if calls.size == 1 =>
           val target = handoffs(transfer.name)
           AgentEvents.HandedOff.emit(context, events.HandedOff(agent.id.value, target.agent.id.value))
@@ -916,10 +945,12 @@ object ToolLoop:
                 askedSuspend(nodes, asked, MiddlewareHook.WrapModelCall, answers, update = update)
               case Left(error) => NodeResult.Fail(error)
               // a blank answer without tool calls is refused before it is stored, so the history stays valid
-              // and recover asks the model again
+              // and recover asks the model again; so are calls whose ids could not each be given one result
               case Right(completion) =>
                 NodeResult.fromResult(
-                  completion.message.validate.map(_ => stored(turn, completion, attempts.get, context))
+                  completion.message.validate
+                    .flatMap(_ => ToolResultRule.callIdsUsable(completion.message))
+                    .map(_ => stored(turn, completion, attempts.get, context))
                 )
       }
       outcome.fold(NodeResult.Fail(_), identity)
@@ -1058,25 +1089,43 @@ object ToolLoop:
    * hooks. Each invocation is an attempt, numbered from 1 by `attempts` (one counter per model task)
    * and announced live with `ModelCallStarted`. It refuses to call the model while the thread is
    * interrupted, returning `Left(CancelledError)`, so a wrapper that retries never calls a cancelled
-   * model again. A NonFatal throw is `Left`; a thrown cancellation - a bare `InterruptedException`
-   * too - restores the interrupt flag and is `Left(CancelledError)`. Either way it is the model's
-   * failure, not a wrapper's.
+   * model again. It refuses a request - as every wrapper left it - in which a tool call lacks
+   * exactly one result straight after its message ([[ToolResultRule]]), so no provider is sent a
+   * dangling call, whatever a wrapper did. A NonFatal throw is `Left`; a thrown cancellation - a
+   * bare `InterruptedException` too - restores the interrupt flag and is `Left(CancelledError)`.
+   * Either way it is the model's failure, not a wrapper's.
    */
   private def callModel(model: ModelStep, agent: AgentId, context: RunContext, attempts: AtomicInteger)(
     request: ModelRequest
   ): Result[Completion] =
     if Thread.currentThread().isInterrupted then Left(CancelledError("model"))
     else
-      val n = attempts.incrementAndGet()
-      AgentEvents.ModelCallStarted.progress(context, events.ModelCallStarted(agent.value, n))
-      attempt(model.next(request.messages, request.tools, ModelCall(context, agent, n))) match
-        case Right(result) => result
-        case Left(thrown) =>
-          CancelledError.fromThrowable(thrown, "model") match
-            case Some(cancellation) =>
-              Thread.currentThread().interrupt()
-              Left(cancellation)
-            case None => Failure[Completion](thrown).toResult
+      ToolResultRule.check(request.messages).flatMap { _ =>
+        val n = attempts.incrementAndGet()
+        AgentEvents.ModelCallStarted.progress(context, events.ModelCallStarted(agent.value, n))
+        attempt(model.next(request.messages, request.tools, ModelCall(context, agent, n))) match
+          case Right(result) => result
+          case Left(thrown) =>
+            CancelledError.fromThrowable(thrown, "model") match
+              case Some(cancellation) =>
+                Thread.currentThread().interrupt()
+                Left(cancellation)
+              case None => Failure[Completion](thrown).toResult
+      }
+
+  /**
+   * The task for `call` of the assistant message `messageId`, with its idempotency key: derived from
+   * where this model call ran on the thread - checkpoint, superstep, task - and the call's id
+   * (design §5.3), so a call of another model request gets a new key even when the provider reuses
+   * its id and the run reuses a [[org.llm4s.agent.graph.RunId]].
+   */
+  private def issued(messageId: String, call: ToolCall, context: RunContext): ToolTask =
+    val at = context.position
+    ToolTask(
+      messageId,
+      call,
+      IdempotencyKey.derive(at.threadId, at.checkpointId, at.superstep, at.taskId, ToolCallId(call.id))
+    )
 
   /**
    * Runs `body`, returning what it throws as `Left`: a NonFatal exception, or a bare
@@ -1189,7 +1238,7 @@ object ToolLoop:
     ): NodeResult =
       NodeResult.Suspend(
         StateUpdate.empty,
-        ApprovalRequest(task.assistantMessageId, call, reason, source, answers),
+        ApprovalRequest(task.assistantMessageId, call, reason, source, task.idempotencyKey, answers),
         approval
       )
 
@@ -1249,7 +1298,7 @@ object ToolLoop:
       state: ThreadState,
       context: RunContext
     ): NodeResult =
-      val task = ToolTask(request.assistantMessageId, request.call)
+      val task = ToolTask(request.assistantMessageId, request.call, request.idempotencyKey)
       val name = tool.spec.name
       tool.spec.question match
         case Some(declared: ToolQuestion[q, ans]) =>
@@ -1265,6 +1314,7 @@ object ToolLoop:
               val toolContext = ToolContext(
                 answering(agent, context, request.answered),
                 ToolCallId(request.call.id),
+                request.idempotencyKey,
                 state,
                 request.approved
               )
@@ -1349,7 +1399,8 @@ object ToolLoop:
       approved: Boolean = false,
       answers: Vector[GivenAnswer] = Vector.empty
     ): NodeResult =
-      val toolContext = ToolContext(answering(agent, context, answers), ToolCallId(call.id), state, approved)
+      val toolContext =
+        ToolContext(answering(agent, context, answers), ToolCallId(call.id), task.idempotencyKey, state, approved)
       val (chain, took) =
         timed(tool, call, toolContext, context)(innermost(tool.spec.name)(tool.execute(args, toolContext)))
       outcome(tool, task, call, approved, chain, context, took, answers)
@@ -1457,7 +1508,7 @@ object ToolLoop:
                   executed(task.call, context, ToolExecutionOutcome.Asked, took)
                   NodeResult.Suspend(
                     StateUpdate.empty,
-                    ToolQuestionRequest(task.assistantMessageId, call, json, approved, answers),
+                    ToolQuestionRequest(task.assistantMessageId, call, json, task.idempotencyKey, approved, answers),
                     ref
                   )
                 case Left(e) =>
@@ -1511,7 +1562,7 @@ object ToolLoop:
                     MiddlewareHook.WrapToolCall,
                     json,
                     None,
-                    Some(ToolTask(task.assistantMessageId, call)),
+                    Some(ToolTask(task.assistantMessageId, call, task.idempotencyKey)),
                     approved,
                     answers
                   )

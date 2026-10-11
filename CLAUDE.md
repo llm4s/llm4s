@@ -101,13 +101,17 @@ llm4s/
 │   │   ├── voyage/            # Voyage AI embedding provider
 │   │   ├── bedrock/           # AWS Bedrock chat provider + AWS SDK bedrockruntime (Converse, ConverseStream)
 │   │   ├── jina/              # Jina AI embedding provider (typed JinaTask)
+│   │   ├── jev/               # Jev decision client (TypeSafe System One: typed Noul/Choice/Score questions); not an LLMClient
 │   │   ├── cohere/            # Cohere embedding provider, native /v2/embed (typed CohereInputType)
-│   │   └── watsonx/           # IBM watsonx.ai chat provider (Beta; IBM has deprecated the endpoints it uses)
+│   │   └── watsonx/           # IBM watsonx.ai chat provider (Beta; never run against the live service)
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
+│   ├── testkit/               # llm4s-testkit: scriptable fake LLMClient for users' own tests (published)
 │   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
 │   ├── observability-prometheus/ # Prometheus MetricsCollector + /metrics endpoint + Prometheus client (published)
+│   ├── observability-micrometer/ # Micrometer MetricsCollector writing into a MeterRegistry (published)
 │   ├── agent/                 # Agent runtime: Agent, graph runtime, guardrails, handoffs, streaming; assistant (published)
 │   ├── agent-tools/           # Built-in tools: core utilities, filesystem, HTTP, shell, web search (published)
+│   ├── agent-testkit/         # CheckpointerContract: the suite every Checkpointer store must pass (published)
 │   ├── bom/                   # llm4s-bom: POM-only bill of materials pinning every published artifact, generated (published)
 │   ├── llm4s-effect/          # cats-effect IO / fs2 wrappers over LLMClient and Agent (published)
 │   ├── llm4s-zio/             # ZIO 2 / ZIO Streams wrappers over LLMClient and Agent (published)
@@ -437,6 +441,7 @@ GOOGLE_API_KEY=...                   # llm4s-gemini (gemini); GEMINI_API_KEY whe
 DEEPSEEK_API_KEY=...                 # llm4s-openai-compatible; also ZAI_API_KEY, OPENROUTER_API_KEY, MISTRAL_API_KEY
 COHERE_API_KEY=...                   # llm4s-openai-compatible, llm4s-rag and llm4s-cohere (Cohere chat, reranker, embeddings)
 VOYAGE_API_KEY=pa-...                # llm4s-voyage
+TYPESAFE_API_KEY=...                 # llm4s-jev (Jev decision client, not a provider) -> llm4s.credentials.typesafe.apiKey
 
 # Embeddings (llm4s-core selects; each provider module binds its own block)
 EMBEDDING_MODEL=openai/text-embedding-3-small  # provider/model

@@ -171,6 +171,26 @@ jobs:
       - name: Compile
         run: sbt compile
 
+      # Builds the CycloneDX SBOMs that the release workflow attaches to a GitHub release (docs/reference/sbom.md), so a
+      # change that breaks their generation fails here and not on release day. It also fails when a published module has
+      # no BOM, or a BOM names a build-machine path or a test framework. The dependencies are resolved by now, so this is
+      # a few seconds of sbt, not a second build.
+      - name: Generate and check the SBOMs
+        run: |
+          sbt -batch publishedSboms
+          sbt -batch -error listPublishedArtifacts | grep -E '^(artifact|stub) ' > target/published-artifacts.txt
+          scripts/test-check-sbom.sh
+          scripts/test-osv-scan.sh
+          scripts/check-sbom.sh target/sboms target/published-artifacts.txt
+
+      - name: Upload the SBOMs
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: target/sboms/*.bom.json
+          retention-days: 14
+          if-no-files-found: error
+
       # Fails when a frozen module resolves a document-parsing, speech, cloud-storage, database,
       # observability-backend or foreign vendor-SDK dependency, so the programme's definition of done
       # (#1126) stays true until the 1.0 freeze.
@@ -289,13 +309,17 @@ jobs:
           voyage/test voyage/coverageReport
           bedrock/test bedrock/coverageReport
           jina/test jina/coverageReport
+          jev/test jev/coverageReport
           cohere/test cohere/coverageReport
           watsonx/test watsonx/coverageReport
           providerTestkit/test providerTestkit/coverageReport
+          testkit/test testkit/coverageReport
           observability/test observability/coverageReport
           observabilityPrometheus/test observabilityPrometheus/coverageReport
+          observabilityMicrometer/test observabilityMicrometer/coverageReport
           agentTools/test agentTools/coverageReport
           agent/test agent/coverageReport
+          agentTestkit/test agentTestkit/coverageReport
           traceOpentelemetry/test traceOpentelemetry/coverageReport
           gradleDemo/test gradleDemo/coverageReport
           javaApi/test javaApi/coverageReport
@@ -471,6 +495,12 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/jina/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: jina
+      - name: Upload jev coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/jev/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: jev
       - name: Upload cohere coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
@@ -497,6 +527,16 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      - name: Upload testkit coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/testkit/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: testkit
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
       - name: Upload observability coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
@@ -517,12 +557,32 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      - name: Upload observability-micrometer coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/observability-micrometer/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: observability-micrometer
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
       - name: Upload agent coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/agent/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: agent
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload agent-testkit coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/agent-testkit/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: agent-testkit
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -849,11 +909,34 @@ jobs:
           path: modules/kotlin-api/build/reports/jacoco/
           retention-days: 14
 
+  # The starter is built against the oldest supported Spring Boot 3.x (project/Dependencies.scala); this runs its
+  # specs against the latest 3.x, so the documented range (docs/guide/spring-boot.md) is tested at both ends (#1467).
+  spring-boot-latest:
+    name: Spring Boot 3.x (latest)
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Test the starter against the latest Spring Boot 3.x
+        run: sbt -Dllm4s.springBootVersion=3.5.16 springBootStarter/test
+
   # All tests must pass
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api]
+    needs: [test, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -887,6 +970,10 @@ jobs:
           fi
           if [[ "${{ needs.kotlin-api.result }}" != "success" ]]; then
             echo "Kotlin API tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.spring-boot-latest.result }}" != "success" ]]; then
+            echo "Spring Boot 3.x (latest) tests failed"
             exit 1
           fi
           echo "All tests passed!"
@@ -1132,4 +1219,14 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
           BEDROCK_MODEL_ID: ${{ secrets.BEDROCK_MODEL_ID }}
+          # WatsonXAssumptionProbeSpec: an IBM Cloud API key plus a project (or deployment space).
+          # WATSONX_BASE_URL and WATSONX_MODEL are optional; unset, the suite uses us-south and its
+          # default model.
+          WATSONX_API_KEY: ${{ secrets.WATSONX_API_KEY }}
+          WATSONX_PROJECT_ID: ${{ secrets.WATSONX_PROJECT_ID }}
+          WATSONX_SPACE_ID: ${{ secrets.WATSONX_SPACE_ID }}
+          WATSONX_BASE_URL: ${{ secrets.WATSONX_BASE_URL }}
+          WATSONX_MODEL: ${{ secrets.WATSONX_MODEL }}
+          # JevSmokeSpec (llm4s-jev): a TypeSafe API key, billed at a few hundred input tokens per test.
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: sbt testSmoke
