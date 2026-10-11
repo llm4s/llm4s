@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **CI runs in a GitHub merge queue** ([#1638](https://github.com/llm4s/llm4s/issues/1638)): `ci.yml`, `dco.yml` and
+  `secret-scan.yml`, the workflows behind `main`'s required checks (`All Tests Pass`, `Check DCO sign-off`, `TruffleHog
+  Secret Scan`), also trigger on `merge_group`, so a maintainer can enable a merge queue that tests each pull request
+  on top of current `main` before it lands. That closes the merge skew that turned `main` red when two independently
+  green pull requests landed together (#1386 with #1417, #1741 with #1585). On a merge group the DCO job reports
+  without re-running `dco-check` (the pull request already passed it to be queued), and the secret scan scans the
+  group's own range. `scripts/test-merge-queue-workflows.sh`, in Quick Checks, keeps it so. Enabling the queue is a
+  repository setting: [docs/reference/merge-queue.md](docs/reference/merge-queue.md). Nothing changes until it is enabled.
 - **Human-review interrupts: static breakpoints and typed middleware questions** ([#1704](https://github.com/llm4s/llm4s/issues/1704),
   part of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `RunConfig.interruptBefore`/`interruptAfter` hold a
   graph node's tasks before they run or after they ran, each as an interrupt of its own keyed by its task id, parked
