@@ -55,7 +55,8 @@ sealed interface AgentStreamItem {
  *
  * A turn whose tools need approval, whose tools or middleware ask a question, or whose task a static
  * breakpoint holds, ends `SUSPENDED`: `result.status().pending()` - or [pending] - lists what it waits for, and [resume] answers some or all of it and continues. A turn that failed or was cancelled
- * continues with [recover], but for [run]'s, whose thread is forgotten.
+ * continues with [recover], but for [run]'s, whose thread is forgotten. A conversation you will not continue is
+ * removed with `forget(result)`, or with `forget(threadId)` for one you named whose turn left no result.
  *
  * [stream], [streamResume] and [streamRecover] run a turn on a thread you name as a cold [Flow] of its
  * events ([AgentStreamItem.Event]), then its result ([AgentStreamItem.Done]).
@@ -121,6 +122,17 @@ class AgentKt internal constructor(private val underlying: JAgent) {
     /** Removes [previous]'s conversation from the agent's runtime. Throws [LLMException] on failure. */
     suspend fun forget(previous: JAgentResult): Unit = runInterruptible(Dispatchers.IO) {
         underlying.forget(previous).unwrap("Agent forget failed")
+        Unit
+    }
+
+    /**
+     * Removes the conversation on [threadId] from the agent's runtime - one you named for [stream], say, whose turn
+     * failed, so no result carries its id to pass to `forget(previous)`. Forgetting an unknown thread succeeds; a
+     * thread whose turn is still running is refused (`ThreadBusy`) and nothing is removed. Throws [LLMException] on
+     * failure.
+     */
+    suspend fun forget(threadId: String): Unit = runInterruptible(Dispatchers.IO) {
+        underlying.forget(threadId).unwrap("Agent forget failed")
         Unit
     }
 
