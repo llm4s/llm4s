@@ -181,7 +181,13 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     classOf[LlmErrorKind],
     classOf[JEmbeddingClient],
     classOf[JEmbeddings],
-    classOf[JEmbeddingPurpose]
+    classOf[JEmbeddingPurpose],
+    classOf[OpenAiClientBuilder],
+    classOf[AnthropicClientBuilder],
+    classOf[GeminiClientBuilder],
+    classOf[OllamaClientBuilder],
+    classOf[OpenAiCompatibleClientBuilder],
+    classOf[AzureOpenAiClientBuilder]
   )
 
   "the public Java-visible surface" should "not expose scala.* types outside the allowlisted internals" in {
@@ -320,6 +326,41 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     classOf[JAgent].getMethod("forget", classOf[JAgentResult]) should not be null
     classOf[JAgent].getMethod("forget", classOf[String]) should not be null
     classOf[JAgent].getMethod("pending", classOf[JAgentResult]) should not be null
+  }
+
+  "the client builders" should "be listed on Llm4s, take and return Java types only, and build an LlmResult<JLlmClient>" in {
+    val llm4s = Class.forName("org.llm4s.javaapi.Llm4s")
+    val builders = Map(
+      "openAi"           -> classOf[OpenAiClientBuilder],
+      "anthropic"        -> classOf[AnthropicClientBuilder],
+      "gemini"           -> classOf[GeminiClientBuilder],
+      "ollama"           -> classOf[OllamaClientBuilder],
+      "openAiCompatible" -> classOf[OpenAiCompatibleClientBuilder],
+      "azureOpenAi"      -> classOf[AzureOpenAiClientBuilder]
+    )
+    builders.foreach { (name, builder) =>
+      withClue(name) {
+        val factory = llm4s.getMethod(name)
+        Modifier.isStatic(factory.getModifiers) shouldBe true
+        factory.getReturnType shouldBe builder
+        mentioned(builder.getMethod("build").getGenericReturnType) shouldBe List(
+          classOf[LlmResult[_]],
+          classOf[JLlmClient]
+        )
+        // a Java caller cannot construct one: the builders come from Llm4s only
+        builder.getConstructors shouldBe empty
+        Modifier.isFinal(builder.getModifiers) shouldBe true
+        val signatures = builder.getMethods.toList.filter(_.getDeclaringClass == builder)
+        signatures
+          .flatMap(m => m.getGenericReturnType :: m.getGenericParameterTypes.toList)
+          .flatMap(mentioned)
+          .filter(
+            scalaOnly
+          ) shouldBe Nil
+        // every setter returns the builder, so calls chain
+        signatures.filterNot(m => Set("build", "toString")(m.getName)).foreach(_.getReturnType shouldBe builder)
+      }
+    }
   }
 }
 

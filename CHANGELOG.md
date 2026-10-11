@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Java client builders: a client in code, with no `application.conf` and no Scala type** ([#1489](https://github.com/llm4s/llm4s/issues/1489)):
+  `Llm4s.openAi()`, `anthropic()`, `gemini()`, `ollama()`, `openAiCompatible()` and `azureOpenAi()` return immutable
+  builders (`OpenAiClientBuilder` and so on) taking `apiKey`, `model`, `baseUrl`, `contextWindow`, `reserveCompletion`,
+  `requestTimeout`/`streamTimeout` (`java.time.Duration`) and each provider's own fields (`organization`, `apiVersion`,
+  `header`), whose `build()` returns `LlmResult<JLlmClient>`. A required field left out, `null` or blank, or a value out
+  of range, is a failed result of kind `VALIDATION` naming the field; `build()` sends no request and never throws, and
+  `toString` prints the key as `***`. Defaults are those `application.conf` gives - the provider's base URL and the
+  model catalogue's context window - because each builder makes its config through the provider's public `fromValues`
+  and `with` setters, never a constructor. Other providers still take a config object through
+  `Llm4s.createClient(ProviderConfig)`. See [Configure in code](docs/guide/java.md#configure-in-code).
 - **Checkpoint history, fork, `updateState` and retention** ([#1702](https://github.com/llm4s/llm4s/issues/1702),
   Stage 2 slice 3 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): a `Checkpointer` keeps every checkpoint a
   thread's runs commit, not only the latest. `GraphRuntime.history(threadId, before, limit)` pages them newest first
