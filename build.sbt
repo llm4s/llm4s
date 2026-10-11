@@ -215,6 +215,14 @@ lazy val listPublishedArtifacts = taskKey[Unit](
 lazy val bomCheck = taskKey[Unit](
   "Fail the build if the generated llm4s-bom does not list exactly the artifacts the build publishes"
 )
+// Every published POM carries what Maven Central requires (name, description, URL, licence, developer, SCM) and the
+// `<scm>` URL Scaladex associates artifacts with (#1455). It reads the generated POMs. See project/PomMetadata.scala.
+lazy val pomMetadataCheck = taskKey[Unit](
+  "Fail the build if a published POM lacks a description, https URL, licence, developer or the llm4s/llm4s GitHub scm"
+)
+// The same check on POM files given by path, for example a released POM downloaded from Maven Central:
+// `sbt "pomMetadataCheckFiles llm4s-core_3-0.5.0.pom"`.
+lazy val pomMetadataCheckFiles = inputKey[Unit]("Run pomMetadataCheck's rules on the POM files given as arguments")
 
 // ---- software bill of materials ----
 // One CycloneDX SBOM per published `llm4s-*` module that ships a jar (samples, `it`, benchmarks, the
@@ -375,6 +383,18 @@ lazy val llm4s = (project in file("."))
         written.map(_._1).sortBy(_.getName)
       }
     }.value,
+    pomMetadataCheck / aggregate := false,
+    pomMetadataCheck := Def.taskDyn {
+      val projects = Def.task((thisProjectRef.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
+      val refs     = projects.collect { case (ref, false) => ref }
+      Def.task(PomMetadata.check(makePom.all(ScopeFilter(inProjects(refs: _*))).value, streams.value.log))
+    }.value,
+    pomMetadataCheckFiles / aggregate := false,
+    pomMetadataCheckFiles := {
+      val paths = Def.spaceDelimited("<pom files>").parsed
+      if (paths.isEmpty) sys.error("pomMetadataCheckFiles needs at least one POM file")
+      PomMetadata.check(paths.map(file), streams.value.log)
+    },
     bomCheck / aggregate := false,
     bomCheck := {
       val projects = Def

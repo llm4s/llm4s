@@ -138,6 +138,52 @@ it never overwrites. Write whatever the release deserves once it exists.
   proof of a miss: re-run before concluding one. A miss that persists cannot be fixed in that version
   ([Re-triggering a failed release](#re-triggering-a-failed-release)); it waits for the next one.
 
+- Check the published POMs' metadata. `sbt pomMetadataCheck` (a CI quick check) already fails a build whose
+  generated POMs lack a description, an https project URL, a licence, a developer or the
+  `https://github.com/llm4s/llm4s` `<scm>` that Scaladex matches on. To check what actually reached Central:
+
+  ```bash
+  curl -sfO https://repo1.maven.org/maven2/org/llm4s/llm4s-core_3/0.5.0/llm4s-core_3-0.5.0.pom
+  sbt "pomMetadataCheckFiles llm4s-core_3-0.5.0.pom"
+  ```
+
+  Run against 0.4.1's POM it reports three problems: the description is the artifact name, the `<scm><url>` has a
+  trailing slash and the connection is the SSH form. All three were fixed after 0.4.1 (#1588).
+- Check Scaladex: `https://index.scala-lang.org/llm4s/llm4s` should list the new version once Scaladex has picked it up.
+  See [Discoverability](#discoverability-scaladex-and-github) when it does not.
+
+### Discoverability: Scaladex and GitHub
+
+Scala developers look for libraries on [Scaladex](https://index.scala-lang.org). It indexes an artifact by the
+POM's `<scm>` (it "associates a new artifact to a project by looking at the `scm` attribute", and supports only
+public GitHub repositories), and it ranks search results by the GitHub repository's name (boost 6), organization (5),
+**description (4)** and **topics (4)**, then the artifact names (2) and the README (0.5)
+([how it works](https://github.com/scalacenter/scaladex#how-it-works),
+[improving visibility](https://github.com/scalacenter/scaladex/blob/main/doc/user/improve-visibility.md)). The POM
+side is in the build and guarded by `pomMetadataCheck`. The rest are repository settings or requests upstream, so they
+need a maintainer:
+
+- **GitHub topics** (Settings, General, the About gear, or
+  `gh repo edit llm4s/llm4s --add-topic scala,scala3,llm,llm-agents,ai-agents,rag,mcp,openai,anthropic,ollama,genai,tool-calling`).
+  These are the words a Scala developer types when looking for this; there are none today.
+- **Repository description:** today "Agentic  and LLM Programming in Scala" (with a double space). One sentence that
+  names what it is helps both Scaladex and GitHub search, for example "Scala 3 toolkit for LLM applications: one client
+  for OpenAI, Anthropic, Gemini, Ollama and more, agents, tool calling, RAG and MCP".
+- **Repository homepage:** empty today; set it to `https://llm4s.org`. Scaladex shows it as the project's website.
+- **If the project is still missing after a release:** several projects published through the Sonatype Central Portal
+  were reported missing in mid-2026, and in each case a Scaladex maintainer added the project by hand on
+  request ([scaladex#1715](https://github.com/scalacenter/scaladex/issues/1715),
+  [#1716](https://github.com/scalacenter/scaladex/issues/1716),
+  [#1717](https://github.com/scalacenter/scaladex/issues/1717); an automatic fallback is proposed in
+  [scaladex#1718](https://github.com/scalacenter/scaladex/pull/1718)). Open an issue there titled "llm4s (org.llm4s) is
+  not indexed", giving the repository, the group id `org.llm4s`, an artifact such as
+  `https://repo1.maven.org/maven2/org/llm4s/llm4s-core_3/` and the POM's `<scm>`. A `claims.json` entry in
+  scaladex-contrib is only for artifacts whose POM has no usable `<scm>`, which ours has. Scaladex reads no
+  repository file such as `.scaladex.json`, so there is nothing to add here.
+- **Once the listing exists:** add the Scaladex badge beside the Maven Central one in `README.md`
+  (`[![llm4s-core Scala version support](https://index.scala-lang.org/llm4s/llm4s/llm4s-core/latest-by-scala-version.svg)](https://index.scala-lang.org/llm4s/llm4s/llm4s-core)`)
+  and a Scaladex link in the installation guide. Until then that badge renders "project not found", so it is not added.
+
 ## Release readiness: a MiMa dry run
 
 `mimaBaselineVersion` in `build.sbt` is `None`, so `sbt mimaReportBinaryIssues` compiles the build and checks
