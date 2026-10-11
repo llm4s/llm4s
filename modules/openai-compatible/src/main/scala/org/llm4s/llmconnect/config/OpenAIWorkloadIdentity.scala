@@ -33,6 +33,7 @@ final case class OpenAIWorkloadIdentity private (
     s"OpenAIWorkloadIdentity($identityToken, identityProviderId=***, serviceAccountId=***, " +
       s"clientId=${Redaction.secretOpt(clientId)})"
 
+@Experimental
 object OpenAIWorkloadIdentity:
 
   /** Creates an [[OpenAIWorkloadIdentity]]. Named arguments are the supported way to construct one. */

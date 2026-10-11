@@ -126,6 +126,7 @@ final class CachingAccessTokenProvider(
       val half   = lifetime.dividedBy(2)
       token.expiresAt.minus(if half.compareTo(margin) < 0 then half else margin)
 
+@Experimental
 object CachingAccessTokenProvider:
   val DefaultRefreshMargin: FiniteDuration = 60.seconds
 

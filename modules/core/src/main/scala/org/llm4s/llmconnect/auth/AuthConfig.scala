@@ -21,6 +21,7 @@ final case class AuthConfig private (identityToken: IdentitySource, extras: Map[
   override def toString: String =
     s"AuthConfig($identityToken, ${extras.keys.toSeq.sorted.map(k => s"$k -> ***").mkString("Map(", ", ", ")")})"
 
+@Experimental
 object AuthConfig:
   private[llm4s] val IdentityTokenFileKey: String = "identityTokenFile"
   private[llm4s] val IdentityTokenKey: String     = "identityToken"

@@ -45,6 +45,7 @@ final case class TokenExchangeConfig private (
     s"TokenExchangeConfig($identityToken, tokenUrl=${Redaction.url(tokenUrl)}, " +
       s"clientId=${Redaction.secretOpt(clientId)}, scope=$scope, audience=$audience)"
 
+@Experimental
 object TokenExchangeConfig:
 
   /** Creates a [[TokenExchangeConfig]]. Named arguments are the supported way to construct one. */

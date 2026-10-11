@@ -36,6 +36,7 @@ final case class AnthropicWorkloadIdentity private (
     s"AnthropicWorkloadIdentity(identityTokenFile=$identityTokenFile, federationRuleId=***, organizationId=***, " +
       s"serviceAccountId=${Redaction.secretOpt(serviceAccountId)}, workspaceId=${Redaction.secretOpt(workspaceId)})"
 
+@Experimental
 object AnthropicWorkloadIdentity:
 
   /** Creates an [[AnthropicWorkloadIdentity]]. Named arguments are the supported way to construct one. */

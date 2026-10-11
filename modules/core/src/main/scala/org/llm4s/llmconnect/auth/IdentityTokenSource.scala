@@ -30,6 +30,7 @@ enum IdentitySource:
 trait IdentityTokenSource:
   def fetch(): Result[String]
 
+@Experimental
 object IdentityTokenSource:
 
   private val Provider = "workload-identity"
