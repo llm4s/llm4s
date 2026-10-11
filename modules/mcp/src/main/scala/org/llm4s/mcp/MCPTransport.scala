@@ -359,12 +359,14 @@ class StreamableHTTPTransportImpl(
   }
 
   /**
-   * Build headers for notifications (similar to requests but notifications don't expect responses).
+   * Build headers for notifications. A notification gets no JSON-RPC response, but the Streamable HTTP
+   * transport requires every POST to carry an `Accept` header listing both `application/json` and
+   * `text/event-stream`; servers built on the MCP SDKs reject one without it with `406 Not Acceptable`.
    */
   private def buildNotificationHeaders(): Map[String, String] = {
     val baseHeaders = Map(
-      "Content-Type" -> "application/json"
-      // No Accept header since we don't expect a response
+      "Content-Type" -> "application/json",
+      "Accept"       -> "application/json, text/event-stream"
     )
 
     // Add MCP-Protocol-Version header (notifications still need protocol version)
