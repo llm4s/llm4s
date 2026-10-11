@@ -5,7 +5,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.nio.charset.StandardCharsets
-import java.nio.file.{ Files, Path }
+import java.nio.file.{ Files, LinkOption, Path, Paths }
 import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
 import scala.util.{ Try, Using }
@@ -260,6 +260,387 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
   }
 
   // ---------------------------------------------------------------------------------------------------------------
+  // A link that points out of the workspace can be removed or renamed itself (#1730)
+
+  /**
+   * `outfile` -> outside/secret.txt, `outdir` -> outside, `dangling` -> outside/missing, and the chain
+   * `chain` -> `hop` -> outside, `hop` itself a link in the workspace.
+   */
+  private def linksOut(fx: Fixture): Unit = {
+    link(fx, "outfile", fx.outside.resolve("secret.txt"))
+    link(fx, "outdir", fx.outside)
+    link(fx, "dangling", fx.outside.resolve("missing"))
+    link(fx, "hop", fx.outside)
+    link(fx, "chain", fx.root.resolve("hop").getFileName)
+    ()
+  }
+
+  private def isLink(p: Path): Boolean = Files.isSymbolicLink(p)
+
+  /** Nothing outside was touched: the directory and its file are still there. */
+  private def outsideIntact(fx: Fixture): Unit = {
+    Files.isDirectory(fx.outside, java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe true
+    new String(Files.readAllBytes(fx.outside.resolve("secret.txt")), StandardCharsets.UTF_8) shouldBe "secret\n"
+  }
+
+  "rm, mv and unlink" should "remove or rename a link that points out of the workspace, and only the link" in
+    inWorkspace { fx =>
+      linksOut(fx)
+      val ws = fx.interface(ReadWrite.withExtraCommands("unlink").fold(fail(_), identity))
+      runs(ws, "rm outfile")
+      Files.exists(fx.root.resolve("outfile"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      runs(ws, "rm -f outdir")
+      Files.exists(fx.root.resolve("outdir"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      runs(ws, "rm -- dangling")
+      Files.exists(fx.root.resolve("dangling"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      // A link to a link: only the first goes
+      runs(ws, "rm chain")
+      Files.exists(fx.root.resolve("chain"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      isLink(fx.root.resolve("hop")) shouldBe true
+      outsideIntact(fx)
+
+      // mv renames the link, not its target, into a name or a directory inside
+      runs(ws, "mv hop renamed")
+      isLink(fx.root.resolve("renamed")) shouldBe true
+      Files.readSymbolicLink(fx.root.resolve("renamed")) shouldBe fx.outside
+      runs(ws, "mv -f renamed sub/")
+      isLink(fx.root.resolve("sub").resolve("renamed")) shouldBe true
+      // by a path through a directory inside, and from another working directory
+      runs(ws, "mv sub/renamed sub/again")
+      runs(ws, "rm ../sub/again", workingDirectory = Some("sub"))
+      Files.exists(fx.root.resolve("sub").resolve("again"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+
+      link(fx, "viaunlink", fx.outside)
+      runs(ws, "unlink viaunlink")
+      Files.exists(fx.root.resolve("viaunlink"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      outsideIntact(fx)
+    }
+
+  it should "refuse such a link written with a trailing '/' or '/.', which makes the program follow it" in
+    inWorkspace { fx =>
+      linksOut(fx)
+      val ws = fx.interface(ReadWrite.withExtraCommands("unlink").fold(fail(_), identity))
+      // `mv outdir/ x` moves the directory outdir points to; `rm -r outdir/` empties it
+      Seq(
+        "rm outdir/",
+        "rm -f outdir/.",
+        "rm -r outdir/",
+        "rm -rf outdir/.",
+        "rm outdir//",
+        "mv outdir/ moved",
+        "mv outdir/. moved",
+        "mv outfile/ moved",
+        "unlink outdir/"
+      ).foreach(refuses(ws, _, PathEscape))
+      isLink(fx.root.resolve("outdir")) shouldBe true
+      Files.exists(fx.root.resolve("moved"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      outsideIntact(fx)
+    }
+
+  it should "refuse a recursive rm of such a link" in inWorkspace { fx =>
+    linksOut(fx)
+    val ws = fx.interface(ReadWrite)
+    Seq("rm -r outdir", "rm -R outdir", "rm -rf outdir", "rm -fR outdir", "rm --recursive outdir", "rm --rec outdir")
+      .foreach(refuses(ws, _, PathEscape))
+    isLink(fx.root.resolve("outdir")) shouldBe true
+    outsideIntact(fx)
+  }
+
+  it should "still hold the destination of mv to the path rule, links followed" in inWorkspace { fx =>
+    linksOut(fx)
+    val ws = fx.interface(ReadWrite)
+    Seq(
+      "mv a.txt outdir", // moves a.txt into the directory outdir points to
+      "mv a.txt outdir/",
+      "mv a.txt outdir/a.txt",
+      "mv a.txt outfile",
+      "mv outfile outdir", // a link source into a link destination
+      "mv b.txt hop",
+      "mv -t outdir a.txt",
+      "mv --target-directory=outdir a.txt",
+      "mv a.txt -t outdir",
+      "mv -f a.txt ../outside/a.txt"
+    ).foreach(refuses(ws, _, PathEscape))
+    Files.exists(fx.root.resolve("a.txt")) shouldBe true
+    Files.exists(fx.outside.resolve("a.txt")) shouldBe false
+    outsideIntact(fx)
+  }
+
+  it should "refuse a link whose directory is outside the workspace, or is so under one reading of the path" in
+    inWorkspace { fx =>
+      linksOut(fx)
+      Files.createSymbolicLink(fx.outside.resolve("lnk"), fx.outside.resolve("secret.txt"))
+      link(fx, "escape", fx.outside)
+      // `l` -> a/b/c, and a/b/x -> outside: physically `l/../x` is a/b/x, textually the workspace's `x`
+      Files.createDirectories(fx.root.resolve("a").resolve("b").resolve("c"))
+      link(fx, "l", fx.root.resolve("a").resolve("b").resolve("c"))
+      link(fx, "a/b/x", fx.outside)
+      val ws = fx.interface(ReadWrite)
+      Seq(
+        "rm escape/lnk",
+        "rm ../outside/lnk",
+        fx.expand("rm '{out}/lnk'"),
+        "mv escape/lnk moved",
+        "rm l/../x",
+        "rm .."
+      ).foreach(refuses(ws, _, PathEscape))
+      isLink(fx.outside.resolve("lnk")) shouldBe true
+      isLink(fx.root.resolve("a").resolve("b").resolve("x")) shouldBe true
+      outsideIntact(fx)
+    }
+
+  it should "keep the link refused under a form macOS or GNU would parse differently" in inWorkspace { fx =>
+    linksOut(fx)
+    val ws = fx.interface(ReadWrite)
+    // GNU-only options (macOS rm and mv have no long options, -t or -T), and GNU mv's -S taking the link as its value
+    Seq(
+      "rm --force outfile",
+      "mv -T outfile moved",
+      "mv -t sub outfile",
+      "mv --verbose outfile moved",
+      "mv -S outfile a.txt sub"
+    ).foreach(refuses(ws, _, PathEscape))
+    isLink(fx.root.resolve("outfile")) shouldBe true
+  }
+
+  it should "keep such a link refused on Windows, where the policy does not model removing a link" in inWorkspace {
+    fx =>
+      linksOut(fx)
+      val root = fx.root.toRealPath()
+      Seq("rm" -> "outfile", "mv" -> "outdir", "del" -> "outfile").foreach { case (program, arg) =>
+        CommandPolicy.refusal(program, Seq(arg, "x"), isWindows = true, root, root, Map.empty).map(_.code) shouldBe
+          Some(PathEscape)
+      }
+      CommandPolicy.refusal("rm", Seq("outfile"), isWindows = false, root, root, Map.empty) shouldBe None
+  }
+
+  it should "leave other programs' handling of the link unchanged" in inWorkspace { fx =>
+    linksOut(fx)
+    val ws = fx.interface(ReadWrite)
+    Seq("cat outfile", "cp outfile copied", "chmod 600 outfile", "touch outfile", "ls outdir", "mkdir outdir/x")
+      .foreach(refuses(ws, _, PathEscape))
+    outsideIntact(fx)
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Several sources in one mv or cp: an earlier operation changes what a later path names (#1776)
+
+  /** Nothing outside was moved, removed or changed, and none of `names` appeared in the workspace. */
+  private def nothingPulledIn(fx: Fixture, names: String*): Unit = {
+    outsideIntact(fx)
+    names.foreach { name =>
+      withClue(s"$name: ")(Files.exists(fx.root.resolve(name), LinkOption.NOFOLLOW_LINKS) shouldBe false)
+    }
+  }
+
+  "mv and cp of several sources" should "refuse a path through a relative link an earlier source moves (#1776)" in
+    inWorkspace { fx =>
+      // While `sub/l` -> ../outside sits in `sub` it names the workspace's own (missing) `outside`; moved to the root
+      // it names the real outside directory, so `mv sub/l l/secret.txt .` would move outside/secret.txt in.
+      link(fx, "sub/l", Paths.get("../outside"))
+      val ws = fx.interface(ReadWrite)
+      Seq(
+        "mv sub/l l/secret.txt .",
+        "mv -f sub/l l/secret.txt ./",
+        "mv -t . sub/l l/secret.txt",
+        "mv sub/l l/../l/secret.txt .",
+        "mv sub/l L/secret.txt ." // a case-insensitive file system
+      ).foreach(refuses(ws, _, ArgumentNotAllowed))
+      refuses(ws, "mv l ../l/secret.txt ..", ArgumentNotAllowed, workingDirectory = Some("sub"))
+      isLink(fx.root.resolve("sub").resolve("l")) shouldBe true
+      nothingPulledIn(fx, "l", "secret.txt")
+    }
+
+  it should "refuse a path through a link out of the workspace that an earlier source moves (#1730's exemption)" in
+    inWorkspace { fx =>
+      // `evil` may be moved itself (#1730); moved into the empty `d`, `d/evil/secret.txt` is outside/secret.txt
+      link(fx, "evil", fx.outside)
+      val d = Files.createDirectory(fx.root.resolve("d"))
+      link(fx, "alias", d)
+      val ws = fx.interface(ReadWrite)
+      // On Windows `evil` is not exempted (#1730), so the path rule refuses it before this rule is reached
+      val refusedWith = if (isWindowsHost) PathEscape else ArgumentNotAllowed
+      Seq(
+        "mv evil d/evil/secret.txt d",
+        "mv evil alias/evil/secret.txt d", // the destination under another name
+        "mv evil d/evil/secret.txt alias",
+        "mv evil d/EVIL/secret.txt d",
+        "mv evil d/evil~/secret.txt d", // the name --backup would keep a replaced entry under
+        "mv evil d/evil.~1~/secret.txt d",
+        "mv d/evil/secret.txt evil d" // order is not modelled
+      ).foreach(refuses(ws, _, refusedWith))
+      // On a case-insensitive file system (macOS, Windows), `D` is `d`: the same directory under another spelling
+      if (Files.isDirectory(fx.root.resolve("D"))) refuses(ws, "mv evil D/evil/secret.txt d", refusedWith)
+      isLink(fx.root.resolve("evil")) shouldBe true
+      Using.resource(Files.list(d))(_.count()) shouldBe 0L
+      nothingPulledIn(fx, "secret.txt")
+    }
+
+  it should "refuse a path through a source the same mv moves away, and an mv of the working directory's tree" in
+    inWorkspace { fx =>
+      Files.createDirectories(fx.root.resolve("a").resolve("b").resolve("w"))
+      Files.createDirectory(fx.root.resolve("d"))
+      val ws = fx.interface(ReadWrite)
+      refuses(ws, "mv sub sub/Main.scala d", ArgumentNotAllowed)
+      // From a/b/w, ../../outside is the workspace's own a/outside; once w is moved to the root, the working
+      // directory moves with it and ../../outside is the real outside directory.
+      refuses(
+        ws,
+        s"mv ../w ../../outside/secret.txt '${fx.root}'",
+        ArgumentNotAllowed,
+        workingDirectory = Some("a/b/w")
+      )
+      Files.isDirectory(fx.root.resolve("a").resolve("b").resolve("w")) shouldBe true
+      Files.isDirectory(fx.root.resolve("sub")) shouldBe true
+      nothingPulledIn(fx, "w", "secret.txt", "d/sub")
+    }
+
+  it should "refuse a cp whose later source is read through a link an earlier source copies as a link" in
+    inWorkspace { fx =>
+      link(fx, "sub/l", Paths.get("../outside"))
+      Files.createDirectory(fx.root.resolve("d"))
+      val ws = fx.interface(ReadWrite)
+      Seq(
+        "cp -P sub/l l/secret.txt .",
+        "cp -R sub/l l/secret.txt .",
+        "cp -a sub/l l/secret.txt .",
+        "cp -P sub/l d/l/secret.txt d",
+        "cp -R sub/l d/l/secret.txt d",
+        "cp -a sub/l d/l/secret.txt d/",
+        "cp -d sub/l d/l/secret.txt d", // GNU's -d
+        "cp -P -t d sub/l d/l/secret.txt",
+        "cp -R sub d/sub/l/secret.txt d" // a directory copied, then read through what it holds
+      ).foreach(refuses(ws, _, ArgumentNotAllowed))
+      nothingPulledIn(fx, "l", "secret.txt", "d/l", "d/secret.txt", "d/sub")
+    }
+
+  it should "refuse a link-preserving cp of sources whose names differ only in letter case or Unicode normalisation" in
+    inWorkspace { fx =>
+      // `a/b/x` -> ../../outside/secret.txt names the workspace's own (missing) `outside` while in `a/b`; copied into
+      // `d` it names the real one. On macOS and Windows `x` and `X` are one name, so `cp -P a/b/x c/X d` makes the
+      // link `d/x`, then opens `d/X` - that link - and writes `c/X` through it (macOS cp, #1775 review).
+      val nfc = "café"  // é composed
+      val nfd = "café" // e and a combining acute accent: the same name on APFS and NTFS
+      Seq("a/b", "c", "d", "e/B").foreach(dir => Files.createDirectories(fx.root.resolve(dir)))
+      link(fx, "a/b/x", Paths.get("../../outside/secret.txt"))
+      link(fx, s"a/b/$nfc", Paths.get("../../outside/secret.txt"))
+      write(fx.root.resolve("c").resolve("X"), "OVERWRITTEN\n")
+      write(fx.root.resolve("c").resolve(nfd), "OVERWRITTEN\n")
+      write(fx.root.resolve("c").resolve("y"), "y\n")
+      write(fx.root.resolve("e").resolve("B").resolve("x"), "OVERWRITTEN\n")
+      val ws = fx.interface(ReadWrite)
+      Seq(
+        "cp -P a/b/x c/X d",
+        "cp -R a/b/x c/X d",
+        "cp -a a/b/x c/X d/",
+        "cp -d a/b/x c/X d", // GNU's -d
+        "cp -P -t d a/b/x c/X",
+        s"cp -P a/b/$nfc c/$nfd d",
+        s"cp -P a/b/$nfd c/$nfc d", // either spelling first
+        "cp -R a/b e/B d" // directories: `d/b/x` is the link, and `e/B/x` is then written into `d/B`, which is `d/b`
+      ).foreach(refuses(ws, _, ArgumentNotAllowed))
+      nothingPulledIn(fx, "d/x", "d/X", s"d/$nfc", "d/b")
+      // A copy that follows links (no -P, -R, -a, -d) makes no link, so one name twice is only overwritten
+      runs(ws, "cp c/X e/B/x d")
+      // Distinct names still copy, directories and links included
+      runs(ws, "cp -R c e/B d")
+      Files.exists(fx.root.resolve("d").resolve("c").resolve("X")) shouldBe true
+      val f = Files.createDirectory(fx.root.resolve("f"))
+      runs(ws, "cp -P a/b/x c/y f")
+      isLink(f.resolve("x")) shouldBe true
+      new String(Files.readAllBytes(f.resolve("y")), StandardCharsets.UTF_8) shouldBe "y\n"
+      // mv renames over a link rather than writing through it: on macOS `c/X` replaces the link `f/x` itself
+      runs(ws, "mv a/b/x c/X f")
+      outsideIntact(fx)
+    }
+
+  it should "refuse a link-preserving cp of sources whose names one pass of case folding leaves apart" in
+    inWorkspace { fx =>
+      // APFS takes each pair for one name, but NFKC, upper and lower case once does not: `ẞ` lower-cases to `ß`, which
+      // only a second pass makes `ss`, and `ΐ` upper-cases to a decomposed `Ϊ́` that NFKC recomposes only afterwards.
+      // So `cp -P a/b/ẞ c/ß d` passed the policy, made the link `d/ẞ` and macOS cp wrote `c/ß` through it (#1775 review).
+      val pairs = Seq(
+        "\u1E9E" -> "\u00DF",             // ẞ, ß
+        "\u1E9E" -> "ss",
+        "\u1E9E" -> "SS",
+        "\u0390" -> "\u0399\u0308\u0301", // ΐ, Ι with diaeresis and acute
+        "\u03B0" -> "\u03A5\u0308\u0301", // ΰ, Υ with diaeresis and acute
+        "\u1FD3" -> "\u0399\u0308\u0301",
+        "\u1FE7" -> "\u03A5\u0308\u0342",
+        // APFS decomposes before it case-folds, putting the iota subscript after a following mark, where NFKC kept it
+        // composed and upper-casing put `\u0399` before the mark: `cp -P a/b/z\u1FBC\u0342 c/z\u1FB7 d` wrote through the link on macOS
+        "\u1FBC\u0342" -> "\u1FB7",            // \u1FBC and a perispomeni, \u1FB7
+        "\u1FB3\u0303" -> "\u03B1\u0303\u03B9" // \u1FB3 and a tilde, \u03B1 with a tilde and \u03B9
+      )
+      Seq("a/b", "c", "d").foreach(dir => Files.createDirectories(fx.root.resolve(dir)))
+      val ws = fx.interface(ReadWrite)
+      pairs.zipWithIndex.foreach { case ((linked, written), i) =>
+        val (l, w) = (s"$i$linked", s"$i$written")
+        link(fx, s"a/b/$l", Paths.get("../../outside/secret.txt"))
+        write(fx.root.resolve("c").resolve(w), "OVERWRITTEN\n")
+        refuses(ws, s"cp -P a/b/$l c/$w d", ArgumentNotAllowed)
+        refuses(ws, s"cp -P c/$w a/b/$l d", ArgumentNotAllowed) // either first
+        refuses(ws, s"cp -R a/b/$l c/$w d", ArgumentNotAllowed)
+        nothingPulledIn(fx, s"d/$l", s"d/$w")
+      }
+      // A longer name ending in `ss` is another name: the link still copies beside it
+      write(fx.root.resolve("c").resolve("0glass"), "g\n")
+      runs(ws, "cp -P a/b/0\u1E9E c/0glass d")
+      isLink(fx.root.resolve("d").resolve("0\u1E9E")) shouldBe true
+      outsideIntact(fx)
+    }
+
+  it should "refuse a cp from a working directory inside a destination an earlier source merges into" in
+    inWorkspace { fx =>
+      // From `d/sub`, `cp -R ../../src/sub l/secret.txt ../../d` first merges `src/sub` into `d/sub`, making
+      // `d/sub/l` -> outside, and GNU cp then reads `l/secret.txt` through it. The walk of `l/secret.txt` from the
+      // working directory never looks up `sub` in `d`; the lexical walk from `/` does (#1775 review).
+      Seq("src/sub", "d/sub").foreach(dir => Files.createDirectories(fx.root.resolve(dir)))
+      link(fx, "src/sub/l", fx.outside)
+      val ws = fx.interface(ReadWrite)
+      refuses(ws, "cp -R ../../src/sub l/secret.txt ../../d", ArgumentNotAllowed, workingDirectory = Some("d/sub"))
+      refuses(ws, "cp -a ../../src/sub l/secret.txt ../../d", ArgumentNotAllowed, workingDirectory = Some("d/sub"))
+      nothingPulledIn(fx, "d/sub/l", "d/secret.txt", "d/sub/secret.txt")
+    }
+
+  it should "on Windows, take a name holding '~' in a link-preserving cp of several sources for any name" in
+    inWorkspace { fx =>
+      // `LONGNA~1` may be the 8.3 short name of `longname.txt`: one entry under two names
+      val root = fx.root.toRealPath()
+      def refusal(windows: Boolean, args: String*) =
+        CommandPolicy.refusal("cp", args, isWindows = windows, root, root, Map.empty).map(_.code)
+      refusal(windows = true, "-P", "a/LONGNA~1", "c/longname.txt", "d") shouldBe Some(ArgumentNotAllowed)
+      refusal(windows = true, "-R", "a/longname.txt", "c/LONGNA~1", "d") shouldBe Some(ArgumentNotAllowed)
+      refusal(windows = true, "-P", "a/x", "c/X", "d") shouldBe Some(ArgumentNotAllowed)
+      // controls: distinct names, a copy that keeps no link, and the same names judged as a POSIX runner would
+      refusal(windows = true, "-P", "a/x", "c/y", "d") shouldBe None
+      refusal(windows = true, "a/LONGNA~1", "c/longname.txt", "d") shouldBe None
+      refusal(windows = false, "-P", "a/LONGNA~1", "c/longname.txt", "d") shouldBe None
+    }
+
+  it should "still move and copy several sources that do not reach through each other, links included" in
+    inWorkspace { fx =>
+      linksOut(fx)
+      val d  = Files.createDirectory(fx.root.resolve("d"))
+      val ws = fx.interface(ReadWrite)
+      runs(ws, "mv a.txt b.txt d")
+      Files.exists(d.resolve("a.txt")) shouldBe true
+      Files.exists(d.resolve("b.txt")) shouldBe true
+      runs(ws, "mv d/a.txt d/b.txt .")
+      runs(ws, "cp a.txt b.txt d/")
+      Files.exists(d.resolve("b.txt")) shouldBe true
+      // several links moved at once, each the link itself (#1730)
+      runs(ws, "mv outdir dangling d/")
+      Files.readSymbolicLink(d.resolve("outdir")) shouldBe fx.outside
+      isLink(d.resolve("dangling")) shouldBe true
+      runs(ws, "mv outfile sub")
+      isLink(fx.root.resolve("sub").resolve("outfile")) shouldBe true
+      runs(ws, "rm sub/outfile d/outdir")
+      Files.exists(d.resolve("outdir"), LinkOption.NOFOLLOW_LINKS) shouldBe false
+      outsideIntact(fx)
+    }
+
+  // ---------------------------------------------------------------------------------------------------------------
   // Links met inside a tree: options that follow them, and writes through a link already in the destination
 
   /** `d/innerout` -> outside, the shape a recursive command meets inside the tree it walks. */
@@ -371,6 +752,98 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     }
 
   // ---------------------------------------------------------------------------------------------------------------
+  // Option values are consumed once, in getopt order (#1763)
+
+  it should "check the file after a -t that an earlier sort option took as its value (#1763)" in inWorkspace { fx =>
+    val ws = fx.interface(ReadOnly)
+    sortValueEscapes.foreach { command =>
+      // A Windows runner refuses sort's -t and -T as options first (see `windowsSortRefusal`)
+      if (isWindowsHost) refusesWithAny(ws, fx.expand(command), Set(ArgumentNotAllowed, PathEscape))
+      else refuses(ws, fx.expand(command), PathEscape)
+      refusesWithAny(fx.interface(ReadOnly, windows = true), fx.expand(command), Set(ArgumentNotAllowed, PathEscape))
+    }
+  }
+
+  it should "still take sort's field separator as text when it really is -t's value (#1763)" in inWorkspace { fx =>
+    val ws = fx.interface(ReadOnly)
+    runs(ws, "sort -t / -k1 a.txt").stdout shouldBe "a\na\nb\nc\n"
+    runs(ws, "sort -t: a.txt").stdout shouldBe "a\na\nb\nc\n"
+    runs(ws, "sort -k2,2 -t, a.txt")
+    runs(ws, "sort -T sub -t / -k2 a.txt")
+    runs(ws, "sort -Tsub -t / a.txt")
+    runs(ws, "sort -rT sub -t / a.txt").stdout shouldBe "c\nb\na\na\n"
+    runs(ws, "sort --temporary-directory=sub -t / a.txt")
+    runs(ws, "sort --temp sub --field-separator / a.txt")
+    runs(ws, "sort --field-sep / a.txt")
+    runs(ws, "sort --random-source a.txt -t / a.txt")
+    runs(ws, "sort -k 1 -t / -- a.txt")
+    runs(ws, "sort -t / a.txt b.txt")
+  }
+
+  it should "check sort's -t value when the arguments cannot be parsed exactly (#1763)" in inWorkspace { fx =>
+    val ws = fx.interface(ReadOnly)
+    Seq(
+      // BSD sort rewrites `+POS1 -POS2` before parsing options, so `-1t` may vanish into another option's value
+      "sort -T +0 -1t /",
+      // an option neither GNU nor BSD sort has: the parse after it is a guess
+      "sort --no-such-option -t / a.txt",
+      "sort -x -t / a.txt",
+      // after an operand, a sort run with POSIXLY_CORRECT reads every argument as a file
+      "sort a.txt -t /"
+    ).foreach(command => refuses(ws, command, if (isWindowsHost) ArgumentNotAllowed else PathEscape))
+  }
+
+  it should "check an option-looking argument whole, as a program that reads it as a file opens it (#1763)" in
+    inWorkspace { fx =>
+      link(fx, "-f", fx.outside.resolve("secret.txt"))
+      link(fx, "-d", fx.outside)
+      val ws = fx.interface(ReadWrite)
+      // BSD cat stops reading options at its first operand, so it opens `-f`
+      refuses(ws, "cat a.txt -f", PathEscape)
+      // `-d` is the value of -T and of -t: sort writes its temporary files into it, cp copies into it
+      // (a Windows runner refuses sort -T itself first, see `windowsSortRefusal`)
+      refuses(ws, "sort -T -d a.txt", if (isWindowsHost) ArgumentNotAllowed else PathEscape)
+      refuses(ws, "cp -t -d a.txt", PathEscape)
+      refuses(ws, "cp --target-directory -d a.txt", PathEscape)
+      new String(Files.readAllBytes(fx.outside.resolve("secret.txt")), StandardCharsets.UTF_8) shouldBe "secret\n"
+    }
+
+  it should "see cp's recursive flag after a -- that -S took as its suffix (#1763)" in inWorkspace { fx =>
+    // `dst/src` is a directory inside the workspace holding a link out: a recursive copy of `src` writes through it
+    Files.createDirectories(fx.root.resolve("dst").resolve("src"))
+    link(fx, "dst/src/secret.txt", fx.outside.resolve("secret.txt"))
+    Files.createDirectory(fx.root.resolve("src"))
+    write(fx.root.resolve("src").resolve("secret.txt"), "OVERWRITTEN\n")
+    val ws = fx.interface(ReadWrite)
+    refuses(ws, "cp -R src dst", PathEscape) // the control: seen as recursive
+    refuses(ws, "cp -S -- -R src dst", PathEscape)
+    refuses(ws, "cp --suffix -- -R src dst", PathEscape)
+    refuses(ws, "cp --suf -- -a src dst", PathEscape)
+    new String(Files.readAllBytes(fx.outside.resolve("secret.txt")), StandardCharsets.UTF_8) shouldBe "secret\n"
+  }
+
+  it should "check the name cp --path writes, as it does for --parents (#1763)" in inWorkspace { fx =>
+    Files.createDirectories(fx.root.resolve("dst"))
+    link(fx, "dst/src", fx.outside)
+    Files.createDirectory(fx.root.resolve("src"))
+    write(fx.root.resolve("src").resolve("secret.txt"), "OVERWRITTEN\n")
+    val ws = fx.interface(ReadWrite)
+    refuses(ws, "cp --parents src/secret.txt dst", PathEscape)
+    refuses(ws, "cp --path src/secret.txt dst", PathEscape)
+    refuses(ws, "cp --pat src/secret.txt dst", PathEscape)
+  }
+
+  it should "still run cp with option values in every spelling (#1763)" in inWorkspace { fx =>
+    val ws = fx.interface(ReadWrite)
+    // GNU cp only; BSD cp has no -t
+    passesPolicy(ws, "cp -t sub a.txt")
+    passesPolicy(ws, "cp --target-directory sub b.txt")
+    passesPolicy(ws, "cp -S .bak -- a.txt sub")
+    runs(ws, "cp -R sub sub2")
+    Files.exists(fx.root.resolve("sub2").resolve("Main.scala")) shouldBe true
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
   // Cost of the path check
 
   it should "refuse an over-long argument instead of walking it" in inWorkspace { fx =>
@@ -381,8 +854,9 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     refuses(ws, ("ls" +: Seq.fill(64)("a/" * 1000)).mkString(" "), ArgumentNotAllowed)
     // an option whose every tail is a path: the first absolute tail is refused without walking the rest
     refuses(ws, "ls -x" + ("a/" * 2040), PathEscape)
-    (System
-      .nanoTime() - start).nanos should be < 5.seconds // seconds per command before the cap; generous for slow runners
+    // The refusals above are the signal: without the cap the first command would walk back inside and run. This
+    // bound is only a backstop against a walk that takes far longer than refusing (seconds per command before the cap).
+    (System.nanoTime() - start).nanos should be < 30.seconds
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -412,7 +886,7 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     val ws = fx.interface(ReadOnly)
     // (command, refused as an option on Windows): a Windows runner refuses sort's `-t` and `-T` before any path is
     // checked, since it cannot tell sort.exe from a GNU sort (see `windowsSortRefusal`), so there those commands are
-    // refused with ARGUMENT_NOT_ALLOWED instead.
+    // refused with ARGUMENT_NOT_ALLOWED instead; so is an argument `/` that is not a native sort.exe switch (#1738).
     Seq(
       "sort --random-source='{out}/secret.txt' a.txt"    -> false,
       "sort --random-source=escape/secret.txt a.txt"     -> false,
@@ -420,7 +894,7 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
       "sort -t/ '{out}/secret.txt'"                      -> true,
       "sort -t / '{out}/secret.txt'"                     -> true,
       "sort -Tt '{out}/secret.txt'"                      -> true,
-      "sort --field-separator / '{out}/secret.txt'"      -> false,
+      "sort --field-separator / '{out}/secret.txt'"      -> true,
       "grep --exclude-from='{out}/secret.txt' x a.txt"   -> false,
       "grep --exclude-from=escape/secret.txt x a.txt"    -> false,
       "git log --grep=escape/secret.txt"                 -> false,
@@ -788,6 +1262,148 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     posix("git", "log", "HEAD..") shouldBe None
     // git's ':' arguments are refused everywhere
     posix("git", "ls-files", ":/") shouldBe Some(ArgumentNotAllowed)
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // #1738: an MSYS2 / Cygwin `sort` or `findstr` reads `/c/...` as `C:\...`, so a `/` argument must be a native switch
+
+  "On Windows, sort and findstr" should "refuse a '/' argument that is not a switch of the native tool (#1738)" in
+    inWorkspace { fx =>
+      def windows(command: String*) = policy(fx, true, command: _*)
+      // The form from the issue, with the outside directory spelled as MSYS2 spells a drive path
+      val msysOutside = "/c" + fx.outside.toString.replace('\\', '/').dropWhile(_ != '/') + "/secret.txt"
+      Seq(
+        Seq("sort", msysOutside),
+        Seq("sort", "/c/Users/someone/outside/secret.txt"),
+        Seq("sort", "/R", msysOutside),
+        Seq("sort", "/secret.txt"),   // a runtime's own root: `<msys root>\secret.txt`
+        Seq("sort", "/d"),            // `D:\`
+        Seq("sort", "/"),             // the runtime's root
+        Seq("sort", "/RX", "a.txt"),  // not a native switch
+        Seq("sort", "/+3x", "a.txt"), // `/+n` takes digits only
+        Seq("sort", "/+", "a.txt"),
+        Seq("sort", "/L", "/c/x/secret"), // a switch's value is judged as any argument
+        Seq("sort", "/M:100", "a.txt"),   // sort.exe takes its values as the next argument
+        Seq("findstr", "/c:foo", msysOutside),
+        Seq("findstr", "/c:foo", "/c/x/secret"),
+        Seq("findstr", "x", "/secret.txt"),
+        Seq("findstr", "/c", "a.txt"), // `/C` needs `:string`
+        Seq("findstr", "/Q", "x", "a.txt"),
+        Seq("findstr", "/SQ", "x", "a.txt"),
+        Seq("findstr", "/A:zz", "x", "a.txt"),
+        Seq("findstr", "/", "x", "a.txt"),
+        Seq("findstr", "x/", "/etc")
+      ).foreach { command =>
+        withClue(s"${command.mkString(" ")}: ") {
+          windows(command: _*) shouldBe Some(ArgumentNotAllowed)
+        }
+      }
+    }
+
+  it should "still hold a native switch's file or directory value to the workspace" in inWorkspace { fx =>
+    def windows(command: String*) = policy(fx, true, command: _*)
+    windows("findstr", "/F:..\\x", "a.txt") shouldBe Some(ArgumentNotAllowed) // /F is refused outright
+    windows("findstr", "/D:..;C:\\", "x", "*.txt") shouldBe Some(ArgumentNotAllowed)
+    windows("findstr", "/D:..", "x", "*.txt") shouldBe Some(PathEscape)
+    windows("findstr", "/G:../outside/secret.txt", "a.txt") shouldBe Some(PathEscape)
+    windows("findstr", "/IG:../outside/secret.txt", "a.txt") shouldBe Some(PathEscape)
+    windows("findstr", s"/G:${fx.outside}/secret.txt", "a.txt") shouldBe Some(PathEscape)
+  }
+
+  it should "hold a drive path in a native switch's value to the workspace on a Windows host" in inWorkspace { fx =>
+    assume(isWindowsHost, "a drive path is a path only on Windows")
+    def windows(command: String*) = policy(fx, true, command: _*)
+    val out                       = fx.outside.toString
+    windows("findstr", s"/G:$out\\secret.txt", "a.txt") shouldBe Some(PathEscape)
+    windows("findstr", "/G:C:\\x", "a.txt") shouldBe Some(PathEscape)
+    windows("findstr", s"/D:$out", "x", "*.txt") shouldBe Some(PathEscape)
+  }
+
+  it should "allow the native tools' own switches" in inWorkspace { fx =>
+    def windows(command: String*) = policy(fx, true, command: _*)
+    Seq(
+      Seq("sort", "/R", "a.txt"),
+      Seq("sort", "/r", "a.txt"),
+      Seq("sort", "/REVERSE", "a.txt"),
+      Seq("sort", "/+3", "a.txt"),
+      Seq("sort", "/+12", "/R", "a.txt"),
+      Seq("sort", "/L", "C", "a.txt"),
+      Seq("sort", "/LOCALE", "C", "a.txt"),
+      Seq("sort", "/M", "1024", "a.txt"),
+      Seq("sort", "/REC", "8192", "a.txt"),
+      Seq("sort", "/record_maximum", "8192", "a.txt"),
+      Seq("sort", "/C", "a.txt"),
+      Seq("sort", "/CASE_SENSITIVE", "a.txt"),
+      Seq("sort", "/UNIQUE", "a.txt"),
+      Seq("findstr", "/I", "/C:foo", "a.txt"),
+      Seq("findstr", "/i", "/c:foo", "a.txt"),
+      Seq("findstr", "/IC:foo", "a.txt"),
+      Seq("findstr", "/B", "/E", "/L", "/R", "/S", "/I", "/X", "/V", "/N", "/M", "/O", "/P", "x", "a.txt"),
+      Seq("findstr", "/BELRSIXVNMOP", "x", "a.txt"),
+      Seq("findstr", "/OFF", "x", "a.txt"),
+      Seq("findstr", "/A:1F", "x", "a.txt"),
+      Seq("findstr", "/D:sub", "x", "*.scala"),
+      Seq("findstr", "/G:a.txt", "b.txt")
+    ).foreach { command =>
+      withClue(s"${command.mkString(" ")}: ") {
+        windows(command: _*) shouldBe None
+      }
+    }
+  }
+
+  it should "refuse the issue's command through executeCommand" in inWorkspace { fx =>
+    val ro = fx.interface(ReadOnly, windows = true)
+    refuses(ro, "sort /c/Users/someone/outside/secret.txt", ArgumentNotAllowed)
+    refuses(ro, "sort /secret.txt", ArgumentNotAllowed)
+    refuses(ro, "findstr /c:foo /c/x/secret", ArgumentNotAllowed)
+    passesPolicy(ro, "sort /R a.txt")
+    passesPolicy(ro, "findstr /I /C:foo a.txt")
+  }
+
+  it should "be read as paths, not switches, by a POSIX runner" in inWorkspace { fx =>
+    def posix(command: String*) = policy(fx, false, command: _*)
+    posix("sort", "/R") shouldBe Some(PathEscape) // an absolute path off Windows
+    posix("sort", "-r", "a.txt") shouldBe None
+  }
+
+  "CommandPolicy.msysDrivePath" should "read '/x' and '/x/...' as drive x's paths, as MSYS2 does" in {
+    CommandPolicy.msysDrivePath("/c/Users/x/secret.txt") shouldBe Some("c:/Users/x/secret.txt")
+    CommandPolicy.msysDrivePath("/D") shouldBe Some("D:/")
+    CommandPolicy.msysDrivePath("/c/") shouldBe Some("c:/")
+    CommandPolicy.msysDrivePath("/cd/x") shouldBe None
+    CommandPolicy.msysDrivePath("c/x") shouldBe None
+    CommandPolicy.msysDrivePath("/1/x") shouldBe None
+    CommandPolicy.msysDrivePath("/") shouldBe None
+  }
+
+  "The program resolver" should "never pick a sort or findstr that CreateProcess would find before the system directory" in
+    inWorkspace { fx =>
+      // #1738 refused sort / findstr when a build sat in the runner's Java or current directory; since #1790 the
+      // runner never searches either, so the system directory's build runs and nothing else is ever started
+      val before = fx.outside // a directory CreateProcess searches before the system directory
+      val system = Files.createDirectories(fx.parent.resolve("Windows").resolve("System32"))
+      val search = ProgramSearch(windows = true, Seq(system), None, Some(before), Some(before))
+      val roots  = Seq(fx.root)
+      Seq("sort.exe", "findstr.exe", "cat.exe").foreach(name => write(before.resolve(name), ""))
+      ProgramResolver.resolve("sort", search, roots).left.map(_.code) shouldBe Left("EXECUTABLE_NOT_ALLOWED")
+      ProgramResolver.resolve("findstr", search, roots).left.map(_.code) shouldBe Left("EXECUTABLE_NOT_ALLOWED")
+      ProgramResolver.resolve("cat", search, roots).left.map(_.code) shouldBe Left("EXECUTABLE_NOT_ALLOWED")
+      Seq("sort.exe", "findstr.exe").foreach(name => write(system.resolve(name), ""))
+      ProgramResolver.resolve("sort", search, roots) shouldBe Right(system.resolve("sort.exe"))
+      ProgramResolver.resolve("findstr", search, roots) shouldBe Right(system.resolve("findstr.exe"))
+    }
+
+  it should "find nothing in front of the system directory on a Windows host's runner" in inWorkspace { fx =>
+    assume(isWindowsHost, "only a Windows host searches its own directories")
+    val ro = fx.interface(ReadOnly, windows = true)
+    Seq("sort /R a.txt", "findstr /I x a.txt").foreach { command =>
+      val refused = Try(ro.executeCommand(command, None, Some(30.seconds), None)).failed.toOption.collect {
+        case e: WorkspaceAgentException => e.code
+      }
+      withClue(command)(
+        refused.filter(PolicyCodes ++ Set("EXECUTABLE_NOT_ALLOWED", "EXECUTABLE_NOT_FOUND")) shouldBe None
+      )
+    }
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -1215,6 +1831,33 @@ object WorkspaceCommandArgumentsSpec {
     "findstr /S /I x *.txt",
     "type a?.txt",
     "git show HEAD:a.txt"
+  )
+
+  /**
+   * A `sort` whose input `{out}/secret.txt` follows a `-t` (or `--field-separator`) that is not an option: an earlier
+   * option took it as its value, so the next argument is a file sort reads (#1763). BSD sort (macOS) printed the
+   * secret for each form it accepts; GNU sort reads it in the same forms (and through `-y`, which BSD lacks).
+   */
+  val sortValueEscapes: Seq[String] = Seq(
+    "sort -T -t '{out}/secret.txt'",
+    "sort --random-source -t '{out}/secret.txt'",
+    "sort -T-t '{out}/secret.txt'",
+    "sort -rT -t '{out}/secret.txt'",
+    "sort --temporary-directory -t '{out}/secret.txt'",
+    "sort --temp -t '{out}/secret.txt'",
+    "sort --random-sou -t '{out}/secret.txt'",
+    "sort --random-source --field-separator '{out}/secret.txt'",
+    "sort --random-source --field-sep '{out}/secret.txt'",
+    "sort -S -t '{out}/secret.txt'",
+    "sort --buffer-size -t '{out}/secret.txt'",
+    "sort --parallel -t '{out}/secret.txt'",
+    "sort --batch-size -t '{out}/secret.txt'",
+    "sort -k -t '{out}/secret.txt'",
+    "sort --key -t '{out}/secret.txt'",
+    "sort --sort -t '{out}/secret.txt'",
+    "sort -yt '{out}/secret.txt'",
+    "sort -T +0 -1t '{out}/secret.txt'",
+    "sort -t, -T -t '{out}/secret.txt'"
   )
 
   val refusedEnvironment: Seq[(String, String)] = Seq(
