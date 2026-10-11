@@ -1,6 +1,6 @@
 package org.llm4s.javaapi
 
-import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -20,9 +20,10 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
   // internal (documented as such) and allowlisted by declaring class and name, so any NEW Scala type
   // in a signature fails here - a `from` or `underlying` on another class included.
   private val internalByDesign: Set[(Class[?], String)] = Set(
-    classOf[LlmResult[?]] -> "from",
-    classOf[JLlmClient]   -> "underlying",
-    classOf[Answer]       -> "underlying"
+    classOf[LlmResult[?]]       -> "from",
+    classOf[JLlmClient]         -> "underlying",
+    classOf[Answer]             -> "underlying",
+    classOf[JCompletionOptions] -> "underlying"
   )
 
   private def isInternal(m: Method): Boolean = internalByDesign(m.getDeclaringClass -> m.getName)
@@ -154,6 +155,9 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
   private def facade: List[Class[_]] = List(
     classOf[LlmResult[_]],
     classOf[JLlmClient],
+    classOf[JCompletionOptions],
+    classOf[JCompletionOptions.Builder],
+    classOf[JReasoningEffort],
     classOf[JAgent],
     Class.forName("org.llm4s.javaapi.Llm4s"),
     classOf[ConversationBuilder],
@@ -171,7 +175,13 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     classOf[JMessageRole],
     classOf[JToolCall],
     classOf[JUsageSummary],
-    classOf[JModelUsage]
+    classOf[JModelUsage],
+    classOf[JCompletion],
+    classOf[JTokenUsage],
+    classOf[LlmErrorKind],
+    classOf[JEmbeddingClient],
+    classOf[JEmbeddings],
+    classOf[JEmbeddingPurpose]
   )
 
   "the public Java-visible surface" should "not expose scala.* types outside the allowlisted internals" in {
@@ -191,9 +201,10 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
    */
   private def boundary: Map[String, String] = Map(
     "org.llm4s.error.LLMError" ->
-      "LlmException.error(): the error taxonomy, matched with instanceof; its Java view is #1487",
+      ("LlmException.error(): the error taxonomy, matched with instanceof for detail; its Java view is LlmException's " +
+        "getKind(), isRecoverable(), getRetryAfter() and getStatusCode() (#1487)"),
     "org.llm4s.llmconnect.model.Conversation" ->
-      "ConversationBuilder.build(): handed back to JLlmClient.complete, not read; the client's inputs are #1488",
+      "ConversationBuilder.build(): handed back to JLlmClient.complete, not read",
     "org.llm4s.agent.graph.StreamEvent" ->
       "AgentStreamListener.onEvent: read with StreamEvents.decode and instanceof, as the streaming guide shows"
   )
@@ -239,6 +250,60 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
 
   "no scala.* or ujson.* type" should "be reachable from any value the Java facade hands a caller" in {
     reachableLeaks(facade, boundary.keySet) shouldBe Nil
+  }
+
+  "the client facade" should "hand Java callers JCompletion from every completion overload, and Java types from LlmException" in {
+    def returns(m: java.lang.reflect.Method): List[Class[_]] = mentioned(m.getGenericReturnType)
+    val completions = List(
+      classOf[JLlmClient].getMethod("completion", classOf[String]),
+      classOf[JLlmClient].getMethod("completion", classOf[Conversation]),
+      classOf[JLlmClient].getMethod("completion", classOf[Conversation], classOf[JCompletionOptions])
+    )
+    completions.foreach(m =>
+      withClue(m.toString)(returns(m) shouldBe List(classOf[LlmResult[_]], classOf[JCompletion]))
+    )
+    // one options overload, so a literal null options needs no cast
+    classOf[JLlmClient].getMethods.count(m => m.getName == "completion" && m.getParameterCount == 2) shouldBe 1
+
+    returns(classOf[LlmException].getMethod("getKind")) shouldBe List(classOf[LlmErrorKind])
+    returns(classOf[LlmException].getMethod("isRecoverable")) shouldBe List(java.lang.Boolean.TYPE)
+    returns(classOf[LlmException].getMethod("getRetryAfter")) shouldBe
+      List(classOf[java.util.Optional[_]], classOf[java.time.Duration])
+    returns(classOf[LlmException].getMethod("getStatusCode")) shouldBe List(classOf[java.util.OptionalInt])
+    returns(classOf[JCompletion].getMethod("usage")) shouldBe List(classOf[java.util.Optional[_]], classOf[JTokenUsage])
+    returns(classOf[JCompletion].getMethod("toolCalls")) shouldBe List(classOf[java.util.List[_]], classOf[JToolCall])
+    // every count a Java int, a cache count unreported by the provider reading as zero like thinkingTokens
+    Seq("promptTokens", "completionTokens", "totalTokens", "thinkingTokens", "cachedTokens", "cacheCreationTokens")
+      .foreach(name => withClue(name)(classOf[JTokenUsage].getMethod(name).getReturnType shouldBe Integer.TYPE))
+  }
+
+  "the embeddings facade" should "hand Java callers JEmbeddings from both embed overloads, its vectors as float arrays" in {
+    def returns(m: java.lang.reflect.Method): List[Class[_]] = mentioned(m.getGenericReturnType)
+    returns(classOf[JEmbeddingClient].getMethod("embed", classOf[java.util.List[_]])) shouldBe
+      List(classOf[LlmResult[_]], classOf[JEmbeddings])
+    returns(
+      classOf[JEmbeddingClient].getMethod("embed", classOf[java.util.List[_]], classOf[JEmbeddingPurpose])
+    ) shouldBe
+      List(classOf[LlmResult[_]], classOf[JEmbeddings])
+    returns(Class.forName("org.llm4s.javaapi.Llm4s").getMethod("createDefaultEmbeddingClient")) shouldBe
+      List(classOf[LlmResult[_]], classOf[JEmbeddingClient])
+    classOf[JEmbeddings].getMethod("vectors").getGenericReturnType.getTypeName shouldBe "java.util.List<float[]>"
+    classOf[JEmbeddings].getMethod("dimensions").getReturnType shouldBe Integer.TYPE
+    classOf[JEmbeddingClient].getMethod("dimensions").getReturnType shouldBe Integer.TYPE
+
+    // the cosine helper is static on JEmbeddings, as Java calls it
+    val cosine = classOf[JEmbeddings].getMethod("cosineSimilarity", classOf[Array[Float]], classOf[Array[Float]])
+    Modifier.isStatic(cosine.getModifiers) shouldBe true
+    cosine.getReturnType shouldBe java.lang.Double.TYPE
+
+    // the client keeps its core client to itself: nothing Java-visible returns one
+    classOf[JEmbeddingClient].getMethods.map(_.getReturnType) should not contain classOf[EmbeddingClient]
+    // their constructors, public in bytecode though private in Scala, take no Scala type either
+    for {
+      cls <- List(classOf[JEmbeddingClient], classOf[JEmbeddings])
+      c   <- cls.getConstructors.toList
+      t   <- c.getGenericParameterTypes.toList.flatMap(mentioned)
+    } withClue(c.toString)(scalaOnly(t) shouldBe false)
   }
 
   "the agent facade" should "hand Java callers JAgentResult from every turn: run, continue, resume, recover, await, onComplete" in {

@@ -15,7 +15,7 @@ import java.time.Instant
  *
  * Features:
  * - Fast lookups using indexed data structures
- * - Basic keyword search (semantic search requires embeddings)
+ * - Whole-word keyword search, case-insensitive (semantic search requires embeddings)
  * - Thread-safe for concurrent access
  * - No external dependencies
  *
@@ -129,28 +129,36 @@ final case class InMemoryStore private (
   }
 
   /**
-   * Simple keyword-based search scoring.
+   * Keyword search: a memory's score is the share of the query's distinct phrases that occur in it as whole words. A
+   * phrase is a whitespace-separated piece of the query, whose words must appear adjacent and in order, so the score
+   * counts phrases, not words.
+   *
+   * The query is split into phrases and query and memory text into words by [[KeywordTokens]], the way
+   * `SQLiteMemoryStore` and its FTS5 index split them, so both stores find the same memories: `java?` matches `Java`,
+   * and `or` does not match `works`. They rank them differently (FTS5 ranks by bm25).
    */
   private def keywordSearch(
     query: String,
     memories: Seq[Memory],
     topK: Int
   ): Result[Seq[ScoredMemory]] = {
-    val queryTerms = query.toLowerCase.split("\\s+").toSet
+    val phrases = KeywordTokens.queryPhrases(query).map(KeywordTokens.words).filter(_.nonEmpty).distinct
 
-    val scored = memories.map { memory =>
-      val content      = memory.content.toLowerCase
-      val matchedTerms = queryTerms.count(content.contains)
-      val score        = if (queryTerms.isEmpty) 0.0 else matchedTerms.toDouble / queryTerms.size
-      ScoredMemory(memory, score)
+    if (phrases.isEmpty) Right(Seq.empty)
+    else {
+      val scored = memories.map { memory =>
+        val words   = KeywordTokens.words(memory.content)
+        val matched = phrases.count(phrase => words.containsSlice(phrase))
+        ScoredMemory(memory, matched.toDouble / phrases.size)
+      }
+
+      Right(
+        scored
+          .filter(_.score > 0)
+          .sorted(ScoredMemory.byScoreDescending)
+          .take(topK)
+      )
     }
-
-    val sorted = scored
-      .filter(_.score > 0)
-      .sorted(ScoredMemory.byScoreDescending)
-      .take(topK)
-
-    Right(sorted)
   }
 
   override def delete(id: MemoryId): Result[MemoryStore] =
