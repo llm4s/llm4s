@@ -416,6 +416,8 @@ propagate_downstream() {
       ;;
     testkit)
       set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE llm4sEffect
+      set_add DOWNSTREAM_COMPILE llm4sZio
       ;;
     providerTestkit)
       set_add DOWNSTREAM_COMPILE rag

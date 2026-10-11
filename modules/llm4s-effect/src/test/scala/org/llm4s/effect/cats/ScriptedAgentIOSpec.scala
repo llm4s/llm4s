@@ -2,6 +2,7 @@ package org.llm4s.effect.cats
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
+import org.llm4s.effect.cats.AgentIO
 import org.llm4s.agent.Agent
 import org.llm4s.agent.graph.GraphError
 import org.llm4s.error.LLMError

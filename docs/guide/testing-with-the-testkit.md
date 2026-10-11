@@ -23,7 +23,7 @@ The module depends on `llm4s-core` only and has no test framework in its API, so
 
 ## A first test
 
-A `Reply` is what one call returns. `ScriptedLLMClient.sequence` answers the first call with the first reply, the second call with the second, and so on.
+A `Reply` is what one call returns. `ScriptedLLMClient.sequence` answers the first call with the first reply, the second call with the second, and so on. Every example on this page needs these imports; each section adds the ones its own code needs.
 
 ```scala
 import org.llm4s.llmconnect.model._
@@ -56,11 +56,10 @@ Here is a small feature built on an `Agent` with one tool of its own:
 import org.llm4s.agent.Agent
 import org.llm4s.agent.graph.GraphError
 import org.llm4s.error.{ LLMError, ProcessingError, RateLimitError }
-```
-
-```scala
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.toolapi._
 import org.llm4s.types.Result
+import upickle.default._
 ```
 
 ```scala
@@ -174,6 +173,7 @@ With cats-effect:
 ```scala
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
+import org.llm4s.effect.cats.AgentIO
 ```
 
 ```scala
@@ -191,6 +191,12 @@ client.calls(1).messages.last.content should include("21")
 ```
 
 With ZIO, in a `ZIOSpecDefault` test, with the same `client`:
+
+```scala
+import org.llm4s.zio.AgentZ
+import zio.ZIO
+import zio.test.*
+```
 
 ```scala
 for {
@@ -225,6 +231,10 @@ client.complete(Conversation(Seq(UserMessage("Weather in Oslo?"))), options).map
 ## Streaming
 
 `streamComplete` replays the reply as chunks: the text in pieces of at most `chunkSize` characters (16 unless you change it), each tool call, then a last chunk that carries the finish reason (`stop`, or `tool_calls` when the reply calls tools).
+
+```scala
+import scala.collection.mutable.ArrayBuffer
+```
 
 ```scala
 val client = ScriptedLLMClient.sequence(Reply.text("Hello, world")).withChunkSize(5)

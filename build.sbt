@@ -1003,7 +1003,6 @@ lazy val testkit = (project in file("modules/testkit"))
   .dependsOn(core)
   .settings(
     name := "llm4s-testkit",
-    description := "Scriptable fake LLMClient for testing code that calls LLM4S: canned replies, tool calls, injected errors and recorded requests.",
     commonSettings,
     // Measured 100.00% statement and 100.00% branch coverage (`sbt coverage testkit/test
     // testkit/coverageReport`). Floor is the measured value rounded down to the nearest 5. Never lower it.

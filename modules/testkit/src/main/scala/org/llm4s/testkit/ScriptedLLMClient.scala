@@ -165,6 +165,9 @@ object ScriptedLLMClient {
    * A client that chooses each reply from the conversation. A conversation no case matches returns a
    * `Left(`[[UnscriptedCallError]]`)` that names the call.
    *
+   * The rules run under the client's lock, so they must not block on another call to the same client, and an
+   * exception a rule throws is not caught: it propagates from `complete` or `streamComplete`.
+   *
    * {{{
    * ScriptedLLMClient.respondingTo {
    *   case c if c.messages.lastOption.exists(_.content.contains("capital")) => Reply.text("Paris")

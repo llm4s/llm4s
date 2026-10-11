@@ -8,6 +8,7 @@ import org.llm4s.testkit.{ Reply, ScriptedLLMClient, UnscriptedCallError }
 import org.llm4s.toolapi._
 import org.llm4s.types.Result
 import upickle.default._
+import org.llm4s.zio.AgentZ
 import zio.ZIO
 import zio.test.*
 

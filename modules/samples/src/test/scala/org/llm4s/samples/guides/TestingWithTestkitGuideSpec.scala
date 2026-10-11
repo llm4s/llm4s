@@ -1,23 +1,25 @@
 package org.llm4s.samples.guides
 
+// The page shows these imports block by block, so each run of them below is one block of the page: keep them in
+// this order.
+import org.llm4s.llmconnect.model._
+import org.llm4s.testkit.{ Reply, ScriptedLLMClient, UnscriptedCallError }
 import org.llm4s.agent.Agent
 import org.llm4s.agent.graph.GraphError
 import org.llm4s.error.{ LLMError, ProcessingError, RateLimitError }
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
-import org.llm4s.llmconnect.model._
-import org.llm4s.testkit.{ Reply, ScriptedLLMClient, UnscriptedCallError }
 import org.llm4s.toolapi._
 import org.llm4s.types.Result
+import upickle.default._
+import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
+import scala.collection.mutable.ArrayBuffer
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import upickle.default._
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Path, Paths }
 import scala.annotation.tailrec
-import scala.collection.mutable.ArrayBuffer
 
 /**
  * The code of `docs/guide/testing-with-the-testkit.md`, compiled and run.

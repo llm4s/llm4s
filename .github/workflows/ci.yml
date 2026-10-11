@@ -484,6 +484,7 @@ jobs:
           flags: provider-testkit
           slug: llm4s/llm4s
           fail_ci_if_error: false
+          verbose: true
 
       - name: Upload testkit coverage to Codecov
         uses: codecov/codecov-action@v7
