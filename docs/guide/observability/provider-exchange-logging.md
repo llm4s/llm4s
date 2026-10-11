@@ -218,13 +218,18 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   with `_` and `-` dropped, is `token`, `authorization`, `proxyauthorization`, `credential(s)`,
   `cookie(s)` or `setcookie`, or ends in `apikey`, `secret`, `password`, `passwd`, `privatekey`,
   `accesstoken`, `refreshtoken`, `idtoken`, `authtoken`, `sessiontoken`, `securitytoken` or
-  `bearertoken`: `client_secret`, `x-api-key`, `api-key`, `x-goog-api-key`, `x-auth-token`,
+  `bearertoken`, or the plural `secrets`, `passwords` or `apikeys`: `client_secret`, `x-api-key`, `api-key`,
+  `x-goog-api-key`, `x-auth-token`, `secrets`, `api_keys`, `db_passwords`,
   `x-amz-security-token`, `refresh_token`, `db_password`, `Proxy-Authorization`, `Cookie` and
   `Set-Cookie` are redacted, as a header line, a JSON field or header map (escaped too) and a
   `key=value` pair; `max_tokens`, `prompt_tokens`, `token_count`, `next_page_token`, `cookie_policy` and
-  `cookie_consent` are not, because the match is never on a substring. URL query parameters are also
+  `cookie_consent` are not, because the match is never on a substring; nor is `tokens`, a count in every
+  provider exchange. URL query parameters are also
   matched against a second, substring list (`key`, `token`, `secret`, `password`, `auth` and similar), so
-  `?x_api_key_id=` is redacted too. A query value written right before JSON
+  `?x_api_key_id=` is redacted too, and a third, matched whole, of parameters that carry a short-lived
+  credential: `sig`, `signature`, `X-Amz-Signature`, `X-Goog-Signature`, `code` (an OAuth authorization code),
+  `session`, `sessionid` and `jsessionid` (also as the matrix parameter `;jsessionid=`); a field `"code": 400`
+  is left, since only a query parameter's key is read so. A query value written right before JSON
   (`?token=...,{"api_key": "..."}`, also with the quotes escaped) does not hide the field after it.
 - **Where a cookie header's value ends.** Outside any string (a raw request dump, a log line), at the end
   of its line, quotes, apostrophes and backslashes included: `Cookie: sid="abc"; x=y` becomes

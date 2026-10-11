@@ -2482,6 +2482,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - `Redaction`: plural credential keys, and query parameters that carry a short-lived credential** ([#1646](https://github.com/llm4s/llm4s/issues/1646)):
+  `{"secrets": ["..."]}`, `{"api_keys": [...]}`, `{"passwords": "..."}` and `secrets=...` came out unchanged, since a
+  key was sensitive only when its normalised name was a credential word or ended in one, and no plural was. A key
+  whose name ends in `secrets`, `passwords` or `apikeys` (`api_keys`, `apiKeys`, `x-api-keys`, `client_secrets`,
+  `db_passwords`) is now read as the singular is, in every shape: a JSON or single-quoted field with a string, number,
+  array or object value, JSON inside a string, `key=value`, a header line and a Python literal. `tokens` is not one:
+  `max_tokens`, `prompt_tokens` and `usage.tokens` are counts, and `"tokens": {...}` is kept. The query parameters
+  `sig` (Azure SAS), `signature`, `X-Amz-Signature` (AWS SigV4), `X-Goog-Signature`, `code` (an OAuth authorization
+  code), `session`, `sessionid` and `jsessionid` - also the matrix parameter `;jsessionid=`, whose value ends at the
+  `?`, `;`, `/` or `#` after it - are now redacted, matched by their whole name and only as a query parameter's key,
+  so `"code": 400`, `?zipcode=` and `?error_code=` are kept. Like the readings before it, this only adds to what was
+  replaced: a reading of the input with those keys written as keys the other readings take.
 - **Security - ShellTool and the workspace runner: on double-byte Windows hosts, a quoted argument holding a character
   whose second byte is 0x5C is refused** ([#1807](https://github.com/llm4s/llm4s/issues/1807)): code pages 932, 936
   and 950 encode some characters with a second byte of 0x5C, the byte of `\` (50, 126 and 126 of the characters they

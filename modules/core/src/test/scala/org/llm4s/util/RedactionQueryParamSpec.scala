@@ -59,9 +59,10 @@ class RedactionQueryParamSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "keep a later URL's non-sensitive query after a question" in {
-    val input = """{"content": "Is this right?", "token": "SECRETAA", "url": "https://x.test/cb?code=abc"}"""
+    // `lang`, not `code`: an OAuth authorization code is a credential since #1646
+    val input = """{"content": "Is this right?", "token": "SECRETAA", "url": "https://x.test/cb?lang=abc"}"""
     val out   = Redaction.redact(input)
-    out shouldBe s"""{"content": "Is this right?", "token": "$R", "url": "https://x.test/cb?code=abc"}"""
+    out shouldBe s"""{"content": "Is this right?", "token": "$R", "url": "https://x.test/cb?lang=abc"}"""
     parses(out) shouldBe true
   }
 

@@ -16,7 +16,7 @@ import scala.util.matching.Regex
  * Pattern-based redaction automatically detects and masks:
  *  - API keys (OpenAI, Anthropic, Google, Voyage, Langfuse)
  *  - Bearer tokens and credential headers: Authorization, Proxy-Authorization, Cookie and Set-Cookie
- *  - URL query parameters with sensitive keys
+ *  - URL query parameters with sensitive keys, and those that carry a short-lived credential (`sig`, `code`, `;jsessionid=`)
  *  - Sensitive fields, whatever the shape: JSON (also inside a string, single-quoted, with a number value, or with
  *    an array or object value, whose every leaf - string, number or bare word - is replaced), `key=value` pairs and
  *    `x-api-key: value` header lines (api_key, password, token, client_secret, etc.)
@@ -159,7 +159,9 @@ private[llm4s] object Redaction {
    * (suffix `apikey`), `X-Auth-Token` (`authtoken`) and `X-Amz-Security-Token` (`securitytoken`). `cookie` is a whole
    * word, never a suffix or a substring: `cookie_policy`, `cookie_consent` and `max_cookie_age` name settings, not
    * cookies. With `SensitiveKeySuffixes`, this is core's one list of sensitive key names for fields, header lines and
-   * `key=value` pairs; URL query parameters are also matched, by substring, against `SensitiveQueryParams`. A list of
+   * `key=value` pairs; URL query parameters are also matched, by substring, against `SensitiveQueryParams`. The
+   * plurals (`SensitivePluralSuffixes`) and the whole query names (`SensitiveQueryNames`) of #1646 are read by a
+   * reading of their own, which only adds to what these lists redact. A list of
    * headers to withhold (the HTTP tool's redirect stripping) should read the same names.
    */
   private val SensitiveKeyWords: Set[String] =
@@ -375,7 +377,10 @@ private[llm4s] object Redaction {
    * backslashes (`password=\\'p&ss=QZXJ\\'`) up to the same quote written the same way, and a fifth (#1706) the
    * strings, numbers and words of the value of a sensitive key of a Python literal, read as Python writes it
    * (`pythonValues`): a `pytest` diff, a notebook's line array, a dict cut off after a comma, `str(dict)` inside a
-   * `repr`, `\'` inside a JSON string, a keyword argument holding a list.
+   * `repr`, `\'` inside a JSON string, a keyword argument holding a list. Last (#1646), every reading again, of the
+   * input with each plural credential key (`secrets`, `api_keys`, `passwords`) and each key of a query parameter that
+   * carries a short-lived credential (`sig`, `X-Amz-Signature`, `code`, `;jsessionid=`) written as a key they take
+   * (`withSingularKeys`).
    *
    * Redacting the output a second time usually changes nothing, but that is not guaranteed: where quotes are
    * unbalanced or stray, the text a first pass replaced can change how a second pass pairs the quotes, and the
@@ -500,6 +505,10 @@ private[llm4s] object Redaction {
    * written in `'`, as the leaf walk writes a bare leaf, so that a line of a notebook's array that starts with one
    * still starts with a quote.
    *
+   * Last, every reading again, of the input with its plural credential keys and its credential query parameters
+   * written as keys they take (`withSingularKeys`, #1646), added the same way: whole where it touches no edit, and in
+   * the parts no edit covers where a placeholder alone replaces the text.
+   *
    * Each reading is a fixed number of passes over the input, so the cost stays linear.
    */
   private def addedReadingEdits(input: String, placeholder: String, edits: Vector[Edit]): Vector[Edit] = {
@@ -531,7 +540,105 @@ private[llm4s] object Redaction {
         if (added.nonEmpty) kept = (kept ++ added).sortBy(_.start)
       }
     }
+    val singular = withSingularKeys(input)
+    if (singular ne input) {
+      // Every reading again, of the input with each plural credential key and each further query parameter written
+      // as a key the readings take (#1646): what it replaces is added where nothing is, whole, or where something is,
+      // in the parts nothing covers. Its text is never written: an edit writes the placeholder and the quotes around
+      // it, never the input.
+      val read  = redaction(singular, placeholder, singleQuotedFromInput = true, addedReadings = true)._2
+      val alone = disjointFrom(kept, read)
+      if (alone.nonEmpty) kept = (kept ++ alone).sortBy(_.start)
+      val whole = alone.toSet
+      val pure  = read.filter(e => e.replacement == placeholder && !whole(e)).map(e => (e.start, e.end))
+      val added = uncoveredEdits(input, kept, pure, placeholder)
+      if (added.nonEmpty) kept = (kept ++ added).sortBy(_.start)
+    }
     kept
+  }
+
+  /**
+   * The plural of a credential name, as the last word of a key (#1646): `secrets`, `passwords` and `apikeys`, after
+   * lower-casing and dropping `_` and `-`, so `api_keys`, `apiKeys`, `x-api-keys`, `client_secrets` and
+   * `db_passwords` too. They name nothing but credentials. `tokens` is not one: `max_tokens`, `prompt_tokens` and
+   * `usage.tokens` are counts in every provider exchange.
+   */
+  private val SensitivePluralSuffixes: Seq[String] = Seq("secrets", "passwords", "apikeys")
+
+  /**
+   * Query parameters that carry a short-lived credential, by their whole name in any case (#1646): `sig` (an Azure
+   * SAS signature), `signature`, `x-amz-signature` (an AWS SigV4 presigned URL), `x-goog-signature` (a Google Cloud
+   * Storage signed URL), `code` (an OAuth 2.0 authorization code), `session`, `sessionid` and `jsessionid` (a session
+   * id, also as the matrix parameter `;jsessionid=`). Matched whole, not as `SensitiveQueryParams` are, by substring:
+   * `sig` is in `signal` and `design`, `code` in `zipcode` and `error_code`. Only as the key of a query parameter, after
+   * `?`, `&` or their JSON escapes: a field `"code": 400` is an error code.
+   */
+  private val SensitiveQueryNames: Set[String] =
+    Set("sig", "signature", "x-amz-signature", "x-goog-signature", "code", "session", "sessionid", "jsessionid")
+
+  /**
+   * `input` with every plural credential key (`SensitivePluralSuffixes`) and every key of a `SensitiveQueryNames`
+   * parameter written, in place and with as many characters, as a key the readings take (#1646), or `input` itself
+   * where there is none. A plural loses its last `s` and doubles its first character, so it keeps its start - what
+   * comes before it is what came before - and ends in a sensitive suffix: `secrets` is `ssecret`, `api_keys` is
+   * `aapi_key`. A parameter's key is written as `x`s and `key`, which `SensitiveQueryParams` holds, and the `;` before
+   * `jsessionid` as `&`, as is the `?`, `;`, `/` or `#` that ends its value. The edits a reading of that text makes are edits of the input: no character moves. One scan
+   * over the runs of letters, digits, `_` and `-`.
+   */
+  private def withSingularKeys(input: String): String = {
+    val length                    = input.length
+    var out: Array[Char]          = null
+    def keyChar(c: Char): Boolean = c.isLetterOrDigit || c == '_' || c == '-'
+    def write(at: Int, text: String): Unit = {
+      if (out == null) out = input.toCharArray
+      text.copyToArray(out, at)
+    }
+    // After `?` or `&`, or the JSON escape of either (backslashes, `u00`, `3f` or `26`): a parameter's key starts.
+    def afterQuerySeparator(at: Int): Boolean =
+      at > 0 && (input.charAt(at - 1) == '?' || input.charAt(at - 1) == '&' || (at >= 6 && {
+        val sep = escapedSeparator(input, at)
+        input.charAt(at - 6) == '\\' && input.startsWith("u00", at - 5) && (sep == '?' || sep == '&')
+      }))
+    // Before `=` or its JSON escape: a parameter's value starts.
+    def beforeEquals(at: Int): Boolean =
+      at < length && (input.charAt(at) == '=' || {
+        val end = if (input.charAt(at) == '\\') separatorEscapeEnd(input, at) else -1
+        end >= 0 && escapedSeparator(input, end) == '='
+      })
+    var i = 0
+    while (i < length)
+      if (!keyChar(input.charAt(i))) i += 1
+      else if (
+        input.charAt(i) == 'u' && i > 0 && input.charAt(i - 1) == '\\' && i + 5 <= length &&
+        (1 to 4).forall(k => Character.digit(input.charAt(i + k), 16) >= 0)
+      ) i += 5 // the hex digits of a JSON escape (`\u0026code`): the key starts after them
+      else {
+        var j = i
+        while (j < length && keyChar(input.charAt(j))) j += 1
+        val word       = input.substring(i, j)
+        val normalised = word.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit)
+        val last       = word.charAt(word.length - 1)
+        if ((last == 's' || last == 'S') && SensitivePluralSuffixes.exists(normalised.endsWith))
+          write(i, word.charAt(0).toString + word.dropRight(1))
+        else if (SensitiveQueryNames(word.toLowerCase(Locale.ROOT)) && beforeEquals(j)) {
+          val separator = afterQuerySeparator(i)
+          val matrix    = !separator && i > 0 && input.charAt(i - 1) == ';' && word.equalsIgnoreCase("jsessionid")
+          if (separator || matrix) {
+            write(i, "x" * (word.length - 3) + "key")
+            if (matrix) {
+              // A matrix parameter's value ends at the `?`, `;`, `/` or `#` after it, where a query value goes on.
+              write(i - 1, "&")
+              var k = j + 1
+              while (k < length && "?;/#&\"'<>\\".indexOf(input.charAt(k).toInt) < 0 && !isRegexSpace(input.charAt(k)))
+                k += 1
+              if (k < length && "?;/#".indexOf(input.charAt(k).toInt) >= 0) write(k, "&")
+              j = math.max(j, k)
+            }
+          }
+        }
+        i = j
+      }
+    if (out == null) input else new String(out)
   }
 
   /**
