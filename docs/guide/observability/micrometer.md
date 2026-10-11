@@ -117,14 +117,16 @@ Two differences:
 ## Tag cardinality
 
 Tags are provider, model and values from a fixed set, so the number of meters stays small. Prompts, user ids and request
-ids are never tags. Two guards apply to values the caller supplies:
+ids are never tags. Guards apply to values the caller supplies:
 
 - A null or blank provider or model is recorded as `unknown` (Micrometer rejects null tag values).
 - An image operation or circuit-breaker state outside the sets above is recorded as `other`, so a stray value cannot create
   a new meter. A test sends a thousand distinct values and checks the meter count does not grow.
+- `provider` and `model` come from your configuration, so they are normally a handful of values. They are capped anyway:
+  one collector records at most 64 distinct providers and 256 distinct models, and records any further value as `other`
+  (logged once at WARN). A value seen before the cap was reached keeps its own series.
 
-`provider` and `model` come from your configuration. If model names could be arbitrary strings in your setup, bound them
-with Micrometer's own `MeterFilter.maximumAllowableTags`.
+If you need a tighter bound, add Micrometer's own `MeterFilter.maximumAllowableTags`.
 
 ## Failures never reach the caller
 
@@ -151,14 +153,20 @@ concepts map as follows, and a Micrometer `MeterFilter` can rename a meter if yo
 
 ## Spring Boot
 
-The Spring Boot starter does not create this collector yet. The starter builds its client with `Llm4s.createClient`
-from `llm4s-java-api`, which has no parameter for a `MetricsCollector`, and `JLlmClient`'s constructor is package-private,
-so there is nothing for the starter to attach a collector to. Adding one is a new method on a published module's API and is
-tracked in [#1466](https://github.com/llm4s/llm4s/issues/1466).
+With `llm4s-spring-boot-starter`, add this module next to `spring-boot-starter-actuator` and there is nothing to write:
+the starter's `LlmMetricsAutoConfiguration` registers a `MicrometerMetrics` over the application's `MeterRegistry` (the
+bean `llm4sMetricsCollector`) and builds its client with it, so the meters above are on `/actuator/metrics` and in
+whatever the registry exports to. The starter declares this module `provided`, like Actuator, so it reaches your
+classpath only when you add it:
 
-Until then, a Spring application written in Scala can create the collector over the injected registry and build the client
-itself, as in the quick start:
-
-```scala
-val metrics = new MicrometerMetrics(meterRegistry) // meterRegistry is the Actuator's MeterRegistry bean
+```xml
+<dependency>
+    <groupId>org.llm4s</groupId>
+    <artifactId>llm4s-observability-micrometer_3</artifactId>
+    <version>{{ site.data.project.latest_release }}</version>
+</dependency>
 ```
+
+A `MetricsCollector` bean of your own replaces `llm4sMetricsCollector`, and the client reports to every `MetricsCollector`
+bean in the context. `llm4s.enabled=false` switches it off with the rest of the starter. See
+[Spring Boot](../spring-boot#metrics).

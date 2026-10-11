@@ -1303,7 +1303,7 @@ lazy val observabilityMicrometer = (project in file("modules/observability-micro
   .settings(
     name := "llm4s-observability-micrometer",
     commonSettings,
-    // Measured 99.41% statement and 97.50% branch coverage (`sbt coverage observabilityMicrometer/test
+    // Measured 99.49% statement and 97.83% branch coverage (`sbt coverage observabilityMicrometer/test
     // observabilityMicrometer/coverageReport`). Floor is the measured value rounded down to the nearest 5.
     // Never lower it.
     coverageFloor(95),
@@ -1604,7 +1604,10 @@ lazy val javaApi = (project in file("modules/java-api"))
   )
 
 lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
-  .dependsOn(javaApi)
+  // `observabilityMicrometer` is provided, like Actuator: `LlmMetricsAutoConfiguration` records into the
+  // application's MeterRegistry only when the application adds `llm4s-observability-micrometer` itself, so the
+  // starter puts no Micrometer jar on a classpath that did not ask for one (#1466).
+  .dependsOn(javaApi, observabilityMicrometer % "provided")
   .settings(
     name := "llm4s-spring-boot-starter",
     commonSettings,
@@ -1618,7 +1621,9 @@ lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
       Deps.scalatest                   % Test,
       Deps.springBootStarterTest       % Test,
       Deps.springBootTestAutoConfigure % Test,
-      Deps.springBootActuator          % Test
+      Deps.springBootActuator          % Test,
+      // MeterRegistry and /actuator/metrics as an application gets them, for LlmMetricsAutoConfigurationSpec.
+      Deps.springBootActuatorAutoConfigure % Test
     )
   )
 

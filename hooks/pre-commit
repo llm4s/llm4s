@@ -193,6 +193,9 @@ propagate_downstream() {
     javaApi)
       set_add DOWNSTREAM_COMPILE springBootStarter
       ;;
+    observabilityMicrometer)
+      set_add DOWNSTREAM_COMPILE springBootStarter
+      ;;
     llm4sEffect)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples

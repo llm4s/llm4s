@@ -4,7 +4,8 @@ import io.micrometer.core.instrument.{ Counter, MeterRegistry, Tag, Tags, Timer 
 import org.slf4j.LoggerFactory
 
 import java.time.Duration
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{ ConcurrentHashMap, TimeUnit }
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.duration.FiniteDuration
 import scala.util.{ Failure, Success, Try }
 
@@ -30,9 +31,9 @@ import scala.util.{ Failure, Success, Try }
  *  - Bounded tag cardinality: tags are provider, model, a fixed outcome or error label, a fixed token type,
  *    and a fixed set of image operations and circuit-breaker states. Anything outside those sets is
  *    recorded as `other`, and a blank provider or model as `unknown`. Prompts, user ids, request ids and
- *    other unbounded values are never tags. `provider` and `model` come from the caller, so a caller that
- *    passes arbitrary model strings can still grow the registry; apply
- *    `MeterFilter.maximumAllowableTags` if that is a concern.
+ *    other unbounded values are never tags. `provider` and `model` come from the caller, so they are capped
+ *    too: after 64 distinct providers or 256 distinct models on one collector, further values are recorded
+ *    as `other` (logged once at WARN), so arbitrary model strings cannot grow the registry without limit.
  *  - Thread-safe: Micrometer meters are, and this class holds no mutable state.
  *
  * Differences from `PrometheusMetrics`: this class also implements `recordRetryAttempt`,
@@ -51,6 +52,13 @@ final class MicrometerMetrics(registry: MeterRegistry) extends MetricsCollector 
 
   private val logger = LoggerFactory.getLogger(getClass)
 
+  // Caps on the distinct provider and model tag values this collector creates meters for; see `BoundedLabels`.
+  private val providers = new BoundedLabels("provider", MaxProviderValues)
+  private val models    = new BoundedLabels("model", MaxModelValues)
+
+  private def providerLabel(value: String): String = providers.admit(label(value))
+  private def modelLabel(value: String): String    = models.admit(label(value))
+
   override def observeRequest(
     provider: String,
     model: String,
@@ -58,8 +66,8 @@ final class MicrometerMetrics(registry: MeterRegistry) extends MetricsCollector 
     duration: FiniteDuration
   ): Unit =
     safely("request") {
-      val p = label(provider)
-      val m = label(model)
+      val p = providerLabel(provider)
+      val m = modelLabel(model)
       counter(
         Names.Requests,
         "Total number of LLM requests",
@@ -76,7 +84,7 @@ final class MicrometerMetrics(registry: MeterRegistry) extends MetricsCollector 
 
   override def addTokens(provider: String, model: String, inputTokens: Long, outputTokens: Long): Unit =
     safely("token") {
-      val tags = Tags.of(ProviderTag, label(provider), ModelTag, label(model))
+      val tags = Tags.of(ProviderTag, providerLabel(provider), ModelTag, modelLabel(model))
       if (inputTokens >= 0) tokens(tags, "input", inputTokens.toDouble)
       if (outputTokens >= 0) tokens(tags, "output", outputTokens.toDouble)
     }
@@ -87,14 +95,15 @@ final class MicrometerMetrics(registry: MeterRegistry) extends MetricsCollector 
         counter(
           Names.CostUsd,
           "Total estimated cost in USD",
-          Tags.of(ProviderTag, label(provider), ModelTag, label(model))
+          Tags.of(ProviderTag, providerLabel(provider), ModelTag, modelLabel(model))
         )
           .increment(costUsd)
     }
 
   override def recordRetryAttempt(provider: String, attemptNumber: Int): Unit =
     safely("retry") {
-      counter(Names.Retries, "Total number of retry attempts", Tags.of(ProviderTag, label(provider))).increment()
+      counter(Names.Retries, "Total number of retry attempts", Tags.of(ProviderTag, providerLabel(provider)))
+        .increment()
     }
 
   override def recordCircuitBreakerTransition(provider: String, newState: String): Unit =
@@ -102,13 +111,13 @@ final class MicrometerMetrics(registry: MeterRegistry) extends MetricsCollector 
       counter(
         Names.CircuitBreakerTransitions,
         "Total number of circuit breaker state transitions",
-        Tags.of(ProviderTag, label(provider), StateTag, circuitState(newState))
+        Tags.of(ProviderTag, providerLabel(provider), StateTag, circuitState(newState))
       ).increment()
     }
 
   override def recordError(errorKind: ErrorKind, provider: String): Unit =
     safely("error") {
-      countError(label(provider), errorKind)
+      countError(providerLabel(provider), errorKind)
     }
 
   override def observeImageGeneration(
@@ -120,8 +129,8 @@ final class MicrometerMetrics(registry: MeterRegistry) extends MetricsCollector 
     imageCount: Int
   ): Unit =
     safely("image generation") {
-      val p  = label(provider)
-      val m  = label(model)
+      val p  = providerLabel(provider)
+      val m  = modelLabel(model)
       val op = imageOperation(operation)
       counter(
         Names.ImageGenerations,
@@ -155,7 +164,7 @@ final class MicrometerMetrics(registry: MeterRegistry) extends MetricsCollector 
         counter(
           Names.ImageGenerationCostUsd,
           "Total estimated image generation cost in USD",
-          Tags.of(ProviderTag, label(provider), ModelTag, label(model))
+          Tags.of(ProviderTag, providerLabel(provider), ModelTag, modelLabel(model))
         ).increment(costUsd)
     }
 
@@ -242,6 +251,38 @@ object MicrometerMetrics {
 
   private val Unknown = "unknown"
   private val Other   = "other"
+
+  // Generous enough for every provider llm4s ships and any realistic model roster, small enough that a caller
+  // passing unbounded strings (a per-request model id, a prompt by mistake) cannot grow the registry without limit.
+  private[metrics] val MaxProviderValues = 64
+  private[metrics] val MaxModelValues    = 256
+
+  /**
+   * The distinct values one tag has taken on this collector. The first `limit` values are recorded as given; any
+   * further value is recorded as `other`, and the first such value is logged once at WARN. A value already admitted
+   * stays admitted, so a busy set of models keeps its own series.
+   */
+  final private class BoundedLabels(tag: String, limit: Int) {
+    private val seen   = ConcurrentHashMap.newKeySet[String]()
+    private val warned = new AtomicBoolean(false)
+
+    def admit(value: String): String =
+      if (seen.contains(value)) value
+      else
+        synchronized {
+          if (seen.contains(value) || (seen.size < limit && seen.add(value))) value
+          else {
+            if (warned.compareAndSet(false, true))
+              LoggerFactory
+                .getLogger(classOf[MicrometerMetrics])
+                .warn(
+                  s"More than $limit distinct '$tag' tag values; further values are recorded as '$Other'. " +
+                    "Pass bounded provider and model names to the client."
+                )
+            Other
+          }
+        }
+  }
 
   // The classic buckets `PrometheusMetrics` uses, so `_bucket` series line up.
   private val RequestBuckets: Seq[Duration] =

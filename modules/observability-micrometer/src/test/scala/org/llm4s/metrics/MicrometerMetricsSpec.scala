@@ -397,6 +397,33 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
     meters(registry, Names.ImageGenerationDuration) shouldBe 1
   }
 
+  it should "cap the distinct model and provider values it records, and keep the ones already admitted" in {
+    val (registry, metrics) = fresh()
+    val cap                 = MicrometerMetrics.MaxModelValues
+    (1 to cap + 500).foreach(i => metrics.observeRequest("openai", s"model-$i", Outcome.Success, 1.millis))
+    // cap admitted models plus one `other`, however many more arrive
+    meters(registry, Names.Requests) shouldBe cap + 1
+    counter(registry, Names.Requests, "model" -> "other") shouldBe Some(500.0)
+    // a model admitted before the cap was reached keeps its own series
+    metrics.observeRequest("openai", "model-1", Outcome.Success, 1.millis)
+    counter(registry, Names.Requests, "model" -> "model-1") shouldBe Some(2.0)
+
+    val (registry2, metrics2) = fresh()
+    val providerCap           = MicrometerMetrics.MaxProviderValues
+    (1 to providerCap + 10).foreach(i => metrics2.recordRetryAttempt(s"provider-$i", 1))
+    meters(registry2, Names.Retries) shouldBe providerCap + 1
+    counter(registry2, Names.Retries, "provider" -> "other") shouldBe Some(10.0)
+  }
+
+  it should "count caps per collector, so two collectors do not share their budget" in {
+    val (r1, m1) = fresh()
+    val (r2, m2) = fresh()
+    (1 to MicrometerMetrics.MaxModelValues).foreach(i => m1.addTokens("openai", s"model-$i", 1L, 1L))
+    m2.addTokens("openai", "fresh-model", 1L, 1L)
+    counter(r2, Names.Tokens, "model" -> "fresh-model", "type" -> "input") shouldBe Some(1.0)
+    counter(r1, Names.Tokens, "model" -> "other") shouldBe None
+  }
+
   it should "add up exactly under concurrent use" in {
     val (registry, metrics) = fresh()
     given ExecutionContext  = ExecutionContext.global

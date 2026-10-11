@@ -32,12 +32,16 @@ The meters, their tags and how they relate to the Prometheus module's series are
 
 The meter names mirror the series of `llm4s-observability-prometheus` (`llm4s.requests` is exported as
 `llm4s_requests_total`), including the duration buckets, so dashboards carry over. Tag values come from fixed sets (plus
-provider and model), no method throws, and negative or non-finite amounts are ignored.
+provider and model, each capped at a fixed number of distinct values), no method throws, and negative or non-finite
+amounts are ignored.
+
+## Spring Boot
+
+`llm4s-spring-boot-starter` picks this module up on its own: with it and a `MeterRegistry` bean (Actuator) on the
+classpath, the starter's client records into that registry and the meters are on `/actuator/metrics`. No code needed.
 
 ## Not included
 
-- **Spring Boot wiring.** The starter builds its client through `llm4s-java-api`, which has no parameter for a
-  `MetricsCollector`. See the guide for the limitation and the interim approach.
 - **OpenTelemetry GenAI metric names.** Those conventions are still in Development status and are being renamed; the guide
   explains the mapping.
 - **Tracing.** Spans are the job of `llm4s-observability-otel`.

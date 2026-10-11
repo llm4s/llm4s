@@ -144,8 +144,10 @@ object Deps {
   val neo4jDriver = "org.neo4j.driver" % "neo4j-java-driver" % Versions.neo4j
 
   // Spring Boot
-  val springBootAutoConfigure     = "org.springframework.boot" % "spring-boot-autoconfigure"      % Versions.springBoot
-  val springBootActuator          = "org.springframework.boot" % "spring-boot-actuator"           % Versions.springBoot
+  val springBootAutoConfigure = "org.springframework.boot" % "spring-boot-autoconfigure" % Versions.springBoot
+  val springBootActuator      = "org.springframework.boot" % "spring-boot-actuator"      % Versions.springBoot
+  val springBootActuatorAutoConfigure =
+    "org.springframework.boot" % "spring-boot-actuator-autoconfigure" % Versions.springBoot
   val springBootStarterTest       = "org.springframework.boot" % "spring-boot-starter-test"       % Versions.springBoot
   val springBootTestAutoConfigure = "org.springframework.boot" % "spring-boot-test-autoconfigure" % Versions.springBoot
   // Note: neo4j-harness is not included as a dependency because neo4j-harness 5.26.x
