@@ -13,7 +13,7 @@ import scala.concurrent.duration.FiniteDuration
 import scala.util.{ Try, Using }
 
 /**
- * A durable [[org.llm4s.agent.graph.Checkpointer]] in one SQLite database file: threads, their latest checkpoints,
+ * A durable [[org.llm4s.agent.graph.Checkpointer]] in one SQLite database file: threads, their checkpoint histories,
  * pending writes, event logs and run claims survive a restart, and several runtimes - in this process or in
  * others on the same host - can share the file, each through a store of its own.
  *
@@ -27,6 +27,9 @@ import scala.util.{ Try, Using }
  *    renews a claim decides when it lapses. Stores in processes on different hosts sharing one file therefore
  *    judge expiry by different clocks, and skew between them changes a claim's effective `ttl` (see
  *    `docs/guide/agents/durable-checkpointers.md`); fencing keeps writes safe regardless.
+ *  - '''History and retention.''' Every checkpoint a commit supersedes stays in the file, readable with `history`
+ *    (newest first, paged through the `(thread, position)` primary key) and `checkpoint`, until `prune`, a commit's
+ *    `retractTurn` or [[deleteThread]] removes it; each of those is one write transaction too.
  *  - '''Fencing tokens''' come from one counter for the whole file, stored in it, so they keep increasing across
  *    restarts and [[deleteThread]], and are never issued twice.
  *  - '''Data only.''' Checkpoints, pending writes and events are stored as JSON - the checkpoint through
@@ -94,22 +97,59 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
     val conflict = commit.checkpoint.filter(_.parent != latestId).map { checkpoint =>
       GraphError.CheckpointConflict(threadId.value, checkpoint.parent, latestId)
     }
+    def invalid(reason: String) = GraphError.InvalidCommit(threadId.value, reason)
+    // checked only once the token and the version have passed, so a stale writer learns nothing of the history
+    def duplicate = commit.checkpoint.filter(c0 => inHistory(c, threadId, c0.id)).map { checkpoint =>
+      invalid(s"checkpoint ${checkpoint.id} is already in the thread's history")
+    }
     val resultingId = commit.checkpoint.map(_.id).orElse(latestId)
     val misdirected = commit.pendingWrites.find(w => !resultingId.contains(w.checkpointId)).map { write =>
-      GraphError.InvalidCommit(
-        threadId.value,
+      invalid(
         s"pending write for task ${write.taskId} names checkpoint ${write.checkpointId}, not ${resultingId.getOrElse("<none>")}"
       )
     }
-    fenced.orElse(conflict).orElse(misdirected).toLeft(()).map { _ =>
+    val unanchored =
+      Option.when(commit.retractTurn && commit.checkpoint.isEmpty)(invalid("retractTurn needs a new checkpoint"))
+    fenced.orElse(conflict).orElse(duplicate).orElse(misdirected).orElse(unanchored).toLeft(()).map { _ =>
       // a thread with a claim always has a row
       val nextSeq = current.fold(1L)(_.nextSeq)
       commit.checkpoint.foreach { checkpoint =>
+        val json = ujson.write(Checkpoint.toJson(checkpoint))
+        // positions only grow, also across a retraction, so the history's order is its primary key's
+        val position = query(
+          c,
+          "SELECT COALESCE(MAX(position) + 1, 0) FROM llm4s_checkpoint_history WHERE thread_id = ?",
+          threadId.value
+        )(_.getLong(1)).head
+        // a blocked turn is retracted back to the newest settled checkpoint, which stays
+        if commit.retractTurn then
+          update(
+            c,
+            """DELETE FROM llm4s_checkpoint_history WHERE thread_id = ? AND position > COALESCE(
+              |  (SELECT MAX(position) FROM llm4s_checkpoint_history WHERE thread_id = ? AND status IN (?, ?)), -1)""".stripMargin,
+            threadId.value,
+            threadId.value,
+            CheckpointStatus.Completed.toString,
+            CheckpointStatus.Failed.toString
+          )
+        update(
+          c,
+          """INSERT INTO llm4s_checkpoint_history
+            |(thread_id, position, checkpoint_id, status, created_second, created_nano, checkpoint_json)
+            |VALUES (?, ?, ?, ?, ?, ?, ?)""".stripMargin,
+          threadId.value,
+          position,
+          checkpoint.id,
+          checkpoint.status.toString,
+          checkpoint.createdAt.getEpochSecond,
+          checkpoint.createdAt.getNano.toLong,
+          json
+        )
         update(
           c,
           "UPDATE llm4s_checkpoint_threads SET checkpoint_id = ?, checkpoint_json = ? WHERE thread_id = ?",
           checkpoint.id,
-          ujson.write(Checkpoint.toJson(checkpoint)),
+          json,
           threadId.value
         )
         update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
@@ -160,15 +200,86 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
       case None => Right(None)
       case Some((json, writes)) =>
         for
-          parsed <- decoding("latest", "checkpoint")(ujson.read(json))
-          // a format this build cannot read is the contract's refusal; anything else is a row that does not decode
-          checkpoint <- Checkpoint.fromJson(parsed).left.map {
-            case refusal: GraphError => refusal
-            case other               => undecodable("latest", "checkpoint", other.message, None)
-          }
-          decoded <- decoding("latest", "pending write")(writes.map(upickle.default.read[PendingWrite](_)))
+          checkpoint <- decodeCheckpoint("latest", json)
+          decoded    <- decoding("latest", "pending write")(writes.map(upickle.default.read[PendingWrite](_)))
         yield Some(StoredCheckpoint(checkpoint, decoded))
     }
+
+  def history(threadId: ThreadId, before: Option[String], limit: Int): Result[Vector[Checkpoint]] =
+    reading("history") { c =>
+      val from = before match
+        case None => Right(Long.MaxValue)
+        case Some(id) =>
+          positionOf(c, threadId, id).toRight(GraphError.CheckpointNotFound(threadId.value, id))
+      from.map { position =>
+        if limit <= 0 then Vector.empty
+        else query(c, HistoryPageSql, threadId.value, position, limit)(_.getString(1))
+      }
+    }.flatMap(rows => sequence(rows.map(decodeCheckpoint("history", _))))
+
+  def checkpoint(threadId: ThreadId, checkpointId: String): Result[Option[Checkpoint]] =
+    reading("checkpoint") { c =>
+      Right(
+        query(c, CheckpointByIdSql, threadId.value, checkpointId)(_.getString(1)).headOption
+      )
+    }.flatMap {
+      case None       => Right(None)
+      case Some(json) => decodeCheckpoint("checkpoint", json).map(Some(_))
+    }
+
+  /**
+   * Removes what `policy` does not keep, in one write transaction, so it sees and changes one state of the thread
+   * whatever other stores on the file are doing; it takes no claim, as the contract says.
+   */
+  def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit] = writing("prune") { c =>
+    readRow(c, threadId) match
+      case None => Right(())
+      case Some(current) =>
+        val now    = clock.instant()
+        val cutoff = policy.maxAge.map(age => now.minusNanos(age.toNanos))
+        // oldest first: (position, id, createdAt)
+        val history = query(
+          c,
+          """SELECT position, checkpoint_id, created_second, created_nano FROM llm4s_checkpoint_history
+            |WHERE thread_id = ? ORDER BY position""".stripMargin,
+          threadId.value
+        )(rows => (rows.getLong(1), rows.getString(2), Instant.ofEpochSecond(rows.getLong(3), rows.getLong(4))))
+        // the latest checkpoint is always kept, whatever its age
+        val (older, latest) = history.splitAt(history.size - 1)
+        val young           = older.filter((_, _, at) => cutoff.forall(cut => !at.isBefore(cut)))
+        val kept            = policy.maxCheckpoints.fold(young ++ latest)(n => (young ++ latest).takeRight(n))
+        val keptPositions   = kept.map(_._1).toSet
+        history.filterNot((position, _, _) => keptPositions(position)).foreach { (position, _, _) =>
+          update(
+            c,
+            "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ? AND position = ?",
+            threadId.value,
+            position
+          )
+        }
+        val keptIds = kept.map(_._2).toSet
+        decoding("prune", "event") {
+          query(
+            c,
+            "SELECT seq, record_json FROM llm4s_checkpoint_events WHERE thread_id = ? ORDER BY seq",
+            threadId.value
+          )(rows => rows.getLong(1) -> rows.getString(2)).map((seq, json) =>
+            seq -> upickle.default.read[EventRecord](json)
+          )
+        }.map { events =>
+          // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
+          val byCheckpoint =
+            if kept.size == history.size then None
+            else events.collectFirst { case (seq, e) if e.checkpointId.exists(keptIds) => seq }
+          val byAge = cutoff.map { cut =>
+            events.collectFirst { case (seq, e) if !e.timestamp.isBefore(cut) => seq }.getOrElse(current.nextSeq)
+          }
+          val bySize = policy.maxEvents.map(n => current.nextSeq - n)
+          val floor  = (Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq)
+          update(c, "DELETE FROM llm4s_checkpoint_events WHERE thread_id = ? AND seq < ?", threadId.value, floor)
+          update(c, "UPDATE llm4s_checkpoint_threads SET earliest_seq = ? WHERE thread_id = ?", floor, threadId.value)
+        }
+  }
 
   def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
     reading("eventsAfter") { c =>
@@ -199,6 +310,7 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
   def deleteThread(threadId: ThreadId): Result[Unit] = writing("deleteThread") { c =>
     update(c, "DELETE FROM llm4s_checkpoint_events WHERE thread_id = ?", threadId.value)
     update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
+    update(c, "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ?", threadId.value)
     update(c, "DELETE FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)
     Right(())
   }
@@ -442,6 +554,39 @@ object SqliteCheckpointer:
         |WHERE thread_id = ? AND checkpoint_id IS NULL AND claim_token IS NULL AND next_seq = 1""".stripMargin,
       threadId.value
     )
+
+  /** A page of the history, newest first: a backwards range of the `(thread, position)` primary key. */
+  private[sqlite] val HistoryPageSql: String =
+    """SELECT checkpoint_json FROM llm4s_checkpoint_history
+      |WHERE thread_id = ? AND position < ? ORDER BY position DESC LIMIT ?""".stripMargin
+
+  /** A checkpoint by id, through the `(thread, checkpoint id)` unique index. */
+  private[sqlite] val CheckpointByIdSql: String =
+    "SELECT checkpoint_json FROM llm4s_checkpoint_history WHERE thread_id = ? AND checkpoint_id = ?"
+
+  /** A checkpoint's position by id, through the `(thread, checkpoint id)` unique index. */
+  private[sqlite] val PositionByIdSql: String =
+    "SELECT position FROM llm4s_checkpoint_history WHERE thread_id = ? AND checkpoint_id = ?"
+
+  /** Whether checkpoint `id` is in the thread's history; by the `(thread, checkpoint id)` index. */
+  private def inHistory(c: Connection, threadId: ThreadId, id: String): Boolean =
+    positionOf(c, threadId, id).isDefined
+
+  /** The position of checkpoint `id` in the thread's history; by the `(thread, checkpoint id)` index. */
+  private def positionOf(c: Connection, threadId: ThreadId, id: String): Option[Long] =
+    query(c, PositionByIdSql, threadId.value, id)(_.getLong(1)).headOption
+
+  /** A stored checkpoint decoded: a format this build cannot read is the contract's refusal, anything else a bad row. */
+  private def decodeCheckpoint(operation: String, json: String)(using ErrorContext): Result[Checkpoint] =
+    decoding(operation, "checkpoint")(ujson.read(json)).flatMap { parsed =>
+      Checkpoint.fromJson(parsed).left.map {
+        case refusal: GraphError => refusal
+        case other               => undecodable(operation, "checkpoint", other.message, None)
+      }
+    }
+
+  private def sequence[A](results: Vector[Result[A]]): Result[Vector[A]] =
+    results.foldLeft[Result[Vector[A]]](Right(Vector.empty))((acc, r) => acc.flatMap(as => r.map(as :+ _)))
 
   /** The next fencing token for the whole file; inside the caller's write transaction. */
   private def nextToken(c: Connection): Long =

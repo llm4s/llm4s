@@ -13,6 +13,10 @@ import scala.util.Using
  *  - `llm4s_checkpoint_threads`: one row per thread that has a checkpoint, a claim, or an event number spent - the
  *    latest checkpoint as JSON with its id (the thread's version), the next event number and the replay floor,
  *    and the claim (holder, token, expiry as epoch seconds and nanoseconds).
+ *  - `llm4s_checkpoint_history`: every checkpoint of every thread's history, latest included, as JSON, keyed by
+ *    `(thread, position)` - the position counts up along the thread, so paging newest first reads the primary key
+ *    backwards - and unique by `(thread, checkpoint id)`, so a read by id and the duplicate-id check use that index.
+ *    The checkpoint's status and creation time sit beside it for retraction and retention.
  *  - `llm4s_checkpoint_pending_writes`: the latest checkpoint's pending writes as JSON, in commit order.
  *  - `llm4s_checkpoint_events`: the durable event log, one JSON `EventRecord` per `(thread, seq)`.
  *
@@ -49,6 +53,17 @@ private[sqlite] object SqliteSchema:
         |  claim_expires_second INTEGER,
         |  claim_expires_nano   INTEGER
         |)""".stripMargin,
+      """CREATE TABLE llm4s_checkpoint_history (
+        |  thread_id       TEXT NOT NULL,
+        |  position        INTEGER NOT NULL,
+        |  checkpoint_id   TEXT NOT NULL,
+        |  status          TEXT NOT NULL,
+        |  created_second  INTEGER NOT NULL,
+        |  created_nano    INTEGER NOT NULL,
+        |  checkpoint_json TEXT NOT NULL,
+        |  PRIMARY KEY (thread_id, position),
+        |  UNIQUE (thread_id, checkpoint_id)
+        |) WITHOUT ROWID""".stripMargin,
       """CREATE TABLE llm4s_checkpoint_pending_writes (
         |  thread_id     TEXT NOT NULL,
         |  position      INTEGER NOT NULL,

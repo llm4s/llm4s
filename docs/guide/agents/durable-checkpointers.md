@@ -223,8 +223,9 @@ it. Checkpoints inside keep their own format version, as with every store, and a
 
 Only data: checkpoints, pending writes and events as JSON, never closures or class names, so a file can be read by
 any build that knows the graph. Its tables are prefixed `llm4s_checkpoint_`, so the file can hold other tables
-too. Like every store today it keeps only each thread's latest checkpoint, and drops events only when
-`compactEvents` is called; history and retention are [#1702](https://github.com/llm4s/llm4s/issues/1702).
+too. It keeps every checkpoint of a thread's history, as the next section describes: `history` pages through it
+newest first by an index, so a long history costs a page, not a scan, and `prune` and `deleteThread` remove from it
+in one transaction each, safely beside other stores writing the file.
 
 ## Checkpoint history, fork and updateState
 

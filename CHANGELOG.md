@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **`llm4s-agent-checkpoint-sqlite`: the first durable checkpointer** ([#1701](https://github.com/llm4s/llm4s/issues/1701),
   Stage 2 slice 2 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `SqliteCheckpointer`
-  (`org.llm4s.agent.graph.sqlite`) keeps threads - latest checkpoint, pending writes, event log and run claim - in one
+  (`org.llm4s.agent.graph.sqlite`) keeps threads - checkpoint history, pending writes, event log and run claim - in one
   SQLite file, so a run survives a restart: a new process opens the file, replays the stopped run's events, and
   `recover` continues it without re-running the tasks that had completed. Several stores, in one process or in several
   on one host, can share the file; every write is one `BEGIN IMMEDIATE` transaction that checks the claim's token and
@@ -19,7 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   WAL mode with `synchronous = FULL`; `SqliteCheckpointerConfig.busyTimeout` (default 5 s) bounds how long a write waits
   for another connection's. The schema is versioned and migrated on open, and a file from a newer build is refused. It
   passes `CheckpointerContract` over one connection and over two alternating connections to one file, and a test kills
-  a forked JVM mid-run and recovers its thread. The sample `SqliteRestartRecoveryExample` shows a restart and recovery.
+  a forked JVM mid-run and recovers its thread. It implements #1702's `history`, `checkpoint` and `prune` over a history
+  table paged by its primary key, each write one transaction. The sample `SqliteRestartRecoveryExample` shows a restart
+  and recovery.
   See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#the-sqlite-store).
 - **Checkpoint history, fork, `updateState` and retention** ([#1702](https://github.com/llm4s/llm4s/issues/1702),
   Stage 2 slice 3 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): a `Checkpointer` keeps every checkpoint a
