@@ -12,6 +12,7 @@ import org.llm4s.agent.graph.{
   FencingToken,
   GraphRuntime,
   InMemoryCheckpointer,
+  RetentionPolicy,
   RunEvent,
   StoredCheckpoint,
   StreamEvent,
@@ -85,7 +86,10 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with Eventually with Befo
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
       underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId): Result[Unit] = underlying.deleteThread(threadId)
+    def deleteThread(threadId: ThreadId): Result[Unit]                  = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
   }
 
   /** An in-memory store that opens `completed` once a commit carrying `RunCompleted` is stored. */
@@ -105,7 +109,10 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with Eventually with Befo
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
       underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId): Result[Unit] = underlying.deleteThread(threadId)
+    def deleteThread(threadId: ThreadId): Result[Unit]                  = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
   }
 
   final case class EchoResult(value: String)
@@ -323,8 +330,8 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with Eventually with Befo
       pekko(client)(_.withTools(tools).withMiddleware(new ApprovalMiddleware(r => Some(s"review ${r.call.id}"))))
     val parked = Await.result(agent.run("go"), Patience)
     val ids = parked.status match {
-      case AgentStatus.Suspended(approvals, _) => approvals.map(_._1)
-      case other                               => fail(s"expected Suspended, got $other")
+      case AgentStatus.Suspended(approvals, _, _, _) => approvals.map(_._1)
+      case other                                     => fail(s"expected Suspended, got $other")
     }
     ids should have size 1
     val all = items(agent.streamResume(parked.threadId, Map(parked.approve(ids.head))))
@@ -408,8 +415,8 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with Eventually with Befo
       pekko(client)(_.withTools(tools).withMiddleware(new ApprovalMiddleware(r => Some(s"review ${r.call.id}"))))
     val parked = Await.result(agent.run("go"), Patience)
     val ids = parked.status match {
-      case AgentStatus.Suspended(approvals, _) => approvals.map(_._1)
-      case other                               => fail(s"expected Suspended, got $other")
+      case AgentStatus.Suspended(approvals, _, _, _) => approvals.map(_._1)
+      case other                                     => fail(s"expected Suspended, got $other")
     }
     val done = Await.result(agent.resume(parked.threadId, Map(parked.approve(ids.head))), Patience)
     done.status shouldBe AgentStatus.Completed("shipped")

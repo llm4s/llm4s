@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.tool
 
-import org.llm4s.agent.graph.{ RunContext, StateKey, StateUpdate, ThreadState, ToolCallId }
+import org.llm4s.agent.graph.{ IdempotencyKey, RunContext, StateKey, StateUpdate, ThreadState, ToolCallId }
 import org.llm4s.error.LLMError
 import org.llm4s.toolapi.{ SchemaDefinition, ToolFunction, ToolHints }
 import org.llm4s.types.Result
@@ -94,19 +94,37 @@ object AgentToolSpec:
 final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec: ReadWriter[Ans])
 
 /**
- * What a tool call knows: the run, the call's id, the thread state it may read, and whether the
- * call has been approved. Built with `ToolContext(...)`; a field added later gets a default there
- * and a `with*` setter, so existing callers keep compiling.
+ * What a tool call knows: the run, the call's id, the call's [[IdempotencyKey]], the thread state
+ * it may read, and whether the call has been approved. Built with `ToolContext(...)`; a field added
+ * later gets a default there and a `with*` setter, so existing callers keep compiling.
+ *
+ * A tool with an external side effect passes `idempotencyKey` to the system it calls (an
+ * `Idempotency-Key` header, a client token, a unique column), because the runtime may run the
+ * same call more than once: a retrying wrapper, `recover` after a failure, cancellation or crash,
+ * and an approval each run it again with the same key.
  */
-final case class ToolContext private (run: RunContext, toolCallId: ToolCallId, state: ThreadState, approved: Boolean):
-  def withRun(r: RunContext): ToolContext         = copy(run = r)
-  def withToolCallId(id: ToolCallId): ToolContext = copy(toolCallId = id)
-  def withState(s: ThreadState): ToolContext      = copy(state = s)
-  def withApproved(a: Boolean): ToolContext       = copy(approved = a)
+final case class ToolContext private (
+  run: RunContext,
+  toolCallId: ToolCallId,
+  idempotencyKey: IdempotencyKey,
+  state: ThreadState,
+  approved: Boolean
+):
+  def withRun(r: RunContext): ToolContext                  = copy(run = r)
+  def withToolCallId(id: ToolCallId): ToolContext          = copy(toolCallId = id)
+  def withIdempotencyKey(key: IdempotencyKey): ToolContext = copy(idempotencyKey = key)
+  def withState(s: ThreadState): ToolContext               = copy(state = s)
+  def withApproved(a: Boolean): ToolContext                = copy(approved = a)
 
 object ToolContext:
-  def apply(run: RunContext, toolCallId: ToolCallId, state: ThreadState, approved: Boolean = false): ToolContext =
-    new ToolContext(run, toolCallId, state, approved)
+  def apply(
+    run: RunContext,
+    toolCallId: ToolCallId,
+    idempotencyKey: IdempotencyKey,
+    state: ThreadState,
+    approved: Boolean = false
+  ): ToolContext =
+    new ToolContext(run, toolCallId, idempotencyKey, state, approved)
 
 /** What a tool call produced, as data. */
 enum ToolOutcome:

@@ -56,4 +56,55 @@ class Llm4sSpec extends AnyFlatSpec with Matchers {
     result.isSuccess shouldBe true
     result.get() shouldBe a[JLlmClient]
   }
+
+  "createClient with a MetricsCollector" should "report the client's calls to that collector" in {
+    import com.sun.net.httpserver.HttpServer
+    import org.llm4s.llmconnect.config.OllamaConfig
+    import org.llm4s.metrics.{ MetricsCollector, Outcome }
+
+    import java.net.InetSocketAddress
+    import java.nio.charset.StandardCharsets
+    import scala.concurrent.duration.FiniteDuration
+
+    // An Ollama `/api/chat` reply, so the real provider client runs end to end against a loopback server.
+    val reply =
+      """{"model":"llama3.2","message":{"role":"assistant","content":"hi"},"done":true,"prompt_eval_count":5,"eval_count":3}"""
+    val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
+    server.createContext(
+      "/api/chat",
+      exchange => {
+        val bytes = reply.getBytes(StandardCharsets.UTF_8)
+        exchange.getResponseHeaders.add("Content-Type", "application/json")
+        exchange.sendResponseHeaders(200, bytes.length.toLong)
+        exchange.getResponseBody.write(bytes)
+        exchange.close()
+      }
+    )
+    server.start()
+
+    val requests = new java.util.concurrent.ConcurrentLinkedQueue[(String, String, Outcome)]()
+    val tokens   = new java.util.concurrent.ConcurrentLinkedQueue[(Long, Long)]()
+    val metrics = new MetricsCollector {
+      override def observeRequest(provider: String, model: String, outcome: Outcome, duration: FiniteDuration): Unit =
+        requests.add((provider, model, outcome))
+      override def addTokens(provider: String, model: String, inputTokens: Long, outputTokens: Long): Unit =
+        tokens.add((inputTokens, outputTokens))
+      override def recordCost(provider: String, model: String, costUsd: Double): Unit = ()
+    }
+
+    val config = OllamaConfig("llama3.2", s"http://127.0.0.1:${server.getAddress.getPort}")
+    val answer = Llm4s.createClient(config, metrics).get().complete("hello")
+    server.stop(0)
+
+    answer.get() shouldBe "hi"
+    requests.size() shouldBe 1
+    requests.peek() shouldBe (("ollama", "llama3.2", Outcome.Success))
+    tokens.peek() shouldBe ((5L, 3L))
+  }
+
+  it should "refuse a null config and treat a null collector as none" in {
+    import org.llm4s.llmconnect.config.OllamaConfig
+    Llm4s.createClient(null, org.llm4s.metrics.MetricsCollector.noop).isFailure shouldBe true
+    Llm4s.createClient(OllamaConfig("llama3.2", "http://127.0.0.1:1"), null).isSuccess shouldBe true
+  }
 }

@@ -537,6 +537,23 @@ The Cohere embedding provider (`EMBEDDING_MODEL=cohere/<model>`), on Cohere's na
 with its `llm4s.embeddings.cohere` config block and a typed `CohereInputType` (`search_document`,
 `search_query`, ...). Cohere chat is a different module: `llm4s-openai-compatible`. A community
 provider module under `modules/providers/`; it brings no dependency beyond `llm4s-core`.
+
+### For the Jev decision model
+
+{: .note }
+> Not yet published. `llm4s-jev` exists in the build as of [#1265](https://github.com/llm4s/llm4s/issues/1265) but ships in
+> the next release.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-jev" % llm4sVersion
+```
+
+A typed client for TypeSafe's Jev decision model: send a state and typed questions (Noul, Choice, Score), get typed answers.
+It is not a chat provider and returns no `Completion`. Configured under `llm4s.jev`, with the key in `TYPESAFE_API_KEY`. A
+community module under `modules/providers/`; it brings no dependency beyond `llm4s-core`. See
+[Jev decision model](../guide/jev).
+
 ### For IBM watsonx.ai
 
 ```scala
@@ -673,7 +690,8 @@ tool API they implement (`ToolFunction`, `ToolRegistry`). Package names are unch
 libraryDependencies ++= Seq(
   "org.llm4s" %% "llm4s-observability"            % llm4sVersion, // TRACING_MODE=langfuse
   "org.llm4s" %% "llm4s-observability-otel"       % llm4sVersion, // TRACING_MODE=opentelemetry
-  "org.llm4s" %% "llm4s-observability-prometheus" % llm4sVersion  // llm4s.metrics.enabled = true
+  "org.llm4s" %% "llm4s-observability-prometheus" % llm4sVersion, // llm4s.metrics.enabled = true
+  "org.llm4s" %% "llm4s-observability-micrometer" % llm4sVersion   // MicrometerMetrics over your MeterRegistry
 )
 ```
 
@@ -689,6 +707,10 @@ names are unchanged. See the migration notes for
 [Langfuse and the collector](../reference/migration#slice-6-llm4s-observability---langfuse-the-trace-collector-and-costtracker-leave-core)
 and for [Prometheus](../reference/migration#slice-6-llm4s-observability-prometheus---prometheus-leaves-core).
 
+`llm4s-observability-micrometer` is the Micrometer counterpart: a `MetricsCollector` that records into a `MeterRegistry`
+you already have, with the same series names as the Prometheus module. It depends on `llm4s-core` and `micrometer-core`.
+See [Micrometer metrics](../guide/observability/micrometer).
+
 ### For Neo4j (knowledge graph store)
 
 ```scala
@@ -698,6 +720,35 @@ libraryDependencies += "org.llm4s" %% "llm4s-knowledgegraph-neo4j" % llm4sVersio
 
 `Neo4jGraphStore`, a graph store for `llm4s-knowledgegraph` backed by Neo4j. It depends on `llm4s-core`
 and `llm4s-knowledgegraph` and brings the Neo4j driver.
+
+### Structured output from a case class
+
+{: .note }
+> Not yet published. `llm4s-schema-derivation` exists in the build as of
+> [#1472](https://github.com/llm4s/llm4s/issues/1472) but ships in a release after 0.4.1. It is experimental.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-schema-derivation" % llm4sVersion
+```
+
+`SchemaOf` and `client.completeStructuredOf[A]`: the JSON schema of `completeStructured`, derived from a case class
+with `derives`. It depends on `llm4s-core` only. See [Derived Schemas](../guide/derived-schemas).
+
+### Testing your own code (the testkit)
+
+{: .note }
+> Not yet published. `llm4s-testkit` exists in the build as of
+> [#1475](https://github.com/llm4s/llm4s/issues/1475) but ships in the next release.
+
+```scala
+// same version as llm4s-core; test scope only
+libraryDependencies += "org.llm4s" %% "llm4s-testkit" % llm4sVersion % Test
+```
+
+A scriptable fake `LLMClient` for the tests of code that calls llm4s: canned replies, scripted tool calls,
+injected errors and recorded requests, with no network and no API key. It depends on `llm4s-core` only. See
+[Testing with the Testkit](../guide/testing-with-the-testkit).
 
 ### For provider authors (testing a provider module)
 

@@ -67,6 +67,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `trace` — Langfuse (`LangfuseTracing`, its batch sender and `TracingBackend`), `TraceCollectorTracing`, `trace/model`, `trace/store`; `metrics` — `CostTracker` — **carved** | `llm4s-observability` | Beta |
 | `trace` — OpenTelemetry (`OpenTelemetryTracing`, `OpenTelemetryConfig`) — **carved** | `llm4s-observability-otel` (`modules/trace-opentelemetry`) | Beta |
 | `metrics` — Prometheus (`PrometheusMetrics`, `PrometheusEndpoint`, `MetricsConfigLoader`) — **carved** | `llm4s-observability-prometheus` | Beta |
+| `metrics` — Micrometer (`MicrometerMetrics`), a `MetricsCollector` over a `MeterRegistry` — **new** | `llm4s-observability-micrometer` | Beta |
 | `llmconnect/provider` — OpenAI, Azure and Requesty (the providers sharing `OpenAIClient`) — **carved** | `llm4s-openai` | Frozen at 1.0 |
 | `llmconnect/provider` — OpenRouter, DeepSeek, Z.ai and the generic `openai-compatible` provider, on one SDK-free `OpenAICompatibleClient` — **carved** | `llm4s-openai-compatible` | Frozen at 1.0 |
 | `llmconnect/provider` — Anthropic — **carved** | `llm4s-anthropic` | Frozen at 1.0 |
@@ -77,10 +78,13 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `llmconnect/provider` — AWS Bedrock (Converse, ConverseStream) — **new** | `llm4s-bedrock` (`modules/providers/bedrock`) | Beta |
 | `llmconnect/provider` — Jina AI embeddings — **new** | `llm4s-jina` (`modules/providers/jina`) | Beta |
 | `llmconnect/provider` — Cohere embeddings, on Cohere's native `/v2/embed` (Cohere chat is a dialect in `llm4s-openai-compatible`) — **new** | `llm4s-cohere` (`modules/providers/cohere`) | Beta |
-| `llmconnect/provider` — IBM watsonx.ai, on the text-generation endpoints IBM has deprecated (never run against the live service; migration to the chat API is [#1314](https://github.com/llm4s/llm4s/issues/1314)) — **new** | `llm4s-watsonx` (`modules/providers/watsonx`) | Beta |
+| `llmconnect/provider` — IBM watsonx.ai, on the chat endpoints (never run against the live service: verification against it is still open in [#1314](https://github.com/llm4s/llm4s/issues/1314)) — **new** | `llm4s-watsonx` (`modules/providers/watsonx`) | Beta |
 | `llmconnect/provider` — other community providers | `llm4s-openai-compatible` dialects, or `modules/providers/<name>` | Beta |
+| `jev` — typed client for TypeSafe's Jev decision model (Noul, Choice, Score); not a chat provider — **new** | `llm4s-jev` (`modules/providers/jev`) | Beta |
 | `testkit` — the checks a provider module's `Llm4s<Name>ModuleSpec` makes (`ProviderModuleChecks`, `ProviderTestConfig`, `CredentialsRoundTrip`, `LocalProviderTestServer`), formerly unpublished helpers in core's test sources — **new** | `llm4s-provider-testkit` (`modules/provider-testkit`), a test-scope dependency; requires JDK 21 (virtual threads) | Beta |
 | `agent/graph/sqlite` — `SqliteCheckpointer`, the first durable `Checkpointer`: threads, events and run claims in one SQLite file that survives a restart and that several processes on one host can share — **new** | `llm4s-agent-checkpoint-sqlite` (`modules/agent-checkpoint-sqlite`); carries the SQLite JDBC driver | Beta |
+| `schema` — `SchemaOf`, a JSON schema derived from a case class with `derives`, and `completeStructuredOf`; builds core's `ObjectSchema` and adds no dependency (Map, recursive types and sealed hierarchies with fields are refused at compile time; a recursion through a hand-written given that derives its type fails on first use) — **new** | `llm4s-schema-derivation` (`modules/schema-derivation`) | Experimental |
+| `testkit` — a scriptable fake `LLMClient` for the tests of code that uses llm4s (`ScriptedLLMClient`, `Reply`, `RecordedCall`, `UnscriptedCallError`) — **new** | `llm4s-testkit` (`modules/testkit`), a test-scope dependency | Beta |
 | `agent/testkit` — `CheckpointerContract`, the contract every `Checkpointer` must pass (commits, event numbering, compaction, run-claim leases and fencing, two runtimes over one store), and `ManualClock` — **new** | `llm4s-agent-testkit` (`modules/agent-testkit`), a test-scope dependency; requires JDK 21 (virtual threads) | Beta |
 | build — the bill of materials that pins every published artifact to one version (no code) — **new** | `llm4s-bom` (`modules/bom`) | Beta |
 | `rag`, `vectorstore`, `chunking`, `reranker`, `eval` — **carved** | `llm4s-rag` | Beta |
@@ -94,7 +98,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `speech` - **carved** | `llm4s-speech` | Experimental |
 | `imagegeneration`, `imageprocessing` - **carved** | `llm4s-image` | Experimental |
 | `knowledgegraph` — **carved** (`knowledgegraph/graphrag` ships in `llm4s-rag`) | `llm4s-knowledgegraph` | Experimental |
-| `javaapi` — the Java facade (`Llm4s`, `JLlmClient`, `JAgent`, `AgentStream`, `AgentStreamListener`, `StreamEvents`, `Answer`, `PendingInterrupt`, `InterruptKind`, `ConversationBuilder`, `LlmResult`, `LlmException`) — **new** | `llm4s-java-api` (`modules/java-api`) | Beta |
+| `javaapi` — the Java facade (`Llm4s`, `JLlmClient`, `JAgent`, `AgentStream`, `AgentStreamListener`, `StreamEvents`, `Answer`, `PendingInterrupt`, `InterruptKind`, `BreakpointPhase`, `ConversationBuilder`, `LlmResult`, `LlmException`) — **new** | `llm4s-java-api` (`modules/java-api`) | Beta |
 | `spring` — Spring Boot auto-configuration (`Llm4sAutoConfiguration`, `Llm4sProperties`, `LLM4STemplate`, `LlmHealthIndicator`) — **new** | `llm4s-spring-boot-starter` (`modules/spring-boot-starter`) | Beta |
 | `effect.cats` — `LLMClientIO`, `AgentIO` (cats-effect 3, fs2) — **new** | `llm4s-effect` (`modules/llm4s-effect`) | Beta |
 | `zio` — `LLMClientZ`, `AgentZ` (ZIO 2, ZIO Streams) — **new** | `llm4s-zio` (`modules/llm4s-zio`) | Beta |
@@ -129,7 +133,7 @@ See [#1126](https://github.com/llm4s/llm4s/issues/1126) for the reasoning behind
 
 | Artifacts | Minimum JDK | Tested on | Why |
 |---|---|---|---|
-| `llm4s-agent`, and the modules that depend on it: `llm4s-java-api`, `llm4s-kotlin-api`, `llm4s-spring-boot-starter`, `llm4s-effect`, `llm4s-zio` | 21 | 21 | `llm4s-agent` depends on Ox, whose jars are compiled for JDK 21 (class-file version 65), and it starts virtual threads (`Thread.ofVirtual`). The Java and Kotlin facades start their own as well: `AgentStream` in `llm4s-java-api`, and `AgentKt`'s stream completion in `llm4s-kotlin-api` ([#1678](https://github.com/llm4s/llm4s/pull/1678)) |
+| `llm4s-agent`, and the modules that depend on it: `llm4s-java-api`, `llm4s-kotlin-api`, `llm4s-spring-boot-starter`, `llm4s-effect`, `llm4s-zio`, `llm4s-agent-testkit` | 21 | 21 | `llm4s-agent` depends on Ox, whose jars are compiled for JDK 21 (class-file version 65), and it starts virtual threads (`Thread.ofVirtual`). The Java and Kotlin facades start their own as well: `AgentStream` in `llm4s-java-api`, and `AgentKt`'s stream completion in `llm4s-kotlin-api` ([#1678](https://github.com/llm4s/llm4s/pull/1678)), and `llm4s-agent-testkit`'s `CheckpointerContract` runs its cases on virtual threads |
 | `llm4s-core` and every module that depends on it | 21 | 21 | `ToolRegistry` starts a virtual thread (`Thread.ofVirtual`), a JDK 21 API, so `llm4s-core` does not compile against an older JDK |
 | `llm4s-provider-testkit` | 21 | 21 | its interruption checks and `LocalProviderTestServer` run on virtual threads ([#1582](https://github.com/llm4s/llm4s/issues/1582)) |
 | `llm4s-media`, `llm4s-workspace-shared` | 21 (supported) | 21 | neither depends on `llm4s-core`: they use no JDK 21 API, and their newest dependency class files are version 55 (uJson), so they may well load on an older JDK, but only JDK 21 is tested and supported |

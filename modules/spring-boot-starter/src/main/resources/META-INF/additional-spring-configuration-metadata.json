@@ -28,7 +28,7 @@
     {
       "name": "llm4s.provider",
       "type": "java.lang.String",
-      "description": "LLM provider to use. Supported: openai, anthropic, ollama. Required."
+      "description": "LLM provider for the flat form: openai, anthropic or ollama. For any other provider use llm4s.providers.* instead; when llm4s.providers.provider is not set, it can also name a section of llm4s.providers. Required for the flat form."
     },
     {
       "name": "llm4s.model",
@@ -91,6 +91,21 @@
       "type": "java.time.Duration",
       "description": "A probe taking longer than this is cancelled (interrupting the provider call) and reports DOWN. Must be positive.",
       "defaultValue": "10s"
+    },
+    {
+      "name": "llm4s.providers.provider",
+      "type": "java.lang.String",
+      "description": "Name of the default section of llm4s.providers, the provider the starter creates a client for. Mirrors llm4s.providers.provider of the HOCON configuration."
+    },
+    {
+      "name": "llm4s.providers",
+      "type": "java.util.Map<java.lang.String,java.util.Map<java.lang.String,java.lang.String>>",
+      "description": "Provider sections, llm4s.providers.<name>.<key>, for any provider on the classpath: provider (the provider id, for example gemini, azure, mistral, openai-compatible), model, api-key, base-url, headers.<Header-Name> and the keys the provider declares (for example endpoint and api-version for azure). kebab-case names are read as the camelCase names of the HOCON block. When any key is set here the flat llm4s.provider, llm4s.model ... are ignored."
+    },
+    {
+      "name": "llm4s.credentials",
+      "type": "java.util.Map<java.lang.String,java.util.Map<java.lang.String,java.lang.String>>",
+      "description": "A vendor's shared credentials, llm4s.credentials.<provider id>.api-key, used by every section of that provider that sets no api-key of its own."
     }
   ]
 }

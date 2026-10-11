@@ -53,11 +53,11 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
 
   /**
    * Runs the tool call through every `wrapToolCall`, the first outermost, with `innermost` at the
-   * centre, and says who raised a resulting `NeedsApproval`.
+   * centre, and says who raised a resulting `NeedsApproval` or `Ask`.
    *
-   * A layer raised it when its own result is `NeedsApproval` and none of the results its `next`
+   * A layer raised it when its own result is `NeedsApproval` or `Ask` and none of the results its `next`
    * returned - however often it was called - is that same value (by reference); otherwise that inner
-   * result's attribution stands, and the innermost function's own `NeedsApproval` is attributed to the tool.
+   * result's attribution stands, and the innermost function's own is attributed to the tool.
    */
   private[graph] def wrapToolCall(request: ToolCallRequest, context: ToolContext)(
     innermost: () => ToolOutcome
@@ -73,8 +73,8 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
           inner.add(result)
           result.outcome
         guardedTool(m)(m.wrapToolCall(request, context)(next)) match
-          case asked: ToolOutcome.NeedsApproval =>
-            inner.asScala.find(_.outcome.eq(asked)).getOrElse(ToolChainResult(asked, Some(m.id)))
+          case raised @ (_: ToolOutcome.NeedsApproval | _: ToolOutcome.Ask[?]) =>
+            inner.asScala.find(_.outcome.eq(raised)).getOrElse(ToolChainResult(raised, Some(m.id)))
           case other => ToolChainResult(other, None)
     layer(0)
 
@@ -107,7 +107,7 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
 
 object MiddlewareStack:
 
-  /** What a tool call's chain returned; `raisedBy` is set when `outcome` is `NeedsApproval`: `None` = the tool, `Some(id)` = that middleware. */
+  /** What a tool call's chain returned; for a `NeedsApproval` or an `Ask`, `raisedBy` says who: `None` = the tool, `Some(id)` = that middleware. */
   final private[graph] case class ToolChainResult(outcome: ToolOutcome, raisedBy: Option[MiddlewareId])
 
   /** No middleware: every chain is its innermost function. */

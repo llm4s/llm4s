@@ -134,7 +134,7 @@ result.map { r =>
     case AgentStatus.Completed(answer)         => println(answer)
     case AgentStatus.Blocked(guardrail, why)   => println(s"Blocked by $guardrail: $why")
     case AgentStatus.StepLimitReached          => println("Hit the step limit")
-    case AgentStatus.Suspended(approvals, qs)  => println("Waiting for a person")
+    case AgentStatus.Suspended(approvals, qs, asked, held) => println("Waiting for a person")
   }
 }
 ```
@@ -163,9 +163,10 @@ which belong to the `Agent`. `AgentResult` is a value to read, not something to 
   `run` is `start` followed by `await`.
 - A run that failed or was cancelled leaves its thread recoverable: `agent.recover(threadId)`
   re-runs only the work that did not finish.
-- A run that suspended for approval (`AgentStatus.Suspended`) continues with
-  `agent.resume(threadId, answers)`, building each answer with `result.approve(id)`,
-  `result.reject(id, reason)`, `result.edit(id, arguments)` or `result.reply(id, value)`.
+- A run that suspended for a person (`AgentStatus.Suspended`) - an approval, a tool's or a middleware's
+  question, or a static breakpoint - continues with `agent.resume(threadId, answers)`, building each
+  answer with `result.approve(id)`, `result.reject(id, reason)`, `result.edit(id, arguments)`,
+  `result.reply(id, value)` or `result.proceed(id)`; see [Human Review](human-review).
 - A thread stays in the runtime until `agent.forget(threadId)` removes it - one-shot
   `agent.run(query)` threads too, which on the default in-memory runtime means they stay in memory.
   Forget a conversation you will not continue: `agent.run(query).flatMap(r => agent.forget(r.threadId).map(_ => r))`.
@@ -179,13 +180,17 @@ The Java facade (`llm4s-java-api`) returns every turn as a `JAgentResult`, read 
 `JUsageSummary`, and `status()` a `JAgentStatus` whose `kind()` is the Java enum `AgentStatusKind` -
 `COMPLETED`, `BLOCKED`, `STEP_LIMIT_REACHED` or `SUSPENDED` - with `answer()`, `guardrail()` and
 `reason()` as `Optional<String>`s (see the [Java guide](../java#an-agent-turn)). A `SUSPENDED`
-status's `pending()` is a `java.util.List<PendingInterrupt>`: the turn's approvals, then its
-questions; it is empty for any other status, and `JAgent.pending(result)` is a shortcut for it. Each `PendingInterrupt` has
-`id()`, `kind()` (the Java enum `InterruptKind`, `APPROVAL` or `QUESTION`), `toolName()` and
-`argumentsJson()`. An approval also has `reason()`, and a question has `questionJson()`, the tool's
-question as JSON. Both are `Optional<String>`, empty for the other kind. Answer each pending item
-with `Answer.approve(id)`, `reject(id, reason)`, `edit(id, argumentsJson)` or `reply(id, json)`, then
-call `agent.resume(threadId, answers)`, which blocks like `run` and returns an `LlmResult<JAgentResult>`.
+status's `pending()` is a `java.util.List<PendingInterrupt>`: the turn's approvals, then its tool
+questions, middleware questions and breakpoints; it is empty for any other status, and
+`JAgent.pending(result)` is a shortcut for it. Each `PendingInterrupt` has `id()` and `kind()` (the Java
+enum `InterruptKind`: `APPROVAL`, `QUESTION`, `MIDDLEWARE_QUESTION` or `BREAKPOINT`). The rest are
+`Optional`s, present only for the kinds they belong to: `toolName()` and `argumentsJson()` when a tool
+call waits (always for an approval or a tool question), `reason()` for an approval, `questionJson()` -
+the question as JSON - for a tool's or a middleware's question, `middleware()` for a middleware
+question, and `node()` and `phase()` (the Java enum `BreakpointPhase`) for a breakpoint. Answer each
+pending item with `Answer.approve(id)`, `reject(id, reason)`, `edit(id, argumentsJson)`,
+`reply(id, json)` or `proceed(id)`, then call `agent.resume(threadId, answers)`, which blocks like `run`
+and returns an `LlmResult<JAgentResult>`.
 You can answer only some of them: the result is `SUSPENDED` again, with the rest still pending.
 
 ```java
@@ -195,7 +200,8 @@ while (turn.get().status().kind() == AgentStatusKind.SUSPENDED) {
     for (PendingInterrupt p : turn.get().status().pending()) {
         switch (p.kind()) {
             case APPROVAL -> answers.add(Answer.approve(p.id()));        // or reject / edit
-            case QUESTION -> answers.add(Answer.reply(p.id(), "{\"ok\":true}"));
+            case QUESTION, MIDDLEWARE_QUESTION -> answers.add(Answer.reply(p.id(), "{\"ok\":true}"));
+            case BREAKPOINT -> answers.add(Answer.proceed(p.id()));
         }
     }
     turn = agent.resume(turn.get().threadId(), answers);
@@ -235,7 +241,8 @@ while (turn.status().kind() == AgentStatusKind.SUSPENDED) {
     val answers = turn.status().pending().map { p ->
         when (p.kind()) {
             InterruptKind.APPROVAL -> Answer.approve(p.id())
-            InterruptKind.QUESTION -> Answer.reply(p.id(), """{"ok":true}""")
+            InterruptKind.QUESTION, InterruptKind.MIDDLEWARE_QUESTION -> Answer.reply(p.id(), """{"ok":true}""")
+            InterruptKind.BREAKPOINT -> Answer.proceed(p.id())
         }
     }
     turn = agent.resume(turn.threadId(), answers)
@@ -266,6 +273,68 @@ The tool calls of one model message run in parallel, bounded by `RunBudgets.maxC
 which you set through the `RunConfig` you pass to `run`.
 
 `ToolExecutionStrategy` remains in core as a `ToolRegistry` feature; the agent no longer takes one.
+
+### Tool Side Effects
+
+**Every tool call gets exactly one result.** The agent, not the tool, writes the result the model
+sees, for every outcome: the tool's content on success, and an `{"error": ...}` result for a tool
+error, a thrown exception, invalid arguments, an unknown tool, a denial, a rejected approval and
+every call of a refused handoff batch. The model is called again only once every call of the batch
+has its result, so a call waiting for approval or an answer holds the model back, and a partial
+`resume` sends nothing to it. Before each model call the agent checks the request, as every
+`wrapModelCall` middleware left it, and refuses one in which a tool call does not have exactly one
+result straight after its message; a model message whose call ids repeat, or are blank, is refused
+before it is stored, and `history` you import must keep the same rule. The OpenAI and Anthropic
+clients are checked against this contract in both wire formats (`assertOneToolResultPerCall` in
+`llm4s-provider-testkit`).
+
+**A call cut short gets no result until it runs again.** When a turn is cancelled, times out, or
+fails on a tool's `Fatal` or a store error mid-batch, the calls that finished keep their results
+and the unfinished ones get none: the thread is left for `recover`, which runs only the unfinished
+calls and never repeats a finished one. `start` refuses the thread until then (`IncompleteRun`).
+Until [#1702](https://github.com/llm4s/llm4s/issues/1702) adds `updateState`, there is no way to
+give an unfinished call a result of your own: a call that misbehaves every time it runs - it hangs
+until cancelled, or fails with `Fatal` - leaves the thread two choices, `recover` (run it again) or
+`forget` (drop the thread and its history).
+
+**Tools run at least once, so pass the idempotency key on.** A call can run again: a retrying
+`wrapToolCall` middleware, `recover` after a cancellation, failure or crash, and an approval each
+run it once more, and a call cut short may already have done its work. `ToolContext.idempotencyKey`
+is the same in every run of one call, so a tool with an external side effect passes it to the
+system it calls, which then does the work once:
+
+```scala
+import org.llm4s.agent.graph.tool.{AgentTool, ToolOutcome}
+
+val charge = AgentTool(chargeSpec) { (args, context) =>
+  payments.charge(args.amount, idempotencyKey = context.idempotencyKey.value) match
+    case Right(receipt) => ToolOutcome.Success(ujson.Str(receipt.id))
+    case Left(error)    => ToolOutcome.Error(error.message)
+}
+```
+
+The key is 64 hexadecimal characters, derived from the thread, where on it the model call that
+issued the tool call ran (its checkpoint, superstep and task), and the call's id, and recorded
+with the call. A call of a later model request gets a new key even when the provider reuses its
+call id (`call_0` in every turn) and the turns share one `RunConfig`, and so does a call from a
+model request made again because the first response was never stored. The boundaries of the guarantee:
+
+- The key de-duplicates only where the external system honours it. Without one, a side effect can
+  happen more than once; the runtime never promises exactly-once execution.
+- Only an `AgentTool` sees the key. A tool added through `ToolRegistry` or
+  `AgentTool.fromToolFunction` - the built-in tools, MCP tools, and tools written with the Java or
+  Kotlin API - runs at least once like any other, but its `ToolFunction` handler has no
+  `ToolContext` to read the key from
+  ([#1740](https://github.com/llm4s/llm4s/issues/1740)). Write a tool with a side effect that must
+  not repeat as an `AgentTool`.
+- An approved or edited call keeps the key it was proposed with, and a call that asked a question
+  keeps it when it resumes. Make a tool's first run, before approval or an answer, free of side
+  effects.
+- The agent stores each call's result as soon as the call finishes (the runtime's `Sync`
+  durability), and a stored result is never run again. A process that dies between a tool's side
+  effect and that store runs the call again on `recover`, with the same key. A graph run under
+  `Async` or `OnExit` durability can lose more after its last durable commit: finished calls run
+  again with their keys, and a lost model response is asked for again, so its calls get new keys.
 
 ---
 
@@ -325,6 +394,12 @@ val agent = Agent.builder("triage", client)
 ```
 
 [Learn more about handoffs →](handoffs)
+
+### [Human Review](human-review)
+
+Pause a turn for a person: tool approvals, questions from tools and from middleware - to review or edit
+an answer, or for missing information - and static breakpoints before or after an agent's model calls,
+tool calls and final answer. Answer any subset of what a turn waits for; the rest stays pending.
 
 ### [Streaming Events](streaming)
 
@@ -429,7 +504,8 @@ val next = agent.run(ThreadId(java.util.UUID.randomUUID().toString), "Continue o
 ```
 
 `history` is accepted only on a thread that does not exist yet, and may not contain system messages
-(prompts belong to the agents). Save only runs that completed; `history` that ends mid tool call is
+(prompts belong to the agents). Save only runs that completed; `history` in which a tool call does
+not have exactly one result straight after its message - one that ends mid tool call, say - is
 refused.
 
 ---

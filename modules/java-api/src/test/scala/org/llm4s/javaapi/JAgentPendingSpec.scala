@@ -2,7 +2,7 @@ package org.llm4s.javaapi
 
 import java.util.Optional
 import org.llm4s.agent.AgentStatus
-import org.llm4s.agent.graph.{ GraphError, InterruptId }
+import org.llm4s.agent.graph.{ GraphError, IdempotencyKey, InterruptId }
 import org.llm4s.agent.graph.toolloop.{ ApprovalRequest, ApprovalSource, ToolQuestionRequest }
 import org.llm4s.error.{ CancelledError, NetworkError, ValidationError }
 import org.llm4s.llmconnect.model.Completion
@@ -35,8 +35,8 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
     first.status.kind shouldBe AgentStatusKind.SUSPENDED
     val List(p) = pendingOf(first): @unchecked
     p.kind shouldBe InterruptKind.APPROVAL
-    p.toolName shouldBe "deploy"
-    p.argumentsJson shouldBe """{"text":"prod"}"""
+    p.toolName() shouldBe Optional.of("deploy")
+    p.argumentsJson() shouldBe Optional.of("""{"text":"prod"}""")
     p.reason() shouldBe java.util.Optional.of("deploying prod")
     p.questionJson() shouldBe java.util.Optional.empty()
     // the id is the turn's own
@@ -54,8 +54,8 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
     val first   = agent.run("ask me").get()
     val List(p) = pendingOf(first): @unchecked
     p.kind shouldBe InterruptKind.QUESTION
-    p.toolName shouldBe "confirm"
-    p.argumentsJson shouldBe """{"text":"go"}"""
+    p.toolName() shouldBe Optional.of("confirm")
+    p.argumentsJson() shouldBe Optional.of("""{"text":"go"}""")
     p.questionJson() shouldBe java.util.Optional.of("""{"prompt":"really go?"}""")
     p.reason() shouldBe java.util.Optional.empty()
 
@@ -77,7 +77,7 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
     val first   = agent.run("everything").get()
     val pending = pendingOf(first)
     pending.map(_.kind) shouldBe List(InterruptKind.APPROVAL, InterruptKind.APPROVAL, InterruptKind.QUESTION)
-    pending.map(_.argumentsJson) shouldBe List("""{"text":"one"}""", """{"text":"two"}""", """{"text":"go"}""")
+    pending.map(_.argumentsJson().get) shouldBe List("""{"text":"one"}""", """{"text":"two"}""", """{"text":"go"}""")
     pending.map(_.id).distinct should have size 3
 
     // answer one approval only: the other approval and the question stay pending
@@ -123,8 +123,8 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
   it should "report a missing approval reason or question as empty, never as a null in an Optional" in {
     val c = call("c1", "deploy", "x")
     val status = AgentStatus.Suspended(
-      Vector(InterruptId("a1") -> ApprovalRequest("m1", c, null, ApprovalSource.Tool)),
-      Vector(InterruptId("q1") -> ToolQuestionRequest("m1", c, null))
+      Vector(InterruptId("a1") -> ApprovalRequest("m1", c, null, ApprovalSource.Tool, IdempotencyKey("k1"))),
+      Vector(InterruptId("q1") -> ToolQuestionRequest("m1", c, null, IdempotencyKey("q1")))
     )
     val List(approval, question) = PendingInterrupt.of(status).asScala.toList: @unchecked
     approval.kind shouldBe InterruptKind.APPROVAL
@@ -136,7 +136,8 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
   "InterruptKind" should "be a Java enum" in {
     classOf[InterruptKind].isEnum shouldBe true
     InterruptKind.valueOf("QUESTION") shouldBe InterruptKind.QUESTION
-    InterruptKind.values.toList shouldBe List(InterruptKind.APPROVAL, InterruptKind.QUESTION)
+    InterruptKind.values.toList shouldBe
+      List(InterruptKind.APPROVAL, InterruptKind.QUESTION, InterruptKind.MIDDLEWARE_QUESTION, InterruptKind.BREAKPOINT)
   }
 
   "JAgent.resume" should "fail for a thread that is not suspended, an unknown thread, or an id the thread does not wait for" in {

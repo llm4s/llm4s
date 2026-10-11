@@ -1,7 +1,13 @@
 package org.llm4s.agent
 
-import org.llm4s.agent.graph.{ InterruptId, RunId, ThreadId }
-import org.llm4s.agent.graph.toolloop.{ ApprovalDecision, ApprovalRequest, ToolQuestionRequest }
+import org.llm4s.agent.graph.{ Breakpoint, InterruptId, RunId, ThreadId }
+import org.llm4s.agent.graph.toolloop.{
+  ApprovalDecision,
+  ApprovalRequest,
+  BreakpointRequest,
+  MiddlewareQuestionRequest,
+  ToolQuestionRequest
+}
 import org.llm4s.llmconnect.model.{ Message, UsageSummary }
 import upickle.default.ReadWriter
 
@@ -23,13 +29,18 @@ enum AgentStatus:
   case StepLimitReached
 
   /**
-   * The turn is parked on tool approvals and tool questions. Answer them with
-   * [[AgentResult.approve]], [[AgentResult.reject]], [[AgentResult.edit]] and [[AgentResult.reply]],
-   * and continue with [[Agent.resume]].
+   * The turn is parked on tool approvals, tool questions, middleware questions and static
+   * breakpoints, each keyed by its interrupt id. Answer them - any non-empty subset at a time - with
+   * [[AgentResult.approve]], [[AgentResult.reject]] and [[AgentResult.edit]] (approvals),
+   * [[AgentResult.reply]] (a tool's or a middleware's question, with its answer type) and
+   * [[AgentResult.proceed]] (breakpoints), and continue with [[Agent.resume]]; unanswered ones stay
+   * pending.
    */
   case Suspended(
     approvals: Vector[(InterruptId, ApprovalRequest)],
-    questions: Vector[(InterruptId, ToolQuestionRequest)]
+    questions: Vector[(InterruptId, ToolQuestionRequest)],
+    middlewareQuestions: Vector[(InterruptId, MiddlewareQuestionRequest)] = Vector.empty,
+    breakpoints: Vector[(InterruptId, BreakpointRequest)] = Vector.empty
   )
 
 /**
@@ -67,9 +78,12 @@ final case class AgentResult private (
   def edit(id: InterruptId, arguments: ujson.Value): (InterruptId, ujson.Value) =
     decide(id, ApprovalDecision.Edit(arguments))
 
-  /** Answers the tool question `id` with `value`, of the asking tool's answer type. */
+  /** Answers the question `id` - a tool's or a middleware's - with `value`, of the asker's answer type. */
   def reply[Ans: ReadWriter](id: InterruptId, value: Ans): (InterruptId, ujson.Value) =
     id -> upickle.default.writeJs(value)
+
+  /** Continues the task the breakpoint `id` holds. */
+  def proceed(id: InterruptId): (InterruptId, ujson.Value) = id -> Breakpoint.proceed
 
   private def decide(id: InterruptId, decision: ApprovalDecision): (InterruptId, ujson.Value) =
     id -> upickle.default.writeJs(decision)

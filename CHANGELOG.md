@@ -21,6 +21,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passes `CheckpointerContract` over one connection and over two alternating connections to one file, and a test kills
   a forked JVM mid-run and recovers its thread. The sample `SqliteRestartRecoveryExample` shows a restart and recovery.
   See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#the-sqlite-store).
+- **Checkpoint history, fork, `updateState` and retention** ([#1702](https://github.com/llm4s/llm4s/issues/1702),
+  Stage 2 slice 3 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): a `Checkpointer` keeps every checkpoint a
+  thread's runs commit, not only the latest. `GraphRuntime.history(threadId, before, limit)` pages them newest first
+  and `checkpoint(threadId, id)` reads one. `fork(source, checkpointId, target)` starts a new thread from any of them,
+  with the checkpoint's state, scheduled work, parked interrupts and status (`RunEvent.ThreadForked`; no pending
+  writes copied). `updateState(threadId, graph, expected, update, asNode)` applies a typed `StateUpdate` to the
+  latest checkpoint as a new one - optimistic on `expected`, checked against `asNode`'s write set, held and fenced by
+  a claim, carrying completed tasks' pending writes over, one superstep on so tool idempotency keys never repeat
+  (`RunEvent.StateUpdated`). `prune(threadId, RetentionPolicy)` removes checkpoints and events by age (`maxAge`, by
+  the store's clock) or size (`maxCheckpoints`, `maxEvents`), never the latest checkpoint, raising the replay floor
+  as `compactEvents` does. A guardrail Block - any `NodeResult.Block` - retracts its turn's earlier checkpoints from
+  the history in the commit that closes it, so none of them stays readable or forkable; the closing `Failed`
+  checkpoint holds what the node's own `Block` update leaves, so a custom blocking node must remove the turn's
+  content in that update, as `Agent` does with `MessageUpdate.RemoveTurn`. Every call checks the tenant.
+  `CheckpointerContract` gains the history, retraction, pruning, `fork` and `updateState` cases. See
+  [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#checkpoint-history-fork-and-updatestate) and the
+  [Stage 2 migration note](docs/reference/migration.md#checkpoint-history-fork-updatestate-and-retention-1702).
+- **Human-review interrupts: static breakpoints and typed middleware questions** ([#1704](https://github.com/llm4s/llm4s/issues/1704),
+  part of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `RunConfig.interruptBefore`/`interruptAfter` hold a
+  graph node's tasks before they run or after they ran, each as an interrupt of its own keyed by its task id, parked
+  and persisted like a node's own suspension and answered with `Breakpoint.proceed`; a held task's siblings run, a
+  held-after task's update commits while its routes, edges and join arrivals wait, and a continuation is not held
+  again by the breakpoint it passed - through `resume`, `recover` and cancellation. `AgentBuilder.withInterruptBefore`
+  / `withInterruptAfter` (Java/Kotlin varargs) take `AgentNode.Model`, `Tool` (one interrupt per tool call) and
+  `Finish`; held after, a step continued after a review - at its approval, question or middleware-question node - is
+  held too. `AgentMiddleware.Asking[Q, Ans]` lets a middleware suspend a turn with a typed question - `ask(q)` from
+  `beforeAgent`, `afterAgent` or `wrapModelCall`, `askAbout(q)` from `wrapToolCall` - for review, an edit or missing
+  information; the answer is decoded as `Ans` at resume (a bad one is refused), and the hook's stack runs again with
+  `answered(context)`, keeping earlier answers of the same run, through approvals and tool questions too; model calls
+  a wrapper made before asking are counted in usage. `GuardrailReviewMiddleware` asks a reviewer (`GuardrailReview`,
+  answered with `GuardrailVerdict.Allow`, `Edit(text)` or `Block`) instead of blocking; a verdict holds for the text
+  whatever the refusal's wording, and the guardrails are not run on it again. `AgentStatus.Suspended` lists `middlewareQuestions` and `breakpoints`;
+  `AgentResult.proceed(id)` continues a breakpoint. The Java and Kotlin facades list them as `PendingInterrupt`s of
+  kind `MIDDLEWARE_QUESTION` and `BREAKPOINT`, with `middleware()`, `node()` and `phase()` (Java enum
+  `BreakpointPhase`), and `Answer.proceed(id)`. Any subset of a turn's interrupts can be answered at a time. See
+  [Human Review](docs/guide/agents/human-review.md).
+- **Tool idempotency keys, and a provider contract suite for one result per tool call** ([#1703](https://github.com/llm4s/llm4s/issues/1703)):
+  an agent tool reads its call's key as `ToolContext.idempotencyKey` (`org.llm4s.agent.graph.IdempotencyKey`, 64 hex
+  characters) and passes it to the system it calls, so a call the runtime runs again - a retrying `wrapToolCall`,
+  approval, an answered question, `recover` after a cancellation, `Fatal` or crash - does its work once. The key is
+  derived from the thread, where on it the issuing model call ran (checkpoint, superstep and task) and the call id
+  (`IdempotencyKey.derive`), and recorded with the call, so it is the same in every run of the call and new for a call
+  of another model request, even when the provider reuses its id and the turns share one `RunConfig`. `runMultiTurn`
+  gives each follow-up turn a fresh `RunId`. Tools added through `ToolRegistry` (built-in, MCP, Java and Kotlin
+  tools) do not see the key yet ([#1740](https://github.com/llm4s/llm4s/issues/1740)). `ApprovalRequest` and `ToolQuestionRequest` carry it too. Tools still run at
+  least once; the [agents guide](docs/guide/agents/index.md#tool-side-effects) documents the boundaries.
+  `llm4s-provider-testkit` adds `ToolResultContract` (`violations(format, requestBody)`, `toolCallCount`,
+  `toolResultCount`, and `cases`: conversations of every shape an agent's tool loop sends), `ToolMessageFormat`
+  (`OpenAIChat`, `AnthropicMessages`), `ProviderModuleChecks.assertOneToolResultPerCall` and
+  `LocalProviderTestServer.anthropicMessage`; the OpenAI, Anthropic and OpenAI-compatible module specs run it, and
+  `AgentToolResultContractSpec` runs the agent through the real OpenAI and Anthropic clients after every outcome of
+  a call - success, error, throw, unknown tool, invalid arguments, denial, rejection, edit, question, handoffs,
+  reused ids, cancellation, `Fatal` and a crash - checking every request.
 - **Run-claim leases and a store contract suite for `Checkpointer`s** ([#1700](https://github.com/llm4s/llm4s/issues/1700),
   Stage 2 slice 1 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): runtimes in one process or many can share a
   checkpoint store. Each run claims its thread in the store before it starts - a `RunClaim` with an expiry, by the
@@ -143,6 +196,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Llm4s.createAgent(client, tools, streaming)` and `wrapAgent` match Java's. As in the fs2 and ZIO streams, a consumer too slow for the stream's 256-event buffer loses live
   events and receives a `StreamEvent.LiveGap` with their count - it never cancels the run - and a run that
   ends without a terminal event still ends the stream with its error. The Java sample streams a turn.
+- **`llm4s-schema-derivation`: the JSON schema of `completeStructured`, derived from a case class** ([#1472](https://github.com/llm4s/llm4s/issues/1472)):
+  a new module (`@Experimental`, not part of the 1.0 frozen surface; depends on `llm4s-core` only, adds no dependency)
+  with `SchemaOf[A]` and `case class Invoice(...) derives SchemaOf`, built on Scala 3 `Mirror`, and
+  `client.completeStructuredOf[Invoice](conversation)`, which builds the same `ObjectSchema` and calls the same
+  `completeStructured`. It describes what uPickle's derived `ReadWriter` reads and writes (field names including
+  `@upickle.implicits.key`, `Option` as the value or `null`, an enum as its case name or the case's
+  `@upickle.implicits.key`, `BigDecimal` and `BigInt` as strings) and the tests check that round trip in both directions,
+  including a read of every document each golden schema allows. `@description("...")` sets a field's or type's
+  description. Supported: scalars, `Option`, `List`/`Seq`/`Vector`/`Set`, nested and generic case classes, enums and
+  sealed hierarchies of singletons. Refused at compile time with a message naming the type: `Map`, recursive types and
+  sealed hierarchies with fields, because core's schema model cannot express map values, `$ref` or `oneOf`; and
+  `Option` directly inside `Option` and tuples, which uPickle writes as arrays, and named tuples, which uPickle cannot
+  read. A hand-written `given SchemaOf` is used as it is, so it describes a type the derivation would refuse. A
+  recursion that passes through a hand-written given which itself calls `SchemaOf.derived` is not visible at compile
+  time; building that schema throws an `IllegalStateException` naming the type on first use, and `completeStructuredOf`
+  returns it as a `Left` without calling the model (a derived instance looks
+  up its fields' instances only when its schema is built, so such givens never deadlock each other's initialisation).
+  The run-time guard is restored whatever a field's instance throws, fatal errors included, so an
+  `ExceptionInInitializerError` or `InterruptedException` is reported as itself on every build, never later as a
+  "recursive type". A generic case class may nest in itself at most 16 deep; a 17th level is refused at compile time
+  when spelled out in a field's type, and when the schema is built when reached through the generic instance.
+  `SchemaOf[A].definition` is the same schema as a `SchemaDefinition`, so `ToolBuilder` takes it as a tool's
+  parameters. Guide: [Derived Schemas](docs/guide/derived-schemas.md).
+- **`llm4s-config-policy`: a setup checker, `DoctorCli`** ([#1481](https://github.com/llm4s/llm4s/issues/1481)):
+  `sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli [--config <file>] [--classpath <path>] [--local] [--live] [--timeout <s>] [--json]"`
+  checks the JDK (21 or newer), that the configuration can be read, that `llm4s.providers.provider` names a section,
+  that the section's provider is registered (and, if not, names the registered ones and says to add the dependency;
+  `--classpath` checks the provider modules on the application's classpath instead of the doctor's own, and layers
+  that classpath's `reference.conf` files, and its `application.conf` when no `--config` is given, so a third-party
+  module's credential binding is seen), that its
+  API key resolves (the config path it came from, never the value), that the section validates, with `--local`, for a
+  server on the loopback interface, that it answers and has the configured model, and that the other sections load
+  (a warning if not). With `--live` it makes one small request and maps an authentication, rate-limit, not-found,
+  timeout or network error to its own advice. Without `--local` or `--live` nothing is contacted. The configuration
+  is read through `Llm4sConfig`. Every step that fails prints a `fix:` line; the exit code is `0`, `1` (warnings
+  only) or `2`. A URL is printed without its user info, query or fragment (a password holding `/` included). A
+  configuration file that cannot be parsed is reported by file, line and kind of error only, never with Typesafe
+  Config's message, which quotes the values beside the problem; every quoted value of 8 characters or more in that
+  file is also hidden by value. Every API key, every section's header values
+  and the base-URL user info and query values in the configuration are hidden by value in the output (values of 8
+  characters or more), in addition to the shape-based redaction. `Doctor.run` and `DoctorPorts` are the same check as a function with the JDK, model probe and live
+  request injectable. The module is not published and `Doctor` adds no public API to a published module. See
+  [Doctor](docs/reference/doctor.md).
 - **`llm4s-pekko`: LLM responses and agent runs as Apache Pekko Streams `Source`s**
   ([#1457](https://github.com/llm4s/llm4s/issues/1457)): a new Beta module (`modules/llm4s-pekko`, package
   `org.llm4s.pekko`) that depends on `llm4s-core`, `llm4s-agent` and `pekko-stream` 1.7 (Apache-2.0; Akka is not
@@ -162,6 +258,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writing, `AudioIO.saveWav` / `saveRawPcm16` and the new `AudioPreprocessing.standardizeForSTT(audio, rate)`
   reject MP3 with a `ValidationError`; Tacotron2 refuses it. A caller with an exhaustive `match` on
   `AudioFormat` needs a case for `Mp3`. The `@Cloud` smoke suites check MP3 magic bytes.
+- **`llm4s-observability-micrometer`: LLM4S metrics in a Micrometer `MeterRegistry`**
+  ([#1466](https://github.com/llm4s/llm4s/issues/1466)): a new Beta module (`modules/observability-micrometer`) that depends on
+  `llm4s-core` and `micrometer-core`. `new MicrometerMetrics(registry)` is a `MetricsCollector` that records requests,
+  durations, tokens, cost, errors and image generation as `llm4s.*` meters whose Prometheus export has the same series names
+  and duration buckets as `llm4s-observability-prometheus` (`llm4s.requests` is `llm4s_requests_total`), so dashboards carry
+  over; a test compares the two collectors' exposed series and values. It also records retries
+  (`llm4s.retries`), circuit-breaker transitions and `recordError`, which the Prometheus collector leaves as no-ops. Tags are
+  provider, model and fixed sets only (provider and model capped at 64 and 256 distinct values per collector, beyond which
+  they are recorded as `other`), no method throws, and negative or non-finite amounts are ignored. The OpenTelemetry
+  GenAI metric names are not used: they are in Development status and the token metric has already been renamed.
+  `llm4s-spring-boot-starter` wires it with no code: its new `LlmMetricsAutoConfiguration` registers a `MicrometerMetrics`
+  bean (`llm4sMetricsCollector`) when the module and a `MeterRegistry` bean are present, and the client bean reports to
+  every `MetricsCollector` bean, so the meters are on `/actuator/metrics`. The starter declares the module `provided`, like
+  Actuator. `FrozenDependencies` now bans `io.micrometer` from frozen modules, as it does `io.prometheus`. See
+  [Micrometer metrics](docs/guide/observability/micrometer.md).
 - **Scala CLI quick start: a first LLM call from one file** ([#1456](https://github.com/llm4s/llm4s/issues/1456)):
   `modules/samples/scala-cli` holds `hello.scala` (with `//> using jvm 21`), `resources/application.conf` (OpenAI),
   `resources/ollama.conf` (a local Ollama, no key) and `logback.xml`; `cd modules/samples/scala-cli && scala-cli run .`
@@ -209,6 +320,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`Locale.ROOT`, aliases such as `google` folded onto `gemini`), and a per-provider cap or pin naming no registered or allowed
   provider is an `unknownProvider` violation instead of being silently ignored. A per-provider pin replaces the environment-wide
   one for that provider, so a loose provider pin weakens a strict global one.
+- **`llm4s-spring-boot-starter`: any provider on the classpath, through `llm4s.providers.*` properties**
+  ([#1467](https://github.com/llm4s/llm4s/issues/1467)): the starter used to map three providers by hand
+  (`llm4s.provider=openai | anthropic | ollama`). The `llm4s.providers.<section>.*` properties now mirror llm4s's
+  own `llm4s.providers` HOCON block (`kebab-case` and `snake_case` names read as the `camelCase` HOCON names, header
+  names under `headers` kept as written), are laid over llm4s's defaults and resolved by the same loader and
+  provider SPI as a HOCON file, so Gemini, Vertex AI, Azure OpenAI, Mistral, OpenRouter, a generic OpenAI-compatible
+  server and any provider module added to the classpath work with their declared extras (`endpoint`, `api-version`,
+  `headers.*`, ...), several sections can coexist, and a vendor's shared `llm4s.credentials.<id>.api-key` applies.
+  `llm4s.providers.provider` names the default section (the flat `llm4s.provider` may name one when it is not set).
+  An unknown provider id fails startup with llm4s's own message, which names the registered providers and the
+  dependency to add. **Backwards compatible**: with no `llm4s.providers.*` property the flat keys of openai,
+  anthropic and ollama are read exactly as before (pinned by `LegacyConfigGoldenSpec`, recorded before the change).
+  Two things differ in the block: the context window and reserved completion size come from the model registry
+  except for the generic `openai-compatible` provider, which reads `context-window` and `reserve-completion` from the
+  section; and with any `llm4s.providers.*` property set the flat `llm4s.model`, `llm4s.api-key`, ... are ignored.
+  When two property sources spell one setting differently (`apiKey` in `application.yml`, `api-key` on the command
+  line), the higher-priority source wins, as Spring's precedence says. An `LLM4S_PROVIDERS_*` environment variable
+  cannot add a setting, only override one a property source declares; secrets come through placeholders or the vendor's variable bound by `llm4s.credentials`.
+  The Actuator health indicator reports the resolved provider and model and keeps every credential out of its
+  messages, including the resolved provider's own key from a non-Spring source (`application.conf`, a vendor's
+  environment variable). The flat `llm4s.provider` error for another provider id now names the providers on the classpath and
+  points to `llm4s.providers.*`. Metadata for the new keys is in `additional-spring-configuration-metadata.json`.
+  **Spring Boot support policy**: Spring Boot 3.x from 3.3 on. The starter is built against 3.3.6 and a new CI job,
+  `Spring Boot 3.x (latest)`, runs its specs against 3.5.16 (`-Dllm4s.springBootVersion`); Spring Boot 4 is not
+  supported yet and stays open in #1467.
 - **`llm4s-spring-boot-starter`: Spring Boot auto-configuration** (Beta, `modules/spring-boot-starter`,
   [#936](https://github.com/llm4s/llm4s/issues/936)): built on `llm4s-java-api`. Properties under `llm4s.*` (`provider`, `model`, `apiKey`,
   `baseUrl`, `organization`, `contextWindow`, `reserveCompletion`) produce a `JLlmClient` and an
@@ -599,6 +735,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SpeechConfigLoader`. TTS output is raw 24 kHz 16-bit mono PCM in `GeneratedAudio`, not MP3. HTTP
   failures map as the chat providers' do (`AuthenticationError`, `RateLimitError`, `ValidationError`,
   `ServiceError`). See [docs/guide/speech.md](docs/guide/speech.md#cloud-providers).
+- **`llm4s-jev`: a typed client for TypeSafe's Jev decision model** ([#1265](https://github.com/llm4s/llm4s/issues/1265)):
+  Jev takes a state and named, typed questions and answers each with a typed answer, so it is not a chat model and
+  this is neither an `LLMClient` nor a provider: `JevClient.evaluate(JevRequest(state, questions))` returns a
+  `Result[JevResponse]`. Questions are `JevQuestion.Noul` (probability of yes), `Choice` (the selected option, a
+  distribution and a confidence) and `Score` (a probability-weighted score over 2 to 10 ordered levels, with a
+  confidence); answers are `NoulAnswer`, `ChoiceAnswer` and `ScoreAnswer`, read with `response.noul(id)`,
+  `.choice(id)` and `.score(id)`, with the resolved model, token usage and the request id. A response is checked against
+  its request: one answer per question asked, each of its question's type, a Choice's selected option among the
+  options asked with the highest probability and a probability for every option, a Score with every level asked,
+  each numbered once (canonical level keys) and a score within the levels (a score a rounding error outside them,
+  within 1e-9, is clamped in); a body nested more than 64 levels deep is refused unparsed (so a Score level
+  description, which the API echoes back, nested more than 60 levels deep is refused before the request is sent), and an error body nested
+  more than 32 levels deep is not read, so neither can overflow a small thread stack;
+  a Score level's legend entry keeps the string, object or array the question gave. Configuration is the
+  `llm4s.jev` block and `TYPESAFE_API_KEY` (bound to `llm4s.credentials.typesafe.apiKey`), `TYPESAFE_BASE_URL` and
+  `TYPESAFE_DEFAULT_MODEL`. Failures map onto LLM4S's errors (401/403 `AuthenticationError`, 400/422
+  `ValidationError`, 429 `RateLimitError` with the server's `Retry-After` or `retry-after-ms`, 5xx including 529
+  `ServiceError`) and transient ones are retried as TypeSafe's SDKs do (two retries, 0.5 s doubling to 5 s with
+  jitter, a 30 s budget, `RetryPolicy.isTransient` as the rule). The key is sent only as a bearer token over https
+  (plain http only for a loopback host) and never reaches a log line or `toString`; an error masks it where a
+  server echoed it as written, JSON-escaped or URL-encoded (a partial echo is not recognised). **No idempotency
+  key:** TypeSafe documents none, so none is invented and each retry is a separate billable call; a header the
+  caller adds with `JevRequest.withHeader` is sent unchanged on every attempt. A Beta module under
+  `modules/providers/jev`, no dependency beyond `llm4s-core`; tested against a local fake server built from the
+  published API reference and not yet run against the live API. A `JevTicketTriageExample` sample and
+  `docs/guide/jev.md`.
 - **`scripts/verify-release.sh`: check that a release is on Maven Central** ([#1281](https://github.com/llm4s/llm4s/issues/1281)):
   `scripts/verify-release.sh 0.5.0` asks the build which artifacts it publishes (the new
   `sbt -error listPublishedArtifacts`: 31 artifacts and 5 relocation stubs today) and checks that each
@@ -624,6 +786,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markers, a stream that ends without a terminal event or with `error`, `cancelled` or `time_limit`
   is a `Left(ServiceError)`, `baseUrl` and `iamUrl` must be `https` (except localhost), the API key
   is trimmed, and setting both `projectId` and `spaceId` is a configuration error.
+- **A CycloneDX SBOM per published module, and a dependency scan** ([#1464](https://github.com/llm4s/llm4s/issues/1464)):
+  `sbt publishedSboms` writes one CycloneDX 1.6 JSON SBOM for each published `llm4s-*` module that ships a jar into
+  `target/sboms` (`<module>-<version>.bom.json`; the samples, `it`, benchmarks, the relocation stubs and any POM-only
+  artifact have none), using the `sbt-sbom` build plugin (MIT; it uses the Apache-2.0 `cyclonedx-core-java`), which adds nothing to the published POMs. The
+  release workflow's new `sbom` job attaches them to the GitHub Release after it exists, so a failure there cannot
+  affect Maven Central, the Release, the docs or the image; CI builds and validates them on every pull request
+  (`scripts/check-sbom.sh`, tested by `scripts/test-check-sbom.sh`) and uploads them as an artifact. A new
+  `Dependency scan` workflow runs OSV-Scanner v2.6.0 (Apache-2.0, pinned by SHA-256) over them on pull requests that touch the
+  dependency files and weekly. A pull request fails only when it adds a HIGH or CRITICAL advisory its base does not
+  have (`scripts/osv-new-findings.sh`); advisories already on `main` are reported, a scanner outage is a warning on a
+  pull request, and no secret is used. See `docs/reference/sbom.md`.
 - **A MiMa dry run, and MiMa skips `@Experimental` types** ([#1281](https://github.com/llm4s/llm4s/issues/1281)):
   `scripts/mima-dry-run.sh` shows, before 0.5.0 exists, that setting `mimaBaselineVersion` will work. In a scratch
   clone of `HEAD` it publishes the build at a throwaway version to a temporary Maven repository (nothing reaches
@@ -678,6 +851,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case is still a `NonRecoverableError` except `DeadlineExceeded`, which is a `RecoverableError`;
   new `GraphError` and `RunEvent` cases break exhaustive matches. Design:
   `docs/design/typed-agent-runtime-design.md` §4.6, with the Stage 0 carry-forward in §4.8.
+- **`llm4s-testkit`: a scriptable fake `LLMClient` for the tests of code that uses llm4s**
+  ([#1475](https://github.com/llm4s/llm4s/issues/1475), [#1796](https://github.com/llm4s/llm4s/issues/1796)): a new Beta
+  module that depends on `llm4s-core` only and registers no provider. `ScriptedLLMClient.sequence` answers call N with reply
+  N, `respondingTo` chooses the reply from the conversation, and `always` repeats one; a `Reply` is a text answer, one or
+  more tool calls (`Reply.toolCall(name, argumentsJson)`, arguments as a JSON-object string checked when the script is
+  built, chained with `withToolCall`), or a failure with any `LLMError`. Every request is recorded with its conversation
+  and `CompletionOptions` (`calls`, `callCount`, `RecordedCall.lastUserText`), `streamComplete` replays the reply as
+  chunks, a call the script has no reply for returns the typed `UnscriptedCallError` (a `NonRecoverableError` carrying
+  the call number, the reason and the last message), and the client is thread-safe. `llm4s-effect` and `llm4s-zio` test
+  an `AgentIO` and an `AgentZ` with it end to end (`ScriptedAgentIOSpec`, `ScriptedAgentZSpec`): a tool-call turn, the
+  final answer, and the recorded requests offering the tool. Until now the fakes lived in `llm4s-core`'s test sources,
+  which are not published, and the Testing Guide taught users to hand-write eight mocks. See
+  [Testing with the Testkit](docs/guide/testing-with-the-testkit.md). Thanks to @vim89 for #1797, which proposed the
+  module for `llm4s-effect` and `llm4s-zio` users and the test dependency from those modules.
 - **CI re-runs a step that failed on a transient download error, and nothing else**:
   `scripts/retry-on-transient-network.sh` wraps the `Check formatting` step (`scalafmt` fetches scalafmt-core at
   run time) and the MiMa step. It re-runs the command at most twice (`RETRY_MAX`, capped at 5; waits of 15 s and
@@ -1018,6 +1205,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **`Checkpointer` keeps a checkpoint history** ([#1702](https://github.com/llm4s/llm4s/issues/1702), BREAKING,
+  `llm4s-agent`): `Checkpointer` gains `history`, `checkpoint` and `prune`, and must keep every superseded checkpoint
+  and refuse a checkpoint id already in the history (`InvalidCommit`); `Commit` gains `retractTurn` (defaulted);
+  `GraphError` gains `CheckpointNotFound` and `ThreadExists`, and `RunEvent` gains `StateUpdated` and `ThreadForked`.
+  Checkpoint ids are `<runId>/<n>` with `n` counting along the thread, so a thread's second and later runs no longer
+  start at `<runId>/1`. `Checkpoint.CurrentFormat` stays 6. No shims; see the
+  [Stage 2 migration note](docs/reference/migration.md#checkpoint-history-fork-updatestate-and-retention-1702).
+- **Breaking: human-review interrupts** ([#1704](https://github.com/llm4s/llm4s/issues/1704)): `AgentStatus.Suspended`
+  has four fields (`approvals`, `questions`, `middlewareQuestions`, `breakpoints`), so a pattern must name four; the
+  kernel's `PendingInterrupt` gains `breakpoint`; `RunConfig` gains `interruptBefore`/`interruptAfter`;
+  `ApprovalRequest` and `ToolQuestionRequest` gain `answered` and, like the new `MiddlewareQuestionRequest`,
+  `BreakpointRequest`, `GivenAnswer` and `GuardrailReview`, have a private constructor: build them with `apply`,
+  change them with `with*` (`copy` is private). A tool wrapper that is not `AgentMiddleware.Asking`
+  and returns `ToolOutcome.Ask` fails the run (`ToolFailed`) instead of asking as the tool. Java/Kotlin:
+  `PendingInterrupt.toolName()` and `argumentsJson()` return `Optional<String>`, and `InterruptKind` has two more
+  values. `Checkpoint.CurrentFormat` is 6 (identity migration from 5). Migration:
+  [Human-review interrupts](docs/reference/migration.md#human-review-interrupts-1704).
+- **Breaking: no model request holds a tool call without exactly one result straight after it** ([#1703](https://github.com/llm4s/llm4s/issues/1703)):
+  the agent checks each request as every `wrapModelCall` middleware left it, positionally rather than by id (a
+  reused `call_0` can no longer hide a call with no result), and fails the model call with a `ValidationError`
+  instead of sending a dangling call. A model message whose tool-call ids repeat or are blank is refused before it
+  is stored, so `recover` asks the model again; a repeated id used to leave the thread unable to advance. Imported
+  `history` is held to the same rule. `ToolContext(run, toolCallId, state, approved)` becomes
+  `ToolContext(run, toolCallId, idempotencyKey, state, approved)`, and `ToolTask`, `ApprovalRequest` and
+  `ToolQuestionRequest` gain an `idempotencyKey` field. `llm4s-agent` gains test-only dependencies on
+  `llm4s-openai`, `llm4s-anthropic` and `llm4s-provider-testkit`. See the
+  [migration guide](docs/reference/migration.md#tool-side-effect-safety-1703).
 - **The `Checkpointer` SPI is fenced by run claims** ([#1700](https://github.com/llm4s/llm4s/issues/1700), BREAKING,
   `llm4s-agent`): `Checkpointer` gains `claim`, `renew` and `release`; `Commit` is `Commit(token, checkpoint,
   pendingWrites, events)` with a private constructor and `with*` setters, and a store applies it only with the
@@ -1141,6 +1355,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `withOrganization`, `withContextWindow`, `withReserveCompletion`, `withExplicitProviderId`); `new OpenAIConfig(...)`
   becomes `OpenAIConfig(...)`; Java and Kotlin call the companion's `apply` - `OpenAIConfig.apply(key, "gpt-4o")
   .withOrganization("org-1")` - instead of the constructor. Pattern matching (`case OpenAIConfig(...)`) is unchanged.
+- **`llm4s-watsonx` moves to the chat endpoints, and tool calling works**
+  ([#1314](https://github.com/llm4s/llm4s/issues/1314), `llm4s-watsonx`): the client called watsonx.ai's
+  text-generation endpoints (`/ml/v1/text/generation` and `/generation_stream`), which IBM deprecated in
+  February 2026; it now calls `/ml/v1/text/chat` and `/ml/v1/text/chat_stream`. The conversation goes as role
+  `messages` instead of one prompt string with `[SYSTEM]:` / `[USER]:` markers, so user content can no longer
+  forge a turn and no stop sequences are sent. `CompletionOptions.tools` are accepted (before, they were rejected
+  with a `ValidationError`): they are sent as `tools` with `tool_choice_option: "auto"`, a reply's `tool_calls`
+  (whole, or streamed in pieces merged by `index`) become `ToolCall`s, and a `ToolMessage` goes back as a `tool`
+  message with its `tool_call_id`. A stream's `event: error` frame is now IBM's error - its `status_code`
+  mapped as an HTTP status would be, its `code` and `message` redacted into the message - instead of the generic
+  "stream ended without a finish_reason". A call interrupted while it waits for another call's IAM token
+  exchange returns `Left(CancelledError)` with the interrupt flag set, instead of throwing
+  `InterruptedException`. The IAM token exchange, the `Result` error mapping, redaction and
+  cancellation are otherwise unchanged, and so are the configuration keys (`WatsonXConfig`, the
+  `llm4s.providers.<name>` keys, `apiVersion`), but the **default `apiVersion` moves from `2024-05-31`, which
+  predates the chat API and tool calling, to `2026-09-25`**, the `version` IBM's Python SDK (`ibm-watsonx-ai`
+  1.8.0) sends; a section that sets `apiVersion` keeps its own. **Not verified against the real service**: there is no watsonx account behind the project, so
+  the wire shapes are those IBM's public pages report, cross-checked against IBM's own open-source clients (the
+  pinned sources are in `WatsonXClient`'s Scaladoc); the `@Cloud` probe suite `WatsonXAssumptionProbeSpec`
+  re-checks them against a real account. The module stays Beta and #1314 stays open until it has been run. **Migration:** a `stop_reason`
+  of the old API is now a `finish_reason` (`stop`, `length`, `tool_calls`; `error`, `cancelled` and `time_limit`
+  are still failures); `WatsonXClient.StopSequences` is gone and `WatsonXClient.ErrorStopReasons` is
+  `WatsonXClient.ErrorFinishReasons`; a model without tool support is answered by the service, not rejected
+  by the client.
 - **`LLMError.isRecoverable` is total** ([#1380](https://github.com/llm4s/llm4s/issues/1380), `llm4s-core`,
   `llm4s-agent`, `llm4s-speech`): it matched only `RecoverableError` and `NonRecoverableError` and threw a
   `MatchError` on any other `LLMError` (`EmbeddingError`, `RerankError`, `EvaluationError`, the orchestration and

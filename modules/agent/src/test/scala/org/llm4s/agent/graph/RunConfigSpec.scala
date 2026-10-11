@@ -8,6 +8,15 @@ import scala.concurrent.duration.*
 
 class RunConfigSpec extends AnyFlatSpec with Matchers {
 
+  "RunConfig" should "have no breakpoints by default, and set them with with* setters" in {
+    val config = RunConfig()
+    (config.interruptBefore, config.interruptAfter) shouldBe ((Set.empty, Set.empty))
+    val set = config.withInterruptBefore(Set(NodeId("a"))).withInterruptAfter(Set(NodeId("b"), NodeId("c")))
+    (set.interruptBefore, set.interruptAfter) shouldBe ((Set(NodeId("a")), Set(NodeId("b"), NodeId("c"))))
+    set.runId shouldBe config.runId
+    set.withInterruptBefore(Set.empty).interruptBefore shouldBe empty
+  }
+
   "RunBudgets" should "default to 1000 supersteps, no timeout and 16 concurrent tasks" in {
     RunBudgets.default shouldBe RunBudgets(1000, None, 16)
   }
