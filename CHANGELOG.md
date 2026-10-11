@@ -1208,12 +1208,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@Experimental` type, and checks itself against fixtures first. **Migration:** `AccessToken` is growth-safe: its
   constructor and `copy` are private - build one with `AccessToken(value, expiresAt)` and change it with
   `withValue` / `withExpiresAt`.
-- **A bare `assertion` key is redacted only as a form or query parameter** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
+- **A test framework's assertion under a bare `assertion` key stays readable** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
   `Redaction` treated every key ending in `assertion` as a credential, which blanked test-framework lines such as
-  `Assertion: expected status 200` and `{"assertion": "response.status == 200"}`. The bare key is now a credential in
-  a `key=value` pair or a query - where it is the RFC 7523 form parameter - and a compound key (`client_assertion`,
-  `saml_assertion`, `jwtAssertion`) still is in every shape; a JWT under a bare `assertion` key is redacted in every
-  shape by the JWT pattern, as before.
+  `Assertion: expected status 200` and `{"assertion": "response.status == 200"}`. The bare key is still a credential
+  in every shape - JSON field, IdP error echo, Python dict, escaped JSON, header line, `key=value` pair, quoted pair,
+  form body and query - but a value under it that holds a space (U+0020) is left readable: a test assertion holds
+  spaces, and an RFC 7521 / 7523 `assertion` grant (a JWT, a base64 or base64url SAML assertion, a hex or opaque
+  token) never does. One rule, read by every pass and by `remoteBody`'s collector. A compound key
+  (`client_assertion`, `saml_assertion`, `jwtAssertion`) and a container under the bare key are redacted whatever
+  they hold, and the patterns that read no key (JWTs, bearer tokens, API keys, sensitive pairs) still apply inside a
+  readable assertion. An `Assertion` request header is still withheld on a cross-origin redirect by the HTTP tool.
 - **`Checkpointer` keeps a checkpoint history** ([#1702](https://github.com/llm4s/llm4s/issues/1702), BREAKING,
   `llm4s-agent`): `Checkpointer` gains `history`, `checkpoint` and `prune`, and must keep every superseded checkpoint
   and refuse a checkpoint id already in the history (`InvalidCommit`); `Commit` gains `retractTurn` (defaulted);

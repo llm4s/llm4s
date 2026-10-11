@@ -130,9 +130,7 @@ private[llm4s] object Redaction {
     "credential",
     "credentials",
     "private_key",
-    "secret_key",
-    // RFC 7521 / 7523 token-request form parameters: `assertion` (a JWT or SAML bearer grant) and `client_assertion`
-    "assertion"
+    "secret_key"
   )
 
   /**
@@ -181,9 +179,7 @@ private[llm4s] object Redaction {
     "sessiontoken",
     "securitytoken",
     "bearertoken",
-    // OAuth 2.0 / RFC 8693 token-endpoint fields: `subject_token`, `actor_token`, `client_assertion`. A compound
-    // `*assertion` key (`client_assertion`, `saml_assertion`) is a credential in every shape; the bare word is only in a
-    // `key=value` pair or a query, where it is the RFC 7523 form parameter (`isSensitivePairKey`, #1818).
+    // OAuth 2.0 / RFC 8693 token-endpoint fields: `subject_token`, `actor_token`, `assertion`, `client_assertion`
     "subjecttoken",
     "actortoken",
     "assertion"
@@ -199,21 +195,28 @@ private[llm4s] object Redaction {
    */
   private[llm4s] def isSensitiveKey(key: String): Boolean = {
     val normalised = key.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit)
-    SensitiveKeyWords.contains(normalised) ||
-    (normalised != BareAssertion && SensitiveKeySuffixes.exists(normalised.endsWith))
+    SensitiveKeyWords.contains(normalised) || SensitiveKeySuffixes.exists(normalised.endsWith)
   }
 
   /**
-   * The bare key `assertion`. As the RFC 7523 form parameter it carries a bearer grant, but as a JSON field or a header
-   * line it is far more often a test framework's assertion (`Assertion: expected status 200`,
-   * `{"assertion": "response.status == 200"}`), so it is sensitive only where a form parameter can be: a `key=value`
-   * pair or a query (#1818). A JWT under it is redacted in every shape all the same, by the JWT pattern.
+   * Whether the value `input(start until end)` of a sensitive `key` is prose that is left readable: the key is the
+   * bare word `assertion` (`Assertion`, `ASSERTION`; normalised as `isSensitiveKey` normalises) and the value holds a
+   * space, U+0020 (#1818). A test framework writes its assertions under that key (`Assertion: expected status 200`,
+   * `{"assertion": "response.status == 200"}`), and they hold spaces; the RFC 7521 / 7523 `assertion` grant - a JWT, a
+   * base64 or base64url SAML assertion (wrapped with line breaks, never spaces), a hex or opaque token - holds none,
+   * so it is redacted in every shape, as before. A compound key (`client_assertion`, `saml_assertion`) is never
+   * exempt, nor is a container (`{"assertion": {...}}`), whose leaves are replaced whatever they hold. Every pass that
+   * reads a field, a header line, a pair or a dict entry by its key, and the collector of [[remoteBody]], asks this of
+   * the value it found, so they agree; only the key's own replacement is withheld, and the patterns that do not read a
+   * key (bearer tokens, JWTs, API keys) still apply inside the value.
    */
-  private val BareAssertion = "assertion"
+  private def isProseAssertion(key: String, input: String, start: Int, end: Int): Boolean =
+    key.length >= BareAssertion.length && key.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit) == BareAssertion && {
+      val space = input.indexOf(' ', start)
+      space >= 0 && space < end
+    }
 
-  /** [[isSensitiveKey]], and the bare `assertion`: the sensitivity of a key in a `key=value` pair. */
-  private def isSensitivePairKey(key: String): Boolean =
-    isSensitiveKey(key) || key.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit) == BareAssertion
+  private val BareAssertion = "assertion"
 
   /**
    * Whether a header line's name is sensitive and not one `CookieHeaderStart` reads (`Cookie`, `Set-Cookie`): the
@@ -835,6 +838,9 @@ private[llm4s] object Redaction {
       i
     }
 
+    // The key whose value `readValue` reads: a string of it that is prose (`isProseAssertion`) is not a span.
+    var valueKey = ""
+
     // The value of a sensitive key that starts at `from`, of a keyword argument with `keyword`; the index after it.
     def readValue(from: Int, jsonDepth: Int, keyRun: Int, keyword: Boolean): Int =
       if (from >= length || placeholderAt(from)) from
@@ -847,7 +853,8 @@ private[llm4s] object Redaction {
             val (end, next, closed) = readString(quote._1, quote._2, jsonDepth, keyRun)
             if (if (closed) !followsValue(next, colon = false) else keyword) from
             else {
-              if (end > quote._2 + 1) found += ((quote._2 + 1) -> end)
+              if (end > quote._2 + 1 && !isProseAssertion(valueKey, input, quote._2 + 1, end))
+                found += ((quote._2 + 1) -> end)
               // The strings written right after it, which Python joins to it, are leaves too.
               val multiplier = quoteMultiplier(0, keyRun, jsonDepth)
               var after      = next
@@ -859,7 +866,8 @@ private[llm4s] object Redaction {
                   if (also == null) (-1, -1, false) else readString(also._1, also._2, jsonDepth, keyRun)
                 if (also == null || !alsoClosed || !followsValue(alsoNext, colon = false)) more = false
                 else {
-                  if (alsoEnd > also._2 + 1) found += ((also._2 + 1) -> alsoEnd)
+                  if (alsoEnd > also._2 + 1 && !isProseAssertion(valueKey, input, also._2 + 1, alsoEnd))
+                    found += ((also._2 + 1) -> alsoEnd)
                   after = alsoNext
                 }
               }
@@ -883,6 +891,7 @@ private[llm4s] object Redaction {
       val key     = if (dictKey != null) dictKey else matcher.group(3)
       searchFrom = matcher.end
       if (isSensitiveKey(key)) {
+        valueKey = key
         val jsonDepth = depth.at(matcher.start)
         val keyRun    = if (dictKey != null) matcher.group(1).length else 0
         searchFrom = math.max(readValue(matcher.end, jsonDepth, keyRun, keyword = dictKey == null), matcher.end)
@@ -1126,7 +1135,7 @@ private[llm4s] object Redaction {
       val after = afterBackslashes(input, at)
       searchFrom = at
       if (
-        after > at && after < length && (isSensitivePairKey(key) || (afterQuerySeparator(matcher.start(1)) &&
+        after > at && after < length && (isSensitiveKey(key) || (afterQuerySeparator(matcher.start(1)) &&
           isSensitiveQueryKey(key)))
       ) {
         val quote =
@@ -1135,7 +1144,8 @@ private[llm4s] object Redaction {
           else ""
         if (quote.nonEmpty) {
           val (end, next) = close(after + quote.length, after - at, quote)
-          if (end > after + quote.length) found += (after + quote.length -> end)
+          if (end > after + quote.length && !isProseAssertion(key, input, after + quote.length, end))
+            found += (after + quote.length -> end)
           searchFrom = math.max(next, at)
         }
       }
@@ -1226,7 +1236,7 @@ private[llm4s] object Redaction {
 
     @tailrec def loop(searchFrom: Int, copiedTo: Int): Int =
       if (searchFrom >= length || !matcher.find(searchFrom)) copiedTo
-      else if (!isSensitivePairKey(matcher.group(1))) loop(matcher.end, copiedTo)
+      else if (!isSensitiveKey(matcher.group(1))) loop(matcher.end, copiedTo)
       else {
         val (first, amp) = stop(matcher.end, tail = false)
         if (!amp) loop(math.max(first, matcher.end), copiedTo)
@@ -1712,8 +1722,15 @@ private[llm4s] object Redaction {
     val stack = scala.collection.mutable.Stack[(ujson.Value, Boolean)](root -> false)
     while (stack.nonEmpty)
       stack.pop() match {
-        case (ujson.Str(s), true)    => found += s
-        case (ujson.Obj(obj), under) => obj.foreach((key, v) => stack.push(v -> (under || isSensitiveKey(key))))
+        case (ujson.Str(s), true) => found += s
+        case (ujson.Obj(obj), under) =>
+          obj.foreach { (key, v) =>
+            val prose = v match {
+              case ujson.Str(s) => isProseAssertion(key, s, 0, s.length)
+              case _            => false
+            }
+            stack.push(v -> (under || (isSensitiveKey(key) && !prose)))
+          }
         case (ujson.Arr(arr), under) => arr.foreach(v => stack.push(v -> under))
         case _                       => ()
       }
@@ -2463,7 +2480,8 @@ private[llm4s] object Redaction {
       else {
         val valueStart = matcher.end
         val end        = valueEnd(valueStart, matcher.group(slashes).length, matcher.group(hex).charAt(1))
-        if (isSensitiveKey(matcher.group(key)) && end > valueStart) {
+        val k          = matcher.group(key)
+        if (isSensitiveKey(k) && end > valueStart && !isProseAssertion(k, input, valueStart, end)) {
           out.copy(copiedTo, valueStart)
           out.mask()
           loop(end, end)
@@ -2730,7 +2748,10 @@ private[llm4s] object Redaction {
         val valueEnd   = valueEndOf(enclosing.exists(_.enclosingAt(matcher.start(1)) == '"'), valueStart)
         if (asValue && !endsAsValue(valueEnd)) {
           loop(matcher.end, copiedTo)
-        } else if (isSensitiveKey(matcher.group(2)) && valueEnd > valueStart) {
+        } else if (
+          isSensitiveKey(matcher.group(2)) && valueEnd > valueStart &&
+          !isProseAssertion(matcher.group(2), input, valueStart, valueEnd)
+        ) {
           out.copy(copiedTo, valueStart)
           out.mask()
           loop(valueEnd, valueEnd)
@@ -3220,7 +3241,14 @@ private[llm4s] object Redaction {
     wrap: String = "",
     sensitive: String => Boolean = isSensitiveKey
   ): Rewrite =
-    regexPass(pattern, input, placeholder, group = 3, wrap = wrap, replaces = m => sensitive(m.group(2)))
+    regexPass(
+      pattern,
+      input,
+      placeholder,
+      group = 3,
+      wrap = wrap,
+      replaces = m => sensitive(m.group(2)) && !isProseAssertion(m.group(2), input, m.start(3), m.end(3))
+    )
 
   /**
    * Replaces the value of every `key=value` pair whose key is sensitive. The value, which `PairStarts.equals` finds the
@@ -3274,11 +3302,11 @@ private[llm4s] object Redaction {
     @tailrec def loop(searchFrom: Int, copiedTo: Int): Int =
       if (searchFrom >= input.length || !matcher.find(searchFrom)) {
         copiedTo
-      } else if (!isSensitivePairKey(matcher.group(2)) && afterEscapedEquals(input, matcher.end(2)) >= 0) {
+      } else if (!isSensitiveKey(matcher.group(2)) && afterEscapedEquals(input, matcher.end(2)) >= 0) {
         // A key that is not sensitive and whose `=` is an escape: the text after the escape is read for pairs, as the
         // text the escape stands for would be (see `afterEscapedEquals`).
         loop(matcher.end, copiedTo)
-      } else if (isSensitivePairKey(matcher.group(2)) && backslashQuoteDepth(input, matcher.end) > 0) {
+      } else if (isSensitiveKey(matcher.group(2)) && backslashQuoteDepth(input, matcher.end) > 0) {
         // A value in quotes escaped with backslashes (`password=\"hunter2\"`, a logfmt line inside a JSON string):
         // its content is replaced, and the escaped quotes around it are kept (#1684).
         val contentStart = afterBackslashes(input, matcher.end) + 1
@@ -3289,14 +3317,14 @@ private[llm4s] object Redaction {
             input.charAt(contentStart - 1),
             backslashQuoteDepth(input, matcher.end)
           )
-        if (contentEnd > contentStart) {
+        if (contentEnd > contentStart && !isProseAssertion(matcher.group(2), input, contentStart, contentEnd)) {
           out.copy(copiedTo, contentStart)
           out.mask()
           loop(next, contentEnd)
         } else loop(next, copiedTo)
       } else {
         val valueStart = matcher.end
-        val sensitive  = isSensitivePairKey(matcher.group(2))
+        val sensitive  = isSensitiveKey(matcher.group(2))
         var valueEnd   = valueStart
         var escapeEnd  = -1
         // The last hex digit of the escaped quote the value opened with and has not closed yet, or `NotAQuote`.
@@ -3327,7 +3355,7 @@ private[llm4s] object Redaction {
             valueEnd += 1
           }
         val copied =
-          if (sensitive && valueEnd > valueStart) {
+          if (sensitive && valueEnd > valueStart && !isProseAssertion(matcher.group(2), input, valueStart, valueEnd)) {
             // The backslashes kept are the last before the quote, copied as they are.
             out.copy(copiedTo, valueStart)
             out.mask()
