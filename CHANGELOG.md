@@ -2520,8 +2520,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   escaped or not, at any depth, and as a query value (`?next=https://u:p@h/`). The user, the host, the port and the
   path are kept; the userinfo ends at the authority's last `@`, so an unencoded `@` in a password is read whole, and a
   percent-encoded one is read as it is. A URL with no userinfo, a user with no password, an empty password and an `@`
-  in the path, query or fragment are left as they were. Like the readings of #1695, #1706 and #1707, it only adds to
-  what was replaced before.
+  in the path, query or fragment are left as they were. Every URL of a list is read: an authority also ends at the
+  scheme of the next URL (`redis://u:[REDACTED]@h1,redis://u:[REDACTED]@h2`, also joined by `;`, `)` or `'`), and a `,`
+  or `;` starts another item when it follows a password and an `@` follows it (`https://u:[REDACTED]@h1,a@b.com` keeps
+  the address) or when it follows a host and its port (`https://example.com:8080,bob@corp.com` is left as it is). A
+  second redaction of the output changes nothing. What is left: a password holding an unencoded `@` and then `,` or
+  `;` before another `@`, or one holding `://`, is replaced only in part. Like the readings of #1695, #1706 and #1707,
+  it only adds to what was replaced before.
 - **Security - `Redaction`: a keyword argument whose value is a call, and a `"` inside a redacted Python string** ([#1813](https://github.com/llm4s/llm4s/issues/1813)):
   `Settings(token=SecretStr('...'))`, `password=Wrapper("...")` and `api_key=module.Secret(value='...')` kept the
   credential readable - `pydantic` masks its own `SecretStr` in a `repr`, a wrapper class of one's own does not - while

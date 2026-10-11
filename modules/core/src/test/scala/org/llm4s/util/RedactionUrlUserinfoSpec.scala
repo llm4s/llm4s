@@ -74,6 +74,48 @@ class RedactionUrlUserinfoSpec extends AnyFlatSpec with Matchers {
       s"""<a href="https://u:$R@h.io">x</a> and bob@example.com"""
   }
 
+  it should "redact the password of every URL of a list joined by , ; ) or ', and a second redaction changes nothing (#1816)" in {
+    Seq(
+      "redis://u:p1@h1,redis://u:p2@h2"                      -> s"redis://u:$R@h1,redis://u:$R@h2",
+      "https://u:p1@h1;https://u:p2@h2"                      -> s"https://u:$R@h1;https://u:$R@h2",
+      "https://u:p1@h1,https://u:p2@h2"                      -> s"https://u:$R@h1,https://u:$R@h2",
+      "REDIS_URLS=redis://u:p1@h1:6379;redis://u:p2@h2:6379" -> s"REDIS_URLS=redis://u:$R@h1:6379;redis://u:$R@h2:6379",
+      "urls=[redis://u:p1@h1,amqp://u:p2@h2]"                -> s"urls=[redis://u:$R@h1,amqp://u:$R@h2]",
+      "(https://u:p1@h1),(https://u:p2@h2)"                  -> s"(https://u:$R@h1),(https://u:$R@h2)",
+      "proxy=http://u:p1@h1:3128,https=http://u:p2@h2:3128"  -> s"proxy=http://u:$R@h1:3128,https=http://u:$R@h2:3128",
+      "https://h1,https://u:p2@h2"                           -> s"https://h1,https://u:$R@h2",
+      "https://u:p1@h1'https://u:p2@h2"                      -> s"https://u:$R@h1'https://u:$R@h2",
+      "https://u:p1@h1:443:https://u:p2@h2"                  -> s"https://u:$R@h1:443:https://u:$R@h2",
+      "https:\\/\\/u:p1@h1,https:\\/\\/u:p2@h2"              -> s"https:\\/\\/u:$R@h1,https:\\/\\/u:$R@h2",
+      "mongodb://u:p1@h1:27017,h2:27017/db?replicaSet=rs0"   -> s"mongodb://u:$R@h1:27017,h2:27017/db?replicaSet=rs0",
+      "redis://u:p1@h1,u2:p2@h2"                             -> s"redis://u:$R@h1,u2:$R@h2"
+    ).foreach { case (input, expected) =>
+      withClue(s"input $input: ") {
+        val once = Redaction.redact(input)
+        once shouldBe expected
+        Redaction.redact(once) shouldBe once
+      }
+    }
+    val json = ujson.write(ujson.Obj("urls" -> "redis://u:p1@h1,redis://u:p2@h2"))
+    val out  = Redaction.redact(json)
+    out shouldBe s"""{"urls":"redis://u:$R@h1,redis://u:$R@h2"}"""
+    parses(out) shouldBe true
+  }
+
+  it should "keep an email address or a host and port after a , in an authority (#1816)" in {
+    Redaction.redact("https://u:p@h1,a@b.com") shouldBe s"https://u:$R@h1,a@b.com"
+    Redaction.redact("https://u:p@h1;a@b.com") shouldBe s"https://u:$R@h1;a@b.com"
+    Seq(
+      "https://example.com:8080,bob@corp.com",
+      "https://10.0.0.1:443;ops@corp.com",
+      "a@b.com,https://h1"
+    ).foreach(input => Redaction.redact(input) shouldBe input)
+    Redaction.redact("https://example.com:8080,u:p@h2") shouldBe s"https://example.com:8080,u:$R@h2"
+    // a password holding `,` or `;` and no `@` before it is still read whole
+    Redaction.redact("https://u:pa,ss;w@h") shouldBe s"https://u:$R@h"
+    Redaction.redact("https://u:1234,5@h") shouldBe s"https://u:$R@h"
+  }
+
   /** Documents with URLs whose password is a unique word, in the shapes the tests above cover, mixed. */
   private def docs(seed: Long, n: Int): Seq[(String, String)] = {
     val rnd                    = new Random(seed)
@@ -133,7 +175,11 @@ class RedactionUrlUserinfoSpec extends AnyFlatSpec with Matchers {
       "colons"           -> (n => "https://" + ":" * (4 * n) + "@"),
       "unclosed"         -> (n => "https://u:" + "p" * (4 * n)),
       "escaped slashes"  -> (n => "a:\\/\\/u:p@h " * n),
-      "deep backslashes" -> (n => ("a:" + "\\" * 30 + "/") * n)
+      "deep backslashes" -> (n => ("a:" + "\\" * 30 + "/") * n),
+      "list"             -> (n => "redis://u:p@h," * n),
+      "list items"       -> (n => "https://u:p@h1," + "a:b@c," * n),
+      "nested schemes"   -> (n => "https://u:p@" + "a:" * n + "//x"),
+      "commas"           -> (n => "https://u:p@h" + ",@" * n)
     )
     shapes.foreach { case (name, build) =>
       LinearTime.assertLinear(name, build(1000), build(4000))(Redaction.redact(_))
