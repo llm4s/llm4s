@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Kotlin `AgentKt.forget(threadId)`** ([#1693](https://github.com/llm4s/llm4s/issues/1693)): a suspend function
+  that forgets a conversation by its thread id, delegating to `JAgent.forget(threadId)` and throwing `LLMException`
+  on failure, so a Kotlin caller can remove a named conversation whose turn left no result - a failed
+  `stream(threadId, ...)` flow - where `forget(previous)` needed one. Forgetting an unknown thread succeeds; a thread
+  whose turn is still running is refused (`ThreadBusy`) and nothing is removed.
 - **Human-review interrupts: static breakpoints and typed middleware questions** ([#1704](https://github.com/llm4s/llm4s/issues/1704),
   part of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `RunConfig.interruptBefore`/`interruptAfter` hold a
   graph node's tasks before they run or after they ran, each as an interrupt of its own keyed by its task id, parked
