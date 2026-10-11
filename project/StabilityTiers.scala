@@ -9,7 +9,8 @@ import scala.util.Using
  * `docs/reference/v1-scope.md` says which packages 1.0 freezes. That page drifts from the code it
  * describes, so every top-level public type of a frozen module carries `@Stable` (covered by the
  * 1.x compatibility promise) or `@Experimental` (not covered), from `org.llm4s.annotation` in
- * `llm4s-core`. A companion `object` is covered by the annotation on its class, trait or enum.
+ * `llm4s-core`. A Stable companion shares its type's tier; an Experimental companion needs its own annotation
+ * because MiMa reads the separate companion class.
  *
  * `check` fails the build for a type that has neither annotation, for one that has both, and for a
  * file the build lists as an exception (a Beta dialect inside a frozen module) whose types are not
@@ -30,7 +31,7 @@ object StabilityTiers {
   private def sources(dir: File): Seq[File] =
     if (!dir.exists) Nil else (dir ** "*.scala").get.sortBy(_.getPath)
 
-  /** Top-level public types of one file, as (zero-based line, kind, name), companions removed. */
+  /** Top-level public types of one file, as (zero-based line, kind, name), Stable companions removed. */
   private[this] def declarations(lines: Vector[String]): Seq[(Int, String, String)] = {
     val found = lines.zipWithIndex.collect {
       case (l, i)
@@ -38,7 +39,9 @@ object StabilityTiers {
             .startsWith("package object") && NonPublic.findFirstIn(l).isEmpty =>
         Decl.findFirstMatchIn(l).map(m => (i, m.group(1), m.group(2)))
     }.flatten
-    val typed = found.collect { case (_, kind, name) if kind != "object" => name }.toSet
+    val typed = found.collect {
+      case (i, kind, name) if kind != "object" && !annotated(lines, i, ExperimentalAnn) => name
+    }.toSet
     found.filterNot { case (_, kind, name) => kind == "object" && typed.contains(name) }
   }
 
@@ -91,7 +94,7 @@ object StabilityTiers {
            |Every top-level public type of a frozen module needs exactly one of
            |  import org.llm4s.annotation.Stable        // covered by the 1.x compatibility promise
            |  import org.llm4s.annotation.Experimental  // not covered; also required for the files the build lists
-           |above its declaration (a companion object is covered by its class). A type that is
+           |above its declaration (an Experimental companion needs its own annotation). A type that is
            |private or private[x] needs neither. See docs/reference/api-stability.md.""".stripMargin
       )
     }
