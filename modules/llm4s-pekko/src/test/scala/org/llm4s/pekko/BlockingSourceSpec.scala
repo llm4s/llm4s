@@ -4,7 +4,7 @@ import org.apache.pekko.Done
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.{ Keep, Sink, Source }
 import org.apache.pekko.stream.testkit.scaladsl.TestSink
-import org.llm4s.error.{ LLMError, NetworkError, ValidationError }
+import org.llm4s.error.{ CancelledError, LLMError, NetworkError, ValidationError }
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -180,6 +180,42 @@ class BlockingSourceSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
     ended(producer.thread.get) shouldBe true
     producer.interrupted.get shouldBe true
     Fixtures.awaitCondition(producer.abandoned.get == 1) shouldBe true
+  }
+
+  /**
+   * Keeps emitting through every interrupt - as provider code that catches `InterruptedException`, clears the flag
+   * and carries on calling back does - counting the emits refused; returns once it has tried `n` items.
+   */
+  final private class SwallowsInterrupts(n: Int) extends Producer[Int] {
+    val thread: AtomicReference[Thread] = new AtomicReference[Thread](null)
+    val started: AtomicInteger          = new AtomicInteger(0)
+    val refused: AtomicInteger          = new AtomicInteger(0)
+    def run(emitter: Emitter[Int]): Either[LLMError, Unit] = {
+      thread.set(Thread.currentThread())
+      (1 to n).foreach { i =>
+        started.incrementAndGet()
+        CancelledError.catchInterrupt(emitter.emit(i)) match {
+          case Right(_) => ()
+          case Left(_) =>
+            Thread.interrupted(): Unit // swallowed
+            refused.incrementAndGet(): Unit
+        }
+      }
+      Right(())
+    }
+    def abandon(): Unit = ()
+  }
+
+  it should "not leak the thread of a producer that swallows the interrupt and keeps emitting" in {
+    val producer = new SwallowsInterrupts(1000)
+    val probe    = source(2, producer).runWith(TestSink[Int]())
+    // the buffer is full and the producer blocked on its next emit when the consumer cancels
+    Fixtures.awaitCondition(producer.started.get == 3 && Fixtures.isWaiting(producer.thread.get)) shouldBe true
+    probe.cancel()
+    // every emit after the stop is refused at once, so the producer runs to its end instead of blocking for good
+    ended(producer.thread.get) shouldBe true
+    producer.started.get shouldBe 1000
+    producer.refused.get shouldBe 998
   }
 
   it should "stop the producer when a stage downstream finishes early" in {

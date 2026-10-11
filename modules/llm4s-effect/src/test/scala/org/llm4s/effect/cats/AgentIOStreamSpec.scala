@@ -6,15 +6,17 @@ import org.llm4s.agent.graph.{
   Checkpointer,
   Commit,
   EventRecord,
+  GraphError,
   GraphRuntime,
   InMemoryCheckpointer,
   RunEvent,
+  RunStatus,
   StoredCheckpoint,
   StreamEvent,
   ThreadId
 }
 import org.llm4s.agent.testkit.Fixtures
-import org.llm4s.error.{ NetworkError, ProcessingError, ValidationError }
+import org.llm4s.error.{ CancelledError, NetworkError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion }
 import org.llm4s.types.Result
@@ -132,6 +134,30 @@ class AgentIOStreamSpec extends AnyFlatSpec with Matchers with Eventually {
       .unsafeRunSync()
     result match {
       case Left(e: LLMException) => e.error shouldBe a[ValidationError]
+      case other                 => fail(s"expected an LLMException, got $other")
+    }
+  }
+
+  it should "fail at once, leaving the holder alone, when another run holds the thread" in {
+    // a turn started directly on the agent holds the thread, parked in its model call until interrupted
+    val parked = new CountDownLatch(1)
+    val client = new Fixtures.Scripted(
+      _ => Right(completion("x")),
+      () => { parked.countDown(); Fixtures.parkUntilInterrupted(); Left(CancelledError("test")) }
+    )
+    val agent    = Fixtures.agentOf(client)()
+    val threadId = ThreadId("f3b")
+    val holder   = agent.start(threadId, "hold").fold(e => fail(s"could not start the holder: $e"), identity)
+    parked.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    val agentIO   = AgentIO[IO](agent)
+    val streamed  = agentIO.stream(threadId, "again").compile.toVector.attempt.unsafeRunSync()
+    val recovered = agentIO.streamRecover(threadId).compile.toVector.attempt.unsafeRunSync()
+    val holding   = holder.status
+    holder.cancel()
+    holder.await(): Unit
+    holding shouldBe RunStatus.Running
+    Seq(streamed, recovered).foreach {
+      case Left(e: LLMException) => e.error shouldBe a[GraphError.ThreadBusy]
       case other                 => fail(s"expected an LLMException, got $other")
     }
   }

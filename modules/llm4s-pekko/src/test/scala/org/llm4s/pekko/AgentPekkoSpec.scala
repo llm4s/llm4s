@@ -16,6 +16,7 @@ import org.llm4s.agent.graph.{
   InMemoryCheckpointer,
   RetentionPolicy,
   RunEvent,
+  RunStatus,
   StoredCheckpoint,
   StreamEvent,
   ThreadId
@@ -226,6 +227,30 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
   it should "fail at once for a refused start" in {
     failureOf(pekko(answering("x"))().stream(ThreadId("p3"), "  ")).error shouldBe a[ValidationError]
+  }
+
+  it should "fail at once, leaving the holder alone, when another run holds the thread" in {
+    // a turn started directly on the agent holds the thread, parked in its model call until interrupted
+    val parked = new CountDownLatch(1)
+    val client = new Fixtures.Scripted(
+      _ => Right(completion("x")),
+      () => { parked.countDown(); Fixtures.parkUntilInterrupted(); Left(CancelledError("test")) }
+    )
+    val agent    = Fixtures.agentOf(client)()
+    val threadId = ThreadId("p3b")
+    val holder   = agent.start(threadId, "hold").fold(e => fail(s"could not start the holder: $e"), identity)
+    parked.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    val agentPekko = AgentPekko(agent)
+    val streamed   = Await.result(agentPekko.stream(threadId, "again").runWith(Sink.seq).failed, Patience)
+    val recovered  = Await.result(agentPekko.streamRecover(threadId).runWith(Sink.seq).failed, Patience)
+    val holding    = holder.status
+    holder.cancel()
+    holder.await(): Unit
+    holding shouldBe RunStatus.Running
+    Seq(streamed, recovered).foreach {
+      case e: LLMException => e.error shouldBe a[GraphError.ThreadBusy]
+      case other           => fail(s"expected an LLMException, got $other")
+    }
   }
 
   it should "end, rather than hang, when the run ends without a terminal event" in {

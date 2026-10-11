@@ -14,12 +14,16 @@ import scala.concurrent.{ Future, Promise }
  * What a producer hands items to: a bounded buffer in front of the stream. [[emit]] blocks the
  * producer's thread while the buffer is full, which is how a blocking, callback-style API (a
  * provider's `streamComplete`, an agent's event listener) is slowed down to the pace of the stream's
- * consumer. It throws `InterruptedException` when the stream is gone, so a producer stops where it is.
+ * consumer. It throws `InterruptedException` when the stream is gone, so a producer stops where it is -
+ * on every call once the stream has stopped, without blocking: a producer that swallows the interrupt
+ * and keeps emitting (provider code that catches `InterruptedException`, clears the flag and carries on
+ * calling back) never blocks on a buffer that nobody drains any more, so its thread is not leaked.
  */
-final private[pekko] class Emitter[T](queue: ArrayBlockingQueue[T], wake: () => Unit) {
+final private[pekko] class Emitter[T](queue: ArrayBlockingQueue[T], wake: () => Unit, stopped: AtomicBoolean) {
 
-  /** Queues `item`, waiting for room; wakes the stream. */
+  /** Queues `item`, waiting for room, and wakes the stream; throws `InterruptedException` once the stream has stopped. */
   def emit(item: T): Unit = {
+    if (stopped.get()) throw new InterruptedException("the stream has stopped")
     queue.put(item)
     wake()
   }
@@ -109,7 +113,7 @@ private[pekko] object BlockingSource {
           // `getAsyncCallback` to be called from the stage, and a `lazy val` first evaluated on the producer's
           // thread would be created there.
           val callback = wake
-          val emitter  = new Emitter[T](queue, () => callback.invoke(()))
+          val emitter  = new Emitter[T](queue, () => callback.invoke(()), stopped)
           val t        = new Thread(null, () => produce(emitter, callback), s"$name-${threadIds.incrementAndGet()}")
           t.setDaemon(true)
           thread = t
@@ -168,6 +172,8 @@ private[pekko] object BlockingSource {
 
         override def postStop(): Unit =
           if (stopped.compareAndSet(false, true)) {
+            // set before the interrupt, so every `emit` after the one it interrupts refuses at once - also when the
+            // producer swallows the interrupt and carries on
             if (!finished.get()) Option(thread).foreach(_.interrupt())
             producer.abandon()
             // no producer thread ever started, so nothing is held

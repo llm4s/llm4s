@@ -2483,6 +2483,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-pekko`: a provider that swallows the interrupt no longer leaks its thread**
+  ([#1815](https://github.com/llm4s/llm4s/issues/1815)): if provider code caught `InterruptedException`, cleared the
+  flag and kept calling back after its stream had stopped, the next chunk blocked its thread forever on a buffer nobody
+  drained. Once the stream has stopped, every chunk is now refused at once with an `InterruptedException` instead, so
+  the thread ends when the provider's call returns. The `AgentStreamPekkoExample` sample now closes its client and terminates its actor system when the turn
+  fails or times out too. The refusal of a stream started on a thread another run holds (`GraphError.ThreadBusy`) is
+  now tested in `llm4s-pekko`, `llm4s-effect` and `llm4s-zio`.
 - **`llm4s-pekko`: a cancelled agent stream releases its thread before reporting it, and says when it has**
   ([#1822](https://github.com/llm4s/llm4s/issues/1822), item 1 of [#1815](https://github.com/llm4s/llm4s/issues/1815)):
   cancelling an `AgentPekko` stream cancelled the turn on a background cleanup thread, so a `recover` on the same thread

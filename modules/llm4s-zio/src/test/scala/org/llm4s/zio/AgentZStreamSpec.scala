@@ -4,9 +4,11 @@ import org.llm4s.agent.graph.{
   Checkpointer,
   Commit,
   EventRecord,
+  GraphError,
   GraphRuntime,
   InMemoryCheckpointer,
   RunEvent,
+  RunStatus,
   StoredCheckpoint,
   StreamEvent,
   ThreadId
@@ -120,6 +122,32 @@ object AgentZStreamSpec extends ZIOSpecDefault {
         .runCollect
         .flip
         .map(e => assertTrue(e.isInstanceOf[ValidationError]))
+    },
+    test("fails at once, leaving the holder alone, when another run holds the thread") {
+      // a turn started directly on the agent holds the thread, parked in its model call until interrupted
+      val parked = new CountDownLatch(1)
+      val client = new Fixtures.Scripted(
+        _ => Right(completion("x")),
+        () => { parked.countDown(); Fixtures.parkUntilInterrupted(); Left(CancelledError("test")) }
+      )
+      val agent    = Fixtures.agentOf(client)()
+      val threadId = ThreadId("z3b")
+      val agentZ   = AgentZ(agent)
+      ZIO.acquireReleaseWith(
+        ZIO.fromEither(agent.start(threadId, "hold")).orDieWith(e => new RuntimeException(e.message))
+      )(holder => ZIO.succeedBlocking { holder.cancel(); holder.await(): Unit }) { holder =>
+        for {
+          _         <- ZIO.succeedBlocking(parked.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS))
+          streamed  <- agentZ.stream(threadId, "again").runCollect.flip
+          recovered <- agentZ.streamRecover(threadId).runCollect.flip
+          // read now: the assertion is evaluated after the release has cancelled the holder
+          holding <- ZIO.succeed(holder.status)
+        } yield assertTrue(
+          streamed.isInstanceOf[GraphError.ThreadBusy],
+          recovered.isInstanceOf[GraphError.ThreadBusy],
+          holding == RunStatus.Running
+        )
+      }
     },
     test("ends, rather than hangs, when the run ends without a terminal event") {
       val agent = Fixtures.agentOf(answering("hello"))(_.withRuntime(GraphRuntime(NoTerminal())))

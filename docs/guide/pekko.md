@@ -55,7 +55,9 @@ blocking call never runs on a stream or actor dispatcher thread.
    while `bufferSize` chunks (64 unless you pass another) wait for the consumer. Nothing is dropped, and no more than
    `bufferSize` chunks are held.
  - **Cancellation.** Cancelling the stream, or stopping it early with `take`, interrupts the provider's thread, which is how
-   llm4s providers are cancelled: they keep the interrupt and return `Left(CancelledError)`. A kill switch works as well:
+   llm4s providers are cancelled: they keep the interrupt and return `Left(CancelledError)`. A provider that swallows
+   the interrupt and keeps calling back is refused at once on every later chunk, never blocked, so its thread ends when
+   its call returns. A kill switch works as well:
 
    ```scala
    import org.apache.pekko.stream.KillSwitches
@@ -187,5 +189,8 @@ same way. What differs is the platform:
 
  - Pekko has no resource or layer type, so there is no `LLMClientPekko.resource`: build and close the `LLMClient` yourself.
  - `run` and the other `Future` methods cannot be cancelled; the streams can.
+ - There is no Java DSL (`javadsl.Source`): the module's API is the Scala DSL. From Java, use
+   [`llm4s-java-api`](java)'s `JAgent.stream`, which delivers the same events to a listener, or convert a `Source`
+   you already have with `asJava()`.
  - Pekko HTTP routes and Play controllers are not part of the module. Serve a stream by mapping it to your framework's
    response type, for example `Source[ServerSentEvent, NotUsed]` in Pekko HTTP.

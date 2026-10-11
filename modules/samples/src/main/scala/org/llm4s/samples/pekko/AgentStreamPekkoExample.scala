@@ -11,6 +11,8 @@ import org.llm4s.types.Result
 
 import scala.concurrent.Await
 import scala.concurrent.duration.*
+import scala.util.Using
+import scala.util.control.Exception.ultimately
 
 /**
  * An agent turn as an Apache Pekko Streams `Source`: text deltas print as they arrive, then the turn's result.
@@ -24,23 +26,27 @@ object AgentStreamPekkoExample:
     given system: ActorSystem = ActorSystem("agent-stream-pekko-example")
     import system.dispatcher
 
-    val outcome: Result[Unit] =
-      for
-        registry <- Llm4sConfig.modelRegistryService()
-        config   <- Llm4sConfig.defaultProvider()
-        client   <- LLMConnect.getClient(config)(using registry)
-        agent    <- LLMClientPekko(client).agent("agent-stream-pekko-example")(_.withStreaming())
-      yield
-        val finished = agent
-          .stream(ThreadId("agent-stream-pekko"), "Explain monads in three sentences.")
-          .runForeach {
-            case AgentStreamItem.Event(AgentEvents.TextDelta(delta)) => print(delta.text)
-            case AgentStreamItem.Done(result) => println(s"\n\nDone: ${AgentResults.answerOrStatus(result)}")
-            case _                            => ()
+    // the actor system is terminated, and the client closed, however the turn ends - a timeout included
+    ultimately(Await.result(system.terminate(), 30.seconds): Unit) {
+      val outcome: Result[Unit] =
+        for
+          registry <- Llm4sConfig.modelRegistryService()
+          config   <- Llm4sConfig.defaultProvider()
+          client   <- LLMConnect.getClient(config)(using registry)
+          answered <- Using.resource(client) { client =>
+            LLMClientPekko(client).agent("agent-stream-pekko-example")(_.withStreaming()).map { agent =>
+              val finished = agent
+                .stream(ThreadId("agent-stream-pekko"), "Explain monads in three sentences.")
+                .runForeach {
+                  case AgentStreamItem.Event(AgentEvents.TextDelta(delta)) => print(delta.text)
+                  case AgentStreamItem.Done(result) => println(s"\n\nDone: ${AgentResults.answerOrStatus(result)}")
+                  case _                            => ()
+                }
+                .recover { case e: LLMException => println(s"\n\nFailed: ${e.error.formatted}") }
+              Await.result(finished, 5.minutes): Unit
+            }
           }
-          .recover { case e: LLMException => println(s"\n\nFailed: ${e.error.formatted}") }
-        Await.result(finished, 5.minutes)
-        client.close()
+        yield answered
 
-    outcome.left.foreach(error => println(s"Could not start: ${error.formatted}"))
-    Await.result(system.terminate(), 30.seconds): Unit
+      outcome.left.foreach(error => println(s"Could not start: ${error.formatted}"))
+    }
