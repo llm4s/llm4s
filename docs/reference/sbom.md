@@ -34,7 +34,9 @@ gives it `test` scope, so `sbt publishedSboms` removes the components the descri
 BOM's own dependency graph (`project/SbomPrune.scala`), and `scripts/check-sbom.sh` fails if one is left.
 
 A published artifact that holds no code, such as a relocation stub or a bill-of-materials POM that only aligns
-versions, has no SBOM: it has no dependencies of its own to describe.
+versions, has no SBOM: it has no dependencies of its own to describe. `llm4s-kotlin-api` has none yet either: it is
+built by Gradle, not sbt (`modules/kotlin-api`), and its dependencies are `llm4s-java-api_3`, whose SBOM is attached,
+`kotlinx-coroutines-core` and the Kotlin standard library.
 
 The files are CycloneDX 1.6 JSON, the default of the `sbt-sbom` plugin version the build uses. They contain no
 timestamp, serial number or build-machine path, and building the same commit twice gave byte-identical files.

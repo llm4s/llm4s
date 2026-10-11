@@ -14,8 +14,9 @@ import scala.util.Using
  *
  * `check` fails the build for a published `llm4s-*` artifact that is not named in
  * `docs/reference/v1-scope.md` (its tier) or in `docs/getting-started/installation.md` (how to depend on it).
- * An artifact is published when its project does not set `publish / skip`; the relocation stubs for the
- * pre-0.4.0 coordinates are not `llm4s-*` artifacts and are not checked.
+ * An artifact is published when its project does not set `publish / skip`, or when it is one of the [[Gradle]]
+ * artifacts another build publishes on the same release; the relocation stubs for the pre-0.4.0 coordinates are not
+ * `llm4s-*` artifacts and are not checked.
  */
 object PublishedArtifacts {
 
@@ -25,6 +26,17 @@ object PublishedArtifacts {
    * The BOM is listed apart from them (`boms`), because a release must find its POM but no jar.
    */
   val Unsuffixed: Set[String] = Set("llm4s-bom")
+
+  /**
+   * Artifacts the release publishes from a Gradle build rather than from sbt, by Maven artifactId:
+   * `org.llm4s:llm4s-kotlin-api` (`modules/kotlin-api`, its `publishing` block). They are Kotlin, so they carry no Scala
+   * suffix, and no sbt project knows them, so they are named here: `listPublishedArtifacts` prints them as `gradle`
+   * lines for `scripts/verify-release.sh`, the BOM manages them, and `check` requires them to be documented like any
+   * other published artifact. release.yml publishes them at the version sbt publishes the rest at, and
+   * `scripts/check-kotlin-publication.sh` (CI) builds a project that takes `llm4s-kotlin-api`'s version from the BOM, so
+   * a rename on either side fails CI.
+   */
+  val Gradle: Seq[String] = Seq("llm4s-kotlin-api")
 
   /** An artifact name followed by anything but a name character, so `llm4s-agent` does not match `llm4s-agent-tools`. */
   private def mentions(text: String, artifact: String): Boolean =
@@ -58,10 +70,11 @@ object PublishedArtifacts {
 
   /**
    * What a BOM must manage: every real artifact of the release, as its full Maven artifactId. It is the
-   * `real` half of [[coordinates]], so a module added to the build is in the BOM the day it is added.
+   * `real` half of [[coordinates]], so a module added to the build is in the BOM the day it is added, and the
+   * [[Gradle]] artifacts, which are released at the same version.
    */
   def managed(projects: Seq[(String, Boolean)], scalaBinaryVersion: String): Seq[String] =
-    coordinates(projects, scalaBinaryVersion)._1
+    (coordinates(projects, scalaBinaryVersion)._1 ++ Gradle).sorted
 
   /** The ways a generated BOM POM disagrees with what the release publishes, empty when it agrees. */
   def bomProblems(expected: Seq[String], bom: scala.xml.Elem, version: String): Seq[String] = {
@@ -109,7 +122,8 @@ object PublishedArtifacts {
   /** The ways the name-based [[managed]] list disagrees with the jar-based [[jarPublishers]] list. */
   def namingProblems(managedIds: Seq[String], jarIds: Seq[String]): Seq[String] = {
     val unmanaged = jarIds.filterNot(managedIds.contains).sorted
-    val jarless   = managedIds.filterNot(jarIds.contains).sorted
+    // a Gradle artifact ships a jar, but not from an sbt project
+    val jarless = managedIds.filterNot(id => jarIds.contains(id) || Gradle.contains(id)).sorted
     Seq(
       if (unmanaged.isEmpty) None
       else Some(s"published with a jar but not in the BOM (is its name llm4s-*?): ${unmanaged.mkString(", ")}"),
@@ -144,7 +158,7 @@ object PublishedArtifacts {
    * @param projects (artifact name, whether `publish / skip` is set) for every project in the build
    */
   def check(projects: Seq[(String, Boolean)], root: File, log: Logger): Unit = {
-    val published = projects.collect { case (name, false) if name.startsWith("llm4s-") => name }.distinct
+    val published = (projects.collect { case (name, false) if name.startsWith("llm4s-") => name } ++ Gradle).distinct
     if (published.isEmpty)
       throw new MessageOnlyException("No published llm4s-* artifacts were found: the check read an empty project list.")
 

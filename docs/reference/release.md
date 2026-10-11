@@ -31,14 +31,16 @@ git push origin v0.3.2
 Pushing the tag is the whole procedure. Everything after it is automated, in this order:
 
 ```
-ci → publish → github-release → docs
-             └───────────────→ docker
+ci → publish → publish-kotlin → github-release → docs
+             │                                 └→ sbom
+             └──────────────────────────────────→ docker
 ```
 
 | Job | Does |
 |-----|------|
 | `ci` | Full CI on the tagged commit |
-| `publish` | Signs and publishes artifacts to Maven Central |
+| `publish` | Signs and publishes the sbt artifacts to Maven Central (`sbt ci-release`) |
+| `publish-kotlin` | Builds, signs, checks and uploads `llm4s-kotlin-api`, the Gradle-built Kotlin artifact, at the same version (see [The Kotlin artifact](#the-kotlin-artifact-llm4s-kotlin-api)) |
 | `github-release` | Creates the GitHub Release for the tag |
 | `docs` | Deploys llm4s.org with the new version in the install snippets: dispatches the docs workflow on `main`, built from the tag, and waits for it |
 | `docker` | Builds and pushes the container image |
@@ -67,6 +69,43 @@ That redeploys the site from that tag's content, so use the **latest** release's
 back. The tag must exist, and `latest_release` in the install snippets always comes from the newest published GitHub
 Release, whichever tag is built.
 
+### The Kotlin artifact: `llm4s-kotlin-api`
+
+`org.llm4s:llm4s-kotlin-api` is built by Gradle (`modules/kotlin-api`), not sbt, so `sbt ci-release` does not publish it.
+The `publish-kotlin` job does, after `publish`, with the same signing key and Central Portal token:
+
+1. It checks that sbt's version (`sbt 'print ThisBuild / version'`, which sbt-dynver derives from the tag) is the tag's
+   version without its `v`, and publishes the library to the runner's local Maven repository (`sbt publishM2`), so
+   the Kotlin build compiles against the very `llm4s-java-api_3` the release published rather than waiting for Central.
+2. `gradle publishMavenPublicationToStagingRepository -Pllm4sVersion=<version>` writes the signed publication - the
+   POM, the jar, the sources jar, a javadoc jar holding the Dokka HTML of the KDoc, the Gradle module file, their
+   `.asc` signatures and checksums - to `modules/kotlin-api/build/staging-deploy`. `llm4sVersion` sets both the
+   artifact's version and the `llm4s-java-api_3` version it depends on; without it the build is `0.1.0-SNAPSHOT`.
+3. `scripts/check-kotlin-publication.sh` (with `REQUIRE_SIGNATURES=1`) checks it: every file signed; the POM's url,
+   licence, organization, scm, developers and version scheme equal to the sbt-published POMs'; a compile-scope
+   dependency on `llm4s-java-api_3` at the same version and on no snapshot; and a throwaway Gradle project that imports
+   `llm4s-bom` and declares `llm4s-kotlin-api` with no version compiles Kotlin code against it.
+4. `scripts/publish-kotlin-api.sh` zips the version directory into a Central Portal bundle, uploads it with
+   `publishingType=AUTOMATIC` (as `sbt ci-release` releases), and waits until the Portal has validated it and is
+   publishing. It refuses a snapshot, an unsigned file or a missing sources or javadoc jar before uploading anything.
+
+The artifact has no `_3` suffix, since it is Kotlin, and `llm4s-bom` manages it with every other artifact, so a Gradle
+build that imports the BOM declares `implementation("org.llm4s:llm4s-kotlin-api")`. `sbt listPublishedArtifacts` lists
+it as a `gradle` line (`project/PublishedArtifacts.scala`, `Gradle`), so `scripts/verify-release.sh` checks it is on
+Central, and `sbt publishedArtifactsCheck` requires it to be documented like any other artifact.
+
+Every pull request runs steps 2 and 3 unsigned in the `Kotlin API` CI job, at `0.1.0-SNAPSHOT`, so a change that breaks
+the publication fails there and not on release day; `scripts/test-publish-kotlin-api.sh` runs step 4 against a fake
+Portal. To try it locally (it writes nothing outside the repository but the local Maven repository you name):
+
+```bash
+sbt -Dmaven.repo.local=/tmp/m2 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
+(cd modules/kotlin-api && gradle -Dmaven.repo.local=/tmp/m2 publishMavenPublicationToStagingRepository)
+scripts/check-kotlin-publication.sh 0.1.0-SNAPSHOT modules/kotlin-api/build/staging-deploy /tmp/m2
+```
+
+The Kotlin build needs JDK 21 to run its tests, and a Kotlin 2.0 compiler does not run on JDK 25: run Gradle on JDK 21.
+
 ### 3. What gets published is whatever the tagged commit aggregates
 
 `sbt ci-release` publishes the root aggregate **as it exists on the tagged commit**. Work that
@@ -92,8 +131,11 @@ and does so silently.
 To see exactly what the tagged commit will publish, ask the build:
 
 ```bash
-sbt -error listPublishedArtifacts   # one `artifact <id>`, `bom <id>` or `stub <id>` per line
+sbt -error listPublishedArtifacts   # one `artifact <id>`, `gradle <id>`, `bom <id>` or `stub <id>` per line
 ```
+
+A `gradle` line is an artifact the release publishes from a Gradle build rather than from the aggregate:
+`llm4s-kotlin-api`, published by the `publish-kotlin` job. It is on the tagged commit when `modules/kotlin-api` is.
 
 `sbt publishedArtifactsCheck` (a CI quick check) fails when a published `llm4s-*` artifact has no tier in
 [1.0 Scope](v1-scope) or no install line in the installation guide.
@@ -128,7 +170,8 @@ it never overwrites. Write whatever the release deserves once it exists.
   ```
 
   It asks the build which artifacts it publishes (the list above) and checks that each resolves at that
-  version: the POM and the jar for a real artifact, a POM that carries a `<dependencyManagement>` for the
+  version: the POM and the jar for a real artifact, and for `llm4s-kotlin-api` also a POM that depends on
+  `llm4s-java-api_3` at that same version, a POM that carries a `<dependencyManagement>` for the
   BOM (it has no jar), and for each relocation stub (the pre-0.4.0 coordinates) a POM that carries a
   `<relocation>`. It exits non-zero and names each miss. Run against
   `0.4.0` with the stub list it reports all five stubs as missing, which is how 0.4.0 shipped
@@ -198,6 +241,12 @@ help.
   Note that deleting a tag that already has a GitHub Release attached leaves the Release
   behind as a draft. Delete it too before retrying, or the recreated tag's `github-release`
   job will skip creation.
+
+- **`publish-kotlin` failed** — the sbt artifacts are live, so do **not** re-tag. If it failed before the upload
+  step, re-run the job from the Actions UI once the cause is fixed outside the tag (a missing secret, a Central
+  outage); `github-release` and `docs` then follow. If the upload step reported a FAILED deployment, the Portal's
+  reasons are in the log and nothing reached Central, so a re-run is safe after fixing them; a change to the build
+  that the fix needs waits for the next patch version. A deployment the Portal accepted cannot be uploaded again.
 
 - **Failed after `publish`** (`github-release`, `docs` or `docker`) — the artifacts are live
   and the release is real. Do **not** re-tag. Re-run the failed job from the Actions UI, or

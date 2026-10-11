@@ -583,8 +583,30 @@ libraryDependencies += "org.llm4s" %% "llm4s-pekko"                % llm4sVersio
 `llm4s-java-api` is the Java-friendly facade (a runnable Gradle sample is in
 [`modules/samples/gradle-java`](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java)) and the base of the Spring starter, which adds the
 `llm4s.*` properties, an `LLM4STemplate` and an Actuator health indicator. `llm4s-effect`,
-`llm4s-zio` and `llm4s-pekko` wrap `LLMClient` and `Agent` for their effect and streaming systems. There is also a Kotlin coroutine
-API, `modules/kotlin-api`, a separate Gradle build that is not published yet.
+`llm4s-zio` and `llm4s-pekko` wrap `LLMClient` and `Agent` for their effect and streaming systems.
+
+### For Kotlin (coroutines and Flow)
+
+{: .note }
+> Not yet published. `llm4s-kotlin-api` ships to Maven Central from the next release on
+> ([#1494](https://github.com/llm4s/llm4s/issues/1494)), with every release after it.
+
+`llm4s-kotlin-api` is the Kotlin coroutine API over the Java facade: `LLMClientKt` and `AgentKt` with suspend
+functions, and `Flow`s of an agent turn's events. It is a Kotlin artifact, so it has **no** `_3` suffix, and it is
+released at the same version as every other llm4s module, so the BOM manages it too:
+
+```kotlin
+// build.gradle.kts
+dependencies {
+    implementation(platform("org.llm4s:llm4s-bom:{{ site.data.project.latest_release }}"))
+    implementation("org.llm4s:llm4s-kotlin-api")   // brings llm4s-java-api_3 and kotlinx-coroutines-core
+}
+```
+
+Without the BOM, write the version on it: `implementation("org.llm4s:llm4s-kotlin-api:{{ site.data.project.latest_release }}")`.
+It runs on JDK 21, like the Java facade it wraps. The module is built by Gradle (`modules/kotlin-api`), not sbt, so
+`sbt publishLocal` does not build it: to try it from `main`, run `sbt publishM2` and then `gradle publishToMavenLocal`
+in `modules/kotlin-api` (it builds at `0.1.0-SNAPSHOT` unless you pass `-Pllm4sVersion=<the version sbt published>`).
 
 ### For image generation and vision
 

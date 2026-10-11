@@ -50,16 +50,87 @@ jobs:
           PGP_SECRET: ${{ secrets.PGP_SECRET }}
           SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
           SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
-      
+
+  # org.llm4s:llm4s-kotlin-api, built by Gradle (modules/kotlin-api), not sbt, so `sbt ci-release` does not publish it
+  # (#1494). It runs after `publish` and is its own job, so a failure here can be re-run alone: `publish` cannot be
+  # re-run once the sbt artifacts are on Central. `github-release` waits for both, so a Release is announced only
+  # when every artifact of the version, the Kotlin one included, is on its way to Central.
+  #
+  # The version is the tag's, the one sbt-dynver gave the sbt artifacts; the job checks the two agree before building.
+  # The Kotlin build compiles against llm4s-java-api_3 at that version, published to this runner's local Maven
+  # repository from the same commit, rather than waiting for Central to serve it.
+  publish-kotlin:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # Needed for sbt-dynver
+
+      - name: Setup JVM
+        uses: actions/setup-java@v6
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: "sbt"
+
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.11.1'
+          cache-provider: basic
+
+      - name: Check sbt released the tag's version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SBT_VERSION="$(sbt -batch -error 'print ThisBuild / version' | tail -1 | tr -d '[:space:]')"
+          if [ "$SBT_VERSION" != "$VERSION" ]; then
+            echo "sbt's version is '$SBT_VERSION', the tag's is '$VERSION': the Kotlin artifact would not match the release."
+            exit 1
+          fi
+
+      - name: Publish the library to the local Maven repository
+        run: sbt publishM2
+        env:
+          SBT_OPTS: "-Xmx4G -XX:+UseG1GC"
+
+      - name: Build and sign the Kotlin publication
+        working-directory: modules/kotlin-api
+        # PGP_SECRET is the base64 of the armored secret key sbt-ci-release signs with; Gradle's in-memory signer takes
+        # the armored key itself, as the `signingKey` property (build.gradle.kts), so it is decoded here.
+        run: |
+          ORG_GRADLE_PROJECT_signingKey="$(printf '%s' "$PGP_SECRET" | base64 --decode)"
+          export ORG_GRADLE_PROJECT_signingKey
+          gradle publishMavenPublicationToStagingRepository -Pllm4sVersion="${GITHUB_REF_NAME#v}"
+        env:
+          PGP_SECRET: ${{ secrets.PGP_SECRET }}
+          ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.PGP_PASSPHRASE }}
+
+      - name: Check the publication
+        run: REQUIRE_SIGNATURES=1 scripts/check-kotlin-publication.sh "${GITHUB_REF_NAME#v}" modules/kotlin-api/build/staging-deploy
+
+      - name: Upload to Maven Central
+        run: scripts/publish-kotlin-api.sh "${GITHUB_REF_NAME#v}" modules/kotlin-api/build/staging-deploy
+        env:
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+
   # Publish the GitHub Release. This is what makes a release visible in the repo UI and
   # what notifies anyone watching "Releases only" -- neither happened automatically
   # before, so every release relied on someone remembering.
   #
-  # It runs after `publish` so a Release can only ever exist for a version that actually
-  # reached Maven Central, and *before* `docs`, because the docs deploy reads the
+  # It runs after `publish` and `publish-kotlin` so a Release can only ever exist for a version
+  # that actually reached Maven Central, Kotlin artifact included, and *before* `docs`, because the docs deploy reads the
   # published version from the Releases API.
   github-release:
-    needs: publish
+    needs: [publish, publish-kotlin]
     runs-on: ubuntu-latest
     permissions:
       contents: write

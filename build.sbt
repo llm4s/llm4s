@@ -205,10 +205,11 @@ Global / excludeLintKeys += coveragePolicy
 lazy val publishedArtifactsCheck = taskKey[Unit](
   "Fail the build if a published llm4s-* artifact is not named in v1-scope.md and installation.md, or has no POM description of its own"
 )
-// What a release must put on Maven Central, one `artifact <id>`, `bom <id>` or `stub <id>` per line, for
-// scripts/verify-release.sh. Run it with `sbt -error listPublishedArtifacts`.
+// What a release must put on Maven Central, one `artifact <id>`, `gradle <id>`, `bom <id>` or `stub <id>` per line,
+// for scripts/verify-release.sh. Run it with `sbt -error listPublishedArtifacts`. `gradle` lines are the artifacts
+// release.yml publishes from a Gradle build (llm4s-kotlin-api), see PublishedArtifacts.Gradle.
 lazy val listPublishedArtifacts = taskKey[Unit](
-  "Print the Maven coordinates a release must publish: artifact lines, then the BOM, then relocation stub lines"
+  "Print the Maven coordinates a release must publish: artifact lines, then Gradle-built artifacts, the BOM and relocation stub lines"
 )
 // The BOM (`org.llm4s:llm4s-bom`) lists every published artifact. It is generated from the same project list
 // as `listPublishedArtifacts`; this check fails when the generated POM disagrees. See project/Bom.scala.
@@ -342,6 +343,7 @@ lazy val llm4s = (project in file("."))
       val projects      = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
       val (real, stubs) = PublishedArtifacts.coordinates(projects, (ThisBuild / scalaBinaryVersion).value)
       real.foreach(a => println(s"artifact $a"))
+      PublishedArtifacts.Gradle.foreach(a => println(s"gradle $a"))
       PublishedArtifacts.boms(projects).foreach(a => println(s"bom $a"))
       stubs.foreach(a => println(s"stub $a"))
     },

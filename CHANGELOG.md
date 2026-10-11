@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`llm4s-kotlin-api` is published to Maven Central with each release** ([#1494](https://github.com/llm4s/llm4s/issues/1494)):
+  `org.llm4s:llm4s-kotlin-api` (no `_3` suffix: a Kotlin artifact), at the release's version, depending on
+  `llm4s-java-api_3` at that same version, and managed by `llm4s-bom`, so a Gradle build that imports the BOM declares
+  `implementation("org.llm4s:llm4s-kotlin-api")`. The Gradle build in `modules/kotlin-api` gained `maven-publish`,
+  `signing` and Dokka: sources and javadoc (Dokka HTML) jars, and a POM with the same url, licence, organization, scm,
+  developers and version scheme as the sbt artifacts. Its version is the `llm4sVersion` Gradle property (default
+  `0.1.0-SNAPSHOT`), and its facade dependency moved from `implementation` to `api`, because `AgentKt`'s signatures
+  expose the facade's types and `Flow`. A new `publish-kotlin` job in `release.yml`, after `publish` and before
+  `github-release`, checks that sbt released the tag's version, builds and signs the publication, checks it
+  (`scripts/check-kotlin-publication.sh`) and uploads it to the Central Portal (`scripts/publish-kotlin-api.sh`). The
+  `Kotlin API` CI job dry-runs it unsigned on every pull request and builds a throwaway project against it.
+  `sbt listPublishedArtifacts` prints it as a `gradle` line and `scripts/verify-release.sh` checks it (POM, jar, and the
+  facade version), with tests (`scripts/test-verify-release.sh`, `scripts/test-publish-kotlin-api.sh`). See
+  [Release Process](docs/reference/release.md#the-kotlin-artifact-llm4s-kotlin-api).
 - **Human-review interrupts: static breakpoints and typed middleware questions** ([#1704](https://github.com/llm4s/llm4s/issues/1704),
   part of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `RunConfig.interruptBefore`/`interruptAfter` hold a
   graph node's tasks before they run or after they ran, each as an interrupt of its own keyed by its task id, parked

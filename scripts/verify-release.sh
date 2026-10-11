@@ -7,7 +7,9 @@
 #
 # The expected coordinates come from the build (`sbt -error listPublishedArtifacts`), not from a list kept
 # here, so a module added to the build is checked the day it is added. For each real artifact the POM and
-# the jar must exist; for the bill of materials (`llm4s-bom`, POM-only) the POM must exist and must carry a
+# the jar must exist; for an artifact published from the Gradle build (`llm4s-kotlin-api`, a `gradle` line) the POM
+# and the jar must exist and the POM must depend on `llm4s-java-api_3` at the same version, the one the release
+# published from sbt; for the bill of materials (`llm4s-bom`, POM-only) the POM must exist and must carry a
 # <dependencyManagement>; for each relocation stub (the pre-0.4.0 coordinates, `core`, `workspaceclient`, ...)
 # the POM must exist and must carry a <relocation>. v0.4.0 shipped without its stubs and nobody noticed
 # until a user could not resolve `org.llm4s:core:0.4.0` (#1150); this is the check that would have said so.
@@ -38,7 +40,7 @@ if [ -n "$LIST_FILE" ]; then
   LIST="$(cat "$LIST_FILE")" || exit 2
 else
   echo "Asking sbt which artifacts the build publishes..." >&2
-  LIST="$(cd "$REPO_ROOT" && sbt -error listPublishedArtifacts 2>/dev/null | grep -E '^(artifact|bom|stub) ')" || true
+  LIST="$(cd "$REPO_ROOT" && sbt -error listPublishedArtifacts 2>/dev/null | grep -E '^(artifact|gradle|bom|stub) ')" || true
 fi
 [ -n "$LIST" ] || { echo "No artifacts listed: sbt printed nothing. Is 'listPublishedArtifacts' defined?" >&2; exit 2; }
 
@@ -55,11 +57,17 @@ while read -r kind id; do
     problems="pom HTTP $code"
   elif [ "$kind" = stub ]; then
     curl -s --max-time 30 "$pom" | grep -q '<relocation>' || problems="pom has no <relocation>"
+  elif [ "$kind" = gradle ]; then
+    # Built by Gradle from the same tag: its POM must name the facade it wraps at this very version, or a user gets
+    # a Kotlin API compiled against one release and a facade from another.
+    pom_text="$(curl -s --max-time 30 "$pom" | tr -d ' \t\r\n')"
+    grep -qF "<artifactId>llm4s-java-api_3</artifactId><version>$VERSION</version>" <<<"$pom_text" ||
+      problems="pom does not depend on llm4s-java-api_3 $VERSION"
   elif [ "$kind" = bom ]; then
     # POM-only: there is no jar, but the POM must carry the managed versions that make it a BOM.
     curl -s --max-time 30 "$pom" | grep -q '<dependencyManagement>' || problems="pom has no <dependencyManagement>"
   fi
-  if [ "$kind" = artifact ] && [ -z "$problems" ]; then
+  if { [ "$kind" = artifact ] || [ "$kind" = gradle ]; } && [ -z "$problems" ]; then
     jcode="$(status "$BASE/$id/$VERSION/$id-$VERSION.jar")"
     [ "$jcode" = 200 ] || problems="jar HTTP $jcode"
   fi

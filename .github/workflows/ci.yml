@@ -141,6 +141,14 @@ jobs:
       - name: Test the MiMa dry-run script
         run: scripts/test-mima-dry-run.sh
 
+      # scripts/verify-release.sh (after a release: is every artifact on Central?) and scripts/publish-kotlin-api.sh (the
+      # release's upload of llm4s-kotlin-api to the Central Portal) run only on release day; their tests run them against
+      # a fake `curl`, with no network and no credentials, so they stay able to fail between releases (#1494).
+      - name: Test the release verification and Kotlin upload scripts
+        run: |
+          scripts/test-verify-release.sh
+          scripts/test-publish-kotlin-api.sh
+
       # scalafmtCheckAll covers sources only; scalafmtSbtCheck covers build.sbt and project/*.scala.
       # scalafmt downloads scalafmt-core at run time, and a network hiccup used to fail this step in about five
       # seconds ("scalafmt: [v3.7.14] failed to download [.scalafmt.conf]", 2 of 267 runs in three days, both
@@ -899,6 +907,32 @@ jobs:
       - name: Build and test Kotlin API with coverage check
         working-directory: modules/kotlin-api
         run: gradle check
+
+      # The Maven Central publication of org.llm4s:llm4s-kotlin-api, as release.yml builds it but unsigned (no secret
+      # here), written to a file repository: its POM must carry the sbt artifacts' metadata and name llm4s-java-api_3 at
+      # the same version, it must have sources and javadoc jars, and a throwaway Gradle project that takes its version
+      # from llm4s-bom must compile Kotlin code against it (#1494).
+      - name: Dry-run the Kotlin API's Maven Central publication
+        run: |
+          (cd modules/kotlin-api && gradle publishMavenPublicationToStagingRepository)
+          scripts/check-kotlin-publication.sh 0.1.0-SNAPSHOT modules/kotlin-api/build/staging-deploy
+
+      # The release signs the publication with an in-memory key (release.yml, publish-kotlin). This signs it the same way
+      # with a throwaway key made here, so the signing configuration is exercised without the release secret: every file
+      # must get a signature that verifies.
+      - name: Dry-run signing the Kotlin API's publication with a throwaway key
+        run: |
+          export GNUPGHOME="$(mktemp -d)"
+          gpg --batch --pinentry-mode loopback --passphrase ci-dry-run \
+            --quick-gen-key 'llm4s CI dry run <ci-dry-run@llm4s.invalid>' rsa3072 sign never
+          ORG_GRADLE_PROJECT_signingKey="$(gpg --batch --pinentry-mode loopback --passphrase ci-dry-run --armor --export-secret-keys)"
+          export ORG_GRADLE_PROJECT_signingKey ORG_GRADLE_PROJECT_signingPassword=ci-dry-run
+          rm -rf modules/kotlin-api/build/staging-deploy
+          (cd modules/kotlin-api && gradle publishMavenPublicationToStagingRepository)
+          REQUIRE_SIGNATURES=1 SKIP_CONSUMER=1 scripts/check-kotlin-publication.sh 0.1.0-SNAPSHOT modules/kotlin-api/build/staging-deploy
+          for f in modules/kotlin-api/build/staging-deploy/org/llm4s/llm4s-kotlin-api/0.1.0-SNAPSHOT/*.{pom,jar,module}; do
+            gpg --batch --verify "$f.asc" "$f"
+          done
 
       # Compiles the Java sample against the library just published, so it cannot drift from the API it shows.
       - name: Build the Java sample
