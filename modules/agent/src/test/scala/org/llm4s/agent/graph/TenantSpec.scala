@@ -210,6 +210,9 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
       def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+      def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+      def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
+      def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
     }
     GraphRuntime(racing).start(thread, f.graph, "y", tenant("b")).awaited.left.value shouldBe
       GraphError.TenantMismatch("t", Some("b"))
@@ -241,6 +244,9 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
       def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+      def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+      def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
+      def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
     }
     GraphRuntime(failing).start(thread, f.graph, "y", tenant("a")).awaited.left.value shouldBe
       GraphError.ThreadBusy("t", winner)
@@ -275,6 +281,9 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
       def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+      def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+      def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
+      def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
     }
     val runtime = GraphRuntime(slow)
     val first   = new java.util.concurrent.LinkedBlockingQueue[org.llm4s.types.Result[RunResult[Vector[String]]]]()

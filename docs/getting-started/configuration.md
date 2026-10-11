@@ -163,6 +163,7 @@ the value.
 | `cohere` | `COHERE_API_KEY` (chat, reranker and embeddings) | `llm4s-openai-compatible`, `llm4s-rag`, `llm4s-cohere` |
 | `voyage` | `VOYAGE_API_KEY` | `llm4s-voyage` |
 | `jina` | `JINA_API_KEY` | `llm4s-jina` |
+| `typesafe` | `TYPESAFE_API_KEY` (the Jev decision client; not a chat or embeddings provider) | `llm4s-jev` |
 
 `ollama` takes no key, the generic `openai-compatible` provider has no vendor, `vertexai`
 authenticates with OAuth2 (Application Default Credentials, or a service-account file named by
@@ -191,6 +192,93 @@ if `OPENAI_BATCH_API_KEY` is unset, `openai-batch` falls back to the shared `OPE
 and bills the default account. In production, give every section its own `apiKey`; the
 config-policy `prod` preset flags any section that does not (see
 [Production deployment](../PRODUCTION_DEPLOYMENT)).
+
+### Workload identity (SPIFFE)
+
+A section can authenticate with a workload identity token - typically a SPIFFE JWT-SVID that
+[`spiffe-helper`](https://github.com/spiffe/spiffe-helper) keeps fresh in a file - instead of an
+API key. Put an `auth` block in the section, with `identityTokenFile` (re-read on every exchange,
+so rotation is picked up) and the keys the provider needs. A relative `identityTokenFile` is
+resolved against the process's working directory when the configuration is loaded, so prefer an
+absolute path. The path must name a regular file of at most 64 KiB (a symbolic link to one is
+followed, as Kubernetes projected volumes rotate tokens that way); anything else fails the exchange
+with an `AuthenticationError` that names the path but never quotes the file. For `openai-compatible`
+and `openai` llm4s reads the file itself; for `anthropic` the Anthropic SDK reads it. Keep the file
+readable only by the workload where the platform allows it. A section sets `apiKey` or `auth`, never both, and a section with `auth` may not set
+an `Authorization` header either: the exchanged token is the request's bearer. With `auth`, the
+shared `llm4s.credentials.<id>.apiKey` is not used.
+
+**Databricks model serving** (the generic `openai-compatible` provider; the SVID is exchanged at
+the workspace's RFC 8693 endpoint, the token cached until shortly before it expires, and refreshed
+once if a request is rejected with 401):
+
+```hocon
+databricks-main {
+  provider = "openai-compatible"
+  baseUrl  = "https://<workspace>.cloud.databricks.com/serving-endpoints"
+  model    = "<serving endpoint name>"
+  auth {
+    identityTokenFile = "/var/run/secrets/spiffe/databricks"
+    tokenUrl = "https://<workspace>.cloud.databricks.com/oidc/v1/token"
+    clientId = ${?DATABRICKS_CLIENT_ID}   # the service principal, for a service-principal federation policy
+    scope    = "all-apis"
+  }
+}
+```
+
+The optional `audience` key sets the RFC 8693 `audience` parameter, for a token endpoint that needs one.
+`tokenUrl` and `baseUrl` must be `https` (plain `http` only for a loopback host). The exchanged
+token is sent as the bearer of every request to `baseUrl`, a host you choose, so no host is
+allow-listed: make sure `tokenUrl` and `baseUrl` belong to the same trusted service. The token is cached for the
+reply's `expires_in`; a reply without one is taken to live until the access token's `exp` claim if
+it is a JWT, and otherwise for 5 minutes.
+
+**OpenAI** (the OpenAI SDK's workload identity federation):
+
+```hocon
+openai-wif {
+  provider = "openai"
+  model    = "gpt-4o-mini"
+  auth {
+    identityTokenFile  = "/var/run/secrets/spiffe/openai"
+    identityProviderId = ${?OPENAI_IDENTITY_PROVIDER_ID}
+    serviceAccountId   = ${?OPENAI_SERVICE_ACCOUNT_ID}
+  }
+}
+```
+
+**Anthropic** (the Anthropic SDK's workload identity federation; `identityTokenFile` only, not a
+literal `identityToken`):
+
+```hocon
+anthropic-wif {
+  provider = "anthropic"
+  model    = "claude-sonnet-4-5"
+  auth {
+    identityTokenFile = "/var/run/secrets/spiffe/anthropic"
+    federationRuleId  = ${?ANTHROPIC_FEDERATION_RULE_ID}
+    organizationId    = ${?ANTHROPIC_ORGANIZATION_ID}
+    serviceAccountId  = ${?ANTHROPIC_SERVICE_ACCOUNT_ID}
+    workspaceId       = ${?ANTHROPIC_WORKSPACE_ID}
+  }
+}
+```
+
+A `${?VAR}` that is unset leaves its key out, and a missing required key is reported when the
+section is loaded. With `auth`, `baseUrl` must be the vendor's own API host over `https`, because the
+exchanged token is a vendor credential sent with every request (plain `http` is accepted only for a
+loopback host, for tests): for OpenAI `api.openai.com` or a data-residency host (`us.`, `eu.` or
+`ae.api.openai.com`), for Anthropic `api.anthropic.com`, where the SDK also posts the identity token
+(`<baseUrl>/v1/oauth/token`). A proxy or gateway `baseUrl` needs an `apiKey` instead.
+
+Request each SVID for the audience its relying party expects (`jwt_audience` in `spiffe-helper`).
+Other providers reject an `auth` block. The `prod` config-policy preset's `ownApiKey` rule accepts
+a section that authenticates this way.
+
+Model listing works for an `openai-compatible` section with `auth` (it exchanges once). For
+`openai` and `anthropic` sections with `auth` it is not supported - their SDKs perform the exchange
+only inside a client - and the lister returns a `ConfigurationError` saying so; list models from a
+section with an `apiKey`.
 
 ### Section keys
 
@@ -251,7 +339,7 @@ The usual precedence applies: `-D` system properties, then `application.conf`, t
 | Embeddings: `openai`, `ollama` | 2 minutes | n/a | the wait for the response to begin |
 | Embeddings: `voyage`, `jina`, `cohere` | 2 minutes | n/a | the wait for the response to begin |
 
-Four things to know:
+Five things to know:
 
 - **The HTTP-based clients bound the wait for the response to begin**, not the time a stream may then
   run. A stream whose server has begun answering is not cut by `stream`.
@@ -263,8 +351,13 @@ Four things to know:
   so a `request = 30s` call fails within 30 seconds; `stream` is a deadline on the whole `ConverseStream`
   call, so unlike the HTTP-based clients it does cut a stream that is still running. Either expiry is a
   `TimeoutError`.
+- **The workload identity token exchange of an `openai-compatible` section with `auth`** (see
+  [Workload identity](#workload-identity-spiffe)) follows that section's `timeouts.request`, so a
+  slow token endpoint is given up on when a slow completion would be; with `request` unset it uses
+  the request default, 2 minutes.
 - **Model listing, the Vertex AI token request and the watsonx IAM token exchange keep their own fixed
-  timeouts**, which the block does not change.
+  timeouts**, which the block does not change. That includes the exchange model listing makes for an
+  `openai-compatible` section with `auth`.
 
 ### Examples for other providers
 
@@ -822,6 +915,8 @@ also set in `application.conf` or with `-D`.
 | `COHERE_API_KEY` | `llm4s.credentials.cohere.apiKey` (Cohere chat, the Cohere reranker and Cohere embeddings) | `llm4s-openai-compatible`, `llm4s-rag`, `llm4s-cohere` |
 | `VOYAGE_API_KEY` | `llm4s.credentials.voyage.apiKey` | `llm4s-voyage` |
 | `JINA_API_KEY` | `llm4s.credentials.jina.apiKey` | `llm4s-jina` |
+| `TYPESAFE_API_KEY` | `llm4s.credentials.typesafe.apiKey` (the Jev decision client) | `llm4s-jev` |
+| `TYPESAFE_BASE_URL`, `TYPESAFE_DEFAULT_MODEL` | `llm4s.jev.baseUrl`, `llm4s.jev.model` | `llm4s-jev` |
 | `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL` | `llm4s.embeddings.openai.*` | `llm4s-openai` |
 | `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_EMBEDDING_MODEL` | `llm4s.embeddings.voyage.*` | `llm4s-voyage` |
 | `JINA_EMBEDDING_BASE_URL`, `JINA_EMBEDDING_MODEL` | `llm4s.embeddings.jina.*` | `llm4s-jina` |

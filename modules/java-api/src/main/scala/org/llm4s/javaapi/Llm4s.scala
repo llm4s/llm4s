@@ -3,9 +3,16 @@ package org.llm4s.javaapi
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
+import org.llm4s.llmconnect.config.{
+  EmbeddingModelConfig,
+  EmbeddingProviderConfig,
+  ModelDimensionRegistry,
+  ProviderConfig
+}
+import org.llm4s.metrics.MetricsCollector
 import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.types.Result
 
 import java.util.Objects
 
@@ -46,15 +53,46 @@ object Llm4s {
    * on environment variables.
    */
   def createClient(config: ProviderConfig): LlmResult[JLlmClient] =
-    if (config == null) LlmResult.failure(ValidationError.required("config"))
-    else createClientFrom(config)
+    createClient(config, MetricsCollector.noop)
 
-  private def createClientFrom(config: ProviderConfig): LlmResult[JLlmClient] = {
+  /**
+   * [[createClient]] whose client reports every call to `metrics`. Internal: the Spring Boot starter uses it to
+   * attach the application's `MetricsCollector` bean (a Micrometer one when `llm4s-observability-micrometer` and a
+   * `MeterRegistry` are present). A null `metrics` records nothing.
+   */
+  private[llm4s] def createClient(config: ProviderConfig, metrics: MetricsCollector): LlmResult[JLlmClient] =
+    if (config == null) LlmResult.failure(ValidationError.required("config"))
+    else createClientFrom(config, Option(metrics).getOrElse(MetricsCollector.noop))
+
+  private def createClientFrom(config: ProviderConfig, metrics: MetricsCollector): LlmResult[JLlmClient] = {
     val result = for {
       registry <- Llm4sConfig.modelRegistryService()
-      client   <- LLMConnect.getClient(config)(using registry)
+      client   <- LLMConnect.getClient(config, metrics)(using registry)
     } yield new JLlmClient(client)
     LlmResult.from(result)
+  }
+
+  /**
+   * Creates a [[JEmbeddingClient]] for the embedding model configured as chat providers are, in the application's
+   * `application.conf`: `llm4s.embeddings.model`, `provider/model` (for example `openai/text-embedding-3-small`), which
+   * `EMBEDDING_MODEL` sets; the provider's key comes from its `llm4s.embeddings.<provider>` block or its vendor
+   * variable, such as `OPENAI_API_KEY`.
+   *
+   * Does not throw and sends no request: no model configured, an embedding provider that is not on the classpath, a
+   * missing key, or a model whose dimensions its provider module does not declare is a failed [[LlmResult]] of kind
+   * `CONFIGURATION`, whose message says what to set.
+   */
+  def createDefaultEmbeddingClient(): LlmResult[JEmbeddingClient] =
+    LlmResult.from(Llm4sConfig.embeddings().flatMap(embeddingClientFor))
+
+  /** The client for the provider and config `llm4s.embeddings` selected, its dimensions as the provider declares them. */
+  private def embeddingClientFor(selected: (String, EmbeddingProviderConfig)): Result[JEmbeddingClient] = {
+    val (provider, config) = selected
+    for {
+      dimensions <- ModelDimensionRegistry.getDimension(provider, config.model)
+      registry   <- Llm4sConfig.modelRegistryService()
+      client     <- EmbeddingClient.from(provider, config)(using registry)
+    } yield new JEmbeddingClient(client, EmbeddingModelConfig(config.model, dimensions))
   }
 
   /**

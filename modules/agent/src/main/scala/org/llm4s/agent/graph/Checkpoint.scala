@@ -81,7 +81,7 @@ object Checkpoint:
     new Checkpoint(formatVersion, id, parent, threadId, runId, status, createdAt, snapshot, tenantId, fencingToken)
 
   /** The format this build writes. */
-  val CurrentFormat: Int = 5
+  val CurrentFormat: Int = 6
 
   /**
    * Migrations of the checkpoint format itself, keyed by the version they upgrade from.
@@ -90,9 +90,18 @@ object Checkpoint:
    * 3 -> 4: the terminal `Failed` status (#1328); nothing to rewrite, but a build that predates it refuses format 4
    * rather than misread the status.
    * 4 -> 5: run-claim fencing (#1700) records the writing claim's token; earlier checkpoints have none.
+   * 5 -> 6: static breakpoints (#1704) park held tasks and mark their continuations; nothing to rewrite, as
+   * the new fields default to none, but a build that predates them refuses format 6 rather than run a held
+   * task's continuation as an ordinary task.
    */
   private val formatVersion: SchemaVersion =
-    SchemaVersion(5)(1 -> addSuspension, 2 -> addTenant, 3 -> addFailedStatus, 4 -> addFencingToken)
+    SchemaVersion(6)(
+      1 -> addSuspension,
+      2 -> addTenant,
+      3 -> addFailedStatus,
+      4 -> addFencingToken,
+      5 -> addBreakpoints
+    )
 
   private def addSuspension(json: ujson.Value): Result[ujson.Value] =
     Try {
@@ -128,6 +137,13 @@ object Checkpoint:
       val upgraded = ujson.copy(json)
       upgraded("fencingToken") = upickle.default.writeJs(Option.empty[Long])
       upgraded("formatVersion") = 5
+      upgraded
+    }.toResult
+
+  private def addBreakpoints(json: ujson.Value): Result[ujson.Value] =
+    Try {
+      val upgraded = ujson.copy(json)
+      upgraded("formatVersion") = 6
       upgraded
     }.toResult
 
@@ -183,28 +199,37 @@ final case class StoredCheckpoint(checkpoint: Checkpoint, pendingWrites: Vector[
  *  - `token` must be the [[FencingToken]] of the thread's current claim ([[GraphError.StaleClaim]]
  *    otherwise, checked first): a writer that lost its claim records nothing.
  *  - `checkpoint`, if present, becomes the thread's latest, provided its `parent` is the current
- *    latest - the thread version the writer expects ([[GraphError.CheckpointConflict]]); pending
- *    writes recorded against the old checkpoint are dropped.
+ *    latest - the thread version the writer expects ([[GraphError.CheckpointConflict]]) - and its id
+ *    is not already in the thread's history ([[GraphError.InvalidCommit]]); the previous latest stays
+ *    in the history, and the pending writes recorded against it are dropped.
  *  - `pendingWrites` are recorded against the (resulting) latest checkpoint, and must name it - the
  *    version they expect ([[GraphError.InvalidCommit]]).
  *  - `events` are appended to the thread's durable log, each given the next sequence number.
+ *  - `retractTurn`, which needs a `checkpoint` ([[GraphError.InvalidCommit]] otherwise), first removes
+ *    from the history every checkpoint after the thread's latest settled one - the newest whose status
+ *    is `Completed` or `Failed`, or all of them if there is none - so that nothing of a turn a
+ *    guardrail blocked stays readable. The runtime sets it on the `Failed` checkpoint that closes a run
+ *    a node blocked ([[NodeResult.Block]]).
  */
 final case class Commit private (
   token: FencingToken,
   checkpoint: Option[Checkpoint],
   pendingWrites: Vector[PendingWrite],
-  events: Vector[EventDraft]
+  events: Vector[EventDraft],
+  retractTurn: Boolean
 ):
   def withToken(t: FencingToken): Commit                 = copy(token = t)
   def withCheckpoint(c: Checkpoint): Commit              = copy(checkpoint = Some(c))
   def withCheckpoint(c: Option[Checkpoint]): Commit      = copy(checkpoint = c)
   def withPendingWrites(w: Vector[PendingWrite]): Commit = copy(pendingWrites = w)
   def withEvents(e: Vector[EventDraft]): Commit          = copy(events = e)
+  def withRetractTurn(r: Boolean): Commit                = copy(retractTurn = r)
 
 object Commit:
   def apply(
     token: FencingToken,
     checkpoint: Option[Checkpoint] = None,
     pendingWrites: Vector[PendingWrite] = Vector.empty,
-    events: Vector[EventDraft] = Vector.empty
-  ): Commit = new Commit(token, checkpoint, pendingWrites, events)
+    events: Vector[EventDraft] = Vector.empty,
+    retractTurn: Boolean = false
+  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn)

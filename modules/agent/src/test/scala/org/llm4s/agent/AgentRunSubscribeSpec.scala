@@ -207,8 +207,8 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     )
     val first = ok(agent.run(ThreadId("s4"), "go"))
     val id = first.status match
-      case AgentStatus.Suspended(approvals, _) => approvals.head._1
-      case other                               => fail(s"expected a suspension, got $other")
+      case AgentStatus.Suspended(approvals, _, _, _) => approvals.head._1
+      case other                                     => fail(s"expected a suspension, got $other")
     val c       = Received()
     val resumed = ok(agent.streamResume(ThreadId("s4"), Map(first.approve(id)))(c.listener))
     ok(resumed.await()).answer shouldBe Some("fine")

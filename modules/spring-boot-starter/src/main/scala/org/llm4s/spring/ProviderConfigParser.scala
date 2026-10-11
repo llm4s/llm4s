@@ -3,6 +3,7 @@ package org.llm4s.spring
 import org.llm4s.error.ConfigurationError
 import org.llm4s.javaapi.LlmResult
 import org.llm4s.llmconnect.config._
+import org.llm4s.llmconnect.spi.ProviderRegistry
 
 object ProviderConfigParser {
 
@@ -34,7 +35,14 @@ object ProviderConfigParser {
         case "anthropic" => parseAnthropic(properties, model)
         case "ollama"    => parseOllama(properties, model)
         case unknown =>
-          invalid(s"Unknown provider: '$unknown'. Supported: openai, anthropic, ollama", "llm4s.provider")
+          val registered = ProviderRegistry.default.descriptors.map(_.id.asString).mkString("[", ", ", "]")
+          invalid(
+            s"Unknown provider: '$unknown'. The flat llm4s.provider key supports openai, anthropic and ollama; " +
+              s"configure any other provider under llm4s.providers.<name> " +
+              s"(llm4s.providers.provider=<name>, llm4s.providers.<name>.provider=<id>). " +
+              s"Providers on the classpath: $registered",
+            "llm4s.provider"
+          )
       }
     }
   }

@@ -9,6 +9,7 @@ import org.llm4s.agent.{ Agent, AgentBuilder, AgentStatus }
 import org.llm4s.agent.graph.GraphError
 import org.llm4s.agent.graph.middleware.{ ApprovalMiddleware, GuardrailMiddleware }
 import org.llm4s.agent.guardrails.builtin.LengthCheck
+import org.llm4s.agent.testkit.Fixtures
 import org.llm4s.error.SimpleError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -219,8 +220,8 @@ class AgentIOFidelitySpec extends AnyFlatSpec with Matchers {
     val agent = io(client)(_.withTools(tools).withMiddleware(new ApprovalMiddleware(r => Some(s"review ${r.call.id}"))))
     val parked = agent.run("go").unsafeRunSync()
     val ids = parked.status match {
-      case AgentStatus.Suspended(approvals, _) => approvals.map(_._1)
-      case other                               => fail(s"expected Suspended, got $other")
+      case AgentStatus.Suspended(approvals, _, _, _) => approvals.map(_._1)
+      case other                                     => fail(s"expected Suspended, got $other")
     }
     ids should have size 1
     val done = agent.resume(parked.threadId, Map(parked.approve(ids.head))).unsafeRunSync()

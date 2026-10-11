@@ -177,7 +177,7 @@ To ensure code quality, we use a Git pre-commit hook that automatically checks c
 
 ### Prerequisites
 
-- JDK 21+
+- JDK 21+ (see [supported JDKs](docs/reference/v1-scope.md#scala-and-jdk-support))
 - SBT
 - Docker
 
@@ -253,7 +253,27 @@ each provider module's `reference.conf` has an example section. See the
 and [running the samples](docs/getting-started/configuration.md#running-the-samples) for the
 samples' own bindings.
 
+To check the whole setup in one run - the JDK, the provider section, its module, its API key (where it was found,
+never its value) and, with `--local`, whether Ollama is running and has the model - run the
+[doctor](docs/reference/doctor.md); each step that fails prints the fix:
+
+```bash
+sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config modules/samples/src/main/resources/application.conf --local"
+```
+
+No build tool yet? The [Scala CLI quick start](docs/getting-started/scala-cli.md) makes a first call from a single file.
+
 ### Running the Examples
+
+The quickest start is the [cookbook](docs/examples/cookbook.md): complete, runnable programs that need no API key
+(a scripted client stands in for the model; add `--live` for your configured provider), each run in CI. Recipes:
+[classify text into an enum](docs/examples/cookbook/structured-output.md), [extract data from an email](docs/examples/cookbook/email-extraction.md), [summarise a long document](docs/examples/cookbook/summarise.md), [answer questions over a folder of files](docs/examples/cookbook/folder-qa.md), [an agent that calls two tools](docs/examples/cookbook/tool-calling.md), [a guardrailed chatbot](docs/examples/cookbook/guardrails.md), [stream tokens](docs/examples/cookbook/streaming.md), [fall back between providers](docs/examples/cookbook/fallback.md), [cache repeated calls](docs/examples/cookbook/caching.md), [evaluate an answer with a judge](docs/examples/cookbook/judge.md), [keyword search](docs/examples/cookbook/document-qa.md), [memory](docs/examples/cookbook/memory.md), [several agents in one graph](docs/examples/cookbook/multi-agent-graph.md).
+
+```bash
+sbt "samples/runMain org.llm4s.samples.cookbook.StructuredOutputRecipe"
+```
+
+Every other sample:
 
 ```bash
 # Using Scala 3

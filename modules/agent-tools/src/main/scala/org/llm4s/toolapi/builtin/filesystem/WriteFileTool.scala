@@ -111,43 +111,46 @@ object WriteFileTool {
       Try(Paths.get(pathStr).toAbsolutePath.normalize()).toEither.left.map(e => s"Invalid path: ${e.getMessage}")
 
     pathResult.flatMap { path =>
-      // Security check - the real location must be in the allowed paths, and the file is written there
+      // Security check - the real location must be in allowed paths, and the file is written there
       config.resolve(path) match {
         case None =>
           Left(
             s"Access denied: path '$pathStr' is not in allowed paths. Allowed: ${config.allowedPaths.mkString(", ")}"
           )
         case Some(real) =>
-          val contentBytes = content.getBytes(java.nio.charset.Charset.forName(encodingStr))
+          Try(java.nio.charset.Charset.forName(encodingStr)).toEither.left
+            .map(_ => s"Unsupported encoding: $encodingStr")
+            .map(content.getBytes)
+            .flatMap { contentBytes =>
+              if (contentBytes.length > config.maxFileSize) {
+                Left(s"Content too large: ${contentBytes.length} bytes (max: ${config.maxFileSize} bytes)")
+              } else {
+                val fileExists = Files.exists(real)
 
-          if (contentBytes.length > config.maxFileSize) {
-            Left(s"Content too large: ${contentBytes.length} bytes (max: ${config.maxFileSize} bytes)")
-          } else {
-            val fileExists = Files.exists(real)
+                if (fileExists && !append && !config.allowOverwrite) {
+                  Left(s"File already exists and overwrite is not allowed: $pathStr")
+                } else {
+                  Try {
+                    // Create parent directories if needed
+                    if (config.createDirectories) {
+                      val parent = real.getParent
+                      if (parent != null && !Files.exists(parent)) {
+                        Files.createDirectories(parent)
+                      }
+                    }
 
-            if (fileExists && !append && !config.allowOverwrite) {
-              Left(s"File already exists and overwrite is not allowed: $pathStr")
-            } else {
-              Try {
-                // Create parent directories if needed
-                if (config.createDirectories) {
-                  val parent = real.getParent
-                  if (parent != null && !Files.exists(parent)) {
-                    Files.createDirectories(parent)
-                  }
+                    val created = writeResolved(real, contentBytes, append, config.allowOverwrite)
+
+                    WriteFileResult(
+                      path = path.toString,
+                      bytesWritten = contentBytes.length,
+                      created = created,
+                      appended = append && !created
+                    )
+                  }.toEither.left.map(e => s"Failed to write file: ${e.getMessage}")
                 }
-
-                val created = writeResolved(real, contentBytes, append, config.allowOverwrite)
-
-                WriteFileResult(
-                  path = path.toString,
-                  bytesWritten = contentBytes.length,
-                  created = created,
-                  appended = append && !created
-                )
-              }.toEither.left.map(e => s"Failed to write file: ${e.getMessage}")
+              }
             }
-          }
       }
     }
   }

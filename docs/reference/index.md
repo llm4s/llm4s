@@ -30,6 +30,7 @@ Start here if you want to contribute to the project.
 - **[Workspace Sandbox](workspace-sandbox)** - Configuring the containerised workspace's limits
 - **[Performance Benchmarks](benchmarks)** - Baseline JMH results for the hot paths
 - **[Troubleshooting / FAQ](troubleshooting)** - Common errors and solutions
+- **[Doctor](doctor)** - One command that checks your JDK, configuration, API key, provider module and local model server, and says what to fix
 - **[Dependency Conflicts](dependency-conflicts)** - Gradle and sbt dependency conflicts and how to resolve them
 
 ## Roadmap & Planning

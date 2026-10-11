@@ -53,8 +53,8 @@ sealed interface AgentStreamItem {
  * Every turn returns a [JAgentResult], read with Java types only: `answer()` is an `Optional<String>`,
  * `messages()` a `List`, and `status().kind()` an [org.llm4s.javaapi.AgentStatusKind] to `when` over.
  *
- * A turn whose tools need approval, or ask a question, ends `SUSPENDED`: `result.status().pending()` - or
- * [pending] - lists what it waits for, and [resume] answers some or all of it and continues. A turn that failed or was cancelled
+ * A turn whose tools need approval, whose tools or middleware ask a question, or whose task a static
+ * breakpoint holds, ends `SUSPENDED`: `result.status().pending()` - or [pending] - lists what it waits for, and [resume] answers some or all of it and continues. A turn that failed or was cancelled
  * continues with [recover], but for [run]'s, whose thread is forgotten.
  *
  * [stream], [streamResume] and [streamRecover] run a turn on a thread you name as a cold [Flow] of its
@@ -238,10 +238,11 @@ class AgentKt internal constructor(private val underlying: JAgent) {
 
     companion object {
         /**
-         * What [result]'s turn waits for: for a `SUSPENDED` turn, its pending approvals, then its
-         * questions, as [PendingInterrupt]s - `id()`, `kind()`, `toolName()`, `argumentsJson()`,
-         * `reason()` and `questionJson()`; an empty list for any other turn. A shortcut for
-         * `result.status().pending()`. Answer them with [Answer] and continue with [resume] or [streamResume].
+         * What [result]'s turn waits for: for a `SUSPENDED` turn, its pending approvals, then its tool
+         * questions, middleware questions and static breakpoints, as [PendingInterrupt]s - `id()`, `kind()`,
+         * and per kind `toolName()`, `argumentsJson()`, `reason()`, `questionJson()`, `middleware()`, `node()`
+         * and `phase()`; an empty list for any other turn. A shortcut for `result.status().pending()`. Answer
+         * them with [Answer] - `proceed` continues a breakpoint - and continue with [resume] or [streamResume].
          */
         fun pending(result: JAgentResult): List<PendingInterrupt> = JAgent.pending(result)
     }

@@ -5,8 +5,14 @@ import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.testkit.LocalProviderTestServer.{ holdOpen, sendSseResponse, streamThenHold, withServer }
-import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig }
+import org.llm4s.testkit.LocalProviderTestServer.{
+  anthropicMessage,
+  holdOpen,
+  sendSseResponse,
+  streamThenHold,
+  withServer
+}
+import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig, ToolMessageFormat }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -87,6 +93,21 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers with ProviderMo
         .map(_.getClass.getSimpleName) shouldBe Right("AnthropicConfig")
     }
 
+    "build a client from an anthropic section with auth" in {
+      given ProviderRegistry = ProviderRegistry.default
+      val section = ProviderTestConfig
+        .loadSection(
+          "wi",
+          """llm4s.providers.wi {
+            |  provider = "anthropic"
+            |  model    = "claude-test"
+            |  auth { identityTokenFile = "/var/run/svid", federationRuleId = "fdrl_1", organizationId = "org_1" }
+            |}""".stripMargin
+        )
+        .fold(error => fail(error.message), identity)
+      assertBuildsClient(AnthropicProvider, section).getClass.getSimpleName shouldBe "AnthropicClient"
+    }
+
     "refuse a config belonging to another provider" in {
       assertRefusesForeignConfig(AnthropicProvider)
     }
@@ -106,6 +127,12 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers with ProviderMo
 
     "return CancelledError when a call is interrupted" in {
       withServer("/v1/messages")(holdOpen)(baseUrl => assertCancelsWhenInterrupted(clientAt(baseUrl)))
+    }
+
+    "send exactly one tool_result per tool_use, keeping every call and result (design 5.3)" in {
+      assertOneToolResultPerCall(ToolMessageFormat.AnthropicMessages, anthropicMessage("done"), "/v1/messages")(
+        clientAt
+      )
     }
 
     "return CancelledError when a stream is interrupted after its first event" in {

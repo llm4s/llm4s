@@ -7,47 +7,21 @@ nav_order: 2
 
 # Migration Guide
 
+Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
+by what you use. The notes below are the per-change detail it links to.
+
 ## Stage 2 migration: durable execution
 
 Not in a release yet. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/1699)) makes agent and graph threads durable and adds human review. One note covers the whole stage; each slice adds its part here as it lands:
 
 - [#1700](https://github.com/llm4s/llm4s/issues/1700), the durable `Checkpointer` contract - run-claim leases, fencing tokens and a store contract suite: [below](#durable-checkpointer-contract-1700).
+- [#1703](https://github.com/llm4s/llm4s/issues/1703), tool side-effect safety - idempotency keys and one result per tool call: [below](#tool-side-effect-safety-1703).
+- [#1704](https://github.com/llm4s/llm4s/issues/1704), human-review interrupts - static breakpoints and typed middleware questions: [below](#human-review-interrupts-1704).
+- [#1702](https://github.com/llm4s/llm4s/issues/1702), checkpoint history, fork, `updateState` and retention: [below](#checkpoint-history-fork-updatestate-and-retention-1702).
 - [#1701](https://github.com/llm4s/llm4s/issues/1701), the SQLite checkpointer - a new module, nothing to change: [below](#sqlite-checkpointer-1701).
 - [#1705](https://github.com/llm4s/llm4s/issues/1705), live subscriptions across runtimes - `Checkpointer.awaitEventsAfter` and `WatchPolicy`: [below](#live-subscriptions-across-runtimes-1705).
-- [#1702](https://github.com/llm4s/llm4s/issues/1702) history, fork and `updateState`, [#1703](https://github.com/llm4s/llm4s/issues/1703) tool side-effect safety and [#1704](https://github.com/llm4s/llm4s/issues/1704) human-review interrupts: not yet landed.
 
 Design: `docs/design/typed-agent-runtime-design.md` §4.16 onwards. Guide: [Durable Checkpointers](../guide/agents/durable-checkpointers.html).
-
-### Live subscriptions across runtimes (#1705)
-
-A subscription now delivers the durable events of commits made through any runtime or process sharing its store, not only through its own runtime. Code that runs agents or graphs, or that implements `Checkpointer`, compiles and works unchanged. What changes:
-
-- **`Checkpointer` gains `awaitEventsAfter(threadId, afterSeq, limit, timeout)`**, with a default that polls `eventsAfter`, so existing stores need no change. A store that can be told of commits may override it to return as soon as one lands; `InMemoryCheckpointer` does. A wrapper that delegates to another store should forward it, so that the wrapped store's notification is used:
-
-  ```scala
-  override def awaitEventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int, timeout: FiniteDuration) =
-    underlying.awaitEventsAfter(threadId, afterSeq, limit, timeout)
-  ```
-
-- **`GraphRuntime` takes an optional `WatchPolicy`** after `ClaimPolicy` (default: enabled, `pollInterval` 250 ms). Java and Kotlin get `new GraphRuntime(store, clock, claims)`. `GraphRuntime(store, watch = WatchPolicy.disabled)` gives the old behaviour, where other runtimes' commits are seen only by subscribing again.
-- **A live subscription holds a second virtual thread**, `llm4s-watch-<threadId>`, which polls a store that has no change notification (SQLite) once per `pollInterval`. `cancel()` stops it, as before for the dispatcher.
-- **A subscription can now end with `Disconnected(lastSeq, ReplayFailed(error))` after its replay**, when a read of the store fails, for instance because the store was closed under it. Before, only a failed replay ended this way. Resubscribe with `afterSeq = lastSeq`.
-- **Other runtimes' durable events arrive; their live events do not.** A listener that assumed every durable event came from its own runtime's runs should check `record.runId`.
-- **`CheckpointerContract` gains change-notification cases and a `sibling(store, clock)` hook.** A durable store's spec overrides `sibling` to open another store over the same storage, so that the cases run between connections.
-
-### SQLite checkpointer (#1701)
-
-Nothing changes for existing code: the durable store is a new module, `llm4s-agent-checkpoint-sqlite`, and `llm4s-agent` is unchanged by it. To keep threads across restarts, add the dependency and replace the in-memory store:
-
-```scala
-// before: threads live as long as the process
-val runtime = GraphRuntime.inMemory()
-
-// after: threads live in a file, and `recover` continues a stopped run in the next process
-val runtime = SqliteCheckpointer.open(Path.of("runs.db")).map(store => GraphRuntime(store))
-```
-
-`SqliteCheckpointer` is in `org.llm4s.agent.graph.sqlite`. It brings the SQLite JDBC driver, at the version `llm4s-memory` already uses. Close it with `close()` when the process is done with it. See [Durable Checkpointers](../guide/agents/durable-checkpointers.html#the-sqlite-store).
 
 ### Durable `Checkpointer` contract (#1700)
 
@@ -69,6 +43,148 @@ A run now holds a lease on its thread - a `RunClaim` with an expiry and a `Fenci
 - **`GraphError.StaleClaim(threadId, token, current)` is new**: a commit, renewal or release made with a token that is not the thread's current claim. A run that lost its claim ends with `CheckpointWriteFailed(StaleClaim)`.
 - **`InMemoryCheckpointer` takes an optional `Clock`** (default the system clock), by which its claims expire, and **`GraphRuntime` an optional `ClaimPolicy`** (`ttl` 30 seconds, `renewEvery` 10 seconds). Java and Kotlin keep `new InMemoryCheckpointer()`, `new GraphRuntime(store)` and `new GraphRuntime(store, clock)`.
 - **`GraphRuntime.deleteThread` claims the thread before deleting it**, so it is refused with `ThreadBusy` while a run holds the thread in any runtime, not only in its own.
+
+### Tool side-effect safety (#1703)
+
+Design §4.17. Tools see an idempotency key, and the agent holds every model request to one result per tool call.
+
+```scala
+// before
+val context = ToolContext(run, ToolCallId("call-1"), state)
+ApprovalRequest(messageId, call, reason, ApprovalSource.Tool)
+ToolQuestionRequest(messageId, call, question)
+
+// after
+val context = ToolContext(run, ToolCallId("call-1"), IdempotencyKey("key-1"), state)
+ApprovalRequest(messageId, call, reason, ApprovalSource.Tool, IdempotencyKey("key-1"))
+ToolQuestionRequest(messageId, call, question, IdempotencyKey("key-1"))
+```
+
+- **`ToolContext` takes the call's key**, after `toolCallId`: `ToolContext(run, toolCallId, idempotencyKey, state,
+  approved)`, with `withIdempotencyKey`. You build one only to unit-test a tool; any key will do there
+  (`IdempotencyKey("test")`, or `IdempotencyKey.derive(threadId, checkpointId, superstep, taskId, toolCallId)`).
+- **`ToolTask`, `ApprovalRequest` and `ToolQuestionRequest` gain `idempotencyKey`** - last in `ApprovalRequest` and
+  `ToolTask`, before the defaulted `approved` in `ToolQuestionRequest`. Code that only reads them (`AgentResult`'s
+  `Suspended`, `ToolLoop.requests`/`questions`, the Java and Kotlin `PendingInterrupt`) is unchanged.
+- **Pass the key to the systems your tools change.** The runtime runs a tool at least once: a retrying
+  `wrapToolCall`, approval, an answered question and `recover` after a cancellation, `Fatal` or crash run a call
+  again, with the same `context.idempotencyKey`. Send it as the external API's idempotency key (or store it in a
+  unique column), and keep a tool's first run, before approval or an answer, free of side effects. See
+  [Tool Side Effects](/guide/agents/#tool-side-effects).
+- **A model request with a dangling tool call fails instead of being sent.** A `wrapModelCall` middleware that
+  removes a `ToolMessage` but keeps its call (or the reverse) now fails the model call with a `ValidationError`
+  naming the call; prune whole turns, as `ContextWindowMiddleware` does. The check is positional: each call's result
+  must be in the run of tool messages straight after its assistant message.
+- **A model message with repeated or blank tool-call ids is refused**, before it is stored, as a blank answer is:
+  the run fails with `NodeFailed(ValidationError)`, and `recover` asks the model again. Before, a repeated id left
+  the thread unable to advance.
+- **Imported `history` must pair positionally too.** History that `Message.validateConversation` accepted only
+  because an earlier turn's result shared a reused id is refused with a `ValidationError`.
+- **No synthetic result for a call cut short.** Unchanged, and now stated: a cancelled, `Fatal` or crashed call
+  records no result, and the thread waits for `recover` (`start` returns `IncompleteRun`), which runs only the
+  unfinished calls with their keys.
+- **Provider authors:** a chat provider that takes tools can run
+  `ProviderModuleChecks.assertOneToolResultPerCall(format, response, path)(baseUrl => client)` from
+  `llm4s-provider-testkit`; see [Writing a provider](/guide/writing-a-provider#tool-results).
+
+### Human-review interrupts (#1704)
+
+A turn can now wait for a person in two new ways: at a static breakpoint, before or after a node runs, and on a
+typed question from middleware. Both are interrupts like approvals and tool questions, answered through the same
+`resume`, any subset at a time. See [Human Review](../guide/agents/human-review.html).
+
+- **`AgentStatus.Suspended` has four lists.** `Suspended(approvals, questions)` is
+  `Suspended(approvals, questions, middlewareQuestions, breakpoints)`. The new fields default to empty, so
+  constructing one still compiles, but a pattern must name all four: `case AgentStatus.Suspended(approvals, _)`
+  becomes `case AgentStatus.Suspended(approvals, _, _, _)`, or match the type, `case _: AgentStatus.Suspended`.
+- **`PendingInterrupt` (graph kernel) has `breakpoint: Option[BreakpointPhase]`**, `None` for a task that suspended
+  itself. For a held task `resumeNode` is the held node and `question` its input (before) or `null` (after).
+- **`RunConfig` has `interruptBefore` and `interruptAfter`** (`Set[NodeId]`, empty by default), with
+  `withInterruptBefore` / `withInterruptAfter`. Admission refuses a node the graph does not have with a
+  `ValidationError`, before the thread is read. `AgentBuilder.withInterruptBefore(AgentNode*)` and
+  `withInterruptAfter(AgentNode*)` add breakpoints to every run of an agent; they are not part of its version.
+- **`CompiledGraph.resume` refuses a breakpoint answer that is not JSON `null`** (`Breakpoint.proceed`,
+  `AgentResult.proceed(id)`, Java `Answer.proceed(id)`) with `InvalidResume`.
+- **Middleware can ask.** `AgentMiddleware.Asking[Q, Ans]` declares a question; a hook asks with `ask(q)` (from
+  `beforeAgent`, `afterAgent`, `wrapModelCall`) or `askAbout(q)` (from `wrapToolCall`). A middleware that is not
+  `Asking` and returns `ToolOutcome.Ask` from `wrapToolCall` now fails the run with `ToolFailed` ("asked a question it
+  does not declare"); before, the question was attributed to the tool. A wrapper that retries on `Left` should pass a
+  `Left(MiddlewareAsked)` through, as it passes a cancellation.
+- **`ApprovalRequest` and `ToolQuestionRequest` gain `answered: Vector[GivenAnswer]`** (default empty), the
+  middleware answers a call carries through an approval or a tool question. Both now have a private constructor, as
+  the new `MiddlewareQuestionRequest`, `BreakpointRequest`, `GivenAnswer` and `GuardrailReview` do: `apply` still
+  builds them and a pattern still matches them, but `copy` is private - `request.copy(approved = true)` becomes
+  `request.withApproved(true)`.
+- **Java and Kotlin: `PendingInterrupt.toolName()` and `argumentsJson()` return `Optional<String>`.** They were
+  `String`s; a breakpoint on a model call, or a middleware question about an answer, has no tool call. They are present
+  for every `APPROVAL` and `QUESTION`, so `p.toolName()` becomes `p.toolName().get()` (or `orElse`) there.
+  `InterruptKind` gains `MIDDLEWARE_QUESTION` and `BREAKPOINT`: a Kotlin `when` over it that is used as an expression
+  must cover them, and a Java `switch` expression too. `PendingInterrupt` gains `middleware()`, `node()` and `phase()`
+  (the Java enum `BreakpointPhase`); `Answer` gains `proceed(id)`.
+- **`Checkpoint.CurrentFormat` is 6**, with an identity migration from 5: a build that predates breakpoints refuses a
+  format-6 checkpoint rather than run a held task's continuation as an ordinary task.
+
+### Checkpoint history, fork, updateState and retention (#1702)
+
+A store now keeps every checkpoint of a thread, and `GraphRuntime` gains `history`, `checkpoint`, `fork`,
+`updateState` and `prune`. Code that only runs agents or graphs needs no change. Code that implements
+`Checkpointer`, matches `GraphError` or `RunEvent` exhaustively, or relies on checkpoint ids does. Source breaks,
+with no shims:
+
+- **`Checkpointer` gains `history`, `checkpoint` and `prune`**, and its contract grows: keep every checkpoint a
+  commit supersedes (pending writes still for the latest only), refuse a checkpoint id already in the history with
+  `InvalidCommit`, and honour `Commit.retractTurn` by removing every checkpoint after the newest `Completed` or
+  `Failed` one before adding the commit's. `CheckpointerContract` checks all of it. A delegating store forwards them:
+
+  ```scala
+  def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+  def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+  def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
+  ```
+- **`Commit` gains `retractTurn: Boolean`**, defaulted to `false` in `Commit(...)`, with `withRetractTurn`. The
+  runtime sets it on the `Failed` checkpoint that closes a run a node blocked.
+- **`GraphError` gains `CheckpointNotFound(threadId, checkpointId)` and `ThreadExists(threadId)`; `RunEvent` gains
+  `StateUpdated` and `ThreadForked`.** An exhaustive `match` needs the new cases.
+- **Checkpoint ids count along the thread.** They are still `<runId>/<n>`, but `n` is one more than the parent's,
+  so the first run on a thread writes `<runId>/1`, `<runId>/2`, ... as before, and a later run continues the count
+  rather than starting again at 1. Code that built an id such as `s"$runId/1"` for a later run reads it from
+  `history` (or `latest`) instead.
+- **A Block retracts its turn from the history.** The thread's latest checkpoint after a Block is its `Failed`
+  checkpoint, as before; the earlier checkpoints of the blocked turn are gone from `history`, `checkpoint` and
+  `fork`.
+
+`Checkpoint.CurrentFormat` stays 6: nothing changes in a checkpoint's JSON.
+
+### SQLite checkpointer (#1701)
+
+Nothing changes for existing code: the durable store is a new module, `llm4s-agent-checkpoint-sqlite`, and `llm4s-agent` is unchanged by it. To keep threads across restarts, add the dependency and replace the in-memory store:
+
+```scala
+// before: threads live as long as the process
+val runtime = GraphRuntime.inMemory()
+
+// after: threads live in a file, and `recover` continues a stopped run in the next process
+val runtime = SqliteCheckpointer.open(Path.of("runs.db")).map(store => GraphRuntime(store))
+```
+
+`SqliteCheckpointer` is in `org.llm4s.agent.graph.sqlite`. It brings the SQLite JDBC driver, at the version `llm4s-memory` already uses. Close it with `close()` when the process is done with it. See [Durable Checkpointers](../guide/agents/durable-checkpointers.html#the-sqlite-store).
+
+### Live subscriptions across runtimes (#1705)
+
+A subscription now delivers the durable events of commits made through any runtime or process sharing its store, not only through its own runtime. Code that runs agents or graphs, or that implements `Checkpointer`, compiles and works unchanged. What changes:
+
+- **`Checkpointer` gains `awaitEventsAfter(threadId, afterSeq, limit, timeout)`**, with a default that polls `eventsAfter`, so existing stores need no change. A store that can be told of commits may override it to return as soon as one lands; `InMemoryCheckpointer` does. A wrapper that delegates to another store should forward it, so that the wrapped store's notification is used:
+
+  ```scala
+  override def awaitEventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int, timeout: FiniteDuration) =
+    underlying.awaitEventsAfter(threadId, afterSeq, limit, timeout)
+  ```
+
+- **`GraphRuntime` takes an optional `WatchPolicy`** after `ClaimPolicy` (default: enabled, `pollInterval` 250 ms). Java and Kotlin get `new GraphRuntime(store, clock, claims)`. `GraphRuntime(store, watch = WatchPolicy.disabled)` gives the old behaviour, where other runtimes' commits are seen only by subscribing again.
+- **A live subscription holds a second virtual thread**, `llm4s-watch-<threadId>`, which polls a store that has no change notification (SQLite) once per `pollInterval`. `cancel()` stops it, as before for the dispatcher.
+- **A subscription can now end with `Disconnected(lastSeq, ReplayFailed(error))` after its replay**, when a read of the store fails, for instance because the store was closed under it. Before, only a failed replay ended this way. Resubscribe with `afterSeq = lastSeq`.
+- **Other runtimes' durable events arrive; their live events do not.** A listener that assumed every durable event came from its own runtime's runs should check `record.runId`.
+- **`CheckpointerContract` gains change-notification cases and a `sibling(store, clock)` hook.** A durable store's spec overrides `sibling` to open another store over the same storage, so that the cases run between connections.
 
 ## Stage 1 migration: agent runtime
 
@@ -158,7 +274,7 @@ Embedding, reranker, MCP, image clients and the Whisper and Tacotron2 speech eng
 
 ### Orchestration removed (#1330)
 
-`org.llm4s.agent.orchestration` is deleted: `PlanRunner`, `Plan`, `Node`, `Edge`, `TypedAgent`, `Policies`, `OrchestrationError` and `CancellationToken`, with `org.llm4s.types.PlanId` and `org.llm4s.types.AgentId` from `llm4s-core` (the agent's id is `org.llm4s.agent.AgentId`). `PlanRunner` passed `Map[String, Any]` between nodes and cast each node to `TypedAgent[Any, Any]`. A typed graph does the same job with checked handles, checkpoints and recovery. The [multi-agent graph recipe](../examples/cookbook#6-several-agents-in-one-graph) is a worked replacement.
+`org.llm4s.agent.orchestration` is deleted: `PlanRunner`, `Plan`, `Node`, `Edge`, `TypedAgent`, `Policies`, `OrchestrationError` and `CancellationToken`, with `org.llm4s.types.PlanId` and `org.llm4s.types.AgentId` from `llm4s-core` (the agent's id is `org.llm4s.agent.AgentId`). `PlanRunner` passed `Map[String, Any]` between nodes and cast each node to `TypedAgent[Any, Any]`. A typed graph does the same job with checked handles, checkpoints and recovery. The [multi-agent graph recipe](../examples/cookbook/multi-agent-graph) is a worked replacement.
 
 | Removed | Use instead |
 |---|---|

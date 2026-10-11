@@ -13,6 +13,7 @@ import org.llm4s.agent.graph.{
   StreamEvent,
   ThreadId
 }
+import org.llm4s.agent.testkit.Fixtures
 import org.llm4s.error.{ NetworkError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion }
@@ -56,7 +57,10 @@ class AgentIOStreamSpec extends AnyFlatSpec with Matchers with Eventually {
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
       underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId): Result[Unit] = underlying.deleteThread(threadId)
+    def deleteThread(threadId: ThreadId): Result[Unit]                  = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: org.llm4s.agent.graph.RetentionPolicy) = underlying.prune(threadId, policy)
   }
 
   /** An in-memory store that opens `completed` once a commit carrying `RunCompleted` is stored. */
@@ -81,7 +85,10 @@ class AgentIOStreamSpec extends AnyFlatSpec with Matchers with Eventually {
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
       underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId): Result[Unit] = underlying.deleteThread(threadId)
+    def deleteThread(threadId: ThreadId): Result[Unit]                  = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: org.llm4s.agent.graph.RetentionPolicy) = underlying.prune(threadId, policy)
   }
 
   private def durableEvents(items: Vector[AgentStreamItem]): Vector[RunEvent] =

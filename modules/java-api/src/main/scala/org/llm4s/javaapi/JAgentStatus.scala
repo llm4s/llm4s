@@ -26,8 +26,9 @@ import java.util.{ Objects, Optional }
  * @param answer the final answer, for `COMPLETED`
  * @param guardrail the name of the first guardrail that refused the turn, for `BLOCKED`
  * @param reason every refusing guardrail's error, for `BLOCKED`
- * @param pending the approvals, then the questions, the turn waits for, for `SUSPENDED` (the same list
- *                as [[JAgent.pending]]); an empty, unmodifiable list otherwise
+ * @param pending the approvals, then the tool questions, middleware questions and breakpoints, the turn
+ *                waits for, for `SUSPENDED` (the same list as [[JAgent.pending]]); an empty, unmodifiable
+ *                list otherwise
  */
 final class JAgentStatus private (
   val kind: AgentStatusKind,

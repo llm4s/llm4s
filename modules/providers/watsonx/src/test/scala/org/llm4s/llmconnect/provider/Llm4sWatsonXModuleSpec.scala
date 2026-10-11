@@ -29,8 +29,8 @@ class Llm4sWatsonXModuleSpec extends AnyWordSpec with Matchers with ProviderModu
   private val tokenBody = """{"access_token":"iam-token","expires_in":3600}"""
 
   private val sseBody: String = Seq(
-    """{"results":[{"generated_text":"Hi","generated_token_count":1,"input_token_count":4,"stop_reason":"not_finished"}]}""",
-    """{"results":[{"generated_text":"!","generated_token_count":2,"input_token_count":4,"stop_reason":"eos_token"}]}"""
+    """{"choices":[{"delta":{"content":"Hi"},"finish_reason":null}],"usage":{"prompt_tokens":4,"completion_tokens":1,"total_tokens":5}}""",
+    """{"choices":[{"delta":{"content":"!"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}"""
   ).map(data => s"id: 1\nevent: message\ndata: $data\n\n").mkString
 
   private def section(baseUrl: String): NamedProviderConfig =
@@ -113,9 +113,9 @@ class Llm4sWatsonXModuleSpec extends AnyWordSpec with Matchers with ProviderModu
 
   "a client built by the watsonx descriptor" should {
 
-    "complete through the IAM exchange and the generation endpoint" in {
+    "complete through the IAM exchange and the chat endpoint" in {
       val body =
-        """{"id":"gen-1","results":[{"generated_text":"Hello there","generated_token_count":3,"input_token_count":5}]}"""
+        """{"id":"gen-1","choices":[{"index":0,"message":{"role":"assistant","content":"Hello there"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}"""
       withServer("/")(routed(sendJsonResponse(_, 200, body))) { baseUrl =>
         clientAt(baseUrl).complete(
           org.llm4s.llmconnect.model.Conversation(Seq(org.llm4s.llmconnect.model.UserMessage("Hi")))

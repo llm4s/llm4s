@@ -135,6 +135,12 @@ jobs:
           scripts/test-check-tier-drift.sh
           scripts/check-tier-drift.sh
 
+      # scripts/mima-dry-run.sh is a manual release-readiness script (it publishes the whole build, minutes). Its
+      # tests run it against a fixture repository and a fake `sbt`, with no network, in about ten seconds, so the
+      # script's checks stay able to fail between releases.
+      - name: Test the MiMa dry-run script
+        run: scripts/test-mima-dry-run.sh
+
       # scalafmtCheckAll covers sources only; scalafmtSbtCheck covers build.sbt and project/*.scala.
       # scalafmt downloads scalafmt-core at run time, and a network hiccup used to fail this step in about five
       # seconds ("scalafmt: [v3.7.14] failed to download [.scalafmt.conf]", 2 of 267 runs in three days, both
@@ -157,8 +163,33 @@ jobs:
       - name: Check every published artifact is documented
         run: sbt publishedArtifactsCheck
 
+      # Fails when the generated llm4s-bom does not list exactly the artifacts the build publishes
+      # (project/Bom.scala). A release cannot be amended, so a BOM that omits a module stays that way.
+      - name: Check the BOM lists every published artifact
+        run: sbt bomCheck
+
       - name: Compile
         run: sbt compile
+
+      # Builds the CycloneDX SBOMs that the release workflow attaches to a GitHub release (docs/reference/sbom.md), so a
+      # change that breaks their generation fails here and not on release day. It also fails when a published module has
+      # no BOM, or a BOM names a build-machine path or a test framework. The dependencies are resolved by now, so this is
+      # a few seconds of sbt, not a second build.
+      - name: Generate and check the SBOMs
+        run: |
+          sbt -batch publishedSboms
+          sbt -batch -error listPublishedArtifacts | grep -E '^(artifact|stub) ' > target/published-artifacts.txt
+          scripts/test-check-sbom.sh
+          scripts/test-osv-scan.sh
+          scripts/check-sbom.sh target/sboms target/published-artifacts.txt
+
+      - name: Upload the SBOMs
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: target/sboms/*.bom.json
+          retention-days: 14
+          if-no-files-found: error
 
       # Fails when a frozen module resolves a document-parsing, speech, cloud-storage, database,
       # observability-backend or foreign vendor-SDK dependency, so the programme's definition of done
@@ -278,11 +309,15 @@ jobs:
           voyage/test voyage/coverageReport
           bedrock/test bedrock/coverageReport
           jina/test jina/coverageReport
+          jev/test jev/coverageReport
           cohere/test cohere/coverageReport
           watsonx/test watsonx/coverageReport
           providerTestkit/test providerTestkit/coverageReport
+          schemaDerivation/test schemaDerivation/coverageReport
+          testkit/test testkit/coverageReport
           observability/test observability/coverageReport
           observabilityPrometheus/test observabilityPrometheus/coverageReport
+          observabilityMicrometer/test observabilityMicrometer/coverageReport
           agentTools/test agentTools/coverageReport
           agent/test agent/coverageReport
           agentTestkit/test agentTestkit/coverageReport
@@ -294,6 +329,7 @@ jobs:
           deployService/test deployService/coverageReport
           llm4sEffect/test llm4sEffect/coverageReport
           llm4sZio/test llm4sZio/coverageReport
+          llm4sPekko/test llm4sPekko/coverageReport
           coverageAggregate
 
       # One upload per measured module, each carrying that module's flag - Codecov attributes
@@ -461,6 +497,12 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/jina/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: jina
+      - name: Upload jev coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/jev/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: jev
       - name: Upload cohere coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
@@ -487,6 +529,26 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      - name: Upload schema-derivation coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/schema-derivation/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: schema-derivation
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload testkit coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/testkit/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: testkit
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
       - name: Upload observability coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
@@ -503,6 +565,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/observability-prometheus/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: observability-prometheus
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload observability-micrometer coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/observability-micrometer/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: observability-micrometer
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -613,6 +685,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/llm4s-zio/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: llm4s-zio
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload llm4s-pekko coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/llm4s-pekko/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: llm4s-pekko
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -817,9 +899,13 @@ jobs:
         run: sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '8.11.1'
+          # Licence: v6's default 'enhanced' cache provider (gradle-actions-caching) is
+          # proprietary, under the Gradle Terms of Use. 'basic' is MIT-licensed, keeping
+          # llm4s CI fully open source.
+          cache-provider: basic
 
       - name: Build and test Kotlin API with coverage check
         working-directory: modules/kotlin-api
@@ -830,6 +916,13 @@ jobs:
         working-directory: modules/samples/gradle-java
         run: gradle build installDist
 
+      # A Gradle and a Maven project that import llm4s-bom and declare two modules with no version must build
+      # against the library just published, and a Gradle project without the BOM must not (#1462).
+      - name: Build a Gradle and a Maven project against llm4s-bom
+        env:
+          REQUIRE_MAVEN: '1'
+        run: scripts/check-bom-consumers.sh 0.1.0-SNAPSHOT
+
       - name: Upload Kotlin coverage report
         if: always()
         uses: actions/upload-artifact@v7
@@ -838,11 +931,34 @@ jobs:
           path: modules/kotlin-api/build/reports/jacoco/
           retention-days: 14
 
+  # The starter is built against the oldest supported Spring Boot 3.x (project/Dependencies.scala); this runs its
+  # specs against the latest 3.x, so the documented range (docs/guide/spring-boot.md) is tested at both ends (#1467).
+  spring-boot-latest:
+    name: Spring Boot 3.x (latest)
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Test the starter against the latest Spring Boot 3.x
+        run: sbt -Dllm4s.springBootVersion=3.5.16 springBootStarter/test
+
   # All tests must pass
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api]
+    needs: [test, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -876,6 +992,10 @@ jobs:
           fi
           if [[ "${{ needs.kotlin-api.result }}" != "success" ]]; then
             echo "Kotlin API tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.spring-boot-latest.result }}" != "success" ]]; then
+            echo "Spring Boot 3.x (latest) tests failed"
             exit 1
           fi
           echo "All tests passed!"
@@ -999,6 +1119,69 @@ jobs:
             modules/it/target/**/test-reports/
           retention-days: 5
 
+  # Tier 2: the MCP client against the official MCP reference server (@McpReference,
+  # MCPReferenceServerSpec, #1006). Split from `integration-tests` because starting the server
+  # downloads the node image from Docker Hub and the server's pinned dependency tree from npm on
+  # every run; an outage of either would fail unrelated PRs. So, like the Workspace and Ollama
+  # tiers, it runs on pushes to main - and also on manual dispatch, to check a branch on demand.
+  # Not in `all-tests-pass` for the same reason.
+  mcp-reference-integration:
+    name: MCP Reference Server Integration
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      # The official MCP reference server (#1006). Started in a step rather than as a service
+      # container because a service cannot be given a command, and the server picks its
+      # transport from one. Everything it runs is pinned: the image by digest (node
+      # 22.23.3 on Alpine), and the server, 2026.8.31, with its whole dependency tree by
+      # modules/it/mcp-reference-server/package-lock.json. run.sh installs that tree with
+      # `npm ci --ignore-scripts`, from a read-only mount. The container gets no secrets and no
+      # environment from the job. It does need registry.npmjs.org and Docker Hub: if either is
+      # down, this step fails the job - which is why the job is not run on PRs.
+      - name: Start the MCP reference server
+        run: |
+          docker run -d --name mcp-everything -p 3001:3001 \
+            -v "$GITHUB_WORKSPACE/modules/it/mcp-reference-server:/src:ro" \
+            node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 \
+            sh /src/run.sh
+          for _ in $(seq 1 60); do
+            if curl -s -o /dev/null http://localhost:3001/mcp; then echo "MCP reference server is ready"; exit 0; fi
+            sleep 2
+          done
+          docker logs mcp-everything >&2
+          echo "MCP reference server did not become ready within 120s" >&2
+          exit 1
+
+      - name: Run the MCP reference-server tests
+        env:
+          # This job starts the server, so "not reachable" here is a failure, not a reason to skip.
+          LLM4S_IT_STRICT: "true"
+          MCP_SERVER_URL: http://localhost:3001/mcp
+        run: sbt testMcpReference
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-mcp-reference
+          path: |
+            modules/it/target/**/test-reports/
+          retention-days: 5
+
   # Tier 4: Cloud smoke tests — minimal sanity checks against real cloud APIs.
   # Manual trigger only (workflow_dispatch) to avoid unintended API costs.
   cloud-smoke:
@@ -1058,4 +1241,14 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
           BEDROCK_MODEL_ID: ${{ secrets.BEDROCK_MODEL_ID }}
+          # WatsonXAssumptionProbeSpec: an IBM Cloud API key plus a project (or deployment space).
+          # WATSONX_BASE_URL and WATSONX_MODEL are optional; unset, the suite uses us-south and its
+          # default model.
+          WATSONX_API_KEY: ${{ secrets.WATSONX_API_KEY }}
+          WATSONX_PROJECT_ID: ${{ secrets.WATSONX_PROJECT_ID }}
+          WATSONX_SPACE_ID: ${{ secrets.WATSONX_SPACE_ID }}
+          WATSONX_BASE_URL: ${{ secrets.WATSONX_BASE_URL }}
+          WATSONX_MODEL: ${{ secrets.WATSONX_MODEL }}
+          # JevSmokeSpec (llm4s-jev): a TypeSafe API key, billed at a few hundred input tokens per test.
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: sbt testSmoke

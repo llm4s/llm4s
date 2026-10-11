@@ -53,7 +53,11 @@ object LLMClientZ {
   /** Wraps an already-constructed [[LLMClient]]. Does not manage its lifecycle. */
   def apply(underlying: LLMClient): LLMClientZ = new Impl(underlying)
 
-  /** Capacity of the bounded buffer between the provider thread and the consumer. */
+  /**
+   * Capacity of the bounded buffer between the provider thread and the consumer. This buffer
+   * applies backpressure - a slow consumer stalls the producer, it never drops a chunk - so a
+   * small size costs nothing.
+   */
   private val StreamBufferSize = 64
 
   /**

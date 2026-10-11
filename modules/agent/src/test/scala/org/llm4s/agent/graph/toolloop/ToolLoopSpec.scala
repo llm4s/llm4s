@@ -434,9 +434,12 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
         store.renew(threadId, token, ttl)
       def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = store.release(threadId, token)
       def latest(threadId: ThreadId)                                             = Right(stale)
-      def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = store.eventsAfter(threadId, afterSeq, limit)
-      def compactEvents(threadId: ThreadId, beforeSeq: Long)          = store.compactEvents(threadId, beforeSeq)
-      def deleteThread(threadId: ThreadId)                            = store.deleteThread(threadId)
+      def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int)     = store.eventsAfter(threadId, afterSeq, limit)
+      def compactEvents(threadId: ThreadId, beforeSeq: Long)              = store.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId)                                = store.deleteThread(threadId)
+      def history(threadId: ThreadId, before: Option[String], limit: Int) = store.history(threadId, before, limit)
+      def checkpoint(threadId: ThreadId, checkpointId: String)            = store.checkpoint(threadId, checkpointId)
+      def prune(threadId: ThreadId, policy: RetentionPolicy)              = store.prune(threadId, policy)
     }
     GraphRuntime(racing)
       .resume(thread, l.graph, l.answers(ids("c2") -> ApprovalDecision.Approve), RunConfig().withRunId(RunId("run-3")))
@@ -1888,9 +1891,14 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
   }
 
   "ToolQuestionRequest" should "round-trip through JSON" in {
-    val request = ToolQuestionRequest("m", ToolCall("c", "confirm", ujson.Obj("env" -> "prod")), ujson.Obj("p" -> 1))
+    val request = ToolQuestionRequest(
+      "m",
+      ToolCall("c", "confirm", ujson.Obj("env" -> "prod")),
+      ujson.Obj("p" -> 1),
+      IdempotencyKey("k")
+    )
     upickle.default.read[ToolQuestionRequest](upickle.default.write(request)) shouldBe request
-    val approved = request.copy(approved = true)
+    val approved = request.withApproved(true)
     upickle.default.read[ToolQuestionRequest](upickle.default.write(approved)) shouldBe approved
   }
 }

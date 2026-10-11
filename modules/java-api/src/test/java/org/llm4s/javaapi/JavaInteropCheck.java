@@ -72,9 +72,7 @@ public final class JavaInteropCheck {
       Conversation conv =
           ConversationBuilder.create().system("be brief").user("hi").assistant("hello").user("2+2").build();
       log.add("conv:" + c.complete(conv).get());
-      // NOTE: complete(Conversation, CompletionOptions) is intentionally not driven here:
-      // CompletionOptions cannot be built from Java without scala.Option/scala.Seq arguments
-      // (known gap, see the PR review).
+      // complete(Conversation, JCompletionOptions) is driven from Java by CompletionOptionsCheck (#1488).
     }
     return log;
   }
@@ -126,12 +124,20 @@ public final class JavaInteropCheck {
       for (PendingInterrupt p : pending) {
         switch (p.kind()) {
           case APPROVAL -> {
-            log.add("approve:" + p.toolName() + ":" + p.argumentsJson() + ":" + p.reason().orElse("?"));
+            log.add("approve:" + p.toolName().orElse("?") + ":" + p.argumentsJson().orElse("?") + ":" + p.reason().orElse("?"));
             answers.add(Answer.approve(p.id()));
           }
           case QUESTION -> {
-            log.add("reply:" + p.toolName() + ":" + p.questionJson().orElse("?"));
+            log.add("reply:" + p.toolName().orElse("?") + ":" + p.questionJson().orElse("?"));
             answers.add(Answer.reply(p.id(), reply));
+          }
+          case MIDDLEWARE_QUESTION -> {
+            log.add("middleware:" + p.middleware().orElse("?") + ":" + p.questionJson().orElse("?"));
+            answers.add(Answer.reply(p.id(), reply));
+          }
+          case BREAKPOINT -> {
+            log.add("breakpoint:" + p.node().orElse("?") + ":" + p.phase().map(Enum::name).orElse("?"));
+            answers.add(Answer.proceed(p.id()));
           }
         }
       }

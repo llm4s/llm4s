@@ -42,6 +42,8 @@ object PomDescriptions {
       "Image generation and image vision and processing clients for LLM4S.",
     "llm4s-java-api" ->
       "Java-friendly facade over LLM4S: a client, an agent and a conversation builder for Java callers.",
+    "llm4s-jev" ->
+      "Client for TypeSafe's Jev decision model for LLM4S: typed yes/no, choice and score answers to questions about a state.",
     "llm4s-jina" ->
       "Jina AI embedding provider for LLM4S.",
     "llm4s-knowledgegraph" ->
@@ -58,6 +60,8 @@ object PomDescriptions {
       "Postgres and pgvector store for LLM4S agent memory.",
     "llm4s-observability" ->
       "Tracing backends for LLM4S: Langfuse, a trace collector and store, and a cost tracker.",
+    "llm4s-observability-micrometer" ->
+      "Micrometer metrics for LLM4S: a MetricsCollector that records requests, tokens, cost, errors and retries in a MeterRegistry.",
     "llm4s-observability-otel" ->
       "OpenTelemetry tracing backend for LLM4S.",
     "llm4s-observability-prometheus" ->
@@ -68,14 +72,20 @@ object PomDescriptions {
       "OpenAI, Azure OpenAI and Requesty chat providers and OpenAI embeddings for LLM4S.",
     "llm4s-openai-compatible" ->
       "Chat client for OpenAI-compatible APIs in LLM4S: DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any generic endpoint.",
+    "llm4s-pekko" ->
+      "Apache Pekko Streams for LLM4S: LLM responses and agent runs as Sources, with backpressure and cancellation.",
     "llm4s-provider-testkit" ->
       "Test checks for authors of LLM4S provider modules: discovery, registration and the config-to-client round trip.",
     "llm4s-rag" ->
       "Retrieval-augmented generation for LLM4S: vector stores, chunking, reranking, evaluation and extraction.",
+    "llm4s-schema-derivation" ->
+      "JSON schemas for LLM4S structured output, derived from Scala 3 case classes and enums.",
     "llm4s-speech" ->
       "Speech-to-text and text-to-speech for LLM4S.",
     "llm4s-spring-boot-starter" ->
       "Spring Boot auto-configuration for the LLM4S Java client.",
+    "llm4s-testkit" ->
+      "Scriptable fake LLM client and recorded calls for testing applications built with LLM4S.",
     "llm4s-voyage" ->
       "Voyage AI embedding provider for LLM4S.",
     "llm4s-watsonx" ->

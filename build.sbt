@@ -112,6 +112,7 @@ addCommandAlias(
 //   sbt test             Tier 1 - unit tests plus the `@Local` suites in modules/it
 //   sbt testIntegration  Tier 2 - `@Docker`: needs Postgres/pgvector, Qdrant, Neo4j
 //   sbt testWorkspace    Tier 2 - `@Workspace`: needs a built workspace-runner image + Docker
+//   sbt testMcpReference Tier 2 - `@McpReference`: needs the MCP reference server at MCP_SERVER_URL
 //   sbt testOllama       Tier 3 - `@Ollama`: needs a local Ollama with `qwen2.5:0.5b` pulled
 //   sbt testSmoke        Tier 4 - `@Cloud`: real provider APIs, real money
 //
@@ -119,6 +120,7 @@ addCommandAlias(
 // to the Local tier; adding a second `-n` would intersect to nothing.
 addCommandAlias("testIntegration", ItTiers.alias(ItTiers.Docker))
 addCommandAlias("testWorkspace", ItTiers.alias(ItTiers.Workspace))
+addCommandAlias("testMcpReference", ItTiers.alias(ItTiers.McpReference))
 addCommandAlias("testOllama", ItTiers.alias(ItTiers.Ollama))
 addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 
@@ -133,9 +135,13 @@ addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 val mimaBaselineVersion: Option[String] = None
 
 // `module` is the artifact name (the project's `name`). Apply this to frozen modules only.
+// A type annotated `@Experimental` (org.llm4s.annotation, a runtime-retained Java annotation) is outside the
+// freeze, so MiMa skips it: no hand-written `ProblemFilters.exclude` per type. scripts/mima-dry-run.sh checks
+// that this works, and that a `@Stable` type is still reported.
 def mimaFrozen(module: String) = Seq(
   mimaPreviousArtifacts := mimaBaselineVersion.map(v => "org.llm4s" %% module % v).toSet,
-  mimaFailOnNoPrevious  := false
+  mimaFailOnNoPrevious  := false,
+  mimaExcludeAnnotations += "org.llm4s.annotation.Experimental"
 )
 
 // ---- shared settings ----
@@ -199,10 +205,24 @@ Global / excludeLintKeys += coveragePolicy
 lazy val publishedArtifactsCheck = taskKey[Unit](
   "Fail the build if a published llm4s-* artifact is not named in v1-scope.md and installation.md, or has no POM description of its own"
 )
-// What a release must put on Maven Central, one `artifact <id>` or `stub <id>` per line, for
+// What a release must put on Maven Central, one `artifact <id>`, `bom <id>` or `stub <id>` per line, for
 // scripts/verify-release.sh. Run it with `sbt -error listPublishedArtifacts`.
 lazy val listPublishedArtifacts = taskKey[Unit](
-  "Print the Maven coordinates a release must publish: artifact lines, then relocation stub lines"
+  "Print the Maven coordinates a release must publish: artifact lines, then the BOM, then relocation stub lines"
+)
+// The BOM (`org.llm4s:llm4s-bom`) lists every published artifact. It is generated from the same project list
+// as `listPublishedArtifacts`; this check fails when the generated POM disagrees. See project/Bom.scala.
+lazy val bomCheck = taskKey[Unit](
+  "Fail the build if the generated llm4s-bom does not list exactly the artifacts the build publishes"
+)
+
+// ---- software bill of materials ----
+// One CycloneDX SBOM per published `llm4s-*` module that ships a jar (samples, `it`, benchmarks, the
+// relocation stubs and any POM-only artifact have none), collected into `target/sboms` of the root
+// project. The release workflow attaches them to the GitHub release and CI builds them on every pull
+// request, so generation cannot silently break. See docs/reference/sbom.md.
+lazy val publishedSboms = taskKey[Seq[File]](
+  "Write a CycloneDX SBOM for every published llm4s-* module into target/sboms and return the files"
 )
 
 // ---- coverage policy check ----
@@ -260,13 +280,17 @@ lazy val llm4s = (project in file("."))
     voyage,
     bedrock,
     jina,
+    jev,
     cohere,
     watsonx,
     providerTestkit,
+    schemaDerivation,
+    testkit,
     agentTestkit,
     agentCheckpointSqlite,
     llm4sEffect,
     llm4sZio,
+    llm4sPekko,
     javaApi,
     springBootStarter,
     samples,
@@ -277,6 +301,7 @@ lazy val llm4s = (project in file("."))
     workspaceSamples,
     observability,
     observabilityPrometheus,
+    observabilityMicrometer,
     traceOpentelemetry,
     agent,
     agentTools,
@@ -288,6 +313,9 @@ lazy val llm4s = (project in file("."))
     // outside the aggregate entirely, so its suites could stop compiling unnoticed. Only the
     // `@Local` tier actually runs under `sbt test`; see `it / Test / testOptions` below.
     it,
+    // The BOM must be aggregated here for the same reason as the stubs below: `sbt ci-release`
+    // publishes the root aggregate, so a BOM outside it would simply never be published.
+    bom,
     // Relocation stubs must be aggregated here: `sbt ci-release` publishes the root
     // aggregate, so a stub outside it would simply never be published.
     relocationCore,
@@ -315,7 +343,55 @@ lazy val llm4s = (project in file("."))
       val projects      = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
       val (real, stubs) = PublishedArtifacts.coordinates(projects, (ThisBuild / scalaBinaryVersion).value)
       real.foreach(a => println(s"artifact $a"))
+      PublishedArtifacts.boms(projects).foreach(a => println(s"bom $a"))
       stubs.foreach(a => println(s"stub $a"))
+    },
+    publishedSboms / aggregate := false,
+    publishedSboms := Def.taskDyn {
+      // A module that publishes a jar gets an SBOM. A POM-only artifact (a relocation stub, or a bill of
+      // materials such as llm4s-bom) has no code and no dependencies of its own to describe.
+      val modules = Def
+        .task(
+          (thisProjectRef.value, name.value, (publish / skip).value, (Compile / packageBin / publishArtifact).value)
+        )
+        .all(ScopeFilter(inAnyProject))
+        .value
+      val refs   = modules.collect { case (ref, name, false, true) if name.startsWith("llm4s-") => ref }
+      val outDir = target.value / "sboms"
+      Def.task {
+        val log  = streams.value.log
+        val boms = makeBom.all(ScopeFilter(inProjects(refs: _*))).value
+        IO.delete(outDir)
+        IO.createDirectory(outDir)
+        // sbt-sbom lists a project that is a `% Test` dependency as a required component; SbomPrune drops those.
+        val written = boms.map { bom =>
+          val (text, dropped) = SbomPrune.prune(IO.read(bom))
+          val copy            = outDir / bom.getName
+          IO.write(copy, text)
+          (copy, dropped)
+        }
+        log.info(
+          s"Wrote ${written.size} SBOMs to $outDir; dropped ${written.map(_._2).sum} test-only components"
+        )
+        written.map(_._1).sortBy(_.getName)
+      }
+    }.value,
+    bomCheck / aggregate := false,
+    bomCheck := {
+      val projects = Def
+        .task(
+          (name.value, (publish / skip).value, (Compile / packageBin / publishArtifact).value, crossPaths.value)
+        )
+        .all(ScopeFilter(inAnyProject))
+        .value
+      val pom = (bom / makePom).value
+      PublishedArtifacts.checkBom(
+        projects,
+        (ThisBuild / scalaBinaryVersion).value,
+        pom,
+        (bom / version).value,
+        streams.value.log
+      )
     },
     // Root is an aggregator with no sources of its own. `coverageAggregate` runs here, and
     // the per-module floors are enforced by each module's own `coverageReport`, so the
@@ -406,7 +482,9 @@ lazy val media = (project in file("modules/media"))
   )
 
 lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
-  .dependsOn(core, agent)
+  // `testkit % Test`: `ScriptedAgentIOSpec` drives an `AgentIO` end to end from a `ScriptedLLMClient`, the way a
+  // user's tests would; the testing guide shows that code.
+  .dependsOn(core, agent, agent % "test->test", testkit % Test)
   .settings(
     name := "llm4s-effect",
     commonSettings,
@@ -422,7 +500,9 @@ lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
   )
 
 lazy val llm4sZio = (project in file("modules/llm4s-zio"))
-  .dependsOn(core, agent)
+  // `testkit % Test`: `ScriptedAgentZSpec` drives an `AgentZ` end to end from a `ScriptedLLMClient`, the way a
+  // user's tests would; the testing guide shows that code.
+  .dependsOn(core, agent, agent % "test->test", testkit % Test)
   .settings(
     name := "llm4s-zio",
     commonSettings,
@@ -437,6 +517,28 @@ lazy val llm4sZio = (project in file("modules/llm4s-zio"))
       Deps.zioTestSbt % Test
     ),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+  )
+
+// `llm4s-pekko` (#1457) is the third streaming bridge, after `llm4s-effect` (fs2) and `llm4s-zio` (ZStream): the
+// same `Agent` events and `LLMClient.streamComplete` chunks as an Apache Pekko Streams `Source`. It depends on core,
+// the agent runtime and `pekko-stream` only. Pekko stays out of every frozen module (`FrozenDependencies` bans
+// `org.apache.pekko` and Akka there).
+lazy val llm4sPekko = (project in file("modules/llm4s-pekko"))
+  .dependsOn(core, agent)
+  .settings(
+    name := "llm4s-pekko",
+    commonSettings,
+    // Measured 97.54% statement and 88.24% branch coverage (`sbt coverage llm4sPekko/test llm4sPekko/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.pekkoStream,
+      Deps.scalatest          % Test,
+      Deps.pekkoStreamTestkit % Test,
+      Deps.pekkoTestkit       % Test
+    )
   )
 
 lazy val core = (project in file("modules/core"))
@@ -911,6 +1013,30 @@ lazy val jina = (project in file("modules/providers/jina"))
     )
   )
 
+// Jev (TypeSafe's System One decision model, #1265): a typed decision client, not a chat or embedding
+// provider. It has no `ProviderDescriptor`, implements neither `LLMClient` nor `EmbeddingProvider`, and
+// returns no `Completion`: Jev takes a state and typed questions (Noul, Choice, Score) and answers each
+// with a probability, a selection or a score. Beta, like the other community modules. No dependency
+// beyond core.
+
+lazy val jev = (project in file("modules/providers/jev"))
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
+  .settings(
+    name := "llm4s-jev",
+    commonSettings,
+    // Measured 98.72% statement coverage (`sbt coverage jev/test jev/coverageReport`). Floor is the
+    // measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 // Cohere embeddings: an embedding provider only, as an `EmbeddingProviderDescriptor` with a typed
 // `CohereInputType` setting. Cohere's native `/v2/embed` is not OpenAI-compatible (`texts`,
 // `input_type`, `embedding_types`, vectors keyed by type), so it is a module of its own and not a
@@ -935,9 +1061,9 @@ lazy val cohere = (project in file("modules/providers/cohere"))
     )
   )
 
-// `llm4s-watsonx` (#1019): IBM watsonx.ai. Not OpenAI-compatible - its text-generation API takes
-// a flattened `input` string and authenticates by exchanging an IBM Cloud API key for an IAM
-// bearer token - so it is a provider module of its own rather than a dialect in
+// `llm4s-watsonx` (#1019): IBM watsonx.ai. Not OpenAI-compatible - it authenticates by
+// exchanging an IBM Cloud API key for an IAM bearer token and has its own chat request and
+// response shapes - so it is a provider module of its own rather than a dialect in
 // `openai-compatible`. No dependency beyond core.
 
 lazy val watsonx = (project in file("modules/providers/watsonx"))
@@ -945,9 +1071,10 @@ lazy val watsonx = (project in file("modules/providers/watsonx"))
   .settings(
     name := "llm4s-watsonx",
     commonSettings,
-    // Measured 98.45% statement coverage (`sbt coverage watsonx/test watsonx/coverageReport`).
-    // Floor is the measured value rounded down to the nearest 5. Never lower it. There is no
-    // live suite in `modules/it`: watsonx.ai needs an IBM Cloud account (#1020).
+    // Measured 99.24% statement coverage (`sbt coverage watsonx/test watsonx/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it. The live check is
+    // the `@Cloud` probe suite `WatsonXAssumptionProbeSpec` in `modules/it`, which needs an IBM Cloud
+    // account and has not been run yet (#1314).
     coverageFloor(95),
     Test / fork                     := true,
     Compile / mainClass             := None,
@@ -988,6 +1115,45 @@ lazy val providerTestkit = (project in file("modules/provider-testkit"))
     libraryDependencies ++= Seq(
       Deps.scalatest,
       Deps.ujson
+    )
+  )
+
+// `llm4s-schema-derivation` (#1472): a JSON schema derived from a case class with Scala 3 `Mirror`, so
+// `completeStructured` needs no hand-written `ObjectSchema` that repeats the type. It layers on core's
+// public API (it builds an `ObjectSchema` and calls `completeStructured`) and adds no dependency.
+lazy val schemaDerivation = (project in file("modules/schema-derivation"))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(
+    name := "llm4s-schema-derivation",
+    commonSettings,
+    // Measured 98.94% statement and 95.24% branch coverage (`sbt coverage schemaDerivation/test
+    // schemaDerivation/coverageReport`), up from 88.63% when the recursion check and the external-package and
+    // tool specs were added, and from 98.62% / 93.33% when the case keys and the given-aware check were; 99.38% / 96.00% with the run-time recursion guard. Floor is the measured value rounded down to the nearest 5. Never lower it. Macro
+    // code runs inside the compiler, where scoverage cannot see all of it; `CompileErrorsSpec` and the golden
+    // specs exercise it when they compile.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty
+  )
+
+// `llm4s-testkit` (#1475) is for the people who USE llm4s: a scriptable fake `LLMClient` they can put
+// in their own tests (`% Test`) instead of copying the mocks out of this repository, whose test sources
+// are not published. It is a different audience from `llm4s-provider-testkit` above, which is for the
+// authors of provider modules. Depends on core only, registers no provider, and has no test framework
+// in its API, so it works with ScalaTest, MUnit and the rest.
+lazy val testkit = (project in file("modules/testkit"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-testkit",
+    commonSettings,
+    // Measured 100.00% statement and 100.00% branch coverage (`sbt coverage testkit/test
+    // testkit/coverageReport`). Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(100),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test
     )
   )
 
@@ -1101,7 +1267,8 @@ lazy val deployService = (project in file("modules/deploy-service"))
     gemini,
     anthropic,
     openai,
-    openaiCompatible
+    openaiCompatible,
+    providerTestkit % Test
   )
   .enablePlugins(JavaAppPackaging, DockerPlugin)
   .settings(
@@ -1134,6 +1301,7 @@ lazy val docSnippetsReport = taskKey[Unit](
 lazy val samples = (project in file("modules//samples"))
   .dependsOn(
     core,
+    schemaDerivation,
     rag,
     knowledgegraph,
     memory,
@@ -1149,6 +1317,7 @@ lazy val samples = (project in file("modules//samples"))
     voyage,
     bedrock,
     jina,
+    jev,
     cohere,
     watsonx,
     knowledgegraphNeo4j,
@@ -1158,7 +1327,10 @@ lazy val samples = (project in file("modules//samples"))
     agentTools,
     agentCheckpointSqlite,
     llm4sEffect,
-    llm4sZio
+    llm4sZio,
+    llm4sPekko,
+    // Test scope: the guide `docs/guide/testing-with-the-testkit` is run by a spec in this module.
+    testkit % Test
   )
   .settings(
     name := "llm4s-samples",
@@ -1291,6 +1463,33 @@ lazy val observabilityPrometheus = (project in file("modules/observability-prome
     )
   )
 
+// `llm4s-observability-micrometer` (#1466) is the Micrometer counterpart of `llm4s-observability-prometheus`: a
+// `MetricsCollector` that writes into a `MeterRegistry` the application already has, so a Spring Boot or
+// Quarkus service sees llm4s request, token, cost and error metrics next to its own with no second metrics
+// stack. It depends on core and `micrometer-core` only. Micrometer stays out of every frozen module
+// (`FrozenDependencies` bans `io.micrometer` there), and it is separate from the Prometheus module so
+// that neither client reaches users who do not use it. The series names match `llm4s-observability-prometheus`
+// (see docs/guide/observability/micrometer), so dashboards carry over.
+lazy val observabilityMicrometer = (project in file("modules/observability-micrometer"))
+  // `observabilityPrometheus % Test` is for `MicrometerPrometheusSeriesSpec`, which feeds the same calls to both
+  // collectors and compares the series they expose. It is not a dependency users get.
+  .dependsOn(core, observabilityPrometheus % Test)
+  .settings(
+    name := "llm4s-observability-micrometer",
+    commonSettings,
+    // Measured 99.49% statement and 97.83% branch coverage (`sbt coverage observabilityMicrometer/test
+    // observabilityMicrometer/coverageReport`). Floor is the measured value rounded down to the nearest 5.
+    // Never lower it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.micrometerCore,
+      Deps.scalatest            % Test,
+      Deps.micrometerPrometheus % Test
+    )
+  )
+
 lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
   // Test depends on core's tests for `ReferenceConfig`, which proves this module's
   // `reference.conf` binds `OTEL_*` under `llm4s.tracing.opentelemetry` (#1133).
@@ -1325,8 +1524,12 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
 // agent is built on: `LLMClient`, `ToolRegistry`, `Tracing` and `TraceEvent`.
 //
 // Test depends on core's tests for `MockLLMClient`, `StubLLMClient` and the shared fixtures.
+// Test scope only, `openai`, `anthropic` and `providerTestkit`: `AgentToolResultContractSpec` runs the
+// tool loop through the real OpenAI and Anthropic clients against a local server and checks every
+// request with the testkit's tool-result contract (#1703). Never make either provider a compile
+// dependency: it would put a vendor SDK on every agent user's classpath.
 lazy val agent = (project in file("modules/agent"))
-  .dependsOn(core % "compile->compile;test->test")
+  .dependsOn(core % "compile->compile;test->test", openai % Test, anthropic % Test, providerTestkit % Test)
   .settings(
     name := "llm4s-agent",
     commonSettings,
@@ -1473,6 +1676,7 @@ lazy val it = (project in file("modules/it"))
     voyage,
     bedrock,
     jina,
+    jev,
     cohere,
     watsonx,
     knowledgegraphNeo4j,
@@ -1551,13 +1755,17 @@ lazy val docs = (project in file("modules/docs"))
     voyage,
     bedrock,
     jina,
+    jev,
     cohere,
     watsonx,
     providerTestkit,
+    schemaDerivation,
+    testkit,
     workspaceShared,
     workspaceClient,
     observability,
     observabilityPrometheus,
+    observabilityMicrometer,
     traceOpentelemetry,
     agent,
     agentTestkit,
@@ -1566,6 +1774,7 @@ lazy val docs = (project in file("modules/docs"))
     knowledgegraphNeo4j,
     llm4sEffect,
     llm4sZio,
+    llm4sPekko,
     javaApi,
     springBootStarter
   )
@@ -1595,13 +1804,17 @@ lazy val docs = (project in file("modules/docs"))
         (voyage / Compile / sources).value ++
         (bedrock / Compile / sources).value ++
         (jina / Compile / sources).value ++
+        (jev / Compile / sources).value ++
         (cohere / Compile / sources).value ++
         (watsonx / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
+        (schemaDerivation / Compile / sources).value ++
+        (testkit / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (observability / Compile / sources).value ++
         (observabilityPrometheus / Compile / sources).value ++
+        (observabilityMicrometer / Compile / sources).value ++
         (traceOpentelemetry / Compile / sources).value ++
         (agent / Compile / sources).value ++
         (agentTestkit / Compile / sources).value ++
@@ -1610,6 +1823,7 @@ lazy val docs = (project in file("modules/docs"))
         (knowledgegraphNeo4j / Compile / sources).value ++
         (llm4sEffect / Compile / sources).value ++
         (llm4sZio / Compile / sources).value ++
+        (llm4sPekko / Compile / sources).value ++
         (javaApi / Compile / sources).value ++
         (springBootStarter / Compile / sources).value
     },
@@ -1618,7 +1832,16 @@ lazy val docs = (project in file("modules/docs"))
   )
 
 lazy val javaApi = (project in file("modules/java-api"))
-  .dependsOn(core % "compile->compile;test->test", agent, openai, anthropic, ollama, gemini, openaiCompatible)
+  .dependsOn(
+    core % "compile->compile;test->test",
+    agent,
+    openai,
+    anthropic,
+    ollama,
+    gemini,
+    openaiCompatible,
+    providerTestkit % Test
+  )
   .settings(
     name := "llm4s-java-api",
     commonSettings,
@@ -1631,7 +1854,12 @@ lazy val javaApi = (project in file("modules/java-api"))
   )
 
 lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
-  .dependsOn(javaApi)
+  // core's test classes carry the `fixturechat` provider and its services entry, and the provider testkit a
+  // local HTTP server: the specs for providers other than openai, anthropic and ollama use both (#1467).
+  // `observabilityMicrometer` is provided, like Actuator: `LlmMetricsAutoConfiguration` records into the
+  // application's MeterRegistry only when the application adds `llm4s-observability-micrometer` itself, so the
+  // starter puts no Micrometer jar on a classpath that did not ask for one (#1466).
+  .dependsOn(javaApi, observabilityMicrometer % "provided", core % "test->test", providerTestkit % Test)
   .settings(
     name := "llm4s-spring-boot-starter",
     commonSettings,
@@ -1645,7 +1873,9 @@ lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
       Deps.scalatest                   % Test,
       Deps.springBootStarterTest       % Test,
       Deps.springBootTestAutoConfigure % Test,
-      Deps.springBootActuator          % Test
+      Deps.springBootActuator          % Test,
+      // MeterRegistry and /actuator/metrics as an application gets them, for LlmMetricsAutoConfigurationSpec.
+      Deps.springBootActuatorAutoConfigure % Test
     )
   )
 
@@ -1695,6 +1925,26 @@ lazy val gradleDemo = (project in file("modules/gradle-demo"))
 //
 // `workspacerunner`, `samples` and the other unpublished modules have `publish / skip` and
 // no Central history, so they need no stub.
+
+// The bill of materials: a POM that pins every published artifact to one version. Generated, not listed by
+// hand: see project/Bom.scala. Its dependencyManagement block is written when the POM is made, because the
+// list comes from tasks (`publish / skip` of every project) that `pomPostProcess` cannot read.
+lazy val bom = (project in file("modules/bom"))
+  .settings(Bom.settings)
+  .settings(
+    // Named here, not in Bom.settings: scripts/check-tier-drift.sh reads project names from this file.
+    name                 := "llm4s-bom",
+    mimaFailOnNoPrevious := false,
+    makePom := {
+      val pom      = makePom.value
+      val projects = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
+      Bom.writeManagedDependencies(
+        pom,
+        PublishedArtifacts.managed(projects, (ThisBuild / scalaBinaryVersion).value),
+        version.value
+      )
+    }
+  )
 
 lazy val relocationCore = (project in file("modules/relocations/core"))
   .settings(Relocation.settings("core", "llm4s-core_3"), mimaFailOnNoPrevious := false)

@@ -16,7 +16,7 @@ import scala.jdk.CollectionConverters.*
  *     case COMPLETED          -> System.out.println(r.answer().orElseThrow());
  *     case BLOCKED            -> System.out.println("Blocked by " + r.status().guardrail().orElseThrow());
  *     case STEP_LIMIT_REACHED -> System.out.println("Hit the step limit");
- *     case SUSPENDED          -> r.status().pending().forEach(p -> System.out.println(p.toolName()));
+ *     case SUSPENDED          -> r.status().pending().forEach(p -> System.out.println(p.kind() + " " + p.id()));
  * }
  * }}}
  *

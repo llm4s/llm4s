@@ -12,6 +12,7 @@ import java.sql.{ Connection, DriverManager }
 import java.time.{ Clock, Instant }
 import java.util.concurrent.{ CountDownLatch, CyclicBarrier, LinkedBlockingQueue, TimeUnit }
 import scala.concurrent.duration.*
+import scala.jdk.CollectionConverters.*
 import scala.util.{ Try, Using }
 
 class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
@@ -455,6 +456,105 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     }
 
   // ---- configuration ----
+
+  // ---- history (#1702) ----
+
+  /** Claims `thread` on `store` and commits `n` checkpoints in a chain, returning their ids, oldest first. */
+  private def chain(store: SqliteCheckpointer, thread: ThreadId, n: Int, prefix: String = "c"): Vector[String] = {
+    val token = store.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val ids   = (1 to n).map(i => s"$prefix$i").toVector
+    ids.foldLeft(store.latest(thread).value.map(_.checkpoint.id)) { (parent, id) =>
+      store.commit(thread, Commit(token, Some(checkpoint(thread, id, parent, token)))).value
+      Some(id)
+    }
+    store.release(thread, token).value
+    ids
+  }
+
+  private def plan(path: Path, sql: String): Vector[String] =
+    Using.resource(jdbc(path)) { c =>
+      Using.resource(c.createStatement()) { s =>
+        Using.resource(s.executeQuery(s"EXPLAIN QUERY PLAN $sql")) { rows =>
+          Iterator.continually(rows).takeWhile(_.next()).map(_.getString("detail")).toVector
+        }
+      }
+    }
+
+  "The checkpoint history" should "page newest first through the primary key, and read by id through an index" in {
+    val db = SqliteFiles.fresh()
+    SqliteCheckpointer.open(db).value.close()
+    // no full scan of the table, and no sort: the page is a backwards range of (thread_id, position)
+    val page = plan(
+      db,
+      SqliteCheckpointer.HistoryPageSql.replaceFirst("\\?", "'t'").replaceFirst("\\?", "9").replaceFirst("\\?", "2")
+    )
+    page.exists(_.contains("USING PRIMARY KEY (thread_id=? AND position<?)")) shouldBe true
+    page.exists(_.contains("TEMP B-TREE")) shouldBe false
+    Vector(SqliteCheckpointer.CheckpointByIdSql, SqliteCheckpointer.PositionByIdSql).foreach { sql =>
+      val byId = plan(db, sql.replaceFirst("\\?", "'t'").replaceFirst("\\?", "'c1'"))
+      byId.exists(d => d.startsWith("SEARCH") && d.contains("INDEX") && d.contains("checkpoint_id=?")) shouldBe true
+    }
+  }
+
+  it should "survive a restart, and go with the thread in deleteThread's own transaction" in {
+    val db     = SqliteFiles.fresh()
+    val thread = ThreadId("kept")
+    val first  = SqliteCheckpointer.open(db).value
+    val ids    = chain(first, thread, 3)
+    first.close()
+    val reopened = SqliteCheckpointer.open(db).value
+    reopened.history(thread, None, 10).value.map(_.id) shouldBe ids.reverse
+    reopened.checkpoint(thread, "c1").value.map(_.id) shouldBe Some("c1")
+    reopened.deleteThread(thread).value
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_history WHERE thread_id = 'kept'")(_.getInt(1)) shouldBe 0
+    reopened.history(thread, None, 10).value shouldBe empty
+    // a new thread of the same id starts a history of its own, and reuses the old ids freely
+    chain(reopened, thread, 1) shouldBe Vector("c1")
+    reopened.history(thread, None, 10).value.map(_.id) shouldBe Vector("c1")
+    reopened.close()
+  }
+
+  it should "be pruned in one transaction while another store writes the same file" in {
+    val db      = SqliteFiles.fresh()
+    val thread  = ThreadId("busy")
+    val writer  = SqliteCheckpointer.open(db).value
+    val pruner  = SqliteCheckpointer.open(db).value
+    val rounds  = 60
+    val failure = new LinkedBlockingQueue[String]()
+    val pruning = Thread.ofPlatform().start { () =>
+      (1 to rounds).foreach { _ =>
+        pruner.prune(thread, RetentionPolicy().withMaxCheckpoints(2)).left.foreach(e => failure.add(e.message): Unit)
+        // the latest is never pruned: whatever the writer has committed, the thread still has it
+        pruner.latest(thread) match
+          case Right(_) => ()
+          case Left(e)  => failure.add(e.message): Unit
+      }
+    }
+    val token = writer.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val ids   = (1 to rounds).map(i => s"c$i").toVector
+    ids.foldLeft(Option.empty[String]) { (parent, id) =>
+      writer.commit(
+        thread,
+        Commit(
+          token,
+          Some(checkpoint(thread, id, parent, token)),
+          events = Vector(event(id).copy(checkpointId = Some(id)))
+        )
+      ) match
+        case Left(e)  => failure.add(e.message): Unit
+        case Right(_) => ()
+      Some(id)
+    }
+    pruning.join(TimeUnit.SECONDS.toMillis(60))
+    failure.asScala.toVector shouldBe empty
+    pruner.prune(thread, RetentionPolicy().withMaxCheckpoints(2)).value
+    writer.history(thread, None, 10).value.map(_.id) shouldBe Vector(s"c$rounds", s"c${rounds - 1}")
+    writer.latest(thread).value.map(_.checkpoint.id) shouldBe Some(s"c$rounds")
+    // the events of the pruned checkpoints went with them, and replay below them is refused
+    writer.eventsAfter(thread, 0L, 100).left.value shouldBe a[GraphError.ReplayUnavailable]
+    writer.close()
+    pruner.close()
+  }
 
   "SqliteCheckpointerConfig" should "default to a 5 second busy timeout and refuse a non-positive or oversized one" in {
     SqliteCheckpointerConfig.default.busyTimeout shouldBe 5.seconds

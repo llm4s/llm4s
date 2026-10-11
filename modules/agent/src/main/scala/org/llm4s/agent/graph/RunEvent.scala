@@ -35,6 +35,28 @@ enum RunEvent derives ReadWriter:
   /** The run's deadline expired, stopping it as a cancel does; its checkpoint stays `Running` for `recover`. */
   case RunTimedOut
 
+  /**
+   * [[GraphRuntime.updateState]] committed a new checkpoint over `fromCheckpoint`, with a state update
+   * applied as `asNode` (the event's `nodeId` too) when one was named.
+   */
+  case StateUpdated(
+    fromCheckpoint: String,
+    asNode: Option[String],
+    tenantId: Option[String],
+    principal: Option[String]
+  )
+
+  /**
+   * [[GraphRuntime.fork]] created this thread from checkpoint `fromCheckpoint` of thread `fromThread`;
+   * the first event of the new thread's log.
+   */
+  case ThreadForked(
+    fromThread: String,
+    fromCheckpoint: String,
+    tenantId: Option[String],
+    principal: Option[String]
+  )
+
   /** A node's own event, from [[RunContext.emit]]; `name` and `version` identify its payload. */
   case Custom(name: String, version: Int, payload: ujson.Value)
 
