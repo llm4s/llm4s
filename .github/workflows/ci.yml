@@ -163,6 +163,11 @@ jobs:
       - name: Check every published artifact is documented
         run: sbt publishedArtifactsCheck
 
+      # Fails when the generated llm4s-bom does not list exactly the artifacts the build publishes
+      # (project/Bom.scala). A release cannot be amended, so a BOM that omits a module stays that way.
+      - name: Check the BOM lists every published artifact
+        run: sbt bomCheck
+
       - name: Compile
         run: sbt compile
 
@@ -298,6 +303,7 @@ jobs:
           deployService/test deployService/coverageReport
           llm4sEffect/test llm4sEffect/coverageReport
           llm4sZio/test llm4sZio/coverageReport
+          llm4sPekko/test llm4sPekko/coverageReport
           coverageAggregate
 
       # One upload per measured module, each carrying that module's flag - Codecov attributes
@@ -601,6 +607,16 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      - name: Upload llm4s-pekko coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/llm4s-pekko/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: llm4s-pekko
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
       - name: Upload coverage report artifact
         uses: actions/upload-artifact@v7
         with:
@@ -817,6 +833,13 @@ jobs:
       - name: Build the Java sample
         working-directory: modules/samples/gradle-java
         run: gradle build installDist
+
+      # A Gradle and a Maven project that import llm4s-bom and declare two modules with no version must build
+      # against the library just published, and a Gradle project without the BOM must not (#1462).
+      - name: Build a Gradle and a Maven project against llm4s-bom
+        env:
+          REQUIRE_MAVEN: '1'
+        run: scripts/check-bom-consumers.sh 0.1.0-SNAPSHOT
 
       - name: Upload Kotlin coverage report
         if: always()

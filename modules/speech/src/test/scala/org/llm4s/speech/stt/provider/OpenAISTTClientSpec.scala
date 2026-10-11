@@ -32,6 +32,17 @@ class OpenAISTTClientSpec extends AnyFlatSpec with Matchers {
     request.fileContents("file") shouldBe wav
   }
 
+  it should "refuse a blank apiKey before any request, rather than send an empty bearer" in {
+    for key <- Seq("", "  ") do
+      val http = StubHttpClient.json(200, """{"text":"hi"}""")
+      new OpenAISTTClient(cfg.copy(apiKey = key), http)
+        .transcribe(AudioInput.BytesAudio(wav, 16000))
+        .left
+        .toOption
+        .get shouldBe a[org.llm4s.error.ConfigurationError]
+      http.requests shouldBe empty
+  }
+
   it should "delete the temporary file it staged for byte input" in {
     val http = StubHttpClient.json(200, """{"text":"hi"}""")
 

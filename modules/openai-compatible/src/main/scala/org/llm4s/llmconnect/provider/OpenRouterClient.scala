@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
+import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, ThinkingBlock, ToolCall }
 import org.llm4s.llmconnect.serialization.StandardToolCallDeserializer
@@ -55,7 +56,8 @@ import scala.util.Try
  * compressed, edited) the details are dropped and only the `reasoning` text is sent.
  *
  * @param config  `OpenAIConfig` whose `baseUrl` must contain `"openrouter.ai"`;
- *                carries the API key and model name.
+ *                carries the API key and model name. A config with `workloadIdentity` or a
+ *                blank `apiKey` is refused with an `IllegalArgumentException`.
  * @param metrics Receives per-call latency and token-usage events.
  *                Defaults to `MetricsCollector.noop`.
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere
@@ -72,7 +74,7 @@ class OpenRouterClient(
         displayName = "OpenRouter",
         model = config.model,
         baseUrl = config.baseUrl,
-        apiKey = Some(config.apiKey),
+        credential = OpenRouterClient.credential(config),
         contextWindow = config.contextWindow,
         reserveCompletion = config.reserveCompletion,
         timeouts = config.timeouts
@@ -84,6 +86,30 @@ class OpenRouterClient(
 
 object OpenRouterClient {
 
+  private val WorkloadIdentityRefusal: String =
+    "OpenRouter does not support workloadIdentity: OpenAI workload identity mints an OpenAI credential, which " +
+      "OpenRouter does not accept - set apiKey to an OpenRouter key instead"
+
+  /**
+   * The bearer credential for `config`, refusing what OpenRouter cannot use: `workloadIdentity`, whose
+   * exchanged token is an OpenAI credential, and a blank `apiKey` (refused by [[OpenAICompatibleClient]]).
+   * The constructor calls this, so a config passed to it directly is refused rather than its identity being
+   * dropped in favour of an empty static key.
+   */
+  private def credential(config: OpenAIConfig): OpenAICompatibleClient.Credential =
+    if (config.workloadIdentity.isDefined) throw new IllegalArgumentException(WorkloadIdentityRefusal)
+    OpenAICompatibleClient.Credential.Static(config.apiKey)
+
+  /** `config` unless it carries `workloadIdentity`, which OpenRouter cannot use; then the rules of `OpenAIConfig.validate`. */
+  private def validate(config: OpenAIConfig): Result[OpenAIConfig] =
+    Either
+      .cond(
+        config.workloadIdentity.isEmpty,
+        config,
+        ConfigurationError(WorkloadIdentityRefusal, List("workloadIdentity"))
+      )
+      .flatMap(OpenAIConfig.validate)
+
   /**
    * Constructs an [[OpenRouterClient]], wrapping any construction-time
    * exception in a `Left`.
@@ -92,20 +118,21 @@ object OpenRouterClient {
    *                a `baseUrl` that contains `"openrouter.ai"`.
    * @param metrics Receives per-call latency and token-usage events.
    *                Defaults to `MetricsCollector.noop`.
-   * @return `Right(client)` on success; `Left(LLMError)` if construction fails.
+   * @return `Right(client)` on success; `Left(ConfigurationError)` for a config with
+   *         `workloadIdentity` or a blank `apiKey`; `Left(LLMError)` if construction fails.
    */
   def apply(
     config: OpenAIConfig,
     metrics: MetricsCollector = MetricsCollector.noop
   )(using ModelRegistryService): Result[OpenRouterClient] =
-    Try(new OpenRouterClient(config, metrics)).toResult
+    validate(config).flatMap(valid => Try(new OpenRouterClient(valid, metrics)).toResult)
 
   def apply(
     config: OpenAIConfig,
     metrics: MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[OpenRouterClient] =
-    Try(new OpenRouterClient(config, metrics, exchangeLogging)).toResult
+    validate(config).flatMap(valid => Try(new OpenRouterClient(valid, metrics, exchangeLogging)).toResult)
 }
 
 /**
