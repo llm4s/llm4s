@@ -2551,6 +2551,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **MCP: `MCPServerConfig.timeout` now bounds a Streamable HTTP call whose reply is an SSE stream** ([#1785](https://github.com/llm4s/llm4s/issues/1785)):
+  the HTTP request timeout stops counting once the response headers arrive, and a Streamable HTTP server that answers
+  with an SSE stream - as servers built on the MCP SDKs do - sends them at once, so a call to a long-running tool
+  waited for the tool however long it ran (20 s against a 2 s timeout on the MCP reference server).
+  `StreamableHTTPTransportImpl` now reads the reply body against the same deadline as the request: a call ends at the
+  configured timeout whether the reply is plain JSON or an SSE stream, with a transport error saying it timed out (a
+  `ToolCallError.HandlerError` from a tool call), and the connection is closed, so the server sees the client leave.
+  An SSE reply is read event by event and returns as soon as its JSON-RPC response arrives, without waiting for the
+  server to end the stream. An interrupt while reading the stream is still a `CancelledError`. Behaviour change: an
+  MCP tool that runs longer than its server's `timeout` (30 s by default) over Streamable HTTP now fails instead of
+  completing late; raise `timeout` for such a server.
 - **Security - `Redaction`: a keyword argument whose value is a call, and a `"` inside a redacted Python string** ([#1813](https://github.com/llm4s/llm4s/issues/1813)):
   `Settings(token=SecretStr('...'))`, `password=Wrapper("...")` and `api_key=module.Secret(value='...')` kept the
   credential readable - `pydantic` masks its own `SecretStr` in a `repr`, a wrapper class of one's own does not - while
