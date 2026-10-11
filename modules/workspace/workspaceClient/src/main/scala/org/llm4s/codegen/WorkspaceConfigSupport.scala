@@ -2,7 +2,6 @@
 package org.llm4s.codegen
 
 import org.llm4s.error.ConfigurationError
-import org.llm4s.shared.WorkspaceSandboxConfig
 import org.llm4s.types.Result
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
 
@@ -32,38 +31,6 @@ object WorkspaceConfigSupport {
 
   implicit private val workspaceRootReader: PureConfigReader[WorkspaceRoot] =
     PureConfigReader.forProduct1("workspace")(WorkspaceRoot.apply)
-
-  /**
-   * Load sandbox config from llm4s.workspace.sandbox.profile or use default.
-   * Validates config; returns Left on validation failure.
-   *
-   * @param source PureConfig source; defaults to `ConfigSource.default`.
-   */
-  def loadSandboxConfig(source: ConfigSource = ConfigSource.default): Result[WorkspaceSandboxConfig] = {
-    val profileOpt = source.at("llm4s.workspace.sandbox.profile").load[String].toOption
-
-    val baseConfig: Result[WorkspaceSandboxConfig] =
-      profileOpt match {
-        // No profile configured -> default to permissive (backwards compatible)
-        case None =>
-          Right(WorkspaceSandboxConfig.Permissive)
-
-        // Profile string provided -> must parse to a known profile
-        case Some(value) =>
-          WorkspaceSandboxConfig
-            .fromProfileName(value)
-            .left
-            .map(msg => ConfigurationError(msg, Nil))
-      }
-
-    baseConfig.flatMap { cfg =>
-      WorkspaceSandboxConfig
-        .validate(cfg)
-        .left
-        .map(msg => ConfigurationError(msg, Nil))
-        .map(_ => cfg)
-    }
-  }
 
   /**
    * @param source PureConfig source; defaults to `ConfigSource.default`.

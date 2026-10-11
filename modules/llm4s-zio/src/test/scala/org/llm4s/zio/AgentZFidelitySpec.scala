@@ -7,6 +7,7 @@ import org.llm4s.agent.{ Agent, AgentBuilder, AgentStatus }
 import org.llm4s.agent.graph.GraphError
 import org.llm4s.agent.graph.middleware.{ ApprovalMiddleware, GuardrailMiddleware }
 import org.llm4s.agent.guardrails.builtin.LengthCheck
+import org.llm4s.agent.testkit.Fixtures
 import org.llm4s.error.SimpleError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*

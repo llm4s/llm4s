@@ -592,17 +592,9 @@ object SQLiteMemoryStore {
   }
 
   private def escapeFtsQuery(query: String): String = {
-    // Split into words and create OR query for FTS5
-    // FTS5 uses implicit AND, so we use OR for more flexible matching
-    val words = query
-      .replace("\"", "")
-      .replace("*", "")
-      .replace(":", " ")
-      .replace("(", " ")
-      .replace(")", " ")
-      .split("\\s+")
-      .filter(_.nonEmpty)
-      .map(w => s""""$w"""")
+    // Split into phrases and create OR query for FTS5
+    // FTS5 uses implicit AND, so we use OR for more flexible matching. InMemoryStore splits queries the same way.
+    val words = KeywordTokens.queryPhrases(query).map(w => s""""$w"""")
 
     if (words.isEmpty) "\"\""
     else words.mkString(" OR ")

@@ -200,32 +200,41 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
    * Format a sequence of memories into a structured context string grouped by memory type.
    *
    * Sections are emitted in a fixed priority order (Knowledge, Entity, UserFact, Conversation,
-   * Task, then any Custom types) and truncated to fit within `maxChars`.
+   * Task, then any Custom types) and truncated to fit within `maxChars`, which covers the whole
+   * output: the `# Retrieved Context` line, the section headings and the entries. A section
+   * heading is written only together with at least one entry under it, so a section whose first
+   * entry does not fit is left out entirely, and the result is empty when no entry fits.
    *
    * @param memories the memories to format
    * @param maxChars approximate character budget for the output
-   * @return formatted context string, or empty string if no memories
+   * @return formatted context string, or empty string if no memories or none fits
    */
   final protected def formatMemoriesAsContext(memories: Seq[Memory], maxChars: Int): String = {
     if (memories.isEmpty) return ""
 
-    val sections      = memories.groupBy(_.memoryType)
-    val formatted     = new StringBuilder()
-    var currentLength = 0
+    val topHeader = "# Retrieved Context\n"
+    val sections  = memories.groupBy(_.memoryType)
+    val formatted = new StringBuilder()
+    // The output is `topHeader + formatted.trim`; trimming drops the leading "\n" of the first
+    // section header and the trailing "\n" of the last entry, hence the `- 2`.
+    var currentLength = topHeader.length - 2
 
     def addSection(title: String, mems: Seq[Memory]): Unit =
-      if (mems.nonEmpty && currentLength < maxChars) {
-        val header = s"\n## $title\n"
-        formatted.append(header)
-        currentLength += header.length
+      mems.headOption.foreach { first =>
+        val header    = s"\n## $title\n"
+        val firstLine = s"- ${first.content}\n"
+        if (currentLength + header.length + firstLine.length <= maxChars) {
+          formatted.append(header).append(firstLine)
+          currentLength += header.length + firstLine.length
 
-        mems.takeWhile { memory =>
-          val line = s"- ${memory.content}\n"
-          if (currentLength + line.length <= maxChars) {
-            formatted.append(line)
-            currentLength += line.length
-            true
-          } else false
+          mems.iterator
+            .drop(1)
+            .map(memory => s"- ${memory.content}\n")
+            .takeWhile(line => currentLength + line.length <= maxChars)
+            .foreach { line =>
+              formatted.append(line)
+              currentLength += line.length
+            }
         }
       }
 
@@ -241,7 +250,7 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
     }
 
     if (formatted.nonEmpty) {
-      s"# Retrieved Context\n${formatted.toString.trim}"
+      s"$topHeader${formatted.toString.trim}"
     } else ""
   }
 }
