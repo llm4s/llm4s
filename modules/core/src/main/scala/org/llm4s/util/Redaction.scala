@@ -200,21 +200,40 @@ private[llm4s] object Redaction {
 
   /**
    * Whether the value `input(start until end)` of a sensitive `key` is prose that is left readable: the key is the
-   * bare word `assertion` (`Assertion`, `ASSERTION`; normalised as `isSensitiveKey` normalises) and the value holds a
-   * space, U+0020 (#1818). A test framework writes its assertions under that key (`Assertion: expected status 200`,
-   * `{"assertion": "response.status == 200"}`), and they hold spaces; the RFC 7521 / 7523 `assertion` grant - a JWT, a
-   * base64 or base64url SAML assertion (wrapped with line breaks, never spaces), a hex or opaque token - holds none,
-   * so it is redacted in every shape, as before. A compound key (`client_assertion`, `saml_assertion`) is never
-   * exempt, nor is a container (`{"assertion": {...}}`), whose leaves are replaced whatever they hold. Every pass that
-   * reads a field, a header line, a pair or a dict entry by its key, and the collector of [[remoteBody]], asks this of
-   * the value it found, so they agree; only the key's own replacement is withheld, and the patterns that do not read a
-   * key (bearer tokens, JWTs, API keys) still apply inside the value.
+   * bare word `assertion` (`Assertion`, `ASSERTION`; normalised as `isSensitiveKey` normalises) and the value reads
+   * as prose (#1818). A test framework writes its assertions under that key (`Assertion: expected status 200`,
+   * `{"assertion": "response.status == 200"}`, `{'assertion': 'len(items) > 0'}`): words and operators with spaces
+   * between them. So the value is prose only if it holds a space (U+0020), holds no `<`, and has no run of
+   * [[CredentialRunLength]] or more characters of `[A-Za-z0-9+/_=-]`. The RFC 7521 / 7523 `assertion` grant fails at
+   * least one of the three, however it is wrapped: a JWT, a base64 or base64url SAML assertion, a hex or opaque token
+   * is one long run (and stays one between the spaces it may be wrapped with), a raw XML SAML assertion opens with a
+   * `<`, and a PEM block holds base64 lines; so does a credential with a word beside it (`ghp_... x`, an AWS key id
+   * and its secret). Any of them is redacted in every shape, as before. A compound key (`client_assertion`,
+   * `saml_assertion`) is never exempt, nor is a container (`{"assertion": {...}}`), whose leaves are replaced
+   * whatever they hold. Every pass that reads a field, a header line, a pair or a dict entry by its key, and the
+   * collector of [[remoteBody]], asks this of the value it found, so they agree; only the key's own replacement is
+   * withheld, and the patterns that do not read a key (bearer tokens, JWTs, API keys) still apply inside the value.
+   * It reads only `input(start until end)`, once, so the passes that call it per value stay linear.
    */
   private def isProseAssertion(key: String, input: String, start: Int, end: Int): Boolean =
     key.length >= BareAssertion.length && key.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit) == BareAssertion && {
-      val space = input.indexOf(' ', start)
-      space >= 0 && space < end
+      var space = false
+      var run   = 0
+      var i     = start
+      while (i < end && run < CredentialRunLength && input.charAt(i) != '<') {
+        val c = input.charAt(i)
+        if (c == ' ') space = true
+        run = if (isCredentialChar(c)) run + 1 else 0
+        i += 1
+      }
+      i == end && space && run < CredentialRunLength
     }
+
+  /** The length of a run of `[A-Za-z0-9+/_=-]` that makes a bare `assertion` value a credential, not prose. */
+  private val CredentialRunLength = 20
+
+  private def isCredentialChar(c: Char): Boolean =
+    (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || "+/_=-".indexOf(c.toInt) >= 0
 
   private val BareAssertion = "assertion"
 

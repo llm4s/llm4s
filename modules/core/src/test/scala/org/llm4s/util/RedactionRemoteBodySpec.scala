@@ -1,5 +1,6 @@
 package org.llm4s.util
 
+import org.llm4s.testutil.LinearTime
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -158,6 +159,47 @@ class RedactionRemoteBodySpec extends AnyFlatSpec with Matchers {
     Redaction.redact("https://x.example/?assertion_count=3") should include("assertion_count=3")
   }
 
+  // A credential can hold a space, or stand beside a word: it is still no prose (#1818 review).
+  it should "redact a credential that holds or sits beside a space under a bare assertion key (#1818)" in {
+    for {
+      (kind, value, probe) <- spacedCredentials
+      key                  <- Seq("assertion", "Assertion")
+      (shape, line)        <- spacedShapes(key, value)
+    } withClue(s"$kind under $key, $shape: ") {
+      (Redaction.redact(line) should not).include(probe)
+      (Redaction.remoteBody(line, maxLength = 0) should not).include(probe)
+    }
+  }
+
+  it should "leave test-assertion prose under a bare assertion key readable in every shape (#1818)" in {
+    for {
+      value         <- proseAssertions
+      (shape, line) <- spacedShapes("assertion", value)
+    } withClue(s"$shape: ") {
+      Redaction.redact(line) shouldBe line
+      Redaction.remoteBody(line, maxLength = 0) shouldBe line
+    }
+  }
+
+  // The prose check reads only the value it is asked about: a spaceless value never scans the rest of the input.
+  it should "redact many spaceless bare assertion values in time linear in the input (#1818)" in {
+    val units: Seq[(String, Int => String)] = Seq(
+      "JSON objects"  -> (n => "[" + "{\"assertion\":\"Q\"}," * n + "1]"),
+      "Python dicts"  -> (n => "[" + "{'assertion':'Q'}," * n + "1]"),
+      "header lines"  -> (n => "Assertion:Q\n" * n),
+      "escaped JSON"  -> (n => "{\"b\":\"" + "{\\\"assertion\\\":\\\"Q\\\"}," * n + "\"}")
+    )
+    for {
+      (name, build)  <- units
+      (small, large) <- Seq(1250 -> 5000, 2500 -> 10000)
+    } {
+      LinearTime.assertLinear(s"$name, redact, $small", build(small), build(large))(Redaction.redact(_))
+      LinearTime.assertLinear(s"$name, remoteBody, $small", build(small), build(large))(
+        Redaction.remoteBody(_, maxLength = 0)
+      )
+    }
+  }
+
   it should "redact a field value containing escaped quotes completely" in {
     val out = Redaction.remoteBody("""{"access_token":"ab\"tail-part"}""")
     (out should not).include("tail-part")
@@ -233,6 +275,40 @@ object RedactionRemoteBodySpec {
     "hex"    -> "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
     "JWT"    -> "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJzcGlmZmU6Ly9leGFtcGxlIn0.c2lnbmF0dXJlLXZhbHVl"
   )
+
+  private val pemBody = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj"
+  // (kind, value, a part of it that must not survive)
+  val spacedCredentials: Seq[(String, String, String)] = Seq(
+    ("raw XML SAML", samlXml, "MIIC9zCCAd+gAwIBAgIJAKx"),
+    ("raw XML SAML, attributes only", """<saml2:Assertion ID="_a1b2c3" Version="2.0">svc</saml2:Assertion>""", "_a1b2c3"),
+    ("space-wrapped base64", grants.head._2.grouped(32).mkString(" "), grants.head._2.substring(32, 64)),
+    ("PEM armour", s"-----BEGIN PRIVATE KEY----- $pemBody -----END PRIVATE KEY-----", pemBody.substring(8, 40)),
+    ("token and a word", "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789 x", "aBcDeFgHiJkLmNoPqRsTuVwXyZ"),
+    ("AWS key id and secret", "AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "IOSFODNN7EXAMPLE")
+  )
+
+  val proseAssertions: Seq[String] = Seq(
+    "expected status 200 but got 404",
+    "response.status == 200",
+    "len(items) > 0",
+    "body contains welcome",
+    "expected [1, 2, 3] to equal [1, 2]"
+  )
+
+  // The shapes a bare `assertion` value with a space is read in.
+  def spacedShapes(key: String, value: String): Seq[(String, String)] = {
+    def quote(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"")
+    val escaped          = quote(value)
+    val inner            = s"""{"$key":"$escaped"}"""
+    Seq(
+      "JSON field"   -> s"""{"$key": "$escaped", "x": 1}""",
+      "header line"  -> s"$key: $value",
+      "Python dict"  -> s"""{'$key': '$value'}""",
+      "kwarg"        -> s"""call($key='$value')""",
+      "quoted pair"  -> s"""$key="$escaped"""",
+      "escaped JSON" -> s"""{"body":"${quote(inner)}"}"""
+    )
+  }
 
   def assertionShapes(key: String, value: String): Seq[(String, String)] = Seq(
     "JSON field"         -> s"""{"$key":"$value"}""",
