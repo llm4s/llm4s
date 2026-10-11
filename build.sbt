@@ -112,6 +112,7 @@ addCommandAlias(
 //   sbt test             Tier 1 - unit tests plus the `@Local` suites in modules/it
 //   sbt testIntegration  Tier 2 - `@Docker`: needs Postgres/pgvector, Qdrant, Neo4j
 //   sbt testWorkspace    Tier 2 - `@Workspace`: needs a built workspace-runner image + Docker
+//   sbt testMcpReference Tier 2 - `@McpReference`: needs the MCP reference server at MCP_SERVER_URL
 //   sbt testOllama       Tier 3 - `@Ollama`: needs a local Ollama with `qwen2.5:0.5b` pulled
 //   sbt testSmoke        Tier 4 - `@Cloud`: real provider APIs, real money
 //
@@ -119,6 +120,7 @@ addCommandAlias(
 // to the Local tier; adding a second `-n` would intersect to nothing.
 addCommandAlias("testIntegration", ItTiers.alias(ItTiers.Docker))
 addCommandAlias("testWorkspace", ItTiers.alias(ItTiers.Workspace))
+addCommandAlias("testMcpReference", ItTiers.alias(ItTiers.McpReference))
 addCommandAlias("testOllama", ItTiers.alias(ItTiers.Ollama))
 addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 
@@ -133,9 +135,13 @@ addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 val mimaBaselineVersion: Option[String] = None
 
 // `module` is the artifact name (the project's `name`). Apply this to frozen modules only.
+// A type annotated `@Experimental` (org.llm4s.annotation, a runtime-retained Java annotation) is outside the
+// freeze, so MiMa skips it: no hand-written `ProblemFilters.exclude` per type. scripts/mima-dry-run.sh checks
+// that this works, and that a `@Stable` type is still reported.
 def mimaFrozen(module: String) = Seq(
   mimaPreviousArtifacts := mimaBaselineVersion.map(v => "org.llm4s" %% module % v).toSet,
-  mimaFailOnNoPrevious  := false
+  mimaFailOnNoPrevious  := false,
+  mimaExcludeAnnotations += "org.llm4s.annotation.Experimental"
 )
 
 // ---- shared settings ----
@@ -266,6 +272,7 @@ lazy val llm4s = (project in file("."))
     schemaDerivation,
     llm4sEffect,
     llm4sZio,
+    llm4sPekko,
     javaApi,
     springBootStarter,
     samples,
@@ -436,6 +443,28 @@ lazy val llm4sZio = (project in file("modules/llm4s-zio"))
       Deps.zioTestSbt % Test
     ),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+  )
+
+// `llm4s-pekko` (#1457) is the third streaming bridge, after `llm4s-effect` (fs2) and `llm4s-zio` (ZStream): the
+// same `Agent` events and `LLMClient.streamComplete` chunks as an Apache Pekko Streams `Source`. It depends on core,
+// the agent runtime and `pekko-stream` only. Pekko stays out of every frozen module (`FrozenDependencies` bans
+// `org.apache.pekko` and Akka there).
+lazy val llm4sPekko = (project in file("modules/llm4s-pekko"))
+  .dependsOn(core, agent)
+  .settings(
+    name := "llm4s-pekko",
+    commonSettings,
+    // Measured 97.54% statement and 88.24% branch coverage (`sbt coverage llm4sPekko/test llm4sPekko/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.pekkoStream,
+      Deps.scalatest          % Test,
+      Deps.pekkoStreamTestkit % Test,
+      Deps.pekkoTestkit       % Test
+    )
   )
 
 lazy val core = (project in file("modules/core"))
@@ -1175,7 +1204,8 @@ lazy val samples = (project in file("modules//samples"))
     agent,
     agentTools,
     llm4sEffect,
-    llm4sZio
+    llm4sZio,
+    llm4sPekko
   )
   .settings(
     name := "llm4s-samples",
@@ -1532,6 +1562,7 @@ lazy val docs = (project in file("modules/docs"))
     knowledgegraphNeo4j,
     llm4sEffect,
     llm4sZio,
+    llm4sPekko,
     javaApi,
     springBootStarter
   )
@@ -1575,6 +1606,7 @@ lazy val docs = (project in file("modules/docs"))
         (knowledgegraphNeo4j / Compile / sources).value ++
         (llm4sEffect / Compile / sources).value ++
         (llm4sZio / Compile / sources).value ++
+        (llm4sPekko / Compile / sources).value ++
         (javaApi / Compile / sources).value ++
         (springBootStarter / Compile / sources).value
     },
