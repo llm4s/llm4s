@@ -16,6 +16,7 @@ import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Path, Paths }
 import java.util.concurrent.atomic.AtomicReference
+import scala.jdk.CollectionConverters._
 import scala.util.Try
 
 /**
@@ -23,11 +24,12 @@ import scala.util.Try
  *
  * `hello.scala` is a standalone Scala CLI script, so sbt does not compile it. What this spec can check is what the
  * script depends on, against the API on this branch:
- *  - the committed `resources/application.conf` loads, its default section is the OpenAI one, and the
- *    documented override (`llm4s.providers.provider`) selects the Ollama one;
+ *  - the committed `resources/application.conf` loads with the OpenAI section as its default, and
+ *    `resources/ollama.conf`, the documented `-Dconfig.resource` alternative, with the Ollama one;
  *  - the same calls the script makes (`defaultProvider` section, model registry, `getClient`, `complete`), with the
  *    prompt read out of the script, work end to end against a fake Ollama server, so no key and no network is needed;
- *  - the three code blocks on the docs page are the committed files, so the page cannot drift from what was run.
+ *  - the code blocks on the docs page, rendered for the script's release, are the committed files, so the page cannot
+ *    drift from what was run; rendered for 0.5.0 they add the provider modules and a logging backend.
  */
 class ScalaCliQuickstartSpec extends AnyFlatSpec with Matchers {
 
@@ -38,9 +40,10 @@ class ScalaCliQuickstartSpec extends AnyFlatSpec with Matchers {
       .find(dir => Files.exists(dir.resolve("build.sbt")))
       .getOrElse(throw new IllegalStateException("build.sbt not found above the working directory"))
 
-  private val sampleDir = root.resolve("modules").resolve("samples").resolve("scala-cli")
-  private val pageFile  = root.resolve("docs").resolve("getting-started").resolve("scala-cli.md")
-  private val confFile  = sampleDir.resolve("resources").resolve("application.conf")
+  private val sampleDir  = root.resolve("modules").resolve("samples").resolve("scala-cli")
+  private val pageFile   = root.resolve("docs").resolve("getting-started").resolve("scala-cli.md")
+  private val confFile   = sampleDir.resolve("resources").resolve("application.conf")
+  private val ollamaFile = sampleDir.resolve("resources").resolve("ollama.conf")
 
   // A checkout with CRLF line endings must not make the comparisons below fail.
   private def read(path: Path): String =
@@ -105,8 +108,10 @@ class ScalaCliQuickstartSpec extends AnyFlatSpec with Matchers {
   }
 
   // `${?OPENAI_API_KEY}` resolves to nothing when the variable is unset, as in a real run.
-  private def committedConfig: ConfigObjectSource =
-    ConfigSource.fromConfig(ConfigFactory.parseFile(confFile.toFile).resolve())
+  private def committedConfig: ConfigObjectSource = configOf(confFile)
+
+  private def configOf(file: Path): ConfigObjectSource =
+    ConfigSource.fromConfig(ConfigFactory.parseFile(file.toFile).resolve())
 
   /** The script's four steps, with the provider config chosen by the caller instead of `application.conf`. */
   private def runScript(config: ProviderConfig): Result[Completion] =
@@ -119,10 +124,11 @@ class ScalaCliQuickstartSpec extends AnyFlatSpec with Matchers {
 
   // --- the files ---------------------------------------------------------------------------------------------
 
-  "The Scala CLI sample" should "ship the three files the docs page lists, and name them in the script" in {
+  "The Scala CLI sample" should "ship the files the docs page lists, and name them in the script" in {
     Files.isRegularFile(sampleDir.resolve("hello.scala")) shouldBe true
     Files.isRegularFile(confFile) shouldBe true
     Files.isRegularFile(sampleDir.resolve("logback.xml")) shouldBe true
+    Files.isRegularFile(ollamaFile) shouldBe true
 
     script should include("//> using resourceDir resources")
     script should include("-Dlogback.configurationFile=logback.xml")
@@ -152,13 +158,21 @@ class ScalaCliQuickstartSpec extends AnyFlatSpec with Matchers {
     config.model shouldBe "gpt-4o-mini"
   }
 
-  it should "pick the Ollama section when llm4s.providers.provider is overridden, as the page documents" in {
-    val overridden = ConfigSource.string("llm4s.providers.provider = \"ollama-local\"").withFallback(committedConfig)
-
-    val config = Llm4sConfig.providerFrom(overridden).fold(error => fail(error.formatted), identity)
+  it should "load ollama.conf, the -Dconfig.resource alternative, with the Ollama section as its default" in {
+    val config = Llm4sConfig.providerFrom(configOf(ollamaFile)).fold(error => fail(error.formatted), identity)
 
     config.providerId.asString shouldBe "ollama"
     config.model shouldBe "llama3"
+  }
+
+  it should "keep one section per file, so a missing OpenAI key cannot stop the Ollama run" in {
+    // 0.4.x validates every section of `llm4s.providers` when it loads the default one: an OpenAI section without a
+    // key next to the Ollama one failed the no-key run with "missing required fields: apiKey".
+    def sections(file: Path): Set[String] =
+      ConfigFactory.parseFile(file.toFile).getConfig("llm4s.providers").root().keySet().asScala.toSet - "provider"
+
+    sections(confFile) shouldBe Set("openai-main")
+    sections(ollamaFile) shouldBe Set("ollama-local")
   }
 
   // --- the run ---------------------------------------------------------------------------------------------------
@@ -168,7 +182,7 @@ class ScalaCliQuickstartSpec extends AnyFlatSpec with Matchers {
       val local = ConfigSource.string(s"""llm4s.providers.ollama-local.baseUrl = "http://localhost:$port"""")
       val config =
         Llm4sConfig
-          .provider(local.withFallback(committedConfig), "ollama-local")
+          .providerFrom(local.withFallback(configOf(ollamaFile)))
           .fold(error => fail(error.formatted), identity)
 
       val completion = runScript(config).fold(error => fail(error.formatted), identity)
@@ -180,25 +194,83 @@ class ScalaCliQuickstartSpec extends AnyFlatSpec with Matchers {
 
   // --- the page ----------------------------------------------------------------------------------------------------
 
+  /** The fenced blocks of a language on a page, in order. */
+  private def blocks(language: String, text: String = page): Seq[String] =
+    ("(?s)```" + language + "\n(.*?)```").r.findAllMatchIn(text).map(_.group(1)).toSeq
+
   /** The first fenced block of a language on the page. */
   private def block(language: String): String =
-    ("(?s)```" + language + "\n(.*?)```").r
-      .findFirstMatchIn(page)
+    blocks(language).headOption.getOrElse(fail(s"the page has no ```$language block"))
+
+  private lazy val releaseTag = "{{ site.data.project.latest_release }}"
+  private lazy val from050    = """{%- unless site.data.project.latest_release contains "0.4." %}"""
+  private lazy val endFrom050 = "{%- endunless %}"
+
+  /**
+   * What Jekyll renders for a release: the version placeholder, and the lines kept only from 0.5.0 on. The `-` in
+   * `{%-` removes the line break before each tag, as Liquid's whitespace control does.
+   */
+  private def render(text: String, release: String): String = {
+    val pattern = ("(?s)\n" + java.util.regex.Pattern.quote(from050) + "(.*?)\n" +
+      java.util.regex.Pattern.quote(endFrom050)).r
+    val kept = pattern.replaceAllIn(
+      text,
+      m => java.util.regex.Matcher.quoteReplacement(if (release.contains("0.4.")) "" else m.group(1))
+    )
+    kept.replace(releaseTag, release)
+  }
+
+  private def usingDeps(text: String): Seq[String] =
+    text.linesIterator.map(_.trim).filter(_.startsWith("//> using dep ")).map(_.stripPrefix("//> using dep ")).toSeq
+
+  private lazy val logbackVersion: String =
+    """val logback\s*=\s*"([^"]+)"""".r
+      .findFirstMatchIn(read(root.resolve("project").resolve("Dependencies.scala")))
       .map(_.group(1))
-      .getOrElse(fail(s"the page has no ```$language block"))
+      .getOrElse(fail("no `val logback` in project/Dependencies.scala"))
 
   /** The code of a file or block: no blank lines, and no comment-only lines (the files carry explanatory headers). */
   private def code(text: String, isComment: String => Boolean): Seq[String] =
     text.linesIterator.map(_.stripTrailing()).filterNot(line => line.isBlank || isComment(line.trim)).toSeq
 
-  it should "match the page's hello.scala block, apart from the version placeholder" in {
-    val onPage = block("scala").replace("{{ site.data.project.latest_release }}", latestRelease)
-
-    code(onPage, scalaComment) shouldBe code(script, scalaComment)
+  it should "match the page's hello.scala block, rendered for the script's release" in {
+    latestRelease should startWith("0.4.")
+    code(render(block("scala"), latestRelease), scalaComment) shouldBe code(script, scalaComment)
   }
 
-  it should "match the page's application.conf block" in {
-    code(block("hocon"), hoconComment) shouldBe code(read(confFile), hoconComment)
+  it should "add the provider modules and a logging backend to the page's script once 0.5.0 is the latest release" in {
+    val deps = usingDeps(render(block("scala"), "0.5.0"))
+
+    deps shouldBe Seq(
+      "org.llm4s::llm4s-core:0.5.0",
+      "org.llm4s::llm4s-openai:0.5.0",
+      "org.llm4s::llm4s-ollama:0.5.0",
+      s"ch.qos.logback:logback-classic:$logbackVersion"
+    )
+    // Rendered for 0.4.x, the one dependency is core: the provider modules are not published for it.
+    usingDeps(render(block("scala"), "0.4.1")) shouldBe Seq("org.llm4s::llm4s-core:0.4.1")
+  }
+
+  it should "add a provider module to the installation page's Scala CLI lines from 0.5.0 on" in {
+    val installation = read(root.resolve("docs").resolve("getting-started").resolve("installation.md"))
+    val cli = blocks("scala", installation)
+      .find(_.contains("//> using dep org.llm4s::llm4s-core"))
+      .getOrElse(fail("installation.md has no Scala CLI block"))
+
+    usingDeps(render(cli, "0.4.1")) shouldBe Seq("org.llm4s::llm4s-core:0.4.1")
+    usingDeps(render(cli, "0.5.0")) shouldBe Seq("org.llm4s::llm4s-core:0.5.0", "org.llm4s::llm4s-openai:0.5.0")
+  }
+
+  it should "match the page's application.conf and ollama.conf blocks" in {
+    val hocon = blocks("hocon")
+    hocon should have size 2
+    code(hocon(0), hoconComment) shouldBe code(read(confFile), hoconComment)
+    code(hocon(1), hoconComment) shouldBe code(read(ollamaFile), hoconComment)
+  }
+
+  it should "document the run commands the script's header gives" in {
+    page should include("scala-cli run . --java-opt -Dconfig.resource=ollama.conf")
+    script should include("scala-cli run . --java-opt -Dconfig.resource=ollama.conf")
   }
 
   it should "match the page's logback.xml block" in {

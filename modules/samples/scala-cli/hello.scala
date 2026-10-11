@@ -1,4 +1,5 @@
 //> using scala 3.7.1
+//> using jvm 21
 //> using dep org.llm4s::llm4s-core:0.4.1
 //> using resourceDir resources
 //> using javaOpt -Dlogback.configurationFile=logback.xml
@@ -6,12 +7,12 @@
 // A first LLM4S call in one file, with no sbt project.
 //
 //   cd modules/samples/scala-cli
-//   scala-cli run .                                              # OpenAI: set OPENAI_API_KEY first
-//   scala-cli run . --java-opt -Dllm4s.providers.provider=ollama-local   # local Ollama, no API key
+//   scala-cli run .                                         # OpenAI: set OPENAI_API_KEY first
+//   scala-cli run . --java-opt -Dconfig.resource=ollama.conf   # local Ollama, no API key
 //
 // Run it from this directory: `logback.xml` is found relative to the working directory.
-// The provider comes from `resources/application.conf` (named sections, see
-// docs/getting-started/configuration.md). The version above is the latest release; update it
+// The provider comes from `resources/application.conf`, or `resources/ollama.conf` when selected as above
+// (named sections, see docs/getting-started/configuration.md). The version above is the latest release; update it
 // (and read the 0.5.0 note in docs/getting-started/scala-cli.md) when a newer one is published.
 
 import org.llm4s.config.Llm4sConfig
