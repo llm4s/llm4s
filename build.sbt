@@ -210,12 +210,12 @@ lazy val listPublishedArtifacts = taskKey[Unit](
 )
 
 // ---- software bill of materials ----
-// One CycloneDX BOM per published `llm4s-*` module (samples, `it`, benchmarks and the relocation stubs
-// have none), collected into `target/boms` of the root project. The release workflow attaches them to
-// the GitHub release and CI builds them on every pull request, so generation cannot silently break.
-// See docs/reference/sbom.md.
-lazy val publishedBoms = taskKey[Seq[File]](
-  "Write a CycloneDX BOM for every published llm4s-* module into target/boms and return the files"
+// One CycloneDX SBOM per published `llm4s-*` module that ships a jar (samples, `it`, benchmarks, the
+// relocation stubs and any POM-only artifact have none), collected into `target/sboms` of the root
+// project. The release workflow attaches them to the GitHub release and CI builds them on every pull
+// request, so generation cannot silently break. See docs/reference/sbom.md.
+lazy val publishedSboms = taskKey[Seq[File]](
+  "Write a CycloneDX SBOM for every published llm4s-* module into target/sboms and return the files"
 )
 
 // ---- coverage policy check ----
@@ -328,12 +328,18 @@ lazy val llm4s = (project in file("."))
       real.foreach(a => println(s"artifact $a"))
       stubs.foreach(a => println(s"stub $a"))
     },
-    publishedBoms / aggregate := false,
-    publishedBoms := Def.taskDyn {
-      val modules =
-        Def.task((thisProjectRef.value, name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
-      val refs   = modules.collect { case (ref, name, false) if name.startsWith("llm4s-") => ref }
-      val outDir = target.value / "boms"
+    publishedSboms / aggregate := false,
+    publishedSboms := Def.taskDyn {
+      // A module that publishes a jar gets an SBOM. A POM-only artifact (a relocation stub, or a bill of
+      // materials such as llm4s-bom) has no code and no dependencies of its own to describe.
+      val modules = Def
+        .task(
+          (thisProjectRef.value, name.value, (publish / skip).value, (Compile / packageBin / publishArtifact).value)
+        )
+        .all(ScopeFilter(inAnyProject))
+        .value
+      val refs   = modules.collect { case (ref, name, false, true) if name.startsWith("llm4s-") => ref }
+      val outDir = target.value / "sboms"
       Def.task {
         val log  = streams.value.log
         val boms = makeBom.all(ScopeFilter(inProjects(refs: _*))).value
@@ -347,7 +353,7 @@ lazy val llm4s = (project in file("."))
           (copy, dropped)
         }
         log.info(
-          s"Wrote ${written.size} BOMs to $outDir; dropped ${written.map(_._2).sum} test-only components sbt-sbom listed"
+          s"Wrote ${written.size} SBOMs to $outDir; dropped ${written.map(_._2).sum} test-only components"
         )
         written.map(_._1).sortBy(_.getName)
       }

@@ -135,13 +135,13 @@ jobs:
 
       - name: Generate and check the SBOMs
         run: |
-          sbt -batch publishedBoms
+          sbt -batch publishedSboms
           sbt -batch -error listPublishedArtifacts | grep -E '^(artifact|stub) ' > target/published-artifacts.txt
-          scripts/check-sbom.sh target/boms target/published-artifacts.txt
+          scripts/check-sbom.sh target/sboms target/published-artifacts.txt
           # A BOM named for a snapshot would be attached to the wrong release: sbt-dynver derives the version from
           # the tag, so every file must carry exactly the tag's version.
           VERSION="${GITHUB_REF_NAME#v}"
-          WRONG="$(ls target/boms | grep -vF -- "-${VERSION}.bom.json" || true)"
+          WRONG="$(ls target/sboms | grep -vF -- "-${VERSION}.bom.json" || true)"
           if [ -n "$WRONG" ]; then
             echo "These BOMs are not named for ${VERSION}:"
             echo "$WRONG"
@@ -151,7 +151,7 @@ jobs:
       - name: Attach the SBOMs to the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" target/boms/*.bom.json --clobber
+        run: gh release upload "$GITHUB_REF_NAME" target/sboms/*.bom.json --clobber
 
   # Deploy the docs once the release is published and visible. Deliberately independent
   # of the container image below: a registry failure must not leave llm4s.org advertising

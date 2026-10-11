@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Validates the CycloneDX BOMs that `sbt publishedBoms` writes (see docs/reference/sbom.md).
+# Validates the CycloneDX BOMs that `sbt publishedSboms` writes (see docs/reference/sbom.md).
 #
 # Usage: scripts/check-sbom.sh BOM_DIR [PUBLISHED_LIST]
-#   BOM_DIR         the directory holding the *.bom.json files (target/boms)
+#   BOM_DIR         the directory holding the *.bom.json files (target/sboms)
 #   PUBLISHED_LIST  optional: the output of `sbt -error listPublishedArtifacts` (`artifact llm4s-core_3`
-#                   lines, or bare artifact names). When given, there must be exactly one BOM per published
-#                   artifact: a published module without one, or a BOM for something that is not published,
-#                   fails.
+#                   lines, or bare artifact names; POM-only `stub` and `bom` lines are ignored). When
+#                   given, there must be exactly one BOM per published artifact: a published module
+#                   without one, or a BOM for something that is not published, fails.
 #
 # What it fails on, naming the file:
 #   - a BOM that is not JSON, is not CycloneDX, or has no `specVersion` (1.x) or no described component;
@@ -16,7 +16,7 @@
 #   - a test framework among the components of a module that does not ship one (llm4s-provider-testkit's
 #     API is built on ScalaTest, so it is allowed to);
 #   - a component the described module does not reach through the BOM's own dependency graph: that is how a
-#     `dependsOn(other % Test)` project showed up before `sbt publishedBoms` pruned it (project/SbomPrune.scala);
+#     `dependsOn(other % Test)` project showed up before `sbt publishedSboms` pruned it (project/SbomPrune.scala);
 #   - the llm4s-core BOM lacking one of the libraries llm4s-core is known to depend on.
 #
 # Needs python3 (already used by scripts/check-doc-links.sh). Works with bash 3.2 (macOS).
@@ -131,7 +131,9 @@ if published_list:
         line = line.strip()
         if line.startswith("artifact "):
             published.add(line.split(None, 1)[1])
-        elif line and not line.startswith(("stub ", "#")):
+        elif line and not line.startswith(("stub ", "bom ", "#")):
+            # `stub` (relocation) and `bom` (the llm4s-bom bill of materials) lines are POM-only artifacts:
+            # no code, so no SBOM.
             published.add(line)
     for missing in sorted(published - set(described)):
         errors.append(f"no BOM for the published artifact {missing}")

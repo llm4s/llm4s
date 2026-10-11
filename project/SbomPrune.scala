@@ -9,7 +9,7 @@ import sjsonnew.support.scalajson.unsafe.{ Parser, PrettyPrinter }
  * component with scope `required`, although the module's POM gives it `<scope>test</scope>` and the BOM's own
  * dependency graph has no edge from the module to it: 21 such components in 17 of the 32 published modules,
  * for example `llm4s-provider-testkit` in nearly every provider module. A BOM that says a module needs its
- * test kit is wrong, so `publishedBoms` writes each BOM through [[prune]].
+ * test kit is wrong, so `publishedSboms` writes each BOM through [[prune]].
  *
  * The rule is the BOM's own: a component stays when the described component reaches it through the
  * `dependencies` graph, and a dependency entry stays when its `ref` is reachable. Everything else is dropped.

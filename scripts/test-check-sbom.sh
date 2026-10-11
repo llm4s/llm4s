@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests for scripts/check-sbom.sh: a good set of BOMs passes, and each kind of defect fails with a message
 # that names it. No sbt is needed: every case writes a small fixture directory of CycloneDX files (the
-# shape `sbt publishedBoms` produces) with one thing changed.
+# shape `sbt publishedSboms` produces) with one thing changed.
 #
 # Usage: scripts/test-check-sbom.sh
 set -euo pipefail
@@ -116,6 +116,9 @@ make_fixture "$WORK/good"
 published_list "$WORK/published.txt"
 expect_pass "a good set passes" "$WORK/good"
 expect_pass "a good set passes against the published list (stubs are ignored)" "$WORK/good" "$WORK/published.txt"
+printf '%s\n' "artifact llm4s-core_3" "artifact llm4s-agent_3" "artifact llm4s-provider-testkit_3" "bom llm4s-bom" \
+  "stub core_3" > "$WORK/published-with-bom.txt"
+expect_pass "a POM-only bill of materials (bom line) needs no SBOM" "$WORK/good" "$WORK/published-with-bom.txt"
 
 defect() { # defect MUTATION FRAGMENT DESCRIPTION
   make_fixture "$WORK/$1" "$1"

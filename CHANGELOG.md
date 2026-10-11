@@ -477,15 +477,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a `Left(ServiceError)`, `baseUrl` and `iamUrl` must be `https` (except localhost), the API key
   is trimmed, and setting both `projectId` and `spaceId` is a configuration error.
 - **A CycloneDX SBOM per published module, and a dependency scan** ([#1464](https://github.com/llm4s/llm4s/issues/1464)):
-  `sbt publishedBoms` writes one CycloneDX 1.6 JSON BOM for each of the 32 published `llm4s-*` modules into
-  `target/boms` (`<artifact>-<version>.bom.json`; the samples, `it`, benchmarks and the relocation stubs have none),
-  using the `sbt-sbom` build plugin, which adds nothing to the published POMs (all 46 generated POMs are
-  byte-identical with and without it). The release workflow's new `sbom` job attaches them to the GitHub Release
-  after it exists, so a failure there cannot affect Maven Central, the Release, the docs or the image; CI builds and
-  validates them on every pull request (`scripts/check-sbom.sh`, tested by `scripts/test-check-sbom.sh`: bad JSON, no
-  components, a build-machine path, a test framework, a published module without a BOM) and uploads them as an
-  artifact. A new `Dependency scan` workflow runs OSV-Scanner over the BOMs on pull requests that touch the
-  dependency files and weekly, report only for now. See `docs/reference/sbom.md`.
+  `sbt publishedSboms` writes one CycloneDX 1.6 JSON SBOM for each published `llm4s-*` module that ships a jar into
+  `target/sboms` (`<module>-<version>.bom.json`; the samples, `it`, benchmarks, the relocation stubs and any POM-only
+  artifact have none), using the `sbt-sbom` build plugin (MIT; it uses the Apache-2.0 `cyclonedx-core-java`), which adds nothing to the published POMs. The
+  release workflow's new `sbom` job attaches them to the GitHub Release after it exists, so a failure there cannot
+  affect Maven Central, the Release, the docs or the image; CI builds and validates them on every pull request
+  (`scripts/check-sbom.sh`, tested by `scripts/test-check-sbom.sh`) and uploads them as an artifact. A new
+  `Dependency scan` workflow runs OSV-Scanner v2.6.0 (Apache-2.0, pinned by SHA-256) over them on pull requests that touch the
+  dependency files and weekly. A pull request fails only when it adds a HIGH or CRITICAL advisory its base does not
+  have (`scripts/osv-new-findings.sh`); advisories already on `main` are reported, a scanner outage is a warning on a
+  pull request, and no secret is used. See `docs/reference/sbom.md`.
 - **A MiMa dry run, and MiMa skips `@Experimental` types** ([#1281](https://github.com/llm4s/llm4s/issues/1281)):
   `scripts/mima-dry-run.sh` shows, before 0.5.0 exists, that setting `mimaBaselineVersion` will work. In a scratch
   clone of `HEAD` it publishes the build at a throwaway version to a temporary Maven repository (nothing reaches
