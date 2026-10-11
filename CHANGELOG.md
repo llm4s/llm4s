@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on `main` now fails in its first step, instead of building for minutes and then being rejected by the `github-pages`
   environment. The release dispatch never sets it. `docs/reference/release.md` also records that only a tag with the
   aggregate `docs` project (after v0.4.1) can be built by today's `pages.yml`.
+- **Kotlin `AgentKt.forget(threadId)`** ([#1693](https://github.com/llm4s/llm4s/issues/1693)): a suspend function
+  that forgets a conversation by its thread id, delegating to `JAgent.forget(threadId)` and throwing `LLMException`
+  on failure, so a Kotlin caller can remove a named conversation whose turn left no result - a failed
+  `stream(threadId, ...)` flow - where `forget(previous)` needed one. Forgetting an unknown thread succeeds; a thread
+  whose turn is still running is refused (`ThreadBusy`) and nothing is removed.
 - **Checkpoint history, fork, `updateState` and retention** ([#1702](https://github.com/llm4s/llm4s/issues/1702),
   Stage 2 slice 3 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): a `Checkpointer` keeps every checkpoint a
   thread's runs commit, not only the latest. `GraphRuntime.history(threadId, before, limit)` pages them newest first
