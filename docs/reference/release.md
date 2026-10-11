@@ -67,6 +67,24 @@ That redeploys the site from that tag's content, so use the **latest** release's
 back. The tag must exist, and `latest_release` in the install snippets always comes from the newest published GitHub
 Release, whichever tag is built.
 
+To check the path **without deploying**, add `dry_run=true`. The run does every build step (tag validation, checkout of
+the tag, version extraction, the aggregate Scaladoc and its package check, Jekyll, the Pages artifact) and skips the
+deploy job, so llm4s.org is untouched. It runs in a concurrency group of its own, so it never displaces a real deploy
+waiting in the `pages` group, and it works on any branch, so a change to `pages.yml` can be tried before it merges:
+
+```bash
+gh workflow run pages.yml --ref main -f ref=v0.5.0 -f dry_run=true          # the release path, build only
+gh workflow run pages.yml --ref my-branch -f dry_run=true                   # a pages.yml change, build only
+```
+
+A run that is not a dry run and is not on `main` fails in its first step, before it builds, because the environment
+would reject its deploy anyway.
+
+Only a tag whose commit has the aggregate `docs` sbt project can be built by today's `pages.yml`: it runs
+`sbt docs/doc`. That project arrived after v0.4.1 (in #1155), so `-f ref=v0.4.1` fails at "Generate Scaladoc"; the first
+tag the release path can build is the next release. Use a dry run on `main` without `ref` to check everything except the
+tag checkout until then.
+
 ### 3. What gets published is whatever the tagged commit aggregates
 
 `sbt ci-release` publishes the root aggregate **as it exists on the tagged commit**. Work that
