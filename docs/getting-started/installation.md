@@ -120,6 +120,22 @@ configurations.all {
 > and the [dependency conflicts reference](/reference/dependency-conflicts).
 
 
+### Scala CLI
+
+No build at all: declare the dependency in the file.
+
+```scala
+//> using scala 3.7.1
+//> using jvm 21
+//> using dep org.llm4s::llm4s-core:{{ site.data.project.latest_release }}
+{%- unless site.data.project.latest_release contains "0.4." %}
+//> using dep org.llm4s::llm4s-openai:{{ site.data.project.latest_release }}
+{%- endunless %}
+```
+
+From 0.5.0, add the provider module you use next to `llm4s-core` (`llm4s-openai` above). The
+[Scala CLI quick start](scala-cli) has a complete file that makes a first call.
+
 ### Multi-Module Project
 
 If you have a multi-module project:
@@ -133,6 +149,74 @@ lazy val myProject = (project in file("."))
       "org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"
     )
   )
+```
+
+### Align versions with the BOM
+
+{: .note }
+> Not yet published. `llm4s-bom` exists in the build as of
+> [#1462](https://github.com/llm4s/llm4s/issues/1462) but ships in the next release.
+
+A project that uses several llm4s modules (a provider, `llm4s-rag`, `llm4s-observability`) can state the
+version once, in the bill of materials `llm4s-bom`, and leave it off every module. The BOM contains no code;
+it supplies the versions released together. Explicit overrides and dependency conflict resolution can still
+select different versions, so check the resolved dependency graph.
+
+Maven and Gradle have no notion of Scala cross-versioning, so the modules are written with the Scala binary
+suffix (`llm4s-core_3`), and the BOM itself has none (`llm4s-bom`).
+
+**Maven** (import scope):
+
+```xml
+<dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>org.llm4s</groupId>
+      <artifactId>llm4s-bom</artifactId>
+      <version>{{ site.data.project.latest_release }}</version>
+      <type>pom</type>
+      <scope>import</scope>
+    </dependency>
+  </dependencies>
+</dependencyManagement>
+
+<dependencies>
+  <dependency>
+    <groupId>org.llm4s</groupId>
+    <artifactId>llm4s-core_3</artifactId>
+  </dependency>
+  <dependency>
+    <groupId>org.llm4s</groupId>
+    <artifactId>llm4s-openai_3</artifactId>
+  </dependency>
+</dependencies>
+```
+
+**Gradle** (Kotlin DSL; in Groovy write `implementation platform("org.llm4s:llm4s-bom:...")`):
+
+```kotlin
+dependencies {
+    implementation(platform("org.llm4s:llm4s-bom:{{ site.data.project.latest_release }}"))
+    implementation("org.llm4s:llm4s-core_3")
+    implementation("org.llm4s:llm4s-openai_3")
+}
+```
+
+Gradle `platform(...)` treats the BOM versions as recommendations that other dependencies can upgrade.
+For strict version pinning in an application, use `enforcedPlatform(...)` instead. Publishing libraries
+should generally keep `platform(...)` to avoid forcing their versions on consumers. See the
+[Gradle platform documentation](https://docs.gradle.org/current/userguide/platforms.html#sub:bom_import).
+
+**sbt** has no BOM import, so the BOM is optional there: keep one `val` for the version, as the sections
+below do (`%%` adds the `_3` suffix itself):
+
+```scala
+val llm4sVersion = "{{ site.data.project.latest_release }}"
+
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core"   % llm4sVersion,
+  "org.llm4s" %% "llm4s-openai" % llm4sVersion
+)
 ```
 
 ### Unreleased changes (`main`)
@@ -453,6 +537,23 @@ The Cohere embedding provider (`EMBEDDING_MODEL=cohere/<model>`), on Cohere's na
 with its `llm4s.embeddings.cohere` config block and a typed `CohereInputType` (`search_document`,
 `search_query`, ...). Cohere chat is a different module: `llm4s-openai-compatible`. A community
 provider module under `modules/providers/`; it brings no dependency beyond `llm4s-core`.
+
+### For the Jev decision model
+
+{: .note }
+> Not yet published. `llm4s-jev` exists in the build as of [#1265](https://github.com/llm4s/llm4s/issues/1265) but ships in
+> the next release.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-jev" % llm4sVersion
+```
+
+A typed client for TypeSafe's Jev decision model: send a state and typed questions (Noul, Choice, Score), get typed answers.
+It is not a chat provider and returns no `Completion`. Configured under `llm4s.jev`, with the key in `TYPESAFE_API_KEY`. A
+community module under `modules/providers/`; it brings no dependency beyond `llm4s-core`. See
+[Jev decision model](../guide/jev).
+
 ### For IBM watsonx.ai
 
 ```scala

@@ -177,7 +177,7 @@ To ensure code quality, we use a Git pre-commit hook that automatically checks c
 
 ### Prerequisites
 
-- JDK 21+
+- JDK 21+ (see [supported JDKs](docs/reference/v1-scope.md#scala-and-jdk-support))
 - SBT
 - Docker
 
@@ -252,6 +252,8 @@ each provider module's `reference.conf` has an example section. See the
 [configuration guide](docs/getting-started/configuration.md#named-provider-sections) for all of them
 and [running the samples](docs/getting-started/configuration.md#running-the-samples) for the
 samples' own bindings.
+
+No build tool yet? The [Scala CLI quick start](docs/getting-started/scala-cli.md) makes a first call from a single file.
 
 ### Running the Examples
 
