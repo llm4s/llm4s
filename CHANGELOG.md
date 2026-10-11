@@ -16,6 +16,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `recordConversation` also run `extractEntities` over each recorded user and assistant message, with its
   conversation id - one extra LLM call per message on `LLMMemoryManager`, nothing on `SimpleMemoryManager`;
   a failed extraction is logged and the message stays recorded. `MemoryManagerConfig.fullFeatured` turns it on.
+- **`llm4s-agent-checkpoint-sqlite`: the first durable checkpointer** ([#1701](https://github.com/llm4s/llm4s/issues/1701),
+  Stage 2 slice 2 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `SqliteCheckpointer`
+  (`org.llm4s.agent.graph.sqlite`) keeps threads - checkpoint history, pending writes, event log and run claim - in one
+  SQLite file, so a run survives a restart: a new process opens the file, replays the stopped run's events, and
+  `recover` continues it without re-running the tasks that had completed. Several stores, in one process or in several
+  on one host, can share the file; every write is one `BEGIN IMMEDIATE` transaction that checks the claim's token and
+  the thread's version and applies the commit, fencing tokens come from a counter stored in the file (so they keep
+  increasing across restarts and `deleteThread`), and claims expire by the store's injected `Clock`. The file runs in
+  WAL mode with `synchronous = FULL`; `SqliteCheckpointerConfig.busyTimeout` (default 5 s) bounds how long a write waits
+  for another connection's. The schema is versioned and migrated on open, and a file from a newer build is refused. It
+  passes `CheckpointerContract` over one connection and over two alternating connections to one file, and a test kills
+  a forked JVM mid-run and recovers its thread. It implements #1702's `history`, `checkpoint` and `prune` over a history
+  table paged by its primary key, each write one transaction. The sample `SqliteRestartRecoveryExample` shows a restart
+  and recovery.
+  See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#the-sqlite-store).
 - **`sbt pomMetadataCheck`: every published POM carries its metadata** ([#1455](https://github.com/llm4s/llm4s/issues/1455)):
   a CI quick check that reads the POM sbt generates for each of the 44 published projects (the `llm4s-*` artifacts, the
   BOM and the relocation stubs) and fails when one lacks a name, a description of its own, an https project URL, a
