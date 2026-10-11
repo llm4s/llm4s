@@ -1040,4 +1040,12 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
           BEDROCK_MODEL_ID: ${{ secrets.BEDROCK_MODEL_ID }}
+          # WatsonXAssumptionProbeSpec: an IBM Cloud API key plus a project (or deployment space).
+          # WATSONX_BASE_URL and WATSONX_MODEL are optional; unset, the suite uses us-south and its
+          # default model.
+          WATSONX_API_KEY: ${{ secrets.WATSONX_API_KEY }}
+          WATSONX_PROJECT_ID: ${{ secrets.WATSONX_PROJECT_ID }}
+          WATSONX_SPACE_ID: ${{ secrets.WATSONX_SPACE_ID }}
+          WATSONX_BASE_URL: ${{ secrets.WATSONX_BASE_URL }}
+          WATSONX_MODEL: ${{ secrets.WATSONX_MODEL }}
         run: sbt testSmoke

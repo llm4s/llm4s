@@ -944,8 +944,9 @@ lazy val watsonx = (project in file("modules/providers/watsonx"))
     name := "llm4s-watsonx",
     commonSettings,
     // Measured 99.24% statement coverage (`sbt coverage watsonx/test watsonx/coverageReport`).
-    // Floor is the measured value rounded down to the nearest 5. Never lower it. There is no
-    // live suite in `modules/it`: watsonx.ai needs an IBM Cloud account (#1020).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it. The live check is
+    // the `@Cloud` probe suite `WatsonXAssumptionProbeSpec` in `modules/it`, which needs an IBM Cloud
+    // account and has not been run yet (#1314).
     coverageFloor(95),
     Test / fork                     := true,
     Compile / mainClass             := None,

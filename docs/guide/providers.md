@@ -445,7 +445,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-watsonx" % llm4sVersion
 ```hocon
 llm4s.providers.watsonx-main {
   provider  = "watsonx"
-  model     = "ibm/granite-13b-instruct-v2"   # or meta-llama/llama-3-8b-instruct, mistralai/mistral-large
+  model     = "ibm/granite-4-h-small"          # any chat model your watsonx.ai region serves
   projectId = ${?WATSONX_PROJECT_ID}          # or spaceId for a deployment space
   # baseUrl = "https://eu-de.ml.cloud.ibm.com" # default https://us-south.ml.cloud.ibm.com
 }

@@ -16,7 +16,7 @@ import org.llm4s.util.Redaction
  * @param apiKey        IBM Cloud API key exchanged for IAM bearer tokens; redacted in `toString`.
  * @param projectId     watsonx project ID; may be empty only when `spaceId` is set.
  * @param spaceId       Optional watsonx deployment space ID, used in place of the project (never together with it).
- * @param model         Model identifier, e.g. `"ibm/granite-13b-instruct-v2"`.
+ * @param model         Model identifier, e.g. `"ibm/granite-4-h-small"`.
  * @param baseUrl       watsonx.ai ML API base URL, e.g. `"https://us-south.ml.cloud.ibm.com"`.
  * @param apiVersion    watsonx API version date, e.g. `"2024-05-31"`.
  * @param iamUrl        IBM Cloud IAM token endpoint.
