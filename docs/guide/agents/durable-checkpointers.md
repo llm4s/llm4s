@@ -295,7 +295,7 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
 ## See also
 
 - [Streaming events](streaming): subscribing to a thread's events, which a store numbers and replays.
-- `docs/design/typed-agent-runtime-design.md` §4.16, the design of claims and fencing, and §4.17, history, fork,
+- `docs/design/typed-agent-runtime-design.md` §4.16, the design of claims and fencing, and §4.19, history, fork,
   `updateState` and retention.
 - [Migration guide](../../reference/migration#stage-2-migration-durable-execution): what changed for code that
   implemented `Checkpointer` or built a `Commit`.
