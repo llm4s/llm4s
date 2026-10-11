@@ -2081,6 +2081,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - ShellTool and the workspace runner: on Windows, arguments whose characters best-fit to separators or
+  quotes are refused** ([#1766](https://github.com/llm4s/llm4s/issues/1766)): a Windows program that reads its command
+  line in an ANSI code page (`main` rather than `wmain`) gets each argument converted from UTF-16 with "best fit", so a
+  fullwidth solidus or reverse solidus (U+FF0F, U+FF3C), a division slash (U+2215), a yen or won sign (U+00A5, U+20A9 on
+  the Japanese and Korean code pages) or a fullwidth quote (U+FF02) reached it as `/`, `\` or `"`, and `-ｏ` as `-o`,
+  while the separator, path and option checks of `ShellTool` (`modules/agent-tools`) and the workspace runner's
+  `CommandPolicy` read one plain name (the "WorstFit" research, Orange Tsai, 2025). On Windows both now refuse an
+  argument, the working directory (below the workspace root, for the runner) and an environment value holding a
+  character that one of the code pages 874, 932, 936, 949, 950 and 1250 to 1258 best-fits to an ASCII character other
+  than a letter or digit, any best-fitted character in an argument starting with `-` or `/`, and a character the host's
+  own ANSI code page cannot hold (a best fit or `?` to the program). The runner refuses with `ARGUMENT_NOT_ALLOWED`
+  (`ENVIRONMENT_NOT_ALLOWED` for an environment value); `ShellTool` returns a refusal naming the character and what it
+  may become, with or without a path policy. Accented letters such as `é` stay allowed in an operand when the host's
+  code page holds them; POSIX hosts are unchanged. The table (539 characters) is generated from Microsoft's best-fit
+  files by `scripts/generate-windows-best-fit.py`, into one `WindowsBestFit` per module.
 - **Security - workspace runner: interpreters and launchers cannot be added as extra commands, a command's child
   `PATH` holds only trusted entries, and cmd.exe runs with `/d`** ([#1761](https://github.com/llm4s/llm4s/issues/1761),
   [#1792](https://github.com/llm4s/llm4s/issues/1792)): `WORKSPACE_EXTRA_COMMANDS` refused shells and some launchers,

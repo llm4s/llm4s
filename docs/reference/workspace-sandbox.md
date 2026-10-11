@@ -126,6 +126,7 @@ and run a second command as a second request.
 | An option the program refuses (below) | `ARGUMENT_NOT_ALLOWED` |
 | An argument longer than 4096 characters, or paths that need more than 20000 lookups to check | `ARGUMENT_NOT_ALLOWED` |
 | An argument holding a NUL character, on Windows one holding `"`, or one whose check fails with an error | `ARGUMENT_NOT_ALLOWED` |
+| On Windows, an argument or the working directory holding a character a program may receive as another ASCII character ("best fit", see [On Windows](#on-windows)); an environment value holding one is `ENVIRONMENT_NOT_ALLOWED` | `ARGUMENT_NOT_ALLOWED` |
 | On Windows, a cmd.exe built-in's argument holding a character cmd.exe splits or parses (`,` `=` `(` `)` `@` `!`, a control character, a non-ASCII space) | `ARGUMENT_NOT_ALLOWED` |
 | `git` with a `.git` file or link between the working directory and the workspace root | `PATH_ESCAPE_ATTEMPT` |
 | A program other than the read-only ones naming `.git` or a path inside one (see [git's own files](#gits-own-files)) | `ARGUMENT_NOT_ALLOWED` |
@@ -421,6 +422,26 @@ On Windows the policy refuses (`ARGUMENT_NOT_ALLOWED`) every form below rather t
 or a program's runtime makes of it. Over-blocking is accepted there: only the forms the rest of this section allows
 are supported. Each rule runs after the path rule, so an argument that leads outside is still `PATH_ESCAPE_ATTEMPT`.
 
+- **Best-fit characters** ([#1766](https://github.com/llm4s/llm4s/issues/1766)), for every program and before
+  the option and path checks. A program that reads its command line in an ANSI code page (`main` rather than `wmain`)
+  gets each argument converted from UTF-16 with "best fit": a character the code page cannot hold may become a
+  similar ASCII one, so `..／..／outside` (U+FF0F) reaches it as `../../outside`, `..＼x` (U+FF3C) as `..\x`, `¥`
+  (U+00A5) and `₩` (U+20A9) as `\` on the Japanese and Korean code pages, `-ｏ` as `-o`, and an ideographic space
+  (U+3000) as a space that splits the argument in two (the "WorstFit" research, Orange Tsai, 2025). Every check
+  here reads UTF-16, so an argument, the working directory below the workspace root (`ARGUMENT_NOT_ALLOWED`) and an
+  environment value (`ENVIRONMENT_NOT_ALLOWED`) are refused when they hold:
+  - a character that one of the common ANSI code pages (874, 932, 936, 949, 950, 1250 to 1258) best-fits to an ASCII
+    character other than a letter or digit - a separator, `"`, `:`, a wildcard, `%`, `^`, `&`, `|`, `<`, `>`, a
+    space, a control character, `-`, `.` or any other punctuation;
+  - in an argument starting with `-` or `/`, a character best-fitted to any ASCII character, since a letter there
+    may be an option (`-ö` is `-o` on code pages 932 and 1251);
+  - a character the host's own ANSI code page cannot hold exactly, which a program reading its arguments in it
+    would receive as a best fit or as `?`.
+
+  Accented letters that only best-fit to a letter (`é`, `ü`) stay allowed in an operand when the host's code page
+  holds them, so `findstr x résumé.txt` runs on a Western European host. The table is generated from Microsoft's
+  best-fit files ([unicode.org](https://www.unicode.org/Public/MAPPINGS/VENDORS/MICSFT/WindowsBestFit/)) by
+  `scripts/generate-windows-best-fit.py`. POSIX hosts are unchanged: nothing converts an argument there.
 - **Device names**, for every program but `echo`, `pwd`, `whoami` and `hostname`: a path component that is `CON`,
   `PRN`, `AUX`, `NUL`, `COM0`-`COM9`, `LPT0`-`LPT9`, `COM¹²³`, `LPT¹²³`, `CONIN$` or `CONOUT$`, in any case, with
   any extension and ignoring trailing dots and spaces (`nul`, `sub\con`, `NUL.txt`, `aux .txt`, `aux:s`). A device

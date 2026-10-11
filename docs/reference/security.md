@@ -148,6 +148,15 @@ links out of the workspace, and any path argument can name a file outside it
   4096 characters, or a command whose paths need more than 20000 lookups, is refused rather than walked.
 - `environment` may set only locale and display variables (`ENVIRONMENT_NOT_ALLOWED`), so `GIT_*`, `PAGER`,
   `LD_PRELOAD`, `PATH` and `HOME` cannot redirect a program.
+- On Windows, a character a program may receive as a different ASCII character is refused
+  ([#1766](https://github.com/llm4s/llm4s/issues/1766)): a program that reads its command line in an ANSI code page
+  gets it converted with "best fit", so `..／..／outside` (U+FF0F) would reach it as `../../outside`, `¥` (U+00A5) and
+  `₩` (U+20A9) as `\`, `-ｏ` as `-o`, past checks that read UTF-16 (the "WorstFit" research). An argument or the
+  working directory (`ARGUMENT_NOT_ALLOWED`), or an environment value (`ENVIRONMENT_NOT_ALLOWED`), holding a character
+  that a common ANSI code page best-fits to ASCII punctuation, a space or a control character, any best-fitted
+  character in an argument starting with `-` or `/`, or a character the host's ANSI code page cannot hold is refused.
+  The shell tool (`ShellTool`) applies the same rule. See
+  [Workspace sandbox](workspace-sandbox#on-windows).
 - The program is started by an absolute path the runner found itself, never by its bare name
   ([#1790](https://github.com/llm4s/llm4s/issues/1790)): on Windows the system directory, the Windows directory, then
   `PATH` (`<name>.exe`, then `<name>.com`); on POSIX `PATH`. It never searches the runner's current directory, which

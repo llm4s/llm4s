@@ -1,6 +1,7 @@
 package org.llm4s.runner
 
 import java.io.File
+import java.nio.charset.Charset
 import java.text.Normalizer
 import java.util.Locale
 import java.nio.file.{ Files, LinkOption, Path, Paths }
@@ -73,7 +74,9 @@ import scala.util.{ Try, Using }
  * tool (#1738). A path candidate of the form `/x/...` is also judged as drive `x:`'s path, as MSYS2 reads it. The
  * runner starts the system directory's `sort.exe` and `findstr.exe` by their absolute paths whenever the system
  * directory has them, never a build in its own working or Java directory ([[ProgramResolver]], #1790).
- * Over-blocking there is accepted.
+ * Over-blocking there is accepted. Before the option and path checks, an argument, the working directory and an
+ * environment value holding a character a program reading its command line in an ANSI code page may receive as a
+ * different ASCII character (`..／x` as `../x`, "best fit") are refused ([[bestFitRefusal]], [[WindowsBestFit]], #1766).
  *
  * '''git.''' git searches upwards for its repository, so the runner confines it to the workspace
  * ([[confineGit]]), a `.git` that is not a directory inside the workspace is refused ([[gitRepositoryRefusal]]), and so
@@ -252,6 +255,8 @@ private[runner] object CommandPolicy {
    *                    which the lexical reading applies `..` as text; `workDir` when not given
    * @param spelledRoot the workspace root as configured (absolute, links not resolved); only its parent's spelling is
    *                    checked, for git (see [[gitCeilingRefusal]])
+   * @param ansiCodePage on Windows, the host's ANSI code page, whose characters must convert exactly (see
+   *                    [[bestFitRefusal]]); the real host's by default, `None` elsewhere
    */
   def refusal(
     program: String,
@@ -261,13 +266,19 @@ private[runner] object CommandPolicy {
     realRoot: Path,
     environment: Map[String, String],
     spelledWorkDir: Option[Path] = None,
-    spelledRoot: Option[Path] = None
+    spelledRoot: Option[Path] = None,
+    ansiCodePage: Option[Charset] = WindowsBestFit.hostAnsiCodePage
   ): Option[Refusal] =
     // Fails closed: a file-system call that throws (a path the platform cannot resolve) refuses the command
     // rather than escaping `executeCommand` as a raw exception.
     Try {
       environmentRefusal(environment, isWindows)
         .orElse(nulRefusal(program, args))
+        .orElse(
+          if (isWindows)
+            bestFitRefusal(program, args, spelledWorkDir.getOrElse(workDir), spelledRoot, environment, ansiCodePage)
+          else None
+        )
         .orElse(if (isWindows) quoteRefusal(program, args) else None)
         .orElse(if (isWindows && WindowsBuiltins.contains(program)) cmdSyntaxRefusal(program, args) else None)
         .orElse(optionRefusal(program, args, isWindows))
@@ -298,6 +309,53 @@ private[runner] object CommandPolicy {
     args
       .find(_.contains('\u0000'))
       .map(arg => notAllowed(program, arg.replace("\u0000", "\\0"), "it contains a NUL character."))
+
+  /**
+   * On Windows a program that reads its command line in an ANSI code page may receive a character as a different
+   * ASCII one ("best fit", #1766): `..／..／outside` as `../../outside`, `-ｏ` as `-o`, `¥` as `\` on code page 932.
+   * Every check here reads the arguments as UTF-16, so an argument (`ARGUMENT_NOT_ALLOWED`), the working directory
+   * below the workspace root (`ARGUMENT_NOT_ALLOWED`; the root itself is the operator's) or an environment value
+   * (`ENVIRONMENT_NOT_ALLOWED`) holding such a character is refused, for every program (see [[WindowsBestFit]]).
+   */
+  private def bestFitRefusal(
+    program: String,
+    args: Seq[String],
+    workDir: Path,
+    spelledRoot: Option[Path],
+    environment: Map[String, String],
+    ansiCodePage: Option[Charset]
+  ): Option[Refusal] = {
+    def why(value: String, optionLike: Boolean): Option[String] =
+      WindowsBestFit.refusal(value, optionLike, ansiCodePage)
+    val belowRoot = spelledRoot.filter(workDir.startsWith).fold(workDir.toString)(_.relativize(workDir).toString)
+    args.iterator
+      .flatMap(arg =>
+        why(arg, WindowsBestFit.isOptionLike(arg)).map(reason => notAllowed(program, arg, s"it holds $reason."))
+      )
+      .nextOption()
+      .orElse(
+        why(belowRoot, optionLike = false).map(reason =>
+          Refusal(
+            ArgumentNotAllowed,
+            s"The working directory '$belowRoot' is not allowed on Windows: it holds $reason."
+          )
+        )
+      )
+      .orElse(
+        environment.toSeq
+          .sortBy(_._1)
+          .iterator
+          .flatMap { case (name, value) =>
+            why(value, optionLike = false).map(reason =>
+              Refusal(
+                EnvironmentNotAllowed,
+                s"The value of the environment variable '$name' is not allowed on Windows: it holds $reason."
+              )
+            )
+          }
+          .nextOption()
+      )
+  }
 
   /**
    * On Windows the C runtime's argv parser and cmd.exe delete `"` as a quote toggle, so the program opens a name
