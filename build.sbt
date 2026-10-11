@@ -205,10 +205,15 @@ Global / excludeLintKeys += coveragePolicy
 lazy val publishedArtifactsCheck = taskKey[Unit](
   "Fail the build if a published llm4s-* artifact is not named in v1-scope.md and installation.md, or has no POM description of its own"
 )
-// What a release must put on Maven Central, one `artifact <id>` or `stub <id>` per line, for
+// What a release must put on Maven Central, one `artifact <id>`, `bom <id>` or `stub <id>` per line, for
 // scripts/verify-release.sh. Run it with `sbt -error listPublishedArtifacts`.
 lazy val listPublishedArtifacts = taskKey[Unit](
-  "Print the Maven coordinates a release must publish: artifact lines, then relocation stub lines"
+  "Print the Maven coordinates a release must publish: artifact lines, then the BOM, then relocation stub lines"
+)
+// The BOM (`org.llm4s:llm4s-bom`) lists every published artifact. It is generated from the same project list
+// as `listPublishedArtifacts`; this check fails when the generated POM disagrees. See project/Bom.scala.
+lazy val bomCheck = taskKey[Unit](
+  "Fail the build if the generated llm4s-bom does not list exactly the artifacts the build publishes"
 )
 
 // ---- coverage policy check ----
@@ -271,6 +276,7 @@ lazy val llm4s = (project in file("."))
     providerTestkit,
     llm4sEffect,
     llm4sZio,
+    llm4sPekko,
     javaApi,
     springBootStarter,
     samples,
@@ -292,6 +298,9 @@ lazy val llm4s = (project in file("."))
     // outside the aggregate entirely, so its suites could stop compiling unnoticed. Only the
     // `@Local` tier actually runs under `sbt test`; see `it / Test / testOptions` below.
     it,
+    // The BOM must be aggregated here for the same reason as the stubs below: `sbt ci-release`
+    // publishes the root aggregate, so a BOM outside it would simply never be published.
+    bom,
     // Relocation stubs must be aggregated here: `sbt ci-release` publishes the root
     // aggregate, so a stub outside it would simply never be published.
     relocationCore,
@@ -319,7 +328,25 @@ lazy val llm4s = (project in file("."))
       val projects      = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
       val (real, stubs) = PublishedArtifacts.coordinates(projects, (ThisBuild / scalaBinaryVersion).value)
       real.foreach(a => println(s"artifact $a"))
+      PublishedArtifacts.boms(projects).foreach(a => println(s"bom $a"))
       stubs.foreach(a => println(s"stub $a"))
+    },
+    bomCheck / aggregate := false,
+    bomCheck := {
+      val projects = Def
+        .task(
+          (name.value, (publish / skip).value, (Compile / packageBin / publishArtifact).value, crossPaths.value)
+        )
+        .all(ScopeFilter(inAnyProject))
+        .value
+      val pom = (bom / makePom).value
+      PublishedArtifacts.checkBom(
+        projects,
+        (ThisBuild / scalaBinaryVersion).value,
+        pom,
+        (bom / version).value,
+        streams.value.log
+      )
     },
     // Root is an aggregator with no sources of its own. `coverageAggregate` runs here, and
     // the per-module floors are enforced by each module's own `coverageReport`, so the
@@ -441,6 +468,28 @@ lazy val llm4sZio = (project in file("modules/llm4s-zio"))
       Deps.zioTestSbt % Test
     ),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+  )
+
+// `llm4s-pekko` (#1457) is the third streaming bridge, after `llm4s-effect` (fs2) and `llm4s-zio` (ZStream): the
+// same `Agent` events and `LLMClient.streamComplete` chunks as an Apache Pekko Streams `Source`. It depends on core,
+// the agent runtime and `pekko-stream` only. Pekko stays out of every frozen module (`FrozenDependencies` bans
+// `org.apache.pekko` and Akka there).
+lazy val llm4sPekko = (project in file("modules/llm4s-pekko"))
+  .dependsOn(core, agent)
+  .settings(
+    name := "llm4s-pekko",
+    commonSettings,
+    // Measured 97.54% statement and 88.24% branch coverage (`sbt coverage llm4sPekko/test llm4sPekko/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.pekkoStream,
+      Deps.scalatest          % Test,
+      Deps.pekkoStreamTestkit % Test,
+      Deps.pekkoTestkit       % Test
+    )
   )
 
 lazy val core = (project in file("modules/core"))
@@ -1105,7 +1154,8 @@ lazy val deployService = (project in file("modules/deploy-service"))
     gemini,
     anthropic,
     openai,
-    openaiCompatible
+    openaiCompatible,
+    providerTestkit % Test
   )
   .enablePlugins(JavaAppPackaging, DockerPlugin)
   .settings(
@@ -1161,7 +1211,8 @@ lazy val samples = (project in file("modules//samples"))
     agent,
     agentTools,
     llm4sEffect,
-    llm4sZio
+    llm4sZio,
+    llm4sPekko
   )
   .settings(
     name := "llm4s-samples",
@@ -1521,6 +1572,7 @@ lazy val docs = (project in file("modules/docs"))
     knowledgegraphNeo4j,
     llm4sEffect,
     llm4sZio,
+    llm4sPekko,
     javaApi,
     springBootStarter
   )
@@ -1563,6 +1615,7 @@ lazy val docs = (project in file("modules/docs"))
         (knowledgegraphNeo4j / Compile / sources).value ++
         (llm4sEffect / Compile / sources).value ++
         (llm4sZio / Compile / sources).value ++
+        (llm4sPekko / Compile / sources).value ++
         (javaApi / Compile / sources).value ++
         (springBootStarter / Compile / sources).value
     },
@@ -1571,7 +1624,16 @@ lazy val docs = (project in file("modules/docs"))
   )
 
 lazy val javaApi = (project in file("modules/java-api"))
-  .dependsOn(core % "compile->compile;test->test", agent, openai, anthropic, ollama, gemini, openaiCompatible)
+  .dependsOn(
+    core % "compile->compile;test->test",
+    agent,
+    openai,
+    anthropic,
+    ollama,
+    gemini,
+    openaiCompatible,
+    providerTestkit % Test
+  )
   .settings(
     name := "llm4s-java-api",
     commonSettings,
@@ -1648,6 +1710,26 @@ lazy val gradleDemo = (project in file("modules/gradle-demo"))
 //
 // `workspacerunner`, `samples` and the other unpublished modules have `publish / skip` and
 // no Central history, so they need no stub.
+
+// The bill of materials: a POM that pins every published artifact to one version. Generated, not listed by
+// hand: see project/Bom.scala. Its dependencyManagement block is written when the POM is made, because the
+// list comes from tasks (`publish / skip` of every project) that `pomPostProcess` cannot read.
+lazy val bom = (project in file("modules/bom"))
+  .settings(Bom.settings)
+  .settings(
+    // Named here, not in Bom.settings: scripts/check-tier-drift.sh reads project names from this file.
+    name                 := "llm4s-bom",
+    mimaFailOnNoPrevious := false,
+    makePom := {
+      val pom      = makePom.value
+      val projects = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
+      Bom.writeManagedDependencies(
+        pom,
+        PublishedArtifacts.managed(projects, (ThisBuild / scalaBinaryVersion).value),
+        version.value
+      )
+    }
+  )
 
 lazy val relocationCore = (project in file("modules/relocations/core"))
   .settings(Relocation.settings("core", "llm4s-core_3"), mimaFailOnNoPrevious := false)
