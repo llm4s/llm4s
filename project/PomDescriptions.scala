@@ -64,6 +64,8 @@ object PomDescriptions {
       "OpenAI, Azure OpenAI and Requesty chat providers and OpenAI embeddings for LLM4S.",
     "llm4s-openai-compatible" ->
       "Chat client for OpenAI-compatible APIs in LLM4S: DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any generic endpoint.",
+    "llm4s-pekko" ->
+      "Apache Pekko Streams for LLM4S: LLM responses and agent runs as Sources, with backpressure and cancellation.",
     "llm4s-provider-testkit" ->
       "Test checks for authors of LLM4S provider modules: discovery, registration and the config-to-client round trip.",
     "llm4s-rag" ->

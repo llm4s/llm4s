@@ -80,9 +80,10 @@ trait AgentZ {
 object AgentZ {
 
   /**
-   * Events buffered between the turn's subscription and the stream's consumer. Larger than
-   * LLMClientZ's StreamBufferSize because each slot is lightweight event metadata, not a provider
-   * payload, so a bigger buffer costs little and absorbs bursts like tool-call argument deltas.
+   * Events buffered between the turn's subscription and the stream's consumer. Unlike
+   * [[LLMClientZ]]'s buffer, this one is lossy - on overflow it drops live events and emits a
+   * `LiveGap` rather than applying backpressure - so a larger size means fewer gaps for a slow
+   * consumer, not just less stalling.
    */
   private val StreamBufferSize = 256
 

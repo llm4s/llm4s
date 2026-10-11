@@ -157,6 +157,11 @@ links out of the workspace, and any path argument can name a file outside it
   character in an argument starting with `-` or `/`, or a character the host's ANSI code page cannot hold is refused.
   The shell tool (`ShellTool`) applies the same rule. See
   [Workspace sandbox](workspace-sandbox#on-windows).
+- On a Windows host whose ANSI code page is double-byte (932, 936, 950), an argument the JDK puts in quotes is refused
+  (`ARGUMENT_NOT_ALLOWED`) when it holds a character whose second byte is 0x5C, the byte of `\`
+  ([#1807](https://github.com/llm4s/llm4s/issues/1807)): `"a 表"` ends in the bytes `5C 22` on code page 932, which a
+  program splitting its command line byte by byte reads as an escaped quote, so the arguments after it split
+  differently. The shell tool applies the same rule; `表.txt`, which the JDK does not quote, stays allowed.
 - The program is started by an absolute path the runner found itself, never by its bare name
   ([#1790](https://github.com/llm4s/llm4s/issues/1790)): on Windows the system directory, the Windows directory, then
   `PATH` (`<name>.exe`, then `<name>.com`); on POSIX `PATH`. It never searches the runner's current directory, which
