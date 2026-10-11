@@ -51,6 +51,7 @@ class MistralClient(
       exchangeLogging
     )
 
+@Experimental
 object MistralClient {
 
   def apply(config: MistralConfig)(using ModelRegistryService): Result[MistralClient] =

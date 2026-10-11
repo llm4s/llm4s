@@ -38,8 +38,9 @@ every top-level public type of a frozen module also carries its tier, from `org.
 | `@Experimental` | Not covered. It can change or disappear in a minor release, with a migration note in that release's CHANGELOG. |
 
 Both are Java annotations with runtime retention, so an IDE, a tool or a Java caller can read them; a
-Scala-only annotation would be invisible to all three. A companion `object` needs no annotation of its
-own: the one on its class, trait or enum covers the pair. A type that is `private` or `private[x]` needs
+Scala-only annotation would be invisible to all three. A Stable companion shares the tier of its class, trait or enum. An Experimental companion
+`object` must also carry `@Experimental`: Scala emits a separate companion class, and MiMa
+reads each class's own annotation. A type that is `private` or `private[x]` needs
 none. A type in a module 1.0 does not freeze (anything Beta or Experimental in the
 [Package Map](v1-scope#package-map)) carries neither.
 
@@ -59,8 +60,10 @@ when that is settled.
 are the frozen set, and every other place that states it must agree. See the script's header for the exact
 comparisons, and mark a Package Map row `tier-drift: ignore` to opt it out.
 
-A type annotated `@Experimental` inside a frozen module needs a `ProblemFilters.exclude` entry that says
-why when the baseline is set (see [The Baseline](#the-baseline)); the annotation is what tells you which.
+MiMa skips a type annotated `@Experimental` inside a frozen module: `mimaFrozen` in `build.sbt` adds
+`mimaExcludeAnnotations += "org.llm4s.annotation.Experimental"`, so such a type needs no `ProblemFilters.exclude`
+entry (a `@Stable` type is still checked). `scripts/mima-dry-run.sh` proves both on every run; see
+[Release readiness](release#release-readiness-a-mima-dry-run).
 
 ---
 
@@ -83,9 +86,10 @@ Every other module is Beta or Experimental, or is not published (`llm4s-samples`
 `llm4s-workspace-*`, `llm4s-it`, `llm4s-docs`, `llm4s-benchmarks`), and is not checked. That includes
 `org.llm4s.speech.*` (`llm4s-speech`), `org.llm4s.runner.*` (`llm4s-workspace-runner`) and
 `org.llm4s.samples.*` (`llm4s-samples`, `llm4s-workspace-samples`): none ships in a frozen module, so
-no filter is needed for them. Anything a frozen module contains that 1.0 Scope marks Beta or Experimental needs a
-`ProblemFilters.exclude` entry that says why; there are none yet because no baseline is set (see
-[The Baseline](#the-baseline)).
+no filter is needed for them. A top-level type that 1.0 Scope marks Beta or Experimental is `@Experimental`, which MiMa skips (see
+[Tiers in the Code](#tiers-in-the-code)); anything else a frozen module contains that 1.0 Scope marks Beta or
+Experimental needs a `ProblemFilters.exclude` entry that says why. There are none yet because no baseline is
+set (see [The Baseline](#the-baseline)).
 
 If you find yourself importing from a Beta or Experimental package, please open an issue: it likely
 means the stable API is missing something.
@@ -175,4 +179,5 @@ This reports binary incompatibilities between the current code and the baseline 
 baseline set, each module logs `mimaPreviousArtifacts not set` (or `is empty`) and the task succeeds.
 With a baseline set, success means the frozen API is compatible, and failure lists each problem with
 the `ProblemFilters.exclude` line that would silence it. To check one module, run
-`sbt agent/mimaReportBinaryIssues`.
+`sbt agent/mimaReportBinaryIssues`. Before 0.5.0 exists, `scripts/mima-dry-run.sh` checks that this wiring
+works (see [Release readiness](release#release-readiness-a-mima-dry-run)).

@@ -53,6 +53,7 @@ class CohereClient(
       exchangeLogging
     )
 
+@Experimental
 object CohereClient {
 
   def apply(config: CohereConfig)(using ModelRegistryService): Result[CohereClient] =
