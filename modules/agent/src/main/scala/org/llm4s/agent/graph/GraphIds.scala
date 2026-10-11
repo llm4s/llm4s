@@ -77,3 +77,18 @@ opaque type ToolName = String
 object ToolName:
   def apply(value: String): ToolName           = value
   extension (name: ToolName) def value: String = name
+
+/**
+ * The fencing token of a run's claim on a thread ([[RunClaim]]). A [[Checkpointer]] issues one with
+ * every claim, strictly greater than every token it issued for that thread before - including
+ * before a takeover, a release or a `deleteThread` - and accepts a commit only with the token of the
+ * thread's current claim, so a writer that lost its claim cannot commit after another took over.
+ */
+opaque type FencingToken = Long
+
+object FencingToken:
+  def apply(value: Long): FencingToken            = value
+  extension (token: FencingToken) def value: Long = token
+  given Ordering[FencingToken]                    = Ordering.Long
+  given upickle.default.ReadWriter[FencingToken] =
+    upickle.default.ReadWriter.join(upickle.default.LongReader, upickle.default.LongWriter)

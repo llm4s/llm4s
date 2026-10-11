@@ -136,6 +136,10 @@ flags:
     paths:
       - modules/observability-prometheus/src/main/scala
     carryforward: true
+  observability-micrometer:
+    paths:
+      - modules/observability-micrometer/src/main/scala
+    carryforward: true
   agent-tools:
     paths:
       - modules/agent-tools/src/main/scala
@@ -143,6 +147,10 @@ flags:
   agent:
     paths:
       - modules/agent/src/main/scala
+    carryforward: true
+  agent-testkit:
+    paths:
+      - modules/agent-testkit/src/main/scala
     carryforward: true
   java-api:
     paths:

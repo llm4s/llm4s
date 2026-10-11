@@ -424,8 +424,16 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
 
     // the loser read the thread before the winner claimed it
     val racing = new Checkpointer {
-      def commit(threadId: ThreadId, commit: Commit)                  = store.commit(threadId, commit)
-      def latest(threadId: ThreadId)                                  = Right(stale)
+      def commit(threadId: ThreadId, commit: Commit)                             = store.commit(threadId, commit)
+      def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = store.claim(threadId, request)
+      def renew(
+        threadId: ThreadId,
+        token: org.llm4s.agent.graph.FencingToken,
+        ttl: scala.concurrent.duration.FiniteDuration
+      ) =
+        store.renew(threadId, token, ttl)
+      def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = store.release(threadId, token)
+      def latest(threadId: ThreadId)                                             = Right(stale)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = store.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long)          = store.compactEvents(threadId, beforeSeq)
       def deleteThread(threadId: ThreadId)                            = store.deleteThread(threadId)

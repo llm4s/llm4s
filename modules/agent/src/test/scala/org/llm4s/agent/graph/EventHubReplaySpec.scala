@@ -68,7 +68,15 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
     val reading                                                                 = new CountDownLatch(1)
     val release                                                                 = new CountDownLatch(1)
     def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = underlying.commit(threadId, commit)
-    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]            = underlying.latest(threadId)
+    def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest)  = underlying.claim(threadId, request)
+    def renew(
+      threadId: ThreadId,
+      token: org.llm4s.agent.graph.FencingToken,
+      ttl: scala.concurrent.duration.FiniteDuration
+    ) =
+      underlying.renew(threadId, token, ttl)
+    def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]           = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       val n = reads.incrementAndGet()
       if n == 1 then

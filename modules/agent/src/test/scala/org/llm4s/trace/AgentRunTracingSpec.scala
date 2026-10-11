@@ -189,7 +189,15 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers with Eventually {
     def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] =
       if (!commit.events.exists(_.event == RunEvent.RunCompleted)) underlying.commit(threadId, commit)
       else Left(ProcessingError("store", "store down"))
-    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]] = underlying.latest(threadId)
+    def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
+    def renew(
+      threadId: ThreadId,
+      token: org.llm4s.agent.graph.FencingToken,
+      ttl: scala.concurrent.duration.FiniteDuration
+    ) =
+      underlying.renew(threadId, token, ttl)
+    def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]           = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =

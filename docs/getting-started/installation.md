@@ -675,7 +675,8 @@ tool API they implement (`ToolFunction`, `ToolRegistry`). Package names are unch
 libraryDependencies ++= Seq(
   "org.llm4s" %% "llm4s-observability"            % llm4sVersion, // TRACING_MODE=langfuse
   "org.llm4s" %% "llm4s-observability-otel"       % llm4sVersion, // TRACING_MODE=opentelemetry
-  "org.llm4s" %% "llm4s-observability-prometheus" % llm4sVersion  // llm4s.metrics.enabled = true
+  "org.llm4s" %% "llm4s-observability-prometheus" % llm4sVersion, // llm4s.metrics.enabled = true
+  "org.llm4s" %% "llm4s-observability-micrometer" % llm4sVersion   // MicrometerMetrics over your MeterRegistry
 )
 ```
 
@@ -690,6 +691,10 @@ and HTTP server; core keeps only the `MetricsCollector` interface every client a
 names are unchanged. See the migration notes for
 [Langfuse and the collector](../reference/migration#slice-6-llm4s-observability---langfuse-the-trace-collector-and-costtracker-leave-core)
 and for [Prometheus](../reference/migration#slice-6-llm4s-observability-prometheus---prometheus-leaves-core).
+
+`llm4s-observability-micrometer` is the Micrometer counterpart: a `MetricsCollector` that records into a `MeterRegistry`
+you already have, with the same series names as the Prometheus module. It depends on `llm4s-core` and `micrometer-core`.
+See [Micrometer metrics](../guide/observability/micrometer).
 
 ### For Neo4j (knowledge graph store)
 
@@ -730,6 +735,21 @@ The checks a provider module's own `Llm4s<Name>ModuleSpec` makes: discovery, sol
 explicit registration and the config-to-client round trip. It requires JDK 21: its interruption checks
 and its local test server run on virtual threads. See
 [Writing a provider](../guide/writing-a-provider#testing).
+
+### For checkpoint store authors (testing a `Checkpointer`)
+
+{: .note }
+> Not yet published. `llm4s-agent-testkit` exists in the build as of
+> [#1700](https://github.com/llm4s/llm4s/issues/1700) but ships in the next release.
+
+```scala
+// same version as llm4s-agent; test scope only
+libraryDependencies += "org.llm4s" %% "llm4s-agent-testkit" % llm4sVersion % Test
+```
+
+`CheckpointerContract`, the suite every `Checkpointer` must pass: commits, event numbering, compaction, run-claim
+leases and fencing, and two runtimes contending over one store. It requires JDK 21, as `llm4s-agent` does. See
+[Durable Checkpointers](../guide/agents/durable-checkpointers#testing-it-with-the-contract-suite).
 
 ### For Workspace (Containerized Execution)
 
