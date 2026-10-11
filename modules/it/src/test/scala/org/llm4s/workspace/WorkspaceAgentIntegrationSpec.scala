@@ -122,17 +122,31 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
     r("stdout").str.trim shouldBe "hello_from_workspace"
   }
 
-  it should "report the real non-zero exit code of a failing command" in {
-    val (_, tms) = runScript("execute_command" -> ujson.Obj("command" -> "exit 42"))
+  // Commands are one program and its arguments, run without a shell, and only allowlisted programs run (#1756), so
+  // `exit 42`, `;`, `1>&2` and `sleep` are gone. `WorkspaceCommandsSpec` in workspaceRunner runs these exact command
+  // strings through the runner's WebSocket executor on every PR, pinning what this suite expects of them.
 
-    tms should have size 1
-    resultOf(tms.head)("exit_code").num.toInt shouldBe 42
+  it should "report the real non-zero exit code of a failing command" in {
+    val (_, tms) = runScript(
+      "write_file"      -> ujson.Obj("path" -> "exit_code.txt", "content" -> "alpha\n"),
+      "execute_command" -> ujson.Obj("command" -> "grep zzz exit_code.txt")
+    )
+
+    tms should have size 2
+    // grep exits 1 when nothing matches.
+    resultOf(tms(1))("exit_code").num.toInt shouldBe 1
   }
 
   it should "capture stderr separately from stdout" in {
-    val (_, tms) = runScript("execute_command" -> ujson.Obj("command" -> "echo out_marker; echo err_marker 1>&2"))
+    val (_, tms) = runScript(
+      "write_file"      -> ujson.Obj("path" -> "out_marker.txt", "content" -> "out_marker\n"),
+      "execute_command" -> ujson.Obj("command" -> "cat out_marker.txt err_marker.txt")
+    )
 
-    val r = resultOf(tms.head)
+    tms should have size 2
+    // cat prints the file that exists to stdout and its complaint about the missing one to stderr.
+    val r = resultOf(tms(1))
+    r("exit_code").num.toInt shouldBe 1
     r("stdout").str should include("out_marker")
     (r("stdout").str should not).include("err_marker")
     r("stderr").str should include("err_marker")
@@ -172,14 +186,18 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
 
   it should "return control within the deadline for a command that exceeds its timeout" in {
     val start = System.currentTimeMillis()
-    val (_, tms) =
-      runScript("execute_command" -> ujson.Obj("command" -> "sleep 60", "timeout" -> 2))
+    // `tail -f` never ends by itself, so only the 2 s timeout stops it.
+    val (_, tms) = runScript(
+      "write_file"      -> ujson.Obj("path" -> "timeout.txt", "content" -> "waiting\n"),
+      "execute_command" -> ujson.Obj("command" -> "tail -f timeout.txt", "timeout" -> 2)
+    )
     val elapsedMs = System.currentTimeMillis() - start
 
     elapsedMs should be < 30000L
-    tms should have size 1
-    // Whether surfaced as a tool error or a non-zero exit code, it must not read as success.
-    val succeeded = Try(resultOf(tms.head)("exit_code").num.toInt).toOption.contains(0)
-    succeeded shouldBe false
+    tms should have size 2
+    // The runner reports a command it stopped at its timeout with exit code -1.
+    val r = resultOf(tms(1))
+    r("exit_code").num.toInt shouldBe -1
+    r("stdout").str should include("waiting")
   }
 }

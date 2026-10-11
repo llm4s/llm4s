@@ -27,7 +27,7 @@ object DocumentQaRecipe extends RecipeApp {
 
   val info: RecipeInfo = RecipeInfo(
     id = "document-qa",
-    title = "Answer questions from your documents",
+    title = "Answer questions with keyword search",
     summary = "Chunk some text, index it, retrieve the best passage for a question and answer from it.",
     mainClass = "org.llm4s.samples.cookbook.DocumentQaRecipe"
   )
@@ -40,7 +40,6 @@ object DocumentQaRecipe extends RecipeApp {
 
   val question: String = "How many vacation days do employees get?"
 
-  // snippet:start
   private val stopWords = Set("what", "when", "where", "which", "does", "many", "much", "have", "from", "with")
 
   /** The question as an OR of its content words, quoted so that FTS5 reads them as plain words. */
@@ -83,7 +82,6 @@ object DocumentQaRecipe extends RecipeApp {
       index.close()
       outcome
     }
-  // snippet:end
 
   /** Answers with the first sentence of the context it was given. */
   def script: ScriptedClient = new ScriptedClient((conversation, _) => {

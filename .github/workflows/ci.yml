@@ -802,9 +802,13 @@ jobs:
         run: sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '8.11.1'
+          # Licence: v6's default 'enhanced' cache provider (gradle-actions-caching) is
+          # proprietary, under the Gradle Terms of Use. 'basic' is MIT-licensed, keeping
+          # llm4s CI fully open source.
+          cache-provider: basic
 
       - name: Build and test Kotlin API with coverage check
         working-directory: modules/kotlin-api
