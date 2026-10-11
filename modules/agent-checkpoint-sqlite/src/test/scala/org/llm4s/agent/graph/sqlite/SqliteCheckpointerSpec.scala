@@ -514,6 +514,32 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     reopened.close()
   }
 
+  it should "be created, seeded with the latest checkpoints, on a version-1 file a pre-release build wrote without it" in {
+    val db    = SqliteFiles.fresh()
+    val kept  = ThreadId("pre-release")
+    val first = SqliteCheckpointer.open(db).value
+    chain(first, kept, 3)
+    first.close()
+    // a version-1 file as a build before the history table wrote it
+    exec(db, "DROP TABLE llm4s_checkpoint_history")
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe 1
+
+    val reopened = SqliteCheckpointer.open(db).value
+    reopened.history(kept, None, 10).value.map(_.id) shouldBe Vector("c3")
+    reopened.checkpoint(kept, "c3").value.map(_.id) shouldBe Some("c3")
+    reopened.latest(kept).value.map(_.checkpoint.id) shouldBe Some("c3")
+    // and the thread goes on: a commit lands in the history after the seeded latest
+    val token = reopened.claim(kept, ClaimRequest(RunId("next"), ttl)).value.token
+    reopened.commit(kept, Commit(token, Some(checkpoint(kept, "c4", Some("c3"), token)))).value
+    reopened.commit(kept, Commit(token, Some(checkpoint(kept, "c3", Some("c4"), token)))).left.value shouldBe
+      a[GraphError.InvalidCommit]
+    reopened.history(kept, None, 10).value.map(_.id) shouldBe Vector("c4", "c3")
+    reopened.close()
+    // opening again finds the table and changes nothing
+    SqliteCheckpointer.open(db).value.close()
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_history")(_.getInt(1)) shouldBe 2
+  }
+
   it should "be pruned in one transaction while another store writes the same file" in {
     val db      = SqliteFiles.fresh()
     val thread  = ThreadId("busy")
