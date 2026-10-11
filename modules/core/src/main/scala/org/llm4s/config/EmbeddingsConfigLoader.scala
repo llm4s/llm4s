@@ -74,6 +74,16 @@ private[config] object EmbeddingsConfigLoader {
       .flatMap(buildEmbeddingsConfig(_, source))
   }
 
+  /**
+   * Loads the embedding provider config for `modelSpec`, `provider/model`, rather than for the model
+   * `llm4s.embeddings.model` selects: the provider's section and key are read from `source` as for that one, and the
+   * model is `modelSpec`'s. `llm4s.embeddings.model` itself is not read, so it need not be set.
+   */
+  def loadProviderFor(source: ConfigSource, modelSpec: String)(using
+    ProviderRegistry
+  ): Result[(String, EmbeddingProviderConfig)] =
+    unified(Option(modelSpec).getOrElse(""), None).flatMap(configFor(_, source))
+
   /** Load configured local model names for non-text modalities from llm4s.embeddings.localModels. */
   def loadLocalModels(source: ConfigSource): Result[LocalEmbeddingModels] = {
     final case class LocalModelsSection(
@@ -107,21 +117,10 @@ private[config] object EmbeddingsConfigLoader {
     // Unified `EMBEDDING_MODEL=provider/model` first, then the legacy EMBEDDING_PROVIDER.
     val selection: Result[Selection] =
       trimmed(emb.model) match {
-        case Some(modelSpec) =>
-          modelSpec.split("/", 2) match {
-            case Array(provider, model) if provider.nonEmpty && model.nonEmpty =>
-              Right(Selection(provider.toLowerCase, Some(model), UnifiedModelPath))
-            case _ =>
-              Left(
-                ConfigurationError(
-                  s"Invalid embedding model format: '$modelSpec'. Expected 'provider/model' (e.g., openai/text-embedding-3-small)"
-                )
-              )
-          }
-
+        case Some(modelSpec) => unified(modelSpec, Some(UnifiedModelPath))
         case None =>
           trimmed(emb.provider)
-            .map(provider => Right(Selection(provider.toLowerCase, None, LegacyProviderPath)))
+            .map(provider => Right(Selection(provider.toLowerCase, None, Some(LegacyProviderPath))))
             .getOrElse(
               Left(
                 ConfigurationError(
@@ -131,10 +130,29 @@ private[config] object EmbeddingsConfigLoader {
             )
       }
 
+    selection.flatMap(configFor(_, source))
+  }
+
+  /** `modelSpec`, `provider/model`, as a selection; `origin` is the config path it came from, if any. */
+  private def unified(modelSpec: String, origin: Option[String]): Result[Selection] =
+    modelSpec.trim.split("/", 2) match {
+      case Array(provider, model) if provider.nonEmpty && model.nonEmpty =>
+        Right(Selection(provider.toLowerCase, Some(model), origin))
+      case _ =>
+        Left(
+          ConfigurationError(
+            s"Invalid embedding model format: '$modelSpec'. Expected 'provider/model' (e.g., openai/text-embedding-3-small)"
+          )
+        )
+    }
+
+  /** The selected provider's config: its section and key read from `source`. */
+  private def configFor(selected: Selection, source: ConfigSource)(using
+    registry: ProviderRegistry
+  ): Result[(String, EmbeddingProviderConfig)] =
     // Bound whole rather than destructured in the generator: `Either` has no
     // `withFilter`, so a pattern-matching generator does not compile.
     for {
-      selected   <- selection
       descriptor <- resolve(selected, registry)
       id = descriptor.id.asString
       section  <- readSection(source, descriptor)
@@ -145,7 +163,6 @@ private[config] object EmbeddingsConfigLoader {
       resolved.foreach(SharedCredentials.logSource(EmbeddingConfigSpec.sectionPath(descriptor.id), _))
       id -> config.copy(timeouts = section.timeouts)
     }
-  }
 
   private val UnifiedModelPath   = "llm4s.embeddings.model"
   private val LegacyProviderPath = "llm4s.embeddings.provider"
@@ -155,12 +172,12 @@ private[config] object EmbeddingsConfigLoader {
    *
    * @param provider      the configured provider name, lowercased; not yet canonical.
    * @param modelOverride the `<model>` half of a unified `EMBEDDING_MODEL`, when that form was used.
-   * @param origin        the config path the selection came from. Carried rather than assumed
-   *                      because an unregistered provider is reported against it, and pointing
-   *                      a legacy `EMBEDDING_PROVIDER` user at `llm4s.embeddings.model` names a
-   *                      key they never set.
+   * @param origin        the config path the selection came from, or none for a model the caller
+   *                      passed. Carried rather than assumed because an unregistered provider is
+   *                      reported against it, and pointing a legacy `EMBEDDING_PROVIDER` user at
+   *                      `llm4s.embeddings.model` names a key they never set.
    */
-  final private case class Selection(provider: String, modelOverride: Option[String], origin: String)
+  final private case class Selection(provider: String, modelOverride: Option[String], origin: Option[String])
 
   /**
    * The descriptor for a configured provider name, or an error naming what is registered.
@@ -170,7 +187,7 @@ private[config] object EmbeddingsConfigLoader {
    * look identical from here otherwise.
    */
   private def resolve(selection: Selection, registry: ProviderRegistry): Result[EmbeddingProviderDescriptor] =
-    registry.resolveEmbedding(registry.canonicalEmbeddingId(selection.provider), Some(selection.origin))
+    registry.resolveEmbedding(registry.canonicalEmbeddingId(selection.provider), selection.origin)
 
   /**
    * Reads `llm4s.embeddings.<id>`, treating an absent section as an empty one.

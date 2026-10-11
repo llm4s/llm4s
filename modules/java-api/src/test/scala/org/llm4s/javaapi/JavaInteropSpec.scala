@@ -289,7 +289,8 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
       List(classOf[LlmResult[_]], classOf[JEmbeddingClient])
     classOf[JEmbeddings].getMethod("vectors").getGenericReturnType.getTypeName shouldBe "java.util.List<float[]>"
     classOf[JEmbeddings].getMethod("dimensions").getReturnType shouldBe Integer.TYPE
-    classOf[JEmbeddingClient].getMethod("dimensions").getReturnType shouldBe Integer.TYPE
+    // empty for a model its provider module does not list (#1781)
+    classOf[JEmbeddingClient].getMethod("dimensions").getReturnType shouldBe classOf[java.util.OptionalInt]
 
     // the cosine helper is static on JEmbeddings, as Java calls it
     val cosine = classOf[JEmbeddings].getMethod("cosineSimilarity", classOf[Array[Float]], classOf[Array[Float]])

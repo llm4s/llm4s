@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Java embeddings: a client for a model you name** ([#1781](https://github.com/llm4s/llm4s/issues/1781)):
+  `Llm4s.createEmbeddingClient("provider/model")` creates a `JEmbeddingClient` for that model rather than the one
+  `llm4s.embeddings.model` names, which need not be set; the provider's key, base URL and timeouts come from its
+  `llm4s.embeddings.<provider>` block or vendor variable, as for `createDefaultEmbeddingClient`. A `null` model is a
+  failed result of kind `VALIDATION`, a malformed one, an unregistered provider or a missing key one of kind
+  `CONFIGURATION`. See the [Java guide](docs/guide/java.md#embeddings).
 - **Checkpoint history, fork, `updateState` and retention** ([#1702](https://github.com/llm4s/llm4s/issues/1702),
   Stage 2 slice 3 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): a `Checkpointer` keeps every checkpoint a
   thread's runs commit, not only the latest. `GraphRuntime.history(threadId, before, limit)` pages them newest first
@@ -1192,6 +1198,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Java embeddings: a model its provider module does not list works, and `JEmbeddingClient.dimensions()` is an
+  `OptionalInt`** ([#1781](https://github.com/llm4s/llm4s/issues/1781)): `createDefaultEmbeddingClient` (and the new
+  `createEmbeddingClient`) failed with `CONFIGURATION` for a model outside its provider's dimension table, such as
+  Ollama's `bge-m3`, although the call needs no dimensions. Such a client is now created: `dimensions()` is empty, and
+  its vectors are as long as the provider makes them (`JEmbeddings.dimensions()`; `0` for an empty batch, which calls
+  no provider). Migration: `int d = embedder.dimensions()` becomes `embedder.dimensions().getAsInt()` for a declared
+  model, or reads `JEmbeddings.dimensions()` from a reply.
+- **Embedding providers report an unreachable or slow provider as a network failure or a timeout**
+  ([#1781](https://github.com/llm4s/llm4s/issues/1781)): the OpenAI, Ollama, Voyage, Jina and Cohere embedding
+  providers returned a refused connection, an unknown host or a timed-out request as an
+  `EmbeddingError(code = None, "HTTP request failed: ...")`, which the Java facade read as `OTHER`. They now return the
+  HTTP client's own `NetworkError` or `TimeoutError`, as they already did a `CancelledError`, so it reads as `NETWORK`
+  or `TIMEOUT` and is recoverable (`LLMError.isRecoverable`). Any other transport failure is still an `EmbeddingError`.
+  Migration: Scala code matching an `EmbeddingError` with no code for a connection failure matches `NetworkError` (or
+  `TimeoutError`) instead.
 - **`Checkpointer` keeps a checkpoint history** ([#1702](https://github.com/llm4s/llm4s/issues/1702), BREAKING,
   `llm4s-agent`): `Checkpointer` gains `history`, `checkpoint` and `prune`, and must keep every superseded checkpoint
   and refuse a checkpoint id already in the history (`InvalidCommit`); `Commit` gains `retractTurn` (defaulted);

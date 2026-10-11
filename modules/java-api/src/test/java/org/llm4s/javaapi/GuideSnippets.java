@@ -145,6 +145,17 @@ final class GuideSnippets {
         return embedder;
     }
 
+    /**
+     * The "Embeddings" block that names its models (#1781). Compiled, not run: the first needs an OpenAI key, which a
+     * test must not depend on; {@code JEmbeddingClientSpec} runs the factory itself.
+     */
+    static List<JEmbeddingClient> namedEmbedders() {
+        JEmbeddingClient large = Llm4s.createEmbeddingClient("openai/text-embedding-3-large").get();
+        JEmbeddingClient local = Llm4s.createEmbeddingClient("ollama/bge-m3").get();   // dimensions() is empty
+
+        return List.of(large, local);
+    }
+
     /** The "Embeddings" block that embeds two sentences and prints how similar they are. */
     static double twoSentences(JEmbeddingClient embedder) {
         JEmbeddings embeddings = embedder.embed(List.of(

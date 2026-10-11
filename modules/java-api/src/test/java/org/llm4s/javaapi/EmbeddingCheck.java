@@ -3,6 +3,7 @@ package org.llm4s.javaapi;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.OptionalInt;
 
 /**
  * {@link JEmbeddingClient}, {@link JEmbeddings} and {@link JEmbeddingPurpose} from real Java source, compiled by sbt
@@ -16,8 +17,8 @@ final class EmbeddingCheck {
   static List<String> embedAndRead(JEmbeddingClient client) {
     List<String> log = new ArrayList<>();
     String configured = client.model();
-    int configuredDimensions = client.dimensions();
-    log.add("client:" + configured + ":" + configuredDimensions);
+    OptionalInt configuredDimensions = client.dimensions();
+    log.add("client:" + configured + ":" + configuredDimensions.getAsInt());
 
     LlmResult<JEmbeddings> documents = client.embed(List.of("first", "second"));
     LlmResult<JEmbeddings> queries = client.embed(List.of("question"), JEmbeddingPurpose.QUERY);
@@ -58,6 +59,30 @@ final class EmbeddingCheck {
         client.embed(texts))) {
       LlmException e = result.getError();
       log.add(e.getKind() + ":" + e.getMessage());
+    }
+    return log;
+  }
+
+  /**
+   * {@code Llm4s.createEmbeddingClient} for each model named, as a Java caller reads the outcome: the model and its
+   * declared dimensions, or "undeclared" and the length of the vectors a call returns; or the failure's kind (#1781).
+   */
+  static List<String> createFor(List<String> models) {
+    List<String> log = new ArrayList<>();
+    for (String model : models) {
+      LlmResult<JEmbeddingClient> created = Llm4s.createEmbeddingClient(model);
+      if (created.isFailure()) {
+        log.add(model + " -> " + created.getError().getKind());
+        continue;
+      }
+      JEmbeddingClient client = created.get();
+      OptionalInt declared = client.dimensions();
+      if (declared.isPresent()) {
+        log.add(model + " -> " + client.model() + ", " + declared.getAsInt() + " dimensions");
+      } else {
+        int made = client.embed(List.of("a text")).get().dimensions();
+        log.add(model + " -> " + client.model() + ", undeclared, made " + made);
+      }
     }
     return log;
   }

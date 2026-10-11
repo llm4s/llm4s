@@ -17,8 +17,8 @@ import java.util.{ Arrays, Objects }
  * are. Not `Serializable`.
  *
  * @param model the embedding model, as the provider named it in its reply, or as configured when it did not say
- * @param dimensions the length of every vector; for an empty batch, which calls no provider, the dimensions the model
- *                   is configured with
+ * @param dimensions the length of every vector; for an empty batch, which calls no provider, the dimensions the model's
+ *                   provider module declares, or `0` when it declares none
  */
 final class JEmbeddings private (val model: String, val dimensions: Int, held: Array[Array[Float]]) {
 

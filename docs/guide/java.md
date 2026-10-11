@@ -441,9 +441,23 @@ created.ifFailure(error -> System.err.println("Could not create an embedding cli
 JEmbeddingClient embedder = created.getOrNull();   // null when it failed
 ```
 
-No model configured, a provider that is not on the classpath, a missing key, or a model whose provider module does
-not declare its dimensions is a failed result of kind `CONFIGURATION`, whose message says what to set.
-`embedder.model()` and `embedder.dimensions()` are the model and its vector length as configured.
+No model configured, a provider that is not on the classpath or a missing key is a failed result of kind
+`CONFIGURATION`, whose message says what to set. `embedder.model()` is the model as configured, and
+`embedder.dimensions()` an `OptionalInt`: its vector length as the provider's module declares it, or empty for a model
+the module does not list, such as an Ollama model you pulled yourself - that model still works, and its vectors are as
+long as the provider makes them.
+
+To embed with a model other than the one `application.conf` names - two models side by side, say -
+`Llm4s.createEmbeddingClient` takes it as `provider/model`. The provider's key, base URL and timeouts still come from
+configuration, as for the default client, so `llm4s.embeddings.model` need not be set at all:
+
+```java
+JEmbeddingClient large = Llm4s.createEmbeddingClient("openai/text-embedding-3-large").get();
+JEmbeddingClient local = Llm4s.createEmbeddingClient("ollama/bge-m3").get();   // dimensions() is empty
+```
+
+A `null` model is a failed result of kind `VALIDATION`; one not in the form `provider/model`, a provider that is not on
+the classpath or a missing key, one of kind `CONFIGURATION`.
 
 `embed` takes a `java.util.List<String>` and returns a `JEmbeddings`: one vector per text, in the order of the texts,
 from a single request. `JEmbeddings.cosineSimilarity` compares two of them:
@@ -489,8 +503,9 @@ System.out.println("closest: " + texts.get(best));
 Like `complete`, `embed` blocks and never throws: an empty list returns no vectors without a request, a `null` list,
 text or purpose is a failed result of kind `VALIDATION`, and an interrupt one of kind `CANCELLED`. A provider's error
 response has the kind of its HTTP status - `401` reads as `AUTHENTICATION`, `429` as `RATE_LIMIT`, `400` as
-`VALIDATION`, any other as `SERVICE`, with `getStatusCode()` - and one with no status, such as a provider that could not
-be reached, is `OTHER`. A vector store to keep the vectors in and search them is
+`VALIDATION`, any other as `SERVICE`, with `getStatusCode()`. A provider that cannot be reached is `NETWORK`, and one
+that does not answer in time `TIMEOUT`; any other failure with no status, such as a reply that cannot be read, is
+`OTHER`. A vector store to keep the vectors in and search them is
 [#1491](https://github.com/llm4s/llm4s/issues/1491).
 
 ## What is not here yet

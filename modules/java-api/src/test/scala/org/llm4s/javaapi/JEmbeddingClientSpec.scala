@@ -180,7 +180,7 @@ class JEmbeddingClientSpec extends AnyFlatSpec with Matchers {
   it should "describe itself by its model and dimensions" in {
     clientOver(new Recording(perText)).toString shouldBe "JEmbeddingClient(embed-model, 1536 dimensions)"
     (clientOver(new Recording(perText)).model, clientOver(new Recording(perText)).dimensions) shouldBe
-      (("embed-model", 1536))
+      (("embed-model", OptionalInt.of(1536)))
   }
 
   "embed, called from Java source" should "compile with Java types only and read the result back" in {
@@ -201,12 +201,145 @@ class JEmbeddingClientSpec extends AnyFlatSpec with Matchers {
     val created = Llm4s.createDefaultEmbeddingClient()
     created.isSuccess shouldBe true
     val client = created.get()
-    (client.model, client.dimensions) shouldBe (("fixture-embed-small", 256))
+    (client.model, client.dimensions) shouldBe (("fixture-embed-small", OptionalInt.of(256)))
 
     val embeddings = client.embed(texts("one", "two"), JEmbeddingPurpose.QUERY).get()
     embeddings.model shouldBe "fixture-embed-small"
     embeddings.dimensions shouldBe FixtureEmbeddingProvider.Dimensions
     embeddings.vectors.asScala.map(_.toList) shouldBe Seq.fill(2)(List.fill(4)(0.5f))
+  }
+
+  // --- #1781 ---
+
+  /** `ReferenceConfig.withEnv`: the application's `hocon` over every module's reference.conf, with no environment. */
+  private def appConf(hocon: String) = org.llm4s.config.ReferenceConfig.withEnv(hocon, Map.empty)
+
+  /** A loaded config's client as the facade hands it out, a failure read as Java reads it. */
+  private def created(
+    loaded: Result[(String, org.llm4s.llmconnect.config.EmbeddingProviderConfig)]
+  ): Either[LlmException, JEmbeddingClient] =
+    EmbeddingClients.from(loaded).left.map(new LlmException(_))
+
+  "Llm4s.createEmbeddingClient" should "build the client for the model it names, with its key from configuration" in {
+    // llm4s.embeddings.model names fixture-embed-small; the factory asks for another model, its key from the same block
+    val client = Llm4s.createEmbeddingClient("fixtureembedding/fixture-embed-large").get()
+    (client.model, client.dimensions) shouldBe (("fixture-embed-large", OptionalInt.of(1024)))
+    client.embed(texts("one")).get().model shouldBe "fixture-embed-large"
+    // an alias of the provider, and a provider name in another case, as llm4s.embeddings.model takes them
+    Llm4s.createEmbeddingClient("Fixture-Embedding-AI/fixture-embed-small").get().model shouldBe "fixture-embed-small"
+  }
+
+  it should "need no llm4s.embeddings.model at all" in {
+    val loaded = org.llm4s.config.Llm4sConfig.embeddingsFor(
+      appConf("""llm4s.embeddings.fixtureembedding.apiKey = "k""""),
+      "fixtureembedding/fixture-embed-small"
+    )
+    created(loaded).map(_.model) shouldBe Right("fixture-embed-small")
+  }
+
+  it should "refuse a null model as VALIDATION, and a malformed model or an unknown provider as CONFIGURATION" in {
+    val refusedNull = Llm4s.createEmbeddingClient(null).getError()
+    refusedNull.getKind shouldBe LlmErrorKind.VALIDATION
+    refusedNull.getMessage should include("'model' is required")
+    Seq("text-embedding-3-small", "openai/", "/text-embedding-3-small", "", "  ").foreach { malformed =>
+      val error = Llm4s.createEmbeddingClient(malformed).getError()
+      withClue(malformed)(error.getKind shouldBe LlmErrorKind.CONFIGURATION)
+      error.getMessage should include("Expected 'provider/model'")
+    }
+    val unknown = Llm4s.createEmbeddingClient("nosuchprovider/m").getError()
+    unknown.getKind shouldBe LlmErrorKind.CONFIGURATION
+    unknown.getMessage should include("'nosuchprovider' is not registered")
+  }
+
+  it should "refuse a provider whose key is not configured, as CONFIGURATION naming the variable" in {
+    val error =
+      created(org.llm4s.config.Llm4sConfig.embeddingsFor(appConf(""), "fixtureembedding/fixture-embed-small")).left
+        .getOrElse(fail("expected a missing-key failure"))
+    error.getKind shouldBe LlmErrorKind.CONFIGURATION
+    error.getMessage should include(FixtureEmbeddingProvider.ApiKeyEnv)
+  }
+
+  it should "be called from Java source, reading declared and undeclared dimensions and each failure's kind" in {
+    EmbeddingCheck
+      .createFor(
+        java.util.List.of("fixtureembedding/fixture-embed-large", "fixtureembedding/my-own-model", "no-slash", "x/y")
+      )
+      .asScala
+      .toList shouldBe List(
+      "fixtureembedding/fixture-embed-large -> fixture-embed-large, 1024 dimensions",
+      s"fixtureembedding/my-own-model -> my-own-model, undeclared, made ${FixtureEmbeddingProvider.Dimensions}",
+      "no-slash -> CONFIGURATION",
+      "x/y -> CONFIGURATION"
+    )
+  }
+
+  "a model its provider module does not list" should "be created, its dimensions empty and its vectors as long as made" in {
+    // the fixture declares fixture-embed-small and fixture-embed-large only; its vectors are four long
+    val client = Llm4s.createEmbeddingClient("fixtureembedding/my-own-model").get()
+    client.dimensions shouldBe OptionalInt.empty()
+    client.toString shouldBe "JEmbeddingClient(my-own-model, dimensions undeclared)"
+    client.embed(texts("a", "b")).get().dimensions shouldBe FixtureEmbeddingProvider.Dimensions
+    // an empty batch calls no provider, so it has no length to report
+    client.embed(texts()).get().dimensions shouldBe 0
+  }
+
+  it should "work end to end with Ollama, whose module lists no bge-m3: the request names the model and asks no size" in {
+    import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, withServer }
+    val asked = new java.util.concurrent.atomic.AtomicReference[ujson.Value]()
+    withServer("/api/embeddings") { exchange =>
+      asked.set(ujson.read(new String(exchange.getRequestBody.readAllBytes(), "UTF-8")))
+      sendJsonResponse(exchange, 200, """{"embedding":[0.1,0.2,0.3,0.4,0.5]}""")
+    } { baseUrl =>
+      val loaded = org.llm4s.config.Llm4sConfig.embeddingsFor(
+        appConf(s"""llm4s.embeddings.ollama.baseUrl = "$baseUrl""""),
+        "ollama/bge-m3"
+      )
+      val client = created(loaded).getOrElse(fail("expected a client"))
+      client.dimensions shouldBe OptionalInt.empty()
+      val embeddings = client.embed(texts("hello")).get()
+      (embeddings.model, embeddings.dimensions) shouldBe (("bge-m3", 5))
+    }
+    asked.get.obj.keySet shouldBe Set("model", "prompt")
+    asked.get()("model").str shouldBe "bge-m3"
+  }
+
+  "an embedding provider that cannot be reached" should "fail the call as NETWORK, not OTHER" in {
+    val socket = new java.net.ServerSocket(0)
+    val port   = socket.getLocalPort
+    socket.close()
+    val loaded = org.llm4s.config.Llm4sConfig.embeddingsFor(
+      appConf(s"""llm4s.embeddings.ollama.baseUrl = "http://127.0.0.1:$port""""),
+      "ollama/bge-m3"
+    )
+    val error = created(loaded).getOrElse(fail("expected a client")).embed(texts("hello")).getError()
+    error.getKind shouldBe LlmErrorKind.NETWORK
+    error.getMessage should include(s"127.0.0.1:$port")
+  }
+
+  "Llm4s.createDefaultEmbeddingClient's loading" should "fail as CONFIGURATION, saying what to set, with no model configured" in {
+    val error = created(org.llm4s.config.Llm4sConfig.embeddings(appConf(""))).left
+      .getOrElse(fail("expected a missing-model failure"))
+    error.getKind shouldBe LlmErrorKind.CONFIGURATION
+    error.getMessage should include("EMBEDDING_MODEL")
+  }
+
+  it should "fail as CONFIGURATION, naming the variable, when the model's provider has no key" in {
+    val error = created(
+      org.llm4s.config.Llm4sConfig.embeddings(
+        appConf("""llm4s.embeddings.model = "fixtureembedding/fixture-embed-small"""")
+      )
+    ).left.getOrElse(fail("expected a missing-key failure"))
+    error.getKind shouldBe LlmErrorKind.CONFIGURATION
+    error.getMessage should include(FixtureEmbeddingProvider.ApiKeyEnv)
+  }
+
+  it should "build a client for a model its provider module does not list" in {
+    val client = created(
+      org.llm4s.config.Llm4sConfig.embeddings(
+        appConf("""llm4s.embeddings { model = "fixtureembedding/my-own-model", fixtureembedding.apiKey = "k" }""")
+      )
+    ).getOrElse(fail("expected a client"))
+    (client.model, client.dimensions) shouldBe (("my-own-model", OptionalInt.empty()))
   }
 
   "JEmbeddings.vectors" should "hand out copies: changing a returned array or list changes nothing held" in {

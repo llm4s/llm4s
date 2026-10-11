@@ -107,8 +107,16 @@ class OpenAIEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "report a refused connection as an EmbeddingError with no status code" in {
-    val error = embeddingError(provider(s"http://localhost:${closedPort()}").embed(request))
+  it should "report a refused connection as the HTTP client's NetworkError, so it reads as a network failure (#1781)" in {
+    val port = closedPort()
+    provider(s"http://localhost:$port").embed(request) match {
+      case Left(e: org.llm4s.error.NetworkError) => e.endpoint should include(s"localhost:$port")
+      case other                                 => fail(s"expected a NetworkError, got $other")
+    }
+  }
+
+  it should "report a request the HTTP client cannot send, a malformed base URL, as an EmbeddingError with no status" in {
+    val error = embeddingError(provider("http://local host:1").embed(request))
     error.code shouldBe None
     error.provider shouldBe "openai"
     error.message should startWith("HTTP request failed")

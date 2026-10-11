@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse, InputPurpose }
 import org.llm4s.types.Result
 
+import java.util.OptionalInt
 import scala.jdk.CollectionConverters.*
 
 /**
@@ -21,22 +22,34 @@ import scala.jdk.CollectionConverters.*
  * }}}
  *
  * Obtain one with [[Llm4s.createDefaultEmbeddingClient]], which reads the model from `llm4s.embeddings.model`
- * (`EMBEDDING_MODEL`).
+ * (`EMBEDDING_MODEL`), or with [[Llm4s.createEmbeddingClient]] for a model you name.
  *
  * Every `embed` sends all its texts to the provider in one request, blocks the calling thread and never throws: a
  * failure - of the provider, the network or an argument - comes back inside the [[LlmResult]], and its
  * `getKind()` says which. An embedding provider's error response reads by its HTTP status, as a chat provider's does:
- * `401` and `403` as `AUTHENTICATION`, `429` as `RATE_LIMIT`, `400` as `VALIDATION`, any other as `SERVICE`.
+ * `401` and `403` as `AUTHENTICATION`, `429` as `RATE_LIMIT`, `400` as `VALIDATION`, any other as `SERVICE`; a
+ * provider that cannot be reached reads as `NETWORK`, and one that does not answer in time as `TIMEOUT`.
  * Interrupting the blocked thread returns a failed result whose kind is `CANCELLED`, with the thread's interrupt flag
  * still set; `InterruptedException` is never thrown.
  */
-final class JEmbeddingClient private[javaapi] (client: EmbeddingClient, modelConfig: EmbeddingModelConfig) {
+final class JEmbeddingClient private[javaapi] (client: EmbeddingClient, configured: String, declared: OptionalInt) {
+
+  /** A client for a model whose dimensions are declared, as `modelConfig` gives them. */
+  private[javaapi] def this(client: EmbeddingClient, modelConfig: EmbeddingModelConfig) =
+    this(client, modelConfig.name, OptionalInt.of(modelConfig.dimensions))
+
+  /** The model as a request names it; a model whose dimensions are not declared asks for none, as no provider sends them. */
+  private val modelConfig = EmbeddingModelConfig(configured, declared.orElse(0))
 
   /** The embedding model this client asks for, as configured. */
-  def model: String = modelConfig.name
+  def model: String = configured
 
-  /** The length of the vectors the model makes, as its provider module declares it. */
-  def dimensions: Int = modelConfig.dimensions
+  /**
+   * The length of the vectors the model makes, as its provider module declares it; empty for a model the module does not
+   * list, such as an Ollama model you pulled yourself. Such a model's vectors are as long as the provider makes them:
+   * [[JEmbeddings.dimensions]] says how long.
+   */
+  def dimensions: OptionalInt = declared
 
   /**
    * Embeds `texts` as documents to be indexed - core's default - returning one vector per text, in order. The same as
@@ -59,7 +72,7 @@ final class JEmbeddingClient private[javaapi] (client: EmbeddingClient, modelCon
       // copied first, so a list changed by another thread cannot make the check and the request disagree
       val input = texts.asScala.toVector
       input.indexOf(null) match {
-        case -1 if input.isEmpty => LlmResult.success(JEmbeddings.of(model, dimensions, Array.empty))
+        case -1 if input.isEmpty => LlmResult.success(JEmbeddings.of(model, declared.orElse(0), Array.empty))
         case -1                  => request(input, purpose)
         case i                   => LlmResult.failure(ValidationError.invalid(s"texts[$i]", "must not be null"))
       }
@@ -88,7 +101,9 @@ final class JEmbeddingClient private[javaapi] (client: EmbeddingClient, modelCon
     else Right(JEmbeddings.of(reply.metadata.get("model").filter(_.nonEmpty).getOrElse(model), lengths(0), vectors))
   }
 
-  override def toString: String = s"JEmbeddingClient($model, $dimensions dimensions)"
+  override def toString: String =
+    if (declared.isPresent) s"JEmbeddingClient($model, ${declared.getAsInt} dimensions)"
+    else s"JEmbeddingClient($model, dimensions undeclared)"
 }
 
 object JEmbeddingClient {

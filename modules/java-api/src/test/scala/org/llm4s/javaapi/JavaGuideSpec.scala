@@ -210,7 +210,7 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
       var embedder: JEmbeddingClient = null
       captured { embedder = GuideSnippets.defaultEmbedder() } shouldBe Printed("", "")
       // this module's test application.conf names core's canned fixture model
-      (embedder.model, embedder.dimensions) shouldBe (("fixture-embed-small", 256))
+      (embedder.model, embedder.dimensions) shouldBe (("fixture-embed-small", java.util.OptionalInt.of(256)))
     }
 
     "embed the two sentences as documents in one request and print the model, dimensions and similarity" in {

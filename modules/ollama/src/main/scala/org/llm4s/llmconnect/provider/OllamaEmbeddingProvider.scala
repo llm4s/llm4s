@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
-import org.llm4s.error.CancelledError
+import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
@@ -106,13 +106,15 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
       val headers = Map("Content-Type" -> "application/json") ++ auth
 
       // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left.
-      // A cancellation passes through as it is (design section 4.4); any other failure is an EmbeddingError.
+      // A cancellation (design section 4.4), a network failure and a timeout pass through as they are; any other
+      // failure is an EmbeddingError.
       val respEither: Result[org.llm4s.http.HttpResponse] =
         httpClient
           .post(url, headers, payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
           .left
           .map {
-            case cancelled: CancelledError => cancelled
+            // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)
+            case typed @ (_: CancelledError | _: NetworkError | _: TimeoutError) => typed
             case e =>
               EmbeddingError(code = None, message = s"HTTP request failed: ${e.message}", provider = "ollama")
           }

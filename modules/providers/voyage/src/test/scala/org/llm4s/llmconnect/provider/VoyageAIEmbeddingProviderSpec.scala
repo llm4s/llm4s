@@ -134,15 +134,25 @@ class VoyageAIEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockF
     result.isLeft shouldBe true
   }
 
-  it should "return EmbeddingError, not throw, on a transport failure" in {
+  it should "return the HTTP client's NetworkError, not throw, when the provider cannot be reached (#1781)" in {
+    val refused  = org.llm4s.error.NetworkError("connection refused", None, "http://voyage-test/embeddings")
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _)
-      .when(*, *, *, *)
-      .returns(Left(org.llm4s.error.NetworkError("connection refused", None, "http://voyage-test/embeddings")))
+    (mockHttp.post _).when(*, *, *, *).returns(Left(refused))
 
-    val result = VoyageAIEmbeddingProvider.forTest(cfg, mockHttp).embed(req)
+    VoyageAIEmbeddingProvider.forTest(cfg, mockHttp).embed(req) shouldBe Left(refused)
+  }
 
-    result.left.toOption.get.message should include("connection refused")
+  it should "return a timeout as it is, and any other transport failure as an EmbeddingError" in {
+    import scala.concurrent.duration.DurationInt
+    val late     = org.llm4s.error.TimeoutError("POST voyage: request timed out", 1.second, "http.POST")
+    val timesOut = stub[Llm4sHttpClient]
+    (timesOut.post _).when(*, *, *, *).returns(Left(late))
+    VoyageAIEmbeddingProvider.forTest(cfg, timesOut).embed(req) shouldBe Left(late)
+
+    val invalid = stub[Llm4sHttpClient]
+    (invalid.post _).when(*, *, *, *).returns(Left(org.llm4s.error.ValidationError("request", "bad URL")))
+    val result = VoyageAIEmbeddingProvider.forTest(cfg, invalid).embed(req)
+    result.left.toOption.get.message should include("HTTP request failed")
     result.left.toOption.get.context.get("provider") shouldBe Some("voyage")
   }
 

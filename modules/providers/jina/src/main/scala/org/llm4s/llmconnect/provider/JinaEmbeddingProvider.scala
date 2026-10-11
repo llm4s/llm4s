@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.JinaConfigKeys
-import org.llm4s.error.CancelledError
+import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
 import org.llm4s.http.{ HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model._
@@ -193,7 +193,8 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
         // A cancellation is not a failed request: it passes through (design section 4.4).
         val respEither: Result[Llm4sHttpResponse] =
           httpClient.post(url, headers, payload.render(), timeout = cfg.timeouts.requestOr(120.seconds)).left.map {
-            case cancelled: CancelledError => cancelled
+            // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)
+            case typed @ (_: CancelledError | _: NetworkError | _: TimeoutError) => typed
             case err =>
               EmbeddingError(code = None, message = s"HTTP request failed: ${err.message}", provider = "jina")
           }

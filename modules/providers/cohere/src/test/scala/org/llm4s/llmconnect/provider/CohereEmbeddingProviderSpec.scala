@@ -343,7 +343,7 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
         Left(NetworkError("connect timed out", None, "http://cohere-test/v2/embed"))
     }
     val err = embed(failing, Seq("a")).left.toOption.get
-    err.message should startWith("HTTP request failed")
+    err shouldBe a[NetworkError]
     (err.toString should not).include(secretKey)
     (err.message should not).include(secretKey)
   }
@@ -397,15 +397,14 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "return a transport error when nothing listens" in {
+  it should "return the HTTP client's NetworkError when nothing listens, so it reads as a network failure (#1781)" in {
     val err = CohereEmbeddingProvider
       .fromConfig(cfg("http://localhost:1"))
       .embed(EmbeddingRequest(Seq("hi"), modelCfg))
       .left
       .toOption
       .get
-    err.code shouldBe None
-    err.message should startWith("HTTP request failed")
+    err shouldBe a[NetworkError]
     (err.message should not).include(secretKey)
   }
 
@@ -444,12 +443,17 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
     http.calls.get shouldBe 2 // the first batch answered, the second was cancelled, the third was never sent
   }
 
-  it should "still report a failed request that was not a cancellation as one" in {
+  it should "still report a failed request that was not a cancellation as one: a network failure or timeout as itself" in {
     Thread.interrupted(): Unit
-    val http = new ScriptedPost(_ => Left(NetworkError("connection reset", None, "http://cohere-test")))
+    val reset = NetworkError("connection reset", None, "http://cohere-test")
+    embed(new ScriptedPost(_ => Left(reset)), Seq("t1")).left.toOption.get shouldBe reset
+    val late = org.llm4s.error.TimeoutError("POST cohere: request timed out", 1.second, "http.POST")
+    embed(new ScriptedPost(_ => Left(late)), Seq("t1")).left.toOption.get shouldBe late
 
-    val err = embed(http, Seq("t1")).left.toOption.get
-
+    val err = embed(
+      new ScriptedPost(_ => Left(org.llm4s.error.ValidationError("request", "bad URL"))),
+      Seq("t1")
+    ).left.toOption.get
     err shouldBe a[EmbeddingError]
     err.message should startWith("HTTP request failed")
   }
