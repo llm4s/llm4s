@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MeterRegistry`, say) was `private[llm4s]` for the Spring Boot starter, yet public in the bytecode, so Java callers
   saw it and Scala callers outside `org.llm4s` could not use it. It is now public and documented
   ([Using LLM4S from Java](docs/guide/java.md#recording-metrics)), settled before the `llm4s-java-api` MiMa baseline.
+- **Kotlin `AgentKt.forget(threadId)`** ([#1693](https://github.com/llm4s/llm4s/issues/1693)): a suspend function
+  that forgets a conversation by its thread id, delegating to `JAgent.forget(threadId)` and throwing `LLMException`
+  on failure, so a Kotlin caller can remove a named conversation whose turn left no result - a failed
+  `stream(threadId, ...)` flow - where `forget(previous)` needed one. Forgetting an unknown thread succeeds; a thread
+  whose turn is still running is refused (`ThreadBusy`) and nothing is removed.
 - **Checkpoint history, fork, `updateState` and retention** ([#1702](https://github.com/llm4s/llm4s/issues/1702),
   Stage 2 slice 3 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): a `Checkpointer` keeps every checkpoint a
   thread's runs commit, not only the latest. `GraphRuntime.history(threadId, before, limit)` pages them newest first
@@ -2500,6 +2505,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names (`org.springframework.boot.micrometer.metrics.autoconfigure.*`), and a test fails if the names stop resolving
   on the Boot version the starter is tested against. The `MicrometerMetrics` Scaladoc no longer claims the class holds
   no mutable state.
+- **The Spring Boot starter's health indicator redacts nested credentials and header values** ([#1820](https://github.com/llm4s/llm4s/issues/1820)):
+  the credentials it removes from a failed probe's `error` message were read only from top-level text fields of the
+  resolved provider config, so a credential set outside Spring properties (in `application.conf`, a `reference.conf`
+  default or an environment variable) was missed when it was nested - Bedrock's `credentials` (access key id, secret
+  key, session token) - or held in `headers` under a name that does not look secret. The starter now reads every case
+  class inside the config, through `Option`, `Seq` and `Map` values, treats every `headers` value (and the token after
+  an auth scheme such as `Bearer`) as a credential, and never throws while reading. A field named like a URL
+  (`tokenUrl`) is no longer taken for a credential.
 - **Security - ShellTool and the workspace runner: on double-byte Windows hosts, a quoted argument holding a character
   whose second byte is 0x5C is refused** ([#1807](https://github.com/llm4s/llm4s/issues/1807)): code pages 932, 936
   and 950 encode some characters with a second byte of 0x5C, the byte of `\` (50, 126 and 126 of the characters they

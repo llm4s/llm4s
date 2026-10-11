@@ -1830,7 +1830,14 @@ lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
   // `observabilityMicrometer` is provided, like Actuator: `LlmMetricsAutoConfiguration` records into the
   // application's MeterRegistry only when the application adds `llm4s-observability-micrometer` itself, so the
   // starter puts no Micrometer jar on a classpath that did not ask for one (#1466).
-  .dependsOn(javaApi, observabilityMicrometer % "provided", core % "test->test", providerTestkit % Test)
+  // `bedrock` is a test dependency only, for the health indicator's redaction of nested credentials (#1820).
+  .dependsOn(
+    javaApi,
+    observabilityMicrometer % "provided",
+    core                    % "test->test",
+    providerTestkit         % Test,
+    bedrock                 % Test
+  )
   .settings(
     name := "llm4s-spring-boot-starter",
     commonSettings,
