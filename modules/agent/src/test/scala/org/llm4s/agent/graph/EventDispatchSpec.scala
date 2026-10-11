@@ -73,9 +73,12 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
       if reads.incrementAndGet() == 2 then switching.countDown()
       underlying.eventsAfter(threadId, afterSeq, limit)
     }
-    def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
-    def awaitSwitch(): Unit                                = switching.await(5, TimeUnit.SECONDS) shouldBe true
+    def compactEvents(threadId: ThreadId, beforeSeq: Long)              = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                                = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
+    def awaitSwitch(): Unit = switching.await(5, TimeUnit.SECONDS) shouldBe true
   }
 
   /** A chain of `steps` nodes n0 -> n1 -> ..., each running `body(index, context)` once. */
@@ -441,8 +444,11 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
       def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = store.release(threadId, token)
       def latest(threadId: ThreadId)                                             = store.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = Left(error)
-      def compactEvents(threadId: ThreadId, beforeSeq: Long) = store.compactEvents(threadId, beforeSeq)
-      def deleteThread(threadId: ThreadId)                   = store.deleteThread(threadId)
+      def compactEvents(threadId: ThreadId, beforeSeq: Long)              = store.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId)                                = store.deleteThread(threadId)
+      def history(threadId: ThreadId, before: Option[String], limit: Int) = store.history(threadId, before, limit)
+      def checkpoint(threadId: ThreadId, checkpointId: String)            = store.checkpoint(threadId, checkpointId)
+      def prune(threadId: ThreadId, policy: RetentionPolicy)              = store.prune(threadId, policy)
     }
     val runtime   = GraphRuntime(failing)
     val collector = Collector()
