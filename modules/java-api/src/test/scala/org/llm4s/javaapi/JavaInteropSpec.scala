@@ -402,8 +402,9 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     val file = new SimpleJavaFileObject(java.net.URI.create("string:///user/Forger.java"), JavaFileObject.Kind.SOURCE) {
       override def getCharContent(ignoreEncodingErrors: Boolean): CharSequence = source
     }
-    val out         = java.nio.file.Files.createTempDirectory("forger")
-    val classes     = classOf[JAgentResult].getProtectionDomain.getCodeSource.getLocation.getPath
+    val out = java.nio.file.Files.createTempDirectory("forger")
+    val classes =
+      java.nio.file.Paths.get(classOf[JAgentResult].getProtectionDomain.getCodeSource.getLocation.toURI).toString
     val diagnostics = new DiagnosticCollector[JavaFileObject]
     val compiled = ToolProvider.getSystemJavaCompiler
       .getTask(
