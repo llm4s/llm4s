@@ -8,7 +8,10 @@ import scala.concurrent.duration._
  *
  * @param name Unique identifier for this server configuration
  * @param transport Transport mechanism (stdio, SSE, or Streamable HTTP) for communication
- * @param timeout Maximum time to wait for server responses
+ * @param timeout Maximum time one request to this server may take, reply included. Over Streamable HTTP it bounds
+ *                the whole exchange: the wait for the response headers and the reading of the body, including a
+ *                reply sent as an SSE stream, which a server opens at once and may keep open while a tool runs.
+ *                A call still unanswered at the deadline fails as timed out and its connection is closed.
  * @param trustAnnotations Whether the tool annotations this server sends (`readOnlyHint`, `destructiveHint`,
  *                         `idempotentHint`, `openWorldHint`) may be used to relax how its tools are treated.
  *                         `false` by default: the MCP specification says a client must consider annotations
