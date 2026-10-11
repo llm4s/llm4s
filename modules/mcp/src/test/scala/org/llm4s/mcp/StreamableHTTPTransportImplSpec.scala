@@ -668,6 +668,24 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
       capturedHeaders("Content-Type") shouldBe "application/json"
     }
 
+    "accept both JSON and an event stream on a notification, as the transport requires of every POST" in {
+      val mockHttp  = stub[Llm4sHttpClient]
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+
+      var capturedHeaders: Map[String, String] = Map.empty
+      (mockHttp.post _)
+        .when(*, *, *, *)
+        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+          Right {
+            capturedHeaders = headers
+            httpResponse(202, "")
+          }
+        }
+
+      transport.sendNotification(JsonRpcNotification("2.0", "notifications/initialized")) shouldBe Right(())
+      capturedHeaders.get("Accept") shouldBe Some("application/json, text/event-stream")
+    }
+
     "include MCP-Protocol-Version in notification headers" in {
       val mockHttp  = stub[Llm4sHttpClient]
       val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
