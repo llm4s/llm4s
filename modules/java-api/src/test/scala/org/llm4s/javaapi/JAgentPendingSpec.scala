@@ -126,7 +126,7 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
       Vector(InterruptId("a1") -> ApprovalRequest("m1", c, null, ApprovalSource.Tool, IdempotencyKey("k1"))),
       Vector(InterruptId("q1") -> ToolQuestionRequest("m1", c, null, IdempotencyKey("q1")))
     )
-    val List(approval, question) = PendingInterrupt.of(status).asScala.toList: @unchecked
+    val List(approval, question) = FacadeInternals.pending(status).asScala.toList: @unchecked
     approval.kind shouldBe InterruptKind.APPROVAL
     approval.reason() shouldBe java.util.Optional.empty()
     question.kind shouldBe InterruptKind.QUESTION
@@ -176,7 +176,7 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail every call of an agent that did not build" in {
-    val broken = new JAgent(Left(ValidationError("agent", "broken")))
+    val broken = new JAgent(FacadeToken.INSTANCE, Left(ValidationError("agent", "broken")))
     broken.resume("t", java.util.List.of()).getError().getMessage should include("broken")
     broken.recover("t").getError().getMessage should include("broken")
   }

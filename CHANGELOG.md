@@ -1175,6 +1175,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Breaking (Java API): the facade's Java-visible surface is the intended one** ([#1666](https://github.com/llm4s/llm4s/issues/1666)):
+  Scala 3 emitted the `private` constructors and `private[javaapi]` factories of `llm4s-java-api` as `public`, so Java
+  could build values the library never would (`new JToolCall(null, null, null)`, a `COMPLETED` `JAgentStatus` with no
+  answer) and adding a field would have broken a caller compiled against a constructor. The value types - `JAgentResult`,
+  `JAgentStatus`, `JMessage`, `JToolCall`, `JUsageSummary`, `JModelUsage`, `PendingInterrupt`, `JCompletion`,
+  `JTokenUsage` and `JEmbeddings` - are now Java classes with package-private constructors and no static factory (bar
+  `JEmbeddings.cosineSimilarity`), with the same accessors, `equals`, `hashCode` and `toString`. The facade's Scala
+  classes (`JLlmClient`, `JAgent`, `JEmbeddingClient`, `AgentStream`, `LlmResult`, `Answer`, `ConversationBuilder`,
+  `JCompletionOptions` and its `Builder`) take a package-private token first in their constructors, which throw
+  `UnsupportedOperationException` when called from outside the package, and the internal `of`/`from` factories,
+  `AgentStream.start` and `Llm4s.createClient(config, metrics)` are gone from the facade types. `JavaInteropSpec` now
+  fails on any public constructor or public static method that is not in its list of intended ones, its companion's
+  included, and compiles a Java class in another package that tries to build each value type. New:
+  `Llm4s.wrapClient(LLMClient)`, the counterpart of `wrapAgent`. Migration: `new JLlmClient(client)` from Java or
+  Kotlin becomes `Llm4s.wrapClient(client)`; nothing else had a supported way in.
 - **Breaking: human-review interrupts** ([#1704](https://github.com/llm4s/llm4s/issues/1704)): `AgentStatus.Suspended`
   has four fields (`approvals`, `questions`, `middlewareQuestions`, `breakpoints`), so a pattern must name four; the
   kernel's `PendingInterrupt` gains `breakpoint`; `RunConfig` gains `interruptBefore`/`interruptAfter`;

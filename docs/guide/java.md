@@ -32,6 +32,16 @@ enum, and so does core's `CompletionOptions`, in an overload that [`JCompletionO
 makes unnecessary. [What is not here yet](#what-is-not-here-yet) says which of them gets in
 your way.
 
+The values it hands you to read - `JCompletion`, `JAgentResult`, `JMessage`, `PendingInterrupt`, `JEmbeddings` and the
+rest - are Java classes whose constructors are package-private: you receive them, you do not build them, so a later
+release can add a field without breaking code compiled against this one. The classes that do the work come from a
+factory: `Llm4s` makes clients and agents, `JCompletionOptions.builder()` and `ConversationBuilder.create()` start a
+builder, `LlmResult.success` and `failure` make a result, and the `Answer` factories an answer. Their constructors are
+not for you either: each takes a first parameter of a type only the package can name, and throws
+`UnsupportedOperationException` when called from anywhere else. To call a Scala `LLMClient` you built yourself - a
+`ReliableClient` around a provider's client, your own implementation, a test double - wrap it with
+`Llm4s.wrapClient(client)`.
+
 {: .note }
 > **Not published yet.** `llm4s-java-api` is not on Maven Central: the latest release, `0.4.1`, is a single
 > `llm4s-core` artifact, and the Java API is planned to ship with `0.5.0`. Until then, build it from a checkout of the

@@ -6,7 +6,6 @@ import org.llm4s.error.RateLimitError
 import org.llm4s.error.ServiceError
 import org.llm4s.javaapi.ConversationBuilder
 import org.llm4s.javaapi.JCompletion
-import org.llm4s.javaapi.JLlmClient
 import org.llm4s.javaapi.LlmErrorKind
 import org.llm4s.javaapi.LlmException
 import org.llm4s.llmconnect.LLMClient
@@ -73,7 +72,7 @@ class CompletionTest {
     @Test
     fun `completion returns the model, usage, cost and tool calls of the reply`() {
         val model = RecordingClient(Right(reply()))
-        val answer: JCompletion = JLlmClient(model).completion("Weather in Paris?").get()
+        val answer: JCompletion = org.llm4s.javaapi.Llm4s.wrapClient(model).completion("Weather in Paris?").get()
 
         assertEquals("Let me check.", answer.content())
         assertEquals("gpt-4o-2024-08-06", answer.model())
@@ -87,7 +86,7 @@ class CompletionTest {
 
     @Test
     fun `an unknown cost is an empty Optional`() {
-        val answer = JLlmClient(RecordingClient(Right(reply(cost = Option.empty())))).completion("q").get()
+        val answer = org.llm4s.javaapi.Llm4s.wrapClient(RecordingClient(Right(reply(cost = Option.empty())))).completion("q").get()
         assertEquals(Optional.empty(), answer.estimatedCost())
     }
 
@@ -97,7 +96,7 @@ class CompletionTest {
         val conversation = ConversationBuilder.create().user("hi").build()
         val options = org.llm4s.javaapi.JCompletionOptions.builder().maxTokens(64).build()
 
-        assertEquals("Let me check.", JLlmClient(model).completion(conversation, options).get().content())
+        assertEquals("Let me check.", org.llm4s.javaapi.Llm4s.wrapClient(model).completion(conversation, options).get().content())
         assertEquals(Option.apply<Any>(64), model.sent.single().second.maxTokens())
     }
 
@@ -114,7 +113,7 @@ class CompletionTest {
     }
 
     private fun failureOf(error: LLMError): LlmException =
-        JLlmClient(RecordingClient(Left(error))).completion("q").error
+        org.llm4s.javaapi.Llm4s.wrapClient(RecordingClient(Left(error))).completion("q").error
 
     @Test
     fun `a when over the error kind covers every one`() {

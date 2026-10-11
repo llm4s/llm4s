@@ -28,7 +28,6 @@ import org.llm4s.error.ProcessingError
 import org.llm4s.error.ValidationError
 import org.llm4s.javaapi.AgentStream
 import org.llm4s.javaapi.Answer
-import org.llm4s.javaapi.JLlmClient
 import org.llm4s.javaapi.StreamEvents
 import org.llm4s.agent.events.AgentEvents
 import org.llm4s.toolapi.ToolRegistry
@@ -178,7 +177,7 @@ class AgentKtStreamTest {
     @Test
     fun `an agent created with streaming streams text deltas, one without does not`() = runBlocking {
         val model = Scripted({ onChunk -> onChunk(StreamedChunk.apply("c", Option.apply("he"), Option.empty(), Option.empty(), Option.empty())); completion("hello") })
-        val client = LLMClientKt(JLlmClient(model))
+        val client = LLMClientKt(org.llm4s.javaapi.Llm4s.wrapClient(model))
         suspend fun deltas(agent: AgentKt, threadId: String): List<String> =
             agent.stream(threadId, "hi").toList().mapNotNull { item ->
                 (item as? AgentStreamItem.Event)?.let { StreamEvents.decode(AgentEvents.TextDelta(), it.event).orElse(null)?.text() }

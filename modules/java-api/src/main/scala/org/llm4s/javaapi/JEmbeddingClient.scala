@@ -30,7 +30,13 @@ import scala.jdk.CollectionConverters.*
  * Interrupting the blocked thread returns a failed result whose kind is `CANCELLED`, with the thread's interrupt flag
  * still set; `InterruptedException` is never thrown.
  */
-final class JEmbeddingClient private[javaapi] (client: EmbeddingClient, modelConfig: EmbeddingModelConfig) {
+final class JEmbeddingClient private[javaapi] (
+  token: FacadeToken,
+  client: EmbeddingClient,
+  modelConfig: EmbeddingModelConfig
+) {
+
+  FacadeToken.check(token, "JEmbeddingClient")
 
   /** The embedding model this client asks for, as configured. */
   def model: String = modelConfig.name
@@ -59,7 +65,7 @@ final class JEmbeddingClient private[javaapi] (client: EmbeddingClient, modelCon
       // copied first, so a list changed by another thread cannot make the check and the request disagree
       val input = texts.asScala.toVector
       input.indexOf(null) match {
-        case -1 if input.isEmpty => LlmResult.success(JEmbeddings.of(model, dimensions, Array.empty))
+        case -1 if input.isEmpty => LlmResult.success(new JEmbeddings(model, dimensions, Array.empty))
         case -1                  => request(input, purpose)
         case i                   => LlmResult.failure(ValidationError.invalid(s"texts[$i]", "must not be null"))
       }
@@ -67,7 +73,7 @@ final class JEmbeddingClient private[javaapi] (client: EmbeddingClient, modelCon
 
   private def request(input: Vector[String], purpose: JEmbeddingPurpose): LlmResult[JEmbeddings] = {
     val sent = EmbeddingRequest(input = input, model = modelConfig, purpose = JEmbeddingClient.toCore(purpose))
-    LlmResult.from(
+    FacadeInternals.result(
       CancelledError.attempt("JEmbeddingClient.embed")(
         Safety.safely(client.embed(sent)).flatMap(identity).flatMap(reply => read(reply, input.size))
       )
@@ -85,7 +91,7 @@ final class JEmbeddingClient private[javaapi] (client: EmbeddingClient, modelCon
       Left(ProcessingError("embed", s"the provider returned ${vectors.length} vectors for $texts texts"))
     else if (lengths.length != 1)
       Left(ProcessingError("embed", s"the provider returned vectors of several lengths: ${lengths.mkString(", ")}"))
-    else Right(JEmbeddings.of(reply.metadata.get("model").filter(_.nonEmpty).getOrElse(model), lengths(0), vectors))
+    else Right(new JEmbeddings(reply.metadata.get("model").filter(_.nonEmpty).getOrElse(model), lengths(0), vectors))
   }
 
   override def toString: String = s"JEmbeddingClient($model, $dimensions dimensions)"

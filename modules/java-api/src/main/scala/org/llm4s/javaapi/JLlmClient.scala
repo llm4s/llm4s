@@ -27,15 +27,18 @@ import org.llm4s.types.Result
  * }
  * }}}
  *
- * Obtain instances via [[Llm4s.createDefaultClient]] or
- * [[Llm4s.createClient]].
+ * Obtain instances via [[Llm4s.createDefaultClient]] or [[Llm4s.createClient]], or wrap a Scala `LLMClient` you
+ * built yourself with [[Llm4s.wrapClient]]; the constructor is the package's own (#1666).
  *
  * {{{
  * LlmResult<String> r = client.complete("What is 2+2?");
  * r.ifSuccess(System.out::println).ifFailure(e -> System.err.println(e.getMessage()));
  * }}}
  */
-final class JLlmClient private[javaapi] (private[javaapi] val underlying: LLMClient) extends AutoCloseable {
+final class JLlmClient private[javaapi] (token: FacadeToken, private[javaapi] val underlying: LLMClient)
+    extends AutoCloseable {
+
+  FacadeToken.check(token, "JLlmClient")
 
   /**
    * Sends a single user query and returns the assistant's text response. A `null` query yields a
@@ -103,7 +106,9 @@ final class JLlmClient private[javaapi] (private[javaapi] val underlying: LLMCli
   def completion(query: String): LlmResult[JCompletion] =
     if (query == null) nullArgument("query")
     else
-      guarded("JLlmClient.completion")(underlying.complete(Conversation(Seq(UserMessage(query)))).map(JCompletion.of))
+      guarded("JLlmClient.completion")(
+        underlying.complete(Conversation(Seq(UserMessage(query)))).map(FacadeInternals.completion)
+      )
 
   /**
    * Sends a pre-built conversation and returns the whole reply, as `completion(String)` does. A `null` conversation
@@ -111,7 +116,7 @@ final class JLlmClient private[javaapi] (private[javaapi] val underlying: LLMCli
    */
   def completion(conversation: Conversation): LlmResult[JCompletion] =
     if (conversation == null) nullArgument("conversation")
-    else guarded("JLlmClient.completion")(underlying.complete(conversation).map(JCompletion.of))
+    else guarded("JLlmClient.completion")(underlying.complete(conversation).map(FacadeInternals.completion))
 
   /**
    * Sends a conversation with the options a [[JCompletionOptions]] builder made and returns the whole reply, as
@@ -129,7 +134,10 @@ final class JLlmClient private[javaapi] (private[javaapi] val underlying: LLMCli
   def completion(conversation: Conversation, options: JCompletionOptions): LlmResult[JCompletion] =
     if (conversation == null) nullArgument("conversation")
     else if (options == null) nullArgument("options")
-    else guarded("JLlmClient.completion")(underlying.complete(conversation, options.underlying).map(JCompletion.of))
+    else
+      guarded("JLlmClient.completion")(
+        underlying.complete(conversation, options.underlying).map(FacadeInternals.completion)
+      )
 
   private def nullArgument[A](name: String): LlmResult[A] =
     LlmResult.failure(ValidationError.required(name))
@@ -143,7 +151,7 @@ final class JLlmClient private[javaapi] (private[javaapi] val underlying: LLMCli
    * declare (#1591).
    */
   private def guarded[A](operation: String)(call: => Result[A]): LlmResult[A] =
-    LlmResult.from(CancelledError.attempt(operation)(Safety.safely(call).flatMap(identity)))
+    FacadeInternals.result(CancelledError.attempt(operation)(Safety.safely(call).flatMap(identity)))
 
   override def close(): Unit = underlying.close()
 }

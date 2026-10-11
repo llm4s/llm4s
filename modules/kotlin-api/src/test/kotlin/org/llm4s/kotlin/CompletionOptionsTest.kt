@@ -2,7 +2,6 @@ package org.llm4s.kotlin
 
 import org.llm4s.javaapi.ConversationBuilder
 import org.llm4s.javaapi.JCompletionOptions
-import org.llm4s.javaapi.JLlmClient
 import org.llm4s.javaapi.JReasoningEffort
 import org.llm4s.llmconnect.model.ReasoningEffort
 import scala.Option
@@ -78,7 +77,7 @@ class CompletionOptionsTest {
         val model = RecordingClient(Right(reply("4")))
         val conversation = ConversationBuilder.create().user("hi").build()
 
-        assertEquals("4", JLlmClient(model).complete(conversation, everySetting).get())
+        assertEquals("4", org.llm4s.javaapi.Llm4s.wrapClient(model).complete(conversation, everySetting).get())
 
         val (sentConversation, sentOptions) = model.sent.single()
         assertEquals(conversation, sentConversation)

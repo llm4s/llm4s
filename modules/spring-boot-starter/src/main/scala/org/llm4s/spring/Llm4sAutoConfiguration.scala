@@ -1,6 +1,6 @@
 package org.llm4s.spring
 
-import org.llm4s.javaapi.{ JLlmClient, Llm4s }
+import org.llm4s.javaapi.{ FacadeInternals, JLlmClient }
 import org.llm4s.metrics.MetricsCollector
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.annotation.Qualifier
@@ -82,7 +82,7 @@ class Llm4sAutoConfiguration {
   ): JLlmClient =
     ProviderSelection
       .resolve(properties, environment)
-      .map(config => Llm4s.createClient(config, Llm4sAutoConfiguration.collector(metrics)).get())
+      .map(config => FacadeInternals.createClient(config, Llm4sAutoConfiguration.collector(metrics)).get())
       .get()
 
   // shutdownNow, not Spring's inferred close(): close() waits for running LLM calls to finish,
