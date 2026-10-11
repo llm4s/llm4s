@@ -2,12 +2,16 @@ package org.llm4s.toolapi.builtin
 
 import org.llm4s.toolapi.SafeParameterExtractor
 import org.llm4s.toolapi.builtin.filesystem._
+import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.nio.file.{ Files, Paths }
+import java.nio.charset.StandardCharsets
+import java.nio.file.{ Files, Path, Paths }
+import scala.jdk.CollectionConverters._
+import scala.util.Using
 
-class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
+class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   private val isWindows: Boolean = System.getProperty("os.name").toLowerCase.contains("win")
 
@@ -18,6 +22,23 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
     Files.createDirectories(dir)
     dir
   }
+
+  // Per-test scratch directory, removed after every test whether it passed or failed
+  private val scratchRoot = testDir.resolve("scratch")
+
+  private def scratchDir(): Path = Files.createDirectories(scratchRoot)
+
+  override def afterEach(): Unit = {
+    deleteRecursively(scratchRoot)
+    super.afterEach()
+  }
+
+  private def deleteRecursively(root: Path): Unit =
+    if (Files.exists(root))
+      Using.resource(Files.walk(root))(_.iterator().asScala.toList.reverse.foreach(p => Files.deleteIfExists(p)))
+
+  private def allFiles(root: Path): List[Path] =
+    Using.resource(Files.walk(root))(_.iterator().asScala.toList)
 
   "FileConfig" should "block system paths by default" in {
     assume(!isWindows, "Unix system paths not available on Windows")
@@ -81,11 +102,12 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
   }
 
   "ReadFileTool" should "read existing files" in {
-    val tempFile = testDir.resolve("read-test.txt")
+    val dir      = scratchDir()
+    val tempFile = dir.resolve("read-test.txt")
     Files.writeString(tempFile, "Hello, World!")
 
-    // No blocked paths, only test dir allowed
-    val config = FileConfig(allowedPaths = Some(Seq(testDir.toString)), blockedPaths = Seq.empty)
+    // No blocked paths, only the scratch dir allowed
+    val config = FileConfig(allowedPaths = Some(Seq(dir.toString)), blockedPaths = Seq.empty)
     ReadFileTool
       .createSafe(config)
       .fold(
@@ -100,12 +122,41 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
                 readResult.content shouldBe "Hello, World!"
                 readResult.lines shouldBe 1
                 readResult.truncated shouldBe false
-
-                Files.deleteIfExists(tempFile)
               }
             )
         }
       )
+  }
+
+  private def readWithEncoding(encoding: Option[String], content: String): Either[String, ReadFileResult] = {
+    val tempFile = scratchDir().resolve("read-encoding.txt")
+    Files.writeString(tempFile, content, StandardCharsets.UTF_8)
+    readPath(tempFile, encoding)
+  }
+
+  private def readPath(path: Path, encoding: Option[String]): Either[String, ReadFileResult] = {
+    val config = FileConfig(allowedPaths = Some(Seq(scratchRoot.toString)), blockedPaths = Seq.empty)
+    val params = ujson.Obj("path" -> path.toString)
+    encoding.foreach(e => params("encoding") = e)
+    ReadFileTool
+      .createSafe(config)
+      .fold(e => fail(s"Tool creation failed: ${e.formatted}"), _.handler(SafeParameterExtractor(params)))
+  }
+
+  it should "return an error for an unknown encoding" in {
+    readWithEncoding(Some("utf-9"), "Hello, World!") shouldBe Left("Unsupported encoding: utf-9")
+  }
+
+  it should "return an error for an illegal encoding name" in {
+    readWithEncoding(Some("bad name!"), "Hello, World!") shouldBe Left("Unsupported encoding: bad name!")
+  }
+
+  it should "return an error for an empty encoding name" in {
+    readWithEncoding(Some(""), "Hello, World!") shouldBe Left("Unsupported encoding: ")
+  }
+
+  it should "read as UTF-8 when no encoding is given" in {
+    readWithEncoding(None, "héllo").map(_.content) shouldBe Right("héllo")
   }
 
   it should "deny access to blocked paths" in {
@@ -340,6 +391,46 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
             )
         }
       )
+  }
+
+  /** Writes `content` to a nested path under a fresh scratch dir; returns the result and the nested target. */
+  private def writeWithEncoding(encoding: Option[String], content: String): (Either[String, WriteFileResult], Path) = {
+    val dir    = scratchDir()
+    val target = dir.resolve("nested").resolve("deeper").resolve("write-encoding.txt")
+    val config = WriteConfig(allowedPaths = Seq(dir.toString), allowOverwrite = true)
+    val params = ujson.Obj("path" -> target.toString, "content" -> content)
+    encoding.foreach(e => params("encoding") = e)
+    val result = WriteFileTool
+      .createSafe(config)
+      .fold(e => fail(s"Tool creation failed: ${e.formatted}"), _.handler(SafeParameterExtractor(params)))
+    (result, target)
+  }
+
+  private def assertRefusesEncoding(encoding: String): org.scalatest.Assertion = {
+    val (result, target) = writeWithEncoding(Some(encoding), "Hello!")
+    result shouldBe Left(s"Unsupported encoding: $encoding")
+    // Neither the file nor its parent directories were created
+    allFiles(scratchRoot) shouldBe List(scratchRoot)
+    Files.exists(target.getParent.getParent) shouldBe false
+  }
+
+  it should "return an error for an unknown encoding" in {
+    assertRefusesEncoding("utf-9")
+  }
+
+  it should "return an error for an illegal encoding name" in {
+    assertRefusesEncoding("bad name!")
+  }
+
+  it should "return an error for an empty encoding name" in {
+    assertRefusesEncoding("")
+  }
+
+  it should "round-trip non-ASCII text through ReadFileTool as UTF-8 when no encoding is given" in {
+    val (result, target) = writeWithEncoding(None, "héllo")
+    result.map(_.created) shouldBe Right(true)
+    Files.readAllBytes(target) shouldBe "héllo".getBytes(StandardCharsets.UTF_8)
+    readPath(target, None).map(_.content) shouldBe Right("héllo")
   }
 
   it should "deny write to non-allowed paths" in {

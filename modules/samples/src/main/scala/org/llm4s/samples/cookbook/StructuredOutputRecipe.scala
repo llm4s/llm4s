@@ -25,7 +25,7 @@ object StructuredOutputRecipe extends RecipeApp {
 
   val info: RecipeInfo = RecipeInfo(
     id = "structured-output",
-    title = "Classify text into a typed value",
+    title = "Classify text into an enum",
     summary = "Turn a customer message into a Ticket case class with completeStructured.",
     mainClass = "org.llm4s.samples.cookbook.StructuredOutputRecipe"
   )
@@ -34,7 +34,6 @@ object StructuredOutputRecipe extends RecipeApp {
 
   val message: String = "I was charged twice for my March invoice and need the second payment refunded today."
 
-  // snippet:start
   val ticketSchema = Schema
     .`object`[Ticket]("A customer support ticket")
     .withRequiredField("category", Schema.string("The kind of ticket").withEnum(categories))
@@ -56,7 +55,6 @@ object StructuredOutputRecipe extends RecipeApp {
         ValidationError.invalid("urgency", s"${ticket.urgency} is outside 1 to 5")
       )
     } yield ticket
-  // snippet:end
 
   /** Answers with the JSON a model following the schema would produce. */
   def script: ScriptedClient = new ScriptedClient((_, _) =>

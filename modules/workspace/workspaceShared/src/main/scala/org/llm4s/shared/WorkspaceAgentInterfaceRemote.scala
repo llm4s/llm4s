@@ -161,7 +161,9 @@ class WorkspaceAgentInterfaceRemote(handler: WorkspaceAgentCommand => WorkspaceA
   }
 
   /**
-   * Execute a shell command in the workspace.
+   * Execute a command in the workspace. The command is a program and its arguments, not shell text: the runner
+   * tokenizes it and runs the program directly, refusing pipes, redirection, `;`, `$(...)` and anything else the
+   * sandbox's command policy forbids (see `docs/reference/workspace-sandbox.md`).
    *
    * @param command Command to execute
    * @param workingDirectory Working directory (default: workspace root)
