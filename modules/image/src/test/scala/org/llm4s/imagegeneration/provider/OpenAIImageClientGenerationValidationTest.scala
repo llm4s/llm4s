@@ -2,6 +2,7 @@ package org.llm4s.imagegeneration.provider
 
 import scala.concurrent.duration.FiniteDuration
 
+import org.llm4s.error.ConfigurationError
 import org.llm4s.http.{ HttpResponse, MultipartPart }
 import org.llm4s.imagegeneration.{
   ImageGenerationOptions,
@@ -70,6 +71,15 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
     val result = c.generateImages(prompt = "a test prompt", count = 2)
 
     result shouldBe Left(ImageValidationError("Count must be between 1 and 1 for dall-e-3"))
+  }
+
+  it should "refuse a blank apiKey before any remote call, rather than send an empty bearer" in {
+    for key <- Seq("", "  ") do
+      val http = new StubHttpClient()
+      val c    = client(OpenAIConfig(apiKey = key, model = "gpt-image-1"), http)
+      c.generateImages(prompt = "a test prompt", count = 1).left.toOption.get shouldBe a[ConfigurationError]
+      c.health().left.toOption.get shouldBe a[ConfigurationError]
+      http.lastPostBody shouldBe None
   }
 
   it should "reject empty prompts before any remote call" in {

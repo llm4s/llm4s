@@ -22,6 +22,12 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
     result.left.getOrElse(fail()) shouldBe a[AuthenticationError]
   }
 
+  it should "carry the HTTP status as the AuthenticationError's code, so a caller can tell 401 from 403" in {
+    for status <- Seq(401, 403) do
+      val error = HttpErrorMapper.mapHttpError(status, "{}", provider).left.getOrElse(fail())
+      error.asInstanceOf[AuthenticationError].code shouldBe Some(status.toString)
+  }
+
   it should "return RateLimitError for 429" in {
     val result = HttpErrorMapper.mapHttpError(429, "{}", provider)
     result.left.getOrElse(fail()) shouldBe a[RateLimitError]

@@ -92,11 +92,15 @@ and does so silently.
 To see exactly what the tagged commit will publish, ask the build:
 
 ```bash
-sbt -error listPublishedArtifacts   # one `artifact <id>` or `stub <id>` per line
+sbt -error listPublishedArtifacts   # one `artifact <id>`, `bom <id>` or `stub <id>` per line
 ```
 
 `sbt publishedArtifactsCheck` (a CI quick check) fails when a published `llm4s-*` artifact has no tier in
 [1.0 Scope](v1-scope) or no install line in the installation guide.
+
+The `bom` line is `llm4s-bom`, a POM-only bill of materials that pins every real artifact to the release
+version. It is generated from the same list as the `artifact` lines, and `sbt bomCheck` (a CI quick check)
+fails when the generated POM disagrees with that list.
 
 ### 4. Do NOT create the GitHub Release by hand
 
@@ -124,8 +128,9 @@ it never overwrites. Write whatever the release deserves once it exists.
   ```
 
   It asks the build which artifacts it publishes (the list above) and checks that each resolves at that
-  version: the POM and the jar for a real artifact, and for each relocation stub (the pre-0.4.0
-  coordinates) a POM that carries a `<relocation>`. It exits non-zero and names each miss. Run against
+  version: the POM and the jar for a real artifact, a POM that carries a `<dependencyManagement>` for the
+  BOM (it has no jar), and for each relocation stub (the pre-0.4.0 coordinates) a POM that carries a
+  `<relocation>`. It exits non-zero and names each miss. Run against
   `0.4.0` with the stub list it reports all five stubs as missing, which is how 0.4.0 shipped
   ([#1150](https://github.com/llm4s/llm4s/issues/1150)); against `0.4.1` it passes.
 
