@@ -95,7 +95,13 @@ object Checkpoint:
    * task's continuation as an ordinary task.
    */
   private val formatVersion: SchemaVersion =
-    SchemaVersion(6)(1 -> addSuspension, 2 -> addTenant, 3 -> addFailedStatus, 4 -> addFencingToken, 5 -> addBreakpoints)
+    SchemaVersion(6)(
+      1 -> addSuspension,
+      2 -> addTenant,
+      3 -> addFailedStatus,
+      4 -> addFencingToken,
+      5 -> addBreakpoints
+    )
 
   private def addSuspension(json: ujson.Value): Result[ujson.Value] =
     Try {
