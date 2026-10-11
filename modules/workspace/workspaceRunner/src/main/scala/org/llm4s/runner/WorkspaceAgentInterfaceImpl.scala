@@ -17,6 +17,7 @@ import scala.collection.mutable.ListBuffer
 import scala.io.Source
 import scala.jdk.CollectionConverters._
 import scala.util.{ Failure, Success, Try, Using }
+import scala.util.chaining._
 
 /**
  * Implementation of WorkspaceAgentInterface that operates on a local filesystem workspace.
@@ -26,11 +27,13 @@ import scala.util.{ Failure, Success, Try, Using }
  *                      (e.g. `echo`, `dir`) through `cmd.exe /c` because those names have
  *                      no standalone `.exe` on Windows.
  * @param sandboxConfig Optional sandbox config; if None, uses [[WorkspaceSandboxConfig.Permissive]]
+ * @param programSearch where the programs a command names are looked for (#1790); the host's, bar in tests
  */
 class WorkspaceAgentInterfaceImpl(
   workspaceRoot: String,
   isWindows: Boolean,
-  sandboxConfig: Option[WorkspaceSandboxConfig] = None
+  sandboxConfig: Option[WorkspaceSandboxConfig] = None,
+  programSearch: ProgramSearch = ProgramSearch.host()
 ) extends WorkspaceAgentInterface {
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -43,12 +46,11 @@ class WorkspaceAgentInterfaceImpl(
     if (config.excludePatterns.nonEmpty) config.excludePatterns
     else WorkspaceSandboxConfig.DefaultExclusions
 
-  // Computed once at construction: allowlist entries are lowercased on Windows so
-  // that execLower (which is also lowercased on Windows) matches correctly even
-  // when a caller-supplied config contains mixed-case entries like Set("GIT").
+  // Computed once at construction: allowlist entries are matched by their program key, as the command's first word
+  // is - on Windows lower-cased and without a `.exe` / `.com` extension, so `GIT` and `sort.exe` entries are `git` and
+  // `sort` and get those programs' rules (#1790, #1761).
   private val allowedCommandsNormalized: Set[String] =
-    if (isWindows) config.allowedCommands.map(_.toLowerCase)
-    else config.allowedCommands
+    config.allowedCommands.map(ProgramResolver.programKey(_, isWindows))
 
   // Pre-formatted for use in EXECUTABLE_NOT_ALLOWED error messages; computed
   // once so we don't sort and join the set on every rejected command.
@@ -82,6 +84,22 @@ class WorkspaceAgentInterfaceImpl(
     }
 
     normalized
+  }
+
+  /**
+   * Refuses (`PATH_NOT_ALLOWED`) a write to `.git` or a path inside one, as written or through a link: git reads its
+   * configuration, hooks and attributes there and runs the programs they name, and a `.git` file points git at another
+   * repository (#1721).
+   */
+  private def refuseGitMetadata(path: String, resolved: Path): Unit = {
+    val realRoot = Try(rootPath.toRealPath()).getOrElse(rootPath)
+    if (CommandPolicy.namesGitMetadata(resolved, rootPath, realRoot))
+      throw new WorkspaceAgentException(
+        s"Path '$path' names '.git' or a path inside one; git reads its configuration, hooks and attributes there " +
+          "and runs the programs they name, so the file operations may not write it",
+        "PATH_NOT_ALLOWED",
+        None
+      )
   }
 
   /**
@@ -270,8 +288,9 @@ class WorkspaceAgentInterfaceImpl(
     createDirectories: Option[Boolean] = None
   ): WriteFileResponse = {
     val resolvedPath = resolvePath(path)
-    val writeMode    = mode.getOrElse("overwrite")
-    val createDirs   = createDirectories.getOrElse(false)
+    refuseGitMetadata(path, resolvedPath)
+    val writeMode  = mode.getOrElse("overwrite")
+    val createDirs = createDirectories.getOrElse(false)
 
     if (createDirs) {
       Files.createDirectories(resolvedPath.getParent)
@@ -335,6 +354,7 @@ class WorkspaceAgentInterfaceImpl(
     operations: List[FileOperation]
   ): ModifyFileResponse = {
     val resolvedPath = resolvePath(path)
+    refuseGitMetadata(path, resolvedPath)
 
     if (!Files.exists(resolvedPath)) {
       throw new WorkspaceAgentException(
@@ -636,7 +656,8 @@ class WorkspaceAgentInterfaceImpl(
   /**
    * Windows `cmd.exe` built-in commands that have no standalone `.exe` on PATH.
    * When [[isWindows]] is `true` and the first argv token is one of these, we
-   * prepend `Seq("cmd.exe", "/c")` so the OS can locate the command.
+   * prepend `Seq("cmd.exe", "/d", "/c")` so the OS can locate the command (`/d`: no AutoRun command from the
+   * registry runs first, #1792).
    * `ProcessBuilder` joins the vector into one command line that cmd.exe
    * parses again, quoting an argument only for a space, tab, `"`, `<` or `>`:
    * cmd.exe still splits on `,`, `;` and `=`, and interprets `&`, `|`, `<`,
@@ -645,13 +666,16 @@ class WorkspaceAgentInterfaceImpl(
    */
   private val WindowsBuiltins: Set[String] = CommandPolicy.WindowsBuiltins
 
+  /** Whether the runner really runs on Windows, whatever `isWindows` says (tests set it on other hosts). */
+  private val windowsHost: Boolean = System.getProperty("os.name", "").startsWith("Windows")
+
   /**
    * The null device every command reads its standard input from (#1728): `NUL` on Windows, `/dev/null` elsewhere.
    * Chosen by the host the runner runs on, not by `isWindows`, which tests set to exercise the Windows checks on
    * another host; on that host `NUL` would name a missing file and the command would fail to start.
    */
   private val nullDevice: java.io.File =
-    new java.io.File(if (System.getProperty("os.name", "").startsWith("Windows")) "NUL" else "/dev/null")
+    new java.io.File(if (windowsHost) "NUL" else "/dev/null")
 
   /**
    * Shell metacharacters that must be rejected in every argument token, even
@@ -728,8 +752,8 @@ class WorkspaceAgentInterfaceImpl(
    * Check a command and build the process that runs it, using direct argument-vector
    * execution (no shell interpolation).  The first token of the command must appear in
    * `config.allowedCommands` (see [[WorkspaceSandboxConfig.allowedCommands]]);
-   * absolute/relative paths to executables are rejected so the lookup always
-   * goes through PATH.
+   * absolute/relative paths to executables are rejected, and the runner looks
+   * the program up itself in trusted directories only (see layer 10).
    *
    * Validation layers (applied in order):
    *  1. `SHELL_DISABLED`              – sandbox config prohibits execution
@@ -749,17 +773,41 @@ class WorkspaceAgentInterfaceImpl(
    *                                      `sort -o`, `git -c`, a git subcommand that
    *                                      is not a read, a second `uniq` operand)
    *  9. `PATH_ESCAPE_ATTEMPT`         – an argument names a location outside the
-   *                                      workspace, links followed
+   *                                      workspace, links followed (on POSIX, an
+   *                                      `rm` / `unlink` operand or `mv` source
+   *                                      naming a link itself is judged by the
+   *                                      directory holding it, #1730); and an `mv`
+   *                                      or `cp` of several sources, one of whose
+   *                                      paths goes through a name another
+   *                                      source's operation changes, is refused
+   *                                      with `ARGUMENT_NOT_ALLOWED` (#1776)
    *
-   * Layers 7-9 are [[CommandPolicy]], which documents each program's rules (#1715).
+   * 10. `EXECUTABLE_NOT_ALLOWED` / `EXECUTABLE_NOT_FOUND` – the program is found
+   *                                      only where the runner never starts one
+   *                                      from (the workspace, the runner's own
+   *                                      working directory, a relative `PATH`
+   *                                      entry), or nowhere (#1790)
+   * 11. `GIT_CONFIG_NOT_ALLOWED` / `EXECUTION_FAILED` – `git` only: the repository's configuration holds what the
+   *                                      runner cannot switch off (an include, a configured hook, a driver name `-c`
+   *                                      cannot express), or cannot be listed; otherwise git is started as
+   *                                      [[GitSandbox]] describes, so the repository cannot make it run a program (#1721)
+   *
+   * Layers 7-9 are [[CommandPolicy]], which documents each program's rules (#1715). Layer 10 is [[ProgramResolver]]:
+   * the program is started by the absolute path it resolves, never by its bare name, so neither `CreateProcess` (which
+   * searches the runner's current directory before the system directory) nor the JDK's `PATH` search (which reads a
+   * relative entry from the command's working directory) picks a file an agent wrote. On Windows the first word is
+   * matched by its program key: case-insensitively and without a `.exe` / `.com` extension.
    *
    * On Windows, if the first token is a [[WindowsBuiltins]] built-in that has
-   * no standalone `.exe`, `cmd.exe /c` is prepended to the already-tokenized
-   * vector so each argument is still passed as a distinct string (not a raw
-   * command string).  The forbidden-character check runs before this routing
-   * step, so no dangerous token ever reaches cmd.exe.
+   * no standalone `.exe`, the system directory's `cmd.exe` (by its absolute path),
+   * `/d` (no AutoRun command) and `/c` are prepended to the already-tokenized vector so each argument is
+   * still passed as a distinct string (not a raw command string).  The
+   * forbidden-character check runs before this routing step, so no dangerous
+   * token ever reaches cmd.exe.
    *
-   * The command's standard input is the null device (#1728), so a program that reads it ends at once.
+   * The command's standard input is the null device (#1728), so a program that reads it ends at once. Its `PATH` keeps
+   * only the entries the runner itself would search ([[ProgramResolver.childPath]]), and on Windows it runs with
+   * `NoDefaultCurrentDirectoryInExePath=1`, so a program it starts by name is never one from the workspace (#1792).
    *
    * Both ways a command reaches the runner go through this one function: [[executeCommand]] (the direct path)
    * and the WebSocket protocol's `ExecuteCommandCommand` (`WebSocketCommandExecutor`, #1756), which streams the
@@ -835,8 +883,8 @@ class WorkspaceAgentInterfaceImpl(
       )
     }
 
-    // On Windows, command names are case-insensitive (e.g. GIT == git).
-    val execLower = if (isWindows) executable.toLowerCase else executable
+    // On Windows, command names are case-insensitive (GIT == git) and may carry `.exe` / `.com` (git.exe == git).
+    val execLower = ProgramResolver.programKey(executable, isWindows)
 
     if (!allowedCommandsNormalized.contains(execLower)) {
       throw new WorkspaceAgentException(
@@ -865,11 +913,8 @@ class WorkspaceAgentInterfaceImpl(
       }
     }
 
-    // Layers 6-8 (#1715): the allowlist names programs, but an allowed program can
-    // still write, delete or run another one through its own options (`find -exec`,
-    // `git -c`, `sort -o`), its environment (`GIT_EXTERNAL_DIFF`), or reach outside
-    // the workspace through a path argument (`cat /etc/passwd`). The working
-    // directory and every path argument are judged by where they really lead.
+    // Layer 6 (#1715): the working directory is judged by where it really leads, so
+    // a symbolic link out of the workspace is refused.
     val realRoot    = Try(rootPath.toRealPath()).getOrElse(rootPath)
     val realWorkDir = Try(workDir.toPath.toRealPath()).getOrElse(workDir.toPath)
     if (!realWorkDir.startsWith(realRoot)) {
@@ -879,21 +924,42 @@ class WorkspaceAgentInterfaceImpl(
         None
       )
     }
+    // Layers 7-9 (#1715): the allowlist names programs, but an allowed program can
+    // still write, delete or run another one through its environment
+    // (`GIT_EXTERNAL_DIFF`) or its own options (`find -exec`, `git -c`, `sort -o`),
+    // or reach outside the workspace through a path argument (`cat /etc/passwd`).
+    // CommandPolicy checks them in that order, judging each path argument by where
+    // it really leads.
     CommandPolicy
       .refusal(execLower, argv.tail, isWindows, realWorkDir, realRoot, env, Some(workDir.toPath), Some(rootPath))
       .foreach(refused => throw new WorkspaceAgentException(refused.message, refused.code, None))
+    // Layer 10 (#1790): start the program by an absolute path found only in trusted directories. A bare name would
+    // let CreateProcess run `<name>.exe` from the runner's current directory before the system directory, and the
+    // JDK's PATH search read a relative entry from the working directory, inside the workspace.
+    val untrustedRoots = Seq(rootPath, realRoot, workDir.toPath)
+    def resolved(found: Either[CommandPolicy.Refusal, Path]): String =
+      found.fold(refused => throw new WorkspaceAgentException(refused.message, refused.code, None), _.toString)
 
     // On Windows, built-in commands (echo, dir, type, …) live inside cmd.exe
-    // and cannot be launched as standalone processes.  We prepend "cmd.exe /c"
-    // to the *already-tokenized* vector so each argument is still a separate
-    // string. ProcessBuilder still joins them into one command line that
-    // cmd.exe re-parses, so the characters it would split or interpret were
-    // refused above (ForbiddenArgChars and CommandPolicy, #1715).
+    // and cannot be launched as standalone processes.  We prepend the system
+    // directory's cmd.exe, "/d" (skip the registry's AutoRun command, #1792)
+    // and "/c" to the *already-tokenized* vector so each
+    // argument is still a separate string, and name the built-in by its key
+    // (`echo`, never `echo.exe`, which cmd.exe would look for as a program).
+    // ProcessBuilder still joins them into one command line that cmd.exe
+    // re-parses, so the characters it would split or interpret were refused
+    // above (ForbiddenArgChars and CommandPolicy, #1715).
+    val routedThroughCmd = isWindows && WindowsBuiltins.contains(execLower)
     val finalArgv: Seq[String] =
-      if (isWindows && WindowsBuiltins.contains(execLower))
-        Seq("cmd.exe", "/c") ++ argv
+      if (routedThroughCmd)
+        Seq(
+          resolved(ProgramResolver.resolveSystem("cmd", programSearch, untrustedRoots)),
+          "/d",
+          "/c",
+          execLower
+        ) ++ argv.tail
       else
-        argv
+        resolved(ProgramResolver.resolve(execLower, programSearch, untrustedRoots)) +: argv.tail
     // --------------------------------------------------------------------------
 
     // Use java.lang.ProcessBuilder with the tokenized argv directly – no shell
@@ -906,9 +972,45 @@ class WorkspaceAgentInterfaceImpl(
     // the command timeout (#1728).
     builder.redirectInput(java.lang.ProcessBuilder.Redirect.from(nullDevice))
     env.foreach { case (k, v) => builder.environment().put(k, v) }
-    if (execLower == "git") CommandPolicy.confineGit(builder.environment(), realRoot)
+    // The program may start another by name (`#!/usr/bin/env x`, sbt starting java), searching PATH from the
+    // workspace: give it only the PATH entries the runner itself would search (#1792). No entry left: no PATH, since
+    // an empty one is read as the current directory.
+    ProgramResolver.childPath(programSearch, untrustedRoots) match {
+      case Some(path) => builder.environment().put("PATH", path)
+      case None       => builder.environment().remove("PATH")
+    }
+    // On Windows, cmd.exe and CreateProcess search the current directory - the workspace - for a program named
+    // without a path before PATH; this stops it, for every command and anything it starts (#1790, #1792)
+    if (isWindows) builder.environment().put("NoDefaultCurrentDirectoryInExePath", "1")
+    if (execLower == "git") {
+      CommandPolicy.confineGit(builder.environment(), realRoot)
+      sandboxGit(builder, finalArgv.head, argv.tail, realRoot)
+    }
 
     PreparedCommand(builder, timeout.getOrElse(config.defaultCommandTimeout))
+  }
+
+  /**
+   * Layer 11 (#1721): `git` runs with the environment, `-c` overrides and options of [[GitSandbox]], and every filter
+   * and diff driver the repository's configuration defines blanked, so neither a configuration the agent wrote nor
+   * one the repository arrived with makes an allowed read command run a program. Refused (`GIT_CONFIG_NOT_ALLOWED`)
+   * when the configuration holds what the overrides cannot cover, or `EXECUTION_FAILED` when it cannot be listed.
+   */
+  private def sandboxGit(builder: java.lang.ProcessBuilder, git: String, args: Seq[String], realRoot: Path): Unit = {
+    def failed(why: String): Nothing =
+      throw new WorkspaceAgentException(s"git was not run: $why.", "EXECUTION_FAILED", None)
+
+    val empty = GitSandbox.checkedEmptyDirectory(realRoot).fold(failed, identity)
+    GitSandbox.environment(builder.environment(), empty)
+    val drivers =
+      if (!GitSandbox.hasSubcommand(args)) Nil
+      else
+        GitSandbox
+          .listConfiguration(builder, git, empty)
+          .fold(failed, identity)
+          .pipe(GitSandbox.driverOverrides)
+          .fold(refused => throw new WorkspaceAgentException(refused.message, refused.code, None), identity)
+    builder.command((git +: GitSandbox.arguments(args, GitSandbox.fixedOverrides(empty) ++ drivers)).asJava)
   }
 
   /**

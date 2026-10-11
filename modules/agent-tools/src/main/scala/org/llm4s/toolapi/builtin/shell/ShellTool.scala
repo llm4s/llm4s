@@ -7,6 +7,7 @@ import org.llm4s.util.DurationRounding
 import upickle.default._
 
 import java.io.File
+import java.nio.charset.Charset
 import java.nio.file.{ Path, Paths }
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -73,6 +74,11 @@ object ShellResult {
  * the command does not name) are refused whatever the policy: anywhere in a short-option
  * cluster, attached value or not, under any abbreviation of the long form, with or without `=value`, wherever they
  * appear, `--` or not before them, and however the program is spelled (`/usr/bin/file`, `FILE`, `file.exe`).
+ *
+ * On Windows, with or without a path policy, an argument, the working directory and an `environment` value are
+ * refused when they hold a character a program reading its command line in an ANSI code page may receive as a
+ * different ASCII character ("best fit": `..／..／secret` as `../../secret`, `-ｏ` as `-o`; see `WindowsBestFit`,
+ * #1766).
  *
  * == Features ==
  *
@@ -141,7 +147,7 @@ object ShellTool {
         case Some(baseCommand) if !config.isCommandAllowed(baseCommand) =>
           Left(s"Command '$baseCommand' is not allowed. Allowed: ${config.allowedCommands.mkString(", ")}")
         case Some(baseCommand) =>
-          refusal(baseCommand.trim, tokens.drop(1), config, _ => ()) match {
+          refusal(baseCommand.trim, tokens.drop(1), config, _ => (), OnWindows, WindowsBestFit.hostAnsiCodePage) match {
             case Some(reason) => Left(reason)
             case None         => runProcess(tokens, command, config)
           }
@@ -235,34 +241,80 @@ object ShellTool {
   /**
    * Why the command may not run, or `None`, decided without running it, and what its path checks cost (all zero
    * when nothing was checked against a path policy). Lets a test bound the work the checks do by counting it,
-   * rather than timing it (#1770).
+   * rather than timing it (#1770). `windows` and `ansiCodePage` let a test apply the Windows character rule
+   * ([[WindowsBestFit]], #1766) on another host; the other Windows rules follow the host.
    */
-  private[builtin] def checkCommand(command: String, config: ShellConfig): (Option[String], PathCheckCost) = {
+  private[builtin] def checkCommand(
+    command: String,
+    config: ShellConfig,
+    windows: Boolean = OnWindows,
+    ansiCodePage: Option[Charset] = WindowsBestFit.hostAnsiCodePage
+  ): (Option[String], PathCheckCost) = {
     var cost = PathCheckCost(0, 0, 0)
     val verdict = CommandTokenizer.tokenize(command) match {
       case Left(reason)                                           => Some(reason)
       case Right(tokens) if tokens.isEmpty                        => Some("Command cannot be empty")
       case Right(tokens) if !config.isCommandAllowed(tokens.head) => Some(s"Command '${tokens.head}' is not allowed")
-      case Right(tokens) => refusal(tokens.head.trim, tokens.drop(1), config, spent => cost = spent)
+      case Right(tokens) =>
+        refusal(tokens.head.trim, tokens.drop(1), config, spent => cost = spent, windows, ansiCodePage)
     }
     (verdict, cost)
   }
 
-  /** Why the command may not run, or `None`; `observe` is given what the path checks cost, when there were any. */
+  /**
+   * Why the command may not run, or `None`; `observe` is given what the path checks cost, when there were any. On
+   * Windows (`windows`) the character rule ([[bestFitRefusal]]) comes first, with or without a path policy.
+   */
   private def refusal(
     command: String,
     args: Seq[String],
     config: ShellConfig,
-    observe: PathCheckCost => Unit
+    observe: PathCheckCost => Unit,
+    windows: Boolean,
+    ansiCodePage: Option[Charset]
   ): Option[String] = {
     // As spelled: only an exact name is exempt from the path policy (`ECHO` may be another program)
     val executable = Try(Paths.get(command).getFileName.toString).getOrElse(command)
     val program    = programName(command)
-    deniedFlag(program, args)
-      .orElse(windowsSwitch(program, args))
-      .map(flag => s"Flag '$flag' is not allowed for '$command'")
+    (if (windows) bestFitRefusal(args, config, ansiCodePage) else None)
+      .orElse(
+        deniedFlag(program, args)
+          .orElse(windowsSwitch(program, args))
+          .map(flag => s"Flag '$flag' is not allowed for '$command'")
+      )
       .orElse(config.pathPolicy.flatMap(policy => pathRefusal(executable, program, args, config, policy, observe)))
   }
+
+  /**
+   * On Windows, a program that reads its command line in an ANSI code page may receive a character as a different
+   * ASCII one ("best fit", #1766): `..／..／secret` as `../../secret`, `-ｏ` as `-o`. Every check here reads the
+   * arguments as UTF-16, so an argument, the working directory or an environment value holding such a character is
+   * refused, whatever the program and with or without a path policy (see [[WindowsBestFit]]).
+   */
+  private def bestFitRefusal(args: Seq[String], config: ShellConfig, ansiCodePage: Option[Charset]): Option[String] =
+    args.iterator
+      .flatMap(arg =>
+        WindowsBestFit
+          .refusal(arg, WindowsBestFit.isOptionLike(arg), ansiCodePage)
+          .map(why => s"Argument '$arg' is not allowed on Windows: it holds $why")
+      )
+      .nextOption()
+      .orElse(
+        config.workingDirectory.flatMap(dir =>
+          WindowsBestFit
+            .refusal(dir, optionLike = false, ansiCodePage)
+            .map(why => s"The working directory '$dir' is not allowed on Windows: it holds $why")
+        )
+      )
+      .orElse(
+        config.environment.iterator
+          .flatMap { case (name, value) =>
+            WindowsBestFit
+              .refusal(value, optionLike = false, ansiCodePage)
+              .map(why => s"The value of the environment variable '$name' is not allowed on Windows: it holds $why")
+          }
+          .nextOption()
+      )
 
   /**
    * Every argument that looks like a flag, `--` or not before it. A `--` does not reliably end the options: when it

@@ -342,6 +342,15 @@ What the controls do, and where they stop:
     minutes before the command starts (the shell `timeout` covers only the command's run). A hard
     link to a file outside passes, as it does for the file tools. A command that walks directories itself (`ls -R`,
     `grep -r`, `find`) is checked only at the path it starts from.
+  - On Windows, a character a program may receive as a different ASCII character is refused, with or without a path
+    policy ([#1766](https://github.com/llm4s/llm4s/issues/1766)). A program that reads its command line in an ANSI
+    code page gets each argument converted with "best fit", so `..／..／secret` (U+FF0F) reaches it as `../../secret`,
+    `¥` and `₩` as `\` on the Japanese and Korean code pages, and `-ｏ` as `-o`, past checks that read the argument
+    as one plain name or no option. An argument, the working directory and an `environment` value are refused when
+    they hold a character a common ANSI code page (874, 932, 936, 949, 950, 1250 to 1258) best-fits to an ASCII
+    character other than a letter or digit, any best-fitted character in an argument starting with `-` or `/`, or a
+    character the host's own ANSI code page cannot hold. Accented letters such as `é` stay allowed in an operand when
+    that code page holds them. POSIX hosts are unchanged.
   - `development()` is not a sandbox: `sbt`, `make`, `npm`, `git`, `find` and `env` can run arbitrary programs, so a
     model given it can do anything the process can.
   - The started program receives a scrubbed environment: only `PATH`, `LANG`, `LC_ALL`, `TERM` and `SystemRoot`

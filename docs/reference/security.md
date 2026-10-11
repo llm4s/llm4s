@@ -118,10 +118,14 @@ links out of the workspace, and any path argument can name a file outside it
   profile: unset, the runner uses `permissive`, whose list is `ReadWriteCommands` (`ReadOnlyCommands` plus `cp`, `mv`,
   `rm`, `mkdir`, `touch`, `chmod`, `copy` and `move`); `locked` (`shellAllowed = false`) refuses every command; an
   unknown name stops the runner. `WORKSPACE_EXTRA_COMMANDS` adds bare program names to the profile's list (set by
-  `ContainerisedWorkspace`'s `extraAllowedCommands`); a shell or a launcher such as `env` or `xargs` cannot be added,
-  and an added program has no per-program option rules, so add only what the agent needs. `ReadOnlyCommands` is the field default, for a `WorkspaceSandboxConfig` constructed directly. The
-  workspace client's `llm4s.workspace.sandbox.profile` does not reach the container. On Windows, built-ins such as
-  `echo`, `dir`, `type`, `copy` and `move` run through `cmd.exe /c`, after the forbidden-character check and the
+  `ContainerisedWorkspace`'s `extraAllowedCommands`); a shell, an interpreter (`python`, `node`, `awk`, `java`,
+  ...), a launcher such as `env`, `xargs` or `setsid`, the cmd.exe built-ins `call` and `start`, or a `.bat` / `.cmd`
+  batch file cannot be added, and with the `locked` profile no name can
+  ([#1761](https://github.com/llm4s/llm4s/issues/1761)). That denylist is a speed bump, not a boundary: an added
+  program has no per-program option rules, so **adding one means trusting it to run any code** - add only what the
+  agent needs. `ReadOnlyCommands` is the field default, for a `WorkspaceSandboxConfig` constructed directly. The
+  workspace client has no sandbox setting of its own. On Windows, built-ins such as
+  `echo`, `dir`, `type`, `copy` and `move` run through `cmd.exe /d /c` (no AutoRun command), after the forbidden-character check and the
   checks below.
 - Each program's arguments are checked (`ARGUMENT_NOT_ALLOWED`): options that delete, write, run another program,
   read a list of file names or follow symbolic links are refused (`find -delete`/`-exec`/`-fprint`/`-L`, `sort -o`,
@@ -134,22 +138,64 @@ links out of the workspace, and any path argument can name a file outside it
 - Every path argument, and the working directory, must really lie inside the workspace (`PATH_ESCAPE_ATTEMPT`):
   it is resolved the way the kernel resolves it, following symbolic links component by component. For `cp`, so are
   the names it will write, since `cp` writes through a link it finds there, and a recursive `cp` refuses a destination
-  directory that holds a link leading outside. An argument longer than 4096 characters, or a command whose paths need
-  more than 20000 lookups, is refused rather than walked.
+  directory that holds a link leading outside. On POSIX, an `rm` or `unlink` operand or an `mv` source that names a
+  symbolic link itself (no trailing `/`, no `rm -r`) is judged by the directory holding it, so a link out of the
+  workspace can be removed or renamed without touching what it points to. An `mv` or `cp` of several sources runs one
+  operation after another while every path is checked before the first, so it is refused (`ARGUMENT_NOT_ALLOWED`)
+  when one of its paths goes through a name another source's operation creates, replaces or removes, or when `mv`
+  moves the working directory: `mv sub/l l/secret.txt .` would otherwise move a relative link to where it points out
+  and then move a file in through it ([#1776](https://github.com/llm4s/llm4s/issues/1776)). An argument longer than
+  4096 characters, or a command whose paths need more than 20000 lookups, is refused rather than walked.
 - `environment` may set only locale and display variables (`ENVIRONMENT_NOT_ALLOWED`), so `GIT_*`, `PAGER`,
   `LD_PRELOAD`, `PATH` and `HOME` cannot redirect a program.
+- On Windows, a character a program may receive as a different ASCII character is refused
+  ([#1766](https://github.com/llm4s/llm4s/issues/1766)): a program that reads its command line in an ANSI code page
+  gets it converted with "best fit", so `..／..／outside` (U+FF0F) would reach it as `../../outside`, `¥` (U+00A5) and
+  `₩` (U+20A9) as `\`, `-ｏ` as `-o`, past checks that read UTF-16 (the "WorstFit" research). An argument or the
+  working directory (`ARGUMENT_NOT_ALLOWED`), or an environment value (`ENVIRONMENT_NOT_ALLOWED`), holding a character
+  that a common ANSI code page best-fits to ASCII punctuation, a space or a control character, any best-fitted
+  character in an argument starting with `-` or `/`, or a character the host's ANSI code page cannot hold is refused.
+  The shell tool (`ShellTool`) applies the same rule. See
+  [Workspace sandbox](workspace-sandbox#on-windows).
+- The program is started by an absolute path the runner found itself, never by its bare name
+  ([#1790](https://github.com/llm4s/llm4s/issues/1790)): on Windows the system directory, the Windows directory, then
+  `PATH` (`<name>.exe`, then `<name>.com`); on POSIX `PATH`. It never searches the runner's current directory, which
+  `CreateProcess` searched before the system directory, nor an empty or relative `PATH` entry, which the JDK read from
+  the command's working directory, nor anything inside the workspace, so a `git.exe` or `cat` an agent wrote cannot
+  run in place of the real one. A program found only there is refused (`EXECUTABLE_NOT_ALLOWED`); built-ins run
+  through the system directory's `cmd.exe`. On Windows the allowlist matches names ignoring case and a `.exe` /
+  `.com` extension, so an entry `sort.exe` gets `sort`'s rules.
+- `git` cannot be made to run a program by its repository ([#1721](https://github.com/llm4s/llm4s/issues/1721)),
+  whether the agent wrote the configuration or the repository arrived with it. Every `git` the runner starts reads no
+  system or global configuration or attributes (`HOME` and `XDG_CONFIG_HOME` are an empty directory the runner owns),
+  may use no transport (so no lazy fetch of a partial clone, `core.sshCommand` or credential helper), and gets `-c`
+  overrides that switch off `core.fsmonitor`, hooks (`core.hooksPath`), `diff.external`, `log.showSignature` and
+  `gpg.*.program`, submodule recursion and implicit bare repositories, plus `--no-ext-diff`, `--no-textconv` and
+  `--ignore-submodules=all` where the subcommand takes them, and `log.diffMerges=separate` and an empty
+  `merge.default`, so `-m` never re-merges a merge commit. Filter, diff and merge drivers are named by attributes, so
+  the runner lists the repository's configuration just before the command and blanks every driver it defines; a
+  configuration it cannot account for (an include, a configured hook, a driver name that is not printable ASCII)
+  refuses the command (`GIT_CONFIG_NOT_ALLOWED`), and `git status -v`, whose staged diff runs textconv drivers, and
+  `git log` / `show` `--remerge-diff` and `--diff-merges`, which re-merge and run a merge driver, are refused
+  (`ARGUMENT_NOT_ALLOWED`). Writes into `.git` - in any spelling a file system may take for it, and through a
+  link - are refused: `writeFile` / `modifyFile` with `PATH_NOT_ALLOWED`, any program other than the read-only ones
+  with `ARGUMENT_NOT_ALLOWED`.
 - The runner normally runs in a Docker container, an additional OS-level boundary.
 
 **Not covered:**
-- `git` reads the repository's own `.git/config` and runs its hooks. Where the agent can write files (the
-  `writeFile` operation, or the read-write allowlist) it can set `core.fsmonitor`, `diff.external` or a filter driver,
-  or add a hook such as `.git/hooks/post-index-change`, which a later `git status` or `git diff` runs, or point git
-  at files outside through `core.worktree`, `.git/commondir` or `.git/objects/info/alternates`
-  ([#1721](https://github.com/llm4s/llm4s/issues/1721)).
+- A repository that arrives in the workspace with a `.git/config` `core.worktree`, a `.git/commondir` or a
+  `.git/objects/info/alternates` still points git at files outside; git reads them but runs nothing from them. A
+  program added with `WORKSPACE_EXTRA_COMMANDS` that writes files without naming them (a script, an archive tool) can
+  still write into `.git`, which git then reads without running what it names. The runner lists a repository's
+  configuration just before running git, so a concurrent command that swaps in another repository between the two is
+  not seen.
 - `diff -r` follows symbolic links it meets inside the tree it walks, and no portable option stops it.
 - A link that the read-write list moves or copies to another depth (`mv a/b/rel rel`) can come to point outside.
-  Path arguments through it are refused, and a later recursive `cp` into its directory is refused, but the link
-  itself is not.
+  Path arguments through it are refused, in the same command or a later one, and a later recursive `cp` into its
+  directory is refused, but the runner does not remove the link itself (the agent can, with `rm rel`).
+- A program added with `WORKSPACE_EXTRA_COMMANDS` that makes links or unpacks an archive (`ln`, `tar`, `unzip`) is not
+  modelled: its arguments are checked, not the link text it writes, the names in an archive, or a later argument
+  that goes through a name an earlier operation of the same command made.
 - The checks run before the program starts; a link made at a checked name by a concurrent command is not seen.
   Windows `copy` has the path rule but not `cp`'s destination checks.
 - A path rule cannot tell a path from text, so an argument or option value that is absolute or climbs out with `..`

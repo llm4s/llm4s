@@ -179,7 +179,11 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   `'password': '` there ends where the string ends rather than taking the rest of the document - but only
   where no `'` that could close it follows anywhere in the input, and not where that end would leave the
   value empty (`'password': '",`); otherwise it runs to the next `'`, or to the end of the input, as it
-  does outside a string, so a credential that holds a `"` (`'Qx"]]9secret'`) is redacted whole; outside
+  does outside a string, so a credential that holds a `"` (`'Qx"]]9secret'`) is redacted whole; a field
+  under a single-quoted key is also read in the input as it was given, so that a double-quoted value before
+  it that runs over its key - a `"password": "` that a Python dict's message only mentions, `{'note': 'see
+  "password": " here', 'apiKey': [...]}` - cannot hide it: what that reading replaces is added where
+  nothing else was replaced, and every other replacement is made as before; outside
   any string, the bare words after an unclosed `'token': [` are replaced to the end of the input, since nothing tells them from leaves; under
   a single-quoted key a single-quoted leaf that stands where a value does is replaced whatever it holds,
   a connection string `'postgres://u:...@h/db'` or a `'k=v'` token included, and so is a `\"`-quoted leaf
@@ -190,7 +194,16 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   `spring.datasource.password=...`, `PASSWORD="..."`), also with the quotes escaped by backslashes, as a
   logfmt line inside a JSON string writes them (`{"message": "login password=\"...\" ok"}`, `\'...\'`, and
   `\\\"...\\\"` one string deeper: the content is replaced and the escaped quotes kept, so the JSON still
-  parses; an escaped quote never closed ends where the enclosing string or the line does), `key: value` header lines (for example
+  parses; an escaped quote never closed ends where the enclosing string or the line does; a value in quotes behind
+  an even run of backslashes, `password=\\'p&ss=...\\'` inside a JSON string, is redacted up to the same quote
+  written the same way, `&word=` included), also with `=` and `&`
+  written as the JSON escapes Gson's default HTML-safe output uses (`password\u003d...\u0026user\u003d...`) and in
+  a log written into a JSON string, where the key follows the escape of a line break or a tab
+  (`...\ntoken\u003d...`, `\r\nAuthorization=...`, also one string deeper); a value that holds a literal `&` with no
+  other pair after it is redacted on both sides of the `&` (`password=p&ssW0rd` becomes
+  `password=[REDACTED]&[REDACTED]`, while `password=abc&user=bob` keeps `user=bob`); a `Bearer` or `Basic` scheme
+  word right before a pair does not hide the pair's value (`Bearer password=...` becomes
+  `[REDACTED]=[REDACTED]`), `key: value` header lines (for example
   `x-api-key: ...`), and strings shaped like known provider API keys (for example `sk-` keys). A quoted
   value is redacted whole, escaped quotes included. A key is sensitive when its whole name, lower-cased
   with `_` and `-` dropped, is `token`, `authorization`, `proxyauthorization`, `credential(s)`,
@@ -202,7 +215,8 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   `key=value` pair; `max_tokens`, `prompt_tokens`, `token_count`, `next_page_token`, `cookie_policy` and
   `cookie_consent` are not, because the match is never on a substring. URL query parameters are also
   matched against a second, substring list (`key`, `token`, `secret`, `password`, `auth` and similar), so
-  `?x_api_key_id=` is redacted too.
+  `?x_api_key_id=` is redacted too. A query value written right before JSON
+  (`?token=...,{"api_key": "..."}`, also with the quotes escaped) does not hide the field after it.
 - **Where a cookie header's value ends.** Outside any string (a raw request dump, a log line), at the end
   of its line, quotes, apostrophes and backslashes included: `Cookie: sid="abc"; x=y` becomes
   `Cookie: [REDACTED]`. Inside a string that opened on the same line - a JSON string, a header in a JSON

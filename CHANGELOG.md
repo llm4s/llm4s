@@ -1936,6 +1936,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `org.llm4s.toolapi.ToolHints` in `llm4s-core` (`@Experimental`), because `llm4s-mcp` cannot depend on the agent runtime.
 
 ### Removed
+- **`WorkspaceConfigSupport.loadSandboxConfig`** ([#1730](https://github.com/llm4s/llm4s/issues/1730)): it read a
+  sandbox profile from the client's `llm4s.workspace.sandbox.profile`, which nothing passed to the runner and nothing
+  called, so it suggested a client setting that enforced nothing. What the runner enforces is decided only by its own
+  `WORKSPACE_SANDBOX_PROFILE` and `WORKSPACE_EXTRA_COMMANDS`. **Migration:** set `WORKSPACE_SANDBOX_PROFILE` on the
+  runner's container (`ContainerisedWorkspace` starts it), and use `WorkspaceSandboxConfig.fromProfileName` and
+  `WorkspaceSandboxConfig.validate` to turn a profile name into a config in your own code.
 - **Orchestration: `PlanRunner`, `DAG`, `TypedAgent`, `Policies`, `OrchestrationError` and `CancellationToken`**
   ([#1330](https://github.com/llm4s/llm4s/issues/1330)): `org.llm4s.agent.orchestration` is deleted, with
   `org.llm4s.types.PlanId` and `org.llm4s.types.AgentId` from `llm4s-core` (`org.llm4s.agent.AgentId` is the agent's
@@ -2085,6 +2091,186 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - ShellTool and the workspace runner: on Windows, arguments whose characters best-fit to separators or
+  quotes are refused** ([#1766](https://github.com/llm4s/llm4s/issues/1766)): a Windows program that reads its command
+  line in an ANSI code page (`main` rather than `wmain`) gets each argument converted from UTF-16 with "best fit", so a
+  fullwidth solidus or reverse solidus (U+FF0F, U+FF3C), a division slash (U+2215), a yen or won sign (U+00A5, U+20A9 on
+  the Japanese and Korean code pages) or a fullwidth quote (U+FF02) reached it as `/`, `\` or `"`, and `-ｏ` as `-o`,
+  while the separator, path and option checks of `ShellTool` (`modules/agent-tools`) and the workspace runner's
+  `CommandPolicy` read one plain name (the "WorstFit" research, Orange Tsai, 2025). On Windows both now refuse an
+  argument, the working directory (below the workspace root, for the runner) and an environment value holding a
+  character that one of the code pages 874, 932, 936, 949, 950 and 1250 to 1258 best-fits to an ASCII character other
+  than a letter or digit, any best-fitted character in an argument starting with `-` or `/`, and a character the host's
+  own ANSI code page cannot hold (a best fit or `?` to the program). The runner refuses with `ARGUMENT_NOT_ALLOWED`
+  (`ENVIRONMENT_NOT_ALLOWED` for an environment value); `ShellTool` returns a refusal naming the character and what it
+  may become, with or without a path policy. Accented letters such as `é` stay allowed in an operand when the host's
+  code page holds them; POSIX hosts are unchanged. The table (539 characters) is generated from Microsoft's best-fit
+  files by `scripts/generate-windows-best-fit.py`, into one `WindowsBestFit` per module. Migration: on Windows,
+  every `ShellTool` command is refused when the operator-configured `workingDirectory` or an environment value holds a
+  character from the table or one the host's ANSI code page cannot hold, and file names the host's ANSI code page
+  cannot hold are refused as arguments for every program, git included, by both `ShellTool` and the runner.
+- **Security - workspace runner: interpreters and launchers cannot be added as extra commands, a command's child
+  `PATH` holds only trusted entries, and cmd.exe runs with `/d`** ([#1761](https://github.com/llm4s/llm4s/issues/1761),
+  [#1792](https://github.com/llm4s/llm4s/issues/1792)): `WORKSPACE_EXTRA_COMMANDS` refused shells and some launchers,
+  but accepted interpreters that run arbitrary code with no forbidden character (`python3 -c ...`, `perl -e`, `node`,
+  `awk`, `java`, `make`, ...), launchers (`setsid`, `stdbuf`, `flock`, `script`, `time`, `systemd-run`, ...),
+  debuggers and remote or container tools (`gdb`, `strace`, `ssh`, `docker`), privilege and namespace tools
+  (`runuser`, `doas`, `pkexec`, `nsenter`, `unshare`), Windows script hosts (`wsl`, `cscript`, `mshta`, `rundll32`),
+  the cmd.exe built-ins `call` and `start`, and `.bat` / `.cmd` names, which Windows runs through cmd.exe (the
+  BatBadBut class). `WorkspaceSandboxConfig.NeverAllowedCommands` now names them, matched ignoring case, a `.exe` /
+  `.com` extension and a trailing version (`Python3.12.EXE`), and a batch-file name is refused; `sbt` is still
+  accepted. With the `locked` profile, which runs no command, any extra name now stops the runner with a message
+  instead of being logged as added. The docs now say plainly that the denylist is a speed bump, not a boundary, and
+  that an added program means trusted code execution. A started program that looks another one up by name (a
+  `#!/usr/bin/env x` script, `sbt` starting `java`) searched the runner's `PATH` from the workspace, so an empty,
+  relative or in-workspace entry let it run a file the agent wrote: the child's `PATH` now keeps only the entries the
+  runner itself searches (`ProgramResolver.childPath`), and is removed when none is left. On Windows every command
+  runs with `NoDefaultCurrentDirectoryInExePath=1`, not only cmd.exe built-ins, and built-ins run as `cmd /d /c`, so
+  the registry's AutoRun command no longer runs first. `docs/workspace-agent-protocol.md` lists
+  `EXECUTABLE_NOT_ALLOWED`, `EXECUTABLE_NOT_FOUND`, `GIT_CONFIG_NOT_ALLOWED` and `PATH_NOT_ALLOWED`. **Migration:** a
+  `WORKSPACE_EXTRA_COMMANDS` (or `extraAllowedCommands`) naming one of the new names, or any name with
+  `WORKSPACE_SANDBOX_PROFILE=locked`, now stops the runner; a host that really needs such a program in the agent's
+  hands must accept that it runs any code, and run it outside the runner's allowlist.
+- **Security - workspace runner: a planted git config or attribute cannot make an allowed git command run a
+  program** ([#1721](https://github.com/llm4s/llm4s/issues/1721)): `git` reads the repository's `.git/config`,
+  attributes and hooks, so an agent that could write files - or a repository cloned into the workspace already
+  hostile - made a later `git status`, `git diff`, `git log -p`, `git show`, `git blame` or `git ls-files -m` run a
+  program through `core.fsmonitor`, a `post-index-change` hook (`.git/hooks` or `core.hooksPath`), `diff.external`,
+  a diff driver's `command` or `textconv`, a `clean` / `smudge` / `process` filter named in `.gitattributes` or
+  `.git/info/attributes`, a merge driver (`merge.<driver>.driver`, by a `merge` attribute or `merge.default`) that
+  `git log` / `git show` ran to re-merge a merge commit for `--remerge-diff`, `--diff-merges=remerge`, or `-m` with
+  `log.diffMerges=remerge`, `gpg.program` under `log.showSignature`, a partial clone's lazy fetch through its remote
+  (`ext::`, `core.sshCommand`), or a submodule's own configuration; `$HOME/.gitconfig` and
+  `$XDG_CONFIG_HOME/git/config` applied too. Every `git` the runner starts now has: no system or global
+  configuration or attributes (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL` the null device, `GIT_ATTR_NOSYSTEM`,
+  `HOME` and `XDG_CONFIG_HOME` an empty directory the runner owns), no transport and no lazy fetch
+  (`GIT_ALLOW_PROTOCOL` naming none, `GIT_NO_LAZY_FETCH`), no optional index write, no pager; `-c` overrides
+  `core.fsmonitor=false`, `core.hooksPath` the empty directory, `diff.external` empty, `log.showSignature=false`,
+  `gpg.*.program` a directory, `diff.ignoreSubmodules=all`, `safe.bareRepository=explicit`,
+  `log.diffMerges=separate`, `merge.default` empty; `--no-ext-diff`,
+  `--no-textconv` and `--ignore-submodules=all` after `diff` / `log` / `show` (and the two that apply to `status`,
+  `blame`, `grep`); and, from a `git config --list` of the repository taken just before the command, every filter,
+  diff and merge driver it defines blanked. The listing is read as bytes, and a configuration with an `include.path` /
+  `includeIf`, a `hook.*` key, or a `filter` / `diff` / `merge` driver name holding any byte but printable ASCII
+  (0x21-0x7E, not `=` or `"`) is refused (`GIT_CONFIG_NOT_ALLOWED`): a name that is not UTF-8 (`[filter "\xE9vil"]`)
+  would otherwise be blanked as U+FFFD while git ran the real driver, and a non-ASCII one could be re-encoded in the
+  JVM's `sun.jnu.encoding`. `--ignore-submodules`, `--remerge-diff` and `--diff-merges` from the agent are refused
+  (`ARGUMENT_NOT_ALLOWED`; `-m`, `-c` and `--cc` stay), as is
+  `git status -v` / `-vv` / `--verbose`, whose staged diff runs textconv drivers and which takes no `--no-textconv`. Writes into `.git` are refused too, in any spelling (`.GIT`, `.git.`, `GIT~1`) and
+  through a link: `writeFile` / `modifyFile` with `PATH_NOT_ALLOWED`, and any program other than the read-only ones
+  (`cp`, `mv`, `rm`, `mkdir`, `touch`, `chmod`, `copy`, `move`, an added program) naming it with
+  `ARGUMENT_NOT_ALLOWED`. The system and global git configuration of whoever runs the runner no longer apply,
+  so a `safe.directory` set there does not either. `GitConfigRoutesSpec` plants each route, shows git run directly
+  runs it, and shows no allowed command run through the runner does.
+- **Security - redaction: a credential in escaped quotes that holds `&word=` is redacted whole**
+  ([#1707](https://github.com/llm4s/llm4s/issues/1707)):
+  `Redaction` (used by the provider exchange logger, `LLMError` messages and error mapping) read the value of
+  `password=\\'p&ss=QZXJ\\'` - a logfmt or shell line inside a JSON string, standing for `password=\'p&ss=QZXJ\'` -
+  as a query or `key=value` value that ends at the `&`, and a quote behind an even run of backslashes as no quote,
+  so `ss=QZXJ` stayed readable; the same in prose (`login password=\\'p&user=x\\'`), one string deeper, and with
+  `\\"` or `\\\'`. A further reading of the input as it was given now replaces the content of a sensitive key's
+  value in quotes written behind backslashes, or as the JSON escape of a quote, up to the same quote written the same
+  way; it adds only the parts that no other edit covers, so every replacement made before is made exactly as before
+  (`password=[REDACTED]'[REDACTED]&[REDACTED]\\'`). A value that does not close before a line break, a `"` that
+  ends its string, or the end of the input is left as the other passes read it. The reading takes time linear in the
+  input. An empty query value at the end of a JSON string (`{"q":"a=1&token=","n":"x"}`) is still redacted as before,
+  `,` included ([#1800](https://github.com/llm4s/llm4s/issues/1800)).
+- **Security - redaction: four more shapes no longer leave a credential readable**
+  ([#1695](https://github.com/llm4s/llm4s/issues/1695)): `Redaction` (used by the provider exchange logger,
+  `LLMError` messages and error mapping) left these readable. (1) A `key=value` pair in a log that Gson or another
+  serialiser wrote into a JSON string, where the key follows the escape of a line break or a tab: `\n` ends in a
+  letter, so the key read as `ntoken` and `{"log":"user\u003dbob\ntoken\u003dabc"}` kept `abc`; also `\u000a`
+  and the same log one string deeper. The issue's own Gson repros (`password\u003dhunter2\u0026...`) were already
+  redacted by #1676's reading of the escaped `=`. (2) A literal `&` in an unquoted value: `password=p&ssW0rd` kept
+  `ssW0rd`; the rest of the value after an `&` that no other pair follows is now replaced too
+  (`password=[REDACTED]&[REDACTED]`). (3) A query value written right before JSON ran over the key of the next
+  field: `?a=1&token=abc,{\"api_key\":\"S\"}` kept `S`. (4) `Bearer password=x` replaced `Bearer password` and
+  kept `x`. Each is closed by a reading of the input as it was given whose replacements are added only where no
+  other pass replaced anything, touching none of them, so every replacement made before is made exactly as before
+  and only more is replaced: the passes again with a query value that ends at a `,` before `{`, `[` or a quote and
+  with a scheme word that is no longer taken where it is the key of a sensitive pair; the `key=value` passes with a
+  key right after such an escape; and the tail of a value after a literal `&`. Each reading takes time linear in
+  the input, and the first runs only where the input holds such a `,` or a scheme word.
+- **Security - redaction: a `"password": "` that a single-quoted string mentions no longer hides the next field's
+  key** ([#1697](https://github.com/llm4s/llm4s/issues/1697)): `Redaction` (used by the provider exchange logger,
+  `LLMError` messages and error mapping) read a JSON-style field that a Python dict's string merely mentions as a
+  real one and ran its value to the next `"`, over the key of the next field, so no later pass found that field and
+  its credential stayed readable: `{'note': 'see "password": " here', 'apiKey': ["7YJ1VSFPX'}", -9935758]}` kept
+  `7YJ1VSFPX` and `-9935758`. The passes that read a field under a single-quoted key (a string in either quote, a
+  number, a list or dict and its leaves) now also read the input as it was given, and what they replace there is
+  added wherever the other passes replaced nothing. Every value is still read as before, so everything redacted
+  before is redacted exactly as before, and only more is replaced: the example becomes
+  `{'note': 'see "password": "[REDACTED]"[REDACTED]", '[REDACTED]']}`. The same holds when the value that runs over
+  the key is `password="`, `"Authorization": "` or `\"password\": \"`, and for such a dict inside a JSON string.
+  The extra reading is made only where the input holds a `'`, and takes time linear in the input.
+- **Security - workspace runner: allowlisted programs start by a trusted absolute path, never from the working
+  directory** ([#1790](https://github.com/llm4s/llm4s/issues/1790)): the runner handed `ProcessBuilder` the bare
+  program name. On Windows `CreateProcess` then searched the directory of the runner's `java.exe` and the runner's
+  current directory before the system directory, appending `.exe`, so a `git.exe` or `cat.exe` an agent wrote there
+  ran in place of the allowlisted program; on POSIX the JDK read an empty or relative `PATH` entry (`.`, `bin`) from
+  the command's working directory, inside the workspace. The runner now looks the program up itself and starts the
+  absolute path: on Windows in the system directory, the Windows directory, then `PATH` (`<name>.exe`, then
+  `<name>.com`), on POSIX in `PATH`, never in the runner's current directory, never `java`'s directory unless it is on
+  `PATH`, never through an empty or relative entry, and never inside the workspace (as written or through a link). A
+  program found only there is refused with `EXECUTABLE_NOT_ALLOWED`, one found nowhere with the new
+  `EXECUTABLE_NOT_FOUND` (it used to fail to start, `EXECUTION_FAILED`). cmd.exe built-ins run through the system
+  directory's `cmd.exe` by its absolute path, named without an extension, with `NoDefaultCurrentDirectoryInExePath`
+  set. This replaces #1738's check for a `sort.exe` / `findstr.exe` in those two directories. On Windows the
+  allowlist and a command's first word are matched ignoring case and a `.exe` / `.com` extension, so an entry
+  `sort.exe` or a command `git.exe` gets that program's rules, which it escaped before
+  ([#1761](https://github.com/llm4s/llm4s/issues/1761)), and `WORKSPACE_EXTRA_COMMANDS` refuses `bash.exe` or
+  `CMD.COM` as it refuses `bash` and `cmd`. See
+  [Program resolution](docs/reference/workspace-sandbox.md#program-resolution).
+- **Security - workspace runner: on Windows, `sort` and `findstr` accept only their native switches**
+  ([#1738](https://github.com/llm4s/llm4s/issues/1738)): the command policy read every argument starting with `/`
+  to `sort` or `findstr` as a switch, path-checked only the text after the slash, and exempted both programs from the
+  refusal of a leading `/`. So `sort /secret.txt` passed, and a GNU / MSYS2 `sort` or `findstr` - which reads
+  `/c/Users/...` as `C:\Users\...` and `/x` from its own root - could read outside the workspace. Now, on Windows, an
+  argument starting with `/` must be, ignoring case, exactly a switch of the native tool, or it is refused
+  (`ARGUMENT_NOT_ALLOWED`): for `sort.exe` `/R[EVERSE]`, `/+n`, `/L[OCALE]`, `/M[EMORY]`, `/REC[ORD_MAXIMUM]`,
+  `/C[ASE_SENSITIVE]`, `/UNIQUE` (`/O` and `/T` stay refused); for `findstr.exe` the flags `/B /E /L /R /S /I /X /V
+  /N /M /O /P` (combinable), `/OFF[LINE]`, `/C:`, `/G:`, `/D:` and `/A:` (`/F` and a `/D:` list stay refused), the
+  values of `/G:` and `/D:` held to the workspace as before. A path candidate of the form `/x/...` is also judged as
+  drive `x:`'s path, as MSYS2 reads it. And on a Windows host the runner refuses `sort` and `findstr`
+  (`EXECUTABLE_NOT_ALLOWED`) when a `sort.exe` / `findstr.exe` sits in the runner's Java or current directory, the two
+  places `CreateProcess` searches before the system directory, so the native builds are the ones that run.
+- **Security - workspace runner: an `mv` or `cp` of several sources cannot reach outside through a name an earlier
+  source's operation makes** ([#1776](https://github.com/llm4s/llm4s/issues/1776)): the command policy checked every
+  path against the file system as it was before the command ran, but `mv` and `cp` handle their sources one at a time.
+  With `sub/l` -> `../outside` (inside the workspace while in `sub`), `mv sub/l l/secret.txt .` moved the link to
+  `./l`, where it points out, and then moved `outside/secret.txt` into the workspace; GNU `cp -P` / `-d` / `-R` / `-a`
+  could copy such a link and read a later source through the copy. Now, for an `mv` or `cp` of two sources or more,
+  each source is taken to change its name in the destination directory (and any name starting with it, for
+  `--backup`) and, for `mv`, its own entry; every other path argument is walked, links followed, and the command is
+  refused (`ARGUMENT_NOT_ALLOWED`) when it looks up one of those entries, comparing names case- and
+  normalisation-insensitively and directories by identity. An `mv` that moves a source holding the working directory
+  is refused too. The existing refusal of a link-preserving `cp` of two sources with the same name now compares the
+  names as the destination's file system does, ignoring letter case and Unicode normalisation (and, on Windows,
+  taking a name with `~` for any): on macOS `cp -P a/b/x c/X d` copied the link `x` into `d` and then wrote `c/X`
+  through it. The comparison repeats NFKD decomposition and case mapping until the name stops changing, since one pass
+  left names APFS takes for one apart (`ẞ` and `ß`, `ss` or `SS`; `ΐ` and its decomposed capital): `cp -P a/b/ẞ c/ß d`
+  passed and wrote `c/ß` through the link on macOS. It decomposes, as APFS does before it case-folds, rather than
+  composing with NFKC, which kept a Greek iota subscript composed and so, after a further mark, apart from the same
+  name spelt with `ι` (`ᾳ̃` and `α̃ι`, `ᾼ͂` and `ᾷ`): `cp -P a/b/zᾼ͂ c/zᾷ d` wrote `c/zᾷ` through the link on macOS. Run one command per source instead. `rm`, `mkdir`, `touch` and `chmod`
+  create no link and are unchanged. See [Several sources in one command](docs/reference/workspace-sandbox.md#several-sources-in-one-command).
+- **Workspace runner: an agent can remove or rename a symbolic link that points out of the workspace**
+  ([#1730](https://github.com/llm4s/llm4s/issues/1730)): the command policy resolved every argument through its
+  links, so `rm outlink` and `mv outlink x` were refused (`PATH_ESCAPE_ATTEMPT`) although removing or renaming a link
+  never touches what it points to, and an agent could not clean such a link up. On POSIX, an operand of `rm` or
+  `unlink`, or a source of `mv`, whose last component is itself a symbolic link is now judged by the directory holding
+  it (`lstat` semantics), over both the direct `executeCommand` path and the WebSocket executor, when: it has no
+  trailing `/` (`mv outlink/ x` moves the directory the link points to, `rm -r outlink/` empties it); the directory
+  holding it is inside the workspace under both readings of the path rule and they name the same directory; `rm` is
+  not recursive; for `mv`, it is not the destination, which still follows links (`mv a.txt outlink`,
+  `mv -t outlink a.txt` stay refused); and GNU's and macOS / FreeBSD's option tables both parse the arguments exactly
+  and agree on the operands, so a GNU-only form (`rm --force outlink`, `mv -T`, `mv -t dir outlink`) keeps the link
+  refused. A dangling link and the first link of a chain can be removed too. A link moved by an `mv` of several
+  sources cannot be reached through by a later source of the same command (`mv evil d/evil/secret.txt d` is refused,
+  see the #1776 entry above). Windows is unchanged: there a link or junction keeps the path rule. `cp` is unchanged. See
+  [Removing a link](docs/reference/workspace-sandbox.md#removing-a-link). The same issue's follow-ups to #1720: the
+  inline comments in `WorkspaceAgentInterfaceImpl.prepareCommand` now number the working-directory check layer 6 and
+  `CommandPolicy` layers 7-9, as its Scaladoc does; and `WorkspaceConfigSupport.loadSandboxConfig`, which nothing
+  called, is removed (see Removed).
 - **MCP: Streamable HTTP notifications carry the `Accept` header the transport requires**
   ([#1006](https://github.com/llm4s/llm4s/issues/1006)): `StreamableHTTPTransportImpl.sendNotification` posted
   without `Accept: application/json, text/event-stream`, which the specification requires on every POST to the MCP
@@ -2346,6 +2532,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parent path holds `:` (POSIX) or `;` (Windows); on Windows, the forms listed
   above; and `environment` variables outside the list. Run writes through the
   `writeFile` / `modifyFile` operations or the read-write allowlist's own programs instead.
+
+  The same change corrected four statements in `docs/reference/security.md` and `workspace-sandbox.md`
+  ([#1716](https://github.com/llm4s/llm4s/issues/1716)): the residual-risk example `git -c core.pager=...` runs nothing
+  (git starts a pager only on a terminal), so the pages use `git -c alias.x='!cmd' x` and `-c core.fsmonitor=...`; the
+  client's sandbox profile does not control enforcement, only the runner's `WORKSPACE_SANDBOX_PROFILE` does; an
+  unknown profile name stops the runner (and makes the client loader return a `Left`) rather than falling back to
+  `permissive`; and `SQLiteMemoryStore.inMemory()` is called as it is, not given `":memory:"`.
 - **A subscription receives every live event sent after `subscribe` returns** ([#1731](https://github.com/llm4s/llm4s/issues/1731)):
   `GraphRuntime.subscribe` returned before its dispatcher joined the event hub's live set, which it
   did only after replaying the log, so live events (`RunContext.progress`, `StreamEvent.Live`) sent in
@@ -2437,6 +2630,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   appended `/v1/embeddings` to it and posted to `https://api.openai.com/v1/v1/embeddings`. A base URL ending in
   `/v1` now gets `/embeddings`; one without it (`https://api.openai.com`, a proxy root) still gets
   `/v1/embeddings`, so a base URL that worked before is unchanged.
+- **`llm4s-agent-tools`: `WriteFileTool` and `ReadFileTool` return an error for an unknown encoding instead of throwing**
+  ([#1710](https://github.com/llm4s/llm4s/issues/1710)): `WriteFileTool.writeFile` called
+  `Charset.forName(encodingStr)` outside any `Try`, so a model-supplied encoding such as `utf-9`
+  (`UnsupportedCharsetException`) or `bad name!` (`IllegalCharsetNameException`) escaped as an exception
+  instead of the `Left` error the other failures use. `ReadFileTool.readFile` did the lookup inside its
+  `Try` but reported it as a generic read failure. Both tools now look the charset up first and return
+  `Left("Unsupported encoding: <name>")` for either exception.
 - **`llm4s-rag`: `SimpleChunker` and `ChunkingUtils.chunkText` no longer throw for a very large window**
   ([#1424](https://github.com/llm4s/llm4s/pull/1424)): the window end and the next start were computed in `Int`, so
   a valid configuration such as `ChunkingConfig(targetSize = Int.MaxValue, maxSize = Int.MaxValue,
