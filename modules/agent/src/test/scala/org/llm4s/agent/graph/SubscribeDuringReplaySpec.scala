@@ -29,12 +29,20 @@ class SubscribeDuringReplaySpec extends AnyFlatSpec with Matchers with EitherVal
    * caught up by the switch to live; otherwise as it is once released, so the replay delivers it.
    */
   final private class SlowFirstRead(stale: Boolean) extends Checkpointer {
-    val underlying                                 = InMemoryCheckpointer()
-    val release                                    = new CountDownLatch(1)
-    val reading                                    = new CountDownLatch(1)
-    private val reads                              = new AtomicInteger()
-    def commit(threadId: ThreadId, commit: Commit) = underlying.commit(threadId, commit)
-    def latest(threadId: ThreadId)                 = underlying.latest(threadId)
+    val underlying                                                             = InMemoryCheckpointer()
+    val release                                                                = new CountDownLatch(1)
+    val reading                                                                = new CountDownLatch(1)
+    private val reads                                                          = new AtomicInteger()
+    def commit(threadId: ThreadId, commit: Commit)                             = underlying.commit(threadId, commit)
+    def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
+    def renew(
+      threadId: ThreadId,
+      token: org.llm4s.agent.graph.FencingToken,
+      ttl: scala.concurrent.duration.FiniteDuration
+    ) =
+      underlying.renew(threadId, token, ttl)
+    def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+    def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       if reads.incrementAndGet() == 1 then
         val early = underlying.eventsAfter(threadId, afterSeq, limit)

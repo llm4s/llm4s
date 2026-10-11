@@ -10,14 +10,40 @@ nav_order: 2
 Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
 by what you use. The notes below are the per-change detail it links to.
 
-## Stage 2 migration: durable execution and human review
+## Stage 2 migration: durable execution
 
-Not in a release yet. Stage 2 of the typed agent runtime ([#1699](https://github.com/llm4s/llm4s/issues/1699)) is
-split into slices; each adds its part below. Design: `docs/design/typed-agent-runtime-design.md` §5.3 and §6.
+Not in a release yet. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/1699)) makes agent and graph threads durable and adds human review. One note covers the whole stage; each slice adds its part here as it lands:
+
+- [#1700](https://github.com/llm4s/llm4s/issues/1700), the durable `Checkpointer` contract - run-claim leases, fencing tokens and a store contract suite: [below](#durable-checkpointer-contract-1700).
+- [#1703](https://github.com/llm4s/llm4s/issues/1703), tool side-effect safety - idempotency keys and one result per tool call: [below](#tool-side-effect-safety-1703).
+- [#1701](https://github.com/llm4s/llm4s/issues/1701) SQLite checkpointer, [#1702](https://github.com/llm4s/llm4s/issues/1702) history, fork and `updateState`, [#1704](https://github.com/llm4s/llm4s/issues/1704) human-review interrupts and [#1705](https://github.com/llm4s/llm4s/issues/1705) live subscriptions across runtimes: not yet landed.
+
+Design: `docs/design/typed-agent-runtime-design.md` §4.16 onwards. Guide: [Durable Checkpointers](../guide/agents/durable-checkpointers.html).
+
+### Durable `Checkpointer` contract (#1700)
+
+A run now holds a lease on its thread - a `RunClaim` with an expiry and a `FencingToken` - which it renews while it runs and releases when it ends, and every commit carries the token. Code that only runs agents or graphs on `GraphRuntime` or `Agent` needs no change. Code that implements `Checkpointer`, builds a `Commit`, `Checkpoint` or `RunPosition`, or matches `ThreadBusy` does. Source breaks, with no shims:
+
+- **`Checkpointer` gains `claim`, `renew` and `release`.** A store grants at most one live claim per thread, judged by its own clock, with a token greater than every token it issued for that thread before, and refuses every commit whose token is not the current claim's with `GraphError.StaleClaim`. A wrapper that delegates to another store forwards the three methods:
+
+  ```scala
+  def claim(threadId: ThreadId, request: ClaimRequest)                      = underlying.claim(threadId, request)
+  def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration)   = underlying.renew(threadId, token, ttl)
+  def release(threadId: ThreadId, token: FencingToken)                      = underlying.release(threadId, token)
+  ```
+
+  Test a store with `CheckpointerContract` from the new `llm4s-agent-testkit` (see the guide).
+- **`Commit(checkpoint, pendingWrites, events)` is `Commit(token, checkpoint, pendingWrites, events)`**, with a private constructor: build it with `Commit(token, ...)` (all but the token default to empty) and change it with `withCheckpoint`, `withPendingWrites`, `withEvents` and `withToken`. A commit to `InMemoryCheckpointer` - or any store - now needs a claim first: `store.claim(threadId, ClaimRequest(runId, ttl))` returns the `RunClaim` whose `token` it carries.
+- **`Checkpoint` and `RunPosition` have private constructors and gain `fencingToken: Option[FencingToken]`.** Build them with `Checkpoint(...)` and `RunPosition(...)` as before (the new field defaults to `None`) and change them with `with*` setters; `checkpoint.copy(parent = p)` is `checkpoint.withParent(p)`. A run's position carries its claim's token; `None` outside a runtime.
+- **`Checkpoint.CurrentFormat` is 5.** Format 4 and earlier checkpoints still read (as written by no claim, `fencingToken = None`); a build before this change refuses format 5.
+- **`GraphError.ThreadBusy(threadId, latestCheckpoint)` gains `holder: Option[String]`**, the holding run's id. A pattern `case GraphError.ThreadBusy(t, c)` becomes `case GraphError.ThreadBusy(t, c, _)`. `ThreadBusy` is now also returned when another runtime or process holds a live claim on the thread.
+- **`GraphError.StaleClaim(threadId, token, current)` is new**: a commit, renewal or release made with a token that is not the thread's current claim. A run that lost its claim ends with `CheckpointWriteFailed(StaleClaim)`.
+- **`InMemoryCheckpointer` takes an optional `Clock`** (default the system clock), by which its claims expire, and **`GraphRuntime` an optional `ClaimPolicy`** (`ttl` 30 seconds, `renewEvery` 10 seconds). Java and Kotlin keep `new InMemoryCheckpointer()`, `new GraphRuntime(store)` and `new GraphRuntime(store, clock)`.
+- **`GraphRuntime.deleteThread` claims the thread before deleting it**, so it is refused with `ThreadBusy` while a run holds the thread in any runtime, not only in its own.
 
 ### Tool side-effect safety (#1703)
 
-Design §4.16. Tools see an idempotency key, and the agent holds every model request to one result per tool call.
+Design §4.17. Tools see an idempotency key, and the agent holds every model request to one result per tool call.
 
 ```scala
 // before

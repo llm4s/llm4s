@@ -196,7 +196,15 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     // a read that misses tenant a's run, as one racing its claim would: the claim then conflicts
     val stale = new AtomicBoolean(true)
     val racing = new Checkpointer {
-      def commit(threadId: ThreadId, commit: Commit) = underlying.commit(threadId, commit)
+      def commit(threadId: ThreadId, commit: Commit)                             = underlying.commit(threadId, commit)
+      def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
+      def renew(
+        threadId: ThreadId,
+        token: org.llm4s.agent.graph.FencingToken,
+        ttl: scala.concurrent.duration.FiniteDuration
+      ) =
+        underlying.renew(threadId, token, ttl)
+      def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
       def latest(threadId: ThreadId) = if stale.getAndSet(false) then Right(None) else underlying.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
@@ -218,7 +226,15 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     val reads  = new java.util.concurrent.atomic.AtomicInteger()
     // the first read misses the winner, so the claim conflicts; the re-read then fails
     val failing = new Checkpointer {
-      def commit(threadId: ThreadId, commit: Commit) = underlying.commit(threadId, commit)
+      def commit(threadId: ThreadId, commit: Commit)                             = underlying.commit(threadId, commit)
+      def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
+      def renew(
+        threadId: ThreadId,
+        token: org.llm4s.agent.graph.FencingToken,
+        ttl: scala.concurrent.duration.FiniteDuration
+      ) =
+        underlying.renew(threadId, token, ttl)
+      def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
       def latest(threadId: ThreadId) =
         if reads.incrementAndGet() == 1 then Right(None) else Left(ValidationError("store", "down"))
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
@@ -237,12 +253,21 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     val release    = new CountDownLatch(1)
     val armed      = new AtomicBoolean(true)
     // the first read blocks, holding tenant a's admission inside its reservation
+    val gate = release // the store has a `release` of its own
     val slow = new Checkpointer {
-      def commit(threadId: ThreadId, commit: Commit) = underlying.commit(threadId, commit)
+      def commit(threadId: ThreadId, commit: Commit)                             = underlying.commit(threadId, commit)
+      def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
+      def renew(
+        threadId: ThreadId,
+        token: org.llm4s.agent.graph.FencingToken,
+        ttl: scala.concurrent.duration.FiniteDuration
+      ) =
+        underlying.renew(threadId, token, ttl)
+      def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
       def latest(threadId: ThreadId) = {
         if armed.compareAndSet(true, false) then {
           reading.countDown()
-          release.await(10, TimeUnit.SECONDS): Unit
+          gate.await(10, TimeUnit.SECONDS): Unit
         }
         underlying.latest(threadId)
       }
@@ -258,7 +283,10 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
 
     runtime.start(thread, f.graph, "y", tenant("b")).left.value shouldBe GraphError.TenantMismatch("t", Some("b"))
     runtime.start(thread, f.graph, "y").left.value shouldBe GraphError.TenantMismatch("t", None)
-    runtime.start(thread, f.graph, "y", tenant("a")).left.value shouldBe GraphError.ThreadBusy("t", None)
+    // the first admission is this runtime's own, so its run is named although the thread has no checkpoint yet
+    runtime.start(thread, f.graph, "y", tenant("a")).left.value should matchPattern {
+      case GraphError.ThreadBusy("t", None, Some(_)) =>
+    }
 
     release.countDown()
     Option(first.poll(10, TimeUnit.SECONDS)).value.value.completed._2 shouldBe Vector("x")

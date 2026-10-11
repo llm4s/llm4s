@@ -106,6 +106,9 @@ flags:
   jina:
     paths:
       - modules/providers/jina/src/main/scala
+  jev:
+    paths:
+      - modules/providers/jev/src/main/scala
   cohere:
     paths:
       - modules/providers/cohere/src/main/scala
@@ -129,6 +132,10 @@ flags:
     paths:
       - modules/observability-prometheus/src/main/scala
     carryforward: true
+  observability-micrometer:
+    paths:
+      - modules/observability-micrometer/src/main/scala
+    carryforward: true
   agent-tools:
     paths:
       - modules/agent-tools/src/main/scala
@@ -136,6 +143,10 @@ flags:
   agent:
     paths:
       - modules/agent/src/main/scala
+    carryforward: true
+  agent-testkit:
+    paths:
+      - modules/agent-testkit/src/main/scala
     carryforward: true
   java-api:
     paths:

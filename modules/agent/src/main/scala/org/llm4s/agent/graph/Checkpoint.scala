@@ -30,12 +30,14 @@ enum CheckpointStatus derives ReadWriter:
  * codec that wrote it ([[VersionedJson]]).
  *
  * `parent` is the checkpoint this one supersedes. A checkpointer accepts a new checkpoint only if
- * `parent` is the thread's latest, so two writers cannot both advance one thread.
+ * `parent` is the thread's latest, so two writers cannot both advance one thread: the latest
+ * checkpoint's id is the thread's version. `fencingToken` is the token of the claim whose run wrote
+ * it ([[RunClaim]]); `None` on checkpoints written before claims existed (format 4 and earlier).
  *
  * Persist with [[Checkpoint.toJson]] and read with [[Checkpoint.fromJson]], which migrates older
  * `formatVersion`s and refuses newer ones.
  */
-final case class Checkpoint(
+final case class Checkpoint private (
   formatVersion: Int,
   id: String,
   parent: Option[String],
@@ -45,13 +47,41 @@ final case class Checkpoint(
   createdAt: Instant,
   snapshot: GraphSnapshot,
   /** The tenant the thread belongs to; checked at admission. */
-  tenantId: Option[String] = None
-)
+  tenantId: Option[String] = None,
+  /** The token of the claim whose run wrote this checkpoint. */
+  fencingToken: Option[FencingToken] = None
+):
+  def withFormatVersion(v: Int): Checkpoint                 = copy(formatVersion = v)
+  def withId(i: String): Checkpoint                         = copy(id = i)
+  def withParent(p: Option[String]): Checkpoint             = copy(parent = p)
+  def withThreadId(t: String): Checkpoint                   = copy(threadId = t)
+  def withRunId(r: String): Checkpoint                      = copy(runId = r)
+  def withStatus(s: CheckpointStatus): Checkpoint           = copy(status = s)
+  def withCreatedAt(at: Instant): Checkpoint                = copy(createdAt = at)
+  def withSnapshot(s: GraphSnapshot): Checkpoint            = copy(snapshot = s)
+  def withTenantId(t: String): Checkpoint                   = copy(tenantId = Some(t))
+  def withTenantId(t: Option[String]): Checkpoint           = copy(tenantId = t)
+  def withFencingToken(t: FencingToken): Checkpoint         = copy(fencingToken = Some(t))
+  def withFencingToken(t: Option[FencingToken]): Checkpoint = copy(fencingToken = t)
 
 object Checkpoint:
 
+  def apply(
+    formatVersion: Int,
+    id: String,
+    parent: Option[String],
+    threadId: String,
+    runId: String,
+    status: CheckpointStatus,
+    createdAt: Instant,
+    snapshot: GraphSnapshot,
+    tenantId: Option[String] = None,
+    fencingToken: Option[FencingToken] = None
+  ): Checkpoint =
+    new Checkpoint(formatVersion, id, parent, threadId, runId, status, createdAt, snapshot, tenantId, fencingToken)
+
   /** The format this build writes. */
-  val CurrentFormat: Int = 4
+  val CurrentFormat: Int = 5
 
   /**
    * Migrations of the checkpoint format itself, keyed by the version they upgrade from.
@@ -59,9 +89,10 @@ object Checkpoint:
    * 2 -> 3: the tenant (#1277) became part of a thread's identity; earlier checkpoints have none.
    * 3 -> 4: the terminal `Failed` status (#1328); nothing to rewrite, but a build that predates it refuses format 4
    * rather than misread the status.
+   * 4 -> 5: run-claim fencing (#1700) records the writing claim's token; earlier checkpoints have none.
    */
   private val formatVersion: SchemaVersion =
-    SchemaVersion(4)(1 -> addSuspension, 2 -> addTenant, 3 -> addFailedStatus)
+    SchemaVersion(5)(1 -> addSuspension, 2 -> addTenant, 3 -> addFailedStatus, 4 -> addFencingToken)
 
   private def addSuspension(json: ujson.Value): Result[ujson.Value] =
     Try {
@@ -89,6 +120,14 @@ object Checkpoint:
     Try {
       val upgraded = ujson.copy(json)
       upgraded("formatVersion") = 4
+      upgraded
+    }.toResult
+
+  private def addFencingToken(json: ujson.Value): Result[ujson.Value] =
+    Try {
+      val upgraded = ujson.copy(json)
+      upgraded("fencingToken") = upickle.default.writeJs(Option.empty[Long])
+      upgraded("formatVersion") = 5
       upgraded
     }.toResult
 
@@ -138,15 +177,34 @@ enum EncodedRoute derives ReadWriter:
 final case class StoredCheckpoint(checkpoint: Checkpoint, pendingWrites: Vector[PendingWrite])
 
 /**
- * One atomic write to a thread. The checkpointer applies all of it or none of it:
+ * One atomic write to a thread, fenced by the writing run's claim. The checkpointer applies all of it
+ * or none of it:
  *
+ *  - `token` must be the [[FencingToken]] of the thread's current claim ([[GraphError.StaleClaim]]
+ *    otherwise, checked first): a writer that lost its claim records nothing.
  *  - `checkpoint`, if present, becomes the thread's latest, provided its `parent` is the current
- *    latest; pending writes recorded against the old checkpoint are dropped.
- *  - `pendingWrites` are recorded against the (resulting) latest checkpoint, and must name it.
+ *    latest - the thread version the writer expects ([[GraphError.CheckpointConflict]]); pending
+ *    writes recorded against the old checkpoint are dropped.
+ *  - `pendingWrites` are recorded against the (resulting) latest checkpoint, and must name it - the
+ *    version they expect ([[GraphError.InvalidCommit]]).
  *  - `events` are appended to the thread's durable log, each given the next sequence number.
  */
-final case class Commit(
+final case class Commit private (
+  token: FencingToken,
   checkpoint: Option[Checkpoint],
   pendingWrites: Vector[PendingWrite],
   events: Vector[EventDraft]
-)
+):
+  def withToken(t: FencingToken): Commit                 = copy(token = t)
+  def withCheckpoint(c: Checkpoint): Commit              = copy(checkpoint = Some(c))
+  def withCheckpoint(c: Option[Checkpoint]): Commit      = copy(checkpoint = c)
+  def withPendingWrites(w: Vector[PendingWrite]): Commit = copy(pendingWrites = w)
+  def withEvents(e: Vector[EventDraft]): Commit          = copy(events = e)
+
+object Commit:
+  def apply(
+    token: FencingToken,
+    checkpoint: Option[Checkpoint] = None,
+    pendingWrites: Vector[PendingWrite] = Vector.empty,
+    events: Vector[EventDraft] = Vector.empty
+  ): Commit = new Commit(token, checkpoint, pendingWrites, events)
