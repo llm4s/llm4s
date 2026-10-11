@@ -13,8 +13,8 @@ five things most programs do: call a model, get typed output, give the model a t
 documents. For whether LLM4S is the right choice, read the [comparison](comparison) first, including
 [what it has not got yet](comparison#what-llm4s-has-not-got-yet).
 
-Every LLM4S snippet below is compiled by a test in this repository (`ComparisonGuideSpec`), so the page cannot drift
-from the API. All but two are also run, against a scripted client, with no network. The two that are only compiled
+Every LLM4S snippet below is compiled by a test in this repository (`ComparisonGuideSpec`), which also checks that the
+code on this page is, word for word, the code it compiles, so the page cannot drift from the API. All but two are also run, against a scripted client, with no network. The two that are only compiled
 (the configuration one and the RAG one) say so. The LangChain4j and Spring AI sides show concept names taken from their
 own documentation, linked at the end, and no invented API.
 
@@ -91,8 +91,8 @@ ActorFilms actorFilms = chatClient.prompt()
     .entity(ActorFilms.class);
 ```
 
-*(From the [Spring AI `ChatClient` page](https://docs.spring.io/spring-ai/reference/api/chatclient.html), fetched
-2026-10-08.)* In LLM4S you describe the shape once as a schema and pass it:
+*(From the [Spring AI `ChatClient` page](https://docs.spring.io/spring-ai/reference/api/chatclient.html), Spring AI
+2.0.1, fetched 2026-10-11.)* In LLM4S you describe the shape once as a schema and pass it:
 
 ```scala
 case class Person(name: String, age: Int)
@@ -160,8 +160,8 @@ JSON, files, HTTP, shell and web search) in the [built-in tools guide](builtin-t
 
 ## 4. Memory
 
-In LangChain4j, chat memory lets a service "remember" previous interactions [L1], and Spring AI has a `ChatMemory`
-[S6]. LLM4S splits this in two:
+In LangChain4j, an AI Service can be given a chat memory, shared or one per user [L1], and Spring AI has a
+`ChatMemory` [S6]. LLM4S splits this in two:
 
 - **Within a conversation**, history is a `Conversation` value: an immutable list of messages that you pass to each
   call.
@@ -226,10 +226,10 @@ library ([guardrails](agents/guardrails)), and cats-effect and ZIO modules ([cat
 
 ## Sources
 
-All fetched on 2026-10-08.
+All fetched on 2026-10-11, against LangChain4j 1.22.0 and Spring AI 2.0.1.
 
 | Tag | Page | Fact used |
 |---|---|---|
-| L1 | [LangChain4j: AI Services](https://docs.langchain4j.dev/tutorials/ai-services) | AI Services; return-type structured output; tools; chat memory "remember" previous interactions; `ContentRetriever` for RAG |
+| L1 | [LangChain4j: AI Services](https://docs.langchain4j.dev/tutorials/ai-services) | AI Services; return-type structured output; tools; chat memory, shared or per user; `ContentRetriever` for RAG |
 | L7 | [LangChain4j: structured outputs](https://docs.langchain4j.dev/tutorials/structured-outputs) | POJOs and records as return types |
 | S6 | [Spring AI: ChatClient](https://docs.spring.io/spring-ai/reference/api/chatclient.html) | The fluent API; the `entity()` example quoted above; `ChatMemory` |

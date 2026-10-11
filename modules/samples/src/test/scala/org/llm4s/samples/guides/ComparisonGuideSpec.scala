@@ -15,14 +15,17 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.{ macroRW, ReadWriter }
 
+import java.nio.charset.StandardCharsets
+import java.nio.file.{ Files, Path, Paths }
 import java.util.concurrent.ConcurrentLinkedQueue
 import scala.jdk.CollectionConverters._
 
 /**
  * Compiles and runs the llm4s snippets of `docs/guide/migrating-from-langchain4j.md`.
  *
- * Each test holds one snippet of the guide, between the "from here" and "to here" comments, so the page cannot drift
- * from the API. The client is a script, not a model: it returns the replies each test hands it, and records what it
+ * Each snippet of the guide sits between a `// snippet: <name>` and an `// end snippet` comment, and the last tests
+ * compare those regions with the page's Scala blocks, word for word, so neither copy can change without the other.
+ * The client is a script, not a model: it returns the replies each test hands it, and records what it
  * was asked, so the checks are on what llm4s sends and returns, never on what a model says. The configuration and
  * RAG snippets need a provider, so they are compiled (as the bodies of `def`s) but not run.
  */
@@ -63,24 +66,25 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
   // 1. A chat call
   // ---------------------------------------------------------------------------------------------------------------
 
-  // The snippet, from here ...
+  // snippet: connect
   def connect(): Result[LLMClient] = for {
     providerConfig  <- Llm4sConfig.defaultProvider()
     registryService <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registryService
     client <- LLMConnect.getClient(providerConfig)
   } yield client
-  // ... to here (compiled, not run: it needs a configured provider).
+  // end snippet
+  // (compiled, not run: it needs a configured provider.)
 
   "The chat snippet" should "send a system and a user message and return the reply text" in {
     val client = new ScriptedClient(_ => AssistantMessage("Scala is a JVM language."))
 
-    // The snippet, from here ...
+    // snippet: chat
     val reply: Result[String] = for {
       conversation <- Conversation.fromPrompts("You answer in one sentence.", "What is Scala?")
       completion   <- client.complete(conversation)
     } yield completion.content
-    // ... to here.
+    // end snippet
 
     reply.value shouldBe "Scala is a JVM language."
     val sent = client.requests.map(_._1.messages)
@@ -95,7 +99,7 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
   // 2. Structured output
   // ---------------------------------------------------------------------------------------------------------------
 
-  // The snippet, from here ...
+  // snippet: person-schema
   case class Person(name: String, age: Int)
   object Person { implicit val rw: ReadWriter[Person] = macroRW }
 
@@ -103,17 +107,17 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     .`object`[Person]("A person")
     .withRequiredField("name", Schema.string("The person's name"))
     .withRequiredField("age", Schema.integer("The person's age in years"))
-  // ... to here.
+  // end snippet
 
   "The structured output snippet" should "return a typed value and send the schema to the provider" in {
     val client = new ScriptedClient(_ => AssistantMessage("""{"name":"Ada","age":36}"""))
 
-    // The snippet, from here ...
+    // snippet: structured
     val person: Result[Person] = for {
       conversation <- Conversation.fromPrompts("Extract the person.", "Ada Lovelace is 36.")
       parsed       <- client.completeStructured[Person](conversation, personSchema)
     } yield parsed
-    // ... to here.
+    // end snippet
 
     person.value shouldBe Person("Ada", 36)
 
@@ -163,7 +167,7 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
   // 3. A tool and an agent
   // ---------------------------------------------------------------------------------------------------------------
 
-  // The snippet, from here ...
+  // snippet: tool
   case class Forecast(city: String, summary: String)
   object Forecast { implicit val rw: ReadWriter[Forecast] = macroRW }
 
@@ -176,7 +180,7 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     description = "Returns the forecast for a city",
     schema = forecastSchema
   ).withHandler(extractor => extractor.getString("city").map(city => Forecast(city, "sunny"))).buildSafe()
-  // ... to here.
+  // end snippet
 
   "The tool snippet" should "run through an agent: the model asks for the tool and the answer uses its result" in {
     val client = new ScriptedClient(conversation =>
@@ -190,13 +194,13 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
       }
     )
 
-    // The snippet, from here ...
+    // snippet: agent-run
     val result = for {
       tool  <- forecastTool
       agent <- Agent.builder("forecast-agent", client).withTools(new ToolRegistry(Seq(tool))).build()
       state <- agent.run("What is the weather in Oslo?")
     } yield state
-    // ... to here.
+    // end snippet
 
     val answer = result.value.answer.getOrElse(fail(s"the run did not complete: ${result.value.status}"))
     answer should include("Oslo")
@@ -210,13 +214,13 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
   // ---------------------------------------------------------------------------------------------------------------
 
   "The memory snippet" should "record facts and return them as context for a query that shares a word" in {
-    // The snippet, from here ...
+    // snippet: memory
     val context: Result[String] = for {
       m1  <- SimpleMemoryManager.empty.recordUserFact("Prefers Scala over Java", Some("user-1"), Some(0.9))
       m2  <- m1.recordKnowledge("Scala 3 has opaque types", "docs")
       ctx <- m2.getRelevantContext("Scala")
     } yield ctx
-    // ... to here.
+    // end snippet
 
     context.value shouldBe
       "# Retrieved Context\n## Relevant Knowledge\n- Scala 3 has opaque types\n\n## User Preferences\n- Prefers Scala over Java"
@@ -235,7 +239,7 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
   // 5. A RAG pipeline
   // ---------------------------------------------------------------------------------------------------------------
 
-  // The snippet, from here ...
+  // snippet: rag
   def buildRag(): Result[RAG] = for {
     registryService <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registryService
@@ -246,7 +250,8 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     _       <- rag.ingestText("Opaque types hide their representation outside the defining scope.", "scala-3")
     results <- rag.query("What are opaque types?")
   } yield results.map(_.content)
-  // ... to here (compiled, not run: embedding needs a provider).
+  // end snippet
+  // (compiled, not run: embedding needs a provider.)
 
   "The RAG snippet" should "compile against the public API" in {
     // `buildRag` and `askTheDocs` are not called: they would need an embedding provider. That they type-check is
@@ -259,5 +264,74 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
   "The configuration snippet" should "compile against the public API" in {
     val connectors: Seq[() => Result[LLMClient]] = Seq(() => connect())
     connectors should have size 1
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // The page (lazy: Scala's initialisation check refuses a test registered before a later plain val)
+  // ---------------------------------------------------------------------------------------------------------------
+
+  private lazy val root: Path =
+    Iterator
+      .iterate(Paths.get("").toAbsolutePath)(_.getParent)
+      .takeWhile(_ != null)
+      .find(dir => Files.exists(dir.resolve("build.sbt")))
+      .getOrElse(throw new IllegalStateException("build.sbt not found above the working directory"))
+
+  private def read(path: Path): String =
+    new String(Files.readAllBytes(path), StandardCharsets.UTF_8).replace("\r\n", "\n")
+
+  private lazy val specSource = read(
+    root.resolve("modules/samples/src/test/scala/org/llm4s/samples/guides/ComparisonGuideSpec.scala")
+  )
+  private lazy val page = read(root.resolve("docs/guide/migrating-from-langchain4j.md"))
+
+  /**
+   * Removes the common indentation and the blank lines around a block, and reads `lazy val` as `val`: the spec needs
+   * `lazy` on class-level vals for Scala 3's initialisation check, while the page shows ordinary code.
+   */
+  private def normalise(block: String): String = {
+    val lines  = block.split("\n", -1).toList.dropWhile(_.trim.isEmpty).reverse.dropWhile(_.trim.isEmpty).reverse
+    val indent = lines.filter(_.trim.nonEmpty).map(l => l.length - l.stripLeading().length).minOption.getOrElse(0)
+    lines
+      .map(l => if (l.length >= indent) l.substring(indent) else l.trim)
+      .map(_.replace("lazy val ", "val "))
+      .mkString("\n")
+  }
+
+  private lazy val regions: List[String] =
+    """(?ms)^[ ]*// snippet: ([a-z-]+)\n(.*?)^[ ]*// end snippet$""".r
+      .findAllMatchIn(specSource)
+      .map(m => normalise(m.group(2)))
+      .toList
+
+  private lazy val pageBlocks: List[String] =
+    """(?ms)^```scala\n(.*?)^```$""".r.findAllMatchIn(page).map(m => normalise(m.group(1))).toList
+
+  private def isImportBlock(block: String): Boolean =
+    block.linesIterator.forall(l => l.trim.isEmpty || l.startsWith("import "))
+
+  "The migration guide" should "show every snippet of this spec, in the same order, word for word" in {
+    regions should have size 8
+    pageBlocks.filterNot(isImportBlock) shouldBe regions
+  }
+
+  it should "list only imports that this spec, which compiles the snippets, also uses" in {
+    val pageImports = pageBlocks.filter(isImportBlock).flatMap(_.linesIterator.filter(_.nonEmpty))
+    pageImports should not be empty
+    val specImports = specSource.linesIterator.filter(_.startsWith("import ")).toSet
+    pageImports.filterNot(line => specImports.contains(line) || coveredBy(line, specImports)) shouldBe empty
+  }
+
+  /** `import a.b.{ X, Y }` on the page is covered by a spec import of `a.b.{ ... }` that names at least X and Y. */
+  private def coveredBy(pageLine: String, specImports: Set[String]): Boolean = {
+    val Braced = """import ([\w.]+)\.\{ (.*) \}""".r
+    pageLine match {
+      case Braced(pkg, names) =>
+        specImports.exists {
+          case Braced(`pkg`, specNames) => names.split(", ").toSet.subsetOf(specNames.split(", ").toSet)
+          case _                        => false
+        }
+      case _ => false
+    }
   }
 }
