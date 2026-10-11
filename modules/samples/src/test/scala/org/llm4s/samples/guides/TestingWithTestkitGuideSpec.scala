@@ -6,7 +6,7 @@ import org.llm4s.error.{ LLMError, ProcessingError, RateLimitError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
 import org.llm4s.llmconnect.model._
-import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
+import org.llm4s.testkit.{ Reply, ScriptedLLMClient, UnscriptedCallError }
 import org.llm4s.toolapi._
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
@@ -22,9 +22,10 @@ import scala.collection.mutable.ArrayBuffer
 /**
  * The code of `docs/guide/testing-with-the-testkit.md`, compiled and run.
  *
- * Every `scala` block of the page is a run of lines of THIS file, word for word (indentation aside): the last
- * test reads the page and fails if a block is not found here, so the page cannot show code that no longer
- * compiles. Change the page and this spec together.
+ * Every `scala` block of the page is a run of lines of THIS file, word for word (indentation aside), or of one of
+ * the [[TestingWithTestkitGuideSpec.otherSpecs]] - the `llm4s-effect` and `llm4s-zio` examples, which run in those
+ * modules' own tests: the last test reads the page and fails if a block is not found in any of them, so the page
+ * cannot show code that no longer compiles. Change the page and these specs together.
  */
 class TestingWithTestkitGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
   import TestingWithTestkitGuideSpec.*
@@ -44,7 +45,7 @@ class TestingWithTestkitGuideSpec extends AnyFlatSpec with Matchers with EitherV
 
   "The agent example of the guide" should "run a tool call and the final answer end to end" in {
     val client = ScriptedLLMClient.sequence(
-      Reply.toolCall("get_temperature", ujson.Obj("city" -> "Oslo")),
+      Reply.toolCall("get_temperature", """{"city": "Oslo"}"""),
       Reply.text("It is 21 degrees in Oslo: pack light layers.")
     )
 
@@ -72,10 +73,11 @@ class TestingWithTestkitGuideSpec extends AnyFlatSpec with Matchers with EitherV
   }
 
   it should "say which call had no reply when the code makes more calls than were scripted" in {
-    val message = ScriptedLLMClient.sequence().complete(conversation, options).left.value.message
+    val error = ScriptedLLMClient.sequence().complete(conversation, options).left.value
 
-    message should include("no reply is scripted for call 1")
-    message should include("Capital of France?")
+    error shouldBe an[UnscriptedCallError]
+    error.message should include("no reply is scripted for call 1")
+    error.message should include("Capital of France?")
   }
 
   "The respondingTo example of the guide" should "choose the answer from the conversation" in {
@@ -105,18 +107,25 @@ class TestingWithTestkitGuideSpec extends AnyFlatSpec with Matchers with EitherV
       root.resolve("modules/samples/src/test/scala/org/llm4s/samples/guides/TestingWithTestkitGuideSpec.scala")
     )
 
+    val specs = (spec +: otherSpecs.map(path => read(root.resolve(path)))).map(text => "\n" + normalised(text) + "\n")
+
     val blocks = scalaBlocks(page)
     blocks should not be empty
-    val specLines = "\n" + normalised(spec) + "\n"
     blocks.foreach { block =>
-      withClue(s"This block of the page is not in the spec, line for line:\n$block\n") {
-        specLines.contains("\n" + normalised(block) + "\n") shouldBe true
+      withClue(s"This block of the page is not in any of the specs, line for line:\n$block\n") {
+        specs.exists(_.contains("\n" + normalised(block) + "\n")) shouldBe true
       }
     }
   }
 }
 
 object TestingWithTestkitGuideSpec {
+
+  /** The specs outside this module whose code the page also shows, relative to the checkout's root. */
+  val otherSpecs: Seq[String] = Seq(
+    "modules/llm4s-effect/src/test/scala/org/llm4s/effect/cats/ScriptedAgentIOSpec.scala",
+    "modules/llm4s-zio/src/test/scala/org/llm4s/zio/ScriptedAgentZSpec.scala"
+  )
 
   final case class Temperature(city: String, celsius: Double) derives ReadWriter
 

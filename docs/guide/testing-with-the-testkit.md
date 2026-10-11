@@ -27,7 +27,7 @@ A `Reply` is what one call returns. `ScriptedLLMClient.sequence` answers the fir
 
 ```scala
 import org.llm4s.llmconnect.model._
-import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
+import org.llm4s.testkit.{ Reply, ScriptedLLMClient, UnscriptedCallError }
 ```
 
 ```scala
@@ -88,14 +88,16 @@ The model's side of the conversation is the script: first it asks for the tool, 
 
 ```scala
 val client = ScriptedLLMClient.sequence(
-  Reply.toolCall("get_temperature", ujson.Obj("city" -> "Oslo")),
+  Reply.toolCall("get_temperature", """{"city": "Oslo"}"""),
   Reply.text("It is 21 degrees in Oslo: pack light layers.")
 )
 
 packingAdvice(client, "Oslo") shouldBe Right("It is 21 degrees in Oslo: pack light layers.")
 ```
 
-`Reply.toolCall` leaves the call's `id` empty, and the client numbers it (`call-1-1`: call 1, first tool call). The recorded calls show what the agent really did:
+The tool's arguments are a JSON object written as a string, so the test needs no JSON library. Text that is not a JSON object throws an `IllegalArgumentException` when the script is built, naming the tool, rather than failing later inside the code under test. Without an `id`, the client numbers the call (`call-1-1`: call 1, first tool call); `id = Some("...")` sets one. For an answer that calls several tools, chain `.withToolCall(name, argumentsJson)`; `Reply.toolCalls(...)` takes core's `ToolCall`s as they are.
+
+The recorded calls show what the agent really did:
 
 ```scala
 client.callCount shouldBe 2
@@ -144,16 +146,65 @@ flaky.callCount shouldBe 2
 
 ## When the code makes a call you did not script
 
-A call past the end of the script does not hang or throw. It returns a `Left(ValidationError)` that says which call it was and what was asked, so a test that makes one call too many fails with a message that explains why:
+A call past the end of the script does not hang or throw. It returns a `Left(UnscriptedCallError)`: an error type of its own, so a test can tell "my code made a call I did not script" apart from any error a provider (or a `Reply.failure`) returns. It carries the `callNumber`, the `reason` and the `lastMessage`, and its message says which call it was and what was asked, so a test that makes one call too many fails with a message that explains why:
 
 ```scala
-val message = ScriptedLLMClient.sequence().complete(conversation, options).left.value.message
+val error = ScriptedLLMClient.sequence().complete(conversation, options).left.value
 
-message should include("no reply is scripted for call 1")
-message should include("Capital of France?")
+error shouldBe an[UnscriptedCallError]
+error.message should include("no reply is scripted for call 1")
+error.message should include("Capital of France?")
 ```
 
-Inside an agent, that error arrives wrapped in the same `NodeFailed` as any provider error.
+Inside an agent, that error arrives wrapped in the same `NodeFailed` as any provider error. It is a `NonRecoverableError`, so a `ReliableClient` does not retry it.
+
+## From llm4s-effect and llm4s-zio
+
+The scripted client is an ordinary `LLMClient`, so it drives an agent run through `AgentIO` (cats-effect, `llm4s-effect`) or `AgentZ` (ZIO, `llm4s-zio`) exactly as through `Agent`. Both examples use the same agent as above, built by a small helper:
+
+```scala
+def packingAgent(client: LLMClient): Result[Agent] =
+  temperatureTool.flatMap(tool =>
+    Agent.builder("packing-assistant", client).withTools(new ToolRegistry(Seq(tool))).build()
+  )
+```
+
+With cats-effect:
+
+```scala
+import cats.effect.IO
+import cats.effect.unsafe.implicits.global
+```
+
+```scala
+val client = ScriptedLLMClient.sequence(
+  Reply.toolCall("get_temperature", """{"city": "Oslo"}"""),
+  Reply.text("It is 21 degrees in Oslo: pack light layers.")
+)
+
+val run = AgentIO[IO](packingAgent(client).value).run("What should I pack for Oslo today?").unsafeRunSync()
+
+run.answer shouldBe Some("It is 21 degrees in Oslo: pack light layers.")
+client.callCount shouldBe 2
+client.calls.head.options.tools.map(_.name) shouldBe Seq("get_temperature")
+client.calls(1).messages.last.content should include("21")
+```
+
+With ZIO, in a `ZIOSpecDefault` test, with the same `client`:
+
+```scala
+for {
+  agent <- ZIO.fromEither(packingAgent(client))
+  run   <- AgentZ(agent).run("What should I pack for Oslo today?")
+} yield assertTrue(
+  run.answer.contains("It is 21 degrees in Oslo: pack light layers."),
+  client.callCount == 2,
+  client.calls.head.options.tools.map(_.name) == Seq("get_temperature"),
+  client.calls(1).messages.last.content.contains("21")
+)
+```
+
+A call the script has no reply for fails the effect like any provider error: `AgentIO` raises an `LLMException` whose `error` is the `NodeFailed` around the `UnscriptedCallError`, and `AgentZ` fails with that `NodeFailed`. These examples are the `ScriptedAgentIOSpec` and `ScriptedAgentZSpec` tests of `llm4s-effect` and `llm4s-zio`, which depend on the testkit `% Test` as your build would.
 
 ## Choose the reply from the conversation
 

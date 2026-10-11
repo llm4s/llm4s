@@ -520,13 +520,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new `GraphError` and `RunEvent` cases break exhaustive matches. Design:
   `docs/design/typed-agent-runtime-design.md` §4.6, with the Stage 0 carry-forward in §4.8.
 - **`llm4s-testkit`: a scriptable fake `LLMClient` for the tests of code that uses llm4s**
-  ([#1475](https://github.com/llm4s/llm4s/issues/1475)): a new Beta module that depends on `llm4s-core` only and registers no
-  provider. `ScriptedLLMClient.sequence` answers call N with reply N, `respondingTo` chooses the reply from the conversation,
-  and `always` repeats one; a `Reply` is a text answer, one or more tool calls, or a failure with any `LLMError`. Every request
-  is recorded (`calls`, `callCount`, `RecordedCall.lastUserText`), `streamComplete` replays the reply as chunks, a call past
-  the end of the script returns a `ValidationError` naming the call and the last message, and the client is thread-safe.
-  Until now the fakes lived in `llm4s-core`'s test sources, which are not published, and the Testing Guide taught users to
-  hand-write eight mocks. See [Testing with the Testkit](docs/guide/testing-with-the-testkit.md).
+  ([#1475](https://github.com/llm4s/llm4s/issues/1475), [#1796](https://github.com/llm4s/llm4s/issues/1796)): a new Beta
+  module that depends on `llm4s-core` only and registers no provider. `ScriptedLLMClient.sequence` answers call N with reply
+  N, `respondingTo` chooses the reply from the conversation, and `always` repeats one; a `Reply` is a text answer, one or
+  more tool calls (`Reply.toolCall(name, argumentsJson)`, arguments as a JSON-object string checked when the script is
+  built, chained with `withToolCall`), or a failure with any `LLMError`. Every request is recorded with its conversation
+  and `CompletionOptions` (`calls`, `callCount`, `RecordedCall.lastUserText`), `streamComplete` replays the reply as
+  chunks, a call the script has no reply for returns the typed `UnscriptedCallError` (a `NonRecoverableError` carrying
+  the call number, the reason and the last message), and the client is thread-safe. `llm4s-effect` and `llm4s-zio` test
+  an `AgentIO` and an `AgentZ` with it end to end (`ScriptedAgentIOSpec`, `ScriptedAgentZSpec`): a tool-call turn, the
+  final answer, and the recorded requests offering the tool. Until now the fakes lived in `llm4s-core`'s test sources,
+  which are not published, and the Testing Guide taught users to hand-write eight mocks. See
+  [Testing with the Testkit](docs/guide/testing-with-the-testkit.md). Thanks to @vim89 for #1797, which proposed the
+  module for `llm4s-effect` and `llm4s-zio` users and the test dependency from those modules.
 - **CI re-runs a step that failed on a transient download error, and nothing else**:
   `scripts/retry-on-transient-network.sh` wraps the `Check formatting` step (`scalafmt` fetches scalafmt-core at
   run time) and the MiMa step. It re-runs the command at most twice (`RETRY_MAX`, capped at 5; waits of 15 s and

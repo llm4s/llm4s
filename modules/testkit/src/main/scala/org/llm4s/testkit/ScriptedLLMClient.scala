@@ -1,6 +1,5 @@
 package org.llm4s.testkit
 
-import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk }
 import org.llm4s.types.Result
@@ -18,7 +17,7 @@ import org.llm4s.types.Result
  *
  * {{{
  * val client = ScriptedLLMClient.sequence(
- *   Reply.toolCall("get_weather", ujson.Obj("city" -> "Paris")),
+ *   Reply.toolCall("get_weather", """{"city": "Paris"}"""),
  *   Reply.text("It is sunny in Paris.")
  * )
  * // ... run the code under test with `client` ...
@@ -27,8 +26,8 @@ import org.llm4s.types.Result
  * }}}
  *
  * Every request is recorded ([[calls]]), whether it came through `complete` or `streamComplete`. A call the script
- * has no reply for does not hang or throw: it returns a `Left(ValidationError)` that names the call and shows the
- * last message, so a test that makes more calls than it scripted fails with a message that says why.
+ * has no reply for does not hang or throw: it returns a `Left(`[[UnscriptedCallError]]`)` that names the call and
+ * shows the last message, so a test that makes more calls than it scripted fails with a message that says why.
  *
  * `streamComplete` replays the same reply as chunks: the text in pieces of at most [[chunkSize]] characters, then
  * each tool call, then a final chunk that carries the finish reason (`stop`, or `tool_calls` when the reply calls
@@ -99,12 +98,7 @@ final class ScriptedLLMClient private (
     }
     scripted match {
       case Left(reason) =>
-        Left(
-          ValidationError(
-            "scripted reply",
-            s"no reply is scripted for call ${index + 1}: $reason; ${describeLast(conversation)}"
-          )
-        )
+        Left(UnscriptedCallError(index + 1, reason, describeLast(conversation)))
       case Right(reply) =>
         reply.failure match {
           case Some(error) => Left(error)
@@ -143,11 +137,10 @@ final class ScriptedLLMClient private (
     text ++ tools ++ List(last)
   }
 
-  private def describeLast(conversation: Conversation): String =
-    conversation.messages.lastOption match {
-      case Some(message) => s"the last message was ${message.role}: \"${ScriptedLLMClient.preview(message.content)}\""
-      case None          => "the conversation has no messages"
-    }
+  private def describeLast(conversation: Conversation): Option[String] =
+    conversation.messages.lastOption.map(message =>
+      s"${message.role}: \"${ScriptedLLMClient.preview(message.content)}\""
+    )
 }
 
 object ScriptedLLMClient {
@@ -159,7 +152,7 @@ object ScriptedLLMClient {
 
   /**
    * A client that answers call 1 with the first reply, call 2 with the second, and so on. A call past the end of
-   * the script returns a `Left(ValidationError)` that names the call.
+   * the script returns a `Left(`[[UnscriptedCallError]]`)` that names the call.
    */
   def sequence(replies: Reply*): ScriptedLLMClient = {
     val script = replies.toVector
@@ -170,7 +163,7 @@ object ScriptedLLMClient {
 
   /**
    * A client that chooses each reply from the conversation. A conversation no case matches returns a
-   * `Left(ValidationError)` that names the call.
+   * `Left(`[[UnscriptedCallError]]`)` that names the call.
    *
    * {{{
    * ScriptedLLMClient.respondingTo {

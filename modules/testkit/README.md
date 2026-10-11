@@ -21,12 +21,13 @@ test framework in its API.
 | Type | What it is |
 |---|---|
 | `ScriptedLLMClient` | The fake `LLMClient`. `sequence(replies*)` answers call N with reply N, `respondingTo { case conversation => reply }` chooses from the conversation, `always(reply)` repeats one. |
-| `Reply` | What one call returns: `Reply.text`, `Reply.toolCall`, `Reply.toolCalls` or `Reply.failure(error)`, adjusted with `withModel`, `withUsage`, `withContent`. |
+| `Reply` | What one call returns: `Reply.text`, `Reply.toolCall(name, argumentsJson)`, `Reply.toolCalls` or `Reply.failure(error)`, adjusted with `withModel`, `withUsage`, `withContent`, `withToolCall`. |
 | `RecordedCall` | One request received: the `conversation`, the `options`, and whether it was `streamed`. |
+| `UnscriptedCallError` | The `LLMError` of a call the script has no reply for: the `callNumber`, the `reason` and the `lastMessage`. |
 
 ```scala
 val client = ScriptedLLMClient.sequence(
-  Reply.toolCall("get_temperature", ujson.Obj("city" -> "Oslo")),
+  Reply.toolCall("get_temperature", """{"city": "Oslo"}"""),
   Reply.text("It is 21 degrees in Oslo.")
 )
 // run the code under test with `client`, then:
@@ -34,8 +35,8 @@ client.callCount        // 2
 client.calls.head.lastUserText
 ```
 
-A call the script has no reply for returns a `Left(ValidationError)` that names the call and the last message. The client
-is thread-safe.
+A call the script has no reply for returns a `Left(UnscriptedCallError)` that names the call and the last message. The
+client is thread-safe. It drives `Agent`, `AgentIO` (`llm4s-effect`) and `AgentZ` (`llm4s-zio`) alike.
 
 ## Not included
 
@@ -45,5 +46,6 @@ tracked in [#1497](https://github.com/llm4s/llm4s/issues/1497).
 ## More
 
 The full guide, with an `Agent` and a tool tested end to end, is `docs/guide/testing-with-the-testkit.md` (its code is
-compiled and run by `TestingWithTestkitGuideSpec` in `modules/samples`). The module's own tests are in
+compiled and run by `TestingWithTestkitGuideSpec` in `modules/samples`, and by `ScriptedAgentIOSpec` and
+`ScriptedAgentZSpec` in `modules/llm4s-effect` and `modules/llm4s-zio`). The module's own tests are in
 `modules/testkit/src/test`.

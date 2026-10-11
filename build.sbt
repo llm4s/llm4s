@@ -405,7 +405,9 @@ lazy val media = (project in file("modules/media"))
   )
 
 lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
-  .dependsOn(core, agent, agent % "test->test")
+  // `testkit % Test`: `ScriptedAgentIOSpec` drives an `AgentIO` end to end from a `ScriptedLLMClient`, the way a
+  // user's tests would; the testing guide shows that code.
+  .dependsOn(core, agent, agent % "test->test", testkit % Test)
   .settings(
     name := "llm4s-effect",
     commonSettings,
@@ -421,7 +423,9 @@ lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
   )
 
 lazy val llm4sZio = (project in file("modules/llm4s-zio"))
-  .dependsOn(core, agent, agent % "test->test")
+  // `testkit % Test`: `ScriptedAgentZSpec` drives an `AgentZ` end to end from a `ScriptedLLMClient`, the way a
+  // user's tests would; the testing guide shows that code.
+  .dependsOn(core, agent, agent % "test->test", testkit % Test)
   .settings(
     name := "llm4s-zio",
     commonSettings,

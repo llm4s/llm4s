@@ -1,6 +1,6 @@
 package org.llm4s.testkit
 
-import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, TimeoutError, ValidationError }
+import org.llm4s.error.{ AuthenticationError, LLMError, NonRecoverableError, RateLimitError, TimeoutError }
 import org.llm4s.llmconnect.model._
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
 import org.scalatest.EitherValues
@@ -23,7 +23,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   private def unscripted(result: Either[LLMError, Completion]): String = {
     val error = result.left.value
-    error shouldBe a[ValidationError]
+    error shouldBe a[UnscriptedCallError]
     error.message
   }
 
@@ -91,6 +91,21 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     message should include("the script has 2 replies")
     message should include("What is the capital of France?")
     message should include("user")
+  }
+
+  it should "return the unscripted call as a typed error a test can match on" in {
+    val client = ScriptedLLMClient.sequence(Reply.text("one"))
+    ask(client, "a").value
+    ask(client, "b").left.value match {
+      case e: UnscriptedCallError =>
+        e.callNumber shouldBe 2
+        e.reason shouldBe "the script has 1 reply"
+        e.lastMessage shouldBe Some("user: \"b\"")
+        e.context shouldBe Map("callNumber" -> "2")
+        e shouldBe a[NonRecoverableError]
+        e shouldBe UnscriptedCallError(2, "the script has 1 reply", Some("user: \"b\""))
+      case other => fail(s"expected an UnscriptedCallError, got $other")
+    }
   }
 
   it should "say 'reply' for a one-reply script" in {
@@ -305,6 +320,13 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val scripted = ScriptedLLMClient.sequence(Reply.failure(AuthenticationError("p", "bad key")), Reply.text("unused"))
     val reliable = new ReliableClient(scripted, "p", ReliabilityConfig.default, sleep = _ => ())
     reliable.complete(conversation("q"), options).left.value shouldBe an[AuthenticationError]
+    scripted.callCount shouldBe 1
+  }
+
+  it should "not retry a call the script has no reply for" in {
+    val scripted = ScriptedLLMClient.sequence()
+    val reliable = new ReliableClient(scripted, "p", ReliabilityConfig.default, sleep = _ => ())
+    reliable.complete(conversation("q"), options).left.value shouldBe an[UnscriptedCallError]
     scripted.callCount shouldBe 1
   }
 

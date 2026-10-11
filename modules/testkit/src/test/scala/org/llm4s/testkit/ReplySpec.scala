@@ -19,15 +19,42 @@ class ReplySpec extends AnyFlatSpec with Matchers {
     reply.isFailure shouldBe false
   }
 
-  "Reply.toolCall" should "make one call with the name and arguments, and an empty id for the client to number" in {
-    val reply = Reply.toolCall("get_weather", ujson.Obj("city" -> "Paris"))
-    reply.toolCalls shouldBe List(ToolCall("", "get_weather", ujson.Obj("city" -> "Paris")))
+  "Reply.toolCall" should "make one call with the name and the parsed arguments, and an empty id for the client to number" in {
+    val reply = Reply.toolCall("get_weather", """{"city": "Paris", "days": 3}""")
+    reply.toolCalls shouldBe List(ToolCall("", "get_weather", ujson.Obj("city" -> "Paris", "days" -> 3)))
     reply.content shouldBe ""
   }
 
   it should "default to no arguments and accept an explicit id" in {
     Reply.toolCall("ping").toolCalls shouldBe List(ToolCall("", "ping", ujson.Obj()))
-    Reply.toolCall("ping", id = "abc").toolCalls.map(_.id) shouldBe List("abc")
+    Reply.toolCall("ping", id = Some("abc")).toolCalls.map(_.id) shouldBe List("abc")
+  }
+
+  it should "reject arguments that are not valid JSON, naming the tool and the text" in {
+    val e = the[IllegalArgumentException] thrownBy Reply.toolCall("get_weather", "{city: Paris")
+    e.getMessage shouldBe "the arguments of tool call 'get_weather' are not valid JSON: {city: Paris"
+  }
+
+  it should "reject JSON that is not an object" in {
+    val e = the[IllegalArgumentException] thrownBy Reply.toolCall("get_weather", """["Paris"]""")
+    e.getMessage shouldBe """the arguments of tool call 'get_weather' must be a JSON object, but were: ["Paris"]"""
+  }
+
+  "withToolCall" should "add a call after the ones the reply already makes" in {
+    val reply = Reply
+      .toolCall("get_weather", """{"city": "Oslo"}""")
+      .withToolCall("get_time", """{"zone": "CET"}""", id = Some("t1"))
+      .withToolCall("ping")
+    reply.toolCalls shouldBe List(
+      ToolCall("", "get_weather", ujson.Obj("city" -> "Oslo")),
+      ToolCall("t1", "get_time", ujson.Obj("zone" -> "CET")),
+      ToolCall("", "ping", ujson.Obj())
+    )
+    Reply.text("checking").withToolCall("ping").content shouldBe "checking"
+  }
+
+  it should "check its arguments like Reply.toolCall" in {
+    an[IllegalArgumentException] should be thrownBy Reply.text("x").withToolCall("t", "42")
   }
 
   "Reply.toolCalls" should "keep the calls in the order given" in {
