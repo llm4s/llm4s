@@ -203,7 +203,9 @@ object WorkspaceTools {
   }
 
   /**
-   * Create an execute command tool that runs shell commands.
+   * Create an execute command tool that runs one allowlisted program with its arguments. The runner does not use a
+   * shell (#1756): pipes, redirection, `;`, `&&` and `$(...)` are refused, as are options and paths the command
+   * policy forbids (see `docs/reference/workspace-sandbox.md`).
    *
    * @param workspace The workspace to operate on
    * @param includeWorkingDir Whether to include working_directory parameter
@@ -220,8 +222,16 @@ object WorkspaceTools {
     handler: (SafeParameterExtractor, ContainerisedWorkspace) => Either[String, T]
   ): Result[ToolFunction[Map[String, Any], T]] = {
     val baseSchema = Schema
-      .`object`[Map[String, Any]]("Execute a command on the shell")
-      .withProperty(Schema.property("command", Schema.string("The shell command to execute")))
+      .`object`[Map[String, Any]](
+        "Run one allowed program with its arguments in the workspace. There is no shell: pipes, redirection, " +
+          "';', '&&' and '$(...)' are refused"
+      )
+      .withProperty(
+        Schema.property(
+          "command",
+          Schema.string("A program and its arguments, e.g. `grep -rn TODO src`; quote an argument that holds spaces")
+        )
+      )
 
     val withWorkingDir = if (includeWorkingDir) {
       baseSchema.withProperty(
