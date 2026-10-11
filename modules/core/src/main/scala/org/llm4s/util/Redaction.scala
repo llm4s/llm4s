@@ -555,11 +555,11 @@ private[llm4s] object Redaction {
    * goes on after it.
    */
   private def urlUserinfoPasswords(input: String): Vector[(Int, Int)] = {
-    val length                         = input.length
-    val found                          = Vector.newBuilder[(Int, Int)]
-    def schemeChar(c: Char): Boolean   = c.isLetterOrDigit || c == '+' || c == '.' || c == '-'
+    val length                          = input.length
+    val found                           = Vector.newBuilder[(Int, Int)]
+    def schemeChar(c: Char): Boolean    = c.isLetterOrDigit || c == '+' || c == '.' || c == '-'
     def endsAuthority(c: Char): Boolean = Character.isWhitespace(c) || "/?#\\\"<>[]{}|^`".indexOf(c.toInt) >= 0
-    var i                              = input.indexOf(':')
+    var i                               = input.indexOf(':')
     while (i >= 0) {
       var next  = i + 1
       val slash = afterBackslashes(input, i + 1)
