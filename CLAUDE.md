@@ -109,6 +109,7 @@ llm4s/
 │   ├── observability-prometheus/ # Prometheus MetricsCollector + /metrics endpoint + Prometheus client (published)
 │   ├── agent/                 # Agent runtime: Agent, graph runtime, guardrails, handoffs, streaming; assistant (published)
 │   ├── agent-tools/           # Built-in tools: core utilities, filesystem, HTTP, shell, web search (published)
+│   ├── bom/                   # llm4s-bom: POM-only bill of materials pinning every published artifact, generated (published)
 │   ├── llm4s-effect/          # cats-effect IO / fs2 wrappers over LLMClient and Agent (published)
 │   ├── llm4s-zio/             # ZIO 2 / ZIO Streams wrappers over LLMClient and Agent (published)
 │   ├── llm4s-pekko/           # Apache Pekko Streams Sources over LLMClient.streamComplete and Agent runs (published)
@@ -283,7 +284,8 @@ with `ResponseFormatMapper` and `ToolCallDeserializer` moved to `llm4s-openai-co
 into descriptor-declared extras with unchanged HOCON names - `endpoint` (required) and
 `apiVersion` to Azure, `organization` to OpenAI, Requesty and OpenRouter, `contextWindow` and
 `reserveCompletion` to the generic `openai-compatible` provider - so `BuiltinKeys` is `provider`,
-`model`, `baseUrl`, `apiKey`, `headers` and `requiresEndpoint` is gone; and moved
+`model`, `baseUrl`, `apiKey`, `headers`, `timeouts` and `auth` (the workload-identity block, which only a provider
+that declares `authExtras` accepts) and `requiresEndpoint` is gone; and moved
 `ProviderModelListers` to `llm4s-openai-compatible` (`sectionHeaders` derives headers such as
 `OpenAI-Organization` from a section). **A field only some providers read is that provider's
 extra, never a field of `NamedProviderConfig`.** Pass 5 settled the SPI's API quality. **The

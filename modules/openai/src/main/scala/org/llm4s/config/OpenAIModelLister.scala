@@ -2,6 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderId }
+import org.llm4s.error.ConfigurationError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.provider.{ OpenAIProvider, RequestyProvider }
 import org.llm4s.types.Result
@@ -23,7 +24,15 @@ object OpenAIModelLister extends ProviderModelLister:
     )
 
   def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
-    delegate.listModels(config, httpClient)
+    if config.auth.isDefined then
+      Left(
+        ConfigurationError(
+          "model listing is not supported with workload identity auth for openai (the OpenAI SDK performs " +
+            "the federation exchange only inside a client); " +
+            "list models from a section that sets an apiKey"
+        )
+      )
+    else delegate.listModels(config, httpClient)
 
 /**
  * Model lister for the Requesty provider, using its OpenAI-compatible `/models` endpoint. The
