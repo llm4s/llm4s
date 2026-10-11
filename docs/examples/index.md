@@ -19,6 +19,28 @@ Explore **70 working examples** covering all LLM4S features.
 
 ---
 
+## Start with the cookbook
+
+The [cookbook](cookbook) has complete programs for the things you would actually build, one page each, with the
+problem, the program, how to run it, what to change for a real provider and the pitfalls. Each runs with no API key
+and is run in CI:
+
+- [Classify text into an enum](cookbook/structured-output)
+- [Extract data from an email](cookbook/email-extraction)
+- [Summarise a long document](cookbook/summarise)
+- [Answer questions over a folder of files](cookbook/folder-qa)
+- [An agent that calls two tools](cookbook/tool-calling)
+- [A guardrailed chatbot](cookbook/guardrails)
+- [Stream tokens](cookbook/streaming)
+- [Fall back between providers](cookbook/fallback)
+- [Cache repeated calls](cookbook/caching)
+- [Evaluate an answer with a judge](cookbook/judge)
+- [Keyword search](cookbook/document-qa)
+- [Memory](cookbook/memory)
+- [Several agents in one graph](cookbook/multi-agent-graph)
+
+---
+
 ## Quick Navigation
 
 | Category | Count | Description |

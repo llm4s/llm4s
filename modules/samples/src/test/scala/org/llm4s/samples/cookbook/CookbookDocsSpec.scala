@@ -9,16 +9,19 @@ import java.nio.file.{ Files, Path, Paths }
 import scala.jdk.CollectionConverters._
 
 /**
- * Keeps `docs/examples/cookbook.md` and the recipes in step, and runs every recipe, so CI executes the whole
- * cookbook on every pull request with no network and no API key.
+ * Keeps the cookbook's docs and its recipes in step, and runs every recipe, so CI executes the whole cookbook on every
+ * pull request with no network and no API key.
  *
- * The page lists each recipe after a `<!-- recipe: id -->` marker and embeds the code between the `// snippet:start`
- * and `// snippet:end` lines of its source. The checks fail when the page and the code list different recipes, when
- * an embedded snippet is not what the source says, or when a recipe file is not registered in [[Cookbook]].
+ * Each recipe has a page, `docs/examples/cookbook/<id>.md`, whose program is the recipe's whole source file; the index
+ * page `docs/examples/cookbook.md` links the pages in the order of [[Cookbook.recipes]], and so do the README and the
+ * examples index. The checks fail when a page is missing, out of order or lacks a section, when a page's program is not
+ * what the source file says, when a recipe file is not registered in [[Cookbook]], or when a recipe fails.
  */
 class CookbookDocsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
-  private val page = "docs/examples/cookbook.md"
+  private val indexPage = "docs/examples/cookbook.md"
+  private val pagesDir  = "docs/examples/cookbook"
+  private val sections  = Seq("## The problem", "## The program", "## Run it", "## Use a real provider", "## Pitfalls")
 
   private lazy val repoRoot: Path =
     Iterator
@@ -31,58 +34,115 @@ class CookbookDocsSpec extends AnyFlatSpec with Matchers with EitherValues {
   private def read(relative: String): String =
     new String(Files.readAllBytes(repoRoot.resolve(relative)), StandardCharsets.UTF_8).replace("\r\n", "\n")
 
-  private lazy val pageText: String = read(page)
+  /** The `key: value` lines of a page's front matter. */
+  private def frontMatter(page: String): Map[String, String] =
+    "(?s)\\A---\n(.*?)\n---\n".r
+      .findFirstMatchIn(page)
+      .map(_.group(1).linesIterator.toSeq)
+      .getOrElse(Seq.empty)
+      .flatMap(line => "^([a-z_]+):\\s*(.*?)\\s*$".r.findFirstMatchIn(line).map(m => m.group(1) -> m.group(2)))
+      .toMap
 
-  private def markers: Seq[String] = "<!-- recipe: ([a-z-]+) -->".r.findAllMatchIn(pageText).map(_.group(1)).toSeq
+  /** The first scala code block after the page's "The program" heading. */
+  private def program(id: String, page: String): String =
+    "(?s)\n## The program\n.*?```scala\n(.*?)\n```".r
+      .findFirstMatchIn(page)
+      .map(_.group(1).trim)
+      .getOrElse(fail(s"the page of $id has no scala block under '## The program'"))
 
-  /** The code between the snippet markers of a source file, with the common indentation removed. */
-  private def snippetOf(source: String): String = {
-    val lines = source.split("\n", -1).toVector
-    val start = lines.indexWhere(_.trim == "// snippet:start")
-    val end   = lines.indexWhere(_.trim == "// snippet:end")
-    withClue("a recipe source needs a '// snippet:start' line before a '// snippet:end' line: ") {
-      (start >= 0 && end > start) shouldBe true
-    }
-    val body   = lines.slice(start + 1, end)
-    val indent = body.filter(_.trim.nonEmpty).map(_.takeWhile(_ == ' ').length).minOption.getOrElse(0)
-    body.map(line => if (line.trim.isEmpty) "" else line.drop(indent)).mkString("\n").trim
+  private def page(recipe: RecipeInfo): String = read(recipe.pagePath)
+
+  /** The recipe ids of the links to recipe pages in `text`, in the order they appear, each id once. */
+  private def linkedIds(text: String, prefix: String): Seq[String] =
+    s"\\]\\(${java.util.regex.Pattern.quote(prefix)}([a-z-]+)(?:\\.md)?\\)".r
+      .findAllMatchIn(text)
+      .map(_.group(1))
+      .toSeq
+      .distinct
+
+  private def relativeMdLinks(text: String): List[String] =
+    "\\]\\((?!https?:)[^)]*\\.md[^)]*\\)".r.findAllIn(text.replaceAll("(?s)```.*?```", "")).toList
+
+  "The cookbook index" should "link every recipe's page, in the order of the registry" in {
+    linkedIds(read(indexPage), "cookbook/") shouldBe Cookbook.recipes.map(_.id)
   }
 
-  /** The first scala code block after a recipe's marker on the page. */
-  private def pageBlock(id: String): String = {
-    val pattern = s"(?s)<!-- recipe: $id -->.*?```scala\n(.*?)\n```".r
-    pattern.findFirstMatchIn(pageText).map(_.group(1).trim).getOrElse(fail(s"no scala block after the marker of $id"))
-  }
-
-  "The cookbook page" should "list the same recipes, in the same order, as the code" in {
-    markers shouldBe Cookbook.recipes.map(_.id)
-  }
-
-  it should "embed each recipe's snippet exactly as its source has it" in {
-    Cookbook.recipes.foreach { recipe =>
-      withClue(s"recipe ${recipe.id}: ") {
-        pageBlock(recipe.id) shouldBe snippetOf(read(recipe.sourcePath))
-      }
-    }
-  }
-
-  it should "give each recipe's run command and a link to its source" in {
-    Cookbook.recipes.foreach { recipe =>
-      withClue(s"recipe ${recipe.id}: ") {
-        pageText should include(s"""sbt "samples/runMain ${recipe.mainClass}"""")
-        pageText should include(s"https://github.com/llm4s/llm4s/blob/main/${recipe.sourcePath}")
-      }
-    }
+  it should "be the parent of the recipe pages in the site's navigation" in {
+    val fm = frontMatter(read(indexPage))
+    fm.get("title") shouldBe Some("Cookbook")
+    fm.get("parent") shouldBe Some("Examples")
+    fm.get("has_children") shouldBe Some("true")
   }
 
   it should "contain no relative link ending in .md, which the site serves as a 404" in {
-    val withoutCode = pageText.replaceAll("(?s)```.*?```", "")
-    "\\]\\((?!https?:)[^)]*\\.md[^)]*\\)".r.findAllIn(withoutCode).toList shouldBe empty
+    relativeMdLinks(read(indexPage)) shouldBe empty
+  }
+
+  "The recipe pages" should "be one per recipe, with no page for a recipe that does not exist" in {
+    val pages = Files.list(repoRoot.resolve(pagesDir)).iterator().asScala.map(_.getFileName.toString).toList
+    pages should contain theSameElementsAs Cookbook.recipes.map(_.id + ".md")
+  }
+
+  they should "sit under the cookbook in the site's navigation, in the order of the registry" in {
+    Cookbook.recipes.zipWithIndex.foreach { (recipe, i) =>
+      withClue(s"recipe ${recipe.id}: ") {
+        val fm = frontMatter(page(recipe))
+        fm.get("title") shouldBe Some(recipe.title)
+        fm.get("parent") shouldBe Some("Cookbook")
+        fm.get("grand_parent") shouldBe Some("Examples")
+        fm.get("nav_order") shouldBe Some((i + 1).toString)
+      }
+    }
+  }
+
+  they should "give the problem, the program, how to run it, what to change for a real provider and the pitfalls" in {
+    Cookbook.recipes.foreach { recipe =>
+      withClue(s"recipe ${recipe.id}: ") {
+        val lines     = page(recipe).split("\n").toSeq
+        val positions = sections.map(section => lines.indexOf(section))
+        positions should not contain -1
+        positions shouldBe positions.sorted
+      }
+    }
+  }
+
+  they should "show the recipe's whole source file as its program, exactly as the file has it" in {
+    Cookbook.recipes.foreach { recipe =>
+      withClue(s"recipe ${recipe.id}: ") {
+        program(recipe.id, page(recipe)) shouldBe read(recipe.sourcePath).trim
+      }
+    }
+  }
+
+  they should "give the run commands, scripted and live, and a link to the source file" in {
+    Cookbook.recipes.foreach { recipe =>
+      withClue(s"recipe ${recipe.id}: ") {
+        val text = page(recipe)
+        text should include(s"""sbt "samples/runMain ${recipe.mainClass}"""")
+        text should include(s"""sbt "samples/runMain ${recipe.mainClass} --live"""")
+        text should include(s"https://github.com/llm4s/llm4s/blob/main/${recipe.sourcePath}")
+      }
+    }
+  }
+
+  they should "contain no relative link ending in .md, which the site serves as a 404" in {
+    Cookbook.recipes.foreach { recipe =>
+      withClue(s"recipe ${recipe.id}: ")(relativeMdLinks(page(recipe)) shouldBe empty)
+    }
+  }
+
+  "The README and the examples index" should "link every recipe's page, in the order of the registry" in {
+    linkedIds(read("README.md"), "docs/examples/cookbook/") shouldBe Cookbook.recipes.map(_.id)
+    linkedIds(read("docs/examples/index.md"), "cookbook/") shouldBe Cookbook.recipes.map(_.id)
   }
 
   "The cookbook registry" should "have unique ids and main classes" in {
     Cookbook.recipes.map(_.id).distinct should have size Cookbook.recipes.size.toLong
     Cookbook.recipes.map(_.mainClass).distinct should have size Cookbook.recipes.size.toLong
+  }
+
+  it should "have at least the eight recipes the cookbook promises" in {
+    Cookbook.recipes.size should be >= 8
   }
 
   it should "name a source file that exists and a main class that sbt runMain can start" in {
