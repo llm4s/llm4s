@@ -38,6 +38,19 @@ object Fixtures {
   case object A extends Letter
   case object B extends Letter
 
+  /** Cases renamed with `@upickle.implicits.key`, which uPickle writes instead of the case name. */
+  sealed trait Stage derives SchemaOf, ReadWriter
+  @upickle.implicits.key("pending")
+  case object Pending extends Stage
+  case object Done    extends Stage
+
+  enum Level derives SchemaOf, ReadWriter {
+    @upickle.implicits.key("lo") case Low
+    case High
+  }
+
+  case class Keyed(stage: Stage, level: Level, levels: List[Level], maybe: Option[Stage]) derives SchemaOf, ReadWriter
+
   case class Optionals(a: Option[Int], b: Option[Inner], c: Option[Color]) derives SchemaOf, ReadWriter
 
   case class Collections(
@@ -66,6 +79,22 @@ object Fixtures {
 
   case class Event(at: java.time.Instant, @description("when it ends") until: java.time.Instant) derives SchemaOf
 
+  /** A sealed hierarchy with fields, described by a hand-written given, which the derivation takes as it is. */
+  sealed trait Payment
+  case class Card(last4: String) extends Payment
+  case object Cash               extends Payment
+  object Payment {
+    given SchemaOf[Payment] = SchemaOf.string("the payment method, as text")
+  }
+
+  /** A recursive type described by a hand-written given. */
+  case class Category(name: String, children: List[Category])
+  object Category {
+    given SchemaOf[Category] = SchemaOf.string("the category path, for example books/fiction")
+  }
+
+  case class Order(id: Int, payment: Payment, category: Category, more: List[Category]) derives SchemaOf
+
   /** Types with no derived schema: they are only given to the compiler, to see what it says. */
   case class WithMap(counts: Map[String, Int])
   case class Tree(value: Int, children: List[Tree])
@@ -85,4 +114,21 @@ object Fixtures {
   case object Leaf    extends Middle
   case class WithOuter(outer: Outer)
   class NotACaseClass(val x: Int)
+  case class WithNestedOption(value: Option[Option[Int]])
+  case class WithTuple(pair: (Int, String))
+
+  /** Each level holds the one below three times: 3^12 paths to Wide0, 13 distinct types. */
+  case class Wide0(n: Int) derives SchemaOf
+  case class Wide1(a: Wide0, b: Wide0, c: List[Wide0]) derives SchemaOf
+  case class Wide2(a: Wide1, b: Wide1, c: List[Wide1]) derives SchemaOf
+  case class Wide3(a: Wide2, b: Wide2, c: List[Wide2]) derives SchemaOf
+  case class Wide4(a: Wide3, b: Wide3, c: List[Wide3]) derives SchemaOf
+  case class Wide5(a: Wide4, b: Wide4, c: List[Wide4]) derives SchemaOf
+  case class Wide6(a: Wide5, b: Wide5, c: List[Wide5]) derives SchemaOf
+  case class Wide7(a: Wide6, b: Wide6, c: List[Wide6]) derives SchemaOf
+  case class Wide8(a: Wide7, b: Wide7, c: List[Wide7]) derives SchemaOf
+  case class Wide9(a: Wide8, b: Wide8, c: List[Wide8]) derives SchemaOf
+  case class Wide10(a: Wide9, b: Wide9, c: List[Wide9]) derives SchemaOf
+  case class Wide11(a: Wide10, b: Wide10, c: List[Wide10]) derives SchemaOf
+  case class Wide12(a: Wide11, b: Wide11, c: List[Wide11]) derives SchemaOf
 }

@@ -77,6 +77,57 @@ class CompileErrorsSpec extends AnyFlatSpec with Matchers {
     messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.NotACaseClass]")) should not be empty
   }
 
+  it should "refuse an Option directly inside an Option, which uPickle writes as an array" in {
+    val direct = messages(scala.compiletime.testing.typeCheckErrors("SchemaOf[Option[Option[Int]]]"))
+    direct should include("An Option directly inside an Option cannot be described")
+    direct should include("Cannot derive a JSON schema for Option[Option[Int]]")
+    direct should include("[null]")
+    val field = messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.WithNestedOption]"))
+    field should include("Cannot derive a JSON schema for Option[Option[Int]]")
+    field should include("An Option directly inside an Option cannot be described")
+  }
+
+  it should "still describe an Option of a type parameter, and an Option inside a List inside an Option" in {
+    scala.compiletime.testing.typeCheckErrors("def f[T: SchemaOf] = SchemaOf[Option[T]]") shouldBe Nil
+    scala.compiletime.testing.typeCheckErrors("SchemaOf[Option[List[Option[Int]]]]") shouldBe Nil
+  }
+
+  it should "refuse a tuple, which uPickle writes as an array" in {
+    val errors = messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[(Int, String)]"))
+    errors should include("Cannot derive SchemaOf[scala.Tuple2[scala.Int, scala.Predef.String]]")
+    errors should include("a tuple")
+    messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.WithTuple]")) should include(
+      "Cannot derive a JSON schema for (Int, String)"
+    )
+    messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.WithTuple]")) should include(
+      "a tuple as an array of mixed types: use a case class"
+    )
+  }
+
+  it should "take a hand-written given as it is, even for a sealed hierarchy with fields or a recursive type" in {
+    scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.Order]") shouldBe Nil
+  }
+
+  it should "still refuse a recursive type whose own given is derived by hand" in {
+    messages(
+      scala.compiletime.testing.typeCheckErrors(
+        "{ given tree: SchemaOf[Fixtures.Tree] = SchemaOf.derived[Fixtures.Tree]; tree }"
+      )
+    ) should include("refers to itself")
+  }
+
+  it should "still refuse mutually recursive types that both derive SchemaOf" in {
+    messages(
+      scala.compiletime.testing.typeCheckErrors(
+        "case class P(q: Option[Q]) derives SchemaOf; case class Q(p: P) derives SchemaOf"
+      )
+    ) should include("refers to itself")
+  }
+
+  it should "check a wide, deep type in reasonable time, walking each type once" in {
+    scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.Wide12]") shouldBe Nil
+  }
+
   it should "accept the types it supports" in {
     scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.Nested]") shouldBe Nil
     scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.Color]") shouldBe Nil

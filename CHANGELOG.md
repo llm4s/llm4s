@@ -118,11 +118,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `SchemaOf[A]` and `case class Invoice(...) derives SchemaOf`, built on Scala 3 `Mirror`, and
   `client.completeStructuredOf[Invoice](conversation)`, which builds the same `ObjectSchema` and calls the same
   `completeStructured`. It describes what uPickle's derived `ReadWriter` reads and writes (field names including
-  `@upickle.implicits.key`, `Option` as the value or `null`, an enum as its case name, `BigDecimal` and `BigInt` as
-  strings) and the tests check that round trip in both directions. `@description("...")` sets a field's or type's
+  `@upickle.implicits.key`, `Option` as the value or `null`, an enum as its case name or the case's
+  `@upickle.implicits.key`, `BigDecimal` and `BigInt` as strings) and the tests check that round trip in both directions,
+  including a read of every document each golden schema allows. `@description("...")` sets a field's or type's
   description. Supported: scalars, `Option`, `List`/`Seq`/`Vector`/`Set`, nested and generic case classes, enums and
   sealed hierarchies of singletons. Refused at compile time with a message naming the type: `Map`, recursive types and
-  sealed hierarchies with fields, because core's schema model cannot express map values, `$ref` or `oneOf`.
+  sealed hierarchies with fields, because core's schema model cannot express map values, `$ref` or `oneOf`; and
+  `Option` directly inside `Option` and tuples, which uPickle writes as arrays. A hand-written `given SchemaOf` is used
+  as it is, so it describes a type the derivation would refuse.
   `SchemaOf[A].definition` is the same schema as a `SchemaDefinition`, so `ToolBuilder` takes it as a tool's
   parameters. Guide: [Derived Schemas](docs/guide/derived-schemas.md).
 - **`llm4s-pekko`: LLM responses and agent runs as Apache Pekko Streams `Source`s**

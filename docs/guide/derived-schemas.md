@@ -2,7 +2,7 @@
 layout: page
 title: Derived Schemas
 parent: User Guide
-nav_order: 24
+nav_order: 25
 ---
 
 # Derived Schemas
@@ -88,7 +88,7 @@ This is exactly the schema that `Schema.object[Invoice](...)` with three `withRe
 | `Option[A]` | the schema of `A`, also allowing `null`; the property is not `required` unless strict (below) |
 | `List[A]`, `Vector[A]`, `Seq[A]`, `Set[A]` | `array` of the schema of `A` |
 | a case class | `object` with one property per field, in declaration order, `additionalProperties: false` |
-| an `enum` or sealed hierarchy of singletons | `string` limited to the case names |
+| an `enum` or sealed hierarchy of singletons | `string` limited to the case names (a case's `@upickle.implicits.key`, where it has one) |
 
 Case classes nest, and they can be generic (`Box[Int]` is described for `Int`).
 
@@ -147,7 +147,9 @@ The schema describes what uPickle's derived `ReadWriter` reads and writes, so a 
 - **Field names.** A property is named as uPickle writes the field, so `@upickle.implicits.key("user_name")` is honoured.
 - **`Option`.** uPickle writes `None` as `null` and `Some(x)` as `x`, and the schema allows exactly that.
 - **`BigDecimal`.** uPickle writes it as a string and cannot read a JSON number, so the schema says `string`.
-- **Enums.** uPickle writes a case as its name, which is the `enum` list in the schema.
+- **Enums.** uPickle writes a case as its name, or as its `@upickle.implicits.key("...")` when the case (an enum case or a case object) has one, and the `enum` list in the schema holds exactly those strings.
+- **`Long`.** uPickle writes a `Long` beyond 2^53 (9007199254740992) in either direction as a JSON *string*, because a JSON number that large loses precision in many readers; it reads both forms back. The schema says `integer`, so a value written that large does not match it. A model answering the schema writes a number, which reads back; if your values can be that large and you validate what uPickle writes, describe the field as a string yourself.
+- **`BigDecimal` and `BigInt` text.** The schema says `string` and cannot say that only numeric text reads back (llm4s-core's schema model has no `pattern`), so give such a field a `@description` that asks for a number.
 - **Defaults.** uPickle leaves out a field that equals its default when it writes, and reads a missing field as the default. The schema still lists the field: `completeStructured` sends the strict schema, in which every property is required (a model must answer every field), so a field with a default is asked for like any other.
 
 ## Strict mode
@@ -156,7 +158,7 @@ The schema describes what uPickle's derived `ReadWriter` reads and writes, so a 
 
 ## Types the module does not know
 
-Another type needs a `given SchemaOf` of its own, written next to the `ReadWriter` that reads it. `SchemaOf.string` describes a type that is written as a JSON string, and `SchemaOf.stringEnum` one that is written as one of a fixed set of strings. The text you pass is what the model sees for a field of that type, unless the field has its own `@description`.
+Another type needs a `given SchemaOf` of its own, written next to the `ReadWriter` that reads it. The derivation takes a hand-written given as it is and does not look inside the type, so this also works for a type it would otherwise refuse, such as a sealed hierarchy with fields or a recursive type, as long as the given describes what its `ReadWriter` writes. `SchemaOf.string` describes a type that is written as a JSON string, and `SchemaOf.stringEnum` one that is written as one of a fixed set of strings. The text you pass is what the model sees for a field of that type, unless the field has its own `@description`.
 
 ```scala
 import java.time.Instant
@@ -174,6 +176,8 @@ These are refused at compile time, with a message that names the type:
 - **`Map`.** `llm4s-core`'s `ObjectSchema` has a fixed set of properties and no way to describe the values of a map.
 - **Recursive types** (a `Tree` with `children: List[Tree]`). They need a JSON Schema `$ref`, which the schema model cannot express.
 - **Sealed hierarchies with fields** (`Circle(radius)` and `Rectangle(w, h)` under `Shape`). They need `oneOf`, which the schema model cannot express. Enums and sealed hierarchies of singletons are fine.
+- **`Option` directly inside `Option`** (`Option[Option[Int]]`). uPickle writes it as a JSON array (`[]`, `[null]`, `[1]`), not as the value or `null`. An `Option` inside a `List` inside an `Option` is fine.
+- **Tuples** (`(Int, String)`). uPickle writes them as JSON arrays of mixed types. Use a case class with named fields.
 - **A class that is not a case class**, and a field of a type nothing describes (a function, for instance).
 
 `completeStructuredOf` also needs the type to be a case class, since the model answers with a JSON object: for an enum or another type it returns a `Left` before calling the model.
@@ -182,4 +186,4 @@ A derived schema has no length or range constraints. When you need `withRange` o
 
 ## Compile time
 
-The derivation is Scala 3 `inline` code plus a small macro that reads annotations and rejects the shapes above. For a case class with 30 fields, one measurement of an incremental compile of the single file took about 8 seconds with `derives SchemaOf, ReadWriter` against about 5 seconds with `derives ReadWriter` alone, so roughly 3 seconds more, on a busy machine. Measure your own project if compile time matters to you.
+The derivation is Scala 3 `inline` code plus a small macro that reads annotations and rejects the shapes above. The macro walks each type it reaches once, so a type reached along many paths does not multiply the work. For a case class with 30 fields, one measurement of an incremental compile of the single file took about 8 seconds with `derives SchemaOf, ReadWriter` against about 5 seconds with `derives ReadWriter` alone, so roughly 3 seconds more, on a busy machine. Measure your own project if compile time matters to you.

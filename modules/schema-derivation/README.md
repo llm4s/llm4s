@@ -34,10 +34,12 @@ val invoice = client.completeStructuredOf[Invoice](conversation)   // Result[Inv
 
 Supported: `String`, `Int`, `Long`, `Double`, `Float`, `Boolean`, `BigDecimal`, `BigInt`, `Option`, `List`, `Seq`,
 `Vector`, `Set`, case classes (nested, generic, with `@upickle.implicits.key`), enums and sealed hierarchies of
-singletons.
+singletons (with `@upickle.implicits.key` on a case, too).
 
 Refused at compile time, naming the type: `Map`, recursive types, and sealed hierarchies with fields. `llm4s-core`'s
-schema model has a fixed set of properties and no `$ref` or `oneOf`, so it cannot express them.
+schema model has a fixed set of properties and no `$ref` or `oneOf`, so it cannot express them. Also refused:
+`Option` directly inside `Option` and tuples, which uPickle writes as JSON arrays. A type with a hand-written
+`given SchemaOf` is taken as that given describes it, even one that would otherwise be refused.
 
 The schema describes what uPickle's derived `ReadWriter` reads and writes, and the tests check that in both
 directions. See the [guide](../../docs/guide/derived-schemas.md) for the details, the strict-mode behaviour and the
@@ -46,7 +48,7 @@ compile-time cost.
 ## Tests
 
 `sbt schemaDerivation/test`. The golden specs pin the derived JSON for every shape, one of them against the hand-built
-schema of `StructuredOutputExample`; `RoundTripSpec` validates what uPickle writes against the schema and reads
-schema-conformant documents back; `CompileErrorsSpec` pins the refusals (including a recursive type whose type arguments grow, which must still
+schema of `StructuredOutputExample`; `RoundTripSpec` validates what uPickle writes against the schema, reads
+schema-conformant documents back, and reads every sample `SchemaSamples` generates from each golden schema; `CompileErrorsSpec` pins the refusals (including a recursive type whose type arguments grow, which must still
 terminate); `ExternalUseSpec` derives from a package outside `org.llm4s`, as user code does;
 `DerivedSchemasGuideSpec` compiles the guide.

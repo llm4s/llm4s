@@ -53,6 +53,28 @@ class RoundTripSpec extends AnyFlatSpec with Matchers {
     JsonSchemaValidator.validate(SchemaOf[Letter].toJsonSchema(), ujson.Str("A")) shouldBe Nil
   }
 
+  it should "list a case renamed with @upickle.implicits.key under the name uPickle writes, and read each one" in {
+    val stageCases: List[Stage] = List(Pending, Done)
+    SchemaOf[Stage].toJsonSchema()("enum").arr.toList shouldBe stageCases.map(c => ujson.read(write(c)))
+    SchemaOf[Stage].toJsonSchema()("enum").arr.toList shouldBe List(ujson.Str("pending"), ujson.Str("Done"))
+    SchemaOf[Level].toJsonSchema()("enum").arr.toList shouldBe Level.values.toList.map(c => ujson.read(write(c)))
+    SchemaOf[Level].toJsonSchema()("enum").arr.toList shouldBe List(ujson.Str("lo"), ujson.Str("High"))
+    for (value <- SchemaOf[Stage].toJsonSchema()("enum").arr) read[Stage](value) shouldBe a[Stage]
+    for (value <- SchemaOf[Level].toJsonSchema()("enum").arr) read[Level](value) shouldBe a[Level]
+    writtenConforms(Keyed(Pending, Level.Low, List(Level.Low, Level.High), Some(Done)))
+    conformingReads(
+      """{"stage":"pending","level":"lo","levels":["High","lo"],"maybe":null}""",
+      Keyed(Pending, Level.Low, List(Level.High, Level.Low), None)
+    )
+  }
+
+  it should "write a Long beyond 2^53 as a string, which the guide documents, and read either form back" in {
+    val big = Scalars("x", 1, Long.MaxValue, 1.5, 2.5f, true, BigDecimal("1.5"), BigInt(7))
+    ujson.read(write(big))("l") shouldBe ujson.Str(Long.MaxValue.toString)
+    ujson.read(write(big.copy(l = 1L << 53)))("l") shouldBe ujson.Num((1L << 53).toDouble)
+    read[Scalars](write(big)) shouldBe big
+  }
+
   it should "write a renamed field under the name the schema gives it" in {
     ujson.read(write(Renamed("ann", 30))).obj.keys.toList shouldBe List("user_name", "age")
     SchemaOf[Renamed].toJsonSchema().obj("properties").obj.keys.toList shouldBe List("user_name", "age")
@@ -91,6 +113,38 @@ class RoundTripSpec extends AnyFlatSpec with Matchers {
       """{"twice":{"value":{"value":1}},"ofInner":{"value":{"n":2}}}""",
       Boxes(Box(Box(1)), Box(Inner(2)))
     )
+  }
+
+  "Every document the schema allows" should "be read by uPickle, for every golden type" in {
+    def allRead[A: SchemaOf: ReadWriter]: Unit = {
+      val schema  = SchemaOf[A].toJsonSchema()
+      val samples = SchemaSamples.of(schema)
+      samples should not be empty
+      for (sample <- samples)
+        withClue(s"${ujson.write(sample)} against ${ujson.write(schema)}: ") {
+          JsonSchemaValidator.validate(schema, sample) shouldBe Nil
+          Try(read[A](sample)).toEither.left.map(_.toString) shouldBe a[Right[?, ?]]
+        }
+    }
+    allRead[Invoice]
+    allRead[Scalars]
+    allRead[Inner]
+    allRead[Described]
+    allRead[Nested]
+    allRead[Color]
+    allRead[Planet]
+    allRead[Letter]
+    allRead[Stage]
+    allRead[Level]
+    allRead[Keyed]
+    allRead[Optionals]
+    allRead[Collections]
+    allRead[WithEnums]
+    allRead[Renamed]
+    allRead[Defaults]
+    allRead[Box[Int]]
+    allRead[Box[List[String]]]
+    allRead[Boxes]
   }
 
   it should "read into the defaults when a field with a default is absent, though the strict schema requires it" in {

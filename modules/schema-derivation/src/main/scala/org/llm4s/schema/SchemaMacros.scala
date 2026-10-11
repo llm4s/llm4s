@@ -18,10 +18,20 @@ private[schema] object SchemaMacros {
   /** The `@upickle.implicits.key` of each constructor parameter of `A`: the name uPickle writes the field under. */
   inline def fieldKeys[A]: List[Option[String]] = ${ fieldAnnotationsImpl[A]("upickle.implicits.key") }
 
+  /**
+   * The `@upickle.implicits.key` of each case of the enum or sealed hierarchy `A`, by case name: the string uPickle
+   * writes for that case instead of its name.
+   */
+  inline def caseKeys[A]: Map[String, String] = ${ caseKeysImpl[A] }
+
   /** The `@description` of the type `A` itself. */
   inline def typeDescription[A]: Option[String] = ${ typeDescriptionImpl[A] }
 
-  /** Fails compilation, naming the type, if `A` refers to itself or is a sealed hierarchy with fields. */
+  /**
+   * Fails compilation, naming the type, if `A` is a tuple, refers to itself or is (or holds) a sealed hierarchy with
+   * fields. A type with a `given SchemaOf` of its own, other than the one being derived, is not looked into: its
+   * schema is whatever that given says.
+   */
   inline def check[A]: Unit = ${ checkImpl[A] }
 
   private def stringArgument(using q: Quotes)(annotation: q.reflect.Term): Option[String] = {
@@ -39,6 +49,22 @@ private[schema] object SchemaMacros {
     Expr.ofList(parameters.map(p => Expr(p.getAnnotation(annotation).flatMap(a => stringArgument(a)))))
   }
 
+  private def caseKeysImpl[A: Type](using q: Quotes): Expr[Map[String, String]] = {
+    import q.reflect.*
+    val annotation = Symbol.requiredClass("upickle.implicits.key")
+    // An enum case without parameters is a term; a case object is a module, whose annotations sit on its class.
+    def key(child: Symbol): Option[String] =
+      List(child, child.moduleClass, child.companionModule)
+        .filterNot(_.isNoSymbol)
+        .flatMap(_.getAnnotation(annotation))
+        .flatMap(a => stringArgument(a))
+        .headOption
+    val keys = TypeRepr.of[A].typeSymbol.children.flatMap { child =>
+      key(child).map(written => child.name.stripSuffix("$") -> written)
+    }
+    Expr(keys.toMap)
+  }
+
   private def typeDescriptionImpl[A: Type](using q: Quotes): Expr[Option[String]] = {
     import q.reflect.*
     val annotation = Symbol.requiredClass("org.llm4s.schema.description")
@@ -50,6 +76,8 @@ private[schema] object SchemaMacros {
 
     def fail(message: String): Nothing = report.errorAndAbort(message)
 
+    val root = TypeRepr.of[A]
+
     // How deep one class may nest inside itself, with different type arguments, before it counts as recursive.
     val maxSameClassDepth = 16
 
@@ -57,9 +85,36 @@ private[schema] object SchemaMacros {
 
     def recursive(name: String): Nothing =
       fail(
-        s"Cannot derive SchemaOf[${TypeRepr.of[A].show}]: $name refers to itself. A recursive type " +
+        s"Cannot derive SchemaOf[${root.show}]: $name refers to itself. A recursive type " +
           "needs a JSON Schema $ref, which llm4s-core's schema model cannot express."
       )
+
+    if (root.dealias <:< TypeRepr.of[Tuple]) {
+      fail(
+        s"Cannot derive SchemaOf[${root.show}]: a tuple is written by uPickle as a JSON array of mixed types, " +
+          "which llm4s-core's schema model cannot express. Use a case class with named fields."
+      )
+    }
+
+    // The definitions being expanded: the `given` (or `derived$SchemaOf`) whose right-hand side this is.
+    val enclosing: Set[Symbol] =
+      Iterator.iterate(Symbol.spliceOwner)(_.owner).takeWhile(s => !s.isNoSymbol && s != defn.RootClass).toSet
+
+    // A type is taken as described when a `given SchemaOf` of it is in scope that was written by hand: not one
+    // that `derives SchemaOf` generated (it is derived the same way, so the walk goes on into it and finds
+    // recursion through it), and not the one being defined, which would otherwise vouch for itself.
+    def describedByAGiven(t: TypeRepr): Boolean =
+      Implicits.search(TypeRepr.of[SchemaOf].appliedTo(t)) match {
+        case found: ImplicitSearchSuccess =>
+          val sym = found.tree.symbol
+          !sym.isNoSymbol && !sym.name.startsWith("derived$") && !enclosing.contains(sym) &&
+          sym.owner != TypeRepr.of[SchemaOf.type].typeSymbol
+        case _ => false
+      }
+
+    // Types already walked to the end without a problem: walking them again would find nothing new, and without
+    // this a type reached along many paths is walked once per path, which grows exponentially with the depth.
+    val checked = scala.collection.mutable.ListBuffer.empty[TypeRepr]
 
     // `path` holds the case class types being walked, outermost last. Recursion is the same *type* again
     // (`Tree` inside `Tree`, `Node[Int]` inside `Node[Int]`), not the same class: `Box[Box[Int]]` nests `Box`
@@ -72,6 +127,8 @@ private[schema] object SchemaMacros {
       t match {
         // List[Tree], Option[Tree] and the like: the type arguments are what matter
         case AppliedType(_, args) if sym.fullName.startsWith("scala.") => args.foreach(walk(_, path))
+        case _ if checked.exists(_ =:= t)                              => ()
+        case _ if path.nonEmpty && describedByAGiven(t)                => ()
         case _ =>
           if (path.exists(_ =:= t) || path.count(_.typeSymbol == sym) >= maxSameClassDepth) {
             recursive(sym.name)
@@ -81,7 +138,7 @@ private[schema] object SchemaMacros {
             sym.children.foreach { child =>
               if (!isSingleton(child)) {
                 fail(
-                  s"Cannot derive SchemaOf[${TypeRepr.of[A].show}]: ${child.name} of ${sym.name} is not a " +
+                  s"Cannot derive SchemaOf[${root.show}]: ${child.name} of ${sym.name} is not a " +
                     "singleton (it has fields, or is itself a hierarchy). A sealed hierarchy with fields needs a " +
                     "JSON Schema oneOf, which llm4s-core's schema model cannot express. Only enums and sealed " +
                     "hierarchies of singletons (case objects) are supported."
@@ -89,10 +146,11 @@ private[schema] object SchemaMacros {
               }
             }
           }
+          checked += t
       }
     }
 
-    walk(TypeRepr.of[A], Nil)
+    walk(root, Nil)
     '{ () }
   }
 }

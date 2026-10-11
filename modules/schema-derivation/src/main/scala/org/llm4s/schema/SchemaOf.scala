@@ -5,6 +5,7 @@ import org.llm4s.toolapi.{ ArraySchema, NullableSchema, ObjectSchema, PropertyDe
 
 import scala.annotation.implicitNotFound
 import scala.compiletime.{ constValue, erasedValue, summonInline }
+import scala.util.NotGiven
 import scala.deriving.Mirror
 
 /**
@@ -22,11 +23,13 @@ import scala.deriving.Mirror
  *
  * Supported: `String`, `Int`, `Long`, `Double`, `Float`, `Boolean`, `BigDecimal`, `BigInt`; `Option`; `List`,
  * `Seq`, `Vector` and `Set` of a supported type; case classes whose fields are supported; enums and sealed
- * hierarchies of singletons (as a string with the case names). Not supported, and refused at compile time with a
- * message naming the type: `Map` (core's `ObjectSchema` has a fixed set of properties and cannot describe map
- * values), recursive types and sealed hierarchies with fields (both need a JSON Schema construct, `$ref` and
- * `oneOf`, that core's schema model lacks). Other types need a `given SchemaOf` of their own: see [[SchemaOf.string]]
- * and [[SchemaOf.stringEnum]].
+ * hierarchies of singletons (as a string with the case names, or a case's `@upickle.implicits.key`). Not supported,
+ * and refused at compile time with a message naming the type: `Map` (core's `ObjectSchema` has a fixed set of
+ * properties and cannot describe map values), recursive types and sealed hierarchies with fields (both need a JSON
+ * Schema construct, `$ref` and `oneOf`, that core's schema model lacks), and `Option` directly inside `Option` and
+ * tuples (uPickle writes both as JSON arrays). Other types need a `given SchemaOf` of their own: see
+ * [[SchemaOf.string]] and [[SchemaOf.stringEnum]]. A hand-written given is used as it is, so it can also describe a
+ * type the derivation would refuse.
  *
  * @tparam A the described type
  */
@@ -35,7 +38,9 @@ import scala.deriving.Mirror
   "Cannot derive a JSON schema for ${A}. Supported: String, Int, Long, Double, Float, Boolean, BigDecimal, BigInt, " +
     "Option, List/Seq/Vector/Set of a supported type, case classes of supported fields (add `derives SchemaOf`), and " +
     "enums or sealed hierarchies of singletons. A Map cannot be described, because llm4s-core's ObjectSchema has a " +
-    "fixed set of properties and no way to describe map values. For any other type define a `given SchemaOf[${A}]`, " +
+    "fixed set of properties and no way to describe map values. An Option directly inside an Option cannot be " +
+    "described either: uPickle writes it as a JSON array ([], [null] or [value]), not as the value or null, and a tuple as an " +
+    "array of mixed types: use a case class. For any other type define a `given SchemaOf[${A}]`, " +
     "for example with SchemaOf.string."
 )
 trait SchemaOf[A] {
@@ -117,12 +122,15 @@ object SchemaOf {
   given SchemaOf[BigDecimal] = leaf("decimal number, as a string")(Schema.string(_))
   given SchemaOf[BigInt]     = leaf("integer, as a string")(Schema.string(_))
 
-  given option[A](using inner: SchemaOf[A]): SchemaOf[Option[A]] = new SchemaOf[Option[A]] {
-    def typeName: String                               = inner.typeName
-    override def typeDescription: Option[String]       = inner.typeDescription
-    override def isOptional: Boolean                   = true
-    def schema(d: String): SchemaDefinition[Option[A]] = NullableSchema(inner.schema(d))
-  }
+  // uPickle writes an `Option` directly inside an `Option` as an array (`[]`, `[null]`, `[1]`), not as the value
+  // or `null`, so the nullable schema would be wrong for it: it has no instance, and the message says why.
+  given option[A](using inner: SchemaOf[A], notNested: NotGiven[A <:< Option[?]]): SchemaOf[Option[A]] =
+    new SchemaOf[Option[A]] {
+      def typeName: String                               = inner.typeName
+      override def typeDescription: Option[String]       = inner.typeDescription
+      override def isOptional: Boolean                   = true
+      def schema(d: String): SchemaDefinition[Option[A]] = NullableSchema(inner.schema(d))
+    }
 
   given list[A](using item: SchemaOf[A]): SchemaOf[List[A]]     = array(item)
   given vector[A](using item: SchemaOf[A]): SchemaOf[Vector[A]] = array(item)
@@ -146,7 +154,12 @@ object SchemaOf {
           SchemaMacros.fieldKeys[A]
         )
       case s: Mirror.SumOf[A] =>
-        enumeration[A](constValue[s.MirroredLabel], SchemaMacros.typeDescription[A], labels[s.MirroredElemLabels])
+        enumeration[A](
+          constValue[s.MirroredLabel],
+          SchemaMacros.typeDescription[A],
+          labels[s.MirroredElemLabels],
+          SchemaMacros.caseKeys[A]
+        )
     }
   }
 
@@ -178,6 +191,12 @@ object SchemaOf {
     ObjectSchema[A](d, properties)
   }
 
-  private def enumeration[A](name: String, described: Option[String], cases: List[String]): SchemaOf[A] =
-    leaf[A](name, described)(Schema.string(_).withEnum(cases))
+  // A case is written as its name, or as its `@upickle.implicits.key` when it has one.
+  private def enumeration[A](
+    name: String,
+    described: Option[String],
+    cases: List[String],
+    keys: Map[String, String]
+  ): SchemaOf[A] =
+    leaf[A](name, described)(Schema.string(_).withEnum(cases.map(c => keys.getOrElse(c, c))))
 }

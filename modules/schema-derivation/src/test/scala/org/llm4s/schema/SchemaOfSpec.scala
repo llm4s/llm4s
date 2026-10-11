@@ -75,6 +75,27 @@ class SchemaOfSpec extends AnyFlatSpec with Matchers {
     )
   }
 
+  it should "list a case by its @upickle.implicits.key, as uPickle writes it" in {
+    written(SchemaOf[Stage].toJsonSchema()) shouldBe json(
+      """{"type":"string","description":"Stage","enum":["pending","Done"]}"""
+    )
+    written(SchemaOf[Level].toJsonSchema()) shouldBe json(
+      """{"type":"string","description":"Level","enum":["lo","High"]}"""
+    )
+  }
+
+  it should "use a hand-written given as it is, for a sealed hierarchy with fields and for a recursive type" in {
+    written(SchemaOf[Order].toJsonSchema()) shouldBe json(
+      """{"type":"object","description":"Order","properties":{
+        |"id":{"type":"integer","description":"id"},
+        |"payment":{"type":"string","description":"the payment method, as text"},
+        |"category":{"type":"string","description":"the category path, for example books/fiction"},
+        |"more":{"type":"array","description":"more",
+        |"items":{"type":"string","description":"the category path, for example books/fiction"}}},
+        |"required":["id","payment","category","more"],"additionalProperties":false}""".stripMargin
+    )
+  }
+
   it should "make an Option nullable, and allow null among the values of an optional enum" in {
     written(SchemaOf[Optionals].toJsonSchema()) shouldBe json(
       """{"type":"object","description":"Optionals","properties":{
