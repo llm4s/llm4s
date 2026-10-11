@@ -127,6 +127,7 @@ and run a second command as a second request.
 | An argument longer than 4096 characters, or paths that need more than 20000 lookups to check | `ARGUMENT_NOT_ALLOWED` |
 | An argument holding a NUL character, on Windows one holding `"`, or one whose check fails with an error | `ARGUMENT_NOT_ALLOWED` |
 | On Windows, an argument or the working directory holding a character a program may receive as another ASCII character ("best fit", see [On Windows](#on-windows)); an environment value holding one is `ENVIRONMENT_NOT_ALLOWED` | `ARGUMENT_NOT_ALLOWED` |
+| On a double-byte Windows host (code page 932, 936 or 950), an argument the JDK puts in quotes holding a character whose second byte is 0x5C (see [On Windows](#on-windows)) | `ARGUMENT_NOT_ALLOWED` |
 | On Windows, a cmd.exe built-in's argument holding a character cmd.exe splits or parses (`,` `=` `(` `)` `@` `!`, a control character, a non-ASCII space) | `ARGUMENT_NOT_ALLOWED` |
 | `git` with a `.git` file or link between the working directory and the workspace root | `PATH_ESCAPE_ATTEMPT` |
 | A program other than the read-only ones naming `.git` or a path inside one (see [git's own files](#gits-own-files)) | `ARGUMENT_NOT_ALLOWED` |
@@ -442,6 +443,17 @@ are supported. Each rule runs after the path rule, so an argument that leads out
   holds them, so `findstr x résumé.txt` runs on a Western European host. The table is generated from Microsoft's
   best-fit files ([unicode.org](https://www.unicode.org/Public/MAPPINGS/VENDORS/MICSFT/WindowsBestFit/)) by
   `scripts/generate-windows-best-fit.py`. POSIX hosts are unchanged: nothing converts an argument there.
+- **Quoted arguments on a double-byte host** ([#1807](https://github.com/llm4s/llm4s/issues/1807)), for every
+  program. Code pages 932, 936 and 950 encode some characters they hold exactly with a second byte of 0x5C, the byte
+  of `\`: 50 on 932 (`表` 0x95 0x5C, `―`, `ソ`, `予`, `十`), 126 on 936 and 126 on 950 (`功` 0xA5 0x5C, `許`); 949
+  has none. The JDK puts an argument in quotes when it is empty or holds a space or whitespace character, and, outside
+  its default mode, `"`, `<` or `>` (`&`, `|`, `^` too for a batch file), so `a 表` reaches the command line as
+  `"a 表"`, whose bytes end `5C 22`. A program that splits its ANSI command line byte by byte, without knowing the
+  code page's lead bytes, reads `\"` as a literal quote: the argument does not end there, and the ones after it
+  split differently, so an operand the checks saw may become an option. The C runtime's parser knows the lead bytes;
+  a hand-written one may not. So on a host whose ANSI code page is 932, 936 or 950, an argument holding such a
+  character and any of the characters above is refused (`ARGUMENT_NOT_ALLOWED`); `表.txt` and `sub\表`, which the
+  JDK leaves unquoted, stay allowed. The characters are found through the JDK's encoder for the host's code page.
 - **Device names**, for every program but `echo`, `pwd`, `whoami` and `hostname`: a path component that is `CON`,
   `PRN`, `AUX`, `NUL`, `COM0`-`COM9`, `LPT0`-`LPT9`, `COM¹²³`, `LPT¹²³`, `CONIN$` or `CONOUT$`, in any case, with
   any extension and ignoring trailing dots and spaces (`nul`, `sub\con`, `NUL.txt`, `aux .txt`, `aux:s`). A device
