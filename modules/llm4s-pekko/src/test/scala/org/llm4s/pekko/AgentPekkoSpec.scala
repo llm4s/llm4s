@@ -134,7 +134,10 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
       underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId): Result[Unit] = underlying.deleteThread(threadId)
+    def deleteThread(threadId: ThreadId): Result[Unit]                  = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
   }
 
   /** The first stream call sends one delta, then parks until interrupted (opening `unparked`); later calls answer. */
