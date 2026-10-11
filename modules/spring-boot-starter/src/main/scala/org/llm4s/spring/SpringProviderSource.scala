@@ -194,26 +194,50 @@ private[spring] object SpringProviderSource {
   /**
    * The credentials of the resolved config itself, wherever they came from: a key the properties do not
    * hold (one from `application.conf`, a `reference.conf` default or a vendor's environment variable) must be
-   * kept out of reports too. A config is read as the case class it is in practice; one that is not yields none.
+   * kept out of reports too.
+   *
+   * A config is read as the case class it is in practice, and so is every case class inside it (#1820): a text
+   * field is a credential when its name looks like one (`apiKey`, `secretAccessKey`, `sessionToken`, ...), and
+   * that reaches through `Option`, `Seq` and `Map` values, so Bedrock's `credentials: Option[BedrockCredentials]`
+   * yields its access key id, secret key and session token. Every value of a `headers` map is a credential,
+   * whatever the header is called, and so is the token after an auth scheme (`Bearer`, `Basic`, ...) in one. A
+   * nested case class is judged by its own field names, so a URL or a file path beside a credential is not one.
+   * A value that is not a case class, or whose reading throws, yields none: this never throws.
    */
   private[spring] def configSecrets(config: ProviderConfig): Seq[String] =
-    config match {
-      case product: Product =>
-        product.productElementNames
-          .zip(product.productIterator)
-          .collect {
-            case (name, value: String) if looksSecret(name)       => value
-            case (name, Some(value: String)) if looksSecret(name) => value
-          }
-          .map(_.trim)
-          .filter(_.nonEmpty)
-          .toSeq
-          .distinct
-      case _ => Nil
-    }
+    credentialsIn(config, secret = false, depth = 0).map(_.trim).filter(_.nonEmpty).distinct
 
+  // Deeper than any real config; stops a value that refers to itself.
+  private val MaxDepth = 16
+
+  private val SchemeToken = """(?i)^\s*(?:bearer|basic|token|apikey|api-key|digest)\s+(\S+)\s*$""".r
+
+  /** The credential text inside `value`; `secret` says whether its text counts as one already. */
+  private def credentialsIn(value: Any, secret: Boolean, depth: Int): Vector[String] =
+    if (depth > MaxDepth) Vector.empty
+    else
+      value match {
+        case text: String =>
+          if (secret) text +: SchemeToken.findFirstMatchIn(text).map(_.group(1)).toVector else Vector.empty
+        case Some(inner) => credentialsIn(inner, secret, depth + 1)
+        case map: scala.collection.Map[?, ?] =>
+          readSafely(map.toVector.flatMap { case (name, inner) =>
+            credentialsIn(inner, secret || looksSecret(String.valueOf(name)), depth + 1)
+          })
+        case items: Iterable[?] => readSafely(items.toVector.flatMap(credentialsIn(_, secret, depth + 1)))
+        case product: Product =>
+          readSafely(product.productElementNames.zip(product.productIterator).toVector.flatMap { case (name, inner) =>
+            credentialsIn(inner, name == "headers" || looksSecret(name), depth + 1)
+          })
+        case _ => Vector.empty
+      }
+
+  private def readSafely(read: => Vector[String]): Vector[String] = Try(read).getOrElse(Vector.empty)
+
+  /** A name that holds a credential: a key, secret, token, password or credential, but not the URL of one. */
   private def looksSecret(name: String): Boolean = {
     val lower = name.toLowerCase
-    Seq("key", "secret", "token", "password", "authorization").exists(lower.contains)
+    Seq("key", "secret", "token", "password", "authorization", "credential").exists(lower.contains) &&
+    !lower.endsWith("url")
   }
 }
