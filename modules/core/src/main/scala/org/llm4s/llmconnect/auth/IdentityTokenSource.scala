@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.auth
 
-import org.llm4s.annotation.Experimental
+import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.error.AuthenticationError
 import org.llm4s.types.Result
 
@@ -11,9 +11,10 @@ import scala.util.{ Try, Using }
 
 /**
  * Where a workload's identity token comes from - typically a SPIFFE JWT-SVID file that
- * `spiffe-helper` keeps fresh. The configured form, before it is read.
+ * `spiffe-helper` keeps fresh. The configured form, before it is read. Stable since #1818, as part of the
+ * workload-identity configuration the Stable configs carry.
  */
-@Experimental
+@Stable
 enum IdentitySource:
   /** A file re-read on every fetch, so a rotated token is picked up. */
   case File(path: Path)

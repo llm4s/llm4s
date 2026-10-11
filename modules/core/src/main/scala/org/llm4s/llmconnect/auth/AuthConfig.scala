@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.auth
 
-import org.llm4s.annotation.Experimental
+import org.llm4s.annotation.Stable
 
 /**
  * A named provider section's `auth` block: the workload's identity token, plus the keys the
@@ -10,8 +10,11 @@ import org.llm4s.annotation.Experimental
  * Extras are trimmed and a blank one is dropped, however the config is built - as a section's
  * `auth` block is read - so a blank `clientId` is absent rather than posted empty, and a required key
  * left blank is reported as missing.
+ *
+ * Stable since #1818: it is a field of the Stable `NamedProviderConfig` and a parameter of
+ * `ProviderDescriptor.requireAuthExtra`, so its shape is covered by the 1.x promise with theirs.
  */
-@Experimental
+@Stable
 final case class AuthConfig private (identityToken: IdentitySource, extras: Map[String, String]):
   def extra(key: String): Option[String] = extras.get(key)
 
@@ -21,7 +24,6 @@ final case class AuthConfig private (identityToken: IdentitySource, extras: Map[
   override def toString: String =
     s"AuthConfig($identityToken, ${extras.keys.toSeq.sorted.map(k => s"$k -> ***").mkString("Map(", ", ", ")")})"
 
-@Experimental
 object AuthConfig:
   private[llm4s] val IdentityTokenFileKey: String = "identityTokenFile"
   private[llm4s] val IdentityTokenKey: String     = "identityToken"

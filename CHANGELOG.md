@@ -1192,6 +1192,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Workload-identity configuration is `@Stable`; `stabilityTierCheck` flags Stable signatures that name Experimental types** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
+  `AuthConfig`, `IdentitySource`, `TokenExchangeConfig`, `AccessToken`, `AccessTokenProvider`,
+  `OpenAIWorkloadIdentity` and `AnthropicWorkloadIdentity` were `@Experimental` while the Stable
+  `NamedProviderConfig.auth`/`withAuth`/`apply`, `ProviderDescriptor.requireAuthExtra`,
+  `OpenAICompatibleConfig.tokenExchange`, `OpenAICompatibleClient.Credential` and the `workloadIdentity` fields of
+  `OpenAIConfig` and `AnthropicConfig` carried them, so the 1.x promise on those signatures could not hold. They are
+  now `@Stable`; `TokenExchange`, `CachingAccessTokenProvider` and `IdentityTokenSource` stay `@Experimental`.
+  `stabilityTierCheck` now also fails for a public member of a `@Stable` type whose signature names an
+  `@Experimental` type, and checks itself against fixtures first. **Migration:** `AccessToken` is growth-safe: its
+  constructor and `copy` are private - build one with `AccessToken(value, expiresAt)` and change it with
+  `withValue` / `withExpiresAt`.
+- **A bare `assertion` key is redacted only as a form or query parameter** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
+  `Redaction` treated every key ending in `assertion` as a credential, which blanked test-framework lines such as
+  `Assertion: expected status 200` and `{"assertion": "response.status == 200"}`. The bare key is now a credential in
+  a `key=value` pair or a query - where it is the RFC 7523 form parameter - and a compound key (`client_assertion`,
+  `saml_assertion`, `jwtAssertion`) still is in every shape; a JWT under a bare `assertion` key is redacted in every
+  shape by the JWT pattern, as before.
 - **`Checkpointer` keeps a checkpoint history** ([#1702](https://github.com/llm4s/llm4s/issues/1702), BREAKING,
   `llm4s-agent`): `Checkpointer` gains `history`, `checkpoint` and `prune`, and must keep every superseded checkpoint
   and refuse a checkpoint id already in the history (`InvalidCommit`); `Commit` gains `retractTurn` (defaulted);
@@ -2482,6 +2499,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **A throwing access-token fetch no longer escapes the client** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
+  an `OpenAICompatibleClient.Credential.Dynamic` provider whose `token()` throws now fails the request with an
+  `AuthenticationError` naming the exception's class (not its message), and one whose `invalidate` throws no longer
+  stops the 401 retry; a `CachingAccessTokenProvider` fetch that throws is a failed `token()`, shared for the
+  failure window like any rejection.
+- **Anthropic workload identity checks the identity token file when the client is built** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
+  the Anthropic SDK reads `identityTokenFile` itself, without llm4s's regular-file and 64 KiB checks. `AnthropicClient`
+  now refuses a path that is a directory, a FIFO, a device or larger than 64 KiB, as a `ConfigurationError` naming
+  `workloadIdentity.identityTokenFile`; a path that does not exist yet is still accepted. Documented in the
+  configuration guide.
 - **Security - ShellTool and the workspace runner: on double-byte Windows hosts, a quoted argument holding a character
   whose second byte is 0x5C is refused** ([#1807](https://github.com/llm4s/llm4s/issues/1807)): code pages 932, 936
   and 950 encode some characters with a second byte of 0x5C, the byte of `\` (50, 126 and 126 of the characters they

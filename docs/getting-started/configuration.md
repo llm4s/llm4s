@@ -271,6 +271,12 @@ loopback host, for tests): for OpenAI `api.openai.com` or a data-residency host 
 `ae.api.openai.com`), for Anthropic `api.anthropic.com`, where the SDK also posts the identity token
 (`<baseUrl>/v1/oauth/token`). A proxy or gateway `baseUrl` needs an `apiKey` instead.
 
+The Anthropic SDK reads `identityTokenFile` itself, so llm4s's own checks on a token file it reads (a regular file
+of at most 64 KiB, read with a bounded read) do not guard the SDK's reads. Building the client applies them once: a
+path that is a directory, a FIFO, a device or a file larger than 64 KiB is refused then, as a `ConfigurationError`
+naming `workloadIdentity.identityTokenFile`. A path that does not exist yet is accepted, because an identity agent
+may write it after the application starts. Point it at the file the agent keeps fresh.
+
 Request each SVID for the audience its relying party expects (`jwt_audience` in `spiffe-helper`).
 Other providers reject an `auth` block. The `prod` config-policy preset's `ownApiKey` rule accepts
 a section that authenticates this way.

@@ -28,4 +28,27 @@ class StabilityAnnotationsSpec extends AnyFlatSpec with Matchers {
   "A Scala 3 enum" should "report @Stable at runtime" in {
     classOf[ApiKeySource].isAnnotationPresent(classOf[Stable]) shouldBe true
   }
+
+  "The workload-identity types that Stable signatures carry" should "be @Stable, and the machinery @Experimental (#1818)" in {
+    import org.llm4s.llmconnect.auth.*
+    Seq[Class[?]](
+      classOf[AuthConfig],
+      classOf[IdentitySource],
+      classOf[TokenExchangeConfig],
+      classOf[AccessToken],
+      classOf[AccessTokenProvider]
+    ).foreach { cls =>
+      withClue(cls.getName + ": ") {
+        cls.isAnnotationPresent(classOf[Stable]) shouldBe true
+        cls.isAnnotationPresent(classOf[Experimental]) shouldBe false
+      }
+    }
+    Seq[Class[?]](
+      classOf[CachingAccessTokenProvider],
+      CachingAccessTokenProvider.getClass,
+      classOf[IdentityTokenSource],
+      IdentityTokenSource.getClass,
+      TokenExchange.getClass
+    ).foreach(cls => withClue(cls.getName + ": ")(cls.isAnnotationPresent(classOf[Experimental]) shouldBe true))
+  }
 }

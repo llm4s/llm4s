@@ -130,7 +130,9 @@ private[llm4s] object Redaction {
     "credential",
     "credentials",
     "private_key",
-    "secret_key"
+    "secret_key",
+    // RFC 7521 / 7523 token-request form parameters: `assertion` (a JWT or SAML bearer grant) and `client_assertion`
+    "assertion"
   )
 
   /**
@@ -179,7 +181,9 @@ private[llm4s] object Redaction {
     "sessiontoken",
     "securitytoken",
     "bearertoken",
-    // OAuth 2.0 / RFC 8693 token-endpoint fields: `subject_token`, `actor_token`, `assertion`, `client_assertion`
+    // OAuth 2.0 / RFC 8693 token-endpoint fields: `subject_token`, `actor_token`, `client_assertion`. A compound
+    // `*assertion` key (`client_assertion`, `saml_assertion`) is a credential in every shape; the bare word is only in a
+    // `key=value` pair or a query, where it is the RFC 7523 form parameter (`isSensitivePairKey`, #1818).
     "subjecttoken",
     "actortoken",
     "assertion"
@@ -195,8 +199,21 @@ private[llm4s] object Redaction {
    */
   private[llm4s] def isSensitiveKey(key: String): Boolean = {
     val normalised = key.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit)
-    SensitiveKeyWords.contains(normalised) || SensitiveKeySuffixes.exists(normalised.endsWith)
+    SensitiveKeyWords.contains(normalised) ||
+    (normalised != BareAssertion && SensitiveKeySuffixes.exists(normalised.endsWith))
   }
+
+  /**
+   * The bare key `assertion`. As the RFC 7523 form parameter it carries a bearer grant, but as a JSON field or a header
+   * line it is far more often a test framework's assertion (`Assertion: expected status 200`,
+   * `{"assertion": "response.status == 200"}`), so it is sensitive only where a form parameter can be: a `key=value`
+   * pair or a query (#1818). A JWT under it is redacted in every shape all the same, by the JWT pattern.
+   */
+  private val BareAssertion = "assertion"
+
+  /** [[isSensitiveKey]], and the bare `assertion`: the sensitivity of a key in a `key=value` pair. */
+  private def isSensitivePairKey(key: String): Boolean =
+    isSensitiveKey(key) || key.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit) == BareAssertion
 
   /**
    * Whether a header line's name is sensitive and not one `CookieHeaderStart` reads (`Cookie`, `Set-Cookie`): the
@@ -1109,7 +1126,7 @@ private[llm4s] object Redaction {
       val after = afterBackslashes(input, at)
       searchFrom = at
       if (
-        after > at && after < length && (isSensitiveKey(key) || (afterQuerySeparator(matcher.start(1)) &&
+        after > at && after < length && (isSensitivePairKey(key) || (afterQuerySeparator(matcher.start(1)) &&
           isSensitiveQueryKey(key)))
       ) {
         val quote =
@@ -1209,7 +1226,7 @@ private[llm4s] object Redaction {
 
     @tailrec def loop(searchFrom: Int, copiedTo: Int): Int =
       if (searchFrom >= length || !matcher.find(searchFrom)) copiedTo
-      else if (!isSensitiveKey(matcher.group(1))) loop(matcher.end, copiedTo)
+      else if (!isSensitivePairKey(matcher.group(1))) loop(matcher.end, copiedTo)
       else {
         val (first, amp) = stop(matcher.end, tail = false)
         if (!amp) loop(math.max(first, matcher.end), copiedTo)
@@ -3257,11 +3274,11 @@ private[llm4s] object Redaction {
     @tailrec def loop(searchFrom: Int, copiedTo: Int): Int =
       if (searchFrom >= input.length || !matcher.find(searchFrom)) {
         copiedTo
-      } else if (!isSensitiveKey(matcher.group(2)) && afterEscapedEquals(input, matcher.end(2)) >= 0) {
+      } else if (!isSensitivePairKey(matcher.group(2)) && afterEscapedEquals(input, matcher.end(2)) >= 0) {
         // A key that is not sensitive and whose `=` is an escape: the text after the escape is read for pairs, as the
         // text the escape stands for would be (see `afterEscapedEquals`).
         loop(matcher.end, copiedTo)
-      } else if (isSensitiveKey(matcher.group(2)) && backslashQuoteDepth(input, matcher.end) > 0) {
+      } else if (isSensitivePairKey(matcher.group(2)) && backslashQuoteDepth(input, matcher.end) > 0) {
         // A value in quotes escaped with backslashes (`password=\"hunter2\"`, a logfmt line inside a JSON string):
         // its content is replaced, and the escaped quotes around it are kept (#1684).
         val contentStart = afterBackslashes(input, matcher.end) + 1
@@ -3279,7 +3296,7 @@ private[llm4s] object Redaction {
         } else loop(next, copiedTo)
       } else {
         val valueStart = matcher.end
-        val sensitive  = isSensitiveKey(matcher.group(2))
+        val sensitive  = isSensitivePairKey(matcher.group(2))
         var valueEnd   = valueStart
         var escapeEnd  = -1
         // The last hex digit of the escaped quote the value opened with and has not closed yet, or `NotAQuote`.

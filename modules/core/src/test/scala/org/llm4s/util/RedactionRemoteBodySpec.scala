@@ -45,7 +45,7 @@ class RedactionRemoteBodySpec extends AnyFlatSpec with Matchers {
   it should "redact OAuth credential fields by key, wherever their values recur" in {
     val body =
       """{"access_token":"at-123456789","refresh_token":"rt-123456789","id_token":"it-123456789",""" +
-        """"client_secret":"cs-123456789","assertion":"as-123456789","subject_token":"st-123456789",""" +
+        """"client_secret":"cs-123456789","saml_assertion":"as-123456789","subject_token":"st-123456789",""" +
         """"error_description":"token at-123456789 is not valid"}"""
     val out = Redaction.remoteBody(body)
     for value <- Seq("at-", "rt-", "it-", "cs-", "as-", "st-") do (out should not).include(value + "123456789")
@@ -55,7 +55,7 @@ class RedactionRemoteBodySpec extends AnyFlatSpec with Matchers {
   it should "redact the RFC 8693 request fields by key, however short their values" in {
     // Values under eight characters are left to the key patterns of `redact`, not scrubbed as repeats.
     val body =
-      """{"subject_token":"st-1","actor_token":"ac-1","assertion":"as-1","client_assertion":"ca-1",""" +
+      """{"subject_token":"st-1","actor_token":"ac-1","jwtAssertion":"as-1","client_assertion":"ca-1",""" +
         """"subjectToken":"st-2","grant_type":"urn:ietf:params:oauth:grant-type:token-exchange"}"""
     val out = Redaction.remoteBody(body)
     for value <- Seq("st-1", "ac-1", "as-1", "ca-1", "st-2") do (out should not).include(value)
@@ -73,9 +73,13 @@ class RedactionRemoteBodySpec extends AnyFlatSpec with Matchers {
         "&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt&client_assertion=ca-opaque-value-1",
       s"https://idp.example/token?subject_token=$jwt&actor_token=ac-opaque-value-1",
       s"""{"subject_token":"$jwt","client_assertion":"ca-opaque-value-1"}""",
-      s"""{"body":"{\\"assertion\\":\\"ca-opaque-value-1\\",\\"subject_token\\":\\"$jwt\\"}"}""",
-      s"""{'subject_token': '$jwt', 'assertion': 'ca-opaque-value-1'}""",
-      "Assertion: ca-opaque-value-1",
+      s"""{"body":"{\\"client_assertion\\":\\"ca-opaque-value-1\\",\\"subject_token\\":\\"$jwt\\"}"}""",
+      s"""{'subject_token': '$jwt', 'client_assertion': 'ca-opaque-value-1'}""",
+      "Client-Assertion: ca-opaque-value-1",
+      // RFC 7523: the bare `assertion` form parameter, wherever it sits in the body, and as a query parameter
+      "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=ca-opaque-value-1",
+      "assertion=ca-opaque-value-1&grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Asaml2-bearer",
+      "https://idp.example/token?assertion=ca-opaque-value-1&scope=all",
       s"actor_token=ac-opaque-value-1 subject_token=$jwt"
     )
     for shape <- shapes do
@@ -87,6 +91,37 @@ class RedactionRemoteBodySpec extends AnyFlatSpec with Matchers {
       }
     // `subject_token_type` and `grant_type` name token types, not credentials: they stay readable.
     Redaction.redact("subject_token_type=urn:ietf:params:oauth:token-type:jwt") should include("token-type:jwt")
+  }
+
+  it should "leave a test framework's assertion readable: the bare key is a credential only as a form parameter (#1818)" in {
+    val benign = Seq(
+      "Assertion: expected status 200 but got 404",
+      """{"assertion": "response.status == 200", "passed": false}""",
+      """{'assertion': 'len(items) > 0'}""",
+      """{"body":"{\"assertion\":\"status == 200\"}"}"""
+    )
+    for line <- benign do withClue(line)(Redaction.redact(line) shouldBe line)
+  }
+
+  it should "still redact a JWT under a bare assertion key in every shape, and every compound assertion key (#1818)" in {
+    val jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJzcGlmZmU6Ly9leGFtcGxlIn0.c2lnbmF0dXJlLXZhbHVl"
+    for shape <- Seq(
+        s"""{"assertion": "$jwt"}""",
+        s"Assertion: $jwt",
+        s"""{'assertion': '$jwt'}""",
+        s"assertion=$jwt"
+      )
+    do withClue(shape)((Redaction.redact(shape) should not).include("c2lnbmF0dXJlLXZhbHVl"))
+    for shape <- Seq(
+        """{"saml_assertion": "PHNhbWw6QXNzZXJ0aW9uPg"}""",
+        """{"clientAssertion": "PHNhbWw6QXNzZXJ0aW9uPg"}""",
+        "Client-Assertion: PHNhbWw6QXNzZXJ0aW9uPg",
+        "client_assertion=PHNhbWw6QXNzZXJ0aW9uPg"
+      )
+    do withClue(shape)((Redaction.redact(shape) should not).include("PHNhbWw6QXNzZXJ0aW9uPg"))
+    // `client_assertion_type` names a type, not a credential
+    Redaction.redact("client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer") should
+      include("client-assertion-type:jwt-bearer")
   }
 
   it should "redact a field value containing escaped quotes completely" in {

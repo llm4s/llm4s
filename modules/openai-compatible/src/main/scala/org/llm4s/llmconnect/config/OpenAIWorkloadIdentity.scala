@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.config
 
-import org.llm4s.annotation.Experimental
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.auth.IdentitySource
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -15,7 +15,7 @@ import org.llm4s.util.Redaction
  * @param serviceAccountId   the OpenAI service account to act as (`OPENAI_SERVICE_ACCOUNT_ID`)
  * @param clientId           sent with the exchange when the identity provider requires one
  */
-@Experimental
+@Stable
 final case class OpenAIWorkloadIdentity private (
   identityToken: IdentitySource,
   identityProviderId: String,
@@ -33,7 +33,6 @@ final case class OpenAIWorkloadIdentity private (
     s"OpenAIWorkloadIdentity($identityToken, identityProviderId=***, serviceAccountId=***, " +
       s"clientId=${Redaction.secretOpt(clientId)})"
 
-@Experimental
 object OpenAIWorkloadIdentity:
 
   /** Creates an [[OpenAIWorkloadIdentity]]. Named arguments are the supported way to construct one. */

@@ -1,21 +1,40 @@
 package org.llm4s.llmconnect.auth
 
-import org.llm4s.annotation.Experimental
-import org.llm4s.error.{ CancelledError, LLMError }
+import org.llm4s.annotation.{ Experimental, Stable }
+import org.llm4s.error.{ AuthenticationError, CancelledError, LLMError }
 import org.llm4s.types.Result
 
 import java.time.{ Clock, Duration as JDuration, Instant }
 import java.util.concurrent.locks.ReentrantLock
 import scala.concurrent.duration.*
-import scala.util.Using
+import scala.util.{ Try, Using }
 
-/** A bearer token and when it stops being valid. The value is redacted in `toString`. */
-@Experimental
-final case class AccessToken(value: String, expiresAt: Instant):
+/**
+ * A bearer token and when it stops being valid. The value is redacted in `toString`.
+ *
+ * Build one with the companion `apply` and change it with the `with*` setters; the constructor is private, so a
+ * field can be added without breaking callers (#1818).
+ */
+@Stable
+final case class AccessToken private (value: String, expiresAt: Instant):
+  def withValue(value: String): AccessToken          = copy(value = value)
+  def withExpiresAt(expiresAt: Instant): AccessToken = copy(expiresAt = expiresAt)
+
   override def toString: String = s"AccessToken(***, expiresAt=$expiresAt)"
 
-/** Supplies the bearer token for each request, refreshing it as needed. */
-@Experimental
+object AccessToken:
+
+  /** Creates an [[AccessToken]]. */
+  def apply(value: String, expiresAt: Instant): AccessToken = new AccessToken(value, expiresAt)
+
+/**
+ * Supplies the bearer token for each request, refreshing it as needed.
+ *
+ * Stable since #1818: `OpenAICompatibleClient.Credential.Dynamic` takes one. An implementation should return a
+ * failure as a `Left` rather than throw; a client that calls it turns a thrown exception into an
+ * `AuthenticationError` all the same.
+ */
+@Stable
 trait AccessTokenProvider:
   /** A token believed valid now. */
   def token(): Result[String]
@@ -40,6 +59,9 @@ trait AccessTokenProvider:
  * limit, 5xx) for `TransientFailureTtl` (1 second) - long enough for the callers queued behind the
  * fetch, short enough that a blip does not outlive itself. After the window the next call tries
  * again; a success, or a rejected cached token, ends it sooner.
+ *
+ * A fetch that throws instead of returning a `Left` fails like one that returned an `AuthenticationError`
+ * naming the exception's class (not its message, which may hold a credential): `token()` never throws for it.
  *
  * A cancellation is never shared. A fetch whose thread is interrupted - it returns
  * `CancelledError`, throws `InterruptedException`, or fails while the flag is set - returns
@@ -84,7 +106,9 @@ final class CachingAccessTokenProvider(
               recentFailure() match
                 case Some(error) => Left(error)
                 case None =>
-                  CancelledError.attempt(CachingAccessTokenProvider.Operation)(fetch()) match
+                  CancelledError.attempt(CachingAccessTokenProvider.Operation)(
+                    CachingAccessTokenProvider.guarded(fetch())
+                  ) match
                     case Right(token) =>
                       cached = Some(Cached(token, refreshAt(token)))
                       failed = None
@@ -129,6 +153,18 @@ final class CachingAccessTokenProvider(
 @Experimental
 object CachingAccessTokenProvider:
   val DefaultRefreshMargin: FiniteDuration = 60.seconds
+
+  /**
+   * `fetch`, with a non-fatal exception it throws returned as an `AuthenticationError` naming the exception's
+   * class. `InterruptedException` is not caught here: [[CancelledError.attempt]] turns it into a cancellation.
+   */
+  private[llm4s] def guarded[A](fetch: => Result[A]): Result[A] =
+    Try(fetch).fold(
+      e => Left(AuthenticationError(Provider, s"the token fetch threw ${e.getClass.getName}")),
+      identity
+    )
+
+  private val Provider = "workload-identity"
 
   /** The operation a [[CancelledError]] names when a caller is interrupted waiting for a token. */
   private[llm4s] val Operation: String = "workload-identity.token"
