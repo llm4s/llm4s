@@ -21,8 +21,8 @@ sections load. It contacts nothing unless `--local` or `--live` is given.
 sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config path/to/application.conf"
 ```
 
-Options are `--config <file>`, `--classpath <path>` (check the provider modules on your application's classpath
-rather than this module's, which has every built-in one), `--local`, `--live`, `--timeout <seconds>` and `--json`. The exit code is `0` when
+Options are `--config <file>`, `--classpath <path>` (check the provider modules and `reference.conf` files on your
+application's classpath rather than this module's, which has every built-in one), `--local`, `--live`, `--timeout <seconds>` and `--json`. The exit code is `0` when
 everything passed, `1` for warnings only and `2` when a step failed. `Doctor.run(source, options, ports)` is the same
 check as a function, with the JDK version, the model probe and the live request passed in as `DoctorPorts` so a test
 can replace them. The full description is in [docs/reference/doctor.md](../../docs/reference/doctor.md).

@@ -12,7 +12,7 @@ This guide addresses common errors and issues you might encounter when building 
 ## Configuration Errors
 
 **Q: Something is wrong with my setup and I do not know which part**
-A: Run the [doctor](doctor). It checks the JDK, your `application.conf`, the default provider, its module, its API key, the other provider sections and (with `--local`, for a server on this machine) whether the server is running and has your model, and prints a fix for each step that fails: `sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config /path/to/application.conf --local"`. It contacts nothing unless you pass `--local` or `--live`, and never prints a key.
+A: Run the [doctor](doctor). It checks the JDK, your `application.conf`, the default provider, its module, its API key, the other provider sections and (with `--local`, for a server on this machine) whether the server is running and has your model, and prints a fix for each step that fails: `sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config /path/to/application.conf --local"`. It contacts nothing unless you pass `--local` or `--live`, and does not print a key's value itself.
 
 **Q: I get a "ConfigurationError" about the provider on startup ("not found", "missing required fields", no default selected)**
 A: LLM4S does not read `LLM_MODEL`. Define a named provider section in your `application.conf` and select it as the default; its key comes from the vendor's variable, which the provider module binds:

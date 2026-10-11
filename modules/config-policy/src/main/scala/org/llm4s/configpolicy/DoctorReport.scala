@@ -43,7 +43,7 @@ final case class DoctorCheck private (name: String, status: CheckStatus, detail:
 
 object DoctorCheck {
 
-  private[configpolicy] def clean(text: String): String = Redaction.redact(text)
+  private[configpolicy] def clean(text: String): String = Redaction.redact(DoctorUrls.scrubText(text))
 
   def apply(name: String, status: CheckStatus, detail: String): DoctorCheck =
     new DoctorCheck(name, status, clean(detail), None)
@@ -52,6 +52,50 @@ object DoctorCheck {
   def warn(name: String, detail: String): DoctorCheck    = apply(name, CheckStatus.Warn, detail)
   def fail(name: String, detail: String): DoctorCheck    = apply(name, CheckStatus.Fail, detail)
   def skipped(name: String, detail: String): DoctorCheck = apply(name, CheckStatus.Skipped, detail)
+}
+
+/**
+ * How the doctor prints a URL: `scheme://host:port/path`, never its user info, query or fragment, which is
+ * where a base URL carries a password, a signature or a token.
+ */
+private[configpolicy] object DoctorUrls {
+
+  private val InText = """[A-Za-z][A-Za-z0-9+.\-]*://[^\s"'<>]+""".r
+
+  /** `url` without its user info, query and fragment. */
+  def display(url: String): String = {
+    val schemeEnd = url.indexOf("://")
+    if (schemeEnd < 0) cutQuery(url)
+    else {
+      val start = schemeEnd + 3
+      val rest  = url.substring(start)
+      // The user info ends at the last '@' before the path, so a password holding '?' or '#' is removed whole.
+      val authority = rest.takeWhile(_ != '/')
+      val hostAndOn = rest.substring(authority.lastIndexOf('@') + 1)
+      url.substring(0, start) + cutQuery(hostAndOn)
+    }
+  }
+
+  /** `text` with every URL in it shown as [[display]] shows it. */
+  def scrubText(text: String): String =
+    InText.replaceAllIn(text, m => scala.util.matching.Regex.quoteReplacement(display(m.matched)))
+
+  /** The parts of `url` that are secret: the user info, its password, the query, each query value and the fragment. */
+  def secretsIn(url: String): List[String] = {
+    val schemeEnd                  = url.indexOf("://")
+    val rest                       = if (schemeEnd < 0) url else url.substring(schemeEnd + 3)
+    val authority                  = rest.takeWhile(_ != '/')
+    val at                         = authority.lastIndexOf('@')
+    val userInfo                   = if (at < 0) "" else authority.substring(0, at)
+    val password                   = userInfo.dropWhile(_ != ':').drop(1)
+    val afterHost                  = rest.substring(at + 1)
+    val (beforeFragment, fragment) = afterHost.span(_ != '#')
+    val query                      = beforeFragment.dropWhile(_ != '?').drop(1)
+    val values                     = query.split('&').toList.map(_.dropWhile(_ != '=').drop(1))
+    (userInfo :: password :: query :: fragment.drop(1) :: values).filter(_.nonEmpty)
+  }
+
+  private def cutQuery(text: String): String = text.takeWhile(c => c != '?' && c != '#')
 }
 
 /**

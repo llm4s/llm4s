@@ -117,14 +117,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli [--config <file>] [--classpath <path>] [--local] [--live] [--timeout <s>] [--json]"`
   checks the JDK (21 or newer), that the configuration can be read, that `llm4s.providers.provider` names a section,
   that the section's provider is registered (and, if not, names the registered ones and says to add the dependency;
-  `--classpath` checks the provider modules on the application's classpath instead of the doctor's own), that its
+  `--classpath` checks the provider modules on the application's classpath instead of the doctor's own, and layers
+  that classpath's `reference.conf` files, and its `application.conf` when no `--config` is given, so a third-party
+  module's credential binding is seen), that its
   API key resolves (the config path it came from, never the value), that the section validates, with `--local`, for a
   server on the loopback interface, that it answers and has the configured model, and that the other sections load
   (a warning if not). With `--live` it makes one small request and maps an authentication, rate-limit, not-found,
   timeout or network error to its own advice. Without `--local` or `--live` nothing is contacted. The configuration
   is read through `Llm4sConfig`. Every step that fails prints a `fix:` line; the exit code is `0`, `1` (warnings
-  only) or `2`. Every API key in the configuration is hidden by value in the output, in addition to the shape-based
-  redaction. `Doctor.run` and `DoctorPorts` are the same check as a function with the JDK, model probe and live
+  only) or `2`. A URL is printed without its user info, query or fragment. Every API key, every section's header values
+  and the base-URL user info and query values in the configuration are hidden by value in the output (values of 8
+  characters or more), in addition to the shape-based redaction. `Doctor.run` and `DoctorPorts` are the same check as a function with the JDK, model probe and live
   request injectable. The module is not published and `Doctor` adds no public API to a published module. See
   [Doctor](docs/reference/doctor.md).
 - **`llm4s-pekko`: LLM responses and agent runs as Apache Pekko Streams `Source`s**

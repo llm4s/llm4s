@@ -45,12 +45,17 @@ sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli"
 sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config /path/to/application.conf --local"
 ```
 
-`--config` layers your file over every provider module's `reference.conf`, exactly as your application would see it,
-so a key that a module binds to a vendor variable (for example `OPENAI_API_KEY`) is found.
+`--config` layers your file over the `reference.conf` of every module on the doctor's classpath, so a key that a
+built-in provider module binds to a vendor variable (for example `OPENAI_API_KEY`) is found. A binding made by a
+module that is not part of this repository is seen only with `--classpath`, below.
 
 The doctor's own classpath has every built-in provider module, so without `--classpath` the "Provider module" step
 can only tell you that a provider id exists, not that your build depends on its module. To check your build, pass your
-application's runtime classpath; only the provider modules on it are then registered:
+application's runtime classpath. Only the provider modules on it are then registered, and the configuration is
+layered as your application would load it: `-D` system properties, over your `--config` file (or, without one, the
+`application.conf` on that classpath), over the `reference.conf` files on that classpath - so a third-party provider
+module's credential binding is found too. The doctor's own `reference.conf` files come last, only to fill in what
+the classpath leaves out:
 
 ```bash
 # In your application's project: print its runtime classpath (the last line of the output)
@@ -63,7 +68,7 @@ sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config /path/to/app
 | Option | What it does |
 |---|---|
 | `--config <file>` | Check this file instead of the application's own `application.conf`. |
-| `--classpath <path>` | Check the provider modules on this classpath (entries separated by `:`, or `;` on Windows) instead of the doctor's own. |
+| `--classpath <path>` | Check the provider modules, `reference.conf` files and (without `--config`) `application.conf` on this classpath (entries separated by `:`, or `;` on Windows) instead of the doctor's own. |
 | `--local` | Ask a model server on this machine whether it is running and has the configured model. |
 | `--live` | Make one small request to the configured provider (see below). |
 | `--timeout <seconds>` | How long to wait for that request. The default is 30. |
@@ -101,13 +106,30 @@ contacted by `--local`.
 provider that request is billed. A rate limit is reported as a warning rather than a failure, since the setup itself
 is fine.
 
-## Your key is never shown
+## How it keeps secrets out of the report
 
 The report shows where a key was found, as a configuration path such as `llm4s.providers.main.apiKey` or
-`llm4s.credentials.openai.apiKey` (the shared key a provider module binds to its vendor's variable), and never its
-value. Every message that reaches the report is also scrubbed twice:
-the values of every API key in the configuration are replaced by `***` wherever they appear (a provider's error
-message that quotes your key, for example), and the text goes through the same redaction as the exchange logs.
+`llm4s.credentials.openai.apiKey` (the shared key a provider module binds to its vendor's variable); the doctor never
+puts a key's value in a message itself. A URL is always printed as `scheme://host:port/path`, without the user
+info, query or fragment where a base URL can carry a password, a signature or a token:
+`https://alice:secret@gw.example.com/v1?sig=...` is shown as `https://gw.example.com/v1`, in the doctor's own
+messages and in any error message that quotes the URL.
+
+Every message that reaches the report is also scrubbed twice, because a provider's or a gateway's error can echo
+what it was sent. First, these values from the configuration are replaced by `***` wherever they appear: every
+shared `llm4s.credentials` key and, from every section under `llm4s.providers` (including one that cannot be read),
+its `apiKey`, each of its `headers` values (and each word of one, so the token of `Bearer <token>` is hidden on its
+own) and the user info, query and query values of its `baseUrl`. Then the text goes through the same shape-based
+redaction as the exchange logs.
+
+That scrubbing has limits worth knowing:
+
+- A value shorter than 8 characters is not replaced by value, because hiding a three-letter value would mangle
+  ordinary words in the report. A key, header value or password that short is hidden only if its shape is recognised
+  by the redaction, so do not rely on the report to hide it.
+- A value is hidden only where it appears whole. A provider that echoes part of a key (`sk-abc...xyz`, the last four
+  characters) is not matched by value; vendors that do this usually show too little of the key to be useful, and
+  the known key shapes are caught by the redaction.
 
 ## JSON output
 

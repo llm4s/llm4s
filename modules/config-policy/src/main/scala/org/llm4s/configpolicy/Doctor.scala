@@ -62,13 +62,13 @@ object DoctorPorts {
     }
 
   // The run's registry, not `ProviderRegistry.default`: a provider registered explicitly (or found on
-  // `--classpath`) must be the one the request goes through.
+  // `--classpath`) must be the one the request goes through. The client is closed after its one request.
   private def systemLive(config: ProviderConfig, registry: ProviderRegistry): Result[String] =
     for {
       service      <- Llm4sConfig.modelRegistryService()
-      client       <- LLMConnect.getClient(config)(using service, registry)
       conversation <- Conversation.userOnly("Reply with the single word: ok")
-      completion   <- client.complete(conversation, CompletionOptions().withMaxTokens(8))
+      client       <- LLMConnect.getClient(config)(using service, registry)
+      completion   <- Using.resource(client)(_.complete(conversation, CompletionOptions().withMaxTokens(8)))
     } yield completion.model
 }
 
@@ -83,8 +83,9 @@ object DoctorPorts {
  * By default nothing leaves the machine and no server is contacted, not even a local one: the network is
  * used only when a run asks for it. The configuration is read through `Llm4sConfig`, so its sections, the
  * default and the shared `llm4s.credentials` mean exactly what they mean to an application. The API key's
- * value is never put in the report: only the config path it came from is shown, and every key the
- * configuration holds is hidden by value in every message as well.
+ * value is never put in the report: only the config path it came from is shown, and every key, header value
+ * and base-URL credential the configuration holds is hidden by value in every message as well. A URL is
+ * printed without its user info, query or fragment.
  */
 object Doctor {
 
@@ -117,7 +118,7 @@ object Doctor {
     ports: DoctorPorts = DoctorPorts.system
   )(using registry: ProviderRegistry): DoctorReport = {
     val block   = Llm4sConfig.providerBlock(source)
-    val secrets = knownSecrets(source, block)
+    val secrets = knownSecrets(source)
     DoctorReport(
       (javaCheck(ports.javaFeature()) :: configChecks(source, block, options, ports)).map(_.scrubbed(secrets))
     )
@@ -127,17 +128,40 @@ object Doctor {
   private val MinSecretLength = 8
 
   /**
-   * Every API key the configuration holds, so the report can hide them by value as well as by shape.
+   * Every secret the configuration holds, so the report can hide them by value as well as by shape:
+   * the shared credentials and, from every section under `llm4s.providers` (including one that cannot be
+   * read), its API key, its header values and the user info, query and fragment of its base URL.
    * Redaction recognises the shapes of known vendors' keys; an error message that echoes a key of
    * another shape (a gateway token, a test key) would otherwise reach the output.
    */
-  private def knownSecrets(
-    source: ConfigSource,
-    block: Result[(Option[ProviderName], Sections)]
-  ): Set[String] = {
+  private def knownSecrets(source: ConfigSource): Set[String] = {
     val shared = SharedCredentials.read(source).entries.values.toList.flatMap(_.toOption)
-    val own    = block.toOption.toList.flatMap(_._2.values.toList.flatMap(_.toOption.flatMap(_.apiKey)))
-    (shared ::: own).map(_.trim).filter(_.length >= MinSecretLength).toSet
+    (shared ::: sectionSecrets(source)).map(_.trim).filter(_.length >= MinSecretLength).toSet
+  }
+
+  /** A header value, and each word of it, so `Bearer <token>` hides the token when it is echoed alone. */
+  private def headerSecrets(value: String): List[String] = value :: value.split("\\s+").toList
+
+  // Read straight from the HOCON rather than through the typed reader, so a section that reader rejects
+  // (a mistyped key beside a real token) still has its secrets hidden.
+  private def sectionSecrets(source: ConfigSource): List[String] = {
+    import com.typesafe.config.{ ConfigObject, ConfigValue, ConfigValueType }
+    import scala.jdk.CollectionConverters.*
+    def scalar(value: ConfigValue): Option[String] =
+      Option(value)
+        .filter(v => v.valueType != ConfigValueType.OBJECT && v.valueType != ConfigValueType.LIST)
+        .flatMap(v => Option(v.unwrapped))
+        .map(_.toString)
+    def objects(value: ConfigValue): List[ConfigObject] = value match {
+      case obj: ConfigObject => obj.asScala.values.toList.collect { case child: ConfigObject => child }
+      case _                 => Nil
+    }
+    source.at("llm4s.providers").value().toOption.toList.flatMap(objects).flatMap { section =>
+      val headers = Option(section.get("headers")).toList.collect { case h: ConfigObject => h }
+      Option(section.get("apiKey")).flatMap(scalar).toList :::
+        headers.flatMap(_.asScala.values.toList.flatMap(scalar)).flatMap(headerSecrets) :::
+        Option(section.get("baseUrl")).flatMap(scalar).toList.flatMap(DoctorUrls.secretsIn)
+    }
   }
 
   private def javaCheck(feature: Int): DoctorCheck =
@@ -349,7 +373,8 @@ object Doctor {
   ): DoctorCheck = {
     val base = section.baseUrl.map(_.asUrl).orElse(descriptor.configSpec.defaultBaseUrl)
     base match {
-      case Some(url) if isLoopback(url) =>
+      case Some(raw) if isLoopback(raw) =>
+        val url = DoctorUrls.display(raw)
         if (!options.local)
           DoctorCheck.skipped(
             LocalModel,
@@ -383,10 +408,10 @@ object Doctor {
                 )
           }
         }
-      case Some(url) =>
+      case Some(raw) =>
         DoctorCheck.skipped(
           LocalModel,
-          s"$url is not a local server, so it was not contacted (use --live for one request)"
+          s"${DoctorUrls.display(raw)} is not a local server, so it was not contacted (use --live for one request)"
         )
       case None =>
         DoctorCheck.skipped(LocalModel, "the provider has no base URL to contact")
@@ -493,7 +518,8 @@ object Doctor {
  *
  * Options: `--config <file>` to check a file layered over every module's `reference.conf` (as
  * `CheckPolicies` does) instead of the application's own configuration, `--classpath <path>` to check the
- * provider modules on an application's classpath instead of the doctor's own, `--local` to ask a model
+ * provider modules, `reference.conf` files and (without `--config`) `application.conf` on an application's
+ * classpath instead of the doctor's own, `--local` to ask a model
  * server on this machine which models it has, `--live` to make one small request, `--timeout <seconds>` for
  * that request, and `--json`. Without `--local` or `--live` nothing is contacted.
  * Exit code: `0` everything passed, `1` warnings only, `2` something failed.
@@ -521,28 +547,44 @@ object DoctorCli {
   }
 
   /**
-   * The providers registered on `classpath` (entries separated by the platform's path separator, as
-   * `sbt "export Runtime/fullClasspath"` prints them): only the provider modules whose
-   * `META-INF/services` entry is on that classpath are discovered. Their classes are loaded from the
-   * doctor's own classpath first, so a built-in module is the doctor's copy of it, and from `classpath`
-   * otherwise, so a third-party module is found too.
+   * A class loader for `classpath` (entries separated by the platform's path separator, as
+   * `sbt "export Runtime/fullClasspath"` prints them) that finds resources on that classpath only: its
+   * `META-INF/services` entries, `reference.conf` and `application.conf` files are the application's, not the
+   * doctor's, which has every built-in provider module. Classes are loaded from the doctor's own classpath
+   * first, so a built-in module is the doctor's copy of it, and from `classpath` otherwise, so a third-party
+   * module is found too. The caller closes it.
    */
-  private[configpolicy] def registryFor(classpath: String): Either[String, ProviderRegistry] = {
+  private[configpolicy] def classLoaderFor(classpath: String): Either[String, java.net.URLClassLoader] = {
     val entries = classpath.split(java.io.File.pathSeparator).toList.map(_.trim).filter(_.nonEmpty)
     val urls    = entries.map(entry => Try(java.nio.file.Paths.get(entry).toUri.toURL).toEither.left.map(_ => entry))
     urls.collect { case Left(bad) => bad } match {
       case Nil =>
-        val loader =
+        Right(
           new java.net.URLClassLoader(
             urls.collect { case Right(url) => url }.toArray,
             DoctorCli.getClass.getClassLoader
           ) {
-            // Only this classpath's own service entries: the parent's would list every built-in provider.
+            // Only this classpath's own resources: the parent's would list every built-in provider.
             override def getResources(name: String): java.util.Enumeration[java.net.URL] = findResources(name)
           }
-        Right(ProviderRegistry.discover(loader))
+        )
       case bad => Left(s"--classpath has entries that are not paths: ${bad.mkString(", ")}")
     }
+  }
+
+  /**
+   * The configuration as an application with `loader`'s classpath would load it: `-D` system properties
+   * over the `--config` file (or, without one, the `application.conf` on that classpath) over the
+   * `reference.conf` files on that classpath, which is where a third-party provider module binds its
+   * vendor's variable to `llm4s.credentials.<id>.apiKey`. The doctor's own `reference.conf` files come last,
+   * only to supply what the given classpath leaves out.
+   */
+  private[configpolicy] def sourceOn(loader: ClassLoader, config: Option[String]): ConfigSource = {
+    val application = config.fold(ConfigSource.resources("application.conf", loader).optional)(ConfigSource.file(_))
+    ConfigSource.defaultOverrides
+      .withFallback(application)
+      .withFallback(ConfigSource.resources("reference.conf", loader).optional)
+      .withFallback(ConfigSource.defaultReference)
   }
 
   /** Runs the doctor for `args` and returns what to print and the exit code. */
@@ -550,12 +592,18 @@ object DoctorCli {
     default: ProviderRegistry
   ): (String, Int) = {
     val invocation = parse(args)
-    invocation.classpath.fold[Either[String, ProviderRegistry]](Right(default))(registryFor) match {
-      case Left(problem) => (s"llm4s doctor: $problem", 2)
-      case Right(registry) =>
-        val report =
-          Doctor.run(CheckPolicies.sourceFor(invocation.config), invocation.options, ports)(using registry)
-        (if (invocation.json) report.renderJson else report.renderText, report.exitCode)
+    def render(source: ConfigSource, registry: ProviderRegistry): (String, Int) = {
+      val report = Doctor.run(source, invocation.options, ports)(using registry)
+      (if (invocation.json) report.renderJson else report.renderText, report.exitCode)
+    }
+    invocation.classpath match {
+      case None => render(CheckPolicies.sourceFor(invocation.config), default)
+      case Some(classpath) =>
+        classLoaderFor(classpath) match {
+          case Left(problem) => (s"llm4s doctor: $problem", 2)
+          case Right(loader) =>
+            Using.resource(loader)(l => render(sourceOn(l, invocation.config), ProviderRegistry.discover(l)))
+        }
     }
   }
 

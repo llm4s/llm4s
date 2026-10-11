@@ -318,6 +318,104 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     }
   }
 
+  "Doctor printing a base URL" should {
+
+    def leaks(report: DoctorReport, secrets: String*): List[String] =
+      secrets.toList.filter(s => report.renderText.contains(s) || report.renderJson.contains(s))
+
+    val hosted =
+      "https://alice:UIPASS-hunter2-secret@gw.example.com/v1?api-version=2024-06-01&sig=SIGSECRET-q1w2e3r4#FRAGSECRET-zz"
+
+    "show a hosted URL without its user info, query or fragment, by default" in {
+      val report = run(openAi(s"""apiKey = "$SecretKey"""", s"""baseUrl = "$hosted""""))
+      val server = check(report, "Local server")
+
+      server.status shouldBe CheckStatus.Skipped
+      server.detail should include("https://gw.example.com/v1 is not a local server")
+      leaks(report, "alice", "UIPASS", "hunter2", "SIGSECRET", "sig=", "api-version", "FRAGSECRET") shouldBe Nil
+    }
+
+    "show a local URL without its user info, whether or not --local is given" in {
+      val withUser = localOllama.replace("http://localhost:11434", "http://u:LOOPPASS-secret-1234@localhost:11434")
+      val reports = List(
+        run(withUser),
+        run(withUser, options = local),
+        run(withUser, new Probe(models = Right(List("mistral"))), local)
+      )
+
+      reports.foreach { report =>
+        check(report, "Local server").detail should include("http://localhost:11434")
+        (check(report, "Local server").detail should not).include("@")
+        leaks(report, "LOOPPASS", "u:") shouldBe Nil
+      }
+      check(reports(1), "Local server").status shouldBe CheckStatus.Pass
+    }
+
+    "hide a URL's user info and query when an error message quotes it" in {
+      val down = new Probe(models =
+        Left(
+          NetworkError(
+            "connection refused: http://u:LOOPPASS-secret-1234@localhost:11434/api/tags?token=QTOKEN-abc",
+            None,
+            "http://localhost:11434"
+          )
+        )
+      )
+      val report = run(
+        localOllama.replace("http://localhost:11434", "http://u:LOOPPASS-secret-1234@localhost:11434"),
+        down,
+        local
+      )
+
+      check(report, "Local server").status shouldBe CheckStatus.Fail
+      check(report, "Local server").detail should include("http://localhost:11434/api/tags")
+      leaks(report, "LOOPPASS", "QTOKEN") shouldBe Nil
+    }
+
+    "hide a query parameter's value even when a provider echoes it without the URL" in {
+      val echoing = new Probe(live = Left(ServiceError(403, "openai", "signature SIGSECRET-q1w2e3r4 has expired")))
+      val report =
+        run(openAi(s"""apiKey = "$SecretKey"""", s"""baseUrl = "$hosted""""), echoing, DoctorOptions().withLive(true))
+
+      leaks(report, "SIGSECRET", "UIPASS") shouldBe Nil
+    }
+  }
+
+  "Doctor hiding header values" should {
+
+    "hide every section's header values when a provider echoes them" in {
+      val config = localOllama.replace(
+        "baseUrl = \"http://localhost:11434\" }",
+        """baseUrl = "http://localhost:11434", headers { X-Gateway-Token = "GWTOKEN-plain-value-77" } }
+          |  other { provider = "ollama", model = "m", headers { Authorization = "Bearer OTHERHDR-token-9876" } }""".stripMargin
+      )
+      val echoing = new Probe(live =
+        Left(
+          AuthenticationError("ollama", "gateway saw X-Gateway-Token=GWTOKEN-plain-value-77 and OTHERHDR-token-9876")
+        )
+      )
+      val report = run(config, echoing, DoctorOptions().withLive(true))
+
+      check(report, "Live call").status shouldBe CheckStatus.Fail
+      check(report, "Live call").detail should include("***")
+      Seq(report.renderText, report.renderJson).foreach { out =>
+        (out should not).include("GWTOKEN")
+        (out should not).include("OTHERHDR")
+      }
+    }
+
+    "hide the header values of a section that cannot be read" in {
+      val config = localOllama +
+        """
+          |llm4s.providers.broken { provider = "ollama", headers { X-Key = "BROKENHDR-secret-555" }, timeouts = "nope" }""".stripMargin
+      val echoing = new Probe(live = Left(ServiceError(500, "ollama", "upstream rejected BROKENHDR-secret-555")))
+      val report  = run(config, echoing, DoctorOptions().withLive(true))
+
+      (report.renderText should not).include("BROKENHDR")
+      (report.renderJson should not).include("BROKENHDR")
+    }
+  }
+
   "Doctor on what it contacts" should {
 
     "make no call to a hosted provider and no live request by default" in {
@@ -675,13 +773,14 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
 
   "DoctorCli with --classpath" should {
 
-    def withClasspath[A](services: Option[String])(body: String => A): A = {
+    def withClasspath[A](services: Option[String], resources: (String, String)*)(body: String => A): A = {
       val dir = Files.createTempDirectory("doctor-cp")
       services.foreach { line =>
         val file = dir.resolve("META-INF/services/org.llm4s.llmconnect.spi.Llm4sProviderModule")
         Files.createDirectories(file.getParent)
         Files.writeString(file, line + "\n")
       }
+      resources.foreach { case (name, content) => Files.writeString(dir.resolve(name), content) }
       body(dir.toString)
     }
 
@@ -716,6 +815,35 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
         ollamaOut should include("on the given --classpath")
         openAiExit shouldBe 2
         openAiOut should include("FAIL  Provider module")
+      }
+    }
+
+    "see a credential that a reference.conf on the application's classpath binds" in {
+      val bound      = "sk-cp-reference-bound-0123456789"
+      val noKeyConf  = conf(openAi())
+      val openAiOnly = Some("org.llm4s.llmconnect.provider.Llm4sOpenAIModule")
+      withClasspath(openAiOnly, "reference.conf" -> s"""llm4s.credentials.openai.apiKey = "$bound"""") { cp =>
+        val (output, _) = DoctorCli.execute(Array("--config", noKeyConf, "--classpath", cp), new Probe().ports)
+
+        output should include("PASS  API key")
+        output should include("llm4s.credentials.openai.apiKey")
+        (output should not).include(bound)
+      }
+      withClasspath(openAiOnly) { cp =>
+        val (output, _) = DoctorCli.execute(Array("--config", noKeyConf, "--classpath", cp), new Probe().ports)
+
+        output should include("FAIL  API key")
+      }
+    }
+
+    "read the application.conf on the application's classpath when no --config is given" in {
+      withClasspath(Some("org.llm4s.llmconnect.provider.Llm4sOllamaModule"), "application.conf" -> localOllama) { cp =>
+        val (output, exitCode) = DoctorCli.execute(Array("--classpath", cp, "--local"), new Probe().ports)
+
+        output should include("PASS  Default provider")
+        output should include("'local'")
+        output should include("PASS  Local server")
+        exitCode shouldBe 0
       }
     }
 
