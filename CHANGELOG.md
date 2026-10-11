@@ -2458,6 +2458,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **The Spring Boot starter's health indicator redacts nested credentials and header values** ([#1820](https://github.com/llm4s/llm4s/issues/1820)):
+  the credentials it removes from a failed probe's `error` message were read only from top-level text fields of the
+  resolved provider config, so a credential set outside Spring properties (in `application.conf`, a `reference.conf`
+  default or an environment variable) was missed when it was nested - Bedrock's `credentials` (access key id, secret
+  key, session token) - or held in `headers` under a name that does not look secret. The starter now reads every case
+  class inside the config, through `Option`, `Seq` and `Map` values, treats every `headers` value (and the token after
+  an auth scheme such as `Bearer`) as a credential, and never throws while reading. A field named like a URL
+  (`tokenUrl`) is no longer taken for a credential.
 - **Security - ShellTool and the workspace runner: on double-byte Windows hosts, a quoted argument holding a character
   whose second byte is 0x5C is refused** ([#1807](https://github.com/llm4s/llm4s/issues/1807)): code pages 932, 936
   and 950 encode some characters with a second byte of 0x5C, the byte of `\` (50, 126 and 126 of the characters they
