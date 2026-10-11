@@ -148,4 +148,30 @@ class AgentKtTest {
 
         assertFailsWith<LLMException> { agent.forget(previous) }
     }
+
+    @Test
+    fun `forget by thread id removes that conversation, needing no result`() = runTest {
+        every { mockJAgent.forget("named") } returns LlmResult.success<Void>(null)
+
+        agent.forget("named")
+        verify(exactly = 1) { mockJAgent.forget("named") }
+        verify(exactly = 0) { mockJAgent.forget(any<JAgentResult>()) }
+    }
+
+    @Test
+    fun `forget by thread id throws LLMException with the facade's error, or a fallback message`() = runTest {
+        val busy = org.llm4s.error.ValidationError.apply("thread", "busy")
+        every { mockJAgent.forget("named") } returns LlmResult.failure<Void>(busy)
+
+        val refused = assertFailsWith<LLMException> { agent.forget("named") }
+        assertEquals(busy, (refused.cause as LlmException).error())
+
+        val err = mockk<LlmException>(relaxed = true)
+        every { err.message } returns null
+        val failed = mockk<LlmResult<Void>>()
+        every { failed.isSuccess } returns false
+        every { failed.getError() } returns err
+        every { mockJAgent.forget("named") } returns failed
+        assertEquals("Agent forget failed", assertFailsWith<LLMException> { agent.forget("named") }.message)
+    }
 }
