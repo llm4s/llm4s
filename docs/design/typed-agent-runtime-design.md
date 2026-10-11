@@ -543,7 +543,7 @@ Limits (owners in §4.9):
 - `RunContext` has no dependency accessor, by decision (§9).
 - `RunPosition` has no fencing token; fencing is Stage 2, with run-claim leases. Closed by #1700 (§4.16).
 - A `Subscription` dropped without `cancel()` keeps its dispatcher's virtual thread parked for the life of the runtime.
-- A subscription is fed live only by commits made through its own `GraphRuntime`. Commits by another runtime or process sharing the `Checkpointer` are seen only by subscribing again, which replays the log. Closed by #1705 (§4.18).
+- A subscription is fed live only by commits made through its own `GraphRuntime`. Commits by another runtime or process sharing the `Checkpointer` are seen only by subscribing again, which replays the log. Closed by #1705 (§4.21).
 - `Subscription.cancel()` blocks while a listener ignores its interrupt, and two listeners that cancel each other's subscriptions deadlock.
 - The hub lock is runtime-wide, so a long catch-up during a replay-to-live switch briefly delays commits on other threads.
 - If the caller is interrupted after a slow store has saved the claim, admission returns `Left(CancelledError)` and the thread is left with a `Running` claim, which `recover` continues.
@@ -688,7 +688,7 @@ Closed by [#1329](https://github.com/llm4s/llm4s/issues/1329) (§4.14): `ModelSt
 
 Closed by [#1701](https://github.com/llm4s/llm4s/issues/1701) (§4.20): the first durable checkpointer backend, SQLite, in its own module (left by #1268).
 
-Closed by [#1705](https://github.com/llm4s/llm4s/issues/1705) (§4.18): live subscriptions across runtimes, through store-level change notification with a polling default (left by #1277).
+Closed by [#1705](https://github.com/llm4s/llm4s/issues/1705) (§4.21): live subscriptions across runtimes, through store-level change notification with a polling default (left by #1277).
 
 Closed by [#1700](https://github.com/llm4s/llm4s/issues/1700) (§4.16): run-claim leases with expiry and renewal, so `recover` in another runtime or process refuses a live run and takes over a dead one, and fencing tokens on every commit and in `RunPosition` (left by #1268, #1269 and #1277), with the store contract suite in `llm4s-agent-testkit`.
 
@@ -1075,7 +1075,7 @@ Limits:
 - A task of an expired holder that finishes after the takeover is run again by the successor: its pending write and its `TaskCompleted` are refused, so the event log records the task once, but its side effects happen in both runs. One that finished before the claim is carried over instead (see admission above). The same at-least-once boundary.
 - A run that lost its claim keeps delivering its tasks' live progress events (`StreamEvent.Live`, which are never stored) to its own runtime's subscribers until it ends. Its durable events are refused with its commits.
 - A process that stops renewing holds its threads for up to `ttl` after it dies; a store that fails to release does the same.
-- Subscriptions still see live only the commits made through their own runtime ([#1705](https://github.com/llm4s/llm4s/issues/1705)). Closed by #1705 (§4.18).
+- Subscriptions still see live only the commits made through their own runtime ([#1705](https://github.com/llm4s/llm4s/issues/1705)). Closed by #1705 (§4.21).
 - Renewal is timed by the runtime's wall time and expiry by the store's clock; a store whose clock runs much faster than the runtime's can expire a live run's claim between renewals. Keep `renewEvery` well inside `ttl`. An embedded store opened by several hosts has as many clocks as hosts, and their skew changes the effective `ttl` (see the first store decision).
 
 ### 4.17 Stage 2 slice 4: tool side-effect safety ([#1703](https://github.com/llm4s/llm4s/issues/1703))
@@ -1260,7 +1260,7 @@ Limits:
 
 ### 4.21 Stage 2 slice 6: live subscriptions across runtimes ([#1705](https://github.com/llm4s/llm4s/issues/1705))
 
-Until this slice a subscription was fed live only by commits made through its own `GraphRuntime` (§4.6): a hub hands each commit to the subscriptions in its runtime under the commit lock, and another runtime or process sharing the store committed without any hub of this runtime knowing. A shared durable store (§4.17) makes such commits observable; this slice delivers them. The specs are `CrossRuntimeSubscriptionSpec` in `llm4s-agent`, the change-notification and cross-runtime cases of `CheckpointerContract` (§4.16), which `InMemoryCheckpointer` and the SQLite store over one and two connections pass, and `SqliteCrossRuntimeSubscriptionSpec` and the extended `SqliteCrossProcessSpec` in `llm4s-agent-checkpoint-sqlite`.
+Until this slice a subscription was fed live only by commits made through its own `GraphRuntime` (§4.6): a hub hands each commit to the subscriptions in its runtime under the commit lock, and another runtime or process sharing the store committed without any hub of this runtime knowing. A shared durable store (§4.20) makes such commits observable; this slice delivers them. The specs are `CrossRuntimeSubscriptionSpec` in `llm4s-agent`, the change-notification and cross-runtime cases of `CheckpointerContract` (§4.16), which `InMemoryCheckpointer` and the SQLite store over one and two connections pass, and `SqliteCrossRuntimeSubscriptionSpec` and the extended `SqliteCrossProcessSpec` in `llm4s-agent-checkpoint-sqlite`.
 
 Store decisions (the `Checkpointer` SPI):
 
