@@ -23,8 +23,8 @@ class JavaGuideConfigSpec extends AnyWordSpec with Matchers {
 
   "The application.conf blocks of the guide" should {
 
-    "be exactly two" in {
-      hocon.size shouldBe 2
+    "be exactly three" in {
+      hocon.size shouldBe 3
     }
 
     "give OpenAI the key from OPENAI_API_KEY with only provider and model in the section" in {
@@ -61,6 +61,23 @@ class JavaGuideConfigSpec extends AnyWordSpec with Matchers {
           ollama.model shouldBe "llama3.2"
           ollama.baseUrl shouldBe "http://localhost:11434"
         case other => fail(s"Expected OllamaConfig, got $other")
+      }
+    }
+
+    "select OpenAI's text-embedding-3-small for embeddings, with the key from OPENAI_API_KEY" in {
+      Llm4sConfig.embeddings(ReferenceConfig.withEnv(hocon(2), env)) match {
+        case Right((provider, config)) =>
+          provider shouldBe "openai"
+          config.model shouldBe "text-embedding-3-small"
+          config.apiKey shouldBe "sk-openai-env"
+        case Left(error) => fail(s"Expected the OpenAI embedding config, got $error")
+      }
+    }
+
+    "name OPENAI_API_KEY when the embeddings block has no key" in {
+      Llm4sConfig.embeddings(ReferenceConfig.withEnv(hocon(2), Map.empty)) match {
+        case Left(error)   => error.message should include("OPENAI_API_KEY")
+        case Right(config) => fail(s"Expected a missing-key error, got $config")
       }
     }
   }

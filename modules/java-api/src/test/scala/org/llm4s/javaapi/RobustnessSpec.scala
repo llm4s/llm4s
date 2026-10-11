@@ -202,7 +202,7 @@ class RobustnessSpec extends AnyFlatSpec with Matchers {
 
   it should "return a failure for null options" in {
     val c = new JLlmClient(client((_, _) => ok("x")))
-    c.complete(ConversationBuilder.create().user("hi").build(), null).isFailure shouldBe true
+    c.complete(ConversationBuilder.create().user("hi").build(), null: CompletionOptions).isFailure shouldBe true
   }
 
   it should "turn an exception thrown by the underlying client into a failed LlmResult" in {

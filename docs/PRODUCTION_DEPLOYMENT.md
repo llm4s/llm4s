@@ -401,8 +401,8 @@ implicit val workspaceReleasable: Using.Releasable[ContainerisedWorkspace] =
   (ws: ContainerisedWorkspace) => ws.stopContainer()
 
 Using.resource(new ContainerisedWorkspace("/app/workspace", "llm4s-runner:latest", 8090)) { workspace =>
-  // Execute a shell command inside the isolated container
-  workspace.executeCommand("python main.py")
+  // Run an allowlisted program inside the isolated container: a program and its arguments, not shell text
+  workspace.executeCommand("ls -la src")
 }
 ```
 
