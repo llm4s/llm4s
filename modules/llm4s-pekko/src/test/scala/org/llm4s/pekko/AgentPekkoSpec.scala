@@ -1,7 +1,8 @@
 package org.llm4s.pekko
 
 import org.apache.pekko.actor.ActorSystem
-import org.apache.pekko.stream.scaladsl.Sink
+import org.apache.pekko.Done
+import org.apache.pekko.stream.scaladsl.{ Keep, Sink }
 import org.apache.pekko.stream.testkit.scaladsl.TestSink
 import org.llm4s.agent.{ AgentBuilder, AgentStatus }
 import org.llm4s.agent.graph.{
@@ -10,6 +11,7 @@ import org.llm4s.agent.graph.{
   Commit,
   EventRecord,
   FencingToken,
+  GraphError,
   GraphRuntime,
   InMemoryCheckpointer,
   RunEvent,
@@ -24,10 +26,8 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.types.Result
 import org.scalatest.BeforeAndAfterAll
-import org.scalatest.concurrent.Eventually
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.time.{ Millis, Seconds, Span }
 import upickle.default.*
 
 import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.{ Await, ExecutionContext }
 import scala.concurrent.duration.*
 
-class AgentPekkoSpec extends AnyFlatSpec with Matchers with Eventually with BeforeAndAfterAll {
+class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
   implicit private val system: ActorSystem  = ActorSystem("agent-pekko-spec")
   implicit private val ec: ExecutionContext = ExecutionContext.global
@@ -44,9 +44,6 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with Eventually with Befo
     Await.result(system.terminate(), 30.seconds): Unit
     super.afterAll()
   }
-
-  implicit override val patienceConfig: PatienceConfig =
-    PatienceConfig(timeout = Span(10, Seconds), interval = Span(20, Millis))
 
   private val Patience = 60.seconds
 
@@ -106,6 +103,48 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with Eventually with Befo
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
       underlying.compactEvents(threadId, beforeSeq)
     def deleteThread(threadId: ThreadId): Result[Unit] = underlying.deleteThread(threadId)
+  }
+
+  /**
+   * An in-memory store whose claim release, the last thing a run does before its result is set, opens `releasing`
+   * and then waits for `let`: it holds a run that has ended, with its subscription already over, on its thread.
+   */
+  final private class SlowRelease extends Checkpointer {
+    private val underlying                                                      = InMemoryCheckpointer()
+    val releasing                                                               = new CountDownLatch(1)
+    val let                                                                     = new CountDownLatch(1)
+    def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = underlying.commit(threadId, commit)
+    def claim(threadId: ThreadId, request: ClaimRequest)                        = underlying.claim(threadId, request)
+    def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration)     = underlying.renew(threadId, token, ttl)
+    def release(threadId: ThreadId, token: FencingToken) = {
+      releasing.countDown()
+      // the run's own thread, which the cancel interrupts: keep holding it
+      Fixtures.awaitUninterruptibly(let): Unit
+      underlying.release(threadId, token)
+    }
+    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]] = underlying.latest(threadId)
+    def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
+      underlying.eventsAfter(threadId, afterSeq, limit)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
+      underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId): Result[Unit] = underlying.deleteThread(threadId)
+  }
+
+  /** The first stream call sends one delta, then parks until interrupted (opening `unparked`); later calls answer. */
+  final private class ParksFirstCall {
+    val calls    = new AtomicInteger(0)
+    val parked   = new CountDownLatch(1)
+    val unparked = new CountDownLatch(1)
+    val client = new Fixtures.Scripted(
+      onChunk =>
+        if (calls.getAndIncrement() == 0) {
+          onChunk(Fixtures.chunk(0))
+          parked.countDown()
+          if (Fixtures.parkUntilInterrupted()) unparked.countDown()
+          Left(CancelledError("test"))
+        } else Right(completion("recovered")),
+      () => Right(completion("recovered"))
+    )
   }
 
   final case class EchoResult(value: String)
@@ -237,52 +276,80 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with Eventually with Befo
     val runtime  = GraphRuntime.inMemory()
     val agent    = pekko(client)(_.withRuntime(runtime).withStreaming())
     val threadId = ThreadId("p6")
-    val first = Await.result(
-      agent
-        .stream(threadId, "hi")
-        .map { item =>
-          // the model call has started and flooded the subscription before the consumer stops
-          sent.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS): Unit
-          item
-        }
-        .take(1)
-        .runWith(Sink.seq),
-      Patience
-    )
-    first should have size 1
+    val (done, taken) = agent
+      .stream(threadId, "hi")
+      .map { item =>
+        // the model call has started and flooded the subscription before the consumer stops
+        sent.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS): Unit
+        item
+      }
+      .take(1)
+      .toMat(Sink.seq)(Keep.both)
+      .run()
+    Await.result(taken, Patience) should have size 1
+    // the turn has ended and released its thread, so recover is not refused as busy
+    Await.result(done, Patience) shouldBe Done
     unparked.await(Fixtures.PromptSeconds, TimeUnit.SECONDS) shouldBe true
-    // the run's subscription has ended
-    eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
+    Fixtures.awaitCondition(runtime.liveSubscriptions(threadId) == 0) shouldBe true
     Await.result(agent.recover(threadId), Patience).answer shouldBe Some("recovered")
   }
 
   it should "cancel the run when the stream is cancelled while the consumer waits for the next event" in {
-    val calls    = new AtomicInteger(0)
-    val parked   = new CountDownLatch(1)
-    val unparked = new CountDownLatch(1)
-    // the first call sends one delta, then parks mid-call until interrupted; later calls answer
-    val client = new Fixtures.Scripted(
-      onChunk =>
-        if (calls.getAndIncrement() == 0) {
-          onChunk(Fixtures.chunk(0))
-          parked.countDown()
-          if (Fixtures.parkUntilInterrupted()) unparked.countDown()
-          Left(CancelledError("test"))
-        } else Right(completion("recovered")),
-      () => Right(completion("recovered"))
-    )
-    val runtime  = GraphRuntime.inMemory()
-    val agent    = pekko(client)(_.withRuntime(runtime).withStreaming())
-    val threadId = ThreadId("p7")
-    val probe    = agent.stream(threadId, "hi").runWith(TestSink[AgentStreamItem]())
+    val model         = new ParksFirstCall
+    val runtime       = GraphRuntime.inMemory()
+    val agent         = pekko(model.client)(_.withRuntime(runtime).withStreaming())
+    val threadId      = ThreadId("p7")
+    val (done, probe) = agent.stream(threadId, "hi").toMat(TestSink[AgentStreamItem]())(Keep.both).run()
     probe.request(1000)
     // the model is parked mid-call, so the consumer is waiting for the next event
-    parked.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    model.parked.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
     probe.within(Patience)(probe.expectNext())
     probe.cancel()
-    unparked.await(Fixtures.PromptSeconds, TimeUnit.SECONDS) shouldBe true // the model call was interrupted
-    eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
+    // the turn has ended and released its thread, so recover is not refused as busy (#1822)
+    Await.result(done, Patience) shouldBe Done
+    model.unparked.await(Fixtures.PromptSeconds, TimeUnit.SECONDS) shouldBe true // the model call was interrupted
+    Fixtures.awaitCondition(runtime.liveSubscriptions(threadId) == 0) shouldBe true
     Await.result(agent.recover(threadId), Patience).answer shouldBe Some("recovered")
+  }
+
+  it should "keep its Future[Done] pending until the cancelled turn has released its thread" in {
+    // The store holds the cancelled run in its claim release - after the run's subscription has ended, before the
+    // thread is free - so the window in which a recover is refused as busy is held open, whatever the scheduling.
+    val model         = new ParksFirstCall
+    val store         = new SlowRelease
+    val runtime       = GraphRuntime(store)
+    val agent         = pekko(model.client)(_.withRuntime(runtime).withStreaming())
+    val threadId      = ThreadId("p7b")
+    val (done, probe) = agent.stream(threadId, "hi").toMat(TestSink[AgentStreamItem]())(Keep.both).run()
+    probe.request(1000)
+    model.parked.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    probe.within(Patience)(probe.expectNext())
+    probe.cancel()
+    store.releasing.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    // what the spec used to wait for before recovering (#1822): the run's subscription ends before its claim is released
+    Fixtures.awaitCondition(runtime.liveSubscriptions(threadId) == 0) shouldBe true
+    // the subscription is over, but the turn still holds the thread: the stream's Future[Done] is not complete
+    done.isCompleted shouldBe false
+    Await.result(agent.recover(threadId).failed, Patience) match {
+      case e: LLMException => e.error shouldBe a[GraphError.ThreadBusy]
+      case other           => fail(s"expected an LLMException, got $other")
+    }
+    store.let.countDown()
+    Await.result(done, Patience) shouldBe Done
+    Await.result(agent.recover(threadId), Patience).answer shouldBe Some("recovered")
+  }
+
+  it should "complete its Future[Done] by the time a completed turn's stream completes" in {
+    val (done, all) =
+      pekko(answering("hello"))().stream(ThreadId("p7c"), "hi").toMat(Sink.seq)(Keep.both).run()
+    Await.result(all, Patience).last shouldBe a[AgentStreamItem.Done]
+    done.isCompleted shouldBe true
+  }
+
+  it should "complete its Future[Done], not fail it, for a refused start" in {
+    val (done, all) = pekko(answering("x"))().stream(ThreadId("p7d"), "  ").toMat(Sink.seq)(Keep.both).run()
+    Await.result(all.failed, Patience) shouldBe a[LLMException]
+    Await.result(done, Patience) shouldBe Done
   }
 
   it should "start the turn once per materialization, and only when materialized" in {

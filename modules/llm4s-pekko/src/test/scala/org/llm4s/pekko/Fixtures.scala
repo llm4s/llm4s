@@ -19,6 +19,9 @@ import org.llm4s.llmconnect.model.{
 }
 import org.llm4s.types.Result
 
+import scala.annotation.tailrec
+import scala.util.{ Failure, Success, Try }
+
 /**
  * Shared deterministic fixtures for the stream specs: no sleeps, only latches and parking. Adapted from the
  * `llm4s-effect` and `llm4s-zio` test fixtures, which a test of another module cannot depend on.
@@ -57,6 +60,25 @@ private[pekko] object Fixtures {
     while (!Thread.currentThread().isInterrupted && System.nanoTime() < deadline)
       LockSupport.parkNanos(10000000L)
     Thread.currentThread().isInterrupted
+  }
+
+  /**
+   * Waits for `latch` to open (or the safety deadline to pass) whatever interrupts the calling thread, and sets its
+   * interrupt flag again on return if it was set or interrupted meanwhile: for a test seam that holds a thread an
+   * interrupt is aimed at - a run's own thread, or a producer's - where it must keep holding it. Returns whether the
+   * latch opened.
+   */
+  def awaitUninterruptibly(latch: CountDownLatch): Boolean = {
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(DeadlineSeconds)
+    @tailrec def await(interrupted: Boolean): (Boolean, Boolean) =
+      Try(latch.await(math.max(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS)) match {
+        case Success(opened)                  => (opened, interrupted)
+        case Failure(_: InterruptedException) => await(interrupted = true)
+        case Failure(other)                   => throw other
+      }
+    val (opened, interrupted) = await(Thread.interrupted())
+    if (interrupted) Thread.currentThread().interrupt()
+    opened
   }
 
   /** Whether `thread` is parked, waiting or blocked, not running: a producer held up by a full buffer is. */

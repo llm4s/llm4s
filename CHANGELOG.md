@@ -213,8 +213,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#1457](https://github.com/llm4s/llm4s/issues/1457)): a new Beta module (`modules/llm4s-pekko`, package
   `org.llm4s.pekko`) that depends on `llm4s-core`, `llm4s-agent` and `pekko-stream` 1.7 (Apache-2.0; Akka is not
   used). `LLMClientPekko(client).streamComplete(conversation)` is a `Source[StreamedChunk, NotUsed]` and `complete` a
-  `Future`; `AgentPekko(agent).stream`, `streamResume` and `streamRecover` are `Source[AgentStreamItem, NotUsed]` (each
-  event of the turn, then `Done(result)`) and `run`, `continueConversation`, `recover` and `resume` are `Future`s, as
+  `Future`; `AgentPekko(agent).stream`, `streamResume` and `streamRecover` are `Source[AgentStreamItem, Future[Done]]`
+  (each event of the turn, then `Done(result)`; the `Future[Done]` completes once the turn has ended and its thread is
+  free) and `run`, `continueConversation`, `recover` and `resume` are `Future`s, as
   `AgentIO` and `AgentZ` offer for fs2 and ZIO. The provider call blocks, so each stream runs it on a daemon thread of its
   own and hands items over through a bounded buffer: a consumer that lags blocks the provider's thread (nothing is
   dropped), and cancelling the stream interrupts it. An agent turn is cancelled when its stream is, a slow consumer gets
@@ -2458,6 +2459,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-pekko`: a cancelled agent stream releases its thread before reporting it, and says when it has**
+  ([#1822](https://github.com/llm4s/llm4s/issues/1822), item 1 of [#1815](https://github.com/llm4s/llm4s/issues/1815)):
+  cancelling an `AgentPekko` stream cancelled the turn on a background cleanup thread, so a `recover` on the same thread
+  straight after could be refused with `GraphError.ThreadBusy` - the run's subscription ends just before it gives its
+  thread claim back - which made `AgentPekkoSpec` flaky. The turn is now cancelled and awaited on the stream's own
+  producer thread, and `stream`, `streamResume` and `streamRecover` materialize a `Future[Done]` (they were
+  `Source[AgentStreamItem, NotUsed]`) that completes once the turn has ended and its thread is free, however the stream
+  ended; it never fails, and it is already complete when the stream completes normally. A failed stream now fails only
+  after its turn has ended. **Migration:** wait for the `Future[Done]` (`toMat(sink)(Keep.both)`) before starting
+  another turn on a thread whose stream you cancelled; a type annotation of `Source[AgentStreamItem, NotUsed]` becomes
+  `Source[AgentStreamItem, Future[Done]]`, or add `.mapMaterializedValue(_ => NotUsed)`. See
+  [Apache Pekko Integration](docs/guide/pekko.md#waiting-for-a-cancelled-turn).
 - **Security - ShellTool and the workspace runner: on double-byte Windows hosts, a quoted argument holding a character
   whose second byte is 0x5C is refused** ([#1807](https://github.com/llm4s/llm4s/issues/1807)): code pages 932, 936
   and 950 encode some characters with a second byte of 0x5C, the byte of `\` (50, 126 and 126 of the characters they

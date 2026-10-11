@@ -114,12 +114,36 @@ def streamAnswer(agent: AgentPekko)(using system: ActorSystem) =
 
  - The turn starts when the stream is materialized, once per materialization.
  - Cancelling the stream, or stopping it early with `take`, cancels the turn: its model call and tool calls are
-   interrupted, and the thread is left for `recover`.
+   interrupted, and the thread is left for `recover`. Cancelling returns at once, while the turn is still ending; the
+   stream's materialized `Future[Done]` completes once it has ended and the thread is free (see below).
  - A slow consumer never holds the run up. It loses live events (text deltas, tool progress) and receives one
    `StreamEvent.LiveGap` with their count where they were dropped. Durable events are never dropped. `bufferSize` (256
    unless you pass another) is how many live events wait before the rest are counted.
  - A refused start (a blank query, a busy thread), a failed turn and a subscription that disconnects fail the stream
    with an `LLMException`. A turn that commits no terminal event still ends the stream.
+
+### Waiting for a cancelled turn
+
+`stream`, `streamResume` and `streamRecover` are `Source[AgentStreamItem, Future[Done]]`. The `Future[Done]` completes
+once the turn has ended and released its thread, however the stream ended: completed, failed or cancelled. It never
+fails; a failed turn fails the stream. Pekko stops a stream asynchronously, so a cancelled turn may still be ending when
+your code moves on, and a `recover` on its thread started then is refused with `GraphError.ThreadBusy`. Keep the
+`Future[Done]` with `Keep.both` and wait for it before the next call on the thread:
+
+```scala
+import org.apache.pekko.stream.scaladsl.{ Keep, Sink }
+
+def firstEventThenRecover(agent: AgentPekko, threadId: ThreadId)(using system: ActorSystem, ec: ExecutionContext) =
+  val (released, firstEvent) = agent.stream(threadId, "Write a long story.").take(1).toMat(Sink.head)(Keep.both).run()
+  for
+    _      <- firstEvent
+    _      <- released // the cancelled turn has ended and its thread is free
+    result <- agent.recover(threadId)
+  yield result
+```
+
+A turn whose provider ignores the interrupt keeps the `Future[Done]` pending until its call returns. When the stream
+completes normally, the `Future[Done]` is already complete.
 
 ### Futures
 

@@ -1,13 +1,14 @@
 package org.llm4s.pekko
 
-import org.apache.pekko.NotUsed
+import org.apache.pekko.Done
 import org.apache.pekko.stream.{ Attributes, Outlet, SourceShape }
 import org.apache.pekko.stream.scaladsl.Source
-import org.apache.pekko.stream.stage.{ AsyncCallback, GraphStage, GraphStageLogic, OutHandler }
+import org.apache.pekko.stream.stage.{ AsyncCallback, GraphStageLogic, GraphStageWithMaterializedValue, OutHandler }
 import org.llm4s.error.{ LLMError, ValidationError }
 
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReference }
+import scala.concurrent.{ Future, Promise }
 
 /**
  * What a producer hands items to: a bounded buffer in front of the stream. [[emit]] blocks the
@@ -36,15 +37,16 @@ private[pekko] trait Producer[T] {
   def run(emitter: Emitter[T]): Either[LLMError, Unit]
 
   /**
-   * The stream has ended or been cancelled; release what `run` holds. Called once, from a stream thread, so
-   * it must not block: hand any waiting to a thread of its own. `run` may still be running, and is
-   * interrupted separately.
+   * The stream has ended or been cancelled. Called once, from a stream thread, so it must not block. `run` may
+   * still be running, and is interrupted separately: release what `run` holds in `run` itself, on its own
+   * thread, so the source's materialized `Future[Done]` completes only once it has been released.
    */
   def abandon(): Unit
 }
 
 /**
- * A Pekko `Source` fed by a blocking [[Producer]] on a dedicated daemon thread.
+ * A Pekko `Source` fed by a blocking [[Producer]] on a dedicated daemon thread. It materializes a
+ * `Future[Done]` that completes once the producer's `run` has returned, however the stream ended.
  *
  *  - '''Backpressure''': the producer hands items over through a buffer of `capacity` items. Pekko pulls
  *    from the buffer at the consumer's pace; once it is full, the producer's `emit` blocks until the
@@ -65,9 +67,11 @@ private[pekko] object BlockingSource {
    * A source of the items `newProducer()` produces. `newProducer` is called once per materialization.
    * A `capacity` below 1 gives a stream that fails at once with a [[ValidationError]].
    */
-  def apply[T](name: String, capacity: Int)(newProducer: () => Producer[T]): Source[T, NotUsed] =
+  def apply[T](name: String, capacity: Int)(newProducer: () => Producer[T]): Source[T, Future[Done]] =
     if (capacity < 1)
-      Source.failed(new LLMException(ValidationError("bufferSize", s"must be at least 1, got $capacity")))
+      Source
+        .failed[T](new LLMException(ValidationError("bufferSize", s"must be at least 1, got $capacity")))
+        .mapMaterializedValue(_ => Future.successful(Done))
     else
       Source.fromGraph(new Stage[T](name, capacity, newProducer)).named(name)
 
@@ -77,14 +81,16 @@ private[pekko] object BlockingSource {
   final private case class Failed(cause: Throwable) extends Outcome
 
   final private class Stage[T](name: String, capacity: Int, newProducer: () => Producer[T])
-      extends GraphStage[SourceShape[T]] {
+      extends GraphStageWithMaterializedValue[SourceShape[T], Future[Done]] {
 
     private val out: Outlet[T]                 = Outlet[T](s"$name.out")
     override val shape: SourceShape[T]         = SourceShape(out)
     override def initialAttributes: Attributes = Attributes.name(name)
 
-    override def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
-      new GraphStageLogic(shape) with OutHandler {
+    override def createLogicAndMaterializedValue(inheritedAttributes: Attributes): (GraphStageLogic, Future[Done]) = {
+      // completed once the producer's `run` has returned, or at the stage's stop if its thread never started
+      val released = Promise[Done]()
+      val logic = new GraphStageLogic(shape) with OutHandler {
         private val queue                    = new ArrayBlockingQueue[T](capacity)
         private val outcome                  = new AtomicReference[Outcome](null)
         private val finished                 = new AtomicBoolean(false)
@@ -110,11 +116,15 @@ private[pekko] object BlockingSource {
           t.start()
         }
 
-        /** Runs on the producer thread; always records how it ended, so the stream cannot hang. */
+        /**
+         * Runs on the producer thread; always records how it ended, so the stream cannot hang. `released` is
+         * completed before the stream is told, so it is complete by the time the stream has ended normally.
+         */
         private def produce(emitter: Emitter[T], callback: AsyncCallback[Unit]): Unit = {
           val result = attempt(emitter)
           outcome.set(result)
           finished.set(true)
+          released.trySuccess(Done): Unit
           callback.invoke(())
         }
 
@@ -160,7 +170,11 @@ private[pekko] object BlockingSource {
           if (stopped.compareAndSet(false, true)) {
             if (!finished.get()) Option(thread).foreach(_.interrupt())
             producer.abandon()
+            // no producer thread ever started, so nothing is held
+            if (thread == null) released.trySuccess(Done): Unit
           }
       }
+      (logic, released.future)
+    }
   }
 }
