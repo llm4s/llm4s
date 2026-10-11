@@ -132,6 +132,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writing, `AudioIO.saveWav` / `saveRawPcm16` and the new `AudioPreprocessing.standardizeForSTT(audio, rate)`
   reject MP3 with a `ValidationError`; Tacotron2 refuses it. A caller with an exhaustive `match` on
   `AudioFormat` needs a case for `Mp3`. The `@Cloud` smoke suites check MP3 magic bytes.
+- **Scala CLI quick start: a first LLM call from one file** ([#1456](https://github.com/llm4s/llm4s/issues/1456)):
+  `modules/samples/scala-cli` holds `hello.scala` (with `//> using jvm 21`), `resources/application.conf` (OpenAI),
+  `resources/ollama.conf` (a local Ollama, no key) and `logback.xml`; `cd modules/samples/scala-cli && scala-cli run .`
+  makes the call, and `scala-cli run . --java-opt -Dconfig.resource=ollama.conf` uses Ollama. The two providers are
+  separate files because 0.4.x validates every provider section when it loads the default one. The page
+  `docs/getting-started/scala-cli.md` (linked from Installation, the Getting Started index and the README) shows the
+  script for the latest release: one `llm4s-core` dependency up to 0.4.x, and the provider modules and a logging
+  backend as well once 0.5.0 is the latest release. The script targets `llm4s-core` 0.4.1 and was run with
+  `scala-cli` against a local fake Ollama. `ScalaCliQuickstartSpec` checks the committed configuration against this
+  branch's API, runs the script's calls end to end against a fake Ollama, renders the page for 0.4.1 and 0.5.0, and
+  fails if the page's code blocks stop matching the files. `scripts/check-doc-versions.sh` now also rejects a
+  literal version in a `//> using dep org.llm4s::...` line.
 - **`llm4s-java-api`: Java interop module** (Beta, `modules/java-api`, package `org.llm4s.javaapi`,
   [#934](https://github.com/llm4s/llm4s/issues/934)): a facade for Java callers over the client and agent API. `Llm4s.createDefaultClient()`
   and `createClient(config)` return an `LlmResult<JLlmClient>`; `JLlmClient` (`AutoCloseable`) offers

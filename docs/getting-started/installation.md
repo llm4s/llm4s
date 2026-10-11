@@ -120,6 +120,22 @@ configurations.all {
 > and the [dependency conflicts reference](/reference/dependency-conflicts).
 
 
+### Scala CLI
+
+No build at all: declare the dependency in the file.
+
+```scala
+//> using scala 3.7.1
+//> using jvm 21
+//> using dep org.llm4s::llm4s-core:{{ site.data.project.latest_release }}
+{%- unless site.data.project.latest_release contains "0.4." %}
+//> using dep org.llm4s::llm4s-openai:{{ site.data.project.latest_release }}
+{%- endunless %}
+```
+
+From 0.5.0, add the provider module you use next to `llm4s-core` (`llm4s-openai` above). The
+[Scala CLI quick start](scala-cli) has a complete file that makes a first call.
+
 ### Multi-Module Project
 
 If you have a multi-module project:
