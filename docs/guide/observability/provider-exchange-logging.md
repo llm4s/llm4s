@@ -216,10 +216,7 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   `cookie_consent` are not, because the match is never on a substring. URL query parameters are also
   matched against a second, substring list (`key`, `token`, `secret`, `password`, `auth` and similar), so
   `?x_api_key_id=` is redacted too. A query value written right before JSON
-  (`?token=...,{"api_key": "..."}`, also with the quotes escaped) does not hide the field after it. An empty
-  query value at the end of a JSON string (`{"q":"a=1&token=","n":"x"}`) leaves the document as it is: where the
-  input is a JSON document, or a string in it holds one, a replacement that would cover only its punctuation is not
-  made, so it still parses.
+  (`?token=...,{"api_key": "..."}`, also with the quotes escaped) does not hide the field after it.
 - **Where a cookie header's value ends.** Outside any string (a raw request dump, a log line), at the end
   of its line, quotes, apostrophes and backslashes included: `Cookie: sid="abc"; x=y` becomes
   `Cookie: [REDACTED]`. Inside a string that opened on the same line - a JSON string, a header in a JSON

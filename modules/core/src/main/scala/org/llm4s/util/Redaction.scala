@@ -345,9 +345,7 @@ private[llm4s] object Redaction {
    * (`addedReadingEdits`): the passes again, with a query value that ends before JSON and a `Bearer` or `Basic` word
    * that leaves the pair after it alone; the pairs after the JSON escape of a line break; and the rest of a value
    * after a literal `&`. A fourth (#1707) adds, wherever no edit is, the content of a value in quotes written behind
-   * backslashes (`password=\\'p&ss=QZXJ\\'`) up to the same quote written the same way. Where the input is a JSON
-   * document, an edit that replaces nothing but its punctuation (the `,` after an empty `token=` that ends a string)
-   * is left out, so that the document still parses.
+   * backslashes (`password=\\'p&ss=QZXJ\\'`) up to the same quote written the same way.
    *
    * Redacting the output a second time usually changes nothing, but that is not guaranteed: where quotes are
    * unbalanced or stray, the text a first pass replaced can change how a second pass pairs the quotes, and the
@@ -365,135 +363,34 @@ private[llm4s] object Redaction {
   /**
    * What [[redact]] makes of a non-empty `input`, and the ranges of the input it replaces; with
    * `singleQuotedFromInput = false`, without the single-quoted field passes' reading of the input as it was given
-   * (#1697), with `addedReadings = false`, without the readings of #1695 and #1707 (`addedReadingEdits`), and with
-   * `keepJsonStructure = false`, with the edits that replace only a JSON document's punctuation
-   * (`withoutJsonPunctuationEdits`), so that a test can check that each reading only adds to what is replaced.
+   * (#1697), and with `addedReadings = false`, without the readings of #1695 and #1707 (`addedReadingEdits`), so that
+   * a test can check that each only adds to what is replaced.
    */
   private[util] def redactedWithRanges(
     input: String,
     singleQuotedFromInput: Boolean,
-    addedReadings: Boolean = true,
-    keepJsonStructure: Boolean = true
+    addedReadings: Boolean = true
   ): (String, Vector[(Int, Int)]) = {
-    val (text, edits) = redaction(input, RedactionPlaceholder, singleQuotedFromInput, addedReadings, keepJsonStructure)
+    val (text, edits) = redaction(input, RedactionPlaceholder, singleQuotedFromInput, addedReadings)
     (text, edits.map(edit => (edit.start, edit.end)))
   }
 
   /**
    * The redacted text of a non-empty `input`, and the edits that make it of the input: those of the passes
-   * (`passRedaction`), and, with `addedReadings`, those of the readings of #1695 and #1707 that overlap none of them,
-   * less, with `keepJsonStructure` too, the edits that replace only the punctuation of a JSON document
-   * (`withoutJsonPunctuationEdits`).
+   * (`passRedaction`), and, with `addedReadings`, those of the readings of #1695 and #1707 that overlap none of them.
    */
   private def redaction(
     input: String,
     placeholder: String,
     singleQuotedFromInput: Boolean,
-    addedReadings: Boolean,
-    keepJsonStructure: Boolean = true
+    addedReadings: Boolean
   ): (String, Vector[Edit]) = {
     val (text, edits) = passRedaction(input, placeholder, singleQuotedFromInput)
     if (!addedReadings) (text, edits)
     else {
-      val added = addedReadingEdits(input, placeholder, edits)
-      val all   = if (keepJsonStructure) withoutJsonPunctuationEdits(input, added) else added
-      if (all == edits) (text, edits) else (applyEdits(input, all), all)
+      val all = addedReadingEdits(input, placeholder, edits)
+      if (all.length == edits.length) (text, edits) else (applyEdits(input, all), all)
     }
-  }
-
-  /**
-   * `edits` without those that replace nothing but the punctuation of a JSON document (#1707): where the input is a
-   * JSON document, or a string in it holds one, at any depth, an edit whose every character replaced is a `,`, `:`,
-   * a bracket, a brace or whitespace between the tokens of that document. A query value that is empty because the
-   * string the URL sits in ends right after its `=` (`{"q":"a=1&token=","n":"x"}`) was read by the pass for
-   * `key="` as a value in quotes, the `,` between the two strings, and replaced, so the output no longer parsed. Such
-   * characters are no value's: in a JSON document they only separate and delimit the values, so leaving them as they
-   * were shows nothing of any value, and every other edit is made as before. Linear in the input, and made only where
-   * an edit replaces nothing but such characters.
-   */
-  private def withoutJsonPunctuationEdits(input: String, edits: Vector[Edit]): Vector[Edit] = {
-    def punctuationOnly(edit: Edit): Boolean =
-      edit.end > edit.start && (edit.start until edit.end).forall(i => isJsonPunctuation(input.charAt(i)))
-    if (!edits.exists(punctuationOnly)) edits
-    else
-      jsonPunctuation(input) match {
-        case None => edits
-        case Some(structural) =>
-          edits.filterNot(edit => punctuationOnly(edit) && (edit.start until edit.end).forall(structural.get))
-      }
-  }
-
-  private def isJsonPunctuation(c: Char): Boolean = ",:[]{} \t\n\r".indexOf(c.toInt) >= 0
-
-  /**
-   * Where `text` is a JSON document, the characters of it that are punctuation between its tokens (`isJsonPunctuation`
-   * outside every string), and those of the documents its strings hold, at any depth, traced back to the characters of
-   * `text` they were decoded from; `None` where `text` is not a JSON document. A string is read for a document only
-   * where its content starts with `{` or `[`.
-   */
-  private def jsonPunctuation(text: String): Option[java.util.BitSet] = {
-    val trimmed = text.trim
-    val document =
-      (trimmed.startsWith("{") || trimmed.startsWith("[")) && scala.util
-        .Try(ujson.transform(ujson.Readable.fromString(text), upickle.core.NoOpVisitor))
-        .isSuccess
-    if (!document) None
-    else {
-      val marks = new java.util.BitSet(text.length)
-      var i     = 0
-      while (i < text.length) {
-        val c = text.charAt(i)
-        if (c == '"') i = markString(text, i + 1, marks)
-        else {
-          if (isJsonPunctuation(c)) marks.set(i)
-          i += 1
-        }
-      }
-      Some(marks)
-    }
-  }
-
-  /**
-   * Reads the JSON string whose content starts at `from` in the valid document `text`, marks in `marks` the
-   * punctuation of the document it holds, if it holds one (`jsonPunctuation`), and returns the index after its
-   * closing quote.
-   */
-  private def markString(text: String, from: Int, marks: java.util.BitSet): Int = {
-    val decoded = new java.lang.StringBuilder
-    val origin  = Array.newBuilder[Int] // where in `text` each decoded character starts; one more for the end
-    var i       = from
-    while (text.charAt(i) != '"') {
-      origin += i
-      if (text.charAt(i) != '\\') {
-        decoded.append(text.charAt(i))
-        i += 1
-      } else
-        text.charAt(i + 1) match {
-          case 'u' =>
-            decoded.append(Integer.parseInt(text.substring(i + 2, i + 6), 16).toChar)
-            i += 6
-          case 'b' => decoded.append('\b'); i += 2
-          case 'f' => decoded.append('\f'); i += 2
-          case 'n' => decoded.append('\n'); i += 2
-          case 'r' => decoded.append('\r'); i += 2
-          case 't' => decoded.append('\t'); i += 2
-          case c   => decoded.append(c); i += 2
-        }
-    }
-    origin += i
-    val content = decoded.toString
-    val first   = content.indexWhere(c => !Character.isWhitespace(c))
-    if (first >= 0 && (content.charAt(first) == '{' || content.charAt(first) == '[')) {
-      val starts = origin.result()
-      jsonPunctuation(content).foreach { inner =>
-        var k = inner.nextSetBit(0)
-        while (k >= 0) {
-          marks.set(starts(k), starts(k + 1))
-          k = inner.nextSetBit(k + 1)
-        }
-      }
-    }
-    i + 1
   }
 
   /** What the passes make of a non-empty `input`: the text, and the edits that make it of the input. */

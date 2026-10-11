@@ -2112,8 +2112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ARGUMENT_NOT_ALLOWED`. The system and global git configuration of whoever runs the runner no longer apply,
   so a `safe.directory` set there does not either. `GitConfigRoutesSpec` plants each route, shows git run directly
   runs it, and shows no allowed command run through the runner does.
-- **Security - redaction: a credential in escaped quotes that holds `&word=` is redacted whole, and an empty query
-  value at the end of a JSON string no longer breaks the document** ([#1707](https://github.com/llm4s/llm4s/issues/1707)):
+- **Security - redaction: a credential in escaped quotes that holds `&word=` is redacted whole**
+  ([#1707](https://github.com/llm4s/llm4s/issues/1707)):
   `Redaction` (used by the provider exchange logger, `LLMError` messages and error mapping) read the value of
   `password=\\'p&ss=QZXJ\\'` - a logfmt or shell line inside a JSON string, standing for `password=\'p&ss=QZXJ\'` -
   as a query or `key=value` value that ends at the `&`, and a quote behind an even run of backslashes as no quote,
@@ -2122,11 +2122,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   value in quotes written behind backslashes, or as the JSON escape of a quote, up to the same quote written the same
   way; it adds only the parts that no other edit covers, so every replacement made before is made exactly as before
   (`password=[REDACTED]'[REDACTED]&[REDACTED]\\'`). A value that does not close before a line break, a `"` that
-  ends its string, or the end of the input is left as the other passes read it. Separately,
-  `{"q":"a=1&token=","n":"x"}` became `{"q":"a=1&token="[REDACTED]"n":"x"}`, which no longer parsed: where the
-  input is a JSON document, or a string in it holds one, an edit that replaces nothing but the document's punctuation
-  (`,`, `:`, brackets, braces, whitespace between its tokens) is left out, since such characters hold no value. An
-  unclosed `'` value in an escaped query still runs to the end of its string. Both take time linear in the input.
+  ends its string, or the end of the input is left as the other passes read it. The reading takes time linear in the
+  input. An empty query value at the end of a JSON string (`{"q":"a=1&token=","n":"x"}`) is still redacted as before,
+  `,` included ([#1800](https://github.com/llm4s/llm4s/issues/1800)).
 - **Security - redaction: four more shapes no longer leave a credential readable**
   ([#1695](https://github.com/llm4s/llm4s/issues/1695)): `Redaction` (used by the provider exchange logger,
   `LLMError` messages and error mapping) left these readable. (1) A `key=value` pair in a log that Gson or another

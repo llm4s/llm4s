@@ -7,11 +7,9 @@ import org.scalatest.matchers.should.Matchers
 import scala.util.{ Random, Try }
 
 /**
- * Two follow-ups of #1694 (#1707): a credential in quotes written behind backslashes (`password=\\'p&ss=QZXJ\\'`,
- * which stands for `password=\'p&ss=QZXJ\'`) that holds `&word=` kept the part after the `&` readable, and an empty
- * query value at the end of a JSON string (`{"q":"a=1&token=","n":"x"}`) had the `,` after the string replaced, so
- * the output no longer parsed. The first is closed by a reading that only adds to what the passes replace; the second
- * by leaving out an edit that replaces nothing but the punctuation of a JSON document.
+ * A follow-up of #1694 (#1707): a credential in quotes written behind backslashes (`password=\\'p&ss=QZXJ\\'`,
+ * which stands for `password=\'p&ss=QZXJ\'`) that holds `&word=` kept the part after the `&` readable. It is closed by
+ * a reading that only adds to what the passes replace, so every character redacted before is redacted still.
  */
 class RedactionEscapedQuotedValueSpec extends AnyFlatSpec with Matchers {
 
@@ -62,23 +60,89 @@ class RedactionEscapedQuotedValueSpec extends AnyFlatSpec with Matchers {
     Redaction.redact("""x=1&user=\\'p&ss=QZXJ\\' n=1""") shouldBe """x=1&user=\\'p&ss=QZXJ\\' n=1"""
   }
 
-  it should "keep a JSON document valid where an empty query value ends its string (#1707)" in {
+  it should "redact as before where an empty query value ends a JSON string (#1707)" in {
+    // The `,` after such a string is still replaced, as before: what keeps the document valid there is #1800.
+    Redaction.redact("""{"q":"a=1&token=","n":"x"}""") shouldBe s"""{"q":"a=1&token="$R"n":"x"}"""
+    // a credential that is itself punctuation, or a JSON document of nothing but punctuation, is redacted
     Seq(
-      """{"q":"a=1&token=","n":"x"}""",
-      s"""{"q":"a=1${BS}u0026token=","n":"x"}""",
-      """[{"q":"a=1&token="}, {"n":"x"}]""",
-      """{"q":"https://x.test/cb?token=bob&api_key=","mode":"x","m":"y"}"""
+      """{"password":"[]"}"""               -> s"""{"password":"$R"}""",
+      """{"password":"{}"}"""               -> s"""{"password":"$R"}""",
+      """{"password":"[ ]"}"""              -> s"""{"password":"$R"}""",
+      """{"password": "[[],{}]", "n": 1}""" -> s"""{"password": "$R", "n": 1}""",
+      """{"api_key":"[ , ]"}"""             -> s"""{"api_key":"$R"}""",
+      """{"token":"[[[]]]"}"""              -> s"""{"token":"$R"}"""
+    ).foreach { case (input, expected) => Redaction.redact(input) shouldBe expected }
+    Redaction.redact("""{"m":"{\"password\":\"[]\"}"}""") shouldBe s"""{"m":"{\\"password\\":\\"$R\\"}"}"""
+  }
+
+  it should "not throw on an invalid escape after an empty query value (#1707)" in {
+    // A reading of these as JSON documents once decoded `\\uZZZZ` and `\\users1` as escapes and threw.
+    Seq(
+      s"""{"q":"a=1&token=","path":"C:${BS}users1"}""",
+      s"""{"q":"https://x.test/cb?a=1&api_key=","note":"${BS}uZZZZ"}""",
+      s"""{"messages":[{"content":"[\\"$BS${BS}uZZZZ\\"]"}],"q":"a=1&token=","n":1}"""
     ).foreach { input =>
-      val out = Redaction.redact(input)
-      withClue(s"input $input, output $out: ")(parses(out) shouldBe true)
+      // as on main: the value after `token=` is read as running to the next string's opening quote
+      val expected = input.replaceFirst("=\",\"", s"=\"$R\"")
+      Redaction.redact(input) shouldBe expected
+      Redaction.safeBody(input) shouldBe expected
     }
-    Redaction.redact("""{"q":"a=1&token=","n":"x"}""") shouldBe """{"q":"a=1&token=","n":"x"}"""
-    // one string deeper, where the inner document parses again
-    val nested = """{"p":"{\"q\":\"a=1&token=\",\"n\":\"x\"}"}"""
-    Redaction.redact(nested) shouldBe nested
-    // punctuation that is a value, in a string or outside JSON, is still replaced
-    Redaction.redact("""password=", " more""") shouldBe s"""password="$R" more"""
-    Redaction.redact("""{"q":"password=\", \" more"}""") shouldBe s"""{"q":"password=\\"$R\\" more"}"""
+  }
+
+  it should "never throw, whatever the input (#1707)" in {
+    // Pieces that make escapes, quotes, keys and JSON punctuation, valid or not, joined at random. Deterministic.
+    val rnd = new Random(17071)
+    val pieces = Seq(
+      BS,
+      BS * 2,
+      BS * 3,
+      s"${BS}u",
+      s"${BS}uZZZZ",
+      s"${BS}users1",
+      s"${BS}u002",
+      s"${BS}u0027",
+      s"${BS}u0022",
+      s"${BS}u0026",
+      s"${BS}u003d",
+      "\"",
+      "'",
+      "&",
+      "=",
+      "?",
+      "token=",
+      "password=",
+      "api_key=",
+      "a=1&",
+      "{",
+      "}",
+      "[",
+      "]",
+      ",",
+      ":",
+      " ",
+      "\n",
+      "\r",
+      "\t",
+      "{\"q\":\"",
+      "\",\"n\":\"",
+      "\"}",
+      "Bearer ",
+      "Cookie: ",
+      "https://x.test/cb?",
+      "x",
+      "QZ",
+      "\u0000",
+      "\uFFFF"
+    )
+    (1 to 2000).foreach { _ =>
+      val noise = Seq.fill(1 + rnd.nextInt(30))(pieces(rnd.nextInt(pieces.length))).mkString
+      // half of them inside a JSON document that holds an empty query value
+      val input = if (rnd.nextBoolean()) noise else s"""{"q":"a=1&token=","n":"$noise"}"""
+      withClue(s"input $input: ") {
+        Try(Redaction.redact(input)).isSuccess shouldBe true
+        Try(Redaction.safeBody(input)).isSuccess shouldBe true
+      }
+    }
   }
 
   /** Documents of #1707's shapes, each with its credentials, unique words that appear nowhere else. */
@@ -128,37 +192,26 @@ class RedactionEscapedQuotedValueSpec extends AnyFlatSpec with Matchers {
   it should "replace all it replaces without the added readings, and more (#1707)" in {
     // The reading of #1707 adds edits only where no edit already is: every range the passes and the readings of #1695
     // replace is replaced as before, nothing they redact is written out, and JSON that parses without it still
-    // parses. The edits left out to keep a JSON document valid replace only its punctuation. Deterministic.
-    val docs                  = new Docs(1707)
-    var closed, punctuationed = 0
+    // parses. Deterministic.
+    val docs   = new Docs(1707)
+    var closed = 0
     (1 to 2000).foreach { _ =>
       val (input, secrets) = docs.next()
-      val (out, ranges)    = Redaction.redactedWithRanges(input, singleQuotedFromInput = true)
-      val (all, added) =
-        Redaction.redactedWithRanges(input, singleQuotedFromInput = true, keepJsonStructure = false)
-      val (base, kept) = Redaction.redactedWithRanges(input, singleQuotedFromInput = true, addedReadings = false)
+      val (out, added)     = Redaction.redactedWithRanges(input, singleQuotedFromInput = true)
+      val (base, kept)     = Redaction.redactedWithRanges(input, singleQuotedFromInput = true, addedReadings = false)
       withClue(s"input $input, output $out, without $base: ") {
         Redaction.redact(input) shouldBe out
         kept.filterNot(added.contains) shouldBe empty
         added.filterNot(kept.contains).foreach { case (s, e) =>
           kept.exists { case (ks, ke) => ke > s && ks < e } shouldBe false
         }
-        secrets.filterNot(base.contains).filter(all.contains) shouldBe empty
         secrets.filterNot(base.contains).filter(out.contains) shouldBe empty
-        if (parses(base)) {
-          parses(all) shouldBe true
-          parses(out) shouldBe true
-        }
-        ranges.filterNot(added.contains) shouldBe empty
-        val left = added.filterNot(ranges.contains)
-        left.foreach { case (s, e) => input.substring(s, e).forall(",:[]{} \t\r\n".contains(_)) shouldBe true }
-        if (left.nonEmpty) punctuationed += 1
+        if (parses(base)) parses(out) shouldBe true
       }
       closed += secrets.count(s => base.contains(s) && !out.contains(s))
     }
-    // and it is the reading that redacts what the passes left, and the punctuation that is kept
+    // and it is the reading that redacts what the passes left
     closed should be > 300
-    punctuationed should be > 50
   }
 
   it should "read values in escaped quotes in time linear in the input (#1707)" in {
@@ -169,11 +222,7 @@ class RedactionEscapedQuotedValueSpec extends AnyFlatSpec with Matchers {
       "a long run after an open"    -> (n => "password=\\\\\\'" + "\\" * (n * 4)),
       "escaped quotes, one by one"  -> (n => "password=" + "\\'" * n),
       "many keys in one open value" -> (n => "password=\\\\'x" + "&password=\\\\'x" * n),
-      "values in a JSON string"     -> (n => "{\"q\":\"" + "x=1&password=\\\\'p&ss=Q\\\\' " * n + "\"}"),
-      "empty values ending strings" -> (n => "{" + "\"q\":\"a=1&token=\",\"n\":\"x\"," * n + "\"z\":1}"),
-      "nested documents with values" -> (n =>
-        "{\"p\":\"{" + "\\\"q\\\":\\\"a=1&token=\\\",\\\"n\\\":\\\"x\\\"," * n + "\\\"z\\\":1}\"}"
-      )
+      "values in a JSON string"     -> (n => "{\"q\":\"" + "x=1&password=\\\\'p&ss=Q\\\\' " * n + "\"}")
     )
     shapes.foreach { case (name, build) =>
       LinearTime.assertLinear(name, build(2500), build(10000))(Redaction.redact(_))
