@@ -108,7 +108,100 @@ class WorkspaceSandboxConfigSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "refuse a versioned interpreter (python3.12, perl5.36, gdb-12)" in {
-    for (name <- Seq("python3.12", "Python3.12.exe", "perl5.36", "lua5.4", "php8.2", "ruby3.3", "java21", "gdb-12"))
+    for (
+      name <- Seq(
+        "python3.12",
+        "Python3.12.exe",
+        "perl5.36",
+        "lua5.4",
+        "php8.2",
+        "ruby3.3",
+        "java21",
+        "gdb-12",
+        "scala3"
+      )
+    )
+      withClue(name) {
+        WorkspaceSandboxConfig.Permissive.withExtraCommands(name) shouldBe
+          Left(s"'$name' runs other programs, so it cannot be added to the allowlist")
+      }
+  }
+
+  it should "refuse the #1805 shells, interpreter aliases, launchers, loaders, editors and Windows programs, in any " +
+    "case and with a .exe / .com extension" in {
+      for {
+        base <- Refused1805
+        name <- Seq(
+          base,
+          base.toUpperCase,
+          base.capitalize,
+          s"$base.exe",
+          s"${base.toUpperCase}.EXE",
+          s"$base.com",
+          s"${base.capitalize}.Com"
+        )
+      } withClue(name) {
+        WorkspaceSandboxConfig.Permissive.withExtraCommands(s"sbt,$name") shouldBe
+          Left(s"'$name' runs other programs, so it cannot be added to the allowlist")
+      }
+    }
+
+  it should "refuse each #1805 entry as a .cmd / .bat batch file too, which Windows runs through cmd.exe" in {
+    for {
+      base <- Refused1805
+      name <- Seq(s"$base.cmd", s"${base.toUpperCase}.CMD", s"$base.bat")
+    } withClue(name) {
+      WorkspaceSandboxConfig.Permissive.withExtraCommands(name) shouldBe Left(
+        s"'$name' is a Windows batch file, which Windows runs through cmd.exe, so it cannot be added to the allowlist"
+      )
+    }
+  }
+
+  it should "refuse a Unicode look-alike of a refused name, which is not a bare program name" in {
+    // Fullwidth letters, the Kelvin sign (lower-cases to `k`), the long s (upper-cases to `S`), a dotless i, a
+    // combining mark, and a Cyrillic `а`: none is ASCII, so none reaches the denylist comparison at all
+    val lookAlikes = Seq(
+      "\uFF53\uFF45\uFF44", // ｓｅｄ
+      "\u212Ash",           // Kelvin sign + sh: lower-cases to `ksh`
+      "\u212ASH.EXE",
+      "\u017Fed",        // long s + ed: upper-cases to `SED`
+      "pyth\u043En",     // Cyrillic o
+      "nod\u0435",       // Cyrillic e
+      "\u0131rb",        // dotless i: upper-cases to `IRB`
+      "pe\u0301rl",      // combining acute
+      "ba\u0073\u0307h", // s with a combining dot above
+      "\uFF50\uFF59\uFF54\uFF48\uFF4F\uFF4E3"
+    )
+    for (name <- lookAlikes)
+      withClue(name.codePoints().toArray.map(c => f"U+$c%04X").mkString(" ")) {
+        WorkspaceSandboxConfig.Permissive.withExtraCommands(s"sbt,$name") shouldBe
+          Left(s"'$name' is not a bare program name")
+      }
+  }
+
+  it should "refuse every spelling of an interpreter family and the dynamic loader, matched by prefix (#1805)" in {
+    val families = Seq(
+      "python3.7m",
+      "python3-dbg",
+      "python-dbg",
+      "python3.12-config",
+      "PYTHON3.7M.EXE",
+      "pythonw3",
+      "pypy3.10",
+      "PyPy",
+      "jython2.7",
+      "luajit-2.1",
+      "lua54",
+      "LuaJIT.exe",
+      "ld.so",
+      "ld-linux.so.2",
+      "ld-linux-x86-64.so.2",
+      "ld-musl-x86_64.so.1",
+      "ld64.so.1",
+      "LD-LINUX.SO.2",
+      "ld.so.com"
+    )
+    for (name <- families)
       withClue(name) {
         WorkspaceSandboxConfig.Permissive.withExtraCommands(name) shouldBe
           Left(s"'$name' runs other programs, so it cannot be added to the allowlist")
@@ -125,7 +218,28 @@ class WorkspaceSandboxConfigSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "still accept sbt and other build tools that are not on the denylist" in {
-    for (name <- Seq("sbt", "SBT.EXE", "mvn", "gradle", "scala-cli", "cargo", "scala3", "sbt-1.10"))
+    for (
+      name <- Seq(
+        "sbt",
+        "SBT.EXE",
+        "mvn",
+        "gradle",
+        "scala-cli",
+        "cargo",
+        "sbt-1.10",
+        // near the #1805 entries and families, but not them
+        "ldconfig",
+        "ldd",
+        "sedx",
+        "tar",
+        "zip",
+        "unzip",
+        "rsync",
+        "jq",
+        "rg",
+        "pyright"
+      )
+    )
       withClue(name) {
         WorkspaceSandboxConfig.Permissive.withExtraCommands(name).map(_.allowedCommands.contains(name)) shouldBe
           Right(true)
@@ -157,6 +271,94 @@ class WorkspaceSandboxConfigSpec extends AnyFlatSpec with Matchers {
 }
 
 object WorkspaceSandboxConfigSpec {
+
+  // #1805: each runs code with no forbidden character, and none was on the denylist before
+  val Refused1805 = Seq(
+    // shells
+    "ash",
+    "mksh",
+    "yash",
+    "rbash",
+    "elvish",
+    "nu",
+    "xonsh",
+    // interpreter aliases
+    "pypy",
+    "pypy3",
+    "jython",
+    "pyw",
+    "javaw",
+    "jjs",
+    "luajit",
+    "rscript",
+    "r",
+    "julia",
+    "guile",
+    "racket",
+    "swipl",
+    "sbcl",
+    "clisp",
+    "escript",
+    "erl",
+    "iex",
+    "elixir",
+    "ghci",
+    "runghc",
+    "ocaml",
+    "scala",
+    "kotlin",
+    "kotlinc",
+    "groovy",
+    "osascript",
+    "dc",
+    // launchers and loaders
+    "setpriv",
+    "capsh",
+    "prlimit",
+    "numactl",
+    "fakeroot",
+    "proot",
+    "bwrap",
+    "firejail",
+    "gosu",
+    "su-exec",
+    "tini",
+    "unbuffer",
+    "tmux",
+    "screen",
+    "valgrind",
+    "lldb",
+    "perf",
+    "ld.so",
+    // editors and stream editors that run a command, and schedulers
+    "sed",
+    "vi",
+    "vim",
+    "nvim",
+    "ex",
+    "view",
+    "emacs",
+    "at",
+    "batch",
+    "crontab",
+    // Windows programs that run another one
+    "forfiles",
+    "conhost",
+    "explorer",
+    "regsvr32",
+    "msbuild",
+    "wmic",
+    "schtasks",
+    "runas",
+    "msiexec",
+    "pcalua",
+    "bitsadmin",
+    "hh",
+    "installutil",
+    "regasm",
+    "regsvcs",
+    "cmstp"
+  )
 
   // #1761, #1792: interpreters and launchers run arbitrary code with no forbidden character
   // (`python3 -c "__import__('os').system('id')"`), so none of them may be added either

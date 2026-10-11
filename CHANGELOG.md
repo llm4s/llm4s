@@ -2458,6 +2458,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - workspace runner: more programs that run another cannot be added as extra commands, `tar`, `zip`,
+  `rsync`, `scp` and `sftp` refuse their program-running options, and a command's child gets the system directories
+  when no `PATH` entry survives** ([#1805](https://github.com/llm4s/llm4s/issues/1805)):
+  `WORKSPACE_EXTRA_COMMANDS` still accepted names that run code - shells (`ash`, `mksh`, `yash`, `rbash`, `elvish`,
+  `nu`, `xonsh`), interpreter aliases (`pypy`, `jython`, `pyw`, `javaw`, `jjs`, `luajit`, `Rscript`, `R`, `julia`,
+  `guile`, `racket`, `swipl`, `sbcl`, `clisp`, `erl`, `escript`, `iex`, `elixir`, `ghci`, `runghc`, `ocaml`, `scala`,
+  `kotlin`, `groovy`, `osascript`, `dc`), launchers and loaders (`setpriv`, `capsh`, `prlimit`, `numactl`,
+  `fakeroot`, `proot`, `bwrap`, `firejail`, `gosu`, `su-exec`, `tini`, `unbuffer`, `tmux`, `screen`, `valgrind`,
+  `lldb`, `perf`, `ld.so` / `ld-linux*.so*`), `sed` (GNU `e`), editors that run a command (`vi`, `vim`, `nvim`, `ex`,
+  `emacs`), schedulers (`at`, `crontab`) and Windows programs that run another (`forfiles`, `conhost`, `explorer`,
+  `regsvr32`, `msbuild`, `wmic`, `schtasks`, `runas`, `msiexec`, `pcalua`, `bitsadmin`, `hh`, ...).
+  `WorkspaceSandboxConfig.NeverAllowedCommands` now names them, and the `python`, `pypy`, `jython` and `lua` families
+  and the dynamic loader are matched by prefix (`python3.7m`, `python3-dbg`, `ld-linux-x86-64.so.2`). For the archive
+  and copy tools operators commonly add, the runner refuses the options that run a program, as for `sort` and `cp`:
+  `tar --to-command`, `-I` / `--use-compress-program`, `--checkpoint-action`, `-F` / `--info-script` (also in the
+  traditional dashless form, `tar cIf`); `zip -TT` / `--unzip-command`; `rsync -e` / `--rsh` / `--rsync-path`; `scp` /
+  `sftp` `-S`, `-o`, `-F` and sftp's `-D`. The docs name GTFOBins-style option abuse as the reason the list cannot be
+  complete. When no `PATH` entry survives sanitising, a command's process used to get no `PATH`, for which bash and
+  sh search a built-in default ending in `.` - the workspace; it now gets `/usr/bin:/bin` on POSIX and the system and
+  Windows directories on Windows (no `PATH` only when even those lie in the workspace). A child `PATH` entry that
+  does not exist yet is judged through its nearest existing ancestor's links, so one under a link into the
+  workspace is dropped. A Windows-host test now checks that a command's own `CreateProcess` does not search its
+  current directory with `NoDefaultCurrentDirectoryInExePath=1`. The dead `;`-re-quoting branch of
+  `ProgramResolver.childPath` is gone, `taskset` and `chrt` are grouped alike in the code and the docs, and
+  `docs/workspace-agent-protocol.md` lists the command policy's other codes (`EXECUTABLE_PATH_NOT_ALLOWED`,
+  `ARGUMENT_NOT_ALLOWED`, `ENVIRONMENT_NOT_ALLOWED`, ...). **Migration:** a runner started with one of the newly
+  refused names in `WORKSPACE_EXTRA_COMMANDS` (`scala`, `scala3`, `sed`, `pypy3`, ...) now stops at start-up naming
+  it; drop the name, or use a build tool, which is still accepted (`sbt`, `scala-cli`, `mvn`, `gradle`). An added
+  `tar`, `zip`, `rsync`, `scp` or `sftp` refuses the options above with `ARGUMENT_NOT_ALLOWED`.
 - **Security - ShellTool and the workspace runner: on double-byte Windows hosts, a quoted argument holding a character
   whose second byte is 0x5C is refused** ([#1807](https://github.com/llm4s/llm4s/issues/1807)): code pages 932, 936
   and 950 encode some characters with a second byte of 0x5C, the byte of `\` (50, 126 and 126 of the characters they
