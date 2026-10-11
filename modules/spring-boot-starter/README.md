@@ -73,8 +73,9 @@ llm4s.providers.local.headers.X-Team-Id=team-7
   registry; only the generic `openai-compatible` provider reads `context-window` and `reserve-completion` from the
   section. The flat `llm4s.context-window` keeps working for the three flat providers.
 - **Values are plain text.** Spring resolves `${...}` placeholders as it does everywhere; the value is not read as HOCON
-  afterwards, so quotes, `$` and braces stay as written. Environment-variable names such as `LLM4S_PROVIDERS_...` are
-  not read: use properties, YAML or `@TestPropertySource`, and pass a secret with a placeholder
+  afterwards, so quotes, `$` and braces stay as written. An environment variable such as `LLM4S_PROVIDERS_...` cannot add a
+  setting; it only overrides one a property source already declares. Use properties, YAML or `@TestPropertySource`,
+  and pass a secret with a placeholder
   (`api-key: ${MY_KEY}`) or through the vendor's environment variable, which `llm4s.credentials` binds.
 - **Precedence.** Spring's order of property sources applies whatever the spelling: `api-key` on the command line
   overrides `apiKey` in `application.yml`, and the other way round.

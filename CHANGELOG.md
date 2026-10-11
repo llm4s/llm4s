@@ -210,8 +210,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   except for the generic `openai-compatible` provider, which reads `context-window` and `reserve-completion` from the
   section; and with any `llm4s.providers.*` property set the flat `llm4s.model`, `llm4s.api-key`, ... are ignored.
   When two property sources spell one setting differently (`apiKey` in `application.yml`, `api-key` on the command
-  line), the higher-priority source wins, as Spring's precedence says. `LLM4S_PROVIDERS_*` environment variables are
-  not read; secrets come through placeholders or the vendor's variable bound by `llm4s.credentials`.
+  line), the higher-priority source wins, as Spring's precedence says. An `LLM4S_PROVIDERS_*` environment variable
+  cannot add a setting, only override one a property source declares; secrets come through placeholders or the vendor's variable bound by `llm4s.credentials`.
   The Actuator health indicator reports the resolved provider and model and keeps every credential out of its
   messages, including the resolved provider's own key from a non-Spring source (`application.conf`, a vendor's
   environment variable). The flat `llm4s.provider` error for another provider id now names the providers on the classpath and

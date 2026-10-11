@@ -170,7 +170,8 @@ llm4s.providers.local.headers.X-Team-Id=team-7
   `apiKey`, `api-version` is `apiVersion`); section and header names are kept as written.
 - A section with no `api-key` uses the vendor's shared `llm4s.credentials.<provider>.api-key`, then the vendor's
   conventional environment variable (`GOOGLE_API_KEY`, `MISTRAL_API_KEY`, ...).
-- `LLM4S_PROVIDERS_*` environment variables are not read. Pass a secret with a placeholder (`api-key=${MY_KEY}`), or leave
+- An `LLM4S_PROVIDERS_*` environment variable cannot add a setting; it only overrides one already declared in a property
+  source (Spring's relaxed binding). Pass a secret with a placeholder (`api-key=${MY_KEY}`), or leave
   `api-key` out and set the vendor's environment variable, which reaches the section through `llm4s.credentials`.
 - As soon as any `llm4s.providers.*` property is set, the block is used and the flat `llm4s.model`, `llm4s.api-key`, ...
   are ignored. With none, the flat keys are read exactly as before.
