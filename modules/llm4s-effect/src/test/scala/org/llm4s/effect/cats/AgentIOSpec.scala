@@ -3,6 +3,7 @@ package org.llm4s.effect.cats
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.llm4s.agent.AgentStatus
+import org.llm4s.agent.testkit.Fixtures
 import org.llm4s.error.SimpleError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk }

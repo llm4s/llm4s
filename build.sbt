@@ -425,7 +425,7 @@ lazy val media = (project in file("modules/media"))
   )
 
 lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
-  .dependsOn(core, agent)
+  .dependsOn(core, agent, agent % "test->test")
   .settings(
     name := "llm4s-effect",
     commonSettings,
@@ -441,7 +441,7 @@ lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
   )
 
 lazy val llm4sZio = (project in file("modules/llm4s-zio"))
-  .dependsOn(core, agent)
+  .dependsOn(core, agent, agent % "test->test")
   .settings(
     name := "llm4s-zio",
     commonSettings,

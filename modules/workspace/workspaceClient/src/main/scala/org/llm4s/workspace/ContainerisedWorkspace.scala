@@ -29,11 +29,23 @@ import scala.concurrent.duration._
  * - Implementing heartbeats over the same connection
  * - Supporting real-time streaming of command output
  * - Eliminating thread pool blocking during long commands
+ *
+ * Commands run without a shell, and only programs on the runner's allowlist run (#1756): the runner's
+ * `WORKSPACE_SANDBOX_PROFILE` (unset, `permissive`) chooses the list, and `extraAllowedCommands` adds to it.
+ *
+ * @param workspaceDir         the host directory mounted as the container's `/workspace`
+ * @param imageName            the workspace-runner image
+ * @param hostPort             the host port the container's 8080 is published on
+ * @param extraAllowedCommands programs the runner may run besides its profile's allowlist (for example `sbt`),
+ *                             passed to the container as `WORKSPACE_EXTRA_COMMANDS`; each is a bare program name,
+ *                             never a shell or a launcher (see [[WorkspaceSandboxConfig.withExtraCommands]]), and
+ *                             a container is not started with a name the runner would refuse
  */
 class ContainerisedWorkspace(
   val workspaceDir: String,
   val imageName: String,
-  val hostPort: Int
+  val hostPort: Int,
+  val extraAllowedCommands: Set[String] = Set.empty
 ) extends WorkspaceAgentInterface {
   private val logger        = LoggerFactory.getLogger(getClass)
   private val containerName = s"workspace-runner-${java.util.UUID.randomUUID().toString}"
@@ -164,43 +176,39 @@ class ContainerisedWorkspace(
     }
 
     // Run the docker container with the workspace directory mounted
-    val dockerProcess = Try {
-      val pb = new java.lang.ProcessBuilder(
-        "docker",
-        "run",
-        "-d",
-        "--name",
-        containerName,
-        "-p",
-        s"$hostPort:$containerPort",
-        "-v",
-        s"$workspaceDir:/workspace",
-        imageName
+    val dockerProcess = ContainerisedWorkspace
+      .dockerRunArgs(containerName, hostPort, containerPort, workspaceDir, imageName, extraAllowedCommands)
+      .left
+      .map(msg => new IllegalArgumentException(s"extraAllowedCommands: $msg"))
+      .toTry
+      .flatMap(args =>
+        Try {
+          val pb      = new java.lang.ProcessBuilder(args.asJava)
+          val process = pb.start()
+
+          // Capture stdout and stderr while process is running(before waitFor)
+          val stdoutF = Future {
+            Using.resource(new BufferedReader(new InputStreamReader(process.getInputStream))) { reader =>
+              Iterator.continually(reader.readLine()).takeWhile(_ != null).mkString("\n")
+            }
+          }
+
+          val stderrF = Future {
+            Using.resource(new BufferedReader(new InputStreamReader(process.getErrorStream))) { reader =>
+              Iterator.continually(reader.readLine()).takeWhile(_ != null).mkString("\n")
+            }
+          }
+
+          val exitCode = process.waitFor()
+          val stdout   = Await.result(stdoutF, 30.seconds)
+          val stderr   = Await.result(stderrF, 30.seconds)
+
+          if (stdout.nonEmpty) logger.info(s"Docker stdout: $stdout")
+          if (stderr.nonEmpty) logger.warn(s"Docker stderr: $stderr")
+
+          (exitCode, stdout, stderr)
+        }
       )
-      val process = pb.start()
-
-      // Capture stdout and stderr while process is running(before waitFor)
-      val stdoutF = Future {
-        Using.resource(new BufferedReader(new InputStreamReader(process.getInputStream))) { reader =>
-          Iterator.continually(reader.readLine()).takeWhile(_ != null).mkString("\n")
-        }
-      }
-
-      val stderrF = Future {
-        Using.resource(new BufferedReader(new InputStreamReader(process.getErrorStream))) { reader =>
-          Iterator.continually(reader.readLine()).takeWhile(_ != null).mkString("\n")
-        }
-      }
-
-      val exitCode = process.waitFor()
-      val stdout   = Await.result(stdoutF, 30.seconds)
-      val stderr   = Await.result(stderrF, 30.seconds)
-
-      if (stdout.nonEmpty) logger.info(s"Docker stdout: $stdout")
-      if (stderr.nonEmpty) logger.warn(s"Docker stderr: $stderr")
-
-      (exitCode, stdout, stderr)
-    }
 
     dockerProcess match {
       case Success((0, containerId, _)) =>
@@ -537,5 +545,32 @@ class ContainerisedWorkspace(
       e => throw e,
       ok => ok
     )
+  }
+}
+
+object ContainerisedWorkspace {
+
+  /**
+   * The `docker run` command that starts a workspace-runner container.
+   *
+   * @return the argument vector, or why `extraAllowedCommands` holds a name the runner would refuse
+   */
+  private[workspace] def dockerRunArgs(
+    containerName: String,
+    hostPort: Int,
+    containerPort: Int,
+    workspaceDir: String,
+    imageName: String,
+    extraAllowedCommands: Set[String]
+  ): Either[String, Seq[String]] = {
+    val extra = extraAllowedCommands.toSeq.sorted.mkString(",")
+    WorkspaceSandboxConfig.Permissive.withExtraCommands(extra).map { _ =>
+      val extraEnv =
+        if (extra.isEmpty) Seq.empty
+        else Seq("-e", s"${WorkspaceSandboxConfig.ExtraCommandsEnvVar}=$extra")
+      Seq("docker", "run", "-d", "--name", containerName, "-p", s"$hostPort:$containerPort") ++
+        extraEnv ++
+        Seq("-v", s"$workspaceDir:/workspace", imageName)
+    }
   }
 }

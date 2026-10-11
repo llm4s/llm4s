@@ -2,6 +2,7 @@ package org.llm4s.zio
 
 import java.util.concurrent.TimeUnit
 
+import org.llm4s.agent.testkit.Fixtures
 import org.llm4s.error.{ LLMError, SimpleError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{
