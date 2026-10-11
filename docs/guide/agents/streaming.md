@@ -153,9 +153,9 @@ Durable events outlive the run. `GraphRuntime.subscribe(threadId, afterSeq = 0)`
 events from the start, which gives the structure of every run without any content. See
 `EventCollectionExample`.
 
-## fs2 and ZIO
+## fs2, ZIO and Pekko Streams
 
-`llm4s-effect` and `llm4s-zio` expose the same stream as a value:
+`llm4s-effect`, `llm4s-zio` and `llm4s-pekko` expose the same stream as a value:
 
 ```scala
 // cats-effect / fs2: Stream[IO, AgentStreamItem]
@@ -167,12 +167,15 @@ agentIO.stream(threadId, "Explain monads").evalMap {
 
 // ZIO: ZStream[Any, LLMError, AgentStreamItem]
 agentZ.stream(threadId, "Explain monads").runForeach { /* same cases */ }
+
+// Apache Pekko Streams: Source[AgentStreamItem, NotUsed]
+agentPekko.stream(threadId, "Explain monads").runForeach { /* same cases */ }
 ```
 
 `AgentStreamItem` is `Event(StreamEvent)` or `Done(AgentResult)`, one enum per module. The stream
 ends after `Done`; a `Left` from admission or from the run fails the stream with that error.
 A run that ends without a terminal event (a crash) still ends the stream, as soon as the run's last
-event has been delivered, and the stream then fails with the run's error. `streamResume` and `streamRecover` exist on both.
+event has been delivered, and the stream then fails with the run's error. `streamResume` and `streamRecover` exist on all three. A Pekko stream fails with an `LLMException` carrying the error; see [Apache Pekko Integration](../pekko).
 Interrupting the stream or stopping early (`take(n)`, `head`) cancels the turn.
 
 A slow consumer does not: the stream's buffer never holds up the run's subscription. Durable events

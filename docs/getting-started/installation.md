@@ -120,6 +120,22 @@ configurations.all {
 > and the [dependency conflicts reference](/reference/dependency-conflicts).
 
 
+### Scala CLI
+
+No build at all: declare the dependency in the file.
+
+```scala
+//> using scala 3.7.1
+//> using jvm 21
+//> using dep org.llm4s::llm4s-core:{{ site.data.project.latest_release }}
+{%- unless site.data.project.latest_release contains "0.4." %}
+//> using dep org.llm4s::llm4s-openai:{{ site.data.project.latest_release }}
+{%- endunless %}
+```
+
+From 0.5.0, add the provider module you use next to `llm4s-core` (`llm4s-openai` above). The
+[Scala CLI quick start](scala-cli) has a complete file that makes a first call.
+
 ### Multi-Module Project
 
 If you have a multi-module project:
@@ -476,12 +492,13 @@ libraryDependencies += "org.llm4s" %% "llm4s-java-api"             % llm4sVersio
 libraryDependencies += "org.llm4s" %% "llm4s-spring-boot-starter"  % llm4sVersion  // Spring Boot auto-configuration
 libraryDependencies += "org.llm4s" %% "llm4s-effect"               % llm4sVersion  // cats-effect 3 / fs2
 libraryDependencies += "org.llm4s" %% "llm4s-zio"                  % llm4sVersion  // ZIO 2 / ZIO Streams
+libraryDependencies += "org.llm4s" %% "llm4s-pekko"                % llm4sVersion  // Apache Pekko Streams
 ```
 
 `llm4s-java-api` is the Java-friendly facade (a runnable Gradle sample is in
 [`modules/samples/gradle-java`](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java)) and the base of the Spring starter, which adds the
-`llm4s.*` properties, an `LLM4STemplate` and an Actuator health indicator. `llm4s-effect` and
-`llm4s-zio` wrap `LLMClient` and `Agent` for their effect systems. There is also a Kotlin coroutine
+`llm4s.*` properties, an `LLM4STemplate` and an Actuator health indicator. `llm4s-effect`,
+`llm4s-zio` and `llm4s-pekko` wrap `LLMClient` and `Agent` for their effect and streaming systems. There is also a Kotlin coroutine
 API, `modules/kotlin-api`, a separate Gradle build that is not published yet.
 
 ### For image generation and vision

@@ -78,7 +78,8 @@ object ShellResult {
  * On Windows, with or without a path policy, an argument, the working directory and an `environment` value are
  * refused when they hold a character a program reading its command line in an ANSI code page may receive as a
  * different ASCII character ("best fit": `..／..／secret` as `../../secret`, `-ｏ` as `-o`; see `WindowsBestFit`,
- * #1766).
+ * #1766). On a double-byte ANSI host (code pages 932, 936, 950) an argument the JDK puts in quotes is also refused
+ * when it holds a character whose second byte is 0x5C, the byte of `\` (`a 表`, #1807).
  *
  * == Features ==
  *
@@ -289,13 +290,16 @@ object ShellTool {
    * On Windows, a program that reads its command line in an ANSI code page may receive a character as a different
    * ASCII one ("best fit", #1766): `..／..／secret` as `../../secret`, `-ｏ` as `-o`. Every check here reads the
    * arguments as UTF-16, so an argument, the working directory or an environment value holding such a character is
-   * refused, whatever the program and with or without a path policy (see [[WindowsBestFit]]).
+   * refused, whatever the program and with or without a path policy (see [[WindowsBestFit]]). On a double-byte ANSI
+   * host (code pages 932, 936, 950), an argument the JDK puts in quotes is also refused when it holds a character
+   * whose second byte is 0x5C (`\`), which a byte-wise parser reads as escaping the closing quote (#1807).
    */
   private def bestFitRefusal(args: Seq[String], config: ShellConfig, ansiCodePage: Option[Charset]): Option[String] =
     args.iterator
       .flatMap(arg =>
         WindowsBestFit
           .refusal(arg, WindowsBestFit.isOptionLike(arg), ansiCodePage)
+          .orElse(WindowsBestFit.quotedTrailByteRefusal(arg, ansiCodePage))
           .map(why => s"Argument '$arg' is not allowed on Windows: it holds $why")
       )
       .nextOption()
