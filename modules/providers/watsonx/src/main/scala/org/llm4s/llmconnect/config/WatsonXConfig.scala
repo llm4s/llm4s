@@ -18,7 +18,7 @@ import org.llm4s.util.Redaction
  * @param spaceId       Optional watsonx deployment space ID, used in place of the project (never together with it).
  * @param model         Model identifier, e.g. `"ibm/granite-4-h-small"`.
  * @param baseUrl       watsonx.ai ML API base URL, e.g. `"https://us-south.ml.cloud.ibm.com"`.
- * @param apiVersion    watsonx API version date, e.g. `"2024-05-31"`.
+ * @param apiVersion    watsonx API version date sent as the `version` query parameter, e.g. `"2026-09-25"`.
  * @param iamUrl        IBM Cloud IAM token endpoint.
  * @param contextWindow Model's total token capacity (prompt + completion combined).
  * @param reserveCompletion Tokens held back from prompt history for the completion.
@@ -47,9 +47,17 @@ final case class WatsonXConfig(
       s"reserveCompletion=$reserveCompletion, timeouts=$timeouts)"
 
 object WatsonXConfig:
-  val DEFAULT_BASE_URL: String    = "https://us-south.ml.cloud.ibm.com"
-  val DEFAULT_API_VERSION: String = "2024-05-31"
-  val DEFAULT_IAM_URL: String     = "https://iam.cloud.ibm.com/identity/token"
+  val DEFAULT_BASE_URL: String = "https://us-south.ml.cloud.ibm.com"
+
+  /**
+   * The `version` date sent when a section sets no `apiVersion`: the one IBM's Python SDK, `ibm-watsonx-ai`
+   * 1.8.0, sends (its `utils/API_VERSION_PARAM` file). watsonx.ai serves the API as of that date, so a date from
+   * before the chat API and tool calling existed asks for an older API than this client speaks. Override it
+   * with the section's `apiVersion`.
+   */
+  val DEFAULT_API_VERSION: String = "2026-09-25"
+
+  val DEFAULT_IAM_URL: String = "https://iam.cloud.ibm.com/identity/token"
 
   private val DefaultContextWindow     = 8192
   private val DefaultReserveCompletion = 4096

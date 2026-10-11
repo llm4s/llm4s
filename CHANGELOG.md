@@ -1017,9 +1017,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   forge a turn and no stop sequences are sent. `CompletionOptions.tools` are accepted (before, they were rejected
   with a `ValidationError`): they are sent as `tools` with `tool_choice_option: "auto"`, a reply's `tool_calls`
   (whole, or streamed in pieces merged by `index`) become `ToolCall`s, and a `ToolMessage` goes back as a `tool`
-  message with its `tool_call_id`. The IAM token exchange, the `Result` error mapping, redaction and
-  cancellation are unchanged, and so is the configuration (`WatsonXConfig`, the `llm4s.providers.<name>` keys,
-  `apiVersion`). **Not verified against the real service**: there is no watsonx account behind the project, so
+  message with its `tool_call_id`. A stream's `event: error` frame is now IBM's error - its `status_code`
+  mapped as an HTTP status would be, its `code` and `message` redacted into the message - instead of the generic
+  "stream ended without a finish_reason". A call interrupted while it waits for another call's IAM token
+  exchange returns `Left(CancelledError)` with the interrupt flag set, instead of throwing
+  `InterruptedException`. The IAM token exchange, the `Result` error mapping, redaction and
+  cancellation are otherwise unchanged, and so are the configuration keys (`WatsonXConfig`, the
+  `llm4s.providers.<name>` keys, `apiVersion`), but the **default `apiVersion` moves from `2024-05-31`, which
+  predates the chat API and tool calling, to `2026-09-25`**, the `version` IBM's Python SDK (`ibm-watsonx-ai`
+  1.8.0) sends; a section that sets `apiVersion` keeps its own. **Not verified against the real service**: there is no watsonx account behind the project, so
   the wire shapes are those IBM's public pages report, cross-checked against IBM's own open-source clients (the
   pinned sources are in `WatsonXClient`'s Scaladoc); the `@Cloud` probe suite `WatsonXAssumptionProbeSpec`
   re-checks them against a real account. The module stays Beta and #1314 stays open until it has been run. **Migration:** a `stop_reason`

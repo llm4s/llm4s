@@ -1,6 +1,13 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ CancelledError, NetworkError, ServiceError }
+import org.llm4s.error.{
+  AuthenticationError,
+  CancelledError,
+  NetworkError,
+  RateLimitError,
+  ServiceError,
+  ValidationError
+}
 import org.llm4s.llmconnect.model.*
 import org.llm4s.model.ModelRegistryService
 import org.scalatest.funsuite.AnyFunSuite
@@ -438,4 +445,92 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
   test("a stream with no usage at all still succeeds, with no usage reported as zero tokens") {
     val (result, _) = completionOf(Seq("""{"choices":[{"delta":{"content":"Hi"},"finish_reason":"stop"}]}"""))
     result.map(_.content).getOrElse(fail(s"expected success, got $result")) shouldBe "Hi"
+  }
+
+  /** IBM's error body, as an `event: error` frame's `data:` line carries it. */
+  private def ibmError(status: Option[Int], code: String = "model_overloaded", message: String = "try later"): String =
+    val statusField = status.fold("")(s => s""","status_code":$s""")
+    s"""{"errors":[{"code":"$code","message":${ujson
+        .Str(message)
+        .render()},"more_info":"https://cloud.ibm.com/apidocs/watsonx-ai"}],"trace":"t-1"$statusField}"""
+
+  private def errorFrame(data: String): String = s"id: 9\nevent: error\ndata: $data\n\n"
+
+  test("an `event: error` frame is IBM's error, not 'stream ended without a finish_reason'") {
+    val chunks = ListBuffer.empty[StreamedChunk]
+    val text   = sse(Seq(event("par", "not_finished"))) + errorFrame(ibmError(Some(500)))
+    val result = new WatsonXClient(config, httpClient = streaming(streamOf(bytes(text))))
+      .streamComplete(hi, CompletionOptions(), chunks += _)
+    result.left.toOption match
+      case Some(e: ServiceError) =>
+        e.httpStatus shouldBe 500
+        e.provider shouldBe "watsonx"
+        e.message should include("stream error event")
+        e.message should include("model_overloaded")
+        e.message should include("try later")
+        (e.message should not).include("finish_reason")
+      case other => fail(s"expected ServiceError, got $other")
+    chunks.flatMap(_.content).mkString shouldBe "par"
+  }
+
+  test("an error frame's status_code picks the error as an HTTP status would; none is a ServiceError(502)") {
+    val table: Seq[(String, String, org.llm4s.error.LLMError => Boolean)] = Seq(
+      ("401", ibmError(Some(401)), { case _: AuthenticationError => true; case _ => false }),
+      ("403", ibmError(Some(403)), { case _: AuthenticationError => true; case _ => false }),
+      ("429", ibmError(Some(429)), { case _: RateLimitError => true; case _ => false }),
+      ("400", ibmError(Some(400)), { case e: ValidationError => e.message.contains("try later"); case _ => false }),
+      ("503", ibmError(Some(503)), { case e: ServiceError => e.httpStatus == 503; case _ => false }),
+      ("no status", ibmError(None), { case e: ServiceError => e.httpStatus == 502; case _ => false }),
+      ("2xx status", ibmError(Some(200)), { case e: ServiceError => e.httpStatus == 502; case _ => false }),
+      (
+        "not JSON",
+        "upstream exploded",
+        { case e: ServiceError => e.httpStatus == 502 && e.message.contains("upstream exploded"); case _ => false }
+      )
+    )
+    table.foreach { case (name, data, check) =>
+      val error = run(bytes(errorFrame(data)))._1.left.toOption.getOrElse(fail(s"$name: expected Left"))
+      withClue(s"$name -> $error: ")(check(error) shouldBe true)
+    }
+  }
+
+  test("an error frame with no data line, before a blank line or at the end of the stream, is still an error") {
+    Seq("event: error\n\n", "event: error\n", "event: error").foreach { text =>
+      run(bytes(sse(Seq(event("par", "not_finished"))) + text))._1.left.toOption match
+        case Some(e: ServiceError) =>
+          withClue(text)(e.message should include("stream error event with no data"))
+        case other => fail(s"expected ServiceError for '$text', got $other")
+    }
+  }
+
+  test("nothing after an error frame is read: a later normal finish does not turn it into a success") {
+    val text        = errorFrame(ibmError(Some(500))) + sse(Seq(event("late", "stop")))
+    val (result, _) = run(bytes(text))
+    result.left.toOption.exists(_.isInstanceOf[ServiceError]) shouldBe true
+  }
+
+  test("an error frame's message never carries the API key or the bearer token") {
+    val leaky = ibmError(Some(500), message = s"bad key ${WatsonXTestConfig.ApiKey} with token tok-1")
+    val error = run(bytes(errorFrame(leaky)))._1.left.toOption.getOrElse(fail("expected Left"))
+    (error.message should not).include(WatsonXTestConfig.ApiKey)
+    (error.message should not).include("tok-1")
+    error.message should include("[REDACTED]")
+  }
+
+  test("an `event: error` frame for a 401 forgets the bearer token, so the next call exchanges again") {
+    val calls = new java.util.concurrent.atomic.AtomicInteger(0)
+    val http = new StubHttp(
+      _ => Right(iamToken()),
+      _ =>
+        if calls.getAndIncrement() == 0 then
+          Right(org.llm4s.http.StreamingHttpResponse(200, bytes(errorFrame(ibmError(Some(401))))))
+        else Right(org.llm4s.http.StreamingHttpResponse(200, bytes(sample)))
+    )
+    val c = new WatsonXClient(config, httpClient = http)
+    c.streamComplete(hi, CompletionOptions(), _ => ())
+      .left
+      .toOption
+      .exists(_.isInstanceOf[AuthenticationError]) shouldBe true
+    c.streamComplete(hi, CompletionOptions(), _ => ()).isRight shouldBe true
+    http.iamRequests.size shouldBe 2
   }

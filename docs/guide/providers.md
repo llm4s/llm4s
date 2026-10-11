@@ -448,6 +448,7 @@ llm4s.providers.watsonx-main {
   model     = "ibm/granite-4-h-small"          # any chat model your watsonx.ai region serves
   projectId = ${?WATSONX_PROJECT_ID}          # or spaceId for a deployment space
   # baseUrl = "https://eu-de.ml.cloud.ibm.com" # default https://us-south.ml.cloud.ibm.com
+  # apiVersion = "2026-09-25"                  # the `version` query parameter; default as shown
 }
 ```
 
@@ -471,6 +472,12 @@ Behaviour to know about:
   `error`, `cancelled` or `time_limit`, returns `Left(ServiceError)` naming the reason, not the
   partial text (chunks already passed to `onChunk` were delivered). `stop`, `length`, `tool_calls`
   and unknown reasons are normal stops. `complete` applies the same rule to `choices[0].finish_reason`.
+- **Stream error events.** An `event: error` frame ends the stream with the error IBM sends in its `data:`
+  line: its `status_code` picks the error as an HTTP status would (`AuthenticationError` for 401 and 403,
+  `RateLimitError` for 429, `ValidationError` for 400, `ServiceError` otherwise, and `ServiceError(502)`
+  without one), and the message is IBM's error `code` and `message`, with the API key and bearer token removed.
+- **API version.** Every request carries `version=<apiVersion>`. The default, `2026-09-25`, is the date
+  IBM's Python SDK (`ibm-watsonx-ai` 1.8.0) sends; set `apiVersion` in the section to pin another.
 - **URLs and ids.** `baseUrl` and `iamUrl` must be `https` (plain `http` only for `localhost`,
   `127.0.0.1` and `::1`), because the IAM request carries the API key. The API key is trimmed. Set
   `projectId` or `spaceId`, not both.

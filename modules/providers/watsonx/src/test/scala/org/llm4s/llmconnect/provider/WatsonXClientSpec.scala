@@ -19,7 +19,7 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
     spaceId = None,
     model = "ibm/granite-13b-instruct-v2",
     baseUrl = "https://wx.example.com",
-    apiVersion = "2024-05-31",
+    apiVersion = "2026-09-25",
     iamUrl = "https://iam.example.com/identity/token",
     contextWindow = 8192,
     reserveCompletion = 1024
@@ -47,7 +47,7 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
     completion.id shouldBe "g-1"
     completion.usage.map(u => (u.promptTokens, u.completionTokens, u.totalTokens)) shouldBe Some((7, 2, 9))
 
-    http.lastUrl shouldBe Some("https://wx.example.com/ml/v1/text/chat?version=2024-05-31")
+    http.lastUrl shouldBe Some("https://wx.example.com/ml/v1/text/chat?version=2026-09-25")
     http.lastHeaders.flatMap(_.get("Authorization")) shouldBe Some("Bearer tok-1")
     http.postCallCount shouldBe 2
   }
@@ -161,7 +161,7 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
       .streamComplete(hi, CompletionOptions(), chunks += _)
       .getOrElse(fail("expected a completion"))
 
-    http.lastUrl shouldBe Some("https://wx.example.com/ml/v1/text/chat_stream?version=2024-05-31")
+    http.lastUrl shouldBe Some("https://wx.example.com/ml/v1/text/chat_stream?version=2026-09-25")
     chunks.flatMap(_.content).mkString shouldBe "Hello"
     chunks.map(_.finishReason) shouldBe Seq(None, None, Some("stop"))
     completion.content shouldBe "Hello"
@@ -185,4 +185,19 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
     val c = client(new MockHttpClient(iam))
     c.getContextWindow() shouldBe 8192
     c.getReserveCompletion() shouldBe 1024
+  }
+
+  test("the version query parameter is IBM's current SDK date by default, and a configured apiVersion overrides it") {
+    WatsonXConfig.DEFAULT_API_VERSION shouldBe "2026-09-25"
+    val defaulted = WatsonXConfig
+      .fromValues(config.model, config.apiKey, Some(config.projectId), None, config.baseUrl)(using
+        org.llm4s.llmconnect.config.ContextWindowResolver(summon[ModelRegistryService])
+      )
+      .getOrElse(fail("expected a config"))
+    Seq(defaulted -> "2026-09-25", config.copy(apiVersion = "2025-01-01") -> "2025-01-01").foreach {
+      case (cfg, version) =>
+        val http = new MockHttpClient(Seq(iam, generation))
+        client(http, cfg).complete(hi, CompletionOptions()).isRight shouldBe true
+        http.lastUrl shouldBe Some(s"https://wx.example.com/ml/v1/text/chat?version=$version")
+    }
   }

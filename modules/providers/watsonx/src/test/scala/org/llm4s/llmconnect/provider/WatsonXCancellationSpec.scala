@@ -33,7 +33,7 @@ class WatsonXCancellationSpec extends AnyFunSuite with Matchers:
       spaceId = None,
       model = "m",
       baseUrl = baseUrl,
-      apiVersion = "2024-05-31",
+      apiVersion = "2026-09-25",
       iamUrl = s"$baseUrl/iam",
       contextWindow = 4096,
       reserveCompletion = 512

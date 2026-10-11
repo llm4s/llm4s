@@ -98,7 +98,7 @@ class WatsonXRegressionSpec extends AnyFunSuite with Matchers:
         .getOrElse(fail(s"config for '$base' should be valid"))
       val http = routed(_ => Right(iamToken()), _ => Right(chatReply))
       new WatsonXClient(cfg, httpClient = http).complete(hi, CompletionOptions())
-      http.modelRequests.map(_.url) shouldBe Seq("https://wx.example.com/ml/v1/text/chat?version=2024-05-31")
+      http.modelRequests.map(_.url) shouldBe Seq("https://wx.example.com/ml/v1/text/chat?version=2026-09-25")
     }
   }
 

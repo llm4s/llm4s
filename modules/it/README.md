@@ -146,6 +146,7 @@ export WATSONX_API_KEY=...        # IBM Cloud API key
 export WATSONX_PROJECT_ID=...     # or WATSONX_SPACE_ID
 export WATSONX_BASE_URL=https://eu-de.ml.cloud.ibm.com   # optional; default https://us-south.ml.cloud.ibm.com
 export WATSONX_MODEL=ibm/granite-4-h-small               # optional; must support tool calling
+export WATSONX_API_VERSION=2026-09-25                     # optional; the client's default
 sbt "it/testOnly org.llm4s.llmconnect.smoke.WatsonXAssumptionProbeSpec"
 ```
 

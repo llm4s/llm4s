@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ AuthenticationError, ProcessingError, ServiceError, ValidationError }
+import org.llm4s.error.{ AuthenticationError, CancelledError, LLMError, ProcessingError, ServiceError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.config.WatsonXConfig
@@ -9,7 +9,7 @@ import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
-import org.llm4s.util.Redaction
+import org.llm4s.util.{ BoundedJson, Redaction }
 
 import java.io.{ BufferedReader, InputStreamReader }
 import java.net.URLEncoder
@@ -37,7 +37,8 @@ import scala.util.{ Try, Using }
  * evidence the service accepts it, but it is not a live check. The sources, pinned:
  *  - `NODE`: https://github.com/IBM/watsonx-ai-node-sdk at 47a4a0c (2026-08-05), IBM's Node.js SDK;
  *  - `LCIBM`: https://github.com/langchain-ai/langchain-ibm at 6c32b1d (2026-10-05), IBM's LangChain integration,
- *    `libs/ibm/langchain_ibm/chat_models.py`.
+ *    `libs/ibm/langchain_ibm/chat_models.py`;
+ *  - `PY`: IBM's Python SDK, `ibm-watsonx-ai` 1.8.0 on PyPI.
  *
  * The `@Cloud` suite `WatsonXAssumptionProbeSpec` (modules/it) re-checks each of these against a real account and
  * prints which held.
@@ -52,7 +53,8 @@ import scala.util.{ Try, Using }
  * The conversation is sent as structured `messages` with roles (`system`, `user`, `assistant`, `tool`), so
  * content is data and cannot forge a turn: there is no prompt string with role markers, and no stop
  * sequences standing in for them. The model goes in `model_id`, the project or space in `project_id` or
- * `space_id`, and the API version in the `version` query parameter (`WatsonXConfig.apiVersion`).
+ * `space_id`, and the API version in the `version` query parameter (`WatsonXConfig.apiVersion`, by default the date PY sends:
+ * [[org.llm4s.llmconnect.config.WatsonXConfig.DEFAULT_API_VERSION]]).
  * `temperature` is always sent, `max_tokens` when set (SDK-evidenced: NODE types/vml_v1.ts:790-797, a deprecated
  * alias of `max_completion_tokens`), and `top_p` when not 1.0.
  *
@@ -80,6 +82,12 @@ import scala.util.{ Try, Using }
  * so far is not returned as a success. Every other reason (`stop`, `length`, `tool_calls`, unknown values) is
  * a normal stop. `complete` applies the same rule to `choices[0].finish_reason` (a missing one is fine). The
  * usage arrives in a final chunk that may have no choices (SDK-evidenced: LCIBM chat_models.py:379-383). Streamed tool calls are reported once, whole, after the last delta, never as fragments.
+ *
+ * An `event: error` frame ends the stream with IBM's error: its `data:` line holds IBM's error JSON, whose
+ * `status_code` picks the `LLMError` as an HTTP status would (401/403 `AuthenticationError`, 429
+ * `RateLimitError`, 400 `ValidationError`, otherwise `ServiceError`; none is `ServiceError(502)`) and whose
+ * first `errors` entry's `code` and `message`, redacted, are the message (SDK-evidenced: PY
+ * `foundation_models/inference/fm_model_inference.py:683-689` raises on that frame).
  *
  * == Timeouts ==
  *
@@ -125,17 +133,27 @@ class WatsonXClient(
   private def freshCached(): Option[String] =
     tokenCache.get().filter(token => nowSeconds() < token.expiresAt - TOKEN_REFRESH_BUFFER_SECONDS).map(_.value)
 
-  /** The cached IAM token, or a fresh one when none is cached or it expires within the buffer. */
+  /**
+   * The cached IAM token, or a fresh one when none is cached or it expires within the buffer.
+   *
+   * A thread interrupted while it waits for another thread's exchange (or that arrives already interrupted)
+   * gets `Left(CancelledError)` with its interrupt flag set again, never a thrown `InterruptedException`.
+   */
   private[provider] def bearerToken(): Result[String] =
     freshCached() match {
       case Some(token) => Right(token)
       case None =>
-        tokenLock.lockInterruptibly()
-        Using.resource(new AutoCloseable { def close(): Unit = tokenLock.unlock() }) { _ =>
-          freshCached() match {
-            case Some(token) => Right(token)
-            case None        => fetchToken()
-          }
+        CancelledError.catchInterrupt(tokenLock.lockInterruptibly()) match {
+          case Left(interrupted) =>
+            Thread.currentThread().interrupt()
+            Left(CancelledError(s"$providerName.iam-token", Some(interrupted)))
+          case Right(()) =>
+            Using.resource(new AutoCloseable { def close(): Unit = tokenLock.unlock() }) { _ =>
+              freshCached() match {
+                case Some(token) => Right(token)
+                case None        => fetchToken()
+              }
+            }
         }
     }
 
@@ -225,7 +243,7 @@ class WatsonXClient(
         .postStream(url, apiHeaders(token, "text/event-stream"), requestText, streamTimeout)
         .flatMap { response =>
           if (response.statusCode >= 200 && response.statusCode < 300)
-            readStream(response.body, url, raw, onChunk)
+            readStream(response.body, url, raw, token, onChunk)
           else {
             val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
             raw.append(err)
@@ -242,6 +260,7 @@ class WatsonXClient(
     in: java.io.InputStream,
     url: String,
     raw: StringBuilder,
+    token: String,
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
     val accumulator                   = StreamingAccumulator.create()
@@ -249,6 +268,9 @@ class WatsonXClient(
     var promptTokens, generatedTokens = 0
     var terminal: Option[String]      = None
     var responseId                    = ""
+    // The `event:` field of the SSE event being read; a blank line ends the event and resets it.
+    var eventType                     = ""
+    var streamError: Option[LLMError] = None
 
     def emit(chunk: StreamedChunk): Unit = {
       accumulator.addChunk(chunk)
@@ -273,10 +295,20 @@ class WatsonXClient(
       }
 
     val read = Using(new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) { reader =>
-      Iterator.continually(reader.readLine()).takeWhile(_ != null).foreach { line =>
+      // reading stops at an error event: IBM's SDK raises on it, nothing after it belongs to this reply
+      Iterator.continually(reader.readLine()).takeWhile(line => line != null && streamError.isEmpty).foreach { line =>
         raw.append(line).append('\n')
         val trimmed = line.trim
-        if (trimmed.startsWith("data:")) {
+        if (trimmed.isEmpty) {
+          if (eventType == "error") streamError = Some(streamErrorEvent(None, token))
+          eventType = ""
+        } else if (trimmed.startsWith("event:")) {
+          eventType = trimmed.drop("event:".length).trim
+        } else if (trimmed.startsWith("data:") && eventType == "error") {
+          // SDK-evidenced: an `event: error` line is followed by a `data:` line holding IBM's error
+          // (PY foundation_models/inference/fm_model_inference.py:683-689).
+          streamError = Some(streamErrorEvent(Some(trimmed.drop("data:".length).trim), token))
+        } else if (trimmed.startsWith("data:")) {
           val data = trimmed.drop("data:".length).trim
           if (data.nonEmpty && data != "[DONE]") {
             ujson.read(data).objOpt.foreach { chunk =>
@@ -306,8 +338,13 @@ class WatsonXClient(
       }
     }.toEither.left.map(HttpFailures.streamReadError(_, url, streamTimeout))
 
+    // an `event: error` the stream ended on before its data line is still an error
+    val errorEvent =
+      streamError.orElse(Option.when(eventType == "error")(streamErrorEvent(None, token)))
+
     val idPrefix = callIdPrefix()
     read
+      .flatMap(_ => errorEvent.toLeft(()))
       .flatMap(_ => checkStreamEnding(terminal))
       .flatMap { reason =>
         finishToolCalls(calls.toSeq.sortBy(_._1).map(_._2), idPrefix).map { toolCalls =>
@@ -325,6 +362,40 @@ class WatsonXClient(
           .withToolCalls(c.message.toolCalls.toList)
           .withEstimatedCost(c.usage.flatMap(estimateCost))
       }
+  }
+
+  /**
+   * The error an `event: error` frame reports, from its `data:` JSON (`None` when the frame had no data line).
+   *
+   * IBM's error body is `{"errors":[{"code","message","more_info"}],"trace","status_code"}`. A `status_code`
+   * outside 2xx is mapped as an HTTP response with that status would be ([[HttpErrorMapper]]: 401/403
+   * `AuthenticationError`, 429 `RateLimitError`, 400 `ValidationError`, else `ServiceError`); without one it is
+   * a `ServiceError(502)`. The message carries IBM's `code` and `message`, with the API key and bearer token
+   * removed and the rest redacted and truncated; a body that is not JSON is quoted the same way. A 401 forgets
+   * the bearer token, as an HTTP 401 does.
+   */
+  private def streamErrorEvent(data: Option[String], token: String): LLMError = {
+    val prefix = "stream error event"
+    val parsed = data.flatMap(d => BoundedJson.read(d).toOption).flatMap(_.objOpt)
+    val status = parsed.flatMap(_.get("status_code")).flatMap(_.numOpt).map(_.toInt).filterNot(s => s >= 200 && s < 300)
+    val first  = parsed.flatMap(_.get("errors")).flatMap(_.arrOpt).flatMap(_.headOption).flatMap(_.objOpt)
+    val code   = first.flatMap(_.get("code")).flatMap(_.strOpt).filter(_.nonEmpty)
+    val text   = first.flatMap(_.get("message")).flatMap(_.strOpt).filter(_.nonEmpty)
+    val detail = (code, text, data.filter(_.nonEmpty)) match {
+      case (None, None, None)       => s"$prefix with no data"
+      case (None, None, Some(body)) => s"$prefix: $body"
+      case _                        => s"$prefix: ${Seq(code, text).flatten.mkString(": ")}"
+    }
+    val safe = Redaction.safeBody(scrub(detail, token), 512)
+    status.foreach(noteStatus(_, token))
+    status match {
+      case Some(s) =>
+        HttpErrorMapper
+          .mapHttpError(s, ujson.Obj("message" -> safe).render(), providerName)
+          .left
+          .getOrElse(ServiceError(s, providerName, safe))
+      case None => ServiceError(502, providerName, safe)
+    }
   }
 
   /** The stream's closing finish reason; a stream with none, or an abnormal one, is a failure. */

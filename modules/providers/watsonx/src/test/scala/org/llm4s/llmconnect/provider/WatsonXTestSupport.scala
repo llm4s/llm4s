@@ -130,7 +130,7 @@ object WatsonXTestConfig {
     spaceId = None,
     model = "ibm/granite-13b-instruct-v2",
     baseUrl = "https://wx.example.com",
-    apiVersion = "2024-05-31",
+    apiVersion = "2026-09-25",
     iamUrl = StubHttp.IamUrl,
     contextWindow = 8192,
     reserveCompletion = 1024

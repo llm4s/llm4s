@@ -39,6 +39,7 @@ import scala.util.{ Try, Using }
  * export WATSONX_PROJECT_ID=...       # or WATSONX_SPACE_ID
  * export WATSONX_BASE_URL=https://eu-de.ml.cloud.ibm.com   # optional; default us-south
  * export WATSONX_MODEL=ibm/granite-4-h-small               # optional; must support tool calling
+ * export WATSONX_API_VERSION=2026-09-25                     # optional; default WatsonXConfig.DEFAULT_API_VERSION
  * sbt "it/testOnly org.llm4s.llmconnect.smoke.WatsonXAssumptionProbeSpec"
  * }}}
  *
@@ -61,6 +62,8 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
   private val baseUrl   = env("WATSONX_BASE_URL").getOrElse(WatsonXConfig.DEFAULT_BASE_URL)
   // The model IBM's own tool-calling example uses (watsonx-ai-node-sdk, examples/src/sdk/example_chat_tools.ts).
   private val model = env("WATSONX_MODEL").getOrElse("ibm/granite-4-h-small")
+  // The `version` query parameter; the client's default unless a run pins another to compare.
+  private val apiVersion = env("WATSONX_API_VERSION").getOrElse(WatsonXConfig.DEFAULT_API_VERSION)
 
   private val PlainCompletion     = "plain completion returns text and token usage"
   private val Roles               = "system and user messages are accepted in `messages`"
@@ -77,7 +80,7 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
   private val BadRequest          = "a malformed request is a 400 that the client reports as a ValidationError"
 
   private val report = new ProbeReport(
-    s"watsonx ($model)",
+    s"watsonx ($model, version=$apiVersion)",
     Seq(
       PlainCompletion,
       Roles,
@@ -108,7 +111,14 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
 
   private def config(key: String): WatsonXConfig =
     WatsonXConfig
-      .fromValues(modelName = model, apiKey = key, projectId = projectId, spaceId = spaceId, baseUrl = baseUrl)
+      .fromValues(
+        modelName = model,
+        apiKey = key,
+        projectId = projectId,
+        spaceId = spaceId,
+        baseUrl = baseUrl,
+        apiVersion = apiVersion
+      )
       .value
 
   private def withClient[A](key: String = apiKey.getOrElse(""))(f: WatsonXClient => A): A =

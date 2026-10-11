@@ -134,3 +134,55 @@ class WatsonXTokenSpec extends AnyFunSuite with Matchers:
     result.toOption.flatMap(_.left.toOption).exists(_.isInstanceOf[CancelledError]) shouldBe true
     http.requests shouldBe empty
   }
+
+  test("bearerToken on an interrupted thread is Left(CancelledError), keeps the flag set and sends nothing") {
+    val http = okStub()
+    val c    = new WatsonXClient(config, httpClient = http)
+    Thread.currentThread().interrupt()
+    val result      = Try(c.bearerToken())
+    val stillMarked = Thread.interrupted()
+    result.isSuccess shouldBe true // no InterruptedException escapes
+    result.toOption.flatMap(_.left.toOption).exists(_.isInstanceOf[CancelledError]) shouldBe true
+    stillMarked shouldBe true
+    http.requests shouldBe empty
+  }
+
+  test("a caller interrupted while another call's IAM exchange holds the lock gets Left(CancelledError)") {
+    import java.util.concurrent.{ CountDownLatch, TimeUnit }
+    import java.util.concurrent.atomic.AtomicReference
+    val exchangeStarted = new CountDownLatch(1)
+    val release         = new CountDownLatch(1)
+    val http = routed(
+      _ =>
+        exchangeStarted.countDown()
+        release.await(10, TimeUnit.SECONDS): Unit
+        Right(iamToken())
+      ,
+      _ => Right(chatReply)
+    )
+    val c         = new WatsonXClient(config, httpClient = http)
+    val holderOut = new AtomicReference[Option[Either[org.llm4s.error.LLMError, String]]](None)
+    val holder    = new Thread(() => holderOut.set(Some(c.bearerToken())))
+    holder.start()
+    exchangeStarted.await(10, TimeUnit.SECONDS) shouldBe true
+
+    val waiterOut  = new AtomicReference[Option[Try[Either[org.llm4s.error.LLMError, String]]]](None)
+    val waiterFlag = new AtomicReference[Option[Boolean]](None)
+    val waiter = new Thread(() =>
+      waiterOut.set(Some(Try(c.bearerToken())))
+      waiterFlag.set(Some(Thread.currentThread().isInterrupted))
+    )
+    waiter.start()
+    // wait until the waiter is parked on the lock, then interrupt it
+    val deadline = System.nanoTime() + 10_000_000_000L
+    while waiter.getState != Thread.State.WAITING && System.nanoTime() < deadline do Thread.onSpinWait()
+    waiter.interrupt()
+    waiter.join(10_000)
+    release.countDown()
+    holder.join(10_000)
+
+    waiterOut.get().flatMap(_.toOption).flatMap(_.left.toOption).exists(_.isInstanceOf[CancelledError]) shouldBe true
+    waiterFlag.get() shouldBe Some(true)
+    holderOut.get() shouldBe Some(Right("tok-1"))
+    iamCount(http) shouldBe 1
+  }
