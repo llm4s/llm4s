@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MeterRegistry`, say) was `private[llm4s]` for the Spring Boot starter, yet public in the bytecode, so Java callers
   saw it and Scala callers outside `org.llm4s` could not use it. It is now public and documented
   ([Using LLM4S from Java](docs/guide/java.md#recording-metrics)), settled before the `llm4s-java-api` MiMa baseline.
+- **CI runs in a GitHub merge queue** ([#1638](https://github.com/llm4s/llm4s/issues/1638)): `ci.yml`, `dco.yml` and
+  `secret-scan.yml`, the workflows behind `main`'s required checks (`All Tests Pass`, `Check DCO sign-off`, `TruffleHog
+  Secret Scan`), also trigger on `merge_group`, so a maintainer can enable a merge queue that tests each pull request
+  on top of current `main` before it lands. That closes the merge skew that turned `main` red when two independently
+  green pull requests landed together (#1386 with #1417, #1741 with #1585). On a merge group the DCO job reports
+  without re-running `dco-check` (the pull request already passed it to be queued), and the secret scan scans the
+  group's own range. `scripts/test-merge-queue-workflows.sh`, in Quick Checks, keeps it so. Enabling the queue is a
+  repository setting: [docs/reference/merge-queue.md](docs/reference/merge-queue.md). Nothing changes until it is enabled.
 - **A build-only dry run for the docs deploy** ([#1152](https://github.com/llm4s/llm4s/issues/1152)): `pages.yml`
   takes `-f dry_run=true`, which runs every build step (tag validation and checkout, version, aggregate Scaladoc and its
   package check, Jekyll, the Pages artifact) and skips the deploy, in a concurrency group of its own so it never
