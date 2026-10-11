@@ -7,11 +7,10 @@ import org.scalatest.matchers.should.Matchers
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration._
-import scala.concurrent.{ Await, Future }
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.jdk.CollectionConverters._
-import scala.util.Using
+import scala.util.{ Try, Using }
 
 class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org.scalatest.BeforeAndAfterAll {
 
@@ -24,6 +23,38 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
   /** Creates a fresh interface with the given sandbox config for isolation. */
   private def newInterface(config: WorkspaceSandboxConfig) =
     new WorkspaceAgentInterfaceImpl(workspacePath, isWindowsHost, Some(config))
+
+  // #1728: the command's standard input is the null device, so a program that reads it gets end-of-file at once.
+  // Before the fix stdin was an open pipe nobody wrote to or closed, and each of these ran until the timeout, which
+  // `executeCommand` reports as a TIMEOUT failure. That failure is the signal, so there is no wall-clock bound here
+  // to trip on a slow runner.
+  private val stdinTimeout = 30.seconds
+
+  private def runReadingStdin(command: String): ExecuteCommandResponse = {
+    val stdinInterface = newInterface(WorkspaceSandboxConfig(defaultCommandTimeout = stdinTimeout))
+    try stdinInterface.executeCommand(command)
+    catch {
+      case e: WorkspaceAgentException =>
+        fail(s"'$command' failed with ${e.code}: ${e.error}")
+    }
+  }
+
+  /**
+   * A regex test asserts what the search or replace did, which tells whether the dangerous regex ran. A regression
+   * that does run it unbounded would hang instead, so the body runs on its own daemon thread and fails after a
+   * generous backstop rather than blocking the suite. The backstop is not the assertion: a healthy run takes well
+   * under a second, and catastrophic backtracking on these inputs takes hours.
+   */
+  private val regexBackstop = 60.seconds
+
+  private def withinBackstop[A](what: String)(body: => A): A = {
+    val outcome = new AtomicReference[Try[A]]()
+    val thread  = new Thread(() => outcome.set(Try(body)), s"regex-backstop: $what")
+    thread.setDaemon(true)
+    thread.start()
+    thread.join(regexBackstop.toMillis)
+    Option(outcome.get()).getOrElse(fail(s"$what did not return within the $regexBackstop backstop")).get
+  }
 
   // Create some test files
   val testFile1 = tempDir.resolve("test1.txt")
@@ -150,12 +181,14 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
     response.matches.exists(_.path == "redos-alt-search.txt") shouldBe true
   }
 
-  it should "complete blocklisted regex search within bounded time" in {
-    // ((a+)+)+b is rejected by the shape blocklist, so the search degrades to a
-    // literal substring match and never runs the dangerous regex.
-    interface.writeFile("redos-time.txt", "a" * 28 + "X")
+  it should "search a blocklisted regex as a literal, never running the regex" in {
+    // ((a+)+)+b is rejected by the shape blocklist, so the search degrades to a literal substring match and never
+    // runs the dangerous regex. Line 1 tells the two paths apart: the regex matches "aaab", the literal does not.
+    // Line 2 is what would make the regex hang without the step budget. Only line 3 holds the literal text.
+    WorkspaceRegexSafetyManager.safeCompile("((a+)+)+b").isLeft shouldBe true
+    interface.writeFile("redos-time.txt", Seq("aaab", "a" * 28 + "X", "literal ((a+)+)+b here").mkString("\n"))
 
-    val eventual = Future {
+    val response = withinBackstop("blocklisted regex search") {
       interface.searchFiles(
         paths = List("redos-time.txt"),
         query = "((a+)+)+b",
@@ -163,20 +196,18 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
         recursive = Some(false)
       )
     }
-
-    val response = Await.result(eventual, 2.seconds)
-    response.matches shouldBe empty
+    response.matches.map(_.line) shouldBe List(3)
   }
 
   it should "bound regex search for catastrophic patterns the blocklist misses" in {
-    // (.*a){25}b is genuinely catastrophic in the JDK engine but slips past the
-    // shape blocklist (the group is quantified with {25}, not +/*), so it
-    // compiles as a real regex. The per-line step budget must abort the
-    // catastrophic match rather than hang. Without the bound this search never
-    // returns and the Await below would time out.
-    interface.writeFile("redos-brace-search.txt", "a" * 40)
+    // (.*a){25}b is genuinely catastrophic in the JDK engine but slips past the shape blocklist (the group is
+    // quantified with {25}, not +/*), so it compiles as a real regex. The per-line step budget must abort the match
+    // and fall back to a literal match for that line. The regex never matches this line (no 'a' is followed by 'b'),
+    // the literal does, so a match proves the budget aborted it; without the budget the search never returns.
+    WorkspaceRegexSafetyManager.safeCompile("(.*a){25}b").isRight shouldBe true
+    interface.writeFile("redos-brace-search.txt", "a" * 40 + " (.*a){25}b")
 
-    val eventual = Future {
+    val response = withinBackstop("catastrophic regex search") {
       interface.searchFiles(
         paths = List("redos-brace-search.txt"),
         query = "(.*a){25}b",
@@ -184,13 +215,13 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
         recursive = Some(false)
       )
     }
-
-    val response = Await.result(eventual, 10.seconds)
-    response.matches shouldBe empty
+    response.matches.map(_.line) shouldBe List(1)
   }
 
   it should "bound regexReplace for catastrophic patterns the blocklist misses" in {
-    interface.writeFile("redos-brace-replace.txt", "a" * 40)
+    // As above: the regex never matches this line, so a replacement proves the step budget aborted it and the
+    // literal fallback ran.
+    interface.writeFile("redos-brace-replace.txt", "a" * 40 + " (.*a){25}b")
 
     val op = RegexReplaceOperation(
       pattern = "(.*a){25}b",
@@ -198,9 +229,9 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
       flags = Some("g")
     )
 
-    val eventual = Future(interface.modifyFile("redos-brace-replace.txt", List(op)))
-    val result   = Await.result(eventual, 10.seconds)
+    val result = withinBackstop("catastrophic regexReplace")(interface.modifyFile("redos-brace-replace.txt", List(op)))
     result.success shouldBe true
+    interface.readFile("redos-brace-replace.txt").content.trim shouldBe "a" * 40 + " SAFE"
   }
 
   it should "fallback to literal replacement for unsafe regexReplace operations" in {
@@ -381,6 +412,55 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
       ex.code shouldBe "TIMEOUT"
       ex.error should include("timed out")
     }
+  }
+
+  it should "give a command with no operands end-of-file on stdin instead of hanging (cat)" in {
+    assume(!isWindowsHost, "POSIX cat")
+    val response = runReadingStdin("cat")
+    response.exitCode shouldBe 0
+    response.stdout shouldBe empty
+  }
+
+  it should "give `cat -` end-of-file on stdin instead of hanging" in {
+    assume(!isWindowsHost, "POSIX cat")
+    val response = runReadingStdin("cat -")
+    response.exitCode shouldBe 0
+    response.stdout shouldBe empty
+  }
+
+  it should "give sort, uniq and head with no file end-of-file on stdin" in {
+    assume(!isWindowsHost, "POSIX sort, uniq and head")
+    Seq("sort", "uniq", "head", "tail").foreach { command =>
+      val response = runReadingStdin(command)
+      withClue(s"$command: ") {
+        response.exitCode shouldBe 0
+        response.stdout shouldBe empty
+      }
+    }
+  }
+
+  it should "give wc with no file end-of-file on stdin, counting nothing" in {
+    assume(!isWindowsHost, "POSIX wc")
+    val response = runReadingStdin("wc")
+    response.exitCode shouldBe 0
+    response.stdout.trim.split("\\s+").toSeq shouldBe Seq("0", "0", "0")
+  }
+
+  it should "give grep with no file end-of-file on stdin, finding no match" in {
+    assume(!isWindowsHost, "POSIX grep")
+    val response = runReadingStdin("grep x")
+    response.exitCode shouldBe 1
+    response.stdout shouldBe empty
+  }
+
+  it should "give Windows sort and findstr with no file end-of-file on stdin" in {
+    assume(isWindowsHost, "Windows sort.exe and findstr.exe")
+    val sorted = runReadingStdin("sort")
+    sorted.exitCode shouldBe 0
+    sorted.stdout.trim shouldBe empty
+    val found = runReadingStdin("findstr x")
+    found.exitCode shouldBe 1
+    found.stdout.trim shouldBe empty
   }
 
   it should "reject destructive commands under a read-only sandbox configuration" in {

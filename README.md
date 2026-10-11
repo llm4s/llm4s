@@ -255,6 +255,16 @@ samples' own bindings.
 
 ### Running the Examples
 
+The quickest start is the [cookbook](docs/examples/cookbook.md): complete, runnable programs that need no API key
+(a scripted client stands in for the model; add `--live` for your configured provider), each run in CI. Recipes:
+[classify text into an enum](docs/examples/cookbook/structured-output.md), [extract data from an email](docs/examples/cookbook/email-extraction.md), [summarise a long document](docs/examples/cookbook/summarise.md), [answer questions over a folder of files](docs/examples/cookbook/folder-qa.md), [an agent that calls two tools](docs/examples/cookbook/tool-calling.md), [a guardrailed chatbot](docs/examples/cookbook/guardrails.md), [stream tokens](docs/examples/cookbook/streaming.md), [fall back between providers](docs/examples/cookbook/fallback.md), [cache repeated calls](docs/examples/cookbook/caching.md), [evaluate an answer with a judge](docs/examples/cookbook/judge.md), [keyword search](docs/examples/cookbook/document-qa.md), [memory](docs/examples/cookbook/memory.md), [several agents in one graph](docs/examples/cookbook/multi-agent-graph.md).
+
+```bash
+sbt "samples/runMain org.llm4s.samples.cookbook.StructuredOutputRecipe"
+```
+
+Every other sample:
+
 ```bash
 # Using Scala 3
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
