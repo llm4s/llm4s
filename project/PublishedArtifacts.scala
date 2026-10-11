@@ -91,24 +91,52 @@ object PublishedArtifacts {
   }
 
   /** Fails the build when the generated BOM POM does not list exactly the artifacts the release publishes. */
+  /**
+   * Published projects that ship a jar, by Maven artifactId, decided without looking at their names: `publish / skip`
+   * off and `Compile / packageBin / publishArtifact` on. Relocation stubs and the BOM ship a POM only, so they are not
+   * here. [[managed]] decides by name (`llm4s-*`), so comparing the two catches a code-carrying module that would be
+   * left out of the BOM because its name does not follow the convention.
+   *
+   * @param projects
+   *   (name, publish / skip, Compile / packageBin / publishArtifact, crossPaths) of every project in the build
+   */
+  def jarPublishers(projects: Seq[(String, Boolean, Boolean, Boolean)], scalaBinaryVersion: String): Seq[String] =
+    projects
+      .collect { case (name, false, true, cross) => if (cross) s"${name}_$scalaBinaryVersion" else name }
+      .distinct
+      .sorted
+
+  /** The ways the name-based [[managed]] list disagrees with the jar-based [[jarPublishers]] list. */
+  def namingProblems(managedIds: Seq[String], jarIds: Seq[String]): Seq[String] = {
+    val unmanaged = jarIds.filterNot(managedIds.contains).sorted
+    val jarless   = managedIds.filterNot(jarIds.contains).sorted
+    Seq(
+      if (unmanaged.isEmpty) None
+      else Some(s"published with a jar but not in the BOM (is its name llm4s-*?): ${unmanaged.mkString(", ")}"),
+      if (jarless.isEmpty) None else Some(s"in the BOM but published without a jar: ${jarless.mkString(", ")}")
+    ).flatten
+  }
+
   def checkBom(
-    projects: Seq[(String, Boolean)],
+    projects: Seq[(String, Boolean, Boolean, Boolean)],
     scalaBinaryVersion: String,
     pom: File,
     version: String,
     log: Logger
   ): Unit = {
-    val expected = managed(projects, scalaBinaryVersion)
+    val expected = managed(projects.map(p => (p._1, p._2)), scalaBinaryVersion)
     if (expected.isEmpty)
       throw new MessageOnlyException("No published llm4s-* artifacts were found: the check read an empty project list.")
-    val problems = bomProblems(expected, scala.xml.XML.loadFile(pom), version)
+    val problems = bomProblems(expected, scala.xml.XML.loadFile(pom), version) ++
+      namingProblems(expected, jarPublishers(projects, scalaBinaryVersion))
     log.info(s"BOM ${pom.getName}: ${expected.size} published artifacts expected, ${problems.size} problem(s)")
     if (problems.nonEmpty)
       throw new MessageOnlyException(
         s"""The generated BOM (${pom.getPath}) disagrees with what the build publishes:
            |${problems.map("  " + _).mkString("\n")}
            |The BOM is generated from the same project list as `listPublishedArtifacts` (project/Bom.scala);
-           |a mismatch means that generator was changed or sbt stopped writing the managed block.""".stripMargin
+           |a mismatch means that generator was changed, sbt stopped writing the managed block, or a module that
+           |publishes a jar is not named llm4s-*.""".stripMargin
       )
   }
 

@@ -381,7 +381,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `platform("org.llm4s:llm4s-bom:<version>")`, and declare the modules without versions. The BOM has no Scala
   suffix and contains no code. It is generated from the same project list as `sbt listPublishedArtifacts`
   (`project/Bom.scala`), never listed by hand, and `sbt bomCheck` fails when the generated POM disagrees with
-  what the build publishes; `listPublishedArtifacts` prints it as a `bom` line, and `scripts/verify-release.sh`
+  what the build publishes, or when a module that publishes a jar is missing from it (a name outside `llm4s-*`);
+  `scripts/check-bom-consumers.sh` (CI) builds a Maven and a Gradle project against the published BOM; `listPublishedArtifacts` prints it as a `bom` line, and `scripts/verify-release.sh`
   checks that its POM is on Maven Central with a `<dependencyManagement>`. It is aggregated by the root project,
   so `sbt ci-release` publishes it. No frozen module's API changes. Install guide: "Align versions with the BOM".
 - **`llm4s-jina`: Jina AI embedding provider** (`modules/providers/jina`,

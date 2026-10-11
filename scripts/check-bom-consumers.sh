@@ -84,8 +84,14 @@ gradle_project "$WORK/gradle-nobom" no
 if (cd "$WORK/gradle-nobom" && gradle -q --no-daemon -Dmaven.repo.local="$REPO" compileJava >"$WORK/nobom.log" 2>&1); then
   note "FAIL  gradle control: built without the BOM, so the check above does not prove the BOM supplies the versions"
   fail=1
-else
+elif grep -q 'Could not find org\.llm4s:llm4s-core_3:\.' "$WORK/nobom.log"; then
+  # Gradle names a dependency it has no version for as `group:name:.`; any other failure (network, a
+  # broken Gradle) would let this control pass for the wrong reason.
   note "ok    gradle control: without the BOM the versionless dependencies do not resolve"
+else
+  note "FAIL  gradle control: failed, but not because llm4s-core_3 had no version"
+  tail -30 "$WORK/nobom.log"
+  fail=1
 fi
 
 # ---- Maven, with the BOM imported in dependencyManagement

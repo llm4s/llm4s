@@ -326,8 +326,13 @@ lazy val llm4s = (project in file("."))
     },
     bomCheck / aggregate := false,
     bomCheck := {
-      val projects = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
-      val pom      = (bom / makePom).value
+      val projects = Def
+        .task(
+          (name.value, (publish / skip).value, (Compile / packageBin / publishArtifact).value, crossPaths.value)
+        )
+        .all(ScopeFilter(inAnyProject))
+        .value
+      val pom = (bom / makePom).value
       PublishedArtifacts.checkBom(
         projects,
         (ThisBuild / scalaBinaryVersion).value,

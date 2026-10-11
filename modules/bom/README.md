@@ -26,7 +26,9 @@ no suffix. See "Align versions with the BOM" in the installation guide.
 
 There is no code and there are no tests here. The managed list is generated when the POM is made, from the same
 project list that `sbt listPublishedArtifacts` prints (`project/Bom.scala`), and `sbt bomCheck` fails when the generated
-POM and that list disagree.
+POM and that list disagree, or when a module that publishes a jar is left out of it (for example because its name
+does not start with `llm4s-`). `scripts/check-bom-consumers.sh`, run in CI after `publishM2`, builds a Maven and a
+Gradle project that declare `llm4s-core_3` and `llm4s-ollama_3` with no versions against the published BOM.
 
 Gradle `platform(...)` recommends these versions; dependency conflicts can upgrade them.
 Applications requiring strict pinning can use `enforcedPlatform(...)`. Published libraries should
