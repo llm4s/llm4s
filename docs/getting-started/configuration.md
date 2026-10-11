@@ -163,7 +163,7 @@ the value.
 | `cohere` | `COHERE_API_KEY` (chat, reranker and embeddings) | `llm4s-openai-compatible`, `llm4s-rag`, `llm4s-cohere` |
 | `voyage` | `VOYAGE_API_KEY` | `llm4s-voyage` |
 | `jina` | `JINA_API_KEY` | `llm4s-jina` |
-| `jev` | `TYPESAFE_API_KEY` (the Jev decision client; not a chat or embeddings provider) | `llm4s-jev` |
+| `typesafe` | `TYPESAFE_API_KEY` (the Jev decision client; not a chat or embeddings provider) | `llm4s-jev` |
 
 `ollama` takes no key, the generic `openai-compatible` provider has no vendor, `vertexai`
 authenticates with OAuth2 (Application Default Credentials, or a service-account file named by
