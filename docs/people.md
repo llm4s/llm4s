@@ -142,6 +142,7 @@ testing, design, and event support. To get involved, join the
 
 | Step | How |
 |---|---|
+| **Foundation Core Team** | Fund Foundation initiatives |
 | **Contributor** | Have a pull request merged |
 | **Regular Member** | Consistent, high-quality PRs over time; nominated by an existing member |
 | **Steering Committee** | Recognised for sustained impact and broad project knowledge; invited by Directors |
