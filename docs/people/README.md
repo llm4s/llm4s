@@ -22,6 +22,7 @@ Use `/people/<filename>` in `docs/people.md` and `docs/people/<filename>` in the
 | Kannupriya Kalra | <img src="kannupriya-kalra.jpg" alt="Kannupriya Kalra" width="100"> | [kannupriya-kalra.jpg](kannupriya-kalra.jpg) |
 | Namrata Priyadarshani | <img src="namrata-priyadarshani.jpg" alt="Namrata Priyadarshani" width="100"> | [namrata-priyadarshani.jpg](namrata-priyadarshani.jpg) |
 | Pavan Vamsi | <img src="pavan-vamsi.jpg" alt="Pavan Vamsi" width="100"> | [pavan-vamsi.jpg](pavan-vamsi.jpg) |
+| Pritish Yuvraj | <img src="pritish-yuvraj.jpg" alt="Pritish Yuvraj" width="100"> | [pritish-yuvraj.jpg](pritish-yuvraj.jpg) |
 | Rory Graves | <img src="rory-graves.jpg" alt="Rory Graves" width="100"> | [rory-graves.jpg](rory-graves.jpg) |
 | Shubham Vishwakarma | <img src="shubham-vishwakarma.jpg" alt="Shubham Vishwakarma" width="100"> | [shubham-vishwakarma.jpg](shubham-vishwakarma.jpg) |
 | Vitthal Mirji | <img src="vitthal-mirji.jpeg" alt="Vitthal Mirji" width="100"> | [vitthal-mirji.jpeg](vitthal-mirji.jpeg) |
@@ -40,4 +41,4 @@ Retained for reference; the People pages use the current headshots above. Numeri
 
 ## Awaiting headshots
 
-No headshots have been supplied for Ipsit Sahoo, Olivier Nouguier, Pritish Yuvraj, or Yoshita Sharma. Add their photos using the same naming convention when available.
+No headshots have been supplied for Ipsit Sahoo, Olivier Nouguier, or Yoshita Sharma. Add their photos using the same naming convention when available.
