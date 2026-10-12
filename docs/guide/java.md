@@ -32,6 +32,16 @@ enum, and so does core's `CompletionOptions`, in an overload that [`JCompletionO
 makes unnecessary. [What is not here yet](#what-is-not-here-yet) says which of them gets in
 your way.
 
+The values it hands you to read - `JCompletion`, `JAgentResult`, `JMessage`, `PendingInterrupt`, `JEmbeddings` and the
+rest - are Java classes whose constructors are package-private: you receive them, you do not build them, so a later
+release can add a field without breaking code compiled against this one. The classes that do the work come from a
+factory: `Llm4s` makes clients and agents, `JCompletionOptions.builder()` and `ConversationBuilder.create()` start a
+builder, `LlmResult.success` and `failure` make a result, and the `Answer` factories an answer. Their constructors are
+not for you either: each takes a first parameter of a type only the package can name, and throws
+`UnsupportedOperationException` when called from anywhere else. To call a Scala `LLMClient` you built yourself - a
+`ReliableClient` around a provider's client, your own implementation, a test double - wrap it with
+`Llm4s.wrapClient(client)`; a Scala `EmbeddingClient`, with `Llm4s.wrapEmbeddingClient(client, model)`.
+
 {: .note }
 > **Not published yet.** `llm4s-java-api` is not on Maven Central: the latest release, `0.4.1`, is a single
 > `llm4s-core` artifact, and the Java API is planned to ship with `0.5.0`. Until then, build it from a checkout of the
@@ -141,6 +151,20 @@ request. The `with` methods of each config (`withContextWindow`, `withReserveCom
 `withBaseUrl` and `withOrganization`) change one field at a time. The other providers (Gemini, Azure, the
 OpenAI-compatible family and so on) have no such entry point yet, so configure them in `application.conf`.
 
+### Recording metrics
+
+`Llm4s.createClient(ProviderConfig, MetricsCollector)` builds a client that reports every call (its outcome, duration,
+tokens and cost) to a `MetricsCollector`:
+
+```java
+LlmResult<JLlmClient> measured = Llm4s.createClient(OllamaConfig.apply("llama3.2", "http://localhost:11434"), metrics);
+```
+
+For `metrics`, use `new MicrometerMetrics(meterRegistry)` from `llm4s-observability-micrometer` to record into the
+application's Micrometer `MeterRegistry` (see [Micrometer metrics](observability/micrometer)), or `PrometheusMetrics`
+from `llm4s-observability-prometheus`. A null collector records nothing. The Spring Boot starter does this for you when
+the application has a `MeterRegistry`.
+
 ## Your first call
 
 ```java
@@ -213,6 +237,7 @@ import org.llm4s.llmconnect.config.AnthropicConfig;
 import org.llm4s.llmconnect.config.OllamaConfig;
 import org.llm4s.llmconnect.config.OpenAIConfig;
 import org.llm4s.llmconnect.model.Conversation;
+import org.llm4s.metrics.MetricsCollector;
 ```
 
 ## A conversation

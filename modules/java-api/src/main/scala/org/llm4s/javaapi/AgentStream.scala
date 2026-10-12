@@ -20,7 +20,14 @@ import scala.util.Using
  * LlmResult<JAgentResult> result = stream.await();   // or stream.cancel()
  * }}}
  */
-final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listener: AgentStreamListener) {
+final class AgentStream private[javaapi] (
+  token: FacadeToken,
+  run: AgentRun,
+  buffer: AgentEventBuffer,
+  listener: AgentStreamListener
+) {
+
+  FacadeToken.check(token, "AgentStream")
 
   private val cancelled = new AtomicBoolean(false)
   private val delivered = new CountDownLatch(1)
@@ -61,7 +68,7 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
     if (Thread.currentThread() eq deliverer)
       LlmResult.failure(ValidationError("await", "called from the stream's own listener, which it would wait on"))
     else
-      LlmResult.from(
+      FacadeInternals.result(
         CancelledError
           .attempt("AgentStream.await")(Right(delivered.await()))
           .flatMap(_ =>
@@ -108,7 +115,7 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
     } yield more
     step match {
       case Right(true)  => events()
-      case Right(false) => run.await().flatMap(result => Safety.safely(JAgentResult.of(result)))
+      case Right(false) => run.await().flatMap(result => Safety.safely(FacadeInternals.agentResult(result)))
       case Left(error) =>
         cancel()
         Left(error)
@@ -127,18 +134,11 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
     CancelledError
       .catchInterrupt(Safety.safely(body))
       .fold(e => Left(CancelledError("AgentStream.listener", Some(e))), identity)
+
+  // last, once every field above is set: the deliverer reads them all
+  deliverer.start()
 }
 
 private[javaapi] object AgentStream {
   private val logger = LoggerFactory.getLogger(classOf[AgentStream])
-
-  /** Events buffered between the turn's subscription and the listener, as for the fs2 and ZIO streams. */
-  val BufferSize: Int = 256
-
-  /** Starts delivering `buffer`'s events, from `run`, to `listener`. */
-  def start(run: AgentRun, buffer: AgentEventBuffer, listener: AgentStreamListener): AgentStream = {
-    val stream = new AgentStream(run, buffer, listener)
-    stream.deliverer.start()
-    stream
-  }
 }

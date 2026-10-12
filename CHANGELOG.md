@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`Llm4s.createClient(ProviderConfig, MetricsCollector)` is public** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
+  the `llm4s-java-api` overload that attaches a `MetricsCollector` (a `MicrometerMetrics` over the application's
+  `MeterRegistry`, say) was `private[llm4s]` for the Spring Boot starter, yet public in the bytecode, so Java callers
+  saw it and Scala callers outside `org.llm4s` could not use it. It is now public and documented
+  ([Using LLM4S from Java](docs/guide/java.md#recording-metrics)), settled before the `llm4s-java-api` MiMa baseline.
+- **Live subscriptions across runtimes** ([#1705](https://github.com/llm4s/llm4s/issues/1705), Stage 2 slice 6 of
+  [#1699](https://github.com/llm4s/llm4s/issues/1699)): a `GraphRuntime.subscribe` now delivers the durable events of
+  commits made through any runtime or process sharing the checkpointer, not only its own, in order, without gap or
+  duplicate. Each live subscription watches the store through the new SPI method `Checkpointer.awaitEventsAfter`, a
+  long poll whose default reads `eventsAfter` once per timeout. `InMemoryCheckpointer` overrides it to wake on its
+  commits; the SQLite store is polled. `WatchPolicy` (on `GraphRuntime`, default enabled, `pollInterval` 250 ms,
+  at least 1 ms) configures the watch, and `WatchPolicy.disabled` turns it off. Other runtimes' events are queued only as they fit,
+  so they never make a subscriber lag. Durable events are queued strictly contiguously: a commit of the subscriber's
+  own runtime first reads any events committed elsewhere that the watch has not read yet. Live events do not cross
+  runtimes, because they are never stored. A commit the store wrote but reported as failed is now delivered too (the
+  second corner case of [#1737](https://github.com/llm4s/llm4s/issues/1737)). `CheckpointerContract` gains
+  change-notification and cross-runtime subscription cases and a `sibling` hook, and the SQLite store passes them over
+  one and two connections, as well as with a subscriber in another process. See
+  [Streaming events](docs/guide/agents/streaming.md#subscriptions-across-runtimes).
 - **`llm4s-agent-checkpoint-sqlite`: the first durable checkpointer** ([#1701](https://github.com/llm4s/llm4s/issues/1701),
   Stage 2 slice 2 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `SqliteCheckpointer`
   (`org.llm4s.agent.graph.sqlite`) keeps threads - checkpoint history, pending writes, event log and run claim - in one
@@ -20,7 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for another connection's. The schema is versioned and migrated on open, and a file from a newer build is refused. It
   passes `CheckpointerContract` over one connection and over two alternating connections to one file, and a test kills
   a forked JVM mid-run and recovers its thread. It implements #1702's `history`, `checkpoint` and `prune` over a history
-  table paged by its primary key, each write one transaction. The sample `SqliteRestartRecoveryExample` shows a restart
+  table paged by its primary key, each write one transaction; the table is part of schema version 1, since no released
+  build wrote a file without it, and opening a version-1 file from a pre-release build creates it. The sample `SqliteRestartRecoveryExample` shows a restart
   and recovery.
   See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#the-sqlite-store).
 - **`sbt pomMetadataCheck`: every published POM carries its metadata** ([#1455](https://github.com/llm4s/llm4s/issues/1455)):
@@ -1263,6 +1283,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`client_assertion`, `saml_assertion`, `jwtAssertion`) and a container under the bare key are redacted whatever
   they hold, and the patterns that read no key (JWTs, bearer tokens, API keys, sensitive pairs) still apply inside a
   readable assertion. An `Assertion` request header is still withheld on a cross-origin redirect by the HTTP tool.
+- **Breaking (Java API): the facade's Java-visible surface is the intended one** ([#1666](https://github.com/llm4s/llm4s/issues/1666)):
+  Scala 3 emitted the `private` constructors and `private[javaapi]` factories of `llm4s-java-api` as `public`, so Java
+  could build values the library never would (`new JToolCall(null, null, null)`, a `COMPLETED` `JAgentStatus` with no
+  answer) and adding a field would have broken a caller compiled against a constructor. The value types - `JAgentResult`,
+  `JAgentStatus`, `JMessage`, `JToolCall`, `JUsageSummary`, `JModelUsage`, `PendingInterrupt`, `JCompletion`,
+  `JTokenUsage` and `JEmbeddings` - are now Java classes with package-private constructors and no static factory (bar
+  `JEmbeddings.cosineSimilarity`), with the same accessors, `equals`, `hashCode` and `toString`. The facade's Scala
+  classes (`JLlmClient`, `JAgent`, `JEmbeddingClient`, `AgentStream`, `LlmResult`, `Answer`, `ConversationBuilder`,
+  `JCompletionOptions` and its `Builder`) take a package-private token first in their constructors, which throw
+  `UnsupportedOperationException` when called from outside the package, and the internal `of`/`from` factories
+  and `AgentStream.start` are gone from the facade types (`Llm4s.createClient(config, metrics)` stays public, as
+  [#1817](https://github.com/llm4s/llm4s/issues/1817) made it). `JavaInteropSpec` now
+  fails on any public constructor or public static method that is not in its list of intended ones, its companion's
+  included, and compiles a Java class in another package that tries to build each value type. New:
+  `Llm4s.wrapClient(LLMClient)` and `Llm4s.wrapEmbeddingClient(EmbeddingClient, EmbeddingModelConfig)`, the
+  counterparts of `wrapAgent`. Migration: `new JLlmClient(client)` from Java or Kotlin becomes
+  `Llm4s.wrapClient(client)`, and `new JEmbeddingClient(client, model)` becomes `Llm4s.wrapEmbeddingClient(client,
+  model)`; nothing else had a supported way in.
+- **Subscriptions watch the checkpoint store** ([#1705](https://github.com/llm4s/llm4s/issues/1705), BREAKING,
+  `llm4s-agent`): `Checkpointer` gains `awaitEventsAfter`, with a polling default, so existing stores compile
+  unchanged. A delegating store should forward it. `GraphRuntime`'s constructor gains an optional `WatchPolicy`, and
+  Java and Kotlin get `new GraphRuntime(store, clock, claims)`. A live subscription holds a second virtual thread
+  (`llm4s-watch-<threadId>`) until it is cancelled, delivers other runtimes' durable events, and ends with
+  `Disconnected(lastSeq, ReplayFailed(error))` when a read of the store fails after its replay, for instance because
+  the store was closed. `CheckpointerContract` gains cases and a `sibling` hook. No shims; see the
+  [Stage 2 migration note](docs/reference/migration.md#live-subscriptions-across-runtimes-1705).
 - **`Checkpointer` keeps a checkpoint history** ([#1702](https://github.com/llm4s/llm4s/issues/1702), BREAKING,
   `llm4s-agent`): `Checkpointer` gains `history`, `checkpoint` and `prune`, and must keep every superseded checkpoint
   and refuse a checkpoint id already in the history (`InvalidCommit`); `Commit` gains `retractTurn` (defaulted);
@@ -2563,6 +2609,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now refuses a path that is a directory, a FIFO, a device or larger than 64 KiB, as a `ConfigurationError` naming
   `workloadIdentity.identityTokenFile`; a path that does not exist yet is still accepted. Documented in the
   configuration guide.
+- **`llm4s-observability-micrometer` no longer double-counts `llm4s.errors` behind a `ReliableClient`** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
+  `MicrometerMetrics.recordError` fed the same `llm4s.errors` counter that `observeRequest` feeds, so a provider client
+  and the `ReliableClient` around it, sharing one collector, counted each failed attempt and then the final failure
+  again. `recordError` now records `llm4s.reliability.errors` (`llm4s_reliability_errors_total`; tags `provider`,
+  `error_type`), and `llm4s.errors` means what `llm4s_errors_total` means in the Prometheus module: failed requests
+  and failed image generations. **Migration:** a query on `llm4s_errors_total` that relied on `recordError` calls
+  (`ReliableClient`'s local throttle, open circuit, deadline and final failure) reads
+  `llm4s_reliability_errors_total` instead. See [Micrometer metrics](docs/guide/observability/micrometer.md#errors-and-reliableclient).
+- **The Spring Boot starter keeps its metrics ordering on Spring Boot 4** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
+  `LlmMetricsAutoConfiguration` now also orders itself after the `MeterRegistry` auto-configurations at their Boot 4
+  names (`org.springframework.boot.micrometer.metrics.autoconfigure.*`), and a test fails if the names stop resolving
+  on the Boot version the starter is tested against. The `MicrometerMetrics` Scaladoc no longer claims the class holds
+  no mutable state.
 - **MCP: `MCPServerConfig.timeout` now bounds a Streamable HTTP call whose reply is an SSE stream** ([#1785](https://github.com/llm4s/llm4s/issues/1785)):
   the HTTP request timeout stops counting once the response headers arrive, and a Streamable HTTP server that answers
   with an SSE stream - as servers built on the MCP SDKs do - sends them at once, so a call to a long-running tool

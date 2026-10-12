@@ -2,8 +2,7 @@ package org.llm4s.javaapi
 
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
+import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient, LLMConnect }
 import org.llm4s.llmconnect.config.{
   EmbeddingModelConfig,
   EmbeddingProviderConfig,
@@ -43,8 +42,8 @@ object Llm4s {
       registry <- Llm4sConfig.modelRegistryService()
       config   <- Llm4sConfig.defaultProvider()
       client   <- LLMConnect.getClient(config)(using registry)
-    } yield new JLlmClient(client)
-    LlmResult.from(result)
+    } yield wrapClient(client)
+    FacadeInternals.result(result)
   }
 
   /**
@@ -53,24 +52,25 @@ object Llm4s {
    * on environment variables.
    */
   def createClient(config: ProviderConfig): LlmResult[JLlmClient] =
-    createClient(config, MetricsCollector.noop)
+    FacadeInternals.createClient(config, MetricsCollector.noop)
 
   /**
-   * [[createClient]] whose client reports every call to `metrics`. Internal: the Spring Boot starter uses it to
-   * attach the application's `MetricsCollector` bean (a Micrometer one when `llm4s-observability-micrometer` and a
-   * `MeterRegistry` are present). A null `metrics` records nothing.
+   * [[createClient]] whose client reports every call (request outcome, duration, tokens and cost) to `metrics`, for
+   * example a `MicrometerMetrics` from `llm4s-observability-micrometer` over the application's `MeterRegistry`, or a
+   * `PrometheusMetrics` from `llm4s-observability-prometheus`. The Spring Boot starter uses it to attach the
+   * application's `MetricsCollector` bean. A null `metrics` records nothing; a null `config` is a failed result.
    */
-  private[llm4s] def createClient(config: ProviderConfig, metrics: MetricsCollector): LlmResult[JLlmClient] =
-    if (config == null) LlmResult.failure(ValidationError.required("config"))
-    else createClientFrom(config, Option(metrics).getOrElse(MetricsCollector.noop))
+  def createClient(config: ProviderConfig, metrics: MetricsCollector): LlmResult[JLlmClient] =
+    FacadeInternals.createClient(config, metrics)
 
-  private def createClientFrom(config: ProviderConfig, metrics: MetricsCollector): LlmResult[JLlmClient] = {
-    val result = for {
-      registry <- Llm4sConfig.modelRegistryService()
-      client   <- LLMConnect.getClient(config, metrics)(using registry)
-    } yield new JLlmClient(client)
-    LlmResult.from(result)
-  }
+  /**
+   * Wraps a Scala [[LLMClient]] you built yourself - a `ReliableClient` around a provider's client, your own
+   * implementation, or a test double - in a [[JLlmClient]]. Closing the wrapper closes `client`.
+   *
+   * @throws NullPointerException when `client` is `null`
+   */
+  def wrapClient(client: LLMClient): JLlmClient =
+    new JLlmClient(FacadeToken.INSTANCE, Objects.requireNonNull(client, "client must not be null"))
 
   /**
    * Creates a [[JEmbeddingClient]] for the embedding model configured as chat providers are, in the application's
@@ -83,7 +83,7 @@ object Llm4s {
    * `CONFIGURATION`, whose message says what to set.
    */
   def createDefaultEmbeddingClient(): LlmResult[JEmbeddingClient] =
-    LlmResult.from(Llm4sConfig.embeddings().flatMap(embeddingClientFor))
+    FacadeInternals.result(Llm4sConfig.embeddings().flatMap(embeddingClientFor))
 
   /** The client for the provider and config `llm4s.embeddings` selected, its dimensions as the provider declares them. */
   private def embeddingClientFor(selected: (String, EmbeddingProviderConfig)): Result[JEmbeddingClient] = {
@@ -92,8 +92,21 @@ object Llm4s {
       dimensions <- ModelDimensionRegistry.getDimension(provider, config.model)
       registry   <- Llm4sConfig.modelRegistryService()
       client     <- EmbeddingClient.from(provider, config)(using registry)
-    } yield new JEmbeddingClient(client, EmbeddingModelConfig(config.model, dimensions))
+    } yield wrapEmbeddingClient(client, EmbeddingModelConfig(config.model, dimensions))
   }
+
+  /**
+   * Wraps a Scala [[EmbeddingClient]] you built yourself - over your own `EmbeddingProvider`, or a test double - in a
+   * [[JEmbeddingClient]] that asks for `model` and reports its dimensions.
+   *
+   * @throws NullPointerException when either argument is `null`
+   */
+  def wrapEmbeddingClient(client: EmbeddingClient, model: EmbeddingModelConfig): JEmbeddingClient =
+    new JEmbeddingClient(
+      FacadeToken.INSTANCE,
+      Objects.requireNonNull(client, "client must not be null"),
+      Objects.requireNonNull(model, "model must not be null")
+    )
 
   /**
    * Wraps a [[JLlmClient]] in a [[JAgent]] ready to accept natural-language
@@ -119,7 +132,7 @@ object Llm4s {
     Objects.requireNonNull(client, "client must not be null")
     Objects.requireNonNull(tools, "tools must not be null")
     val builder = Agent.builder("assistant", client.underlying).withTools(tools)
-    new JAgent((if (streaming) builder.withStreaming() else builder).build())
+    new JAgent(FacadeToken.INSTANCE, (if (streaming) builder.withStreaming() else builder).build())
   }
 
   /**
@@ -128,6 +141,6 @@ object Llm4s {
    */
   def wrapAgent(agent: Agent): JAgent = {
     Objects.requireNonNull(agent, "agent must not be null")
-    new JAgent(Right(agent))
+    new JAgent(FacadeToken.INSTANCE, Right(agent))
   }
 }

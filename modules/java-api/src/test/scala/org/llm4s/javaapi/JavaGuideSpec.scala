@@ -102,7 +102,7 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
     override def getReserveCompletion(): Int = 512
   }
 
-  private def client(underlying: LLMClient): JLlmClient = new JLlmClient(underlying)
+  private def client(underlying: LLMClient): JLlmClient = Llm4s.wrapClient(underlying)
 
   "The first-call example (HelloLlm4s)" should {
 
@@ -199,6 +199,7 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
     }
     def client: JEmbeddingClient =
       new JEmbeddingClient(
+        FacadeToken.INSTANCE,
         new EmbeddingClient(this)(using ModelRegistryService.fromModels(Nil)),
         EmbeddingModelConfig("text-embedding-3-small", 1536)
       )
@@ -425,6 +426,11 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
       val results = GuideSnippets.inCode("sk-test").asScala.toList
       results.map(_.isSuccess) shouldBe List(true, true, true)
       results.foreach(_.get() shouldBe a[JLlmClient])
+    }
+
+    "build a client that reports to a MetricsCollector, without a request" in {
+      GuideSnippets.withMetrics(org.llm4s.metrics.MetricsCollector.noop).isSuccess shouldBe true
+      GuideSnippets.withMetrics(null).isSuccess shouldBe true
     }
 
     "offer the with methods the guide names" in {

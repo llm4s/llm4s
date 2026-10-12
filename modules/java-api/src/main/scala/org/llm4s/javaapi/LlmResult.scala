@@ -21,7 +21,9 @@ import java.util.function.{ Consumer, Function => JFunction }
  *       .ifFailure(e -> System.err.println(e.getMessage()));
  * }}}
  */
-final class LlmResult[A] private (private val underlying: Result[A]) {
+final class LlmResult[A] private[javaapi] (token: FacadeToken, private val underlying: Result[A]) {
+
+  FacadeToken.check(token, "LlmResult")
 
   def isSuccess: Boolean = underlying.isRight
   def isFailure: Boolean = underlying.isLeft
@@ -68,7 +70,7 @@ final class LlmResult[A] private (private val underlying: Result[A]) {
 
   /** Transforms the success value; failures pass through unchanged. */
   def map[B](f: JFunction[A, B]): LlmResult[B] =
-    new LlmResult(underlying.map(a => f.apply(a)))
+    new LlmResult(FacadeToken.INSTANCE, underlying.map(a => f.apply(a)))
 
   /**
    * Returns `Optional.of(value)` on success, `Optional.empty()` on failure, and also
@@ -89,8 +91,10 @@ final class LlmResult[A] private (private val underlying: Result[A]) {
 }
 
 object LlmResult {
-  def success[A](value: A): LlmResult[A]        = new LlmResult(Right(value))
-  def failure[A](error: LLMError): LlmResult[A] = new LlmResult(Left(error))
 
-  private[javaapi] def from[A](result: Result[A]): LlmResult[A] = new LlmResult(result)
+  /** A successful result holding `value`. */
+  def success[A](value: A): LlmResult[A] = new LlmResult(FacadeToken.INSTANCE, Right(value))
+
+  /** A failed result holding `error`. */
+  def failure[A](error: LLMError): LlmResult[A] = new LlmResult(FacadeToken.INSTANCE, Left(error))
 }
