@@ -72,8 +72,10 @@ class MCPTransportRedactionSpec extends AnyWordSpec with Matchers with MockFacto
   }
 
   private val transports: Seq[(String, Llm4sHttpClient => MCPTransportImpl)] = Seq(
-    "streamable-http" -> (http => new StreamableHTTPTransportImpl("http://localhost:8080/mcp", "t", 5.seconds, http)),
-    "sse"             -> (http => new SSETransportImpl("http://localhost:8080/mcp", "t", 5.seconds, http))
+    "streamable-http" -> (http =>
+      new StreamableHTTPTransportImpl("http://localhost:8080/mcp", "t", 5.seconds, WholeBodyReplies(http))
+    ),
+    "sse" -> (http => new SSETransportImpl("http://localhost:8080/mcp", "t", 5.seconds, http))
   )
 
   "every HTTP transport" should {
@@ -111,7 +113,8 @@ class MCPTransportRedactionSpec extends AnyWordSpec with Matchers with MockFacto
       val outcome =
         Try(
           logged(
-            new StreamableHTTPTransportImpl("http://localhost:8080/mcp", "t", 5.seconds, http).sendRequest(request)
+            new StreamableHTTPTransportImpl("http://localhost:8080/mcp", "t", 5.seconds, WholeBodyReplies(http))
+              .sendRequest(request)
           )
         )
       mcpLogger.setLevel(previous)

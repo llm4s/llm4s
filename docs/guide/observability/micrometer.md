@@ -82,6 +82,7 @@ val calls = meterRegistry.find("llm4s.requests").tag("status", "success").counte
 | `llm4s.tokens` | counter | `provider`, `model`, `type` | `llm4s_tokens_total` |
 | `llm4s.cost.usd` | counter | `provider`, `model` | `llm4s_cost_usd_total` |
 | `llm4s.errors` | counter | `provider`, `error_type` | `llm4s_errors_total` |
+| `llm4s.reliability.errors` | counter | `provider`, `error_type` | `llm4s_reliability_errors_total` |
 | `llm4s.retries` | counter | `provider` | `llm4s_retries_total` |
 | `llm4s.circuit.breaker.transitions` | counter | `provider`, `state` | `llm4s_circuit_breaker_transitions_total` |
 | `llm4s.image.generations` | counter | `provider`, `model`, `operation`, `status` | `llm4s_image_generations_total` |
@@ -109,10 +110,31 @@ calls to both collectors and compares the series they expose (names, label names
 
 Two differences:
 
-- This module also records retries (`llm4s_retries_total`) and circuit-breaker transitions
-  (`llm4s_circuit_breaker_transitions_total`), and counts `recordError` calls, which the Prometheus collector leaves as
-  no-ops.
+- This module also records retries (`llm4s_retries_total`), circuit-breaker transitions
+  (`llm4s_circuit_breaker_transitions_total`) and `recordError` calls (`llm4s_reliability_errors_total`), which the
+  Prometheus collector leaves as no-ops.
 - A Micrometer timer also exposes a `_max` series. The Prometheus module has no equivalent.
+
+## Errors and `ReliableClient`
+
+`llm4s.errors` counts failed requests and failed image generations, exactly as `llm4s_errors_total` does in the
+Prometheus module: one increment per call the provider client observed failing.
+
+`llm4s.reliability.errors` counts `recordError` calls instead. In llm4s the caller is `ReliableClient`, which reports a
+call its local rate limit or open circuit rejected, a deadline exceeded, and the final failure once retries are
+exhausted. Pass the same collector to both layers:
+
+```scala
+val metrics = new MicrometerMetrics(meterRegistry)
+val client = LLMConnect
+  .getClient(providerConfig, metrics)
+  .map(c => new ReliableClient(c, "openai", ReliabilityConfig.default, Some(metrics)))
+```
+
+and a call that fails on all three attempts records three `llm4s.errors` (one per attempt), one
+`llm4s.reliability.errors` (the final failure) and two `llm4s.retries`. The counters are separate so that neither counts
+the same failure twice: `llm4s_errors_total` is failed provider calls, `llm4s_reliability_errors_total` is what the
+caller of `ReliableClient` saw fail.
 
 ## Tag cardinality
 

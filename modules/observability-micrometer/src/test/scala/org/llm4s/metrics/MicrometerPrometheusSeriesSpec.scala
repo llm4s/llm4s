@@ -66,6 +66,7 @@ class MicrometerPrometheusSeriesSpec extends AnyFlatSpec with Matchers {
     // Extras the Prometheus collector leaves as no-ops: they must appear, but only as the documented series.
     metrics.recordRetryAttempt("openai", 1)
     metrics.recordCircuitBreakerTransition("openai", "open")
+    metrics.recordError(ErrorKind.Timeout, "openai")
     comparable(parse(registry.scrape()))
   }
 
@@ -77,7 +78,8 @@ class MicrometerPrometheusSeriesSpec extends AnyFlatSpec with Matchers {
     comparable(parse(new String(out.toByteArray, StandardCharsets.UTF_8)))
   }
 
-  private val Extras = Set("llm4s_retries_total", "llm4s_circuit_breaker_transitions_total")
+  private val Extras =
+    Set("llm4s_retries_total", "llm4s_circuit_breaker_transitions_total", "llm4s_reliability_errors_total")
 
   "The Micrometer collector, exported as Prometheus," should "expose the series of the Prometheus module and nothing else but the documented extras" in {
     val micrometer = micrometerSamples()
@@ -120,6 +122,9 @@ class MicrometerPrometheusSeriesSpec extends AnyFlatSpec with Matchers {
     extras.find(_.name == "llm4s_retries_total").map(_.labels.keySet) shouldBe Some(Set("provider"))
     extras.find(_.name == "llm4s_circuit_breaker_transitions_total").map(_.labels.keySet) shouldBe Some(
       Set("provider", "state")
+    )
+    extras.find(_.name == "llm4s_reliability_errors_total").map(_.labels.keySet) shouldBe Some(
+      Set("provider", "error_type")
     )
   }
 }

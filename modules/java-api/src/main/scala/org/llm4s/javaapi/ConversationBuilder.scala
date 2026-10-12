@@ -18,18 +18,25 @@ import java.util.Objects
  * Instances are immutable: every method returns a new builder, so a builder may be shared and
  * forked across threads. A `null` content argument throws `NullPointerException` immediately.
  */
-final class ConversationBuilder private (private val messages: Seq[Message]) {
+final class ConversationBuilder private (token: FacadeToken, messages: Seq[Message]) {
+
+  FacadeToken.check(token, "ConversationBuilder")
 
   def system(content: String): ConversationBuilder =
     new ConversationBuilder(
+      FacadeToken.INSTANCE,
       messages :+ SystemMessage(Objects.requireNonNull(content, "system content must not be null"))
     )
 
   def user(content: String): ConversationBuilder =
-    new ConversationBuilder(messages :+ UserMessage(Objects.requireNonNull(content, "user content must not be null")))
+    new ConversationBuilder(
+      FacadeToken.INSTANCE,
+      messages :+ UserMessage(Objects.requireNonNull(content, "user content must not be null"))
+    )
 
   def assistant(content: String): ConversationBuilder =
     new ConversationBuilder(
+      FacadeToken.INSTANCE,
       messages :+ AssistantMessage(Objects.requireNonNull(content, "assistant content must not be null"))
     )
 
@@ -39,5 +46,5 @@ final class ConversationBuilder private (private val messages: Seq[Message]) {
 object ConversationBuilder {
 
   /** Returns a new empty builder. */
-  def create(): ConversationBuilder = new ConversationBuilder(Seq.empty)
+  def create(): ConversationBuilder = new ConversationBuilder(FacadeToken.INSTANCE, Seq.empty)
 }

@@ -33,7 +33,7 @@ class JCompletionOptionsSpec extends AnyFlatSpec with Matchers {
 
   private def sent(options: JCompletionOptions): CompletionOptions = {
     val capturing = new Capturing
-    CompletionOptionsCheck.send(new JLlmClient(capturing), options).get() shouldBe "4"
+    CompletionOptionsCheck.send(Llm4s.wrapClient(capturing), options).get() shouldBe "4"
     capturing.received.toList match {
       case List(only) => only
       case other      => fail(s"expected one request, got $other")
@@ -203,7 +203,7 @@ class JCompletionOptionsSpec extends AnyFlatSpec with Matchers {
   }
 
   "JLlmClient.complete(Conversation, JCompletionOptions)" should "fail, not throw, for a null argument" in {
-    val client       = new JLlmClient(new Capturing)
+    val client       = Llm4s.wrapClient(new Capturing)
     val conversation = ConversationBuilder.create().user("hi").build()
 
     val noOptions = client.complete(conversation, null: JCompletionOptions)
@@ -223,8 +223,8 @@ class JCompletionOptionsSpec extends AnyFlatSpec with Matchers {
     val viaScala = new Capturing
     val options  = CompletionOptionsCheck.everySetting()
     val conv     = ConversationBuilder.create().user("hi").build()
-    new JLlmClient(viaJava).complete(conv, options)
-    new JLlmClient(viaScala).complete(conv, options.underlying)
+    Llm4s.wrapClient(viaJava).complete(conv, options)
+    Llm4s.wrapClient(viaScala).complete(conv, options.underlying)
     viaJava.received.toList shouldBe viaScala.received.toList
   }
 }

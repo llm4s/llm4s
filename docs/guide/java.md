@@ -32,6 +32,16 @@ enum, and so does core's `CompletionOptions`, in an overload that [`JCompletionO
 makes unnecessary. [What is not here yet](#what-is-not-here-yet) says which of them gets in
 your way.
 
+The values it hands you to read - `JCompletion`, `JAgentResult`, `JMessage`, `PendingInterrupt`, `JEmbeddings` and the
+rest - are Java classes whose constructors are package-private: you receive them, you do not build them, so a later
+release can add a field without breaking code compiled against this one. The classes that do the work come from a
+factory: `Llm4s` makes clients and agents, `JCompletionOptions.builder()` and `ConversationBuilder.create()` start a
+builder, `LlmResult.success` and `failure` make a result, and the `Answer` factories an answer. Their constructors are
+not for you either: each takes a first parameter of a type only the package can name, and throws
+`UnsupportedOperationException` when called from anywhere else. To call a Scala `LLMClient` you built yourself - a
+`ReliableClient` around a provider's client, your own implementation, a test double - wrap it with
+`Llm4s.wrapClient(client)`; a Scala `EmbeddingClient`, with `Llm4s.wrapEmbeddingClient(client, model)`.
+
 {: .note }
 > **Not published yet.** `llm4s-java-api` is not on Maven Central: the latest release, `0.4.1`, is a single
 > `llm4s-core` artifact, and the Java API is planned to ship with `0.5.0`. Until then, build it from a checkout of the
@@ -165,6 +175,9 @@ immutable, so one can be kept and forked: `base.model("gpt-4o")` returns a new b
 Its `toString` prints the API key as `***`, an OpenAI-compatible server's headers by name only, and a base URL or
 endpoint without its userinfo, query or fragment, so a builder can be logged.
 
+The builders are for Java callers: `llm4s-kotlin-api`'s `LLMClientKt` cannot wrap a client they build yet
+([#1850](https://github.com/llm4s/llm4s/issues/1850)).
+
 For any other provider - one from its own module, such as `llm4s-bedrock` - `Llm4s.createClient(ProviderConfig)` takes
 the provider's config object. OpenAI, Anthropic and Ollama have one with a Java entry point too, which takes the
 essentials and fills in the rest (the default base URL, and a context window and completion reserve guessed from the
@@ -180,6 +193,22 @@ LlmResult<JLlmClient> local = Llm4s.createClient(OllamaConfig.apply("llama3.2", 
 request. The `with` methods of each config (`withContextWindow`, `withReserveCompletion`, and for OpenAI
 `withBaseUrl` and `withOrganization`) change one field at a time; some take a Scala `Option`, which the builders above
 avoid.
+
+### Recording metrics
+
+`Llm4s.createClient(ProviderConfig, MetricsCollector)` builds a client that reports every call (its outcome, duration,
+tokens and cost) to a `MetricsCollector`:
+
+```java
+LlmResult<JLlmClient> measured = Llm4s.createClient(OllamaConfig.apply("llama3.2", "http://localhost:11434"), metrics);
+```
+
+For `metrics`, use `new MicrometerMetrics(meterRegistry)` from `llm4s-observability-micrometer` to record into the
+application's Micrometer `MeterRegistry` (see [Micrometer metrics](observability/micrometer)), or `PrometheusMetrics`
+from `llm4s-observability-prometheus`. A null collector records nothing. The Spring Boot starter does this for you when
+the application has a `MeterRegistry`.
+
+A [client builder](#configure-in-code) takes the collector too: `Llm4s.ollama().model("llama3.2").metrics(metrics).build()`.
 
 ## Your first call
 
@@ -253,6 +282,7 @@ import org.llm4s.llmconnect.config.AnthropicConfig;
 import org.llm4s.llmconnect.config.OllamaConfig;
 import org.llm4s.llmconnect.config.OpenAIConfig;
 import org.llm4s.llmconnect.model.Conversation;
+import org.llm4s.metrics.MetricsCollector;
 ```
 
 ## A conversation

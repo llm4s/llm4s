@@ -22,6 +22,7 @@ import org.llm4s.llmconnect.config.AnthropicConfig;
 import org.llm4s.llmconnect.config.OllamaConfig;
 import org.llm4s.llmconnect.config.OpenAIConfig;
 import org.llm4s.llmconnect.model.Conversation;
+import org.llm4s.metrics.MetricsCollector;
 
 /**
  * The fragments of {@code docs/guide/java.md}, compiled, and run by {@code JavaGuideSpec} against a client the
@@ -58,6 +59,13 @@ final class GuideSnippets {
         LlmResult<JLlmClient> local = Llm4s.createClient(OllamaConfig.apply("llama3.2", "http://localhost:11434"));
 
         return Arrays.asList(openai, anthropic, local);
+    }
+
+    /** The "Recording metrics" block: a client that reports every call to a MetricsCollector. */
+    static LlmResult<JLlmClient> withMetrics(MetricsCollector metrics) {
+        LlmResult<JLlmClient> measured = Llm4s.createClient(OllamaConfig.apply("llama3.2", "http://localhost:11434"), metrics);
+
+        return measured;
     }
 
     /** The "A conversation" block. */
