@@ -44,6 +44,27 @@ liaisons with sponsors, and conference programme committees.
 
 ---
 
+## LLM4S Global Chapter Leaders
+
+| Landmark | Location | Name | Role | LinkedIn |
+|---|---|---|---|---|
+| <img src="/images/chapters/merlion.svg" alt="Merlion, Singapore" title="Merlion, Singapore" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇸🇬 Singapore | **Gagandeep Kalra** | Chapter Lead — Singapore | [linkedin.com/in/gagandeep-kalra-9b23b2b1](https://www.linkedin.com/in/gagandeep-kalra-9b23b2b1/) |
+| <img src="/images/chapters/gateway-of-india.svg" alt="Gateway of India" title="Gateway of India" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇮🇳 Mumbai | **Shubham Vishwakarma** | Chapter Lead — Mumbai | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
+| <img src="/images/chapters/india-gate.svg" alt="India Gate" title="India Gate" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇮🇳 Delhi | **Vansh Sharma** | Chapter Lead — Delhi | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
+| <img src="/images/chapters/eiffel-tower.svg" alt="Eiffel Tower" title="Eiffel Tower" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇫🇷 France | **Olivier Nouguier** | Chapter Lead — France | [linkedin.com/in/olivier-nouguier](https://www.linkedin.com/in/olivier-nouguier/) |
+| <img src="/images/chapters/sheikh-zayed-mosque.svg" alt="Sheikh Zayed Grand Mosque" title="Sheikh Zayed Grand Mosque" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇦🇪 Abu Dhabi | **Yoshita Sharma** | Chapter Lead — Abu Dhabi | [linkedin.com/in/yoshita-sharma-trojan](https://www.linkedin.com/in/yoshita-sharma-trojan/) |
+| <img src="/images/chapters/elizabeth-tower.svg" alt="Elizabeth Tower (Big Ben)" title="Elizabeth Tower (Big Ben)" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇬🇧 London | **Dmitry Mamonov** | Chapter Lead — London | [linkedin.com/in/dmamonov](https://www.linkedin.com/in/dmamonov/) |
+| <img src="/images/chapters/brandenburg-gate.svg" alt="Brandenburg Gate" title="Brandenburg Gate" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇩🇪 Germany | **Vitthal Mirji** | Chapter Lead — Germany | [linkedin.com/in/vitthal10](https://www.linkedin.com/in/vitthal10/) |
+| <img src="/images/chapters/colosseum.svg" alt="Colosseum" title="Colosseum" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇮🇹 Italy | **Giovanni Ruggiero** | Chapter Lead — Italy | [linkedin.com/in/giovanniruggiero](https://www.linkedin.com/in/giovanniruggiero/) |
+| <img src="/images/chapters/space-needle.svg" alt="Space Needle" title="Space Needle" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 Seattle | **Ansh K Shah** | Chapter Lead — Seattle | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
+| <img src="/images/chapters/stanford-hoover-tower.svg" alt="Stanford Hoover Tower" title="Stanford Hoover Tower" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 Silicon Valley | **Ipsit Sahoo** | Chapter Lead — Silicon Valley | [linkedin.com/in/ipsit-sahoo](https://www.linkedin.com/in/ipsit-sahoo/) |
+| <img src="/images/chapters/golden-gate-bridge.svg" alt="Golden Gate Bridge" title="Golden Gate Bridge" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 San Francisco | **Pritish Yuvraj** | Chapter Lead — San Francisco | [linkedin.com/in/pritishyuvraj](https://www.linkedin.com/in/pritishyuvraj/) |
+| <img src="/images/chapters/statue-of-liberty.svg" alt="Statue of Liberty" title="Statue of Liberty" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 New York | **Aatif Ullah** | Chapter Lead — New York | [linkedin.com/in/aatif-ullah-92308a49](https://www.linkedin.com/in/aatif-ullah-92308a49/) |
+| <img src="/images/chapters/alamo.svg" alt="The Alamo" title="The Alamo" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 Texas | **Gopi Trinadh** | Chapter Lead — Texas | [linkedin.com/in/gopitrinadhmaddikunta](https://www.linkedin.com/in/gopitrinadhmaddikunta/) |
+| <img src="/images/chapters/chapel-bridge.svg" alt="Chapel Bridge, Lucerne" title="Chapel Bridge, Lucerne" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇨🇭 Switzerland | **Elvan Konukseven** | Chapter Lead — Switzerland | [linkedin.com/in/elvan-konukseven](https://www.linkedin.com/in/elvan-konukseven/) |
+
+---
+
 ## Maintainers
 
 Maintainers have merge rights across the repository, lead technical direction, and
@@ -118,27 +139,6 @@ and community outreach.
 | <img src="people/Gopi.jpg" alt="Gopi Trinadh" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Gopi Trinadh** | [@GOPITRINADH3561](https://github.com/GOPITRINADH3561) | [https://www.linkedin.com/in/gopitrinadhmaddikunta/](https://www.linkedin.com/in/gopitrinadhmaddikunta/) |
 
 > **Add yourself:** Open a PR or comment on [issue #1117](https://github.com/llm4s/llm4s/issues/1117).
-
----
-
-## LLM4S Global Chapter Leaders
-
-| Landmark | Location | Name | Role | LinkedIn |
-|---|---|---|---|---|
-| <img src="/images/chapters/merlion.svg" alt="Merlion, Singapore" title="Merlion, Singapore" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇸🇬 Singapore | **Gagandeep Kalra** | Chapter Lead — Singapore | [linkedin.com/in/gagandeep-kalra-9b23b2b1](https://www.linkedin.com/in/gagandeep-kalra-9b23b2b1/) |
-| <img src="/images/chapters/gateway-of-india.svg" alt="Gateway of India" title="Gateway of India" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇮🇳 Mumbai | **Shubham Vishwakarma** | Chapter Lead — Mumbai | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
-| <img src="/images/chapters/india-gate.svg" alt="India Gate" title="India Gate" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇮🇳 Delhi | **Vansh Sharma** | Chapter Lead — Delhi | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
-| <img src="/images/chapters/eiffel-tower.svg" alt="Eiffel Tower" title="Eiffel Tower" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇫🇷 France | **Olivier Nouguier** | Chapter Lead — France | [linkedin.com/in/olivier-nouguier](https://www.linkedin.com/in/olivier-nouguier/) |
-| <img src="/images/chapters/sheikh-zayed-mosque.svg" alt="Sheikh Zayed Grand Mosque" title="Sheikh Zayed Grand Mosque" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇦🇪 Abu Dhabi | **Yoshita Sharma** | Chapter Lead — Abu Dhabi | [linkedin.com/in/yoshita-sharma-trojan](https://www.linkedin.com/in/yoshita-sharma-trojan/) |
-| <img src="/images/chapters/elizabeth-tower.svg" alt="Elizabeth Tower (Big Ben)" title="Elizabeth Tower (Big Ben)" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇬🇧 London | **Dmitry Mamonov** | Chapter Lead — London | [linkedin.com/in/dmamonov](https://www.linkedin.com/in/dmamonov/) |
-| <img src="/images/chapters/brandenburg-gate.svg" alt="Brandenburg Gate" title="Brandenburg Gate" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇩🇪 Germany | **Vitthal Mirji** | Chapter Lead — Germany | [linkedin.com/in/vitthal10](https://www.linkedin.com/in/vitthal10/) |
-| <img src="/images/chapters/colosseum.svg" alt="Colosseum" title="Colosseum" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇮🇹 Italy | **Giovanni Ruggiero** | Chapter Lead — Italy | [linkedin.com/in/giovanniruggiero](https://www.linkedin.com/in/giovanniruggiero/) |
-| <img src="/images/chapters/space-needle.svg" alt="Space Needle" title="Space Needle" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 Seattle | **Ansh K Shah** | Chapter Lead — Seattle | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
-| <img src="/images/chapters/stanford-hoover-tower.svg" alt="Stanford Hoover Tower" title="Stanford Hoover Tower" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 Silicon Valley | **Ipsit Sahoo** | Chapter Lead — Silicon Valley | [linkedin.com/in/ipsit-sahoo](https://www.linkedin.com/in/ipsit-sahoo/) |
-| <img src="/images/chapters/golden-gate-bridge.svg" alt="Golden Gate Bridge" title="Golden Gate Bridge" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 San Francisco | **Pritish Yuvraj** | Chapter Lead — San Francisco | [linkedin.com/in/pritishyuvraj](https://www.linkedin.com/in/pritishyuvraj/) |
-| <img src="/images/chapters/statue-of-liberty.svg" alt="Statue of Liberty" title="Statue of Liberty" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 New York | **Aatif Ullah** | Chapter Lead — New York | [linkedin.com/in/aatif-ullah-92308a49](https://www.linkedin.com/in/aatif-ullah-92308a49/) |
-| <img src="/images/chapters/alamo.svg" alt="The Alamo" title="The Alamo" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 Texas | **Gopi Trinadh** | Chapter Lead — Texas | [linkedin.com/in/gopitrinadhmaddikunta](https://www.linkedin.com/in/gopitrinadhmaddikunta/) |
-| <img src="/images/chapters/chapel-bridge.svg" alt="Chapel Bridge, Lucerne" title="Chapel Bridge, Lucerne" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇨🇭 Switzerland | **Elvan Konukseven** | Chapter Lead — Switzerland | [linkedin.com/in/elvan-konukseven](https://www.linkedin.com/in/elvan-konukseven/) |
 
 ---
 
