@@ -31,7 +31,7 @@ liaisons with sponsors, and conference programme committees.
 | <img src="docs/people/pavan-vamsi.jpg" alt="Pavan Vamsi" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Pavan Vamsi** | Foundation Core Team Member | [linkedin.com/in/pavanvamsi3](https://www.linkedin.com/in/pavanvamsi3/) |
 | <img src="docs/people/namrata-priyadarshani.jpg" alt="Namrata Priyadarshani" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Namrata Priyadarshani** | Foundation Core Team Member | [linkedin.com/in/namrata-priyadarshani-61a316159](https://www.linkedin.com/in/namrata-priyadarshani-61a316159/) |
 |  | **Ipsit Sahoo** | Foundation Core Team Member | [linkedin.com/in/ipsit-sahoo](https://www.linkedin.com/in/ipsit-sahoo/) |
-|  | **Ansh K Shah** | Foundation Core Team Member | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
+| <img src="docs/people/ansh-k-shah.jpg" alt="Ansh K Shah" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Ansh K Shah** | Foundation Core Team Member | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
 | <img src="docs/people/christopher-wheeler.jpg" alt="Christopher Wheeler" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Christopher Wheeler** | Foundation Core Team Member | [linkedin.com/in/chris-w-1499161a](https://www.linkedin.com/in/chris-w-1499161a/) |
 
 ---
