@@ -26,6 +26,7 @@ Use `/people/<filename>` in `docs/people.md` and `docs/people/<filename>` in the
 | Rory Graves | <img src="rory-graves.jpg" alt="Rory Graves" width="100"> | [rory-graves.jpg](rory-graves.jpg) |
 | Shubham Vishwakarma | <img src="shubham-vishwakarma.jpg" alt="Shubham Vishwakarma" width="100"> | [shubham-vishwakarma.jpg](shubham-vishwakarma.jpg) |
 | Vitthal Mirji | <img src="vitthal-mirji.jpeg" alt="Vitthal Mirji" width="100"> | [vitthal-mirji.jpeg](vitthal-mirji.jpeg) |
+| Yoshita Sharma | <img src="yoshita-sharma.png" alt="Yoshita Sharma" width="100"> | [yoshita-sharma.png](yoshita-sharma.png) |
 
 Anshuman Awasthi’s current photo is copied unchanged from [the GSoC 2025 contributor headshot](../image_assets/gsoc_assets/gsoc_2025/contributor_headshots/Anshuman-headshot.jpg).
 
@@ -43,4 +44,4 @@ Retained for reference; the People pages use the current headshots above. Numeri
 
 ## Awaiting headshots
 
-No headshots have been supplied for Ipsit Sahoo, Olivier Nouguier, or Yoshita Sharma. Add their photos using the same naming convention when available.
+No headshots have been supplied for Ipsit Sahoo and Olivier Nouguier. Add their photos using the same naming convention when available.
