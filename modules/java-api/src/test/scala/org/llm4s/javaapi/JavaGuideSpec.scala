@@ -422,6 +422,14 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
 
   "Configuring in code" should {
 
+    "build OpenAI, Ollama and OpenAI-compatible clients from the builders, without a request" in {
+      val results = GuideSnippets.builders("sk-test").asScala.toList
+      results.map(_.isSuccess) shouldBe List(true, true, true)
+      results.foreach(_.get() shouldBe a[JLlmClient])
+      // the key a Java caller reads from an unset variable is null: the OpenAI builder names the field it lacks
+      GuideSnippets.builders(null).get(0).getError().getMessage shouldBe "Field 'apiKey' is required"
+    }
+
     "build a client for OpenAI, Anthropic and Ollama from the Java entry points, without a request" in {
       val results = GuideSnippets.inCode("sk-test").asScala.toList
       results.map(_.isSuccess) shouldBe List(true, true, true)

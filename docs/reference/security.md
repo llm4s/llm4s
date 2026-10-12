@@ -119,11 +119,14 @@ links out of the workspace, and any path argument can name a file outside it
   `rm`, `mkdir`, `touch`, `chmod`, `copy` and `move`); `locked` (`shellAllowed = false`) refuses every command; an
   unknown name stops the runner. `WORKSPACE_EXTRA_COMMANDS` adds bare program names to the profile's list (set by
   `ContainerisedWorkspace`'s `extraAllowedCommands`); a shell, an interpreter (`python`, `node`, `awk`, `java`,
-  ...), a launcher such as `env`, `xargs` or `setsid`, the cmd.exe built-ins `call` and `start`, or a `.bat` / `.cmd`
-  batch file cannot be added, and with the `locked` profile no name can
-  ([#1761](https://github.com/llm4s/llm4s/issues/1761)). That denylist is a speed bump, not a boundary: an added
-  program has no per-program option rules, so **adding one means trusting it to run any code** - add only what the
-  agent needs. `ReadOnlyCommands` is the field default, for a `WorkspaceSandboxConfig` constructed directly. The
+  `scala`, ... and every `python*`, `pypy*`, `jython*` or `lua*` name), a launcher such as `env`, `xargs` or
+  `setsid`, the dynamic loader, `sed` and editors that run a command, a scheduler, a Windows program that runs another
+  (`regsvr32`, `forfiles`, `msbuild`, ...), the cmd.exe built-ins `call` and `start`, or a `.bat` / `.cmd` batch file
+  cannot be added, and with the `locked` profile no name can ([#1761](https://github.com/llm4s/llm4s/issues/1761),
+  [#1805](https://github.com/llm4s/llm4s/issues/1805)). That denylist is a speed bump, not a boundary - GTFOBins and
+  LOLBAS list hundreds of programs that run another through an option - and an added program has no per-program
+  option rules beyond those for `tar`, `zip`, `rsync`, `scp` and `sftp`, so **adding one means trusting it to run any
+  code** - add only what the agent needs. `ReadOnlyCommands` is the field default, for a `WorkspaceSandboxConfig` constructed directly. The
   workspace client has no sandbox setting of its own. On Windows, built-ins such as
   `echo`, `dir`, `type`, `copy` and `move` run through `cmd.exe /d /c` (no AutoRun command), after the forbidden-character check and the
   checks below.

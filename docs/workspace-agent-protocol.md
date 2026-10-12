@@ -361,6 +361,14 @@ Common error codes include:
 - `SIZE_LIMIT_EXCEEDED`: Operation exceeded a size or count limit
 - `INVALID_ARGUMENT`: An argument provided is invalid
 - `EXECUTION_FAILED`: Command execution failed
+- `SHELL_DISABLED`: The sandbox runs no command (`shellAllowed = false`, the `locked` profile)
+- `EMPTY_COMMAND`: The command has no words
+- `FORBIDDEN_CHARACTERS`: A word holds a shell metacharacter (`&`, `|`, `<`, `>`, `^`, `;`, `` ` ``, `$`, `%`)
+- `EXECUTABLE_PATH_NOT_ALLOWED`: The command's program is given as a path rather than a bare name
+- `ARGUMENT_NOT_ALLOWED`: An argument is one the program's rules refuse (an option that writes, deletes, runs a
+  program or follows links), or one the runner cannot check safely
+- `ENVIRONMENT_NOT_ALLOWED`: `environment` sets a variable other than the locale and terminal ones the runner allows
+- `PATH_ESCAPE_ATTEMPT`: The working directory or an argument leads outside the workspace
 - `EXECUTABLE_NOT_ALLOWED`: The command's program is not on the runner's allowlist, or is found only where the runner
   never starts a program from (the workspace, the runner's own working directory, a relative or empty `PATH` entry)
 - `EXECUTABLE_NOT_FOUND`: The command's program was not found in a trusted directory

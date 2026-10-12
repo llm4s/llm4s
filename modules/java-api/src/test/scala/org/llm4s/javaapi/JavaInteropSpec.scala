@@ -181,7 +181,13 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     classOf[LlmErrorKind],
     classOf[JEmbeddingClient],
     classOf[JEmbeddings],
-    classOf[JEmbeddingPurpose]
+    classOf[JEmbeddingPurpose],
+    classOf[OpenAiClientBuilder],
+    classOf[AnthropicClientBuilder],
+    classOf[GeminiClientBuilder],
+    classOf[OllamaClientBuilder],
+    classOf[OpenAiCompatibleClientBuilder],
+    classOf[AzureOpenAiClientBuilder]
   )
 
   "the public Java-visible surface" should "not expose scala.* types outside the allowlisted internals" in {
@@ -316,6 +322,41 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     classOf[JAgent].getMethod("pending", classOf[JAgentResult]) should not be null
   }
 
+  "the client builders" should "be listed on Llm4s, take and return Java types only, and build an LlmResult<JLlmClient>" in {
+    val llm4s = Class.forName("org.llm4s.javaapi.Llm4s")
+    val builders = Map(
+      "openAi"           -> classOf[OpenAiClientBuilder],
+      "anthropic"        -> classOf[AnthropicClientBuilder],
+      "gemini"           -> classOf[GeminiClientBuilder],
+      "ollama"           -> classOf[OllamaClientBuilder],
+      "openAiCompatible" -> classOf[OpenAiCompatibleClientBuilder],
+      "azureOpenAi"      -> classOf[AzureOpenAiClientBuilder]
+    )
+    builders.foreach { (name, builder) =>
+      withClue(name) {
+        val factory = llm4s.getMethod(name)
+        Modifier.isStatic(factory.getModifiers) shouldBe true
+        factory.getReturnType shouldBe builder
+        mentioned(builder.getMethod("build").getGenericReturnType) shouldBe List(
+          classOf[LlmResult[_]],
+          classOf[JLlmClient]
+        )
+        // a Java caller cannot construct one: the builders come from Llm4s only
+        builder.getConstructors shouldBe empty
+        Modifier.isFinal(builder.getModifiers) shouldBe true
+        val signatures = builder.getMethods.toList.filter(_.getDeclaringClass == builder)
+        signatures
+          .flatMap(m => m.getGenericReturnType :: m.getGenericParameterTypes.toList)
+          .flatMap(mentioned)
+          .filter(
+            scalaOnly
+          ) shouldBe Nil
+        // every setter returns the builder, so calls chain
+        signatures.filterNot(m => Set("build", "toString")(m.getName)).foreach(_.getReturnType shouldBe builder)
+      }
+    }
+  }
+
   // --- #1666: the Java-visible surface is the intended one, in bytecode as well as in Scala ---
 
   /** The value types the facade hands a caller to read: Java classes, built only inside the package. */
@@ -348,7 +389,13 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
       "createAgent(JLlmClient)",
       "createAgent(JLlmClient,ToolRegistry)",
       "createAgent(JLlmClient,ToolRegistry,boolean)",
-      "wrapAgent(Agent)"
+      "wrapAgent(Agent)",
+      "openAi()",
+      "anthropic()",
+      "gemini()",
+      "ollama()",
+      "openAiCompatible()",
+      "azureOpenAi()"
     ),
     classOf[LlmResult[_]]        -> Set("success(Object)", "failure(LLMError)"),
     classOf[ConversationBuilder] -> Set("create()"),
@@ -487,7 +534,8 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
    */
   private def internalClasses: Set[String] = Set(
     "org.llm4s.javaapi.FacadeInternals", // reads core's Scala values into the facade's types
-    "org.llm4s.javaapi.LlmErrorKinds"    // how LlmException reads an LLMError: its kind, status and retry delay
+    "org.llm4s.javaapi.LlmErrorKinds",   // how LlmException reads an LLMError: its kind, status and retry delay
+    "org.llm4s.javaapi.ClientBuilds"     // what the client builders' build() does with their settings
   )
 
   /** Every public top-level class the compiled package holds, a Scala object's `X$` counted as `X`. */

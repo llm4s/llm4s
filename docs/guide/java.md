@@ -136,9 +136,52 @@ reads a `LLM_MODEL` variable; the model is the `model` key of the section.
 
 ### Configure in code
 
-`Llm4s.createClient(ProviderConfig)` builds a client from a config object instead of a file. For OpenAI, Anthropic and
-Ollama the config classes have a Java entry point that takes the essentials and fills in the rest (the default base
-URL, and a context window and completion reserve guessed from the model name):
+To build a client in code instead of from a file, `Llm4s` has a builder for each provider this module brings:
+`openAi()`, `anthropic()`, `gemini()`, `ollama()`, `openAiCompatible()` (vLLM, LM Studio, LiteLLM, a gateway: any
+server that speaks OpenAI's chat-completions API) and `azureOpenAi()`. Each takes plain Java values and builds an
+`LlmResult<JLlmClient>`:
+
+```java
+LlmResult<JLlmClient> openai = Llm4s.openAi()
+    .apiKey(apiKey)
+    .model("gpt-4o-mini")
+    .build();
+LlmResult<JLlmClient> local = Llm4s.ollama()
+    .model("llama3.2")
+    .build();
+LlmResult<JLlmClient> gateway = Llm4s.openAiCompatible()
+    .baseUrl("http://localhost:8000/v1")
+    .model("qwen2.5-coder")
+    .header("X-Team-Id", "platform")
+    .build();
+```
+
+What each provider needs is required - an API key and a model, for Ollama the model alone, for an OpenAI-compatible
+server its base URL and model, for Azure the endpoint, key and deployment - and everything else has the default
+`application.conf` would give it: a builder makes the same config as a section with the same values. That means the
+provider's own base URL (`http://localhost:11434` for Ollama), and the context window and reply reserve the model
+catalogue lists for the model; for an OpenAI-compatible server, the catalogue's window for the provider its base URL's
+host names (Groq, Together, Fireworks, xAI, Perplexity), else 8192 tokens. `baseUrl`, `contextWindow`,
+`reserveCompletion`, `requestTimeout` and `streamTimeout` (each a `java.time.Duration`, at most about 292 years)
+override them, as do `organization` for OpenAI, `apiVersion` for Azure and `header` for an OpenAI-compatible server. A
+context window set without a reserve keeps a quarter of itself for the reply, up to the reserve the provider would
+otherwise use, as a section's `contextWindow` does. `metrics(MetricsCollector)` makes the client report every call, as
+[`createClient(config, metrics)`](#recording-metrics) does.
+
+`build()` sends no request and does not throw. A required field left out - or set to `null` or a blank string, as
+`System.getenv` returns for a variable that is not set - is a failed result of kind `VALIDATION` whose message names
+it (`Field 'apiKey' is required`), as is a value out of range, such as a context window of zero. A builder is
+immutable, so one can be kept and forked: `base.model("gpt-4o")` returns a new builder and leaves `base` as it was.
+Its `toString` prints the API key as `***`, an OpenAI-compatible server's headers by name only, and a base URL or
+endpoint without its userinfo, query or fragment, so a builder can be logged.
+
+The builders are for Java callers: `llm4s-kotlin-api`'s `LLMClientKt` cannot wrap a client they build yet
+([#1850](https://github.com/llm4s/llm4s/issues/1850)).
+
+For any other provider - one from its own module, such as `llm4s-bedrock` - `Llm4s.createClient(ProviderConfig)` takes
+the provider's config object. OpenAI, Anthropic and Ollama have one with a Java entry point too, which takes the
+essentials and fills in the rest (the default base URL, and a context window and completion reserve guessed from the
+model name):
 
 ```java
 LlmResult<JLlmClient> openai = Llm4s.createClient(OpenAIConfig.apply(apiKey, "gpt-4o-mini"));
@@ -148,8 +191,8 @@ LlmResult<JLlmClient> local = Llm4s.createClient(OllamaConfig.apply("llama3.2", 
 
 (The imports are listed under [The snippets' imports](#the-snippets-imports).) Reading the key is up to you; creating the client sends no
 request. The `with` methods of each config (`withContextWindow`, `withReserveCompletion`, and for OpenAI
-`withBaseUrl` and `withOrganization`) change one field at a time. The other providers (Gemini, Azure, the
-OpenAI-compatible family and so on) have no such entry point yet, so configure them in `application.conf`.
+`withBaseUrl` and `withOrganization`) change one field at a time; some take a Scala `Option`, which the builders above
+avoid.
 
 ### Recording metrics
 
@@ -164,6 +207,8 @@ For `metrics`, use `new MicrometerMetrics(meterRegistry)` from `llm4s-observabil
 application's Micrometer `MeterRegistry` (see [Micrometer metrics](observability/micrometer)), or `PrometheusMetrics`
 from `llm4s-observability-prometheus`. A null collector records nothing. The Spring Boot starter does this for you when
 the application has a `MeterRegistry`.
+
+A [client builder](#configure-in-code) takes the collector too: `Llm4s.ollama().model("llama3.2").metrics(metrics).build()`.
 
 ## Your first call
 

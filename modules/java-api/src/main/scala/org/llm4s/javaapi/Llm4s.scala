@@ -30,6 +30,18 @@ import java.util.Objects
  *     client.complete("Hello").ifSuccess(System.out::println);
  * }
  * }}}
+ *
+ * === A client configured in code ===
+ * The providers this module brings each have a builder, so a client needs no `application.conf` and no Scala type:
+ * [[openAi]], [[anthropic]], [[gemini]], [[ollama]], [[openAiCompatible]] (vLLM, LM Studio, LiteLLM, a gateway) and
+ * [[azureOpenAi]]. Every other provider - one from its own module, such as `llm4s-bedrock` - takes its config object
+ * through [[createClient]], or a section of `application.conf` through [[createDefaultClient]].
+ * {{{
+ * LlmResult<JLlmClient> r = Llm4s.openAi()
+ *     .apiKey(apiKey)   // read however your application keeps its secrets
+ *     .model("gpt-4o-mini")
+ *     .build();
+ * }}}
  */
 object Llm4s {
 
@@ -45,6 +57,27 @@ object Llm4s {
     } yield wrapClient(client)
     FacadeInternals.result(result)
   }
+
+  /** A builder for an OpenAI client: `apiKey` and `model` are required (#1489). */
+  def openAi(): OpenAiClientBuilder = new OpenAiClientBuilder(ClientSettings.EMPTY)
+
+  /** A builder for an Anthropic client: `apiKey` and `model` are required (#1489). */
+  def anthropic(): AnthropicClientBuilder = new AnthropicClientBuilder(ClientSettings.EMPTY)
+
+  /** A builder for a client of the Google Gemini API: `apiKey` and `model` are required (#1489). */
+  def gemini(): GeminiClientBuilder = new GeminiClientBuilder(ClientSettings.EMPTY)
+
+  /** A builder for an Ollama client: `model` is required, and the server is `http://localhost:11434` unless set (#1489). */
+  def ollama(): OllamaClientBuilder = new OllamaClientBuilder(ClientSettings.EMPTY)
+
+  /**
+   * A builder for a client of any server that speaks OpenAI's chat-completions API - vLLM, LM Studio, LiteLLM, a
+   * gateway: `baseUrl` and `model` are required, the API key optional (#1489).
+   */
+  def openAiCompatible(): OpenAiCompatibleClientBuilder = new OpenAiCompatibleClientBuilder(ClientSettings.EMPTY)
+
+  /** A builder for an Azure OpenAI client: `endpoint`, `apiKey` and `model` (the deployment) are required (#1489). */
+  def azureOpenAi(): AzureOpenAiClientBuilder = new AzureOpenAiClientBuilder(ClientSettings.EMPTY)
 
   /**
    * Creates a [[JLlmClient]] from an explicit [[ProviderConfig]].  Useful

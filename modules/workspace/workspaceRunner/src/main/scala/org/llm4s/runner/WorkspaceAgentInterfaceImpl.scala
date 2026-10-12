@@ -806,7 +806,8 @@ class WorkspaceAgentInterfaceImpl(
    * token ever reaches cmd.exe.
    *
    * The command's standard input is the null device (#1728), so a program that reads it ends at once. Its `PATH` keeps
-   * only the entries the runner itself would search ([[ProgramResolver.childPath]]), and on Windows it runs with
+   * only the entries the runner itself would search, or the system directories when none is left
+   * ([[ProgramResolver.childPath]]), and on Windows it runs with
    * `NoDefaultCurrentDirectoryInExePath=1`, so a program it starts by name is never one from the workspace (#1792).
    *
    * Both ways a command reaches the runner go through this one function: [[executeCommand]] (the direct path)
@@ -973,8 +974,9 @@ class WorkspaceAgentInterfaceImpl(
     builder.redirectInput(java.lang.ProcessBuilder.Redirect.from(nullDevice))
     env.foreach { case (k, v) => builder.environment().put(k, v) }
     // The program may start another by name (`#!/usr/bin/env x`, sbt starting java), searching PATH from the
-    // workspace: give it only the PATH entries the runner itself would search (#1792). No entry left: no PATH, since
-    // an empty one is read as the current directory.
+    // workspace: give it only the PATH entries the runner itself would search (#1792). No entry left: the system
+    // directories (#1805), since without a PATH sh and bash search a default ending in `.`; only when even those are
+    // untrusted, no PATH, since an empty one is read as the current directory.
     ProgramResolver.childPath(programSearch, untrustedRoots) match {
       case Some(path) => builder.environment().put("PATH", path)
       case None       => builder.environment().remove("PATH")
