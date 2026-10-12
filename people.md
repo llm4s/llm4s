@@ -118,6 +118,7 @@ and community outreach.
 
 | Landmark | Location | Name | Role | LinkedIn |
 |---|---|---|---|---|
+| <img src="docs/images/chapters/merlion.svg" alt="Merlion, Singapore" title="Merlion, Singapore" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇸🇬 Singapore | **Gagandeep Kalra** | Chapter Lead — Singapore | [linkedin.com/in/gagandeep-kalra-9b23b2b1](https://www.linkedin.com/in/gagandeep-kalra-9b23b2b1/) |
 | <img src="docs/images/chapters/gateway-of-india.svg" alt="Gateway of India" title="Gateway of India" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇮🇳 Mumbai | **Shubham Vishwakarma** | Chapter Lead — Mumbai | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
 | <img src="docs/images/chapters/india-gate.svg" alt="India Gate" title="India Gate" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇮🇳 Delhi | **Vansh Sharma** | Chapter Lead — Delhi | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
 | <img src="docs/images/chapters/eiffel-tower.svg" alt="Eiffel Tower" title="Eiffel Tower" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇫🇷 France | **Olivier Nouguier** | Chapter Lead — France | [linkedin.com/in/olivier-nouguier](https://www.linkedin.com/in/olivier-nouguier/) |
