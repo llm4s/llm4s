@@ -116,21 +116,21 @@ and community outreach.
 
 ## LLM4S Global Chapter Leaders
 
-| Location | Name | Role | LinkedIn |
-|---|---|---|---|
-| 🇮🇳 Mumbai | **Shubham Vishwakarma** | Chapter Lead — Mumbai | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
-| 🇮🇳 Delhi | **Vansh Sharma** | Chapter Lead — Delhi | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
-| 🇫🇷 France | **Olivier Nouguier** | Chapter Lead — France | [linkedin.com/in/olivier-nouguier](https://www.linkedin.com/in/olivier-nouguier/) |
-| 🇦🇪 Abu Dhabi | **Yoshita Sharma** | Chapter Lead — Abu Dhabi | [linkedin.com/in/yoshita-sharma-trojan](https://www.linkedin.com/in/yoshita-sharma-trojan/) |
-| 🇬🇧 London | **Dmitry Mamonov** | Chapter Lead — London | [linkedin.com/in/dmamonov](https://www.linkedin.com/in/dmamonov/) |
-| 🇩🇪 Germany | **Vitthal Mirji** | Chapter Lead — Germany | [linkedin.com/in/vitthal10](https://www.linkedin.com/in/vitthal10/) |
-| 🇮🇹 Italy | **Giovanni Ruggiero** | Chapter Lead — Italy | [linkedin.com/in/giovanniruggiero](https://www.linkedin.com/in/giovanniruggiero/) |
-| 🇺🇸 Seattle | **Ansh K Shah** | Chapter Lead — Seattle | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
-| 🇺🇸 Silicon Valley | **Ipsit Sahoo** | Chapter Lead — Silicon Valley | [linkedin.com/in/ipsit-sahoo](https://www.linkedin.com/in/ipsit-sahoo/) |
-| 🇺🇸 San Francisco | **Pritish Yuvraj** | Chapter Lead — San Francisco | [linkedin.com/in/pritishyuvraj](https://www.linkedin.com/in/pritishyuvraj/) |
-| 🇺🇸 New York | **Aatif Ullah** | Chapter Lead — New York | [linkedin.com/in/aatif-ullah-92308a49](https://www.linkedin.com/in/aatif-ullah-92308a49/) |
-| 🇺🇸 Texas | **Gopi Trinadh** | Chapter Lead — Texas | [linkedin.com/in/gopitrinadhmaddikunta](https://www.linkedin.com/in/gopitrinadhmaddikunta/) |
-| 🇨🇭 Switzerland | **Elvan Konukseven** | Chapter Lead — Switzerland | [linkedin.com/in/elvan-konukseven](https://www.linkedin.com/in/elvan-konukseven/) |
+| Landmark | Location | Name | Role | LinkedIn |
+|---|---|---|---|---|
+| <img src="docs/images/chapters/gateway-of-india.svg" alt="Gateway of India" title="Gateway of India" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇮🇳 Mumbai | **Shubham Vishwakarma** | Chapter Lead — Mumbai | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
+| <img src="docs/images/chapters/india-gate.svg" alt="India Gate" title="India Gate" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇮🇳 Delhi | **Vansh Sharma** | Chapter Lead — Delhi | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
+| <img src="docs/images/chapters/eiffel-tower.svg" alt="Eiffel Tower" title="Eiffel Tower" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇫🇷 France | **Olivier Nouguier** | Chapter Lead — France | [linkedin.com/in/olivier-nouguier](https://www.linkedin.com/in/olivier-nouguier/) |
+| <img src="docs/images/chapters/sheikh-zayed-mosque.svg" alt="Sheikh Zayed Grand Mosque" title="Sheikh Zayed Grand Mosque" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇦🇪 Abu Dhabi | **Yoshita Sharma** | Chapter Lead — Abu Dhabi | [linkedin.com/in/yoshita-sharma-trojan](https://www.linkedin.com/in/yoshita-sharma-trojan/) |
+| <img src="docs/images/chapters/elizabeth-tower.svg" alt="Elizabeth Tower (Big Ben)" title="Elizabeth Tower (Big Ben)" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇬🇧 London | **Dmitry Mamonov** | Chapter Lead — London | [linkedin.com/in/dmamonov](https://www.linkedin.com/in/dmamonov/) |
+| <img src="docs/images/chapters/brandenburg-gate.svg" alt="Brandenburg Gate" title="Brandenburg Gate" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇩🇪 Germany | **Vitthal Mirji** | Chapter Lead — Germany | [linkedin.com/in/vitthal10](https://www.linkedin.com/in/vitthal10/) |
+| <img src="docs/images/chapters/colosseum.svg" alt="Colosseum" title="Colosseum" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇮🇹 Italy | **Giovanni Ruggiero** | Chapter Lead — Italy | [linkedin.com/in/giovanniruggiero](https://www.linkedin.com/in/giovanniruggiero/) |
+| <img src="docs/images/chapters/space-needle.svg" alt="Space Needle" title="Space Needle" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 Seattle | **Ansh K Shah** | Chapter Lead — Seattle | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
+| <img src="docs/images/chapters/stanford-hoover-tower.svg" alt="Stanford Hoover Tower" title="Stanford Hoover Tower" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 Silicon Valley | **Ipsit Sahoo** | Chapter Lead — Silicon Valley | [linkedin.com/in/ipsit-sahoo](https://www.linkedin.com/in/ipsit-sahoo/) |
+| <img src="docs/images/chapters/golden-gate-bridge.svg" alt="Golden Gate Bridge" title="Golden Gate Bridge" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 San Francisco | **Pritish Yuvraj** | Chapter Lead — San Francisco | [linkedin.com/in/pritishyuvraj](https://www.linkedin.com/in/pritishyuvraj/) |
+| <img src="docs/images/chapters/statue-of-liberty.svg" alt="Statue of Liberty" title="Statue of Liberty" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 New York | **Aatif Ullah** | Chapter Lead — New York | [linkedin.com/in/aatif-ullah-92308a49](https://www.linkedin.com/in/aatif-ullah-92308a49/) |
+| <img src="docs/images/chapters/alamo.svg" alt="The Alamo" title="The Alamo" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 Texas | **Gopi Trinadh** | Chapter Lead — Texas | [linkedin.com/in/gopitrinadhmaddikunta](https://www.linkedin.com/in/gopitrinadhmaddikunta/) |
+| <img src="docs/images/chapters/chapel-bridge.svg" alt="Chapel Bridge, Lucerne" title="Chapel Bridge, Lucerne" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇨🇭 Switzerland | **Elvan Konukseven** | Chapter Lead — Switzerland | [linkedin.com/in/elvan-konukseven](https://www.linkedin.com/in/elvan-konukseven/) |
 
 ---
 
