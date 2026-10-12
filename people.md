@@ -18,7 +18,7 @@ liaisons with sponsors, and conference programme committees.
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="docs/people/39022252.png" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
+| <img src="docs/people/kannupriya-kalra.jpg" alt="Kannupriya Kalra" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
 | <img src="docs/people/2352078.jpg" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
 
 ---
@@ -43,7 +43,7 @@ are the decision-makers when no consensus is reached among contributors.
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="docs/people/39022252.png" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
+| <img src="docs/people/kannupriya-kalra.jpg" alt="Kannupriya Kalra" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
 | <img src="docs/people/2352078.jpg" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
 
 ---
