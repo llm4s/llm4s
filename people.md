@@ -118,6 +118,7 @@ and community outreach.
 
 | Location | Name | Role | LinkedIn |
 |---|---|---|---|
+| Abu Dhabi | **Yoshita Sharma** | Chapter Lead — Abu Dhabi | [linkedin.com/in/yoshita-sharma-trojan](https://www.linkedin.com/in/yoshita-sharma-trojan/) |
 | London | **Dmitry Mamonov** | Chapter Lead — London | [linkedin.com/in/dmamonov](https://www.linkedin.com/in/dmamonov/) |
 | Germany | **Vitthal Mirji** | Chapter Lead — Germany | [linkedin.com/in/vitthal10](https://www.linkedin.com/in/vitthal10/) |
 | Italy | **Giovanni Ruggiero** | Chapter Lead — Italy | [linkedin.com/in/giovanniruggiero](https://www.linkedin.com/in/giovanniruggiero/) |
