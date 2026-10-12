@@ -102,7 +102,6 @@ project discussions and direction.
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img alt="Anshuman Awasthi" src="/people/anshuman-awasthi.jpg" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) | [linkedin.com/in/autodidact](https://www.linkedin.com/in/autodidact) |
 | <img src="/people/vansh-sharma.jpg" alt="Vansh Sharma" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Vansh Sharma** | [@vansh7nvc](https://github.com/vansh7nvc) | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
 | <img src="/people/elvan-konukseven.jpg" alt="Elvan Konukseven" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Elvan Konukseven** | [@elvankonukseven](https://github.com/elvankonukseven) | [https://www.linkedin.com/in/elvan-konukseven/](https://www.linkedin.com/in/elvan-konukseven/) |
 
