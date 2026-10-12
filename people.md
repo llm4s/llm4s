@@ -27,9 +27,9 @@ liaisons with sponsors, and conference programme committees.
 
 | Photo | Name | Role | LinkedIn |
 |---|---|---|---|
-|  | **Gagandeep Kalra** | Foundation Core Team Member | [linkedin.com/in/gagandeep-kalra-9b23b2b1](https://www.linkedin.com/in/gagandeep-kalra-9b23b2b1/) |
+| <img src="docs/people/gagandeep-kalra.jpg" alt="Gagandeep Kalra" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Gagandeep Kalra** | Foundation Core Team Member | [linkedin.com/in/gagandeep-kalra-9b23b2b1](https://www.linkedin.com/in/gagandeep-kalra-9b23b2b1/) |
 | <img src="docs/people/pavan-vamsi.jpg" alt="Pavan Vamsi" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Pavan Vamsi** | Foundation Core Team Member | [linkedin.com/in/pavanvamsi3](https://www.linkedin.com/in/pavanvamsi3/) |
-|  | **Namrata Priyadarshani** | Foundation Core Team Member | [linkedin.com/in/namrata-priyadarshani-61a316159](https://www.linkedin.com/in/namrata-priyadarshani-61a316159/) |
+| <img src="docs/people/namrata-priyadarshani.jpg" alt="Namrata Priyadarshani" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Namrata Priyadarshani** | Foundation Core Team Member | [linkedin.com/in/namrata-priyadarshani-61a316159](https://www.linkedin.com/in/namrata-priyadarshani-61a316159/) |
 |  | **Ipsit Sahoo** | Foundation Core Team Member | [linkedin.com/in/ipsit-sahoo](https://www.linkedin.com/in/ipsit-sahoo/) |
 |  | **Ansh K Shah** | Foundation Core Team Member | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
 |  | **Christopher Wheeler** | Foundation Core Team Member | [linkedin.com/in/chris-w-1499161a](https://www.linkedin.com/in/chris-w-1499161a/) |
