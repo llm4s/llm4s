@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph.sqlite
 
+import org.llm4s.agent.graph.Checkpoint
+
 import java.sql.Connection
 import scala.util.Using
 
@@ -53,17 +55,7 @@ private[sqlite] object SqliteSchema:
         |  claim_expires_second INTEGER,
         |  claim_expires_nano   INTEGER
         |)""".stripMargin,
-      """CREATE TABLE llm4s_checkpoint_history (
-        |  thread_id       TEXT NOT NULL,
-        |  position        INTEGER NOT NULL,
-        |  checkpoint_id   TEXT NOT NULL,
-        |  status          TEXT NOT NULL,
-        |  created_second  INTEGER NOT NULL,
-        |  created_nano    INTEGER NOT NULL,
-        |  checkpoint_json TEXT NOT NULL,
-        |  PRIMARY KEY (thread_id, position),
-        |  UNIQUE (thread_id, checkpoint_id)
-        |) WITHOUT ROWID""".stripMargin,
+      historyTable,
       """CREATE TABLE llm4s_checkpoint_pending_writes (
         |  thread_id     TEXT NOT NULL,
         |  position      INTEGER NOT NULL,
@@ -78,6 +70,67 @@ private[sqlite] object SqliteSchema:
         |  PRIMARY KEY (thread_id, seq)
         |) WITHOUT ROWID""".stripMargin
     )
+
+  /**
+   * The history table (#1702). Part of version 1 from the start, but a file a pre-release build of version 1 wrote
+   * lacks it, so opening a version-1 file also creates it if it is missing ([[ensureHistory]]). `IF NOT EXISTS`, so
+   * the statement is safe on every file; its `UNIQUE (thread_id, checkpoint_id)` is the by-id index.
+   */
+  private val historyTable: String =
+    """CREATE TABLE IF NOT EXISTS llm4s_checkpoint_history (
+      |  thread_id       TEXT NOT NULL,
+      |  position        INTEGER NOT NULL,
+      |  checkpoint_id   TEXT NOT NULL,
+      |  status          TEXT NOT NULL,
+      |  created_second  INTEGER NOT NULL,
+      |  created_nano    INTEGER NOT NULL,
+      |  checkpoint_json TEXT NOT NULL,
+      |  PRIMARY KEY (thread_id, position),
+      |  UNIQUE (thread_id, checkpoint_id)
+      |) WITHOUT ROWID""".stripMargin
+
+  private def tableExists(connection: Connection, name: String): Boolean =
+    Using.resource(connection.prepareStatement("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")) {
+      query =>
+        query.setString(1, name)
+        Using.resource(query.executeQuery())(_.next())
+    }
+
+  /**
+   * Creates the history table on a version-1 file that lacks it - one written by a pre-release build - and seeds it
+   * with each thread's latest checkpoint, so `history` and `checkpoint` see what `latest` sees. Call inside the
+   * opening transaction; a file that has the table is left as it is.
+   */
+  private[sqlite] def ensureHistory(connection: Connection): Unit =
+    if tableExists(connection, "llm4s_checkpoint_threads") && !tableExists(connection, "llm4s_checkpoint_history") then
+      statements(connection, historyTable)
+      val latest = Using.resource(connection.createStatement()) { statement =>
+        Using.resource(
+          statement.executeQuery(
+            "SELECT thread_id, checkpoint_json FROM llm4s_checkpoint_threads WHERE checkpoint_json IS NOT NULL"
+          )
+        )(rows => Iterator.continually(rows).takeWhile(_.next()).map(r => r.getString(1) -> r.getString(2)).toVector)
+      }
+      Using.resource(
+        connection.prepareStatement(
+          """INSERT INTO llm4s_checkpoint_history
+            |(thread_id, position, checkpoint_id, status, created_second, created_nano, checkpoint_json)
+            |VALUES (?, 0, ?, ?, ?, ?, ?)""".stripMargin
+        )
+      ) { insert =>
+        latest.foreach { (thread, json) =>
+          // a checkpoint this build cannot decode keeps no history row; `latest` reports it as before
+          Checkpoint.fromJson(ujson.read(json)).foreach { checkpoint =>
+            insert.setString(1, thread)
+            insert.setString(2, checkpoint.id)
+            insert.setString(3, checkpoint.status.toString)
+            insert.setLong(4, checkpoint.createdAt.getEpochSecond)
+            insert.setLong(5, checkpoint.createdAt.getNano.toLong)
+            insert.setString(6, json)
+            insert.executeUpdate(): Unit
+          }
+        }
+      }
 
   /** The version the file is at; 0 for a file without the schema table. Call inside a transaction. */
   def version(connection: Connection): Int =
@@ -102,6 +155,7 @@ private[sqlite] object SqliteSchema:
         case Some(missing) => Left(s"no migration from checkpoint schema version $missing to ${missing + 1}")
         case None =>
           (found until target).foreach(v => steps(v)(connection))
+          if target >= 1 then ensureHistory(connection)
           if found != target then
             statements(connection, "DELETE FROM llm4s_checkpoint_schema")
             Using.resource(connection.prepareStatement("INSERT INTO llm4s_checkpoint_schema (version) VALUES (?)")) {

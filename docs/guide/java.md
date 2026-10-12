@@ -141,6 +141,20 @@ request. The `with` methods of each config (`withContextWindow`, `withReserveCom
 `withBaseUrl` and `withOrganization`) change one field at a time. The other providers (Gemini, Azure, the
 OpenAI-compatible family and so on) have no such entry point yet, so configure them in `application.conf`.
 
+### Recording metrics
+
+`Llm4s.createClient(ProviderConfig, MetricsCollector)` builds a client that reports every call (its outcome, duration,
+tokens and cost) to a `MetricsCollector`:
+
+```java
+LlmResult<JLlmClient> measured = Llm4s.createClient(OllamaConfig.apply("llama3.2", "http://localhost:11434"), metrics);
+```
+
+For `metrics`, use `new MicrometerMetrics(meterRegistry)` from `llm4s-observability-micrometer` to record into the
+application's Micrometer `MeterRegistry` (see [Micrometer metrics](observability/micrometer)), or `PrometheusMetrics`
+from `llm4s-observability-prometheus`. A null collector records nothing. The Spring Boot starter does this for you when
+the application has a `MeterRegistry`.
+
 ## Your first call
 
 ```java
@@ -213,6 +227,7 @@ import org.llm4s.llmconnect.config.AnthropicConfig;
 import org.llm4s.llmconnect.config.OllamaConfig;
 import org.llm4s.llmconnect.config.OpenAIConfig;
 import org.llm4s.llmconnect.model.Conversation;
+import org.llm4s.metrics.MetricsCollector;
 ```
 
 ## A conversation
