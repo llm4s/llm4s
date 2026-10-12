@@ -102,11 +102,9 @@ private[llm4s] object Redaction {
    * placeholder and its `[truncated, N chars omitted]` suffix, which `safe` and the MCP payload log rely on.
    *
    * A body longer than `SafeBodyWholeLimit` (128 KiB) - an HTML 5xx page from a proxy, a dumped payload - is not
-   * redacted whole, which takes seconds for a few megabytes (#1680), but in a prefix (`safeBodyWindow`): one that ends
-   * right before a separator, so that no credential straddles the end, read as the whole body would be read, and long
-   * enough that its redaction runs `SafeBodyMargin` (16 KiB) past the `maxLength` characters kept, so that what the
-   * end of the prefix changes - a value cut off there - is never shown. Its truncation suffix gives the body's length,
-   * the redacted length not being known. A body that a prefix of half its length cannot show is redacted whole.
+   * redacted whole, which takes seconds for a few megabytes (#1680), but, where that shows exactly what redacting it
+   * whole shows, in a prefix (`safeBodyWindow`). The kept characters are always those of `redact(body)`; only the
+   * truncation suffix differs, giving the body's length, the redacted length not being known.
    *
    * @param body The text to redact and truncate
    * @param maxLength Maximum length of the redacted text before truncation (default: 2048)
@@ -126,54 +124,81 @@ private[llm4s] object Redaction {
   /** How much redacted text the prefix [[safeBody]] reads of a longer body must hold past the characters it keeps. */
   private val SafeBodyMargin: Int = 16 * 1024
 
-  /** How far back from the end of a window [[safeBody]] looks for a separator to end the prefix before. */
-  private val SafeBodySeparatorReach: Int = 4 * 1024
-
   /**
    * Where [[safeBody]] cuts a body longer than `SafeBodyWholeLimit`, and the redaction of the prefix before the cut,
-   * whose first `maxLength` characters it keeps, or `None` where it redacts the body whole (#1680).
+   * whose first `maxLength` characters it keeps, or `None` where it redacts the body whole (#1680). The kept
+   * characters must be those of `redact(body)`, so a prefix is used only where all of the following hold, and
+   * otherwise the window doubles; once the next window would reach half the body, the body is redacted whole.
    *
-   * The window starts at twice `maxLength` and `SafeBodyMargin` (32 KiB at least) and doubles until the redacted
-   * prefix holds `SafeBodyMargin` characters past `maxLength`; once it would reach half the body, the body is
-   * redacted whole. The prefix ends right before the last separator in the window's last `SafeBodySeparatorReach`
-   * characters - whitespace or one of `"'`, `,;<>{}[]()` - a character no API key, token or other credential the
-   * patterns read holds, so none is cut in two: cutting at a fixed length left `sk-proj-A1b2`, too short for the
-   * key pattern, and a long value collapsed before it brought it into the kept characters. Where the window holds
-   * no separator there, it doubles.
+   *  - '''Where it ends.''' At the last place in the second half of the window right after a letter or a digit and
+   *    right before a separator - whitespace or one of `"',;<>{}[]()` - which no API key, token, number, escape or
+   *    other run that a pattern reads holds. So the end of the prefix reads, to every such run, as the separator after
+   *    it does, and the runs of whitespace, backslashes, quotes and brackets that a reading skips stop at that letter
+   *    or digit, inside the prefix, as they do in the body.
+   *  - '''Read as the whole body is read.''' The facts each reading takes of the input as a whole - whether it holds
+   *    the JSON escape of a separator or a quote, a `'`, a backslash, an `&`, a `=`, a `,` before JSON, a `Bearer` or
+   *    `Basic` word (`Scope`) - are taken of the body, not of the prefix. The one fact the passes take of the text an
+   *    earlier pass left - whether it kept every `'` of the input, which decides where a single-quoted value inside a
+   *    double-quoted string ends (`redactQuoted`) - is not known for the body without redacting it: a prefix in which
+   *    such a value occurs at all is not used, and the body is redacted whole.
+   *  - '''Nothing left open where it matters.''' A reading that only takes or leaves a value once it has read on past
+   *    it - where it closes, and what follows - reports a value that reaches the end of the prefix
+   *    (`Scope.reachedEnd`): there the body may decide otherwise, and the window doubles. A reading that replaces a
+   *    value that is not closed up to the end of the input replaces, in the prefix, all of it from where it opens:
+   *    the redacted prefix then ends with a placeholder where the value opens.
+   *  - '''A margin past what is shown.''' The redacted prefix is at least `maxLength + SafeBodyMargin` long, so
+   *    whatever the end of the prefix changes - a value replaced up to it, a key or a token it cuts - lies 16 KiB of
+   *    redacted text beyond the kept characters.
+   *  - '''The same from a longer prefix.''' The prefix of the next window, twice as long, meets the same conditions
+   *    and its redaction keeps the same `maxLength` characters, so a value that the first prefix cuts and the second
+   *    holds whole is read the same way by both.
    *
-   * The prefix is read as the whole body is: where the body holds the JSON escape of a separator or a quote and the
-   * prefix does not, or a `'` that may close a value runs on past the cut, the prefix is redacted with such an
-   * escape or quote written after it, past every character kept, since either changes how every value before it is
-   * read. A value the cut leaves open runs to the end of the prefix, as a payload cut off in the middle is read; one
-   * that a reading only takes when it closes ends in the margin, which is never shown. The cost is that of
-   * redacting the prefixes, at most twice the last one, or that of the body and half of it again.
+   * The cost is that of redacting two prefixes per window, and the gates' linear scans of the body.
    */
   private[util] def safeBodyWindow(body: String, maxLength: Int): Option[(Int, String)] =
     if (maxLength < 0 || body.length <= SafeBodyWholeLimit) None
     else {
-      val bodyEscaped                 = holdsSeparatorOrQuoteEscape(body)
-      lazy val closing                = lastClosingSingleQuote(body)
-      def separator(c: Char): Boolean = Character.isWhitespace(c) || "\"',;<>{}[]()".indexOf(c.toInt) >= 0
-      @tailrec def attempt(window: Long): Option[(Int, String)] =
-        if (2 * window >= body.length) None
+      val gates = Scope.of(body)
+      // The prefix ends at the last place in the second half of the window after a letter or a digit and before a
+      // separator, or -1 where there is none.
+      def cutIn(window: Long): Int = {
+        val end   = math.min(window, body.length.toLong - 1).toInt
+        val floor = math.max(1L, window / 2).toInt
+        var cut   = end
+        while (cut > floor && !(separatesPrefix(body.charAt(cut)) && body.charAt(cut - 1).isLetterOrDigit)) cut -= 1
+        if (cut > floor) cut else -1
+      }
+      // The redaction of the prefix the window ends, where it may be used, or `None`; `Left(())` where the body must
+      // be redacted whole.
+      def prefixAt(window: Long): Either[Unit, Option[(Int, String)]] = {
+        val cut = cutIn(window)
+        if (cut < 0) Right(None)
         else {
-          val end   = window.toInt
-          val floor = math.max(0, end - SafeBodySeparatorReach)
-          var cut   = end
-          while (cut > floor && !separator(body.charAt(cut))) cut -= 1
-          if (cut <= floor) attempt(2 * window)
-          else {
-            val prefix = body.substring(0, cut)
-            val tail =
-              (if (bodyEscaped && !holdsSeparatorOrQuoteEscape(prefix)) "\n\\u0026" else "") +
-                (if (closing >= cut) " '" else "")
-            val redacted = redact(prefix + tail)
-            if (redacted.length.toLong >= maxLength.toLong + SafeBodyMargin + tail.length) Some((cut, redacted))
-            else attempt(2 * window)
+          val scope    = gates.forPrefix
+          val redacted = redaction(body.substring(0, cut), RedactionPlaceholder, true, true, scope)._1
+          if (scope.whole) Left(())
+          else if (scope.uncertain || redacted.length.toLong < maxLength.toLong + SafeBodyMargin) Right(None)
+          else Right(Some((cut, redacted)))
+        }
+      }
+      @tailrec def attempt(window: Long, first: Either[Unit, Option[(Int, String)]]): Option[(Int, String)] =
+        if (4 * window >= body.length) None
+        else {
+          val second = prefixAt(2 * window)
+          (first, second) match {
+            case (Left(_), _) | (_, Left(_)) => None
+            case (Right(Some((cut, redacted))), Right(Some((_, longer))))
+                if redacted.regionMatches(0, longer, 0, maxLength) =>
+              Some((cut, redacted))
+            case _ => attempt(2 * window, second)
           }
         }
-      attempt(math.max(32L * 1024, 2L * (maxLength.toLong + SafeBodyMargin)))
+      val window = math.max(32L * 1024, 2L * (maxLength.toLong + SafeBodyMargin))
+      if (4 * window >= body.length) None else attempt(window, prefixAt(window))
     }
+
+  /** The characters [[safeBodyWindow]] ends a prefix before: whitespace and `"',;<>{}[]()`. */
+  private def separatesPrefix(c: Char): Boolean = Character.isWhitespace(c) || "\"',;<>{}[]()".indexOf(c.toInt) >= 0
 
   // ============================================================
   // Pattern-based redaction (for log messages)
@@ -455,7 +480,7 @@ private[llm4s] object Redaction {
    */
   def redact(input: String, placeholder: String = RedactionPlaceholder): String =
     if (input == null || input.isEmpty) input
-    else redaction(input, placeholder, singleQuotedFromInput = true, addedReadings = true)._1
+    else redaction(input, placeholder, singleQuotedFromInput = true, addedReadings = true, Scope.of(input))._1
 
   /**
    * What [[redact]] makes of a non-empty `input`, and the ranges of the input it replaces; with
@@ -468,25 +493,27 @@ private[llm4s] object Redaction {
     singleQuotedFromInput: Boolean,
     addedReadings: Boolean = true
   ): (String, Vector[(Int, Int)]) = {
-    val (text, edits) = redaction(input, RedactionPlaceholder, singleQuotedFromInput, addedReadings)
+    val (text, edits) = redaction(input, RedactionPlaceholder, singleQuotedFromInput, addedReadings, Scope.of(input))
     (text, edits.map(edit => (edit.start, edit.end)))
   }
 
   /**
    * The redacted text of a non-empty `input`, and the edits that make it of the input: those of the passes
    * (`passRedaction`), and, with `addedReadings`, those of the readings of #1695, #1707 and #1706 that overlap none of
-   * them.
+   * them. `scope` holds what the passes take of the input as a whole: of `input` itself, or, for a prefix that
+   * [[safeBody]] redacts in place of a longer body, of that body.
    */
   private def redaction(
     input: String,
     placeholder: String,
     singleQuotedFromInput: Boolean,
-    addedReadings: Boolean
+    addedReadings: Boolean,
+    scope: Scope
   ): (String, Vector[Edit]) = {
-    val (text, edits) = passRedaction(input, placeholder, singleQuotedFromInput)
+    val (text, edits) = passRedaction(input, placeholder, singleQuotedFromInput, scope)
     if (!addedReadings) (text, edits)
     else {
-      val all = addedReadingEdits(input, placeholder, edits)
+      val all = addedReadingEdits(input, placeholder, edits, scope)
       if (all.length == edits.length) (text, edits) else (applyEdits(input, all), all)
     }
   }
@@ -495,11 +522,12 @@ private[llm4s] object Redaction {
   private def passRedaction(
     input: String,
     placeholder: String,
-    singleQuotedFromInput: Boolean
+    singleQuotedFromInput: Boolean,
+    scope: Scope
   ): (String, Vector[Edit]) = {
-    val escaped = holdsSeparatorOrQuoteEscape(input)
+    val escaped = scope.escaped
     val quotes  = input.count(_ == '\'')
-    val passes  = redactionPasses(placeholder, quotes, escaped)
+    val passes  = redactionPasses(placeholder, quotes, escaped, scope)
     if (escaped) {
       // Every pass also reads the input as it was given, and what any of them replaces is merged with what the
       // passes in sequence replace, and written once: no pass can take the key or the quote of a field from
@@ -516,8 +544,8 @@ private[llm4s] object Redaction {
       // replaced anything: every edit of the passes in sequence is made as before, so the output masks all it did.
       val (text, sequenced) = sequenceEdits(input, passes)
       val added =
-        if (!singleQuotedFromInput || quotes == 0) Vector.empty
-        else disjointFrom(sequenced, sequenceEdits(input, singleQuotedFieldPasses(placeholder, quotes))._2)
+        if (!singleQuotedFromInput || !scope.quotes) Vector.empty
+        else disjointFrom(sequenced, sequenceEdits(input, singleQuotedFieldPasses(placeholder, quotes, scope))._2)
       if (added.isEmpty) (text, sequenced)
       else {
         val edits = (sequenced ++ added).sortBy(_.start)
@@ -571,25 +599,25 @@ private[llm4s] object Redaction {
    *
    * Each reading is a fixed number of passes over the input, so the cost stays linear.
    */
-  private def addedReadingEdits(input: String, placeholder: String, edits: Vector[Edit]): Vector[Edit] = {
+  private def addedReadingEdits(input: String, placeholder: String, edits: Vector[Edit], scope: Scope): Vector[Edit] = {
     var kept = edits
     def add(extra: Vector[Edit]): Unit = {
       val added = disjointFrom(kept, extra)
       if (added.nonEmpty) kept = (kept ++ added).sortBy(_.start)
     }
-    val escaped = holdsSeparatorOrQuoteEscape(input)
+    val escaped = scope.escaped
     val quotes  = input.count(_ == '\'')
-    if (!escaped && (holdsJsonAfterComma(input) || holdsAuthScheme(input)))
-      add(sequenceEdits(input, redactionPasses(placeholder, quotes, escaped, variant = true))._2)
-    if (input.indexOf('\\') >= 0) add(sequenceEdits(input, afterEscapePairPasses(escaped, placeholder))._2)
-    if (input.indexOf('&') >= 0) add(ampTailEdits(input, placeholder))
-    if (input.indexOf('\\') >= 0) {
-      val added = uncoveredEdits(input, kept, escapedQuotedValues(input), placeholder)
+    if (!escaped && (scope.jsonAfterComma || scope.authScheme))
+      add(sequenceEdits(input, redactionPasses(placeholder, quotes, escaped, scope, variant = true))._2)
+    if (scope.backslash) add(sequenceEdits(input, afterEscapePairPasses(escaped, placeholder))._2)
+    if (scope.ampersand) add(ampTailEdits(input, placeholder))
+    if (scope.backslash) {
+      val added = uncoveredEdits(input, kept, escapedQuotedValues(input, scope), placeholder)
       if (added.nonEmpty) kept = (kept ++ added).sortBy(_.start)
     }
-    if (input.indexOf('\'') >= 0 || input.indexOf('=') >= 0) {
+    if (scope.quotes || scope.equalsSign) {
       Seq(false, true).foreach { calls =>
-        val (strings, words) = pythonValues(input, placeholder, calls)
+        val (strings, words) = pythonValues(input, placeholder, calls, scope)
         if (strings.nonEmpty || words.nonEmpty) {
           // A word replaced whole is written in quotes, as the leaf walk writes one, so the literal stays one.
           val wordParts = quoteSafeParts(input, words, placeholder)
@@ -683,11 +711,16 @@ private[llm4s] object Redaction {
    * too (`token=SecretStr('...')`), which `PythonFieldStart` leaves to the other passes, as they read `key=value`.
    * Inside the call, a `=` is read as a dict's `:` is, so the name of a keyword argument of the call is no leaf and
    * the walk goes on over its value (`Secret(value='...', kind='...')`).
+   *
+   * Whether a value is taken depends on where it closes and on what follows it, so a value whose string or container
+   * runs to the end of the input is reported to `scope` (`Scope.reachedEnd`): in a prefix of a longer body (#1680),
+   * the body may close it, or not, past the prefix.
    */
   private def pythonValues(
     input: String,
     placeholder: String,
-    calls: Boolean
+    calls: Boolean,
+    scope: Scope
   ): (Vector[(Int, Int, Int)], Vector[(Int, Int, Int)]) = {
     val length = input.length
     val found  = scala.collection.mutable.ArrayBuffer.empty[(Int, Int, Int)]
@@ -809,8 +842,10 @@ private[llm4s] object Redaction {
         else if (c == '\\' || c == q || c == '"') {
           val j = afterBackslashes(input, i)
           val r = j - i
-          if (j >= length) result = (length, length, false)
-          else {
+          if (j >= length) {
+            scope.reachedEnd()
+            result = (length, length, false)
+          } else {
             val x = input.charAt(j)
             if (x == q && r % (2 * multiplier) == b) result = (i, j + 1, true)
             else if (x == '"' && escapeDepth(r) < jsonDepth) result = (i, i, false)
@@ -819,7 +854,10 @@ private[llm4s] object Redaction {
           }
         } else i += 1
       }
-      if (result._1 < 0) (length, length, false) else result
+      if (result._1 < 0) {
+        scope.reachedEnd()
+        (length, length, false)
+      } else result
     }
 
     def placeholderAt(at: Int): Boolean = placeholder.nonEmpty && input.startsWith(placeholder, at)
@@ -1014,7 +1052,9 @@ private[llm4s] object Redaction {
         val keyRun                 = if (dictKey != null) matcher.group(1).length else 0
         val (foundMark, wordsMark) = (found.length, words.length)
         walkClosed = true
-        searchFrom = math.max(readValue(matcher.end, jsonDepth, keyRun, keyword = dictKey == null), matcher.end)
+        val valueEnd = readValue(matcher.end, jsonDepth, keyRun, keyword = dictKey == null)
+        if (valueEnd >= length) scope.reachedEnd()
+        searchFrom = math.max(valueEnd, matcher.end)
         // A call is read only where it closes, or is cut off inside a string: `secret=a((b [{...` is a value of a
         // `key=value` pair, which the other passes read, and the text after it no argument of a call.
         if (calls && !walkClosed) {
@@ -1233,9 +1273,10 @@ private[llm4s] object Redaction {
    * end of the string that the value sits in, or the start of the next - or the end of the input: such a value may
    * not be a value at all, and the passes' reading of it stands. The key is one `AmpTailPairStart` finds, sensitive
    * by `isSensitiveKey`, or by `isSensitiveQueryKey` after `?`, `&` or the escape of either. A loop that reads each
-   * character once: the search goes on where a value closes or is given up.
+   * character once: the search goes on where a value closes or is given up. A value that runs to the end of the
+   * input is reported to `scope` (`Scope.reachedEnd`): past a prefix (#1680), the body may close it.
    */
-  private def escapedQuotedValues(input: String): Vector[(Int, Int)] = {
+  private def escapedQuotedValues(input: String, scope: Scope): Vector[(Int, Int)] = {
     val length  = input.length
     val matcher = AmpTailPairStart.pattern.matcher(input)
     val found   = Vector.newBuilder[(Int, Int)]
@@ -1262,7 +1303,10 @@ private[llm4s] object Redaction {
           else i = after
         } else i += 1
       }
-      if (result._2 < 0) (-1, length) else result
+      if (result._2 < 0) {
+        scope.reachedEnd()
+        (-1, length)
+      } else result
     }
 
     var searchFrom = 0
@@ -1494,14 +1538,64 @@ private[llm4s] object Redaction {
     placeholder: String,
     inputQuotes: Int,
     escaped: Boolean,
+    scope: Scope,
     variant: Boolean = false
   ): Vector[String => Rewrite] =
     authHeaderPasses(placeholder, variant) ++
       Vector((text: String) => redactQueryParams(text, placeholder, endBeforeJson = variant)) ++
-      jsonFieldPasses(placeholder, inputQuotes, escaped, variant) ++
+      jsonFieldPasses(placeholder, inputQuotes, escaped, variant, scope) ++
       SecretPatterns.SecretType.default.toVector.map(t => (text: String) => regexPass(t.pattern, text, placeholder)) ++
-      containerLeafPasses(placeholder) :+
+      containerLeafPasses(placeholder, scope) :+
       ((text: String) => redactCookieHeaders(text, placeholder))
+
+  /**
+   * What the passes take of the input as a whole: whether it holds the JSON escape of a separator or a quote
+   * (`escaped`, see [[redact]]), a `'`, a backslash, an `&`, a `=`, a `,` before JSON, or a `Bearer` or `Basic` word,
+   * each of which turns a pass or a reading on, or decides how every value is read. They are the input's own, or, for
+   * a prefix that [[safeBody]] redacts in place of a longer body (`prefix`, #1680), the body's, so that the prefix is
+   * read as the body is.
+   *
+   * For a prefix, it also gathers what tells that its redaction may not be the body's: a reading that only takes or
+   * leaves a value once it has read on past it found the value running to the end of the prefix (`reachedEnd`, so
+   * `uncertain`), or a pass met a value whose end depends on the `'`s the passes before it left of the whole body
+   * (`whole`). A scope is used for one redaction.
+   */
+  final private class Scope private (facts: InputFacts, val prefix: Boolean) {
+    def escaped: Boolean        = facts.escaped
+    def quotes: Boolean         = facts.quotes
+    def backslash: Boolean      = facts.backslash
+    def ampersand: Boolean      = facts.ampersand
+    def equalsSign: Boolean     = facts.equalsSign
+    def jsonAfterComma: Boolean = facts.jsonAfterComma
+    def authScheme: Boolean     = facts.authScheme
+
+    /** The redaction of this prefix may not be the body's: a longer prefix may tell. */
+    var uncertain: Boolean = false
+
+    /** The redaction of this prefix may not be the body's, however long the prefix: the body is redacted whole. */
+    var whole: Boolean = false
+
+    /** A reading read a value up to the end of the input, so would decide it otherwise if the input went on. */
+    def reachedEnd(): Unit = if (prefix) uncertain = true
+
+    /** A scope for one prefix of this input, with this input's facts: each prefix gathers its own flags. */
+    def forPrefix: Scope = new Scope(facts, prefix = true)
+  }
+
+  private object Scope {
+    def of(input: String): Scope = new Scope(new InputFacts(input), prefix = false)
+  }
+
+  /** The facts of [[Scope]], each found by one scan of the input, when a pass first asks. */
+  final private class InputFacts(input: String) {
+    lazy val escaped: Boolean        = holdsSeparatorOrQuoteEscape(input)
+    lazy val quotes: Boolean         = input.indexOf('\'') >= 0
+    lazy val backslash: Boolean      = input.indexOf('\\') >= 0
+    lazy val ampersand: Boolean      = input.indexOf('&') >= 0
+    lazy val equalsSign: Boolean     = input.indexOf('=') >= 0
+    lazy val jsonAfterComma: Boolean = holdsJsonAfterComma(input)
+    lazy val authScheme: Boolean     = holdsAuthScheme(input)
+  }
 
   /**
    * Whether the input holds the JSON escape of `&`, `=`, `?`, `'` or `"` (backslashes, `u00` and `26`, `3d`, `3f`,
@@ -2466,7 +2560,8 @@ private[llm4s] object Redaction {
     placeholder: String,
     inputQuotes: Int,
     escaped: Boolean,
-    variant: Boolean
+    variant: Boolean,
+    scope: Scope
   ): Vector[String => Rewrite] = {
     // Arrays and objects first: the strings and numbers under a sensitive key are replaced in one pass, and what is
     // left for the field patterns below is already the placeholder. Then the quoted shapes, then the bare ones, so
@@ -2482,12 +2577,21 @@ private[llm4s] object Redaction {
     val pairs                             = pairStarts(escaped)
     Vector(
       (text: String) =>
-        redactContainers(EscapedJsonContainerStart, text, placeholder, ValueEnd.EscapedQuote, leaves = false),
-      (text: String) => redactContainers(JsonContainerStart, text, placeholder, ValueEnd.Quote('"'), leaves = false),
+        redactContainers(EscapedJsonContainerStart, text, placeholder, ValueEnd.EscapedQuote, leaves = false, scope),
+      (text: String) =>
+        redactContainers(JsonContainerStart, text, placeholder, ValueEnd.Quote('"'), leaves = false, scope),
       (text: String) => redactQuoted(EscapedJsonStringStart, text, placeholder, ValueEnd.EscapedQuote),
       (text: String) => redactQuoted(JsonStringStart, text, placeholder, ValueEnd.Quote('"')),
       (text: String) =>
-        redactQuoted(SingleQuotedStart, text, placeholder, ValueEnd.Quote('\''), endsWithString = quotesKept(text)),
+        redactQuoted(
+          SingleQuotedStart,
+          text,
+          placeholder,
+          ValueEnd.Quote('\''),
+          endsWithString = quotesKept(text),
+          quotesGate = true,
+          scope = Some(scope)
+        ),
       // In the added reading of #1695 (`variant`), not a `key="` inside a double-quoted string, whose `"` ends that
       // string: a token or a query value that no longer runs over such a pair must not hand it to this pass.
       (text: String) =>
@@ -2499,15 +2603,31 @@ private[llm4s] object Redaction {
           placeholder,
           ValueEnd.Quote('\''),
           endsWithString = quotesKept(text),
-          pair = true
+          pair = true,
+          quotesGate = true,
+          scope = Some(scope)
         ),
       // A double-quoted value under a single-quoted key: Python's repr of a string that holds a `'` (#1687), escaped
       // when the dict sits inside a JSON string. After the single-quoted passes, so that the quotes `quotesKept`
       // counts are the input's; only where it reads as a value of a dict (`asValue`).
       (text: String) =>
-        redactQuoted(SingleQuotedKeyEscapedStringStart, text, placeholder, ValueEnd.EscapedQuote, asValue = true),
+        redactQuoted(
+          SingleQuotedKeyEscapedStringStart,
+          text,
+          placeholder,
+          ValueEnd.EscapedQuote,
+          asValue = true,
+          scope = Some(scope)
+        ),
       (text: String) =>
-        redactQuoted(SingleQuotedKeyStringStart, text, placeholder, ValueEnd.Quote('"'), asValue = true),
+        redactQuoted(
+          SingleQuotedKeyStringStart,
+          text,
+          placeholder,
+          ValueEnd.Quote('"'),
+          asValue = true,
+          scope = Some(scope)
+        ),
       // A number becomes a string, so that the redacted JSON still parses; in the key's own quote, so that a dict
       // inside a JSON string still sits in that string (#1675).
       (text: String) => redactPairs(EscapedJsonNumberField, text, placeholder, wrap = "\\\""),
@@ -2532,7 +2652,7 @@ private[llm4s] object Redaction {
    * them that reads a double-quoted value can run it over such a key, `'see "password": " here', 'apiKey': [`, and
    * they would not find it in the text it leaves.
    */
-  private def singleQuotedFieldPasses(placeholder: String, inputQuotes: Int): Vector[String => Rewrite] =
+  private def singleQuotedFieldPasses(placeholder: String, inputQuotes: Int, scope: Scope): Vector[String => Rewrite] =
     Vector(
       (text: String) =>
         redactQuoted(
@@ -2540,15 +2660,31 @@ private[llm4s] object Redaction {
           text,
           placeholder,
           ValueEnd.Quote('\''),
-          endsWithString = quotesAllKept(text, placeholder, inputQuotes)
+          endsWithString = quotesAllKept(text, placeholder, inputQuotes),
+          quotesGate = true,
+          scope = Some(scope)
         ),
       (text: String) =>
-        redactQuoted(SingleQuotedKeyEscapedStringStart, text, placeholder, ValueEnd.EscapedQuote, asValue = true),
+        redactQuoted(
+          SingleQuotedKeyEscapedStringStart,
+          text,
+          placeholder,
+          ValueEnd.EscapedQuote,
+          asValue = true,
+          scope = Some(scope)
+        ),
       (text: String) =>
-        redactQuoted(SingleQuotedKeyStringStart, text, placeholder, ValueEnd.Quote('"'), asValue = true),
+        redactQuoted(
+          SingleQuotedKeyStringStart,
+          text,
+          placeholder,
+          ValueEnd.Quote('"'),
+          asValue = true,
+          scope = Some(scope)
+        ),
       (text: String) => redactPairs(SingleQuotedNumberField, text, placeholder, wrap = "'"),
       (text: String) =>
-        redactContainers(SingleQuotedContainerStart, text, placeholder, ValueEnd.Quote('\''), leaves = true)
+        redactContainers(SingleQuotedContainerStart, text, placeholder, ValueEnd.Quote('\''), leaves = true, scope)
     )
 
   /**
@@ -2637,13 +2773,14 @@ private[llm4s] object Redaction {
    * into the text after it - and a guess made before them could swallow the key of a field they would have redacted
    * and leave its value readable. After them it can only replace more.
    */
-  private def containerLeafPasses(placeholder: String): Vector[String => Rewrite] =
+  private def containerLeafPasses(placeholder: String, scope: Scope): Vector[String => Rewrite] =
     Vector(
       (text: String) =>
-        redactContainers(EscapedJsonContainerStart, text, placeholder, ValueEnd.EscapedQuote, leaves = true),
-      (text: String) => redactContainers(JsonContainerStart, text, placeholder, ValueEnd.Quote('"'), leaves = true),
+        redactContainers(EscapedJsonContainerStart, text, placeholder, ValueEnd.EscapedQuote, leaves = true, scope),
       (text: String) =>
-        redactContainers(SingleQuotedContainerStart, text, placeholder, ValueEnd.Quote('\''), leaves = true)
+        redactContainers(JsonContainerStart, text, placeholder, ValueEnd.Quote('"'), leaves = true, scope),
+      (text: String) =>
+        redactContainers(SingleQuotedContainerStart, text, placeholder, ValueEnd.Quote('\''), leaves = true, scope)
     )
 
   /** How a quoted value ends. */
@@ -2791,6 +2928,11 @@ private[llm4s] object Redaction {
    *
    * With `pair`, `start` is a `key="` or `key='` of `PairStarts`, and the value of a key that is not sensitive and
    * whose `=` is an escape is not skipped: the search goes on right after the escape (see `afterEscapedEquals`).
+   *
+   * With `quotesGate`, `endsWithString` is what the passes before left of the input's `'`s (`quotesAllKept`), which,
+   * in a prefix of a longer body (#1680), may not be what they leave of the body: there a key inside a double-quoted
+   * string, whose value it would decide, has the body redacted whole (`Scope.whole`). With `scope`, a value whose
+   * `asValue` reading runs to the end of the input is reported to it (`Scope.reachedEnd`).
    */
   private def redactQuoted(
     start: Regex,
@@ -2800,12 +2942,15 @@ private[llm4s] object Redaction {
     endsWithString: Boolean = false,
     asValue: Boolean = false,
     pair: Boolean = false,
-    outsideOnly: Boolean = false
+    outsideOnly: Boolean = false,
+    quotesGate: Boolean = false,
+    scope: Option[Scope] = None
   ): Rewrite = {
     val matcher              = start.pattern.matcher(input)
     val out                  = new Rewrite(input, placeholder)
     val outsideStrings       = (asValue || outsideOnly) && end == ValueEnd.Quote('"')
-    val enclosing            = if (endsWithString || outsideStrings) Some(new EnclosingQuotes(input)) else None
+    val gated                = quotesGate && scope.exists(_.prefix)
+    val enclosing            = if (endsWithString || outsideStrings || gated) Some(new EnclosingQuotes(input)) else None
     lazy val lastSingleQuote = lastClosingSingleQuote(input)
 
     // Inside a double-quoted string, a value that is the placeholder followed by a `"` that ends the string - one
@@ -2846,8 +2991,10 @@ private[llm4s] object Redaction {
         val q = input.charAt(at)
         var j = at + 1
         while (j < input.length && j <= at + MaxKeyLength && input.charAt(j) != q && input.charAt(j) != '\n') j += 1
+        if (j >= input.length) scope.foreach(_.reachedEnd())
         j < input.length && input.charAt(j) == q && {
           val colon = skipSpace(j + 1)
+          if (colon >= input.length) scope.foreach(_.reachedEnd())
           colon < input.length && input.charAt(colon) == ':'
         }
       }
@@ -2873,7 +3020,9 @@ private[llm4s] object Redaction {
         loop(afterEscapedEquals(input, matcher.end(2)), copiedTo)
       } else {
         val valueStart = matcher.end
-        val valueEnd   = valueEndOf(enclosing.exists(_.enclosingAt(matcher.start(1)) == '"'), valueStart)
+        val inString   = enclosing.exists(_.enclosingAt(matcher.start(1)) == '"')
+        if (gated && inString) scope.foreach(_.whole = true)
+        val valueEnd = valueEndOf(inString, valueStart)
         if (asValue && !endsAsValue(valueEnd)) {
           loop(matcher.end, copiedTo)
         } else if (isSensitiveKey(matcher.group(2)) && valueEnd > valueStart) {
@@ -3002,7 +3151,8 @@ private[llm4s] object Redaction {
     input: String,
     placeholder: String,
     end: ValueEnd,
-    leaves: Boolean
+    leaves: Boolean,
+    scope: Scope
   ): Rewrite = {
     val matcher   = start.pattern.matcher(input)
     val out       = new Rewrite(input, placeholder)
@@ -3030,7 +3180,7 @@ private[llm4s] object Redaction {
           // Leaves in escaped double quotes, only where the key is not itself inside a string escaped within the
           // string, whose closing `\"` would otherwise be read as the opening quote of a leaf.
           val escapedLeaves = leaves && walk == Walk.InDoubleQuotes && !enclosing.inEscapedString
-          val valueEnd      = redactLeaves(input, open, out, placeholder, end, walk, leaves, escapedLeaves)
+          val valueEnd      = redactLeaves(input, open, out, placeholder, end, walk, leaves, escapedLeaves, scope)
           loop(valueEnd, valueEnd)
         } else {
           loop(open + 1, copiedTo)
@@ -3052,6 +3202,10 @@ private[llm4s] object Redaction {
    * the one before #1647 (see [[redactContainers]]). A bare leaf is written back as the placeholder in the key's
    * quote, `end`: a number, a word with a digit or `-` in it, and, with `leaves` and outside a double-quoted string,
    * any other word, bar the literals of `KeptLiterals` and a word before `:`.
+   *
+   * A bare leaf, or a `\"` that may open a leaf, read up to the end of the input is reported to `scope`
+   * (`Scope.reachedEnd`): whether it is replaced depends on what follows it, which, past a prefix (#1680), the body
+   * holds.
    */
   private def redactLeaves(
     input: String,
@@ -3061,7 +3215,8 @@ private[llm4s] object Redaction {
     end: ValueEnd,
     walk: Walk,
     leaves: Boolean,
-    escapedLeaves: Boolean
+    escapedLeaves: Boolean,
+    scope: Scope
   ): Int = {
     val length         = input.length
     val quote          = quoteOf(end)
@@ -3158,6 +3313,7 @@ private[llm4s] object Redaction {
     def followedAsValue(next: Int, orEnd: Boolean): Boolean = {
       var k = next
       while (k < length && isSpace(input.charAt(k))) k += 1
+      if (k == length && !orEnd) scope.reachedEnd()
       if (k == length) orEnd
       else ",]}".indexOf(input.charAt(k).toInt) >= 0 || (orEnd && inDoubleQuotes && input.charAt(k) == '"')
     }
@@ -3167,6 +3323,7 @@ private[llm4s] object Redaction {
     // stands where a value does. Any other `"` ends the container, as the doc of `Walk.InDoubleQuotes` has it.
     def escapedLeaf(from: Int, quoteAt: Int): Boolean = {
       val contentEnd = scanQuotedValue(input, quoteAt + 1, ValueEnd.EscapedQuote)
+      if (contentEnd >= length) scope.reachedEnd()
       contentEnd < length && input.charAt(contentEnd) == '\\' && precededAsValue(from) &&
       followedAsValue(contentEnd + 2, orEnd = false)
     }
@@ -3316,6 +3473,7 @@ private[llm4s] object Redaction {
           if (d == '=') eq = true
           next += 1
         }
+        if (next >= length) scope.reachedEnd()
         val number = c == '-' || (c >= '0' && c <= '9')
         val replace =
           if (!leaves) digits && !eq && !keyFollows(next)

@@ -2530,15 +2530,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **A multi-megabyte provider error body no longer takes seconds to redact for a log line or an error**
   ([#1680](https://github.com/llm4s/llm4s/issues/1680)): the internal `safeBody` helper behind the error bodies of
-  #1674 redacted the whole body before truncating it to 2048 characters - about 0.5 s for 1 MB and 3.5 s for a
+  #1674 redacted the whole body before truncating it to 2048 characters - about 0.5 s for 1 MB and 3 to 5 s for a
   5.75 MB JSON body. A body up to 128 KiB is still redacted whole, with exactly the output it had. A longer one is
-  redacted in a prefix: it ends right before a separator (whitespace or one of `"',;<>{}[]()`), which no credential
-  the patterns read holds, so none is cut in two; it is read as the whole body is (a JSON escape of a separator or a
-  closing `'` past the cut is taken into account); and it runs 16 KiB of redacted text past the characters kept, so
-  a value the cut leaves open is never shown. Where no prefix up to half the body can show that much - one value
-  running over it, or no separator - the body is redacted whole. The 5.75 MB body now takes milliseconds. Behaviour
-  change: for a body over 128 KiB the suffix `(truncated, original length: N)` gives the body's length, as the
-  redacted length is not computed.
+  redacted in a prefix only where the characters kept are exactly those of redacting the whole body: the prefix ends
+  after a letter or a digit and before a separator, so no key, token or escape is cut; the facts the passes take of
+  the input as a whole (a JSON escape of a separator or a quote, a `'`, a backslash, `&`, `=`, a `,` before JSON, a
+  `Bearer` or `Basic` word) are the body's; a value that a reading takes only once it closes, or by what follows it,
+  and that runs to the end of the prefix makes the window double; a single-quoted value inside a JSON string, whose end
+  depends on the quotes the passes leave of the whole body, has the body redacted whole; the redacted prefix runs
+  16 KiB past the characters kept; and the prefix of the next window, twice as long, keeps the same characters.
+  Otherwise the body is redacted whole. The 5.75 MB body now takes tens of milliseconds. Behaviour change: for a body
+  redacted in a prefix, the suffix `(truncated, original length: N)` gives the body's length, as the redacted length
+  is not computed.
 - **MCP: `MCPServerConfig.timeout` now bounds a Streamable HTTP call whose reply is an SSE stream** ([#1785](https://github.com/llm4s/llm4s/issues/1785)):
   the HTTP request timeout stops counting once the response headers arrive, and a Streamable HTTP server that answers
   with an SSE stream - as servers built on the MCP SDKs do - sends them at once, so a call to a long-running tool
