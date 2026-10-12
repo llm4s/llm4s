@@ -13,6 +13,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MeterRegistry`, say) was `private[llm4s]` for the Spring Boot starter, yet public in the bytecode, so Java callers
   saw it and Scala callers outside `org.llm4s` could not use it. It is now public and documented
   ([Using LLM4S from Java](docs/guide/java.md#recording-metrics)), settled before the `llm4s-java-api` MiMa baseline.
+- **`llm4s-agent-checkpoint-sqlite`: the first durable checkpointer** ([#1701](https://github.com/llm4s/llm4s/issues/1701),
+  Stage 2 slice 2 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `SqliteCheckpointer`
+  (`org.llm4s.agent.graph.sqlite`) keeps threads - checkpoint history, pending writes, event log and run claim - in one
+  SQLite file, so a run survives a restart: a new process opens the file, replays the stopped run's events, and
+  `recover` continues it without re-running the tasks that had completed. Several stores, in one process or in several
+  on one host, can share the file; every write is one `BEGIN IMMEDIATE` transaction that checks the claim's token and
+  the thread's version and applies the commit, fencing tokens come from a counter stored in the file (so they keep
+  increasing across restarts and `deleteThread`), and claims expire by the store's injected `Clock`. The file runs in
+  WAL mode with `synchronous = FULL`; `SqliteCheckpointerConfig.busyTimeout` (default 5 s) bounds how long a write waits
+  for another connection's. The schema is versioned and migrated on open, and a file from a newer build is refused. It
+  passes `CheckpointerContract` over one connection and over two alternating connections to one file, and a test kills
+  a forked JVM mid-run and recovers its thread. It implements #1702's `history`, `checkpoint` and `prune` over a history
+  table paged by its primary key, each write one transaction. The sample `SqliteRestartRecoveryExample` shows a restart
+  and recovery.
+  See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#the-sqlite-store).
+- **`sbt pomMetadataCheck`: every published POM carries its metadata** ([#1455](https://github.com/llm4s/llm4s/issues/1455)):
+  a CI quick check that reads the POM sbt generates for each of the 44 published projects (the `llm4s-*` artifacts, the
+  BOM and the relocation stubs) and fails when one lacks a name, a description of its own, an https project URL, a
+  licence with an https URL, a developer, or the `<scm>` Scaladex associates artifacts by
+  (`https://github.com/llm4s/llm4s`, no trailing slash, with an `scm:git:https` connection). Maven Central rejects a
+  POM without these at publish time, after the tag is pushed, and a released POM cannot be amended.
+  `sbt "pomMetadataCheckFiles <pom>..."` runs the same rules on POMs downloaded from Central; on 0.4.1's it reports
+  the three problems fixed since (#1588). The README has a Maven Central badge, and `docs/reference/release.md` has a
+  Discoverability section for maintainers: GitHub topics and description, the homepage, and how to get Scaladex to
+  list `org.llm4s` (it does not yet).
 - **CI runs in a GitHub merge queue** ([#1638](https://github.com/llm4s/llm4s/issues/1638)): `ci.yml`, `dco.yml` and
   `secret-scan.yml`, the workflows behind `main`'s required checks (`All Tests Pass`, `Check DCO sign-off`, `TruffleHog
   Secret Scan`), also trigger on `merge_group`, so a maintainer can enable a merge queue that tests each pull request
@@ -2521,6 +2546,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names (`org.springframework.boot.micrometer.metrics.autoconfigure.*`), and a test fails if the names stop resolving
   on the Boot version the starter is tested against. The `MicrometerMetrics` Scaladoc no longer claims the class holds
   no mutable state.
+- **MCP: `MCPServerConfig.timeout` now bounds a Streamable HTTP call whose reply is an SSE stream** ([#1785](https://github.com/llm4s/llm4s/issues/1785)):
+  the HTTP request timeout stops counting once the response headers arrive, and a Streamable HTTP server that answers
+  with an SSE stream - as servers built on the MCP SDKs do - sends them at once, so a call to a long-running tool
+  waited for the tool however long it ran (20 s against a 2 s timeout on the MCP reference server).
+  `StreamableHTTPTransportImpl` now reads the reply body against the same deadline as the request: a call ends at the
+  configured timeout whether the reply is plain JSON or an SSE stream, with a transport error saying it timed out (a
+  `ToolCallError.HandlerError` from a tool call), and the connection is closed, so the server sees the client leave.
+  An SSE reply is read event by event and returns as soon as its JSON-RPC response arrives, without waiting for the
+  server to end the stream. An interrupt while reading the stream is still a `CancelledError`. Behaviour change: an
+  MCP tool that runs longer than its server's `timeout` (30 s by default) over Streamable HTTP now fails instead of
+  completing late; raise `timeout` for such a server.
+- **Security - `Redaction`: a keyword argument whose value is a call, and a `"` inside a redacted Python string** ([#1813](https://github.com/llm4s/llm4s/issues/1813)):
+  `Settings(token=SecretStr('...'))`, `password=Wrapper("...")` and `api_key=module.Secret(value='...')` kept the
+  credential readable - `pydantic` masks its own `SecretStr` in a `repr`, a wrapper class of one's own does not - while
+  the same call under a dict key was redacted. The strings, numbers and words of a call under a sensitive keyword
+  argument or dict key are now replaced, the call's own keyword arguments included (`token=[REDACTED]'[REDACTED]')`).
+  A secret holding `'"` in a single-quoted Python string came out as `'[REDACTED][REDACTED]"[REDACTED]'`, which told
+  that it held a `"`, and a second redaction collapsed it: the `"` is now replaced with the rest of the content, a part
+  that meets a placeholder already written is written as nothing, and the output is `'[REDACTED]'`, which a second
+  redaction leaves as it is. A `"` that delimits a JSON string around the value, at any depth, is still kept, so the
+  JSON parses. Like the readings before it, this only adds to what was replaced: `data={'password': pw}` still
+  replaces `pw`, since a bare word there may be the credential.
 - **The Spring Boot starter's health indicator redacts nested credentials and header values** ([#1820](https://github.com/llm4s/llm4s/issues/1820)):
   the credentials it removes from a failed probe's `error` message were read only from top-level text fields of the
   resolved provider config, so a credential set outside Spring properties (in `application.conf`, a `reference.conf`
