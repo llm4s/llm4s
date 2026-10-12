@@ -118,6 +118,8 @@ and community outreach.
 
 | Location | Name | Role | LinkedIn |
 |---|---|---|---|
+| 🇮🇳 Mumbai | **Shubham Vishwakarma** | Chapter Lead — Mumbai | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
+| 🇮🇳 Delhi | **Vansh Sharma** | Chapter Lead — Delhi | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
 | 🇫🇷 France | **Olivier Nouguier** | Chapter Lead — France | [linkedin.com/in/olivier-nouguier](https://www.linkedin.com/in/olivier-nouguier/) |
 | 🇦🇪 Abu Dhabi | **Yoshita Sharma** | Chapter Lead — Abu Dhabi | [linkedin.com/in/yoshita-sharma-trojan](https://www.linkedin.com/in/yoshita-sharma-trojan/) |
 | 🇬🇧 London | **Dmitry Mamonov** | Chapter Lead — London | [linkedin.com/in/dmamonov](https://www.linkedin.com/in/dmamonov/) |
