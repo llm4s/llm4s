@@ -57,9 +57,9 @@ cross-cutting decisions. Members are recognised for sustained, high-quality cont
 |---|---|---|---|
 | <img src="docs/people/247329.jpg" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Atul S. Khot** | [@atulkhot](https://github.com/atulkhot) | [linkedin.com/in/atul-s-khot-035b4b1](https://www.linkedin.com/in/atul-s-khot-035b4b1) |
 | <img src="docs/people/595111.jpg" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Vitthal Mirji** | [@vim89](https://github.com/vim89) | [linkedin.com/in/vitthal10](https://www.linkedin.com/in/vitthal10) |
-| <img src="https://github.com/iyadi.png?size=48" alt="Iyad M. Issa" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover"> | **Iyad M. Issa** | [@iyadi](https://github.com/iyadi) | [linkedin.com/in/iyadissa](https://www.linkedin.com/in/iyadissa) |
-| <img src="https://github.com/gruggiero.png?size=48" alt="Giovanni Ruggiero" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover"> | **Giovanni Ruggiero** | [@gruggiero](https://github.com/gruggiero) | [linkedin.com/in/giovanniruggiero](https://www.linkedin.com/in/giovanniruggiero) |
-| <img src="https://github.com/dmamonov.png?size=48" alt="Dmitry Mamonov" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover"> | **Dmitry Mamonov** | [@dmamonov](https://github.com/dmamonov) | [linkedin.com/in/dmamonov](https://www.linkedin.com/in/dmamonov) |
+| <img src="https://github.com/iyadi.png?size=416" alt="Iyad M. Issa" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Iyad M. Issa** | [@iyadi](https://github.com/iyadi) | [linkedin.com/in/iyadissa](https://www.linkedin.com/in/iyadissa) |
+| <img src="https://github.com/gruggiero.png?size=416" alt="Giovanni Ruggiero" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Giovanni Ruggiero** | [@gruggiero](https://github.com/gruggiero) | [linkedin.com/in/giovanniruggiero](https://www.linkedin.com/in/giovanniruggiero) |
+| <img src="https://github.com/dmamonov.png?size=416" alt="Dmitry Mamonov" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Dmitry Mamonov** | [@dmamonov](https://github.com/dmamonov) | [linkedin.com/in/dmamonov](https://www.linkedin.com/in/dmamonov) |
 
 > This list is a starting point — please add names via comments on
 > [issue #1117](https://github.com/llm4s/llm4s/issues/1117) or a PR.
@@ -75,7 +75,7 @@ project discussions and direction.
 |---|---|---|---|
 | <img src="docs/people/117119879.jpg" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Shubham Vishwakarma** | [@Vi-shub](https://github.com/Vi-shub) | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
 | <img src="docs/people/mai.jpg" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) | [linkedin.com/in/autodidact](https://www.linkedin.com/in/autodidact) |
-| <img src="docs/people/vansh-sharma.webp" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Vansh Sharma** | [@vansh7nvc](https://github.com/vansh7nvc) | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
+| <img src="docs/people/vansh-sharma.jpg" alt="Vansh Sharma" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Vansh Sharma** | [@vansh7nvc](https://github.com/vansh7nvc) | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
 
 > **Add yourself:** If you have merged PRs and would like to be listed here,
 > open a PR adding your row.
@@ -103,7 +103,7 @@ and community outreach.
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="docs/people/vansh-sharma.webp" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Vansh Sharma** | [@vansh7nvc](https://github.com/vansh7nvc) | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
+| <img src="docs/people/vansh-sharma.jpg" alt="Vansh Sharma" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Vansh Sharma** | [@vansh7nvc](https://github.com/vansh7nvc) | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
 | <img src="docs/people/117119879.jpg" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Shubham Vishwakarma** | [@Vi-shub](https://github.com/Vi-shub) | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
 | <img src="docs/people/mai.jpg" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) | [linkedin.com/in/autodidact](https://www.linkedin.com/in/autodidact) |
 
