@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Llm4s.createClient(config, metrics)` does. Other providers still take a config object through
   `Llm4s.createClient(ProviderConfig)`. The Kotlin API cannot wrap a builder's client yet
   ([#1850](https://github.com/llm4s/llm4s/issues/1850)). See [Configure in code](docs/guide/java.md#configure-in-code).
+- **`MemoryManagerConfig.contextTokenBudget` and `autoExtractEntities` take effect** ([#1579](https://github.com/llm4s/llm4s/issues/1579)):
+  `getRelevantContext` without a `maxTokens` now uses the manager's `contextTokenBudget` (2000 by default, as
+  before; an explicit `maxTokens` still wins), through a new `MemoryManager.contextTokenBudget` member that
+  `SimpleMemoryManager` and `LLMMemoryManager` take from their config and other implementations inherit as
+  `MemoryManager.DefaultContextTokenBudget`. With `autoExtractEntities = true`, `recordMessage` and
+  `recordConversation` also run `extractEntities` over each recorded user and assistant message, with its
+  conversation id - one extra LLM call per message on `LLMMemoryManager`, nothing on `SimpleMemoryManager`;
+  a failed extraction is logged and the message stays recorded. `MemoryManagerConfig.fullFeatured` turns it on.
 - **`Llm4s.createClient(ProviderConfig, MetricsCollector)` is public** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
   the `llm4s-java-api` overload that attaches a `MetricsCollector` (a `MicrometerMetrics` over the application's
   `MeterRegistry`, say) was `private[llm4s]` for the Spring Boot starter, yet public in the bytecode, so Java callers
@@ -2432,6 +2440,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `org.llm4s.toolapi.ToolHints` in `llm4s-core` (`@Experimental`), because `llm4s-mcp` cannot depend on the agent runtime.
 
 ### Removed
+- **`MemoryManagerConfig.autoRecordMessages` and `consolidationEnabled`** ([#1579](https://github.com/llm4s/llm4s/issues/1579)):
+  no manager ever read them. A manager records only the messages passed to `recordMessage`/`recordConversation`,
+  so there was nothing for `autoRecordMessages` (default `true`) to switch, and automatic consolidation has no
+  trigger to hang on - `consolidateMemories` runs when you call it, reading `consolidationConfig`. The 5-parameter
+  `MemoryManagerConfig` constructor, `apply` and `copy` overloads went with them. **Migration:** drop both
+  arguments; record each turn with `recordMessage`/`recordConversation` and call `consolidateMemories` yourself
+  (for example from a scheduled job). Positional calls shift: the constructor and `apply` are now
+  `(autoExtractEntities, defaultImportance, contextTokenBudget, consolidationConfig)`.
 - **`WorkspaceConfigSupport.loadSandboxConfig`** ([#1730](https://github.com/llm4s/llm4s/issues/1730)): it read a
   sandbox profile from the client's `llm4s.workspace.sandbox.profile`, which nothing passed to the runner and nothing
   called, so it suggested a client setting that enforced nothing. What the runner enforces is decided only by its own
@@ -2587,6 +2603,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - workspace runner: more programs that run another cannot be added as extra commands, `tar`, `zip`,
+  `rsync`, `scp` and `sftp` refuse their program-running options, and a command's child gets the system directories
+  when no `PATH` entry survives** ([#1805](https://github.com/llm4s/llm4s/issues/1805)):
+  `WORKSPACE_EXTRA_COMMANDS` still accepted names that run code - shells (`ash`, `mksh`, `yash`, `rbash`, `elvish`,
+  `nu`, `xonsh`), interpreter aliases (`pypy`, `jython`, `pyw`, `javaw`, `jjs`, `luajit`, `Rscript`, `R`, `julia`,
+  `guile`, `racket`, `swipl`, `sbcl`, `clisp`, `erl`, `escript`, `iex`, `elixir`, `ghci`, `runghc`, `ocaml`, `scala`,
+  `kotlin`, `groovy`, `osascript`, `dc`), launchers and loaders (`setpriv`, `capsh`, `prlimit`, `numactl`,
+  `fakeroot`, `proot`, `bwrap`, `firejail`, `gosu`, `su-exec`, `tini`, `unbuffer`, `tmux`, `screen`, `valgrind`,
+  `lldb`, `perf`, `ld.so` / `ld-linux*.so*`), `sed` (GNU `e`), editors that run a command (`vi`, `vim`, `nvim`, `ex`,
+  `emacs`), schedulers (`at`, `crontab`) and Windows programs that run another (`forfiles`, `conhost`, `explorer`,
+  `regsvr32`, `msbuild`, `wmic`, `schtasks`, `runas`, `msiexec`, `pcalua`, `bitsadmin`, `hh`, ...).
+  `WorkspaceSandboxConfig.NeverAllowedCommands` now names them, and the `python`, `pypy`, `jython` and `lua` families
+  and the dynamic loader are matched by prefix (`python3.7m`, `python3-dbg`, `ld-linux-x86-64.so.2`). For the archive
+  and copy tools operators commonly add, the runner refuses the options that run a program, as for `sort` and `cp`:
+  `tar --to-command`, `-I` / `--use-compress-program`, `--checkpoint-action`, `-F` / `--info-script` (also in the
+  traditional dashless form, `tar cIf`); `zip -TT` / `--unzip-command`; `rsync -e` / `--rsh` / `--rsync-path`; `scp` /
+  `sftp` `-S`, `-o`, `-F` and sftp's `-D`. The docs name GTFOBins-style option abuse as the reason the list cannot be
+  complete. When no `PATH` entry survives sanitising, a command's process used to get no `PATH`, for which bash and
+  sh search a built-in default ending in `.` - the workspace; it now gets `/usr/bin:/bin` on POSIX and the system and
+  Windows directories on Windows (no `PATH` only when even those lie in the workspace). A child `PATH` entry that
+  does not exist yet is judged through its nearest existing ancestor's links, so one under a link into the
+  workspace is dropped. A Windows-host test now checks that a command's own `CreateProcess` does not search its
+  current directory with `NoDefaultCurrentDirectoryInExePath=1`. The dead `;`-re-quoting branch of
+  `ProgramResolver.childPath` is gone, `taskset` and `chrt` are grouped alike in the code and the docs, and
+  `docs/workspace-agent-protocol.md` lists the command policy's other codes (`EXECUTABLE_PATH_NOT_ALLOWED`,
+  `ARGUMENT_NOT_ALLOWED`, `ENVIRONMENT_NOT_ALLOWED`, ...). **Migration:** a runner started with one of the newly
+  refused names in `WORKSPACE_EXTRA_COMMANDS` (`scala`, `scala3`, `sed`, `pypy3`, ...) now stops at start-up naming
+  it; drop the name, or use a build tool, which is still accepted (`sbt`, `scala-cli`, `mvn`, `gradle`). An added
+  `tar`, `zip`, `rsync`, `scp` or `sftp` refuses the options above with `ARGUMENT_NOT_ALLOWED`.
 - **`llm4s-observability-micrometer` no longer double-counts `llm4s.errors` behind a `ReliableClient`** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
   `MicrometerMetrics.recordError` fed the same `llm4s.errors` counter that `observeRequest` feeds, so a provider client
   and the `ReliableClient` around it, sharing one collector, counted each failed attempt and then the final failure
