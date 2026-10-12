@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Live subscriptions across runtimes** ([#1705](https://github.com/llm4s/llm4s/issues/1705), Stage 2 slice 6 of
+  [#1699](https://github.com/llm4s/llm4s/issues/1699)): a `GraphRuntime.subscribe` now delivers the durable events of
+  commits made through any runtime or process sharing the checkpointer, not only its own, in order, without gap or
+  duplicate. Each live subscription watches the store through the new SPI method `Checkpointer.awaitEventsAfter`, a
+  long poll whose default reads `eventsAfter` once per timeout. `InMemoryCheckpointer` overrides it to wake on its
+  commits; the SQLite store is polled. `WatchPolicy` (on `GraphRuntime`, default enabled, `pollInterval` 250 ms,
+  at least 1 ms) configures the watch, and `WatchPolicy.disabled` turns it off. Other runtimes' events are queued only as they fit,
+  so they never make a subscriber lag. Durable events are queued strictly contiguously: a commit of the subscriber's
+  own runtime first reads any events committed elsewhere that the watch has not read yet. Live events do not cross
+  runtimes, because they are never stored. A commit the store wrote but reported as failed is now delivered too (the
+  second corner case of [#1737](https://github.com/llm4s/llm4s/issues/1737)). `CheckpointerContract` gains
+  change-notification and cross-runtime subscription cases and a `sibling` hook, and the SQLite store passes them over
+  one and two connections, as well as with a subscriber in another process. See
+  [Streaming events](docs/guide/agents/streaming.md#subscriptions-across-runtimes).
+- **`llm4s-agent-checkpoint-sqlite`: the first durable checkpointer** ([#1701](https://github.com/llm4s/llm4s/issues/1701),
+  Stage 2 slice 2 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `SqliteCheckpointer`
+  (`org.llm4s.agent.graph.sqlite`) keeps threads - checkpoint history, pending writes, event log and run claim - in one
+  SQLite file, so a run survives a restart: a new process opens the file, replays the stopped run's events, and
+  `recover` continues it without re-running the tasks that had completed. Several stores, in one process or in several
+  on one host, can share the file; every write is one `BEGIN IMMEDIATE` transaction that checks the claim's token and
+  the thread's version and applies the commit, fencing tokens come from a counter stored in the file (so they keep
+  increasing across restarts and `deleteThread`), and claims expire by the store's injected `Clock`. The file runs in
+  WAL mode with `synchronous = FULL`; `SqliteCheckpointerConfig.busyTimeout` (default 5 s) bounds how long a write waits
+  for another connection's. The schema is versioned and migrated on open, and a file from a newer build is refused. It
+  passes `CheckpointerContract` over one connection and over two alternating connections to one file, and a test kills
+  a forked JVM mid-run and recovers its thread. It implements #1702's `history`, `checkpoint` and `prune` over a history
+  table paged by its primary key, each write one transaction; the table is part of schema version 1, since no released
+  build wrote a file without it, and opening a version-1 file from a pre-release build creates it. The sample `SqliteRestartRecoveryExample` shows a restart
+  and recovery.
+  See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#the-sqlite-store).
 - **`sbt pomMetadataCheck`: every published POM carries its metadata** ([#1455](https://github.com/llm4s/llm4s/issues/1455)):
   a CI quick check that reads the POM sbt generates for each of the 44 published projects (the `llm4s-*` artifacts, the
   BOM and the relocation stubs) and fails when one lacks a name, a description of its own, an https project URL, a
@@ -1223,6 +1253,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Subscriptions watch the checkpoint store** ([#1705](https://github.com/llm4s/llm4s/issues/1705), BREAKING,
+  `llm4s-agent`): `Checkpointer` gains `awaitEventsAfter`, with a polling default, so existing stores compile
+  unchanged. A delegating store should forward it. `GraphRuntime`'s constructor gains an optional `WatchPolicy`, and
+  Java and Kotlin get `new GraphRuntime(store, clock, claims)`. A live subscription holds a second virtual thread
+  (`llm4s-watch-<threadId>`) until it is cancelled, delivers other runtimes' durable events, and ends with
+  `Disconnected(lastSeq, ReplayFailed(error))` when a read of the store fails after its replay, for instance because
+  the store was closed. `CheckpointerContract` gains cases and a `sibling` hook. No shims; see the
+  [Stage 2 migration note](docs/reference/migration.md#live-subscriptions-across-runtimes-1705).
 - **`Checkpointer` keeps a checkpoint history** ([#1702](https://github.com/llm4s/llm4s/issues/1702), BREAKING,
   `llm4s-agent`): `Checkpointer` gains `history`, `checkpoint` and `prune`, and must keep every superseded checkpoint
   and refuse a checkpoint id already in the history (`InvalidCommit`); `Commit` gains `retractTurn` (defaulted);
@@ -2527,6 +2565,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   second redaction of the output changes nothing. What is left: a password holding an unencoded `@` and then `,` or
   `;` before another `@`, or one holding `://`, is replaced only in part. Like the readings of #1695, #1706 and #1707,
   it only adds to what was replaced before.
+- **MCP: `MCPServerConfig.timeout` now bounds a Streamable HTTP call whose reply is an SSE stream** ([#1785](https://github.com/llm4s/llm4s/issues/1785)):
+  the HTTP request timeout stops counting once the response headers arrive, and a Streamable HTTP server that answers
+  with an SSE stream - as servers built on the MCP SDKs do - sends them at once, so a call to a long-running tool
+  waited for the tool however long it ran (20 s against a 2 s timeout on the MCP reference server).
+  `StreamableHTTPTransportImpl` now reads the reply body against the same deadline as the request: a call ends at the
+  configured timeout whether the reply is plain JSON or an SSE stream, with a transport error saying it timed out (a
+  `ToolCallError.HandlerError` from a tool call), and the connection is closed, so the server sees the client leave.
+  An SSE reply is read event by event and returns as soon as its JSON-RPC response arrives, without waiting for the
+  server to end the stream. An interrupt while reading the stream is still a `CancelledError`. Behaviour change: an
+  MCP tool that runs longer than its server's `timeout` (30 s by default) over Streamable HTTP now fails instead of
+  completing late; raise `timeout` for such a server.
 - **Security - `Redaction`: a keyword argument whose value is a call, and a `"` inside a redacted Python string** ([#1813](https://github.com/llm4s/llm4s/issues/1813)):
   `Settings(token=SecretStr('...'))`, `password=Wrapper("...")` and `api_key=module.Secret(value='...')` kept the
   credential readable - `pydantic` masks its own `SecretStr` in a `repr`, a wrapper class of one's own does not - while

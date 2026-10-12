@@ -34,9 +34,14 @@ Every agent turn and every graph run executes on a `GraphRuntime`, which stores 
 - the durable event log, numbered `1, 2, 3, ...` per thread;
 - the **claim** of the run that holds the thread, if one does.
 
-`InMemoryCheckpointer` is the only store today, and the one `GraphRuntime.inMemory()` and `Agent.builder`
-use. A SQLite store is coming in [#1701](https://github.com/llm4s/llm4s/issues/1701). This page describes the
-contract all stores share, so it applies unchanged when a durable one arrives.
+Two stores ship with LLM4S:
+
+- `InMemoryCheckpointer`, the one `GraphRuntime.inMemory()` and `Agent.builder` use. Its threads live as long as
+  its instance.
+- `SqliteCheckpointer`, in `llm4s-agent-checkpoint-sqlite`: one SQLite file that survives a restart and that
+  processes on one host can share. See [The SQLite store](#the-sqlite-store).
+
+Both meet the same contract, described below.
 
 ## Runs claim their thread
 
@@ -115,6 +120,139 @@ on executing supersteps whose results would be refused.
 - Until it ends, such a run's live progress events (`StreamEvent.Live`, which are never stored) still reach the
   subscribers of its own runtime. Its durable events are refused with its commits.
 - A process that dies holds its threads for up to `ttl`; so does a store that fails to release a claim.
+
+## Subscriptions across runtimes
+
+A subscription sees every commit on its thread, made through any runtime or process that shares the store, not
+only through its own: in order, without gap or duplicate, as for its own runtime's commits. Each live subscription
+watches the store with `Checkpointer.awaitEventsAfter`. A store that is told of commits returns at once. A store that
+is not, such as SQLite, is polled every `WatchPolicy.pollInterval` (250 ms by default):
+
+```scala
+val runtime = GraphRuntime(store, watch = WatchPolicy(pollInterval = 100.millis))
+```
+
+Only durable events cross runtimes; live progress is never stored. See
+[Subscriptions across runtimes](streaming#subscriptions-across-runtimes) for the delivery and back-pressure rules.
+
+## The SQLite store
+
+{: .note }
+> Not yet published. `llm4s-agent-checkpoint-sqlite` exists in the build as of
+> [#1701](https://github.com/llm4s/llm4s/issues/1701) but ships in the next release.
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-agent-checkpoint-sqlite" % llm4sVersion // same version as llm4s-agent
+```
+
+`SqliteCheckpointer` keeps every thread - its latest checkpoint, pending writes, event log and claim - in one
+SQLite database file. Open it with a path, hand it to a `GraphRuntime` (or to `Agent.builder` through
+`withRuntime`), and close it when the process is done with it:
+
+```scala
+import org.llm4s.agent.graph.*
+import org.llm4s.agent.graph.sqlite.SqliteCheckpointer
+import java.nio.file.Path
+
+for
+  store   <- SqliteCheckpointer.open(Path.of("/var/lib/my-app/runs.db"))
+  runtime  = GraphRuntime(store)
+  handle  <- runtime.start(threadId, graph, input)
+  result  <- handle.await()
+yield result
+```
+
+`open` creates the file if it does not exist (its directory must), and brings it to the current schema version.
+Any number of stores may open one file at the same moment, also a new one: each waits up to `busyTimeout` for the
+others. The path may hold any character the file system allows, `?` and spaces included. It must be on a local
+disk: a Windows UNC path (`\\server\share\runs.db`) becomes a `file://server/share/runs.db` URI, which the
+native libraries bundled with sqlite-jdbc refuse (they are built without `SQLITE_ALLOW_URI_AUTHORITY`), and WAL
+does not work on a network file system anyway (see [Sharing one file between processes](#sharing-one-file-between-processes)).
+An open interrupted while it waits for a busy file returns a `CancelledError` and closes its connection.
+`SqliteCheckpointer.open(path, clock)` and `open(path, clock, config)` take the clock claims expire by and a
+`SqliteCheckpointerConfig`.
+
+### Restart and recovery
+
+Everything a run commits is in the file, so a process that stops - crashes, is killed, or is redeployed - loses
+only the work in flight. A new process opens the same file and continues:
+
+```scala
+// after a restart: the same file, a new store, a new runtime, the same graph
+for
+  store  <- SqliteCheckpointer.open(Path.of("/var/lib/my-app/runs.db"))
+  events <- store.eventsAfter(threadId, 0L, 100)     // the stopped run's event log, as it was committed
+  handle <- GraphRuntime(store).recover(threadId, graph)
+  result <- handle.await()
+yield result
+```
+
+`recover` reuses the pending writes of the tasks that had completed, so they are not run again; only the tasks
+that were running or not yet started run. A run that was killed still holds its claim until the claim expires
+(`ttl`, 30 seconds by default), so `recover` is refused with `ThreadBusy` until then; retry it. A run that
+failed - a node returned `NodeResult.Fail` - released its claim as it ended, and `recover` is admitted at once.
+Event numbers continue where the stopped run's log ended: none is reused, and a subscriber that had seen events
+`1..n` resubscribes with `afterSeq = n`.
+
+The sample `org.llm4s.samples.durable.SqliteRestartRecoveryExample` shows the whole sequence:
+`sbt "samples/runMain org.llm4s.samples.durable.SqliteRestartRecoveryExample"`.
+
+### Sharing one file between processes
+
+Several stores - in one process or in several on the same host - can open one file, each with its own connection,
+and the runtimes over them exclude each other through claims exactly as runtimes over one store do. Every write is
+one `BEGIN IMMEDIATE` transaction, in which the claim's token and the thread's version are checked and the commit
+applied, so two stores cannot both pass the checks.
+
+- **WAL mode.** The store switches the file to SQLite's write-ahead log. Readers - `latest`, `eventsAfter`, a
+  subscriber's replay - never wait for a writer, and a writer never waits for readers. WAL needs memory shared
+  between the processes that open the file, so keep the file on a local disk, not on a network file system.
+- **One writer at a time.** SQLite admits one writing transaction per file. The store's writes are short, so a
+  write that finds another in progress waits for it - up to `SqliteCheckpointerConfig.busyTimeout`, 5 seconds by
+  default - and only then fails, with a `ProcessingError` and nothing changed. Raise it if many processes write to
+  one file at once: `SqliteCheckpointer.open(path, clock, SqliteCheckpointerConfig(busyTimeout = 15.seconds))`.
+- **Durable commits.** `synchronous = FULL`: a commit that returned survives a crash or a power loss.
+- **Calls within one store are serialised.** A store is one connection; it is safe to share between threads, and
+  a busy runtime gains from a store of its own rather than from sharing another runtime's.
+- **Virtual threads.** sqlite-jdbc makes its native calls inside `synchronized` methods, so on JDK 21 a call from
+  a virtual thread - as the runtime's tasks are - pins its carrier thread for as long as the call lasts: up to
+  `busyTimeout` while it waits for another connection's write. Calls within one store are serialised, so each store
+  pins at most one carrier at a time; keep `busyTimeout` short if many stores in one process write to busy files.
+
+### Watching the file
+
+SQLite cannot tell one connection that another has committed, so a subscription over a `SqliteCheckpointer` sees the
+commits of other stores on the file by reading the event log, once per `WatchPolicy.pollInterval`. Each read is a
+short indexed query, and in WAL mode it never waits for another connection's writer. It can wait for its own store,
+though: the calls on one `SqliteCheckpointer` share its one connection and are serialised behind its lock, so a
+watch's read waits while that store is committing - including a commit that is itself waiting, up to
+`busyTimeout`, for another connection's write. A process's own runtime still delivers its own commits at once. Each live subscription reads once per interval, so where many subscriptions watch one file, raise
+the interval. A subscription whose store is closed under it ends with `Disconnected(lastSeq, ReplayFailed(...))`,
+from which the next process resubscribes.
+
+### Clocks
+
+A claim's expiry is judged by the clock of the store that grants or renews it - `Clock.systemUTC()` unless you pass
+one. Stores on one host share that host's clock. Processes on different hosts cannot share one SQLite file safely
+anyway (see WAL above), but if host clocks still differ - containers with skewed clocks, a clock step - a claim
+lasts longer or shorter than `ttl` as other processes see it. Fencing keeps every write safe regardless; skew only
+changes when a dead run's thread can be taken over.
+
+### Schema versions
+
+The file records its schema version. Opening a file at an older version upgrades it in one transaction, and
+opening a file written by a newer build is refused with a `ProcessingError`, so an older process never misreads
+it. Checkpoints inside keep their own format version, as with every store, and are migrated when read.
+
+### What it stores
+
+Only data: checkpoints, pending writes and events as JSON, never closures or class names, so a file can be read by
+any build that knows the graph. Its tables are prefixed `llm4s_checkpoint_`, so the file can hold other tables
+too. It keeps every checkpoint of a thread's history, as the next section describes: `history` pages through it
+newest first by an index, so a long history costs a page, not a scan, and `prune` and `deleteThread` remove from it
+in one transaction each, safely beside other stores writing the file. `prune` reads the thread's whole history and
+event log inside its transaction, so on a very long log it holds the file for a while and other stores' writes wait,
+up to `busyTimeout`; prune regularly, or off-peak, rather than once after months.
 
 ## Checkpoint history, fork and updateState
 
@@ -225,8 +363,9 @@ theirs, so on a store shared by several hosts, clock skew between them shifts th
 ## Writing a store
 
 A store implements `Checkpointer`: `claim`, `renew` and `release` for claims; `commit`, `latest`, `history`,
-`checkpoint`, `eventsAfter`, `compactEvents`, `prune` and `deleteThread` for the data. The Scaladoc of
-`Checkpointer` states the contract. In short:
+`checkpoint`, `eventsAfter`, `compactEvents`, `prune` and `deleteThread` for the data. `awaitEventsAfter`, which
+subscriptions use to watch the store, has a default that polls `eventsAfter`. The Scaladoc of `Checkpointer` states
+the contract. In short:
 
 - grant at most one live claim per thread, by the store's clock, and replace an expired one;
 - give every claim a token greater than every token issued for that thread before, also after `deleteThread`;
@@ -237,7 +376,16 @@ A store implements `Checkpointer`: `claim`, `renew` and `release` for claims; `c
   removes it, and keep pending writes for the latest only;
 - on `retractTurn`, remove every checkpoint after the newest `Completed` or `Failed` one before adding the new one;
 - number events contiguously inside the commit, and never reuse a number;
-- release only with the current token, and treat any other as a no-op.
+- release only with the current token, and treat any other as a no-op;
+- return from `awaitEventsAfter` what `eventsAfter` would: at once if there is something, and otherwise within about
+  its `timeout`. A store that can be told of commits, such as a database with a notification channel, overrides it
+  to return as soon as one lands. It must then wake for commits made through every store over the same storage;
+- tolerate the reading thread being interrupted at any point. Cancelling a subscription interrupts its watch, which
+  may be in the middle of `eventsAfter` or `awaitEventsAfter`: that one call may fail (`CancelledError`), but the
+  store must stay usable by every other thread. A driver whose I/O goes through a
+  `java.nio.channels.InterruptibleChannel` (a `FileChannel` or `SocketChannel`) closes the channel when the thread is
+  interrupted mid-read, so a store sharing one such connection between threads must read on a connection of its own
+  for the watch, or replace a connection an interrupt closed.
 
 ### Testing it with the contract suite
 
@@ -267,9 +415,11 @@ trips, the checkpoint history (paging, reads by id, unique ids, retraction and p
 count), claims and fencing (also from many threads at once), and two or more `GraphRuntime`s contending over one
 store - a live run refused elsewhere, renewal, takeover after expiry without re-running completed tasks, a stale
 run's commits refused, only one of several runtimes admitted to recover a thread, `updateState` and `fork` fenced
-against a live run, and a blocked turn leaving nothing in the history. `InMemoryCheckpointer` passes it.
+against a live run, and a blocked turn leaving nothing in the history. It also checks change notification:
+`awaitEventsAfter` itself, and subscriptions in one runtime that receive another runtime's commits in order, mid-run,
+across a restart, and only until they are cancelled. `InMemoryCheckpointer` passes it.
 
-Two hooks fit it to a durable store:
+Three hooks fit it to a durable store:
 
 ```scala
 class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
@@ -286,6 +436,9 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
 
 - **`reopen`** runs the cases that check a live claim, its token and the fencing of a stale holder survive a
   restart. It defaults to the same instance.
+- **`sibling`** opens another store over the same storage, as another process would, while the first stays open:
+  `MyCheckpointer.open(mine.location, clock)`. The change-notification cases put each runtime on a store of its own
+  through it. It defaults to the same instance.
 - **`advanceStoreClock`** is how the suite expires claims. By default it moves the `ManualClock` it handed to
   `newCheckpointer`, so the store must judge expiry by that `clock`. A store that can only use a clock of its own,
   such as a database server's `now()`, overrides it to make claims expire as if that clock had moved - by moving
@@ -295,7 +448,7 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
 ## See also
 
 - [Streaming events](streaming): subscribing to a thread's events, which a store numbers and replays.
-- `docs/design/typed-agent-runtime-design.md` §4.16, the design of claims and fencing, and §4.19, history, fork,
-  `updateState` and retention.
+- `docs/design/typed-agent-runtime-design.md` §4.16, the design of claims and fencing, §4.19, history, fork,
+  `updateState` and retention, and §4.21, subscriptions across runtimes.
 - [Migration guide](../../reference/migration#stage-2-migration-durable-execution): what changed for code that
   implemented `Checkpointer` or built a `Commit`.

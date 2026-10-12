@@ -153,6 +153,27 @@ class MCPReferenceServerSpec extends AnyFlatSpec with Matchers {
     transport.sendNotification(JsonRpcNotification("2.0", "notifications/initialized")) shouldBe Right(())
   }
 
+  it should "end a call to a long-running tool at the configured timeout, though the reply is an SSE stream" in {
+    // The SDK answers tools/call with an SSE stream whose headers come at once; the HTTP request timeout
+    // stops there, so the client must bound the stream itself (#1785). The operation would take 20 s.
+    val url    = requireServer()
+    val client = new MCPClientImpl(MCPServerConfig.streamableHTTP("reference-timeout", url, 2.seconds))
+    Using.resource(new AutoCloseable { def close(): Unit = client.close() }) { _ =>
+      client.initialize() shouldBe Right(())
+      val longRunning = toolNamed(client, "trigger-long-running-operation")
+      val echo        = toolNamed(client, "echo")
+
+      val start   = System.nanoTime()
+      val result  = longRunning.execute(ujson.Obj("duration" -> 20, "steps" -> 2))
+      val elapsed = (System.nanoTime() - start).nanos
+
+      failureText(result) should include("timed out")
+      elapsed should be >= 2.seconds
+      elapsed should be < 6.seconds // ~2 s; the slack is for a slow runner, far below the tool's 20 s
+      echo.execute(ujson.Obj("message" -> "still usable")) shouldBe Right(ujson.Str("Echo: still usable"))
+    }
+  }
+
   "MCPToolRegistry against the MCP reference server" should "execute a discovered tool and refuse an unknown one" in {
     val url = requireServer()
     Using.resource(
