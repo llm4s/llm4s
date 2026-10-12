@@ -154,7 +154,7 @@ class RobustnessSpec extends AnyFlatSpec with Matchers {
 
   "JLlmClient.close" should "delegate every time and be harmless to call twice" in {
     val closes = new AtomicInteger
-    val c      = new JLlmClient(client((_, _) => ok("x"), () => { closes.incrementAndGet(); () }))
+    val c      = Llm4s.wrapClient(client((_, _) => ok("x"), () => { closes.incrementAndGet(); () }))
     c.close()
     c.close()
     closes.get shouldBe 2
@@ -162,19 +162,19 @@ class RobustnessSpec extends AnyFlatSpec with Matchers {
 
   it should "work with try-with-resources semantics (AutoCloseable)" in {
     val closes = new AtomicInteger
-    val c      = new JLlmClient(client((_, _) => ok("x"), () => { closes.incrementAndGet(); () }))
+    val c      = Llm4s.wrapClient(client((_, _) => ok("x"), () => { closes.incrementAndGet(); () }))
     (c: AutoCloseable).close()
     closes.get shouldBe 1
   }
 
   it should "propagate an exception thrown by the underlying close" in {
-    val c = new JLlmClient(client((_, _) => ok("x"), () => throw new IllegalStateException("close failed")))
+    val c = Llm4s.wrapClient(client((_, _) => ok("x"), () => throw new IllegalStateException("close failed")))
     intercept[IllegalStateException](c.close()).getMessage shouldBe "close failed"
   }
 
   "use after close" should "be governed by the underlying client (the wrapper adds no guard)" in {
     var closed = false
-    val c = new JLlmClient(
+    val c = Llm4s.wrapClient(
       client(
         (_, _) => if (closed) Left(ValidationError("client", "closed")) else ok("alive"),
         () => closed = true
@@ -188,40 +188,40 @@ class RobustnessSpec extends AnyFlatSpec with Matchers {
   // ---- null safety for Java callers --------------------------------------------------------
 
   "JLlmClient.complete" should "return a failure (not throw) for a null query" in {
-    val c = new JLlmClient(client((_, _) => ok("x")))
+    val c = Llm4s.wrapClient(client((_, _) => ok("x")))
     val r = c.complete(null: String)
     r.isFailure shouldBe true
     r.getError().error shouldBe a[ValidationError]
   }
 
   it should "return a failure for a null conversation" in {
-    val c = new JLlmClient(client((_, _) => ok("x")))
+    val c = Llm4s.wrapClient(client((_, _) => ok("x")))
     c.complete(null: Conversation).isFailure shouldBe true
     c.complete(null: Conversation, CompletionOptions()).isFailure shouldBe true
   }
 
   it should "return a failure for null options" in {
-    val c = new JLlmClient(client((_, _) => ok("x")))
+    val c = Llm4s.wrapClient(client((_, _) => ok("x")))
     c.complete(ConversationBuilder.create().user("hi").build(), null: CompletionOptions).isFailure shouldBe true
   }
 
   it should "turn an exception thrown by the underlying client into a failed LlmResult" in {
     val cause = new IllegalStateException("provider blew up")
-    val c     = new JLlmClient(client((_, _) => throw cause))
+    val c     = Llm4s.wrapClient(client((_, _) => throw cause))
     val r     = c.complete("hi")
     r.isFailure shouldBe true
     (r.getError().getCause should be).theSameInstanceAs(cause)
   }
 
   "JAgent.run" should "return a failure for a null query" in {
-    val agent = Llm4s.createAgent(new JLlmClient(client((_, _) => ok("x"))))
+    val agent = Llm4s.createAgent(Llm4s.wrapClient(client((_, _) => ok("x"))))
     agent.run(null: String).isFailure shouldBe true
   }
 
   "Llm4s" should "reject a null client or null tools when creating an agent, with a clear message" in {
     val ex = intercept[NullPointerException](Llm4s.createAgent(null))
     ex.getMessage should include("client")
-    val noTools = intercept[NullPointerException](Llm4s.createAgent(new JLlmClient(client((_, _) => ok("x"))), null))
+    val noTools = intercept[NullPointerException](Llm4s.createAgent(Llm4s.wrapClient(client((_, _) => ok("x"))), null))
     noTools.getMessage should include("tools")
   }
 

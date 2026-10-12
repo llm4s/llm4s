@@ -196,7 +196,9 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   cut off after its `,` has it, a `pytest` assertion diff whose lines start with `E` and its `+`/`-` markers,
   a notebook's `text/plain` line array in an `.ipynb` file, `str(dict)` inside a `repr`
   (`{'body': '{\'password\': "it\'s..."}'}`), Python's `\'` inside a JSON string
-  (`"{'password': 'a\\'b\"c'}"`), `Settings(token=['a', 'b'])` and a `\"` in an earlier leaf are redacted; a
+  (`"{'password': 'a\\'b\"c'}"`), `Settings(token=['a', 'b'])`, a call under a sensitive key
+  (`Settings(token=SecretStr('...'))`, `api_key=module.Secret(value='...')`) and a `\"` in an earlier leaf are
+  redacted; a `"` of a credential in a single-quoted string is replaced with it (`'[REDACTED]'`), while a
   `"` that delimits a JSON string, at any depth, is never replaced, so the JSON still parses, and what this
   reading replaces is added only where no other replacement is), `key=value` pairs and quoted
   `KEY="value"` / `KEY='value'` assignments outside a query string (for example `password=...`,
@@ -224,7 +226,9 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   `key=value` pair; `max_tokens`, `prompt_tokens`, `token_count`, `next_page_token`, `cookie_policy` and
   `cookie_consent` are not, because the match is never on a substring. URL query parameters are also
   matched against a second, substring list (`key`, `token`, `secret`, `password`, `auth` and similar), so
-  `?x_api_key_id=` is redacted too. A query value written right before JSON
+  `?x_api_key_id=` is redacted too. The password of a URL's userinfo is redacted wherever the URL is
+  (`https://alice:[REDACTED]@gw.example.com/v1`, also with JSON's `\/`), every URL of a list joined by `,` or
+  `;` included; the user and the host are kept. A query value written right before JSON
   (`?token=...,{"api_key": "..."}`, also with the quotes escaped) does not hide the field after it.
 - **Where a cookie header's value ends.** Outside any string (a raw request dump, a log line), at the end
   of its line, quotes, apostrophes and backslashes included: `Cookie: sid="abc"; x=y` becomes

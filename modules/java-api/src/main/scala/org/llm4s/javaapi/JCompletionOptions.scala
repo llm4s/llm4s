@@ -24,7 +24,9 @@ import java.util.{ Objects, Optional, OptionalInt }
  *
  * A value: two are equal when every setting is. Tools and response formats are not options here yet.
  */
-final class JCompletionOptions private (private[javaapi] val underlying: CompletionOptions) {
+final class JCompletionOptions private (token: FacadeToken, private[javaapi] val underlying: CompletionOptions) {
+
+  FacadeToken.check(token, "JCompletionOptions")
 
   /** The sampling temperature: higher is more random. Reasoning models may ignore it. */
   def temperature: Double = underlying.temperature
@@ -52,7 +54,7 @@ final class JCompletionOptions private (private[javaapi] val underlying: Complet
   def budgetTokens: OptionalInt = JCompletionOptions.optionalInt(underlying.budgetTokens)
 
   /** A builder that starts from these options. */
-  def toBuilder: JCompletionOptions.Builder = new JCompletionOptions.Builder(underlying)
+  def toBuilder: JCompletionOptions.Builder = new JCompletionOptions.Builder(FacadeToken.INSTANCE, underlying)
 
   override def equals(other: Any): Boolean = other match {
     case that: JCompletionOptions => underlying == that.underlying
@@ -74,7 +76,7 @@ final class JCompletionOptions private (private[javaapi] val underlying: Complet
 object JCompletionOptions {
 
   /** A builder holding core's defaults. */
-  def builder(): Builder = new Builder(CompletionOptions())
+  def builder(): Builder = new Builder(FacadeToken.INSTANCE, CompletionOptions())
 
   /**
    * Builds a [[JCompletionOptions]]. Immutable: every setter returns a new builder, so one may be shared and
@@ -82,7 +84,9 @@ object JCompletionOptions {
    * `0..1`, a non-finite penalty, a token count below 1 - throws `IllegalArgumentException` at once, and a
    * `null` throws `NullPointerException`; a range only some models accept is left to the provider.
    */
-  final class Builder private[javaapi] (options: CompletionOptions) {
+  final class Builder private[javaapi] (token: FacadeToken, options: CompletionOptions) {
+
+    FacadeToken.check(token, "JCompletionOptions.Builder")
 
     /** Sets the sampling temperature; at least `0`. */
     def temperature(value: Double): Builder =
@@ -129,9 +133,9 @@ object JCompletionOptions {
     def budgetTokens(value: OptionalInt): Builder = next(options.withBudgetTokens(positive(value, "budgetTokens")))
 
     /** The options set so far. */
-    def build(): JCompletionOptions = new JCompletionOptions(options)
+    def build(): JCompletionOptions = new JCompletionOptions(FacadeToken.INSTANCE, options)
 
-    private def next(updated: CompletionOptions): Builder = new Builder(updated)
+    private def next(updated: CompletionOptions): Builder = new Builder(FacadeToken.INSTANCE, updated)
   }
 
   private def check(value: Double, inRange: Boolean, name: String, rule: String): Double =

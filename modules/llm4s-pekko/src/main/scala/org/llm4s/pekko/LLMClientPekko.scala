@@ -78,6 +78,7 @@ object LLMClientPekko {
       bufferSize: Int
     ): Source[StreamedChunk, NotUsed] =
       BlockingSource("llm4s-pekko-llm", bufferSize)(() => new ChunkProducer(underlying, conversation, options))
+        .mapMaterializedValue(_ => NotUsed)
 
     def agent(id: String)(configure: AgentBuilder => AgentBuilder): Result[AgentPekko] =
       configure(Agent.builder(id, underlying)).build().map(AgentPekko(_))

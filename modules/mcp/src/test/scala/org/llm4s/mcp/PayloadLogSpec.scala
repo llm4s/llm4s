@@ -100,7 +100,7 @@ class PayloadLogSpec extends AnyFlatSpec with Matchers with MockFactory {
   Seq[(String, Llm4sHttpClient => MCPTransportImpl, Class[?])](
     (
       "StreamableHTTPTransportImpl",
-      http => new StreamableHTTPTransportImpl("http://localhost/mcp", "sse-log", 5.seconds, http),
+      http => new StreamableHTTPTransportImpl("http://localhost/mcp", "sse-log", 5.seconds, WholeBodyReplies(http)),
       classOf[StreamableHTTPTransportImpl]
     ),
     (

@@ -23,6 +23,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sbt listPublishedArtifacts` prints it as a `gradle` line and `scripts/verify-release.sh` checks it (POM, jar, and the
   facade version), with tests (`scripts/test-verify-release.sh`, `scripts/test-publish-kotlin-api.sh`). See
   [Release Process](docs/reference/release.md#the-kotlin-artifact-llm4s-kotlin-api).
+- **Java client builders: a client in code, with no `application.conf` and no Scala type** ([#1489](https://github.com/llm4s/llm4s/issues/1489)):
+  `Llm4s.openAi()`, `anthropic()`, `gemini()`, `ollama()`, `openAiCompatible()` and `azureOpenAi()` return immutable
+  builders (`OpenAiClientBuilder` and so on) taking `apiKey`, `model`, `baseUrl`, `contextWindow`, `reserveCompletion`,
+  `requestTimeout`/`streamTimeout` (`java.time.Duration`) and each provider's own fields (`organization`, `apiVersion`,
+  `header`), whose `build()` returns `LlmResult<JLlmClient>`. A required field left out, `null` or blank, or a value out
+  of range, is a failed result of kind `VALIDATION` naming the field; `build()` sends no request and never throws, and
+  `toString` prints the key as `***` and URLs without userinfo, query or fragment. Defaults are those `application.conf`
+  gives - the provider's base URL and the model catalogue's context window, for an OpenAI-compatible server the window
+  for the provider its base URL's host names - because each builder makes its config as the provider's descriptor makes
+  it from a section, and a test compares the two. `metrics(MetricsCollector)` attaches a collector, as
+  `Llm4s.createClient(config, metrics)` does. Other providers still take a config object through
+  `Llm4s.createClient(ProviderConfig)`. The Kotlin API cannot wrap a builder's client yet
+  ([#1850](https://github.com/llm4s/llm4s/issues/1850)). See [Configure in code](docs/guide/java.md#configure-in-code).
+- **`MemoryManagerConfig.contextTokenBudget` and `autoExtractEntities` take effect** ([#1579](https://github.com/llm4s/llm4s/issues/1579)):
+  `getRelevantContext` without a `maxTokens` now uses the manager's `contextTokenBudget` (2000 by default, as
+  before; an explicit `maxTokens` still wins), through a new `MemoryManager.contextTokenBudget` member that
+  `SimpleMemoryManager` and `LLMMemoryManager` take from their config and other implementations inherit as
+  `MemoryManager.DefaultContextTokenBudget`. With `autoExtractEntities = true`, `recordMessage` and
+  `recordConversation` also run `extractEntities` over each recorded user and assistant message, with its
+  conversation id - one extra LLM call per message on `LLMMemoryManager`, nothing on `SimpleMemoryManager`;
+  a failed extraction is logged and the message stays recorded. `MemoryManagerConfig.fullFeatured` turns it on.
+- **`Llm4s.createClient(ProviderConfig, MetricsCollector)` is public** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
+  the `llm4s-java-api` overload that attaches a `MetricsCollector` (a `MicrometerMetrics` over the application's
+  `MeterRegistry`, say) was `private[llm4s]` for the Spring Boot starter, yet public in the bytecode, so Java callers
+  saw it and Scala callers outside `org.llm4s` could not use it. It is now public and documented
+  ([Using LLM4S from Java](docs/guide/java.md#recording-metrics)), settled before the `llm4s-java-api` MiMa baseline.
+- **Live subscriptions across runtimes** ([#1705](https://github.com/llm4s/llm4s/issues/1705), Stage 2 slice 6 of
+  [#1699](https://github.com/llm4s/llm4s/issues/1699)): a `GraphRuntime.subscribe` now delivers the durable events of
+  commits made through any runtime or process sharing the checkpointer, not only its own, in order, without gap or
+  duplicate. Each live subscription watches the store through the new SPI method `Checkpointer.awaitEventsAfter`, a
+  long poll whose default reads `eventsAfter` once per timeout. `InMemoryCheckpointer` overrides it to wake on its
+  commits; the SQLite store is polled. `WatchPolicy` (on `GraphRuntime`, default enabled, `pollInterval` 250 ms,
+  at least 1 ms) configures the watch, and `WatchPolicy.disabled` turns it off. Other runtimes' events are queued only as they fit,
+  so they never make a subscriber lag. Durable events are queued strictly contiguously: a commit of the subscriber's
+  own runtime first reads any events committed elsewhere that the watch has not read yet. Live events do not cross
+  runtimes, because they are never stored. A commit the store wrote but reported as failed is now delivered too (the
+  second corner case of [#1737](https://github.com/llm4s/llm4s/issues/1737)). `CheckpointerContract` gains
+  change-notification and cross-runtime subscription cases and a `sibling` hook, and the SQLite store passes them over
+  one and two connections, as well as with a subscriber in another process. See
+  [Streaming events](docs/guide/agents/streaming.md#subscriptions-across-runtimes).
+- **`llm4s-agent-checkpoint-sqlite`: the first durable checkpointer** ([#1701](https://github.com/llm4s/llm4s/issues/1701),
+  Stage 2 slice 2 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `SqliteCheckpointer`
+  (`org.llm4s.agent.graph.sqlite`) keeps threads - checkpoint history, pending writes, event log and run claim - in one
+  SQLite file, so a run survives a restart: a new process opens the file, replays the stopped run's events, and
+  `recover` continues it without re-running the tasks that had completed. Several stores, in one process or in several
+  on one host, can share the file; every write is one `BEGIN IMMEDIATE` transaction that checks the claim's token and
+  the thread's version and applies the commit, fencing tokens come from a counter stored in the file (so they keep
+  increasing across restarts and `deleteThread`), and claims expire by the store's injected `Clock`. The file runs in
+  WAL mode with `synchronous = FULL`; `SqliteCheckpointerConfig.busyTimeout` (default 5 s) bounds how long a write waits
+  for another connection's. The schema is versioned and migrated on open, and a file from a newer build is refused. It
+  passes `CheckpointerContract` over one connection and over two alternating connections to one file, and a test kills
+  a forked JVM mid-run and recovers its thread. It implements #1702's `history`, `checkpoint` and `prune` over a history
+  table paged by its primary key, each write one transaction; the table is part of schema version 1, since no released
+  build wrote a file without it, and opening a version-1 file from a pre-release build creates it. The sample `SqliteRestartRecoveryExample` shows a restart
+  and recovery.
+  See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#the-sqlite-store).
+- **`sbt pomMetadataCheck`: every published POM carries its metadata** ([#1455](https://github.com/llm4s/llm4s/issues/1455)):
+  a CI quick check that reads the POM sbt generates for each of the 44 published projects (the `llm4s-*` artifacts, the
+  BOM and the relocation stubs) and fails when one lacks a name, a description of its own, an https project URL, a
+  licence with an https URL, a developer, or the `<scm>` Scaladex associates artifacts by
+  (`https://github.com/llm4s/llm4s`, no trailing slash, with an `scm:git:https` connection). Maven Central rejects a
+  POM without these at publish time, after the tag is pushed, and a released POM cannot be amended.
+  `sbt "pomMetadataCheckFiles <pom>..."` runs the same rules on POMs downloaded from Central; on 0.4.1's it reports
+  the three problems fixed since (#1588). The README has a Maven Central badge, and `docs/reference/release.md` has a
+  Discoverability section for maintainers: GitHub topics and description, the homepage, and how to get Scaladex to
+  list `org.llm4s` (it does not yet).
+- **CI runs in a GitHub merge queue** ([#1638](https://github.com/llm4s/llm4s/issues/1638)): `ci.yml`, `dco.yml` and
+  `secret-scan.yml`, the workflows behind `main`'s required checks (`All Tests Pass`, `Check DCO sign-off`, `TruffleHog
+  Secret Scan`), also trigger on `merge_group`, so a maintainer can enable a merge queue that tests each pull request
+  on top of current `main` before it lands. That closes the merge skew that turned `main` red when two independently
+  green pull requests landed together (#1386 with #1417, #1741 with #1585). On a merge group the DCO job reports
+  without re-running `dco-check` (the pull request already passed it to be queued), and the secret scan scans the
+  group's own range. `scripts/test-merge-queue-workflows.sh`, in Quick Checks, keeps it so. Enabling the queue is a
+  repository setting: [docs/reference/merge-queue.md](docs/reference/merge-queue.md). Nothing changes until it is enabled.
 - **A build-only dry run for the docs deploy** ([#1152](https://github.com/llm4s/llm4s/issues/1152)): `pages.yml`
   takes `-f dry_run=true`, which runs every build step (tag validation and checkout, version, aggregate Scaladoc and its
   package check, Jekyll, the Pages artifact) and skips the deploy, in a concurrency group of its own so it never
@@ -258,8 +332,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#1457](https://github.com/llm4s/llm4s/issues/1457)): a new Beta module (`modules/llm4s-pekko`, package
   `org.llm4s.pekko`) that depends on `llm4s-core`, `llm4s-agent` and `pekko-stream` 1.7 (Apache-2.0; Akka is not
   used). `LLMClientPekko(client).streamComplete(conversation)` is a `Source[StreamedChunk, NotUsed]` and `complete` a
-  `Future`; `AgentPekko(agent).stream`, `streamResume` and `streamRecover` are `Source[AgentStreamItem, NotUsed]` (each
-  event of the turn, then `Done(result)`) and `run`, `continueConversation`, `recover` and `resume` are `Future`s, as
+  `Future`; `AgentPekko(agent).stream`, `streamResume` and `streamRecover` are `Source[AgentStreamItem, Future[Done]]`
+  (each event of the turn, then `Done(result)`; the `Future[Done]` completes once the turn has ended and its thread is
+  free) and `run`, `continueConversation`, `recover` and `resume` are `Future`s, as
   `AgentIO` and `AgentZ` offer for fs2 and ZIO. The provider call blocks, so each stream runs it on a daemon thread of its
   own and hands items over through a bounded buffer: a consumer that lags blocks the provider's thread (nothing is
   dropped), and cancelling the stream interrupts it. An agent turn is cancelled when its stream is, a slow consumer gets
@@ -1220,6 +1295,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Workload-identity configuration is `@Stable`; `stabilityTierCheck` flags Stable signatures that name Experimental types** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
+  `AuthConfig`, `IdentitySource`, `TokenExchangeConfig`, `AccessToken`, `AccessTokenProvider`,
+  `OpenAIWorkloadIdentity` and `AnthropicWorkloadIdentity` were `@Experimental` while the Stable
+  `NamedProviderConfig.auth`/`withAuth`/`apply`, `ProviderDescriptor.requireAuthExtra`,
+  `OpenAICompatibleConfig.tokenExchange`, `OpenAICompatibleClient.Credential` and the `workloadIdentity` fields of
+  `OpenAIConfig` and `AnthropicConfig` carried them, so the 1.x promise on those signatures could not hold. They are
+  now `@Stable`; `TokenExchange`, `CachingAccessTokenProvider` and `IdentityTokenSource` stay `@Experimental`.
+  `stabilityTierCheck` now also fails for a public member of a `@Stable` type whose signature names an
+  `@Experimental` type, and checks itself against fixtures first. **Migration:** `AccessToken` is growth-safe: its
+  constructor and `copy` are private - build one with `AccessToken(value, expiresAt)` and change it with
+  `withValue` / `withExpiresAt`.
+- **A test framework's assertion under a bare `assertion` key stays readable** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
+  `Redaction` treated every key ending in `assertion` as a credential, which blanked test-framework lines such as
+  `Assertion: expected status 200` and `{"assertion": "response.status == 200"}`. The bare key is still a credential
+  in every shape - JSON field, IdP error echo, Python dict, escaped JSON, header line, `key=value` pair, quoted pair,
+  form body and query - but a value under it that reads as prose is left readable: it holds a space (U+0020), no
+  `<`, and no run of 20 or more characters of `[A-Za-z0-9+/_=-]`. A test assertion (`expected status 200 but got
+  404`, `len(items) > 0`) is words and operators between spaces; an RFC 7521 / 7523 `assertion` grant fails the rule
+  however it is wrapped - a JWT, a base64 or base64url SAML assertion (also wrapped with spaces), a hex or opaque
+  token is one long run, a raw XML SAML assertion holds `<`, a PEM block holds base64 lines - and so does a credential
+  with a word beside it (`ghp_... x`, an AWS key id and its secret). The check reads only the value, so redaction
+  stays linear in the input. One rule, read by every pass and by `remoteBody`'s collector. A compound key
+  (`client_assertion`, `saml_assertion`, `jwtAssertion`) and a container under the bare key are redacted whatever
+  they hold, and the patterns that read no key (JWTs, bearer tokens, API keys, sensitive pairs) still apply inside a
+  readable assertion. An `Assertion` request header is still withheld on a cross-origin redirect by the HTTP tool.
+- **Breaking (Java API): the facade's Java-visible surface is the intended one** ([#1666](https://github.com/llm4s/llm4s/issues/1666)):
+  Scala 3 emitted the `private` constructors and `private[javaapi]` factories of `llm4s-java-api` as `public`, so Java
+  could build values the library never would (`new JToolCall(null, null, null)`, a `COMPLETED` `JAgentStatus` with no
+  answer) and adding a field would have broken a caller compiled against a constructor. The value types - `JAgentResult`,
+  `JAgentStatus`, `JMessage`, `JToolCall`, `JUsageSummary`, `JModelUsage`, `PendingInterrupt`, `JCompletion`,
+  `JTokenUsage` and `JEmbeddings` - are now Java classes with package-private constructors and no static factory (bar
+  `JEmbeddings.cosineSimilarity`), with the same accessors, `equals`, `hashCode` and `toString`. The facade's Scala
+  classes (`JLlmClient`, `JAgent`, `JEmbeddingClient`, `AgentStream`, `LlmResult`, `Answer`, `ConversationBuilder`,
+  `JCompletionOptions` and its `Builder`) take a package-private token first in their constructors, which throw
+  `UnsupportedOperationException` when called from outside the package, and the internal `of`/`from` factories
+  and `AgentStream.start` are gone from the facade types (`Llm4s.createClient(config, metrics)` stays public, as
+  [#1817](https://github.com/llm4s/llm4s/issues/1817) made it). `JavaInteropSpec` now
+  fails on any public constructor or public static method that is not in its list of intended ones, its companion's
+  included, and compiles a Java class in another package that tries to build each value type. New:
+  `Llm4s.wrapClient(LLMClient)` and `Llm4s.wrapEmbeddingClient(EmbeddingClient, EmbeddingModelConfig)`, the
+  counterparts of `wrapAgent`. Migration: `new JLlmClient(client)` from Java or Kotlin becomes
+  `Llm4s.wrapClient(client)`, and `new JEmbeddingClient(client, model)` becomes `Llm4s.wrapEmbeddingClient(client,
+  model)`; nothing else had a supported way in.
+- **Subscriptions watch the checkpoint store** ([#1705](https://github.com/llm4s/llm4s/issues/1705), BREAKING,
+  `llm4s-agent`): `Checkpointer` gains `awaitEventsAfter`, with a polling default, so existing stores compile
+  unchanged. A delegating store should forward it. `GraphRuntime`'s constructor gains an optional `WatchPolicy`, and
+  Java and Kotlin get `new GraphRuntime(store, clock, claims)`. A live subscription holds a second virtual thread
+  (`llm4s-watch-<threadId>`) until it is cancelled, delivers other runtimes' durable events, and ends with
+  `Disconnected(lastSeq, ReplayFailed(error))` when a read of the store fails after its replay, for instance because
+  the store was closed. `CheckpointerContract` gains cases and a `sibling` hook. No shims; see the
+  [Stage 2 migration note](docs/reference/migration.md#live-subscriptions-across-runtimes-1705).
 - **`Checkpointer` keeps a checkpoint history** ([#1702](https://github.com/llm4s/llm4s/issues/1702), BREAKING,
   `llm4s-agent`): `Checkpointer` gains `history`, `checkpoint` and `prune`, and must keep every superseded checkpoint
   and refuse a checkpoint id already in the history (`InvalidCommit`); `Commit` gains `retractTurn` (defaulted);
@@ -2355,6 +2481,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `org.llm4s.toolapi.ToolHints` in `llm4s-core` (`@Experimental`), because `llm4s-mcp` cannot depend on the agent runtime.
 
 ### Removed
+- **`MemoryManagerConfig.autoRecordMessages` and `consolidationEnabled`** ([#1579](https://github.com/llm4s/llm4s/issues/1579)):
+  no manager ever read them. A manager records only the messages passed to `recordMessage`/`recordConversation`,
+  so there was nothing for `autoRecordMessages` (default `true`) to switch, and automatic consolidation has no
+  trigger to hang on - `consolidateMemories` runs when you call it, reading `consolidationConfig`. The 5-parameter
+  `MemoryManagerConfig` constructor, `apply` and `copy` overloads went with them. **Migration:** drop both
+  arguments; record each turn with `recordMessage`/`recordConversation` and call `consolidateMemories` yourself
+  (for example from a scheduled job). Positional calls shift: the constructor and `apply` are now
+  `(autoExtractEntities, defaultImportance, contextTokenBudget, consolidationConfig)`.
 - **`WorkspaceConfigSupport.loadSandboxConfig`** ([#1730](https://github.com/llm4s/llm4s/issues/1730)): it read a
   sandbox profile from the client's `llm4s.workspace.sandbox.profile`, which nothing passed to the runner and nothing
   called, so it suggested a client setting that enforced nothing. What the runner enforces is decided only by its own
@@ -2510,6 +2644,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - `Redaction`: the password of a URL's userinfo is redacted** ([#1816](https://github.com/llm4s/llm4s/issues/1816)):
+  `https://alice:s3cret@gw.example.com/v1` - a provider `baseUrl`, a proxy or a database URL in a connection error,
+  an HTTP client error or the provider exchange log - came out unchanged. The password of `scheme://user:password@host`
+  is now replaced (`https://alice:[REDACTED]@gw.example.com/v1`), in plain text, inside a JSON string with the slashes
+  escaped or not, at any depth, and as a query value (`?next=https://u:p@h/`). The user, the host, the port and the
+  path are kept; the userinfo ends at the authority's last `@`, so an unencoded `@` in a password is read whole, and a
+  percent-encoded one is read as it is. A URL with no userinfo, a user with no password, an empty password and an `@`
+  in the path, query or fragment are left as they were. Every URL of a list is read: an authority also ends at the
+  scheme of the next URL (`redis://u:[REDACTED]@h1,redis://u:[REDACTED]@h2`, also joined by `;`, `)` or `'`), and a `,`
+  or `;` starts another item when it follows a password and an `@` follows it (`https://u:[REDACTED]@h1,a@b.com` keeps
+  the address) or when it follows a host and its port (`https://example.com:8080,bob@corp.com` is left as it is). A
+  second redaction of the output changes nothing. What is left: a password holding an unencoded `@` and then `,` or
+  `;` before another `@`, or one holding `://`, is replaced only in part. Like the readings of #1695, #1706 and #1707,
+  it only adds to what was replaced before.
+- **`llm4s-pekko`: a cancelled agent stream releases its thread before reporting it, and says when it has**
+  ([#1822](https://github.com/llm4s/llm4s/issues/1822), item 1 of [#1815](https://github.com/llm4s/llm4s/issues/1815)):
+  cancelling an `AgentPekko` stream cancelled the turn on a background cleanup thread, so a `recover` on the same thread
+  straight after could be refused with `GraphError.ThreadBusy` - the run's subscription ends just before it gives its
+  thread claim back - which made `AgentPekkoSpec` flaky. The turn is now cancelled and awaited on the stream's own
+  producer thread, and `stream`, `streamResume` and `streamRecover` materialize a `Future[Done]` (they were
+  `Source[AgentStreamItem, NotUsed]`) that completes once the turn has ended and its thread is free, however the stream
+  ended; it never fails, and it is already complete when the stream completes normally. A failed stream now fails only
+  after its turn has ended. **Migration:** wait for the `Future[Done]` (`toMat(sink)(Keep.both)`) before starting
+  another turn on a thread whose stream you cancelled; a type annotation of `Source[AgentStreamItem, NotUsed]` becomes
+  `Source[AgentStreamItem, Future[Done]]`, or add `.mapMaterializedValue(_ => NotUsed)`. See
+  [Apache Pekko Integration](docs/guide/pekko.md#waiting-for-a-cancelled-turn).
+- **A throwing access-token fetch no longer escapes the client** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
+  an `OpenAICompatibleClient.Credential.Dynamic` provider whose `token()` throws now fails the request with an
+  `AuthenticationError` naming the exception's class (not its message), and one whose `invalidate` throws no longer
+  stops the 401 retry; a `CachingAccessTokenProvider` fetch that throws is a failed `token()`, shared for the
+  failure window like any rejection.
+- **Anthropic workload identity checks the identity token file when the client is built** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
+  the Anthropic SDK reads `identityTokenFile` itself, without llm4s's regular-file and 64 KiB checks. `AnthropicClient`
+  now refuses a path that is a directory, a FIFO, a device or larger than 64 KiB, as a `ConfigurationError` naming
+  `workloadIdentity.identityTokenFile`; a path that does not exist yet is still accepted. Documented in the
+  configuration guide.
+- **Security - workspace runner: more programs that run another cannot be added as extra commands, `tar`, `zip`,
+  `rsync`, `scp` and `sftp` refuse their program-running options, and a command's child gets the system directories
+  when no `PATH` entry survives** ([#1805](https://github.com/llm4s/llm4s/issues/1805)):
+  `WORKSPACE_EXTRA_COMMANDS` still accepted names that run code - shells (`ash`, `mksh`, `yash`, `rbash`, `elvish`,
+  `nu`, `xonsh`), interpreter aliases (`pypy`, `jython`, `pyw`, `javaw`, `jjs`, `luajit`, `Rscript`, `R`, `julia`,
+  `guile`, `racket`, `swipl`, `sbcl`, `clisp`, `erl`, `escript`, `iex`, `elixir`, `ghci`, `runghc`, `ocaml`, `scala`,
+  `kotlin`, `groovy`, `osascript`, `dc`), launchers and loaders (`setpriv`, `capsh`, `prlimit`, `numactl`,
+  `fakeroot`, `proot`, `bwrap`, `firejail`, `gosu`, `su-exec`, `tini`, `unbuffer`, `tmux`, `screen`, `valgrind`,
+  `lldb`, `perf`, `ld.so` / `ld-linux*.so*`), `sed` (GNU `e`), editors that run a command (`vi`, `vim`, `nvim`, `ex`,
+  `emacs`), schedulers (`at`, `crontab`) and Windows programs that run another (`forfiles`, `conhost`, `explorer`,
+  `regsvr32`, `msbuild`, `wmic`, `schtasks`, `runas`, `msiexec`, `pcalua`, `bitsadmin`, `hh`, ...).
+  `WorkspaceSandboxConfig.NeverAllowedCommands` now names them, and the `python`, `pypy`, `jython` and `lua` families
+  and the dynamic loader are matched by prefix (`python3.7m`, `python3-dbg`, `ld-linux-x86-64.so.2`). For the archive
+  and copy tools operators commonly add, the runner refuses the options that run a program, as for `sort` and `cp`:
+  `tar --to-command`, `-I` / `--use-compress-program`, `--checkpoint-action`, `-F` / `--info-script` (also in the
+  traditional dashless form, `tar cIf`); `zip -TT` / `--unzip-command`; `rsync -e` / `--rsh` / `--rsync-path`; `scp` /
+  `sftp` `-S`, `-o`, `-F` and sftp's `-D`. The docs name GTFOBins-style option abuse as the reason the list cannot be
+  complete. When no `PATH` entry survives sanitising, a command's process used to get no `PATH`, for which bash and
+  sh search a built-in default ending in `.` - the workspace; it now gets `/usr/bin:/bin` on POSIX and the system and
+  Windows directories on Windows (no `PATH` only when even those lie in the workspace). A child `PATH` entry that
+  does not exist yet is judged through its nearest existing ancestor's links, so one under a link into the
+  workspace is dropped. A Windows-host test now checks that a command's own `CreateProcess` does not search its
+  current directory with `NoDefaultCurrentDirectoryInExePath=1`. The dead `;`-re-quoting branch of
+  `ProgramResolver.childPath` is gone, `taskset` and `chrt` are grouped alike in the code and the docs, and
+  `docs/workspace-agent-protocol.md` lists the command policy's other codes (`EXECUTABLE_PATH_NOT_ALLOWED`,
+  `ARGUMENT_NOT_ALLOWED`, `ENVIRONMENT_NOT_ALLOWED`, ...). **Migration:** a runner started with one of the newly
+  refused names in `WORKSPACE_EXTRA_COMMANDS` (`scala`, `scala3`, `sed`, `pypy3`, ...) now stops at start-up naming
+  it; drop the name, or use a build tool, which is still accepted (`sbt`, `scala-cli`, `mvn`, `gradle`). An added
+  `tar`, `zip`, `rsync`, `scp` or `sftp` refuses the options above with `ARGUMENT_NOT_ALLOWED`.
+- **`llm4s-observability-micrometer` no longer double-counts `llm4s.errors` behind a `ReliableClient`** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
+  `MicrometerMetrics.recordError` fed the same `llm4s.errors` counter that `observeRequest` feeds, so a provider client
+  and the `ReliableClient` around it, sharing one collector, counted each failed attempt and then the final failure
+  again. `recordError` now records `llm4s.reliability.errors` (`llm4s_reliability_errors_total`; tags `provider`,
+  `error_type`), and `llm4s.errors` means what `llm4s_errors_total` means in the Prometheus module: failed requests
+  and failed image generations. **Migration:** a query on `llm4s_errors_total` that relied on `recordError` calls
+  (`ReliableClient`'s local throttle, open circuit, deadline and final failure) reads
+  `llm4s_reliability_errors_total` instead. See [Micrometer metrics](docs/guide/observability/micrometer.md#errors-and-reliableclient).
+- **The Spring Boot starter keeps its metrics ordering on Spring Boot 4** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
+  `LlmMetricsAutoConfiguration` now also orders itself after the `MeterRegistry` auto-configurations at their Boot 4
+  names (`org.springframework.boot.micrometer.metrics.autoconfigure.*`), and a test fails if the names stop resolving
+  on the Boot version the starter is tested against. The `MicrometerMetrics` Scaladoc no longer claims the class holds
+  no mutable state.
+- **MCP: `MCPServerConfig.timeout` now bounds a Streamable HTTP call whose reply is an SSE stream** ([#1785](https://github.com/llm4s/llm4s/issues/1785)):
+  the HTTP request timeout stops counting once the response headers arrive, and a Streamable HTTP server that answers
+  with an SSE stream - as servers built on the MCP SDKs do - sends them at once, so a call to a long-running tool
+  waited for the tool however long it ran (20 s against a 2 s timeout on the MCP reference server).
+  `StreamableHTTPTransportImpl` now reads the reply body against the same deadline as the request: a call ends at the
+  configured timeout whether the reply is plain JSON or an SSE stream, with a transport error saying it timed out (a
+  `ToolCallError.HandlerError` from a tool call), and the connection is closed, so the server sees the client leave.
+  An SSE reply is read event by event and returns as soon as its JSON-RPC response arrives, without waiting for the
+  server to end the stream. An interrupt while reading the stream is still a `CancelledError`. Behaviour change: an
+  MCP tool that runs longer than its server's `timeout` (30 s by default) over Streamable HTTP now fails instead of
+  completing late; raise `timeout` for such a server.
+- **Security - `Redaction`: a keyword argument whose value is a call, and a `"` inside a redacted Python string** ([#1813](https://github.com/llm4s/llm4s/issues/1813)):
+  `Settings(token=SecretStr('...'))`, `password=Wrapper("...")` and `api_key=module.Secret(value='...')` kept the
+  credential readable - `pydantic` masks its own `SecretStr` in a `repr`, a wrapper class of one's own does not - while
+  the same call under a dict key was redacted. The strings, numbers and words of a call under a sensitive keyword
+  argument or dict key are now replaced, the call's own keyword arguments included (`token=[REDACTED]'[REDACTED]')`).
+  A secret holding `'"` in a single-quoted Python string came out as `'[REDACTED][REDACTED]"[REDACTED]'`, which told
+  that it held a `"`, and a second redaction collapsed it: the `"` is now replaced with the rest of the content, a part
+  that meets a placeholder already written is written as nothing, and the output is `'[REDACTED]'`, which a second
+  redaction leaves as it is. A `"` that delimits a JSON string around the value, at any depth, is still kept, so the
+  JSON parses. Like the readings before it, this only adds to what was replaced: `data={'password': pw}` still
+  replaces `pw`, since a bare word there may be the credential.
 - **The Spring Boot starter's health indicator redacts nested credentials and header values** ([#1820](https://github.com/llm4s/llm4s/issues/1820)):
   the credentials it removes from a failed probe's `error` message were read only from top-level text fields of the
   resolved provider config, so a credential set outside Spring properties (in `application.conf`, a `reference.conf`

@@ -13,6 +13,9 @@
     <a href="https://codecov.io/gh/llm4s/llm4s">
         <img src="https://codecov.io/gh/llm4s/llm4s/branch/main/graph/badge.svg?token=WQSNRKV121" alt="codecov">
     </a>
+    <a href="https://central.sonatype.com/artifact/org.llm4s/llm4s-core_3">
+        <img src="https://img.shields.io/maven-central/v/org.llm4s/llm4s-core_3?label=Maven%20Central" alt="Maven Central">
+    </a>
 </h4>
 <h4 align="center">
     <img src="docs/image_assets/llm4s_logo.png" width="100pt" alt="LLM4S Logo">

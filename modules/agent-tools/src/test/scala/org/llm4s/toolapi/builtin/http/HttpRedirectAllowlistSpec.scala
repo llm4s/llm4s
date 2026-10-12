@@ -179,6 +179,21 @@ class HttpRedirectAllowlistSpec extends AnyFlatSpec with Matchers with BeforeAnd
     received.keySet.intersect(credentials.keySet.map(_.toLowerCase(Locale.ROOT))) shouldBe Set("x-custom")
   }
 
+  it should "never forward an assertion header, bare or compound, even one the allowlist names (#1818)" in {
+    // An RFC 7521 / 7523 bearer assertion sent as a header is a credential, whatever Redaction leaves readable in
+    // a log line: the header name alone decides, so a cross-origin hop never carries it.
+    val assertions = Map(
+      "Assertion"        -> "PHNhbWwyOkFzc2VydGlvbiB4bWxucz0idXJuIj4",
+      "Client-Assertion" -> "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln",
+      "X-Saml-Assertion" -> "PHNhbWwyOkFzc2VydGlvbj4"
+    )
+    val cfg           = config.copy(redirectSafeHeaders = assertions.keys.toSeq)
+    val (received, _) = echoed(via(originA, s"$originB/echo"), assertions, cfg)
+    received.keySet.intersect(assertions.keySet.map(_.toLowerCase(Locale.ROOT))) shouldBe empty
+    val (sameOrigin, _) = echoed(via(originA, s"$originA/echo"), assertions, cfg)
+    sameOrigin.get("assertion") shouldBe Some("PHNhbWwyOkFzc2VydGlvbiB4bWxucz0idXJuIj4")
+  }
+
   it should "forward Content-Type with a body a 307 re-sends, and drop it when a 302 drops the body" in {
     val cfg     = config.withAllMethods
     val headers = Map("Content-Type" -> "text/plain", "X-Api-Key" -> "k1")
