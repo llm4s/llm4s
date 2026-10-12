@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`Llm4s.createClient(ProviderConfig, MetricsCollector)` is public** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
+  the `llm4s-java-api` overload that attaches a `MetricsCollector` (a `MicrometerMetrics` over the application's
+  `MeterRegistry`, say) was `private[llm4s]` for the Spring Boot starter, yet public in the bytecode, so Java callers
+  saw it and Scala callers outside `org.llm4s` could not use it. It is now public and documented
+  ([Using LLM4S from Java](docs/guide/java.md#recording-metrics)), settled before the `llm4s-java-api` MiMa baseline.
 - **Live subscriptions across runtimes** ([#1705](https://github.com/llm4s/llm4s/issues/1705), Stage 2 slice 6 of
   [#1699](https://github.com/llm4s/llm4s/issues/1699)): a `GraphRuntime.subscribe` now delivers the durable events of
   commits made through any runtime or process sharing the checkpointer, not only its own, in order, without gap or
@@ -1253,6 +1258,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Breaking (Java API): the facade's Java-visible surface is the intended one** ([#1666](https://github.com/llm4s/llm4s/issues/1666)):
+  Scala 3 emitted the `private` constructors and `private[javaapi]` factories of `llm4s-java-api` as `public`, so Java
+  could build values the library never would (`new JToolCall(null, null, null)`, a `COMPLETED` `JAgentStatus` with no
+  answer) and adding a field would have broken a caller compiled against a constructor. The value types - `JAgentResult`,
+  `JAgentStatus`, `JMessage`, `JToolCall`, `JUsageSummary`, `JModelUsage`, `PendingInterrupt`, `JCompletion`,
+  `JTokenUsage` and `JEmbeddings` - are now Java classes with package-private constructors and no static factory (bar
+  `JEmbeddings.cosineSimilarity`), with the same accessors, `equals`, `hashCode` and `toString`. The facade's Scala
+  classes (`JLlmClient`, `JAgent`, `JEmbeddingClient`, `AgentStream`, `LlmResult`, `Answer`, `ConversationBuilder`,
+  `JCompletionOptions` and its `Builder`) take a package-private token first in their constructors, which throw
+  `UnsupportedOperationException` when called from outside the package, and the internal `of`/`from` factories
+  and `AgentStream.start` are gone from the facade types (`Llm4s.createClient(config, metrics)` stays public, as
+  [#1817](https://github.com/llm4s/llm4s/issues/1817) made it). `JavaInteropSpec` now
+  fails on any public constructor or public static method that is not in its list of intended ones, its companion's
+  included, and compiles a Java class in another package that tries to build each value type. New:
+  `Llm4s.wrapClient(LLMClient)` and `Llm4s.wrapEmbeddingClient(EmbeddingClient, EmbeddingModelConfig)`, the
+  counterparts of `wrapAgent`. Migration: `new JLlmClient(client)` from Java or Kotlin becomes
+  `Llm4s.wrapClient(client)`, and `new JEmbeddingClient(client, model)` becomes `Llm4s.wrapEmbeddingClient(client,
+  model)`; nothing else had a supported way in.
 - **Subscriptions watch the checkpoint store** ([#1705](https://github.com/llm4s/llm4s/issues/1705), BREAKING,
   `llm4s-agent`): `Checkpointer` gains `awaitEventsAfter`, with a polling default, so existing stores compile
   unchanged. A delegating store should forward it. `GraphRuntime`'s constructor gains an optional `WatchPolicy`, and
@@ -2565,6 +2588,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Otherwise the body is redacted whole. The 5.75 MB body now takes tens of milliseconds. Behaviour change: for a body
   redacted in a prefix, the suffix `(truncated, original length: N)` gives the body's length, as the redacted length
   is not computed.
+- **`llm4s-observability-micrometer` no longer double-counts `llm4s.errors` behind a `ReliableClient`** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
+  `MicrometerMetrics.recordError` fed the same `llm4s.errors` counter that `observeRequest` feeds, so a provider client
+  and the `ReliableClient` around it, sharing one collector, counted each failed attempt and then the final failure
+  again. `recordError` now records `llm4s.reliability.errors` (`llm4s_reliability_errors_total`; tags `provider`,
+  `error_type`), and `llm4s.errors` means what `llm4s_errors_total` means in the Prometheus module: failed requests
+  and failed image generations. **Migration:** a query on `llm4s_errors_total` that relied on `recordError` calls
+  (`ReliableClient`'s local throttle, open circuit, deadline and final failure) reads
+  `llm4s_reliability_errors_total` instead. See [Micrometer metrics](docs/guide/observability/micrometer.md#errors-and-reliableclient).
+- **The Spring Boot starter keeps its metrics ordering on Spring Boot 4** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
+  `LlmMetricsAutoConfiguration` now also orders itself after the `MeterRegistry` auto-configurations at their Boot 4
+  names (`org.springframework.boot.micrometer.metrics.autoconfigure.*`), and a test fails if the names stop resolving
+  on the Boot version the starter is tested against. The `MicrometerMetrics` Scaladoc no longer claims the class holds
+  no mutable state.
 - **MCP: `MCPServerConfig.timeout` now bounds a Streamable HTTP call whose reply is an SSE stream** ([#1785](https://github.com/llm4s/llm4s/issues/1785)):
   the HTTP request timeout stops counting once the response headers arrive, and a Streamable HTTP server that answers
   with an SSE stream - as servers built on the MCP SDKs do - sends them at once, so a call to a long-running tool
