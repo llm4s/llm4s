@@ -303,6 +303,24 @@ sbt "samples/runMain org.llm4s.samples.basic.ProviderFallbackExample"
 
 ---
 
+### ProviderDiscoveryExample
+
+**File:** [`ProviderDiscoveryExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/basic/ProviderDiscoveryExample.scala)
+
+Inspect providers and embedding providers discovered from the classpath, and compare with explicit registration.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.basic.ProviderDiscoveryExample"
+```
+
+**What it demonstrates:**
+- Dynamic provider discovery via `ProviderRegistry.discover()`
+- Inspecting `ProviderRegistryReport` (`report.describe`, `ids`, `embeddingIds`)
+- Contrasting classpath discovery with explicit module registration (`ProviderRegistry.ofModules`)
+- Diagnosing missing providers, collisions, and load failures without API keys or network access
+
+---
+
 
 
 ## Agent Examples

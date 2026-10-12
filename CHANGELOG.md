@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Classpath provider discovery sample** ([#1548](https://github.com/llm4s/llm4s/issues/1548)):
+  `ProviderDiscoveryExample` demonstrates dynamic provider discovery via `ProviderRegistry.discover()`,
+  prints the diagnostic `ProviderRegistryReport` (`report.describe`, `ids`, and `embeddingIds`), and
+  contrasts discovery with an explicit registry (`ProviderRegistry.ofModules(new Llm4sOllamaModule)`).
 - **The cookbook: thirteen runnable recipes, one page each, run offline in CI**
   ([#1476](https://github.com/llm4s/llm4s/issues/1476)): seven new recipes join the six under
   `org.llm4s.samples.cookbook` - `EmailExtractionRecipe` (a nested schema, checked against the email),
