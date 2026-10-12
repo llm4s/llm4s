@@ -85,6 +85,8 @@ project discussions and direction.
 | <img src="people/mai.jpg" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) | [linkedin.com/in/autodidact](https://www.linkedin.com/in/autodidact) |
 | <img src="/people/vansh-sharma.jpg" alt="Vansh Sharma" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Vansh Sharma** | [@vansh7nvc](https://github.com/vansh7nvc) | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
 
+| <img src="people/elvan.jpg" alt="Elvan Konukseven" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Elvan Konukseven** | [@elvankonukseven](https://github.com/elvankonukseven) | [https://www.linkedin.com/in/elvan-konukseven/](https://www.linkedin.com/in/elvan-konukseven/) |
+
 > **Add yourself:** If you have merged PRs and would like to be listed here,
 > open a PR adding your row.
 
@@ -114,7 +116,6 @@ and community outreach.
 | <img src="people/vansh-sharma.jpg" alt="Vansh Sharma" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Vansh Sharma** | [@vansh7nvc](https://github.com/vansh7nvc) | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
 | <img src="https://github.com/Vi-shub.png?size=416" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Shubham Vishwakarma** | [@Vi-shub](https://github.com/Vi-shub) | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
 | <img src="people/mai.jpg" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) | [linkedin.com/in/autodidact](https://www.linkedin.com/in/autodidact) |
-| <img src="people/elvan.jpg" alt="Elvan Konukseven" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Elvan Konukseven** | [@elvankonukseven](https://github.com/elvankonukseven) | [https://www.linkedin.com/in/elvan-konukseven/](https://www.linkedin.com/in/elvan-konukseven/) |
 | <img src="people/Gopi.jpg" alt="Gopi Trinadh" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Gopi Trinadh** | [@GOPITRINADH3561](https://github.com/GOPITRINADH3561) | [https://www.linkedin.com/in/gopitrinadhmaddikunta/](https://www.linkedin.com/in/gopitrinadhmaddikunta/) |
 
 > **Add yourself:** Open a PR or comment on [issue #1117](https://github.com/llm4s/llm4s/issues/1117).
