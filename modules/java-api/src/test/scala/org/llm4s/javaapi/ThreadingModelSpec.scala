@@ -71,7 +71,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
   private def echoClientAfter(n: Int): JLlmClient = {
     val inFlight = new CountDownLatch(n)
     val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(waitSeconds)
-    new JLlmClient(fake { conversation =>
+    Llm4s.wrapClient(fake { conversation =>
       inFlight.countDown()
       if (remainingNanos(deadline) > 0 && inFlight.await(remainingNanos(deadline), TimeUnit.NANOSECONDS))
         Right(completion("echo:" + lastUser(conversation)))
@@ -183,13 +183,13 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
   }
 
   /** A client that throws `InterruptedException` from every call, as a custom `LLMClient` might. */
-  private def interruptingClient: JLlmClient = new JLlmClient(fake(_ => throw new InterruptedException("stop")))
+  private def interruptingClient: JLlmClient = Llm4s.wrapClient(fake(_ => throw new InterruptedException("stop")))
 
   // ---- which thread runs a call ----
 
   "JLlmClient.complete" should "run the provider call on the calling thread, platform or virtual" in {
     val seen = new AtomicReference[Thread]()
-    val client = new JLlmClient(fake { _ =>
+    val client = Llm4s.wrapClient(fake { _ =>
       seen.set(Thread.currentThread()); Right(completion("x"))
     })
 
@@ -208,7 +208,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
 
   "JAgent.run" should "block the caller while the model call runs on a virtual daemon thread of the library" in {
     val seen = new AtomicReference[Thread]()
-    val agent = Llm4s.createAgent(new JLlmClient(fake { _ =>
+    val agent = Llm4s.createAgent(Llm4s.wrapClient(fake { _ =>
       seen.set(Thread.currentThread()); Right(completion("x"))
     }))
     val caller = Thread.currentThread()
@@ -361,7 +361,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
       val entered         = new CountDownLatch(1)
       val modelDone       = new CountDownLatch(1)
       val modelInterrupts = new AtomicInteger(0)
-      val agent = Llm4s.createAgent(new JLlmClient(fake { _ =>
+      val agent = Llm4s.createAgent(Llm4s.wrapClient(fake { _ =>
         entered.countDown()
         val outcome = CancelledError.catchInterrupt(Thread.sleep(waitSeconds * 1000L))
         outcome.left.foreach(_ => modelInterrupts.incrementAndGet(): Unit)
@@ -395,7 +395,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
   // ---- the guide's Java snippets ----
 
   "the guide's Java snippets" should "behave as the guide says" in {
-    val ok = new JLlmClient(fake(_ => Right(completion("x"))))
+    val ok = Llm4s.wrapClient(fake(_ => Right(completion("x"))))
     ThreadingGuideSnippets.onVirtualThread(ok) shouldBe "x"
 
     ThreadingGuideSnippets.wasCancelled(LlmResult.failure(CancelledError("test", None))) shouldBe true

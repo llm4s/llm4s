@@ -57,7 +57,7 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
   private def replying(completion: Completion): Recording = new Recording(Right(completion))
 
   "JLlmClient.completion" should "return the model, the usage, the cost and the tool calls of the reply" in {
-    val reply = new JLlmClient(replying(full)).completion("Weather in Paris?").get()
+    val reply = Llm4s.wrapClient(replying(full)).completion("Weather in Paris?").get()
 
     reply.id shouldBe "reply-1"
     reply.content shouldBe "Let me check."
@@ -74,7 +74,7 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "read the same reply from Java, with Java types only" in {
-    CompletionCheck.readBack(new JLlmClient(replying(full)).completion("q").get()).asScala.toList shouldBe List(
+    CompletionCheck.readBack(Llm4s.wrapClient(replying(full)).completion("q").get()).asScala.toList shouldBe List(
       "id:reply-1",
       "content:Let me check.",
       "model:gpt-4o-2024-08-06",
@@ -88,7 +88,7 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "leave usage, cost and thinking empty, and the tool calls an empty list, when the provider reported none" in {
-    val reply = new JLlmClient(replying(bare)).completion("q").get()
+    val reply = Llm4s.wrapClient(replying(bare)).completion("q").get()
 
     reply.usage.isPresent shouldBe false
     reply.estimatedCost.isPresent shouldBe false
@@ -105,14 +105,14 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
 
   it should "read thinking and cache tokens the provider did not report as zero, as the agent's usage does" in {
     val unreported = full.withUsage(TokenUsage(promptTokens = 1, completionTokens = 2, totalTokens = 3))
-    val usage      = new JLlmClient(replying(unreported)).completion("q").get().usage.get()
+    val usage      = Llm4s.wrapClient(replying(unreported)).completion("q").get().usage.get()
     (usage.thinkingTokens, usage.cachedTokens, usage.cacheCreationTokens) shouldBe ((0, 0, 0))
   }
 
   it should "read cache reads and cache writes apart, each as the provider reported it" in {
     def read(cached: Option[Int], creation: Option[Int]): (Int, Int) = {
       val tokens = TokenUsage(10, 2, 12, cachedTokens = cached, cacheCreationTokens = creation)
-      val usage  = new JLlmClient(replying(full.withUsage(tokens))).completion("q").get().usage.get()
+      val usage  = Llm4s.wrapClient(replying(full.withUsage(tokens))).completion("q").get().usage.get()
       (usage.cachedTokens, usage.cacheCreationTokens)
     }
     read(Some(6), None) shouldBe ((6, 0))
@@ -121,7 +121,7 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
 
   it should "give the cost as core's agent usage adds it, so a reply's cost and an agent turn's total agree" in {
     val cost  = 0.1 + 0.2 // 0.30000000000000004 as a Double
-    val reply = new JLlmClient(replying(full.withEstimatedCost(cost))).completion("q").get()
+    val reply = Llm4s.wrapClient(replying(full.withEstimatedCost(cost))).completion("q").get()
     val turn  = UsageSummary().add("m", full.usage.get, Some(cost))
 
     reply.estimatedCost.get() shouldBe turn.totalCost.bigDecimal
@@ -129,18 +129,18 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
 
   it should "read a cost that is not a number as unknown, not fail" in {
     Seq(Double.NaN, Double.PositiveInfinity).foreach { cost =>
-      val result = new JLlmClient(replying(full.withEstimatedCost(cost))).completion("q")
+      val result = Llm4s.wrapClient(replying(full.withEstimatedCost(cost))).completion("q")
       result.get().estimatedCost.isPresent shouldBe false
     }
   }
 
   it should "read a null text as empty, as the agent's messages do" in {
-    new JLlmClient(replying(bare.withContent(null))).completion("q").get().content shouldBe ""
+    Llm4s.wrapClient(replying(bare.withContent(null))).completion("q").get().content shouldBe ""
   }
 
   it should "send the query as one user message with default options" in {
     val client = replying(bare)
-    new JLlmClient(client).completion("What is 2+2?")
+    Llm4s.wrapClient(client).completion("What is 2+2?")
     client.sent.toList shouldBe List(Conversation(Seq(UserMessage("What is 2+2?"))) -> CompletionOptions())
   }
 
@@ -149,8 +149,8 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
     val conversation = ConversationBuilder.create().system("be brief").user("hi").build()
     val options      = JCompletionOptions.builder().temperature(0.1).maxTokens(64).build()
 
-    new JLlmClient(client).completion(conversation).get().content shouldBe "4"
-    new JLlmClient(client).completion(conversation, options).get().content shouldBe "4"
+    Llm4s.wrapClient(client).completion(conversation).get().content shouldBe "4"
+    Llm4s.wrapClient(client).completion(conversation, options).get().content shouldBe "4"
 
     client.sent.toList shouldBe List(
       conversation -> CompletionOptions(),
@@ -160,13 +160,13 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
 
   it should "offer every overload from Java source" in {
     val client = replying(full)
-    CompletionCheck.everyOverload(new JLlmClient(client)).asScala.map(_.get().model) shouldBe Seq.fill(3)(full.model)
+    CompletionCheck.everyOverload(Llm4s.wrapClient(client)).asScala.map(_.get().model) shouldBe Seq.fill(3)(full.model)
     client.sent.map(_._2.maxTokens).toList shouldBe List(None, None, Some(64))
   }
 
   it should "fail, not throw, for a null argument - a literal null options included, which Java passes without a cast" in {
     val client       = replying(bare)
-    val jClient      = new JLlmClient(client)
+    val jClient      = Llm4s.wrapClient(client)
     val conversation = ConversationBuilder.create().user("hi").build()
     val options      = JCompletionOptions.builder().build()
 
@@ -186,23 +186,25 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
 
   it should "pass the client's failure through" in {
     val down   = ServiceError(503, "openai", "overloaded")
-    val result = new JLlmClient(new Recording(Left(down))).completion("q")
+    val result = Llm4s.wrapClient(new Recording(Left(down))).completion("q")
     result.getError().error shouldBe down
   }
 
   it should "turn an exception from the client, or from reading its reply, into a failed result" in {
     val throwing = new Recording(throw new IllegalStateException("provider bug"))
-    new JLlmClient(throwing).completion("q").getError().getMessage should include("provider bug")
+    Llm4s.wrapClient(throwing).completion("q").getError().getMessage should include("provider bug")
 
     val unreadable = full.withToolCalls(List(ToolCall("c", "t", null)))
-    new JLlmClient(replying(unreadable)).completion("q").isFailure shouldBe true
+    Llm4s.wrapClient(replying(unreadable)).completion("q").isFailure shouldBe true
   }
 
   it should "turn an InterruptedException into a CancelledError, with the interrupt flag restored" in {
     val interrupted = new Recording(throw new InterruptedException("stop"))
     val outcome     = new AtomicReference[(LlmResult[JCompletion], Boolean)]()
     val thread =
-      new Thread(() => outcome.set(new JLlmClient(interrupted).completion("q") -> Thread.currentThread().isInterrupted))
+      new Thread(() =>
+        outcome.set(Llm4s.wrapClient(interrupted).completion("q") -> Thread.currentThread().isInterrupted)
+      )
     thread.setDaemon(true)
     thread.start()
     thread.join(20000L)
@@ -215,7 +217,7 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
   }
 
   "the existing complete overloads" should "still return the text alone" in {
-    val client       = new JLlmClient(replying(full))
+    val client       = Llm4s.wrapClient(replying(full))
     val conversation = ConversationBuilder.create().user("hi").build()
     client.complete("q").get() shouldBe "Let me check."
     client.complete(conversation).get() shouldBe "Let me check."
@@ -224,7 +226,7 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
   }
 
   "JCompletion" should "be a value: equal, with equal hash codes, when every field is" in {
-    def reply(c: Completion): JCompletion = JCompletion.of(c)
+    def reply(c: Completion): JCompletion = FacadeInternals.completion(c)
 
     reply(full) shouldBe reply(full)
     reply(full).hashCode shouldBe reply(full).hashCode
@@ -234,38 +236,46 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "print its id, model, tool-call count and full text" in {
-    JCompletion.of(full).toString shouldBe "JCompletion(reply-1, gpt-4o-2024-08-06, 2 tool calls: Let me check.)"
+    FacadeInternals
+      .completion(full)
+      .toString shouldBe "JCompletion(reply-1, gpt-4o-2024-08-06, 2 tool calls: Let me check.)"
   }
 
   it should "hand out an unmodifiable list of tool calls" in {
-    an[UnsupportedOperationException] should be thrownBy JCompletion.of(full).toolCalls.clear()
+    an[UnsupportedOperationException] should be thrownBy FacadeInternals.completion(full).toolCalls.clear()
   }
 
   "JTokenUsage" should "be a value, and print every count" in {
-    val usage = JTokenUsage.of(TokenUsage(promptTokens = 3, completionTokens = 4, totalTokens = 7))
-    usage shouldBe JTokenUsage.of(TokenUsage(promptTokens = 3, completionTokens = 4, totalTokens = 7))
-    usage.hashCode shouldBe JTokenUsage.of(TokenUsage(promptTokens = 3, completionTokens = 4, totalTokens = 7)).hashCode
-    usage should not be JTokenUsage.of(TokenUsage(promptTokens = 3, completionTokens = 4, totalTokens = 8))
+    val usage = FacadeInternals.tokenUsage(TokenUsage(promptTokens = 3, completionTokens = 4, totalTokens = 7))
+    usage shouldBe FacadeInternals.tokenUsage(TokenUsage(promptTokens = 3, completionTokens = 4, totalTokens = 7))
+    usage.hashCode shouldBe FacadeInternals
+      .tokenUsage(TokenUsage(promptTokens = 3, completionTokens = 4, totalTokens = 7))
+      .hashCode
+    usage should not be FacadeInternals.tokenUsage(TokenUsage(promptTokens = 3, completionTokens = 4, totalTokens = 8))
     usage.equals("usage") shouldBe false
     usage.toString shouldBe "JTokenUsage(3 prompt, 4 completion, 7 total, 0 thinking, 0 cached, 0 cache creation)"
-    JTokenUsage.of(full.usage.get).toString shouldBe
+    FacadeInternals.tokenUsage(full.usage.get).toString shouldBe
       "JTokenUsage(120 prompt, 30 completion, 150 total, 7 thinking, 80 cached, 25 cache creation)"
   }
 
   it should "tell apart usages that differ only in their cache counts" in {
     val plain = TokenUsage(promptTokens = 3, completionTokens = 4, totalTokens = 7)
-    val base  = JTokenUsage.of(plain)
-    JTokenUsage.of(plain.withCachedTokens(2)) should not be base
-    JTokenUsage.of(plain.withCacheCreationTokens(2)) should not be base
-    JTokenUsage.of(plain.withCachedTokens(2)) should not be JTokenUsage.of(plain.withCacheCreationTokens(2))
-    JTokenUsage.of(plain.withCachedTokens(2)) shouldBe JTokenUsage.of(plain.withCachedTokens(2))
-    JTokenUsage.of(plain.withCachedTokens(2)).hashCode shouldBe JTokenUsage.of(plain.withCachedTokens(2)).hashCode
+    val base  = FacadeInternals.tokenUsage(plain)
+    FacadeInternals.tokenUsage(plain.withCachedTokens(2)) should not be base
+    FacadeInternals.tokenUsage(plain.withCacheCreationTokens(2)) should not be base
+    FacadeInternals.tokenUsage(plain.withCachedTokens(2)) should not be FacadeInternals.tokenUsage(
+      plain.withCacheCreationTokens(2)
+    )
+    FacadeInternals.tokenUsage(plain.withCachedTokens(2)) shouldBe FacadeInternals.tokenUsage(plain.withCachedTokens(2))
+    FacadeInternals.tokenUsage(plain.withCachedTokens(2)).hashCode shouldBe FacadeInternals
+      .tokenUsage(plain.withCachedTokens(2))
+      .hashCode
   }
 
   it should "count what an agent turn's usage sums: prompt tokens as input, completion tokens as output" in {
     val tokens = full.usage.get
-    val usage  = JTokenUsage.of(tokens)
-    val turn   = JUsageSummary.of(UsageSummary().add("m", tokens, None).add("m", tokens, None))
+    val usage  = FacadeInternals.tokenUsage(tokens)
+    val turn   = FacadeInternals.usageSummary(UsageSummary().add("m", tokens, None).add("m", tokens, None))
 
     turn.inputTokens shouldBe 2L * usage.promptTokens
     turn.outputTokens shouldBe 2L * usage.completionTokens

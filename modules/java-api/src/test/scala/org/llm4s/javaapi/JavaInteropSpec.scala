@@ -20,7 +20,6 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
   // internal (documented as such) and allowlisted by declaring class and name, so any NEW Scala type
   // in a signature fails here - a `from` or `underlying` on another class included.
   private val internalByDesign: Set[(Class[?], String)] = Set(
-    classOf[LlmResult[?]]       -> "from",
     classOf[JLlmClient]         -> "underlying",
     classOf[Answer]             -> "underlying",
     classOf[JCompletionOptions] -> "underlying"
@@ -38,7 +37,7 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
   }
 
   "the documented Java quick-start" should "compile from Java and run end to end" in {
-    val log = JavaInteropCheck.quickStart(new JLlmClient(answering("4"))).asScala.toList
+    val log = JavaInteropCheck.quickStart(Llm4s.wrapClient(answering("4"))).asScala.toList
     log shouldBe List("ok:4", "get:4", "len:1", "opt:4", "cf:4", "conv:4")
   }
 
@@ -168,6 +167,7 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     classOf[Answer],
     classOf[PendingInterrupt],
     classOf[InterruptKind],
+    classOf[BreakpointPhase],
     classOf[JAgentResult],
     classOf[JAgentStatus],
     classOf[AgentStatusKind],
@@ -298,12 +298,6 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
 
     // the client keeps its core client to itself: nothing Java-visible returns one
     classOf[JEmbeddingClient].getMethods.map(_.getReturnType) should not contain classOf[EmbeddingClient]
-    // their constructors, public in bytecode though private in Scala, take no Scala type either
-    for {
-      cls <- List(classOf[JEmbeddingClient], classOf[JEmbeddings])
-      c   <- cls.getConstructors.toList
-      t   <- c.getGenericParameterTypes.toList.flatMap(mentioned)
-    } withClue(c.toString)(scalaOnly(t) shouldBe false)
   }
 
   "the agent facade" should "hand Java callers JAgentResult from every turn: run, continue, resume, recover, await, onComplete" in {
@@ -320,6 +314,237 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     classOf[JAgent].getMethod("forget", classOf[JAgentResult]) should not be null
     classOf[JAgent].getMethod("forget", classOf[String]) should not be null
     classOf[JAgent].getMethod("pending", classOf[JAgentResult]) should not be null
+  }
+
+  // --- #1666: the Java-visible surface is the intended one, in bytecode as well as in Scala ---
+
+  /** The value types the facade hands a caller to read: Java classes, built only inside the package. */
+  private def valueTypes: List[Class[_]] = List(
+    classOf[JAgentResult],
+    classOf[JAgentStatus],
+    classOf[JMessage],
+    classOf[JToolCall],
+    classOf[JUsageSummary],
+    classOf[JModelUsage],
+    classOf[PendingInterrupt],
+    classOf[JCompletion],
+    classOf[JTokenUsage],
+    classOf[JEmbeddings]
+  )
+
+  /** A method as `javap` would list it: its name and parameter types. */
+  private def signature(name: String, params: Seq[Class[_]]): String =
+    params.map(_.getSimpleName).mkString(s"$name(", ",", ")")
+
+  /** Every public static method the facade means Java callers to call, by class. Nothing else may be one. */
+  private def intendedStatics: Map[Class[_], Set[String]] = Map(
+    Class.forName("org.llm4s.javaapi.Llm4s") -> Set(
+      "createDefaultClient()",
+      "createClient(ProviderConfig)",
+      "createClient(ProviderConfig,MetricsCollector)",
+      "wrapClient(LLMClient)",
+      "wrapEmbeddingClient(EmbeddingClient,EmbeddingModelConfig)",
+      "createDefaultEmbeddingClient()",
+      "createAgent(JLlmClient)",
+      "createAgent(JLlmClient,ToolRegistry)",
+      "createAgent(JLlmClient,ToolRegistry,boolean)",
+      "wrapAgent(Agent)"
+    ),
+    classOf[LlmResult[_]]        -> Set("success(Object)", "failure(LLMError)"),
+    classOf[ConversationBuilder] -> Set("create()"),
+    classOf[JCompletionOptions]  -> Set("builder()"),
+    classOf[Answer] -> Set(
+      "approve(String)",
+      "reject(String,String)",
+      "edit(String,String)",
+      "reply(String,String)",
+      "proceed(String)"
+    ),
+    classOf[JAgent]                                 -> Set("pending(JAgentResult)"),
+    Class.forName("org.llm4s.javaapi.StreamEvents") -> Set("decode(EventType,StreamEvent)"),
+    classOf[JEmbeddings]                            -> Set("cosineSimilarity(float[],float[])")
+  )
+
+  /** A method name the compiler made up - an expanded private name or a lambda - rather than one a caller is offered. */
+  private def synthetic(name: String): Boolean = name.contains("$")
+
+  private def publicStatics(cls: Class[_]): Set[String] =
+    cls.getDeclaredMethods.toList
+      .filter(m => Modifier.isPublic(m.getModifiers) && Modifier.isStatic(m.getModifiers) && !synthetic(m.getName))
+      .map(m => signature(m.getName, m.getParameterTypes.toList))
+      .toSet
+
+  "the facade's value types" should "have no public constructor, no public static factory and no Scala companion" in {
+    for (cls <- valueTypes) withClue(cls.getName) {
+      cls.getConstructors shouldBe empty
+      publicStatics(cls) shouldBe intendedStatics.getOrElse(cls, Set.empty)
+      Modifier.isFinal(cls.getModifiers) shouldBe true
+      // no `JAgentResult$` whose public `of(AgentResult)` Java could call instead
+      an[ClassNotFoundException] should be thrownBy Class.forName(cls.getName + "$")
+    }
+  }
+
+  they should "be impossible to construct from Java code in another package, as javac reports" in {
+    import javax.tools.{ DiagnosticCollector, JavaFileObject, SimpleJavaFileObject, ToolProvider }
+    // one statement per line, each calling a value type's constructor with arguments of its parameter types, then
+    // the `of` factories the Scala companions had
+    def argument(t: Class[_]): String =
+      if (t == java.lang.Boolean.TYPE) "false" else if (t.isPrimitive) "0" else s"(${t.getCanonicalName}) null"
+    val constructions = valueTypes.map { cls =>
+      val params = cls.getDeclaredConstructors.head.getParameterTypes.toList
+      s"Object ${cls.getSimpleName.toLowerCase}New = new ${cls.getName}(${params.map(argument).mkString(", ")});"
+    }
+    val factories = List(
+      "Object agentResultOf = org.llm4s.javaapi.JAgentResult.of(null);",
+      "Object toolCallOf = org.llm4s.javaapi.JToolCall.of(null);",
+      "Object completionOf = org.llm4s.javaapi.JCompletion.of(null);"
+    )
+    val statements = constructions ++ factories
+    val source     = statements.mkString("package user;\nclass Forger {\n  void forge() {\n", "\n", "\n  }\n}\n")
+    val file = new SimpleJavaFileObject(java.net.URI.create("string:///user/Forger.java"), JavaFileObject.Kind.SOURCE) {
+      override def getCharContent(ignoreEncodingErrors: Boolean): CharSequence = source
+    }
+    val out = java.nio.file.Files.createTempDirectory("forger")
+    val classes =
+      java.nio.file.Paths.get(classOf[JAgentResult].getProtectionDomain.getCodeSource.getLocation.toURI).toString
+    val diagnostics = new DiagnosticCollector[JavaFileObject]
+    val compiled = ToolProvider.getSystemJavaCompiler
+      .getTask(
+        null,
+        null,
+        diagnostics,
+        java.util.List.of("-proc:none", "-cp", classes, "-d", out.toString),
+        null,
+        java.util.List.of(file)
+      )
+      .call()
+    compiled shouldBe false
+    val errors = diagnostics.getDiagnostics.asScala.toList.filter(_.getKind == javax.tools.Diagnostic.Kind.ERROR)
+    // the statements start on line 4: every one is refused, a constructor for being package-private
+    errors.map(_.getLineNumber.toInt).distinct.sorted shouldBe statements.indices.map(_ + 4).toList
+    errors
+      .filter(_.getLineNumber <= constructions.size + 3)
+      .foreach(e => e.getMessage(java.util.Locale.ROOT) should include("is not public in"))
+  }
+
+  /** The facade's Scala classes whose constructors only the package may call: each takes the package's token first. */
+  private def tokenGuarded: List[Class[_]] = List(
+    classOf[LlmResult[_]],
+    classOf[JLlmClient],
+    classOf[JEmbeddingClient],
+    classOf[JCompletionOptions],
+    classOf[JCompletionOptions.Builder],
+    classOf[JAgent],
+    classOf[AgentStream],
+    classOf[ConversationBuilder],
+    classOf[Answer]
+  )
+
+  "the facade's other classes" should "take a token only the package can name first in every public constructor" in {
+    val token = Class.forName("org.llm4s.javaapi.FacadeToken")
+    Modifier.isPublic(token.getModifiers) shouldBe false
+    for (cls <- tokenGuarded) withClue(cls.getName) {
+      cls.getConstructors should not be empty
+      cls.getConstructors.foreach(c => c.getParameterTypes.head shouldBe token)
+      consumer.FacadeSurfaceCheck.firstParameterUnnamable(cls) shouldBe true
+    }
+  }
+
+  they should "refuse a constructor call forged from another package, null for the token" in {
+    for (cls <- tokenGuarded) withClue(cls.getName) {
+      consumer.FacadeSurfaceCheck.forge(cls).asScala.toList shouldBe List("UnsupportedOperationException")
+    }
+    for (cls <- valueTypes) withClue(cls.getName)(consumer.FacadeSurfaceCheck.forge(cls).asScala shouldBe empty)
+  }
+
+  "every facade class" should "have only intended public constructors and public static methods, its companion too" in {
+    // LlmException is meant to be built: a caller may throw or wrap one around its own LLMError
+    val intendedConstructors = Map[Class[_], Set[String]](classOf[LlmException] -> Set("LlmException(LLMError)"))
+    for (cls <- facade if !cls.isInterface && !cls.isEnum) withClue(cls.getName) {
+      val constructors = cls.getConstructors.toList
+        .filterNot(_ => tokenGuarded.contains(cls))
+        .map(c => signature(cls.getSimpleName, c.getParameterTypes.toList))
+        .toSet
+      constructors shouldBe intendedConstructors.getOrElse(cls, Set.empty)
+      publicStatics(cls) shouldBe intendedStatics.getOrElse(cls, Set.empty)
+      // the companion's own public methods: `LlmResult$.MODULE$.from(either)` was callable too
+      scala.util.Try(Class.forName(cls.getName + "$")).foreach { companion =>
+        val offered = companion.getDeclaredMethods.toList
+          .filter(m => Modifier.isPublic(m.getModifiers) && !Modifier.isStatic(m.getModifiers) && !synthetic(m.getName))
+          .map(m => signature(m.getName, m.getParameterTypes.toList))
+          .toSet
+        offered shouldBe intendedStatics.getOrElse(cls, Set.empty)
+      }
+    }
+    for (cls <- facade if cls.isEnum) withClue(cls.getName) {
+      publicStatics(cls) shouldBe Set("values()", "valueOf(String)")
+    }
+  }
+
+  /**
+   * Public top-level classes of the package that are not facade: internal by design and documented as such. Scala's
+   * `private[llm4s]` is public in bytecode, so these are visible to Java; nothing else may be.
+   */
+  private def internalClasses: Set[String] = Set(
+    "org.llm4s.javaapi.FacadeInternals", // reads core's Scala values into the facade's types
+    "org.llm4s.javaapi.LlmErrorKinds"    // how LlmException reads an LLMError: its kind, status and retry delay
+  )
+
+  /** Every public top-level class the compiled package holds, a Scala object's `X$` counted as `X`. */
+  private def publicTopLevelClasses: Set[String] = {
+    val root  = java.nio.file.Paths.get(classOf[JAgentResult].getProtectionDomain.getCodeSource.getLocation.toURI)
+    val names = javaApiClassNames(root)
+    names
+      .map(n => Class.forName(n, false, getClass.getClassLoader))
+      .filter(c => c.getEnclosingClass == null && Modifier.isPublic(c.getModifiers) && !c.isSynthetic)
+      .map(_.getName.stripSuffix("$"))
+      .toSet
+  }
+
+  /** The binary names of the classes directly in `org/llm4s/javaapi` under a classes directory or jar. */
+  private def javaApiClassNames(root: java.nio.file.Path): List[String] = {
+    val prefix = "org/llm4s/javaapi/"
+    def named(entries: List[String]): List[String] =
+      entries
+        .filter(e => e.startsWith(prefix) && e.endsWith(".class") && !e.stripPrefix(prefix).contains("/"))
+        .map(_.stripSuffix(".class").replace('/', '.'))
+    if (java.nio.file.Files.isDirectory(root)) {
+      val dir = root.resolve(prefix)
+      named(
+        java.nio.file.Files.list(dir).iterator().asScala.toList.map(p => prefix + p.getFileName.toString)
+      )
+    } else {
+      val jar = new java.util.jar.JarFile(root.toFile)
+      val all = jar.entries().asScala.map(_.getName).toList
+      jar.close()
+      named(all)
+    }
+  }
+
+  "every public top-level class of the package" should "be a reviewed facade class or a listed internal" in {
+    val reviewed = facade.map(_.getName).toSet
+    val found    = publicTopLevelClasses
+    // found the facade itself, so the scan saw the compiled package and not an empty directory
+    (found should contain).allOf(
+      "org.llm4s.javaapi.Llm4s",
+      "org.llm4s.javaapi.JAgentResult",
+      "org.llm4s.javaapi.LlmResult"
+    )
+    (found -- reviewed -- internalClasses) shouldBe empty
+    // and every listed internal still exists, so the list cannot carry a stale name that would hide a new class
+    internalClasses.foreach(n => found should contain(n))
+  }
+
+  "a Java caller in another package" should "read every value type the facade hands it" in {
+    consumer.FacadeSurfaceCheck.readValues(answering("4")).asScala.toList shouldBe List(
+      "completion:4:m:0",
+      "status:COMPLETED:4:0",
+      "USER:What is 2+2?",
+      "ASSISTANT:4",
+      "usage:1:0:0",
+      "model:m:1:0",
+      "same:true:true"
+    )
   }
 }
 
