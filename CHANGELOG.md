@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MeterRegistry`, say) was `private[llm4s]` for the Spring Boot starter, yet public in the bytecode, so Java callers
   saw it and Scala callers outside `org.llm4s` could not use it. It is now public and documented
   ([Using LLM4S from Java](docs/guide/java.md#recording-metrics)), settled before the `llm4s-java-api` MiMa baseline.
+- **Live subscriptions across runtimes** ([#1705](https://github.com/llm4s/llm4s/issues/1705), Stage 2 slice 6 of
+  [#1699](https://github.com/llm4s/llm4s/issues/1699)): a `GraphRuntime.subscribe` now delivers the durable events of
+  commits made through any runtime or process sharing the checkpointer, not only its own, in order, without gap or
+  duplicate. Each live subscription watches the store through the new SPI method `Checkpointer.awaitEventsAfter`, a
+  long poll whose default reads `eventsAfter` once per timeout. `InMemoryCheckpointer` overrides it to wake on its
+  commits; the SQLite store is polled. `WatchPolicy` (on `GraphRuntime`, default enabled, `pollInterval` 250 ms,
+  at least 1 ms) configures the watch, and `WatchPolicy.disabled` turns it off. Other runtimes' events are queued only as they fit,
+  so they never make a subscriber lag. Durable events are queued strictly contiguously: a commit of the subscriber's
+  own runtime first reads any events committed elsewhere that the watch has not read yet. Live events do not cross
+  runtimes, because they are never stored. A commit the store wrote but reported as failed is now delivered too (the
+  second corner case of [#1737](https://github.com/llm4s/llm4s/issues/1737)). `CheckpointerContract` gains
+  change-notification and cross-runtime subscription cases and a `sibling` hook, and the SQLite store passes them over
+  one and two connections, as well as with a subscriber in another process. See
+  [Streaming events](docs/guide/agents/streaming.md#subscriptions-across-runtimes).
 - **`llm4s-agent-checkpoint-sqlite`: the first durable checkpointer** ([#1701](https://github.com/llm4s/llm4s/issues/1701),
   Stage 2 slice 2 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `SqliteCheckpointer`
   (`org.llm4s.agent.graph.sqlite`) keeps threads - checkpoint history, pending writes, event log and run claim - in one
@@ -25,7 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for another connection's. The schema is versioned and migrated on open, and a file from a newer build is refused. It
   passes `CheckpointerContract` over one connection and over two alternating connections to one file, and a test kills
   a forked JVM mid-run and recovers its thread. It implements #1702's `history`, `checkpoint` and `prune` over a history
-  table paged by its primary key, each write one transaction. The sample `SqliteRestartRecoveryExample` shows a restart
+  table paged by its primary key, each write one transaction; the table is part of schema version 1, since no released
+  build wrote a file without it, and opening a version-1 file from a pre-release build creates it. The sample `SqliteRestartRecoveryExample` shows a restart
   and recovery.
   See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#the-sqlite-store).
 - **`sbt pomMetadataCheck`: every published POM carries its metadata** ([#1455](https://github.com/llm4s/llm4s/issues/1455)):
@@ -1243,6 +1258,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Subscriptions watch the checkpoint store** ([#1705](https://github.com/llm4s/llm4s/issues/1705), BREAKING,
+  `llm4s-agent`): `Checkpointer` gains `awaitEventsAfter`, with a polling default, so existing stores compile
+  unchanged. A delegating store should forward it. `GraphRuntime`'s constructor gains an optional `WatchPolicy`, and
+  Java and Kotlin get `new GraphRuntime(store, clock, claims)`. A live subscription holds a second virtual thread
+  (`llm4s-watch-<threadId>`) until it is cancelled, delivers other runtimes' durable events, and ends with
+  `Disconnected(lastSeq, ReplayFailed(error))` when a read of the store fails after its replay, for instance because
+  the store was closed. `CheckpointerContract` gains cases and a `sibling` hook. No shims; see the
+  [Stage 2 migration note](docs/reference/migration.md#live-subscriptions-across-runtimes-1705).
 - **`Checkpointer` keeps a checkpoint history** ([#1702](https://github.com/llm4s/llm4s/issues/1702), BREAKING,
   `llm4s-agent`): `Checkpointer` gains `history`, `checkpoint` and `prune`, and must keep every superseded checkpoint
   and refuse a checkpoint id already in the history (`InvalidCommit`); `Commit` gains `retractTurn` (defaulted);
