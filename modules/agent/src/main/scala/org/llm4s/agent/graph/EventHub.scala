@@ -1,8 +1,9 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.error.CancelledError
+import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.types.{ Result, TryOps }
 
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.{ Condition, ReentrantLock }
 import scala.annotation.tailrec
 import scala.util.{ Failure, Success, Try, Using }
@@ -85,8 +86,28 @@ private[graph] trait Dispatched extends Subscription:
  * is released, after the run's last hand-over, so the hub keeps no state for idle threads. A live
  * event sent on a thread no run holds - only a node's own thread outliving its run sends one - is
  * held unmarked until the next commit is handed to the subscription, and placed just before it.
+ *
+ * '''Commits made elsewhere''' ([[WatchPolicy]]). Another runtime or process sharing the store
+ * commits without this hub knowing, so the hub hands over only this runtime's commits. While `watch`
+ * is enabled, each live subscription therefore also watches the store, on a virtual thread of its own
+ * ([[Dispatcher]]'s `watchLoop`): it waits in [[Checkpointer.awaitEventsAfter]] from the last event it
+ * has queued, and queues what that returns holding `commitLock` and `hubLock`. Every commit of this
+ * runtime is written and handed over under `commitLock`, so whatever the read found that this
+ * runtime wrote has been handed over by then, and is dropped by `seq`: only other runtimes' events
+ * are queued this way, and this runtime's keep their place among its live events. They are queued
+ * only while they fit beside what is queued - the rest stay in the store, read again on the next
+ * call - so commits made elsewhere never make a subscriber lag. A subscription queues durable events
+ * contiguously: a hand-over that finds events missing before it - committed elsewhere and not yet
+ * read by the watch - reads them from the store first, under the same locks, so they keep their
+ * place before it; if they do not fit, the subscriber lags as for any durable event. A failed watch
+ * or gap read ends the subscription once its queue is delivered, with
+ * `Disconnected(lastSeq, ReplayFailed(error))`.
  */
-final private[graph] class EventHub(checkpointer: Checkpointer):
+final private[graph] class EventHub(
+  checkpointer: Checkpointer,
+  commitLock: ReentrantLock = new ReentrantLock(),
+  watch: WatchPolicy = WatchPolicy.disabled
+):
 
   private val PageSize = 500
 
@@ -148,6 +169,16 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
   /** How many dispatchers are in the thread's live set; for tests. */
   private[graph] def liveCount(threadId: ThreadId): Int =
     withLock(hubLock)(subscribers.getOrElse(threadId.value, Vector.empty).size)
+
+  /** Running store watches, by thread; guarded by `hubLock`. */
+  private var watching = Map.empty[String, Int]
+
+  /** How many store watches are running for the thread; for tests. */
+  private[graph] def watchCount(threadId: ThreadId): Int = withLock(hubLock)(watching.getOrElse(threadId.value, 0))
+
+  private def watched(threadId: ThreadId, delta: Int): Unit = withLock(hubLock) {
+    watching = watching.updatedWith(threadId.value)(n => Some(n.getOrElse(0) + delta).filter(_ > 0))
+  }
 
   /** Offers committed `records` to the thread's subscribers; never blocks on a listener. */
   def durable(threadId: ThreadId, records: Vector[EventRecord]): Unit =
@@ -220,8 +251,10 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
    * commits hand events over under the same lock, so none lands between the last read and the
    * switch, and the `seq` check drops any already read. Both stop at an event written to the store
    * but not yet handed over ([[handedOver]]): the hand-over queues it, behind the live events sent
-   * before it. After that it drains its queue. The listener is never called while a lock is held. A
-   * `preJoined` dispatcher ([[observe]]) never replays, and only drains.
+   * before it. After that it drains its queue, and watches the store for commits made elsewhere
+   * (`watchLoop`). The listener is never called while a lock is held. A `preJoined` dispatcher
+   * ([[observe]]) never replays, and only drains and watches; it takes its place in the log from the
+   * first commit handed to it - its run's claim - and its watch waits until then.
    */
   final private class Dispatcher(
     threadId: ThreadId,
@@ -246,6 +279,22 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     private var droppedLive         = 0
     private var lagging             = false
     @volatile private var cancelled = false
+
+    /** Why reading the store - the watch, or a hand-over's gap - failed; ends the subscription like `lagging`. */
+    private var failed = Option.empty[LLMError]
+
+    /** Whether the subscription stops taking events, to end once its queue is delivered. */
+    private def halted: Boolean = lagging || failed.isDefined
+
+    /**
+     * Whether `lastQueuedSeq` is a place in the thread's log: from the start for a subscription, which
+     * replays from `afterSeq`; for a `preJoined` one, from the first commit handed to it.
+     */
+    private var anchored = !preJoined
+
+    /** The store watch, once started; and whether the dispatcher has ended, which stops it. */
+    @volatile private var watcher  = Option.empty[Thread]
+    @volatile private var finished = false
 
     /**
      * Whether the dispatcher has replayed and queues what the hub hands it; until then a barrier
@@ -300,6 +349,7 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
         notEmpty.signalAll()
       }
       leave(threadId, this)
+      watcher.foreach(_.interrupt())
       thread.filterNot(_ eq Thread.currentThread()).foreach { dispatcher =>
         dispatcher.interrupt()
         withLock(lock) {
@@ -311,11 +361,59 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
         }
       }
 
-    def offerDurable(record: EventRecord): Unit = withLock(lock) {
-      if cancelled then ()
-      else if joined then queueDurable(record)
-      else noteDurable(record.seq)
-    }
+    /**
+     * Offers a commit this runtime has just made; called holding `commitLock` and `hubLock`. A live
+     * subscription queues it after the events before it: any missing - committed through another
+     * runtime and not yet read by the watch - are read from the store first and queued ahead of it,
+     * or make the subscriber lag if they do not fit. A replaying one only notes it.
+     */
+    def offerDurable(record: EventRecord): Unit =
+      val missing = withLock(lock) {
+        if cancelled then None
+        else if !joined then
+          noteDurable(record.seq)
+          None
+        else
+          if !anchored then
+            lastQueuedSeq = record.seq - 1
+            anchored = true
+          if record.seq <= lastQueuedSeq + 1 || halted then
+            queueDurable(record)
+            None
+          else if durableQueued + (record.seq - lastQueuedSeq) > capacity then
+            // the missing events and this one cannot all fit: behind by more than `capacity`
+            lagging = true
+            notEmpty.signal()
+            None
+          else Some(lastQueuedSeq)
+      }
+      // `lastQueuedSeq` of a live dispatcher moves only under `hubLock`, which the caller holds
+      missing.foreach { after =>
+        val between = readBetween(after, record.seq)
+        withLock(lock) {
+          between match
+            case Right(found) => (found :+ record).foreach(queueDurable)
+            case Left(error)  => fail(error)
+        }
+      }
+
+    /** The events with `after < seq < before`, read from the store page by page. */
+    private def readBetween(after: Long, before: Long): Result[Vector[EventRecord]] =
+      @tailrec def page(from: Long, found: Vector[EventRecord]): Result[Vector[EventRecord]] =
+        if from >= before - 1 then Right(found)
+        else
+          val limit = math.min(PageSize.toLong, before - 1 - from).toInt
+          Try(checkpointer.eventsAfter(threadId, from, limit)).toResult.flatten match
+            case Left(error)                 => Left(error)
+            case Right(read) if read.isEmpty => Right(found)
+            case Right(read)                 => page(read.last.seq, found ++ read.filter(_.seq < before))
+      page(after, Vector.empty)
+
+    /** Ends the subscription, once its queue is delivered, with `ReplayFailed(error)`; holding `lock`. */
+    private def fail(error: LLMError): Unit =
+      if !cancelled && !halted then
+        failed = Some(error)
+        notEmpty.signal()
 
     /**
      * While replaying, a commit's event is read from the store, not queued: it only marks where the
@@ -343,9 +441,13 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
       if handedSeq.isEmpty then held = held.map(h => h.copy(after = h.after.orElse(Some(seq - 1))))
       handedSeq = handedSeq.fold(Some(seq))(s => Some(math.max(s, seq)))
 
-    /** Queues a committed event behind what is queued, holding `lock`; see the class description. */
+    /**
+     * Queues a committed event behind what is queued, holding `lock`; see the class description. Only
+     * the next event in the log is queued, so a subscriber never skips one: an event already queued is
+     * dropped, and so is one past a gap, which the store is read again for.
+     */
     private def queueDurable(record: EventRecord): Unit =
-      if !cancelled && !lagging && record.seq > lastQueuedSeq then
+      if !cancelled && !halted && record.seq == lastQueuedSeq + 1 then
         if durableQueued >= capacity then lagging = true
         else
           queue.add(afterPendingGap(StreamEvent.Durable(record)))
@@ -356,7 +458,7 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     def offerLive(event: StreamEvent.Live): Unit = withLock(lock) {
       if cancelled then ()
       else if !joined then hold(event)
-      else if !lagging then
+      else if !halted then
         // the gap marker needs one slot and the event one
         if capacity - liveQueued >= 2 then
           flushGap()
@@ -383,7 +485,7 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
 
     /** Moves `events` into the queue's live slots, holding `lock`; a lagging subscriber counts them as dropped. */
     private def queueHeld(events: Vector[StreamEvent]): Unit =
-      if lagging then
+      if halted then
         droppedLive += events.map {
           case StreamEvent.LiveGap(n) => n
           case _                      => 1
@@ -424,15 +526,25 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
      * `capacity`.
      */
     private def queueEnd(runId: RunId): Unit =
-      if !cancelled && !lagging then
+      if !cancelled && !halted then
         queue.add(afterPendingGap(RunEnd(runId)))
         notEmpty.signal()
 
     private def run(): Unit =
-      // leaves the live set on every exit, including one by a fatal error
-      Using.resource(new AutoCloseable { def close(): Unit = leave(threadId, Dispatcher.this) }) { _ =>
-        val ready  = if preJoined then Right(()) else replay().flatMap(_ => switchToLive())
-        val ending = ready.fold(identity, _ => drain())
+      // leaves the live set, and stops the watch, on every exit, including one by a fatal error
+      Using.resource(new AutoCloseable {
+        def close(): Unit =
+          finished = true
+          watcher.foreach(_.interrupt())
+          leave(threadId, Dispatcher.this)
+      }) { _ =>
+        val ready = if preJoined then Right(()) else replay().flatMap(_ => switchToLive())
+        val ending = ready.fold(
+          identity,
+          _ =>
+            startWatching()
+            drain()
+        )
         ending match
           case End.Disconnect(reason) =>
             leave(threadId, this)
@@ -452,7 +564,7 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
      */
     private def reportPendingGap(reason: DisconnectReason): Option[DisconnectReason] =
       val dropped = withLock(lock) {
-        val pending = if reason == DisconnectReason.Lagging then droppedLive else 0
+        val pending = if reason == DisconnectReason.Lagging || failed.isDefined then droppedLive else 0
         droppedLive = 0
         pending
       }
@@ -550,7 +662,7 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
                   case _                                   => liveQueued -= 1
                 Some(item)
               }
-              .toRight(End.Disconnect(DisconnectReason.Lagging))
+              .toRight(End.Disconnect(failed.fold(DisconnectReason.Lagging)(DisconnectReason.ReplayFailed(_))))
         }) match
           case Right(taken) => taken
           // only `cancel` interrupts this thread; anything else is ignored
@@ -580,7 +692,7 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
 
     /** Waits, holding `lock`, until there is something to deliver or a reason to stop. */
     @tailrec private def awaitWork(): Unit =
-      if !cancelled && !lagging && queue.isEmpty then
+      if !cancelled && !halted && queue.isEmpty then
         notEmpty.await()
         awaitWork()
 
@@ -619,6 +731,70 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
           }
         })(_ => CancelledError.catchInterrupt(Try(body())))
       }
+
+    /** Starts the store watch, unless `watch` is disabled; on the dispatcher thread, once it is live. */
+    private def startWatching(): Unit =
+      if watch.enabled && !cancelled then
+        watched(threadId, 1)
+        val started = Try(
+          Thread
+            .ofVirtual()
+            .name(s"llm4s-watch-${threadId.value}")
+            .start { () =>
+              Using.resource(new AutoCloseable { def close(): Unit = watched(threadId, -1) })(_ =>
+                CancelledError.catchInterrupt(watchLoop()): Unit
+              )
+            }
+        )
+        started.fold(_ => watched(threadId, -1), thread => watcher = Some(thread))
+        // stopped meanwhile: the interrupt that would have stopped it found no thread
+        if cancelled || finished then watcher.foreach(_.interrupt())
+
+    /**
+     * Watches the store for commits made through another runtime or process: waits in
+     * [[Checkpointer.awaitEventsAfter]] from the last event queued and queues what it returns, until
+     * the dispatcher ends. An interrupt - from `cancel` or the dispatcher's end - stops it.
+     */
+    @tailrec private def watchLoop(): Unit =
+      val from = withLock(lock) {
+        if cancelled || finished || halted then None else Some(Option.when(anchored)(lastQueuedSeq))
+      }
+      from match
+        case None       => ()
+        case Some(None) =>
+          // an Observer's dispatcher, before its run's claim is handed to it
+          TimeUnit.NANOSECONDS.sleep(watch.pollInterval.toNanos)
+          watchLoop()
+        case Some(Some(after)) =>
+          Try(checkpointer.awaitEventsAfter(threadId, after, PageSize, watch.pollInterval)).toResult.flatten match
+            case _ if cancelled || finished => ()
+            case Left(_: CancelledError)    => ()
+            case Left(error) =>
+              withLock(lock)(fail(error))
+            case Right(found) =>
+              val stuck = found.nonEmpty && withLock(commitLock)(withLock(hubLock)(withLock(lock)(queueWatched(found))))
+              // what did not fit stays in the store until the listener has caught up; read it again later
+              if stuck then TimeUnit.NANOSECONDS.sleep(watch.pollInterval.toNanos)
+              watchLoop()
+
+    /**
+     * Queues, in order, the events the watch read that follow the last queued, while they fit: the
+     * durable slots are never overfilled, so the watch never makes a subscriber lag. Returns whether
+     * the watch should wait before reading again: it stopped for want of room, or at an event that
+     * does not follow the last queued, which a store never returns but which must not make the watch
+     * spin. Holding `commitLock`, `hubLock` and `lock`.
+     */
+    private def queueWatched(found: Vector[EventRecord]): Boolean =
+      @tailrec def next(rest: List[EventRecord]): Boolean = rest match
+        case Nil                                           => false
+        case _ if cancelled || halted                      => false
+        case record :: more if record.seq <= lastQueuedSeq => next(more)
+        case record :: _ if record.seq > lastQueuedSeq + 1 => true
+        case _ if durableQueued >= capacity                => true
+        case record :: more =>
+          queueDurable(record)
+          next(more)
+      next(found.toList)
 
     /** The next page after `lastQueuedSeq`; a failed or interrupted read ends the subscription. */
     private def read(): Either[End, Vector[EventRecord]] =
