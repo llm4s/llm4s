@@ -125,6 +125,20 @@ To report a security issue privately, see [`SECURITY.md`](https://github.com/llm
 
 ---
 
+## Code of Conduct Committee
+
+See the [Code of Conduct](https://github.com/llm4s/llm4s/blob/main/CODE_OF_CONDUCT.md) for community standards and reporting guidance.
+
+| Photo | Name | GitHub | LinkedIn |
+|---|---|---|---|
+| <img src="/people/kannupriya-kalra.jpg" alt="Kannupriya Kalra" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
+| <img src="/people/vitthal-mirji.jpeg" alt="Vitthal Mirji" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **[Vitthal Mirji](https://vitthalmirji.com/)** | [@vim89](https://github.com/vim89) | [linkedin.com/in/vitthal10](https://www.linkedin.com/in/vitthal10) |
+| <img alt="Shubham Vishwakarma" src="/people/shubham-vishwakarma.jpg" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Shubham Vishwakarma** | [@Vi-shub](https://github.com/Vi-shub) | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
+| <img alt="Anshuman Awasthi" src="/people/anshuman-awasthi.jpg" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) | [linkedin.com/in/autodidact](https://www.linkedin.com/in/autodidact) |
+| <img src="/people/rory-graves.jpg" alt="Rory Graves" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
+
+---
+
 ## Social Media & Community Committee
 
 The Social Media team manages the LLM4S presence on Discord, social platforms, events,
