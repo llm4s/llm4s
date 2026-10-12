@@ -27,6 +27,8 @@ Use `/people/<filename>` in `docs/people.md` and `docs/people/<filename>` in the
 | Shubham Vishwakarma | <img src="shubham-vishwakarma.jpg" alt="Shubham Vishwakarma" width="100"> | [shubham-vishwakarma.jpg](shubham-vishwakarma.jpg) |
 | Vitthal Mirji | <img src="vitthal-mirji.jpeg" alt="Vitthal Mirji" width="100"> | [vitthal-mirji.jpeg](vitthal-mirji.jpeg) |
 
+Anshuman Awasthi’s current photo is copied unchanged from [the GSoC 2025 contributor headshot](../image_assets/gsoc_assets/gsoc_2025/contributor_headshots/Anshuman-headshot.jpg).
+
 ## Previous GitHub avatars
 
 Retained for reference; the People pages use the current headshots above. Numeric filenames were identified using GitHub account IDs.
