@@ -38,7 +38,7 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
   }
 
   "JAgentStatus" should "carry a completed turn's answer, and nothing else" in {
-    val s = JAgentStatus.of(AgentStatus.Completed("42"))
+    val s = FacadeInternals.agentStatus(AgentStatus.Completed("42"))
     pending(AgentStatusKind.COMPLETED, s)
     s.answer shouldBe Optional.of("42")
     s.guardrail shouldBe Optional.empty
@@ -47,7 +47,7 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "carry a blocked turn's guardrail and reason, and nothing else" in {
-    val s = JAgentStatus.of(AgentStatus.Blocked("NoSecrets", "leaks a key"))
+    val s = FacadeInternals.agentStatus(AgentStatus.Blocked("NoSecrets", "leaks a key"))
     pending(AgentStatusKind.BLOCKED, s)
     s.answer shouldBe Optional.empty
     s.guardrail shouldBe Optional.of("NoSecrets")
@@ -56,7 +56,7 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "carry nothing for a turn that reached its step limit" in {
-    val s = JAgentStatus.of(AgentStatus.StepLimitReached)
+    val s = FacadeInternals.agentStatus(AgentStatus.StepLimitReached)
     pending(AgentStatusKind.STEP_LIMIT_REACHED, s)
     s.answer shouldBe Optional.empty
     s.guardrail shouldBe Optional.empty
@@ -64,15 +64,15 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
     s.toString shouldBe "STEP_LIMIT_REACHED"
   }
 
-  it should "list a suspended turn's interrupts as PendingInterrupt.of does, approvals first" in {
+  it should "list a suspended turn's interrupts as FacadeInternals.pending does, approvals first" in {
     val c = SuspensionFixtures.call("c1", "deploy", "x")
     val suspended = AgentStatus.Suspended(
       Vector(InterruptId("a1") -> ApprovalRequest("m1", c, "why", ApprovalSource.Tool, IdempotencyKey("k1"))),
       Vector(InterruptId("q1") -> ToolQuestionRequest("m1", c, ujson.Obj("q" -> 1), IdempotencyKey("q1")))
     )
-    val s = JAgentStatus.of(suspended)
+    val s = FacadeInternals.agentStatus(suspended)
     s.kind shouldBe AgentStatusKind.SUSPENDED
-    s.pending shouldBe PendingInterrupt.of(suspended)
+    s.pending shouldBe FacadeInternals.pending(suspended)
     s.pending.asScala.map(_.id) shouldBe Seq("a1", "q1")
     s.answer shouldBe Optional.empty
     s.guardrail shouldBe Optional.empty
@@ -82,25 +82,25 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "read a null answer, guardrail or reason as empty, not throw" in {
-    val completed = JAgentStatus.of(AgentStatus.Completed(null))
+    val completed = FacadeInternals.agentStatus(AgentStatus.Completed(null))
     completed.answer shouldBe Optional.empty
     completed.toString shouldBe "COMPLETED()"
-    val blocked = JAgentStatus.of(AgentStatus.Blocked(null, null))
+    val blocked = FacadeInternals.agentStatus(AgentStatus.Blocked(null, null))
     blocked.guardrail shouldBe Optional.empty
     blocked.reason shouldBe Optional.empty
     blocked.toString shouldBe "BLOCKED(: )"
   }
 
-  "PendingInterrupt.of" should "list nothing for a status that is not suspended" in {
-    PendingInterrupt.of(AgentStatus.Completed("a")).asScala shouldBe empty
-    PendingInterrupt.of(AgentStatus.StepLimitReached).asScala shouldBe empty
+  "FacadeInternals.pending" should "list nothing for a status that is not suspended" in {
+    FacadeInternals.pending(AgentStatus.Completed("a")).asScala shouldBe empty
+    FacadeInternals.pending(AgentStatus.StepLimitReached).asScala shouldBe empty
   }
 
   "JAgentStatus" should "be a value" in {
-    val s = JAgentStatus.of(AgentStatus.Completed("a"))
-    s shouldBe JAgentStatus.of(AgentStatus.Completed("a"))
-    s.hashCode shouldBe JAgentStatus.of(AgentStatus.Completed("a")).hashCode
-    s should not be JAgentStatus.of(AgentStatus.Completed("b"))
+    val s = FacadeInternals.agentStatus(AgentStatus.Completed("a"))
+    s shouldBe FacadeInternals.agentStatus(AgentStatus.Completed("a"))
+    s.hashCode shouldBe FacadeInternals.agentStatus(AgentStatus.Completed("a")).hashCode
+    s should not be FacadeInternals.agentStatus(AgentStatus.Completed("b"))
     s should not be "COMPLETED(a)"
   }
 
@@ -110,7 +110,7 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
   }
 
   "JMessage" should "read each role of the history" in {
-    val user = JMessage.of(UserMessage("hi"))
+    val user = FacadeInternals.message(UserMessage("hi"))
     user.role shouldBe JMessageRole.USER
     user.content shouldBe "hi"
     user.toolCalls.asScala shouldBe empty
@@ -118,11 +118,11 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
     user.thinking shouldBe Optional.empty
     user.toString shouldBe "USER: hi"
 
-    val system = JMessage.of(SystemMessage("be brief"))
+    val system = FacadeInternals.message(SystemMessage("be brief"))
     system.role shouldBe JMessageRole.SYSTEM
     system.content shouldBe "be brief"
 
-    val tool = JMessage.of(ToolMessage("42", "call-1"))
+    val tool = FacadeInternals.message(ToolMessage("42", "call-1"))
     tool.role shouldBe JMessageRole.TOOL
     tool.content shouldBe "42"
     tool.toolCallId shouldBe Optional.of("call-1")
@@ -131,22 +131,22 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "read a null text as empty, never null, and a null tool-call id as empty" in {
-    JMessage.of(UserMessage(null)).content shouldBe ""
-    JMessage.of(SystemMessage(null)).content shouldBe ""
-    JMessage.of(AssistantMessage(Some(null))).content shouldBe ""
-    val tool = JMessage.of(ToolMessage(null, null))
+    FacadeInternals.message(UserMessage(null)).content shouldBe ""
+    FacadeInternals.message(SystemMessage(null)).content shouldBe ""
+    FacadeInternals.message(AssistantMessage(Some(null))).content shouldBe ""
+    val tool = FacadeInternals.message(ToolMessage(null, null))
     tool.content shouldBe ""
     tool.toolCallId shouldBe Optional.empty
     tool.toString shouldBe "TOOL: "
   }
 
   it should "render a call's ujson.Str arguments as a JSON string literal" in {
-    JToolCall.of(ToolCall("c1", "say", ujson.Str("hi"))).argumentsJson shouldBe "\"hi\""
+    FacadeInternals.toolCall(ToolCall("c1", "say", ujson.Str("hi"))).argumentsJson shouldBe "\"hi\""
   }
 
   it should "read an assistant message's tool calls, as JSON text, and its reasoning" in {
     val calls = Seq(ToolCall("c1", "add", ujson.Obj("a" -> 1, "b" -> 2)), ToolCall("c2", "now", ujson.Obj()))
-    val m     = JMessage.of(AssistantMessage(None, calls).withThinking("adding first"))
+    val m     = FacadeInternals.message(AssistantMessage(None, calls).withThinking("adding first"))
     m.role shouldBe JMessageRole.ASSISTANT
     m.content shouldBe ""
     m.toolCallId shouldBe Optional.empty
@@ -157,23 +157,25 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
     add.toString shouldBe """JToolCall(c1, add, {"a":1,"b":2})"""
     an[UnsupportedOperationException] should be thrownBy m.toolCalls.clear()
 
-    val plain = JMessage.of(AssistantMessage(Some("done")))
+    val plain = FacadeInternals.message(AssistantMessage(Some("done")))
     plain.content shouldBe "done"
     plain.thinking shouldBe Optional.empty
     plain.toolCalls.asScala shouldBe empty
   }
 
   it should "be a value, as its tool calls are" in {
-    val m = JMessage.of(AssistantMessage(None, Seq(ToolCall("c1", "add", ujson.Obj("a" -> 1)))))
-    m shouldBe JMessage.of(AssistantMessage(None, Seq(ToolCall("c1", "add", ujson.Obj("a" -> 1)))))
-    m.hashCode shouldBe JMessage.of(AssistantMessage(None, Seq(ToolCall("c1", "add", ujson.Obj("a" -> 1))))).hashCode
-    m should not be JMessage.of(AssistantMessage(None, Seq(ToolCall("c1", "add", ujson.Obj("a" -> 2)))))
+    val m = FacadeInternals.message(AssistantMessage(None, Seq(ToolCall("c1", "add", ujson.Obj("a" -> 1)))))
+    m shouldBe FacadeInternals.message(AssistantMessage(None, Seq(ToolCall("c1", "add", ujson.Obj("a" -> 1)))))
+    m.hashCode shouldBe FacadeInternals
+      .message(AssistantMessage(None, Seq(ToolCall("c1", "add", ujson.Obj("a" -> 1)))))
+      .hashCode
+    m should not be FacadeInternals.message(AssistantMessage(None, Seq(ToolCall("c1", "add", ujson.Obj("a" -> 2)))))
     m should not be "ASSISTANT: "
 
     val call = m.toolCalls.get(0)
-    call shouldBe JToolCall.of(ToolCall("c1", "add", ujson.Obj("a" -> 1)))
-    call.hashCode shouldBe JToolCall.of(ToolCall("c1", "add", ujson.Obj("a" -> 1))).hashCode
-    call should not be JToolCall.of(ToolCall("c2", "add", ujson.Obj("a" -> 1)))
+    call shouldBe FacadeInternals.toolCall(ToolCall("c1", "add", ujson.Obj("a" -> 1)))
+    call.hashCode shouldBe FacadeInternals.toolCall(ToolCall("c1", "add", ujson.Obj("a" -> 1))).hashCode
+    call should not be FacadeInternals.toolCall(ToolCall("c2", "add", ujson.Obj("a" -> 1)))
     call should not be "c1"
   }
 
@@ -188,7 +190,7 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
     .add("gpt-b", TokenUsage(1, 1, 2), Some(0.5))
 
   "JUsageSummary" should "report the totals, and each model's share sorted by model name, in JDK types" in {
-    val u = JUsageSummary.of(usage)
+    val u = FacadeInternals.usageSummary(usage)
     (u.requestCount, u.inputTokens, u.outputTokens, u.thinkingTokens) shouldBe ((3L, 14L, 7L, 2L))
     u.totalCost shouldBe new java.math.BigDecimal("0.75")
     u.byModel.keySet.asScala.toList shouldBe List("gpt-a", "gpt-b")
@@ -203,21 +205,21 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "be a value, as each model's share is" in {
-    val u = JUsageSummary.of(usage)
-    u shouldBe JUsageSummary.of(usage)
-    u.hashCode shouldBe JUsageSummary.of(usage).hashCode
-    u should not be JUsageSummary.of(UsageSummary())
+    val u = FacadeInternals.usageSummary(usage)
+    u shouldBe FacadeInternals.usageSummary(usage)
+    u.hashCode shouldBe FacadeInternals.usageSummary(usage).hashCode
+    u should not be FacadeInternals.usageSummary(UsageSummary())
     u should not be "usage"
 
-    val m = JModelUsage.of(ModelUsage(1L, 2L, 3L, 0L, BigDecimal("0.1")))
-    m shouldBe JModelUsage.of(ModelUsage(1L, 2L, 3L, 0L, BigDecimal("0.1")))
-    m.hashCode shouldBe JModelUsage.of(ModelUsage(1L, 2L, 3L, 0L, BigDecimal("0.1"))).hashCode
-    m should not be JModelUsage.of(ModelUsage(1L, 2L, 4L, 0L, BigDecimal("0.1")))
+    val m = FacadeInternals.modelUsage(ModelUsage(1L, 2L, 3L, 0L, BigDecimal("0.1")))
+    m shouldBe FacadeInternals.modelUsage(ModelUsage(1L, 2L, 3L, 0L, BigDecimal("0.1")))
+    m.hashCode shouldBe FacadeInternals.modelUsage(ModelUsage(1L, 2L, 3L, 0L, BigDecimal("0.1"))).hashCode
+    m should not be FacadeInternals.modelUsage(ModelUsage(1L, 2L, 4L, 0L, BigDecimal("0.1")))
     m should not be "usage"
   }
 
   it should "compare costs by numeric value, whatever their scale, as Scala's BigDecimal does" in {
-    def model(cost: String) = JModelUsage.of(ModelUsage(1L, 2L, 3L, 0L, BigDecimal(cost)))
+    def model(cost: String) = FacadeInternals.modelUsage(ModelUsage(1L, 2L, 3L, 0L, BigDecimal(cost)))
     BigDecimal("1.0") shouldBe BigDecimal("1.00")
     model("1.0") shouldBe model("1.00")
     model("1.0").hashCode shouldBe model("1.00").hashCode
@@ -226,7 +228,7 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
     model("1.0") should not be model("1.01")
 
     def summary(cost: String) =
-      JUsageSummary.of(
+      FacadeInternals.usageSummary(
         UsageSummary(1L, 2L, 3L, 0L, BigDecimal(cost), Map("m" -> ModelUsage(1L, 2L, 3L, 0L, BigDecimal(cost))))
       )
     summary("1.0") shouldBe summary("1.00")
@@ -236,9 +238,9 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "print a cost in plain notation, not scientific" in {
-    JModelUsage.of(ModelUsage(1L, 2L, 3L, 0L, BigDecimal("1E-7"))).toString shouldBe
+    FacadeInternals.modelUsage(ModelUsage(1L, 2L, 3L, 0L, BigDecimal("1E-7"))).toString shouldBe
       "JModelUsage(1 requests, 2 in, 3 out, 0 thinking, 0.0000001 USD)"
-    JUsageSummary.of(UsageSummary(totalCost = BigDecimal("1E-7"))).toString shouldBe
+    FacadeInternals.usageSummary(UsageSummary(totalCost = BigDecimal("1E-7"))).toString shouldBe
       "JUsageSummary(0 requests, 0 in, 0 out, 0 thinking, 0.0000001 USD)"
   }
 
@@ -258,7 +260,7 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
       case Right(r) => r
       case Left(e)  => fail(e.message)
     }
-    val r = JAgentResult.of(scala)
+    val r = FacadeInternals.agentResult(scala)
     r.threadId shouldBe scala.threadId.value
     r.runId shouldBe scala.runId.value
     r.activeAgent shouldBe "test"
@@ -274,8 +276,8 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
     r.usage.byModel.keySet.asScala shouldBe Set("m")
     r.usage.totalCost shouldBe new java.math.BigDecimal("0.01")
 
-    r shouldBe JAgentResult.of(scala)
-    r.hashCode shouldBe JAgentResult.of(scala).hashCode
+    r shouldBe FacadeInternals.agentResult(scala)
+    r.hashCode shouldBe FacadeInternals.agentResult(scala).hashCode
     r should not be "a result"
     r.toString shouldBe s"JAgentResult(${r.threadId} ${r.runId}: COMPLETED(4), 2 messages)"
   }

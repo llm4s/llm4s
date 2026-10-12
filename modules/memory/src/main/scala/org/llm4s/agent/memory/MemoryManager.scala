@@ -115,13 +115,13 @@ trait MemoryManager {
    * as context for the LLM.
    *
    * @param query The user's query
-   * @param maxTokens Approximate maximum tokens of context
+   * @param maxTokens Approximate maximum tokens of context; when omitted, [[contextTokenBudget]]
    * @param filter Additional filter criteria
    * @return Formatted context string
    */
   def getRelevantContext(
     query: String,
-    maxTokens: Int = 2000,
+    maxTokens: Int = contextTokenBudget,
     filter: MemoryFilter = MemoryFilter.All
   ): Result[String]
 
@@ -187,6 +187,21 @@ trait MemoryManager {
    * Get memory statistics.
    */
   def stats: Result[MemoryStats]
+
+  /**
+   * The token budget `getRelevantContext` uses when a call passes no `maxTokens`.
+   *
+   * [[SimpleMemoryManager]] and [[LLMMemoryManager]] return their
+   * `MemoryManagerConfig.contextTokenBudget`; other implementations get
+   * [[MemoryManager.DefaultContextTokenBudget]] unless they override it.
+   */
+  def contextTokenBudget: Int = MemoryManager.DefaultContextTokenBudget
+}
+
+object MemoryManager {
+
+  /** The context token budget used when neither the call nor the configuration sets one: 2000. */
+  val DefaultContextTokenBudget: Int = 2000
 }
 
 /**
@@ -229,100 +244,58 @@ object MemoryStats {
 /**
  * Configuration for memory manager behavior.
  *
- * Refactored from case class to regular class to maintain binary compatibility
- * when adding new parameters.
+ * A plain value built in code; this module reads no configuration file. Every option is read by
+ * the managers that extend the shared record/retrieve operations ([[SimpleMemoryManager]] and
+ * [[LLMMemoryManager]]).
  *
- * @param autoRecordMessages Whether to automatically record conversation messages
- * @param autoExtractEntities Whether to automatically extract entities from messages
- * @param defaultImportance Default importance score for unscored memories
- * @param contextTokenBudget Default token budget for context retrieval
- * @param consolidationEnabled Whether to enable automatic memory consolidation
- * @param consolidationConfig Configuration for memory consolidation behavior
+ * @param autoExtractEntities When true, `recordMessage` (and so `recordConversation`) also runs
+ *                            `extractEntities` over the content of each user and assistant
+ *                            message it records, passing the conversation id. System and tool
+ *                            messages are not analysed. Extraction is best-effort: if it fails,
+ *                            the message stays recorded and the failure is logged as a warning.
+ *                            [[SimpleMemoryManager]] extracts nothing, so the option only changes
+ *                            what [[LLMMemoryManager]] stores (one extra LLM call per message).
+ * @param defaultImportance Importance score given to memories recorded without one
+ * @param contextTokenBudget Token budget `getRelevantContext` uses when the call passes no
+ *                           `maxTokens`. An explicit `maxTokens` always wins.
+ * @param consolidationConfig How `consolidateMemories` groups memories and handles errors
  */
 final class MemoryManagerConfig(
-  val autoRecordMessages: Boolean = true,
   val autoExtractEntities: Boolean = false,
   val defaultImportance: Double = 0.5,
-  val contextTokenBudget: Int = 2000,
-  val consolidationEnabled: Boolean = false,
+  val contextTokenBudget: Int = MemoryManager.DefaultContextTokenBudget,
   val consolidationConfig: ConsolidationConfig = ConsolidationConfig.default
 ) {
 
   /**
-   * Binary-compatible 5-parameter constructor.
-   * Preserves the old constructor signature for code compiled against pre-0.1.4 versions.
-   */
-  def this(
-    autoRecordMessages: Boolean,
-    autoExtractEntities: Boolean,
-    defaultImportance: Double,
-    contextTokenBudget: Int,
-    consolidationEnabled: Boolean
-  ) = this(
-    autoRecordMessages,
-    autoExtractEntities,
-    defaultImportance,
-    contextTokenBudget,
-    consolidationEnabled,
-    ConsolidationConfig.default
-  )
-
-  /**
-   * Copy method with all 6 parameters.
+   * Copy with any subset of the options changed.
    */
   def copy(
-    autoRecordMessages: Boolean = this.autoRecordMessages,
     autoExtractEntities: Boolean = this.autoExtractEntities,
     defaultImportance: Double = this.defaultImportance,
     contextTokenBudget: Int = this.contextTokenBudget,
-    consolidationEnabled: Boolean = this.consolidationEnabled,
     consolidationConfig: ConsolidationConfig = this.consolidationConfig
   ): MemoryManagerConfig = new MemoryManagerConfig(
-    autoRecordMessages,
     autoExtractEntities,
     defaultImportance,
     contextTokenBudget,
-    consolidationEnabled,
     consolidationConfig
-  )
-
-  /**
-   * Binary-compatible 5-parameter copy method.
-   * Preserves the old copy signature for code compiled against pre-0.1.4 versions.
-   */
-  def copy(
-    autoRecordMessages: Boolean,
-    autoExtractEntities: Boolean,
-    defaultImportance: Double,
-    contextTokenBudget: Int,
-    consolidationEnabled: Boolean
-  ): MemoryManagerConfig = new MemoryManagerConfig(
-    autoRecordMessages,
-    autoExtractEntities,
-    defaultImportance,
-    contextTokenBudget,
-    consolidationEnabled,
-    ConsolidationConfig.default
   )
 
   override def equals(obj: Any): Boolean = obj match {
     case that: MemoryManagerConfig =>
-      this.autoRecordMessages == that.autoRecordMessages &&
       this.autoExtractEntities == that.autoExtractEntities &&
       this.defaultImportance == that.defaultImportance &&
       this.contextTokenBudget == that.contextTokenBudget &&
-      this.consolidationEnabled == that.consolidationEnabled &&
       this.consolidationConfig == that.consolidationConfig
     case _ => false
   }
 
   override def hashCode(): Int = {
     val state = Seq(
-      autoRecordMessages,
       autoExtractEntities,
       defaultImportance,
       contextTokenBudget,
-      consolidationEnabled,
       consolidationConfig
     )
     state.map(_.hashCode()).foldLeft(0)((a, b) => 31 * a + b)
@@ -330,19 +303,17 @@ final class MemoryManagerConfig(
 
   override def toString: String =
     s"MemoryManagerConfig(" +
-      s"autoRecordMessages=$autoRecordMessages, " +
       s"autoExtractEntities=$autoExtractEntities, " +
       s"defaultImportance=$defaultImportance, " +
       s"contextTokenBudget=$contextTokenBudget, " +
-      s"consolidationEnabled=$consolidationEnabled, " +
       s"consolidationConfig=$consolidationConfig)"
 }
 
 /**
  * Configuration for memory consolidation behavior.
  *
- * This nested config contains consolidation-specific settings and is only used
- * when consolidationEnabled is true.
+ * Read by `consolidateMemories` whenever it is called. Nothing consolidates on its own: call
+ * `consolidateMemories` when your application decides to.
  *
  * @param maxMemoriesPerGroup Maximum memories per consolidation group (prevents unbounded context)
  * @param strictMode If true, fail fast on any consolidation error. If false, log and continue (best-effort)
@@ -368,41 +339,18 @@ object ConsolidationConfig {
 object MemoryManagerConfig {
 
   /**
-   * Factory method with all 6 parameters.
+   * Build a configuration; every option has a default.
    */
   def apply(
-    autoRecordMessages: Boolean = true,
     autoExtractEntities: Boolean = false,
     defaultImportance: Double = 0.5,
-    contextTokenBudget: Int = 2000,
-    consolidationEnabled: Boolean = false,
+    contextTokenBudget: Int = MemoryManager.DefaultContextTokenBudget,
     consolidationConfig: ConsolidationConfig = ConsolidationConfig.default
   ): MemoryManagerConfig = new MemoryManagerConfig(
-    autoRecordMessages,
     autoExtractEntities,
     defaultImportance,
     contextTokenBudget,
-    consolidationEnabled,
     consolidationConfig
-  )
-
-  /**
-   * Binary-compatible 5-parameter factory method.
-   * Maintains backward compatibility for code compiled against pre-0.1.4 versions.
-   */
-  def apply(
-    autoRecordMessages: Boolean,
-    autoExtractEntities: Boolean,
-    defaultImportance: Double,
-    contextTokenBudget: Int,
-    consolidationEnabled: Boolean
-  ): MemoryManagerConfig = new MemoryManagerConfig(
-    autoRecordMessages,
-    autoExtractEntities,
-    defaultImportance,
-    contextTokenBudget,
-    consolidationEnabled,
-    ConsolidationConfig.default
   )
 
   /**
@@ -411,19 +359,18 @@ object MemoryManagerConfig {
   val default: MemoryManagerConfig = new MemoryManagerConfig()
 
   /**
-   * Configuration for testing.
+   * Configuration for testing: no automatic entity extraction, so no LLM call is made unless a
+   * test asks for one.
    */
   val testing: MemoryManagerConfig = new MemoryManagerConfig(
-    autoRecordMessages = false,
     autoExtractEntities = false
   )
 
   /**
-   * Full-featured configuration.
+   * Full-featured configuration: entities are extracted from every recorded user and assistant
+   * message.
    */
   val fullFeatured: MemoryManagerConfig = new MemoryManagerConfig(
-    autoRecordMessages = true,
-    autoExtractEntities = true,
-    consolidationEnabled = true
+    autoExtractEntities = true
   )
 }

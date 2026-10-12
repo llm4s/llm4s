@@ -51,7 +51,7 @@ class JAgentSpec extends AnyFlatSpec with Matchers {
   }
 
   "run(String)" should "return a completed AgentResult when the LLM completes normally" in {
-    val agent  = Llm4s.createAgent(new JLlmClient(completingClient("42")))
+    val agent  = Llm4s.createAgent(Llm4s.wrapClient(completingClient("42")))
     val result = agent.run("What is 6*7?")
     result.isSuccess shouldBe true
     result.get().status.kind shouldBe AgentStatusKind.COMPLETED
@@ -59,7 +59,7 @@ class JAgentSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return the LLM answer as the last message of the conversation" in {
-    val agent  = Llm4s.createAgent(new JLlmClient(completingClient("Paris")))
+    val agent  = Llm4s.createAgent(Llm4s.wrapClient(completingClient("Paris")))
     val result = agent.run("Capital of France?")
     result.isSuccess shouldBe true
     result.get().messages.asScala.last.content shouldBe "Paris"
@@ -68,27 +68,27 @@ class JAgentSpec extends AnyFlatSpec with Matchers {
 
   it should "return a failure result when the underlying LLM call fails" in {
     val error  = APIError("test-provider", "timeout")
-    val agent  = Llm4s.createAgent(new JLlmClient(failingClient(error)))
+    val agent  = Llm4s.createAgent(Llm4s.wrapClient(failingClient(error)))
     val result = agent.run("hello")
     result.isFailure shouldBe true
   }
 
   "createAgent(client, tools)" should "succeed with an empty tool registry" in {
-    val agent  = Llm4s.createAgent(new JLlmClient(completingClient("done")), ToolRegistry.empty)
+    val agent  = Llm4s.createAgent(Llm4s.wrapClient(completingClient("done")), ToolRegistry.empty)
     val result = agent.run("query")
     result.isSuccess shouldBe true
   }
 
   it should "return failure when the LLM fails, even with tools provided" in {
     val error  = APIError("test-provider", "server error")
-    val agent  = Llm4s.createAgent(new JLlmClient(failingClient(error)), ToolRegistry.empty)
+    val agent  = Llm4s.createAgent(Llm4s.wrapClient(failingClient(error)), ToolRegistry.empty)
     val result = agent.run("query")
     result.isFailure shouldBe true
     result.getError().error shouldBe a[GraphError.NodeFailed]
   }
 
   "continueConversation" should "run the next turn on the same conversation" in {
-    val agent  = Llm4s.createAgent(new JLlmClient(completingClient("ok")))
+    val agent  = Llm4s.createAgent(Llm4s.wrapClient(completingClient("ok")))
     val first  = agent.run("one").get()
     val second = agent.continueConversation(first, "two").get()
     second.threadId shouldBe first.threadId
@@ -96,14 +96,14 @@ class JAgentSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return a failure for a null previous result or query" in {
-    val agent = Llm4s.createAgent(new JLlmClient(completingClient("ok")))
+    val agent = Llm4s.createAgent(Llm4s.wrapClient(completingClient("ok")))
     val first = agent.run("one").get()
     agent.continueConversation(null, "two").isFailure shouldBe true
     agent.continueConversation(first, null).isFailure shouldBe true
   }
 
   "forget" should "remove the conversation, so its thread starts afresh" in {
-    val agent = Llm4s.createAgent(new JLlmClient(completingClient("ok")))
+    val agent = Llm4s.createAgent(Llm4s.wrapClient(completingClient("ok")))
     val first = agent.run("one").get()
     agent.forget(first).isSuccess shouldBe true
     agent.continueConversation(first, "two").get().messages.asScala.map(_.content) shouldBe Seq("two", "ok")
@@ -111,7 +111,7 @@ class JAgentSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "remove a conversation named by its thread id, one a failed result never carried included" in {
-    val agent = Llm4s.createAgent(new JLlmClient(completingClient("ok")))
+    val agent = Llm4s.createAgent(Llm4s.wrapClient(completingClient("ok")))
     agent.stream("named", "one", _ => ()).get().await().isSuccess shouldBe true
     agent.forget("named").isSuccess shouldBe true
     agent.stream("named", "two", _ => ()).get().await().get().messages.asScala.map(_.content) shouldBe Seq("two", "ok")

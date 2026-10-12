@@ -2,8 +2,7 @@ package org.llm4s.javaapi
 
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
+import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient, LLMConnect }
 import org.llm4s.llmconnect.config.{
   EmbeddingModelConfig,
   EmbeddingProviderConfig,
@@ -31,6 +30,18 @@ import java.util.Objects
  *     client.complete("Hello").ifSuccess(System.out::println);
  * }
  * }}}
+ *
+ * === A client configured in code ===
+ * The providers this module brings each have a builder, so a client needs no `application.conf` and no Scala type:
+ * [[openAi]], [[anthropic]], [[gemini]], [[ollama]], [[openAiCompatible]] (vLLM, LM Studio, LiteLLM, a gateway) and
+ * [[azureOpenAi]]. Every other provider - one from its own module, such as `llm4s-bedrock` - takes its config object
+ * through [[createClient]], or a section of `application.conf` through [[createDefaultClient]].
+ * {{{
+ * LlmResult<JLlmClient> r = Llm4s.openAi()
+ *     .apiKey(apiKey)   // read however your application keeps its secrets
+ *     .model("gpt-4o-mini")
+ *     .build();
+ * }}}
  */
 object Llm4s {
 
@@ -43,9 +54,30 @@ object Llm4s {
       registry <- Llm4sConfig.modelRegistryService()
       config   <- Llm4sConfig.defaultProvider()
       client   <- LLMConnect.getClient(config)(using registry)
-    } yield new JLlmClient(client)
-    LlmResult.from(result)
+    } yield wrapClient(client)
+    FacadeInternals.result(result)
   }
+
+  /** A builder for an OpenAI client: `apiKey` and `model` are required (#1489). */
+  def openAi(): OpenAiClientBuilder = new OpenAiClientBuilder(ClientSettings.EMPTY)
+
+  /** A builder for an Anthropic client: `apiKey` and `model` are required (#1489). */
+  def anthropic(): AnthropicClientBuilder = new AnthropicClientBuilder(ClientSettings.EMPTY)
+
+  /** A builder for a client of the Google Gemini API: `apiKey` and `model` are required (#1489). */
+  def gemini(): GeminiClientBuilder = new GeminiClientBuilder(ClientSettings.EMPTY)
+
+  /** A builder for an Ollama client: `model` is required, and the server is `http://localhost:11434` unless set (#1489). */
+  def ollama(): OllamaClientBuilder = new OllamaClientBuilder(ClientSettings.EMPTY)
+
+  /**
+   * A builder for a client of any server that speaks OpenAI's chat-completions API - vLLM, LM Studio, LiteLLM, a
+   * gateway: `baseUrl` and `model` are required, the API key optional (#1489).
+   */
+  def openAiCompatible(): OpenAiCompatibleClientBuilder = new OpenAiCompatibleClientBuilder(ClientSettings.EMPTY)
+
+  /** A builder for an Azure OpenAI client: `endpoint`, `apiKey` and `model` (the deployment) are required (#1489). */
+  def azureOpenAi(): AzureOpenAiClientBuilder = new AzureOpenAiClientBuilder(ClientSettings.EMPTY)
 
   /**
    * Creates a [[JLlmClient]] from an explicit [[ProviderConfig]].  Useful
@@ -53,7 +85,7 @@ object Llm4s {
    * on environment variables.
    */
   def createClient(config: ProviderConfig): LlmResult[JLlmClient] =
-    createClient(config, MetricsCollector.noop)
+    FacadeInternals.createClient(config, MetricsCollector.noop)
 
   /**
    * [[createClient]] whose client reports every call (request outcome, duration, tokens and cost) to `metrics`, for
@@ -62,16 +94,16 @@ object Llm4s {
    * application's `MetricsCollector` bean. A null `metrics` records nothing; a null `config` is a failed result.
    */
   def createClient(config: ProviderConfig, metrics: MetricsCollector): LlmResult[JLlmClient] =
-    if (config == null) LlmResult.failure(ValidationError.required("config"))
-    else createClientFrom(config, Option(metrics).getOrElse(MetricsCollector.noop))
+    FacadeInternals.createClient(config, metrics)
 
-  private def createClientFrom(config: ProviderConfig, metrics: MetricsCollector): LlmResult[JLlmClient] = {
-    val result = for {
-      registry <- Llm4sConfig.modelRegistryService()
-      client   <- LLMConnect.getClient(config, metrics)(using registry)
-    } yield new JLlmClient(client)
-    LlmResult.from(result)
-  }
+  /**
+   * Wraps a Scala [[LLMClient]] you built yourself - a `ReliableClient` around a provider's client, your own
+   * implementation, or a test double - in a [[JLlmClient]]. Closing the wrapper closes `client`.
+   *
+   * @throws NullPointerException when `client` is `null`
+   */
+  def wrapClient(client: LLMClient): JLlmClient =
+    new JLlmClient(FacadeToken.INSTANCE, Objects.requireNonNull(client, "client must not be null"))
 
   /**
    * Creates a [[JEmbeddingClient]] for the embedding model configured as chat providers are, in the application's
@@ -84,7 +116,7 @@ object Llm4s {
    * `CONFIGURATION`, whose message says what to set.
    */
   def createDefaultEmbeddingClient(): LlmResult[JEmbeddingClient] =
-    LlmResult.from(Llm4sConfig.embeddings().flatMap(embeddingClientFor))
+    FacadeInternals.result(Llm4sConfig.embeddings().flatMap(embeddingClientFor))
 
   /** The client for the provider and config `llm4s.embeddings` selected, its dimensions as the provider declares them. */
   private def embeddingClientFor(selected: (String, EmbeddingProviderConfig)): Result[JEmbeddingClient] = {
@@ -93,8 +125,21 @@ object Llm4s {
       dimensions <- ModelDimensionRegistry.getDimension(provider, config.model)
       registry   <- Llm4sConfig.modelRegistryService()
       client     <- EmbeddingClient.from(provider, config)(using registry)
-    } yield new JEmbeddingClient(client, EmbeddingModelConfig(config.model, dimensions))
+    } yield wrapEmbeddingClient(client, EmbeddingModelConfig(config.model, dimensions))
   }
+
+  /**
+   * Wraps a Scala [[EmbeddingClient]] you built yourself - over your own `EmbeddingProvider`, or a test double - in a
+   * [[JEmbeddingClient]] that asks for `model` and reports its dimensions.
+   *
+   * @throws NullPointerException when either argument is `null`
+   */
+  def wrapEmbeddingClient(client: EmbeddingClient, model: EmbeddingModelConfig): JEmbeddingClient =
+    new JEmbeddingClient(
+      FacadeToken.INSTANCE,
+      Objects.requireNonNull(client, "client must not be null"),
+      Objects.requireNonNull(model, "model must not be null")
+    )
 
   /**
    * Wraps a [[JLlmClient]] in a [[JAgent]] ready to accept natural-language
@@ -120,7 +165,7 @@ object Llm4s {
     Objects.requireNonNull(client, "client must not be null")
     Objects.requireNonNull(tools, "tools must not be null")
     val builder = Agent.builder("assistant", client.underlying).withTools(tools)
-    new JAgent((if (streaming) builder.withStreaming() else builder).build())
+    new JAgent(FacadeToken.INSTANCE, (if (streaming) builder.withStreaming() else builder).build())
   }
 
   /**
@@ -129,6 +174,6 @@ object Llm4s {
    */
   def wrapAgent(agent: Agent): JAgent = {
     Objects.requireNonNull(agent, "agent must not be null")
-    new JAgent(Right(agent))
+    new JAgent(FacadeToken.INSTANCE, Right(agent))
   }
 }

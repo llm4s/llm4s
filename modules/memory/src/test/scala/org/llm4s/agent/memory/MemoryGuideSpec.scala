@@ -338,7 +338,7 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       val (manager, configured) = managers()
       manager.stats.value.totalMemories shouldBe 0L
       configured.config.defaultImportance shouldBe 0.7
-      MemoryManagerConfig.default.consolidationEnabled shouldBe false
+      MemoryManagerConfig.default.autoExtractEntities shouldBe false
     }
 
     "give a memory the configured default importance when none is passed" in {
@@ -350,16 +350,20 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       importances.value shouldBe Seq(Some(0.7))
     }
 
-    // The guide says contextTokenBudget is not consulted yet. When a manager starts to honour it, this
-    // test starts failing: promote it and update the guide.
-    "keep the context within contextTokenBudget when a manager honours it" in pendingUntilFixed {
+    "build the configuration of the Configuration Options block" in {
+      val config = MemoryManagerConfig(contextTokenBudget = 500, autoExtractEntities = true)
+      SimpleMemoryManager(config).contextTokenBudget shouldBe 500
+      config.autoExtractEntities shouldBe true
+    }
+
+    "keep the context within contextTokenBudget when the call passes no maxTokens" in {
       val longFact = "Scala " + ("word " * 400)
-      val manager  = SimpleMemoryManager(MemoryManagerConfig(contextTokenBudget = 10))
-      val context = for {
-        m1  <- manager.recordKnowledge(longFact, "docs")
+      def context(budget: Int) = for {
+        m1  <- SimpleMemoryManager(MemoryManagerConfig(contextTokenBudget = budget)).recordKnowledge(longFact, "docs")
         ctx <- m1.getRelevantContext("Scala")
       } yield ctx
-      context.value.length should be <= 40
+      context(10).value.length should be <= 40
+      context(1000).value should include(longFact.trim)
     }
   }
 

@@ -127,24 +127,37 @@ private[runner] object ProgramResolver {
   /**
    * The `PATH` a command's process is given (#1792): the runner's, keeping only the entries the runner itself would
    * search (see [[resolve]]) - absolute, outside the workspace and the command's working directory as written and
-   * after following links, and not the runner's own working directory - in their order.
+   * after following links (for an entry that does not exist yet, its nearest existing ancestor's links), and not the
+   * runner's own working directory - in their order.
    *
    * The runner starts the program itself by an absolute path, but the program may look another one up by name: a
    * `#!/usr/bin/env x` script, a launcher such as `sbt` starting `java`, `git` starting a helper. It searches the
    * `PATH` it inherits, from the workspace as its working directory, so an empty or relative entry, or one inside the
    * workspace, would let it run a file the agent wrote.
    *
-   * @return the sanitised `PATH`, or None when the runner has none or none of its entries is kept; the caller then
-   *         removes `PATH` from the child's environment, since an empty `PATH` is itself read as the current directory
+   * When no entry is kept, the child gets the platform's system directories instead (#1805): on Windows the system
+   * and Windows directories, elsewhere [[PosixFallbackPath]]. Without a `PATH`, bash and sh fall back to a built-in
+   * default that ends in `.` - the workspace - and on Windows a child's own search also covers the system directories,
+   * so a fallback that names them is both what a program expects and never the working directory.
+   *
+   * Only directories are vetted: a program in a kept directory that is itself a link into the workspace is followed
+   * by a child, though [[resolve]] refuses it. Making one needs a write outside the workspace or a link the operator
+   * made; checking every file of every `PATH` directory for each command would cost more than it guards.
+   *
+   * @return the sanitised `PATH`, or None only when even the fallback directories are untrusted (the workspace is the
+   *         file system's root); the caller then removes `PATH`, since an empty one is read as the current directory
    */
   def childPath(search: ProgramSearch, untrustedRoots: Seq[Path]): Option[String] = {
     val trusted = trustedDirectories(search, untrustedRoots)
-    val kept = pathEntries(search).filter(entry => trusted(entry).isDefined).distinct.map { entry =>
-      // Windows reads an entry holding `;` only in double quotes
-      if (search.windows && entry.contains(File.pathSeparator)) "\"" + entry + "\"" else entry
-    }
-    if (kept.isEmpty) None else Some(kept.mkString(File.pathSeparator))
+    val kept    = pathEntries(search).filter(entry => trusted(entry).isDefined).distinct
+    def fallback = (if (search.windows) search.systemDirectories.map(_.toString) else PosixFallbackPath)
+      .filter(entry => trusted(entry).isDefined)
+      .distinct
+    Some(if (kept.nonEmpty) kept else fallback).filter(_.nonEmpty).map(_.mkString(File.pathSeparator))
   }
+
+  /** The `PATH` a POSIX command's process gets when none of the runner's entries is kept: the system's binaries. */
+  val PosixFallbackPath: Seq[String] = Seq("/usr/bin", "/bin")
 
   /**
    * Whether a `PATH` entry names a directory the runner may run a program from: the directory, or None when the entry
@@ -221,10 +234,23 @@ private[runner] object ProgramResolver {
   private def fileNames(program: String, windows: Boolean): Seq[String] =
     if (windows) Seq(program + ".exe", program + ".com") else Seq(program)
 
-  /** Each path as written (absolute, normalized) and as its real path, where it exists. */
+  /**
+   * Each path as written (absolute, normalized) and as its real path: where it does not exist, its nearest existing
+   * ancestor's real path with the rest appended, so an entry not yet made under a link into the workspace is judged
+   * by where the link leads (#1805).
+   */
   private def expand(paths: Seq[Path]): Seq[Path] =
     paths.flatMap { p =>
       val absolute = p.toAbsolutePath.normalize()
-      absolute +: Try(absolute.toRealPath()).toOption.toSeq
+      absolute +: realPath(absolute).toSeq
     }.distinct
+
+  private def realPath(absolute: Path): Option[Path] =
+    Iterator
+      .iterate(Option(absolute))(_.flatMap(p => Option(p.getParent)))
+      .takeWhile(_.isDefined)
+      .flatten
+      .flatMap(ancestor => Try(ancestor.toRealPath().resolve(ancestor.relativize(absolute))).toOption)
+      .nextOption()
+      .map(_.normalize())
 }
