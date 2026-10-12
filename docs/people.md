@@ -27,7 +27,7 @@ liaisons with sponsors, and conference programme committees.
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
 | <img src="/people/kannupriya-kalra.jpg" alt="Kannupriya Kalra" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
-| <img src="https://github.com/rorygraves.png?size=48" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
+| <img src="/people/rory-graves.jpg" alt="Rory Graves" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
 
 ---
 
@@ -52,7 +52,7 @@ are the decision-makers when no consensus is reached among contributors.
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
 | <img src="/people/kannupriya-kalra.jpg" alt="Kannupriya Kalra" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
-| <img src="https://github.com/rorygraves.png?size=48" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
+| <img src="/people/rory-graves.jpg" alt="Rory Graves" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
 
 ---
 
@@ -98,7 +98,7 @@ To report a security issue privately, see [`SECURITY.md`](https://github.com/llm
 | | Name | GitHub |
 |---|---|---|
 | <img src="https://github.com/AnshumanAI.png?size=48" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) |
-| <img src="https://github.com/rorygraves.png?size=48" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) |
+| <img src="/people/rory-graves.jpg" alt="Rory Graves" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) |
 
 > Actively seeking additional members — comment on [issue #1117](https://github.com/llm4s/llm4s/issues/1117) if you're interested.
 
