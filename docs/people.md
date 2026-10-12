@@ -125,17 +125,17 @@ and community outreach.
 
 | Location | Name | Role | LinkedIn |
 |---|---|---|---|
-| France | **Olivier Nouguier** | Chapter Lead — France | [linkedin.com/in/olivier-nouguier](https://www.linkedin.com/in/olivier-nouguier/) |
-| Abu Dhabi | **Yoshita Sharma** | Chapter Lead — Abu Dhabi | [linkedin.com/in/yoshita-sharma-trojan](https://www.linkedin.com/in/yoshita-sharma-trojan/) |
-| London | **Dmitry Mamonov** | Chapter Lead — London | [linkedin.com/in/dmamonov](https://www.linkedin.com/in/dmamonov/) |
-| Germany | **Vitthal Mirji** | Chapter Lead — Germany | [linkedin.com/in/vitthal10](https://www.linkedin.com/in/vitthal10/) |
-| Italy | **Giovanni Ruggiero** | Chapter Lead — Italy | [linkedin.com/in/giovanniruggiero](https://www.linkedin.com/in/giovanniruggiero/) |
-| Seattle | **Ansh K Shah** | Chapter Lead — Seattle | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
-| Silicon Valley | **Ipsit Sahoo** | Chapter Lead — Silicon Valley | [linkedin.com/in/ipsit-sahoo](https://www.linkedin.com/in/ipsit-sahoo/) |
-| San Francisco | **Pritish Yuvraj** | Chapter Lead — San Francisco | [linkedin.com/in/pritishyuvraj](https://www.linkedin.com/in/pritishyuvraj/) |
-| New York | **Aatif Ullah** | Chapter Lead — New York | [linkedin.com/in/aatif-ullah-92308a49](https://www.linkedin.com/in/aatif-ullah-92308a49/) |
-| Texas | **Gopi Trinadh** | Chapter Lead — Texas | [linkedin.com/in/gopitrinadhmaddikunta](https://www.linkedin.com/in/gopitrinadhmaddikunta/) |
-| Switzerland | **Elvan Konukseven** | Chapter Lead — Switzerland | [linkedin.com/in/elvan-konukseven](https://www.linkedin.com/in/elvan-konukseven/) |
+| 🇫🇷 France | **Olivier Nouguier** | Chapter Lead — France | [linkedin.com/in/olivier-nouguier](https://www.linkedin.com/in/olivier-nouguier/) |
+| 🇦🇪 Abu Dhabi | **Yoshita Sharma** | Chapter Lead — Abu Dhabi | [linkedin.com/in/yoshita-sharma-trojan](https://www.linkedin.com/in/yoshita-sharma-trojan/) |
+| 🇬🇧 London | **Dmitry Mamonov** | Chapter Lead — London | [linkedin.com/in/dmamonov](https://www.linkedin.com/in/dmamonov/) |
+| 🇩🇪 Germany | **Vitthal Mirji** | Chapter Lead — Germany | [linkedin.com/in/vitthal10](https://www.linkedin.com/in/vitthal10/) |
+| 🇮🇹 Italy | **Giovanni Ruggiero** | Chapter Lead — Italy | [linkedin.com/in/giovanniruggiero](https://www.linkedin.com/in/giovanniruggiero/) |
+| 🇺🇸 Seattle | **Ansh K Shah** | Chapter Lead — Seattle | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
+| 🇺🇸 Silicon Valley | **Ipsit Sahoo** | Chapter Lead — Silicon Valley | [linkedin.com/in/ipsit-sahoo](https://www.linkedin.com/in/ipsit-sahoo/) |
+| 🇺🇸 San Francisco | **Pritish Yuvraj** | Chapter Lead — San Francisco | [linkedin.com/in/pritishyuvraj](https://www.linkedin.com/in/pritishyuvraj/) |
+| 🇺🇸 New York | **Aatif Ullah** | Chapter Lead — New York | [linkedin.com/in/aatif-ullah-92308a49](https://www.linkedin.com/in/aatif-ullah-92308a49/) |
+| 🇺🇸 Texas | **Gopi Trinadh** | Chapter Lead — Texas | [linkedin.com/in/gopitrinadhmaddikunta](https://www.linkedin.com/in/gopitrinadhmaddikunta/) |
+| 🇨🇭 Switzerland | **Elvan Konukseven** | Chapter Lead — Switzerland | [linkedin.com/in/elvan-konukseven](https://www.linkedin.com/in/elvan-konukseven/) |
 
 ---
 
