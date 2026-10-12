@@ -427,6 +427,11 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
       results.foreach(_.get() shouldBe a[JLlmClient])
     }
 
+    "build a client that reports to a MetricsCollector, without a request" in {
+      GuideSnippets.withMetrics(org.llm4s.metrics.MetricsCollector.noop).isSuccess shouldBe true
+      GuideSnippets.withMetrics(null).isSuccess shouldBe true
+    }
+
     "offer the with methods the guide names" in {
       val openai = OpenAIConfig.apply("sk-test", "gpt-4o-mini")
       openai.withContextWindow(1000).contextWindow shouldBe 1000

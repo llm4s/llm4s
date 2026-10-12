@@ -3,8 +3,25 @@ package org.llm4s.metrics
 import io.micrometer.core.instrument.config.MeterFilter
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.micrometer.core.instrument.{ Meter, MeterRegistry, Timer }
-import org.llm4s.error.{ AuthenticationError, CancelledError, NetworkError, RateLimitError, ServiceError, TimeoutError }
-import org.llm4s.llmconnect.model.TokenUsage
+import org.llm4s.error.{
+  AuthenticationError,
+  CancelledError,
+  LLMError,
+  NetworkError,
+  RateLimitError,
+  ServiceError,
+  TimeoutError
+}
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model.{
+  Completion,
+  CompletionOptions,
+  Conversation,
+  StreamedChunk,
+  TokenUsage,
+  UserMessage
+}
+import org.llm4s.reliability.{ CircuitBreakerConfig, ReliabilityConfig, ReliableClient, RetryPolicy }
 import org.llm4s.llmconnect.provider.MetricsRecording
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -271,11 +288,23 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
     counter(registry, Names.CircuitBreakerTransitions, "state" -> "other") shouldBe Some(2.0)
   }
 
-  "recordError" should "count a failure outside a timed request under error_type" in {
+  "recordError" should "count a failure outside a timed request under error_type, on its own meter" in {
     val (registry, metrics) = fresh()
     metrics.recordError(ErrorKind.Validation, "openai")
-    counter(registry, Names.Errors, "provider" -> "openai", "error_type" -> "validation") shouldBe Some(1.0)
+    counter(registry, Names.ReliabilityErrors, "provider" -> "openai", "error_type" -> "validation") shouldBe Some(
+      1.0
+    )
+    tagKeys(registry, Names.ReliabilityErrors) shouldBe Set("provider", "error_type")
     meters(registry, Names.Requests) shouldBe 0
+  }
+
+  it should "not feed llm4s.errors, which counts only failed requests and image generations, as in the Prometheus module" in {
+    val (registry, metrics) = fresh()
+    allKinds.foreach { case (kind, _) => metrics.recordError(kind, "openai") }
+    meters(registry, Names.Errors) shouldBe 0
+    allKinds.foreach { case (_, label) =>
+      counter(registry, Names.ReliabilityErrors, "error_type" -> label) shouldBe Some(1.0)
+    }
   }
 
   // --- images -----------------------------------------------------------------------------------
@@ -505,6 +534,53 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
       counter(registry, Names.Errors, "error_type" -> label) shouldBe Some(1.0)
       meters(registry, Names.Tokens) shouldBe 0
     }
+  }
+
+  // --- through ReliableClient (#1817) -----------------------------------------------------------
+
+  /** A provider-shaped client whose every call fails, observed through `MetricsRecording` as real clients are. */
+  final private class FailingClient(protected val metrics: MetricsCollector, error: LLMError)
+      extends LLMClient
+      with MetricsRecording {
+    val calls = new java.util.concurrent.atomic.AtomicInteger(0)
+    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
+      calls.incrementAndGet()
+      withMetrics("probe", "probe-model", Left(error), (_: Completion) => None, (_: Completion) => None)
+    }
+    override def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] = complete(conversation, options)
+    override def getContextWindow(): Int     = 4096
+    override def getReserveCompletion(): Int = 512
+  }
+
+  "With ReliableClient and the provider client on one collector" should "count each failed attempt once in llm4s.errors and the final failure once in llm4s.reliability.errors" in {
+    val (registry, metrics) = fresh()
+    val provider            = new FailingClient(metrics, ServiceError(503, "probe", "unavailable"))
+    val reliable = new ReliableClient(
+      provider,
+      "probe",
+      ReliabilityConfig(
+        retryPolicy = RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millisecond),
+        circuitBreaker = CircuitBreakerConfig.disabled,
+        deadline = None
+      ),
+      Some(metrics),
+      sleep = _ => ()
+    )
+
+    reliable.complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions()).isLeft shouldBe true
+
+    provider.calls.get shouldBe 3
+    counter(registry, Names.Requests, "status" -> "error_service_error") shouldBe Some(3.0)
+    // Before #1817 recordError fed this counter too, so it read 4.0 for three failed attempts.
+    counter(registry, Names.Errors, "provider" -> "probe", "error_type" -> "service_error") shouldBe Some(3.0)
+    counter(registry, Names.ReliabilityErrors, "provider" -> "probe", "error_type" -> "service_error") shouldBe Some(
+      1.0
+    )
+    counter(registry, Names.Retries, "provider" -> "probe") shouldBe Some(2.0)
   }
 
   implicit private class OptionOps[A](private val option: Option[A]) {
