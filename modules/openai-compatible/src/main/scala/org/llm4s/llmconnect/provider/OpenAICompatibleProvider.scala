@@ -195,6 +195,16 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
   def buildConfig(providerName: String, section: NamedProviderConfig)(using
     ContextWindowResolver
   ): Result[ProviderConfig] =
+    configOf(providerName, section)
+
+  /**
+   * [[buildConfig]], typed: the config a section describes, its context window from the model registry when the
+   * section sets none. `llm4s-java-api`'s `openAiCompatible()` builder makes its config here, so it gives exactly what
+   * the same values in `application.conf` give.
+   */
+  private[llm4s] def configOf(providerName: String, section: NamedProviderConfig)(using
+    ContextWindowResolver
+  ): Result[OpenAICompatibleConfig] =
     validatedConfig(providerName, section)(baseUrl =>
       registryWindow(providerName, section.model.asString, baseUrl, section.extra(RegistryProviderKey))
     )

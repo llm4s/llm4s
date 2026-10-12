@@ -1,6 +1,7 @@
 package org.llm4s.javaapi;
 
 import java.time.Duration;
+import org.llm4s.metrics.MetricsCollector;
 
 /**
  * Builds a {@link JLlmClient} for Azure OpenAI in code, with no {@code application.conf} and no Scala type: start
@@ -74,6 +75,16 @@ public final class AzureOpenAiClientBuilder {
   /** How long a streamed call may go without a chunk, more than zero; {@code null} for the provider's default. */
   public AzureOpenAiClientBuilder streamTimeout(Duration streamTimeout) {
     return new AzureOpenAiClientBuilder(settings.streamTimeout(streamTimeout));
+  }
+
+  /**
+   * Where the client reports every call - request outcome, duration, tokens and cost - such as a
+   * {@code MicrometerMetrics} from {@code llm4s-observability-micrometer} over the application's
+   * {@code MeterRegistry}, as {@link Llm4s#createClient(org.llm4s.llmconnect.config.ProviderConfig, MetricsCollector)}
+   * does for a config object; {@code null}, the default, records nothing.
+   */
+  public AzureOpenAiClientBuilder metrics(MetricsCollector metrics) {
+    return new AzureOpenAiClientBuilder(settings.metrics(metrics));
   }
 
   /**

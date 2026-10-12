@@ -14,6 +14,7 @@ import org.llm4s.javaapi.Llm4s;
 import org.llm4s.javaapi.OllamaClientBuilder;
 import org.llm4s.javaapi.OpenAiClientBuilder;
 import org.llm4s.javaapi.OpenAiCompatibleClientBuilder;
+import org.llm4s.metrics.MetricsCollector;
 
 /**
  * The client builders as a Java application in its own package uses them (#1489): no {@code application.conf}, no
@@ -23,8 +24,11 @@ import org.llm4s.javaapi.OpenAiCompatibleClientBuilder;
 public final class ClientBuilderCheck {
   private ClientBuilderCheck() {}
 
-  /** Asks each provider, at {@code baseUrl}, "Say hi", with the key and model the spec checks reach the request. */
-  public static List<String> askEach(String baseUrl) {
+  /**
+   * Asks each provider, at {@code baseUrl}, "Say hi", with the key and model the spec checks reach the request, each
+   * client reporting its call to {@code metrics} ({@code null} records nothing).
+   */
+  public static List<String> askEach(String baseUrl, MetricsCollector metrics) {
     List<String> answers = new ArrayList<>();
     answers.add("openai: " + ask(Llm4s.openAi()
         .apiKey("sk-openai-java")
@@ -32,33 +36,39 @@ public final class ClientBuilderCheck {
         .baseUrl(baseUrl + "/v1")
         .organization("org-java")
         .requestTimeout(Duration.ofSeconds(30))
+        .metrics(metrics)
         .build()));
     answers.add("anthropic: " + ask(Llm4s.anthropic()
         .apiKey("sk-ant-java")
         .model("claude-sonnet-4-20250514")
         .baseUrl(baseUrl)
+        .metrics(metrics)
         .build()));
     answers.add("gemini: " + ask(Llm4s.gemini()
         .apiKey("gemini-java-key")
         .model("gemini-2.0-flash")
         .baseUrl(baseUrl)
+        .metrics(metrics)
         .build()));
     answers.add("ollama: " + ask(Llm4s.ollama()
         .model("llama3.2")
         .baseUrl(baseUrl)
         .contextWindow(8192)
         .reserveCompletion(1024)
+        .metrics(metrics)
         .build()));
     answers.add("openai-compatible: " + ask(Llm4s.openAiCompatible()
         .baseUrl(baseUrl + "/v1")
         .model("local-model")
         .apiKey("sk-local-java")
         .header("X-Team-Id", "team-7")
+        .metrics(metrics)
         .build()));
     answers.add("azure: " + ask(Llm4s.azureOpenAi()
         .endpoint(baseUrl)
         .apiKey("azure-java-key")
         .model("my-deployment")
+        .metrics(metrics)
         .build()));
     return answers;
   }
@@ -95,14 +105,14 @@ public final class ClientBuilderCheck {
     OpenAiClientBuilder openAi = Llm4s.openAi().apiKey("sk-secret-1").model("gpt-4o-mini");
     AnthropicClientBuilder anthropic = Llm4s.anthropic().apiKey("sk-secret-2").model("claude");
     GeminiClientBuilder gemini = Llm4s.gemini().apiKey("sk-secret-3").model("gemini-2.0-flash");
-    OllamaClientBuilder ollama = Llm4s.ollama().model("llama3.2").baseUrl("http://gpu-box:11434");
+    OllamaClientBuilder ollama = Llm4s.ollama().model("llama3.2").baseUrl("http://ops:sk-secret-7@gpu-box:11434");
     OpenAiCompatibleClientBuilder compatible = Llm4s.openAiCompatible()
         .baseUrl("http://localhost:8000/v1")
         .model("m")
         .apiKey("sk-secret-4")
         .header("Authorization-Extra", "sk-secret-5");
     AzureOpenAiClientBuilder azure = Llm4s.azureOpenAi()
-        .endpoint("https://r.openai.azure.com")
+        .endpoint("https://r.openai.azure.com/?sig=sk-secret-8")
         .apiKey("sk-secret-6")
         .model("d")
         .apiVersion("2024-10-21");
