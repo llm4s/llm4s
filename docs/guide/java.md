@@ -148,17 +148,22 @@ LlmResult<JLlmClient> gateway = Llm4s.openAiCompatible()
 
 What each provider needs is required - an API key and a model, for Ollama the model alone, for an OpenAI-compatible
 server its base URL and model, for Azure the endpoint, key and deployment - and everything else has the default
-`application.conf` would give it: the provider's own base URL (`http://localhost:11434` for Ollama), and the context
-window and reply reserve the model catalogue lists for the model. `baseUrl`, `contextWindow`, `reserveCompletion`,
-`requestTimeout` and `streamTimeout` (each a `java.time.Duration`) override them, as do `organization` for OpenAI,
-`apiVersion` for Azure and `header` for an OpenAI-compatible server.
+`application.conf` would give it: a builder makes the same config as a section with the same values. That means the
+provider's own base URL (`http://localhost:11434` for Ollama), and the context window and reply reserve the model
+catalogue lists for the model; for an OpenAI-compatible server, the catalogue's window for the provider its base URL's
+host names (Groq, Together, Fireworks, xAI, Perplexity), else 8192 tokens. `baseUrl`, `contextWindow`,
+`reserveCompletion`, `requestTimeout` and `streamTimeout` (each a `java.time.Duration`, at most about 292 years)
+override them, as do `organization` for OpenAI, `apiVersion` for Azure and `header` for an OpenAI-compatible server. A
+context window set without a reserve keeps a quarter of itself for the reply, up to the reserve the provider would
+otherwise use, as a section's `contextWindow` does. `metrics(MetricsCollector)` makes the client report every call, as
+[`createClient(config, metrics)`](#recording-metrics) does.
 
 `build()` sends no request and does not throw. A required field left out - or set to `null` or a blank string, as
 `System.getenv` returns for a variable that is not set - is a failed result of kind `VALIDATION` whose message names
 it (`Field 'apiKey' is required`), as is a value out of range, such as a context window of zero. A builder is
 immutable, so one can be kept and forked: `base.model("gpt-4o")` returns a new builder and leaves `base` as it was.
-Its `toString` prints the API key as `***` and an OpenAI-compatible server's headers by name only, so a builder can be
-logged.
+Its `toString` prints the API key as `***`, an OpenAI-compatible server's headers by name only, and a base URL or
+endpoint without its userinfo, query or fragment, so a builder can be logged.
 
 For any other provider - one from its own module, such as `llm4s-bedrock` - `Llm4s.createClient(ProviderConfig)` takes
 the provider's config object. OpenAI, Anthropic and Ollama have one with a Java entry point too, which takes the

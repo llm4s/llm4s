@@ -14,9 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `requestTimeout`/`streamTimeout` (`java.time.Duration`) and each provider's own fields (`organization`, `apiVersion`,
   `header`), whose `build()` returns `LlmResult<JLlmClient>`. A required field left out, `null` or blank, or a value out
   of range, is a failed result of kind `VALIDATION` naming the field; `build()` sends no request and never throws, and
-  `toString` prints the key as `***`. Defaults are those `application.conf` gives - the provider's base URL and the
-  model catalogue's context window - because each builder makes its config through the provider's public `fromValues`
-  and `with` setters, never a constructor. Other providers still take a config object through
+  `toString` prints the key as `***` and URLs without userinfo, query or fragment. Defaults are those `application.conf`
+  gives - the provider's base URL and the model catalogue's context window, for an OpenAI-compatible server the window
+  for the provider its base URL's host names - because each builder makes its config as the provider's descriptor makes
+  it from a section, and a test compares the two. `metrics(MetricsCollector)` attaches a collector, as
+  `Llm4s.createClient(config, metrics)` does. Other providers still take a config object through
   `Llm4s.createClient(ProviderConfig)`. See [Configure in code](docs/guide/java.md#configure-in-code).
 - **Kotlin `AgentKt.forget(threadId)`** ([#1693](https://github.com/llm4s/llm4s/issues/1693)): a suspend function
   that forgets a conversation by its thread id, delegating to `JAgent.forget(threadId)` and throwing `LLMException`
