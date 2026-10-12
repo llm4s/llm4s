@@ -18,8 +18,8 @@ liaisons with sponsors, and conference programme committees.
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="docs/people/kannupriya-kalra.jpg" alt="Kannupriya Kalra" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
-| <img src="docs/people/rory-graves.jpg" alt="Rory Graves" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
+| <img src="docs/people/kannupriya-kalra.jpg" alt="Kannupriya Kalra" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
+| <img src="docs/people/rory-graves.jpg" alt="Rory Graves" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
 
 ---
 
@@ -27,12 +27,12 @@ liaisons with sponsors, and conference programme committees.
 
 | Photo | Name | Role | LinkedIn |
 |---|---|---|---|
-| <img src="docs/people/gagandeep-kalra.jpg" alt="Gagandeep Kalra" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Gagandeep Kalra** | Foundation Core Team Member | [linkedin.com/in/gagandeep-kalra-9b23b2b1](https://www.linkedin.com/in/gagandeep-kalra-9b23b2b1/) |
-| <img src="docs/people/pavan-vamsi.jpg" alt="Pavan Vamsi" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Pavan Vamsi** | Foundation Core Team Member | [linkedin.com/in/pavanvamsi3](https://www.linkedin.com/in/pavanvamsi3/) |
-| <img src="docs/people/namrata-priyadarshani.jpg" alt="Namrata Priyadarshani" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Namrata Priyadarshani** | Foundation Core Team Member | [linkedin.com/in/namrata-priyadarshani-61a316159](https://www.linkedin.com/in/namrata-priyadarshani-61a316159/) |
+| <img src="docs/people/gagandeep-kalra.jpg" alt="Gagandeep Kalra" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:left top"> | **Gagandeep Kalra** | Foundation Core Team Member | [linkedin.com/in/gagandeep-kalra-9b23b2b1](https://www.linkedin.com/in/gagandeep-kalra-9b23b2b1/) |
+| <img src="docs/people/pavan-vamsi.jpg" alt="Pavan Vamsi" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Pavan Vamsi** | Foundation Core Team Member | [linkedin.com/in/pavanvamsi3](https://www.linkedin.com/in/pavanvamsi3/) |
+| <img src="docs/people/namrata-priyadarshani.jpg" alt="Namrata Priyadarshani" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Namrata Priyadarshani** | Foundation Core Team Member | [linkedin.com/in/namrata-priyadarshani-61a316159](https://www.linkedin.com/in/namrata-priyadarshani-61a316159/) |
 |  | **Ipsit Sahoo** | Foundation Core Team Member | [linkedin.com/in/ipsit-sahoo](https://www.linkedin.com/in/ipsit-sahoo/) |
-| <img src="docs/people/ansh-k-shah.jpg" alt="Ansh K Shah" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Ansh K Shah** | Foundation Core Team Member | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
-| <img src="docs/people/christopher-wheeler.jpg" alt="Christopher Wheeler" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Christopher Wheeler** | Foundation Core Team Member | [linkedin.com/in/chris-w-1499161a](https://www.linkedin.com/in/chris-w-1499161a/) |
+| <img src="docs/people/ansh-k-shah.jpg" alt="Ansh K Shah" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Ansh K Shah** | Foundation Core Team Member | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
+| <img src="docs/people/christopher-wheeler.jpg" alt="Christopher Wheeler" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Christopher Wheeler** | Foundation Core Team Member | [linkedin.com/in/chris-w-1499161a](https://www.linkedin.com/in/chris-w-1499161a/) |
 
 ---
 
@@ -43,8 +43,8 @@ are the decision-makers when no consensus is reached among contributors.
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="docs/people/kannupriya-kalra.jpg" alt="Kannupriya Kalra" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
-| <img src="docs/people/rory-graves.jpg" alt="Rory Graves" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
+| <img src="docs/people/kannupriya-kalra.jpg" alt="Kannupriya Kalra" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
+| <img src="docs/people/rory-graves.jpg" alt="Rory Graves" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
 
 ---
 
@@ -55,27 +55,28 @@ cross-cutting decisions. Members are recognised for sustained, high-quality cont
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="docs/people/247329.jpg" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Atul S. Khot** | [@atulkhot](https://github.com/atulkhot) | [linkedin.com/in/atul-s-khot-035b4b1](https://www.linkedin.com/in/atul-s-khot-035b4b1) |
-| <img src="docs/people/vim89.jpeg" alt="Vitthal Mirji" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **[Vitthal Mirji](https://vitthalmirji.com/)** | [@vim89](https://github.com/vim89) | [linkedin.com/in/vitthal10](https://www.linkedin.com/in/vitthal10/) |
-| <img src="https://github.com/iyadi.png?size=416" alt="Iyad M. Issa" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Iyad M. Issa** | [@iyadi](https://github.com/iyadi) | [linkedin.com/in/iyadissa](https://www.linkedin.com/in/iyadissa) |
-| <img src="docs/people/giovanni-ruggiero.jpg" alt="Giovanni Ruggiero" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Giovanni Ruggiero** | [@gruggiero](https://github.com/gruggiero) | [linkedin.com/in/giovanniruggiero](https://www.linkedin.com/in/giovanniruggiero) |
-| <img src="https://github.com/dmamonov.png?size=416" alt="Dmitry Mamonov" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Dmitry Mamonov** | [@dmamonov](https://github.com/dmamonov) | [linkedin.com/in/dmamonov](https://www.linkedin.com/in/dmamonov) |
+| <img src="docs/people/247329.jpg" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Atul S. Khot** | [@atulkhot](https://github.com/atulkhot) | [linkedin.com/in/atul-s-khot-035b4b1](https://www.linkedin.com/in/atul-s-khot-035b4b1) |
+| <img src="docs/people/vim89.jpeg" alt="Vitthal Mirji" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **[Vitthal Mirji](https://vitthalmirji.com/)** | [@vim89](https://github.com/vim89) | [linkedin.com/in/vitthal10](https://www.linkedin.com/in/vitthal10/) |
+| <img src="https://github.com/iyadi.png?size=416" alt="Iyad M. Issa" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Iyad M. Issa** | [@iyadi](https://github.com/iyadi) | [linkedin.com/in/iyadissa](https://www.linkedin.com/in/iyadissa) |
+| <img src="docs/people/giovanni-ruggiero.jpg" alt="Giovanni Ruggiero" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Giovanni Ruggiero** | [@gruggiero](https://github.com/gruggiero) | [linkedin.com/in/giovanniruggiero](https://www.linkedin.com/in/giovanniruggiero) |
+| <img src="https://github.com/dmamonov.png?size=416" alt="Dmitry Mamonov" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Dmitry Mamonov** | [@dmamonov](https://github.com/dmamonov) | [linkedin.com/in/dmamonov](https://www.linkedin.com/in/dmamonov) |
 
 > This list is a starting point — please add names via comments on
 > [issue #1117](https://github.com/llm4s/llm4s/issues/1117) or a PR.
 
 ---
 
-## Regular Members
+## Significant Individual Contributors
 
-Regular members are active contributors with merged pull requests who participate in
+Significant individual contributors are active contributors with merged pull requests who participate in
 project discussions and direction.
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="docs/people/117119879.jpg" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Shubham Vishwakarma** | [@Vi-shub](https://github.com/Vi-shub) | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
-| <img src="docs/people/mai.jpg" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) | [linkedin.com/in/autodidact](https://www.linkedin.com/in/autodidact) |
-| <img src="docs/people/vansh-sharma.jpg" alt="Vansh Sharma" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Vansh Sharma** | [@vansh7nvc](https://github.com/vansh7nvc) | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
+| <img src="docs/people/117119879.jpg" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Shubham Vishwakarma** | [@Vi-shub](https://github.com/Vi-shub) | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
+| <img src="docs/people/mai.jpg" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) | [linkedin.com/in/autodidact](https://www.linkedin.com/in/autodidact) |
+| <img src="docs/people/vansh-sharma.jpg" alt="Vansh Sharma" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Vansh Sharma** | [@vansh7nvc](https://github.com/vansh7nvc) | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
+| <img src="docs/people/elvan.jpg" alt="Elvan Konukseven" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Elvan Konukseven** | [@elvankonukseven](https://github.com/elvankonukseven) | [https://www.linkedin.com/in/elvan-konukseven/](https://www.linkedin.com/in/elvan-konukseven/) |
 
 > **Add yourself:** If you have merged PRs and would like to be listed here,
 > open a PR adding your row.
@@ -89,8 +90,8 @@ To report a security issue privately, see [`SECURITY.md`](https://github.com/llm
 
 | | Name | GitHub |
 |---|---|---|
-| <img src="docs/people/mai.jpg" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) |
-| <img src="docs/people/rory-graves.jpg" alt="Rory Graves" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) |
+| <img src="docs/people/mai.jpg" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) |
+| <img src="docs/people/rory-graves.jpg" alt="Rory Graves" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) |
 
 > Actively seeking additional members — comment on [issue #1117](https://github.com/llm4s/llm4s/issues/1117) if you're interested.
 
@@ -103,11 +104,34 @@ and community outreach.
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="docs/people/vansh-sharma.jpg" alt="Vansh Sharma" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Vansh Sharma** | [@vansh7nvc](https://github.com/vansh7nvc) | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
-| <img src="docs/people/117119879.jpg" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Shubham Vishwakarma** | [@Vi-shub](https://github.com/Vi-shub) | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
-| <img src="docs/people/mai.jpg" width="208" height="208" style="border-radius:50%;width:208px;height:208px;max-width:none;object-fit:cover"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) | [linkedin.com/in/autodidact](https://www.linkedin.com/in/autodidact) |
+| <img src="docs/people/ansh-k-shah.jpg" alt="Ansh K Shah" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Ansh K Shah** |  | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
+| <img src="docs/people/117119879.jpg" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Shubham Vishwakarma** | [@Vi-shub](https://github.com/Vi-shub) | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
+| <img src="docs/people/mai.jpg" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) | [linkedin.com/in/autodidact](https://www.linkedin.com/in/autodidact) |
+| <img src="docs/people/Gopi.jpg" alt="Gopi Trinadh" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Gopi Trinadh** | [@GOPITRINADH3561](https://github.com/GOPITRINADH3561) | [https://www.linkedin.com/in/gopitrinadhmaddikunta/](https://www.linkedin.com/in/gopitrinadhmaddikunta/) |
+
 
 > **Add yourself:** Open a PR or comment on [issue #1117](https://github.com/llm4s/llm4s/issues/1117).
+
+---
+
+## LLM4S Global Chapter Leaders
+
+| Landmark | Location | Name | Role | LinkedIn |
+|---|---|---|---|---|
+| <img src="docs/images/chapters/merlion.svg" alt="Merlion, Singapore" title="Merlion, Singapore" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇸🇬 Singapore | **Gagandeep Kalra** | Chapter Lead — Singapore | [linkedin.com/in/gagandeep-kalra-9b23b2b1](https://www.linkedin.com/in/gagandeep-kalra-9b23b2b1/) |
+| <img src="docs/images/chapters/gateway-of-india.svg" alt="Gateway of India" title="Gateway of India" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇮🇳 Mumbai | **Shubham Vishwakarma** | Chapter Lead — Mumbai | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
+| <img src="docs/images/chapters/india-gate.svg" alt="India Gate" title="India Gate" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇮🇳 Delhi | **Vansh Sharma** | Chapter Lead — Delhi | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
+| <img src="docs/images/chapters/eiffel-tower.svg" alt="Eiffel Tower" title="Eiffel Tower" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇫🇷 France | **Olivier Nouguier** | Chapter Lead — France | [linkedin.com/in/olivier-nouguier](https://www.linkedin.com/in/olivier-nouguier/) |
+| <img src="docs/images/chapters/sheikh-zayed-mosque.svg" alt="Sheikh Zayed Grand Mosque" title="Sheikh Zayed Grand Mosque" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇦🇪 Abu Dhabi | **Yoshita Sharma** | Chapter Lead — Abu Dhabi | [linkedin.com/in/yoshita-sharma-trojan](https://www.linkedin.com/in/yoshita-sharma-trojan/) |
+| <img src="docs/images/chapters/elizabeth-tower.svg" alt="Elizabeth Tower (Big Ben)" title="Elizabeth Tower (Big Ben)" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇬🇧 London | **Dmitry Mamonov** | Chapter Lead — London | [linkedin.com/in/dmamonov](https://www.linkedin.com/in/dmamonov/) |
+| <img src="docs/images/chapters/brandenburg-gate.svg" alt="Brandenburg Gate" title="Brandenburg Gate" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇩🇪 Germany | **Vitthal Mirji** | Chapter Lead — Germany | [linkedin.com/in/vitthal10](https://www.linkedin.com/in/vitthal10/) |
+| <img src="docs/images/chapters/colosseum.svg" alt="Colosseum" title="Colosseum" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇮🇹 Italy | **Giovanni Ruggiero** | Chapter Lead — Italy | [linkedin.com/in/giovanniruggiero](https://www.linkedin.com/in/giovanniruggiero/) |
+| <img src="docs/images/chapters/space-needle.svg" alt="Space Needle" title="Space Needle" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 Seattle | **Ansh K Shah** | Chapter Lead — Seattle | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
+| <img src="docs/images/chapters/stanford-hoover-tower.svg" alt="Hoover Tower, Stanford University" title="Hoover Tower, Stanford University" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 Silicon Valley | **Ipsit Sahoo** | Chapter Lead — Silicon Valley | [linkedin.com/in/ipsit-sahoo](https://www.linkedin.com/in/ipsit-sahoo/) |
+| <img src="docs/images/chapters/golden-gate-bridge.svg" alt="Golden Gate Bridge" title="Golden Gate Bridge" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 San Francisco | **Pritish Yuvraj** | Chapter Lead — San Francisco | [linkedin.com/in/pritishyuvraj](https://www.linkedin.com/in/pritishyuvraj/) |
+| <img src="docs/images/chapters/statue-of-liberty.svg" alt="Statue of Liberty" title="Statue of Liberty" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 New York | **Aatif Ullah** | Chapter Lead — New York | [linkedin.com/in/aatif-ullah-92308a49](https://www.linkedin.com/in/aatif-ullah-92308a49/) |
+| <img src="docs/images/chapters/alamo.svg" alt="The Alamo" title="The Alamo" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇺🇸 Texas | **Gopi Trinadh** | Chapter Lead — Texas | [linkedin.com/in/gopitrinadhmaddikunta](https://www.linkedin.com/in/gopitrinadhmaddikunta/) |
+| <img src="docs/images/chapters/chapel-bridge.svg" alt="Chapel Bridge, Lucerne" title="Chapel Bridge, Lucerne" width="88" height="88" style="width:88px;height:88px;max-width:none"> | 🇨🇭 Switzerland | **Elvan Konukseven** | Chapter Lead — Switzerland | [linkedin.com/in/elvan-konukseven](https://www.linkedin.com/in/elvan-konukseven/) |
 
 ---
 
@@ -132,8 +156,10 @@ testing, design, and event support. To get involved, join the
 
 | Step | How |
 |---|---|
+| **Foundation Core Team** | Fund Foundation initiatives |
+| **LLM4S Global Chapter Leader** | Organise local community events and provide leadership for the city’s LLM4S community |
 | **Contributor** | Have a pull request merged |
-| **Regular Member** | Consistent, high-quality PRs over time; nominated by an existing member |
+| **Significant Individual Contributor** | Consistent, high-quality PRs over time; nominated by an existing member |
 | **Steering Committee** | Recognised for sustained impact and broad project knowledge; invited by Directors |
 | **Maintainer / Director** | Appointed by existing Directors for exceptional, long-term leadership |
 
