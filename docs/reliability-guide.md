@@ -360,7 +360,10 @@ val client  = new ReliableClient(baseClient, "openai", ReliabilityConfig.default
 `recordRetryAttempt`, `recordCircuitBreakerTransition` and `recordError` default to no-ops;
 `observeRequest`, `addTokens` and `recordCost` must be implemented. To also get per-call
 latency and token metrics from the provider client, pass the same collector to
-`LLMConnect.getClient(providerConfig, metrics)`.
+`LLMConnect.getClient(providerConfig, metrics)`. Both layers then report a failed call: the
+provider client once per attempt (`observeRequest`) and `ReliableClient` once for the final failure (`recordError`).
+`MicrometerMetrics` keeps the two apart (`llm4s.errors` and `llm4s.reliability.errors`), so neither counts a failure
+twice; a collector of your own should do the same.
 
 ## Error Handling
 

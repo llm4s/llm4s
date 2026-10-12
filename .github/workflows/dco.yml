@@ -3,6 +3,10 @@ name: DCO
 on:
   pull_request:
     branches: [ main ]
+  # A GitHub merge queue on main (#1638) waits for every required check to report on its merge group, so this job must
+  # run there too, under the same name. See the second step for what it checks there.
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read
@@ -14,6 +18,7 @@ jobs:
 
     steps:
       - name: Run dco-check
+        if: github.event_name == 'pull_request'
         uses: christophebedard/dco-check@0.5.1 # v0.5.0
         with:
           python-version: '3.12'
@@ -28,3 +33,15 @@ jobs:
             --exclude-pattern "\[bot\]@users\.noreply\.github\.com$"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # In a merge group there is nothing new to sign: GitHub adds a pull request to the queue only after its required
+      # checks, this one included, have passed on the pull request, and the queue itself adds only commits GitHub writes
+      # (a merge or squash of those already-checked commits). dco-check reads the pull request from the event, which a
+      # merge_group event does not carry, so it is not run here; this step reports the check for the queue instead.
+      - name: Merge group - sign-off was checked on each pull request
+        if: github.event_name == 'merge_group'
+        env:
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          echo "Merge group $BASE_SHA..$HEAD_SHA: each queued pull request passed this check before it was queued."

@@ -133,6 +133,13 @@ and [API keys](docs/getting-started/configuration.md#api-keys).
    - Reference related issues: `Fixes #123`
    - Respond to reviewer feedback
 
+6. **Landing on `main`:**
+   - Two pull requests can each be green and still break `main` together (merge skew), because a PR's CI tests the
+     merge with `main` as it was when that run started. CI also runs on GitHub's `merge_group` event, so `main` can be
+     protected by a merge queue that tests each PR on top of current `main` before it lands.
+   - When the queue bounces your PR, merge `origin/main` into your branch (`git merge --signoff origin/main`), fix the
+     clash and push. Maintainers: see [Protecting main](docs/reference/merge-queue.md) for enabling the queue.
+
 ## Code Conventions
 
 See [CLAUDE.md](CLAUDE.md) for detailed guidelines. Key points:
