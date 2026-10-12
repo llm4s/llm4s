@@ -8,6 +8,7 @@ Use `/people/<filename>` in `docs/people.md` and `docs/people/<filename>` in the
 
 | Person | Preview | File |
 |---|---|---|
+| Aatif Ullah | <img src="aatif-ullah.jpeg" alt="Aatif Ullah" width="100"> | [aatif-ullah.jpeg](aatif-ullah.jpeg) |
 | Ansh K Shah | <img src="ansh-k-shah.jpg" alt="Ansh K Shah" width="100"> | [ansh-k-shah.jpg](ansh-k-shah.jpg) |
 | Anshuman Awasthi | <img src="anshuman-awasthi.jpg" alt="Anshuman Awasthi" width="100"> | [anshuman-awasthi.jpg](anshuman-awasthi.jpg) |
 | Atul S. Khot | <img src="atul-s-khot.jpg" alt="Atul S. Khot" width="100"> | [atul-s-khot.jpg](atul-s-khot.jpg) |
@@ -39,4 +40,4 @@ Retained for reference; the People pages use the current headshots above. Numeri
 
 ## Awaiting headshots
 
-No headshots have been supplied for Aatif Ullah, Ipsit Sahoo, Olivier Nouguier, Pritish Yuvraj, or Yoshita Sharma. Add their photos using the same naming convention when available.
+No headshots have been supplied for Ipsit Sahoo, Olivier Nouguier, Pritish Yuvraj, or Yoshita Sharma. Add their photos using the same naming convention when available.
