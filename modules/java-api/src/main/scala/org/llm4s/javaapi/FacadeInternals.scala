@@ -33,7 +33,7 @@ import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 
 /**
- * Not part of the API: what the facade's classes share and the Spring Boot starter calls - reading core's Scala
+ * Not part of the API: what the facade's classes share - building a client, reading core's Scala
  * values into the facade's Java value types, and wrapping a `Result` in an [[LlmResult]].
  *
  * These lived on the facade types' own companions as `private[javaapi]` factories, which Scala 3 emits as `public
@@ -46,9 +46,8 @@ private[llm4s] object FacadeInternals {
   def result[A](result: Result[A]): LlmResult[A] = new LlmResult(FacadeToken.INSTANCE, result)
 
   /**
-   * [[Llm4s.createClient]] whose client reports every call to `metrics`: the Spring Boot starter uses it to attach the
-   * application's `MetricsCollector` bean (a Micrometer one when `llm4s-observability-micrometer` and a
-   * `MeterRegistry` are present). A null `metrics` records nothing.
+   * What both public `Llm4s.createClient` overloads do: the client for `config`, reporting every call to `metrics` (a
+   * null `metrics` records nothing; a null `config` is a failed result).
    */
   def createClient(config: ProviderConfig, metrics: MetricsCollector): LlmResult[JLlmClient] =
     if (config == null) LlmResult.failure(ValidationError.required("config"))

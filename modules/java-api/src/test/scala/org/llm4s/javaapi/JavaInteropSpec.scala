@@ -341,6 +341,7 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     Class.forName("org.llm4s.javaapi.Llm4s") -> Set(
       "createDefaultClient()",
       "createClient(ProviderConfig)",
+      "createClient(ProviderConfig,MetricsCollector)",
       "wrapClient(LLMClient)",
       "wrapEmbeddingClient(EmbeddingClient,EmbeddingModelConfig)",
       "createDefaultEmbeddingClient()",
@@ -466,7 +467,7 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
         .toSet
       constructors shouldBe intendedConstructors.getOrElse(cls, Set.empty)
       publicStatics(cls) shouldBe intendedStatics.getOrElse(cls, Set.empty)
-      // the companion's own public methods: `Llm4s$.MODULE$.createClient(config, metrics)` was callable too
+      // the companion's own public methods: `LlmResult$.MODULE$.from(either)` was callable too
       scala.util.Try(Class.forName(cls.getName + "$")).foreach { companion =>
         val offered = companion.getDeclaredMethods.toList
           .filter(m => Modifier.isPublic(m.getModifiers) && !Modifier.isStatic(m.getModifiers) && !synthetic(m.getName))

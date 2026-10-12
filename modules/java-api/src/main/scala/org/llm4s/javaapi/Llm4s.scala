@@ -55,6 +55,15 @@ object Llm4s {
     FacadeInternals.createClient(config, MetricsCollector.noop)
 
   /**
+   * [[createClient]] whose client reports every call (request outcome, duration, tokens and cost) to `metrics`, for
+   * example a `MicrometerMetrics` from `llm4s-observability-micrometer` over the application's `MeterRegistry`, or a
+   * `PrometheusMetrics` from `llm4s-observability-prometheus`. The Spring Boot starter uses it to attach the
+   * application's `MetricsCollector` bean. A null `metrics` records nothing; a null `config` is a failed result.
+   */
+  def createClient(config: ProviderConfig, metrics: MetricsCollector): LlmResult[JLlmClient] =
+    FacadeInternals.createClient(config, metrics)
+
+  /**
    * Wraps a Scala [[LLMClient]] you built yourself - a `ReliableClient` around a provider's client, your own
    * implementation, or a test double - in a [[JLlmClient]]. Closing the wrapper closes `client`.
    *
