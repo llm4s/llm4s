@@ -12,6 +12,178 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ProviderDiscoveryExample` demonstrates dynamic provider discovery via `ProviderRegistry.discover()`,
   prints the diagnostic `ProviderRegistryReport` (`report.describe`, `ids`, and `embeddingIds`), and
   contrasts discovery with an explicit registry (`ProviderRegistry.ofModules(new Llm4sOllamaModule)`).
+- **`llm4s-kotlin-api` is published to Maven Central with each release** ([#1494](https://github.com/llm4s/llm4s/issues/1494)):
+  `org.llm4s:llm4s-kotlin-api` (no `_3` suffix: a Kotlin artifact), at the release's version, depending on
+  `llm4s-java-api_3` at that same version, and managed by `llm4s-bom`, so a Gradle build that imports the BOM declares
+  `implementation("org.llm4s:llm4s-kotlin-api")`. The Gradle build in `modules/kotlin-api` gained `maven-publish`,
+  `signing` and Dokka: sources and javadoc (Dokka HTML) jars, and a POM with the same url, licence, organization, scm,
+  developers and version scheme as the sbt artifacts. Its version is the `llm4sVersion` Gradle property (default
+  `0.1.0-SNAPSHOT`), and its facade dependency moved from `implementation` to `api`, because `AgentKt`'s signatures
+  expose the facade's types and `Flow`. A new `publish-kotlin` job in `release.yml`, after `publish` and before
+  `github-release`, checks that sbt released the tag's version, builds and signs the publication, checks it
+  (`scripts/check-kotlin-publication.sh`) and uploads it to the Central Portal (`scripts/publish-kotlin-api.sh`, which
+  is safe to re-run: it uploads nothing when Central or the Portal already has the version, and fails closed when the
+  Portal cannot say). The `Kotlin API` CI job dry-runs it unsigned on every pull request and builds a throwaway project against it.
+  `sbt listPublishedArtifacts` prints it as a `gradle` line and `scripts/verify-release.sh` checks it (POM, jar, and the
+  facade version), with tests (`scripts/test-verify-release.sh`, `scripts/test-publish-kotlin-api.sh`). See
+  [Release Process](docs/reference/release.md#the-kotlin-artifact-llm4s-kotlin-api).
+- **Java client builders: a client in code, with no `application.conf` and no Scala type** ([#1489](https://github.com/llm4s/llm4s/issues/1489)):
+  `Llm4s.openAi()`, `anthropic()`, `gemini()`, `ollama()`, `openAiCompatible()` and `azureOpenAi()` return immutable
+  builders (`OpenAiClientBuilder` and so on) taking `apiKey`, `model`, `baseUrl`, `contextWindow`, `reserveCompletion`,
+  `requestTimeout`/`streamTimeout` (`java.time.Duration`) and each provider's own fields (`organization`, `apiVersion`,
+  `header`), whose `build()` returns `LlmResult<JLlmClient>`. A required field left out, `null` or blank, or a value out
+  of range, is a failed result of kind `VALIDATION` naming the field; `build()` sends no request and never throws, and
+  `toString` prints the key as `***` and URLs without userinfo, query or fragment. Defaults are those `application.conf`
+  gives - the provider's base URL and the model catalogue's context window, for an OpenAI-compatible server the window
+  for the provider its base URL's host names - because each builder makes its config as the provider's descriptor makes
+  it from a section, and a test compares the two. `metrics(MetricsCollector)` attaches a collector, as
+  `Llm4s.createClient(config, metrics)` does. Other providers still take a config object through
+  `Llm4s.createClient(ProviderConfig)`. The Kotlin API cannot wrap a builder's client yet
+  ([#1850](https://github.com/llm4s/llm4s/issues/1850)). See [Configure in code](docs/guide/java.md#configure-in-code).
+- **`MemoryManagerConfig.contextTokenBudget` and `autoExtractEntities` take effect** ([#1579](https://github.com/llm4s/llm4s/issues/1579)):
+  `getRelevantContext` without a `maxTokens` now uses the manager's `contextTokenBudget` (2000 by default, as
+  before; an explicit `maxTokens` still wins), through a new `MemoryManager.contextTokenBudget` member that
+  `SimpleMemoryManager` and `LLMMemoryManager` take from their config and other implementations inherit as
+  `MemoryManager.DefaultContextTokenBudget`. With `autoExtractEntities = true`, `recordMessage` and
+  `recordConversation` also run `extractEntities` over each recorded user and assistant message, with its
+  conversation id - one extra LLM call per message on `LLMMemoryManager`, nothing on `SimpleMemoryManager`;
+  a failed extraction is logged and the message stays recorded. `MemoryManagerConfig.fullFeatured` turns it on.
+- **`Llm4s.createClient(ProviderConfig, MetricsCollector)` is public** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
+  the `llm4s-java-api` overload that attaches a `MetricsCollector` (a `MicrometerMetrics` over the application's
+  `MeterRegistry`, say) was `private[llm4s]` for the Spring Boot starter, yet public in the bytecode, so Java callers
+  saw it and Scala callers outside `org.llm4s` could not use it. It is now public and documented
+  ([Using LLM4S from Java](docs/guide/java.md#recording-metrics)), settled before the `llm4s-java-api` MiMa baseline.
+- **Live subscriptions across runtimes** ([#1705](https://github.com/llm4s/llm4s/issues/1705), Stage 2 slice 6 of
+  [#1699](https://github.com/llm4s/llm4s/issues/1699)): a `GraphRuntime.subscribe` now delivers the durable events of
+  commits made through any runtime or process sharing the checkpointer, not only its own, in order, without gap or
+  duplicate. Each live subscription watches the store through the new SPI method `Checkpointer.awaitEventsAfter`, a
+  long poll whose default reads `eventsAfter` once per timeout. `InMemoryCheckpointer` overrides it to wake on its
+  commits; the SQLite store is polled. `WatchPolicy` (on `GraphRuntime`, default enabled, `pollInterval` 250 ms,
+  at least 1 ms) configures the watch, and `WatchPolicy.disabled` turns it off. Other runtimes' events are queued only as they fit,
+  so they never make a subscriber lag. Durable events are queued strictly contiguously: a commit of the subscriber's
+  own runtime first reads any events committed elsewhere that the watch has not read yet. Live events do not cross
+  runtimes, because they are never stored. A commit the store wrote but reported as failed is now delivered too (the
+  second corner case of [#1737](https://github.com/llm4s/llm4s/issues/1737)). `CheckpointerContract` gains
+  change-notification and cross-runtime subscription cases and a `sibling` hook, and the SQLite store passes them over
+  one and two connections, as well as with a subscriber in another process. See
+  [Streaming events](docs/guide/agents/streaming.md#subscriptions-across-runtimes).
+- **`llm4s-agent-checkpoint-sqlite`: the first durable checkpointer** ([#1701](https://github.com/llm4s/llm4s/issues/1701),
+  Stage 2 slice 2 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `SqliteCheckpointer`
+  (`org.llm4s.agent.graph.sqlite`) keeps threads - checkpoint history, pending writes, event log and run claim - in one
+  SQLite file, so a run survives a restart: a new process opens the file, replays the stopped run's events, and
+  `recover` continues it without re-running the tasks that had completed. Several stores, in one process or in several
+  on one host, can share the file; every write is one `BEGIN IMMEDIATE` transaction that checks the claim's token and
+  the thread's version and applies the commit, fencing tokens come from a counter stored in the file (so they keep
+  increasing across restarts and `deleteThread`), and claims expire by the store's injected `Clock`. The file runs in
+  WAL mode with `synchronous = FULL`; `SqliteCheckpointerConfig.busyTimeout` (default 5 s) bounds how long a write waits
+  for another connection's. The schema is versioned and migrated on open, and a file from a newer build is refused. It
+  passes `CheckpointerContract` over one connection and over two alternating connections to one file, and a test kills
+  a forked JVM mid-run and recovers its thread. It implements #1702's `history`, `checkpoint` and `prune` over a history
+  table paged by its primary key, each write one transaction; the table is part of schema version 1, since no released
+  build wrote a file without it, and opening a version-1 file from a pre-release build creates it. The sample `SqliteRestartRecoveryExample` shows a restart
+  and recovery.
+  See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#the-sqlite-store).
+- **`sbt pomMetadataCheck`: every published POM carries its metadata** ([#1455](https://github.com/llm4s/llm4s/issues/1455)):
+  a CI quick check that reads the POM sbt generates for each of the 44 published projects (the `llm4s-*` artifacts, the
+  BOM and the relocation stubs) and fails when one lacks a name, a description of its own, an https project URL, a
+  licence with an https URL, a developer, or the `<scm>` Scaladex associates artifacts by
+  (`https://github.com/llm4s/llm4s`, no trailing slash, with an `scm:git:https` connection). Maven Central rejects a
+  POM without these at publish time, after the tag is pushed, and a released POM cannot be amended.
+  `sbt "pomMetadataCheckFiles <pom>..."` runs the same rules on POMs downloaded from Central; on 0.4.1's it reports
+  the three problems fixed since (#1588). The README has a Maven Central badge, and `docs/reference/release.md` has a
+  Discoverability section for maintainers: GitHub topics and description, the homepage, and how to get Scaladex to
+  list `org.llm4s` (it does not yet).
+- **CI runs in a GitHub merge queue** ([#1638](https://github.com/llm4s/llm4s/issues/1638)): `ci.yml`, `dco.yml` and
+  `secret-scan.yml`, the workflows behind `main`'s required checks (`All Tests Pass`, `Check DCO sign-off`, `TruffleHog
+  Secret Scan`), also trigger on `merge_group`, so a maintainer can enable a merge queue that tests each pull request
+  on top of current `main` before it lands. That closes the merge skew that turned `main` red when two independently
+  green pull requests landed together (#1386 with #1417, #1741 with #1585). On a merge group the DCO job reports
+  without re-running `dco-check` (the pull request already passed it to be queued), and the secret scan scans the
+  group's own range. `scripts/test-merge-queue-workflows.sh`, in Quick Checks, keeps it so. Enabling the queue is a
+  repository setting: [docs/reference/merge-queue.md](docs/reference/merge-queue.md). Nothing changes until it is enabled.
+- **A build-only dry run for the docs deploy** ([#1152](https://github.com/llm4s/llm4s/issues/1152)): `pages.yml`
+  takes `-f dry_run=true`, which runs every build step (tag validation and checkout, version, aggregate Scaladoc and its
+  package check, Jekyll, the Pages artifact) and skips the deploy, in a concurrency group of its own so it never
+  displaces a pending real deploy. It works on any branch, so the release path (`--ref main -f ref=<tag> -f
+  dry_run=true`) and a `pages.yml` change can be checked without touching llm4s.org. A run that is neither a dry run nor
+  on `main` now fails in its first step, instead of building for minutes and then being rejected by the `github-pages`
+  environment. The release dispatch never sets it. `docs/reference/release.md` also records that only a tag with the
+  aggregate `docs` project (after v0.4.1) can be built by today's `pages.yml`.
+- **Kotlin `AgentKt.forget(threadId)`** ([#1693](https://github.com/llm4s/llm4s/issues/1693)): a suspend function
+  that forgets a conversation by its thread id, delegating to `JAgent.forget(threadId)` and throwing `LLMException`
+  on failure, so a Kotlin caller can remove a named conversation whose turn left no result - a failed
+  `stream(threadId, ...)` flow - where `forget(previous)` needed one. Forgetting an unknown thread succeeds; a thread
+  whose turn is still running is refused (`ThreadBusy`) and nothing is removed.
+- **Checkpoint history, fork, `updateState` and retention** ([#1702](https://github.com/llm4s/llm4s/issues/1702),
+  Stage 2 slice 3 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): a `Checkpointer` keeps every checkpoint a
+  thread's runs commit, not only the latest. `GraphRuntime.history(threadId, before, limit)` pages them newest first
+  and `checkpoint(threadId, id)` reads one. `fork(source, checkpointId, target)` starts a new thread from any of them,
+  with the checkpoint's state, scheduled work, parked interrupts and status (`RunEvent.ThreadForked`; no pending
+  writes copied). `updateState(threadId, graph, expected, update, asNode)` applies a typed `StateUpdate` to the
+  latest checkpoint as a new one - optimistic on `expected`, checked against `asNode`'s write set, held and fenced by
+  a claim, carrying completed tasks' pending writes over, one superstep on so tool idempotency keys never repeat
+  (`RunEvent.StateUpdated`). `prune(threadId, RetentionPolicy)` removes checkpoints and events by age (`maxAge`, by
+  the store's clock) or size (`maxCheckpoints`, `maxEvents`), never the latest checkpoint, raising the replay floor
+  as `compactEvents` does. A guardrail Block - any `NodeResult.Block` - retracts its turn's earlier checkpoints from
+  the history in the commit that closes it, so none of them stays readable or forkable; the closing `Failed`
+  checkpoint holds what the node's own `Block` update leaves, so a custom blocking node must remove the turn's
+  content in that update, as `Agent` does with `MessageUpdate.RemoveTurn`. Every call checks the tenant.
+  `CheckpointerContract` gains the history, retraction, pruning, `fork` and `updateState` cases. See
+  [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#checkpoint-history-fork-and-updatestate) and the
+  [Stage 2 migration note](docs/reference/migration.md#checkpoint-history-fork-updatestate-and-retention-1702).
+- **Human-review interrupts: static breakpoints and typed middleware questions** ([#1704](https://github.com/llm4s/llm4s/issues/1704),
+  part of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `RunConfig.interruptBefore`/`interruptAfter` hold a
+  graph node's tasks before they run or after they ran, each as an interrupt of its own keyed by its task id, parked
+  and persisted like a node's own suspension and answered with `Breakpoint.proceed`; a held task's siblings run, a
+  held-after task's update commits while its routes, edges and join arrivals wait, and a continuation is not held
+  again by the breakpoint it passed - through `resume`, `recover` and cancellation. `AgentBuilder.withInterruptBefore`
+  / `withInterruptAfter` (Java/Kotlin varargs) take `AgentNode.Model`, `Tool` (one interrupt per tool call) and
+  `Finish`; held after, a step continued after a review - at its approval, question or middleware-question node - is
+  held too. `AgentMiddleware.Asking[Q, Ans]` lets a middleware suspend a turn with a typed question - `ask(q)` from
+  `beforeAgent`, `afterAgent` or `wrapModelCall`, `askAbout(q)` from `wrapToolCall` - for review, an edit or missing
+  information; the answer is decoded as `Ans` at resume (a bad one is refused), and the hook's stack runs again with
+  `answered(context)`, keeping earlier answers of the same run, through approvals and tool questions too; model calls
+  a wrapper made before asking are counted in usage. `GuardrailReviewMiddleware` asks a reviewer (`GuardrailReview`,
+  answered with `GuardrailVerdict.Allow`, `Edit(text)` or `Block`) instead of blocking; a verdict holds for the text
+  whatever the refusal's wording, and the guardrails are not run on it again. `AgentStatus.Suspended` lists `middlewareQuestions` and `breakpoints`;
+  `AgentResult.proceed(id)` continues a breakpoint. The Java and Kotlin facades list them as `PendingInterrupt`s of
+  kind `MIDDLEWARE_QUESTION` and `BREAKPOINT`, with `middleware()`, `node()` and `phase()` (Java enum
+  `BreakpointPhase`), and `Answer.proceed(id)`. Any subset of a turn's interrupts can be answered at a time. See
+  [Human Review](docs/guide/agents/human-review.md).
+- **Tool idempotency keys, and a provider contract suite for one result per tool call** ([#1703](https://github.com/llm4s/llm4s/issues/1703)):
+  an agent tool reads its call's key as `ToolContext.idempotencyKey` (`org.llm4s.agent.graph.IdempotencyKey`, 64 hex
+  characters) and passes it to the system it calls, so a call the runtime runs again - a retrying `wrapToolCall`,
+  approval, an answered question, `recover` after a cancellation, `Fatal` or crash - does its work once. The key is
+  derived from the thread, where on it the issuing model call ran (checkpoint, superstep and task) and the call id
+  (`IdempotencyKey.derive`), and recorded with the call, so it is the same in every run of the call and new for a call
+  of another model request, even when the provider reuses its id and the turns share one `RunConfig`. `runMultiTurn`
+  gives each follow-up turn a fresh `RunId`. Tools added through `ToolRegistry` (built-in, MCP, Java and Kotlin
+  tools) do not see the key yet ([#1740](https://github.com/llm4s/llm4s/issues/1740)). `ApprovalRequest` and `ToolQuestionRequest` carry it too. Tools still run at
+  least once; the [agents guide](docs/guide/agents/index.md#tool-side-effects) documents the boundaries.
+  `llm4s-provider-testkit` adds `ToolResultContract` (`violations(format, requestBody)`, `toolCallCount`,
+  `toolResultCount`, and `cases`: conversations of every shape an agent's tool loop sends), `ToolMessageFormat`
+  (`OpenAIChat`, `AnthropicMessages`), `ProviderModuleChecks.assertOneToolResultPerCall` and
+  `LocalProviderTestServer.anthropicMessage`; the OpenAI, Anthropic and OpenAI-compatible module specs run it, and
+  `AgentToolResultContractSpec` runs the agent through the real OpenAI and Anthropic clients after every outcome of
+  a call - success, error, throw, unknown tool, invalid arguments, denial, rejection, edit, question, handoffs,
+  reused ids, cancellation, `Fatal` and a crash - checking every request.
+- **Run-claim leases and a store contract suite for `Checkpointer`s** ([#1700](https://github.com/llm4s/llm4s/issues/1700),
+  Stage 2 slice 1 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): runtimes in one process or many can share a
+  checkpoint store. Each run claims its thread in the store before it starts - a `RunClaim` with an expiry, by the
+  store's clock, and a `FencingToken` - renews it while it runs (`ClaimPolicy`, default `ttl` 30 s, renewed every
+  10 s, on a `llm4s-claim-<threadId>` virtual thread) and releases it as it ends. `start`, `recover`, `resume` and
+  `deleteThread` in any runtime are refused a thread whose claim is live with `ThreadBusy`, which now names the
+  holding run; once a claim has expired - its process died - another runtime's `recover` takes the thread over,
+  reusing the pending writes of the tasks that finished. Every commit carries the claim's token, and the store refuses
+  a stale one atomically (`GraphError.StaleClaim`), so a run that lost its claim records nothing after its successor
+  started and ends with `CheckpointWriteFailed`. `RunPosition.fencingToken` gives a node the token. The new
+  **`llm4s-agent-testkit`** publishes `CheckpointerContract`, the contract every store must pass as a ScalaTest
+  suite (atomic commits, conflicts, event numbering, compaction and `ReplayUnavailable`, `deleteThread`, claims and
+  fencing, and two or more `GraphRuntime`s contending over one store), with the `ManualClock` it drives expiry with;
+  `InMemoryCheckpointer` passes it. A durable store overrides `reopen`, so that claims, tokens and fencing are checked
+  across a close and reopen, and a store that judges expiry by a clock of its own (a database server's) overrides
+  `advanceStoreClock` and `exactExpiry`. See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md) and the
+  [Stage 2 migration note](docs/reference/migration.md#stage-2-migration-durable-execution).
 - **The cookbook: thirteen runnable recipes, one page each, run offline in CI**
   ([#1476](https://github.com/llm4s/llm4s/issues/1476)): seven new recipes join the six under
   `org.llm4s.samples.cookbook` - `EmailExtractionRecipe` (a nested schema, checked against the email),

@@ -15,9 +15,13 @@ import org.llm4s.llmconnect.spi.ProviderRegistry
  * Calling `ProviderRegistry.discover()` scans the classpath using `java.util.ServiceLoader` and
  * compiles a `ProviderRegistryReport` (`registry.report`) detailing:
  *  - `modules`: every `Llm4sProviderModule` loaded from the classpath.
- *  - `failures`: any service entries that could not be loaded or instantiated. A broken jar
- *    or missing dependency will be recorded here rather than throwing an unhandled exception,
- *    ensuring that other healthy providers continue to load.
+ *  - `failures`: any failures encountered while reading service entries, instantiating modules,
+ *    or querying provider descriptors. When troubleshooting missing providers, note the distinction:
+ *    - Service entry parsing failures (`iterator.hasNext`, such as a malformed `META-INF/services`
+ *      file) terminate discovery early; remaining providers on the classpath will not be scanned.
+ *    - Module instantiation failures (`iterator.next()`, such as a missing class or dependency)
+ *      or descriptor query failures (`module.chatProviders`/`embeddingProviders`) are recorded in
+ *      `failures` while allowing discovery to continue loading other healthy providers.
  *  - `collisions`: instances where two modules register the same chat or embedding provider ID.
  *    LLM4S resolves collisions by letting the last-registered descriptor win, and logs the collision.
  *  - `summary`: a single-line summary of modules scanned, failures, and collisions.
@@ -56,9 +60,11 @@ object ProviderDiscoveryExample {
    */
   def run(classLoader: ClassLoader = Thread.currentThread().getContextClassLoader): DiscoveryResult = {
     // 1. Classpath discovery: scans META-INF/services for Llm4sProviderModule implementations.
-    // If a service file is broken, ServiceConfigurationErrors are recorded in report.failures
-    // rather than terminating discovery. If multiple modules declare identical provider IDs,
-    // the last one registered wins and report.collisions records both modules.
+    // Failures during service-file parsing (`iterator.hasNext`, such as a malformed service
+    // file) terminate the scan early. Failures during module instantiation (`iterator.next()`,
+    // such as a missing class or dependency) or descriptor loading are captured in report.failures
+    // while allowing discovery of other healthy providers to continue. If multiple modules
+    // declare identical provider IDs, the last one registered wins and report.collisions records both.
     val discovered = ProviderRegistry.discover(classLoader)
 
     // 2. Explicit registry: manually provides modules. Useful in shaded jars where
@@ -93,7 +99,7 @@ object ProviderDiscoveryExample {
       s"Summary: ${if (explicit.report.summary.isEmpty) "(empty for explicit registry)" else explicit.report.summary}",
       "",
       "--- 3. Troubleshooting Notes ---",
-      "• Failures: recorded when a service entry in META-INF/services cannot be loaded or throws an exception.",
+      "• Failures: recorded when service entries fail to load (malformed service files halt the scan; missing classes allow other providers to load).",
       "• Collisions: recorded when two modules register the same provider ID (last-registered wins).",
       "• Shaded jars: if 'provider X is not registered' occurs in a fat jar, verify META-INF/services merging.",
       "• Documentation: see docs/guide/writing-a-provider.md for provider authoring and assembly merge strategies."
