@@ -74,9 +74,9 @@ cross-cutting decisions. Members are recognised for sustained, high-quality cont
 
 ---
 
-## Regular Members
+## Significant Individual Contributors
 
-Regular members are active contributors with merged pull requests who participate in
+Significant individual contributors are active contributors with merged pull requests who participate in
 project discussions and direction.
 
 | | Name | GitHub | LinkedIn |
@@ -144,7 +144,7 @@ testing, design, and event support. To get involved, join the
 |---|---|
 | **Foundation Core Team** | Fund Foundation initiatives |
 | **Contributor** | Have a pull request merged |
-| **Regular Member** | Consistent, high-quality PRs over time; nominated by an existing member |
+| **Significant Individual Contributor** | Consistent, high-quality PRs over time; nominated by an existing member |
 | **Steering Committee** | Recognised for sustained impact and broad project knowledge; invited by Directors |
 | **Maintainer / Director** | Appointed by existing Directors for exceptional, long-term leadership |
 
