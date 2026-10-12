@@ -99,7 +99,7 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
     // A JSON escape of a separator, or a `'` that may close a value, past the cut changes how the text before it is
     // read; what is kept matches redacting the whole body.
     (1 to 12).foreach { i =>
-      val b = body(i.toLong, 300 * 1024) + Seq("\\u0026x=1", " 'q", "\\u0027", " bearer z")(i % 4)
+      val b     = body(i.toLong, 300 * 1024) + Seq("\\u0026x=1", " 'q", "\\u0027", " bearer z")(i % 4)
       val whole = Redaction.redact(b)
       Seq(1, 300, 2048).foreach(max => Redaction.safeBody(b, max).take(max) shouldBe whole.take(max))
     }
