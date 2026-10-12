@@ -5,6 +5,7 @@ import org.llm4s.javaapi.{ ConversationBuilder, JLlmClient, LlmResult }
 import org.llm4s.llmconnect.model.CompletionOptions
 import org.llm4s.types.Result
 import org.springframework.boot.actuate.health.{ Health, HealthIndicator }
+import org.springframework.core.env.ConfigurableEnvironment
 
 import java.time.Duration
 import java.util.concurrent.{ Callable, ExecutorService, TimeUnit, TimeoutException }
@@ -24,6 +25,28 @@ final case class HealthSettings(
 }
 
 object HealthSettings {
+
+  /**
+   * The settings for the provider the properties configure. With `llm4s.providers.*` properties that is the
+   * provider they resolve to, and every credential among them is kept out of the messages; if they do not
+   * resolve (the client bean reports why) or are absent, it is what the flat properties say.
+   */
+  def from(p: Llm4sProperties, env: ConfigurableEnvironment): HealthSettings =
+    if (SpringProviderSource.usesProvidersBlock(env)) {
+      val resolved = SpringProviderSource.resolve(env, p.provider)
+      if (resolved.isSuccess) {
+        val r = resolved.get()
+        HealthSettings(
+          r.config.providerId.asString,
+          Option(r.config.model).map(_.trim).filter(_.nonEmpty).getOrElse("unknown"),
+          p.health.probe,
+          p.health.probeTtl,
+          p.health.probeTimeout,
+          r.secrets
+        )
+      } else from(p)
+    } else from(p)
+
   def from(p: Llm4sProperties): HealthSettings = {
     def name(s: String) = Option(s).map(_.trim).filter(_.nonEmpty).getOrElse("unknown")
     HealthSettings(

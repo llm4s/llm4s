@@ -119,8 +119,8 @@ API call failed, what now?
 
 ## Quick Links
 
-- **Run Samples**: `sbt "samples/runMain org.llm4s.samples.patterns.MultiAgentExample"`
-- **View Sample Code**: [modules/samples/src/main/scala/org/llm4s/samples/patterns](https://github.com/llm4s/llm4s/tree/main/modules/samples/src/main/scala/org/llm4s/samples/patterns)
+- **Run Samples**: `sbt "samples/runMain org.llm4s.samples.agent.MultiStepAgentExample"`
+- **View Sample Code**: [modules/samples/src/main/scala/org/llm4s/samples/agent](https://github.com/llm4s/llm4s/tree/main/modules/samples/src/main/scala/org/llm4s/samples/agent)
 - **Report Issues**: [GitHub Issues](https://github.com/llm4s/llm4s/issues)
 - **Discuss Patterns**: [GitHub Discussions](https://github.com/llm4s/llm4s/discussions)
 

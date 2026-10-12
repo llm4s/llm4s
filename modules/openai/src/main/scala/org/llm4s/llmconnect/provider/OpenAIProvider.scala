@@ -3,8 +3,9 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenAIConfigKeys, OpenAIModelLister, ProviderModelLister }
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
+import org.llm4s.llmconnect.auth.AuthConfig
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, OpenAIWorkloadIdentity, ProviderConfig }
+import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -23,11 +24,32 @@ object OpenAIProvider extends ProviderDescriptor:
    */
   val DEFAULT_BASE_URL: String = "https://api.openai.com/v1"
 
-  /** The key falls back to `llm4s.credentials.openai.apiKey`, bound to `OPENAI_API_KEY`. */
+  /** `auth` keys for OpenAI's workload identity federation. */
+  private[llm4s] val IdentityProviderIdKey: String = "identityProviderId"
+  private[llm4s] val ServiceAccountIdKey: String   = "serviceAccountId"
+  private[llm4s] val ClientIdKey: String           = "clientId"
+
+  /** Each `workloadIdentity` field a config refusal names, as the `auth` key the section spells it with. */
+  private val AuthSectionKeys: Map[String, String] =
+    (Seq(IdentityProviderIdKey, ServiceAccountIdKey, ClientIdKey) ++ AuthConfig.ReservedKeys)
+      .map(key => s"${OpenAIWorkloadIdentity.FieldPrefix}$key" -> s"auth.$key")
+      .toMap
+
+  /**
+   * The key falls back to `llm4s.credentials.openai.apiKey`, bound to `OPENAI_API_KEY`; a section with an
+   * `auth` block uses workload identity federation instead and needs no key.
+   */
   val configSpec: ProviderConfigSpec =
     ProviderConfigSpec
       .apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL, Seq(OpenAIConfigKeys.OPENAI_API_KEY))
       .withExtras(Seq(OpenAIConfig.OrganizationConfigKey))
+      .withAuthExtras(
+        Seq(
+          ProviderConfigKey.required(IdentityProviderIdKey, "the OpenAI workload identity provider id"),
+          ProviderConfigKey.required(ServiceAccountIdKey, "the OpenAI service account id"),
+          ProviderConfigKey.optional(ClientIdKey, "the client id, if the identity provider requires one")
+        )
+      )
 
   override val modelLister: Option[ProviderModelLister] = Some(OpenAIModelLister)
 
@@ -35,15 +57,33 @@ object OpenAIProvider extends ProviderDescriptor:
     ContextWindowResolver
   ): Result[ProviderConfig] =
     for
-      apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
+      workloadIdentity <- workloadIdentityOf(providerName, section)
+      apiKey <-
+        if (workloadIdentity.isDefined) Right("") else ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-      config <- OpenAIConfig.fromValues(
-        section.model.asString,
-        apiKey,
-        section.extra(OpenAIConfig.OrganizationKey),
-        baseUrl
-      )
+      config <- OpenAIConfig
+        .fromValues(
+          section.model.asString,
+          apiKey,
+          section.extra(OpenAIConfig.OrganizationKey),
+          baseUrl,
+          workloadIdentity = workloadIdentity
+        )
+        .left
+        .map(ProviderConfig.inSection(providerName, AuthSectionKeys))
     yield config
+
+  private def workloadIdentityOf(
+    providerName: String,
+    section: NamedProviderConfig
+  ): Result[Option[OpenAIWorkloadIdentity]] =
+    section.auth match
+      case None => Right(None)
+      case Some(auth) =>
+        for
+          idp <- ProviderDescriptor.requireAuthExtra(providerName, auth, IdentityProviderIdKey)
+          sa  <- ProviderDescriptor.requireAuthExtra(providerName, auth, ServiceAccountIdKey)
+        yield Some(OpenAIWorkloadIdentity(auth.identityToken, idp, sa, auth.extra(ClientIdKey)))
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService

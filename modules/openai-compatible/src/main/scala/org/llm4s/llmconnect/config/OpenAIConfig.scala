@@ -1,6 +1,8 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.auth.TokenExchange
 import org.llm4s.llmconnect.spi.ProviderConfigKey
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -49,6 +51,7 @@ final case class OpenAIConfig private (
   contextWindow: Int,
   reserveCompletion: Int,
   explicitProviderId: Option[ProviderId],
+  workloadIdentity: Option[OpenAIWorkloadIdentity],
   override val timeouts: ProviderTimeouts
 ) extends ProviderConfig:
   /**
@@ -81,9 +84,14 @@ final case class OpenAIConfig private (
   def withExplicitProviderId(providerId: ProviderId): OpenAIConfig = copy(explicitProviderId = Some(providerId))
   def withExplicitProviderId(providerId: Option[ProviderId]): OpenAIConfig =
     copy(explicitProviderId = providerId)
+  def withWorkloadIdentity(workloadIdentity: OpenAIWorkloadIdentity): OpenAIConfig =
+    copy(workloadIdentity = Some(workloadIdentity))
+  def withWorkloadIdentity(workloadIdentity: Option[OpenAIWorkloadIdentity]): OpenAIConfig =
+    copy(workloadIdentity = workloadIdentity)
   override def toString: String =
     s"OpenAIConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, organization=$organization, baseUrl=$baseUrl, " +
-      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, providerId=${providerId.asString})"
+      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, providerId=${providerId.asString}, " +
+      s"workloadIdentity=$workloadIdentity)"
 
 object OpenAIConfig {
   private val standardReserve = 4096
@@ -92,8 +100,10 @@ object OpenAIConfig {
   val DEFAULT_BASE_URL: String = "https://api.openai.com/v1"
 
   /**
-   * Builds a config without validating it; [[fromValues]] validates. `explicitProviderId`
-   * defaults to `None`, which infers the provider from `baseUrl`.
+   * Builds a config without validating it; [[fromValues]] validates, and `OpenAIClient` applies
+   * [[validate]] to whatever it is given. `explicitProviderId` defaults to `None`, which infers
+   * the provider from `baseUrl`; `workloadIdentity` defaults to `None`, which authenticates with
+   * `apiKey`.
    */
   def apply(
     apiKey: String,
@@ -102,7 +112,8 @@ object OpenAIConfig {
     baseUrl: String,
     contextWindow: Int,
     reserveCompletion: Int,
-    explicitProviderId: Option[ProviderId] = None
+    explicitProviderId: Option[ProviderId] = None,
+    workloadIdentity: Option[OpenAIWorkloadIdentity] = None
   ): OpenAIConfig =
     new OpenAIConfig(
       apiKey,
@@ -112,6 +123,7 @@ object OpenAIConfig {
       contextWindow,
       reserveCompletion,
       explicitProviderId,
+      workloadIdentity,
       ProviderTimeouts.default
     )
 
@@ -151,6 +163,53 @@ object OpenAIConfig {
     }
 
   /**
+   * The OpenAI API hosts a config with `workloadIdentity` may target: the global API and the
+   * data-residency regions, as listed by the OpenAI Java SDK's `com.openai.core.DataResidency`
+   * (`GLOBAL`, `US`, `EU`, `AE`).
+   */
+  private[llm4s] val WorkloadIdentityHosts: Set[String] =
+    Set("api.openai.com", "us.api.openai.com", "eu.api.openai.com", "ae.api.openai.com")
+
+  /**
+   * The rules every [[OpenAIConfig]] must meet, whichever way it was built: [[fromValues]] applies
+   * them, and `OpenAIClient` applies them again to a config built with `apply` or changed with a `with*` setter.
+   * Without `workloadIdentity`, `apiKey` must not be blank: it is the only credential, and a blank one
+   * would be sent as an empty bearer. With `workloadIdentity` set, it must meet its own rules (no blank
+   * identity token, `identityProviderId`, `serviceAccountId` or `clientId`), `apiKey` must be empty (a config authenticates one way), the
+   * config must belong to `openai`, and `baseUrl` must be `https` to one of [[WorkloadIdentityHosts]]
+   * (or a loopback host, for tests): the token OpenAI's exchange issues is an OpenAI credential, sent
+   * as the bearer of every request to `baseUrl`, so a Requesty, OpenRouter, proxy or other custom
+   * endpoint would receive it. The provider label alone is not enough - an `openai` config with a
+   * custom `baseUrl` still reports `openai` - so the host is checked against an allow-list.
+   */
+  private[llm4s] def validate(config: OpenAIConfig): Result[OpenAIConfig] =
+    config.workloadIdentity match
+      // Without workload identity the key is the only credential: a blank one would send `Authorization: Bearer `.
+      case None => ProviderConfig.nonEmpty("OpenAI", "apiKey", config.apiKey).map(_ => config)
+      case Some(identity) =>
+        for
+          _ <- OpenAIWorkloadIdentity.validate(identity)
+          _ <- Either.cond(
+            config.apiKey.trim.isEmpty,
+            (),
+            ConfigurationError(
+              "OpenAI config sets both apiKey and workloadIdentity; a config authenticates one way - use one",
+              List("apiKey", "workloadIdentity")
+            )
+          )
+          _ <- Either.cond(
+            config.providerId == ProviderId("openai"),
+            (),
+            ConfigurationError(
+              s"OpenAI workload identity is for provider openai only, but this config belongs to " +
+                s"${config.providerId.asString}: the exchanged token is an OpenAI credential",
+              List("workloadIdentity")
+            )
+          )
+          _ <- TokenExchange.requireTrustedHost(config.baseUrl, "baseUrl", "OpenAI", WorkloadIdentityHosts)
+        yield config
+
+  /**
    * Constructs an [[OpenAIConfig]], resolving `contextWindow` and
    * `reserveCompletion` from the model name automatically.
    *
@@ -161,22 +220,29 @@ object OpenAIConfig {
    * without manual lookup.
    *
    * @param modelName    Model identifier, e.g. `"gpt-4o"`.
-   * @param apiKey       OpenAI API key; must be non-empty.
+   * @param apiKey       OpenAI API key; must be non-empty, except that it is empty exactly when
+   *                     `workloadIdentity` is set.
    * @param organization Optional OpenAI organisation ID.
    * @param baseUrl      API base URL; must be non-empty. Pass a URL containing
    *                     `"openrouter.ai"` to route through OpenRouter.
    * @param providerId   the provider the config belongs to, e.g. `ProviderId("requesty")`;
    *                     `None` infers it from `baseUrl`, as [[OpenAIConfig.providerId]] describes.
+   * @param workloadIdentity OpenAI workload identity federation instead of `apiKey`; only for a
+   *                     config belonging to `openai` whose `baseUrl` is an OpenAI API host
+   *                     (`https://api.openai.com/v1` or a data-residency region such as
+   *                     `https://eu.api.openai.com/v1`).
+   * @return `Left(ConfigurationError)` for a blank field or a config [[validate]] refuses.
    */
   def fromValues(
     modelName: String,
     apiKey: String,
     organization: Option[String],
     baseUrl: String,
-    providerId: Option[ProviderId] = None
+    providerId: Option[ProviderId] = None,
+    workloadIdentity: Option[OpenAIWorkloadIdentity] = None
   )(using resolver: ContextWindowResolver): Result[OpenAIConfig] =
-    for {
-      _ <- ProviderConfig.nonEmpty("OpenAI", "apiKey", apiKey)
+    (for {
+      _ <- if (workloadIdentity.isDefined) Right(()) else ProviderConfig.nonEmpty("OpenAI", "apiKey", apiKey)
       _ <- ProviderConfig.nonEmpty("OpenAI", "baseUrl", baseUrl)
     } yield {
       val (cw, rc) = resolver.resolve(
@@ -193,7 +259,8 @@ object OpenAIConfig {
         baseUrl = baseUrl,
         contextWindow = cw,
         reserveCompletion = rc,
-        explicitProviderId = providerId
+        explicitProviderId = providerId,
+        workloadIdentity = workloadIdentity
       )
-    }
+    }).flatMap(validate)
 }

@@ -11,6 +11,9 @@ This guide addresses common errors and issues you might encounter when building 
 
 ## Configuration Errors
 
+**Q: Something is wrong with my setup and I do not know which part**
+A: Run the [doctor](doctor). It checks the JDK, your `application.conf`, the default provider, its module, its API key, the other provider sections and (with `--local`, for a server on this machine) whether the server is running and has your model, and prints a fix for each step that fails: `sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config /path/to/application.conf --local"`. It contacts nothing unless you pass `--local` or `--live`, and does not print a key's value itself.
+
 **Q: I get a "ConfigurationError" about the provider on startup ("not found", "missing required fields", no default selected)**
 A: LLM4S does not read `LLM_MODEL`. Define a named provider section in your `application.conf` and select it as the default; its key comes from the vendor's variable, which the provider module binds:
 
@@ -103,3 +106,6 @@ A: The workspace requires access to the Docker daemon. If running on Linux, ensu
 
 **Q: Cannot connect to stdio MCP server**
 A: Build the server config with `MCPServerConfig.stdio`, which requires the exact command that starts the server, then pass it to `new MCPClientImpl(config)`. Make sure the executable is in your PATH or provide the absolute path. Example: `val config = MCPServerConfig.stdio("sqlite", Seq("npx", "-y", "@modelcontextprotocol/server-sqlite")); val client = new MCPClientImpl(config)`.
+
+**Q: An MCP tool call fails with "timed out"**
+A: Each request to an MCP server must finish within its `MCPServerConfig.timeout` (30 seconds by default). Over Streamable HTTP that covers the whole exchange, including a reply the server streams as SSE while the tool runs, so a tool that takes longer fails rather than completing late, and the connection is closed. Give that server a longer timeout, for example `MCPServerConfig.streamableHTTP("reports", url, timeout = 5.minutes)`.

@@ -22,6 +22,7 @@ import org.llm4s.llmconnect.config.AnthropicConfig;
 import org.llm4s.llmconnect.config.OllamaConfig;
 import org.llm4s.llmconnect.config.OpenAIConfig;
 import org.llm4s.llmconnect.model.Conversation;
+import org.llm4s.metrics.MetricsCollector;
 
 /**
  * The fragments of {@code docs/guide/java.md}, compiled, and run by {@code JavaGuideSpec} against a client the
@@ -33,13 +34,38 @@ final class GuideSnippets {
 
     private GuideSnippets() {}
 
-    /** The "Configure in code" block: a client from a provider config, with no application.conf. */
+    /** The first "Configure in code" block: clients from the builders, with no application.conf (#1489). */
+    static List<LlmResult<JLlmClient>> builders(String apiKey) {
+        LlmResult<JLlmClient> openai = Llm4s.openAi()
+            .apiKey(apiKey)
+            .model("gpt-4o-mini")
+            .build();
+        LlmResult<JLlmClient> local = Llm4s.ollama()
+            .model("llama3.2")
+            .build();
+        LlmResult<JLlmClient> gateway = Llm4s.openAiCompatible()
+            .baseUrl("http://localhost:8000/v1")
+            .model("qwen2.5-coder")
+            .header("X-Team-Id", "platform")
+            .build();
+
+        return Arrays.asList(openai, local, gateway);
+    }
+
+    /** The second "Configure in code" block: a client from a provider config, with no application.conf. */
     static List<LlmResult<JLlmClient>> inCode(String apiKey) {
         LlmResult<JLlmClient> openai = Llm4s.createClient(OpenAIConfig.apply(apiKey, "gpt-4o-mini"));
         LlmResult<JLlmClient> anthropic = Llm4s.createClient(AnthropicConfig.apply(apiKey, "claude-sonnet-4-20250514"));
         LlmResult<JLlmClient> local = Llm4s.createClient(OllamaConfig.apply("llama3.2", "http://localhost:11434"));
 
         return Arrays.asList(openai, anthropic, local);
+    }
+
+    /** The "Recording metrics" block: a client that reports every call to a MetricsCollector. */
+    static LlmResult<JLlmClient> withMetrics(MetricsCollector metrics) {
+        LlmResult<JLlmClient> measured = Llm4s.createClient(OllamaConfig.apply("llama3.2", "http://localhost:11434"), metrics);
+
+        return measured;
     }
 
     /** The "A conversation" block. */

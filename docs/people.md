@@ -31,6 +31,19 @@ liaisons with sponsors, and conference programme committees.
 
 ---
 
+## Foundation Core Team
+
+| Name | Role | LinkedIn |
+|---|---|---|
+| **Gagandeep Kalra** | Foundation Core Team Member | [linkedin.com/in/gagandeep-kalra-9b23b2b1](https://www.linkedin.com/in/gagandeep-kalra-9b23b2b1/) |
+| **Pavan Vamsi** | Foundation Core Team Member | [linkedin.com/in/pavanvamsi3](https://www.linkedin.com/in/pavanvamsi3/) |
+| **Namrata Priyadarshani** | Foundation Core Team Member | [linkedin.com/in/namrata-priyadarshani-61a316159](https://www.linkedin.com/in/namrata-priyadarshani-61a316159/) |
+| **Ipsit Sahoo** | Foundation Core Team Member | [linkedin.com/in/ipsit-sahoo](https://www.linkedin.com/in/ipsit-sahoo/) |
+| **Ansh K Shah** | Foundation Core Team Member | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
+| **Christopher Wheeler** | Foundation Core Team Member | [linkedin.com/in/chris-w-1499161a](https://www.linkedin.com/in/chris-w-1499161a/) |
+
+---
+
 ## Maintainers
 
 Maintainers have merge rights across the repository, lead technical direction, and
@@ -147,4 +160,4 @@ _No emeritus members yet. The project is young — this section will grow with t
 
 ---
 
-*Last updated: August 2026. To update this page, open a pull request.*
+*Last updated: October 2026. To update this page, open a pull request.*

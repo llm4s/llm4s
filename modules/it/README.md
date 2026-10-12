@@ -17,6 +17,7 @@ declares no tier or more than one, so a suite cannot end up being run by nothing
 | `@Local` | nothing external | `sbt test` | every PR |
 | `@Docker` | Postgres/pgvector, Qdrant or Neo4j | `sbt testIntegration` | every PR (service containers) |
 | `@Workspace` | Docker + a built `workspace-runner` image | `sbt testWorkspace` | pushes to `main` |
+| `@McpReference` | the MCP reference server at `MCP_SERVER_URL` | `sbt testMcpReference` | pushes to `main` and manual `workflow_dispatch` (a container started in a CI step) |
 | `@Ollama` | a local Ollama with `qwen2.5:0.5b` pulled | `sbt testOllama` | pushes to `main` |
 | `@Cloud` | live provider API keys | `sbt testSmoke` | manual `workflow_dispatch` |
 
@@ -133,11 +134,68 @@ A suite whose service is missing cancels its tests, which ScalaTest reports as s
 Set `LLM4S_IT_STRICT=true` - as every tier's CI job does - to make that a failure instead,
 so a service that did not start cannot pass for a suite that did.
 
+## The watsonx assumption probe
+
+`llm4s-watsonx` has never been run against the real service: there was no IBM account behind the project.
+`WatsonXAssumptionProbeSpec` (`@Cloud`) is the first run for whoever has one. It checks, one test per detail,
+what `WatsonXClient` takes from IBM's public pages and IBM's open-source clients, and prints a table saying
+which held.
+
+```bash
+export WATSONX_API_KEY=...        # IBM Cloud API key
+export WATSONX_PROJECT_ID=...     # or WATSONX_SPACE_ID
+export WATSONX_BASE_URL=https://eu-de.ml.cloud.ibm.com   # optional; default https://us-south.ml.cloud.ibm.com
+export WATSONX_MODEL=ibm/granite-4-h-small               # optional; must support tool calling
+export WATSONX_API_VERSION=2026-09-25                     # optional; the client's default
+sbt "it/testOnly org.llm4s.llmconnect.smoke.WatsonXAssumptionProbeSpec"
+```
+
+Without `WATSONX_API_KEY` and a project or space id every test is cancelled and nothing is sent to IBM. The
+cost is a few dozen requests of at most a few hundred tokens each. `sbt testSmoke` runs it with the other
+`@Cloud` suites.
+
+**Reading the report.** The last thing the run prints is a table, one row per assumption:
+
+| Result | Meaning | What to do |
+|---|---|---|
+| `held` | the service behaves as the client assumes | nothing |
+| `NOT HELD` | the assumption is wrong; the failed test's message names it and the place in `WatsonXClient` to change | send the table and the message |
+| `skipped` | no credentials, or the test was cancelled | run it with an account |
+
+Rows marked `(info)` check things the client does not depend on, to settle the documentation. A `NOT HELD`
+there needs no client change.
+
+**What to send back.** The table, and the sanitised bodies of one plain reply, one tool-call reply and one
+stream, with the API key, the bearer token and anything you would not publish removed. They replace the
+fake-server fixtures in `modules/providers/watsonx/src/test`, which turns what was a guess into a regression
+test. Then #1314 can close.
+
+## Running the MCP reference-server tier
+
+`MCPReferenceServerSpec` (`@McpReference`) runs against the official MCP reference server.
+Starting it pulls the `node` image from Docker Hub and the server from npm, so CI runs this
+tier on pushes to `main` and on manual `workflow_dispatch` (the `mcp-reference-integration`
+job), not on every PR, where an outage of either would fail unrelated changes.
+
+```bash
+# Start the MCP reference server (Streamable HTTP):
+# (from the repository root; the server and its dependency tree are pinned by
+# modules/it/mcp-reference-server/package-lock.json, installed with install scripts disabled.
+# Without Docker: MCP_SERVER_SRC=modules/it/mcp-reference-server sh modules/it/mcp-reference-server/run.sh)
+docker run --rm -p 3001:3001 -v "$PWD/modules/it/mcp-reference-server:/src:ro" \
+  node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 sh /src/run.sh
+
+export MCP_SERVER_URL=http://localhost:3001/mcp
+
+sbt testMcpReference
+```
+
 ## Environment variables
 
 - Neo4j via `NEO4J_URI`, `NEO4J_USER`, and `NEO4J_PASSWORD`
 - PostgreSQL/pgvector via `PGVECTOR_TEST_URL`, `PGVECTOR_TEST_USER`, `PGVECTOR_TEST_PASSWORD`, or the `POSTGRES_*` variables used by memory tests
 - Qdrant via `QDRANT_TEST_URL` and `QDRANT_TEST_API_KEY`
+- The MCP reference server (`@modelcontextprotocol/server-everything`, Streamable HTTP, pinned with its dependency tree in `mcp-reference-server/`) via `MCP_SERVER_URL`
 - Docker-backed workspace tests via `LLM4S_DOCKER_TESTS=true`; the image tag comes from the build as `LLM4S_WORKSPACE_IMAGE`
 - Ollama via a local server at `http://localhost:11434` with `qwen2.5:0.5b` pulled
 - Cloud provider smoke tests via credentials such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`, and `COHERE_API_KEY`. Each `@Cloud` suite reads its own variable with `System.getenv` and builds the provider config directly; the provider modules also bind most of them to `llm4s.credentials.<provider>.apiKey` for applications, but these suites do not go through that

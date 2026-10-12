@@ -22,16 +22,27 @@ class SubscriptionOrderStressSpec extends AnyFlatSpec with Matchers with EitherV
 
   /** Reads the log when called and returns it after a random pause, so a read races commits. */
   final private class JitteryStore extends Checkpointer {
-    val underlying                                 = InMemoryCheckpointer()
-    def commit(threadId: ThreadId, commit: Commit) = underlying.commit(threadId, commit)
-    def latest(threadId: ThreadId)                 = underlying.latest(threadId)
+    val underlying                                                             = InMemoryCheckpointer()
+    def commit(threadId: ThreadId, commit: Commit)                             = underlying.commit(threadId, commit)
+    def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
+    def renew(
+      threadId: ThreadId,
+      token: org.llm4s.agent.graph.FencingToken,
+      ttl: scala.concurrent.duration.FiniteDuration
+    ) =
+      underlying.renew(threadId, token, ttl)
+    def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+    def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = {
       val page = underlying.eventsAfter(threadId, afterSeq, limit)
       if ThreadLocalRandom.current().nextInt(4) > 0 then Thread.sleep(0, ThreadLocalRandom.current().nextInt(800000))
       page
     }
-    def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long)              = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                                = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
   }
 
   /** `steps` nodes in a line, each sending `live` progress events and then one custom event. */

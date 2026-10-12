@@ -2,13 +2,15 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 
+import com.fasterxml.jackson.databind.json.JsonMapper
+import com.openai.auth.{ SubjectTokenProvider, SubjectTokenType, WorkloadIdentity }
 import com.openai.azure.credential.AzureApiKeyCredential
 import com.openai.azure.{ AzureOpenAIServiceVersion, AzureUrlPathMode }
 import com.openai.client.okhttp.OpenAIOkHttpClient
 import com.openai.client.{ OpenAIClient => SdkClient }
 import com.openai.core.{ JsonField, ObjectMappers, RequestOptions }
-import com.openai.core.http.StreamResponse
-import com.openai.errors.{ OpenAIIoException, OpenAIServiceException }
+import com.openai.core.http.{ HttpClient => SdkHttpClient, StreamResponse }
+import com.openai.errors.{ OpenAIException, OpenAIIoException, OpenAIServiceException }
 import com.openai.models.chat.completions.{
   ChatCompletion,
   ChatCompletionAssistantMessageParam,
@@ -24,11 +26,18 @@ import com.openai.models.chat.completions.{
 }
 import com.openai.models.completions.CompletionUsage
 import com.openai.models.{ ResponseFormatJsonObject, ResponseFormatJsonSchema }
-import org.llm4s.error.LLMError
+import org.llm4s.error.{ LLMError, UnknownError }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, ProviderConfig, ProviderTimeouts }
+import org.llm4s.llmconnect.auth.{ IdentitySource, IdentityTokenSource }
+import org.llm4s.llmconnect.config.{
+  AzureConfig,
+  OpenAIConfig,
+  OpenAIWorkloadIdentity,
+  ProviderConfig,
+  ProviderTimeouts
+}
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
@@ -37,10 +46,11 @@ import org.llm4s.model.{ ModelRegistryService, TransformationResult }
 import org.llm4s.toolapi.{ OpenAIToolHelper, ToolRegistry }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.util.BoundedJson
+import org.llm4s.util.{ BoundedJson, Redaction }
 import org.slf4j.{ Logger, LoggerFactory }
 
 import java.time.Instant
+import java.util.concurrent.{ CompletableFuture, Executor }
 import scala.annotation.nowarn
 import scala.jdk.CollectionConverters._
 import scala.jdk.OptionConverters._
@@ -113,6 +123,9 @@ class OpenAIClient private[provider] (
   private lazy val logger: Logger = LoggerFactory.getLogger(getClass)
 
   private val displayName: String = OpenAIClient.displayName(provider)
+
+  /** The configured credentials, which an error built from a remote reply must not repeat. */
+  private val credentialSecrets: Seq[String] = OpenAIClient.credentialSecrets(config)
 
   protected def clientDescription: String = s"$displayName client for model $model"
   protected def providerName: String      = provider.asString
@@ -235,8 +248,15 @@ class OpenAIClient private[provider] (
   /** Runs one SDK call, logging and mapping any failure to an [[LLMError]]. */
   private def call[A](what: String)(body: => A): Result[A] =
     Try(body).toEither.left.map { e =>
-      logger.error(s"$displayName $what failed for model $model", e)
-      OpenAIClient.mapError(e, providerName)
+      val error = OpenAIClient.mapError(e, providerName, credentialSecrets)
+      e match {
+        // The SDK's exceptions carry the service's (or the token endpoint's) reply in their message, which
+        // may repeat a credential: only the redacted error is logged, not the exception.
+        case _: OpenAIException =>
+          logger.error(s"$displayName $what failed for model $model: ${error.message}")
+        case _ => logger.error(s"$displayName $what failed for model $model", e)
+      }
+      error
     }
 
   /**
@@ -718,19 +738,59 @@ object OpenAIClient {
    * carrying its `Retry-After`, and so on; an I/O failure is mapped by its cause, so a timeout
    * stays a `NetworkError`.
    */
-  private[provider] def mapError(e: Throwable, provider: String): LLMError = e match {
+  private[provider] def mapError(e: Throwable, provider: String, secrets: Seq[String] = Nil): LLMError =
+    OpenAIClientTransport.identityTokenFailure(e).getOrElse(mapSdkError(e, provider, secrets))
+
+  /**
+   * A service reply's body is scrubbed of `secrets` and of credential JSON fields before `HttpErrorMapper`
+   * extracts (and redacts) its detail; any other SDK exception's message - the workload-identity token
+   * exchange puts the endpoint's reply in one - is redacted the same way, and truncated.
+   */
+  private def mapSdkError(e: Throwable, provider: String, secrets: Seq[String]): LLMError = e match {
     case service: OpenAIServiceException =>
       HttpErrorMapper
         .mapHttpError(
           service.statusCode(),
-          Try(service.body().toString).getOrElse(""),
+          // Rendered as JSON: the SDK's `JsonValue.toString` is a Java map's (`{error={message=...}}`), which
+          // `HttpErrorMapper` cannot parse, so the service's message never reached the error.
+          Redaction.scrubRemote(
+            Try(ObjectMappers.jsonMapper().writeValueAsString(service.body())).getOrElse(""),
+            secrets
+          ),
           provider,
           Try(headerMap(service.headers())).getOrElse(Map.empty)
         )
         .left
-        .getOrElse(service.toLLMError)
-    case io: OpenAIIoException if io.getCause != null => io.getCause.toLLMError
-    case other                                        => other.toLLMError
+        .getOrElse(redactMessage(service.toLLMError, service, secrets))
+    case io: OpenAIIoException if io.getCause != null => redactMessage(io.getCause.toLLMError, io.getCause, secrets)
+    case other                                        => redactMessage(other.toLLMError, other, secrets)
+  }
+
+  /** `error` with its message redacted when it is the exception's own message, as `UnknownError`'s is. */
+  private def redactMessage(error: LLMError, cause: Throwable, secrets: Seq[String]): LLMError = error match {
+    case unknown: UnknownError => UnknownError(Redaction.remoteBody(unknown.message, secrets), cause)
+    case other                 => other
+  }
+
+  /**
+   * The configured values an error built from a remote reply must not repeat: the API key, or with
+   * workload identity a literal identity token and the ids `toString` redacts (those long enough to scrub
+   * without garbling the body, [[Redaction.identifiers]]).
+   */
+  private[provider] def credentialSecrets(config: ProviderConfig): Seq[String] = config match {
+    case openAI: OpenAIConfig =>
+      openAI.workloadIdentity match {
+        case None => Seq(openAI.apiKey)
+        case Some(wi) =>
+          Redaction.identifiers(
+            Seq(wi.identityProviderId, wi.serviceAccountId) ++ wi.clientId
+          ) ++ (wi.identityToken match {
+            case IdentitySource.Literal(token) => Seq(token)
+            case IdentitySource.File(_)        => Nil
+          })
+      }
+    case azure: AzureConfig => Seq(azure.apiKey)
+    case _                  => Nil
   }
 
   /** The SDK's response headers as the multi-valued map `HttpErrorMapper` reads. */
@@ -773,19 +833,19 @@ object OpenAIClient {
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[OpenAIClient] =
-    Try(new OpenAIClient(config, metrics, exchangeLogging)).toResult
+    OpenAIConfig.validate(config).flatMap(valid => Try(new OpenAIClient(valid, metrics, exchangeLogging)).toResult)
 
   def apply(
     config: OpenAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector
   )(using ModelRegistryService): Result[OpenAIClient] =
-    Try(new OpenAIClient(config, metrics)).toResult
+    OpenAIConfig.validate(config).flatMap(valid => Try(new OpenAIClient(valid, metrics)).toResult)
 
   /**
    * Convenience overload with noop metrics.
    */
   def apply(config: OpenAIConfig)(using ModelRegistryService): Result[OpenAIClient] =
-    Try(new OpenAIClient(config, org.llm4s.metrics.MetricsCollector.noop)).toResult
+    apply(config, org.llm4s.metrics.MetricsCollector.noop)
 
   /**
    * Creates an OpenAI client for Azure OpenAI service.
@@ -856,16 +916,64 @@ private[provider] object OpenAIClientTransport {
    * OpenAI, Requesty or any OpenAI-compatible base URL: a bearer API key, the configured
    * organisation, and requests to `<baseUrl>/chat/completions`.
    */
-  def openAI(config: OpenAIConfig): OpenAIClientTransport =
-    sdk(
-      OpenAIOkHttpClient
-        .builder()
-        .apiKey(config.apiKey)
-        .baseUrl(config.baseUrl)
-        .organization(config.organization.orNull)
-        .build(),
-      config.timeouts
-    )
+  def openAI(
+    config: OpenAIConfig,
+    customize: OpenAIOkHttpClient.Builder => OpenAIOkHttpClient.Builder = identity
+  ): OpenAIClientTransport = {
+    // A config built with `apply` or a `with*` setter skipped `fromValues`: `OpenAIClient.apply` refuses it as a
+    // ConfigurationError, and every constructor here, so an exchanged OpenAI token never goes to another provider.
+    OpenAIConfig.validate(config).left.foreach(error => throw new IllegalArgumentException(error.message))
+    val builder = OpenAIOkHttpClient
+      .builder()
+      .baseUrl(config.baseUrl)
+      .organization(config.organization.orNull)
+    config.workloadIdentity match {
+      case Some(wi) => builder.workloadIdentity(sdkWorkloadIdentity(wi))
+      case None     => builder.apiKey(config.apiKey)
+    }
+    sdk(customize(builder).build(), config.timeouts)
+  }
+
+  /** Carries a failure to read the identity token through the SDK, which only understands exceptions. */
+  final private class IdentityTokenException(val error: LLMError)
+      extends RuntimeException(error.message, null, false, false)
+
+  /** Starts each task on a new virtual thread; nothing to shut down. */
+  private val IdentityTokenExecutor: Executor =
+    (task: Runnable) => Thread.ofVirtual().name("llm4s-openai-identity-token").start(task): Unit
+
+  /** The identity-token failure somewhere in `e`'s cause chain, if any; a cause cycle is walked once. */
+  private[provider] def identityTokenFailure(e: Throwable): Option[LLMError] = {
+    val seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap[Throwable, java.lang.Boolean]())
+    Iterator
+      .iterate(e)(_.getCause)
+      .takeWhile(c => c != null && seen.add(c))
+      .collectFirst { case failure: IdentityTokenException => failure.error }
+  }
+
+  /** The SDK's workload identity for `wi`: a JWT subject token read from `wi.identityToken` on each exchange. */
+  private[provider] def sdkWorkloadIdentity(wi: OpenAIWorkloadIdentity): WorkloadIdentity = {
+    val source = IdentityTokenSource.from(wi.identityToken)
+    val subject = new SubjectTokenProvider {
+      override def tokenType(): SubjectTokenType = SubjectTokenType.JWT
+
+      // The SDK's callback contract is exceptions. The error rides inside one, whatever the SDK wraps it
+      // in, and `mapError` takes it back out, so a missing token file stays an AuthenticationError.
+      override def getToken(httpClient: SdkHttpClient, jsonMapper: JsonMapper): String =
+        source.fetch().fold(error => throw new IdentityTokenException(error), identity)
+
+      // The read is blocking file I/O: it runs on a virtual thread, not on the common pool.
+      override def getTokenAsync(httpClient: SdkHttpClient, jsonMapper: JsonMapper): CompletableFuture[String] =
+        CompletableFuture.supplyAsync(() => getToken(httpClient, jsonMapper), IdentityTokenExecutor)
+    }
+    val builder = WorkloadIdentity
+      .builder()
+      .identityProviderId(wi.identityProviderId)
+      .serviceAccountId(wi.serviceAccountId)
+      .provider(subject)
+    wi.clientId.foreach(builder.clientId)
+    builder.build()
+  }
 
   /**
    * Azure OpenAI: an `api-key` header, and requests to

@@ -24,7 +24,8 @@ dependencies {
     runtimeOnly("ch.qos.logback:logback-classic:1.5.34")
 }
 
-// Compile for Java 17 whatever JDK runs Gradle, so the sample builds on any JDK from 17 up.
+// The sample's own code is compiled for Java 17 whatever JDK runs Gradle. Running it needs JDK 21,
+// because llm4s-java-api depends on Ox (see https://github.com/llm4s/llm4s/issues/1493).
 tasks.withType<JavaCompile>().configureEach {
     options.release.set(17)
 }

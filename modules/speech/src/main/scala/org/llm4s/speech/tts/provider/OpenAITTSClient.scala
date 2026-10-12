@@ -33,6 +33,7 @@ final class OpenAITTSClient(config: TTSConfig, httpClient: Llm4sHttpClient = Llm
 
   override def synthesize(text: String, options: TTSOptions): Result[GeneratedAudio] =
     for {
+      _     <- CloudSpeechSupport.requireApiKey("OpenAI TTS", config.apiKey)
       input <- CloudSpeechSupport.requireText(text).flatMap(OpenAITTSClient.requireWithinLimit)
       _     <- OpenAITTSClient.requireSpeed(options.speakingRate)
       payload = ujson.Obj(

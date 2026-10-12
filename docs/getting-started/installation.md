@@ -120,6 +120,22 @@ configurations.all {
 > and the [dependency conflicts reference](/reference/dependency-conflicts).
 
 
+### Scala CLI
+
+No build at all: declare the dependency in the file.
+
+```scala
+//> using scala 3.7.1
+//> using jvm 21
+//> using dep org.llm4s::llm4s-core:{{ site.data.project.latest_release }}
+{%- unless site.data.project.latest_release contains "0.4." %}
+//> using dep org.llm4s::llm4s-openai:{{ site.data.project.latest_release }}
+{%- endunless %}
+```
+
+From 0.5.0, add the provider module you use next to `llm4s-core` (`llm4s-openai` above). The
+[Scala CLI quick start](scala-cli) has a complete file that makes a first call.
+
 ### Multi-Module Project
 
 If you have a multi-module project:
@@ -133,6 +149,74 @@ lazy val myProject = (project in file("."))
       "org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"
     )
   )
+```
+
+### Align versions with the BOM
+
+{: .note }
+> Not yet published. `llm4s-bom` exists in the build as of
+> [#1462](https://github.com/llm4s/llm4s/issues/1462) but ships in the next release.
+
+A project that uses several llm4s modules (a provider, `llm4s-rag`, `llm4s-observability`) can state the
+version once, in the bill of materials `llm4s-bom`, and leave it off every module. The BOM contains no code;
+it supplies the versions released together. Explicit overrides and dependency conflict resolution can still
+select different versions, so check the resolved dependency graph.
+
+Maven and Gradle have no notion of Scala cross-versioning, so the modules are written with the Scala binary
+suffix (`llm4s-core_3`), and the BOM itself has none (`llm4s-bom`).
+
+**Maven** (import scope):
+
+```xml
+<dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>org.llm4s</groupId>
+      <artifactId>llm4s-bom</artifactId>
+      <version>{{ site.data.project.latest_release }}</version>
+      <type>pom</type>
+      <scope>import</scope>
+    </dependency>
+  </dependencies>
+</dependencyManagement>
+
+<dependencies>
+  <dependency>
+    <groupId>org.llm4s</groupId>
+    <artifactId>llm4s-core_3</artifactId>
+  </dependency>
+  <dependency>
+    <groupId>org.llm4s</groupId>
+    <artifactId>llm4s-openai_3</artifactId>
+  </dependency>
+</dependencies>
+```
+
+**Gradle** (Kotlin DSL; in Groovy write `implementation platform("org.llm4s:llm4s-bom:...")`):
+
+```kotlin
+dependencies {
+    implementation(platform("org.llm4s:llm4s-bom:{{ site.data.project.latest_release }}"))
+    implementation("org.llm4s:llm4s-core_3")
+    implementation("org.llm4s:llm4s-openai_3")
+}
+```
+
+Gradle `platform(...)` treats the BOM versions as recommendations that other dependencies can upgrade.
+For strict version pinning in an application, use `enforcedPlatform(...)` instead. Publishing libraries
+should generally keep `platform(...)` to avoid forcing their versions on consumers. See the
+[Gradle platform documentation](https://docs.gradle.org/current/userguide/platforms.html#sub:bom_import).
+
+**sbt** has no BOM import, so the BOM is optional there: keep one `val` for the version, as the sections
+below do (`%%` adds the `_3` suffix itself):
+
+```scala
+val llm4sVersion = "{{ site.data.project.latest_release }}"
+
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core"   % llm4sVersion,
+  "org.llm4s" %% "llm4s-openai" % llm4sVersion
+)
 ```
 
 ### Unreleased changes (`main`)
@@ -453,6 +537,23 @@ The Cohere embedding provider (`EMBEDDING_MODEL=cohere/<model>`), on Cohere's na
 with its `llm4s.embeddings.cohere` config block and a typed `CohereInputType` (`search_document`,
 `search_query`, ...). Cohere chat is a different module: `llm4s-openai-compatible`. A community
 provider module under `modules/providers/`; it brings no dependency beyond `llm4s-core`.
+
+### For the Jev decision model
+
+{: .note }
+> Not yet published. `llm4s-jev` exists in the build as of [#1265](https://github.com/llm4s/llm4s/issues/1265) but ships in
+> the next release.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-jev" % llm4sVersion
+```
+
+A typed client for TypeSafe's Jev decision model: send a state and typed questions (Noul, Choice, Score), get typed answers.
+It is not a chat provider and returns no `Completion`. Configured under `llm4s.jev`, with the key in `TYPESAFE_API_KEY`. A
+community module under `modules/providers/`; it brings no dependency beyond `llm4s-core`. See
+[Jev decision model](../guide/jev).
+
 ### For IBM watsonx.ai
 
 ```scala
@@ -476,13 +577,36 @@ libraryDependencies += "org.llm4s" %% "llm4s-java-api"             % llm4sVersio
 libraryDependencies += "org.llm4s" %% "llm4s-spring-boot-starter"  % llm4sVersion  // Spring Boot auto-configuration
 libraryDependencies += "org.llm4s" %% "llm4s-effect"               % llm4sVersion  // cats-effect 3 / fs2
 libraryDependencies += "org.llm4s" %% "llm4s-zio"                  % llm4sVersion  // ZIO 2 / ZIO Streams
+libraryDependencies += "org.llm4s" %% "llm4s-pekko"                % llm4sVersion  // Apache Pekko Streams
 ```
 
 `llm4s-java-api` is the Java-friendly facade (a runnable Gradle sample is in
 [`modules/samples/gradle-java`](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java)) and the base of the Spring starter, which adds the
-`llm4s.*` properties, an `LLM4STemplate` and an Actuator health indicator. `llm4s-effect` and
-`llm4s-zio` wrap `LLMClient` and `Agent` for their effect systems. There is also a Kotlin coroutine
-API, `modules/kotlin-api`, a separate Gradle build that is not published yet.
+`llm4s.*` properties, an `LLM4STemplate` and an Actuator health indicator. `llm4s-effect`,
+`llm4s-zio` and `llm4s-pekko` wrap `LLMClient` and `Agent` for their effect and streaming systems.
+
+### For Kotlin (coroutines and Flow)
+
+{: .note }
+> Not yet published. `llm4s-kotlin-api` ships to Maven Central from the next release on
+> ([#1494](https://github.com/llm4s/llm4s/issues/1494)), with every release after it.
+
+`llm4s-kotlin-api` is the Kotlin coroutine API over the Java facade: `LLMClientKt` and `AgentKt` with suspend
+functions, and `Flow`s of an agent turn's events. It is a Kotlin artifact, so it has **no** `_3` suffix, and it is
+released at the same version as every other llm4s module, so the BOM manages it too:
+
+```kotlin
+// build.gradle.kts
+dependencies {
+    implementation(platform("org.llm4s:llm4s-bom:{{ site.data.project.latest_release }}"))
+    implementation("org.llm4s:llm4s-kotlin-api")   // brings llm4s-java-api_3 and kotlinx-coroutines-core
+}
+```
+
+Without the BOM, write the version on it: `implementation("org.llm4s:llm4s-kotlin-api:{{ site.data.project.latest_release }}")`.
+It runs on JDK 21, like the Java facade it wraps. The module is built by Gradle (`modules/kotlin-api`), not sbt, so
+`sbt publishLocal` does not build it: to try it from `main`, run `sbt publishM2` and then `gradle publishToMavenLocal`
+in `modules/kotlin-api` (it builds at `0.1.0-SNAPSHOT` unless you pass `-Pllm4sVersion=<the version sbt published>`).
 
 ### For image generation and vision
 
@@ -544,6 +668,21 @@ Agent memory is the separate `llm4s-memory`; the ready-made tools are `llm4s-age
 contract. Package names are unchanged. See the
 [migration note](../reference/migration#slice-7-llm4s-agent---the-agent-runtime-leaves-core).
 
+### For durable agent threads (SQLite checkpointer)
+
+{: .note }
+> Not yet published. `llm4s-agent-checkpoint-sqlite` exists in the build as of
+> [#1701](https://github.com/llm4s/llm4s/issues/1701) but ships in the next release.
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-agent-checkpoint-sqlite" % llm4sVersion // same version as llm4s-agent
+```
+
+`SqliteCheckpointer` (`org.llm4s.agent.graph.sqlite`) keeps graph and agent threads - checkpoints, pending
+writes, event logs and run claims - in one SQLite file, so a run survives a restart and `recover` continues it
+in a new process. It brings the SQLite JDBC driver (`org.xerial:sqlite-jdbc`), which `llm4s-agent` itself does
+not depend on. See [Durable Checkpointers](../guide/agents/durable-checkpointers#the-sqlite-store).
+
 ### For built-in tools (web search, HTTP, filesystem, shell)
 
 {: .note }
@@ -573,7 +712,8 @@ tool API they implement (`ToolFunction`, `ToolRegistry`). Package names are unch
 libraryDependencies ++= Seq(
   "org.llm4s" %% "llm4s-observability"            % llm4sVersion, // TRACING_MODE=langfuse
   "org.llm4s" %% "llm4s-observability-otel"       % llm4sVersion, // TRACING_MODE=opentelemetry
-  "org.llm4s" %% "llm4s-observability-prometheus" % llm4sVersion  // llm4s.metrics.enabled = true
+  "org.llm4s" %% "llm4s-observability-prometheus" % llm4sVersion, // llm4s.metrics.enabled = true
+  "org.llm4s" %% "llm4s-observability-micrometer" % llm4sVersion   // MicrometerMetrics over your MeterRegistry
 )
 ```
 
@@ -589,6 +729,10 @@ names are unchanged. See the migration notes for
 [Langfuse and the collector](../reference/migration#slice-6-llm4s-observability---langfuse-the-trace-collector-and-costtracker-leave-core)
 and for [Prometheus](../reference/migration#slice-6-llm4s-observability-prometheus---prometheus-leaves-core).
 
+`llm4s-observability-micrometer` is the Micrometer counterpart: a `MetricsCollector` that records into a `MeterRegistry`
+you already have, with the same series names as the Prometheus module. It depends on `llm4s-core` and `micrometer-core`.
+See [Micrometer metrics](../guide/observability/micrometer).
+
 ### For Neo4j (knowledge graph store)
 
 ```scala
@@ -598,6 +742,35 @@ libraryDependencies += "org.llm4s" %% "llm4s-knowledgegraph-neo4j" % llm4sVersio
 
 `Neo4jGraphStore`, a graph store for `llm4s-knowledgegraph` backed by Neo4j. It depends on `llm4s-core`
 and `llm4s-knowledgegraph` and brings the Neo4j driver.
+
+### Structured output from a case class
+
+{: .note }
+> Not yet published. `llm4s-schema-derivation` exists in the build as of
+> [#1472](https://github.com/llm4s/llm4s/issues/1472) but ships in a release after 0.4.1. It is experimental.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-schema-derivation" % llm4sVersion
+```
+
+`SchemaOf` and `client.completeStructuredOf[A]`: the JSON schema of `completeStructured`, derived from a case class
+with `derives`. It depends on `llm4s-core` only. See [Derived Schemas](../guide/derived-schemas).
+
+### Testing your own code (the testkit)
+
+{: .note }
+> Not yet published. `llm4s-testkit` exists in the build as of
+> [#1475](https://github.com/llm4s/llm4s/issues/1475) but ships in the next release.
+
+```scala
+// same version as llm4s-core; test scope only
+libraryDependencies += "org.llm4s" %% "llm4s-testkit" % llm4sVersion % Test
+```
+
+A scriptable fake `LLMClient` for the tests of code that calls llm4s: canned replies, scripted tool calls,
+injected errors and recorded requests, with no network and no API key. It depends on `llm4s-core` only. See
+[Testing with the Testkit](../guide/testing-with-the-testkit).
 
 ### For provider authors (testing a provider module)
 
@@ -614,6 +787,21 @@ The checks a provider module's own `Llm4s<Name>ModuleSpec` makes: discovery, sol
 explicit registration and the config-to-client round trip. It requires JDK 21: its interruption checks
 and its local test server run on virtual threads. See
 [Writing a provider](../guide/writing-a-provider#testing).
+
+### For checkpoint store authors (testing a `Checkpointer`)
+
+{: .note }
+> Not yet published. `llm4s-agent-testkit` exists in the build as of
+> [#1700](https://github.com/llm4s/llm4s/issues/1700) but ships in the next release.
+
+```scala
+// same version as llm4s-agent; test scope only
+libraryDependencies += "org.llm4s" %% "llm4s-agent-testkit" % llm4sVersion % Test
+```
+
+`CheckpointerContract`, the suite every `Checkpointer` must pass: commits, event numbering, compaction, run-claim
+leases and fencing, and two runtimes contending over one store. It requires JDK 21, as `llm4s-agent` does. See
+[Durable Checkpointers](../guide/agents/durable-checkpointers#testing-it-with-the-contract-suite).
 
 ### For Workspace (Containerized Execution)
 

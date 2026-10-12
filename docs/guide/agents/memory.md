@@ -159,15 +159,23 @@ variable):
 | Option | Default | Description |
 |--------|---------|-------------|
 | `defaultImportance` | `0.5` | Importance given to a memory when you do not pass one |
-| `autoRecordMessages` | `true` | Not read by the managers yet (see below) |
-| `autoExtractEntities` | `false` | Not read by the managers yet (see below) |
-| `contextTokenBudget` | `2000` | Not read by the managers yet: pass `maxTokens` to `getRelevantContext` |
-| `consolidationEnabled` | `false` | Not read by the managers yet: call `consolidateMemories` yourself |
+| `contextTokenBudget` | `2000` | Token budget of `getRelevantContext` when the call passes no `maxTokens` |
+| `autoExtractEntities` | `false` | `recordMessage` and `recordConversation` also run `extractEntities` over each user and assistant message |
+| `consolidationConfig` | `ConsolidationConfig.default` | Group size and error handling of `consolidateMemories` |
 
-`defaultImportance` is the only option a manager consults today. The other four are accepted and
-stored, but neither `SimpleMemoryManager` nor `LLMMemoryManager` reads them, so setting them
-changes nothing: record messages with `recordMessage`, bound the context with `maxTokens`, and
-call `consolidateMemories` and `extractEntities` yourself.
+Both `SimpleMemoryManager` and `LLMMemoryManager` read every option. An explicit `maxTokens` always
+wins over `contextTokenBudget`. `autoExtractEntities` only changes what `LLMMemoryManager` stores,
+because `SimpleMemoryManager.extractEntities` extracts nothing; with it on, every recorded user and
+assistant message costs one extra LLM call (system and tool messages are not analysed). Extraction is
+best-effort: if the call fails, the message stays recorded and a warning is logged.
+
+```scala
+val config = MemoryManagerConfig(contextTokenBudget = 500, autoExtractEntities = true)
+```
+
+Managers record only what you pass to the `record*` methods, and nothing consolidates unless you
+call `consolidateMemories`: the `autoRecordMessages` and `consolidationEnabled` options, which no
+manager ever read, were removed in 0.5.0 ([#1579](https://github.com/llm4s/llm4s/issues/1579)).
 
 ---
 
@@ -400,9 +408,8 @@ def answerWithMemory(
 
 ### Recording the Conversation
 
-Managers record only what you pass to the `record*` methods. `MemoryManagerConfig.autoRecordMessages`
-is accepted but no manager reads it yet, so record each turn yourself, as above, with
-`recordMessage` or `recordConversation`.
+Managers record only what you pass to the `record*` methods, so record each turn yourself, as
+above, with `recordMessage` or `recordConversation`.
 
 ---
 
@@ -482,8 +489,8 @@ def consolidate(manager: MemoryManager): Result[MemoryManager] =
 ```
 
 `minCount` applies to each group of old memories (same type and context) separately, not to their
-total. Nothing consolidates on its own: `consolidationEnabled` is not read, so call
-`consolidateMemories` when you want it (for example from a scheduled job).
+total. Nothing consolidates on its own: call `consolidateMemories` when you want it (for example
+from a scheduled job).
 
 ---
 
@@ -509,8 +516,9 @@ def extractEntities(manager: MemoryManager): Result[String] =
 
 `extractEntities` returns the manager holding the new entity memories, not a list of ids. Read
 them back with `getEntityContext`; `EntityId.fromName` turns a name into the id used for it
-(lower case, spaces replaced by `_`). Nothing extracts on its own: `autoExtractEntities` is not
-read, so call `extractEntities` for the text you want mined.
+(lower case, spaces replaced by `_`). To mine every recorded user and assistant message instead,
+set `MemoryManagerConfig(autoExtractEntities = true)`: `recordMessage` then calls `extractEntities`
+for you, with the message's conversation id.
 
 ---
 
@@ -618,7 +626,8 @@ val context = manager.getRelevantContext(query, maxTokens = 500)
 `getRelevantContext` stops adding memories once the next one would take the text past
 `maxTokens * 4` characters; the section headings and the `# Retrieved Context` line count towards
 that. A heading is written only with at least one memory under it, so a `maxTokens` too small for
-any memory gives an empty string. The default is 2000 tokens, and `MemoryManagerConfig.contextTokenBudget` is not consulted.
+any memory gives an empty string. Without `maxTokens` the budget is the manager's
+`MemoryManagerConfig.contextTokenBudget`, 2000 tokens unless you set it.
 
 ### 4. Clean Up Old Memories
 

@@ -2,6 +2,7 @@ package org.llm4s.agent.graph
 
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.types.{ Result, TryOps }
+import org.slf4j.LoggerFactory
 
 import java.time.Clock
 import java.util.concurrent.atomic.AtomicReference
@@ -36,8 +37,26 @@ enum Durability:
 
 /** Runs compiled graphs on durable threads; see [[GraphRuntime]]. */
 object GraphRuntime:
-  /** A runtime over a new [[InMemoryCheckpointer]]. */
-  def inMemory(clock: Clock = Clock.systemUTC()): GraphRuntime = new GraphRuntime(new InMemoryCheckpointer, clock)
+  private val logger = LoggerFactory.getLogger(classOf[GraphRuntime])
+
+  /**
+   * The id of a new checkpoint that run `runId` writes over `parent`: `<runId>/<n>`, where `n` is one
+   * more than the parent's - so `n` counts along the thread's history, and an id is never repeated on
+   * a thread even when one `RunId` serves several runs. A parent id of another form counts as 0.
+   */
+  private[graph] def checkpointId(runId: RunId, parentOrdinal: Long, written: Long): String =
+    s"${runId.value}/${parentOrdinal + written}"
+
+  /** The `n` of a `<runId>/<n>` checkpoint id; 0 for an id of another form, or none. */
+  private[graph] def ordinal(checkpointId: Option[String]): Long =
+    checkpointId
+      .map(id => id.substring(id.lastIndexOf('/') + 1))
+      .flatMap(_.toLongOption)
+      .filter(_ >= 0)
+      .getOrElse(0L)
+
+  /** A runtime over a new [[InMemoryCheckpointer]], whose claims expire by the system clock. */
+  def inMemory(clock: Clock = Clock.systemUTC()): GraphRuntime = new GraphRuntime(new InMemoryCheckpointer(), clock)
 
 /**
  * Runs compiled graphs on durable threads.
@@ -54,18 +73,30 @@ object GraphRuntime:
  *  - `Suspended`: `resume` answers any non-empty subset of the parked interrupts; unanswered ones
  *    stay parked, and the run suspends again if nothing else can proceed.
  *
+ * Each call's [[RunConfig]] brings the run's static breakpoints; one on a node the graph does not have
+ * is refused with a `ValidationError` before the thread is read. A task they hold parks like a task
+ * that suspended, so the thread ends `Suspended` and `resume` answers it with [[Breakpoint.proceed]].
+ *
  * Any other call is refused ([[GraphError.IncompleteRun]], [[GraphError.PendingInterrupts]],
  * [[GraphError.NothingToRecover]], [[GraphError.NotSuspended]]) without changing the thread. A
  * thread belongs to the tenant on its latest checkpoint, and a call with another `tenantId` is
  * refused with [[GraphError.TenantMismatch]] before anything else is reported - the thread's
  * status, or that a run is live on it - and the error names only the caller's tenant, so it
- * learns nothing about the thread. Each
- * call is a new run: it claims the thread by committing a checkpoint whose parent is the latest
- * it read, and if another run got there first it fails with [[GraphError.ThreadBusy]] - its input
- * or answers neither accepted nor discarded. A call on a thread whose run is still executing in
- * this runtime fails the same way, before reading the thread, so `recover` cannot mistake a live
- * run's `Running` checkpoint for an abandoned one. Across processes nothing yet tells a live run
- * from a dead one: claim leases and fencing a claim against a stale worker are Stage 2.
+ * learns nothing about the thread.
+ *
+ * Each call is a new run, and claims the thread in two steps before it runs anything. First it
+ * asks the store for a [[RunClaim]]: a lease with an expiry and a [[FencingToken]], which the run
+ * renews while it executes (see [[ClaimPolicy]]) and releases when it ends. While another run's
+ * claim is live - in this runtime or in any other runtime or process sharing the store - the call
+ * fails with [[GraphError.ThreadBusy]] naming that run, so `recover` elsewhere refuses a live run
+ * and takes over a dead one only once its claim has expired. Then it commits a checkpoint whose
+ * parent is the latest it read; if another run advanced the thread in between, it fails with
+ * `ThreadBusy` too. Either way its input or answers are neither accepted nor discarded. Every
+ * commit of the run carries its claim's token, and the store refuses one whose claim was taken
+ * over ([[GraphError.StaleClaim]]), so a run that lost its claim - a process paused past `ttl` -
+ * cannot record anything after its successor started: it fails with
+ * [[GraphError.CheckpointWriteFailed]]. A call on a thread whose run is still executing in this
+ * runtime fails with `ThreadBusy` before reading the thread at all.
  *
  * Admission - the checks above, restoring the thread and committing the claim - runs on the
  * caller's thread and never throws: a `Left` means no run exists, and the thread is free again. A
@@ -103,27 +134,58 @@ object GraphRuntime:
  * `start` returns can miss the run's first live events; an [[Observer]] passed to `start`, `recover`
  * or `resume` is subscribed during admission, before the claim commits, and so sees every event of
  * the run ([[RunHandle.observation]]).
+ *
+ * A subscription also sees the durable events of commits made through another runtime or process
+ * sharing the checkpointer, in the same order and with the same guarantees: each live subscription
+ * watches the store ([[WatchPolicy]], [[Checkpointer.awaitEventsAfter]]), so they arrive as soon as
+ * the store reports them - at once from a store that is told of commits, within `pollInterval` from
+ * one that is polled. Live progress events are never stored, so another runtime's do not arrive.
  */
-final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.systemUTC()):
+final class GraphRuntime(
+  checkpointer: Checkpointer,
+  clock: Clock = Clock.systemUTC(),
+  claims: ClaimPolicy = ClaimPolicy.default,
+  watch: WatchPolicy = WatchPolicy.default
+):
 
-  private val hub        = EventHub(checkpointer)
+  /** For callers that cannot use default arguments (Java, Kotlin): [[WatchPolicy.default]]. */
+  def this(checkpointer: Checkpointer, clock: Clock, claims: ClaimPolicy) =
+    this(checkpointer, clock, claims, WatchPolicy.default)
+
+  /** For callers that cannot use default arguments (Java, Kotlin): [[ClaimPolicy.default]] and [[WatchPolicy.default]]. */
+  def this(checkpointer: Checkpointer, clock: Clock) =
+    this(checkpointer, clock, ClaimPolicy.default, WatchPolicy.default)
+
+  /**
+   * For callers that cannot use default arguments (Java, Kotlin): the system clock, [[ClaimPolicy.default]]
+   * and [[WatchPolicy.default]].
+   */
+  def this(checkpointer: Checkpointer) = this(checkpointer, Clock.systemUTC(), ClaimPolicy.default, WatchPolicy.default)
+
+  /** Every commit is written and handed to the event hub under it; the hub's store watches take it too. */
   private val commitLock = new java.util.concurrent.locks.ReentrantLock()
+  private val hub        = EventHub(checkpointer, commitLock, watch)
 
   /**
    * Threads with a run admitting or executing in this runtime, each with that run's tenant, so a
-   * caller from another tenant is refused even before the thread's first checkpoint exists;
-   * guarded by `activeLock`.
+   * caller from another tenant is refused even before the thread's first checkpoint exists, and its
+   * run id, the holder `ThreadBusy` names; guarded by `activeLock`.
    */
-  private val active     = mutable.Map.empty[String, Option[String]]
+  private val active     = mutable.Map.empty[String, (Option[String], RunId)]
   private val activeLock = new java.util.concurrent.locks.ReentrantLock()
 
   /**
    * Replays events with `seq > afterSeq`, then delivers new events until cancelled or
    * disconnected. The subscription is scoped to the thread, so it delivers every later run on it,
    * and its dispatcher (a virtual thread, parked while idle) lives until [[Subscription.cancel]];
-   * see there for how cancel waits on a running listener. Only commits made through this runtime are
-   * delivered live; another runtime or process sharing the checkpointer is seen only by subscribing
-   * again, which replays the log (store-level change notification is Stage 2). Returns without
+   * see there for how cancel waits on a running listener. Commits made through this runtime are
+   * handed over as they land; those of another runtime or process sharing the checkpointer are read
+   * from the store by the subscription's watch ([[WatchPolicy]]: a second virtual thread, which
+   * `cancel` stops too), in the same order and with the same guarantees, and are queued only as they
+   * fit, so they never make it lag. Live progress of another runtime's runs is not delivered: it is
+   * never stored. With [[WatchPolicy.disabled]], another runtime's commits are seen only by
+   * subscribing again, which replays the log. A failed read of the store ends the subscription,
+   * after what is queued, with [[DisconnectReason.ReplayFailed]]. Returns without
    * replaying: replay runs on the subscription's dispatcher thread, the only thread `listener` is
    * called on, and a failed replay ends it with [[DisconnectReason.ReplayFailed]]. Joining the event
    * hub takes its lock, which another subscription to any thread holds for its final catch-up read
@@ -154,6 +216,9 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
 
   /** How many subscriptions to `threadId` are in the event hub's live set; for tests. */
   private[llm4s] def liveSubscriptions(threadId: ThreadId): Int = hub.liveCount(threadId)
+
+  /** How many subscriptions to `threadId` are watching the store; for tests. */
+  private[llm4s] def storeWatches(threadId: ThreadId): Int = hub.watchCount(threadId)
 
   /** Starts a run on `threadId` with `input`; see the class description. */
   def start[I, O](
@@ -189,7 +254,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     newOnly: Option[() => LLMError],
     observer: Option[Observer]
   ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { signal =>
-    checkpointer.latest(threadId).flatMap {
+    graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None =>
         newRun(graph, threadId, config, durability, 0, signal).admit(graph.start(input), None, started(config))
       case Some(stored) =>
@@ -221,7 +286,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     durability: Durability = Durability.Sync,
     observer: Option[Observer] = None
   ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { signal =>
-    checkpointer.latest(threadId).flatMap {
+    graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None => Left(GraphError.NothingToRecover(threadId.value))
       case Some(stored) =>
         checkTenant(threadId, stored, config).flatMap { _ =>
@@ -235,8 +300,15 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
                   Some(stored.checkpoint.id),
                   RunEvent
                     .RunRecovered(stored.checkpoint.id, config.tenantId.map(_.value), config.principal.map(_.value)),
-                  stored.pendingWrites,
-                  reused
+                  // read again under the claim: a holder whose claim expired but was not yet replaced
+                  // could still add pending writes after the read above, and only the claim stops it
+                  () =>
+                    checkpointer.latest(threadId).flatMap {
+                      case Some(now) if now.checkpoint.id == stored.checkpoint.id =>
+                        reusableWrites(graph, execution, now).map(now.pendingWrites -> _)
+                      // the thread moved on: the claim commit's parent no longer matches, so it conflicts
+                      case _ => Right(stored.pendingWrites -> reused)
+                    }
                 )
               yield run
             case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
@@ -258,7 +330,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     durability: Durability = Durability.Sync,
     observer: Option[Observer] = None
   ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { signal =>
-    checkpointer.latest(threadId).flatMap {
+    graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None => Left(GraphError.NotSuspended(threadId.value))
       case Some(stored) =>
         checkTenant(threadId, stored, config).flatMap { _ =>
@@ -292,30 +364,356 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       .map(_.exists(s => s.checkpoint.runId == runId.value && s.checkpoint.status == CheckpointStatus.Failed))
 
   /**
-   * Deletes `threadId` from the runtime's store - its checkpoint, pending writes and event log - so
-   * its id names a new thread again. Refused, with nothing deleted, as admission refuses a run: a
+   * Deletes `threadId` from the runtime's store - its checkpoint, pending writes, event log and claim -
+   * so its id names a new thread again. Refused, with nothing deleted, as admission refuses a run: a
    * thread of another tenant is [[GraphError.TenantMismatch]], and one whose run is admitting or
-   * executing in this runtime is [[GraphError.ThreadBusy]]. The thread is held exclusively while
-   * it is deleted, so no run starts on it meanwhile. An unknown thread is `Right(())`. Cancel any
+   * executing in this runtime, or holds a live claim in any runtime, is [[GraphError.ThreadBusy]].
+   * The thread is held exclusively, and claimed in the store under `config.runId`, while it is
+   * deleted, so no run starts on it meanwhile. An unknown thread is `Right(())`. Cancel any
    * [[subscribe]] to the thread first: a new thread of the same id numbers its events from 1 again.
+   * The tenant is checked once more after the store claim is granted, so a thread another runtime
+   * created for another tenant in between is `TenantMismatch`, not deleted.
    */
   def deleteThread(threadId: ThreadId, config: RunConfig = RunConfig()): Result[Unit] = admission(threadId) {
     val holder = withLock(activeLock) {
       val existing = active.get(threadId.value)
-      if existing.isEmpty then active.update(threadId.value, config.tenantId.map(_.value))
+      if existing.isEmpty then active.update(threadId.value, (config.tenantId.map(_.value), config.runId))
       existing
     }
     holder match
-      case Some(holderTenant) => busy(threadId, config, holderTenant)
-      case None               =>
+      case Some((holderTenant, holderRun)) => busy(threadId, config, holderTenant, holderRun)
+      case None                            =>
         // released on every exit, including an InterruptedException, which `Try` would not catch
         Using.resource(new AutoCloseable { def close(): Unit = release(threadId) }) { _ =>
-          checkpointer.latest(threadId).flatMap {
-            case None         => checkpointer.deleteThread(threadId)
-            case Some(stored) => checkTenant(threadId, stored, config).flatMap(_ => checkpointer.deleteThread(threadId))
-          }
+          checkpointer
+            .latest(threadId)
+            .flatMap(_.fold[Result[Unit]](Right(()))(checkTenant(threadId, _, config)))
+            .flatMap(_ => claimThread(threadId, config))
+            .flatMap { claim =>
+              // the deletion removes the claim with the thread; one that did not happen gives it back
+              var deleted = false
+              Using.resource(new AutoCloseable {
+                def close(): Unit = if !deleted then releaseClaim(threadId, claim.token)
+              }) { _ =>
+                // checked again under the claim: another runtime may have created the thread, for
+                // another tenant, between the read above and the claim, and nothing else stops it
+                // before the delete (the delete, unlike a commit, names no parent checkpoint)
+                checkpointer
+                  .latest(threadId)
+                  .flatMap(_.fold[Result[Unit]](Right(()))(checkTenant(threadId, _, config)))
+                  .flatMap { _ =>
+                    val outcome = checkpointer.deleteThread(threadId)
+                    deleted = outcome.isRight
+                    outcome
+                  }
+              }
+            }
         }
   }
+
+  /**
+   * Up to `limit` of `threadId`'s checkpoints, newest first - the latest is the first of the first page
+   * - starting after checkpoint `before` when it is given: pass the last id of a page to read the
+   * next. Each is data; read its typed state with `graph.restore(checkpoint.snapshot)`. The history
+   * holds every checkpoint the thread's runs, [[updateState]] and [[fork]] committed, except those
+   * [[prune]] removed and the earlier checkpoints of a turn a guardrail blocked ([[NodeResult.Block]]
+   * retracts its turn). The retraction leaves the closing `Failed` checkpoint, which holds whatever the
+   * blocking node's own `Block` update leaves in the state: `Agent` removes the turn there with
+   * `MessageUpdate.RemoveTurn`, and a custom blocking node must remove the content in its `Block` update
+   * likewise. A thread of another tenant is [[GraphError.TenantMismatch]]; a `before` not in the history
+   * is [[GraphError.CheckpointNotFound]]; a new thread has an empty history. `limit` must be positive
+   * (`ValidationError`). Reading needs no claim, so it never waits for a run.
+   */
+  def history(
+    threadId: ThreadId,
+    before: Option[String] = None,
+    limit: Int = 100,
+    config: RunConfig = RunConfig()
+  ): Result[Vector[Checkpoint]] = admission(threadId) {
+    if limit < 1 then Left(ValidationError("limit", s"must be at least 1, was $limit"))
+    else
+      checkpointer.latest(threadId).flatMap {
+        case None => before.fold[Result[Vector[Checkpoint]]](Right(Vector.empty))(notFound(threadId, _))
+        case Some(stored) =>
+          for
+            _    <- checkTenant(threadId, stored, config)
+            page <- checkpointer.history(threadId, before, limit)
+            _    <- page.map(owned(threadId, _, config)).find(_.isLeft).getOrElse(Right(()))
+          yield page
+      }
+  }
+
+  /**
+   * Checkpoint `checkpointId` of `threadId`'s history (see [[history]]), the latest included.
+   * [[GraphError.CheckpointNotFound]] if it is not there; [[GraphError.TenantMismatch]] for a thread of
+   * another tenant.
+   */
+  def checkpoint(threadId: ThreadId, checkpointId: String, config: RunConfig = RunConfig()): Result[Checkpoint] =
+    admission(threadId) {
+      checkpointer.latest(threadId).flatMap {
+        case None => notFound(threadId, checkpointId)
+        case Some(stored) =>
+          checkTenant(threadId, stored, config)
+            .flatMap(_ => checkpointer.checkpoint(threadId, checkpointId))
+            .flatMap(
+              _.fold[Result[Checkpoint]](notFound(threadId, checkpointId))(c => owned(threadId, c, config).map(_ => c))
+            )
+      }
+    }
+
+  /**
+   * Starts thread `target` from checkpoint `checkpointId` of thread `source`, and returns the new
+   * thread's first checkpoint: the source checkpoint's state, scheduled work, parked interrupts and
+   * status, with no parent, written by `config.runId` and recorded with a [[RunEvent.ThreadForked]]
+   * event, the first of the new thread's log. Continue it as its status says: `start` after `Completed`
+   * or `Failed`, `recover` after `Running` - which runs the checkpoint's pending tasks again, in the new
+   * thread, because pending writes are never copied - and `resume` after `Suspended`. The source thread
+   * is only read, so it may be running meanwhile, and is left unchanged.
+   *
+   * Refused, with nothing changed: a source of another tenant is [[GraphError.TenantMismatch]], a
+   * checkpoint not in its history [[GraphError.CheckpointNotFound]]; a target that is the source is a
+   * `ValidationError`, one that exists [[GraphError.ThreadExists]] (or `TenantMismatch` if it is
+   * another tenant's), and one held by a run [[GraphError.ThreadBusy]]. The target is claimed in the
+   * store while it is created.
+   *
+   * The snapshot is copied as it is, so tool calls already issued at the forked checkpoint keep the
+   * source thread's idempotency keys, which the snapshot records (once #1739 lands, in their `ToolTask`,
+   * `ApprovalRequest` or `ToolQuestionRequest`); only model calls the new thread makes afterwards derive
+   * new keys, since the key includes the thread. This is intended: a fork that re-runs a call the source
+   * already issued is de-duplicated against the source's call by its key, rather than performing the
+   * side effect a second time.
+   */
+  def fork(
+    source: ThreadId,
+    checkpointId: String,
+    target: ThreadId,
+    config: RunConfig = RunConfig()
+  ): Result[Checkpoint] = admission(target) {
+    val tenant = config.tenantId.map(_.value)
+    def origin: Result[Checkpoint] =
+      checkpointer.latest(source).flatMap {
+        case None => notFound(source, checkpointId)
+        case Some(stored) =>
+          checkTenant(source, stored, config)
+            .flatMap(_ => checkpointer.checkpoint(source, checkpointId))
+            .flatMap(
+              _.fold[Result[Checkpoint]](notFound(source, checkpointId))(c => owned(source, c, config).map(_ => c))
+            )
+      }
+    def vacant: Result[Unit] =
+      checkpointer.latest(target).flatMap {
+        case None => Right(())
+        case Some(stored) =>
+          checkTenant(target, stored, config).flatMap(_ => Left(GraphError.ThreadExists(target.value)))
+      }
+    if source == target then
+      Left(ValidationError("target", "a fork creates a new thread; name one other than its source"))
+    else
+      origin.flatMap { from =>
+        holding(target, config)(vacant) { claim =>
+          // checked again under the claim: another runtime may have created the target in between
+          vacant.flatMap { _ =>
+            val now = clock.instant()
+            val forked = from
+              .withFormatVersion(Checkpoint.CurrentFormat)
+              .withId(GraphRuntime.checkpointId(config.runId, 0L, 1L))
+              .withParent(None)
+              .withThreadId(target.value)
+              .withRunId(config.runId.value)
+              .withCreatedAt(now)
+              .withTenantId(tenant)
+              .withFencingToken(claim.token)
+            val event = EventDraft(
+              config.runId.value,
+              Some(forked.id),
+              None,
+              None,
+              now,
+              RunEvent.ThreadForked(source.value, checkpointId, tenant, config.principal.map(_.value))
+            )
+            commitAndDeliver(target, Commit(claim.token, Some(forked), events = Vector(event))).left
+              .map(GraphError.CheckpointWriteFailed(target.value, _))
+              .map(_ => forked)
+          }
+        }
+      }
+  }
+
+  /**
+   * Applies `update` to the committed state of `threadId`'s latest checkpoint, which must be
+   * `expected` - the version the caller read; [[GraphError.CheckpointConflict]] otherwise, so an
+   * update never lands on a state its caller has not seen - and commits the result as a new latest
+   * checkpoint, recorded with a [[RunEvent.StateUpdated]] event, and returns it. Use it to correct a
+   * thread's state, for example before `resume`.
+   *
+   * Only the state changes: the new checkpoint keeps the status, scheduled tasks, open joins and
+   * parked interrupts, so the same call - `start`, `recover` or `resume` - continues the thread
+   * afterwards. With `asNode`, the update is checked as if that node had returned it: every key must
+   * be in its declared write set ([[GraphError.UndeclaredWrite]]), and the event names the node.
+   * Without it, every key must be one the graph registers ([[GraphError.UnknownStateKey]]). The
+   * update is applied with each key's update function, like any node's ([[GraphError.StateUpdateFailed]]).
+   *
+   * The pending writes of tasks that completed against `expected` are carried over to the new
+   * checkpoint, so `recover` still does not run them again; their updates apply after this one. The new
+   * checkpoint is one superstep on from `expected`, so the supersteps a thread runs keep increasing and
+   * no later model call derives a tool idempotency key an earlier one used.
+   *
+   * The thread is held - in this runtime and by a claim in the store, so the commit is fenced - while it
+   * is updated, and a run holding it refuses the update with [[GraphError.ThreadBusy]]. A thread of
+   * another tenant is [[GraphError.TenantMismatch]]; a thread with no checkpoint
+   * [[GraphError.CheckpointNotFound]]. Every refusal leaves the thread unchanged.
+   */
+  def updateState[I, O](
+    threadId: ThreadId,
+    graph: CompiledGraph[I, O],
+    expected: String,
+    update: StateUpdate,
+    asNode: Option[NodeRef[?]] = None,
+    config: RunConfig = RunConfig()
+  ): Result[Checkpoint] = admission(threadId) {
+    def edited: Result[(StoredCheckpoint, Execution)] =
+      checkpointer.latest(threadId).flatMap {
+        case None => notFound(threadId, expected)
+        case Some(stored) =>
+          for
+            _ <- checkTenant(threadId, stored, config)
+            _ <- Either.cond(
+              stored.checkpoint.id == expected,
+              (),
+              GraphError.CheckpointConflict(threadId.value, Some(expected), Some(stored.checkpoint.id))
+            )
+            execution <- graph.restore(stored.checkpoint.snapshot)
+            // the carried writes must still rebind: they are reused by the next `recover`
+            _    <- reusableWrites(graph, execution, stored)
+            edit <- graph.edit(execution, update, asNode)
+          yield stored -> edit
+      }
+    holding(threadId, config)(edited.map(_ => ())) { claim =>
+      // read again under the claim: the version, and the pending writes to carry over, are now settled
+      edited.flatMap { (stored, execution) =>
+        graph.snapshot(execution).flatMap { snapshot =>
+          val now      = clock.instant()
+          val tenant   = config.tenantId.map(_.value)
+          val nodeId   = asNode.map(_.id.value)
+          val parentId = stored.checkpoint.id
+          val saved = Checkpoint(
+            Checkpoint.CurrentFormat,
+            GraphRuntime.checkpointId(config.runId, GraphRuntime.ordinal(Some(parentId)), 1L),
+            Some(parentId),
+            threadId.value,
+            config.runId.value,
+            stored.checkpoint.status,
+            now,
+            snapshot,
+            tenant,
+            Some(claim.token)
+          )
+          val event = EventDraft(
+            config.runId.value,
+            Some(saved.id),
+            None,
+            nodeId,
+            now,
+            RunEvent.StateUpdated(parentId, nodeId, tenant, config.principal.map(_.value))
+          )
+          commitAndDeliver(
+            threadId,
+            Commit(claim.token, Some(saved), stored.pendingWrites.map(_.copy(checkpointId = saved.id)), Vector(event))
+          ).left
+            .map {
+              case conflict: GraphError.CheckpointConflict => conflict
+              case other                                   => GraphError.CheckpointWriteFailed(threadId.value, other)
+            }
+            .map(_ => saved)
+        }
+      }
+    }
+  }
+
+  /**
+   * Removes the checkpoints and events of `threadId` that `policy` does not keep, by the store's clock
+   * ([[Checkpointer.prune]]): never the latest checkpoint or its pending writes, so what the thread
+   * does next is unchanged. Pruning a checkpoint also removes earlier events; `maxAge` and `maxEvents`
+   * may remove more, including the latest checkpoint's. Removing events raises the replay floor
+   * ([[GraphError.ReplayUnavailable]]). A thread of another tenant is [[GraphError.TenantMismatch]];
+   * an unknown thread is `Right(())`. It needs no claim, so it may run while a run executes.
+   */
+  def prune(threadId: ThreadId, policy: RetentionPolicy, config: RunConfig = RunConfig()): Result[Unit] =
+    admission(threadId) {
+      checkpointer
+        .latest(threadId)
+        .flatMap(_.fold[Result[Unit]](Right(()))(checkTenant(threadId, _, config)))
+        .flatMap(_ => checkpointer.prune(threadId, policy))
+    }
+
+  private def notFound[A](threadId: ThreadId, checkpointId: String): Result[A] =
+    Left(GraphError.CheckpointNotFound(threadId.value, checkpointId))
+
+  /** A checkpoint read from the history belongs to the caller's tenant, as its thread's latest does. */
+  private def owned(threadId: ThreadId, checkpoint: Checkpoint, config: RunConfig): Result[Unit] =
+    val requested = config.tenantId.map(_.value)
+    Either.cond(checkpoint.tenantId == requested, (), GraphError.TenantMismatch(threadId.value, requested))
+
+  /**
+   * Holds `threadId` for one change that is not a run - in this runtime, then by a claim in the store -
+   * and gives both back however `body` ends. `check` runs first, after the in-process hold and before
+   * the store claim, so that a caller it refuses (another tenant) learns nothing from a claim; `body`
+   * then runs with the claim, and should check again what it relies on.
+   */
+  private def holding[A](threadId: ThreadId, config: RunConfig)(check: => Result[Unit])(
+    body: RunClaim => Result[A]
+  ): Result[A] =
+    val holder = withLock(activeLock) {
+      val existing = active.get(threadId.value)
+      if existing.isEmpty then active.update(threadId.value, (config.tenantId.map(_.value), config.runId))
+      existing
+    }
+    holder match
+      case Some((holderTenant, holderRun)) => busy(threadId, config, holderTenant, holderRun)
+      case None                            =>
+        // released on every exit, including an InterruptedException, which `Try` would not catch
+        Using.resource(new AutoCloseable { def close(): Unit = release(threadId) }) { _ =>
+          check.flatMap(_ => claimThread(threadId, config)).flatMap { claim =>
+            Using.resource(new AutoCloseable { def close(): Unit = releaseClaim(threadId, claim.token) })(_ =>
+              body(claim)
+            )
+          }
+        }
+
+  /**
+   * Asks the store for a claim on `threadId` for `config.runId`. A live claim held by another run is
+   * [[GraphError.ThreadBusy]] naming it - after the thread is re-read and its tenant checked, so a
+   * caller from another tenant gets `TenantMismatch` instead and learns nothing; for a thread with
+   * no checkpoint, whose tenant cannot be checked, the holder is not named. Any other failure of the
+   * store, returned or thrown (non-fatally), is [[GraphError.CheckpointWriteFailed]].
+   */
+  private def claimThread(threadId: ThreadId, config: RunConfig): Result[RunClaim] =
+    Try(checkpointer.claim(threadId, ClaimRequest(config.runId, claims.ttl))).toResult.flatten match
+      case Right(claim) => Right(claim)
+      case Left(GraphError.ThreadBusy(_, latest, holder)) =>
+        Try(busyAt(threadId, config, holder, nameWithoutCheckpoint = false)).toResult.flatten.left.map {
+          case refusal @ (_: GraphError.TenantMismatch | _: GraphError.ThreadBusy) => refusal
+          case _ => GraphError.ThreadBusy(threadId.value, latest)
+        }
+      case Left(other) => Left(GraphError.CheckpointWriteFailed(threadId.value, other))
+
+  /**
+   * Gives back the claim whose token is `token`, logging (never throwing) a store that fails: its
+   * claim then lapses after `claims.ttl`, and until then the thread is `ThreadBusy` to every runtime.
+   */
+  private def releaseClaim(threadId: ThreadId, token: FencingToken): Unit =
+    DefaultRunHandle.guarded(checkpointer.release(threadId, token)) match
+      case Right(Right(_)) => ()
+      case Right(Left(error)) =>
+        GraphRuntime.logger.warn(
+          s"Releasing the claim on thread '${threadId.value}' failed; it lapses after ${claims.ttl}: ${error.message}"
+        )
+      case Left(thrown) =>
+        if thrown.isInstanceOf[InterruptedException] then Thread.currentThread().interrupt()
+        GraphRuntime.logger.warn(
+          s"Releasing the claim on thread '${threadId.value}' failed; it lapses after ${claims.ttl}",
+          thrown
+        )
 
   /**
    * Admits a run as the only run on `threadId` in this runtime, and launches it. While a run
@@ -333,28 +731,32 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       case Some(o) =>
         Left(ValidationError("capacity", s"must be at least 2 (one slot is reserved for a LiveGap), was ${o.capacity}"))
       case None =>
-        val reserving = config.tenantId.map(_.value)
+        val reserving = (config.tenantId.map(_.value), config.runId)
         val holder = withLock(activeLock) {
           val existing = active.get(threadId.value)
           if existing.isEmpty then active.update(threadId.value, reserving)
           existing
         }
         holder match
-          case Some(holderTenant) => busy(threadId, config, holderTenant)
+          case Some((holderTenant, holderRun)) => busy(threadId, config, holderTenant, holderRun)
           case None =>
             val signal   = StopSignal()
             var launched = false
+            var admitted = Option.empty[Run[I, O]]
             // joined before the claim commits, so it receives the claim and everything after it
             var observation = Option.empty[EventHub#Observation]
             // on every exit but a launch, including an InterruptedException, which `Try` would not
-            // catch: the observer is abandoned, then the thread released, so no later run reaches it
+            // catch: the observer is abandoned, then the store claim and the thread released, so no
+            // later run reaches it
             Using.resource(new AutoCloseable {
               def close(): Unit = if !launched then
                 observation.foreach(_.abandon())
+                admitted.foreach(_.releaseClaim())
                 release(threadId)
             }) { _ =>
               observation = observer.map(o => hub.observe(threadId, o.capacity, o.listener))
               admit(signal).map { run =>
+                admitted = Some(run)
                 val subscription = observation.map(_.start(run.claimSeq - 1))
                 val handle = DefaultRunHandle[O](
                   threadId,
@@ -364,7 +766,18 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
                   (afterSeq, capacity, listener) => dispatched(threadId, afterSeq, capacity, listener),
                   subscription
                 )
-                handle.launch(() => run.execute(), run.crashed, () => release(threadId), run.deadline)
+                // the store claim first, then this runtime's hold: once a caller sees the result, any
+                // runtime may claim the thread
+                def releaseBoth(): Unit =
+                  run.releaseClaim()
+                  release(threadId)
+                handle.launch(
+                  () => run.execute(),
+                  run.crashed,
+                  () => releaseBoth(),
+                  run.deadline,
+                  Some(claims.renewEvery -> (() => run.renewClaim()))
+                )
                 launched = true
                 handle
               }
@@ -399,24 +812,39 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     RunEvent.RunStarted(config.tenantId.map(_.value), config.principal.map(_.value))
 
   /**
-   * [[GraphError.ThreadBusy]] naming the thread's latest checkpoint - unless the run holding the
-   * thread, or that checkpoint, belongs to another tenant: then [[GraphError.TenantMismatch]], so
-   * that a caller from another tenant learns nothing about the thread, not even that a run is live
-   * on it. The holder's tenant is checked first, because a first admission on a new thread holds it
-   * before any checkpoint exists.
+   * [[GraphError.ThreadBusy]] naming the thread's latest checkpoint and the run holding it in this
+   * runtime - unless that run, or that checkpoint, belongs to another tenant: then
+   * [[GraphError.TenantMismatch]], so that a caller from another tenant learns nothing about the
+   * thread, not even that a run is live on it. The holder's tenant is checked first, because a first
+   * admission on a new thread holds it before any checkpoint exists.
    */
-  private def busy(threadId: ThreadId, config: RunConfig, holder: Option[String]): Result[Nothing] =
+  private def busy(
+    threadId: ThreadId,
+    config: RunConfig,
+    holderTenant: Option[String],
+    holderRun: RunId
+  ): Result[Nothing] =
     val requested = config.tenantId.map(_.value)
-    if holder != requested then Left(GraphError.TenantMismatch(threadId.value, requested))
-    else busyAt(threadId, config)
+    if holderTenant != requested then Left(GraphError.TenantMismatch(threadId.value, requested))
+    else busyAt(threadId, config, Some(holderRun.value), nameWithoutCheckpoint = true)
 
-  /** [[busy]]'s store half: the thread's latest checkpoint, tenant-checked. */
-  private def busyAt(threadId: ThreadId, config: RunConfig): Result[Nothing] =
+  /**
+   * [[busy]]'s store half: the thread's latest checkpoint, tenant-checked, and `holder`. With no
+   * checkpoint the holder is named only if `nameWithoutCheckpoint`: its tenant is then known to be the
+   * caller's, as for a run of this runtime.
+   */
+  private def busyAt(
+    threadId: ThreadId,
+    config: RunConfig,
+    holder: Option[String],
+    nameWithoutCheckpoint: Boolean
+  ): Result[Nothing] =
     checkpointer.latest(threadId).flatMap {
-      case None => Left(GraphError.ThreadBusy(threadId.value, None))
+      case None =>
+        Left(GraphError.ThreadBusy(threadId.value, None, holder.filter(_ => nameWithoutCheckpoint)))
       case Some(stored) =>
         checkTenant(threadId, stored, config).flatMap(_ =>
-          Left(GraphError.ThreadBusy(threadId.value, Some(stored.checkpoint.id)))
+          Left(GraphError.ThreadBusy(threadId.value, Some(stored.checkpoint.id), holder))
         )
     }
 
@@ -548,9 +976,13 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     private var writes: Vector[PendingWrite]          = Vector.empty
     private var events: Vector[EventDraft]            = Vector.empty
     private var failed: Option[LLMError]              = None
+    private var token: Option[FencingToken]           = None
+    private var retract                               = false
     private val lock                                  = new java.util.concurrent.locks.ReentrantLock()
 
     def submit(commit: Commit): Unit = withLock(lock) {
+      // every commit of a run carries its claim's token; the exit commit carries it too
+      if token.isEmpty then token = Some(commit.token)
       commit.checkpoint.foreach { next =>
         if durableParent.isEmpty then durableParent = Some(next.parent)
         checkpoint = Some(next)
@@ -558,12 +990,15 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       }
       writes ++= commit.pendingWrites
       events ++= commit.events
+      retract = retract || commit.retractTurn
     }
     def failure: Option[LLMError] = withLock(lock)(failed)
     def close(): Unit = withLock(lock) {
-      val last = checkpoint.map(c => c.copy(parent = durableParent.flatten))
-      if last.isDefined || writes.nonEmpty || events.nonEmpty then
-        failed = commitAndDeliver(threadId, Commit(last, writes, events)).left.toOption
+      val last = checkpoint.map(_.withParent(durableParent.flatten))
+      token.foreach { fence =>
+        if last.isDefined || writes.nonEmpty || events.nonEmpty then
+          failed = commitAndDeliver(threadId, Commit(fence, last, writes, events, retract)).left.toOption
+      }
     }
 
   /** One run: drives supersteps, recording task results, checkpoints and events as it goes. */
@@ -577,7 +1012,10 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
   ):
     val runId               = config.runId
     private val cause       = signal.cause
-    private var checkpoints = 0
+    private var checkpoints = 0L
+
+    /** The `n` of the checkpoint this run claims over; its own checkpoints count on from it. */
+    private var parentOrdinal = 0L
 
     /** Where the run is: the execution `loop` is at and its checkpoint; set by the claim. */
     private var position: (Execution, String) = null
@@ -592,22 +1030,45 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     var deadline: Option[Long] = None
 
     /**
-     * Claims the thread with a synchronous commit of `execution` as a new checkpoint whose parent
-     * is `parent`, carrying `carried` pending writes over to it; [[execute]] then runs from there.
-     * A conflicting claim means another run advanced the thread first.
+     * Claims the thread in two steps: a [[RunClaim]] from the store, then a synchronous commit of
+     * `execution` as a new checkpoint whose parent is `parent`, carrying `carried` pending writes over
+     * to it, fenced by the claim's token; [[execute]] then runs from there. A live claim of another
+     * run, or a conflicting commit - another run advanced the thread first - is `ThreadBusy`. If the
+     * commit does not land, or anything throws, the store claim is given back before this returns.
+     * `carry` is called once the store claim is granted, and returns the pending writes to carry over
+     * and the task results `execute` reuses: read under the claim, nothing a fenced holder writes
+     * can be missed.
      */
     def admit(
       execution: Execution,
       parent: Option[String],
       event: RunEvent,
-      carried: Vector[PendingWrite] = Vector.empty,
-      reused: Map[TaskId, TaskResult] = Map.empty
+      carry: () => Result[(Vector[PendingWrite], Map[TaskId, TaskResult])] = () => Right(Vector.empty -> Map.empty)
+    ): Result[Run[I, O]] =
+      claimThread(threadId, config).flatMap { granted =>
+        claim = Some(granted)
+        parentOrdinal = GraphRuntime.ordinal(parent)
+        var admitted = false
+        Using.resource(new AutoCloseable { def close(): Unit = if !admitted then releaseClaim() }) { _ =>
+          val outcome = carry().flatMap((carried, reused) => committed(execution, parent, event, carried, reused))
+          admitted = outcome.isRight
+          outcome
+        }
+      }
+
+    private def committed(
+      execution: Execution,
+      parent: Option[String],
+      event: RunEvent,
+      carried: Vector[PendingWrite],
+      reused: Map[TaskId, TaskResult]
     ): Result[Run[I, O]] =
       for
         claimed <- newCheckpoint(execution, parent, CheckpointStatus.Running)
         records <- commitAndDeliver(
           threadId,
           Commit(
+            token,
             Some(claimed),
             carried.map(_.copy(checkpointId = claimed.id)),
             Vector(draft(Some(claimed.id), None, event))
@@ -617,7 +1078,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
           // checkpoint is not named, but the conflict's own `latest` is the authoritative one. A
           // re-read that fails or throws falls back to that ThreadBusy rather than a store error.
           case Left(GraphError.CheckpointConflict(_, _, latest)) =>
-            Try(busyAt(threadId, config)).toResult.flatten.left.map {
+            Try(busyAt(threadId, config, None, nameWithoutCheckpoint = false)).toResult.flatten.left.map {
               case mismatch: GraphError.TenantMismatch => mismatch
               case _                                   => GraphError.ThreadBusy(threadId.value, latest)
             }
@@ -640,6 +1101,58 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
         claimSeq = seq
         deadline = config.budgets.timeout.map(timeout => System.nanoTime() + timeout.toNanos)
         this
+
+    /** The store claim this run holds, from [[admit]] on; `None` before it, or if it was refused. */
+    @volatile private var claim: Option[RunClaim] = None
+    private val claimReleased                     = new java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Set by [[renewClaim]] when the store reports the claim taken over. The run checks it at the
+     * start of each superstep, so a run whose commits are deferred (Async, OnExit) stops there
+     * rather than executing more tasks whose results the store would refuse.
+     */
+    @volatile private var lostClaim: Option[GraphError.StaleClaim] = None
+
+    /** The token every commit of this run carries; set by [[admit]] before its first commit. */
+    private def token: FencingToken = claim.map(_.token).getOrElse(FencingToken(0L))
+
+    /** Gives back the store claim, once; a no-op before the claim was granted. Never throws. */
+    def releaseClaim(): Unit =
+      claim.foreach(c =>
+        if claimReleased.compareAndSet(false, true) then GraphRuntime.this.releaseClaim(threadId, c.token)
+      )
+
+    /**
+     * Renews the store claim for another `claims.ttl`; on the claim's renewal thread. Returns whether
+     * to keep renewing: `false` once the claim has been released or lost ([[GraphError.StaleClaim]]:
+     * another run took the thread over, and this run's commits are now refused). A store that fails
+     * otherwise is logged, and renewal is tried again at the next interval. Never throws.
+     */
+    def renewClaim(): Boolean =
+      claim match
+        case None                         => false
+        case Some(_) if claimReleased.get => false
+        case Some(held) =>
+          DefaultRunHandle.guarded(checkpointer.renew(threadId, held.token, claims.ttl)) match
+            case Right(Right(_)) => true
+            case Right(Left(lost: GraphError.StaleClaim)) =>
+              if !claimReleased.get then
+                lostClaim = Some(lost)
+                GraphRuntime.logger.warn(
+                  s"Run '${runId.value}' lost its claim on thread '${threadId.value}': ${lost.message}; its commits will be refused"
+                )
+              false
+            case Right(Left(error)) =>
+              GraphRuntime.logger.warn(
+                s"Renewing run '${runId.value}''s claim on thread '${threadId.value}' failed: ${error.message}"
+              )
+              true
+            case Left(thrown) =>
+              GraphRuntime.logger.warn(
+                s"Renewing run '${runId.value}''s claim on thread '${threadId.value}' failed",
+                thrown
+              )
+              true
 
     /** Runs the claimed execution to its end; on the run thread. */
     def execute(): RunResult[O] =
@@ -670,7 +1183,10 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
         case Some(error)             => stop(execution, GraphError.CheckpointWriteFailed(threadId.value, error))
         case None =>
           position = execution -> checkpointId
-          if execution.paused || execution.isQuiescent then end(execution, checkpointId)
+          // the claim was taken over: nothing more this run commits would land
+          val lost = lostClaim
+          if lost.nonEmpty then stop(execution, GraphError.CheckpointWriteFailed(threadId.value, lost.get))
+          else if execution.paused || execution.isQuiescent then end(execution, checkpointId)
           else if execution.superstep - firstSuperstep >= config.budgets.maxSupersteps then
             fail(execution, GraphError.SuperstepLimitExceeded(config.budgets.maxSupersteps))
           else if Thread.currentThread().isInterrupted || overdue() then cancelled()
@@ -678,7 +1194,11 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
             val outcomes = graph
               .executorFor(config.budgets)
               .runAll(execution.frontier.map { task => () =>
-                reused.get(task.id).fold(runTask(task, execution, checkpointId))(Right(_)).map(task -> _)
+                reused.get(task.id) match
+                  case Some(result) => Right(task -> result)
+                  // held at a breakpoint before it runs: nothing to record, and recovery decides again
+                  case None if graph.holdsBefore(task, config) => Right(task -> TaskResult.Held)
+                  case None                                    => runTask(task, execution, checkpointId).map(task -> _)
               })
             // a cancelled task cancels the run, even if an earlier task failed
             if outcomes.exists { case Left(_: CancelledError) => true; case _ => false } then cancelled()
@@ -689,7 +1209,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
                 )
               // the first blocked task, in frontier order, ends the run once the superstep is committed
               val blockedBy = completed.toOption.flatMap(graph.blockedBy)
-              completed.flatMap(graph.commitSuperstep(execution, _)) match
+              completed.flatMap(graph.commitSuperstep(execution, _, config)) match
                 case Left(error) => fail(execution, error)
                 case Right(next) =>
                   blockedBy match
@@ -754,8 +1274,9 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       newCheckpoint(execution, Some(parent), CheckpointStatus.Failed) match
         case Left(storeError)                                                  => fail(execution, storeError)
         case Right(_) if !cause.compareAndSet(None, Some(StopCause.Finishing)) => cancelled()
-        case Right(saved) =>
-          submit(saved, RunEvent.RunFailed(error.message))
+        case Right(saved)                                                      =>
+          // the blocked turn leaves the history with it: nothing of it stays readable or forkable
+          submit(saved, RunEvent.RunFailed(error.message), retractTurn = true)
           committer.close()
           committer.failure.fold[RunResult[O]](RunResult.Failed(execution.state, error))(e =>
             RunResult.Failed(execution.state, GraphError.CheckpointWriteFailed(threadId.value, e, Some(error)))
@@ -765,7 +1286,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       val sink = TaskSink(task, checkpointId)
       val context = new RunContext(
         config,
-        RunPosition(threadId, runId, checkpointId, task.id, task.node, execution.superstep),
+        RunPosition(threadId, runId, checkpointId, task.id, task.node, execution.superstep, claim.map(_.token)),
         sink
       )
       def settled(executed: Result[TaskResult]): Result[TaskResult] =
@@ -775,16 +1296,18 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
           case Right(_) if Thread.currentThread().isInterrupted => Left(CancelledError(s"task ${task.id.value}"))
           case Right((result, write)) =>
             val event = result match
-              case TaskResult.Done(_)         => RunEvent.TaskCompleted
-              case TaskResult.Parked(_, _, _) => RunEvent.TaskSuspended(task.id.value)
-              case TaskResult.Blocked(_, e)   => RunEvent.TaskFailed(e.message)
+              // a held task never reaches here: encodeWrite refuses it
+              case TaskResult.Done(_) | TaskResult.Held => RunEvent.TaskCompleted
+              case TaskResult.Parked(_, _, _)           => RunEvent.TaskSuspended(task.id.value)
+              case TaskResult.Blocked(_, e)             => RunEvent.TaskFailed(e.message)
             committer.submit(
-              Commit(None, Vector(write), draft(Some(checkpointId), Some(task), event) +: sink.customEvents)
+              Commit(token, None, Vector(write), draft(Some(checkpointId), Some(task), event) +: sink.customEvents)
             )
             Right(result)
           case Left(error) =>
             committer.submit(
               Commit(
+                token,
                 None,
                 Vector.empty,
                 Vector(draft(Some(checkpointId), Some(task), RunEvent.TaskFailed(error.message)))
@@ -799,6 +1322,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
         case Right(blocked @ TaskResult.Blocked(_, error)) =>
           committer.submit(
             Commit(
+              token,
               None,
               Vector.empty,
               draft(Some(checkpointId), Some(task), RunEvent.TaskFailed(error.message)) +: sink.customEvents
@@ -814,7 +1338,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     ): Result[Checkpoint] =
       graph.snapshot(execution).map { snapshot =>
         checkpoints += 1
-        val id = s"${runId.value}/$checkpoints"
+        val id = GraphRuntime.checkpointId(runId, parentOrdinal, checkpoints)
         Checkpoint(
           Checkpoint.CurrentFormat,
           id,
@@ -824,7 +1348,8 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
           status,
           clock.instant(),
           snapshot,
-          config.tenantId.map(_.value)
+          config.tenantId.map(_.value),
+          claim.map(_.token)
         )
       }
 
@@ -839,8 +1364,10 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
         saved.id
       }
 
-    private def submit(saved: Checkpoint, event: RunEvent): Unit =
-      committer.submit(Commit(Some(saved), Vector.empty, Vector(draft(Some(saved.id), None, event))))
+    private def submit(saved: Checkpoint, event: RunEvent, retractTurn: Boolean = false): Unit =
+      committer.submit(
+        Commit(token, Some(saved), Vector.empty, Vector(draft(Some(saved.id), None, event)), retractTurn)
+      )
 
     /**
      * Ends a cancelled or expired run, by its recorded cause: [[RunEvent.RunCancelled]] and
@@ -868,7 +1395,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
           RunEvent.RunCancelled -> GraphError.Cancelled(Some(threadId.value), Some(checkpointId))
         case StopCause.Expired =>
           RunEvent.RunTimedOut -> GraphError.DeadlineExceeded(threadId.value, Some(checkpointId))
-      committer.submit(Commit(None, Vector.empty, Vector(draft(Some(checkpointId), None, event))))
+      committer.submit(Commit(token, None, Vector.empty, Vector(draft(Some(checkpointId), None, event))))
       val result = stop(execution, error)
       Thread.currentThread().interrupt()
       result
@@ -882,7 +1409,9 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     private def fail(execution: Execution, error: LLMError): RunResult[O] =
       if !cause.compareAndSet(None, Some(StopCause.Finishing)) then cancelled()
       else
-        committer.submit(Commit(None, Vector.empty, Vector(draft(None, None, RunEvent.RunFailed(error.message)))))
+        committer.submit(
+          Commit(token, None, Vector.empty, Vector(draft(None, None, RunEvent.RunFailed(error.message))))
+        )
         stop(execution, error)
 
     /**

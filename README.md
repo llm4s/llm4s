@@ -13,6 +13,9 @@
     <a href="https://codecov.io/gh/llm4s/llm4s">
         <img src="https://codecov.io/gh/llm4s/llm4s/branch/main/graph/badge.svg?token=WQSNRKV121" alt="codecov">
     </a>
+    <a href="https://central.sonatype.com/artifact/org.llm4s/llm4s-core_3">
+        <img src="https://img.shields.io/maven-central/v/org.llm4s/llm4s-core_3?label=Maven%20Central" alt="Maven Central">
+    </a>
 </h4>
 <h4 align="center">
     <img src="docs/image_assets/llm4s_logo.png" width="100pt" alt="LLM4S Logo">
@@ -177,7 +180,7 @@ To ensure code quality, we use a Git pre-commit hook that automatically checks c
 
 ### Prerequisites
 
-- JDK 21+
+- JDK 21+ (see [supported JDKs](docs/reference/v1-scope.md#scala-and-jdk-support))
 - SBT
 - Docker
 
@@ -252,6 +255,16 @@ each provider module's `reference.conf` has an example section. See the
 [configuration guide](docs/getting-started/configuration.md#named-provider-sections) for all of them
 and [running the samples](docs/getting-started/configuration.md#running-the-samples) for the
 samples' own bindings.
+
+To check the whole setup in one run - the JDK, the provider section, its module, its API key (where it was found,
+never its value) and, with `--local`, whether Ollama is running and has the model - run the
+[doctor](docs/reference/doctor.md); each step that fails prints the fix:
+
+```bash
+sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config modules/samples/src/main/resources/application.conf --local"
+```
+
+No build tool yet? The [Scala CLI quick start](docs/getting-started/scala-cli.md) makes a first call from a single file.
 
 ### Running the Examples
 

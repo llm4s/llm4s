@@ -21,13 +21,13 @@ class Llm4sSpec extends AnyFlatSpec with Matchers {
   }
 
   "createAgent" should "return a JAgent wrapping the given client" in {
-    val jClient = new JLlmClient(stubClient)
+    val jClient = Llm4s.wrapClient(stubClient)
     val agent   = Llm4s.createAgent(jClient)
     agent shouldBe a[JAgent]
   }
 
   it should "produce an agent that can run a query" in {
-    val jClient = new JLlmClient(stubClient)
+    val jClient = Llm4s.wrapClient(stubClient)
     val agent   = Llm4s.createAgent(jClient)
     val result  = agent.run("hello")
     result.isSuccess shouldBe true
@@ -55,5 +55,108 @@ class Llm4sSpec extends AnyFlatSpec with Matchers {
     val result = Llm4s.createClient(config)
     result.isSuccess shouldBe true
     result.get() shouldBe a[JLlmClient]
+  }
+
+  "createClient with a MetricsCollector" should "report the client's calls to that collector" in {
+    import com.sun.net.httpserver.HttpServer
+    import org.llm4s.llmconnect.config.OllamaConfig
+    import org.llm4s.metrics.{ MetricsCollector, Outcome }
+
+    import java.net.InetSocketAddress
+    import java.nio.charset.StandardCharsets
+    import scala.concurrent.duration.FiniteDuration
+
+    // An Ollama `/api/chat` reply, so the real provider client runs end to end against a loopback server.
+    val reply =
+      """{"model":"llama3.2","message":{"role":"assistant","content":"hi"},"done":true,"prompt_eval_count":5,"eval_count":3}"""
+    val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
+    server.createContext(
+      "/api/chat",
+      exchange => {
+        val bytes = reply.getBytes(StandardCharsets.UTF_8)
+        exchange.getResponseHeaders.add("Content-Type", "application/json")
+        exchange.sendResponseHeaders(200, bytes.length.toLong)
+        exchange.getResponseBody.write(bytes)
+        exchange.close()
+      }
+    )
+    server.start()
+
+    val requests = new java.util.concurrent.ConcurrentLinkedQueue[(String, String, Outcome)]()
+    val tokens   = new java.util.concurrent.ConcurrentLinkedQueue[(Long, Long)]()
+    val metrics = new MetricsCollector {
+      override def observeRequest(provider: String, model: String, outcome: Outcome, duration: FiniteDuration): Unit =
+        requests.add((provider, model, outcome))
+      override def addTokens(provider: String, model: String, inputTokens: Long, outputTokens: Long): Unit =
+        tokens.add((inputTokens, outputTokens))
+      override def recordCost(provider: String, model: String, costUsd: Double): Unit = ()
+    }
+
+    val config = OllamaConfig("llama3.2", s"http://127.0.0.1:${server.getAddress.getPort}")
+    val answer = FacadeInternals.createClient(config, metrics).get().complete("hello")
+    server.stop(0)
+
+    answer.get() shouldBe "hi"
+    requests.size() shouldBe 1
+    requests.peek() shouldBe (("ollama", "llama3.2", Outcome.Success))
+    tokens.peek() shouldBe ((5L, 3L))
+  }
+
+  it should "refuse a null config and treat a null collector as none" in {
+    import org.llm4s.llmconnect.config.OllamaConfig
+    FacadeInternals.createClient(null, org.llm4s.metrics.MetricsCollector.noop).isFailure shouldBe true
+    FacadeInternals.createClient(OllamaConfig("llama3.2", "http://127.0.0.1:1"), null).isSuccess shouldBe true
+  }
+
+  "wrapClient" should "wrap a Scala LLMClient the caller built, its calls and close going to it (#1666)" in {
+    val closed = new java.util.concurrent.atomic.AtomicBoolean(false)
+    val own = new LLMClient {
+      override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
+        Right(Completion("id", 0L, "mine", "m", AssistantMessage("mine")))
+      override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+        complete(c, o)
+      override def getContextWindow(): Int     = 4096
+      override def getReserveCompletion(): Int = 512
+      override def close(): Unit               = closed.set(true)
+    }
+    val client = Llm4s.wrapClient(own)
+    client.underlying shouldBe theSameInstanceAs(own)
+    client.complete("hi").get() shouldBe "mine"
+    client.close()
+    closed.get shouldBe true
+  }
+
+  it should "refuse a null client at once" in {
+    (the[NullPointerException] thrownBy Llm4s.wrapClient(null) should have).message("client must not be null")
+  }
+
+  "wrapEmbeddingClient" should "wrap a Scala EmbeddingClient the caller built, asking for the model it names (#1666)" in {
+    import org.llm4s.llmconnect.EmbeddingClient
+    import org.llm4s.llmconnect.config.EmbeddingModelConfig
+    import org.llm4s.llmconnect.provider.EmbeddingProvider
+    import org.llm4s.model.ModelRegistryService
+    val asked = new java.util.concurrent.atomic.AtomicReference[EmbeddingRequest]()
+    val provider = new EmbeddingProvider {
+      override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
+        asked.set(request)
+        Right(EmbeddingResponse(Seq(Vector(1.0, 0.0))))
+      }
+    }
+    val core   = new EmbeddingClient(provider)(using ModelRegistryService.fromModels(Nil))
+    val client = Llm4s.wrapEmbeddingClient(core, EmbeddingModelConfig("mine", 2))
+    (client.model, client.dimensions) shouldBe (("mine", 2))
+    client.embed(java.util.List.of("a")).get().vectors.get(0).toList shouldBe List(1.0f, 0.0f)
+    asked.get.model shouldBe EmbeddingModelConfig("mine", 2)
+  }
+
+  it should "refuse a null client or model at once" in {
+    import org.llm4s.llmconnect.EmbeddingClient
+    import org.llm4s.llmconnect.config.EmbeddingModelConfig
+    import org.llm4s.model.ModelRegistryService
+    val core = new EmbeddingClient(_ => Right(EmbeddingResponse(Seq.empty)))(using ModelRegistryService.fromModels(Nil))
+    (the[NullPointerException] thrownBy Llm4s.wrapEmbeddingClient(null, EmbeddingModelConfig("m", 1)) should
+      have).message("client must not be null")
+    (the[NullPointerException] thrownBy Llm4s.wrapEmbeddingClient(core, null) should have)
+      .message("model must not be null")
   }
 }

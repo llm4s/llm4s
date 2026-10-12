@@ -25,11 +25,13 @@ Start here if you want to contribute to the project.
 - **[Migration Guide](migration)** - Upgrade between versions
 - **[Test Coverage](test-coverage)** - Coverage tooling and thresholds
 - **[Release Process](release)** - How releases are created
+- **[Protecting main (merge queue)](merge-queue)** - Why two green PRs can break `main` together, and how maintainers enable the merge queue that prevents it
 - **[Postgres Memory Store](postgres-memory-store)** - PostgreSQL-backed agent memory persistence
 - **[Security Reference](security)** - Threat model, trust boundaries, known risks and mitigations
 - **[Workspace Sandbox](workspace-sandbox)** - Configuring the containerised workspace's limits
 - **[Performance Benchmarks](benchmarks)** - Baseline JMH results for the hot paths
 - **[Troubleshooting / FAQ](troubleshooting)** - Common errors and solutions
+- **[Doctor](doctor)** - One command that checks your JDK, configuration, API key, provider module and local model server, and says what to fix
 - **[Dependency Conflicts](dependency-conflicts)** - Gradle and sbt dependency conflicts and how to resolve them
 
 ## Roadmap & Planning

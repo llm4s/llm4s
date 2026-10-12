@@ -351,6 +351,12 @@ What the controls do, and where they stop:
     character other than a letter or digit, any best-fitted character in an argument starting with `-` or `/`, or a
     character the host's own ANSI code page cannot hold. Accented letters such as `é` stay allowed in an operand when
     that code page holds them. POSIX hosts are unchanged.
+  - On a Windows host whose ANSI code page is double-byte (932, 936, 950), an argument holding a character whose
+    second byte is 0x5C, the byte of `\` (`表` and `十` on 932, `功` on 950), is refused when the JDK puts it in quotes
+    ([#1807](https://github.com/llm4s/llm4s/issues/1807)): `a 表` reaches the command line as `"a 表"`, whose bytes
+    end `5C 22`, and a program that splits its command line byte by byte reads `\"` as a literal quote and splits the
+    arguments after it differently. The JDK quotes an argument holding a space or whitespace character, `"`, `<`, `>`,
+    `&`, `|` or `^`; `表.txt` stays allowed.
   - `development()` is not a sandbox: `sbt`, `make`, `npm`, `git`, `find` and `env` can run arbitrary programs, so a
     model given it can do anything the process can.
   - The started program receives a scrubbed environment: only `PATH`, `LANG`, `LC_ALL`, `TERM` and `SystemRoot`

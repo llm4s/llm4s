@@ -50,7 +50,11 @@ trait LLMClientIO[F[_]] {
 
 object LLMClientIO {
 
-  /** Capacity of the bounded buffer between the provider thread and the consumer. */
+  /**
+   * Capacity of the bounded buffer between the provider thread and the consumer. This buffer
+   * applies backpressure - a slow consumer stalls the producer, it never drops a chunk - so a
+   * small size costs nothing.
+   */
   private val StreamBufferSize = 64
 
   /** Wraps an already-constructed [[LLMClient]]. Does not manage its lifecycle. */

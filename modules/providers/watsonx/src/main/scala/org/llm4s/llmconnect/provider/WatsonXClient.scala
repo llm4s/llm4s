@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ AuthenticationError, ServiceError, ValidationError }
+import org.llm4s.error.{ AuthenticationError, CancelledError, LLMError, ProcessingError, ServiceError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.config.WatsonXConfig
@@ -9,7 +9,7 @@ import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
-import org.llm4s.util.Redaction
+import org.llm4s.util.{ BoundedJson, Redaction }
 
 import java.io.{ BufferedReader, InputStreamReader }
 import java.net.URLEncoder
@@ -17,19 +17,31 @@ import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
+import scala.collection.mutable
 import scala.concurrent.duration.*
 import scala.util.{ Try, Using }
 
 /**
- * [[LLMClient]] for IBM watsonx.ai text generation
- * (`POST /ml/v1/text/generation` and `/ml/v1/text/generation_stream`).
+ * [[LLMClient]] for IBM watsonx.ai chat (`POST /ml/v1/text/chat` and `/ml/v1/text/chat_stream`).
  *
- * '''Beta - built on deprecated endpoints.''' IBM's February 2026 release notes
- * (https://www.ibm.com/docs/en/software-hub/5.3.x?topic=new-watsonxai) deprecate the watsonx.ai
- * "Infer text" and "Infer text event stream" endpoints (`/ml/v1/text/generation` and
- * `/generation_stream`) this module uses; IBM points to the chat API. This module has never been run
- * against the live service (no watsonx account), its API is not frozen, and tools are unsupported
- * because of the endpoint. Migration to the chat API: https://github.com/llm4s/llm4s/issues/1314.
+ * '''Beta - never run against the live service.''' There is no watsonx account behind this project, so nothing
+ * here has been checked against the real service (see https://github.com/llm4s/llm4s/issues/1314). The request
+ * and response shapes are those IBM's public pages report, cross-checked against IBM's own open-source client
+ * code (see ''Evidence'' below). The module's API is not frozen. It replaces the text-generation endpoints
+ * (`/ml/v1/text/generation` and `/generation_stream`), which IBM's February 2026 release notes deprecate
+ * without giving a removal date.
+ *
+ * == Evidence ==
+ *
+ * A detail is ''SDK-evidenced'' when IBM's own code shows it. That proves IBM's client sends it, which is strong
+ * evidence the service accepts it, but it is not a live check. The sources, pinned:
+ *  - `NODE`: https://github.com/IBM/watsonx-ai-node-sdk at 47a4a0c (2026-08-05), IBM's Node.js SDK;
+ *  - `LCIBM`: https://github.com/langchain-ai/langchain-ibm at 6c32b1d (2026-10-05), IBM's LangChain integration,
+ *    `libs/ibm/langchain_ibm/chat_models.py`;
+ *  - `PY`: IBM's Python SDK, `ibm-watsonx-ai` 1.8.0 on PyPI.
+ *
+ * The `@Cloud` suite `WatsonXAssumptionProbeSpec` (modules/it) re-checks each of these against a real account and
+ * prints which held.
  *
  * == Authentication ==
  *
@@ -38,31 +50,48 @@ import scala.util.{ Try, Using }
  *
  * == Request format ==
  *
- * The text-generation API is not a chat API: the conversation is flattened into one `input`
- * string with `[SYSTEM]:`, `[USER]:`, `[ASSISTANT]:` and `[TOOL_RESULT:<id>]:` prefixes, ending in
- * an open `[ASSISTANT]:` turn. Content is not escaped, so user content can forge those markers
- * (a prompt-injection surface inherent to the flattened format). Requests carry `stop_sequences`
- * ([[WatsonXClient.StopSequences]]) so a model cannot go on to write the next turn itself.
+ * The conversation is sent as structured `messages` with roles (`system`, `user`, `assistant`, `tool`), so
+ * content is data and cannot forge a turn: there is no prompt string with role markers, and no stop
+ * sequences standing in for them. The model goes in `model_id`, the project or space in `project_id` or
+ * `space_id`, and the API version in the `version` query parameter (`WatsonXConfig.apiVersion`, by default the date PY sends:
+ * [[org.llm4s.llmconnect.config.WatsonXConfig.DEFAULT_API_VERSION]]).
+ * `temperature` is always sent, `max_tokens` when set (SDK-evidenced: NODE types/vml_v1.ts:790-797, a deprecated
+ * alias of `max_completion_tokens`), and `top_p` when not 1.0.
+ *
+ * == Tools ==
+ *
+ * `CompletionOptions.tools` are sent as `tools` (`type: function`, `function: {name, description,
+ * parameters}`; the OpenAI `strict` flag is dropped) with `tool_choice_option: "auto"`. Tool calls in a reply
+ * (`message.tool_calls`, whole, or streamed as `delta.tool_calls` pieces merged by `index`) become
+ * `ToolCall`s. An assistant turn's calls go back as `tool_calls`, and a [[ToolMessage]] as a `tool` message
+ * with its `tool_call_id`. `arguments` is a JSON string on the wire (SDK-evidenced: NODE types/messages.ts:19-24)
+ * and a JSON object in a `ToolCall`. A call without an `id` gets a generated one, defensively: the SDK's type makes
+ * `id` required (NODE types/messages.ts:29-30), and a stream sends it on a call's first piece only (LCIBM
+ * chat_models.py:324). Whether the model calls tools, or supports them at all, depends on the model.
  *
  * == Unsupported options ==
  *
- *  - '''Tools are rejected.''' text-generation has no tool calling: `complete` and `streamComplete`
- *    return a `Left(ValidationError("tools", ...))` when `CompletionOptions.tools` is non-empty, before
- *    any HTTP call (the IAM exchange included).
- *  - '''Ignored without error:''' `presencePenalty`, `frequencyPenalty`, `responseFormat`,
- *    `reasoning` and `budgetTokens`. Only `temperature`, `maxTokens` and `topP` (when not 1.0) are sent.
+ * Ignored without error: `presencePenalty`, `frequencyPenalty`, `responseFormat`, `reasoning` and
+ * `budgetTokens`. The chat API documents some of these (penalties, `response_format`); this client does not
+ * expose them yet.
  *
- * == Stream endings ==
+ * == Finish reasons and stream endings ==
  *
- * A stream must end with a terminal event (a `stop_reason` other than `not_finished`). One that
- * ends without it, or whose reason is in [[WatsonXClient.ErrorStopReasons]], is a
- * `Left(ServiceError)` naming the reason; text received so far is not returned as a success. Every
- * other reason (`eos_token`, `stop_sequence`, `max_tokens`, `token_limit`, unknown values) is a
- * normal stop. `complete` applies the same rule to `results[0].stop_reason` (a missing one is fine).
+ * A stream must end with a choice that carries a `finish_reason`. One that ends without it, or whose reason
+ * is in [[WatsonXClient.ErrorFinishReasons]], is a `Left(ServiceError)` naming the reason; text received
+ * so far is not returned as a success. Every other reason (`stop`, `length`, `tool_calls`, unknown values) is
+ * a normal stop. `complete` applies the same rule to `choices[0].finish_reason` (a missing one is fine). The
+ * usage arrives in a final chunk that may have no choices (SDK-evidenced: LCIBM chat_models.py:379-383). Streamed tool calls are reported once, whole, after the last delta, never as fragments.
+ *
+ * An `event: error` frame ends the stream with IBM's error: its `data:` line holds IBM's error JSON, whose
+ * `status_code` picks the `LLMError` as an HTTP status would (401/403 `AuthenticationError`, 429
+ * `RateLimitError`, 400 `ValidationError`, otherwise `ServiceError`; none is `ServiceError(502)`) and whose
+ * first `errors` entry's `code` and `message`, redacted, are the message (SDK-evidenced: PY
+ * `foundation_models/inference/fm_model_inference.py:683-689` raises on that frame).
  *
  * == Timeouts ==
  *
- * A generation call times out after two minutes and a streamed one after ten, unless the section's
+ * A chat call times out after two minutes and a streamed one after ten, unless the section's
  * `timeouts { request = ..., stream = ... }` block sets either ([[WatsonXConfig.timeouts]]). The IAM
  * token exchange keeps its own 30 seconds.
  *
@@ -104,17 +133,27 @@ class WatsonXClient(
   private def freshCached(): Option[String] =
     tokenCache.get().filter(token => nowSeconds() < token.expiresAt - TOKEN_REFRESH_BUFFER_SECONDS).map(_.value)
 
-  /** The cached IAM token, or a fresh one when none is cached or it expires within the buffer. */
+  /**
+   * The cached IAM token, or a fresh one when none is cached or it expires within the buffer.
+   *
+   * A thread interrupted while it waits for another thread's exchange (or that arrives already interrupted)
+   * gets `Left(CancelledError)` with its interrupt flag set again, never a thrown `InterruptedException`.
+   */
   private[provider] def bearerToken(): Result[String] =
     freshCached() match {
       case Some(token) => Right(token)
       case None =>
-        tokenLock.lockInterruptibly()
-        Using.resource(new AutoCloseable { def close(): Unit = tokenLock.unlock() }) { _ =>
-          freshCached() match {
-            case Some(token) => Right(token)
-            case None        => fetchToken()
-          }
+        CancelledError.catchInterrupt(tokenLock.lockInterruptibly()) match {
+          case Left(interrupted) =>
+            Thread.currentThread().interrupt()
+            Left(CancelledError(s"$providerName.iam-token", Some(interrupted)))
+          case Right(()) =>
+            Using.resource(new AutoCloseable { def close(): Unit = tokenLock.unlock() }) { _ =>
+              freshCached() match {
+                case Some(token) => Right(token)
+                case None        => fetchToken()
+              }
+            }
         }
     }
 
@@ -163,25 +202,15 @@ class WatsonXClient(
   private def apiHeaders(token: String, accept: String): Map[String, String] =
     Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token", "Accept" -> accept)
 
-  private def rejectTools(options: CompletionOptions): Result[Unit] =
-    Either.cond(
-      options.tools.isEmpty,
-      (),
-      ValidationError(
-        "tools",
-        "watsonx text generation does not support tool calling; remove the tools from CompletionOptions"
-      )
-    )
-
   private def endpoint(path: String): String = s"${config.baseUrl}$path?version=${config.apiVersion}"
 
   override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
     completeWithMetrics {
-      rejectTools(options).flatMap(_ => bearerToken()).flatMap { token =>
+      bearerToken().flatMap { token =>
         val requestText = createRequestBody(conversation, options).render()
         val startedAt   = Instant.now()
         httpClient
-          .post(endpoint("/ml/v1/text/generation"), apiHeaders(token, "application/json"), requestText, requestTimeout)
+          .post(endpoint("/ml/v1/text/chat"), apiHeaders(token, "application/json"), requestText, requestTimeout)
           .flatMap { response =>
             noteStatus(response.statusCode, token)
             val result =
@@ -204,9 +233,9 @@ class WatsonXClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
-    rejectTools(options).flatMap(_ => bearerToken()).flatMap { token =>
+    bearerToken().flatMap { token =>
       val requestText = createRequestBody(conversation, options).render()
-      val url         = endpoint("/ml/v1/text/generation_stream")
+      val url         = endpoint("/ml/v1/text/chat_stream")
       val startedAt   = Instant.now()
       val raw         = new StringBuilder
 
@@ -214,7 +243,7 @@ class WatsonXClient(
         .postStream(url, apiHeaders(token, "text/event-stream"), requestText, streamTimeout)
         .flatMap { response =>
           if (response.statusCode >= 200 && response.statusCode < 300)
-            readStream(response.body, url, raw, onChunk)
+            readStream(response.body, url, raw, token, onChunk)
           else {
             val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
             raw.append(err)
@@ -231,123 +260,239 @@ class WatsonXClient(
     in: java.io.InputStream,
     url: String,
     raw: StringBuilder,
+    token: String,
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
     val accumulator                   = StreamingAccumulator.create()
+    val calls                         = mutable.LinkedHashMap.empty[Int, PartialCall]
     var promptTokens, generatedTokens = 0
     var terminal: Option[String]      = None
+    var responseId                    = ""
+    // The `event:` field of the SSE event being read; a blank line ends the event and resets it.
+    var eventType                     = ""
+    var streamError: Option[LLMError] = None
+
+    def emit(chunk: StreamedChunk): Unit = {
+      accumulator.addChunk(chunk)
+      onChunk(chunk)
+    }
+
+    // One `delta.tool_calls` entry: its pieces share an `index`, the id and name come once, the argument
+    // text in fragments that are appended in order.
+    def mergeToolCall(entry: ujson.Value, position: Int): Unit =
+      entry.objOpt.foreach { fields =>
+        val index = fields.get("index").flatMap(_.numOpt).map(_.toInt).getOrElse(position)
+        val call  = calls.getOrElseUpdate(index, new PartialCall)
+        fields.get("id").flatMap(_.strOpt).filter(_.nonEmpty).foreach(id => call.id = id)
+        fields.get("function").flatMap(_.objOpt).foreach { function =>
+          function.get("name").flatMap(_.strOpt).filter(_.nonEmpty).foreach(name => call.name = name)
+          function.get("arguments").foreach {
+            case ujson.Str(fragment) => call.arguments.append(fragment)
+            case ujson.Null          => ()
+            case other               => call.arguments.append(ujson.write(other))
+          }
+        }
+      }
+
     val read = Using(new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) { reader =>
-      Iterator.continually(reader.readLine()).takeWhile(_ != null).foreach { line =>
+      // reading stops at an error event: IBM's SDK raises on it, nothing after it belongs to this reply
+      Iterator.continually(reader.readLine()).takeWhile(line => line != null && streamError.isEmpty).foreach { line =>
         raw.append(line).append('\n')
         val trimmed = line.trim
-        if (trimmed.startsWith("data:")) {
+        if (trimmed.isEmpty) {
+          if (eventType == "error") streamError = Some(streamErrorEvent(None, token))
+          eventType = ""
+        } else if (trimmed.startsWith("event:")) {
+          eventType = trimmed.drop("event:".length).trim
+        } else if (trimmed.startsWith("data:") && eventType == "error") {
+          // SDK-evidenced: an `event: error` line is followed by a `data:` line holding IBM's error
+          // (PY foundation_models/inference/fm_model_inference.py:683-689).
+          streamError = Some(streamErrorEvent(Some(trimmed.drop("data:".length).trim), token))
+        } else if (trimmed.startsWith("data:")) {
           val data = trimmed.drop("data:".length).trim
           if (data.nonEmpty && data != "[DONE]") {
-            val json   = ujson.read(data)
-            val result = json.obj.get("results").flatMap(_.arrOpt).flatMap(_.headOption)
-            val text   = result.flatMap(_.obj.get("generated_text")).flatMap(_.strOpt).filter(_.nonEmpty)
-            val stop = result
-              .flatMap(_.obj.get("stop_reason"))
-              .flatMap(_.strOpt)
-              .map(normalizeStopReason)
-              .filter(reason => reason.nonEmpty && reason != NOT_FINISHED)
-            result.foreach { r =>
-              r.obj.get("input_token_count").flatMap(_.numOpt).foreach(n => promptTokens = n.toInt)
-              r.obj.get("generated_token_count").flatMap(_.numOpt).foreach(n => generatedTokens = n.toInt)
-            }
-            stop.foreach(reason => terminal = Some(reason))
-            if (text.isDefined || stop.isDefined) {
-              val chunk = StreamedChunk(id = "", content = text, toolCall = None, finishReason = stop)
-              accumulator.addChunk(chunk)
-              onChunk(chunk)
+            ujson.read(data).objOpt.foreach { chunk =>
+              chunk.get("id").flatMap(_.strOpt).filter(_.nonEmpty).foreach(id => responseId = id)
+              parseUsage(chunk.get("usage")).foreach { usage =>
+                promptTokens = usage.promptTokens
+                generatedTokens = usage.completionTokens
+              }
+              chunk.get("choices").flatMap(_.arrOpt).flatMap(_.headOption).flatMap(_.objOpt).foreach { choice =>
+                val delta = choice.get("delta").flatMap(_.objOpt)
+                delta.flatMap(_.get("content")).flatMap(_.strOpt).filter(_.nonEmpty).foreach { text =>
+                  emit(StreamedChunk(id = responseId, content = Some(text), toolCall = None, finishReason = None))
+                }
+                delta.flatMap(_.get("tool_calls")).flatMap(_.arrOpt).foreach { entries =>
+                  entries.zipWithIndex.foreach { case (entry, position) => mergeToolCall(entry, position) }
+                }
+                choice
+                  .get("finish_reason")
+                  .flatMap(_.strOpt)
+                  .map(normalizeFinishReason)
+                  .filter(_.nonEmpty)
+                  .foreach(reason => terminal = Some(reason))
+              }
             }
           }
         }
       }
     }.toEither.left.map(HttpFailures.streamReadError(_, url, streamTimeout))
 
+    // an `event: error` the stream ended on before its data line is still an error
+    val errorEvent =
+      streamError.orElse(Option.when(eventType == "error")(streamErrorEvent(None, token)))
+
+    val idPrefix = callIdPrefix()
     read
+      .flatMap(_ => errorEvent.toLeft(()))
       .flatMap(_ => checkStreamEnding(terminal))
-      .flatMap { _ =>
-        accumulator.updateTokens(promptTokens, generatedTokens)
-        accumulator.toCompletion
+      .flatMap { reason =>
+        finishToolCalls(calls.toSeq.sortBy(_._1).map(_._2), idPrefix).map { toolCalls =>
+          toolCalls.foreach { call =>
+            emit(StreamedChunk(id = responseId, content = None, toolCall = Some(call), finishReason = None))
+          }
+          emit(StreamedChunk(id = responseId, content = None, toolCall = None, finishReason = Some(reason)))
+          accumulator.updateTokens(promptTokens, generatedTokens)
+        }
       }
-      .map(c => c.withModel(config.model).withEstimatedCost(c.usage.flatMap(estimateCost)))
+      .flatMap(_ => accumulator.toCompletion)
+      .map { c =>
+        // the accumulator reports streamed calls on the message only
+        c.withModel(config.model)
+          .withToolCalls(c.message.toolCalls.toList)
+          .withEstimatedCost(c.usage.flatMap(estimateCost))
+      }
   }
 
-  private def checkStreamEnding(terminal: Option[String]): Result[Unit] = terminal match {
+  /**
+   * The error an `event: error` frame reports, from its `data:` JSON (`None` when the frame had no data line).
+   *
+   * IBM's error body is `{"errors":[{"code","message","more_info"}],"trace","status_code"}`. A `status_code`
+   * outside 2xx is mapped as an HTTP response with that status would be ([[HttpErrorMapper]]: 401/403
+   * `AuthenticationError`, 429 `RateLimitError`, 400 `ValidationError`, else `ServiceError`); without one it is
+   * a `ServiceError(502)`. The message carries IBM's `code` and `message`, with the API key and bearer token
+   * removed and the rest redacted and truncated; a body that is not JSON is quoted the same way. A 401 forgets
+   * the bearer token, as an HTTP 401 does.
+   */
+  private def streamErrorEvent(data: Option[String], token: String): LLMError = {
+    val prefix = "stream error event"
+    val parsed = data.flatMap(d => BoundedJson.read(d).toOption).flatMap(_.objOpt)
+    val status = parsed.flatMap(_.get("status_code")).flatMap(_.numOpt).map(_.toInt).filterNot(s => s >= 200 && s < 300)
+    val first  = parsed.flatMap(_.get("errors")).flatMap(_.arrOpt).flatMap(_.headOption).flatMap(_.objOpt)
+    val code   = first.flatMap(_.get("code")).flatMap(_.strOpt).filter(_.nonEmpty)
+    val text   = first.flatMap(_.get("message")).flatMap(_.strOpt).filter(_.nonEmpty)
+    val detail = (code, text, data.filter(_.nonEmpty)) match {
+      case (None, None, None)       => s"$prefix with no data"
+      case (None, None, Some(body)) => s"$prefix: $body"
+      case _                        => s"$prefix: ${Seq(code, text).flatten.mkString(": ")}"
+    }
+    val safe = Redaction.safeBody(scrub(detail, token), 512)
+    status.foreach(noteStatus(_, token))
+    status match {
+      case Some(s) =>
+        HttpErrorMapper
+          .mapHttpError(s, ujson.Obj("message" -> safe).render(), providerName)
+          .left
+          .getOrElse(ServiceError(s, providerName, safe))
+      case None => ServiceError(502, providerName, safe)
+    }
+  }
+
+  /** The stream's closing finish reason; a stream with none, or an abnormal one, is a failure. */
+  private def checkStreamEnding(terminal: Option[String]): Result[String] = terminal match {
     case None =>
       Left(
         ServiceError(
           502,
           providerName,
-          "stream ended without a terminal event (no stop_reason); the response is incomplete"
+          "stream ended without a finish_reason; the response is incomplete"
         )
       )
-    case Some(reason) => checkStopReason(reason)
+    case Some(reason) => checkFinishReason(reason).map(_ => reason)
   }
 
-  /** `reason` must already be normalised by [[WatsonXClient.normalizeStopReason]]. */
-  private def checkStopReason(reason: String): Result[Unit] =
-    if (ErrorStopReasons.contains(reason))
-      Left(ServiceError(502, providerName, s"generation ended abnormally with stop_reason '$reason'"))
+  /** `reason` must already be normalised by [[WatsonXClient.normalizeFinishReason]]. */
+  private def checkFinishReason(reason: String): Result[Unit] =
+    if (ErrorFinishReasons.contains(reason))
+      Left(ServiceError(502, providerName, s"generation ended abnormally with finish_reason '$reason'"))
     else Right(())
 
   private def estimateCost(usage: TokenUsage): Option[Double] = CostEstimator.estimate(config.model, usage)
 
   private[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
-    val parameters = ujson.Obj("temperature" -> options.temperature)
-    parameters("stop_sequences") = ujson.Arr.from(StopSequences)
-    options.maxTokens.foreach(max => parameters("max_new_tokens") = max)
-    if (options.topP != 1.0) parameters("top_p") = options.topP
-
-    val request = ujson.Obj(
-      "model_id"   -> config.model,
-      "input"      -> formatInput(conversation),
-      "parameters" -> parameters
+    val body = ujson.Obj(
+      "model_id"    -> config.model,
+      "messages"    -> encodeMessages(conversation),
+      "temperature" -> options.temperature
     )
     config.spaceId match {
-      case Some(space) => request("space_id") = space
-      case None        => request("project_id") = config.projectId
+      case Some(space) => body("space_id") = space
+      case None        => body("project_id") = config.projectId
     }
-    request
+    // SDK-evidenced: the chat body names the limit `max_tokens`, not text generation's `max_new_tokens`; it is
+    // deprecated in favour of `max_completion_tokens`, which a later change may adopt (NODE vml_v1.ts:2812-2813,
+    // types/vml_v1.ts:790-803; LCIBM chat_models.py:953-959).
+    options.maxTokens.foreach(max => body("max_tokens") = max)
+    if (options.topP != 1.0) body("top_p") = options.topP
+    if (options.tools.nonEmpty) {
+      body("tools") = ujson.Arr.from(options.tools.map(tool => encodeTool(tool.toOpenAITool(strict = false))))
+      // SDK-evidenced: IBM's LangChain integration sends "auto" by default (LCIBM chat_models.py:1764). The Node
+      // SDK's own doc comment says `auto` is not yet supported (NODE types/vml_v1.ts:751-761); that integration
+      // contradicts it, so the probe suite checks this against a real account.
+      body("tool_choice_option") = "auto"
+    }
+    body
   }
 
-  private def formatInput(conversation: Conversation): String = {
-    val turns = conversation.messages.flatMap {
-      case SystemMessage(content)   => Some(s"[SYSTEM]: $content")
-      case UserMessage(content)     => Some(s"[USER]: $content")
-      case am: AssistantMessage     => Some(am.content).filter(_.nonEmpty).map(c => s"[ASSISTANT]: $c")
-      case ToolMessage(content, id) => Some(s"[TOOL_RESULT:$id]: $content")
-    }
-    (turns :+ "[ASSISTANT]: ").mkString("\n")
-  }
+  private def encodeMessages(conversation: Conversation): ujson.Arr =
+    ujson.Arr.from(conversation.messages.flatMap {
+      case SystemMessage(content) => Some(ujson.Obj("role" -> "system", "content" -> content))
+      case UserMessage(content)   => Some(ujson.Obj("role" -> "user", "content" -> content))
+      case am: AssistantMessage   =>
+        // an assistant turn with neither text nor calls says nothing: it is dropped
+        if (am.content.isEmpty && am.toolCalls.isEmpty) None
+        else {
+          val message = ujson.Obj("role" -> "assistant")
+          // SDK-evidenced: `content` is optional when `tool_calls` is given (NODE types/messages.ts:58-59); IBM's
+          // LangChain integration sends null instead (LCIBM chat_models.py:258-259).
+          if (am.content.nonEmpty) message("content") = am.content
+          if (am.toolCalls.nonEmpty)
+            message("tool_calls") = ujson.Arr.from(am.toolCalls.map { call =>
+              ujson.Obj(
+                "id"       -> call.id,
+                "type"     -> "function",
+                "function" -> ujson.Obj("name" -> call.name, "arguments" -> requestArguments(call.arguments))
+              )
+            })
+          Some(message)
+        }
+      case ToolMessage(content, toolCallId) =>
+        Some(ujson.Obj("role" -> "tool", "tool_call_id" -> toolCallId, "content" -> content))
+    })
 
   private def parseCompletion(body: String): Result[Completion] =
     Try(ujson.read(body)).toResult.flatMap { json =>
-      json.objOpt.flatMap(_.get("results")).flatMap(_.arrOpt).flatMap(_.headOption).flatMap(_.objOpt) match {
+      json.objOpt.flatMap(_.get("choices")).flatMap(_.arrOpt).flatMap(_.headOption).flatMap(_.objOpt) match {
         case None =>
-          Left(
-            org.llm4s.error.ValidationError(
-              "responseBody",
-              "watsonx response has no 'results' entry"
+          Left(ValidationError("responseBody", "watsonx response has no 'choices' entry"))
+        case Some(choice) =>
+          val message = choice.get("message").flatMap(_.objOpt)
+          for {
+            toolCalls <- parseToolCalls(message.flatMap(_.get("tool_calls")), callIdPrefix())
+            _ <- checkFinishReason(
+              choice.get("finish_reason").flatMap(_.strOpt).map(normalizeFinishReason).getOrElse("")
             )
-          )
-        case Some(first) =>
-          val text = first.get("generated_text").flatMap(_.strOpt).getOrElse("")
-          checkStopReason(first.get("stop_reason").flatMap(_.strOpt).map(normalizeStopReason).getOrElse("")).map { _ =>
-            val usage = for {
-              prompt <- first.get("input_token_count").flatMap(_.numOpt).map(_.toInt)
-              gen    <- first.get("generated_token_count").flatMap(_.numOpt).map(_.toInt)
-            } yield TokenUsage(prompt, gen, prompt + gen)
+          } yield {
+            val text  = message.flatMap(_.get("content")).flatMap(_.strOpt).getOrElse("")
+            val usage = parseUsage(json.objOpt.flatMap(_.get("usage")))
             Completion(
               id = json.objOpt.flatMap(_.get("id")).flatMap(_.strOpt).getOrElse(java.util.UUID.randomUUID().toString),
               created = nowSeconds(),
               content = text,
-              toolCalls = List.empty,
+              toolCalls = toolCalls,
               usage = usage,
               model = config.model,
-              message = AssistantMessage(text),
+              message = AssistantMessage(Some(text).filter(_.nonEmpty), toolCalls),
               estimatedCost = usage.flatMap(estimateCost)
             )
           }
@@ -387,30 +532,120 @@ object WatsonXClient {
   private val IAM_TIMEOUT: FiniteDuration        = 30.seconds
   private val TOKEN_REFRESH_BUFFER_SECONDS: Long = 300L
   private val DEFAULT_TOKEN_TTL_SECONDS: Long    = 3600L
-  private val NOT_FINISHED                       = "not_finished"
 
   /**
-   * Strings that stop generation, so a base or instruct model cannot write the next turn of the
-   * flattened prompt itself: the role markers `[USER]:`, `[SYSTEM]:` and `[TOOL_RESULT:` at the start
-   * of a line. Sent as `parameters.stop_sequences` (unverified against IBM's reference; the
-   * API documents an array of at most six strings).
+   * The single point where a `finish_reason` is normalised (trimmed, lower-cased). Everything after
+   * reading (the abnormal-ending check, messages, `StreamedChunk.finishReason`) uses this form.
    */
-  val StopSequences: Seq[String] = Seq("\n[USER]:", "\n[SYSTEM]:", "\n[TOOL_RESULT:")
+  private[provider] def normalizeFinishReason(raw: String): String = raw.trim.toLowerCase(java.util.Locale.ROOT)
 
   /**
-   * The single point where a `stop_reason` is normalised (trimmed, lower-cased). IBM documents the
-   * values in upper case (`NOT_FINISHED`, `EOS_TOKEN`, ...); everything after reading (terminal
-   * detection, [[ErrorStopReasons]], messages, `StreamedChunk.finishReason`) uses this form.
+   * The `finish_reason` values that mean a generation did not finish: `error`, `cancelled` and
+   * `time_limit`. The chat API's values are `stop`, `length`, `tool_calls`, `time_limit`, `cancelled`, `error`, and
+   * null while a response is incomplete (SDK-evidenced: NODE types/vml_v1.ts:3319-3330, 3362-3369). Calling the
+   * last three failures is this client's policy: the SDK notes that on `time_limit` the text generated so far is
+   * returned, which this client does not report as a success. Compared after [[normalizeFinishReason]], so any
+   * case matches. Anything else is a normal stop: `stop`, `length`, `tool_calls` and any value IBM adds later.
    */
-  private[provider] def normalizeStopReason(raw: String): String = raw.trim.toLowerCase(java.util.Locale.ROOT)
+  val ErrorFinishReasons: Set[String] = Set("error", "cancelled", "time_limit")
+
+  /** A tool call whose `delta` pieces are still arriving: ids and names come once, arguments in fragments. */
+  final private class PartialCall {
+    var id: String               = ""
+    var name: String             = ""
+    val arguments: StringBuilder = new StringBuilder
+  }
+
+  /** A fresh prefix per reply for the ids of calls the service sent without one. */
+  private def callIdPrefix(): String = java.util.UUID.randomUUID().toString.take(12).replace("-", "")
+
+  private def syntheticId(prefix: String, index: Int): String = s"call_${prefix}_$index"
+
+  private def malformed(detail: String): org.llm4s.error.LLMError =
+    ProcessingError("watsonx-tool-calls", s"malformed tool call: $detail")
 
   /**
-   * The `stop_reason` values that mean a generation did not finish: `error`, `cancelled` and
-   * `time_limit`. Compared after [[normalizeStopReason]], so any case matches. Anything else is a normal stop:
-   * `eos_token`, `stop_sequence`, `max_tokens` and `token_limit` (length stops, as for other
-   * providers) and any value IBM adds later.
+   * An OpenAI-format tool definition as watsonx takes it: no `strict`. The SDK's tool function type has only
+   * `name`, `description` and `parameters` (NODE types/vml_v1.ts:3202-3218); IBM's LangChain integration passes
+   * `strict` through only when a caller sets it (LCIBM chat_models.py:1718-1723).
    */
-  val ErrorStopReasons: Set[String] = Set("error", "cancelled", "time_limit")
+  private[provider] def encodeTool(tool: ujson.Value): ujson.Value = {
+    val function = ujson.Obj.from(tool("function").obj.filterNot(_._1 == "strict"))
+    ujson.Obj("type" -> "function", "function" -> function)
+  }
+
+  /**
+   * The `arguments` of a call as the chat API takes them: a JSON string (SDK-evidenced: NODE types/messages.ts:19-24). An object is rendered; a string
+   * that parses to an object is sent as it is; anything else is sent as `{}` rather than as text that is not JSON.
+   */
+  private[provider] def requestArguments(arguments: ujson.Value): String = arguments match {
+    case obj: ujson.Obj => ujson.write(obj)
+    case ujson.Str(text) =>
+      Try(ujson.read(text)).toOption match {
+        case Some(parsed: ujson.Obj) => ujson.write(parsed)
+        case _                       => "{}"
+      }
+    case _ => "{}"
+  }
+
+  /** The `arguments` of a reply's call as a JSON object: an object, or a string holding one; none is `{}`. */
+  private def normalizeArguments(raw: Option[ujson.Value]): Result[ujson.Value] = raw match {
+    case None | Some(ujson.Null)                    => Right(ujson.Obj())
+    case Some(obj: ujson.Obj)                       => Right(obj)
+    case Some(ujson.Str(text)) if text.trim.isEmpty => Right(ujson.Obj())
+    case Some(ujson.Str(text)) =>
+      Try(ujson.read(text)).toOption match {
+        case Some(parsed: ujson.Obj) => Right(parsed)
+        case _                       => Left(malformed("the arguments are not a JSON object"))
+      }
+    case Some(_) => Left(malformed("the arguments are neither a JSON object nor a string"))
+  }
+
+  private def parseToolCall(entry: ujson.Value, index: Int, idPrefix: String): Result[ToolCall] =
+    for {
+      fields   <- entry.objOpt.toRight(malformed("an entry is not an object"))
+      function <- fields.get("function").flatMap(_.objOpt).toRight(malformed("an entry has no `function` object"))
+      name     <- function.get("name").flatMap(_.strOpt).filter(_.nonEmpty).toRight(malformed("an entry has no name"))
+      args     <- normalizeArguments(function.get("arguments"))
+    } yield ToolCall(
+      fields.get("id").flatMap(_.strOpt).filter(_.nonEmpty).getOrElse(syntheticId(idPrefix, index)),
+      name,
+      args
+    )
+
+  /** The `tool_calls` of a reply's `message`: none when absent, null or empty. */
+  private def parseToolCalls(raw: Option[ujson.Value], idPrefix: String): Result[List[ToolCall]] =
+    raw.filterNot(_.isNull) match {
+      case None => Right(Nil)
+      case Some(entries: ujson.Arr) =>
+        entries.value.toList.zipWithIndex.foldLeft[Result[List[ToolCall]]](Right(Nil)) { case (done, (entry, index)) =>
+          done.flatMap(calls => parseToolCall(entry, index, idPrefix).map(calls :+ _))
+        }
+      case Some(_) => Left(malformed("`tool_calls` is not an array"))
+    }
+
+  /** The calls a stream's pieces added up to, in `index` order; a call that never got a name is malformed. */
+  private def finishToolCalls(partials: Seq[PartialCall], idPrefix: String): Result[List[ToolCall]] =
+    partials.zipWithIndex.foldLeft[Result[List[ToolCall]]](Right(Nil)) { case (done, (partial, index)) =>
+      done.flatMap { calls =>
+        if (partial.name.isEmpty) Left(malformed("a streamed call has no name"))
+        else
+          normalizeArguments(Some(ujson.Str(partial.arguments.result()))).map { args =>
+            calls :+ ToolCall(if (partial.id.nonEmpty) partial.id else syntheticId(idPrefix, index), partial.name, args)
+          }
+      }
+    }
+
+  private def parseUsage(raw: Option[ujson.Value]): Option[TokenUsage] =
+    for {
+      usage      <- raw.flatMap(_.objOpt)
+      prompt     <- usage.get("prompt_tokens").flatMap(_.numOpt).map(_.toInt)
+      completion <- usage.get("completion_tokens").flatMap(_.numOpt).map(_.toInt)
+    } yield TokenUsage(
+      prompt,
+      completion,
+      usage.get("total_tokens").flatMap(_.numOpt).map(_.toInt).getOrElse(prompt + completion)
+    )
 
   /**
    * Constructs a [[WatsonXClient]], wrapping any construction-time exception in a `Left`.

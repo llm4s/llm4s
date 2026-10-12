@@ -113,6 +113,19 @@ object LocalProviderTestServer {
        |  }
        |}""".stripMargin
 
+  /** A minimal Anthropic Messages (`/v1/messages`) response carrying `content` as one text block. */
+  def anthropicMessage(content: String, model: String = "claude-test"): String =
+    s"""{
+       |  "id": "msg_test",
+       |  "type": "message",
+       |  "role": "assistant",
+       |  "model": "$model",
+       |  "content": [{"type": "text", "text": ${ujson.Str(content).render()}}],
+       |  "stop_reason": "end_turn",
+       |  "stop_sequence": null,
+       |  "usage": {"input_tokens": 10, "output_tokens": 5}
+       |}""".stripMargin
+
   /**
    * An OpenAI-format streaming body: one SSE `data:` event per chunk of content, the last
    * carrying `finish_reason` and usage, then `data: [DONE]`.

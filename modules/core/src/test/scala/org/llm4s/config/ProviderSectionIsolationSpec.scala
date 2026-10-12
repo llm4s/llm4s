@@ -154,3 +154,23 @@ class ProviderSectionIsolationSpec extends AnyWordSpec with Matchers:
       Llm4sConfig.defaultProvider(source).isLeft shouldBe true
     }
   }
+
+  "Llm4sConfig.providerBlock" should {
+    "read the default and every section without validating any of them" in {
+      val block = Llm4sConfig.providerBlock(config(unreadable, selected = "bad-one"))
+      block.map(_._1) shouldBe Right(Some(ProviderName("bad-one")))
+      val sections = block.map(_._2).getOrElse(Map.empty)
+      sections.keySet shouldBe Set(ProviderName("good-one"), ProviderName("bad-one"))
+      sections(ProviderName("good-one")).map(_.apiKey) shouldBe Right(Some("good-key"))
+      sections(ProviderName("bad-one")).left.map(_.message.contains("headers")) shouldBe Left(true)
+    }
+
+    "read a configuration with no providers block as no default and no sections" in {
+      Llm4sConfig.providerBlock(ConfigSource.string("llm4s.other = 1")) shouldBe Right((None, Map.empty))
+    }
+
+    "fail on a configuration that cannot be parsed, or a block that is not an object" in {
+      Llm4sConfig.providerBlock(ConfigSource.string("llm4s { providers = ")).isLeft shouldBe true
+      Llm4sConfig.providerBlock(ConfigSource.string("""llm4s { providers = "openai" }""")).isLeft shouldBe true
+    }
+  }

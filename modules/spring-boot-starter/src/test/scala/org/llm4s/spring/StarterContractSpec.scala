@@ -145,12 +145,29 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
       }
   }
 
-  it should "list both auto-configurations in AutoConfiguration.imports, all loadable" in {
+  it should "list every auto-configuration in AutoConfiguration.imports, all loadable" in {
     val names =
       ImportCandidates.load(classOf[org.springframework.boot.autoconfigure.AutoConfiguration], getClass.getClassLoader)
     names.getCandidates.asScala.filter(_.startsWith("org.llm4s.")).toSet shouldBe Set(
       classOf[Llm4sAutoConfiguration].getName,
-      classOf[LlmActuatorAutoConfiguration].getName
+      classOf[LlmActuatorAutoConfiguration].getName,
+      classOf[LlmMetricsAutoConfiguration].getName
+    )
+  }
+
+  "LlmMetricsAutoConfiguration" should "be ordered after Boot's MeterRegistry configurations and before the client" in {
+    // @ConditionalOnBean(MeterRegistry) is only reliable once Boot's metrics auto-configurations have run, and
+    // the collector bean must be defined before Llm4sAutoConfiguration's client asks for it.
+    val meta = classOf[LlmMetricsAutoConfiguration].getAnnotation(
+      classOf[org.springframework.boot.autoconfigure.AutoConfiguration]
+    )
+    meta.before().toSeq should contain(classOf[Llm4sAutoConfiguration])
+    (meta.afterName().toSeq should contain).allOf(
+      classOf[org.springframework.boot.actuate.autoconfigure.metrics.MetricsAutoConfiguration].getName,
+      classOf[org.springframework.boot.actuate.autoconfigure.metrics.CompositeMeterRegistryAutoConfiguration].getName,
+      classOf[
+        org.springframework.boot.actuate.autoconfigure.metrics.`export`.simple.SimpleMetricsExportAutoConfiguration
+      ].getName
     )
   }
 
@@ -163,7 +180,7 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
     meta.after().toSeq should contain(classOf[Llm4sAutoConfiguration])
   }
 
-  "configuration metadata" should "document exactly the bound properties plus llm4s.enabled, with defaults that match" in {
+  "configuration metadata" should "document exactly the bound properties, llm4s.enabled and the keys read from the environment" in {
     // The Scala sources get no annotation-processor-generated metadata, so IDE completion depends
     // on this hand-written file staying in sync with Llm4sProperties.
     val stream = getClass.getClassLoader.getResourceAsStream("META-INF/additional-spring-configuration-metadata.json")
@@ -185,7 +202,13 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
         }
     val bound = leaves(classOf[Llm4sProperties], "llm4s")
 
-    documented.keySet shouldBe bound + "llm4s.enabled"
+    // Read from the Spring Environment by SpringProviderSource rather than bound to Llm4sProperties (#1467).
+    val environmentRead = Set(
+      SpringProviderSource.ProvidersPrefix,
+      s"${SpringProviderSource.ProvidersPrefix}.provider",
+      SpringProviderSource.CredentialsPrefix
+    )
+    documented.keySet shouldBe bound + "llm4s.enabled" ++ environmentRead
     documented.values.foreach(p => p("description").str should not be empty)
 
     val defaults = new Llm4sProperties

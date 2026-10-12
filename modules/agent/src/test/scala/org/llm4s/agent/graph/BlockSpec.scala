@@ -143,11 +143,22 @@ class BlockSpec extends AnyFlatSpec with Matchers with EitherValues with OptionV
       def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] =
         if commit.checkpoint.exists(_.status == CheckpointStatus.Failed) then Left(ValidationError("store", "down"))
         else underlying.commit(threadId, commit)
-      def latest(threadId: ThreadId) = underlying.latest(threadId)
+      def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
+      def renew(
+        threadId: ThreadId,
+        token: org.llm4s.agent.graph.FencingToken,
+        ttl: scala.concurrent.duration.FiniteDuration
+      ) =
+        underlying.renew(threadId, token, ttl)
+      def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+      def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
       def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+      def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+      def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
+      def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
     }
 
     val (_, error) = GraphRuntime(closing).start(thread, guarded, "bad-1").awaited.value.failed
@@ -167,7 +178,7 @@ class BlockSpec extends AnyFlatSpec with Matchers with EitherValues with OptionV
     val checkpoint = store.latest(thread).value.value.checkpoint
 
     checkpoint.formatVersion shouldBe Checkpoint.CurrentFormat
-    Checkpoint.CurrentFormat shouldBe 4
+    Checkpoint.CurrentFormat shouldBe 6
     Checkpoint.fromJson(Checkpoint.toJson(checkpoint)).value shouldBe checkpoint
   }
 }

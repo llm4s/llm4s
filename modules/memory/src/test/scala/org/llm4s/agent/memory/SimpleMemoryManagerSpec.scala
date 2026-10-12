@@ -275,7 +275,6 @@ class SimpleMemoryManagerSpec extends AnyFlatSpec with Matchers {
 
   "SimpleMemoryManager.forTesting" should "create a testing instance" in {
     val manager = SimpleMemoryManager.forTesting
-    manager.config.autoRecordMessages shouldBe false
     manager.config.autoExtractEntities shouldBe false
   }
 }

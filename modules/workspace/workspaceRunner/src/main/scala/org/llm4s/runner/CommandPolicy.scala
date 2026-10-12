@@ -157,7 +157,30 @@ private[runner] object CommandPolicy {
     // Follow links met inside the tree (`-L`) or on the command line (`-H`) and change what they point at.
     "chmod" -> Options(short = Set('L', 'H'), long = Set("--dereference")),
     // Sets the host name.
-    "hostname" -> Options(short = Set('F', 'b'), long = Set("--file", "--boot"))
+    "hostname" -> Options(short = Set('F', 'b'), long = Set("--file", "--boot")),
+    // Not on any built-in list, but common additions with WORKSPACE_EXTRA_COMMANDS whose options run a program (#1805).
+    // tar: `--to-command`, `-I` / `--use-compress-program`, `--checkpoint-action=exec=`, `-F` / `--info-script` /
+    // `--new-volume-script`, and the remote-archive helpers `--rsh-command` and `--rmt-command`.
+    "tar" -> Options(
+      short = Set('I', 'F'),
+      long = Set(
+        "--to-command",
+        "--use-compress-program",
+        "--checkpoint-action",
+        "--info-script",
+        "--new-volume-script",
+        "--rsh-command",
+        "--rmt-command"
+      )
+    ),
+    // zip: `-TT` / `--unzip-command` runs the command that tests the archive (`-T` is refused with it).
+    "zip" -> Options(short = Set('T'), long = Set("--unzip-command")),
+    // rsync: `-e` / `--rsh` and `--rsync-path` name the program it starts.
+    "rsync" -> Options(short = Set('e'), long = Set("--rsh", "--rsync-path")),
+    // scp and sftp: `-S` names the ssh program, `-o ProxyCommand=` and a `-F` configuration file run a command, and
+    // sftp's `-D` starts a local sftp server program.
+    "scp"  -> Options(short = Set('S', 'o', 'F')),
+    "sftp" -> Options(short = Set('S', 'o', 'F', 'D'))
   )
 
   /** `find`'s leading options in one cluster (`-HL` on BSD); one with `L` follows every link. */
@@ -316,6 +339,9 @@ private[runner] object CommandPolicy {
    * Every check here reads the arguments as UTF-16, so an argument (`ARGUMENT_NOT_ALLOWED`), the working directory
    * below the workspace root (`ARGUMENT_NOT_ALLOWED`; the root itself is the operator's) or an environment value
    * (`ENVIRONMENT_NOT_ALLOWED`) holding such a character is refused, for every program (see [[WindowsBestFit]]).
+   * On a double-byte ANSI host (code pages 932, 936, 950), an argument the JDK puts in quotes is also refused when it
+   * holds a character whose second byte is 0x5C (`\`), which a byte-wise parser reads as escaping the closing quote
+   * (`ARGUMENT_NOT_ALLOWED`, [[WindowsBestFit.quotedTrailByteRefusal]], #1807).
    */
   private def bestFitRefusal(
     program: String,
@@ -330,7 +356,9 @@ private[runner] object CommandPolicy {
     val belowRoot = spelledRoot.filter(workDir.startsWith).fold(workDir.toString)(_.relativize(workDir).toString)
     args.iterator
       .flatMap(arg =>
-        why(arg, WindowsBestFit.isOptionLike(arg)).map(reason => notAllowed(program, arg, s"it holds $reason."))
+        why(arg, WindowsBestFit.isOptionLike(arg))
+          .orElse(WindowsBestFit.quotedTrailByteRefusal(arg, ansiCodePage))
+          .map(reason => notAllowed(program, arg, s"it holds $reason."))
       )
       .nextOption()
       .orElse(
@@ -576,6 +604,7 @@ private[runner] object CommandPolicy {
       case "findstr" if isWindows => findstrRefusal(args)
       case "hostname"             => hostnameRefusal(args).orElse(refusedOption(program, args))
       case "find"                 => findFollowRefusal(args).orElse(refusedOption(program, args))
+      case "tar"                  => tarTraditionalRefusal(args).orElse(refusedOption(program, args))
       case _                      => refusedOption(program, args)
     }
 
@@ -605,6 +634,15 @@ private[runner] object CommandPolicy {
         arg.drop(1).exists(options.short.contains)
       else false
     }
+
+  /**
+   * tar reads a first argument without a leading `-` as a cluster of option letters (`tar xIf prog a.tar`, the
+   * traditional form), so the refused letters are looked for there too (#1805).
+   */
+  private def tarTraditionalRefusal(args: Seq[String]): Option[Refusal] =
+    args.headOption
+      .filter(first => !first.startsWith("-") && first.exists(ProgramOptions("tar").short.contains))
+      .map(notAllowed("tar", _, WritesOrRuns))
 
   private def findFollowRefusal(args: Seq[String]): Option[Refusal] =
     args.find(arg => FindFollowCluster.matches(arg)).map(notAllowed("find", _, "it follows every link it meets."))

@@ -67,7 +67,11 @@ final private[config] case class ProviderSections(
         if descriptor.configSpec.requiresApiKey
       yield
         val source =
-          if raw.apiKey.exists(_.trim.nonEmpty) then ApiKeySource.Section(s"llm4s.providers.${name.asName}.apiKey")
+          // Only a provider that accepts `auth` uses it; for any other the section fails to load, and
+          // reporting it as authenticated would hide that from the policy check.
+          if raw.auth.isDefined && descriptor.configSpec.supportsAuth then
+            ApiKeySource.WorkloadIdentity(s"llm4s.providers.${name.asName}.auth")
+          else if raw.apiKey.exists(_.trim.nonEmpty) then ApiKeySource.Section(s"llm4s.providers.${name.asName}.apiKey")
           else ApiKeySource.Credentials(SharedCredentials.apiKeyPath(descriptor.id))
         name -> source
     }.toMap

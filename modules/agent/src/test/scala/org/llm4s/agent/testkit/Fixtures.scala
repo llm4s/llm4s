@@ -19,7 +19,13 @@ import org.llm4s.llmconnect.model.{
 }
 import org.llm4s.types.Result
 
-/** Shared deterministic fixtures for the concurrency specs: no sleeps, only latches and parking. */
+/**
+ * Shared deterministic fixtures for the concurrency specs: no sleeps, only latches and parking.
+ *
+ * These are this repository's own test sources (`agent % "test->test"`), unpublished. They are not the published
+ * `llm4s-testkit` (package `org.llm4s.testkit`, `ScriptedLLMClient`), which is what a user's tests should depend on;
+ * the two packages share the name `testkit` only.
+ */
 object Fixtures {
 
   val completion: Completion =

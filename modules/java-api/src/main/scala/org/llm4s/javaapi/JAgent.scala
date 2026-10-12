@@ -27,8 +27,9 @@ import scala.jdk.CollectionConverters.*
  * rejects a `catch (InterruptedException e)` around them - test the result for a `CancelledError`
  * instead. To cancel a turn without interrupting a thread, `stream` it and call [[AgentStream.cancel]].
  *
- * A turn whose tools need approval, or ask a question, ends `SUSPENDED`: its status's `pending()` - or
- * [[JAgent.pending]] - lists what it waits for, and `resume(threadId, answers)` answers some or all of it and continues. A turn that
+ * A turn whose tools need approval, whose tools or middleware ask a question, or whose task a static
+ * breakpoint holds, ends `SUSPENDED`: its status's `pending()` - or [[JAgent.pending]] - lists what it
+ * waits for, and `resume(threadId, answers)` answers some or all of it and continues. A turn that
  * failed or was cancelled continues with `recover(threadId)`. Both block, as `run` does.
  *
  * {{{
@@ -51,7 +52,9 @@ import scala.jdk.CollectionConverters.*
  *       .ifFailure(e -> System.err.println(e.getMessage()));
  * }}}
  */
-final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
+final class JAgent private[javaapi] (token: FacadeToken, underlying: Result[Agent]) {
+
+  FacadeToken.check(token, "JAgent")
 
   /**
    * Runs `query` as the first turn of a new conversation. A `null` query yields a failed result.
@@ -114,9 +117,9 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
       )
 
   /**
-   * Answers some of `threadId`'s pending approvals and questions and continues, as a stream; see
-   * [[stream]]. Build each answer with [[Answer.approve]], [[Answer.reject]], [[Answer.edit]] or
-   * [[Answer.reply]], e.g. `List.of(Answer.approve(id))`; for an id answered twice, the last answer
+   * Answers some of `threadId`'s pending approvals, questions and breakpoints and continues, as a stream;
+   * see [[stream]]. Build each answer with [[Answer.approve]], [[Answer.reject]], [[Answer.edit]],
+   * [[Answer.reply]] or [[Answer.proceed]], e.g. `List.of(Answer.approve(id))`; for an id answered twice, the last answer
    * counts. A `null` or malformed answer is a failed result, and `listener` hears nothing.
    */
   def streamResume(
@@ -136,11 +139,11 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
       )
 
   /**
-   * Answers some of `threadId`'s pending approvals and questions - read them with
+   * Answers some of `threadId`'s pending approvals, questions and breakpoints - read them with
    * `result.status().pending()` -
    * and continues the turn, returning its result; unanswered ones stay pending, so the result can be
-   * `Suspended` again. Build each answer with [[Answer.approve]], [[Answer.reject]], [[Answer.edit]] or
-   * [[Answer.reply]]; for an id answered twice, the last answer counts. A `null` or malformed answer,
+   * `Suspended` again. Build each answer with [[Answer.approve]], [[Answer.reject]], [[Answer.edit]],
+   * [[Answer.reply]] or [[Answer.proceed]]; for an id answered twice, the last answer counts. A `null` or malformed answer,
    * an empty answers list (`GraphError.InvalidResume`), an answer to an id the thread does not wait
    * for, or a thread that is not suspended is a failed result. Blocks and handles an interrupt as [[run]] does: the
    * turn is cancelled, the result is a `CancelledError` with the interrupt flag left set, and the
@@ -187,13 +190,14 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
     if (listener == null) LlmResult.failure(ValidationError.required("listener"))
     else
       call("JAgent.stream") { agent =>
-        val buffer = AgentEventBuffer(AgentStream.BufferSize)
-        start(agent, () => buffer.end(), buffer.listener).map(AgentStream.start(_, buffer, listener))
+        val buffer = AgentEventBuffer(JAgent.BufferSize)
+        start(agent, () => buffer.end(), buffer.listener)
+          .map(new AgentStream(FacadeToken.INSTANCE, _, buffer, listener))
       }
 
   /** [[call]] for a turn: its result as a [[JAgentResult]]. */
   private def turn(operation: String)(body: Agent => Result[AgentResult]): LlmResult[JAgentResult] =
-    call(operation)(agent => body(agent).map(JAgentResult.of))
+    call(operation)(agent => body(agent).map(FacadeInternals.agentResult))
 
   /**
    * `body` as a result that never throws. An `InterruptedException` escaping it - the runtime answers
@@ -202,16 +206,19 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
    * declare (#1591).
    */
   private def call[A](operation: String)(body: Agent => Result[A]): LlmResult[A] =
-    LlmResult.from(
+    FacadeInternals.result(
       CancelledError.attempt(operation)(underlying.flatMap(agent => Safety.safely(body(agent)).flatMap(identity)))
     )
 }
 
 object JAgent {
 
+  /** Events buffered between a streamed turn's subscription and its listener, as for the fs2 and ZIO streams. */
+  private val BufferSize: Int = 256
+
   /**
-   * What `result`'s turn waits for: for a `SUSPENDED` turn, its pending approvals, then its questions,
-   * as [[PendingInterrupt]]s; an empty list for a turn that completed, was blocked, reached its step
+   * What `result`'s turn waits for: for a `SUSPENDED` turn, its pending approvals, then its tool questions,
+   * middleware questions and breakpoints, as [[PendingInterrupt]]s; an empty list for a turn that completed, was blocked, reached its step
    * limit, or a `null` result. The list is unmodifiable. A shortcut for `result.status().pending()`.
    * Answer them with [[Answer]] and continue with [[JAgent.resume]] or [[JAgent.streamResume]].
    */

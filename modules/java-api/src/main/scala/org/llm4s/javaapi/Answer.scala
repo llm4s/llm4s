@@ -1,15 +1,16 @@
 package org.llm4s.javaapi
 
-import org.llm4s.agent.graph.InterruptId
+import org.llm4s.agent.graph.{ Breakpoint, InterruptId }
 import org.llm4s.agent.graph.toolloop.ApprovalDecision
 import org.llm4s.core.safety.Safety
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
 /**
- * An answer to one pending approval or question of a suspended turn, for [[JAgent.resume]] or
- * [[JAgent.streamResume]]: built with [[Answer.approve]], [[Answer.reject]], [[Answer.edit]] or
- * [[Answer.reply]], with JSON as a `String`. The id is a [[PendingInterrupt]]'s, from [[JAgent.pending]].
+ * An answer to one pending approval, question or breakpoint of a suspended turn, for [[JAgent.resume]] or
+ * [[JAgent.streamResume]]: built with [[Answer.approve]], [[Answer.reject]], [[Answer.edit]],
+ * [[Answer.reply]] or [[Answer.proceed]], with JSON as a `String`. The id is a [[PendingInterrupt]]'s, from
+ * [[JAgent.pending]].
  *
  * {{{
  * agent.resume(threadId, List.of(Answer.approve(pending.id())));
@@ -18,7 +19,9 @@ import org.llm4s.types.Result
  * A `null` argument or malformed JSON is reported when the answer is used: `resume` and `streamResume`
  * return a failed result.
  */
-final class Answer private (val interruptId: String, encoded: () => Result[ujson.Value]) {
+final class Answer private (token: FacadeToken, val interruptId: String, encoded: () => Result[ujson.Value]) {
+
+  FacadeToken.check(token, "Answer")
 
   /** The answer as `Agent.resume` takes it, or why it cannot be one. */
   private[javaapi] def underlying: Result[(InterruptId, ujson.Value)] =
@@ -42,14 +45,25 @@ object Answer {
 
   /** Approves the pending tool call `interruptId` with new arguments, a JSON object as a `String`. */
   def edit(interruptId: String, argumentsJson: String): Answer =
-    new Answer(interruptId, () => json("argumentsJson", argumentsJson).map(a => encode(ApprovalDecision.Edit(a))))
+    new Answer(
+      FacadeToken.INSTANCE,
+      interruptId,
+      () => json("argumentsJson", argumentsJson).map(a => encode(ApprovalDecision.Edit(a)))
+    )
 
-  /** Answers the tool question `interruptId` with `json`, the asking tool's answer type as JSON. */
+  /**
+   * Answers the question `interruptId` - a tool's or a middleware's - with `json`, the asker's answer type
+   * as JSON.
+   */
   def reply(interruptId: String, json: String): Answer =
-    new Answer(interruptId, () => Answer.json("json", json))
+    new Answer(FacadeToken.INSTANCE, interruptId, () => Answer.json("json", json))
+
+  /** Continues the task the breakpoint `interruptId` holds. */
+  def proceed(interruptId: String): Answer =
+    new Answer(FacadeToken.INSTANCE, interruptId, () => Right(Breakpoint.proceed))
 
   private def decision(interruptId: String, decision: Result[ApprovalDecision]): Answer =
-    new Answer(interruptId, () => decision.map(encode))
+    new Answer(FacadeToken.INSTANCE, interruptId, () => decision.map(encode))
 
   private def encode(decision: ApprovalDecision): ujson.Value = upickle.default.writeJs(decision)
 

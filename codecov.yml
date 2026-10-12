@@ -72,6 +72,10 @@ flags:
     paths:
       - modules/llm4s-zio/src/main/scala
     carryforward: true
+  llm4s-pekko:
+    paths:
+      - modules/llm4s-pekko/src/main/scala
+    carryforward: true
   ollama:
     paths:
       - modules/ollama/src/main/scala
@@ -102,6 +106,9 @@ flags:
   jina:
     paths:
       - modules/providers/jina/src/main/scala
+  jev:
+    paths:
+      - modules/providers/jev/src/main/scala
   cohere:
     paths:
       - modules/providers/cohere/src/main/scala
@@ -112,6 +119,14 @@ flags:
   provider-testkit:
     paths:
       - modules/provider-testkit/src/main/scala
+    carryforward: true
+  schema-derivation:
+    paths:
+      - modules/schema-derivation/src/main/scala
+    carryforward: true
+  testkit:
+    paths:
+      - modules/testkit/src/main/scala
     carryforward: true
   knowledgegraph-neo4j:
     paths:
@@ -125,6 +140,10 @@ flags:
     paths:
       - modules/observability-prometheus/src/main/scala
     carryforward: true
+  observability-micrometer:
+    paths:
+      - modules/observability-micrometer/src/main/scala
+    carryforward: true
   agent-tools:
     paths:
       - modules/agent-tools/src/main/scala
@@ -132,6 +151,14 @@ flags:
   agent:
     paths:
       - modules/agent/src/main/scala
+    carryforward: true
+  agent-testkit:
+    paths:
+      - modules/agent-testkit/src/main/scala
+    carryforward: true
+  agent-checkpoint-sqlite:
+    paths:
+      - modules/agent-checkpoint-sqlite/src/main/scala
     carryforward: true
   java-api:
     paths:

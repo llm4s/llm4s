@@ -11,7 +11,7 @@ import org.scalatest.matchers.should.Matchers
 import scala.concurrent.duration.*
 
 /**
- * The `timeouts` block of a section reaches the watsonx client (#712). Without one a generation call
+ * The `timeouts` block of a section reaches the watsonx client (#712). Without one a chat call
  * keeps its two minutes and a streamed one its ten; the IAM exchange keeps its own 30 seconds either way.
  */
 final class WatsonXConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers {
@@ -67,8 +67,8 @@ final class WatsonXConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers {
 
   // ---- the value reaches the wire ----
 
-  "A configured request timeout" should "be the timeout of the generation call, not of the IAM exchange" in {
-    val http = routed(_ => Right(iamToken()), _ => Right(generation))
+  "A configured request timeout" should "be the timeout of the chat call, not of the IAM exchange" in {
+    val http = routed(_ => Right(iamToken()), _ => Right(chatReply))
     val client = new WatsonXClient(
       WatsonXTestConfig.config.withTimeouts(ProviderTimeouts(request = Some(7.seconds))),
       httpClient = http
@@ -81,7 +81,7 @@ final class WatsonXConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers {
 
   "A configured stream timeout" should "be the timeout of the streamed call" in {
     val sse =
-      """data: {"results":[{"generated_text":"Hi","generated_token_count":1,"input_token_count":3,"stop_reason":"eos_token"}]}
+      """data: {"id":"c-1","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}
         |
         |""".stripMargin
     val http = streaming(streamOf(bytes(sse)))
@@ -95,7 +95,7 @@ final class WatsonXConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers {
   }
 
   "A client without configured timeouts" should "send its own defaults" in {
-    val http   = routed(_ => Right(iamToken()), _ => Right(generation))
+    val http   = routed(_ => Right(iamToken()), _ => Right(chatReply))
     val client = new WatsonXClient(WatsonXTestConfig.config, httpClient = http)
     client.complete(hi, CompletionOptions()).isRight shouldBe true
 

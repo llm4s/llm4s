@@ -1,6 +1,8 @@
 package org.llm4s.spring
 
 import org.llm4s.javaapi.{ JLlmClient, Llm4s }
+import org.llm4s.metrics.MetricsCollector
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.autoconfigure.condition.{
@@ -10,6 +12,7 @@ import org.springframework.boot.autoconfigure.condition.{
 }
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.{ Bean, Configuration }
+import org.springframework.core.env.ConfigurableEnvironment
 
 import java.util.concurrent.{ ExecutorService, LinkedBlockingQueue, ThreadFactory, ThreadPoolExecutor, TimeUnit }
 import java.util.concurrent.atomic.AtomicInteger
@@ -22,7 +25,7 @@ object Llm4sExecutors {
    * A bounded pool of daemon threads named `llm4s-async-N`: at most `maxThreads` workers (idle
    * ones time out, so an idle application holds none) and `queueCapacity` queued calls; beyond that
    * `submit` is rejected and `completeAsync` fails its future instead of growing without bound.
-   * Bounded rather than virtual threads so the module keeps working on JDK 17.
+   * Bounded rather than virtual threads.
    */
   def create(p: AsyncProperties): ExecutorService = {
     require(p.maxThreads >= 1, s"llm4s.async.max-threads must be >= 1, got ${p.maxThreads}")
@@ -46,6 +49,19 @@ object Llm4sExecutors {
   }
 }
 
+object Llm4sAutoConfiguration {
+
+  /** All `MetricsCollector` beans as one: none is `noop`, one is itself, several are composed in bean order. */
+  private[spring] def collector(beans: ObjectProvider[MetricsCollector]): MetricsCollector = {
+    val all = beans.orderedStream().toArray().toSeq.collect { case c: MetricsCollector => c }
+    all match {
+      case Seq()  => MetricsCollector.noop
+      case Seq(c) => c
+      case many   => MetricsCollector.compose(many*)
+    }
+  }
+}
+
 @AutoConfiguration
 @Configuration
 @ConditionalOnClass(name = Array("org.llm4s.javaapi.Llm4s$"))
@@ -53,12 +69,20 @@ object Llm4sExecutors {
 @EnableConfigurationProperties(Array(classOf[Llm4sProperties]))
 class Llm4sAutoConfiguration {
 
+  /**
+   * The client, reporting its calls to every `MetricsCollector` bean in the context: the Micrometer one
+   * `LlmMetricsAutoConfiguration` registers, any of the application's own, or none.
+   */
   @Bean
   @ConditionalOnMissingBean
-  def llm4sClient(properties: Llm4sProperties): JLlmClient =
-    ProviderConfigParser
-      .parse(properties)
-      .map(config => Llm4s.createClient(config).get())
+  def llm4sClient(
+    properties: Llm4sProperties,
+    environment: ConfigurableEnvironment,
+    metrics: ObjectProvider[MetricsCollector]
+  ): JLlmClient =
+    ProviderSelection
+      .resolve(properties, environment)
+      .map(config => Llm4s.createClient(config, Llm4sAutoConfiguration.collector(metrics)).get())
       .get()
 
   // shutdownNow, not Spring's inferred close(): close() waits for running LLM calls to finish,

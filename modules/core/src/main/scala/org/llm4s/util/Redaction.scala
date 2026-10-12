@@ -1,5 +1,7 @@
 package org.llm4s.util
 
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.util.Locale
 
 import scala.annotation.{ tailrec, unused }
@@ -14,7 +16,7 @@ import scala.util.matching.Regex
  * Pattern-based redaction automatically detects and masks:
  *  - API keys (OpenAI, Anthropic, Google, Voyage, Langfuse)
  *  - Bearer tokens and credential headers: Authorization, Proxy-Authorization, Cookie and Set-Cookie
- *  - URL query parameters with sensitive keys
+ *  - URL query parameters with sensitive keys, and the password of a URL's userinfo (`https://user:password@host`)
  *  - Sensitive fields, whatever the shape: JSON (also inside a string, single-quoted, with a number value, or with
  *    an array or object value, whose every leaf - string, number or bare word - is replaced), `key=value` pairs and
  *    `x-api-key: value` header lines (api_key, password, token, client_secret, etc.)
@@ -52,6 +54,27 @@ private[llm4s] object Redaction {
       case Some(_) => "Some(***)"
       case None    => "None"
     }
+
+  /**
+   * A URL fit for a `toString` or a log line: scheme, host, port and path are kept; userinfo
+   * (`user:password@`), the query and the fragment, which may carry credentials or a signature, are
+   * replaced by `***`. A value that does not parse as an absolute URL is `***` altogether.
+   */
+  def url(value: String): String =
+    scala.util
+      .Try(new java.net.URI(value.trim))
+      .toOption
+      .filter(uri => uri.getScheme != null && uri.getRawAuthority != null)
+      .map { uri =>
+        val userInfo = Option(uri.getRawUserInfo).fold("")(_ => "***@")
+        val host     = Option(uri.getHost).getOrElse("***")
+        val port     = if uri.getPort >= 0 then s":${uri.getPort}" else ""
+        val path     = Option(uri.getRawPath).getOrElse("")
+        val query    = Option(uri.getRawQuery).fold("")(_ => "?***")
+        val fragment = Option(uri.getRawFragment).fold("")(_ => "#***")
+        s"${uri.getScheme}://$userInfo$host$port$path$query$fragment"
+      }
+      .getOrElse("***")
 
   /**
    * Truncates a string for safe logging to prevent PII leaks and log flooding.
@@ -155,7 +178,11 @@ private[llm4s] object Redaction {
     "authtoken",
     "sessiontoken",
     "securitytoken",
-    "bearertoken"
+    "bearertoken",
+    // OAuth 2.0 / RFC 8693 token-endpoint fields: `subject_token`, `actor_token`, `assertion`, `client_assertion`
+    "subjecttoken",
+    "actortoken",
+    "assertion"
   )
 
   /** The bare words a container under a sensitive key keeps: JSON's literals, and Python's, since a dict is a container too. */
@@ -170,6 +197,45 @@ private[llm4s] object Redaction {
     val normalised = key.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit)
     SensitiveKeyWords.contains(normalised) || SensitiveKeySuffixes.exists(normalised.endsWith)
   }
+
+  /**
+   * Whether the value `input(start until end)` of a sensitive `key` is prose that is left readable: the key is the
+   * bare word `assertion` (`Assertion`, `ASSERTION`; normalised as `isSensitiveKey` normalises) and the value reads
+   * as prose (#1818). A test framework writes its assertions under that key (`Assertion: expected status 200`,
+   * `{"assertion": "response.status == 200"}`, `{'assertion': 'len(items) > 0'}`): words and operators with spaces
+   * between them. So the value is prose only if it holds a space (U+0020), holds no `<`, and has no run of
+   * [[CredentialRunLength]] or more characters of `[A-Za-z0-9+/_=-]`. The RFC 7521 / 7523 `assertion` grant fails at
+   * least one of the three, however it is wrapped: a JWT, a base64 or base64url SAML assertion, a hex or opaque token
+   * is one long run (and stays one between the spaces it may be wrapped with), a raw XML SAML assertion opens with a
+   * `<`, and a PEM block holds base64 lines; so does a credential with a word beside it (`ghp_... x`, an AWS key id
+   * and its secret). Any of them is redacted in every shape, as before. A compound key (`client_assertion`,
+   * `saml_assertion`) is never exempt, nor is a container (`{"assertion": {...}}`), whose leaves are replaced
+   * whatever they hold. Every pass that reads a field, a header line, a pair or a dict entry by its key, and the
+   * collector of [[remoteBody]], asks this of the value it found, so they agree; only the key's own replacement is
+   * withheld, and the patterns that do not read a key (bearer tokens, JWTs, API keys) still apply inside the value.
+   * It reads only `input(start until end)`, once, so the passes that call it per value stay linear.
+   */
+  private def isProseAssertion(key: String, input: String, start: Int, end: Int): Boolean =
+    key.length >= BareAssertion.length && key.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit) == BareAssertion && {
+      var space = false
+      var run   = 0
+      var i     = start
+      while (i < end && run < CredentialRunLength && input.charAt(i) != '<') {
+        val c = input.charAt(i)
+        if (c == ' ') space = true
+        run = if (isCredentialChar(c)) run + 1 else 0
+        i += 1
+      }
+      i == end && space && run < CredentialRunLength
+    }
+
+  /** The length of a run of `[A-Za-z0-9+/_=-]` that makes a bare `assertion` value a credential, not prose. */
+  private val CredentialRunLength = 20
+
+  private def isCredentialChar(c: Char): Boolean =
+    (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || "+/_=-".indexOf(c.toInt) >= 0
+
+  private val BareAssertion = "assertion"
 
   /**
    * Whether a header line's name is sensitive and not one `CookieHeaderStart` reads (`Cookie`, `Set-Cookie`): the
@@ -345,7 +411,12 @@ private[llm4s] object Redaction {
    * (`addedReadingEdits`): the passes again, with a query value that ends before JSON and a `Bearer` or `Basic` word
    * that leaves the pair after it alone; the pairs after the JSON escape of a line break; and the rest of a value
    * after a literal `&`. A fourth (#1707) adds, wherever no edit is, the content of a value in quotes written behind
-   * backslashes (`password=\\'p&ss=QZXJ\\'`) up to the same quote written the same way.
+   * backslashes (`password=\\'p&ss=QZXJ\\'`) up to the same quote written the same way, and a fifth (#1706) the
+   * strings, numbers and words of the value of a sensitive key of a Python literal, read as Python writes it
+   * (`pythonValues`): a `pytest` diff, a notebook's line array, a dict cut off after a comma, `str(dict)` inside a
+   * `repr`, `\'` inside a JSON string, a keyword argument holding a list or a call (`token=SecretStr('...')`, #1813).
+   * A sixth (#1816) adds the password of a URL's userinfo, `https://alice:[REDACTED]@host`, also with the slashes
+   * escaped as JSON writes them.
    *
    * Redacting the output a second time usually changes nothing, but that is not guaranteed: where quotes are
    * unbalanced or stray, the text a first pass replaced can change how a second pass pairs the quotes, and the
@@ -363,8 +434,8 @@ private[llm4s] object Redaction {
   /**
    * What [[redact]] makes of a non-empty `input`, and the ranges of the input it replaces; with
    * `singleQuotedFromInput = false`, without the single-quoted field passes' reading of the input as it was given
-   * (#1697), and with `addedReadings = false`, without the readings of #1695 and #1707 (`addedReadingEdits`), so that
-   * a test can check that each only adds to what is replaced.
+   * (#1697), and with `addedReadings = false`, without the readings of #1695, #1707 and #1706 (`addedReadingEdits`),
+   * so that a test can check that each only adds to what is replaced.
    */
   private[util] def redactedWithRanges(
     input: String,
@@ -377,7 +448,8 @@ private[llm4s] object Redaction {
 
   /**
    * The redacted text of a non-empty `input`, and the edits that make it of the input: those of the passes
-   * (`passRedaction`), and, with `addedReadings`, those of the readings of #1695 and #1707 that overlap none of them.
+   * (`passRedaction`), and, with `addedReadings`, those of the readings of #1695, #1707 and #1706 that overlap none of
+   * them.
    */
   private def redaction(
     input: String,
@@ -463,6 +535,16 @@ private[llm4s] object Redaction {
    * added only where nothing touches it would add nothing. No part overlaps an edit, so here too every edit is made as
    * it is without the reading.
    *
+   * Then, the same way, the strings, numbers and words of the value of a sensitive key of a Python literal
+   * (`pythonValues`, #1706), less every `"` that delimits a JSON string and every escape a part would split
+   * (`quoteSafeParts`), so that a JSON string around them, at any depth, is left as it was. A word replaced whole is
+   * written in `'`, as the leaf walk writes a bare leaf, so that a line of a notebook's array that starts with one
+   * still starts with a quote. A `"` of a single-quoted string is replaced with the rest of its content, and a part
+   * that meets a placeholder already written is written as nothing, so that the two read as one (#1813). The same
+   * reading then runs again for a key whose value is a call (`token=SecretStr('...')`, #1813).
+   *
+   * Last, the same way, the password of a URL's userinfo (`urlUserinfoPasswords`, #1816).
+   *
    * Each reading is a fixed number of passes over the input, so the cost stays linear.
    */
   private def addedReadingEdits(input: String, placeholder: String, edits: Vector[Edit]): Vector[Edit] = {
@@ -481,7 +563,709 @@ private[llm4s] object Redaction {
       val added = uncoveredEdits(input, kept, escapedQuotedValues(input), placeholder)
       if (added.nonEmpty) kept = (kept ++ added).sortBy(_.start)
     }
+    if (input.indexOf('\'') >= 0 || input.indexOf('=') >= 0) {
+      Seq(false, true).foreach { calls =>
+        val (strings, words) = pythonValues(input, placeholder, calls)
+        if (strings.nonEmpty || words.nonEmpty) {
+          // A word replaced whole is written in quotes, as the leaf walk writes one, so the literal stays one.
+          val wordParts = quoteSafeParts(input, words, placeholder)
+          val wordSpans = wordParts.toSet
+          val added = joinedToPlaceholders(
+            kept,
+            uncoveredEdits(input, kept, quoteSafeParts(input, strings, placeholder), placeholder)
+          ) ++
+            uncoveredEdits(input, kept, wordParts, placeholder).map { e =>
+              if (wordSpans((e.start, e.end))) Edit(e.start, e.end, "'" + placeholder + "'", 1, 1 + placeholder.length)
+              else e
+            }
+          if (added.nonEmpty) kept = (kept ++ added).sortBy(_.start)
+        }
+      }
+    }
+    if (input.indexOf('@') >= 0) {
+      val added = joinedToPlaceholders(kept, uncoveredEdits(input, kept, urlUserinfoPasswords(input), placeholder))
+      if (added.nonEmpty) kept = (kept ++ added).sortBy(_.start)
+    }
     kept
+  }
+
+  /**
+   * The password of every URL whose authority holds userinfo, `scheme://user:password@host`, as `(start, end)`
+   * spans of the input, sorted and free of overlaps (#1816): a provider `baseUrl`, a proxy or a database URL in a
+   * connection error or a log line. The scheme is a run of letters, digits, `+`, `.` or `-` before `:`, and its two
+   * slashes may be written behind backslashes, as JSON writes them (`https:\/\/`, behind the same run each). The
+   * authority runs from there to the first character no authority holds unencoded in a log line - whitespace, `/`,
+   * `?`, `#`, `\`, `"`, `<`, `>`, `[`, `]`, `{`, `}`, `|`, `^` or a backtick - or to the scheme of another URL
+   * (`redis://u:p1@h1,redis://u:p2@h2`), where the search goes on, so that every URL of a list joined by `,`, `;`,
+   * `)` or `'` is read. Its userinfo runs to its last `@`, as a browser reads it, so a password that holds `@`
+   * unencoded is read whole. The password is the userinfo after its first `:`; a userinfo with no `:`
+   * (`https://alice@host`) has none, and an empty password is left. Only the password is replaced:
+   * `https://alice:[REDACTED]@host` keeps the user and the host. It holds no `"` or backslash, so a JSON string around
+   * the URL still parses, and it holds `[`, which ends an authority, so a second redaction finds nothing more.
+   *
+   * A `,` or `;` in an authority starts another item of a list, read the same way without a scheme, when it follows
+   * a password and an `@` follows it (`https://u:p@h1,a@b.com` keeps `a@b.com`), or when it follows a host and its
+   * port (`https://example.com:8080,bob@corp.com` keeps the port and `bob`): a host holds a `.` and a port only
+   * digits. What is left: a password holding `@` and then `,` or `;` before another `@`, a password of digits only
+   * behind a user holding a `.` and before a `,`, or one holding `://` after letters, is read only in part. One
+   * forward scan, each character read once.
+   */
+  private def urlUserinfoPasswords(input: String): Vector[(Int, Int)] = {
+    val length                          = input.length
+    val found                           = Vector.newBuilder[(Int, Int)]
+    def schemeChar(c: Char): Boolean    = c.isLetterOrDigit || c == '+' || c == '.' || c == '-'
+    def endsAuthority(c: Char): Boolean = Character.isWhitespace(c) || "/?#\\\"<>[]{}|^`".indexOf(c.toInt) >= 0
+    // The index after the two slashes of a scheme whose `:` is at `i`, behind the same run of backslashes each, or -1.
+    def afterSlashes(i: Int): Int = {
+      val slash = afterBackslashes(input, i + 1)
+      if (slash < length && input.charAt(slash) == '/') {
+        val second = afterBackslashes(input, slash + 1)
+        if (second < length && input.charAt(second) == '/' && second - (slash + 1) == slash - (i + 1)) second + 1
+        else -1
+      } else -1
+    }
+    var i = input.indexOf(':')
+    while (i >= 0) {
+      var next  = i + 1
+      val start = if (i > 0 && schemeChar(input.charAt(i - 1))) afterSlashes(i) else -1
+      if (start >= 0) {
+        var j            = start
+        var end          = -1
+        var colon        = -1    // the first `:` of the item
+        var lastAt       = -1    // its last `@`
+        var hostDot      = false // a `.` before `colon`, in the item
+        var portOnly     = true  // only digits since `colon`
+        var pending      = -1    // a `,` or `;` after the item's password, which an `@` would make a list's
+        var nextColon    = -1    // the first `:` after `pending`
+        var nextHostDot  = false
+        var nextPortOnly = true
+        var run          = start // the start of the run of scheme characters `j` is in
+        def emit(): Unit = if (colon >= 0 && lastAt > colon + 1) found += ((colon + 1) -> lastAt)
+        def startItem(firstColon: Int, dot: Boolean, port: Boolean): Unit = {
+          colon = firstColon; lastAt = -1; hostDot = dot; portOnly = port; pending = -1
+        }
+        while (j < length && end < 0) {
+          val c = input.charAt(j)
+          if (endsAuthority(c)) end = j
+          else {
+            if (c == ':' && j > run && afterSlashes(j) >= 0) end = run
+            else {
+              if (c == '@') {
+                if (pending >= 0) {
+                  emit()
+                  startItem(nextColon, nextHostDot, nextPortOnly)
+                }
+                lastAt = j
+              } else if (c == ':') {
+                if (pending >= 0) { if (nextColon < 0) nextColon = j }
+                else if (colon < 0) colon = j
+              } else if ((c == ',' || c == ';') && pending < 0) {
+                if (colon >= 0 && lastAt > colon + 1) {
+                  pending = j; nextColon = -1; nextHostDot = false; nextPortOnly = true
+                } else if (colon >= 0 && lastAt < 0 && hostDot && portOnly && j > colon + 1) {
+                  startItem(-1, false, true)
+                }
+              }
+              if (pending >= 0) {
+                if (c == '.' && nextColon < 0) nextHostDot = true
+                if (nextColon >= 0 && j > nextColon && !c.isDigit) nextPortOnly = false
+              } else {
+                if (c == '.' && colon < 0) hostDot = true
+                if (colon >= 0 && j > colon && !c.isDigit) portOnly = false
+              }
+              if (!schemeChar(c)) run = j + 1
+            }
+            if (end < 0) j += 1
+          }
+        }
+        if (end < 0) end = length
+        emit()
+        next = end
+      }
+      i = if (next < length) input.indexOf(':', next) else -1
+    }
+    found.result()
+  }
+
+  /**
+   * `extra`, edits that write the placeholder, each written as nothing where it meets an edit of `kept` that ends
+   * with the placeholder or starts with it (#1813): the two read as one placeholder, as a second redaction would
+   * make them, so redacting the output again changes nothing. What it replaces is replaced still; only the second
+   * placeholder is not written. One pass over each.
+   */
+  private def joinedToPlaceholders(kept: Vector[Edit], extra: Vector[Edit]): Vector[Edit] =
+    if (extra.isEmpty) extra
+    else {
+      val endsMasked   = kept.iterator.filter(k => k.masked && k.after.isEmpty).map(_.end).toSet
+      val startsMasked = kept.iterator.filter(k => k.masked && k.before.isEmpty).map(_.start).toSet
+      extra.map(e => if (endsMasked(e.start) || startsMasked(e.end)) Edit(e.start, e.end, "", -1, -1) else e)
+    }
+
+  /**
+   * `'key':`, the key of a Python dict, with its `:` and the spaces after it, its quotes behind the same run of
+   * backslashes, none included (group 1, the run; group 2, the key): a dict written by `repr`, as a string escapes it
+   * (`\'key\':`, `str(dict)` inside the `repr` of another) or as JSON does (`'key':` inside a JSON string, whose
+   * quotes JSON does not escape). Or `key=` before `[`, `(`, `{` or a quote, behind backslashes or a string prefix
+   * (group 3, the key): a keyword argument of a `repr` (`Settings(token=['a', 'b'], password='x')`). A run of
+   * backslashes is matched only from its first.
+   */
+  private val PythonFieldStart: Regex =
+    s"""(?<!\\\\)(\\\\*+)'($Key)\\1'[ \\t]*:[ \\t]*|(?<![A-Za-z0-9_.-])($Key)[ \\t]*=[ \\t]*(?=[\\[({'"]|\\\\++['"]|[bBrRuUfF]{1,2}['"])""".r
+
+  /** The name of a call and its `(`: a letter or `_`, then letters, digits, `_` and `.`. */
+  private val CallName: String = """[A-Za-z_][A-Za-z0-9_.]{0,127}\("""
+
+  /**
+   * The key of a dict or of a keyword argument, as `PythonFieldStart` reads it, whose value is a call: a name, dotted
+   * or not, right before `(` (`token=SecretStr('...')`, `'api_key': pydantic.SecretStr(...)`, #1813). `pydantic`
+   * masks its own `SecretStr` in a `repr`, but a wrapper class of one's own does not. Group 1 is the run of
+   * backslashes before the quotes of a dict's key, group 2 its key, group 3 the key of a keyword argument.
+   */
+  private val PythonCallFieldStart: Regex =
+    s"""(?<!\\\\)(\\\\*+)'($Key)\\1'[ \\t]*:[ \\t]*(?=$CallName)|(?<![A-Za-z0-9_.-])($Key)[ \\t]*=[ \\t]*(?=$CallName)""".r
+
+  /**
+   * The content of every value of a sensitive key of a Python literal, as `(start, end)` spans of the input, sorted
+   * and free of overlaps (#1706): the key of a dict (`'key':`, `\'key\':`) or of a keyword argument (`key=[`,
+   * `key='`), and the value after it read as Python writes it - a string, with its prefix (`b'...'`) and the strings
+   * written right after it, which Python joins to it (`pprint` splits a long one so); a list, a tuple, a dict or a set,
+   * each leaf of which is a span, bar the keys of a dict and `True`, `False` and `None`; or a number or a word, as a
+   * call (`SecretStr('...')`) with its arguments. The words are the second result: they are written in quotes. The
+   * passes read such a value as JSON's: a `"` is the end of the string around it unless a key and its `,` follow, and
+   * the leaves of a container are found where they look like JSON's. Here:
+   *
+   *  - A string ends at its own quote written the way the opening one is, behind as many backslashes as a backslash of
+   *    its content is written with (`StringDepth`, `quoteMultiplier`). Inside a JSON string, the Python escape `\'`
+   *    is `\\'` and a `"` of the content is `\"` (`{"m": "{'password': 'QQ\\'S\"x'}"}`), and in `str(dict)` inside
+   *    the `repr` of another dict, a quote of the inner dict is `\'`; neither ends the value. After its closing quote
+   *    comes what comes after a value - `,` and a next key of any length or kind, a number, `**extra`, or nothing, as
+   *    in a dict cut off after its `,`, or a line break, as in a `pytest` diff, whose next line starts with `E` - or the
+   *    string is no value but prose that mentions the key (`say 'password': "abc" to log in`), and is left.
+   *  - A value that does not close ends at a line break, at a `"` that ends a JSON string around it, or at the end of
+   *    the input; that of a keyword argument is left, as `key='...` in a logfmt line or a query is the other passes'.
+   *  - A container goes on over the line breaks of `pprint` and `pytest`'s `E` and diff prefixes, and from the end of
+   *    one JSON string of a notebook's `text/plain` array to the next. A leaf is read only where a value stands - after
+   *    an opening bracket, `,` or `:` - and inside a JSON string a bare word only if it is a number; a string or a word
+   *    anywhere else is prose, and the walk ends there, as it does at a string that does not close (a leaf only where
+   *    the text was cut off there: at the end of the input or of a line, or of a JSON string that only closing
+   *    brackets follow), or at the end of a JSON string around it.
+   *  - The placeholder, where a redaction before has written it, is kept as it is, so a second redaction reads it as
+   *    the first wrote it.
+   *
+   * The spans are content only: never a quote that delimits a string, a bracket, a comma or a key. Each is given the
+   * depth at which a `"` is its content (`quoteSafeParts`): a string in `'`, the number of JSON strings around it;
+   * any other span, `NoContentQuotes`. A loop that reads each character a bounded number of times: the search goes on
+   * after each value.
+   *
+   * With `calls` (#1813), the keys read are those whose value is a call (`PythonCallFieldStart`): a keyword argument
+   * too (`token=SecretStr('...')`), which `PythonFieldStart` leaves to the other passes, as they read `key=value`.
+   * Inside the call, a `=` is read as a dict's `:` is, so the name of a keyword argument of the call is no leaf and
+   * the walk goes on over its value (`Secret(value='...', kind='...')`).
+   */
+  private def pythonValues(
+    input: String,
+    placeholder: String,
+    calls: Boolean
+  ): (Vector[(Int, Int, Int)], Vector[(Int, Int, Int)]) = {
+    val length = input.length
+    val found  = scala.collection.mutable.ArrayBuffer.empty[(Int, Int, Int)]
+    val words  = scala.collection.mutable.ArrayBuffer.empty[(Int, Int, Int)]
+    // Whether the last container read closed, or stopped at a leaf the text was cut off in.
+    var walkClosed = false
+    val depth      = new StringDepth(input)
+    val matcher    = (if (calls) PythonCallFieldStart else PythonFieldStart).pattern.matcher(input)
+
+    // A string whose content runs from `from` to `to`, opened by the quote at `quoteAt`, inside `jsonDepth` JSON
+    // strings: in `'`, a `"` of its content is written behind the run of a quote of a string `jsonDepth` deep, and is
+    // the content's (`quoteSafeParts`).
+    def string(quoteAt: Int, from: Int, to: Int, jsonDepth: Int): Unit =
+      found += ((from, to, if (input.charAt(quoteAt) == '\'') jsonDepth else NoContentQuotes))
+
+    def isLayerBreak(at: Int, multiplier: Long): Boolean = {
+      val j = afterBackslashes(input, at)
+      j > at && j < length && "nrt".indexOf(input.charAt(j).toInt) >= 0 && (j - at) % multiplier != 0
+    }
+
+    // Past spaces, line breaks with the prefix of a `pytest` line after them, and the escape of a line break in a
+    // string of `multiplier` (a JSON string's `\n`); after such an escape, past the `"` that ends a JSON string of a
+    // notebook's line array, its `,` and the `"` that opens the next, at the same depth (`jsonDepth`).
+    def skipGap(from: Int, jsonDepth: Int, multiplier: Long): Int = {
+      var i          = from
+      var afterBreak = false
+      var more       = true
+      while (more && i < length) {
+        val c = input.charAt(i)
+        if (c == ' ' || c == '\t') i += 1
+        else if (c == '\n' || c == '\r') {
+          i = skipLinePrefix(i + 1)
+          afterBreak = false
+        } else if (c == '\\' && isLayerBreak(i, multiplier)) {
+          i = afterBackslashes(input, i) + 1
+          afterBreak = true
+        } else if (afterBreak && jsonDepth > 0 && endsJsonString(i, jsonDepth)) {
+          val next = nextLineString(afterBackslashes(input, i) + 1, jsonDepth)
+          if (next < 0) more = false
+          else {
+            i = next
+            afterBreak = false
+          }
+        } else more = false
+      }
+      i
+    }
+
+    // After a line break: the indentation, and `E` and a diff marker (`+`, `-`, `?`) of a `pytest` line.
+    def skipLinePrefix(from: Int): Int = {
+      def spaces(at: Int): Int = {
+        var j = at
+        while (j < length && (input.charAt(j) == ' ' || input.charAt(j) == '\t')) j += 1
+        j
+      }
+      def marker(at: Int, chars: String): Int =
+        if (
+          at + 1 < length && chars
+            .indexOf(input.charAt(at).toInt) >= 0 && " \t".indexOf(input.charAt(at + 1).toInt) >= 0
+        )
+          spaces(at + 1)
+        else at
+      marker(marker(spaces(from), "E"), "+-?")
+    }
+
+    // Whether a `"` that ends a JSON string around the value, at `jsonDepth`, is at `at`: behind a run of backslashes
+    // that writes a quote of a string less deep.
+    def endsJsonString(at: Int, jsonDepth: Int): Boolean = {
+      val j = afterBackslashes(input, at)
+      j < length && input.charAt(j) == '"' && escapeDepth(j - at) < jsonDepth
+    }
+
+    // After the `"` that ends one string of a JSON array: past whitespace, `,`, whitespace and the `"` that opens the
+    // next string at the same depth, the index of its content, or -1.
+    def nextLineString(from: Int, jsonDepth: Int): Int = {
+      def ws(at: Int): Int = {
+        var j = at
+        while (j < length && Character.isWhitespace(input.charAt(j))) j += 1
+        j
+      }
+      val comma = ws(from)
+      if (comma >= length || input.charAt(comma) != ',') -1
+      else {
+        val open = ws(comma + 1)
+        val q    = afterBackslashes(input, open)
+        if (q < length && input.charAt(q) == '"' && escapeDepth(q - open) == jsonDepth - 1) q + 1 else -1
+      }
+    }
+
+    // The quote of a string that opens at `at`, after a prefix of one or two of `bBrRuUfF`, as (where its run of
+    // backslashes starts, where the quote is), or null: a `'`, or a `"` that no JSON string around the value ends.
+    def opener(at: Int, jsonDepth: Int): (Int, Int) = {
+      var p = at
+      while (p < length && p < at + 2 && "bBrRuUfF".indexOf(input.charAt(p).toInt) >= 0) p += 1
+      def quoteAt(from: Int): (Int, Int) = {
+        val q = afterBackslashes(input, from)
+        if (q >= length) null
+        else if (input.charAt(q) == '\'') (from, q)
+        else if (input.charAt(q) == '"' && escapeDepth(q - from) >= jsonDepth) (from, q)
+        else null
+      }
+      val direct = quoteAt(at)
+      if (direct != null) direct
+      else if (p > at && p < length) quoteAt(p)
+      else null
+    }
+
+    // The string whose quote is at `quoteAt`, behind the backslashes from `runStart`, as (where its content ends,
+    // the index after it, whether it closed); its content starts after the quote.
+    def readString(runStart: Int, quoteAt: Int, jsonDepth: Int, keyRun: Int): (Int, Int, Boolean) = {
+      val q          = input.charAt(quoteAt)
+      val b          = quoteAt - runStart
+      val multiplier = quoteMultiplier(b, keyRun, jsonDepth)
+      var i          = quoteAt + 1
+      var result     = (-1, -1, false)
+      while (result._1 < 0 && i < length) {
+        val c = input.charAt(i)
+        if (c == '\n' || c == '\r') result = (i, i, false)
+        else if (c == '\\' || c == q || c == '"') {
+          val j = afterBackslashes(input, i)
+          val r = j - i
+          if (j >= length) result = (length, length, false)
+          else {
+            val x = input.charAt(j)
+            if (x == q && r % (2 * multiplier) == b) result = (i, j + 1, true)
+            else if (x == '"' && escapeDepth(r) < jsonDepth) result = (i, i, false)
+            else if (r > 0 && (x == 'n' || x == 'r') && r % multiplier != 0) result = (i, i, false)
+            else i = j + 1
+          }
+        } else i += 1
+      }
+      if (result._1 < 0) (length, length, false) else result
+    }
+
+    def placeholderAt(at: Int): Boolean = placeholder.nonEmpty && input.startsWith(placeholder, at)
+
+    // Whether what follows `from`, past spaces, is what follows a value: `,`, a closing bracket, another string, an
+    // escape, a line break, the end of the input, or, with `colon`, the `:` after the key of a dict.
+    def followsValue(from: Int, colon: Boolean): Boolean = {
+      var j = from
+      while (j < length && (input.charAt(j) == ' ' || input.charAt(j) == '\t')) j += 1
+      j >= length || ",)]}'\"\\\n\r".indexOf(input.charAt(j).toInt) >= 0 || (colon && input.charAt(j) == ':')
+    }
+
+    // Whether a string that does not close stops at `at` where the text was cut off: at the end of the input, at a
+    // line break, written or escaped, or at the end of a JSON string after which only closing brackets and
+    // whitespace come.
+    def cutOff(at: Int): Boolean =
+      at >= length || input.charAt(at) == '\n' || input.charAt(at) == '\r' || {
+        val q = afterBackslashes(input, at)
+        q < length && (input.charAt(q) == 'n' || input.charAt(q) == 'r') && q > at
+      } || {
+        var j = afterBackslashes(input, at) + 1
+        while (j < length && "}] \t\n\r".indexOf(input.charAt(j).toInt) >= 0) j += 1
+        j >= length
+      }
+
+    // Whether a `:` follows `from`, past spaces: what ends there is the key of a dict.
+    def colonAfter(from: Int): Boolean = {
+      var j = from
+      while (j < length && (input.charAt(j) == ' ' || input.charAt(j) == '\t')) j += 1
+      j < length && input.charAt(j) == ':'
+    }
+
+    def separates(c: Char): Boolean =
+      Character.isWhitespace(c) || ",:[](){}'\"\\".indexOf(c.toInt) >= 0
+
+    def wordEnd(at: Int): Int = {
+      var j = at
+      while (j < length && !separates(input.charAt(j)) && !(calls && input.charAt(j) == '=')) j += 1
+      math.max(j, at + 1)
+    }
+
+    def isNumber(at: Int, end: Int): Boolean = {
+      def digit(i: Int): Boolean = i < end && input.charAt(i) >= '0' && input.charAt(i) <= '9'
+      digit(at) || ("+-.".indexOf(input.charAt(at).toInt) >= 0 && digit(at + 1))
+    }
+
+    // The word from `at` to `end` as a leaf, unless it is a literal kept, a key or, inside a JSON string, no number:
+    // among the words to write in quotes where the dict's quotes are bare.
+    def addWord(at: Int, end: Int, jsonDepth: Int, keyRun: Int): Unit =
+      if (
+        !KeptLiterals.contains(input.substring(at, end)) && !colonAfter(end) && !(calls && equalsAfter(end)) &&
+        (jsonDepth == 0 || isNumber(at, end))
+      )
+        (if (keyRun == 0) words else found) += ((at, end, NoContentQuotes))
+
+    // Whether a `=` follows `from`, past spaces: what ends there is the name of a keyword argument of a call.
+    def equalsAfter(from: Int): Boolean = {
+      var j = from
+      while (j < length && (input.charAt(j) == ' ' || input.charAt(j) == '\t')) j += 1
+      j < length && input.charAt(j) == '='
+    }
+
+    // The container that opens at `from`; the index after it, or where it stops.
+    def readContainer(from: Int, jsonDepth: Int, keyRun: Int): Int = {
+      val multiplier = quoteMultiplier(0, keyRun, jsonDepth)
+      var open       = 0
+      var i          = from
+      var done       = false
+      var expect     = true  // a value may start here: after an opening bracket, `,` or `:`
+      var joined     = false // right after a string, which Python joins to a string written next to it
+      var stray      = false
+      while (!done && i < length) {
+        val c = input.charAt(i)
+        if (placeholderAt(i)) {
+          i += placeholder.length
+          expect = false
+          joined = false
+        } else if (
+          calls && (c == '[' || c == '(' || c == '{') && !expect && !(c == '(' && i > 0 && !separates(
+            input.charAt(i - 1)
+          ))
+        ) {
+          // In a call, a bracket opens a value only where one may start, or a call right after its name: here the
+          // walk has left the call (`secret=a((b [{...`), and what it read is not one.
+          done = true
+          stray = true
+        } else if (c == '[' || c == '(' || c == '{') {
+          open += 1
+          i += 1
+          expect = true
+          joined = false
+        } else if (c == ']' || c == ')' || c == '}') {
+          open -= 1
+          i += 1
+          done = open <= 0
+          expect = false
+          joined = false
+        } else if (c == ',' || c == ':' || (calls && c == '=')) {
+          i += 1
+          expect = true
+          joined = false
+        } else if (" \t\n\r".indexOf(c.toInt) >= 0 || (c == '\\' && isLayerBreak(i, multiplier)))
+          i = skipGap(i, jsonDepth, multiplier)
+        else if (Character.isWhitespace(c)) i += 1
+        else {
+          val quote = opener(i, jsonDepth)
+          if (quote != null && (expect || joined)) {
+            val (end, next, closed) = readString(quote._1, quote._2, jsonDepth, keyRun)
+            if (!closed) {
+              // A leaf cut off where the input or its line ends is one; any other is not known to be.
+              if (end > quote._2 + 1 && cutOff(next)) {
+                string(quote._2, quote._2 + 1, end, jsonDepth)
+                open = 0
+              }
+              i = next
+              done = true
+            } else if (!followsValue(next, colon = true)) done = true
+            else {
+              // A string before `:` is the key of a dict, not a leaf.
+              if (end > quote._2 + 1 && !colonAfter(next)) string(quote._2, quote._2 + 1, end, jsonDepth)
+              i = next
+              expect = false
+              joined = true
+            }
+          } else if (quote != null) done = true
+          else if (c == '"' || c == '\\') {
+            // The end of a JSON string around the container, or an escape between its leaves.
+            if (endsJsonString(i, jsonDepth)) done = true
+            else i = math.min(length, afterBackslashes(input, i) + 1)
+          } else if (expect) {
+            val end = wordEnd(i)
+            addWord(i, end, jsonDepth, keyRun)
+            i = end
+            expect = false
+            joined = false
+          } else done = true
+        }
+      }
+      walkClosed = !stray && (open <= 0 || i >= length)
+      i
+    }
+
+    // The key whose value `readValue` reads: a string of it that is prose (`isProseAssertion`) is not a span.
+    var valueKey = ""
+
+    // The value of a sensitive key that starts at `from`, of a keyword argument with `keyword`; the index after it.
+    def readValue(from: Int, jsonDepth: Int, keyRun: Int, keyword: Boolean): Int =
+      if (from >= length || placeholderAt(from)) from
+      else {
+        val c = input.charAt(from)
+        if (c == '[' || c == '(' || c == '{') readContainer(from, jsonDepth, keyRun)
+        else {
+          val quote = opener(from, jsonDepth)
+          if (quote != null) {
+            val (end, next, closed) = readString(quote._1, quote._2, jsonDepth, keyRun)
+            if (if (closed) !followsValue(next, colon = false) else keyword) from
+            else {
+              if (end > quote._2 + 1 && !isProseAssertion(valueKey, input, quote._2 + 1, end))
+                string(quote._2, quote._2 + 1, end, jsonDepth)
+              // The strings written right after it, which Python joins to it, are leaves too.
+              val multiplier = quoteMultiplier(0, keyRun, jsonDepth)
+              var after      = next
+              var more       = closed
+              while (more) {
+                val at   = skipGap(after, jsonDepth, multiplier)
+                val also = if (at < length) opener(at, jsonDepth) else null
+                val (alsoEnd, alsoNext, alsoClosed) =
+                  if (also == null) (-1, -1, false) else readString(also._1, also._2, jsonDepth, keyRun)
+                if (also == null || !alsoClosed || !followsValue(alsoNext, colon = false)) more = false
+                else {
+                  if (alsoEnd > also._2 + 1 && !isProseAssertion(valueKey, input, also._2 + 1, alsoEnd))
+                    string(also._2, also._2 + 1, alsoEnd, jsonDepth)
+                  after = alsoNext
+                }
+              }
+              after
+            }
+          } else if (c == '"' || c == '\\' || separates(c)) from
+          else {
+            val end = wordEnd(from)
+            if (end < length && input.charAt(end) == '(') readContainer(end, jsonDepth, keyRun)
+            else {
+              if (followsValue(end, colon = false)) addWord(from, end, jsonDepth, keyRun)
+              end
+            }
+          }
+        }
+      }
+
+    var searchFrom = 0
+    while (searchFrom < length && matcher.find(searchFrom)) {
+      val dictKey = matcher.group(2)
+      val key     = if (dictKey != null) dictKey else matcher.group(3)
+      searchFrom = matcher.end
+      if (isSensitiveKey(key)) {
+        valueKey = key
+        val jsonDepth              = depth.at(matcher.start)
+        val keyRun                 = if (dictKey != null) matcher.group(1).length else 0
+        val (foundMark, wordsMark) = (found.length, words.length)
+        walkClosed = true
+        searchFrom = math.max(readValue(matcher.end, jsonDepth, keyRun, keyword = dictKey == null), matcher.end)
+        // A call is read only where it closes, or is cut off inside a string: `secret=a((b [{...` is a value of a
+        // `key=value` pair, which the other passes read, and the text after it no argument of a call.
+        if (calls && !walkClosed) {
+          found.dropRightInPlace(found.length - foundMark)
+          words.dropRightInPlace(words.length - wordsMark)
+        }
+      }
+    }
+    (found.toVector, words.toVector)
+  }
+
+  /**
+   * How many backslashes a backslash of the content of a Python string is written with, where its quote is written
+   * behind `quoteRun` backslashes, the quotes of its key behind `keyRun`, and it sits inside `jsonDepth` JSON strings
+   * (`StringDepth`): a power of two, at least one more than either run, since each string the text sits in doubles a
+   * backslash and writes its own quote behind one more. A quote of the content closes the string where the run before
+   * it is the opening quote's run and an even number of such backslashes, which are escaped backslashes of the
+   * content.
+   */
+  private def quoteMultiplier(quoteRun: Int, keyRun: Int, jsonDepth: Int): Long = {
+    val least = math.max(math.max(quoteRun.toLong, keyRun.toLong) + 1, 1L << math.min(jsonDepth, 40))
+    var m     = 1L
+    while (m < least && m < (1L << 40)) m <<= 1
+    m
+  }
+
+  /**
+   * How many JSON strings, one inside the other, enclose a position of the input, from one forward scan (#1706). A
+   * `"` behind a run of backslashes is a quote of a string as deep as the number of trailing one bits of the run
+   * (`escapeDepth`: 0 for `"`, 1 for `\"`, 2 for `\\\"`). Inside `d` strings, a quote of depth less than `d` ends the
+   * strings down to it, and a quote of depth `d` opens one more where a value opens (`opensValue`) or, outside every
+   * string, after anything but a letter or a digit. A quote of greater depth, or one of depth `d` elsewhere, is
+   * content: a `"` of a Python string inside a JSON string, `'abc\"d'`, or outside one, `'a"b'`. So is a `"` of
+   * depth `d` inside a Python string in `'` that opened where a value opens and has not closed: its own `'` closes
+   * it, behind an even number of the backslashes a backslash of its content is written with at depth `d`, and so
+   * does a quote that ends a JSON string. A line break ends every string, as no JSON string holds one.
+   *
+   * `at` takes its positions in increasing order; each character is read once, and each run of whitespace before a
+   * quote once more.
+   */
+  final private class StringDepth(input: String) {
+    private var pos      = 0
+    private var depth    = 0
+    private var inPython = false
+    // Where the content of the string open at each depth starts; at depth 0, where the line starts.
+    private val starts = scala.collection.mutable.ArrayBuffer(0)
+
+    def at(index: Int): Int = {
+      while (pos < index && pos < input.length) {
+        val c = input.charAt(pos)
+        if (c == '\n' || c == '\r') {
+          depth = 0
+          inPython = false
+          starts.clear()
+          starts += pos + 1
+          pos += 1
+        } else if (c == '\\' || c == '"' || c == '\'') {
+          val j = afterBackslashes(input, pos)
+          if (j < input.length && input.charAt(j) == '"') doubleQuote(pos, j)
+          else if (j < input.length && input.charAt(j) == '\'') singleQuote(pos, j)
+          pos = j + 1
+        } else pos += 1
+      }
+      depth
+    }
+
+    private def doubleQuote(runStart: Int, quoteAt: Int): Unit = {
+      val quoteDepth = escapeDepth(quoteAt - runStart)
+      if (quoteDepth < depth) {
+        depth = quoteDepth
+        starts.dropRightInPlace(starts.length - depth - 1)
+        inPython = false
+      } else if (
+        quoteDepth == depth && !inPython &&
+        (if (depth == 0) runStart == 0 || !input.charAt(runStart - 1).isLetterOrDigit else opensValue(runStart))
+      ) {
+        depth += 1
+        starts += quoteAt + 1
+      }
+    }
+
+    private def singleQuote(runStart: Int, quoteAt: Int): Unit =
+      if ((quoteAt - runStart) % (2L << math.min(depth, 40)) == 0) {
+        if (inPython) inPython = false
+        else inPython = opensValue(runStart)
+      }
+
+    // Whether a value opens at `at`: past spaces and escaped whitespace (`\n`), and the `E` or diff marker of a
+    // `pytest` line, the content of the string or the line starts, or `:`, `,`, `=` or an opening bracket comes.
+    private def opensValue(at: Int): Boolean = {
+      val floor = starts(math.min(depth, starts.length - 1))
+      var j     = at - 1
+      var more  = true
+      while (more && j >= floor) {
+        val c = input.charAt(j)
+        if (c == ' ' || c == '\t') j -= 1
+        else if ("nrt".indexOf(c.toInt) >= 0 && j > floor && input.charAt(j - 1) == '\\') j -= 2
+        else if ("E+-?".indexOf(c.toInt) >= 0 && (j == floor || " \t".indexOf(input.charAt(j - 1).toInt) >= 0)) j -= 1
+        else more = false
+      }
+      j < floor || ":,=[{(".indexOf(input.charAt(j).toInt) >= 0
+    }
+  }
+
+  /** The third of a span of `pythonValues` whose every `"` `quoteSafeParts` leaves out. */
+  private val NoContentQuotes: Int = -1
+
+  /**
+   * The parts of `spans` (sorted, each free of overlaps) that hold no `"` and split no escape, so that replacing
+   * them leaves every JSON string around them, at any depth, as it was (#1706): a `"`, with the run of backslashes
+   * before it, is left out, as is a run of backslashes with the character it escapes (and the four hex digits of a
+   * `\u` escape) where a span would start or end inside it. The placeholder, where a redaction before has written it,
+   * is left out too, so that a second redaction does not join two placeholders into one. The input is cut into such
+   * units from its start, as JSON reads it, and each unit is read once.
+   *
+   * The third of a span is the depth of a `"` that is its content (#1813): a span of a Python string in `'` inside
+   * `d` JSON strings is given `d`, and a `"` behind the run of a quote of a string `d` deep (`escapeDepth`) is part of
+   * it - the content's `"`, which a JSON string `d` deep escapes so - and is replaced with the rest. Left out, it was
+   * kept between two placeholders (`'[REDACTED]"[REDACTED]'`), told that the secret held one, and a second redaction
+   * joined the two. A `"` that delimits a JSON string around the span, at any depth, is behind a shorter run and is
+   * still left out, as is every `"` of a span given `NoContentQuotes`.
+   */
+  private def quoteSafeParts(input: String, spans: Vector[(Int, Int, Int)], placeholder: String): Vector[(Int, Int)] = {
+    val length                  = input.length
+    val out                     = Vector.newBuilder[(Int, Int)]
+    def isHex(c: Char): Boolean = Character.digit(c, 16) >= 0
+    // The end of the unit that starts at `u`, and whether it is a quote (with the backslashes before it).
+    def unitEnd(u: Int): Int =
+      if (input.charAt(u) != '\\') u + 1
+      else {
+        val j = afterBackslashes(input, u)
+        if (j >= length) j
+        else if (input.charAt(j) == '"') j + 1
+        else if ((j - u) % 2 == 0) j
+        else if (input.charAt(j) == 'u') {
+          var k = j + 1
+          while (k < length && k < j + 5 && isHex(input.charAt(k))) k += 1
+          k
+        } else j + 1
+      }
+    // Whether the unit at `u` is a `"` (with the backslashes before it) that is not the content's, at `contentDepth`.
+    def isQuote(u: Int, contentDepth: Int): Boolean =
+      input.charAt(u) == '"' && contentDepth != 0 || (input.charAt(u) == '\\' && {
+        val j = afterBackslashes(input, u)
+        j < length && input.charAt(j) == '"' && escapeDepth(j - u) != contentDepth
+      })
+    def isPlaceholder(u: Int): Boolean = placeholder.nonEmpty && input.startsWith(placeholder, u)
+    var u                              = 0
+    spans.foreach { case (start, end, contentDepth) =>
+      while (u < start) u = unitEnd(u)
+      var from = -1
+      var more = true
+      while (more && u < end) {
+        val placed = isPlaceholder(u)
+        val next   = if (placed) u + placeholder.length else unitEnd(u)
+        if (next > end) more = false
+        else {
+          if (placed || isQuote(u, contentDepth)) {
+            if (from >= 0) out += (from -> u)
+            from = -1
+          } else if (from < 0) from = u
+          u = next
+        }
+      }
+      if (from >= 0 && u > from) out += (from -> u)
+    }
+    out.result()
   }
 
   /**
@@ -581,7 +1365,8 @@ private[llm4s] object Redaction {
           else ""
         if (quote.nonEmpty) {
           val (end, next) = close(after + quote.length, after - at, quote)
-          if (end > after + quote.length) found += (after + quote.length -> end)
+          if (end > after + quote.length && !isProseAssertion(key, input, after + quote.length, end))
+            found += (after + quote.length -> end)
           searchFrom = math.max(next, at)
         }
       }
@@ -974,6 +1759,204 @@ private[llm4s] object Redaction {
       case s: String => redactForLogging(s)
       case other     => redactForLogging(other.toString)
     }
+
+  /**
+   * A remote reply's body (or an exception message carrying one), fit to put in an `LLMError` or a log
+   * line. In order: every exact occurrence of each of `secrets` - the credentials the request carried,
+   * such as a subject token, client id or bearer - is replaced, as are its URL-encoded and JSON-escaped
+   * forms; so is the string value (of eight characters or more) of every sensitive JSON field
+   * (`access_token`, `refresh_token`, `id_token`, `client_secret`, `assertion`, `subject_token`, ...)
+   * anywhere in the body, wherever else it is repeated; then [[redact]] applies the general patterns (bearer tokens, JWTs, API keys,
+   * sensitive JSON fields and query parameters); and the result is truncated to `maxLength`. Blank
+   * secrets are ignored. Truncation comes last, so it never cuts a secret in two before it is matched.
+   */
+  def remoteBody(body: String, secrets: Iterable[String] = Nil, maxLength: Int = 512): String =
+    if (body == null || body.isEmpty) ""
+    else redactForLogging(scrubRemote(body, secrets), maxLength)
+
+  /**
+   * The exact-match half of [[remoteBody]], untruncated and without the general patterns: `secrets`, and
+   * the string values of sensitive JSON fields in `body`, scrubbed. For a body that is parsed afterwards,
+   * as `HttpErrorMapper` parses one, which then redacts and truncates the detail it extracts.
+   */
+  def scrubRemote(body: String, secrets: Iterable[String] = Nil): String =
+    if (body == null || body.isEmpty) body
+    else scrub(body, secrets ++ sensitiveJsonValues(body))
+
+  /**
+   * `input` with every exact occurrence of each non-blank value in `secrets`, and of its URL-encoded and
+   * JSON-escaped forms, replaced by `placeholder`. Where occurrences overlap the longest one starting
+   * leftmost wins, and the run they cover together becomes one placeholder, so a secret that contains or
+   * overlaps another is never left half-masked.
+   *
+   * All forms are found in one scan ([[ExactMatcher]]), so the cost is linear in the input and the total
+   * length of the forms, however many there are: a body echoing thousands of tokens is scrubbed as
+   * quickly as one echoing one.
+   */
+  def scrub(input: String, secrets: Iterable[String], placeholder: String = RedactionPlaceholder): String =
+    if (input == null || input.isEmpty) input
+    else {
+      val forms = secrets.iterator
+        .filter(_ != null)
+        .map(_.trim)
+        .filter(_.nonEmpty)
+        .flatMap(secret => Iterator(secret, URLEncoder.encode(secret, StandardCharsets.UTF_8), jsonEscaped(secret)))
+        .toSeq
+        .distinct
+      if (forms.isEmpty) input else ExactMatcher(forms).replaceAll(input, placeholder)
+    }
+
+  /**
+   * An Aho-Corasick automaton over the reversed `patterns`. Scanning the input backwards gives, for every
+   * position, the length of the longest pattern that starts there, in time linear in the input; a forward
+   * pass then replaces each maximal run of overlapping occurrences, leftmost first, with the placeholder.
+   * Transitions live in one `LongMap` keyed by `(state, char)` rather than a map per state.
+   */
+  final private class ExactMatcher private (
+    transitions: scala.collection.mutable.LongMap[Int],
+    fail: Array[Int],
+    longestTerminal: Array[Int]
+  ) {
+    private def key(state: Int, c: Char): Long = (state.toLong << 16) | c.toLong
+
+    private def step(from: Int, c: Char): Int = {
+      var state = from
+      while (state != 0 && !transitions.contains(key(state, c))) state = fail(state)
+      transitions.getOrElse(key(state, c), 0)
+    }
+
+    def replaceAll(input: String, placeholder: String): String = {
+      val n = input.length
+      // longestAt(i): the length of the longest pattern that starts at i, or 0.
+      val longestAt = new Array[Int](n)
+      var state     = 0
+      var j         = n - 1
+      while (j >= 0) {
+        state = step(state, input.charAt(j))
+        longestAt(j) = longestTerminal(state)
+        j -= 1
+      }
+      val out = new java.lang.StringBuilder(n)
+      var i   = 0
+      while (i < n)
+        if (longestAt(i) == 0) {
+          out.append(input.charAt(i))
+          i += 1
+        } else {
+          // Extend the run over every occurrence that starts inside it, then mask it once.
+          var end = i + longestAt(i)
+          var k   = i + 1
+          while (k < end) {
+            if (longestAt(k) > 0) end = math.max(end, k + longestAt(k))
+            k += 1
+          }
+          out.append(placeholder)
+          i = end
+        }
+      out.toString
+    }
+  }
+
+  private object ExactMatcher {
+    def apply(patterns: Seq[String]): ExactMatcher = {
+      val transitions                    = scala.collection.mutable.LongMap.empty[Int]
+      val parent                         = scala.collection.mutable.ArrayBuffer(0)
+      val viaChar                        = scala.collection.mutable.ArrayBuffer('\u0000')
+      val depth                          = scala.collection.mutable.ArrayBuffer(0)
+      val terminal                       = scala.collection.mutable.ArrayBuffer(false)
+      def key(state: Int, c: Char): Long = (state.toLong << 16) | c.toLong
+
+      patterns.foreach { pattern =>
+        var state = 0
+        var p     = pattern.length - 1
+        while (p >= 0) {
+          val c = pattern.charAt(p)
+          state = transitions.getOrElseUpdate(
+            key(state, c), {
+              parent += state; viaChar += c; depth += depth(state) + 1; terminal += false
+              parent.length - 1
+            }
+          )
+          p -= 1
+        }
+        terminal(state) = true
+      }
+
+      val size = parent.length
+      // Breadth-first order: every state after its parent and after any shallower state its failure link can be.
+      val order           = (0 until size).sortBy(depth(_)).toArray
+      val fail            = new Array[Int](size)
+      val longestTerminal = new Array[Int](size)
+      order.foreach { s =>
+        if (s != 0) {
+          val p = parent(s)
+          val c = viaChar(s)
+          if (p != 0) {
+            var f = fail(p)
+            while (f != 0 && !transitions.contains(key(f, c))) f = fail(f)
+            fail(s) = transitions.getOrElse(key(f, c), 0)
+          }
+          // A state's string is a suffix (in the reversed text, a prefix) of its own; its failure chain's first
+          // terminal is the longest pattern ending here.
+          longestTerminal(s) = if (terminal(s)) depth(s) else longestTerminal(fail(s))
+        }
+      }
+      new ExactMatcher(transitions, fail, longestTerminal)
+    }
+  }
+
+  private def jsonEscaped(value: String): String = {
+    val rendered = ujson.Str(value).render()
+    rendered.substring(1, rendered.length - 1)
+  }
+
+  private val MinRepeatedSecretLength = 8
+
+  /**
+   * Of `ids` - identifiers a request carried that are not themselves credentials, such as a client id, an
+   * identity-provider, organization or federation-rule id - those long enough to scrub by exact match: eight
+   * characters or more, the floor applied to sensitive JSON values. A short id (`app`, `prod`) would garble every
+   * error body it was scrubbed from, so it is left out. Never pass a bearer token, API key, JWT or identity token
+   * through this: those go to [[scrub]] / [[remoteBody]] as they are, whatever their length.
+   */
+  def identifiers(ids: Iterable[String]): Seq[String] =
+    ids.iterator.filter(_ != null).map(_.trim).filter(_.length >= MinRepeatedSecretLength).toSeq
+
+  /**
+   * The string values of sensitive fields, at any depth, when `input` is JSON; otherwise none. The body is a
+   * remote server's, so it is parsed through [[BoundedJson]]: one nested too deeply is treated as no JSON (the
+   * configured secrets and the general patterns still apply to its text). The traversal is iterative as well, so
+   * it cannot overflow the stack whatever the depth of the value.
+   */
+  private def sensitiveJsonValues(input: String): Seq[String] =
+    // A very short value is left to the key pattern: replacing every occurrence of, say, "a" would garble the body.
+    BoundedJson
+      .read(input)
+      .toOption
+      .fold(Seq.empty[String])(sensitiveStrings)
+      .filter(_.trim.length >= MinRepeatedSecretLength)
+
+  /** Every string leaf under a sensitive key of `root`, found with an explicit stack rather than recursion. */
+  private def sensitiveStrings(root: ujson.Value): Seq[String] = {
+    val found = Seq.newBuilder[String]
+    // Each entry is a value and whether it sits under a sensitive key.
+    val stack = scala.collection.mutable.Stack[(ujson.Value, Boolean)](root -> false)
+    while (stack.nonEmpty)
+      stack.pop() match {
+        case (ujson.Str(s), true) => found += s
+        case (ujson.Obj(obj), under) =>
+          obj.foreach { (key, v) =>
+            val prose = v match {
+              case ujson.Str(s) => isProseAssertion(key, s, 0, s.length)
+              case _            => false
+            }
+            stack.push(v -> (under || (isSensitiveKey(key) && !prose)))
+          }
+        case (ujson.Arr(arr), under) => arr.foreach(v => stack.push(v -> under))
+        case _                       => ()
+      }
+    found.result()
+  }
 
   // ============================================================
   // Private redaction helpers
@@ -1718,7 +2701,8 @@ private[llm4s] object Redaction {
       else {
         val valueStart = matcher.end
         val end        = valueEnd(valueStart, matcher.group(slashes).length, matcher.group(hex).charAt(1))
-        if (isSensitiveKey(matcher.group(key)) && end > valueStart) {
+        val k          = matcher.group(key)
+        if (isSensitiveKey(k) && end > valueStart && !isProseAssertion(k, input, valueStart, end)) {
           out.copy(copiedTo, valueStart)
           out.mask()
           loop(end, end)
@@ -1985,7 +2969,10 @@ private[llm4s] object Redaction {
         val valueEnd   = valueEndOf(enclosing.exists(_.enclosingAt(matcher.start(1)) == '"'), valueStart)
         if (asValue && !endsAsValue(valueEnd)) {
           loop(matcher.end, copiedTo)
-        } else if (isSensitiveKey(matcher.group(2)) && valueEnd > valueStart) {
+        } else if (
+          isSensitiveKey(matcher.group(2)) && valueEnd > valueStart &&
+          !isProseAssertion(matcher.group(2), input, valueStart, valueEnd)
+        ) {
           out.copy(copiedTo, valueStart)
           out.mask()
           loop(valueEnd, valueEnd)
@@ -2475,7 +3462,14 @@ private[llm4s] object Redaction {
     wrap: String = "",
     sensitive: String => Boolean = isSensitiveKey
   ): Rewrite =
-    regexPass(pattern, input, placeholder, group = 3, wrap = wrap, replaces = m => sensitive(m.group(2)))
+    regexPass(
+      pattern,
+      input,
+      placeholder,
+      group = 3,
+      wrap = wrap,
+      replaces = m => sensitive(m.group(2)) && !isProseAssertion(m.group(2), input, m.start(3), m.end(3))
+    )
 
   /**
    * Replaces the value of every `key=value` pair whose key is sensitive. The value, which `PairStarts.equals` finds the
@@ -2544,7 +3538,7 @@ private[llm4s] object Redaction {
             input.charAt(contentStart - 1),
             backslashQuoteDepth(input, matcher.end)
           )
-        if (contentEnd > contentStart) {
+        if (contentEnd > contentStart && !isProseAssertion(matcher.group(2), input, contentStart, contentEnd)) {
           out.copy(copiedTo, contentStart)
           out.mask()
           loop(next, contentEnd)
@@ -2582,7 +3576,7 @@ private[llm4s] object Redaction {
             valueEnd += 1
           }
         val copied =
-          if (sensitive && valueEnd > valueStart) {
+          if (sensitive && valueEnd > valueStart && !isProseAssertion(matcher.group(2), input, valueStart, valueEnd)) {
             // The backslashes kept are the last before the quote, copied as they are.
             out.copy(copiedTo, valueStart)
             out.mask()

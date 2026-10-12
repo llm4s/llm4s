@@ -20,6 +20,7 @@ class GrowthProneTypesSpec extends AnyFlatSpec with Matchers {
   private val state = ThreadState.empty(Map.empty)
   private val spec  = AgentToolSpec[Search]("search", "Searches", searchSchema)
   private val call  = ToolCall("call-1", "search", ujson.Obj("query" -> "x"))
+  private val idem  = IdempotencyKey("key-1")
 
   "ToolCallId and ToolName" should "wrap and unwrap a string" in {
     ToolCallId("call-1").value shouldBe "call-1"
@@ -27,26 +28,28 @@ class GrowthProneTypesSpec extends AnyFlatSpec with Matchers {
   }
 
   "ToolContext" should "default to not approved" in {
-    ToolContext(run, ToolCallId("call-1"), state).approved shouldBe false
+    ToolContext(run, ToolCallId("call-1"), idem, state).approved shouldBe false
   }
 
   it should "change one field per setter and leave the original alone" in {
-    val original = ToolContext(run, ToolCallId("call-1"), state)
+    val original = ToolContext(run, ToolCallId("call-1"), idem, state)
 
     original.withApproved(true).approved shouldBe true
     original.withToolCallId(ToolCallId("call-2")).toolCallId shouldBe ToolCallId("call-2")
     original.withRun(testRunContext()).toolCallId shouldBe ToolCallId("call-1")
     original.withState(state).state shouldBe state
+    original.withIdempotencyKey(IdempotencyKey("key-2")).idempotencyKey shouldBe IdempotencyKey("key-2")
+    original.idempotencyKey shouldBe idem
     original.approved shouldBe false
     original.toolCallId shouldBe ToolCallId("call-1")
   }
 
   it should "have no public constructor and no public copy" in {
-    val context = ToolContext(run, ToolCallId("call-1"), state)
+    val context = ToolContext(run, ToolCallId("call-1"), idem, state)
     assert(context.approved == false)
 
     scala.compiletime.testing
-      .typeCheckErrors("new ToolContext(run, ToolCallId(\"x\"), state, true)")
+      .typeCheckErrors("new ToolContext(run, ToolCallId(\"x\"), idem, state, true)")
       .map(_.message)
       .mkString(" ") should include("cannot be accessed")
     scala.compiletime.testing

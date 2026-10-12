@@ -35,8 +35,8 @@ class AgentSuspensionSpec extends AnyFlatSpec with Matchers {
     )
 
   private def approvalsOf(result: AgentResult): Vector[InterruptId] = result.status match {
-    case AgentStatus.Suspended(approvals, _) => approvals.map(_._1)
-    case other                               => fail(s"expected Suspended, got $other")
+    case AgentStatus.Suspended(approvals, _, _, _) => approvals.map(_._1)
+    case other                                     => fail(s"expected Suspended, got $other")
   }
 
   "A tool behind ApprovalMiddleware" should "suspend with one approval, and resume completes once approved" in {
@@ -133,7 +133,7 @@ class AgentSuspensionSpec extends AnyFlatSpec with Matchers {
 
     val parked = agent.run("ask me").value
     val (id, request) = parked.status match {
-      case AgentStatus.Suspended(approvals, questions) =>
+      case AgentStatus.Suspended(approvals, questions, _, _) =>
         approvals shouldBe empty
         questions should have size 1
         questions.head

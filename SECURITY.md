@@ -62,3 +62,9 @@ Out of scope:
 
 For secure-coding expectations on contributions, see the security checklist in the
 [security reference](docs/reference/security.md#security-checklist-for-pr-authors).
+
+## Dependencies and SBOMs
+
+Each GitHub Release carries a CycloneDX SBOM for every published module, and the dependencies are scanned for known
+advisories with OSV-Scanner every week and on each pull request that changes them; a pull request that adds a HIGH or
+CRITICAL advisory fails. See [Software Bill of Materials](docs/reference/sbom.md).

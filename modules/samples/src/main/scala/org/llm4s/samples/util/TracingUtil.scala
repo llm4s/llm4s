@@ -47,7 +47,7 @@ object TracingUtil {
           case AgentStatus.Completed(_)     => "completed"
           case AgentStatus.Blocked(g, _)    => s"blocked:$g"
           case AgentStatus.StepLimitReached => "step_limit_reached"
-          case AgentStatus.Suspended(_, _)  => "suspended"
+          case _: AgentStatus.Suspended     => "suspended"
         },
         messages = result.messages,
         usage = result.usage

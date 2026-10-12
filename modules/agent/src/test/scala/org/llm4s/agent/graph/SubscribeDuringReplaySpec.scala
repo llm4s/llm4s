@@ -29,12 +29,20 @@ class SubscribeDuringReplaySpec extends AnyFlatSpec with Matchers with EitherVal
    * caught up by the switch to live; otherwise as it is once released, so the replay delivers it.
    */
   final private class SlowFirstRead(stale: Boolean) extends Checkpointer {
-    val underlying                                 = InMemoryCheckpointer()
-    val release                                    = new CountDownLatch(1)
-    val reading                                    = new CountDownLatch(1)
-    private val reads                              = new AtomicInteger()
-    def commit(threadId: ThreadId, commit: Commit) = underlying.commit(threadId, commit)
-    def latest(threadId: ThreadId)                 = underlying.latest(threadId)
+    val underlying                                                             = InMemoryCheckpointer()
+    val release                                                                = new CountDownLatch(1)
+    val reading                                                                = new CountDownLatch(1)
+    private val reads                                                          = new AtomicInteger()
+    def commit(threadId: ThreadId, commit: Commit)                             = underlying.commit(threadId, commit)
+    def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
+    def renew(
+      threadId: ThreadId,
+      token: org.llm4s.agent.graph.FencingToken,
+      ttl: scala.concurrent.duration.FiniteDuration
+    ) =
+      underlying.renew(threadId, token, ttl)
+    def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+    def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       if reads.incrementAndGet() == 1 then
         val early = underlying.eventsAfter(threadId, afterSeq, limit)
@@ -42,8 +50,11 @@ class SubscribeDuringReplaySpec extends AnyFlatSpec with Matchers with EitherVal
         release.await(10, TimeUnit.SECONDS): Unit
         if stale then early else underlying.eventsAfter(threadId, afterSeq, limit)
       else underlying.eventsAfter(threadId, afterSeq, limit)
-    def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long)              = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                                = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
   }
 
   /** A chain of `steps` nodes, each sending `live` progress events and committing one custom event. */

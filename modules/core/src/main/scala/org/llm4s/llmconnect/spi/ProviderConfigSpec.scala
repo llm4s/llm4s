@@ -106,6 +106,11 @@ object ProviderConfigKey:
  *                             the module's `reference.conf`, and the module's round-trip spec
  *                             proves the two agree. Empty when the module binds no variable; the
  *                             error then names `llm4s.credentials.<id>.apiKey` itself.
+ * @param authExtras           the keys this provider reads from a section's `auth` block besides the
+ *                             identity token (`identityTokenFile` / `identityToken`, which core reads
+ *                             itself). Non-empty means the provider supports workload-identity
+ *                             authentication, and a section with an `auth` block then needs no
+ *                             `apiKey`; required and default keys are validated as for `extras`.
  *
  * == The API key ==
  * A section's key is its own `apiKey` when it sets one, and otherwise the vendor's shared
@@ -121,7 +126,8 @@ final case class ProviderConfigSpec private (
   baseUrlExample: String,
   baseUrlEnv: Option[String],
   extras: Seq[ProviderConfigKey],
-  apiKeyEnv: Seq[String]
+  apiKeyEnv: Seq[String],
+  authExtras: Seq[ProviderConfigKey]
 ):
   def withRequiresApiKey(requiresApiKey: Boolean): ProviderConfigSpec   = copy(requiresApiKey = requiresApiKey)
   def withRequiresBaseUrl(requiresBaseUrl: Boolean): ProviderConfigSpec = copy(requiresBaseUrl = requiresBaseUrl)
@@ -132,9 +138,13 @@ final case class ProviderConfigSpec private (
   def withBaseUrlEnv(baseUrlEnv: Option[String]): ProviderConfigSpec         = copy(baseUrlEnv = baseUrlEnv)
   def withExtras(extras: Seq[ProviderConfigKey]): ProviderConfigSpec         = copy(extras = extras)
   def withApiKeyEnv(apiKeyEnv: Seq[String]): ProviderConfigSpec              = copy(apiKeyEnv = apiKeyEnv)
+  def withAuthExtras(authExtras: Seq[ProviderConfigKey]): ProviderConfigSpec = copy(authExtras = authExtras)
 
   /** The declared provider-specific key called `name`, if any. */
   def extra(name: String): Option[ProviderConfigKey] = extras.find(_.name == name)
+
+  /** Whether a section for this provider may carry an `auth` block. */
+  private[llm4s] def supportsAuth: Boolean = authExtras.nonEmpty
 
 object ProviderConfigSpec:
 
@@ -146,7 +156,8 @@ object ProviderConfigSpec:
     baseUrlExample: String = "e.g. https://api.example.com/",
     baseUrlEnv: Option[String] = None,
     extras: Seq[ProviderConfigKey] = Seq.empty,
-    apiKeyEnv: Seq[String] = Seq.empty
+    apiKeyEnv: Seq[String] = Seq.empty,
+    authExtras: Seq[ProviderConfigKey] = Seq.empty
   ): ProviderConfigSpec =
     new ProviderConfigSpec(
       requiresApiKey,
@@ -155,7 +166,8 @@ object ProviderConfigSpec:
       baseUrlExample,
       baseUrlEnv,
       extras,
-      apiKeyEnv
+      apiKeyEnv,
+      authExtras
     )
 
   /**
@@ -166,7 +178,7 @@ object ProviderConfigSpec:
    * generic `openai-compatible` provider's `contextWindow` - is a [[ProviderConfigKey]] its
    * provider declares, not a built-in, and is unknown to every provider that does not declare it.
    */
-  val BuiltinKeys: Set[String] = Set("provider", "model", "baseUrl", "apiKey", "headers", "timeouts")
+  val BuiltinKeys: Set[String] = Set("provider", "model", "baseUrl", "apiKey", "headers", "timeouts", "auth")
 
   /**
    * The built-in fields that can be a deprecated alias (`ProviderConfigKey.deprecatedAliases`):

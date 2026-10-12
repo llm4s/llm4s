@@ -189,7 +189,18 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   a connection string `'postgres://u:...@h/db'` or a `'k=v'` token included, and so is a `\"`-quoted leaf
   there, `\"{'token': [\\\"...\\\"]}\"`, when its own `\"` closes it where a value does; any other `"`
   under a single-quoted key inside a string ends the container, since it may be the end of a string
-  inside it), `key=value` pairs and quoted
+  inside it; a Python literal is also read as Python writes it, wherever a dict key `'password':` or a
+  keyword argument `token=[...]` / `password='...'` stands: each string, number and word of the value is
+  replaced, its quotes, brackets and the dict's keys kept, a string ending only at its own quote written the
+  way the opening one is - so `{'password': "x'y", 1: 2}` and a value before any next key or none, as a dict
+  cut off after its `,` has it, a `pytest` assertion diff whose lines start with `E` and its `+`/`-` markers,
+  a notebook's `text/plain` line array in an `.ipynb` file, `str(dict)` inside a `repr`
+  (`{'body': '{\'password\': "it\'s..."}'}`), Python's `\'` inside a JSON string
+  (`"{'password': 'a\\'b\"c'}"`), `Settings(token=['a', 'b'])`, a call under a sensitive key
+  (`Settings(token=SecretStr('...'))`, `api_key=module.Secret(value='...')`) and a `\"` in an earlier leaf are
+  redacted; a `"` of a credential in a single-quoted string is replaced with it (`'[REDACTED]'`), while a
+  `"` that delimits a JSON string, at any depth, is never replaced, so the JSON still parses, and what this
+  reading replaces is added only where no other replacement is), `key=value` pairs and quoted
   `KEY="value"` / `KEY='value'` assignments outside a query string (for example `password=...`,
   `spring.datasource.password=...`, `PASSWORD="..."`), also with the quotes escaped by backslashes, as a
   logfmt line inside a JSON string writes them (`{"message": "login password=\"...\" ok"}`, `\'...\'`, and
@@ -215,7 +226,9 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   `key=value` pair; `max_tokens`, `prompt_tokens`, `token_count`, `next_page_token`, `cookie_policy` and
   `cookie_consent` are not, because the match is never on a substring. URL query parameters are also
   matched against a second, substring list (`key`, `token`, `secret`, `password`, `auth` and similar), so
-  `?x_api_key_id=` is redacted too. A query value written right before JSON
+  `?x_api_key_id=` is redacted too. The password of a URL's userinfo is redacted wherever the URL is
+  (`https://alice:[REDACTED]@gw.example.com/v1`, also with JSON's `\/`), every URL of a list joined by `,` or
+  `;` included; the user and the host are kept. A query value written right before JSON
   (`?token=...,{"api_key": "..."}`, also with the quotes escaped) does not hide the field after it.
 - **Where a cookie header's value ends.** Outside any string (a raw request dump, a log line), at the end
   of its line, quotes, apostrophes and backslashes included: `Cookie: sid="abc"; x=y` becomes

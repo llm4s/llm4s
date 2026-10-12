@@ -2,6 +2,7 @@
 // The same file is generated into modules/agent-tools and modules/workspace/workspaceRunner.
 package org.llm4s.runner
 
+import java.nio.CharBuffer
 import java.nio.charset.{ Charset, StandardCharsets }
 import java.util.Locale
 import scala.util.Try
@@ -35,6 +36,11 @@ import scala.util.Try
  * code pages maps to a single ASCII byte, with the ASCII characters it maps to
  * (https://www.unicode.org/Public/MAPPINGS/VENDORS/MICSFT/WindowsBestFit/); `scripts/generate-windows-best-fit.py`
  * writes it, and `--check` compares both copies with what it would write.
+ *
+ * On a host whose ANSI code page is a double-byte one (932, 936, 950), an argument is also refused when the JDK may
+ * put it in quotes and it holds a character the code page encodes with a second byte of 0x5C, the byte of `\`
+ * ([[quotedTrailByteRefusal]], #1807): `"a 表"` ends in the bytes `5C 22` on code page 932, which a program that
+ * splits its ANSI command line byte by byte reads as an escaped quote, so the arguments after it split differently.
  */
 private[runner] object WindowsBestFit {
 
@@ -81,6 +87,52 @@ private[runner] object WindowsBestFit {
             "arguments in it would receive another character"
         )
   }
+
+  /**
+   * Why `arg` may not be given to a program on a Windows host whose ANSI code page encodes some characters with a
+   * second byte of 0x5C, the byte of `\` (code pages 932, 936 and 950; #1807), or `None`.
+   *
+   * The JDK's Windows `ProcessImpl` puts an argument in quotes when it is empty or holds a space or whitespace
+   * character (and, outside its default legacy mode, `"`, `<`, `>`, and for a batch file `&`, `|`, `^`). `a 表`
+   * reaches the command line as `"a 表"`, which code page 932 holds as the bytes `22 61 20 95 5C 22`. A program that
+   * splits its ANSI command line (`GetCommandLineA`) byte by byte, without knowing the code page's lead bytes, reads
+   * `\"` as a literal quote, so the argument does not end there and the ones after it split differently: an operand
+   * the checks saw may become an option. The C runtime's own parser knows the lead bytes; a hand-written one may not.
+   * So such a character is refused in an argument the JDK may quote, or one that holds `"` itself: one that holds
+   * any of the characters above, whichever mode the JDK runs in. `表.txt` stays allowed.
+   *
+   * @param ansiCodePage the host's ANSI code page ([[hostAnsiCodePage]]); `None` (no Windows host, or UTF-8) and a
+   *                     code page without such characters refuse nothing
+   */
+  def quotedTrailByteRefusal(arg: String, ansiCodePage: Option[Charset]): Option[String] =
+    ansiCodePage
+      .filter(_ => mayBeQuoted(arg))
+      .flatMap(cs =>
+        codePoints(arg)
+          .filter(_ >= 0x80)
+          .find(endsInBackslashByte(_, cs))
+          .map(cp =>
+            s"${describe(cp)}, which this host's ANSI code page (${cs.name}) encodes with a second byte of 0x5C " +
+              "('\\'), in an argument the JDK puts in quotes or that holds a quote, so a program reading its command " +
+              "line byte by byte may read the closing quote as escaped and split the arguments differently"
+          )
+      )
+
+  /**
+   * Whether the JDK's Windows `ProcessImpl` (JDK 21, `needsEscaping`) may put `arg` in quotes in any of its modes,
+   * or `arg` holds a quote itself.
+   */
+  def mayBeQuoted(arg: String): Boolean = arg.isEmpty || arg.exists(quotes)
+
+  /** A character for which the JDK quotes an argument in some mode, or a quote. */
+  private def quotes(c: Char): Boolean =
+    Character.isSpaceChar(c) || Character.isWhitespace(c) || "\"<>&|^".indexOf(c.toInt) >= 0
+
+  /** Whether `cs` encodes `cp` exactly, as more than one byte, one after the first being 0x5C. */
+  private def endsInBackslashByte(cp: Int, cs: Charset): Boolean =
+    Try(cs.newEncoder().encode(CharBuffer.wrap(Character.toChars(cp)))).toOption.exists(bytes =>
+      (1 until bytes.limit()).exists(bytes.get(_) == 0x5c)
+    )
 
   private def roundTrips(cp: Int, cs: Charset): Boolean = {
     val s = new String(Character.toChars(cp))

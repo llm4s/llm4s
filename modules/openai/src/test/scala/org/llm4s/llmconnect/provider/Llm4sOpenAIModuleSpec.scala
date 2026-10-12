@@ -9,7 +9,13 @@ import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.testkit.{ CredentialsRoundTrip, LocalProviderTestServer, ProviderModuleChecks }
+import org.llm4s.testkit.{
+  CredentialsRoundTrip,
+  LocalProviderTestServer,
+  ProviderModuleChecks,
+  ProviderTestConfig,
+  ToolMessageFormat
+}
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -105,6 +111,21 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
         case other                     => fail(s"Expected AzureConfig, got $other")
     }
 
+    "build a client from an openai section with auth" in {
+      given ProviderRegistry = ProviderRegistry.default
+      val section = ProviderTestConfig
+        .loadSection(
+          "wi",
+          """llm4s.providers.wi {
+            |  provider = "openai"
+            |  model    = "gpt-4o-mini"
+            |  auth { identityTokenFile = "/var/run/svid", identityProviderId = "idp_1", serviceAccountId = "sa_1" }
+            |}""".stripMargin
+        )
+        .fold(error => fail(error.message), identity)
+      assertBuildsClient(OpenAIProvider, section).getClass.getSimpleName shouldBe "OpenAIClient"
+    }
+
     "refuse a config belonging to another provider" in {
       expectations.foreach((descriptor, _, _) => assertRefusesForeignConfig(descriptor))
     }
@@ -152,6 +173,12 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
         assertCancelsWhenInterrupted(openAIClientAt(baseUrl))
       }
+    }
+
+    "send exactly one tool message per tool call, keeping every call and result (design 5.3)" in {
+      assertOneToolResultPerCall(ToolMessageFormat.OpenAIChat, LocalProviderTestServer.openAICompletion("done"))(
+        openAIClientAt
+      )
     }
 
     "return CancelledError when a stream is interrupted after its first event" in {

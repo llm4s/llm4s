@@ -53,12 +53,14 @@ environment. Stores and managers are built in code, at the application edge:
 - `MemoryStoreConfig(maxMemories, defaultEmbeddingDimensions, enableAutoCleanup, cleanupThreshold)`
   with `MemoryStoreConfig.default`, `.testing` (a 1,000-memory cap) and `.production(maxMemories)`
   (cleanup on, threshold at 90% of the cap).
-- `MemoryManagerConfig(autoRecordMessages = true, autoExtractEntities = false, defaultImportance = 0.5,
-  contextTokenBudget = 2000, consolidationEnabled = false, consolidationConfig)` for the manager.
-  The managers read `defaultImportance`; `LLMMemoryManager.consolidateMemories` also reads
-  `consolidationConfig.strictMode` and `consolidationConfig.maxMemoriesPerGroup`.
-  `autoRecordMessages`, `autoExtractEntities`,
-  `contextTokenBudget` and `consolidationEnabled` are declared but have no effect yet
+- `MemoryManagerConfig(autoExtractEntities = false, defaultImportance = 0.5, contextTokenBudget = 2000,
+  consolidationConfig)` for the manager. Every option is read: `defaultImportance` scores memories
+  recorded without an importance, `contextTokenBudget` bounds `getRelevantContext` when a call passes
+  no `maxTokens`, `autoExtractEntities` makes `recordMessage` run `extractEntities` over each user and
+  assistant message (only `LLMMemoryManager` extracts anything), and `consolidateMemories` reads
+  `consolidationConfig.strictMode` and `consolidationConfig.maxMemoriesPerGroup`. `autoRecordMessages`
+  and `consolidationEnabled` were removed: no manager can record messages it is not given, and
+  nothing consolidates unless `consolidateMemories` is called
   ([#1579](https://github.com/llm4s/llm4s/issues/1579)).
 - An embedding provider for the semantic stores. `LLMEmbeddingService(client, modelConfig)` wraps any
   llm4s embedding client, so the provider, its model and its API key are configured through the

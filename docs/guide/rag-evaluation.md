@@ -306,7 +306,7 @@ val suite = BenchmarkSuite(
 // Run and report
 val results = runner.runSuite(suite)
 println(BenchmarkReport.console(results))
-BenchmarkReport.saveJson(results, "data/results/my-comparison.json")
+BenchmarkReport.save(results, "data/results/my-comparison.json") // returns Result[Unit]
 ```
 
 ### Custom Dataset Format

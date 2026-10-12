@@ -162,5 +162,14 @@ private[graph] object ResumeRef:
         json => Resumed(upickle.default.read[Q](json("question")), upickle.default.read[A](json("answer")))
       )
 
-/** A parked continuation, as reported by a suspended run. */
-final case class PendingInterrupt(id: InterruptId, resumeNode: NodeId, question: ujson.Value)
+/**
+ * A parked continuation, as reported by a suspended run. For a task a static breakpoint holds,
+ * `breakpoint` is its phase, `resumeNode` is the held task's own node, and `question` is the task's
+ * input before it ran, or JSON `null` after; answer it with [[Breakpoint.proceed]].
+ */
+final case class PendingInterrupt(
+  id: InterruptId,
+  resumeNode: NodeId,
+  question: ujson.Value,
+  breakpoint: Option[BreakpointPhase] = None
+)

@@ -54,9 +54,9 @@ object LLMClientZ {
   def apply(underlying: LLMClient): LLMClientZ = new Impl(underlying)
 
   /**
-   * Capacity of the bounded buffer between the provider thread and the consumer. Kept small because
-   * each slot holds a full chunk's content; AgentZ's StreamBufferSize is larger because its events
-   * are lightweight metadata, not provider payloads.
+   * Capacity of the bounded buffer between the provider thread and the consumer. This buffer
+   * applies backpressure - a slow consumer stalls the producer, it never drops a chunk - so a
+   * small size costs nothing.
    */
   private val StreamBufferSize = 64
 

@@ -83,7 +83,15 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     val reading                                                                 = new CountDownLatch(1)
     val release                                                                 = new CountDownLatch(1)
     def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = underlying.commit(threadId, commit)
-    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]            = underlying.latest(threadId)
+    def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest)  = underlying.claim(threadId, request)
+    def renew(
+      threadId: ThreadId,
+      token: org.llm4s.agent.graph.FencingToken,
+      ttl: scala.concurrent.duration.FiniteDuration
+    ) =
+      underlying.renew(threadId, token, ttl)
+    def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]           = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       if reads.incrementAndGet() == blockOn then
         reading.countDown()
@@ -91,6 +99,9 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
       Right(records.filter(_.seq > afterSeq).take(limit))
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = underlying.compactEvents(threadId, beforeSeq)
     def deleteThread(threadId: ThreadId): Result[Unit]                   = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int)  = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)             = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)               = underlying.prune(threadId, policy)
 
   "A barrier given before the dispatcher joins the live set" should "be reached after its catch-up" in {
     // replay reads [1, 2], then an empty page; the third read is switchToLive's catch-up, under hubLock

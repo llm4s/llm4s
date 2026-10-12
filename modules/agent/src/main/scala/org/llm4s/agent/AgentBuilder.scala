@@ -1,6 +1,6 @@
 package org.llm4s.agent
 
-import org.llm4s.agent.graph.GraphRuntime
+import org.llm4s.agent.graph.{ BreakpointPhase, GraphRuntime, NodeId }
 import org.llm4s.agent.graph.middleware.AgentMiddleware
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolArgumentValidator, ToolSet }
 import org.llm4s.agent.graph.toolloop.{ LoopAgent, LoopHandoff, ModelStep, ToolLoop }
@@ -13,7 +13,7 @@ import org.llm4s.types.Result
 
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
-import scala.annotation.tailrec
+import scala.annotation.{ tailrec, varargs }
 
 /**
  * An agent's settings, immutable: every `with*` returns a new builder, and [[build]] compiles it,
@@ -36,7 +36,9 @@ final class AgentBuilder private (
   maxSteps: Int,
   runtime: Option[GraphRuntime],
   tracing: Option[Tracing],
-  streaming: Boolean
+  streaming: Boolean,
+  private val interruptBefore: Vector[AgentNode],
+  private val interruptAfter: Vector[AgentNode]
 ):
 
   private def copy(
@@ -49,7 +51,9 @@ final class AgentBuilder private (
     maxSteps: Int = maxSteps,
     runtime: Option[GraphRuntime] = runtime,
     tracing: Option[Tracing] = tracing,
-    streaming: Boolean = streaming
+    streaming: Boolean = streaming,
+    interruptBefore: Vector[AgentNode] = interruptBefore,
+    interruptAfter: Vector[AgentNode] = interruptAfter
   ): AgentBuilder =
     new AgentBuilder(
       id,
@@ -63,7 +67,9 @@ final class AgentBuilder private (
       maxSteps,
       runtime,
       tracing,
-      streaming
+      streaming,
+      interruptBefore,
+      interruptAfter
     )
 
   /** The agent's tools, replacing any set before, checked with the set's validator. */
@@ -121,6 +127,29 @@ final class AgentBuilder private (
   def withStreaming(): AgentBuilder = copy(streaming = true)
 
   /**
+   * Static breakpoints that hold each task of these nodes of this agent before it runs, on every run;
+   * added to those set before, and to those a run's `RunConfig.interruptBefore` names. A held task is
+   * an interrupt of its own - `AgentStatus.Suspended.breakpoints` - continued with
+   * `AgentResult.proceed`. Like streaming, breakpoints change nothing stored, so they are not part of
+   * the graph's version: a thread held by one agent is continued by one without them. A task continued
+   * after an approval or a question is not held before again: the reviewer has just seen it. Java and
+   * Kotlin call it with plain arguments: `withInterruptBefore(AgentNode.valueOf("Tool"))`.
+   */
+  @varargs
+  def withInterruptBefore(nodes: AgentNode*): AgentBuilder = copy(interruptBefore = interruptBefore ++ nodes)
+
+  /**
+   * Static breakpoints that hold each task of these nodes of this agent after it ran, on every run: its
+   * update is stored, and what follows it waits. A step continued after an approval or a question - a
+   * model call after a `wrapModelCall` question, a tool call after an approval or a question, an answer
+   * guarded again after an `afterAgent` question - is held after it ran, as the step itself is. Each
+   * release replays the held routes in a superstep of its own, which counts against
+   * `RunBudgets.maxSupersteps`. See [[withInterruptBefore]].
+   */
+  @varargs
+  def withInterruptAfter(nodes: AgentNode*): AgentBuilder = copy(interruptAfter = interruptAfter ++ nodes)
+
+  /**
    * Compiles this agent and every agent reachable through handoffs into one graph. Refuses an
    * invalid id, a `maxSteps` below 1, a handoff whose id is invalid or differs from its target's,
    * an id-only handoff ([[Handoff.toId]]) to an id no builder of the family defines, one id
@@ -137,7 +166,18 @@ final class AgentBuilder private (
       }
       root <- AgentId.of(id)
       loop <- ToolLoop.build(id, AgentBuilder.fingerprint(family), root, agents)
-    yield new Agent(root, loop, runtime.getOrElse(GraphRuntime.inMemory()), tracing)
+    yield new Agent(
+      root,
+      loop,
+      runtime.getOrElse(GraphRuntime.inMemory()),
+      tracing,
+      family.flatMap(b => b.held(loop, b.interruptBefore, BreakpointPhase.Before)).toSet,
+      family.flatMap(b => b.held(loop, b.interruptAfter, BreakpointPhase.After)).toSet
+    )
+
+  /** The nodes of `loop` this agent's breakpoints on `nodes` hold in `phase`; its id is checked by `build` first. */
+  private def held(loop: ToolLoop, nodes: Vector[AgentNode], phase: BreakpointPhase): Vector[NodeId] =
+    nodes.flatMap(loop.breakpointNodes(AgentId.unsafe(id), _, phase))
 
   private def loopAgent: Result[LoopAgent] =
     for
@@ -213,7 +253,9 @@ object AgentBuilder:
       Agent.DefaultMaxSteps,
       None,
       None,
-      streaming = false
+      streaming = false,
+      interruptBefore = Vector.empty,
+      interruptAfter = Vector.empty
     )
 
   /**
@@ -261,7 +303,8 @@ object AgentBuilder:
    * agent's id, system prompt and max steps, its tools' names and definitions sorted by name, its
    * middleware ids in registration order with each middleware's contributed tools' names and
    * definitions, and its handoff targets with `preserveContext`. Completion
-   * options, streaming and the model client are not part of it: they are rebound when a thread is restored.
+   * options, streaming, breakpoints and the model client are not part of it: they are rebound when a thread is
+   * restored.
    */
   private[agent] def fingerprint(family: Vector[AgentBuilder]): String =
     val canonical = ujson.Arr.from(family.sortBy(_.id).map(_.canonical)).render()

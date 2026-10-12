@@ -4,7 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.error.CancelledError
 import org.llm4s.http.Llm4sHttpClient
-import org.llm4s.llmconnect.config.EmbeddingProviderConfig
+import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -76,7 +76,12 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
   }
 
   /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
+  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+    requireApiKey(config).map(_ => fromConfig(config))
+
+  /** A blank `apiKey` would be sent as an empty bearer token: a `ConfigurationError` instead. */
+  private def requireApiKey(config: EmbeddingProviderConfig): Result[Unit] =
+    ProviderConfig.nonEmpty("OpenAI embeddings", "apiKey", config.apiKey)
 
   /**
    * Creates an OpenAI embedding provider from configuration.
@@ -103,15 +108,18 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
 
       // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left.
       // A cancellation passes through as it is (design section 4.4); any other failure is an EmbeddingError.
+      // A blank key would be sent as `Authorization: Bearer `: refused before any request.
       val respEither: Result[org.llm4s.http.HttpResponse] =
-        httpClient
-          .post(url, headers, payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
-          .left
-          .map {
-            case cancelled: CancelledError => cancelled
-            case e =>
-              EmbeddingError(code = None, message = s"HTTP request failed: ${e.message}", provider = "openai")
-          }
+        requireApiKey(cfg).flatMap(_ =>
+          httpClient
+            .post(url, headers, payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
+            .left
+            .map {
+              case cancelled: CancelledError => cancelled
+              case e =>
+                EmbeddingError(code = None, message = s"HTTP request failed: ${e.message}", provider = "openai")
+            }
+        )
 
       respEither.flatMap { response =>
         response.statusCode match {

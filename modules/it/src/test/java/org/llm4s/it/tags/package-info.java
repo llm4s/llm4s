@@ -14,6 +14,8 @@
  *       Neo4j). Runs on every PR via CI service containers ({@code sbt testIntegration}).
  *   <li>{@link org.llm4s.it.tags.Workspace} - a locally built {@code workspace-runner} image
  *       plus a Docker daemon ({@code sbt testWorkspace}).
+ *   <li>{@link org.llm4s.it.tags.McpReference} - the official MCP reference server, run from npm
+ *       ({@code sbt testMcpReference}). CI runs it on pushes to main and on manual dispatch.
  *   <li>{@link org.llm4s.it.tags.Ollama} - a local Ollama server ({@code sbt testOllama}).
  *   <li>{@link org.llm4s.it.tags.Cloud} - live provider API keys ({@code sbt testSmoke}).
  * </ul>

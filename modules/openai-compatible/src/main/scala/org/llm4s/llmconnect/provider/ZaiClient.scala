@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.ZaiConfig
+import org.llm4s.llmconnect.config.{ ZaiConfig, ProviderConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, ThinkingBlock }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
@@ -42,7 +42,7 @@ class ZaiClient(
         displayName = "Z.ai",
         model = config.model,
         baseUrl = config.baseUrl,
-        apiKey = Some(config.apiKey),
+        credential = OpenAICompatibleClient.Credential.Static(config.apiKey),
         contextWindow = config.contextWindow,
         reserveCompletion = config.reserveCompletion,
         timeouts = config.timeouts
@@ -58,14 +58,16 @@ object ZaiClient {
     config: ZaiConfig,
     metrics: MetricsCollector = MetricsCollector.noop
   )(using ModelRegistryService): Result[ZaiClient] =
-    Try(new ZaiClient(config, metrics)).toResult
+    ProviderConfig.nonEmpty("Z.ai", "apiKey", config.apiKey).flatMap(_ => Try(new ZaiClient(config, metrics)).toResult)
 
   def apply(
     config: ZaiConfig,
     metrics: MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[ZaiClient] =
-    Try(new ZaiClient(config, metrics, exchangeLogging)).toResult
+    ProviderConfig
+      .nonEmpty("Z.ai", "apiKey", config.apiKey)
+      .flatMap(_ => Try(new ZaiClient(config, metrics, exchangeLogging)).toResult)
 }
 
 /**

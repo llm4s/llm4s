@@ -110,10 +110,21 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
       if delayMillis > 0 then Thread.sleep(delayMillis)
       if crashed.get then Left(ValidationError("store", "simulated crash")) else underlying.commit(threadId, commit)
     }
-    def latest(threadId: ThreadId)                                  = underlying.latest(threadId)
+    def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
+    def renew(
+      threadId: ThreadId,
+      token: org.llm4s.agent.graph.FencingToken,
+      ttl: scala.concurrent.duration.FiniteDuration
+    ) =
+      underlying.renew(threadId, token, ttl)
+    def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+    def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
     def deleteThread(threadId: ThreadId)                            = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
   }
 
   private def kinds(records: Vector[EventRecord]): Vector[String] =
@@ -213,7 +224,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
     val (latest, results) = during.loneElement
     latest.value should startWith("run-1/")
-    results.map(_.left.value) shouldBe Vector.fill(3)(GraphError.ThreadBusy(thread.value, latest))
+    results.map(_.left.value) shouldBe Vector.fill(3)(GraphError.ThreadBusy(thread.value, latest, Some("run-1")))
     f.callsOf("a") shouldBe 1
     f.callsOf("x") shouldBe 0
     runtime.recover(thread, f.graph, RunConfig().withRunId(RunId("run-2"))).awaited.left.value shouldBe GraphError
@@ -354,12 +365,23 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
       .failed
 
     def tampered(change: PendingWrite => PendingWrite): Checkpointer = new Checkpointer {
-      def commit(threadId: ThreadId, commit: Commit) = store.commit(threadId, commit)
+      def commit(threadId: ThreadId, commit: Commit)                             = store.commit(threadId, commit)
+      def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = store.claim(threadId, request)
+      def renew(
+        threadId: ThreadId,
+        token: org.llm4s.agent.graph.FencingToken,
+        ttl: scala.concurrent.duration.FiniteDuration
+      ) =
+        store.renew(threadId, token, ttl)
+      def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = store.release(threadId, token)
       def latest(threadId: ThreadId) =
         store.latest(threadId).map(_.map(s => s.copy(pendingWrites = s.pendingWrites.map(change))))
-      def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = store.eventsAfter(threadId, afterSeq, limit)
-      def compactEvents(threadId: ThreadId, beforeSeq: Long)          = store.compactEvents(threadId, beforeSeq)
-      def deleteThread(threadId: ThreadId)                            = store.deleteThread(threadId)
+      def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int)     = store.eventsAfter(threadId, afterSeq, limit)
+      def compactEvents(threadId: ThreadId, beforeSeq: Long)              = store.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId)                                = store.deleteThread(threadId)
+      def history(threadId: ThreadId, before: Option[String], limit: Int) = store.history(threadId, before, limit)
+      def checkpoint(threadId: ThreadId, checkpointId: String)            = store.checkpoint(threadId, checkpointId)
+      def prune(threadId: ThreadId, policy: RetentionPolicy)              = store.prune(threadId, policy)
     }
     GraphRuntime(tampered(_.copy(nodeId = "summarize")))
       .recover(thread, f.graph, RunConfig().withRunId(RunId("run-2")))
@@ -580,9 +602,11 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
       .value
       .failed
     val stored = store.latest(thread).value.get
-    // the exit commit sits on the run's claim, which sits on the previous run's completion
-    stored.checkpoint.parent shouldBe Some("run-1/1")
+    // the exit commit sits on the run's claim, which sits on the previous run's completion; checkpoint
+    // ids count along the thread, so the claim is the sixth
+    stored.checkpoint.parent shouldBe Some("run-1/6")
     previous shouldBe "run-0/5"
+    store.checkpoint(thread, "run-1/6").value.value.parent shouldBe Some(previous)
     stored.pendingWrites.map(_.taskId) shouldBe Vector(s"${stored.checkpoint.snapshot.superstep}.0")
 
     runtime

@@ -159,11 +159,22 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
         if interrupted then Left(org.llm4s.error.ValidationError("store", "interrupted"))
         else underlying.commit(threadId, commit)
       } else underlying.commit(threadId, commit)
-    def latest(threadId: ThreadId) = underlying.latest(threadId)
+    def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
+    def renew(
+      threadId: ThreadId,
+      token: org.llm4s.agent.graph.FencingToken,
+      ttl: scala.concurrent.duration.FiniteDuration
+    ) =
+      underlying.renew(threadId, token, ttl)
+    def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+    def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
       underlying.eventsAfter(threadId, afterSeq, limit)
-    def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long)              = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                                = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
   }
 
   "A stop" should "never interrupt the closing commit of a run that has acknowledged it" in {
@@ -295,11 +306,22 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     def commit(threadId: ThreadId, commit: Commit) =
       if throwOn.contains(commits.incrementAndGet()) then throw new RuntimeException("store exploded")
       else underlying.commit(threadId, commit)
-    def latest(threadId: ThreadId) = underlying.latest(threadId)
+    def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
+    def renew(
+      threadId: ThreadId,
+      token: org.llm4s.agent.graph.FencingToken,
+      ttl: scala.concurrent.duration.FiniteDuration
+    ) =
+      underlying.renew(threadId, token, ttl)
+    def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+    def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
       underlying.eventsAfter(threadId, afterSeq, limit)
-    def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long)              = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                                = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
   }
 
   /** A clock that throws while `failing` says so for the read numbered by its argument (from 1). */
@@ -358,8 +380,16 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
   private def latestStore(onLatest: () => Unit): (Checkpointer, AtomicBoolean) = {
     val armed = new AtomicBoolean(true)
     val store = new Checkpointer {
-      val underlying                                 = InMemoryCheckpointer()
-      def commit(threadId: ThreadId, commit: Commit) = underlying.commit(threadId, commit)
+      val underlying                                                             = InMemoryCheckpointer()
+      def commit(threadId: ThreadId, commit: Commit)                             = underlying.commit(threadId, commit)
+      def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
+      def renew(
+        threadId: ThreadId,
+        token: org.llm4s.agent.graph.FencingToken,
+        ttl: scala.concurrent.duration.FiniteDuration
+      ) =
+        underlying.renew(threadId, token, ttl)
+      def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
       def latest(threadId: ThreadId) = {
         if armed.get then onLatest()
         underlying.latest(threadId)
@@ -368,6 +398,9 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
       def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+      def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+      def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
+      def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
     }
     (store, armed)
   }
@@ -413,11 +446,22 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
         underlying
           .commit(threadId, commit)
           .map(records => if commit.checkpoint.isDefined then Vector.empty else records)
-      def latest(threadId: ThreadId) = underlying.latest(threadId)
+      def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
+      def renew(
+        threadId: ThreadId,
+        token: org.llm4s.agent.graph.FencingToken,
+        ttl: scala.concurrent.duration.FiniteDuration
+      ) =
+        underlying.renew(threadId, token, ttl)
+      def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+      def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
       def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+      def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+      def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
+      def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
     }
     val runtime = GraphRuntime(store)
     runtime.start(thread, instant, "x").left.value match {

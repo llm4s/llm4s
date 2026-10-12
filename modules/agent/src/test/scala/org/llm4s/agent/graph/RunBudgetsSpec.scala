@@ -152,11 +152,22 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
         if commit.events.exists(_.event == RunEvent.RunCancelled) then Thread.sleep(300)
         underlying.commit(threadId, commit)
       }
-      def latest(threadId: ThreadId) = underlying.latest(threadId)
+      def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
+      def renew(
+        threadId: ThreadId,
+        token: org.llm4s.agent.graph.FencingToken,
+        ttl: scala.concurrent.duration.FiniteDuration
+      ) =
+        underlying.renew(threadId, token, ttl)
+      def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+      def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
       def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+      def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+      def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
+      def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
     }
     val b = GraphBuilder("self-interrupt", "v1")
     val node = b.node[Unit]("n") { (_, _, _) =>

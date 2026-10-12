@@ -8,6 +8,7 @@
 # quietly sends new users to the old one - the installation guide already pinned 0.4.0 in its sbt and
 # Maven snippets and 0.4.1 in its Gradle ones.
 #
+# Scala CLI `//> using dep org.llm4s::llm4s-...:<version>` lines are checked like the others.
 # A SNAPSHOT version is a locally built one, not a release, and is not checked.
 # Release notes, the migration guides and design documents name versions on purpose and are not checked.
 # Exit code 0 = no literal pin. Non-zero = file:line of each one.
@@ -25,6 +26,7 @@ SKIP_FILES = {"docs/reference/migration.md", "docs/reference/release.md", "CHANG
 SBT    = re.compile(r'"org\.llm4s"\s*%+\s*"llm4s-[a-z0-9-]+"\s*%\s*"(\d+\.\d+\.\d+[^"]*)"')
 GRADLE = re.compile(r'org\.llm4s:llm4s-[a-z0-9_-]+:(\d+\.\d+\.\d+[^\s"\')`]*)')
 MAVEN  = re.compile(r'<artifactId>llm4s-[a-z0-9_-]+</artifactId>\s*<version>(\d+\.\d+\.\d+[^<]*)</version>')
+CLI    = re.compile(r'//>\s*using\s+dep\s+org\.llm4s::llm4s-[a-z0-9-]+:(\d+\.\d+\.\d+[^\s"\')`]*)')
 
 bad = []
 files = [p for p in pathlib.Path("docs").rglob("*.md")] + [pathlib.Path("README.md")]
@@ -33,7 +35,7 @@ for p in files:
     if rel in SKIP_FILES or rel.startswith(SKIP_DIRS) or not p.exists():
         continue
     text = p.read_text(encoding="utf-8")
-    for rx in (SBT, GRADLE, MAVEN):
+    for rx in (SBT, GRADLE, MAVEN, CLI):
         for m in rx.finditer(text):
             if "SNAPSHOT" in m.group(1):
                 continue          # a locally built version is not "the latest release"

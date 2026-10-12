@@ -34,6 +34,9 @@ Testing LLM applications requires a different approach than traditional software
 
 For pure logic tests, mock the LLM client:
 
+{: .note }
+> For a ready-made scriptable client - canned replies, tool calls, injected errors and recorded requests - see [Testing with the Testkit](../guide/testing-with-the-testkit) (`llm4s-testkit`). The hand-written mocks below still work for a one-off.
+
 ### Basic Mock
 
 ```scala

@@ -21,7 +21,7 @@ class WatsonXTokenSpec extends AnyFunSuite with Matchers:
   private def iamCount(http: StubHttp): Int = http.iamRequests.size
 
   private def okStub(iamBody: HttpResponse = iamToken()): StubHttp =
-    routed(_ => Right(iamBody), _ => Right(generation))
+    routed(_ => Right(iamBody), _ => Right(chatReply))
 
   test("token refresh boundary: reused strictly more than 300s before expiry, exchanged again at 300s and inside") {
     val table = Seq(
@@ -81,7 +81,7 @@ class WatsonXTokenSpec extends AnyFunSuite with Matchers:
     val calls = new AtomicInteger(0)
     val http = routed(
       _ => if calls.getAndIncrement() == 0 then Right(HttpResponse(503, "busy")) else Right(iamToken()),
-      _ => Right(generation)
+      _ => Right(chatReply)
     )
     val c = new WatsonXClient(config, httpClient = http)
     c.complete(hi, CompletionOptions()).left.toOption.exists(_.isInstanceOf[AuthenticationError]) shouldBe true
@@ -96,7 +96,7 @@ class WatsonXTokenSpec extends AnyFunSuite with Matchers:
       _ =>
         if calls.getAndIncrement() == 0 then Left(NetworkError("down", None, "https://iam.example.com"))
         else Right(iamToken()),
-      _ => Right(generation)
+      _ => Right(chatReply)
     )
     val c = new WatsonXClient(config, httpClient = http)
     c.bearerToken().isLeft shouldBe true
@@ -107,7 +107,7 @@ class WatsonXTokenSpec extends AnyFunSuite with Matchers:
     val calls = new AtomicInteger(0)
     val http = routed(
       _ => if calls.getAndIncrement() == 0 then Right(iamToken()) else Right(HttpResponse(500, "boom")),
-      _ => Right(generation)
+      _ => Right(chatReply)
     )
     var now = 0L
     val c   = new WatsonXClient(config, httpClient = http, nowSeconds = () => now)
@@ -133,4 +133,56 @@ class WatsonXTokenSpec extends AnyFunSuite with Matchers:
     Thread.interrupted(): Unit
     result.toOption.flatMap(_.left.toOption).exists(_.isInstanceOf[CancelledError]) shouldBe true
     http.requests shouldBe empty
+  }
+
+  test("bearerToken on an interrupted thread is Left(CancelledError), keeps the flag set and sends nothing") {
+    val http = okStub()
+    val c    = new WatsonXClient(config, httpClient = http)
+    Thread.currentThread().interrupt()
+    val result      = Try(c.bearerToken())
+    val stillMarked = Thread.interrupted()
+    result.isSuccess shouldBe true // no InterruptedException escapes
+    result.toOption.flatMap(_.left.toOption).exists(_.isInstanceOf[CancelledError]) shouldBe true
+    stillMarked shouldBe true
+    http.requests shouldBe empty
+  }
+
+  test("a caller interrupted while another call's IAM exchange holds the lock gets Left(CancelledError)") {
+    import java.util.concurrent.{ CountDownLatch, TimeUnit }
+    import java.util.concurrent.atomic.AtomicReference
+    val exchangeStarted = new CountDownLatch(1)
+    val release         = new CountDownLatch(1)
+    val http = routed(
+      _ =>
+        exchangeStarted.countDown()
+        release.await(10, TimeUnit.SECONDS): Unit
+        Right(iamToken())
+      ,
+      _ => Right(chatReply)
+    )
+    val c         = new WatsonXClient(config, httpClient = http)
+    val holderOut = new AtomicReference[Option[Either[org.llm4s.error.LLMError, String]]](None)
+    val holder    = new Thread(() => holderOut.set(Some(c.bearerToken())))
+    holder.start()
+    exchangeStarted.await(10, TimeUnit.SECONDS) shouldBe true
+
+    val waiterOut  = new AtomicReference[Option[Try[Either[org.llm4s.error.LLMError, String]]]](None)
+    val waiterFlag = new AtomicReference[Option[Boolean]](None)
+    val waiter = new Thread(() =>
+      waiterOut.set(Some(Try(c.bearerToken())))
+      waiterFlag.set(Some(Thread.currentThread().isInterrupted))
+    )
+    waiter.start()
+    // wait until the waiter is parked on the lock, then interrupt it
+    val deadline = System.nanoTime() + 10_000_000_000L
+    while waiter.getState != Thread.State.WAITING && System.nanoTime() < deadline do Thread.onSpinWait()
+    waiter.interrupt()
+    waiter.join(10_000)
+    release.countDown()
+    holder.join(10_000)
+
+    waiterOut.get().flatMap(_.toOption).flatMap(_.left.toOption).exists(_.isInstanceOf[CancelledError]) shouldBe true
+    waiterFlag.get() shouldBe Some(true)
+    holderOut.get() shouldBe Some(Right("tok-1"))
+    iamCount(http) shouldBe 1
   }

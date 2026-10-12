@@ -25,6 +25,7 @@ final case class ToolHints private (readOnly: Boolean, destructive: Boolean, ide
   def withIdempotent(v: Boolean): ToolHints  = copy(idempotent = v)
   def withOpenWorld(v: Boolean): ToolHints   = copy(openWorld = v)
 
+@Experimental
 object ToolHints:
   def apply(
     readOnly: Boolean = false,

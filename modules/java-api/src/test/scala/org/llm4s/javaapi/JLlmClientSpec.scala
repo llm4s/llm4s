@@ -36,14 +36,14 @@ class JLlmClientSpec extends AnyFlatSpec with Matchers {
   private val apiError: LLMError = APIError("test-provider", "service unavailable")
 
   "complete(String)" should "return the assistant text on success" in {
-    val client = new JLlmClient(successClient("4"))
+    val client = Llm4s.wrapClient(successClient("4"))
     val result = client.complete("What is 2+2?")
     result.isSuccess shouldBe true
     result.get() shouldBe "4"
   }
 
   it should "return a failure result when the underlying client fails" in {
-    val client = new JLlmClient(errorClient(apiError))
+    val client = Llm4s.wrapClient(errorClient(apiError))
     val result = client.complete("hello")
     result.isFailure shouldBe true
     result.getError().error shouldBe apiError
@@ -51,7 +51,7 @@ class JLlmClientSpec extends AnyFlatSpec with Matchers {
 
   "complete(Conversation)" should "return the assistant text on success" in {
     val conv   = ConversationBuilder.create().user("ping").build()
-    val client = new JLlmClient(successClient("pong"))
+    val client = Llm4s.wrapClient(successClient("pong"))
     val result = client.complete(conv)
     result.isSuccess shouldBe true
     result.get() shouldBe "pong"
@@ -59,7 +59,7 @@ class JLlmClientSpec extends AnyFlatSpec with Matchers {
 
   it should "return a failure result when the underlying client fails" in {
     val conv   = ConversationBuilder.create().user("ping").build()
-    val client = new JLlmClient(errorClient(apiError))
+    val client = Llm4s.wrapClient(errorClient(apiError))
     val result = client.complete(conv)
     result.isFailure shouldBe true
   }
@@ -85,7 +85,7 @@ class JLlmClientSpec extends AnyFlatSpec with Matchers {
 
     val options = CompletionOptions(temperature = 0.5)
     val conv    = ConversationBuilder.create().user("test").build()
-    val client  = new JLlmClient(capturingClient)
+    val client  = Llm4s.wrapClient(capturingClient)
     client.complete(conv, options)
 
     capturedOptions shouldBe Some(options)
@@ -106,7 +106,7 @@ class JLlmClientSpec extends AnyFlatSpec with Matchers {
       override def close(): Unit               = closed = true
     }
 
-    val client = new JLlmClient(trackingClient)
+    val client = Llm4s.wrapClient(trackingClient)
     client.close()
     closed shouldBe true
   }

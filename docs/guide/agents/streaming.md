@@ -153,9 +153,50 @@ Durable events outlive the run. `GraphRuntime.subscribe(threadId, afterSeq = 0)`
 events from the start, which gives the structure of every run without any content. See
 `EventCollectionExample`.
 
-## fs2 and ZIO
+## Subscriptions across runtimes
 
-`llm4s-effect` and `llm4s-zio` expose the same stream as a value:
+Several `GraphRuntime`s, in one process or several, can share one checkpoint store
+([Durable Checkpointers](durable-checkpointers)). A `GraphRuntime.subscribe` on any of them delivers
+the durable events of every commit on the thread, whichever runtime made it, with the same
+guarantees: in order, without gap or duplicate, and only after the commit.
+
+- The subscription's own runtime hands it that runtime's commits as they land. Other runtimes' commits
+  it reads from the store, on a second virtual thread (`llm4s-watch-<threadId>`) that runs while the
+  subscription is live. A store that is told of commits delivers them at once: `InMemoryCheckpointer`,
+  shared between runtimes in one process. A store that is not is read every `pollInterval`, 250 ms by
+  default; the SQLite store is read this way.
+- Only durable events cross runtimes. Live progress is never stored, so another runtime's
+  `TextDelta`s and other live events never arrive.
+- Another runtime's events wait in the store until the listener has room for them, so they never
+  make a subscriber lag. The subscription's own runtime's commits are still delivered in their place.
+  A commit that finds other runtimes' events not yet read reads them first. If they do not fit, the
+  subscriber lags as usual, and you resubscribe from `lastSeq`.
+- If a read of the store fails, the subscription delivers what it has queued and then ends with
+  `Disconnected(lastSeq, ReplayFailed(error))`. Closing the store under it ends it this way too.
+  Resubscribe with `afterSeq = lastSeq`, for example after a restart.
+
+```scala
+import org.llm4s.agent.graph.*
+import scala.concurrent.duration.*
+
+// a process that only watches threads whose runs execute elsewhere, over the same SQLite file
+val watcher = GraphRuntime(store, watch = WatchPolicy(pollInterval = 100.millis))
+watcher.subscribe(threadId) {
+  case StreamEvent.Durable(record) => println(s"${record.seq} ${record.event}")
+  case _                           => ()
+}
+```
+
+`WatchPolicy.disabled` turns the watch off, for a runtime that knows it is the store's only user. Its
+subscriptions then see other runtimes' commits only by subscribing again, which replays the log.
+
+`Agent.stream*` and `AgentRun.subscribe`, and the fs2, ZIO, Java and Kotlin streams built on them, follow
+a run that their own runtime started, so they work as before. To follow a thread whose runs execute in
+another process, subscribe with `GraphRuntime.subscribe` on a runtime over the same store.
+
+## fs2, ZIO and Pekko Streams
+
+`llm4s-effect`, `llm4s-zio` and `llm4s-pekko` expose the same stream as a value:
 
 ```scala
 // cats-effect / fs2: Stream[IO, AgentStreamItem]
@@ -167,12 +208,15 @@ agentIO.stream(threadId, "Explain monads").evalMap {
 
 // ZIO: ZStream[Any, LLMError, AgentStreamItem]
 agentZ.stream(threadId, "Explain monads").runForeach { /* same cases */ }
+
+// Apache Pekko Streams: Source[AgentStreamItem, NotUsed]
+agentPekko.stream(threadId, "Explain monads").runForeach { /* same cases */ }
 ```
 
 `AgentStreamItem` is `Event(StreamEvent)` or `Done(AgentResult)`, one enum per module. The stream
 ends after `Done`; a `Left` from admission or from the run fails the stream with that error.
 A run that ends without a terminal event (a crash) still ends the stream, as soon as the run's last
-event has been delivered, and the stream then fails with the run's error. `streamResume` and `streamRecover` exist on both.
+event has been delivered, and the stream then fails with the run's error. `streamResume` and `streamRecover` exist on all three. A Pekko stream fails with an `LLMException` carrying the error; see [Apache Pekko Integration](../pekko).
 Interrupting the stream or stopping early (`take(n)`, `head`) cancels the turn.
 
 A slow consumer does not: the stream's buffer never holds up the run's subscription. Durable events
@@ -268,6 +312,9 @@ listener { case Checked(v) => ... } // None for another name, version or an unde
   receives every live event sent after `subscribe` returns, so `GraphRuntime.subscribe` followed by
   `start` sees all of the run's - unless more arrive than its `capacity` holds, while it replays or
   before its listener drains them: those are dropped and reported as a `LiveGap` with their count.
+- **Live events stay in their runtime.** A subscription receives another runtime's durable events,
+  but never its live ones, which are not stored. With a polled store, such as SQLite, another
+  runtime's commits arrive up to `WatchPolicy.pollInterval` after they land.
 
 See also the [observability guide](../observability/), the
 [migration note](../../reference/migration.html), and
