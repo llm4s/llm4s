@@ -125,6 +125,7 @@ and community outreach.
 
 | Location | Name | Role | LinkedIn |
 |---|---|---|---|
+| France | **Olivier Nouguier** | Chapter Lead — France | [linkedin.com/in/olivier-nouguier](https://www.linkedin.com/in/olivier-nouguier/) |
 | Abu Dhabi | **Yoshita Sharma** | Chapter Lead — Abu Dhabi | [linkedin.com/in/yoshita-sharma-trojan](https://www.linkedin.com/in/yoshita-sharma-trojan/) |
 | London | **Dmitry Mamonov** | Chapter Lead — London | [linkedin.com/in/dmamonov](https://www.linkedin.com/in/dmamonov/) |
 | Germany | **Vitthal Mirji** | Chapter Lead — Germany | [linkedin.com/in/vitthal10](https://www.linkedin.com/in/vitthal10/) |
