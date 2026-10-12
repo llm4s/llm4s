@@ -327,7 +327,11 @@ class OpenAICompatibleClient(
   private def bearer(): Result[Option[String]] = settings.credential match
     case OpenAICompatibleClient.Credential.Anonymous   => Right(None)
     case OpenAICompatibleClient.Credential.Static(key) => Right(Some(key))
-    case _ => tokenProvider.fold[Result[Option[String]]](Right(None))(_.token().map(Some(_)))
+    // A Dynamic provider is the caller's code: one that throws fails the request instead of escaping it.
+    case _ =>
+      tokenProvider.fold[Result[Option[String]]](Right(None))(p =>
+        CachingAccessTokenProvider.guarded(p.token()).map(Some(_))
+      )
 
   /**
    * The headers every request carries, for bearer value `token`. A header the dialect repeats is
@@ -372,7 +376,7 @@ class OpenAICompatibleClient(
       val result = send(requestHeaders(token))
       (result, token) match
         case (Left(e: AuthenticationError), Some(rejected)) if e.code.contains("401") =>
-          tokenProvider.foreach(_.invalidate(rejected))
+          tokenProvider.foreach(p => Try(p.invalidate(rejected)))
         case _ => ()
       result
     }
@@ -715,7 +719,9 @@ object OpenAICompatibleClient {
 
     /**
      * `Authorization: Bearer <token>`, the token fetched per request from `provider` and refreshed once
-     * on a 401. The caller owns `provider`.
+     * on a 401. The caller owns `provider`. A `token()` that throws fails the request with an
+     * `AuthenticationError` naming the exception's class, and an `invalidate` that throws is ignored: neither
+     * escapes `complete` or `streamComplete`.
      */
     case Dynamic(provider: AccessTokenProvider)
 

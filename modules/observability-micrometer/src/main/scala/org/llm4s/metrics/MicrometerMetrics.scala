@@ -34,11 +34,18 @@ import scala.util.{ Failure, Success, Try }
  *    other unbounded values are never tags. `provider` and `model` come from the caller, so they are capped
  *    too: after 64 distinct providers or 256 distinct models on one collector, further values are recorded
  *    as `other` (logged once at WARN), so arbitrary model strings cannot grow the registry without limit.
- *  - Thread-safe: Micrometer meters are, and this class holds no mutable state.
+ *  - Thread-safe: Micrometer meters are, and the only mutable state this class holds is the two sets of
+ *    provider and model tag values admitted under the caps above, which are concurrent sets guarded for the
+ *    check-then-add.
  *
  * Differences from `PrometheusMetrics`: this class also implements `recordRetryAttempt`,
  * `recordCircuitBreakerTransition` and `recordError`, which the Prometheus collector leaves as no-ops, and it
- * ignores negative or non-finite amounts instead of passing them to the registry.
+ * ignores negative or non-finite amounts instead of passing them to the registry. `recordError` goes to its own
+ * meter, [[MicrometerMetrics.Names.ReliabilityErrors]], never to `llm4s.errors`: `ReliableClient` reports each
+ * failed attempt through the provider client's `observeRequest` and then the final failure through `recordError`,
+ * so sharing one counter would count the same failure twice when both report to this collector. `llm4s.errors`
+ * therefore means exactly what `llm4s_errors_total` means in the Prometheus module: failed requests and failed
+ * image generations.
  *
  * This module is Beta: the meter names are intended to be stable, but they are not covered by the 1.x
  * compatibility promise.
@@ -117,7 +124,12 @@ final class MicrometerMetrics(registry: MeterRegistry) extends MetricsCollector 
 
   override def recordError(errorKind: ErrorKind, provider: String): Unit =
     safely("error") {
-      countError(providerLabel(provider), errorKind)
+      counter(
+        Names.ReliabilityErrors,
+        "Total number of errors reported outside a timed request (by ReliableClient: local throttle, open circuit, " +
+          "deadline, final failure)",
+        Tags.of(ProviderTag, providerLabel(provider), ErrorTypeTag, errorLabel(errorKind))
+      ).increment()
     }
 
   override def observeImageGeneration(
@@ -213,8 +225,21 @@ object MicrometerMetrics {
     /** Counter of estimated cost in USD. Tags: `provider`, `model`. */
     final val CostUsd = "llm4s.cost.usd"
 
-    /** Counter. Tags: `provider`, `error_type` (see [[ErrorKind]], in snake case). */
+    /**
+     * Counter of failed requests and failed image generations, as `llm4s_errors_total` in the Prometheus module.
+     * Tags: `provider`, `error_type` (see [[ErrorKind]], in snake case). `recordError` calls are not counted here;
+     * see [[ReliabilityErrors]].
+     */
     final val Errors = "llm4s.errors"
+
+    /**
+     * Counter of `recordError` calls (not in the Prometheus module): errors reported outside a timed request. In
+     * llm4s the caller is `ReliableClient`, which reports a call rejected by its local rate limit or its open
+     * circuit, a deadline exceeded, and the final failure once retries are exhausted. Kept apart from [[Errors]],
+     * which already counts each failed attempt the provider client observed, so neither counts a failure twice.
+     * Tags: `provider`, `error_type`.
+     */
+    final val ReliabilityErrors = "llm4s.reliability.errors"
 
     /** Counter of retry attempts (not in the Prometheus module). Tags: `provider`. */
     final val Retries = "llm4s.retries"

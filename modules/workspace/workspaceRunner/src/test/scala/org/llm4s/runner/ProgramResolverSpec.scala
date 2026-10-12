@@ -287,13 +287,44 @@ class ProgramResolverSpec extends AnyFlatSpec with Matchers {
       ProgramResolver.childPath(posix(path, cwd = Some(d.runnerCwd)), d.roots) shouldBe Some(d.trusted1.toString)
     }
 
-  it should "give no PATH at all when no entry is kept, never an empty one (read as the current directory)" in
+  it should "fall back to the system directories when no entry is kept, never to no PATH (#1805)" in inDirs { d =>
+    // Without PATH, bash and sh search a built-in default ending in `.`: the workspace. (`/usr/bin` is not an
+    // absolute path on a Windows host, so the POSIX fallback is checked on a POSIX one.)
+    if (!isWindowsHost) {
+      val posixFallback = Some(Seq("/usr/bin", "/bin").mkString(File.pathSeparator))
+      ProgramResolver.childPath(posix(Seq("", ".", "bin", d.workspace)), d.roots) shouldBe posixFallback
+      ProgramResolver.childPath(ProgramSearch(false, Nil, None, None, None), d.roots) shouldBe posixFallback
+    }
+    // On Windows: the system and Windows directories, which the runner searches first anyway
+    val windowsFallback = Some(Seq(d.system32, d.windowsDir).mkString(File.pathSeparator))
+    ProgramResolver.childPath(windows(d, Seq("", ".", d.workspace)), d.roots) shouldBe windowsFallback
+    ProgramResolver.childPath(ProgramSearch(true, Seq(d.system32, d.windowsDir), None, None, None), d.roots) shouldBe
+      windowsFallback
+  }
+
+  it should "give no PATH only when even the fallback directories are untrusted, never an empty one" in inDirs { d =>
+    // A workspace at the file system's root holds /usr/bin and /bin; an empty PATH would be read as `.`
+    val root = Seq(d.workspace.getRoot)
+    ProgramResolver.childPath(posix(Seq(".", "")), root) shouldBe None
+    ProgramResolver.childPath(ProgramSearch(true, Seq(d.system32), Some("."), None, None), Seq(d.base)) shouldBe None
+  }
+
+  it should "drop an entry not made yet under a link into the workspace, judged by where the link leads (#1805)" in
     inDirs { d =>
-      ProgramResolver.childPath(posix(Seq("", ".", "bin", d.workspace)), d.roots) shouldBe None
-      ProgramResolver.childPath(ProgramSearch(false, Nil, None, None, None), d.roots) shouldBe None
+      d.link(d.base.resolve("tools-link"), d.workspace).foreach { viaLink =>
+        val notYet = viaLink.resolve("later").resolve("bin")
+        ProgramResolver.childPath(posix(Seq(notYet, d.trusted1)), d.roots) shouldBe Some(d.trusted1.toString)
+        // where the agent makes it later, a child would find the agent's program first
+        Files.createDirectories(d.workspace.resolve("later").resolve("bin"))
+        ProgramResolver.childPath(posix(Seq(notYet, d.trusted1)), d.roots) shouldBe Some(d.trusted1.toString)
+      }
+      // an entry not made yet under a trusted directory is kept, as written
+      val pending = d.trusted2.resolve("not-yet")
+      ProgramResolver.childPath(posix(Seq(pending, d.trusted1)), d.roots) shouldBe
+        Some(Seq(pending, d.trusted1).mkString(File.pathSeparator))
     }
 
-  it should "keep Windows' double quotes around an entry that holds the separator" in inDirs { d =>
+  it should "give a child a Windows PATH entry that was in double quotes without them" in inDirs { d =>
     val search = windows(d, Seq("\"" + d.trusted1 + "\"", ".", d.workspace, d.trusted2))
     ProgramResolver.childPath(search, d.roots) shouldBe Some(Seq(d.trusted1, d.trusted2).mkString(File.pathSeparator))
   }
@@ -315,10 +346,12 @@ class ProgramResolverSpec extends AnyFlatSpec with Matchers {
       // not only for cmd.exe: CreateProcess in any child searches its current directory, the workspace, otherwise
       env.get("NoDefaultCurrentDirectoryInExePath") shouldBe "1"
 
+      // No entry kept: the system directories, where sh or a child's own search would otherwise use a default
+      // ending in `.` (#1805)
       val onlyWorkspace = ProgramSearch(windows = true, Seq(d.system32, d.windowsDir), Some("."), None, None)
       val bare          = new WorkspaceAgentInterfaceImpl(d.workspace.toString, true, Some(ReadOnly), onlyWorkspace)
       val bareEnv = bare.prepareCommand("whoami", None, None, None).fold(e => fail(e.error), _.builder.environment())
-      bareEnv.containsKey("PATH") shouldBe false
+      bareEnv.get("PATH") shouldBe Seq(d.system32, d.windowsDir).mkString(File.pathSeparator)
     }
 
   it should "leave NoDefaultCurrentDirectoryInExePath alone off Windows" in inDirs { d =>
@@ -384,6 +417,51 @@ class ProgramResolverSpec extends AnyFlatSpec with Matchers {
             system32.toRealPath()
           )
         }
+      }
+    }
+  }
+
+  it should "start a command whose own CreateProcess does not search its current directory, the workspace (#1805)" in {
+    assume(isWindowsHost, "CreateProcess searches the current directory only on Windows")
+    val system32 = ProgramSearch.host().systemDirectories.head
+    val hostname = system32.resolve("HOSTNAME.EXE")
+    assume(Files.exists(hostname), "the stub is a copy of System32's hostname.exe")
+    val javaExe = Paths.get(System.getProperty("java.home"), "bin", "java.exe")
+    assume(Files.exists(javaExe), "the child is a Java program run from source")
+    inDirs { d =>
+      // A child that starts `whoami` by its bare name: the JDK hands it to CreateProcess with no application name
+      val source = write(
+        d.base.resolve("StartsWhoami.java"),
+        """public class StartsWhoami {
+          |  public static void main(String[] args) throws Exception {
+          |    Process p = new ProcessBuilder("whoami").redirectErrorStream(true).start();
+          |    System.out.print(new String(p.getInputStream().readAllBytes()));
+          |    p.waitFor();
+          |  }
+          |}
+          |""".stripMargin
+      )
+      def output(command: Seq[String], noCurrentDirectory: Boolean): String = {
+        val builder = new java.lang.ProcessBuilder(command.asJava).directory(d.workspace.toFile)
+        builder.redirectErrorStream(true)
+        builder.redirectInput(java.lang.ProcessBuilder.Redirect.from(new File("NUL")))
+        builder.environment().put("PATH", Seq(system32, system32.getParent).mkString(File.pathSeparator))
+        if (noCurrentDirectory) builder.environment().put("NoDefaultCurrentDirectoryInExePath", "1")
+        else builder.environment().remove("NoDefaultCurrentDirectoryInExePath")
+        val process = builder.start()
+        val out     = new String(process.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
+        process.waitFor()
+        out.trim
+      }
+      val host = output(Seq(hostname.toString), noCurrentDirectory = true)
+      val user = output(Seq(system32.resolve("whoami.exe").toString), noCurrentDirectory = true)
+      assume(user.nonEmpty && user != host, "whoami and hostname print the same here")
+      Using.resource(new Stub(d.workspace.resolve("whoami.exe"), hostname)) { _ =>
+        val child = Seq(javaExe.toString, source.toString)
+        // Without the variable the child's CreateProcess finds the stub in its current directory: the check can tell
+        output(child, noCurrentDirectory = false) shouldBe host
+        // With it, as the runner starts every Windows command, the child runs System32's whoami
+        output(child, noCurrentDirectory = true) shouldBe user
       }
     }
   }

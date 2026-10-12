@@ -629,6 +629,115 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     SpringProviderSource.configSecrets(SomeConfig(" ", None, "gpt", 3)) shouldBe Nil
   }
 
+  it should "read the credentials of a nested case class, through Option, Seq and Map values (#1820)" in {
+    final case class Inner(sessionToken: String, region: String)
+    final case class Nested(
+      model: String,
+      credentials: Option[Inner],
+      fallbacks: Seq[Inner],
+      byName: Map[String, Inner],
+      tokenUrl: String,
+      extra: Map[String, String]
+    ) extends org.llm4s.llmconnect.config.ProviderConfig {
+      def providerId                   = ProviderId("x")
+      def contextWindow                = 1
+      def reserveCompletion            = 0
+      def endpointUrl: Option[String]  = None
+      def withModel(m: String): Nested = copy(model = m)
+    }
+    SpringProviderSource.configSecrets(
+      Nested(
+        "gpt",
+        Some(Inner("t1", "us-east-1")),
+        Seq(Inner("t2", "eu-west-1")),
+        Map("a" -> Inner("t3", "ap-south-1")),
+        "https://sts.example.test/token",
+        Map("password" -> "p1", "plain" -> "not-a-secret")
+      )
+    ) shouldBe Seq("t1", "t2", "t3", "p1")
+  }
+
+  it should "treat every headers value as a credential, and the token after its auth scheme too (#1820)" in {
+    val config = org.llm4s.llmconnect.config.OpenAICompatibleConfig
+      .fromValues(
+        "m",
+        "https://gateway.example.test/v1",
+        headers = Map("Authorization" -> "Bearer h1", "X-Tenant" -> "t9")
+      )
+      .fold(e => fail(e.message), identity)
+    (SpringProviderSource.configSecrets(config) should contain).allOf("Bearer h1", "h1", "t9")
+  }
+
+  it should "never throw, and stop at a value that refers to itself (#1820)" in {
+    final class Exploding extends Product {
+      def productArity: Int                   = 1
+      def productElement(n: Int): Any         = throw new IllegalStateException("boom")
+      def canEqual(that: Any): Boolean        = false
+      override def productElementName(n: Int) = "apiKey"
+    }
+    final class Loop extends Product {
+      def productArity: Int                   = 1
+      def productElement(n: Int): Any         = this
+      def canEqual(that: Any): Boolean        = false
+      override def productElementName(n: Int) = "next"
+    }
+    final class ExplodingSeq extends Iterable[String] {
+      def iterator: Iterator[String] = throw new IllegalStateException("boom")
+    }
+    final case class Odd(model: String, a: Exploding, b: Loop, apiKeys: ExplodingSeq, apiKey: String)
+        extends org.llm4s.llmconnect.config.ProviderConfig {
+      def providerId                  = ProviderId("x")
+      def contextWindow               = 1
+      def reserveCompletion           = 0
+      def endpointUrl: Option[String] = None
+      def withModel(m: String): Odd   = copy(model = m)
+    }
+    SpringProviderSource.configSecrets(Odd("gpt", new Exploding, new Loop, new ExplodingSeq, "k1")) shouldBe Seq("k1")
+  }
+
+  they should "carry Bedrock session credentials from application.conf, nested in the resolved config (#1820)" in {
+    val settings = HealthSettings.from(new Llm4sProperties, env("llm4s.providers.provider" -> "conf-bedrock"))
+    settings.provider shouldBe "bedrock"
+    (settings.secrets should contain).allOf(
+      "ASIACONFHELDKEYID",
+      "conf-held-secret-access-key",
+      "conf-held-session-token"
+    )
+  }
+
+  they should "carry a header token from application.conf, whatever the header is called (#1820)" in {
+    val settings = HealthSettings.from(new Llm4sProperties, env("llm4s.providers.provider" -> "conf-gateway"))
+    settings.provider shouldBe "openai-compatible"
+    (settings.secrets should contain).allOf(
+      "Bearer conf-held-header-token",
+      "conf-held-header-token",
+      "conf-held-tenant-credential"
+    )
+  }
+
+  "the health indicator" should "redact Bedrock session credentials and header tokens from application.conf out of a failed probe (#1820)" in {
+    Seq(
+      "conf-bedrock" -> Seq("ASIACONFHELDKEYID", "conf-held-secret-access-key", "conf-held-session-token"),
+      "conf-gateway" -> Seq("conf-held-header-token", "conf-held-tenant-credential")
+    ).foreach { case (section, credentials) =>
+      val message  = s"rejected ${credentials.mkString(" and ")}"
+      val provider = new AsyncAndHealthSpec.FakeProvider(_ => Left(APIError("x", message)))
+      val settings = HealthSettings
+        .from(new Llm4sProperties, env("llm4s.providers.provider" -> section))
+        .copy(probe = true, ttl = Duration.ofSeconds(60), timeout = Duration.ofSeconds(5))
+      val error =
+        new LlmHealthIndicator(provider.client, settings, StarterTestSupport.pool)
+          .health()
+          .getDetails
+          .get("error")
+          .toString
+      withClue(s"$section: $error ") {
+        error should include("rejected")
+        credentials.foreach(c => (error should not).include(c))
+      }
+    }
+  }
+
   it should "read nothing from a config that is not a case class" in {
     final class PlainConfig extends org.llm4s.llmconnect.config.ProviderConfig {
       def providerId                        = ProviderId("x")

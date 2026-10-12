@@ -7,8 +7,9 @@
 #
 # The cases cover: the tag check (valid tags pass; injection attempts, branches and malformed tags are refused before
 # anything runs), finding the dispatched run among other runs, every way the deploy can end (success, failure,
-# cancelled, still running, never appeared, unreadable), and that pages.yml, release.yml and the script agree on the
-# run's title and the tag pattern, with no workflow input interpolated into a shell.
+# cancelled, still running, never appeared, unreadable), that pages.yml, release.yml and the script agree on the
+# run's title and the tag pattern, with no workflow input interpolated into a shell, and that pages.yml deploys only
+# from a non-dry run on main while a `dry_run` builds on any branch without deploying.
 #
 # Usage: scripts/test-dispatch-docs-deploy.sh      (needs bash, jq and ruby, all on GitHub's runners)
 set -uo pipefail
@@ -222,7 +223,15 @@ errs << "workflow_dispatch has no `ref` input" if input.nil?
 errs << "the ref input must be an optional string" unless input && input['type'] == 'string' && input['required'] == false
 errs << "the push trigger changed (must still be main with the docs paths)" unless trig['push']['branches'] == ['main'] && trig['push']['paths'].include?('docs/**') && trig['push']['paths'].include?('.github/workflows/pages.yml')
 errs << "permissions changed" unless pages['permissions'] == { 'contents' => 'read', 'pages' => 'write', 'id-token' => 'write' }
-errs << "concurrency changed" unless pages['concurrency'] == { 'group' => 'pages', 'cancel-in-progress' => false }
+# A real deploy is in the one `pages` group; a build-only run is in a group of its own, so it can never displace a
+# pending deploy (GitHub keeps one pending run per group and cancels the older one).
+errs << "concurrency changed (a deploy must be in `pages`, a dry run in its own group)" unless pages['concurrency'] == {
+  'group' => "${{ inputs.dry_run && format('pages-dry-run-{0}', github.ref) || 'pages' }}", 'cancel-in-progress' => false }
+dry = (trig['workflow_dispatch'] || {}).dig('inputs', 'dry_run')
+errs << "workflow_dispatch has no `dry_run` input" if dry.nil?
+errs << "the dry_run input must be an optional boolean defaulting to false" unless dry && dry['type'] == 'boolean' && dry['required'] == false && dry['default'] == false
+errs << "the deploy job must be skipped on a dry run (and only then)" unless pages['jobs']['deploy']['if'] == '${{ inputs.dry_run != true }}'
+errs << "the release dispatch must never be a dry run" if script =~ /dry_run/
 errs << "the deploy job must use the github-pages environment" unless pages['jobs']['deploy']['environment']['name'] == 'github-pages'
 errs << "the deploy job must still wait for the build" unless pages['jobs']['deploy']['needs'] == 'build'
 
@@ -233,6 +242,9 @@ errs << "the build checkout must fall back to github.ref" unless checkout['with'
 validate = steps.find { |s| s['name'] == 'Validate the requested ref' }
 errs << "there must be a validation step before the checkout" unless validate && steps.index(validate) < steps.index(checkout)
 errs << "the validation step must read the input through env" unless validate && validate['env'] && validate['env']['REQUESTED_REF'] == '${{ inputs.ref }}'
+guard = steps.find { |s| s['name'] == 'Check where this run may deploy' }
+errs << "the build must first check that a non-dry run is on main" unless guard && steps.index(guard) == 0
+errs << "the deploy check must read the run's ref and dry_run through env" unless guard && guard['env'] == { 'DRY_RUN' => '${{ inputs.dry_run == true }}', 'RUN_REF' => '${{ github.ref }}' }
 
 # no workflow input may be interpolated into a shell
 [[pages, 'pages.yml'], [release, 'release.yml']].each do |wf, name|
@@ -269,6 +281,27 @@ exit(errs.empty? ? 0 : 1)
 RUBY
 CHECK_OUT="$(ruby "$YAML_CHECK" "$PAGES" "$RELEASE" "$SCRIPT" 2>&1)" && CHECK_RC=0 || CHECK_RC=$?
 check "pages.yml, release.yml and the script agree (trigger, ref handling, permissions, no interpolation, title, pattern)" "$([ "$CHECK_RC" = 0 ] && echo yes || echo no)" "$CHECK_OUT"
+
+echo "== pages.yml: only a run on main deploys; a dry run builds anywhere and never deploys"
+# The guard step's own script, run as the workflow would run it (bash -e), with the env GitHub would give it.
+GUARD="$WORK/guard.sh"
+ruby -ryaml -e 'w = YAML.load_file(ARGV[0]); s = w["jobs"]["build"]["steps"].find { |x| x["name"] == "Check where this run may deploy" }; print(s ? s["run"] : "exit 99")' "$PAGES" > "$GUARD"
+guard() {   # guard <DRY_RUN> <RUN_REF> <expected exit: 0 or nonzero> <label>
+  local out rc
+  out="$(DRY_RUN="$1" RUN_REF="$2" bash -e "$GUARD" 2>&1)" && rc=0 || rc=$?
+  if [ "$3" = 0 ]; then
+    check "$4" "$([ "$rc" = 0 ] && echo yes || echo no)" "rc=$rc: $out"
+  else
+    check "$4" "$([ "$rc" != 0 ] && [ "$rc" != 99 ] && echo "$out" | grep -q 'dry_run=true' && echo yes || echo no)" "rc=$rc: $out"
+  fi
+}
+guard false refs/heads/main 0 "a push or dispatch on main may deploy"
+guard false refs/heads/ci/some-branch 1 "a non-dry run on another branch is refused before it builds, naming dry_run"
+guard false refs/tags/v0.5.0 1 "a run on a tag is refused before it builds (the #1152 failure)"
+guard true refs/heads/ci/some-branch 0 "a dry run on another branch builds"
+guard true refs/heads/main 0 "a dry run on main builds"
+DRY_OUT="$(DRY_RUN=true RUN_REF=refs/heads/main bash -e "$GUARD" 2>&1)"
+check "a dry run says it will not deploy" "$(echo "$DRY_OUT" | grep -q 'deploy job is skipped' && echo yes || echo no)" "$DRY_OUT"
 
 echo
 echo "$PASS passed, $FAIL failed"

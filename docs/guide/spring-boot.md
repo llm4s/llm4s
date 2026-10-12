@@ -296,7 +296,10 @@ is never reported.
 With `llm4s.health.probe=true` it sends a one-token completion on the executor, waits at most `llm4s.health.probe-timeout`, and
 reuses the outcome (a failure too) for `llm4s.health.probe-ttl`, so health polling does not call the provider each time. A
 failed or timed-out probe is `DOWN` with `probe=failed` or `probe=timeout` and an `error` message that has the API key and
-token-like strings removed. A health check whose thread is interrupted while it waits (Actuator shutting down, say) is
+token-like strings removed. Every credential of the resolved provider is removed, wherever it was set (a Spring property,
+`application.conf`, a `reference.conf` default or an environment variable) and however deep it sits in the provider's
+config: Bedrock's access key id, secret key and session token, a workload-identity token, and every `headers` value,
+whatever the header is called, along with the token after an auth scheme such as `Bearer`. A health check whose thread is interrupted while it waits (Actuator shutting down, say) is
 `DOWN` with `probe=cancelled` and the interrupt flag left set; `health()` never throws `InterruptedException`. A cancelled
 probe is not cached: it says something about that thread, not the provider, so the next check probes again. A probe is a
 billed call: keep the TTL generous.

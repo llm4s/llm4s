@@ -89,7 +89,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "create transport with correct configuration" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       transport.name shouldBe testName
     }
@@ -99,7 +99,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "send POST request with correct base headers for initialize" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request      = createRequest("initialize", "1")
       val responseJson = createResponse("1", Some(ujson.Obj("protocolVersion" -> "2025-06-18")))
@@ -122,7 +122,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "NOT include MCP-Protocol-Version header on initialize request" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request      = createRequest("initialize", "1")
       val responseJson = createResponse("1")
@@ -146,7 +146,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "include MCP-Protocol-Version header on non-initialize requests" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       // Capture headers from both calls
       var callCount                              = 0
@@ -186,7 +186,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle successful JSON response" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request      = createRequest("initialize", "1")
       val responseJson = createResponse("1", Some(ujson.Obj("serverInfo" -> ujson.Obj("name" -> "test"))))
@@ -200,7 +200,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle successful SSE stream response" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request        = createRequest("initialize", "1")
       val responseJson   = createResponse("1", Some(ujson.Obj("serverInfo" -> ujson.Obj("name" -> "test"))))
@@ -216,7 +216,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "extract session ID from initialize response headers" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request       = createRequest("initialize", "1")
       val responseJson  = createResponse("1")
@@ -255,7 +255,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle server without session management" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request      = createRequest("initialize", "1")
       val responseJson = createResponse("1")
@@ -291,7 +291,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle HTTP 400 Bad Request error" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request = createRequest("initialize", "1")
       (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(400, "Bad Request: Invalid parameters")))
@@ -306,7 +306,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle HTTP 401 Unauthorized error" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request = createRequest("initialize", "1")
       (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(401, "Unauthorized")))
@@ -318,7 +318,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle HTTP 403 Forbidden error" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request = createRequest("initialize", "1")
       (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(403, "Forbidden")))
@@ -330,7 +330,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle HTTP 404 with active session as session expiration" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val initRequest      = createRequest("initialize", "1")
       val initResponseJson = createResponse("1")
@@ -362,7 +362,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle HTTP 405 Method Not Allowed error" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request = createRequest("initialize", "1")
       (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(405, "Method Not Allowed")))
@@ -377,7 +377,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle HTTP 500 Internal Server Error" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request = createRequest("initialize", "1")
       (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(500, "Internal Server Error: Database down")))
@@ -392,7 +392,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle HTTP 503 Service Unavailable error" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request = createRequest("initialize", "1")
       (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(503, "Service Unavailable")))
@@ -404,7 +404,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle JSON-RPC error responses" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request       = createRequest("initialize", "1")
       val errorResponse = createErrorResponse("1", -32600, "Invalid Request")
@@ -419,7 +419,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle malformed JSON in response" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request = createRequest("initialize", "1")
       (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, "{invalid-json")))
@@ -431,7 +431,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle network exceptions" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request = createRequest("initialize", "1")
       (mockHttp.post _)
@@ -445,7 +445,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle connection failures" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request = createRequest("initialize", "1")
       (mockHttp.post _)
@@ -462,7 +462,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle SSE with multiple data lines (concatenation with newlines)" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request = createRequest("initialize", "1")
 
@@ -484,7 +484,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle SSE comments (lines starting with colon)" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request      = createRequest("initialize", "1")
       val responseJson = createResponse("1")
@@ -506,7 +506,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle SSE retry directives (ignored)" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request      = createRequest("initialize", "1")
       val responseJson = createResponse("1")
@@ -527,7 +527,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle SSE event type field" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request      = createRequest("initialize", "1")
       val responseJson = createResponse("1")
@@ -548,7 +548,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle SSE id field" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request      = createRequest("initialize", "1")
       val responseJson = createResponse("1")
@@ -569,7 +569,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle [DONE] sentinel in SSE data" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request      = createRequest("initialize", "1")
       val responseJson = createResponse("1")
@@ -591,7 +591,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "skip non-JSON-RPC data in SSE stream" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request      = createRequest("initialize", "1")
       val responseJson = createResponse("1")
@@ -616,7 +616,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle empty SSE stream with no valid JSON-RPC response" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val request = createRequest("initialize", "1")
 
@@ -642,7 +642,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "send notification with Content-Type header" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       var capturedHeaders: Map[String, String] = Map.empty
       val notification = JsonRpcNotification(
@@ -670,7 +670,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "accept both JSON and an event stream on a notification, as the transport requires of every POST" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       var capturedHeaders: Map[String, String] = Map.empty
       (mockHttp.post _)
@@ -688,7 +688,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "include MCP-Protocol-Version in notification headers" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       var capturedHeaders: Map[String, String] = Map.empty
       val notification = JsonRpcNotification(
@@ -716,7 +716,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "include session ID in notification if present" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val initRequest      = createRequest("initialize", "1")
       val initResponseJson = createResponse("1")
@@ -757,7 +757,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle notification errors" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val notification = JsonRpcNotification(
         jsonrpc = "2.0",
@@ -777,7 +777,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "send DELETE request if session exists" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       // Initialize with session
       val initRequest      = createRequest("initialize", "1")
@@ -806,7 +806,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "clear session after close" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       // Initialize with session
       val initRequest      = createRequest("initialize", "1")
@@ -841,7 +841,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "handle 405 error during session termination gracefully" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       // Initialize with session
       val initRequest      = createRequest("initialize", "1")
@@ -859,7 +859,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "allow close without session" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       // Should not throw
       noException should be thrownBy transport.close()
@@ -870,7 +870,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
     "generate unique sequential IDs" in {
       val mockHttp  = stub[Llm4sHttpClient]
-      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, mockHttp)
+      val transport = new StreamableHTTPTransportImpl(testUrl, testName, testTimeout, WholeBodyReplies(mockHttp))
 
       val id1 = transport.generateId()
       val id2 = transport.generateId()

@@ -29,7 +29,7 @@ When running the workspace runner (e.g. in Docker):
 |----------|-------------|---------|
 | `WORKSPACE_PATH` | Workspace root directory | `/workspace` |
 | `WORKSPACE_SANDBOX_PROFILE` | Sandbox profile: `permissive` or `locked`; any other value stops the runner | `permissive` |
-| `WORKSPACE_EXTRA_COMMANDS` | Programs added to the profile's `allowedCommands`, separated by commas or whitespace (for example `sbt`); a name that is not a bare program name, is a `.bat` / `.cmd` batch file, or is a shell, interpreter or launcher (in any case, with or without `.exe` / `.com` or a version), stops the runner, as does any name with the `locked` profile, which runs no command | none |
+| `WORKSPACE_EXTRA_COMMANDS` | Programs added to the profile's `allowedCommands`, separated by commas or whitespace (for example `sbt`); a name that is not a bare program name, is a `.bat` / `.cmd` batch file, or is a shell, interpreter, launcher, loader or other program that runs another (in any case, with or without `.exe` / `.com` or a version), stops the runner, as does any name with the `locked` profile, which runs no command | none |
 
 These two variables are the only things that decide what the runner enforces.
 
@@ -45,25 +45,49 @@ new ContainerisedWorkspace(workspaceDir, imageName, hostPort, extraAllowedComman
 ```
 
 **An added program means trusted code execution.** It is held to every check below (no shell, forbidden characters,
-path arguments inside the workspace, the environment allowlist), but it has no per-program option rules, so it can do
-anything its own arguments allow: `sbt run` runs the project's code, and so can the agent that wrote it. Add only what
-the agent needs, and only a program you would let run any code in the container. In particular, the policy does not model a program
+path arguments inside the workspace, the environment allowlist), but, bar the few option rules below, it has no
+per-program option rules, so it can do anything its own arguments allow: `sbt run` runs the project's code, and so
+can the agent that wrote it. Add only what the agent needs, and only a program you would let run any code in the
+container. In particular, the policy does not model a program
 that makes links or unpacks an archive (`ln`, `tar`, `unzip`, `rsync`, `install`): each of its arguments is checked
 against the file system as it is before the command runs, but not the link text it writes, the names in an archive,
 or a later argument that goes through a name an earlier one of its operations made (see
-[Several sources in one command](#several-sources-in-one-command)). Shells (`sh`, `bash`, `cmd`, `pwsh`, `busybox`, ...),
-interpreters (`python`, `perl`, `ruby`, `node`, `php`, `lua`, `awk`, `java`, `jshell`, `make`, `expect`, ...),
-launchers that run a program named in their arguments (`env`, `xargs`, `sudo`, `nohup`, `timeout`, `setsid`,
-`stdbuf`, `flock`, `script`, `time`, `systemd-run`, `parallel`, ...), debuggers and remote or container tools
-(`gdb`, `strace`, `ssh`, `docker`, `podman`), privilege and namespace tools (`runuser`, `doas`, `pkexec`, `nsenter`,
-`unshare`, `taskset`, `chrt`), Windows script hosts (`wsl`, `cscript`, `wscript`, `mshta`, `rundll32`) and the cmd.exe
-built-ins `call` and `start` are refused (`WorkspaceSandboxConfig.NeverAllowedCommands`), as any of them would bring
-back the shell [#1756](https://github.com/llm4s/llm4s/issues/1756) removed
-([#1761](https://github.com/llm4s/llm4s/issues/1761), [#1792](https://github.com/llm4s/llm4s/issues/1792)). A name is
-matched ignoring case, a `.exe` / `.com` extension and a trailing version (`Python3.12.EXE` is `python`). A `.bat` or
-`.cmd` name is refused too: Windows runs a batch file through cmd.exe, outside the runner's cmd.exe checks. **The list
-is a speed bump, not a boundary**: no list names every program that can run another, which is why an added program
-must be one you trust to run any code.
+[Several sources in one command](#several-sources-in-one-command)).
+
+These cannot be added (`WorkspaceSandboxConfig.NeverAllowedCommands`), as any of them would bring back the shell
+[#1756](https://github.com/llm4s/llm4s/issues/1756) removed ([#1761](https://github.com/llm4s/llm4s/issues/1761),
+[#1792](https://github.com/llm4s/llm4s/issues/1792), [#1805](https://github.com/llm4s/llm4s/issues/1805)):
+
+| Kind | Refused |
+|------|---------|
+| Shells | `sh`, `bash`, `rbash`, `zsh`, `dash`, `ash`, `ksh`, `mksh`, `yash`, `csh`, `tcsh`, `fish`, `elvish`, `nu`, `xonsh`, `busybox`, `toybox`, `cmd`, `powershell`, `pwsh`, and the cmd.exe built-ins `call` and `start` |
+| Interpreters | `python`, `py`, `pyw`, `pypy`, `jython`, `perl`, `ruby`, `irb`, `node`, `nodejs`, `deno`, `bun`, `php`, `lua`, `luajit`, `tclsh`, `wish`, `awk` (`gawk`, `mawk`, `nawk`), `java`, `javaw`, `jshell`, `jjs`, `jrunscript`, `scala`, `kotlin`, `kotlinc`, `groovy`, `r`, `rscript`, `julia`, `guile`, `racket`, `swipl`, `sbcl`, `clisp`, `erl`, `escript`, `iex`, `elixir`, `ghci`, `runghc`, `ocaml`, `osascript`, `dc`, `make`, `gmake`, `expect` |
+| Interpreter families, by prefix | every name starting `python`, `pypy`, `jython` or `lua` (`python3.7m`, `python3-dbg`, `pypy3.10`, `luajit-2.1`) |
+| Editors that run a command | `sed` (GNU `e`, `s///e`), `vi`, `vim`, `nvim`, `ex`, `view`, `emacs` |
+| Launchers | `env`, `xargs`, `nohup`, `nice`, `timeout`, `exec`, `eval`, `setsid`, `stdbuf`, `chroot`, `ionice`, `flock`, `watch`, `script`, `time`, `systemd-run`, `parallel`, `prlimit`, `numactl`, `unbuffer`, `tini`, `tmux`, `screen`, `fakeroot`, `proot` |
+| The dynamic loader | `ld.so`, `ld-linux*.so*`, `ld-musl*.so*`, `ld64.so*` |
+| Schedulers | `at`, `batch`, `crontab` |
+| Debuggers, profilers, remote and container tools | `strace`, `ltrace`, `gdb`, `lldb`, `valgrind`, `perf`, `ssh`, `docker`, `podman` |
+| Privilege, scheduling and namespace tools | `sudo`, `su`, `runuser`, `doas`, `pkexec`, `gosu`, `su-exec`, `setpriv`, `capsh`, `nsenter`, `unshare`, `bwrap`, `firejail`, `taskset`, `chrt` |
+| Windows programs that run another | `wsl`, `cscript`, `wscript`, `mshta`, `rundll32`, `regsvr32`, `forfiles`, `conhost`, `explorer`, `msbuild`, `wmic`, `schtasks`, `runas`, `msiexec`, `pcalua`, `bitsadmin`, `hh`, `installutil`, `regasm`, `regsvcs`, `cmstp` |
+
+A name is matched ignoring case, a `.exe` / `.com` extension and a trailing version (`Python3.12.EXE` is `python`,
+`scala3` is `scala`). A `.bat` or `.cmd` name is refused too: Windows runs a batch file through cmd.exe, outside the
+runner's cmd.exe checks. A name may hold only ASCII letters, digits, `.`, `_`, `+` and `-`, so no Unicode spelling of
+a refused name (fullwidth letters, a Kelvin sign that lower-cases to `k`, a character Windows best-fits to a
+letter) is accepted. Build tools (`sbt`, `mvn`, `gradle`, `scala-cli`, `cargo`, `npm`) are not refused: they run the
+project's code by design, which is what an operator adds them for.
+
+**The list is a speed bump, not a boundary.** No list names every program that can run another: most tools with a
+hook, plugin, pager, editor or helper-program option can, and catalogues such as
+[GTFOBins](https://gtfobins.github.io/) and [LOLBAS](https://lolbas-project.github.io/) list hundreds - `man -P`,
+`sqlite3 -cmd .shell`, `psql` and `mysql` shell escapes, `ssh-keygen -D lib.so`, an `openssl` engine, `gpg`'s exec
+options, `wget --use-askpass`, `cmake -P`, `gcc -wrapper` and `-fplugin`, and every package manager's install
+scripts (`npm`, `npx`, `yarn`, `pnpm`, `pip`, `cargo`, `go`). That is why an added program must be one you trust to
+run any code. For the archive and copy tools operators most often add, the runner refuses the options that run a
+program, as it does for `sort` and `cp` (see [Command policy](#command-policy)): `tar --to-command`, `-I` /
+`--use-compress-program`, `--checkpoint-action`, `-F` / `--info-script`; `zip -TT` / `--unzip-command`; `rsync -e` /
+`--rsh` / `--rsync-path`; `scp` and `sftp` `-S`, `-o`, `-F` and sftp's `-D`.
 
 With `WORKSPACE_SANDBOX_PROFILE=locked`, which refuses every command, any `WORKSPACE_EXTRA_COMMANDS` name stops the
 runner with a message saying so, rather than logging programs added that could never run.
@@ -179,9 +203,15 @@ an extension. The `PATH` the runner was started with is the one searched; a comm
 The program the runner starts may itself start another by name - a `#!/usr/bin/env x` script, `sbt` starting `java`,
 `git` a helper - searching the `PATH` it inherits from the workspace as its working directory. So the command's
 process gets only the `PATH` entries the runner itself would search: an empty or relative entry, an entry inside the
-workspace (as written or after following links) and the runner's own working directory are dropped, the rest kept in
-order; with none left the process has no `PATH` at all, since an empty one is read as the current directory
-([#1792](https://github.com/llm4s/llm4s/issues/1792)). On Windows every command, not only a built-in, runs with
+workspace (as written or after following links, and for an entry that does not exist yet, through its nearest
+existing ancestor's links) and the runner's own working directory are dropped, the rest kept in order
+([#1792](https://github.com/llm4s/llm4s/issues/1792)). With none left the process gets the system directories -
+`/usr/bin:/bin` on POSIX, the system and Windows directories on Windows - rather than no `PATH`, for which bash and sh
+use a built-in default ending in `.`, the workspace ([#1805](https://github.com/llm4s/llm4s/issues/1805)); only if
+even those lie in the workspace (a workspace at the file system's root) has it no `PATH`, never an empty one, which
+is read as the current directory. Directories are vetted, not the files in them: a program in a kept directory that
+is itself a link into the workspace is followed by a child, though the runner never starts one through it. Making
+such a link needs a write outside the workspace, or an operator who made it. On Windows every command, not only a built-in, runs with
 `NoDefaultCurrentDirectoryInExePath=1`, so neither cmd.exe nor `CreateProcess` in a child looks a program up in the
 working directory.
 
@@ -217,6 +247,10 @@ following links out of the workspace through its own options:
 | `cp` | `-L`, `--dereference`, `-H`, `-s`, `--symbolic-link`; with `-R`, `-r`, `-a`, `-P` or `-d` (or their long forms) anywhere in the arguments, two sources with the same name (letter case and Unicode normalisation ignored; on Windows a name with `~` matches any), or several sources and one that names a directory's contents (`src/.`, `src/`) |
 | `chmod` | `-L`, `-H`, `--dereference` |
 | `hostname` | an operand, `-F`, `--file`, `-b`, `--boot` |
+| `tar` (when added) | `--to-command`, `-I`, `--use-compress-program`, `--checkpoint-action`, `-F`, `--info-script`, `--new-volume-script`, `--rsh-command`, `--rmt-command`; `I` or `F` in a first argument without a dash (the traditional `tar cIf` form) |
+| `zip` (when added) | `-T` (and so `-TT`), `--unzip-command` |
+| `rsync` (when added) | `-e`, `--rsh`, `--rsync-path` |
+| `scp`, `sftp` (when added) | `-S`, `-o`, `-F`; sftp's `-D` |
 
 `mv`, `rm`, `mkdir` and `touch` have no option that follows a link out of the workspace, so they get the path rule
 only (with the exception for a link itself under [Removing a link](#removing-a-link)).

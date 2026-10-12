@@ -52,7 +52,9 @@ import scala.jdk.CollectionConverters.*
  *       .ifFailure(e -> System.err.println(e.getMessage()));
  * }}}
  */
-final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
+final class JAgent private[javaapi] (token: FacadeToken, underlying: Result[Agent]) {
+
+  FacadeToken.check(token, "JAgent")
 
   /**
    * Runs `query` as the first turn of a new conversation. A `null` query yields a failed result.
@@ -188,13 +190,14 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
     if (listener == null) LlmResult.failure(ValidationError.required("listener"))
     else
       call("JAgent.stream") { agent =>
-        val buffer = AgentEventBuffer(AgentStream.BufferSize)
-        start(agent, () => buffer.end(), buffer.listener).map(AgentStream.start(_, buffer, listener))
+        val buffer = AgentEventBuffer(JAgent.BufferSize)
+        start(agent, () => buffer.end(), buffer.listener)
+          .map(new AgentStream(FacadeToken.INSTANCE, _, buffer, listener))
       }
 
   /** [[call]] for a turn: its result as a [[JAgentResult]]. */
   private def turn(operation: String)(body: Agent => Result[AgentResult]): LlmResult[JAgentResult] =
-    call(operation)(agent => body(agent).map(JAgentResult.of))
+    call(operation)(agent => body(agent).map(FacadeInternals.agentResult))
 
   /**
    * `body` as a result that never throws. An `InterruptedException` escaping it - the runtime answers
@@ -203,12 +206,15 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
    * declare (#1591).
    */
   private def call[A](operation: String)(body: Agent => Result[A]): LlmResult[A] =
-    LlmResult.from(
+    FacadeInternals.result(
       CancelledError.attempt(operation)(underlying.flatMap(agent => Safety.safely(body(agent)).flatMap(identity)))
     )
 }
 
 object JAgent {
+
+  /** Events buffered between a streamed turn's subscription and its listener, as for the fs2 and ZIO streams. */
+  private val BufferSize: Int = 256
 
   /**
    * What `result`'s turn waits for: for a `SUSPENDED` turn, its pending approvals, then its tool questions,

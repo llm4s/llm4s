@@ -231,7 +231,9 @@ If the turn had already completed when the cancellation arrived, the call still 
 `CancellationException`, but the turn's result is committed to the thread: `recover` then has nothing to
 recover and throws `LLMException` ("no incomplete execution"), and the next turn continues from that result.
 The one-shot `run(query)` is the exception, as in Java and Scala: nothing it throws carries its random thread
-id, so once a failed or cancelled turn has ended it forgets the thread. A cancelled call waits up to 5 seconds
+id, so once a failed or cancelled turn has ended it forgets the thread. A conversation you named for `stream` is
+yours to forget: `agent.forget(threadId)` needs no result, succeeds for an unknown thread and throws
+`LLMException` for one whose turn is still running. A cancelled call waits up to 5 seconds
 for the turn to end; a provider that ignores the interrupt for longer is left to finish on its own, and the
 thread stays busy (`ThreadBusy`) until it does.
 
@@ -416,7 +418,9 @@ give the same events as fs2 and ZIO streams.
 Every run claims its thread in the `Checkpointer` before it starts, renews the claim while it runs, and fences
 every commit with the claim's token. Runtimes sharing one store - in one process or many - are refused a live
 run's thread with `ThreadBusy`, can `recover` a run whose process died once its claim has expired, and a run that
-lost its claim records nothing more. `CheckpointerContract` in `llm4s-agent-testkit` tests a store of your own.
+lost its claim records nothing more. `SqliteCheckpointer` (`llm4s-agent-checkpoint-sqlite`) keeps threads in a
+SQLite file, so a run survives a restart and `recover` continues it in the next process. `CheckpointerContract` in
+`llm4s-agent-testkit` tests a store of your own.
 
 [Learn more about durable checkpointers →](durable-checkpointers)
 

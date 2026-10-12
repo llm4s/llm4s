@@ -5,12 +5,19 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+  # A GitHub merge queue on main (#1638): the queue builds main plus the queued pull request(s) on a temporary
+  # gh-readonly-queue/... branch and waits for the required checks to report on it, so this workflow must run there
+  # too or the queue waits until its timeout. A no-op until a maintainer enables the queue (docs/reference/merge-queue.md).
+  # The push-to-main-only tiers below (Ollama, Workspace, MCP reference) stay off it: they are not required checks.
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
   workflow_call:
 
 # Concurrency settings to prevent conflicts
 concurrency:
-  # For PRs, cancel duplicate runs. For pushes to main/master, queue them.
+  # For PRs, cancel duplicate runs. For pushes to main/master, queue them. A merge group's ref is its own temporary
+  # branch, unique per group, so it falls through to github.ref and is never cancelled by another group.
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
   # Only cancel in-progress runs for pull requests, not for pushes to main/master
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -103,6 +110,12 @@ jobs:
       - name: Test the release docs-deploy dispatcher
         run: scripts/test-dispatch-docs-deploy.sh
 
+      # A merge queue on main waits for each required check to report on its merge group (#1638). Fails if CI, DCO or
+      # the secret scan loses its merge_group trigger, if a required job or anything it needs would be skipped there,
+      # or if a step reads github.event.pull_request without a pull_request gate. Needs ruby, on the runner.
+      - name: Test that the required workflows run in a merge queue
+        run: scripts/test-merge-queue-workflows.sh
+
       # Fails on a broken internal link in docs/ that scripts/docs-link-baseline.txt does not list, and on a
       # listed link that no longer breaks (the baseline only shrinks). Links are resolved the way llm4s.org serves
       # them; see the header of the script. The test runs the check against fixture trees, with no network.
@@ -167,6 +180,12 @@ jobs:
       # (project/Bom.scala). A release cannot be amended, so a BOM that omits a module stays that way.
       - name: Check the BOM lists every published artifact
         run: sbt bomCheck
+
+      # Fails when a published POM lacks what Maven Central requires (name, description, https URL, licence,
+      # developer, SCM) or points its <scm> anywhere but https://github.com/llm4s/llm4s, which is how Scaladex
+      # finds the project (#1455). It reads the generated POMs (project/PomMetadata.scala).
+      - name: Check every published POM has its metadata
+        run: sbt pomMetadataCheck
 
       - name: Compile
         run: sbt compile
@@ -321,6 +340,7 @@ jobs:
           agentTools/test agentTools/coverageReport
           agent/test agent/coverageReport
           agentTestkit/test agentTestkit/coverageReport
+          agentCheckpointSqlite/test agentCheckpointSqlite/coverageReport
           traceOpentelemetry/test traceOpentelemetry/coverageReport
           gradleDemo/test gradleDemo/coverageReport
           javaApi/test javaApi/coverageReport
@@ -594,6 +614,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/agent-testkit/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: agent-testkit
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload agent-checkpoint-sqlite coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/agent-checkpoint-sqlite/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: agent-checkpoint-sqlite
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

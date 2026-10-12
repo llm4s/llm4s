@@ -49,9 +49,10 @@ final case class WorkspaceSandboxConfig(
    *
    * '''An added program is trusted code execution.''' It is held to the same checks as the built-in ones (no shell,
    * forbidden characters, path arguments inside the workspace, the environment allowlist), but it has no per-program
-   * option rules, so it can do whatever its own arguments let it - and a build tool such as `sbt` runs the code in the
-   * workspace by design. The denylist only stops the obvious ways to run anything (shells, interpreters, launchers);
-   * it is not a boundary. Add only what the agent needs.
+   * option rules (bar those that stop `tar`, `zip`, `rsync`, `scp` and `sftp` running a program, #1805), so it can do
+   * whatever its own arguments let it - and a build tool such as `sbt` runs the code in the workspace by design. The
+   * denylist only stops the obvious ways to run anything (shells, interpreters, launchers, loaders); it is not a
+   * boundary. Add only what the agent needs.
    *
    * A config that does not run commands at all (`shellAllowed = false`, the locked profile) refuses any name, rather
    * than report programs added that can never run (#1761).
@@ -80,24 +81,38 @@ object WorkspaceSandboxConfig {
   val ExtraCommandsEnvVar: String = "WORKSPACE_EXTRA_COMMANDS"
 
   /**
-   * Programs [[WorkspaceSandboxConfig.withExtraCommands]] refuses to add: shells, interpreters, and launchers that run
-   * another program or code named in their arguments (#1756, #1761, #1792). Any of them would let a command run
-   * anything, which is what running commands without a shell prevents.
+   * Programs [[WorkspaceSandboxConfig.withExtraCommands]] refuses to add: shells, interpreters, launchers and loaders
+   * that run another program or code named in their arguments, editors and stream editors that run a command
+   * (`vim -c '!cmd'`, GNU `sed` `e`), schedulers, and Windows programs that run another one (#1756, #1761, #1792,
+   * #1805). Any of them would let a command run anything, which is what running commands without a shell prevents.
    *
    * A name is matched case-insensitively, without a `.exe` / `.com` extension and without a trailing version
-   * (`Python3.12.EXE` is `python`). The list is a speed bump, not a boundary: no list names every program that can run
-   * another, so every name added with `WORKSPACE_EXTRA_COMMANDS` must be one the host trusts to run any code.
+   * (`Python3.12.EXE` is `python`). Interpreter families are matched by prefix as well, since they come in many
+   * spellings (`python3.7m`, `python3-dbg`, `pypy3`, `luajit`), as is the dynamic loader (`ld.so`, `ld-linux-x86-64.so.2`,
+   * `ld-musl-x86_64.so.1`), which runs any program given as its argument. Only ASCII letters, digits, `.`, `_`, `+` and
+   * `-` make a name, so no Unicode look-alike (`ｐｙｔｈｏｎ`, a Kelvin sign for `k`) reaches the comparison.
+   *
+   * The list is a speed bump, not a boundary: no list names every program that can run another - most tools with a
+   * plugin, hook, pager, editor or helper-program option can (the GTFOBins and LOLBAS catalogues list hundreds) - so
+   * every name added with `WORKSPACE_EXTRA_COMMANDS` must be one the host trusts to run any code.
    */
   val NeverAllowedCommands: Set[String] = Set(
     // Shells
     "sh",
     "bash",
+    "rbash",
     "zsh",
     "dash",
+    "ash",
     "ksh",
+    "mksh",
+    "yash",
     "csh",
     "tcsh",
     "fish",
+    "elvish",
+    "nu",
+    "xonsh",
     "busybox",
     "toybox",
     "cmd",
@@ -109,12 +124,16 @@ object WorkspaceSandboxConfig {
     // cmd.exe built-ins that run a program or a batch file (#1792)
     "call",
     "start",
-    // Interpreters
+    // Interpreters (the python, pypy, jython and lua families are also matched by prefix)
     "python",
     "python2",
     "python3",
     "pythonw",
     "py",
+    "pyw",
+    "pypy",
+    "pypy3",
+    "jython",
     "perl",
     "ruby",
     "irb",
@@ -124,6 +143,7 @@ object WorkspaceSandboxConfig {
     "bun",
     "php",
     "lua",
+    "luajit",
     "tclsh",
     "wish",
     "awk",
@@ -131,11 +151,43 @@ object WorkspaceSandboxConfig {
     "mawk",
     "nawk",
     "java",
+    "javaw",
     "jshell",
+    "jjs",
     "jrunscript",
+    "scala",
+    "kotlin",
+    "kotlinc",
+    "groovy",
+    "r",
+    "rscript",
+    "julia",
+    "guile",
+    "racket",
+    "swipl",
+    "sbcl",
+    "clisp",
+    "erl",
+    "escript",
+    "iex",
+    "elixir",
+    "ghci",
+    "runghc",
+    "ocaml",
+    "osascript",
+    "dc",
     "make",
     "gmake",
     "expect",
+    // Editors and stream editors that run a command: GNU sed's `e` command and `s///e` flag, `vim -c '!cmd'`,
+    // `emacs --batch --eval`
+    "sed",
+    "vi",
+    "vim",
+    "nvim",
+    "ex",
+    "view",
+    "emacs",
     // Launchers: run the program named in their arguments
     "env",
     "xargs",
@@ -154,30 +206,76 @@ object WorkspaceSandboxConfig {
     "time",
     "systemd-run",
     "parallel",
-    "taskset",
-    "chrt",
-    // Debuggers, remote and container tools
+    "prlimit",
+    "numactl",
+    "unbuffer",
+    "tini",
+    "tmux",
+    "screen",
+    "fakeroot",
+    "proot",
+    // Schedulers: run a command later
+    "at",
+    "batch",
+    "crontab",
+    // Debuggers and profilers, remote and container tools
     "strace",
     "ltrace",
     "gdb",
+    "lldb",
+    "valgrind",
+    "perf",
     "ssh",
     "docker",
     "podman",
-    // Privilege and namespace tools
+    // Privilege, scheduling and namespace tools: run the program named in their arguments
     "sudo",
     "su",
     "runuser",
     "doas",
     "pkexec",
+    "gosu",
+    "su-exec",
+    "setpriv",
+    "capsh",
     "nsenter",
     "unshare",
-    // Windows script and program hosts
+    "bwrap",
+    "firejail",
+    "taskset",
+    "chrt",
+    // Windows script and program hosts, and programs that run another one (LOLBAS)
     "wsl",
     "cscript",
     "wscript",
     "mshta",
-    "rundll32"
+    "rundll32",
+    "regsvr32",
+    "forfiles",
+    "conhost",
+    "explorer",
+    "msbuild",
+    "wmic",
+    "schtasks",
+    "runas",
+    "msiexec",
+    "pcalua",
+    "bitsadmin",
+    "hh",
+    "installutil",
+    "regasm",
+    "regsvcs",
+    "cmstp"
   )
+
+  /**
+   * Interpreter families whose every spelling runs code, matched by prefix: `python3.7m`, `python3-dbg`,
+   * `python-dbg`, `pypy3.10`, `jython2.7`, `luajit-2.1`.
+   */
+  private val NeverAllowedPrefixes: Seq[String] = Seq("python", "pypy", "jython", "lua")
+
+  /** The dynamic loader, which runs the program given as its argument: `ld.so`, `ld-linux-x86-64.so.2`, `ld64.so.1`. */
+  private val DynamicLoader = "ld[^.]*\\.so(\\..*)?".r
 
   private val CommandName = "[A-Za-z0-9._+-]+".r
 
@@ -187,11 +285,15 @@ object WorkspaceSandboxConfig {
   /** Extensions of the files Windows runs through cmd.exe, outside the runner's cmd.exe checks (BatBadBut, #1761). */
   private val BatchExtensions = Seq(".bat", ".cmd")
 
-  /** Whether `name` is on [[NeverAllowedCommands]], in any case, with any `.exe` / `.com` extension or version. */
+  /**
+   * Whether `name` is on [[NeverAllowedCommands]], in any case, with any `.exe` / `.com` extension or version, or
+   * is of an interpreter family or the dynamic loader.
+   */
   private def neverAllowed(name: String): Boolean = {
     val key         = programKey(name, windows = true)
     val unversioned = TrailingVersion.replaceFirstIn(key, "")
-    NeverAllowedCommands.contains(key) || (unversioned.nonEmpty && NeverAllowedCommands.contains(unversioned))
+    NeverAllowedCommands.contains(key) || (unversioned.nonEmpty && NeverAllowedCommands.contains(unversioned)) ||
+    NeverAllowedPrefixes.exists(key.startsWith) || DynamicLoader.matches(key)
   }
 
   private def parseCommandNames(names: String): Either[String, Set[String]] = {

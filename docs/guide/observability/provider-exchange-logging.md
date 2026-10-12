@@ -196,7 +196,9 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   cut off after its `,` has it, a `pytest` assertion diff whose lines start with `E` and its `+`/`-` markers,
   a notebook's `text/plain` line array in an `.ipynb` file, `str(dict)` inside a `repr`
   (`{'body': '{\'password\': "it\'s..."}'}`), Python's `\'` inside a JSON string
-  (`"{'password': 'a\\'b\"c'}"`), `Settings(token=['a', 'b'])` and a `\"` in an earlier leaf are redacted; a
+  (`"{'password': 'a\\'b\"c'}"`), `Settings(token=['a', 'b'])`, a call under a sensitive key
+  (`Settings(token=SecretStr('...'))`, `api_key=module.Secret(value='...')`) and a `\"` in an earlier leaf are
+  redacted; a `"` of a credential in a single-quoted string is replaced with it (`'[REDACTED]'`), while a
   `"` that delimits a JSON string, at any depth, is never replaced, so the JSON still parses, and what this
   reading replaces is added only where no other replacement is), `key=value` pairs and quoted
   `KEY="value"` / `KEY='value'` assignments outside a query string (for example `password=...`,

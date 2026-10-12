@@ -116,7 +116,7 @@ class JAgentHumanReviewSpec extends AnyFlatSpec with Matchers {
     ran.asScala.toList shouldBe List("one", "two")
   }
 
-  "PendingInterrupt.of" should "list approvals, then tool questions, middleware questions and breakpoints" in {
+  "FacadeInternals.pending" should "list approvals, then tool questions, middleware questions and breakpoints" in {
     val c = call("c1", "deploy", "x")
     val status = AgentStatus.Suspended(
       Vector(InterruptId("a") -> ApprovalRequest("m", c, "why", ApprovalSource.Tool, IdempotencyKey("k1"))),
@@ -132,7 +132,7 @@ class JAgentHumanReviewSpec extends AnyFlatSpec with Matchers {
       ),
       Vector(InterruptId("b") -> BreakpointRequest(NodeId("assistant/finish"), GraphPhase.Before, None))
     )
-    val pending = PendingInterrupt.of(status).asScala.toList
+    val pending = FacadeInternals.pending(status).asScala.toList
     pending.map(p => p.id -> p.kind) shouldBe List(
       "a" -> InterruptKind.APPROVAL,
       "q" -> InterruptKind.QUESTION,
@@ -143,7 +143,7 @@ class JAgentHumanReviewSpec extends AnyFlatSpec with Matchers {
     pending(2).toolName() shouldBe Optional.of("deploy")
     pending(3).node() shouldBe Optional.of("assistant/finish")
     pending.distinct should have size 4
-    pending(3) should not be PendingInterrupt.of(status).asScala.toList(2)
+    pending(3) should not be FacadeInternals.pending(status).asScala.toList(2)
   }
 
   "BreakpointPhase" should "be a Java enum" in {

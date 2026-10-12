@@ -106,3 +106,6 @@ A: The workspace requires access to the Docker daemon. If running on Linux, ensu
 
 **Q: Cannot connect to stdio MCP server**
 A: Build the server config with `MCPServerConfig.stdio`, which requires the exact command that starts the server, then pass it to `new MCPClientImpl(config)`. Make sure the executable is in your PATH or provide the absolute path. Example: `val config = MCPServerConfig.stdio("sqlite", Seq("npx", "-y", "@modelcontextprotocol/server-sqlite")); val client = new MCPClientImpl(config)`.
+
+**Q: An MCP tool call fails with "timed out"**
+A: Each request to an MCP server must finish within its `MCPServerConfig.timeout` (30 seconds by default). Over Streamable HTTP that covers the whole exchange, including a reply the server streams as SSE while the tool runs, so a tool that takes longer fails rather than completing late, and the connection is closed. Give that server a longer timeout, for example `MCPServerConfig.streamableHTTP("reports", url, timeout = 5.minutes)`.
