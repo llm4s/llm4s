@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`llm4s-agent-checkpoint-sqlite`: the first durable checkpointer** ([#1701](https://github.com/llm4s/llm4s/issues/1701),
+  Stage 2 slice 2 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `SqliteCheckpointer`
+  (`org.llm4s.agent.graph.sqlite`) keeps threads - checkpoint history, pending writes, event log and run claim - in one
+  SQLite file, so a run survives a restart: a new process opens the file, replays the stopped run's events, and
+  `recover` continues it without re-running the tasks that had completed. Several stores, in one process or in several
+  on one host, can share the file; every write is one `BEGIN IMMEDIATE` transaction that checks the claim's token and
+  the thread's version and applies the commit, fencing tokens come from a counter stored in the file (so they keep
+  increasing across restarts and `deleteThread`), and claims expire by the store's injected `Clock`. The file runs in
+  WAL mode with `synchronous = FULL`; `SqliteCheckpointerConfig.busyTimeout` (default 5 s) bounds how long a write waits
+  for another connection's. The schema is versioned and migrated on open, and a file from a newer build is refused. It
+  passes `CheckpointerContract` over one connection and over two alternating connections to one file, and a test kills
+  a forked JVM mid-run and recovers its thread. It implements #1702's `history`, `checkpoint` and `prune` over a history
+  table paged by its primary key, each write one transaction. The sample `SqliteRestartRecoveryExample` shows a restart
+  and recovery.
+  See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#the-sqlite-store).
 - **`sbt pomMetadataCheck`: every published POM carries its metadata** ([#1455](https://github.com/llm4s/llm4s/issues/1455)):
   a CI quick check that reads the POM sbt generates for each of the 44 published projects (the `llm4s-*` artifacts, the
   BOM and the relocation stubs) and fails when one lacks a name, a description of its own, an https project URL, a
@@ -2548,6 +2563,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now refuses a path that is a directory, a FIFO, a device or larger than 64 KiB, as a `ConfigurationError` naming
   `workloadIdentity.identityTokenFile`; a path that does not exist yet is still accepted. Documented in the
   configuration guide.
+- **MCP: `MCPServerConfig.timeout` now bounds a Streamable HTTP call whose reply is an SSE stream** ([#1785](https://github.com/llm4s/llm4s/issues/1785)):
+  the HTTP request timeout stops counting once the response headers arrive, and a Streamable HTTP server that answers
+  with an SSE stream - as servers built on the MCP SDKs do - sends them at once, so a call to a long-running tool
+  waited for the tool however long it ran (20 s against a 2 s timeout on the MCP reference server).
+  `StreamableHTTPTransportImpl` now reads the reply body against the same deadline as the request: a call ends at the
+  configured timeout whether the reply is plain JSON or an SSE stream, with a transport error saying it timed out (a
+  `ToolCallError.HandlerError` from a tool call), and the connection is closed, so the server sees the client leave.
+  An SSE reply is read event by event and returns as soon as its JSON-RPC response arrives, without waiting for the
+  server to end the stream. An interrupt while reading the stream is still a `CancelledError`. Behaviour change: an
+  MCP tool that runs longer than its server's `timeout` (30 s by default) over Streamable HTTP now fails instead of
+  completing late; raise `timeout` for such a server.
 - **Security - `Redaction`: a keyword argument whose value is a call, and a `"` inside a redacted Python string** ([#1813](https://github.com/llm4s/llm4s/issues/1813)):
   `Settings(token=SecretStr('...'))`, `password=Wrapper("...")` and `api_key=module.Secret(value='...')` kept the
   credential readable - `pydantic` masks its own `SecretStr` in a `repr`, a wrapper class of one's own does not - while

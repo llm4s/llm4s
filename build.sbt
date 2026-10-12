@@ -295,6 +295,7 @@ lazy val llm4s = (project in file("."))
     schemaDerivation,
     testkit,
     agentTestkit,
+    agentCheckpointSqlite,
     llm4sEffect,
     llm4sZio,
     llm4sPekko,
@@ -1344,6 +1345,7 @@ lazy val samples = (project in file("modules//samples"))
     observabilityPrometheus,
     agent,
     agentTools,
+    agentCheckpointSqlite,
     llm4sEffect,
     llm4sZio,
     llm4sPekko,
@@ -1592,6 +1594,31 @@ lazy val agentTestkit = (project in file("modules/agent-testkit"))
     )
   )
 
+// `llm4s-agent-checkpoint-sqlite` (#1701) is the first durable `Checkpointer`: `SqliteCheckpointer`, one SQLite file
+// that survives a restart and that runtimes in several processes can share, fenced by run claims. Its own module,
+// as the design (section 3.1) asks of every checkpoint adapter, because `llm4s-agent` is frozen and
+// `frozenDependencyCheck` bans a JDBC driver there; the driver is declared here, never in `commonSettings`, at the
+// version `llm4s-memory` already uses. It needs no service, so no suite needs a `modules/it` tier: its tests,
+// including the one that kills a forked JVM mid-run and recovers in this one, run with `sbt test`.
+lazy val agentCheckpointSqlite = (project in file("modules/agent-checkpoint-sqlite"))
+  .dependsOn(agent, agentTestkit % Test)
+  .settings(
+    name := "llm4s-agent-checkpoint-sqlite",
+    commonSettings,
+    // Measured 97.96% statement coverage
+    // (`sbt coverage agentCheckpointSqlite/test agentCheckpointSqlite/coverageReport`) on its first version.
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.sqlite,
+      Deps.ujson,
+      Deps.scalatest % Test
+    )
+  )
+
 // `llm4s-agent-tools` carries the ready-made tools: `org.llm4s.toolapi.builtin` (core utilities,
 // filesystem, HTTP, shell, and the Brave, DuckDuckGo and Exa search clients) and the demo
 // `toolapi.tools.WeatherTool`. They are integrations with third-party APIs, so they leave the
@@ -1762,6 +1789,7 @@ lazy val docs = (project in file("modules/docs"))
     traceOpentelemetry,
     agent,
     agentTestkit,
+    agentCheckpointSqlite,
     agentTools,
     knowledgegraphNeo4j,
     llm4sEffect,
@@ -1810,6 +1838,7 @@ lazy val docs = (project in file("modules/docs"))
         (traceOpentelemetry / Compile / sources).value ++
         (agent / Compile / sources).value ++
         (agentTestkit / Compile / sources).value ++
+        (agentCheckpointSqlite / Compile / sources).value ++
         (agentTools / Compile / sources).value ++
         (knowledgegraphNeo4j / Compile / sources).value ++
         (llm4sEffect / Compile / sources).value ++
