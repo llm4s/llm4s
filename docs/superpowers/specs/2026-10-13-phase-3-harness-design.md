@@ -1,6 +1,6 @@
 # Phase 3: the Deep Agents harness profile, sliced
 
-Stage 3 of #1266. Design record: `docs/design/typed-agent-runtime-design.md` §5.4, §5.6, §6 (row 3) and
+Stage 3 of #1266, tracked by #1901. Design record: `docs/design/typed-agent-runtime-design.md` §5.4, §5.6, §6 (row 3) and
 the Stage 3 rows of §4.9. This document refines that stage and breaks it into slices: core slices that
 fix shared contracts, feature slices that run in parallel on them, and integration slices that finish
 the stage.
@@ -49,23 +49,23 @@ streaming, checkpoint/resume, and persisted artifacts, and runs deterministicall
 
 ## Slice map
 
-| # | Slice | Kind | Depends on |
-|---|---|---|---|
-| C1 | Middleware that sees and writes state on the model side, and contributes prompt sections | core | - |
-| C2 | Tool permissions and timeouts | core | - |
-| C3 | Backend SPIs: files, sandbox, long-term store | core | - |
-| F1 | Filesystem tool suite | feature | C2, C3 |
-| F2 | Workspace sandbox and file backends; `WorkspaceTools` removed | feature | C3 |
-| F3 | Todos | feature | C1 |
-| F4 | Summarisation and tool-output offload | feature | C1, C3 |
-| F5 | Agent Skills | feature | C1, C3 |
-| F6 | Instruction memory (`AGENTS.md`) | feature | C1, C3 |
-| F7 | Semantic memory, `llm4s-agent-memory` | feature | C1 |
-| F8a | Response format for the agent's answer | feature | - |
-| F8b | Multimodal content parts (core) | feature | - |
-| F9 | Typed custom streams | feature | - |
-| P1 | Harness profile | integration | F1, F3-F6 (F2 optional) |
-| P2 | Exit examples as acceptance suites | integration | all |
+| # | Issue | Slice | Kind | Depends on |
+|---|---|---|---|---|
+| C1 | #1902 | Middleware that sees and writes state on the model side, and contributes prompt sections | core | - |
+| C2 | #1903 | Tool permissions and timeouts | core | - |
+| C3 | #1904 | Backend SPIs: files, sandbox, long-term store | core | - |
+| F1 | #1905 | Filesystem tool suite | feature | C2, C3 |
+| F2 | #1906 | Workspace sandbox and file backends; `WorkspaceTools` removed | feature | C3 |
+| F3 | #1907 | Todos | feature | C1 |
+| F4 | #1908 | Summarisation and tool-output offload | feature | C1, C3 |
+| F5 | #1909 | Agent Skills | feature | C1, C3 |
+| F6 | #1910 | Instruction memory (`AGENTS.md`) | feature | C1, C3 |
+| F7 | #1911 | Semantic memory, `llm4s-agent-memory` | feature | C1 |
+| F8a | #1912 | Response format for the agent's answer | feature | - |
+| F8b | #1913 | Multimodal content parts (core) | feature | - |
+| F9 | #1914 | Typed custom streams | feature | - |
+| P1 | #1915 | Harness profile | integration | F1, F3-F6 (F2 optional) |
+| P2 | #1916 | Exit examples as acceptance suites | integration | all |
 
 Parallel lanes:
 
@@ -80,7 +80,7 @@ core must settle before MiMa, so it is reviewed first.
 
 ## Core slices
 
-### C1: model-side state and prompt sections
+### C1: model-side state and prompt sections (#1902)
 
 Today `wrapModelCall` sees only the request and returns a `Completion`. Summarisation, todos, skills and
 memory recall need to read thread state, write their own keys, and contribute system-prompt content.
@@ -111,7 +111,7 @@ Tests: state read and write through a wrapper; undeclared write refused; a retry
 updates not committed; section ordering, caching order and duplicate ids; updates surviving
 checkpoint/resume on `InMemoryCheckpointer`.
 
-### C2: tool permissions and timeouts
+### C2: tool permissions and timeouts (#1903)
 
 - `AgentToolSpec.withTimeout(FiniteDuration)` (a new `timeout: Option[FiniteDuration]` field).
   - The loop interrupts the task when it runs over and writes a tool-level
@@ -141,7 +141,7 @@ Tests: first match wins, unmatched denied, multi-resource calls, `Ask` resumes a
 timeout produces an error result and the barrier still gets one result per call, a cancelled run
 during a timed tool is `CancelledError`, not a timeout.
 
-### C3: backend SPIs
+### C3: backend SPIs (#1904)
 
 All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 
@@ -183,7 +183,7 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 
 ## Feature slices
 
-### F1: filesystem tool suite
+### F1: filesystem tool suite (#1905)
 
 `FileTools(backend)` yields `ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob` and `grep` as
 `AgentTool`s.
@@ -195,7 +195,7 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 - Tool names match Deep Agents. `ToolSet` rejects duplicate names, so the docs tell users not to
   register `llm4s-agent-tools`' host file tools alongside this suite.
 
-### F2: workspace sandbox
+### F2: workspace sandbox (#1906)
 
 - In `workspaceClient`, `WorkspaceSandboxBackend` implements `SandboxBackend` and `WorkspaceFileBackend`
   implements `FileBackend`, both over `WorkspaceAgentInterface`.
@@ -206,7 +206,7 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 - Live-container tests go in `modules/it` under the `@Workspace` tier. Unit tests use a fake
   `WorkspaceAgentInterface`.
 
-### F3: todos
+### F3: todos (#1907)
 
 - `TodoMiddleware` contributes:
   - a `todos` key, `Vector[Todo(id, content, status)]`, with `status` = `Pending | InProgress | Done`
@@ -215,7 +215,7 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 - The plan guides the model only: it never routes or overrides tool policy (§8).
 - Each change emits a durable `HarnessEvents.TodosUpdated` custom event.
 
-### F4: context management
+### F4: context management (#1908)
 
 - `SummarizationMiddleware(trigger, keepRecent, compressor)`:
   - The trigger is a token count or message count of the outgoing request, measured with core's token
@@ -231,7 +231,7 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
   - The model sees a short preview plus that path, and reads more with `read_file`.
 - `ContextWindowMiddleware` stays as the pruning-only option.
 
-### F5: Agent Skills
+### F5: Agent Skills (#1909)
 
 - `SkillsMiddleware(sources: Vector[VPath], backend)` discovers `<source>/*/SKILL.md` through the backend
   once per run.
@@ -243,7 +243,7 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
   - a malformed skill is skipped and reported in a durable event; it does not fail the run
 - `allowed-tools` is parsed and exposed on `Skill`, not enforced in Stage 3.
 
-### F6: instruction memory
+### F6: instruction memory (#1910)
 
 - `InstructionMemoryMiddleware(paths: Vector[VPath], backend)` reads the listed `AGENTS.md` files in
   order (for example user scope, then project scope) once per run, as one prompt section.
@@ -252,7 +252,7 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
   shows at the next run. Instruction memory differs from semantic memory (§9 "Skills and memory
   distinction").
 
-### F7: semantic memory (`llm4s-agent-memory`)
+### F7: semantic memory (`llm4s-agent-memory`) (#1911)
 
 - `SemanticMemoryMiddleware(manager: MemoryManager, recall, record, consolidate)`:
   - Recall runs `getRelevantContext` on the run input in `beforeAgent`, kept for the run, and shows it as
@@ -268,7 +268,7 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
   - `docs` project source list
   - `hooks/pre-commit`
 
-### F8a: response format for the agent's answer
+### F8a: response format for the agent's answer (#1912)
 
 - `AgentBuilder.withOutput[O](using SchemaDefinition[O], ReadWriter[O])` records the schema.
   `withOutputOf[O: SchemaOf]` is a convenience in `schema-derivation`.
@@ -280,7 +280,7 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 - `AgentResult.decodeOutput[O: ReadWriter]: Result[O]` decodes the answer. `Agent` stays non-generic;
   Stage 4's `TypedAgent[I, O]` builds on this.
 
-### F8b: multimodal content parts (core)
+### F8b: multimodal content parts (core) (#1913)
 
 - `ContentPart` = `Text(text) | Image(source: MediaSource, mediaType) | Document(source, mediaType)`,
   using `org.llm4s.media`.
@@ -291,7 +291,7 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 - `ProviderModuleChecks` gains `assertContentParts`, and every chat provider module's spec calls it.
 - The graph and tool-result model carry parts unchanged, so a tool can return an image.
 
-### F9: typed custom streams
+### F9: typed custom streams (#1914)
 
 - `agent.stream(threadId, query, events = Set(eventTypes))(listener)` and `AgentRun.subscribe`, filtered
   by `EventType[A]`, with typed payloads.
@@ -300,7 +300,7 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 
 ## Integration slices
 
-### P1: harness profile
+### P1: harness profile (#1915)
 
 `HarnessProfile` is a growth-prone `final case class HarnessProfile private (...)`, with `apply`
 defaults and `with*` setters. Its fields:
@@ -327,7 +327,7 @@ defaults and `with*` setters. Its fields:
 - Defaults are in `llm4s.agent.harness.*` in `llm4s-agent`'s `reference.conf`, read by
   `HarnessConfigLoader` at the app edge, never by `sys.env` (CLAUDE.md "Core Principles").
 
-### P2: exit examples
+### P2: exit examples (#1916)
 
 Both run as samples and as deterministic specs on `ScriptedLLMClient`.
 
