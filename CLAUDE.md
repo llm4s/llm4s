@@ -17,66 +17,58 @@
 3. **Use type-safe newtypes** - `ModelName`, `ApiKey`, `ConversationId` etc.
 4. **Scala 3 idioms are welcome** - `opaque type`, `using` clauses, `enum` and `extension` are all in use. Do not rewrite them to a Scala 2.13-compatible subset; see [#1127](https://github.com/llm4s/llm4s/issues/1127)
 
-## Active: modularisation programme (#1126)
+## Status
 
-`modules/core` is being split into per-concern modules ahead of a 1.0 API freeze. **Before moving, renaming, or adding files under `modules/core`, read [#1126](https://github.com/llm4s/llm4s/issues/1126) and the relevant slice issue.**
+The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/issues/1126)) is done; slice 8 ([#1281](https://github.com/llm4s/llm4s/issues/1281)) is the 0.5.0 release, MiMa baseline and compatibility policy, then 1.0. **Nothing is frozen until 0.5.0 is published and the MiMa baseline is set.** "Frozen module" below means a module in 1.0 Scope's *Frozen at 1.0* tier (those calling `mimaFrozen` in `build.sbt`); it is a target, not a constraint. Never argue for or against a design from "frozen", "the baseline" or "can be added later without breaking": fix a bad API outright, record the break in the CHANGELOG and migration guide, and add no shim or `@deprecated` overload. Coverage floors are in [#1127](https://github.com/llm4s/llm4s/issues/1127); they ratchet upward and are never lowered.
 
-Slice order — each is an issue with its own scope and gotchas:
+## Architecture rules
 
-| Slice | Issue | Carves |
-|---|---|---|
-| 0 ✅ | [#1127](https://github.com/llm4s/llm4s/issues/1127) | build + tracker prerequisites |
-| 1 ✅ | [#1128](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` |
-| 2 ✅ | [#1129](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` |
-| 3 ✅ | [#1130](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` |
-| 4 ✅ | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
-| 5 ✅ | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (incl. Mistral, Cohere), `llm4s-voyage`; core holds no client |
-| 6 ✅ | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `TracingBackend` SPI; `llm4s-observability` (Langfuse, trace collector/model/store, `CostTracker`); `llm4s-observability-prometheus`; pre-baseline API cleanup (passes 1-8) |
-| 7 ✅ | [#1242](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (built-in tools + their config); `llm4s-agent` (`agent`, `assistant`); spine re-audit (core 20.7k lines) |
-| 8 ⏳ | [#1281](https://github.com/llm4s/llm4s/issues/1281) | release, not a carve: publish 0.5.0, MiMa baseline on the Frozen-at-1.0 modules, `@Stable` / `@Experimental`, compatibility policy, g8 template; then 1.0 |
+**Core is the spine** (`types`, `error`, `config`, `model`, `toolapi`, `context`, `llmconnect`, the `trace`/`metrics` contracts, `util`, `http`, `reliability`, `core/safety`, `security`, `resource`, `syntax`, `identity`) on cats, upickle, slf4j-api, Typesafe Config, pureconfig and jtokkit only.
+- No vendor SDK (`com.anthropic`, `com.azure`, `com.openai`), observability, JDBC, parsing or speech dependency in core. `commonSettings` carries no JDBC driver: declare one per module. The build has no third-party resolvers; think hard before adding one.
+- Nothing in core imports `org.llm4s.agent` or `org.llm4s.assistant`. Core's trace specs build `TraceEvent.AgentRunEnded` directly.
+- A utility with one consuming module lives in that module, not core. A helper only llm4s modules use is `private[llm4s]`.
+- Moving code between modules keeps its `org.llm4s.*` package, and its tests, `reference.conf` keys and `modules/it` suite move with it.
 
-**Invariants for every carve:**
+**Providers.** A provider is a `ProviderDescriptor` (or `EmbeddingProviderDescriptor`), never an edit to shared files: list it in an `Llm4sProviderModule` declared in `META-INF/services/org.llm4s.llmconnect.spi.Llm4sProviderModule`, a `class` with a public no-arg constructor, never an `object`. `ProviderRegistry.of` / `.ofModules` / `.withProvider` do explicit registration.
+- **Core ships no provider, no provider list and no main services entry.** Never add one back.
+- Each provider module proves itself in an `Llm4s<Name>ModuleSpec` built on `llm4s-provider-testkit`'s `ProviderModuleChecks`: discovery, sole supplier, explicit registration, a config-to-client round trip per descriptor, plus `assertRefusesForeignConfig`, `assertStreams` and `assertCredentialBindings` where they apply.
+- **OpenAI-compatible** (`/chat/completions`): first check whether the generic `openai-compatible` provider covers it with config alone; otherwise a dialect (`OpenAICompatibleDialect`) and descriptor in `modules/openai-compatible`, as Mistral and Cohere are. Never another copy of the client. `OpenAIConfig` lives there; `llm4s-openai` depends on it, never the reverse.
+- **Anything else**: `modules/providers/<name>`, artifact `llm4s-<name>`, depending only on core. `modules/providers/voyage` is the template, `modules/ollama` the chat plus embeddings example.
+- A streamed tool call's continuation deltas carry only `index`; a client must give each its call's id (`OpenAICompatibleClient.StreamToolCalls`), because `StreamingAccumulator` keys calls by id.
+- Vendor model rules live in the vendor's module, layered on with `RequestTransformer.adjusted` (`OpenAIModelRules`). The provider-author SPI is public: `docs/guide/writing-a-provider.md`.
+- A field only some providers read is that provider's declared extra, never a field of `NamedProviderConfig`. `BuiltinKeys` is `provider`, `model`, `baseUrl`, `apiKey`, `headers`, `timeouts` and `auth`.
+- Core tests never use a real provider: use `org.llm4s.testutil.FixtureChatProvider` (id `fixturechat`) and `FixtureEmbeddingProvider` (id `fixtureembedding`), registered by core's **test** `META-INF/services` and visible to every module depending on `core % "test->test"`.
+- Test-only dependencies stay test-only: `rag` on `openai`, `image` on `observability-prometheus`.
 
-1. **Keep package names.** Move files between sbt modules without renaming `org.llm4s.*`, so each carve stays source-compatible — users add a dependency, not new imports. The one sanctioned exception is `org.llm4s.extract` in slice 1.
-2. **Tests move with their code.** Leaving them behind silently drops coverage in both modules.
-3. **`reference.conf` keys move with their code.** HOCON merges across jars; keys left behind become defaults that apply to nothing.
-4. **Coverage floor and codecov flag land in the same commit as the carve.** A missing flag makes the moved code untracked rather than failing.
-5. **One migration note per slice**, in CHANGELOG and docs.
-6. **Integration suites move with their code, and keep a tier.** A suite that needs a
-   database, a container, a model server or an API key lives in `modules/it` and declares
-   exactly one tier tag from `org.llm4s.it.tags`; `sbt it/itTierCheck` fails the build
-   otherwise. Carving code out of `core` without carrying its integration suite - or moving
-   the suite and leaving it untagged - removes the only signal the carve has (see
-   [#1143](https://github.com/llm4s/llm4s/issues/1143)).
-7. **Add the new module to the `docs` project in `build.sbt`.** The published Scaladoc is one
-   aggregate API tree built from that project's source list, not from `core` alone. A module
-   missing from it does not fail - its API pages are simply never generated, which reads as
-   "this API does not exist". Slices 1 and 2 both hit this and it went unnoticed until slice 3;
-   `pages.yml` now fails the deploy if a known package is absent, and the ScalaDoc CI job runs
-   `docs/doc` on every PR.
-8. **A provider is a `ProviderDescriptor`, not an edit to shared files** - since slice 4 PRs 2
-   and 3 ([#1131](https://github.com/llm4s/llm4s/issues/1131)). Implement
-   `org.llm4s.llmconnect.spi.ProviderDescriptor`, list it in an `Llm4sProviderModule`, and
-   declare that module in `META-INF/services/org.llm4s.llmconnect.spi.Llm4sProviderModule` - a
-   `class` with a public no-arg constructor, never an `object`. Adding a provider is then adding
-   a dependency; `ProviderRegistry.of` / `.ofModules` / `.withProvider` remain for explicit
-   registration. Nothing in `llm4s-core` needs editing: `ProviderCapabilities`,
-   `ProviderCapabilitiesRegistry` and the twelve `NamedProviderValidators` objects are gone, and
-   the dispatch `match` expressions in `LLMConnect` and `NamedProviderLoader` with them.
-   **`llm4s-core` ships no provider and holds no provider list**: `BuiltinProviders`,
-   `BuiltinProviderModule`, `BuiltinProvidersSpec`, core's main `META-INF/services` entry and
-   `ProviderRegistry.builtin` were deleted when the last client left core in slice 5
-   ([#1132](https://github.com/llm4s/llm4s/issues/1132)). Never add a provider, a provider
-   list or a services entry back to core. Each provider module proves its own registration
-   instead, in an `Llm4s<Name>ModuleSpec`: discovered through `ProviderRegistry.discover()`,
-   the only module supplying its ids, registrable with `ProviderRegistry.ofModules`, and a
-   config-to-client round trip per descriptor - that spec is what replaced the compiler's
-   exhaustivity check over the old closed `enum`. `modules/ollama` (chat plus embeddings) and
-   `modules/providers/voyage` (embeddings only) are the worked examples: their own
-   `Llm4s<Name>Module`, services entry, `reference.conf` block and module spec, and nothing of
-   them in core.
+**Tracing and metrics.** Core keeps only the contract (`Tracing`, `TraceEvent`, `TracingComposer`, `TracingMode` = `Console` | `NoOp` | `Named`, `TracingSettings(mode, extras)`, `MetricsCollector`) and registers no backend. A backend is an `org.llm4s.trace.spi.TracingBackend` (`class`, in `META-INF/services`) that parses its own `llm4s.tracing.<mode>` block from `TracingSettings.extras`. Its module ships that block, the services entry and a `<Name>TracingBackendSpec`. Never add a `TracingMode` case object, a backend field on `TracingSettings` or a backend's `reference.conf` block to core.
 
-Current per-module coverage floors are recorded in [#1127](https://github.com/llm4s/llm4s/issues/1127); floors ratchet upward and are never lowered.
+**Other placement rules.**
+- `llm4s-agent-tools` depends on core only, never on the agent runtime.
+- `org.llm4s.media` has no I/O, no content sniffing and no third-party dependency.
+- `org.llm4s.vectorstore.PostgresVectorHelpers` stays in core because `llm4s-rag` and `llm4s-memory-postgres` must not depend on each other.
+
+## API rules (frozen modules)
+
+- No speculative public types and no `@deprecated` members: delete, with a migration note.
+- A new top-level public type needs `@Stable` (or `@Experimental` for Beta) from `org.llm4s.annotation`; `sbt stabilityTierCheck` enforces it. A companion object is covered by its class.
+- Public signatures expose no third-party type (fansi, cats type classes) and no implicit that a wildcard import would pull in.
+- **Growth-prone data types** (`CompletionOptions`, `Completion`, `StreamedChunk`, `TokenUsage`, `ModelCapabilities`, `ModelMetadata`, `ProviderConfigSpec`, `EmbeddingConfigSpec`, `ProviderFeatures`, `NamedProviderConfig`, `ReliabilityConfig`, `CircuitBreakerConfig`, `RateLimitConfig`, `ContextConfig`, and any new one that may grow) are `final case class X private (...)` with a companion `apply` carrying the defaults and `with*` setters (an `Option` field's setter takes the value or an `Option`). `.copy` is private and stays private.
+  - To add a field: add it to the constructor and, with a default, to `apply`; keep the previous `apply` as an overload without defaults that forwards; add `withX`.
+  - A type with an upickle `macroRW` keeps its constructor defaults, because the reader fills missing keys from them.
+- **Durations are `FiniteDuration`, points in time `Instant`.** Never a raw `Int`/`Long` with the unit in its name (`timeoutMs`), and never a plain `Duration`, which admits `Duration.Inf`.
+  - Wire formats keep their units: convert at the boundary (`.toMillis`; `DurationJson.millisRW` or `WireDurations` for a `macroRW`, with `@upickle.implicits.key` pinning a renamed field).
+  - Round up with `DurationRounding` where an API reads `0` as "no timeout".
+  - `s"${d}ms"` prints `150 millisecondsms`: use `d.toMillis`.
+
+## Adding a module
+
+Each step below is easy to miss because a missing one does not fail the build.
+1. Add a coverage floor (or an explicit disabled policy), a codecov flag and a CI upload in the same commit.
+2. Add a migration note in the CHANGELOG and docs.
+3. Add the module to the `docs` project's source list in `build.sbt`. Otherwise its Scaladoc is silently never generated.
+4. Register it in `hooks/pre-commit`.
+5. If it has an integration suite that needs a database, container, model server or API key, put the suite in `modules/it` with exactly one tier tag from `org.llm4s.it.tags`; `sbt it/itTierCheck` enforces this. A store that needs none, such as SQLite, runs its suites in its own module.
+6. A provider module also goes into the root aggregate, `samples`, `it`, and `configPolicy` if it has chat providers.
 
 ## Repository Structure
 
@@ -135,204 +127,6 @@ llm4s/
 └── build.sbt
 ```
 
-Slices 0 to 3 have landed. `modules/rag`, `modules/knowledgegraph`, `modules/memory`,
-`modules/memory-postgres`, `modules/mcp`, `modules/media`, `modules/image` and `modules/speech`
-are carved, so `modules/core` no longer holds `rag`, `vectorstore` (bar `PostgresVectorHelpers`,
-see below), `chunking`, `reranker`, `eval`, `knowledgegraph`, `agent/memory`, `mcp`,
-`imagegeneration`, `imageprocessing` or `speech`, nor any Tika/POI/PDFBox/jsoup/AWS, HikariCP,
-Postgres, SQLite, Java-WebSocket, Vosk or JNA dependency. Slices 4 to 7 then took the
-provider clients, the observability integrations, the built-in tools and the agent runtime, so core
-is now the ~19k-line spine (see below).
-Those three JDBC dependencies also left `commonSettings`, which used to put them on every
-module's classpath - declare them per-module if you add database code. The build now has **no
-third-party resolvers at all**: the "Vosk Repository" at alphacephei.com was the last one, and
-it went with the speech carve because Vosk publishes to Maven Central and it had never resolved
-anything. Think hard before adding one back.
-
-Slice 5 is done. `modules/ollama` carries the Ollama chat client, embedding provider,
-`OllamaConfig`, model lister and its `llm4s.embeddings.ollama` block, so core's tests cannot
-use Ollama as a convenient no-key provider any more - use a fixture descriptor, as
-`EmbeddingProviderSpiSpec` and `ModelDimensionRegistrySpec` do. `modules/gemini` followed,
-carrying both Google providers - the Gemini API and Vertex AI, which only calls Gemini models in
-the same JSON format and needs no extra dependency. `modules/anthropic` came third and took the
-Anthropic Java SDK with it. `modules/openai` came fourth with the three providers that share
-`OpenAIClient` - OpenAI, Azure and Requesty - plus `OpenAIEmbeddingProvider`, `AzureConfig` and
-the tool helper, and took the Azure OpenAI SDK: **core now depends on no vendor SDK
-(`com.anthropic`, `com.azure`, `com.openai`)**, and must not again. `OpenAIClient` has since
-moved from Microsoft's deprecated `com.azure:azure-ai-openai` to OpenAI's `com.openai:openai-java`,
-which serves Azure too (`AzureApiKeyCredential`, a forced `AzureUrlPathMode`, `api-version`), so
-`AzureToolHelper` became `OpenAIToolHelper`; tests build SDK objects from JSON through
-`ObjectMappers.jsonMapper()` (`OpenAISdkFixtures`), and read responses leniently through
-`_field().asKnown()`, because the SDK's plain getters throw on a missing field. `modules/openai-compatible`
-came fifth and is a **consolidation, not a pure move**: DeepSeek, Z.ai and OpenRouter had three
-~400-line copies of one SDK-free chat-completions client, and are now thin subclasses of
-`OpenAICompatibleClient`, each with an `OpenAICompatibleDialect` (headers, content encoding,
-assistant-content policy, reasoning request, content/thinking/reasoning-token decoding,
-tool-call parser - every member defaults to the standard format). The module also holds
-`OpenAIConfig` - `llm4s-openai` depends on it for that, never the reverse, which would put the
-OpenAI SDK on every OpenAI-compatible user's classpath - and the generic `openai-compatible`
-provider, the standard dialect configured entirely from a named section (`baseUrl`, `model`,
-optional `apiKey`, `contextWindow`, `reserveCompletion`, `headers`; `headers` is a built-in field
-of `NamedProviderConfig`, the other two are the provider's own declared extras). **A new OpenAI-compatible provider is a
-dialect and a descriptor in that module, or just config** - check whether `openai-compatible`
-covers it before writing one; never another copy of the client. Mistral and Cohere followed as
-dialects: Mistral over its OpenAI-format `/v1/chat/completions` (nine-character tool-call ids,
-no empty assistant turns, content-as-chunks with thinking), Cohere over its OpenAI-compatibility
-API (`https://api.cohere.ai/compatibility/v1`; `developer` system role, `json_object`+`schema`
-response format; a configured native root gets `/compatibility/v1` appended). That gave both
-streaming, which they had never had (#925). The dialect hook therefore also has
-`sendEmptyAssistantTurns`, `encodeToolCallId`, `systemRole` and `encodeResponseFormat`, and the
-base client reports streamed token usage. Community providers that are **not** OpenAI-compatible
-live under `modules/providers/<name>`, published as `llm4s-<name>`: Voyage
-(`modules/providers/voyage`, `llm4s-voyage`, embeddings only) was the first. With it core held
-no client, and `BuiltinProviders` went (invariant 8). `StreamingResponseHandler` (with
-`forProvider`, `OpenAIStreamingHandler` and `AnthropicStreamingHandler`) and
-`OpenRouterToolCallDeserializer` were deleted with the openai-compatible carve: no client used
-them. A streamed tool call is split across deltas that
-continuations identify only by `index`; clients must give each continuation its call's id
-(`OpenAICompatibleClient.StreamToolCalls`), because `StreamingAccumulator` keys calls by id and
-skips a chunk with none. Tests that need an
-incidental API-key provider - and never a real one, which would leave core in a later carve -
-use `org.llm4s.testutil.FixtureChatProvider` (id `fixturechat`, `FixtureChatConfig`, a canned
-no-network client). It lives in core's test sources, is registered by core's **test**
-`META-INF/services`, so `ProviderRegistry.default` resolves it in core and in every module
-depending on `core % "test->test"`; core's test `application.conf` default is
-`fixturechat-main`. Its embedding counterpart is `org.llm4s.testutil.FixtureEmbeddingProvider`
-(id `fixtureembedding`, alias, API key, default base URL, env-var names, declared dimensions,
-canned vectors), registered the same way; use it wherever a spec needs "some embedding
-provider", as core's embedding config, registry and dimension specs do. A spec that builds its own registry passes
-it to `ProviderRegistry.of`/`.withProvider`. A provider module's own `Llm4s<Name>ModuleSpec` uses
-the published `llm4s-provider-testkit` (`org.llm4s.testkit.ProviderModuleChecks`: discovery, sole
-supplier, explicit registration, the config-to-client round trip, `assertRefusesForeignConfig`,
-`assertStreams`, `assertCredentialBindings`), so in-repo providers prove themselves exactly as an
-external one must; `CredentialsRoundTrip` and `LocalProviderTestServer` live there too. When a stand-in test checked a real provider's own facts in
-passing, those move to that provider's spec (`DeepSeekNamedProviderSpec`, now in
-`llm4s-openai-compatible`). Strings that do not reach a client
-(model-registry data, config-policy allow-lists, secret patterns) stay. `llm4s-rag`'s
-`RAGConfig.default` embeds with `openai`, so `rag` has a **test-only** dependency on `openai`;
-never make it a compile one - that would put the OpenAI SDK on every RAG user's classpath.
-
-Slice 6 is done. #1233 added the tracing extension point: `Tracing.create` builds `Console`
-and `NoOp` itself and dispatches every other mode to an `org.llm4s.trace.spi.TracingBackend`
-declared in `META-INF/services/org.llm4s.trace.spi.TracingBackend` (a `class`, never an `object`),
-selected by `TracingMode.Named(name)`. `modules/observability` (`llm4s-observability`, no
-third-party dependency) then took Langfuse (`LangfuseTracing`, `LangfuseBatchSender`,
-`LangfuseTracingBackend`, `LangfuseConfig`, `LangfuseConfigLoader`, `LangfuseConfigKeys`), the
-trace collector (`TraceCollectorTracing`, `trace.model`, `trace.store`) and `CostTracker`, and
-`OpenTelemetryConfig` went to `modules/trace-opentelemetry` (`llm4s-observability-otel`). **Core
-keeps only the tracing contract** - `Tracing`, `TraceEvent`, `TracingComposer`, `TracingMode`
-(`Console`, `NoOp`, `Named`), the SPI, `NoOpTracing`, `ConsoleTracing`, `TracingSettings(mode,
-extras)` - and **registers no backend and reads no backend's keys**: `TracingConfigLoader` reads
-`llm4s.tracing.mode` and hands the selected mode's `llm4s.tracing.<mode>` block to the backend as
-`TracingSettings.extras`, which each backend parses itself (`LangfuseConfig.fromExtras`,
-`OpenTelemetryConfig.fromExtras`), as provider descriptors read their section. Never add a
-`TracingMode` case object, a backend config field on `TracingSettings`, or a backend's
-`reference.conf` block back to core; a backend module ships its own block, services entry and
-`<Name>TracingBackendSpec` (discovery, explicit registration, a config round trip).
-`llm4s-rag` depends on `llm4s-observability` for `RAGASLangfuseObserver`.
-`modules/observability-prometheus` (`llm4s-observability-prometheus`) took `PrometheusMetrics`,
-`PrometheusEndpoint`, `MetricsConfigLoader` (public now; it replaces the removed
-`Llm4sConfig.metrics()`) and the `llm4s.metrics` `reference.conf` block, with the Prometheus client
-and HTTP server, so **core declares no observability dependency** and keeps only the
-`MetricsCollector` contract. It is separate from `llm4s-observability` so that `rag` does not pass
-Prometheus on; `image` has it as a **test-only** dependency, for `ImageGenerationCostTrackingSpec` -
-never make it a compile one.
-
-Slice 7 (#1242) carves what the spine audit found left in core. `modules/agent-tools`
-(`llm4s-agent-tools`) took `toolapi/builtin`, `toolapi/tools/WeatherTool`, `ToolsConfigLoader`
-(public; its no-argument `load*SearchTool()` replaced the removed `Llm4sConfig` methods), the
-`*SearchToolConfig` types, `ToolsConfigKeys` and the `llm4s.tools` `reference.conf` block. It
-depends on **core only, never on the agent runtime** - the tools serve plain `ToolRegistry` tool
-calling too. Core keeps the tool API (`ToolFunction`, `ToolRegistry`, schemas, execution).
-`UsageSummary`/`ModelUsage` moved to `org.llm4s.llmconnect.model` so `llm4s-observability` need not
-depend on `llm4s-agent`. `modules/agent` (`llm4s-agent`) then took `org.llm4s.agent` (bar
-`agent.memory`, already in `llm4s-memory`, which does not depend on it) and `org.llm4s.assistant`,
-with fansi. **Nothing in core may import either package** - the tracing contract's
-agent event is `TraceEvent.AgentRunEnded` (built from core types; it replaced `AgentStateUpdated`
-in #1329), so core's trace specs build it directly.
-`workspaceClient` depends on `llm4s-agent` for `codegen`; `observability` only in Test scope.
-
-With slice 7, `llm4s-core` is the spine: 20.7k lines at the re-audit, 19.1k after the cleanup passes (`types`, `error`, `config`, `model`,
-`toolapi`, `context`, `llmconnect`, the `trace`/`metrics` contracts, `util`, `http`, `reliability`,
-`core/safety`, `security`, `resource`, `syntax`, `identity`), on cats, upickle, slf4j-api, Typesafe
-Config, pureconfig and jtokkit only ([re-audit](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5935792540)).
-**Nothing is frozen until 0.5.0 is published and the MiMa baseline is set** (slice 8,
-[#1281](https://github.com/llm4s/llm4s/issues/1281)). Until then "frozen module" below means a module in
-1.0 Scope's *Frozen at 1.0* tier - the ones calling `mimaFrozen` in `build.sbt` - and is a target, not a
-constraint: never argue for or against a design from "frozen", "the baseline" or "can be added later
-without breaking". Fix a bad API outright, record the break in the CHANGELOG and migration guide, and
-add no shim or `@deprecated` overload. The rules below shape what those modules will freeze, which is
-why they apply now.
-Before slice 8 publishes 0.5.0 and sets the
-MiMa baseline, **pre-baseline cleanup passes** (slice 6, done) removed what should not be frozen. Pass 1 removed the unused `org.llm4s.types` vocabulary (it keeps `Result`, its syntax and
-the newtypes the library takes), every `@deprecated` member of core and `Agent`, `ContextConfig`'s
-legacy field, `ClientStatus`, `StreamingOptions`, `RuntimeId`/`ModelId`, and cats `Show`/`Validated`
-on the API. Do not add them back: **a frozen module gains no speculative public types and no
-`@deprecated` members before the baseline** - delete instead, with a migration note - and a
-helper only llm4s modules use is `private[llm4s]`. **A new top-level public type in a frozen module
-needs `@Stable` (or `@Experimental` for a Beta one)** from `org.llm4s.annotation`; `sbt
-stabilityTierCheck` fails the build otherwise, and a companion object is covered by its class. Pass 2 removed `ToolRegistry`'s provider switch
-(`getToolDefinitionsSafe`; tool definitions are `getOpenAITools()`, the format every client
-takes), replaced `CancellationToken`'s exception-throwing members with `whenCancelled:
-Future[Unit]`, and moved single-consumer utilities to their consumer, keeping packages:
-`SqlIdentifier`, `ChunkingUtils` and `RateLimitedLogger` to `llm4s-rag`, `ManagedResource` to
-`llm4s-speech`, `LiftToResult` to `llm4s-observability`. **A utility with one consuming module
-lives in that module, not core.** Pass 3 deleted `llmconnect.middleware`, `ReliableProviders`,
-`ReliabilitySyntax` and `ReliableClient`'s factories (`new ReliableClient(...)` is the one way in,
-and it applies `rateLimit` itself through a private `TokenBucket`); moved OpenAI's o-series and
-`max_completion_tokens` rules out of core's `RequestTransformer` into `llm4s-openai`'s
-`OpenAIModelRules` - **vendor model rules live in the vendor's module**, layered on with
-`RequestTransformer.adjusted`, as Anthropic's temperature rule already did; and settled the
-provider plumbing as a **public provider-author SPI, Frozen at 1.0** (`docs/guide/writing-a-provider.md`),
-with `ResponseFormatMapper` and `ToolCallDeserializer` moved to `llm4s-openai-compatible` and
-`ProviderResultOps` made `private[llm4s]`. Pass 4 moved `NamedProviderConfig`'s vendor fields
-into descriptor-declared extras with unchanged HOCON names - `endpoint` (required) and
-`apiVersion` to Azure, `organization` to OpenAI, Requesty and OpenRouter, `contextWindow` and
-`reserveCompletion` to the generic `openai-compatible` provider - so `BuiltinKeys` is `provider`,
-`model`, `baseUrl`, `apiKey`, `headers`, `timeouts` and `auth` (the workload-identity block, which only a provider
-that declares `authExtras` accepts) and `requiresEndpoint` is gone; and moved
-`ProviderModelListers` to `llm4s-openai-compatible` (`sectionHeaders` derives headers such as
-`OpenAI-Organization` from a section). **A field only some providers read is that provider's
-extra, never a field of `NamedProviderConfig`.** Pass 5 settled the SPI's API quality. **The
-growth-prone data types** (`CompletionOptions`, `Completion`, `StreamedChunk`, `TokenUsage`,
-`ModelCapabilities`, `ModelMetadata`, `ProviderConfigSpec`, `EmbeddingConfigSpec`,
-`ProviderFeatures`, `NamedProviderConfig`, `ReliabilityConfig`, `CircuitBreakerConfig`,
-`RateLimitConfig`, `ContextConfig`) are `final case class X private (...)` with a public companion
-`apply` carrying the defaults and `with*` setters (an `Option` field's setter takes the value or an
-`Option`); `.copy` is private. **To add a field after the baseline**: add it to the constructor and,
-with a default, to `apply`; keep the previous `apply` as an overload *without* defaults that
-forwards to the new one; add `withX`. Never re-expose `copy`. A type with an upickle `macroRW`
-(`ModelCapabilities`) keeps its constructor defaults too - the reader fills missing keys from them.
-A new frozen data type that may grow follows the same pattern from the start. Passes 6 and 7 typed
-the public API's times: **a duration, supplied or reported, is a `FiniteDuration`, a point in time
-an `Instant`** - never a raw `Int`/`Long` with its unit in the name (`timeoutMs`, `durationMs`) or
-the Scaladoc, and never a plain `Duration`, which admits `Duration.Inf`. Wire formats keep their
-units and keys: convert at the boundary (`.toMillis` into a JSON field; `DurationJson.millisRW` or
-`WireDurations` for a `macroRW`, with `@upickle.implicits.key` pinning a renamed field), and round
-up with `DurationRounding` when a whole-unit API reads `0` as "no timeout" or "now". A
-`FiniteDuration` interpolated as `s"${d}ms"` compiles and prints `150 millisecondsms` - use
-`d.toMillis`. Pass 8 kept third-party types out of `llm4s-agent`'s API: the console UI
-(`ConsoleInterface`, `ConsoleConfig`, `StyleConfig`, `MessageType`), whose fansi `Attrs` and cats
-`Show` would have frozen both libraries into it, and `SessionState.localDateTimeRW`, a public
-implicit codec any `import SessionState._` picked up, are `private[assistant]`, and
-`AssistantAgent` lost its `consoleConfig` parameter; `SimilarityUtils` is `private[llm4s]`. **A
-frozen module's public signatures expose no third-party type** (fansi, cats type classes) and no
-implicit a wildcard import would pull in.
-
-`org.llm4s.vectorstore.PostgresVectorHelpers` is the one file in that package still in core:
-it is a pure pgvector text codec shared by `llm4s-rag` and `llm4s-memory-postgres`, which must
-not depend on each other.
-
-`modules/media` is not a carve - it is a new module, added mid-slice-3 because `image` and
-`speech` could not be split apart cleanly without it. Core had grown three overlapping image
-format enumerations (`imagegeneration.ImageFormat`, `imageprocessing.ImageFormat`,
-`imageprocessing.MediaType`) and RAG matched on raw MIME prefixes; carving first would have
-frozen those copies into separate artifacts. `org.llm4s.media` holds the consolidated
-vocabulary and nothing else - **no I/O, no content sniffing, no third-party dependencies**.
-Keep it that way: the moment it grows a dependency, every consumer inherits it. Tika-based
-sniffing stays in `llm4s-rag` and resolves its result through `MediaType.fromMimeType`.
-Core's dependency on it is temporary and leaves with the `llm4s-image` carve.
-
 **Key paths in `modules/core/src/main/scala/org/llm4s/`:**
 - `types/` - Result type, newtypes
 - `config/` - Llm4sConfig + typed loaders
@@ -359,6 +153,20 @@ sbt it/itTierCheck     # every suite in modules/it must declare exactly one tier
 sbt stabilityTierCheck # every top-level public type of a frozen module is @Stable or @Experimental
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
+
+## Reading files and output efficiently
+
+Every token read stays in context for the rest of the session, so read narrowly.
+- **Locate, then read a range.** `grep -n` first, then `sed -n 'a,bp'` or Read with `offset`/`limit`. Never print all of `CHANGELOG.md` (4.5k lines), `build.sbt` (1.6k), `docs/reference/migration.md` or a design document.
+- **Don't re-read** a file already read in this session unless it has changed since. Keep the line numbers from the first read.
+- **CHANGELOG.md: never read it.** `grep -n '^## \|^### ' CHANGELOG.md | head -8` lists the `## [Unreleased]` subsections (`Added`, `Changed`, `Removed`, `Fixed`). Insert a new entry as the first bullet under the right heading, with an Edit anchored on that heading. To find an existing entry, grep for its issue number.
+- **Typed agent runtime design:** `docs/design/typed-agent-runtime-design.md` holds the model and roadmap, with one file per slice (§4.2 onwards) under `docs/design/typed-agent-runtime/`. Open only the § you need.
+- **Filter command output at the source:**
+  - sbt: `... 2>&1 | tail -40`, or `grep -E '\[error\]|\*\*\* FAILED|Tests: |Failed tests'`.
+  - gh: `gh pr view N --json title,state,mergeable,statusCheckRollup`, `gh run view ID --log-failed | tail -80`.
+  - git: `git diff --stat` before any full diff, then diff file by file.
+- **A large output saved to a file:** `grep` or `tail` it. Never Read the whole file back.
+- **Subagents get this file automatically.** Don't tell them to read CLAUDE.md; point them at the section, issue or files they need.
 
 ## Commits
 
@@ -650,16 +458,7 @@ class MySpec extends AnyFlatSpec with Matchers {
 3. Run with `sbt "samples/runMain org.llm4s.samples.<category>.YourExample"`
 
 ### New Provider
-Follow invariant 8 above: a `ProviderDescriptor` (or `EmbeddingProviderDescriptor`) in a module
-of its own, listed in an `Llm4sProviderModule` declared in `META-INF/services`, with an
-`Llm4s<Name>ModuleSpec` proving discovery and the round trip. Nothing goes in core. Where:
-- **OpenAI-compatible** (speaks `/chat/completions`): first check the generic
-  `openai-compatible` provider covers it with config alone; if not, a dialect and descriptor in
-  `modules/openai-compatible` (Mistral and Cohere are the examples).
-- **Anything else**: `modules/providers/<name>`, artifact `llm4s-<name>`, depending only on
-  core; `modules/providers/voyage` is the template, `modules/ollama` for chat plus embeddings.
-Wire it into the root and `docs` aggregates and the docs source list, `samples`, `it`, and
-`configPolicy` if it has chat providers; add a coverage floor, a codecov flag and a CI upload.
+See **Providers** under Architecture rules, and **Adding a module**.
 
 ### New Tool
 1. Define function returning `Result[T]`
