@@ -17,8 +17,9 @@ enum RunEvent derives ReadWriter:
   /**
    * A run continued the incomplete execution at `fromCheckpoint`. `takenOverFrom` is the run id of
    * another run whose claim on the thread had expired, unreleased, and which this run's claim replaced:
-   * a takeover, so that run may still have been executing. `None` when the thread was free; a log
-   * written before the field existed reads as `None`.
+   * a takeover, so that run may still have been executing. It can equal this run's own id, when a
+   * caller reuses a `RunId` ([[RunConfig.withRunId]]): still a takeover of a separate, earlier run.
+   * `None` when the thread was free; a log written before the field existed reads as `None`.
    */
   case RunRecovered(
     fromCheckpoint: String,

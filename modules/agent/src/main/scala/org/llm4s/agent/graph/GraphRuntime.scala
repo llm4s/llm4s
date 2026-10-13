@@ -366,13 +366,14 @@ final class GraphRuntime(
                 run <- newRun(graph, threadId, config, durability, execution.superstep, signal).admit(
                   execution,
                   Some(stored.checkpoint.id),
-                  // a claim that replaced another run's expired one is a takeover: that run may still be executing
+                  // a claim that replaced an expired one is a takeover: its run may still be executing, even
+                  // when it had this run's id - a reused RunId names two runs, so the id is never filtered
                   granted =>
                     RunEvent.RunRecovered(
                       stored.checkpoint.id,
                       config.tenantId.map(_.value),
                       config.principal.map(_.value),
-                      granted.takenOverFrom.filter(_ != config.runId).map(_.value)
+                      granted.takenOverFrom.map(_.value)
                     ),
                   // read again under the claim: a holder whose claim expired but was not yet replaced
                   // could still add pending writes after the read above, and only the claim stops it

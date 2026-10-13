@@ -269,8 +269,10 @@ final private[graph] class EventHub(
    * handed over first, if the store applied it before the claim was granted. Such a commit is not the
    * run's, nor the observer's place in the log: until the first commit holding an event of `runId` is
    * handed to it, the dispatcher skips every commit, so it delivers what a subscription from just before
-   * the claim ([[RunHandle.subscribe]]) does. [[Observation.start]] starts it; [[Observation.abandon]]
-   * removes it, delivering nothing.
+   * the claim ([[RunHandle.subscribe]]) does. The check is by run id, so it assumes ids are unique, as
+   * the agent's `RunScope` does: a run that reuses the `RunId` of a lost run on the same thread may
+   * still take that run's orphan, handed over before its claim, as its place in the log.
+   * [[Observation.start]] starts it; [[Observation.abandon]] removes it, delivering nothing.
    */
   def observe(
     threadId: ThreadId,

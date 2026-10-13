@@ -101,7 +101,9 @@ retry. `resume` and `start` are refused the same way while another runtime holds
 
 A `recover` whose claim replaced another run's expired, unreleased claim records that run's id on its
 `RunEvent.RunRecovered` event, as `takenOverFrom`, so the thread's log shows the takeover. That run may have been
-paused rather than dead, and still executing; `takenOverFrom` is `None` when the thread was free.
+paused rather than dead, and still executing. It is recorded even when it is the recovering run's own id - a
+`RunId` reused with `RunConfig.withRunId` - since the expired claim was still another, earlier run's;
+`takenOverFrom` is `None` when the thread was free.
 
 `recover` reads the dead run's pending writes again once its own claim is granted, so a task that finished in
 the last moments before the takeover is reused, not run again.

@@ -1308,7 +1308,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused as stale returns `ThreadBusy`, so no runtime call returns `CheckpointWriteFailed(StaleClaim)`. `StaleClaim`
   stays the store's refusal. `RunEvent.RunRecovered` gains
   `takenOverFrom: Option[String]`, and `RunClaim` `takenOverFrom: Option[RunId]`: a `recover` whose claim replaced
-  another run's expired, unreleased one records that run, so the log shows the takeover; a store reports it from
+  another run's expired, unreleased one records that run, so the log shows the takeover - even when a reused `RunId`
+  makes it this run's own id; a store reports it from
   `claim`, and `CheckpointerContract` checks it. Both default to `None`, so older logs still read. See
   [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#fencing-a-run-that-lost-its-claim-stops-and-records-nothing)
   and the [migration note](docs/reference/migration.md#durable-checkpointer-contract-1700).

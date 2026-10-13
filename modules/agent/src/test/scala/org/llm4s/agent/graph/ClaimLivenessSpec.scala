@@ -1741,6 +1741,24 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     await(first).failed._2 shouldBe a[GraphError.ClaimLost]
   }
 
+  it should "record a takeover even from a run with the same run id" in {
+    val time  = ManualTime()
+    val store = InMemoryCheckpointer(time)
+    val stale = TwoStep()
+    val first = runtime(store, time, slow).start(thread, stale.graph, "x", run("same")).value
+    stale.awaitEntered()
+    time.skewStore(3.hours)
+    val successor = TwoStep()
+    successor.gate.countDown()
+    // a reused run id: the store still reports the expired claim it replaced, which may still be executing
+    await(runtime(store, time, slow).recover(thread, successor.graph, run("same")).value).completed
+    events(store).map(_.event).collect { case r: RunEvent.RunRecovered => r.takenOverFrom } shouldBe
+      Vector(Some("same"))
+
+    stale.gate.countDown()
+    await(first).failed._2 shouldBe a[GraphError.ClaimLost]
+  }
+
   it should "record no takeover when the thread was free" in {
     val time  = ManualTime()
     val store = InMemoryCheckpointer(time)
