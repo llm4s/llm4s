@@ -115,8 +115,14 @@ successor started, and the thread's state and event log are its successor's.
 
 A run does not wait for a refused commit to learn that its claim is gone. It judges its own lease: the lease ends
 `ttl` after the moment, by the runtime's monotonic clock (`System.nanoTime`), just before it sent the request that
-granted or last renewed the claim. The store started its own `ttl` no earlier than that, so the run's lease never
-outlives the store's, whatever the skew between their clocks. A heartbeat that never waits on the store checks it,
+granted or last renewed the claim. The store started its own `ttl` no earlier than that, so the run's lease ends no
+later than the store's - provided the store judges expiry by one clock that does not run faster than the runtime's
+monotonic clock and is not stepped forward. A constant offset between the two clocks does not matter. A store clock
+that runs fast or is stepped forward (an NTP step on `Clock.systemUTC()`), or a store whose processes each judge
+expiry by their own skewed clock (SQLite shared between processes), can expire the claim while the run still judges
+it live, so another runtime can take the thread over early. The run then learns of it from its next refused renewal
+or commit - within `renewEvery` - and stops; fencing keeps every write safe, but tasks it was already running can
+repeat side effects (see [Limits](#limits)). A heartbeat that never waits on the store checks the lease,
 so a run whose renewals keep failing, or hang - its store unreachable, or partitioned from it - still notices. A
 renewal that fails, or a store clock that throws, is retried at the next beat while the lease lasts.
 
@@ -136,8 +142,9 @@ over, its last durable checkpoint is still `Running`, and `recover` continues it
 
 ### Limits
 
-- A stale worker can still act until it notices, and while its tasks see their interrupt. The loss is noticed
-  within about one `renewEvery` of the lease passing, or as soon as a renewal or commit is refused. A task already
+- A stale worker can still act until it notices, and while its tasks see their interrupt. The loss is noticed as
+  the run's own lease passes, or as soon as a renewal or commit is refused - within `renewEvery` of a takeover that a
+  store clock running ahead allowed early. A task already
   running then may finish an external side effect before it checks its interrupt, and a tool that ignores
   interrupts runs to its end. Such a side effect can happen in both the stale run and its successor, concurrently.
   That is the at-least-once boundary every run has: make such tools idempotent. A tool or node that writes to a
@@ -268,8 +275,9 @@ anyway (see WAL above), but if host clocks still differ - containers with skewed
 lasts longer or shorter than `ttl` as other processes see it. Fencing keeps every write safe regardless. A store
 clock running ahead lets another process take over a live run early; that run then finds its commits or renewals
 refused and stops, but tasks it was already running can repeat side effects (see
-[Limits](#limits)). A store clock running behind holds a dead run's thread longer. A run's own lease is judged by
-its monotonic clock and never outlives the store's view, so skew between hosts cannot make a run outlast its claim.
+[Limits](#limits)). A store clock running behind holds a dead run's thread longer. A run's own lease, judged by its
+monotonic clock, does not protect against a store clock that runs ahead: the run learns of the takeover only from its
+next refused renewal or commit.
 
 ### Schema versions
 
