@@ -17,11 +17,11 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
   private val thread = ThreadId("t")
   private val run    = RunId("r1")
 
-  private def record(seq: Long): EventRecord =
+  private def record(seq: Long, runId: RunId = run): EventRecord =
     EventRecord(
       thread.value,
       seq,
-      run.value,
+      runId.value,
       None,
       None,
       None,
@@ -160,4 +160,48 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
       Vector("1", "live", "live", "live", "gap:8", "2", "gap:1", "3", "gap:1", "4", "gap:1", "5", "gap:2", "end:r1")
     sub.cancel()
     hub.liveCount(thread) shouldBe 0
+  }
+
+  "A run's cut taken while a hand-over's read of the events missing before it is in flight" should "count that commit as abandoned, so the run's listeners agree live and on replay" in {
+    // 1 is the run's, handed over; 2 was committed elsewhere, so the run-scoped dispatcher is missing it
+    // when the run's commit 3 is handed over, and reads it - the log's only read, the first - from the store
+    val log      = BlockingLog(Vector(record(1), record(2, RunId("elsewhere"))), blockOn = 1)
+    val cut      = AbandonedWrites(run)
+    val fourth   = new CountDownLatch(1)
+    val listener = Recording(countAt(4, fourth))
+    val hub      = EventHub(log)
+    val sub      = hub.observe(thread, capacity = 16, listener, cut.apply).start(lastSeq = 0L)
+    hub.durable(thread, Vector(record(1)))
+    log.records = log.records :+ record(3)
+    val handing = Thread.ofVirtual().start(() => hub.durable(thread, Vector(record(3))))
+    log.reading.await(5, TimeUnit.SECONDS) shouldBe true // 3's gap read is stuck in the store
+    // the run loses its claim and stops waiting for it: its cut is taken, then its barrier queued
+    hub.atMark(thread)(cut.abandonAfter)
+    sub.endOfRun(run)
+    listener.reached.await(5, TimeUnit.SECONDS) shouldBe true
+    log.release.countDown()
+    handing.join(java.time.Duration.ofSeconds(5)) shouldBe true
+    // a later commit, by another run, shows the dispatcher has delivered or skipped everything before it
+    log.records = log.records :+ record(4, RunId("next"))
+    hub.durable(thread, Vector(record(4, RunId("next"))))
+    fourth.await(5, TimeUnit.SECONDS) shouldBe true
+    // 3 is the run's own, and above the cut: abandoned, never delivered - not after the barrier either
+    listener.seen.asScala.toVector shouldBe Vector("1", "end:r1", "2", "4")
+    sub.cancel()
+
+    // a replay through the same cut agrees: the run's events are 1 alone
+    val replayedFourth = new CountDownLatch(1)
+    val replayed       = Recording(countAt(4, replayedFourth))
+    val again =
+      hub.subscribe(thread, afterSeq = 0L, capacity = 16, replayed, cut.apply).fold(e => fail(e.message), identity)
+    replayedFourth.await(5, TimeUnit.SECONDS) shouldBe true
+    replayed.seen.asScala.toVector shouldBe Vector("1", "2", "4")
+    again.cancel()
+    hub.liveCount(thread) shouldBe 0
+  }
+
+  /** Counts `latch` down once the durable event `seq` has been recorded. */
+  private def countAt(seq: Long, latch: CountDownLatch): StreamEvent => Unit = {
+    case StreamEvent.Durable(r) if r.seq == seq => latch.countDown()
+    case _                                      => ()
   }

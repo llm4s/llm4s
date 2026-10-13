@@ -2700,7 +2700,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the run is freeing the thread (the check and both steps of the run's local release share one lock). Its events are
   an orphan of a run that has ended: they reach the thread's subscribers in sequence, but never the run's own
   listeners, its observer or its tracing, live or replayed, so a `ClaimLost` run's run-scoped stream ends at its end
-  and `AgentRun.await` never waits for a write it abandoned.
+  and `AgentRun.await` never waits for a write it abandoned. So is a commit whose hand-over is still reading a
+  subscriber's missing events from the store when the run stops waiting: it was not yet queued to every subscription,
+  and was counted as the run's, so a run-scoped listener could reach the run's end before it while a replay through
+  the same handle delivered it.
 - **A run that loses its claim while finishing, or while stuck in the store, still ends**
   ([#1700](https://github.com/llm4s/llm4s/issues/1700)): a loss found once the run had begun committing its outcome
   was discarded, because the first stop cause wins, so a `Sync`, `Async` or `OnExit` closing commit hung in the store

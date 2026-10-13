@@ -1561,6 +1561,8 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     val two = TwoStep()
     two.gate.countDown()
     val outcome = within(awaitResult(here.start(thread, two.graph, "x", run("first")).value))
+    // a healthy run waits for its own hand-over's gap read: it has not ended, so no barrier precedes it
+    behind.get shouldBe None
     unstall.countDown()
     outcome.value.value shouldBe a[RunResult.Completed[?]]
     eventually(behind.get.isDefined)

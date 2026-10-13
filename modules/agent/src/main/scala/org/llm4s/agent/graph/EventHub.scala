@@ -67,8 +67,10 @@ private[agent] trait RunListener extends (StreamEvent => Unit):
  * has ended. Such events are an orphan of a run that has ended, not events it
  * delivered: the run's own listeners ([[RunListener]]) never receive them, live or replayed, while
  * thread-scoped subscribers receive them like any other durable event, in sequence. [[abandonAfter]]
- * sets the cut once, at the highest `seq` the hub had handed over on the thread when the run stopped
- * waiting; every event of the run with a higher `seq` is an orphan.
+ * sets the cut once, at the highest `seq` the hub had finished handing over on the thread when the run
+ * stopped waiting ([[EventHub.atMark]]); every event of the run with a higher `seq` is an orphan - also
+ * one of a hand-over still reading a subscriber's missing events from the store then, which may reach
+ * some subscriptions only after the run's barrier.
  */
 final private[graph] class AbandonedWrites(runId: RunId):
   private val after = new java.util.concurrent.atomic.AtomicLong(Long.MaxValue)
@@ -197,6 +199,13 @@ final private[graph] class EventHub(
    */
   private var handed = Map.empty[String, Long]
 
+  /**
+   * The first `seq` of a hand-over still filling a subscriber's gap ([[Dispatcher.Gap]]), by thread;
+   * guarded by `hubLock`. Such a hand-over has raised the mark but is not yet queued everywhere, so
+   * [[atMark]] cuts below it. A thread has at most one: hand-overs are made under its commit lock.
+   */
+  private var filling = Map.empty[String, Long]
+
   /** Starts a dispatcher that replays events with `seq > afterSeq`, then delivers new ones. */
   def subscribe(
     threadId: ThreadId,
@@ -265,16 +274,23 @@ final private[graph] class EventHub(
    * elsewhere and not yet read by its watch - has them read from the store after `hubLock` is let go,
    * still under the thread's commit lock: a store read that stalls holds up only this thread's commits,
    * never the hub - another thread's hand-overs, a subscription's switch to live, or [[release]], which
-   * the runtime calls holding the lock every admission and release takes.
+   * the runtime calls holding the lock every admission and release takes. Until the gaps are filled the
+   * hand-over is not complete, and [[atMark]] cuts below it.
    */
   def durable(threadId: ThreadId, records: Vector[EventRecord]): Unit =
     if records.nonEmpty then
       val gaps = withLock(hubLock) {
         val top = records.iterator.map(_.seq).max
         handed = handed.updated(threadId.value, handed.get(threadId.value).fold(top)(math.max(_, top)))
-        subscribers.getOrElse(threadId.value, Vector.empty).flatMap(_.offerDurable(records))
+        val gaps = subscribers.getOrElse(threadId.value, Vector.empty).flatMap(_.offerDurable(records))
+        if gaps.nonEmpty then filling = filling.updated(threadId.value, records.iterator.map(_.seq).min)
+        gaps
       }
-      gaps.foreach(_.fill())
+      // on every exit, so a fill that fails never leaves the thread's cut held below this hand-over
+      if gaps.nonEmpty then
+        Using.resource(new AutoCloseable {
+          def close(): Unit = withLock(hubLock) { filling = filling - threadId.value }
+        })(_ => gaps.foreach(_.fill()))
 
   /**
    * Forgets the thread's hand-over mark. The runtime calls it when a run's claim on the thread is
@@ -287,11 +303,17 @@ final private[graph] class EventHub(
     }
 
   /**
-   * Runs `f` with the highest `seq` handed over on the thread (0 if none), holding `hubLock`, so no
-   * hand-over lands while it runs: one that landed before is at or below the value, one after above it.
+   * Runs `f` with the highest `seq` whose hand-over on the thread is complete (0 if none), holding
+   * `hubLock`, so no hand-over lands or completes while it runs: one completed before is at or below
+   * the value, one after above it. A hand-over still filling a subscriber's gap ([[durable]]) is not
+   * complete - it may not be queued to every subscription yet - so the value is just below it: a run
+   * that stops waiting for it counts it as abandoned ([[AbandonedWrites]]), on every subscription
+   * alike, rather than queue its barrier ahead of events it calls its own.
    */
   def atMark(threadId: ThreadId)(f: Long => Unit): Unit =
-    withLock(hubLock)(f(handed.getOrElse(threadId.value, 0L)))
+    withLock(hubLock) {
+      f(filling.get(threadId.value).fold(handed.getOrElse(threadId.value, 0L))(_ - 1))
+    }
 
   /**
    * The store has deleted the thread: every subscription to it in the live set now ends with

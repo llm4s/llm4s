@@ -1776,8 +1776,9 @@ final class GraphRuntime(
      * claim was found lost, and the run thread has not ended - stuck, say, in a store call that ignores
      * interrupts. The committer is fenced and orphaned, so nothing more of the run lands but what is in
      * the store already, and that leaves the hub no mark for an idle thread; the run's own subscriptions
-     * are cut at what the hub has handed over, so a write landing later never reaches them as the run's
-     * ([[AbandonedWrites]]). Fails with [[GraphError.ClaimLost]], at the last position the run reached.
+     * are cut at what the hub has finished handing over ([[EventHub.atMark]]), so a write landing later -
+     * or one whose hand-over is still reading a subscriber's missing events - never reaches them as the
+     * run's ([[AbandonedWrites]]). Fails with [[GraphError.ClaimLost]], at the last position the run reached.
      * When the run thread does end, nothing it returns is used. Never throws.
      */
     def endedWithoutRunThread(): RunResult[O] =
@@ -2102,7 +2103,8 @@ final class GraphRuntime(
       markLost()
       val lost = GraphError.ClaimLost(threadId.value, token, current.orElse(lostTo.get))
       // a write still in flight may land after the run's end-of-run barrier: it is cut from the run's
-      // own subscriptions at what the hub has handed over by now, so it never reaches them as the run's
+      // own subscriptions at what the hub has finished handing over by now, so it never reaches them as
+      // the run's
       if committer.abandon(lost) then abandonedWrites.foreach(cut => hub.atMark(threadId)(cut.abandonAfter))
       RunResult.Failed(execution.state, lost)
 
