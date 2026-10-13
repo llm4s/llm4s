@@ -99,8 +99,18 @@ it meets each rule, and its tests cover each rule that applies.
    write. That includes `beforeAgent` (the input task), the tool calls, and `afterAgent` (the finish
    task), and under `Async`/`OnExit` durability even work whose write was not yet durable
    (`GraphRuntime.scala:919-946, 1338-1377`). An effect outside thread state must be idempotent under a
-   key that is stable across recovery. That key is `(threadId, superstep, taskId)`; `runId`,
-   `checkpointId` and the fencing token are not stable.
+   key that is stable across recovery. That key is `(threadId, superstep, taskId)`, or for a tool
+   call its `IdempotencyKey`; `runId`, `checkpointId` and the fencing token are not stable.
+   - **Provider tool-call ids are not identities.** A provider can reuse them across model requests,
+     which is why `IdempotencyKey` exists. Anything stored is keyed by a runtime identity, never by
+     `toolCallId` alone.
+   - **"At-least-once" is not a mechanism.** Every external effect names how a replay behaves, using
+     one of three mechanisms (C3):
+     1. a marker written in the same atomic write as the effect, which a replay sees
+     2. a write-ahead intent plus a check of the resulting state, which tells applied from not
+        applied
+     3. refusal: a replay that cannot tell reports "may already have happened" and does not repeat
+        the effect
 5. **A Block retracts messages only, today.** An output Block's update is `RemoveTurn` on messages, with
    `activeAgent` and `transfer` restored (`ToolLoop.scala:977-988`). Every other key written during the
    turn survives. Harness keys hold content (files, todos, summaries, recalled memory), so C1 widens
@@ -120,7 +130,9 @@ it meets each rule, and its tests cover each rule that applies.
     terminal-failure path a Block uses (a `Failed` checkpoint).
 11. **Every model call is accounted.** That covers a wrapper's retries, a hook's own calls (a
     summariser, an LLM memory manager), and calls in a failed task. None may drop out of `usage`. C1
-    makes the loop count them rather than trusting each hook.
+    makes the loop count them rather than trusting each hook. Library code that hides its
+    `Completion` (`LLMMemoryManager`, `LLMCompressor`) is given an accounted client, so its calls are
+    counted without the library's help.
 12. **Everything the harness keeps is bounded on its own.** Each key, and each in-process cache, has a
     limit that holds whatever else is configured, not one that relies on another feature (such as
     summarisation) being on. The limit is enforced by a total update (evict or compact) or by a check
@@ -170,8 +182,10 @@ keys, prompt content, a recovery-stable key for effects, and a retraction that c
   - The `next` the loop hands to the innermost wrapper records each provider call's usage in a per-task
     accumulator, whichever response finally wins. A retrying wrapper therefore cannot lose a discarded
     call's cost.
-  - A hook that makes its own model call reports it with `context.recordUsage(TokenUsage)`, available
-    on `ModelContext` and the `afterAgent` context.
+  - **`context.accounted(client: LLMClient): LLMClient`** wraps a client so that every call through it
+    records its usage in the current task's accumulator. A hook passes it to any library that calls a
+    model internally: `LLMMemoryManager`, the compressors, LLM-judge guardrails.
+  - `context.recordUsage(TokenUsage)` is kept for usage that arrives without a client call.
   - A succeeding task adds the accumulator to `usage`.
   - A failing task carries it on its durable `RunFailed` event, so cost is never silently lost (rule
     10). This is a kernel change in `GraphRuntime.fail`.
@@ -221,7 +235,12 @@ field.
 
 **Batch locks (rules 1 and 2).**
 - `AgentToolSpec.withLocks(A => Set[LockKey])`.
-- In one batch, calls whose lock sets intersect run in successive supersteps, in call order. The others
+- `LockKey` is a path of segments, for example `state-files`, `workspace/<id>`, or
+  `workspace/<id>/src/a.scala`. Two keys **conflict when one is a prefix of the other**.
+  - A workspace-wide lock therefore conflicts with every file lock in that workspace.
+  - Deleting a directory conflicts with a write beneath it.
+- In one batch, calls with any conflicting pair of locks run in successive supersteps, in call
+  order. The others
   run concurrently in the first superstep, as now.
 - A later call therefore sees the earlier one's committed state. Its check against the snapshot (a
   quota, a file's content) is exact, and its update cannot lose another's.
@@ -270,9 +289,23 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
     backend with a `RetentionPolicy`, and P1 sets one.
 - **`CompositeBackend(default, routes: (VPath, FileBackend)*)`** routes by longest prefix. `writes` and
   `locks` come from the routed backend. `glob` and `grep` span the routes.
-- **`HostFileBackend(root)`** is opt-in.
+- **`EffectJournal`** records the replay intent of external mutations (rule 4, mechanism 2).
+  - `begin(key: IdempotencyKey, intent)` runs before the effect; `complete(key)` runs after it.
+  - The intent carries the operation, the path, a hash of the content before, and a hash of the
+    content after.
+  - On a replay under the same key with an intent recorded, the backend compares the target's current
+    hash:
+    - equal to the after-hash: already applied, so it returns success
+    - equal to the before-hash: not applied, so it applies the effect
+    - anything else: a tool error naming the conflict
+  - Implementations: `FileEffectJournal(dir)` (durable, one file per key, written with an atomic
+    rename) and in-memory for tests. Entries older than a configured age are pruned.
+- **`HostFileBackend(root, journal)`** is opt-in.
   - Paths resolve under `root`, and symlink escape is refused.
-  - Mutations lock their path, so two writes to one host file in a batch are ordered.
+  - Mutations lock their path (`host/<root>/<path>`), so two writes to one file, or a directory delete
+    and a write beneath it, are ordered.
+  - Each mutation goes through the journal under the call's `IdempotencyKey`. A replayed `edit_file`
+    whose first attempt landed therefore returns success, not "`old` not found".
   - It is not tenant-scoped: an application serving tenants builds one per tenant through
     `FileBackend.resolved` (rule 8).
 - **`FileBackend.resolved(FileContext => FileBackend)`** and **`SandboxBackend.resolved`** are
@@ -282,8 +315,10 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
   it.
 - **`LongTermStore`** works on `(Namespace, key)`:
   - `Namespace(tenant: Option[TenantId], path: Vector[String])` and `key: String`.
-  - The value is `StoreItem(value: ujson.Value, updated: Instant)`, with a per-item `maxItemBytes`
-    checked on `put`.
+  - The value is `StoreItem(value: ujson.Value, updated: Instant, writtenBy: Option[IdempotencyKey])`,
+    with a per-item `maxItemBytes` checked on `put`.
+  - `writtenBy` is the replay marker (rule 4, mechanism 1). A `StoreFileBackend` mutation whose item
+    already carries its key returns success without writing again.
   - Operations are `get`, `put`, `delete`, `list(prefix)` and `search(query)`. The in-memory `search`
     is a substring match over keys and string values; a store may do better, and says so.
   - `put` replaces, so a replayed put is idempotent.
@@ -295,7 +330,8 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
   - the operations
   - ordered mutations under locks in one batch
   - the quota exact under a parallel batch
-  - replay idempotence after `recover`
+  - replay idempotence after `recover`: write, edit and delete each run twice under one key, with a
+    crash between the effect and the commit
   - tenant isolation for resolved and store backends
 
 ## Feature slices
@@ -333,12 +369,17 @@ Tests:
   `(Execute, <command>)` and it is `destructive` and `openWorld`.
 - `WorkspaceTools` is deleted and `codegen/CodeWorker` moves to the new tools. Migration note.
 - Related: #870, so sandbox limits are enforced in the runner as well as by tool policy.
-- **Effects.** Workspace effects are outside thread state.
-  - They are at-least-once (rule 4). `execute` passes the call's `IdempotencyKey` to the workspace,
-    which skips a command already run under it.
-  - A Block cannot undo them (rule 5), and this is documented.
-- **Locks.** `WorkspaceFileBackend` mutations lock their path, and `execute` takes a workspace-wide
-  lock, so a batch's commands and edits apply in call order.
+- **Effects.** Workspace effects are outside thread state, and a Block cannot undo them (rule 5). This
+  is documented.
+- **Locks.** `WorkspaceFileBackend` mutations lock `workspace/<id>/<path>`, and `execute` locks
+  `workspace/<id>`. By C2's prefix rule a command conflicts with every edit in its workspace, so a
+  batch's commands and edits apply in call order.
+- **Replay.**
+  - File mutations go through an `EffectJournal` held on the client side, which is checked against
+    workspace file hashes (mechanism 2).
+  - `execute` journals its intent, but a command's effect cannot be checked. A replay that finds an
+    intent with no completion returns the tool error "may already have run; not re-run" (mechanism 3),
+    unless the tool's `ToolHints.idempotent` is set.
 - **Tenants.** One workspace serves one tenant: an application serving several builds the backends
   through the C3 resolvers (rule 8).
 - Live-container tests go in `modules/it` under the `@Workspace` tier. Unit tests use a fake
@@ -368,7 +409,7 @@ Tests:
   again, the summary is extended, not recomputed.
 - The summary itself has a bound, `maxSummaryTokens`. An extension that would exceed it compresses the
   old summary and the new messages together, so the key cannot grow without limit (rule 12).
-- The compression call's usage is reported with `recordUsage` (rule 11).
+- The compressor gets `context.accounted(client)`, so its calls are counted (rule 11).
 - Tool-call/result pairs are never split.
 - The stored thread is never edited.
 - A Block restores the key (C1), so a summary of a blocked turn is never kept.
@@ -377,7 +418,9 @@ Tests:
 
 **`ToolOutputOffload(thresholdTokens, maxResultBytes, maxTotalBytes)`**, in `wrapToolCall`:
 - A `Success` over the threshold is stored, truncated at `maxResultBytes`, in the middleware's own
-  `offloads` key. The model sees a preview plus the path `/large_tool_results/<toolCallId>`.
+  `offloads` key. The model sees a preview plus the path `/large_tool_results/<idempotencyKey>`, the
+  runtime's call identity. A provider that reuses a `toolCallId` therefore cannot make an older result
+  point at a newer call's content (rule 4).
 - An `OffloadBackend` serves that prefix through `CompositeBackend`. It is read-only: writes and
   deletes there are tool errors.
 - **Bound (rule 12).** The key's update function is total and evicts the oldest entries until the total
@@ -385,7 +428,7 @@ Tests:
   - This holds with or without summarisation, and under a parallel batch, because eviction happens
     when the update is applied, not as a check against the snapshot.
   - Reading an evicted path returns a tool error that says it was evicted.
-- **Idempotence.** The path is unique per call and a replayed write replaces it (rule 4).
+- **Idempotence.** The path is unique per runtime call, and a replayed write replaces it (rule 4).
 - **Cleanup.** When summarisation is on, offloads older than the summary's `throughMessageId` are
   dropped as the summary advances. This is extra cleanup; the bound does not depend on it.
 
@@ -417,18 +460,22 @@ Tests:
 
 ### F7: semantic memory (`llm4s-agent-memory`) (#1911)
 
-`SemanticMemoryMiddleware(managers: Option[TenantId] => MemoryManager, recall, record, consolidate)`.
+`SemanticMemoryMiddleware(stores: Option[TenantId] => MemoryStore, manager: (MemoryStore, LLMClient) => MemoryManager, client: LLMClient, recall, record, consolidate)`.
 
-**Tenant scope (rule 8).** The manager is resolved per tenant and held in one thread-safe cell per
-tenant, not per thread.
+**Tenant scope (rule 8).** The store is resolved per tenant and held in one thread-safe cell per tenant,
+not per thread.
+- The manager is built for each hook call from the tenant's current store and
+  `context.accounted(client)` (C1). Every call an `LLMMemoryManager` makes for extraction, recording or
+  consolidation is therefore counted in `usage` (rule 11), though the manager's API returns no
+  `Completion`.
+- The store the manager returns is put back in the cell.
 - Every thread of a tenant recalls what earlier threads of that tenant recorded.
 - No tenant's recall reads another's: the resolver supplies a tenant-scoped store, or a store filtered
   by a tenant tag the middleware writes and filters on.
 - Updates to one tenant's cell are serialised.
 
 **Recall** runs `getRelevantContext` on the turn's input in `beforeAgent`.
-- The text is truncated at `maxRecallTokens` (rule 12). An LLM manager's calls are reported with
-  `recordUsage` (rule 11).
+- The text is truncated at `maxRecallTokens` (rule 12).
 - It writes the text to a declared `recalled` key (C1), committed with the input task, so the turn's
   first model call shows it as a prompt section (rule 3).
 - After a crash before that commit, the input task reruns and recalls again. Nothing has used the result
