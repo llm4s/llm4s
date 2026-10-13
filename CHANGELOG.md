@@ -2694,6 +2694,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   claim released on a detached thread. The run thread, when it returns, sets no second result and frees nothing.
   `fork` and `updateState` likewise release on a detached thread when their heartbeat's renewal cannot be joined, so a
   renewal hung in a store that serialises its calls (SQLite) no longer keeps them from returning.
+- **A lost claim bounds the end exactly, admission included** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  a commit could pass the fence's check and begin after the loss was found, so the store could accept work of a run
+  already declared lost; a commit now begins, or is skipped, in one atomic step with the fence. The claim commit of
+  `start`, `recover` and `resume` ran on the caller's thread with no bound, so a store hung on it kept the call blocked
+  and the thread held even after the claim was found lost; that commit is now given up `2 × ttl` after the loss, the
+  call returns `ClaimLost`, the thread is freed and the claim released, and the run never starts. Settling a lost run
+  no longer joins a renewal still in the store before releasing, which had pushed the end to about `3 × ttl`. From
+  the moment a loss is found - its lease passing, or a renewal or commit refused - `await()` and the call that
+  admits a run now return, with the thread free in the runtime, within `2 × ttl`, plus only local work that never
+  calls the store.
 - **A commit hung in the store holds up only its own thread** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   every commit in a `GraphRuntime` was written under one runtime-wide lock, so one thread's hung commit stalled every
   other thread's runs, their admission included. Commits are now ordered per thread.

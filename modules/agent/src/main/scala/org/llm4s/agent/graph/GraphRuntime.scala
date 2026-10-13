@@ -99,14 +99,16 @@ object GraphRuntime:
  * passes with no renewal landing, or a renewal or commit is refused as stale, it stops at once - its
  * tasks interrupted, as a cancel interrupts them - commits nothing more, and fails with
  * [[GraphError.ClaimLost]]. A loss found once the run has begun committing its outcome sends no interrupt,
- * but still skips every commit not yet begun; and whatever the run is doing, if it has not ended within
- * twice `ttl` of the loss - its thread stuck in a store call that ignores interrupts - it is ended without
- * its thread, `ClaimLost`, and the thread freed. A `recover` that takes over an expired claim records
+ * but still skips every commit not yet begun; and whatever the run is doing, it ends within twice `ttl`
+ * of the loss: if it has not begun to by then - its thread stuck in a store call that ignores interrupts -
+ * it is ended without its thread, `ClaimLost`, and the thread freed. Admission is bounded the same way: a
+ * claim's commit still in the store twice `ttl` after the loss is given up, and the call fails `ClaimLost`. A `recover` that takes over an expired claim records
  * the run it took the thread from ([[RunEvent.RunRecovered]]). A call on a thread whose run is still
  * executing in this runtime fails with `ThreadBusy` before reading the thread at all.
  *
  * Admission - the checks above, restoring the thread and committing the claim - runs on the
- * caller's thread and never throws: a `Left` means no run exists, and the thread is free again. A
+ * caller's thread, but for the read under the claim and the claim's commit, which run on
+ * `llm4s-admit-<threadId>` while the caller waits, and never throws: a `Left` means no run exists, and the thread is free again. A
  * throwable from the store, the clock or the graph during admission is [[GraphError.RunCrashed]],
  * and an interrupt is `CancelledError` with the flag set. The run itself executes on a virtual
  * thread owned by the runtime, named `llm4s-run-<threadId>`, behind the returned [[RunHandle]];
@@ -198,6 +200,18 @@ final class GraphRuntime(
 
   /** A test hook run by a claim's renewal thread once it has acted on the store's answer; a no-op by default. */
   @volatile private[graph] var renewalSettled: ThreadId => Unit = _ => ()
+
+  /**
+   * A test hook run by a committer once a commit has begun - it was not fenced - and before it enters
+   * the store; a no-op by default.
+   */
+  @volatile private[graph] var committing: (ThreadId, Commit) => Unit = (_, _) => ()
+
+  /**
+   * A test hook run by [[Committer.fence]] when it fences the committer, with whether a commit had
+   * begun and not yet returned then; a no-op by default.
+   */
+  @volatile private[graph] var fenced: (ThreadId, Boolean) => Unit = (_, _) => ()
 
   /**
    * Replays events with `seq > afterSeq`, then delivers new events until cancelled or
@@ -717,7 +731,8 @@ final class GraphRuntime(
             }
             .flatMap { (claim, sentAt) =>
               var heartbeat = Option.empty[Heartbeat]
-              val lost      = new AtomicBoolean(false)
+              // when the claim was found lost, as a System.nanoTime value
+              val lost = AtomicReference[Option[Long]](None)
               // as a run's: a lost claim, or a renewal that could not be joined - which a store that
               // serialises its calls would queue the release behind - must not hold the change's end
               Using.resource(new AutoCloseable {
@@ -730,7 +745,7 @@ final class GraphRuntime(
                     claim.token,
                     sentAt,
                     "its change is refused if not yet committed",
-                    _ => lost.set(true)
+                    _ => lost.compareAndSet(None, Some(System.nanoTime())): Unit
                   )
                 )
                 body(claim)
@@ -768,24 +783,43 @@ final class GraphRuntime(
     if interrupted then Thread.currentThread().interrupt()
 
   /**
-   * Stops `heartbeat` - waiting, at most `claims.ttl`, for its beat and a renewal in flight, so that none
-   * lands after the release - and gives back the claim whose token is `token`. Synchronously, as
-   * [[releaseClaim]], when the heartbeat was joined and the claim not found `lost` (read once it has
-   * stopped): a caller that sees the end of the change or run can then claim the thread at once.
-   * Otherwise on a detached thread ([[releaseDetached]]), so that the end does not wait on a store that
-   * may be hung, or serialise the release behind the renewal it could not join: waited for up to
-   * `claims.ttl` if the heartbeat was joined, so that a healthy store still frees the thread at once, and
-   * not at all if it was not. Never throws, and keeps the caller's interrupt flag.
+   * How long after a claim is found lost the holder's end is bounded: twice `claims.ttl`, in nanoseconds.
+   * A run's own path to its end - an Async run's wait for its writer, at most `claims.ttl` - normally
+   * finishes well within it; past it, the run is ended without its run thread, and its admission without
+   * its claim's commit.
+   */
+  private def lossBound: Long = claims.ttl.toNanos * 2
+
+  /**
+   * Stops `heartbeat` and gives back the claim whose token is `token`.
+   *
+   * A claim found lost - `lostAt` is when, as a `System.nanoTime` value, read before and again after the
+   * heartbeat stops - is given back on a detached thread ([[releaseDetached]]) without joining the
+   * heartbeat, whose renewal may be stuck in the store: waited for only until [[lossBound]] after the
+   * loss, so that a healthy store still frees the thread at once and a hung one never holds the end past
+   * that bound. A claim not lost is given back once the heartbeat's beat and any renewal in flight are
+   * joined - at most `claims.ttl` - so that no renewal lands after the release: synchronously, as
+   * [[releaseClaim]], when they were, so a caller that sees the end of the change or run can claim the
+   * thread at once; otherwise on a detached thread, not waited for, so the end does not serialise the
+   * release behind the renewal it could not join. Never throws, and keeps the caller's interrupt flag.
    */
   private def stopAndRelease(
     threadId: ThreadId,
     token: FencingToken,
     heartbeat: Option[Heartbeat],
-    lost: => Boolean
+    lostAt: => Option[Long]
   ): Unit =
-    val joined = heartbeat.forall(_.stop())
-    if joined && !lost then releaseClaim(threadId, token)
-    else releaseDetached(threadId, token, if joined then claims.ttl.toNanos else 0L)
+    def untilBound(at: Long): Long = math.max(0L, at + lossBound - System.nanoTime())
+    lostAt match
+      case Some(at) =>
+        heartbeat.foreach(_.halt())
+        releaseDetached(threadId, token, untilBound(at))
+      case None =>
+        val joined = heartbeat.forall(_.stop())
+        lostAt match
+          case Some(at)       => releaseDetached(threadId, token, if joined then untilBound(at) else 0L)
+          case None if joined => releaseClaim(threadId, token)
+          case None           => releaseDetached(threadId, token, 0L)
 
   /**
    * Gives back the claim whose token is `token` on a detached virtual thread, `llm4s-release-<threadId>`,
@@ -893,14 +927,16 @@ final class GraphRuntime(
                   release(threadId)
                 // from now on a lost claim stops the run as a cancel does; before, it was only recorded.
                 // Whatever the run is doing - finishing included, or stuck in a store call that ignores
-                // interrupts - its end is then bounded: if the run thread has not settled it within
-                // twice `claims.ttl`, it is settled without it, as ClaimLost
+                // interrupts - its end is then bounded: if the run thread has not begun to settle it by
+                // twice `claims.ttl` after the loss, it is settled without it, as ClaimLost
                 run.stopper = () =>
                   handle.stop(StopCause.ClaimLost)
-                  handle.endWithin(claims.ttl * 2, () => run.endedWithoutRunThread(), () => releaseBoth())
+                  handle.endWithin(run.lossDeadline, () => run.endedWithoutRunThread(), () => releaseBoth())
                 run.abandonedWrites = Some(abandoned)
                 handle.launch(() => run.execute(), run.crashed, () => releaseBoth(), run.deadline)
                 launched = true
+                // a loss found before the stopper was set only recorded its cause: its end is bounded too
+                if run.claimWasLost then run.stopper()
                 handle
               }
             }
@@ -1060,19 +1096,55 @@ final class GraphRuntime(
     def submit(commit: Commit): Unit
     def failure: Option[LLMError]
 
-    /** Set by [[fence]]: what a commit not yet begun fails with, instead of being written. */
-    @volatile protected var fencedBy: Option[LLMError] = None
+    /**
+     * Guards `fencedBy` and `inFlight` together, so that a commit's start and a fence are one atomic
+     * step each: a commit either begins before the fence, and the fence counts it as in flight, or finds
+     * the fence and never begins. Held only to read or change them, never across a store call.
+     */
+    private val gate = new java.util.concurrent.locks.ReentrantLock()
+
+    /** Set by [[fence]]: what a commit not yet begun fails with, instead of being written; under `gate`. */
+    private var fencedBy: Option[LLMError] = None
+
+    /** Whether a commit has begun and not returned; under `gate`. */
+    private var inFlight = false
 
     /** Set by [[orphan]]: a commit that lands from now on may land after the run has ended. */
     @volatile private var orphaned = false
 
     /**
      * From now on, every commit not yet begun is skipped, and recorded as failing with `reason`; one
-     * already in the store is not touched. For a run whose claim is found lost at any stage, even while
-     * it commits its outcome: nothing it has not begun to write may land. Never blocks, so the
-     * heartbeat can call it whatever the run thread is doing.
+     * already begun is not touched, and may land. For a run whose claim is found lost at any stage, even
+     * while it commits its outcome: nothing it has not begun to write may land. A commit begins - or is
+     * skipped - atomically with this ([[begun]]), so none starts once the fence is up. Never waits
+     * on the store, so the heartbeat can call it whatever the run thread is doing. Whether a commit had
+     * begun and not returned when the fence went up.
      */
-    def fence(reason: LLMError): Unit = if fencedBy.isEmpty then fencedBy = Some(reason)
+    def fence(reason: LLMError): Boolean =
+      val (fencedNow, begun) = withLock(gate) {
+        val first = fencedBy.isEmpty
+        if first then fencedBy = Some(reason)
+        (first, inFlight)
+      }
+      if fencedNow then fenced(threadId, begun)
+      begun
+
+    /**
+     * Begins `write` unless the committer is fenced, as one atomic step with the check; `skipped` with the
+     * fence's reason otherwise. The commit counts as in flight until `write` returns or throws.
+     */
+    def begun[A](commit: Commit)(skipped: LLMError => A)(write: => A): A =
+      val fence = withLock(gate) {
+        if fencedBy.isEmpty then inFlight = true
+        fencedBy
+      }
+      fence match
+        case Some(reason) => skipped(reason)
+        case None =>
+          Using.resource(new AutoCloseable { def close(): Unit = withLock(gate) { inFlight = false } }) { _ =>
+            GraphRuntime.this.committing(threadId, commit)
+            write
+          }
 
     /**
      * Marks the run as ended without waiting for this committer: a commit that lands later must leave
@@ -1122,11 +1194,10 @@ final class GraphRuntime(
     private val failed = AtomicReference[Option[LLMError]](None)
     def submit(commit: Commit): Unit =
       if failed.get.isEmpty then
-        fencedBy match
-          case Some(reason) => failed.compareAndSet(None, Some(reason)): Unit
-          case None =>
-            commitAndDeliver(threadId, commit).left.foreach(refused(failed, _))
-            landed()
+        begun(commit)(reason => failed.compareAndSet(None, Some(reason)): Unit) {
+          commitAndDeliver(threadId, commit).left.foreach(refused(failed, _))
+          landed()
+        }
     def failure: Option[LLMError]                 = failed.get
     def close(): Unit                             = ()
     override def forgetInterruptedFailure(): Unit = failed.set(None)
@@ -1145,13 +1216,12 @@ final class GraphRuntime(
       writer.execute { () =>
         // a failed commit stops the queue: a later commit must not land on top of a lost one
         if failed.get.isEmpty then
-          fencedBy match
-            case Some(reason) => failed.compareAndSet(None, Some(reason)): Unit
-            case None =>
-              commitAndDeliver(threadId, commit).left.foreach(refused(failed, _))
-              // a write the run abandoned, landing after the run let the thread go, must leave the hub
-              // no hand-over mark for a thread no run holds
-              landed()
+          begun(commit)(reason => failed.compareAndSet(None, Some(reason)): Unit) {
+            commitAndDeliver(threadId, commit).left.foreach(refused(failed, _))
+            // a write the run abandoned, landing after the run let the thread go, must leave the hub
+            // no hand-over mark for a thread no run holds
+            landed()
+          }
       }
     def failure: Option[LLMError] = failed.get
 
@@ -1221,11 +1291,11 @@ final class GraphRuntime(
       val last = checkpoint.map(_.withParent(durableParent.flatten))
       token.foreach { fence =>
         if last.isDefined || writes.nonEmpty || events.nonEmpty then
-          fencedBy match
-            case Some(reason) => failed = Some(reason)
-            case None =>
-              failed = commitAndDeliver(threadId, Commit(fence, last, writes, events, retract)).left.toOption
-              landed()
+          val exit = Commit(fence, last, writes, events, retract)
+          begun(exit)(reason => failed = Some(reason)) {
+            failed = commitAndDeliver(threadId, exit).left.toOption
+            landed()
+          }
       }
     }
     def abandon(reason: LLMError): Boolean = withLock(lock) {
@@ -1328,7 +1398,8 @@ final class GraphRuntime(
               stopped.await(math.max(1L, math.min(claims.renewEvery.toNanos, remaining)), TimeUnit.NANOSECONDS)
             ) match
               case Right(false) =>
-                if !over && renewal.get.forall(!_.isAlive) then renewal.set(Some(renewing()))
+                // under `lock`, so that no renewal starts once `stop` or `halt` has ended the heartbeat
+                withLock(lock)(if !over && renewal.get.forall(!_.isAlive) then renewal.set(Some(renewing())))
                 beating()
               // stopped; nothing else wakes or interrupts it
               case _ => ()
@@ -1356,6 +1427,14 @@ final class GraphRuntime(
               )
         renewalSettled(threadId)
       }
+
+    /**
+     * Ends the heartbeat without waiting for its beat or a renewal in flight: for a claim found lost,
+     * whose renewal may be stuck in the store and whose outcome no longer matters.
+     */
+    def halt(): Unit =
+      withLock(lock) { over = true }
+      stopped.countDown()
 
     /** Ends the heartbeat; whether the beat and any renewal in flight were joined in time. */
     def stop(): Boolean =
@@ -1411,7 +1490,8 @@ final class GraphRuntime(
      *
      * The claim's [[Heartbeat]] starts as soon as it is granted, so the first renewal is timed from the
      * grant, and the time admission takes counts against the lease. A loss found before the run is
-     * launched is only recorded, as [[StopCause.ClaimLost]], and the run stops before its first superstep.
+     * launched is recorded, as [[StopCause.ClaimLost]], and the run stops before its first superstep; the
+     * claim's commit is fenced against it, and given up once the loss is old enough ([[boundedByLoss]]).
      */
     def admit(
       execution: Execution,
@@ -1435,12 +1515,58 @@ final class GraphRuntime(
               claimLost
             )
           )
-          val outcome =
+          val outcome = boundedByLoss(() =>
             carry().flatMap((carried, reused) => committed(execution, parent, event(granted), carried, reused))
+          )
           admitted = outcome.isRight
           outcome
         }
       }
+
+    /**
+     * Runs `claiming` - admission's read under the claim and the claim's commit - on a virtual thread,
+     * `llm4s-admit-<threadId>`, and waits for it: for as long as it takes while the claim holds, but once
+     * the claim is found lost only until [[lossDeadline]]. Past that it is given up, and the admission
+     * fails [[GraphError.ClaimLost]] without it, so that a store hung on the claim's commit cannot keep
+     * `start`, `recover` or `resume` from returning, or the thread held. A commit given up on that lands
+     * later is fenced by the claim's token, and leaves the hub no hand-over mark for a thread no run holds
+     * ([[forgetIfIdle]]); the run is never launched. An interrupt of the waiting thread is passed on to
+     * `claiming`, which a store that honours interrupts then fails, as it would on the caller's thread; one
+     * left set on `claiming`'s thread is set on the caller's too. What `claiming` threw is thrown again.
+     */
+    private def boundedByLoss(claiming: () => Result[Run[I, O]]): Result[Run[I, O]] =
+      // completed once: by the claiming thread with its outcome, or by the caller giving it up
+      val attempt = new java.util.concurrent.CompletableFuture[(Either[Throwable, Result[Run[I, O]]], Boolean)]()
+      val worker = Thread.ofVirtual().name(s"llm4s-admit-${threadId.value}").start { () =>
+        var outcome: Either[Throwable, Result[Run[I, O]]] =
+          Left(new IllegalStateException("admission ended abnormally"))
+        // completed on every exit; a commit that lands once the caller gave it up leaves no hand-over mark
+        Using.resource(new AutoCloseable {
+          def close(): Unit =
+            if !attempt.complete(outcome -> Thread.currentThread().isInterrupted) then forgetIfIdle(threadId)
+        })(_ => outcome = DefaultRunHandle.guarded(claiming()))
+      }
+      @tailrec def waiting(interrupted: Boolean): Boolean =
+        if attempt.isDone then interrupted
+        else
+          val waited = lostAt.get match
+            case None =>
+              DefaultRunHandle.guarded(java.util.concurrent.CompletableFuture.anyOf(attempt, lossSignal).get())
+            case Some(_) =>
+              val remaining = lossDeadline - System.nanoTime()
+              if remaining <= 0 then
+                attempt.complete(Right(Left(GraphError.ClaimLost(threadId.value, token, lostTo.get))) -> false): Unit
+                Right(())
+              else DefaultRunHandle.guarded(attempt.get(remaining, TimeUnit.NANOSECONDS))
+          waited match
+            case Left(_: InterruptedException) =>
+              worker.interrupt()
+              waiting(interrupted = true)
+            case _ => waiting(interrupted)
+      val interrupted        = waiting(Thread.interrupted())
+      val (outcome, flagged) = attempt.join()
+      if interrupted || flagged then Thread.currentThread().interrupt()
+      outcome.fold(thrown => throw thrown, identity)
 
     private def committed(
       execution: Execution,
@@ -1451,15 +1577,15 @@ final class GraphRuntime(
     ): Result[Run[I, O]] =
       for
         claimed <- newCheckpoint(execution, parent, CheckpointStatus.Running)
-        records <- commitAndDeliver(
-          threadId,
-          Commit(
-            token,
-            Some(claimed),
-            carried.map(_.copy(checkpointId = claimed.id)),
-            Vector(draft(Some(claimed.id), None, event))
-          )
-        ) match
+        claim = Commit(
+          token,
+          Some(claimed),
+          carried.map(_.copy(checkpointId = claimed.id)),
+          Vector(draft(Some(claimed.id), None, event))
+        )
+        // through the committer's fence, so that a claim found lost before it begins never lands
+        records <- committer.begun(claim)(reason => Left(reason))(commitAndDeliver(threadId, claim)) match
+          case Left(lost: GraphError.ClaimLost) => Left(lost)
           // another run advanced the thread first: the thread is re-read so that another tenant's
           // checkpoint is not named, but the conflict's own `latest` is the authoritative one. A
           // re-read that fails or throws falls back to that ThreadBusy rather than a store error.
@@ -1499,6 +1625,28 @@ final class GraphRuntime(
     private val lostTo = AtomicReference[Option[FencingToken]](None)
 
     /**
+     * When the claim was found lost, at any stage of the run, as a `System.nanoTime` value; set once. The
+     * run's end is bounded from it: see [[lossDeadline]].
+     */
+    private val lostAt = AtomicReference[Option[Long]](None)
+
+    /** Records that the claim is lost, now, unless it was recorded already. */
+    private def markLost(): Unit = lostAt.compareAndSet(None, Some(System.nanoTime())): Unit
+
+    /** Whether the claim has been found lost. */
+    def claimWasLost: Boolean = lostAt.get.isDefined
+
+    /**
+     * When a run whose claim was found lost must have ended, as a `System.nanoTime` value: twice
+     * `claims.ttl` after the loss. By then its admission has returned, its result is set, and its local
+     * slot is free, whatever the store is doing.
+     */
+    def lossDeadline: Long = lostAt.get.getOrElse(System.nanoTime()) + lossBound
+
+    /** Completed once the claim is found lost; an admission waiting on its claim's commit wakes on it. */
+    private val lossSignal = new java.util.concurrent.CompletableFuture[Unit]()
+
+    /**
      * What the heartbeat does when it finds the claim lost: until the run has a handle, it records
      * [[StopCause.ClaimLost]], which the loop checks before every superstep; the runtime then sets it to
      * the handle's `stop`, which also interrupts the run, as a cancel does.
@@ -1506,15 +1654,21 @@ final class GraphRuntime(
     @volatile var stopper: () => Unit = () => cause.compareAndSet(None, Some(StopCause.ClaimLost)): Unit
 
     /**
-     * Records the current claim the store named, and stops the run through [[stopper]]. Then fences the
+     * Records the current claim the store named and when the loss was found ([[lostAt]]), and fences the
      * committer, whatever the run is doing - even committing its outcome, when the stop is ignored - so
-     * nothing it has not begun to write lands ([[Committer.fence]]).
+     * nothing it has not begun to write lands ([[Committer.fence]]). Then wakes an admission waiting on
+     * its claim's commit ([[admit]]), and stops the run through [[stopper]].
      */
     private def claimLost(current: Option[FencingToken]): Unit =
       if current.nonEmpty then lostTo.compareAndSet(None, current): Unit
-      claimGone = true
+      markLost()
+      // fenced before the loss is acted on, so no commit starts once the run is stopped or settled
+      if committer.fence(GraphError.ClaimLost(threadId.value, token, lostTo.get)) then
+        GraphRuntime.logger.warn(
+          s"Run '${runId.value}' on thread '${threadId.value}' lost its claim with a commit in the store; it may still land"
+        )
+      lossSignal.complete(()): Unit
       stopper()
-      committer.fence(GraphError.ClaimLost(threadId.value, token, lostTo.get))
 
     // a commit refused as stale stops the run at once, as the heartbeat's loss does
     committer.onStale = stale => claimLost(stale.current.map(FencingToken(_)))
@@ -1533,17 +1687,15 @@ final class GraphRuntime(
     def releaseClaim(): Unit =
       claim match
         case Some(c) if claimReleased.compareAndSet(false, true) =>
-          stopAndRelease(threadId, c.token, heartbeat, claimGone)
-        case _ => heartbeat.foreach(_.stop()): Unit
+          stopAndRelease(threadId, c.token, heartbeat, lostAt.get)
+        // no claim, or released already: a lost claim's heartbeat is not joined, as stopAndRelease says
+        case _ => heartbeat.foreach(beat => if lostAt.get.isDefined then beat.halt() else beat.stop(): Unit)
 
     /**
      * The cut for the run's own subscriptions, set when the run is launched: a write its committer
      * abandoned that lands after the run stopped waiting is never given to them.
      */
     @volatile var abandonedWrites: Option[AbandonedWrites] = None
-
-    /** Set once the claim is found lost, at any stage of the run, or the run ends because it was. */
-    @volatile private var claimGone = false
 
     /**
      * The run's result when it is settled without its run thread ([[DefaultRunHandle.endWithin]]): the
@@ -1555,11 +1707,11 @@ final class GraphRuntime(
      * When the run thread does end, nothing it returns is used. Never throws.
      */
     def endedWithoutRunThread(): RunResult[O] =
-      claimGone = true
+      markLost()
       val lost = GraphError.ClaimLost(threadId.value, token, lostTo.get)
       DefaultRunHandle
         .guarded {
-          committer.fence(lost)
+          committer.fence(lost): Unit
           committer.orphan()
           abandonedWrites.foreach(cut => hub.atMark(threadId)(cut.abandonAfter))
         }
@@ -1873,7 +2025,7 @@ final class GraphRuntime(
     private def lostClaim(execution: Execution, current: Option[FencingToken]): RunResult[O] =
       cause.compareAndSet(None, Some(StopCause.ClaimLost)): Unit
       signal.acknowledge()
-      claimGone = true
+      markLost()
       val lost = GraphError.ClaimLost(threadId.value, token, current.orElse(lostTo.get))
       // a write still in flight may land after the run's end-of-run barrier: it is cut from the run's
       // own subscriptions at what the hub has handed over by now, so it never reaches them as the run's

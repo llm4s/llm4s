@@ -896,6 +896,135 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     await(handle).completed
   }
 
+  // ---- round 7: the fence is atomic with a commit's start, admission is bounded, settling never joins ----
+
+  "A commit that has begun when its run's claim is found lost" should
+    "be the one the fence counts as in flight, so that no commit starts after the fence, in every durability mode" in {
+      for durability <- Durability.values do
+        withClue(s"$durability: ") {
+          val time    = ManualTime()
+          val store   = Hooked(InMemoryCheckpointer(time))
+          val two     = TwoStep()
+          val rt      = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+          val verdict = new java.util.concurrent.LinkedBlockingQueue[Boolean]()
+          val seen    = new AtomicReference[Option[Boolean]](None)
+          val reached = new AtomicBoolean(false)
+          rt.fenced = (_, inFlight) => verdict.offer(inFlight): Unit
+          store.onCommit = commit => {
+            if commit.checkpoint.exists(_.status == CheckpointStatus.Completed) then reached.set(true)
+            None
+          }
+          // the closing commit has been let past the fence, and has not reached the store: the claim is
+          // found lost now, and the fence must count the commit as begun, since it goes on to the store
+          rt.committing = (_, commit) =>
+            if commit.checkpoint.exists(_.status == CheckpointStatus.Completed) then {
+              store.onRenew = unreachable
+              time.advance(1.second)
+              seen.set(Option(verdict.poll(5, TimeUnit.SECONDS)))
+            }
+          two.gate.countDown()
+          val handle = rt.start(thread, two.graph, "x", run("first"), durability).value
+          awaitResult(handle).isRight shouldBe true
+          reached.get shouldBe true
+          seen.get shouldBe Some(true)
+        }
+    }
+
+  "An admission whose claim commit hangs in the store" should
+    "return ClaimLost once its claim is found lost, free its thread, and run nothing, for start and recover" in {
+      for recovering <- Seq(false, true) do
+        withClue(s"${if recovering then "recover" else "start"}: ") {
+          val time  = ManualTime()
+          val store = Hooked(InMemoryCheckpointer(time))
+          if recovering then {
+            // a cancelled run leaves the thread Running, for recover
+            val prior = TwoStep()
+            val first = runtime(store, time, slow).start(thread, prior.graph, "x", run("prior")).value
+            prior.awaitEntered()
+            first.cancel()
+            await(first)
+          }
+          val two       = TwoStep()
+          val entering  = new CountDownLatch(1)
+          val hang      = new CountDownLatch(1)
+          val returned  = new CountDownLatch(1)
+          val releasing = store.releases.get
+          // the claim's commit enters the store and stays there, interrupted or not, until `hang` opens
+          store.onCommit = commit =>
+            if commit.checkpoint.exists(_.runId == "first") && entering.getCount > 0 then {
+              entering.countDown()
+              stuckUntil(hang)
+              val late = store.underlying.commit(thread, commit)
+              returned.countDown()
+              Some(late)
+            } else None
+          val rt        = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+          val admitting = new java.util.concurrent.LinkedBlockingQueue[Result[RunHandle[Vector[String]]]]()
+          Thread
+            .ofVirtual()
+            .start(() =>
+              admitting.offer(
+                if recovering then rt.recover(thread, two.graph, run("first"))
+                else rt.start(thread, two.graph, "x", run("first"))
+              ): Unit
+            )
+          entering.await(5, TimeUnit.SECONDS) shouldBe true
+
+          // the lease passes while the claim's commit hangs: admission must not wait on the store
+          store.onRenew = unreachable
+          time.advance(1.second)
+          val admitted = Option(admitting.poll(5, TimeUnit.SECONDS))
+          hang.countDown()
+          admitted.value.left.value shouldBe a[GraphError.ClaimLost]
+          rt.heldLocally(thread) shouldBe false
+          eventually(store.releases.get == releasing + 1)
+
+          // the late commit is refused, the claim it was fenced by is gone, and it leaves no mark
+          returned.await(5, TimeUnit.SECONDS) shouldBe true
+          eventually(!rt.handOverMarked(thread))
+          two.entered.getCount shouldBe 1
+          events(store).filter(_.runId == "first") shouldBe empty
+
+          // the thread is free for the next run
+          store.onRenew = () => None
+          two.gate.countDown()
+          val next =
+            if recovering then rt.recover(thread, two.graph, run("next"))
+            else rt.start(thread, two.graph, "x", run("next"))
+          await(next.value).completed
+        }
+    }
+
+  "A run whose claim is found lost while a renewal hangs in the store" should
+    "end and free its thread without joining that renewal, in every durability mode" in {
+      for durability <- Durability.values do
+        withClue(s"$durability: ") {
+          val time     = ManualTime()
+          val store    = Hooked(InMemoryCheckpointer(time))
+          val two      = TwoStep()
+          val renewing = new CountDownLatch(1)
+          val hang     = new CountDownLatch(1)
+          val rt       = runtime(store, time)
+          val handle   = rt.start(thread, two.graph, "x", run("first"), durability).value
+          two.awaitEntered()
+          val token = tokenOf(store)
+          // the next renewal stays in the store, interrupted or not, until `hang` opens
+          store.onRenew = () => {
+            renewing.countDown()
+            stuckUntil(hang)
+            Some(Left(ProcessingError("store", "timed out")))
+          }
+          renewing.await(5, TimeUnit.SECONDS) shouldBe true
+
+          time.advance(31.seconds)
+          val ended = within(await(handle))
+          hang.countDown()
+          ended.value.failed._2 shouldBe GraphError.ClaimLost("t", token, None)
+          rt.heldLocally(thread) shouldBe false
+          eventually(store.releases.get == 1)
+        }
+    }
+
   "ThreadLocks" should "serialise one thread id, leave others free, and keep no lock once idle" in {
     val locks   = ThreadLocks()
     val holding = new CountDownLatch(1)

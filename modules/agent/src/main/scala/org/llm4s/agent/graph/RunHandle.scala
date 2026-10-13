@@ -243,13 +243,16 @@ final private[graph] class DefaultRunHandle[O](
 
   /**
    * Settles the run, once, by whichever comes first - the run thread as it exits, or [[endWithin]]:
-   * `outcome` is computed, the subscriptions are given their end-of-run barriers, `release` runs, and
-   * then the result is set. Whoever comes second does nothing, so a run has one result, and its thread
-   * is freed once - never after a later run has taken it.
+   * `outcome` is computed, then the run is taken, the subscriptions are given their end-of-run
+   * barriers, `release` runs, and the result is set. Whoever takes the run second sets nothing, so a run
+   * has one result, and its thread is freed once - never after a later run has taken it. Nothing from
+   * taking the run to setting its result waits on the store but what `release` bounds.
    */
   private def settle(outcome: () => RunResult[O], release: () => Unit): Unit =
+    // the outcome is computed before the run is taken - closing a crashed run's committer can wait on the
+    // store - so that the watchdog can still settle a run whose thread is stuck computing it
+    val settled = outcome()
     if settling.compareAndSet(false, true) then
-      val settled = outcome()
       DefaultRunHandle.guarded(handedOver.complete(())): Unit
       DefaultRunHandle.guarded(release()): Unit
       result.complete(settled): Unit
@@ -258,20 +261,22 @@ final private[graph] class DefaultRunHandle[O](
 
   /**
    * Bounds the run's end once its claim is found lost, whatever the run is doing: a virtual thread,
-   * `llm4s-lost-<threadId>`, waits up to `wait` for the result and, if the run thread has not begun to
-   * settle it by then, settles it without the run thread ([[settle]]) with `outcome`, which must not
-   * throw. The run thread may be stuck in a store call that ignores interrupts, as a commit can be,
-   * even one of its outcome, which no stop interrupts; when it does return, it changes nothing. Only the
-   * first call starts the thread.
+   * `llm4s-lost-<threadId>`, waits for the result until `deadline` (a `System.nanoTime` value) and, if
+   * the run thread has not taken the run to settle it by then, settles it without the run thread
+   * ([[settle]]) with `outcome`, which must not throw. The run thread may be stuck in a store call that
+   * ignores interrupts, as a commit can be, even one of its outcome, which no stop interrupts; when it
+   * does return, it changes nothing. Only the first call starts the thread.
    */
-  private[graph] def endWithin(wait: FiniteDuration, outcome: () => RunResult[O], release: () => Unit): Unit =
+  private[graph] def endWithin(deadline: Long, outcome: () => RunResult[O], release: () => Unit): Unit =
     if bounding.compareAndSet(false, true) then
       Thread
         .ofVirtual()
         .name(s"llm4s-lost-${threadId.value}")
         .start { () =>
-          DefaultRunHandle.guarded(result.get(wait.toNanos, TimeUnit.NANOSECONDS)) match
-            case Left(_: TimeoutException) => settle(outcome, release)
+          val wait = math.max(0L, deadline - System.nanoTime())
+          DefaultRunHandle.guarded(result.get(wait, TimeUnit.NANOSECONDS)) match
+            // `outcome` fences and cuts the run: not once the run thread has taken it
+            case Left(_: TimeoutException) if !settling.get => settle(outcome, release)
             // settled first; nothing else interrupts this thread
             case _ => ()
         }: Unit
