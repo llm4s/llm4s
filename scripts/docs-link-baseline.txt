@@ -38,9 +38,7 @@ docs/guide/agents/index.md -> /design/phase-1.2-guardrails-framework
 docs/guide/agents/index.md -> /design/phase-1.3-handoff-mechanism
 docs/guide/agents/index.md -> /design/phase-1.4-memory-system
 docs/guide/agents/index.md -> /design/phase-2.1-streaming-events
-docs/guide/agents/index.md -> /design/typed-agent-runtime-design
 docs/guide/agents/memory.md -> ../../reference/postgres-memory-store.md
-docs/guide/agents/streaming.md -> /design/typed-agent-runtime-design
 docs/guide/basic-usage.md -> ../getting-started/configuration.md#api-keys
 docs/guide/basic-usage.md -> ../getting-started/configuration.md#environment-variables-llm4s-reads
 docs/guide/basic-usage.md -> ../getting-started/configuration.md#named-provider-sections
