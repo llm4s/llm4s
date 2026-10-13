@@ -42,7 +42,8 @@ private[sqlite] object SqliteSchema:
 
   /**
    * Version 2: the first event number of the thread now under each id, so that a thread deleted and created again
-   * numbers on past the deleted one's events. Every thread a version-1 file holds is its id's first, numbered from 1.
+   * numbers on past the deleted one's events. Every thread a version-1 file holds numbers its events from 1 - a
+   * version-1 delete restarted an id's numbering - so its `first_seq` is 1.
    */
   private def addFirstSeq(connection: Connection): Unit =
     statements(connection, "ALTER TABLE llm4s_checkpoint_threads ADD COLUMN first_seq INTEGER NOT NULL DEFAULT 1")

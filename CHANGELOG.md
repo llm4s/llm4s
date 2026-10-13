@@ -1305,7 +1305,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GraphError.ThreadDeleted(threadId, afterSeq, firstSeq)` (`Checkpointer.deleted` is the rule), and a read from 0
   starts at the current thread's first event. `DisconnectReason` gains `ThreadDeleted`, which ends every subscription
   to a deleted thread. `CheckpointerContract` drops its "deletes regardless of claims" case for cases on the fenced
-  delete, the numbering and `ThreadDeleted`. The SQLite schema is version 2 (`first_seq`), upgraded on open. No shims;
+  delete, the numbering and `ThreadDeleted`. A deleted id keeps that tombstone for good: nothing reclaims it yet. There
+  is no unfenced delete. The SQLite schema is version 2 (`first_seq`), upgraded on open; stop processes on an older
+  build first. No shims;
   see the [Stage 2 migration note](docs/reference/migration.md#durable-checkpointer-contract-1700).
 - **Workload-identity configuration is `@Stable`; `stabilityTierCheck` flags Stable signatures that name Experimental types** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
   `AuthConfig`, `IdentitySource`, `TokenExchangeConfig`, `AccessToken`, `AccessTokenProvider`,
@@ -2664,8 +2666,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A subscription no longer crosses a deleted thread into a new thread of the same id** ([#1700](https://github.com/llm4s/llm4s/issues/1700) follow-up, [#1705](https://github.com/llm4s/llm4s/issues/1705)):
   a subscription in another runtime that had followed a deleted thread silently skipped the first events of a new
   thread created under the same id, then delivered the rest as if they continued the old log - another tenant's
-  events included. It now ends with `Disconnected(lastSeq, ThreadDeleted)`, as does a subscription in the deleting
-  runtime, which used to stay open.
+  events included. It now ends with `Disconnected(lastSeq, ThreadDeleted)` at its next read of the store, as does a
+  subscription in the deleting runtime, which used to stay open. A subscription in another runtime that had
+  delivered no event yet cannot be told from a new one, and follows the new thread from its first event.
 - **A one-shot `Agent.run` whose turn failed forgets its thread even when releasing the turn's claim failed**
   ([#1700](https://github.com/llm4s/llm4s/issues/1700) follow-up): the store refused the forget as it refuses any live
   claim, the turn's own run id included, so the thread - which nobody can name - was kept. `GraphRuntime.deleteThread`

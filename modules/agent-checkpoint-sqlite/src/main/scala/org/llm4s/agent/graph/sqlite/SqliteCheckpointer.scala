@@ -335,12 +335,13 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
       update(
         c,
         // every SET expression reads the row as it was: the next thread starts one past the deleted one's next
-        // number, which is never used (see `Checkpointer.deleted`); a thread that numbered no event leaves nothing
+        // number, which is never used (see `Checkpointer.deleted`); a thread that numbered no event leaves nothing,
+        // and a tombstone that numbered no event since its delete keeps its numbering
         """UPDATE llm4s_checkpoint_threads
           |SET checkpoint_id = NULL, checkpoint_json = NULL,
-          |    next_seq = CASE WHEN next_seq > 1 THEN next_seq + 1 ELSE 1 END,
-          |    first_seq = CASE WHEN next_seq > 1 THEN next_seq + 1 ELSE 1 END,
-          |    earliest_seq = CASE WHEN next_seq > 1 THEN next_seq + 1 ELSE 1 END,
+          |    next_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+          |    first_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+          |    earliest_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
           |    claim_holder = NULL, claim_token = NULL, claim_expires_second = NULL, claim_expires_nano = NULL
           |WHERE thread_id = ?""".stripMargin,
         threadId.value

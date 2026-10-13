@@ -487,6 +487,13 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.store.deleteThread(s.thread, again).value shouldBe (())
     val third = s.claim("third").value.token
     s.commit(third, events = Vector(s.event("t1"))).value.map(_.seq) shouldBe Vector(8L)
+    // deleting a tombstone that numbered no event since moves nothing on: forgetting twice is idempotent
+    s.store.deleteThread(s.thread, third).value shouldBe (())
+    val fourth = s.claim("fourth").value.token
+    s.store.deleteThread(s.thread, fourth).value shouldBe (())
+    s.store.eventsAfter(s.thread, 8L, 10).refused shouldBe GraphError.ThreadDeleted(s.thread.value, 8L, 10L)
+    val fifth = s.claim("fifth").value.token
+    s.commit(fifth, events = Vector(s.event("f1"))).value.map(_.seq) shouldBe Vector(10L)
     // a thread that numbered no event leaves no gap
     val quiet = newThread()
     val q1    = s.claim("q1", quiet).value.token
@@ -495,7 +502,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.commit(q2, events = Vector(s.event("q")), on = quiet).value.map(_.seq) shouldBe Vector(1L)
   }
 
-  it should "refuse to read on from inside a deleted thread's log, so no reader takes a new thread for its continuation" in {
+  it should "refuse a read from inside a deleted thread's log, so no reader takes a new thread for its sequel" in {
     val s     = Store()
     val token = s.claim("run").value.token
     s.commit(token, Some(s.checkpoint("c1", None)), events = Vector(s.event("a"), s.event("b"), s.event("c"))).value
@@ -1421,7 +1428,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     same(seen.all, delivered)
   }
 
-  it should "end with ThreadDeleted when another runtime deletes the thread, delivering nothing of a new thread of its id" in {
+  it should "end with ThreadDeleted when another runtime deletes its thread, delivering nothing of a new one" in {
     val s    = Store()
     val st   = Steps()
     val a    = runtime(s.store)

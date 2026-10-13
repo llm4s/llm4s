@@ -179,6 +179,8 @@ final class GraphRuntime(
    * [[deleteThread]] can try once more before it claims the thread: the store refuses a live claim
    * whoever asks, the same run id included, so a one-shot run whose release failed could not
    * otherwise be forgotten until its claim lapsed. A claim granted on the thread since drops it.
+   * Entries are not expired: each is a thread id and a token, one per thread whose release failed
+   * and that this runtime has neither deleted nor claimed since.
    */
   private val unreleased = new java.util.concurrent.ConcurrentHashMap[String, FencingToken]()
 
@@ -383,16 +385,18 @@ final class GraphRuntime(
    * is `ThreadBusy`, or `TenantMismatch` if the run is another tenant's. An unknown thread is
    * `Right(())`. The tenant is checked once more after the store claim is granted, so a thread another
    * runtime created for another tenant in between is `TenantMismatch`, not deleted. A claim this
-   * runtime failed to give back when a run on the thread ended is given back first, so that it does
-   * not refuse the delete until it lapses.
+   * runtime failed to give back when a run on the thread ended is given back first, once the tenant
+   * has been checked, so that it does not refuse the delete until it lapses.
    *
-   * A subscription follows a thread, not its id. Every [[subscribe]] to the deleted thread - in this
-   * runtime, or in another sharing the store - ends with `Disconnected(lastSeq,
-   * DisconnectReason.ThreadDeleted)` once it has delivered what it had queued: in this runtime at
-   * once, in another when its watch next reads the store ([[WatchPolicy]]; with the watch disabled,
-   * only when its own runtime next commits on the thread and it reads the store for the gap). It never delivers a new thread created under the same id, whose events are
-   * numbered on past the deleted thread's ([[Checkpointer.deleteThread]]); subscribe again from `0`
-   * to follow that one.
+   * A subscription follows a thread, not its id. A [[subscribe]] in this runtime made before the
+   * delete ends with `Disconnected(lastSeq, DisconnectReason.ThreadDeleted)` once it has delivered
+   * what it had queued. One in another runtime sharing the store ends the same way when it next reads
+   * the store: when its watch next polls ([[WatchPolicy]]), or, with the watch disabled, only when
+   * its own runtime next commits on the thread. A subscription in another runtime that has delivered
+   * no event yet - it is still at `0` - cannot be told from a new one, and follows the new thread
+   * instead. None of them delivers a new thread created under the same id as a continuation of the
+   * deleted one: its events are numbered on past the deleted thread's
+   * ([[Checkpointer.deleteThread]]); subscribe again from `0` to follow it.
    */
   def deleteThread(threadId: ThreadId, config: RunConfig = RunConfig()): Result[Unit] = admission(threadId) {
     val holder = withLock(activeLock) {
@@ -405,13 +409,16 @@ final class GraphRuntime(
       case None                            =>
         // released on every exit, including an InterruptedException, which `Try` would not catch
         Using.resource(new AutoCloseable { def close(): Unit = release(threadId) }) { _ =>
-          // a claim of this runtime's that it failed to give back - a run's, ended - would refuse the
-          // delete until it lapsed; nothing holds the thread in this runtime now, so it is given back first
-          Option(unreleased.remove(threadId.value)).foreach(releaseClaim(threadId, _))
           checkpointer
             .latest(threadId)
             .flatMap(_.fold[Result[Unit]](Right(()))(checkTenant(threadId, _, config)))
-            .flatMap(_ => claimThread(threadId, config))
+            .flatMap { _ =>
+              // a claim of this runtime's that it failed to give back - a run's, ended - would refuse the
+              // delete until it lapsed; nothing holds the thread in this runtime now, so it is given back
+              // first, once the caller is known to be the thread's tenant
+              Option(unreleased.remove(threadId.value)).foreach(releaseClaim(threadId, _))
+              claimThread(threadId, config)
+            }
             .flatMap { claim =>
               // the deletion removes the claim with the thread; one that did not happen gives it back
               var deleted = false

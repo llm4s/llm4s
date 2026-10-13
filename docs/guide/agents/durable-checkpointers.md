@@ -132,11 +132,29 @@ deletes only while the token is the thread's current claim, atomically. So a run
 deletes nothing of that run: the call returns `ThreadBusy` (or `TenantMismatch`, if the run is another tenant's).
 
 A deleted thread's id names a new thread, but the new thread does not reuse the old event numbers: it numbers its
-events on past the deleted thread's, one number skipped. A subscription follows a thread, not its id, so every
+events on past the deleted thread's, one number skipped. A subscription follows a thread, not its id, so a
 subscription to the deleted thread ends with `Disconnected(lastSeq, DisconnectReason.ThreadDeleted)` once it has
-delivered what it had queued - in the deleting runtime at once, in another runtime sharing the store when its watch
-next reads the store - and never delivers the new thread's events. Subscribe again from `afterSeq = 0` to follow the
-new thread from its first event.
+delivered what it had queued, and never delivers the new thread's events as if they continued the old log:
+
+- in the deleting runtime, every subscription made before the delete ends at once;
+- in another runtime sharing the store, a subscription ends when it next reads the store: when its watch next polls,
+  or, with `WatchPolicy.disabled`, only when its own runtime next commits on the thread;
+- in another runtime, a subscription that has delivered no event yet - still at `afterSeq = 0`, as one to a thread
+  that never numbered an event always is - cannot be told from a new subscription, so it follows the new thread
+  from its first event instead of ending.
+
+Subscribe again from `afterSeq = 0` to follow the new thread from its first event.
+
+There is no unfenced delete: to delete a thread outside a runtime, claim it and delete with the claim's token.
+
+### Limits
+
+- A deleted thread that numbered any event leaves a small record in the store for good: its next event number, and
+  nothing of its data. It is what lets a reader of the deleted log - in any process, however late - be told that the
+  thread was deleted, and a new thread of the id be numbered past it. Nothing removes it, `prune` included, so a store
+  grows by one such record per deleted thread; `Agent.run(query)` forgets the thread of every failed or cancelled
+  one-shot turn, so a long-lived store gains one per such turn. Deleting the same id again, with no event since,
+  adds nothing.
 
 ## Subscriptions across runtimes
 
@@ -150,7 +168,7 @@ val runtime = GraphRuntime(store, watch = WatchPolicy(pollInterval = 100.millis)
 ```
 
 Only durable events cross runtimes; live progress is never stored. A thread deleted through any runtime ends its
-subscriptions in every runtime with `ThreadDeleted` ([Deleting a thread](#deleting-a-thread)). See
+subscriptions with `ThreadDeleted`, with the exceptions [Deleting a thread](#deleting-a-thread) lists. See
 [Subscriptions across runtimes](streaming#subscriptions-across-runtimes) for the delivery and back-pressure rules.
 
 ## The SQLite store
@@ -259,7 +277,9 @@ changes when a dead run's thread can be taken over.
 ### Schema versions
 
 The file records its schema version, 2 since the fenced delete (which added `first_seq`, where a deleted thread's id
-continues its event numbering). Opening a file at an older version upgrades it in one transaction, and
+continues its event numbering). Stop every process running an older build before opening its file with this one: an
+older process that already has the file open is not refused, and until it stops its deletes are not fenced and drop
+the record a deleted thread's id numbers on from. Opening a file at an older version upgrades it in one transaction, and
 opening a file written by a newer build is refused with a `ProcessingError`, so an older process never misreads
 it. Checkpoints inside keep their own format version, as with every store, and are migrated when read.
 

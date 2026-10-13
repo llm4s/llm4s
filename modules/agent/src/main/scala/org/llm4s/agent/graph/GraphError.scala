@@ -146,8 +146,8 @@ object GraphError:
    * A read of the thread's event log after `afterSeq` was refused because that point is in the log of a
    * thread of the same id that [[Checkpointer.deleteThread]] removed ([[Checkpointer.deleted]]): the
    * thread now under the id - if one has been created - numbers its events from `firstSeq`, so its log
-   * is not a continuation of the one the reader was following. A subscription ends on it with [[DisconnectReason.ThreadDeleted]].
-   * Read from `0` to follow the thread now under the id.
+   * is not a continuation of the one the reader was following. A subscription ends on it with
+   * [[DisconnectReason.ThreadDeleted]]. Read from `0` to follow the thread now under the id.
    */
   final case class ThreadDeleted(threadId: String, afterSeq: Long, firstSeq: Long)
       extends GraphError

@@ -177,7 +177,15 @@ trait Checkpointer:
    * thread that numbered no event - so that a new thread of the id numbers its events on past the
    * deleted thread's, one number skipped, and a read of the deleted log after the
    * delete is [[GraphError.ThreadDeleted]] (see [[eventsAfter]]); a store that wakes
-   * [[awaitEventsAfter]] on commits wakes it on a delete too. Fenced like a [[commit]]: only while `token` is
+   * [[awaitEventsAfter]] on commits wakes it on a delete too. Deleting a thread whose tombstone has
+   * numbered no event since does not move the numbering on again.
+   *
+   * '''The tombstone is kept for good.''' A deleted id keeps a small record - its next event number,
+   * nothing of the thread's data - which nothing removes: neither [[prune]] nor a later delete. It is
+   * what lets a reader of the deleted log, in any process, be told the thread was deleted, and a new
+   * thread of the id be numbered past it, however long after the delete either happens. A store
+   * whose threads are deleted often - every failed one-shot `Agent.run` forgets its thread - grows by
+   * one such record per deleted thread that numbered an event. Fenced like a [[commit]]: only while `token` is
    * the thread's current claim, checked atomically with the delete, and otherwise
    * `Left(GraphError.StaleClaim)` with nothing deleted - so a deleter that lost its claim (it
    * expired and another run took the thread over, or it was released) deletes nothing of the run
@@ -438,8 +446,11 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     else
       // a tombstone: nothing of the thread but where its numbering ended, so a new thread of the id
       // numbers on past it, one number skipped (see `deleted`), and a reader of the deleted log is told
-      // it was deleted; a thread that numbered no event leaves nothing
+      // it was deleted; a thread that numbered no event leaves nothing, and a tombstone that numbered no
+      // event since its delete is kept as it is, so deleting it again moves nothing on
       if current.nextSeq == 1L then threads.remove(threadId.value): Unit
+      else if current.nextSeq == current.firstSeq && current.firstSeq > 1L then
+        store(threadId, current.copy(history = Vector.empty, pendingWrites = Vector.empty, claim = None))
       else
         val first = current.nextSeq + 1
         store(threadId, ThreadRecord(Vector.empty, Vector.empty, Vector.empty, first, first, None, first))
