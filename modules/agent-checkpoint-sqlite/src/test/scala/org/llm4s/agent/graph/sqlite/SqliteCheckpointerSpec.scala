@@ -446,8 +446,8 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       }
       gate.countDown()
       running.await().value match {
-        case RunResult.Failed(_, GraphError.CheckpointWriteFailed(_, _: GraphError.StaleClaim, _)) => succeed
-        case other => fail(s"the stale run was not fenced off: $other")
+        case RunResult.Failed(_, _: GraphError.ClaimLost) => succeed
+        case other                                        => fail(s"the stale run was not fenced off: $other")
       }
       one.latest(thread).value.value.checkpoint.runId shouldBe "second"
       workers.callsOf("a") shouldBe 1

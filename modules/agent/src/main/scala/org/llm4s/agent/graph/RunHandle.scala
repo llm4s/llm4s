@@ -37,10 +37,11 @@ trait RunHandle[O]:
   /**
    * Cancels the run by interrupting its thread; see [[GraphError.Cancelled]]. Returns at once and
    * is idempotent. A no-op once the run has ended, and once it has begun closing: committing its
-   * outcome (completed, suspended or failed), or stopping on a store failure or a crash. What it is
-   * closing is not interrupted - neither its commits nor the release of its claim - and the run ends
-   * with it. A cancel that interrupts a superstep's commit still ends the run `Cancelled`, even if
-   * the store reports that commit as failed.
+   * outcome (completed, suspended or failed), stopping on a store failure or a crash, or stopping
+   * because it lost its claim ([[GraphError.ClaimLost]]). What it is closing is not interrupted -
+   * neither its commits nor the release of its claim - and the run ends with it. A cancel that
+   * interrupts a superstep's commit still ends the run `Cancelled`, even if the store reports that
+   * commit as failed.
    */
   def cancel(): Unit
 
@@ -60,16 +61,18 @@ trait RunHandle[O]:
   def observation: Option[Subscription]
 
 /**
- * Why a run stops, recorded once: the first cause recorded wins. `Cancelled` and `Expired` are
- * recorded by [[DefaultRunHandle.stop]], which interrupts the run only if its cause was the first.
- * `Finishing` is recorded by the run itself just before it closes on its own account - committing
- * its outcome (its completed or suspended checkpoint, or a failed run's `RunFailed`), or stopping on
- * a store failure or a crash - so a later cancel or expiry records nothing and sends no interrupt
- * into its commits or its release; a run that finds `Cancelled` or `Expired` already recorded is
- * stopped instead.
+ * Why a run stops, recorded once: the first cause recorded wins. `Cancelled`, `Expired` and
+ * `ClaimLost` are recorded by [[DefaultRunHandle.stop]], which interrupts the run only if its cause
+ * was the first; `ClaimLost` comes from the run's claim heartbeat, when the run's lease passed with no
+ * renewal landing or a renewal was refused, and the run also records it itself when the store refuses
+ * one of its commits as stale. `Finishing` is recorded by the run itself just before it closes on its
+ * own account - committing its outcome (its completed or suspended checkpoint, or a failed run's
+ * `RunFailed`), or stopping on a store failure or a crash - so a later cancel, expiry or lost claim
+ * records nothing and sends no interrupt into its commits or its release; a run that finds another
+ * cause already recorded is stopped by that cause instead.
  */
 private[graph] enum StopCause:
-  case Cancelled, Expired, Finishing
+  case Cancelled, Expired, ClaimLost, Finishing
 
 /**
  * How a run and its [[DefaultRunHandle]] agree that it stops. `cause` records why (see
@@ -168,7 +171,8 @@ final private[graph] class DefaultRunHandle[O](
     // that has not yet run sets its flag, which the loop checks before every superstep
     if signal.cause.compareAndSet(None, Some(stopCause)) then
       beforeInterrupt()
-      signal.interruptUnlessAcknowledged(() => if !result.isDone then runThread.interrupt())
+      // a stop before the run thread exists records only its cause, which the loop checks before every superstep
+      signal.interruptUnlessAcknowledged(() => if !result.isDone && runThread != null then runThread.interrupt())
 
   /** A test hook run by [[stop]] between recording its cause and interrupting; a no-op by default. */
   @volatile private[graph] var beforeInterrupt: () => Unit = () => ()
@@ -183,17 +187,14 @@ final private[graph] class DefaultRunHandle[O](
    * Starts the run thread, running `body`. A throwable escaping it becomes `crashed(throwable)`;
    * `release` runs before the result is set, on every exit. With a `deadline` (a `System.nanoTime`
    * value), it then starts a virtual thread named `llm4s-deadline-<threadId>` that stops the run
-   * with [[StopCause.Expired]] when the deadline passes; see [[expireAt]]. With a `renewal` - an
-   * interval and a renew function that returns whether to go on - it starts a virtual thread named
-   * `llm4s-claim-<threadId>` that calls it every interval until the run ends or it returns `false`;
-   * see [[renewEvery]].
+   * with [[StopCause.Expired]] when the deadline passes; see [[expireAt]]. The run's claim is renewed
+   * by the runtime's heartbeat, which `release` stops before it gives the claim back.
    */
   private[graph] def launch(
     body: () => RunResult[O],
     crashed: Throwable => RunResult[O],
     release: () => Unit,
-    deadline: Option[Long] = None,
-    renewal: Option[(FiniteDuration, () => Boolean)] = None
+    deadline: Option[Long] = None
   ): Unit =
     val thread = Thread.ofVirtual().name(s"llm4s-run-${threadId.value}").unstarted(() => run(body, crashed, release))
     runThread = thread
@@ -202,21 +203,6 @@ final private[graph] class DefaultRunHandle[O](
     deadline.foreach { at =>
       Thread.ofVirtual().name(s"llm4s-deadline-${threadId.value}").start(() => expireAt(at)): Unit
     }
-    renewal.foreach { (interval, renew) =>
-      Thread.ofVirtual().name(s"llm4s-claim-${threadId.value}").start(() => renewEvery(interval, renew)): Unit
-    }
-
-  /**
-   * The claim thread's body: waits for the run's result for `interval` at a time, and calls `renew`
-   * each time the wait times out, until the result is set or `renew` returns `false`. Like the
-   * deadline thread it holds nothing the run needs and ends as soon as the result is set. A `renew`
-   * that throws ends it (the runtime's never does).
-   */
-  @tailrec private def renewEvery(interval: FiniteDuration, renew: () => Boolean): Unit =
-    DefaultRunHandle.guarded(result.get(interval.toNanos, TimeUnit.NANOSECONDS)) match
-      case Left(_: TimeoutException) =>
-        if DefaultRunHandle.guarded(renew()).getOrElse(false) then renewEvery(interval, renew)
-      case _ => ()
 
   /**
    * The deadline thread's body: waits for the run's result until `deadline`, and stops the run if

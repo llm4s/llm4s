@@ -52,8 +52,8 @@ import scala.jdk.CollectionConverters.*
  *  - '''Two runtimes over one store''': a second [[GraphRuntime]] is refused a thread whose run is
  *    live in the first ([[GraphError.ThreadBusy]] naming the holder); a run that keeps renewing is
  *    not taken over; once a claim expires, the second runtime recovers the thread without re-running
- *    the first run's completed tasks, and the first run's later commits are refused, so it fails
- *    with [[GraphError.CheckpointWriteFailed]] and leaves nothing in the thread; and of several
+ *    the first run's completed tasks, and the first run's later commits are refused as stale, so it
+ *    ends with [[GraphError.ClaimLost]] and leaves nothing in the thread; and of several
  *    runtimes recovering one thread at once, exactly one is admitted; `updateState` and `fork` from a
  *    second runtime are refused while a run is live in the first, and fenced by their own claim; and
  *    a run a node blocks leaves nothing of its turn in the history.
@@ -1045,12 +1045,12 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     recovered.status shouldBe CheckpointStatus.Completed
     recovered.runId shouldBe "second"
 
-    // the first run wakes up: its commits are refused, so it fails and records nothing more
+    // the first run wakes up: its commits are refused as stale, so it ends ClaimLost and records nothing more
     val seqs = s.seqs()
     gate.countDown()
     outcome(running).value match
-      case RunResult.Failed(_, GraphError.CheckpointWriteFailed(_, _: GraphError.StaleClaim, _)) => succeed
-      case other => fail(s"the stale run was not refused: $other")
+      case RunResult.Failed(_, _: GraphError.ClaimLost) => succeed
+      case other                                        => fail(s"the stale run was not refused: $other")
     s.seqs() shouldBe seqs
     same(s.store.latest(s.thread).value.value.checkpoint, recovered)
     val events         = s.store.eventsAfter(s.thread, 0L, 1000).value

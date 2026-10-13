@@ -137,7 +137,8 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
 
     held.gate.countDown()
     val (_, error) = await(handle).failed
-    error should matchPattern { case GraphError.CheckpointWriteFailed("t", _: GraphError.StaleClaim, None) => }
+    // its commit is refused as stale: it lost its claim (the successor has since released its own)
+    error shouldBe GraphError.ClaimLost("t", held.positions.peek().fencingToken.value, None)
     store.eventsAfter(thread, 0L, 100).value shouldBe after
     held.positions.asScala.toVector.map(_.fencingToken.value.value).distinct should have size 2
   }
@@ -214,11 +215,9 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     Thread.sleep(100)
     lost.get shouldBe 1
 
-    // and the run stops at its next superstep, as it would have at its next commit
-    held.gate.countDown()
-    await(handle).failed._2 should matchPattern {
-      case GraphError.CheckpointWriteFailed("t", GraphError.StaleClaim("t", 1L, Some(2L)), None) =>
-    }
+    // and the run stops at once: its task is interrupted, and it ends naming the current claim
+    await(handle).failed._2 shouldBe
+      GraphError.ClaimLost("t", held.positions.peek().fencingToken.value, Some(FencingToken(2L)))
   }
 
   it should "survive a renew that throws" in {
@@ -232,7 +231,7 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     await(handle).completed._2 shouldBe Vector("x")
   }
 
-  "A run that lost its claim" should "stop at its next superstep, running nothing more, even with deferred commits" in {
+  "A run that lost its claim" should "stop at once, running nothing more, even with deferred commits" in {
     val clock   = MovingClock()
     val store   = Hooked(InMemoryCheckpointer(clock))
     val gate    = new CountDownLatch(1)
@@ -265,12 +264,9 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
       None
     }
     renewed.await(5, TimeUnit.SECONDS) shouldBe true
-    Thread.sleep(100) // the renewal's StaleClaim is recorded just after the store answers
 
-    gate.countDown()
-    await(handle).failed._2 should matchPattern {
-      case GraphError.CheckpointWriteFailed("t", _: GraphError.StaleClaim, None) =>
-    }
+    // the refused renewal interrupts `first`, whose gate never opens
+    await(handle).failed._2 should matchPattern { case GraphError.ClaimLost("t", _, Some(_)) => }
     // superstep 2 never ran: under OnExit, nothing would have stopped it before the exit commit
     later.get shouldBe 0
     store.latest(thread).value.value.checkpoint shouldBe claimCheckpoint
@@ -330,9 +326,7 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     calls.get("b").get shouldBe 1
 
     hold.countDown()
-    await(handle).failed._2 should matchPattern {
-      case GraphError.CheckpointWriteFailed("t", _: GraphError.StaleClaim, None) =>
-    }
+    await(handle).failed._2 shouldBe a[GraphError.ClaimLost]
   }
 
   "resume" should "be refused while another runtime is admitting on the thread, naming its run" in {

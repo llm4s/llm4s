@@ -12,9 +12,14 @@ import scala.concurrent.duration.*
  * While it is live - `expiresAt` has not passed - no other claim on the thread is granted, so a run
  * in another runtime or process is refused with [[GraphError.ThreadBusy]]. Once it has expired,
  * another run may take the thread over, and the store then refuses this claim's token
- * ([[GraphError.StaleClaim]]). Until then the holder may still commit and renew, even past
- * `expiresAt`: expiry only lets another run claim the thread. `takenOverFrom` is the holder of the
- * expired claim, never released, that this one replaced: `None` when the thread was free.
+ * ([[GraphError.StaleClaim]]). `takenOverFrom` is the holder of the expired claim, never released,
+ * that this one replaced: `None` when the thread was free.
+ *
+ * To the store, the holder may still commit and renew past `expiresAt` until another claim replaces
+ * it: expiry only lets another run claim the thread. A [[GraphRuntime]] does not rely on that: a run
+ * judges its own lease, by its monotonic clock from just before it sent the request that granted or
+ * last renewed the claim, and stops with [[GraphError.ClaimLost]] once that lease has passed - which
+ * is never later than the store's expiry, whatever the skew between their clocks.
  */
 final case class RunClaim private (
   threadId: ThreadId,
@@ -67,11 +72,17 @@ object ClaimRequest:
 
 /**
  * How a [[GraphRuntime]] holds its runs' claims: each claim lasts `ttl` from when the store grants or
- * renews it, and a running run renews it every `renewEvery`, on a virtual thread named
- * `llm4s-claim-<threadId>`, until the run ends and releases it. A process that dies stops renewing,
- * so after at most `ttl` its threads can be recovered elsewhere; a live run that cannot reach its
- * store for longer than `ttl` can lose its claim the same way, after which its commits are refused
- * ([[GraphError.StaleClaim]]) and it fails with [[GraphError.CheckpointWriteFailed]].
+ * renews it, and is renewed every `renewEvery` from its grant - also while the run is still being
+ * admitted, and while `fork` or `updateState` holds a thread - until it is released. A process that
+ * dies stops renewing, so after at most `ttl` its threads can be recovered elsewhere.
+ *
+ * A run judges its own lease: it ends `ttl` after the moment, by the runtime's monotonic clock, just
+ * before the request that granted or last renewed the claim was sent. A run whose renewals fail or
+ * hang until that lease passes - its store is unreachable, or partitioned from it - stops at once, as
+ * one whose renewal or commit the store refuses as stale does: its tasks are interrupted, it commits
+ * nothing more, and it fails with [[GraphError.ClaimLost]]. A renewal that fails is tried again at the
+ * next beat while the lease lasts. Tasks already running when the loss is found may still complete a
+ * side effect before they see their interrupt.
  *
  * Both must be positive and `renewEvery` shorter than `ttl`: `apply` and the `with*` setters throw
  * `IllegalArgumentException` otherwise, and [[ClaimPolicy.of]] returns a `ValidationError`.
