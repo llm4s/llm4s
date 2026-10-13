@@ -14,6 +14,14 @@ private[agent] def withLock[A](lock: ReentrantLock)(body: => A): A =
   Using.resource(new AutoCloseable { def close(): Unit = lock.unlock() })(_ => body)
 
 /**
+ * [[withLock]], but an interrupt while waiting for `lock` ends the wait with an `InterruptedException`,
+ * and `body` never runs.
+ */
+private[agent] def withLockInterruptibly[A](lock: ReentrantLock)(body: => A): A =
+  lock.lockInterruptibly()
+  Using.resource(new AutoCloseable { def close(): Unit = lock.unlock() })(_ => body)
+
+/**
  * One lock per thread id, held while a commit on that thread is written and handed over (and while a
  * store watch of that thread queues what it read), so that delivery order is commit order on each
  * thread - the only order a subscription, which is to one thread, sees. A commit hung in the store
@@ -28,7 +36,17 @@ final private[graph] class ThreadLocks:
   private val locks = new java.util.concurrent.ConcurrentHashMap[String, Held]()
 
   /** Runs `body` holding `threadId`'s lock, releasing it on every exit, an `InterruptedException` included. */
-  def withThreadLock[A](threadId: ThreadId)(body: => A): A =
+  def withThreadLock[A](threadId: ThreadId)(body: => A): A = using(threadId)(held => withLock(held.lock)(body))
+
+  /**
+   * [[withThreadLock]], but an interrupt while waiting for the lock - behind a commit hung in the store,
+   * say - ends the wait with an `InterruptedException`, and `body` never runs.
+   */
+  def withThreadLockInterruptibly[A](threadId: ThreadId)(body: => A): A =
+    using(threadId)(held => withLockInterruptibly(held.lock)(body))
+
+  /** Runs `f` with `threadId`'s lock entry, which exists while `f` runs. */
+  private def using[A](threadId: ThreadId)(f: Held => A): A =
     val held = locks.compute(
       threadId.value,
       (_, existing) =>
@@ -44,7 +62,7 @@ final private[graph] class ThreadLocks:
             entry.users -= 1
             if entry.users == 0 then null else entry
         ): Unit
-    })(_ => withLock(held.lock)(body))
+    })(_ => f(held))
 
   /** How many thread ids have a lock; for tests. */
   private[graph] def size: Int = locks.size
@@ -101,6 +119,9 @@ private[graph] trait Dispatched extends Subscription:
   /** How many items the subscription's queue holds; for tests. */
   private[graph] def queued: Int
 
+  /** Whether the dispatcher thread has ended, waiting for it at most `within`; for tests. */
+  private[graph] def ended(within: scala.concurrent.duration.FiniteDuration): Boolean
+
 /**
  * Delivers a runtime's events to subscribers. Each subscription has its own dispatcher: a bounded
  * queue drained in order by one virtual thread, the only thread its listener is called on. The
@@ -142,6 +163,16 @@ private[graph] trait Dispatched extends Subscription:
  * over and leaves the rest to the hand-over, which then queues them behind every live event sent
  * before it. Durable events are otherwise unaffected: the replay reads them from the store, so
  * holding live events never makes a subscriber lag.
+ *
+ * '''Which stored events have been handed over''' is decided only where no commit on the thread is
+ * between its write and its hand-over. Every commit is written and handed over holding its thread's
+ * commit lock, so that lock is where: either the dispatcher holds it, or it compares with a mark - the
+ * top of a hand-over that has finished, which every event of a commit not yet handed over is above.
+ * A subscription that joins with no mark - no run holds the thread, or none has handed anything over
+ * since its claim was released, while the next run's first commit may already be in the store - takes
+ * the thread's commit lock, on its own dispatcher thread and holding no lock of the hub's, before it
+ * judges a page it read: waiting, interruptibly, for a commit being handed over to finish, so it never
+ * replays a commit its other subscribers have not been handed ([[Dispatcher]]'s `settled`).
  *
  * The mark is kept only while a run holds the thread: the runtime calls [[release]] when the claim
  * is released, after the run's last hand-over, so the hub keeps no state for idle threads. A live
@@ -251,6 +282,9 @@ final private[graph] class EventHub(
   /** How many dispatchers are in the thread's live set; for tests. */
   private[graph] def liveCount(threadId: ThreadId): Int =
     withLock(hubLock)(subscribers.getOrElse(threadId.value, Vector.empty).size)
+
+  /** A test hook run on a dispatcher thread just before it waits for its thread's commit lock. */
+  @volatile private[graph] var settling: ThreadId => Unit = _ => ()
 
   /** Running store watches, by thread; guarded by `hubLock`. */
   private var watching = Map.empty[String, Int]
@@ -410,7 +444,8 @@ final private[graph] class EventHub(
   /**
    * A live event or gap marker held while its dispatcher replays, `after` the highest durable `seq`
    * handed to the hub before it; `None` if the hub had no mark for the thread (no run held it) and
-   * none has been handed to the dispatcher since, until the first one is.
+   * none has been handed to the dispatcher since, until the first one is. An unplaced event was sent
+   * after the dispatcher joined, so after every event its replay finds to be history.
    */
   final private case class Held(after: Option[Long], event: StreamEvent.Live | StreamEvent.LiveGap)
 
@@ -485,16 +520,60 @@ final private[graph] class EventHub(
     private var held      = Vector.empty[Held]
     private var handedSeq = Option.empty[Long]
 
-    /** Starts from the hub's mark for the thread; called under `hubLock`, as the dispatcher joins. */
+    /**
+     * Starts from the hub's mark for the thread; called under `hubLock`, as the dispatcher joins. A
+     * mark is the top of a hand-over that has finished, so taking it needs no commit lock: every event
+     * at or below it was handed over or committed elsewhere, and every commit of this runtime not yet
+     * handed over is above it - commits are numbered in the order they are written, and each is
+     * written and handed over under its thread's commit lock before the next is written. With no mark
+     * the dispatcher knows nothing yet, and learns what it reads is history only holding that lock
+     * ([[settled]]).
+     */
     def seedHanded(mark: Option[Long]): Unit = withLock(lock) { handedSeq = mark }
+
+    /**
+     * With no mark (`handedSeq` is `None`): the highest `seq` read from the store that was found, holding
+     * the thread's commit lock, to be history - handed over before the dispatcher joined, or committed
+     * elsewhere ([[settled]]); guarded by `lock`.
+     */
+    private var history = 0L
 
     /**
      * Whether the event `seq`, read from the store, has been handed to the hub: one written but not
      * yet handed over is left to the hand-over, so that it follows the live events sent before it.
-     * With no mark - no run held the thread when the dispatcher joined, and nothing has been handed
-     * to it since - everything read is history, and counts as handed over.
+     * Every page read is [[settled]] before it is judged, so an event is counted as handed over only
+     * at or below a mark, or found to be history holding the commit lock - never one a commit has
+     * written and not yet handed over.
      */
-    private def handedOver(seq: Long): Boolean = withLock(lock)(handedSeq.forall(seq <= _))
+    private def handedOver(seq: Long): Boolean = withLock(lock)(seq <= history || handedSeq.exists(seq <= _))
+
+    /**
+     * `page`, once the dispatcher can tell which of its events have been handed over ([[handedOver]]).
+     * With a mark (`handedSeq`) it can at once. With none - the hub had no mark for the thread when the
+     * dispatcher joined (no run held it), and nothing has been handed to it since - an event a commit
+     * has written but not yet handed over looks like one handed over before the dispatcher joined: the
+     * write is visible first, and there is no mark to compare it with. So it decides holding the
+     * thread's commit lock, which every commit of this runtime holds from its write to its hand-over:
+     * then no commit is between the two, so every event of this runtime in the page has been handed over
+     * - and one handed over since the dispatcher joined was handed to it too, giving it a mark. If it
+     * still has none, every event of the page was handed over before it joined, or committed elsewhere:
+     * history, up to the page's last `seq`. Live events it holds meanwhile were sent after it joined,
+     * so after all of that history, and keep their place before the first commit handed to it. It
+     * waits for the lock holding no lock of the hub's, and interruptibly: `cancel` ends a wait behind
+     * a commit hung in the store.
+     */
+    private def settled(page: Vector[EventRecord]): Either[End, Vector[EventRecord]] =
+      val known = page.lastOption.forall(last => withLock(lock)(handedSeq.isDefined || last.seq <= history))
+      if known then Right(page)
+      else
+        settling(threadId)
+        CancelledError.catchInterrupt(commitLocks.withThreadLockInterruptibly(threadId)(withLock(lock) {
+          if handedSeq.isEmpty then history = math.max(history, page.last.seq)
+        })) match
+          case _ if cancelled => Left(End.Cancelled)
+          case Right(_)       => Right(page)
+          case Left(_) =>
+            Left(End.Disconnect(DisconnectReason.ReplayFailed(CancelledError(s"replay of thread ${threadId.value}"))))
 
     /** A listener call is in progress; set, with `cancelled` checked, under `lock`. */
     private var delivering = false
@@ -712,6 +791,9 @@ final private[graph] class EventHub(
         gapped
 
     def queued: Int = withLock(lock)(queue.size)
+
+    private[graph] def ended(within: scala.concurrent.duration.FiniteDuration): Boolean =
+      thread.forall(_.join(java.time.Duration.ofNanos(within.toNanos)))
 
     def endOfRun(runId: RunId): Unit =
       listener match
@@ -1005,7 +1087,7 @@ final private[graph] class EventHub(
             case Left(error) =>
               withLock(lock)(fail(error))
             case Right(found) =>
-              val stuck = found.nonEmpty && commitLocks.withThreadLock(threadId)(
+              val stuck = found.nonEmpty && commitLocks.withThreadLockInterruptibly(threadId)(
                 withLock(hubLock)(withLock(lock)(queueWatched(found)))
               )
               // what did not fit stays in the store until the listener has caught up; read it again later
@@ -1039,7 +1121,7 @@ final private[graph] class EventHub(
       val (from, stopped) = withLock(lock)((lastQueuedSeq, failed))
       stopped match
         case Some(reason) => Left(End.Disconnect(reason))
-        case None         => readFrom(from)
+        case None         => readFrom(from).flatMap(settled)
 
     private def readFrom(from: Long): Either[End, Vector[EventRecord]] =
       CancelledError.catchInterrupt(

@@ -2705,6 +2705,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of its thread in one step, once every subscriber's missing events are read, or to none: before, it reached the
   subscriptions one at a time, and was counted as the run's while some still waited for it, so one run-scoped
   listener or tracing sink could deliver it live while another, and a replay through the same handle, skipped it.
+  A subscription made while no run holds the thread no longer replays a commit whose hand-over has not finished - the
+  next run's first commit, say - ahead of progress its other subscriptions received before that commit: it decides
+  which stored events have been handed over holding the thread's commit lock, on its own dispatcher thread, and a
+  cancel ends that wait.
 - **A run that loses its claim while finishing, or while stuck in the store, still ends**
   ([#1700](https://github.com/llm4s/llm4s/issues/1700)): a loss found once the run had begun committing its outcome
   was discarded, because the first stop cause wins, so a `Sync`, `Async` or `OnExit` closing commit hung in the store
