@@ -522,6 +522,42 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     hub.liveCount(thread) shouldBe 0
   }
 
+  "A subscription with no mark that learns of a hand-over while it waits for the commit lock" should "still count what else it read as history, so an event committed elsewhere after that commit is replayed" in {
+    // 1 is handed over, then the run releases the thread: the hub has no mark. A commit holds the commit
+    // lock after writing 2 - a lost run's late write, applied before another runtime committed 3 - and
+    // the store watch is disabled, so only a replay can deliver 3
+    val log   = BlockingLog(Vector(record(1)), blockOn = 0)
+    val locks = ThreadLocks()
+    val hub   = EventHub(log, locks, WatchPolicy.disabled)
+    locks.withThreadLock(thread)(hub.durable(thread, Vector(record(1))))
+    hub.release(thread)
+    val written  = new CountDownLatch(1)
+    val handOver = new CountDownLatch(1)
+    val committing = Thread.ofVirtual().start { () =>
+      locks.withThreadLock(thread) {
+        log.records = log.records :+ record(2, RunId("lost"))
+        written.countDown()
+        handOver.await(5, TimeUnit.SECONDS): Unit
+        hub.durable(thread, Vector(record(2, RunId("lost"))))
+      }
+    }
+    written.await(5, TimeUnit.SECONDS) shouldBe true
+    log.records = log.records :+ record(3, RunId("elsewhere"))
+    val waiting = new CountDownLatch(1)
+    hub.settling = _ => waiting.countDown()
+    val lateThree = new CountDownLatch(1)
+    val lateSeen  = recording(countAt(3, lateThree))
+    val la        = hub.subscribe(thread, afterSeq = 0L, capacity = 16, lateSeen).fold(e => fail(e.message), identity)
+    waiting.await(5, TimeUnit.SECONDS) shouldBe true // `late` read 1, 2 and 3, and waits for the commit lock
+    // 2 is handed over, and noted by `late`, while it waits
+    handOver.countDown()
+    committing.join(java.time.Duration.ofSeconds(5)) shouldBe true
+    lateThree.await(5, TimeUnit.SECONDS) shouldBe true
+    lateSeen.seen.asScala.toVector shouldBe Vector("1", "2", "3")
+    la.cancel()
+    hub.liveCount(thread) shouldBe 0
+  }
+
   /** Counts `latch` down once the durable event `seq` has been recorded. */
   private def countAt(seq: Long, latch: CountDownLatch): StreamEvent => Unit = {
     case StreamEvent.Durable(r) if r.seq == seq => latch.countDown()

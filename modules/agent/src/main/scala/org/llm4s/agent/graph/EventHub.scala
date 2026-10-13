@@ -549,9 +549,9 @@ final private[graph] class EventHub(
     def seedHanded(mark: Option[Long]): Unit = withLock(lock) { handedSeq = mark }
 
     /**
-     * With no mark (`handedSeq` is `None`): the highest `seq` read from the store that was found, holding
-     * the thread's commit lock, to be history - handed over before the dispatcher joined, or committed
-     * elsewhere ([[settled]]); guarded by `lock`.
+     * The highest `seq` read from the store that was found, holding the thread's commit lock, to be
+     * history - handed over, or committed elsewhere ([[settled]]); guarded by `lock`. Set only by a
+     * dispatcher that had no mark when it read the page.
      */
     private var history = 0L
 
@@ -571,13 +571,14 @@ final private[graph] class EventHub(
      * has written but not yet handed over looks like one handed over before the dispatcher joined: the
      * write is visible first, and there is no mark to compare it with. So it decides holding the
      * thread's commit lock, which every commit of this runtime holds from its write to its hand-over:
-     * then no commit is between the two, so every event of this runtime in the page has been handed over
-     * - and one handed over since the dispatcher joined was handed to it too, giving it a mark. If it
-     * still has none, every event of the page was handed over before it joined, or committed elsewhere:
-     * history, up to the page's last `seq`. Live events it holds meanwhile were sent after it joined,
-     * so after all of that history, and keep their place before the first commit handed to it. It
-     * waits for the lock holding no lock of the hub's, and interruptibly: `cancel` ends a wait behind
-     * a commit hung in the store.
+     * then no commit is between the two, so every event of the page was handed over or committed
+     * elsewhere - history, up to the page's last `seq`, whether or not a hand-over was noted while it
+     * waited (which gives it a mark as well). Live events it holds keep their place: one held before any
+     * hand-over was noted was sent after the dispatcher joined, so after everything handed over before
+     * that, and goes just before the first commit handed to it; one held after a noted hand-over goes
+     * just after that commit, before the events above it, which were committed elsewhere. It waits for
+     * the lock holding no lock of the hub's, and interruptibly: `cancel` ends a wait behind a commit hung
+     * in the store.
      */
     private def settled(page: Vector[EventRecord]): Either[End, Vector[EventRecord]] =
       val known = page.lastOption.forall(last => withLock(lock)(handedSeq.isDefined || last.seq <= history))
@@ -585,7 +586,7 @@ final private[graph] class EventHub(
       else
         settling(threadId)
         CancelledError.catchInterrupt(commitLocks.withThreadLockInterruptibly(threadId)(withLock(lock) {
-          if handedSeq.isEmpty then history = math.max(history, page.last.seq)
+          history = math.max(history, page.last.seq)
         })) match
           case _ if cancelled => Left(End.Cancelled)
           case Right(_)       => Right(page)
