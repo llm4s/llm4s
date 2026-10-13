@@ -18,6 +18,7 @@ Use `/people/<filename>` in `docs/people.md` and `docs/people/<filename>` in the
 | Gagandeep Kalra | <img src="gagandeep-kalra.jpg" alt="Gagandeep Kalra" width="100"> | [gagandeep-kalra.jpg](gagandeep-kalra.jpg) |
 | Giovanni Ruggiero | <img src="giovanni-ruggiero.jpg" alt="Giovanni Ruggiero" width="100"> | [giovanni-ruggiero.jpg](giovanni-ruggiero.jpg) |
 | Gopi Trinadh | <img src="gopi-trinadh.jpg" alt="Gopi Trinadh" width="100"> | [gopi-trinadh.jpg](gopi-trinadh.jpg) |
+| Ipsit Sahoo | <img src="ipsit-sahoo.jpeg" alt="Ipsit Sahoo" width="100"> | [ipsit-sahoo.jpeg](ipsit-sahoo.jpeg) |
 | Iyad M. Issa | <img src="iyad-m-issa.png" alt="Iyad M. Issa" width="100"> | [iyad-m-issa.png](iyad-m-issa.png) |
 | Kannupriya Kalra | <img src="kannupriya-kalra.jpg" alt="Kannupriya Kalra" width="100"> | [kannupriya-kalra.jpg](kannupriya-kalra.jpg) |
 | Namrata Priyadarshani | <img src="namrata-priyadarshani.jpg" alt="Namrata Priyadarshani" width="100"> | [namrata-priyadarshani.jpg](namrata-priyadarshani.jpg) |
@@ -44,4 +45,4 @@ Retained for reference; the People pages use the current headshots above. Numeri
 
 ## Awaiting headshots
 
-No headshots have been supplied for Ipsit Sahoo and Olivier Nouguier. Add their photos using the same naming convention when available.
+No headshot has been supplied for Olivier Nouguier. Add their photos using the same naming convention when available.
