@@ -561,6 +561,149 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       store.underlying.claim(thread, ClaimRequest(RunId("next"), 1.minute)).value.holder shouldBe RunId("next")
     }
 
+  /**
+   * A run whose Async write of `quick`'s result hangs in the store until `hang` opens, and whose release
+   * waits for `releaseGate`, so the late write lands while the claim is still the run's. Its `held` node
+   * waits for `heldGate`, or for the interrupt a lost claim sends.
+   */
+  final private class LateWrite {
+    val time        = ManualTime()
+    val store       = Hooked(InMemoryCheckpointer(time))
+    val writing     = new CountDownLatch(1)
+    val hang        = new CountDownLatch(1)
+    val entered     = new CountDownLatch(1)
+    val releaseGate = new CountDownLatch(1)
+    val heldGate    = new CountDownLatch(1)
+    val releasers   = new ConcurrentLinkedQueue[Thread]()
+    private val log = StateKey.appending[String]("log")
+    val graph: CompiledGraph[String, Vector[String]] = {
+      val b = GraphBuilder("late", "v1")
+      val held = b.node[Unit]("held", writes = Set(log)) { (_, _, _) =>
+        entered.countDown()
+        CancelledError.catchInterrupt(heldGate.await(60, TimeUnit.SECONDS)).left.foreach { _ =>
+          Thread.currentThread().interrupt()
+        }
+        continue(Command.empty.update(log, "held"))
+      }
+      val quick = b.node[String]("quick", writes = Set(log)) { (input, _, _) =>
+        continue(Command.empty.update(log, input).goto(held))
+      }
+      b.compile(quick)(_.get(log)).value
+    }
+    private val armed = new AtomicBoolean(true)
+    store.onCommit = commit => {
+      if commit.checkpoint.isEmpty && commit.pendingWrites.nonEmpty && armed.compareAndSet(true, false) then {
+        writing.countDown()
+        hang.await(10, TimeUnit.SECONDS): Unit
+      }
+      None
+    }
+    store.onRelease = () => {
+      releasers.add(Thread.currentThread())
+      releaseGate.await(10, TimeUnit.SECONDS): Unit
+      None
+    }
+    val rt: GraphRuntime = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+
+    def start(): RunHandle[Vector[String]] = rt.start(thread, graph, "x", run("first"), Durability.Async).value
+
+    /** Waits until `quick`'s write hangs and `held` runs, then lets the lease pass; the run's token. */
+    def loseClaim(): FencingToken = {
+      entered.await(5, TimeUnit.SECONDS) shouldBe true
+      writing.await(5, TimeUnit.SECONDS) shouldBe true
+      store.onRenew = unreachable
+      val token = tokenOf(store)
+      time.advance(1.second)
+      token
+    }
+
+    /** Opens the release, and waits until it has landed. */
+    def letRelease(): Unit = {
+      releaseGate.countDown()
+      eventually(store.releases.get >= 1 && !releasers.asScala.exists(_.isAlive))
+    }
+  }
+
+  /** A run-scoped listener that never ends its subscription: it records every event, and each barrier. */
+  final private class RunRecorder extends RunListener {
+    val received                                = new ConcurrentLinkedQueue[StreamEvent]()
+    val ended                                   = new CountDownLatch(1)
+    def apply(event: StreamEvent): Unit         = received.add(event): Unit
+    def runEnded(runId: RunId): Unit            = ended.countDown()
+    def records: Vector[EventRecord]            = received.asScala.toVector.collect { case StreamEvent.Durable(r) => r }
+    def eventsOf(run: String): Vector[RunEvent] = records.filter(_.runId == run).map(_.event)
+  }
+
+  "A lost Async run's write that lands after the run ended" should
+    "reach the thread's subscribers in order, but never the run's own listeners" in {
+      val late         = LateWrite()
+      val threadEvents = new ConcurrentLinkedQueue[EventRecord]()
+      val onThread = late.rt
+        .subscribe(thread) {
+          case StreamEvent.Durable(r) => threadEvents.add(r): Unit
+          case _                      => ()
+        }
+        .value
+      val handle = late.start()
+      val live   = RunRecorder()
+      handle.subscribe()(live).value
+      val token = late.loseClaim()
+      await(handle).failed._2 shouldBe GraphError.ClaimLost("t", token, None)
+      live.ended.await(5, TimeUnit.SECONDS) shouldBe true
+
+      // the write the run abandoned lands now, after the run's end-of-run barrier
+      late.hang.countDown()
+      eventually(!writerAlive)
+      events(late.store).filter(_.runId == "first").map(_.event) should contain(RunEvent.TaskCompleted)
+      // a run-scoped subscription made now replays the log, the late write included
+      val replaying = RunRecorder()
+      handle.subscribe()(replaying).value
+      replaying.ended.await(5, TimeUnit.SECONDS) shouldBe true
+
+      // a later run on the thread moves every subscription past the late write
+      late.letRelease()
+      late.store.onRenew = () => None
+      late.heldGate.countDown()
+      await(late.rt.recover(thread, late.graph, run("second")).value).completed
+      eventually(Seq(live, replaying).forall(_.eventsOf("second").contains(RunEvent.RunCompleted)))
+      eventually(threadEvents.asScala.exists(r => r.runId == "second" && r.event == RunEvent.RunCompleted))
+      onThread.cancel()
+
+      // the late write is an orphan of a run that has ended: not one of its delivered events
+      for recorder <- Seq(live, replaying) do recorder.eventsOf("first") should not contain RunEvent.TaskCompleted
+      // the thread's subscribers get it, in sequence, before anything of the run that followed
+      val seqs = threadEvents.asScala.toVector.map(_.seq)
+      seqs shouldBe (1L to seqs.last).toVector
+      val ordered = threadEvents.asScala.toVector
+      ordered.indexWhere(r => r.runId == "first" && r.event == RunEvent.TaskCompleted) should be <
+        ordered.indexWhere(_.runId == "second")
+    }
+
+  "A lost Async run's late write that lands while the run frees its thread" should
+    "leave the hub no hand-over mark, whichever of the two finishes last" in {
+      val late   = LateWrite()
+      val hooked = new CountDownLatch(1)
+      // between the run forgetting the mark and freeing its slot: the late write lands and recreates the
+      // mark, then either finishes its own cleanup (a race) or waits for the release to complete
+      late.rt.releasingLocally = _ => {
+        // the run thread of a lost run still has its interrupt flag set; waiting here needs it clear
+        val interrupted = Thread.interrupted()
+        late.hang.countDown()
+        eventually(late.rt.handOverMarked(thread))
+        eventually(!writerAlive || late.rt.activeLockContended)
+        hooked.countDown()
+        if interrupted then Thread.currentThread().interrupt()
+      }
+      val handle = late.start()
+      val token  = late.loseClaim()
+      await(handle).failed._2 shouldBe GraphError.ClaimLost("t", token, None)
+      hooked.getCount shouldBe 0
+      eventually(!writerAlive)
+      late.rt.heldLocally(thread) shouldBe false
+      late.rt.handOverMarked(thread) shouldBe false
+      late.letRelease()
+    }
+
   "A healthy Async run" should "still drain every commit before it releases its claim" in {
     val time   = ManualTime()
     val store  = Hooked(InMemoryCheckpointer(time))

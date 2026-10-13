@@ -24,6 +24,28 @@ private[agent] trait RunListener extends (StreamEvent => Unit):
   /** The run `runId` has ended and everything of it queued to this listener has been delivered. */
   def runEnded(runId: RunId): Unit
 
+/**
+ * The events of run `runId` that land after the run gave up on them: a write its Async committer
+ * abandoned when the run lost its claim, still in the store when the run stopped waiting for it, may
+ * land after the run has ended. Such events are an orphan of a run that has ended, not events it
+ * delivered: the run's own listeners ([[RunListener]]) never receive them, live or replayed, while
+ * thread-scoped subscribers receive them like any other durable event, in sequence. [[abandonAfter]]
+ * sets the cut once, at the highest `seq` the hub had handed over on the thread when the run stopped
+ * waiting; every event of the run with a higher `seq` is an orphan.
+ */
+final private[graph] class AbandonedWrites(runId: RunId):
+  @volatile private var after = Long.MaxValue
+
+  /** Marks every event of the run with `seq > last` as abandoned. */
+  def abandonAfter(last: Long): Unit = after = last
+
+  /** Whether `record` is an event of the run that landed after it was abandoned. */
+  def apply(record: EventRecord): Boolean = record.runId == runId.value && record.seq > after
+
+private[graph] object AbandonedWrites:
+  /** For a subscription not made for a run: nothing is abandoned. */
+  val none: EventRecord => Boolean = _ => false
+
 /** A subscription the [[EventHub]] dispatches: one that can be given a run's end-of-run barrier. */
 private[graph] trait Dispatched extends Subscription:
   /**
@@ -129,9 +151,10 @@ final private[graph] class EventHub(
     threadId: ThreadId,
     afterSeq: Long,
     capacity: Int,
-    listener: StreamEvent => Unit
+    listener: StreamEvent => Unit,
+    abandoned: EventRecord => Boolean = AbandonedWrites.none
   ): Result[Dispatched] =
-    val dispatcher = new Dispatcher(threadId, afterSeq, capacity, listener)
+    val dispatcher = new Dispatcher(threadId, afterSeq, capacity, listener, abandoned)
     // joined before the dispatcher starts, so no live event sent after this returns is missed, and
     // marked with what the hub has handed over so far, so every live event it holds is placed
     withLock(hubLock) {
@@ -151,8 +174,13 @@ final private[graph] class EventHub(
    * exclusively, so the next commit is its run's claim. [[Observation.start]] starts it;
    * [[Observation.abandon]] removes it, delivering nothing.
    */
-  def observe(threadId: ThreadId, capacity: Int, listener: StreamEvent => Unit): Observation =
-    val dispatcher = new Dispatcher(threadId, afterSeq = 0L, capacity, listener, preJoined = true)
+  def observe(
+    threadId: ThreadId,
+    capacity: Int,
+    listener: StreamEvent => Unit,
+    abandoned: EventRecord => Boolean = AbandonedWrites.none
+  ): Observation =
+    val dispatcher = new Dispatcher(threadId, afterSeq = 0L, capacity, listener, abandoned, preJoined = true)
     withLock(hubLock)(join(threadId, dispatcher))
     new Observation(dispatcher)
 
@@ -198,6 +226,13 @@ final private[graph] class EventHub(
     withLock(hubLock) {
       handed = handed - threadId.value
     }
+
+  /**
+   * Runs `f` with the highest `seq` handed over on the thread (0 if none), holding `hubLock`, so no
+   * hand-over lands while it runs: one that landed before is at or below the value, one after above it.
+   */
+  def atMark(threadId: ThreadId)(f: Long => Unit): Unit =
+    withLock(hubLock)(f(handed.getOrElse(threadId.value, 0L)))
 
   /** Whether the hub holds a hand-over mark for the thread; for tests. */
   private[graph] def marked(threadId: ThreadId): Boolean = withLock(hubLock)(handed.contains(threadId.value))
@@ -261,6 +296,7 @@ final private[graph] class EventHub(
     afterSeq: Long,
     capacity: Int,
     listener: StreamEvent => Unit,
+    abandoned: EventRecord => Boolean,
     preJoined: Boolean = false
   ) extends Dispatched:
     private val lock                = new ReentrantLock()
@@ -696,13 +732,21 @@ final private[graph] class EventHub(
         notEmpty.await()
         awaitWork()
 
-    /** Calls the listener; a throw ends the subscription, and a delivered durable event advances `lastDeliveredSeq`. */
+    /**
+     * Calls the listener; a throw ends the subscription, and a delivered durable event advances
+     * `lastDeliveredSeq`. A run's own listener is never given an event of the run that landed after the
+     * run abandoned it ([[AbandonedWrites]]); checked here, as it is delivered, so the cut applies
+     * whenever the event was read or queued.
+     */
     private def deliver(event: StreamEvent): Either[End, Unit] =
-      outcome(call(() => listener(event))).map { _ =>
-        event match
-          case StreamEvent.Durable(record) => lastDeliveredSeq = record.seq
-          case _                           => ()
-      }
+      event match
+        case StreamEvent.Durable(record) if listener.isInstanceOf[RunListener] && abandoned(record) => Right(())
+        case _ =>
+          outcome(call(() => listener(event))).map { _ =>
+            event match
+              case StreamEvent.Durable(record) => lastDeliveredSeq = record.seq
+              case _                           => ()
+          }
 
     /** How a listener call ended: on, or stopped - cancelled, or the listener threw. */
     private def outcome(called: Option[Either[InterruptedException, Try[Unit]]]): Either[End, Unit] =

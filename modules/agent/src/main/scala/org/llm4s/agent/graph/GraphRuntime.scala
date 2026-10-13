@@ -227,11 +227,12 @@ final class GraphRuntime(
     threadId: ThreadId,
     afterSeq: Long,
     capacity: Int,
-    listener: StreamEvent => Unit
+    listener: StreamEvent => Unit,
+    abandoned: EventRecord => Boolean = AbandonedWrites.none
   ): Result[Dispatched] =
     if capacity < 2 then
       Left(ValidationError("capacity", s"must be at least 2 (one slot is reserved for a LiveGap), was $capacity"))
-    else hub.subscribe(threadId, afterSeq, capacity, listener)
+    else hub.subscribe(threadId, afterSeq, capacity, listener, abandoned)
 
   /** How many subscriptions to `threadId` are in the event hub's live set; for tests. */
   private[llm4s] def liveSubscriptions(threadId: ThreadId): Int = hub.liveCount(threadId)
@@ -783,7 +784,8 @@ final class GraphRuntime(
 
   /**
    * Forgets the hub's hand-over mark for `threadId` unless a run holds the thread in this runtime: for a
-   * late write of a run that has ended. Checked under `activeLock`, so it never races an admission.
+   * late write of a run that has ended, after its hand-over. Checked under `activeLock`, so it never
+   * races an admission, nor falls between the two steps of [[release]], which takes the same lock.
    */
   private def forgetIfIdle(threadId: ThreadId): Unit =
     withLock(activeLock)(if !active.contains(threadId.value) then hub.release(threadId))
@@ -827,9 +829,11 @@ final class GraphRuntime(
         holder match
           case Some((holderTenant, holderRun)) => busy(threadId, config, holderTenant, holderRun)
           case None =>
-            val signal   = StopSignal()
-            var launched = false
-            var admitted = Option.empty[Run[I, O]]
+            val signal = StopSignal()
+            // what the run's own subscriptions must not be given: a write it abandoned that lands late
+            val abandoned = AbandonedWrites(config.runId)
+            var launched  = false
+            var admitted  = Option.empty[Run[I, O]]
             // joined before the claim commits, so it receives the claim and everything after it
             var observation = Option.empty[EventHub#Observation]
             // on every exit but a launch, including an InterruptedException, which `Try` would not
@@ -841,7 +845,7 @@ final class GraphRuntime(
                 admitted.foreach(_.releaseClaim())
                 release(threadId)
             }) { _ =>
-              observation = observer.map(o => hub.observe(threadId, o.capacity, o.listener))
+              observation = observer.map(o => hub.observe(threadId, o.capacity, o.listener, abandoned.apply))
               admit(signal).map { run =>
                 admitted = Some(run)
                 val subscription = observation.map(_.start(run.claimSeq - 1))
@@ -850,7 +854,7 @@ final class GraphRuntime(
                   run.runId,
                   run.claimSeq,
                   signal,
-                  (afterSeq, capacity, listener) => dispatched(threadId, afterSeq, capacity, listener),
+                  (afterSeq, capacity, listener) => dispatched(threadId, afterSeq, capacity, listener, abandoned.apply),
                   subscription
                 )
                 // the store claim first - its heartbeat stopped and joined before it - then this
@@ -860,6 +864,7 @@ final class GraphRuntime(
                   release(threadId)
                 // from now on a lost claim stops the run as a cancel does; before, it was only recorded
                 run.stopper = () => handle.stop(StopCause.ClaimLost)
+                run.abandonedWrites = Some(abandoned)
                 handle.launch(() => run.execute(), run.crashed, () => releaseBoth(), run.deadline)
                 launched = true
                 handle
@@ -882,11 +887,23 @@ final class GraphRuntime(
   /**
    * Releases the thread's claim. The event hub forgets the thread's hand-over mark first, while the
    * thread is still held: every event of the run has been handed over, and no other run can claim
-   * the thread, and set a new mark, until it is released.
+   * the thread, and set a new mark, until it is released. Both happen under `activeLock`, as
+   * [[forgetIfIdle]]'s check does, so a late write of an abandoned run that recreates the mark either
+   * sees the thread still held - and the mark is then forgotten here, after its hand-over - or sees it
+   * free and forgets the mark itself.
    */
   private def release(threadId: ThreadId): Unit =
-    hub.release(threadId)
-    withLock(activeLock)(active.remove(threadId.value)): Unit
+    withLock(activeLock) {
+      hub.release(threadId)
+      releasingLocally(threadId)
+      active.remove(threadId.value)
+    }: Unit
+
+  /** A test hook run by [[release]] between forgetting the hand-over mark and freeing the local slot. */
+  @volatile private[graph] var releasingLocally: ThreadId => Unit = _ => ()
+
+  /** Whether a thread is waiting for `activeLock`; for tests. */
+  private[graph] def activeLockContended: Boolean = activeLock.hasQueuedThreads
 
   /** Whether a run is admitting or executing on the thread in this runtime; for tests. */
   private[graph] def heldLocally(threadId: ThreadId): Boolean = withLock(activeLock)(active.contains(threadId.value))
@@ -1037,9 +1054,10 @@ final class GraphRuntime(
      * Drops every commit not yet written, and fails with `reason` from then on: the run lost its
      * claim, so nothing more it submitted may land - after a takeover the store would refuse it, and
      * after a bare expiry it would record work of a run that has stopped. Waits for a commit already
-     * in flight, as `close` does. Never throws.
+     * in flight, as `close` does, but - for Async - at most `claims.ttl`. Never throws. Whether a
+     * commit is still in flight when it returns, and so may land after the run has ended.
      */
-    def abandon(reason: LLMError): Unit
+    def abandon(reason: LLMError): Boolean
 
   final private class SyncCommitter(threadId: ThreadId) extends Committer:
     private val failed = AtomicReference[Option[LLMError]](None)
@@ -1048,7 +1066,9 @@ final class GraphRuntime(
     def failure: Option[LLMError]                 = failed.get
     def close(): Unit                             = ()
     override def forgetInterruptedFailure(): Unit = failed.set(None)
-    def abandon(reason: LLMError): Unit           = failed.set(Some(reason))
+    def abandon(reason: LLMError): Boolean =
+      failed.set(Some(reason))
+      false
 
   final private class AsyncCommitter(threadId: ThreadId) extends Committer:
     private val failed = AtomicReference[Option[LLMError]](None)
@@ -1090,9 +1110,11 @@ final class GraphRuntime(
      * A commit still in the store then is left to finish on the writer, a daemon thread. It is fenced by
      * the run's token, so it lands only if no other run has claimed the thread meanwhile - the store
      * refuses it as stale otherwise - and its events, if it lands, are delivered in order under
-     * `commitLock` like any other commit's. Never throws; an interrupt is remembered and set again.
+     * `commitLock` like any other commit's - but the run's own listeners never receive them
+     * ([[AbandonedWrites]]). Never throws; an interrupt is remembered and set again. Whether the writer
+     * was still busy when the wait ended.
      */
-    def abandon(reason: LLMError): Unit =
+    def abandon(reason: LLMError): Boolean =
       failed.set(Some(reason))
       abandoned.set(true)
       abandoning(threadId)
@@ -1106,6 +1128,7 @@ final class GraphRuntime(
             case Right(_) => interrupted
             case Left(_)  => await(interrupted = true)
       if await(Thread.interrupted()) then Thread.currentThread().interrupt()
+      !writer.isTerminated
 
   final private class OnExitCommitter(threadId: ThreadId) extends Committer:
     private var durableParent: Option[Option[String]] = None
@@ -1137,12 +1160,13 @@ final class GraphRuntime(
           failed = commitAndDeliver(threadId, Commit(fence, last, writes, events, retract)).left.toOption
       }
     }
-    def abandon(reason: LLMError): Unit = withLock(lock) {
+    def abandon(reason: LLMError): Boolean = withLock(lock) {
       checkpoint = None
       writes = Vector.empty
       events = Vector.empty
       retract = false
       failed = Some(reason)
+      false
     }
 
   /**
@@ -1438,6 +1462,12 @@ final class GraphRuntime(
           if joined && !endedLost then GraphRuntime.this.releaseClaim(threadId, c.token)
           else releaseDetached(threadId, c.token, if joined then claims.ttl.toNanos else 0L)
       )
+
+    /**
+     * The cut for the run's own subscriptions, set when the run is launched: a write its committer
+     * abandoned that lands after the run stopped waiting is never given to them.
+     */
+    @volatile var abandonedWrites: Option[AbandonedWrites] = None
 
     /** Set once the run ends because it lost its claim. */
     @volatile private var endedLost = false
@@ -1745,7 +1775,9 @@ final class GraphRuntime(
       signal.acknowledge()
       endedLost = true
       val lost = GraphError.ClaimLost(threadId.value, token, current.orElse(lostTo.get))
-      committer.abandon(lost)
+      // a write still in flight may land after the run's end-of-run barrier: it is cut from the run's
+      // own subscriptions at what the hub has handed over by now, so it never reaches them as the run's
+      if committer.abandon(lost) then abandonedWrites.foreach(cut => hub.atMark(threadId)(cut.abandonAfter))
       RunResult.Failed(execution.state, lost)
 
     /**

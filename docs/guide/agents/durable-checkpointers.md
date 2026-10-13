@@ -133,7 +133,9 @@ The run finds its claim lost when its lease passes with no renewal landing, when
 - it commits nothing more - not even `RunFailed` - and drops what it had not yet written: the queue of
   `Durability.Async` and the buffer of `Durability.OnExit`. An `Async` commit already in the store is waited for
   at most `ttl`; one still there then is left to finish on its own. It is fenced by the run's token, so it lands
-  only if nobody has claimed the thread since;
+  only if nobody has claimed the thread since. If it lands, it lands after the run has ended: its events are an
+  orphan of the run, not part of it. They are in the thread's log, and reach the thread's subscribers in sequence
+  and before any later run's events, but never the run's own listeners or its tracing (see [Limits](#limits));
 - it releases its claim, which is a no-op if another run holds the thread. The release runs on a thread of its
   own, waited for at most `ttl` (not at all if a renewal is still hung in the store), so the run's result and the
   thread's release in this runtime never wait on a store that hangs; a release that never lands lets the claim
@@ -163,6 +165,10 @@ is free:
   lower than the highest it has seen.
 - Until it ends, such a run's live progress events (`StreamEvent.Live`, which are never stored) still reach the
   subscribers of its own runtime. Its durable events are refused or dropped with its commits.
+- A `ClaimLost` run's own event stream - `AgentRun.subscribe`, `Agent.stream`, its observer and its tracing - ends
+  at the run's end, which never waits on a hung store. An `Async` write the run abandoned may still land after
+  that; it is then visible only through the thread's log - a thread subscription (`GraphRuntime.subscribe`) or a
+  replay - never as one of the run's events, even to a run-scoped subscription made later that replays the run.
 - A run that has begun committing its outcome finishes that commit: a loss found during it does not interrupt it.
   The commit is still fenced, so it lands only if nobody has taken the thread over.
 - A process that dies holds its threads for up to `ttl`; so does a store that fails to release a claim. A run's
