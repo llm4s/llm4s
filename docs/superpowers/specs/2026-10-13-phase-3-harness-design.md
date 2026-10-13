@@ -51,16 +51,17 @@ streaming, checkpoint/resume, and persisted artifacts, and runs deterministicall
 
 | # | Issue | Slice | Kind | Depends on |
 |---|---|---|---|---|
-| C1 | #1902 | Kernel hooks: state-writing `beforeAgent`/`wrapModelCall`, prompt sections, `taskKey`, Block restores every key | core | - |
+| C1 | #1902 | Kernel hooks: state-writing `beforeAgent`/`wrapModelCall`/`afterAgent`, prompt sections, usage accounting, Block restores every key | core | - |
 | C2 | #1903 | Tool permissions, timeouts and batch locks | core | - |
-| C3 | #1904 | Backend SPIs: files, sandbox, long-term store | core | - (uses C2's `LockKey`) |
+| C3 | #1904 | Backend SPIs: files, sandbox, long-term store | core | C4 (uses C2's `LockKey`) |
+| C4 | #1921 | Replay of external effects: `EffectKey`, `ReplaySupport` guards, journal, applied keys, retention, `ReplayContract` | core | - |
 | F1 | #1905 | Filesystem tool suite | feature | C2, C3 |
 | F2 | #1906 | Workspace sandbox and file backends; `WorkspaceTools` removed | feature | C2, C3 |
 | F3 | #1907 | Todos | feature | C1, C2 |
 | F4 | #1908 | Summarisation and tool-output offload | feature | C1, C3 |
 | F5 | #1909 | Agent Skills | feature | C1, C3 |
 | F6 | #1910 | Instruction memory (`AGENTS.md`) | feature | C1, C3 |
-| F7 | #1911 | Semantic memory, `llm4s-agent-memory` | feature | C1 |
+| F7 | #1911 | Semantic memory, `llm4s-agent-memory` | feature | C1, C4 |
 | F8a | #1912 | Response format for the agent's answer | feature | - |
 | F8b | #1913 | Multimodal content parts (core) | feature | - |
 | F9 | #1914 | Typed custom streams | feature | - |
@@ -69,13 +70,15 @@ streaming, checkpoint/resume, and persisted artifacts, and runs deterministicall
 
 Parallel lanes:
 
-1. **From the start:** C1, C2, C3 and F8b, plus F8a and F9 whenever someone is free. None depends on
-   another, except that C3 uses C2's `LockKey`, a one-line opaque type: whichever lands first adds it.
-2. **After the core slices merge:** F1-F7, up to seven lanes, each with its own files. F7 needs only
-   C1; F3 needs C1 and C2; F1 and F2 need C2 and C3.
+1. **From the start:** C1, C2, C4 and F8b, plus F8a and F9 whenever someone is free. None depends on
+   another.
+   - C3 can be written alongside C4, against C4's specified types, and merges after it.
+   - C3 uses C2's `LockKey`, a one-line opaque type: whichever lands first adds it.
+2. **After the core slices merge:** F1-F7, up to seven lanes, each with its own files. F7 needs C1
+   and C4; F3 needs C1 and C2; F1 and F2 need C2 and C3.
 3. **Last:** P1, then P2.
 
-The critical path is C3 → F1 → P1 → P2. F8b is the only core-API change outside the agent runtime;
+The critical path is C4 → C3 → F1 → P1 → P2. F8b is the only core-API change outside the agent runtime;
 core must settle before MiMa, so it is reviewed first.
 
 ## Runtime rules every slice must satisfy
@@ -104,27 +107,18 @@ it meets each rule, and its tests cover each rule that applies.
    - **Provider tool-call ids are not identities.** A provider can reuse them across model requests,
      which is why `IdempotencyKey` exists. Anything stored is keyed by a runtime identity, never by
      `toolCallId` alone.
-   - **"At-least-once" is not a mechanism.** Every external effect names how a replay behaves, using
-     one of three mechanisms (C3):
-     1. a marker written in the same atomic write as the effect, which a replay sees
-     2. a write-ahead intent plus a check of the resulting state, which tells applied from not
-        applied
-     3. refusal: a replay that cannot tell reports "may already have happened" and does not repeat
-        the effect
-   - **The harness enforces the mechanism; implementations do not opt in.** Every external backend
-     declares `replay: ReplaySupport`:
-     - `Transactional`: it records the applied key in the same transaction as the effect, so it can
-       give exactly-once.
-     - `Verifiable`: replay uses write-ahead intent plus a state check.
-     - `Unverifiable`
-     The harness wraps every backend in its matching guard. An `Unverifiable` effect always gets
-     mechanism 3 unless its tool is `ToolHints.idempotent`. No backend can be "at-least-once by
-     choice". This matches §8: no exactly-once claim without the external system's support.
-   - **Replay evidence lives as long as the replay window, no longer and no shorter.** A task can be
-     replayed until its superstep commits. So an applied-key record or journal entry is kept until then,
-     and removed after that commit (best effort; a leftover is harmless). Removal also happens on
-     `deleteThread` and on `prune` of the thread. It is never removed by age. Evidence is a record of its
-     own, never a marker on a value that a later write can overwrite or delete.
+   - **A replay key identifies one effect, not one task.** A task may perform several effects:
+     recording plus consolidation, or several consolidation groups. Each needs its own key, derived from
+     the task's key, the operation, and what it touches.
+   - **"At-least-once" is not a mechanism.** Every external effect replays through a guard the harness
+     enforces, chosen by what the target can support:
+     - an applied key recorded atomically with the effect
+     - a write-ahead intent plus a state check
+     - refusal of an ambiguous replay
+   - **A completed replay returns the original outcome.** It does not make one up and does not refuse.
+   - **Replay evidence is its own record** (never a marker on a value), kept exactly for the replay
+     window.
+   - **C4 owns all of this.** Every other slice uses C4's guards and does not invent its own.
 5. **A Block retracts messages only, today.** An output Block's update is `RemoveTurn` on messages, with
    `activeAgent` and `transfer` restored (`ToolLoop.scala:977-988`). Every other key written during the
    turn survives. Harness keys hold content (files, todos, summaries, recalled memory), so C1 widens
@@ -148,7 +142,8 @@ it meets each rule, and its tests cover each rule that applies.
     `Completion` (`LLMMemoryManager`, `LLMCompressor`) is given an accounted client, so its calls are
     counted without the library's help.
 12. **Everything the harness keeps or sends is bounded on its own, in size as well as count.** Each
-    key, each in-process cache entry, each prompt section, and each tool result has a limit. The limit
+    key, each in-process cache entry, each prompt section, each tool result, and each outside store
+    the harness writes into (a `LongTermStore` namespace, a tenant's memory store) has a limit. The limit
     holds whatever else is configured, and does not rely on another feature (such as summarisation)
     being on. The limit is enforced by a total update (evict or compact) or by a check
     made under a lock when the tool runs (rules 1-2).
@@ -187,9 +182,6 @@ keys, prompt content, a recovery-stable key for effects, and a retraction that c
   - The loop also enforces an aggregate `maxPromptSectionTokens` (rule 12). An over-budget request
     fails the run with `MiddlewareFailed` naming each section's size. This is a configuration error,
     not something to truncate silently.
-- **`RunContext.taskKey: IdempotencyKey`**, derived from `(threadId, superstep, taskId)`. It is stable
-  across `recover` (rule 4), and is what a hook's external effect is keyed by. Tool calls keep their
-  existing `IdempotencyKey`.
 - **Block restores the whole turn (rule 5).**
   - An output Block now restores every key, including middleware and tool keys, to its value at the
     turn's settled checkpoint. It keeps only `usage` and the loop's own bookkeeping, as today.
@@ -218,7 +210,6 @@ Tests (each rule that applies):
 - a retrying wrapper's discarded updates not committed
 - a `beforeAgent` update visible to the first model call
 - section order and duplicate ids
-- `taskKey` equal before and after a crash-and-`recover` of the same task
 - a retrying wrapper's two provider calls both counted in `usage`
 - a failing task's usage on `RunFailed`
 - an output Block after a turn that wrote a middleware key and a tool key restores both and keeps
@@ -231,7 +222,8 @@ Tests (each rule that applies):
 field.
 - The loop interrupts a task that runs over and writes a tool-level `ToolOutcome.Error("timed out after
   <n> ms")` the model sees, not `Fatal`.
-- The idempotency key is unchanged, so the effect is at-least-once (§10).
+- The idempotency key is unchanged, so an external effect the tool started replays through its C4
+  guard.
 - Timeouts rely on interruption, as cancellation does (§4.4). The structured scope waits for a tool that
   ignores its interrupt, so such a tool delays its batch past the timeout. This is documented, with the
   tool-author rule: block interruptibly.
@@ -294,8 +286,7 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 
   Each takes a `FileContext` (`RunContext` and `ThreadState`) and returns `Result[(A, StateUpdate)]`.
   State-backed files are committed by the runtime, so they are part of checkpoints, `history` and `fork`.
-  Host and sandbox backends perform the effect, return `StateUpdate.empty`, and are at-least-once
-  (rule 4).
+  Host and sandbox backends perform the effect through a C4 guard and return `StateUpdate.empty`.
 - **`StateFileBackend`** is the default.
   - A `files` key, `StateKey[Map[VPath, FileEntry], FileUpdate]`, with total `Put` / `Delete` update
     functions (rule 2). `FileEntry(content: String, modified: Instant)` holds UTF-8 text only in Stage 3:
@@ -308,33 +299,18 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
     backend with a `RetentionPolicy`, and P1 sets one.
 - **`CompositeBackend(default, routes: (VPath, FileBackend)*)`** routes by longest prefix. `writes` and
   `locks` come from the routed backend. `glob` and `grep` span the routes.
-- **`ReplaySupport` and the guards (rule 4).** `FileBackend` and `SandboxBackend` declare `replay`. The
-  harness wraps them:
-  - `Verifiable` backends in a `Journaled` guard over an `EffectJournal`.
-  - `Unverifiable` ones in a `Refusing` guard, which journals intent and refuses an ambiguous replay.
-  - `Transactional` ones pass the call's `IdempotencyKey` to the backend, which records it in the same
-    transaction.
+- **Replay (C4).**
+  - Every external backend declares its `ReplaySupport`, and the harness wraps it in C4's matching
+    guard.
+  - Each mutation's `EffectKey` is derived from the call's `IdempotencyKey`, the operation and the path.
   - `StateFileBackend` needs no guard, because its effect is the committed update.
-- **`EffectJournal`** records the replay intent of external mutations (rule 4, mechanism 2).
-  - `begin(key: IdempotencyKey, intent)` runs before the effect; `complete(key)` runs after it.
-  - The intent carries the operation, the path, a hash of the content before, and a hash of the
-    content after.
-  - On a replay under the same key with an intent recorded, the backend compares the target's current
-    hash:
-    - equal to the after-hash: already applied, so it returns success
-    - equal to the before-hash: not applied, so it applies the effect
-    - anything else: a tool error naming the conflict
-  - Implementations: `FileEffectJournal(dir)` (durable, one file per key, written with an atomic
-    rename) and in-memory for tests.
-  - **Retention (rule 4).** An entry is removed after the commit of the superstep that holds its task,
-    and on `deleteThread`/`prune` of the thread. It is never removed by age, so a run that stays
-    recoverable for weeks keeps its evidence.
-- **`HostFileBackend(root, journal)`** is opt-in and `Verifiable`.
+- **`HostFileBackend(root)`** is opt-in and `Verifiable` (C4).
   - Paths resolve under `root`, and symlink escape is refused.
   - Mutations lock their path (`host/<root>/<path>`), so two writes to one file, or a directory delete
     and a write beneath it, are ordered.
-  - Each mutation goes through the journal under the call's `IdempotencyKey`. A replayed `edit_file`
-    whose first attempt landed therefore returns success, not "`old` not found".
+  - Each mutation goes through C4's `Journaled` guard, with the before and after content hashes. A
+    replayed `edit_file` whose first attempt landed therefore returns its original result, not "`old`
+    not found".
   - It is not tenant-scoped: an application serving tenants builds one per tenant through
     `FileBackend.resolved` (rule 8).
 - **`FileBackend.resolved(FileContext => FileBackend)`** and **`SandboxBackend.resolved`** are
@@ -342,19 +318,18 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 - **`SandboxBackend`**: `execute(command, workdir, timeout, ctx): Result[ExecResult(exitCode, stdout,
   stderr, truncated)]`, with `maxOutputBytes` per stream (rule 12).
   - A sandbox is `Unverifiable` unless it records the key transactionally.
-  - Whatever an implementation does, the harness's `Refusing` guard keeps a command from running twice
-    on replay (rule 4). The guard lives in the harness, not in each adapter.
+  - Whatever an implementation does, C4's guard keeps a command from running twice on replay, and gives
+    a completed command its stored `ExecResult` back.
 - **`LongTermStore`** works on `(Namespace, key)`:
   - `Namespace(tenant: Option[TenantId], path: Vector[String])` and `key: String`.
   - The value is `StoreItem(value: ujson.Value, updated: Instant)`, with a per-item `maxItemBytes`
     checked on `put`.
-  - **`LongTermStore` is `Transactional` (rule 4, mechanism 1).**
-    - Every mutation takes an `IdempotencyKey` and records it in an applied-keys table, in the same
-      transaction as the effect.
-    - A replay finds the key there and returns the original outcome without writing, even if the item
-      has since been replaced or deleted by another thread.
-    - Applied keys follow the rule-4 retention.
-    - The in-memory store does this under one lock.
+  - **`LongTermStore` is `Transactional` (C4).** Every mutation takes an `EffectKey` and records it,
+    with its outcome, in C4's applied-keys table in the same transaction. A replay returns the stored
+    outcome without writing, even if another thread has since replaced or deleted the item.
+  - **Bounds (rule 12).** Each namespace has `maxItems` and `maxBytes`, checked inside that transaction.
+    An over-limit `put` is an error, which reaches the model as a tool error through
+    `StoreFileBackend`.
   - Operations are `get`, `put`, `delete`, `list(prefix)` and `search(query)`. The in-memory `search`
     is a substring match over keys and string values; a store may do better, and says so.
   - `Namespace` always includes the tenant (`None` is its own single-tenant namespace) (rule 8).
@@ -365,9 +340,76 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
   - the operations
   - ordered mutations under locks in one batch
   - the quota exact under a parallel batch
-  - replay idempotence after `recover`: write, edit and delete each run twice under one key, with a
-    crash between the effect and the commit
+  - replay through C4's `ReplayContract` for each external backend
   - tenant isolation for resolved and store backends
+
+### C4: replay of external effects (#1921)
+
+One slice owns how every effect outside thread state behaves when `recover` replays its task (rule 4).
+Before this, the rule was patched slice by slice and review kept finding the next case: a marker on a
+value that a later write overwrote, evidence pruned by age, one key shared by several effects, a
+completed command with no stored result. All of that now lives here, and the other slices only use it.
+
+- **`RunContext.taskKey: IdempotencyKey`**, from `(threadId, superstep, taskId)`, stable across
+  `recover`.
+- **`EffectKey(base, operation, discriminator)`.**
+  - `base` is the tool call's `IdempotencyKey` or the hook's `taskKey`.
+  - `operation` names the effect kind, for example `file.edit`, `memory.record` or
+    `memory.consolidate`.
+  - `discriminator` is a stable digest of what the effect touches: the path, or the sorted source
+    memory ids.
+  - A key is unique per effect, so effects in one task never suppress one another.
+  - `EffectKey`s are built only by `context.effectKey(operation, discriminator)`, so no slice composes
+    one by hand.
+- **`ReplaySupport` = `Transactional | Verifiable | Unverifiable`**, declared by every external target.
+- **`ReplayGuard.run[A: ReadWriter](key, support, ...)(effect: => Result[A]): Result[A]`** is the only
+  way the harness performs an external effect. Every outcome is stored, and a completed replay returns
+  it.
+  - **`Transactional`.** The target records `(key, outcome)` in its applied-keys table in the same
+    transaction as the effect. A replay returns the recorded outcome. This is used by `LongTermStore`
+    and by F7's `MemoryStore.applyAtomically`.
+  - **`Verifiable`.**
+    - The guard writes an intent before the effect: `(key, before: StateCheck, after: StateCheck)`.
+    - After the effect, it writes `complete(key, outcome)`.
+    - On replay:
+      - completed: return the stored outcome
+      - intent only, current state matches `after`: return the success the caller rebuilds from the
+        intent
+      - matches `before`: run the effect
+      - anything else: a tool error naming the conflict
+    - This is used by the host and workspace file backends.
+  - **`Unverifiable`.**
+    - The guard writes an intent, runs the effect, and then writes `complete(key, outcome)`.
+    - On replay:
+      - completed: return the stored outcome (for `execute`, the original `ExecResult`)
+      - intent only: return the tool error "may already have run; not re-run", unless the tool is
+        `ToolHints.idempotent`, in which case it runs again
+    - This is used by sandboxes.
+- **`EffectJournal`** holds intents and outcomes for `Verifiable` and `Unverifiable` targets.
+  - `begin(key, intent)`, `complete(key, outcome: ujson.Value)` and `lookup(key)`.
+  - Implementations: `FileEffectJournal(dir)` (durable, one file per key, written with an atomic
+    rename) and in-memory.
+  - Each outcome is capped at `maxOutcomeBytes`. An `ExecResult` is already capped by `maxOutputBytes`.
+- **Retention: exactly the replay window.**
+  - Each guard registers its key with the running task. After a superstep commits, the runtime releases
+    the keys of that superstep's tasks from their journals and applied-keys tables. A leftover from a
+    crash during release is harmless.
+  - `deleteThread` and `prune` release every key of the thread.
+  - Nothing is ever released by age, so a run that stays recoverable for weeks keeps its evidence.
+  - Release is a kernel hook in `GraphRuntime`, after the commit.
+- **Blocks.** C4 cannot undo an external effect, so a Block leaves it in place (rule 5), and the docs
+  say so.
+- **`ReplayContract`** in `llm4s-agent-testkit`. Every external target passes it, for each support
+  class. It crashes at each point and then recovers:
+  - before the effect
+  - after the effect, before `complete`
+  - after `complete`, before the commit
+  - after the commit
+  It also checks that two effects in one task never collide, and that a replay after another thread
+  changed the target behaves as specified.
+
+Tests: `ReplayContract` on the in-memory and file journals; release after a commit, on `deleteThread`
+and on `prune`; a run left recoverable past any age still replays correctly.
 
 ## Feature slices
 
@@ -413,12 +455,10 @@ Tests:
 - **Locks.** `WorkspaceFileBackend` mutations lock `workspace/<id>/<path>`, and `execute` locks
   `workspace/<id>`. By C2's prefix rule a command conflicts with every edit in its workspace, so a
   batch's commands and edits apply in call order.
-- **Replay.**
-  - File mutations go through an `EffectJournal` held on the client side, which is checked against
-    workspace file hashes (mechanism 2).
-  - `WorkspaceSandboxBackend` is `Unverifiable`, so the harness's `Refusing` guard (C3) applies. A
-    replay that finds an intent with no completion returns "may already have run; not re-run" unless
-    the tool is `ToolHints.idempotent`.
+- **Replay (C4).**
+  - `WorkspaceFileBackend` is `Verifiable` against workspace file hashes.
+  - `WorkspaceSandboxBackend` is `Unverifiable`: a completed command replays its stored `ExecResult`,
+    and an ambiguous one is refused. Both pass `ReplayContract`.
 - **Tenants.** One workspace serves one tenant: an application serving several builds the backends
   through the C3 resolvers (rule 8).
 - Live-container tests go in `modules/it` under the `@Workspace` tier. Unit tests use a fake
@@ -527,19 +567,27 @@ not per thread.
 - A Block restores the key (C1).
 
 **Record** runs in `afterAgent`.
-- **Recording and consolidation are each one atomic store operation with an applied key (rule 4,
-  mechanism 1).**
-  - F7 adds `MemoryStore.applyAtomically(key: IdempotencyKey, add: Seq[Memory], remove: Seq[MemoryId]):
-    Result[(MemoryStore, Applied | AlreadyApplied)]`, keyed by `RunContext.taskKey`. The in-memory,
-    SQLite and Postgres stores implement it in one transaction, with an applied-keys table.
-  - A replay finds its key and does nothing. It cannot re-insert a memory a later consolidation
-    removed, and it cannot consolidate a different set.
+- **Each recording, and each consolidation group, is one `Transactional` effect (C4).**
+  - F7 adds `MemoryStore.applyAtomically(key: EffectKey, add: Seq[Memory], remove: Seq[MemoryId]):
+    Result[(MemoryStore, Outcome)]`. It records `(key, outcome)` in the store's applied-keys table in the
+    same transaction. The in-memory, SQLite and Postgres stores implement it.
+  - Recording uses `context.effectKey("memory.record", turn)`. Each consolidation group uses
+    `context.effectKey("memory.consolidate", sortedSourceIds)`.
+  - So one `afterAgent` that records and consolidates several groups performs distinct effects that
+    never suppress each other.
+  - A replay returns the recorded outcome: it cannot re-insert a memory a later consolidation removed,
+    and it cannot consolidate a different set.
   - **Consolidation.** `LLMMemoryManager.consolidateGroup` today stores the summary, then deletes the
-    originals one by one (`LLMMemoryManager.scala:236-241`). It changes to one `applyAtomically` call
-    with the exact source ids.
-  - **Unsupported stores.** A store that cannot implement the operation atomically reports
-    `ReplaySupport.Unverifiable`. The middleware then refuses to enable consolidation, and records
-    turns under the `Refusing` guard.
+    originals one by one (`LLMMemoryManager.scala:236-241`). It changes to one `applyAtomically` per
+    group, with the exact source ids.
+  - **Unsupported stores.** A store that cannot be `Transactional` gets C4's `Unverifiable` guard for
+    recording, and consolidation is refused.
+- **Bounds (rule 12), whether or not consolidation is on.**
+  - Each recorded memory is cut at `maxRecordChars`.
+  - Each tenant's store keeps at most `maxMemories` (and `maxBytes`). The same `applyAtomically` that
+    adds a memory evicts the oldest memories of lowest importance beyond the limit, so the bound needs
+    no consolidation and holds under concurrent threads.
+  - The in-memory cell holds that bounded store.
 
 **Order.** The middleware runs outside guardrail middleware (`runsBefore`). Inner `afterAgent` hooks run
 first, and a guardrail `Left` stops the fold (`MiddlewareStack.scala:40-43`), so a blocked answer is
@@ -558,6 +606,8 @@ Tests:
 - a crash after record, then `recover`, leaves exactly one memory
 - a crash mid-consolidation, then `recover`, leaves exactly the consolidated set
 - a replayed record after another thread consolidated it does not resurrect it
+- record plus two consolidation groups in one `afterAgent` all apply
+- the store stays within `maxMemories` with consolidation off
 - a blocked answer is not recorded
 
 ### F8a: response format for the agent's answer (#1912)
@@ -607,7 +657,15 @@ Tests:
 - Each provider module maps the parts it supports. Any other part fails the request with a typed
   `LLMError` naming the part kind, never dropped silently.
 - `ProviderModuleChecks` gains `assertContentParts`, and every chat provider module's spec calls it.
-- The graph and tool-result model carry parts unchanged, so a tool can return an image.
+- **Tool results carry parts (rule 13).** Today `ToolOutcome.Success` takes a `ujson.Value`, and
+  `ToolLoop` renders it to the string in `ToolMessage`, so nothing typed can carry an image.
+  - `ToolOutcome.Success(content: ToolContent, update)` takes
+    `ToolContent = Json(value) | Parts(Vector[ContentPart])`.
+  - `ToolLoop` builds the `ToolMessage` from parts unchanged, and providers map them.
+  - `AgentTool.fromToolFunction` keeps `Json`.
+  - F4's offload acts on text parts only. Image and document parts stay inline, under
+    `maxInlineBytes`.
+  - This is a breaking change to `ToolOutcome`, with no shim.
 
 ### F9: typed custom streams (#1914)
 
@@ -682,7 +740,7 @@ rules:
 
 - One `[PHASE 3] Deep Agents harness profile` umbrella issue, linked to #1266, listing the slices, the
   lanes and the exit criteria, as #1699 does.
-- One issue per slice (15). Each slice has one design-record file,
+- One issue per slice (16). Each slice has one design-record file,
   `docs/design/typed-agent-runtime/4.2x-stage-3-slice-<n>-<name>.md`, and one PR.
 - §4.9 changes:
   - the permissions/timeouts row is marked as owned by C2
