@@ -779,6 +779,62 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       late.letRelease()
     }
 
+  "A run-scoped subscription made after a lost Sync run ended, while one of two concurrent task commits still hangs" should
+    "replay the run and end at once, and the hung commit's hand-over be cleaned up once it returns" in {
+      val time    = ManualTime()
+      val store   = Hooked(InMemoryCheckpointer(time))
+      val results = StateKey.appending[String]("results")
+      val graph: CompiledGraph[Vector[String], Vector[String]] = {
+        val b = GraphBuilder("pair", "v1")
+        val worker = b.node[String]("worker", writes = Set(results)) { (item, _, _) =>
+          continue(Command.empty.update(results, item))
+        }
+        val summarize = b.node[Unit]("summarize")((_, _, _) => continue(Command.empty))
+        val join      = b.dynamicJoin("workers", summarize)
+        val plan = b.node[Vector[String]]("plan")((items, _, _) => continue(Command.empty.fanOut(join, worker, items)))
+        b.compile(plan)(_.get(results)).value
+      }
+      def isWorker(commit: Commit): Boolean = commit.pendingWrites.exists(_.nodeId == "worker")
+      // both workers' commits begin - concurrently, from their own tasks - before the first returns
+      val begun  = new CountDownLatch(2)
+      val stuck  = new CountDownLatch(1)
+      val hang   = new CountDownLatch(1)
+      val inside = new AtomicInteger()
+      val rt     = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      rt.committing = (_, commit) => if isWorker(commit) then begun.countDown()
+      // the first worker commit to reach the store returns once both have begun; the second stays there
+      store.onCommit = commit => {
+        if isWorker(commit) then
+          if inside.incrementAndGet() == 1 then begun.await(5, TimeUnit.SECONDS): Unit
+          else {
+            stuck.countDown()
+            stuckUntil(hang)
+          }
+        None
+      }
+      val handle = rt.start(thread, graph, Vector("a", "b"), run("first")).value
+      stuck.await(5, TimeUnit.SECONDS) shouldBe true
+
+      // the lease passes while the second commit hangs; the run's end is bounded by the watchdog
+      store.onRenew = unreachable
+      time.advance(1.second)
+      await(handle).failed._2 shouldBe a[GraphError.ClaimLost]
+      // the hung commit is an orphan: the hub keeps its hand-over mark while it is in flight
+      rt.handOverMarked(thread) shouldBe true
+
+      val replaying = RunRecorder()
+      val sub       = handle.subscribe()(replaying).value
+      // the hung commit is let return only after this, so a subscription that waited on it could not end
+      replaying.ended.await(5, TimeUnit.SECONDS) shouldBe true
+      replaying.eventsOf("first") should contain(RunEvent.RunStarted(None, None))
+      sub.cancel()
+
+      hang.countDown()
+      // once the orphan has returned, the hub keeps no mark for the idle thread
+      eventually(!rt.handOverMarked(thread))
+      eventually(!rt.heldLocally(thread))
+    }
+
   "A healthy Async run" should "still drain every commit before it releases its claim" in {
     val time   = ManualTime()
     val store  = Hooked(InMemoryCheckpointer(time))

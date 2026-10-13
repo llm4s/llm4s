@@ -2696,8 +2696,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   result or freed its thread in the runtime. An `Async` commit in flight is now waited for at most `ttl`, then left
   to finish fenced on the writer, and such a run releases its claim on a detached thread, waited for at most `ttl`
   (not at all when a renewal is still hung); a release landing late is by token, so it never frees a claim another
-  run has taken since. Until a write the run gave up on returns, the event hub keeps its hand-over mark for the
-  thread, so a subscription made meanwhile - a run-scoped replay of the lost run included - joins with it and never
+  run has taken since. Until every write the run gave up on returns - a `Sync` run's concurrent tasks can leave
+  several - the event hub keeps its hand-over mark for the thread, so a subscription made meanwhile - a run-scoped replay of the lost run included - joins with it and never
   waits on that write; once the write returns the hub keeps no state for the thread, even when it returns while the
   run is freeing the thread (the check and both steps of the run's local release share one lock). Its events are
   an orphan of a run that has ended: they reach the thread's subscribers in sequence, but never the run's own

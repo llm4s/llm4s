@@ -932,9 +932,9 @@ final class GraphRuntime(
   private def forgetIfIdle(threadId: ThreadId): Unit =
     if !active.contains(threadId.value) && !orphans.contains(threadId.value) then hub.release(threadId)
 
-  /** Counts an orphaned commit in flight on `threadId` ([[orphans]]). */
-  private def orphanInFlight(threadId: ThreadId): Unit =
-    withLock(activeLock)(orphans.updateWith(threadId.value)(n => Some(n.getOrElse(0) + 1))): Unit
+  /** Counts `count` orphaned commits in flight on `threadId` ([[orphans]]). */
+  private def orphanInFlight(threadId: ThreadId, count: Int): Unit =
+    withLock(activeLock)(orphans.updateWith(threadId.value)(n => Some(n.getOrElse(0) + count))): Unit
 
   /**
    * An orphaned commit on `threadId` has returned from the store - and, if it landed, been handed over:
@@ -1054,10 +1054,10 @@ final class GraphRuntime(
    * Releases the thread's claim. The event hub forgets the thread's hand-over mark first, while the
    * thread is still held: every event of the run has been handed over, and no other run can claim
    * the thread, and set a new mark, until it is released - unless a commit the run gave up on is still
-   * in flight ([[orphans]]). Then the mark is kept until that commit returns: it is the top of a
-   * hand-over that has finished, and the orphan, not yet handed over, is above it, so a subscription
-   * made meanwhile is seeded with it and judges what it replays without waiting for the orphan - which
-   * holds the thread's commit lock, and may hang in the store. Both steps happen under `activeLock`, as
+   * in flight ([[orphans]]). Then the mark is kept until every such commit returns: it is the top of a
+   * hand-over that has finished, and an orphan, not yet handed over, is above it, so a subscription
+   * made meanwhile is seeded with it and judges what it replays without waiting for an orphan - which
+   * holds, or waits for, the thread's commit lock, and may hang in the store. Both steps happen under `activeLock`, as
    * [[orphanReturned]]'s check does, so an orphan that returns either sees the thread still held - and
    * the mark is then forgotten here, after its hand-over - or sees it free and forgets the mark itself.
    */
@@ -1205,11 +1205,19 @@ final class GraphRuntime(
     /** Set by [[fence]]: what a commit not yet begun fails with, instead of being written; under `gate`. */
     private var fencedBy: Option[LLMError] = None
 
-    /** Whether a commit has begun and not returned; under `gate`. */
-    private var inFlight = false
+    /**
+     * How many commits have begun and not returned; under `gate`. A count, not a flag: a Sync run's
+     * concurrent tasks each submit their own commit, so several can be begun at once - one in the store,
+     * the others waiting for the thread's commit lock - and the first to return must not hide the rest.
+     */
+    private var inFlight = 0
 
-    /** Whether the commit in flight was counted as an orphan ([[orphan]]); under `gate`. */
-    private var orphanCounted = false
+    /**
+     * How many of the commits in flight are counted as orphans ([[orphan]]); under `gate`. Never more
+     * than `inFlight`: each orphan is a commit in flight when the committer was orphaned, and whichever
+     * commit returns first settles one of them - the thread's count ([[orphans]]) needs only how many.
+     */
+    private var orphanCounted = 0
 
     /**
      * From now on, every commit not yet begun is skipped, and recorded as failing with `reason`; one
@@ -1223,7 +1231,7 @@ final class GraphRuntime(
       val (fencedNow, begun) = withLock(gate) {
         val first = fencedBy.isEmpty
         if first then fencedBy = Some(reason)
-        (first, inFlight)
+        (first, inFlight > 0)
       }
       if fencedNow then fenced(threadId, begun)
       begun
@@ -1234,7 +1242,7 @@ final class GraphRuntime(
      */
     def begun[A](commit: Commit)(skipped: LLMError => A)(write: => A): A =
       val fence = withLock(gate) {
-        if fencedBy.isEmpty then inFlight = true
+        if fencedBy.isEmpty then inFlight += 1
         fencedBy
       }
       fence match
@@ -1243,9 +1251,9 @@ final class GraphRuntime(
           Using.resource(new AutoCloseable {
             def close(): Unit =
               val orphaned = withLock(gate) {
-                inFlight = false
-                val counted = orphanCounted
-                orphanCounted = false
+                inFlight -= 1
+                val counted = orphanCounted > 0
+                if counted then orphanCounted -= 1
                 counted
               }
               if orphaned then orphanReturned(threadId)
@@ -1256,16 +1264,16 @@ final class GraphRuntime(
 
     /**
      * Marks the run as ended without waiting for this committer, once it is fenced, so no commit begins
-     * after this. A commit in flight now is counted as orphaned on its thread ([[orphans]]) until it
-     * returns: meanwhile the hub keeps its hand-over mark for the thread ([[release]]), and once it
-     * returns the mark is forgotten if no run holds the thread ([[orphanReturned]]). Called before the
-     * run lets its thread go.
+     * after this. Every commit in flight now - several, for a Sync run's concurrent tasks - is counted
+     * as orphaned on its thread ([[orphans]]) until it returns: meanwhile the hub keeps its hand-over
+     * mark for the thread ([[release]]), and once the last returns the mark is forgotten if no run holds
+     * the thread ([[orphanReturned]]). Called before the run lets its thread go.
      */
     def orphan(): Unit =
       withLock(gate) {
-        if inFlight && !orphanCounted then
-          orphanCounted = true
-          orphanInFlight(threadId)
+        if inFlight > orphanCounted then
+          orphanInFlight(threadId, inFlight - orphanCounted)
+          orphanCounted = inFlight
       }
 
     /**

@@ -175,8 +175,8 @@ private[graph] trait Dispatched extends Subscription:
  * replays a commit its other subscribers have not been handed ([[Dispatcher]]'s `settled`).
  *
  * The mark is kept only while the thread is in use: the runtime calls [[release]] when the claim is
- * released, after the run's last hand-over - or, if a commit the run gave up on is still in flight
- * then (an orphan, which may hang in the store), once that commit returns - so the hub keeps no state
+ * released, after the run's last hand-over - or, if commits the run gave up on are still in flight
+ * then (orphans, which may hang in the store), once the last of them returns - so the hub keeps no state
  * for idle threads. A mark kept for an orphan is still the top of a hand-over that has finished, and
  * the orphan is above it, so a subscription made meanwhile joins with it and never waits for the
  * orphan. A live event sent on a thread with no mark - only a node's own thread outliving its run
