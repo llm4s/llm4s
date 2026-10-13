@@ -212,6 +212,12 @@ final class GraphRuntime(
   @volatile private[graph] var renewalSettled: ThreadId => Unit = _ => ()
 
   /**
+   * A test hook run by a heartbeat being stopped, once its beat has ended, just before it waits for a
+   * renewal still in flight; a no-op by default.
+   */
+  @volatile private[graph] var joiningRenewal: ThreadId => Unit = _ => ()
+
+  /**
    * A test hook run by a committer once a commit has begun - it was not fenced - and before it enters
    * the store; a no-op by default.
    */
@@ -1543,7 +1549,8 @@ final class GraphRuntime(
       val deadline = System.nanoTime() + claims.ttl.toNanos
       // the beat first, so that no renewal starts after the one read below
       val interrupted = joinWithin(beat, deadline, Thread.interrupted())
-      val all         = renewal.get.fold(interrupted)(joinWithin(_, deadline, interrupted))
+      if renewal.get.exists(_.isAlive) then joiningRenewal(threadId)
+      val all = renewal.get.fold(interrupted)(joinWithin(_, deadline, interrupted))
       if all then Thread.currentThread().interrupt()
       !beat.isAlive && renewal.get.forall(!_.isAlive)
 

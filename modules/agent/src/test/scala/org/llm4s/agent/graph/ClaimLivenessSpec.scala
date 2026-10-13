@@ -312,7 +312,11 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     eventually(store.renewed.get > landed)
     // past the lease the grant gave, inside the one the renewal gave
     time.advance(25.seconds)
-    Thread.sleep(100) // many beats: one that judged by the grant's lease would stop the run now
+    // a beat starts a renewal only once the last has ended, at the end of a beat that judged the lease
+    // still held: the third renewal to reach the store after the advance was started by a beat that
+    // judged the lease after it - one that judged by the grant's lease would have stopped the run
+    val judged = store.renewals.get
+    eventually(store.renewals.get > judged + 2)
     two.gate.countDown()
     await(handle).completed._2 shouldBe Vector("x", "second")
   }
@@ -401,7 +405,9 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     time.broken = false
     eventually(store.renewed.get > 0)
     time.advance(25.seconds)
-    Thread.sleep(100)
+    // three renewals after the advance: a beat has judged the renewed lease still held since it
+    val judged = store.renewals.get
+    eventually(store.renewals.get > judged + 2)
     two.gate.countDown()
     await(handle).completed._2 shouldBe Vector("x", "second")
   }
@@ -1381,13 +1387,19 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       None
     }
     store.onRelease = () => { order.add("released"); None }
-    val handle = runtime(store, time).start(thread, two.graph, "x", run("first")).value
+    val rt      = runtime(store, time)
+    val joining = new CountDownLatch(1)
+    rt.joiningRenewal = _ => joining.countDown()
+    val handle = rt.start(thread, two.graph, "x", run("first")).value
     two.awaitEntered()
     armed.set(true)
     renewing.await(5, TimeUnit.SECONDS) shouldBe true
 
     two.gate.countDown()
-    Thread.sleep(100) // the run ends meanwhile; it must not release while the renewal is in the store
+    // the run has ended and is stopping its heartbeat: it waits for the renewal in the store, and must
+    // not release meanwhile
+    joining.await(5, TimeUnit.SECONDS) shouldBe true
+    order.asScala.toVector shouldBe empty
     finish.countDown()
     await(handle).completed
     order.asScala.toVector shouldBe Vector("renewed", "released")
@@ -1416,7 +1428,9 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
 
     two.gate.countDown()
     await(handle).completed
-    store.releases.get shouldBe 1
+    // the renewal could not be joined within ttl, so the claim is given back on a detached thread that
+    // the run's end does not wait for: it may reach the store only after `await` returns
+    eventually(store.releases.get == 1)
     hang.countDown()
   }
 

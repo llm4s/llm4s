@@ -192,10 +192,17 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
   }
 
   "Renewal" should "keep a run's claim alive past its ttl, and stop once the claim is lost" in {
-    val clock  = MovingClock()
-    val store  = Hooked(InMemoryCheckpointer(clock))
-    val held   = Held()
-    val handle = GraphRuntime(store, claims = ClaimPolicy(30.seconds, 10.millis)).start(thread, held.graph, "x").value
+    val clock = MovingClock()
+    val store = Hooked(InMemoryCheckpointer(clock))
+    val held  = Held()
+    val rt    = GraphRuntime(store, claims = ClaimPolicy(30.seconds, 10.millis))
+    // the claim's beat, the only thread that starts a renewal: it reads the ticker on every beat
+    val beat = new AtomicReference[Thread]()
+    rt.ticker = () => {
+      if Thread.currentThread().getName == s"llm4s-claim-${thread.value}" then beat.set(Thread.currentThread())
+      System.nanoTime()
+    }
+    val handle = rt.start(thread, held.graph, "x").value
     held.awaitEntered()
     clock.advance(20.seconds)
     val before = store.renewals.get
@@ -213,7 +220,8 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
       Some(Left(GraphError.StaleClaim("t", 1L, Some(2L))))
     }
     eventually(lost.get == 1)
-    Thread.sleep(100)
+    // the beat ends once the claim is lost, so no renewal starts after the refused one
+    beat.get.join(java.time.Duration.ofSeconds(5)) shouldBe true
     lost.get shouldBe 1
 
     // and the run stops at once: its task is interrupted, and it ends naming the current claim
