@@ -175,6 +175,14 @@ final class GraphRuntime(
   private val activeLock = new java.util.concurrent.locks.ReentrantLock()
 
   /**
+   * The claims this runtime failed to give back ([[releaseClaim]]), by thread, so that
+   * [[deleteThread]] can try once more before it claims the thread: the store refuses a live claim
+   * whoever asks, the same run id included, so a one-shot run whose release failed could not
+   * otherwise be forgotten until its claim lapsed. A claim granted on the thread since drops it.
+   */
+  private val unreleased = new java.util.concurrent.ConcurrentHashMap[String, FencingToken]()
+
+  /**
    * Replays events with `seq > afterSeq`, then delivers new events until cancelled or
    * disconnected. The subscription is scoped to the thread, so it delivers every later run on it,
    * and its dispatcher (a virtual thread, parked while idle) lives until [[Subscription.cancel]];
@@ -374,7 +382,9 @@ final class GraphRuntime(
    * `claims.ttl` - and another run takes the thread over, nothing of that run is deleted: the call
    * is `ThreadBusy`, or `TenantMismatch` if the run is another tenant's. An unknown thread is
    * `Right(())`. The tenant is checked once more after the store claim is granted, so a thread another
-   * runtime created for another tenant in between is `TenantMismatch`, not deleted.
+   * runtime created for another tenant in between is `TenantMismatch`, not deleted. A claim this
+   * runtime failed to give back when a run on the thread ended is given back first, so that it does
+   * not refuse the delete until it lapses.
    *
    * A subscription follows a thread, not its id. Every [[subscribe]] to the deleted thread - in this
    * runtime, or in another sharing the store - ends with `Disconnected(lastSeq,
@@ -395,6 +405,9 @@ final class GraphRuntime(
       case None                            =>
         // released on every exit, including an InterruptedException, which `Try` would not catch
         Using.resource(new AutoCloseable { def close(): Unit = release(threadId) }) { _ =>
+          // a claim of this runtime's that it failed to give back - a run's, ended - would refuse the
+          // delete until it lapsed; nothing holds the thread in this runtime now, so it is given back first
+          Option(unreleased.remove(threadId.value)).foreach(releaseClaim(threadId, _))
           checkpointer
             .latest(threadId)
             .flatMap(_.fold[Result[Unit]](Right(()))(checkTenant(threadId, _, config)))
@@ -707,7 +720,10 @@ final class GraphRuntime(
    */
   private def claimThread(threadId: ThreadId, config: RunConfig): Result[RunClaim] =
     Try(checkpointer.claim(threadId, ClaimRequest(config.runId, claims.ttl))).toResult.flatten match
-      case Right(claim) => Right(claim)
+      case Right(claim) =>
+        // any claim this runtime failed to give back has lapsed and been replaced
+        unreleased.remove(threadId.value)
+        Right(claim)
       case Left(GraphError.ThreadBusy(_, latest, holder)) =>
         Try(busyAt(threadId, config, holder, nameWithoutCheckpoint = false)).toResult.flatten.left.map {
           case refusal @ (_: GraphError.TenantMismatch | _: GraphError.ThreadBusy) => refusal
@@ -717,17 +733,20 @@ final class GraphRuntime(
 
   /**
    * Gives back the claim whose token is `token`, logging (never throwing) a store that fails: its
-   * claim then lapses after `claims.ttl`, and until then the thread is `ThreadBusy` to every runtime.
+   * claim then lapses after `claims.ttl`, and until then the thread is `ThreadBusy` to every runtime -
+   * but for this runtime's [[deleteThread]], which tries once more to give it back first.
    */
   private def releaseClaim(threadId: ThreadId, token: FencingToken): Unit =
     DefaultRunHandle.guarded(checkpointer.release(threadId, token)) match
-      case Right(Right(_)) => ()
+      case Right(Right(_)) => unreleased.remove(threadId.value, token): Unit
       case Right(Left(error)) =>
+        unreleased.put(threadId.value, token)
         GraphRuntime.logger.warn(
           s"Releasing the claim on thread '${threadId.value}' failed; it lapses after ${claims.ttl}: ${error.message}"
         )
       case Left(thrown) =>
         if thrown.isInstanceOf[InterruptedException] then Thread.currentThread().interrupt()
+        unreleased.put(threadId.value, token)
         GraphRuntime.logger.warn(
           s"Releasing the claim on thread '${threadId.value}' failed; it lapses after ${claims.ttl}",
           thrown
