@@ -1301,7 +1301,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   thread's current one when the store named it. The run finds its claim lost when its lease passes with no renewal
   landing - judged by the runtime's own monotonic clock - or when a renewal or commit is refused as stale. Its tasks
   are interrupted as a cancel interrupts them, it commits nothing more (not even `RunFailed`), and it drops its
-  `Async` queue and `OnExit` buffer. `StaleClaim` stays the store's refusal. `RunEvent.RunRecovered` gains
+  `Async` queue and `OnExit` buffer. `recover` may be attempted once the thread is free: it is refused with
+  `ThreadBusy` while a successor holds the thread, a successor that finished leaves the thread's state showing it, and
+  a lease that lapsed with no successor leaves the run for `recover` to continue. `StaleClaim` stays the store's
+  refusal. `RunEvent.RunRecovered` gains
   `takenOverFrom: Option[String]`, and `RunClaim` `takenOverFrom: Option[RunId]`: a `recover` whose claim replaced
   another run's expired, unreleased one records that run, so the log shows the takeover; a store reports it from
   `claim`, and `CheckpointerContract` checks it. Both default to `None`, so older logs still read. See

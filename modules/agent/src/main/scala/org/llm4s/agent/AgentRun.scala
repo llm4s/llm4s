@@ -37,7 +37,11 @@ final class AgentRun private[agent] (
   /** Non-blocking: `Running` until the turn ends, then how it ended. */
   def status: RunStatus = handle.status
 
-  /** Cancels the turn; see [[org.llm4s.agent.graph.RunHandle.cancel]]. The thread is left for `recover`. */
+  /**
+   * Cancels the turn; see [[org.llm4s.agent.graph.RunHandle.cancel]]. The thread is left for `recover`, as
+   * it is after a turn that lost its claim (`GraphError.ClaimLost`) once the thread is free: `recover` is
+   * refused with `ThreadBusy` while another runtime holds it.
+   */
   def cancel(): Unit = handle.cancel()
 
   /**

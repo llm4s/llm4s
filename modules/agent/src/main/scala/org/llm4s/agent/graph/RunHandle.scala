@@ -30,7 +30,8 @@ trait RunHandle[O]:
   /**
    * Blocks until the run ends and returns its result; the result is retained, so every call
    * returns the same value. If the awaiting thread is interrupted, returns `Left(CancelledError)`
-   * with the interrupt flag still set, and the run continues: only [[cancel]] stops a run.
+   * with the interrupt flag still set, and the run continues: only [[cancel]] stops a run. A run that
+   * ends `Failed` with [[GraphError.ClaimLost]] may be recovered once its thread is free; see there.
    */
   def await(): Result[RunResult[O]]
 

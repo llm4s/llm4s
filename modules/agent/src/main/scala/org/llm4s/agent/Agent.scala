@@ -29,9 +29,11 @@ import org.slf4j.LoggerFactory
  * leave the thread unchanged, as does another middleware's `beforeAgent` or `afterAgent` failure
  * (a Block without a guardrail; a blank query or answer from a hook is one), which also ends the
  * run; a failed run - a provider error, a tool's `Fatal`, a model or tool wrapper's failure,
- * cancellation, a deadline - leaves the thread for [[recover]]. A run that lost its claim on the thread
- * (`GraphError.ClaimLost`: another runtime sharing the store may have taken it over) is not one to
- * recover: whoever holds the thread now continues it, and `recover` is refused with `ThreadBusy` meanwhile.
+ * cancellation, a deadline - leaves the thread for [[recover]]. So does a run that lost its claim on the
+ * thread (`GraphError.ClaimLost`), once the thread is free: `recover` is refused with `ThreadBusy` while
+ * another runtime sharing the store holds it - retry - and if a successor finished the work, the
+ * thread's state shows it (`recover` then reports `NothingToRecover`). If the lease merely lapsed, with
+ * no successor, `recover` continues the interrupted turn.
  */
 final class Agent private[agent] (
   val id: AgentId,

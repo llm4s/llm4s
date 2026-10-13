@@ -136,9 +136,14 @@ The run finds its claim lost when its lease passes with no renewal landing, when
 - it ends with `GraphError.ClaimLost(threadId, token, current)`, where `current` is the thread's current claim
   when the store named one.
 
-`ClaimLost` is not a store outage (`CheckpointWriteFailed`), and it is not yours to `recover`: another worker may
-already be running the thread, so `recover` is refused with `ThreadBusy` while it does. If nobody took the thread
-over, its last durable checkpoint is still `Running`, and `recover` continues it as after a crash.
+`ClaimLost` is not a store outage (`CheckpointWriteFailed`). After it, `recover` may be attempted once the thread
+is free:
+
+- while a successor holds the thread, `recover` is refused with `ThreadBusy`: retry later;
+- if a successor took over and finished the work, the thread's state shows it, and `recover` reports
+  `NothingToRecover` (or the thread is suspended or completed, as the successor left it);
+- if the lease merely lapsed - renewals failed until it passed, and nobody took the thread over - the run released
+  its claim and its last durable checkpoint is still `Running`, so `recover` continues it as after a crash.
 
 ### Limits
 

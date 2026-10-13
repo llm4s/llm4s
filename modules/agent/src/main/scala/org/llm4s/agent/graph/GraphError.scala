@@ -225,9 +225,11 @@ object GraphError:
    * own claim, and `current` the thread's current claim when the store named one: another run then
    * holds the thread. `None` means the store named none - the run judged its lease passed without
    * asking it, or the store found no current claim (a successor that took over has since released
-   * it). A failure the run was recording when its commit was refused is logged, not carried. Unlike [[CheckpointWriteFailed]], it is not a store outage, and it is not the
-   * caller's to `recover`: another worker may already be running the thread, so a `recover` is refused
-   * with [[ThreadBusy]] while it does.
+   * it). A failure the run was recording when its commit was refused is logged, not carried. Unlike
+   * [[CheckpointWriteFailed]], it is not a store outage. `recover` may be attempted once the thread is
+   * free: it is refused with [[ThreadBusy]] while a successor holds the thread, so retry; a successor
+   * that finished the work leaves the thread's state showing it ([[NothingToRecover]]); and a lease that
+   * lapsed with no successor leaves the last checkpoint `Running`, which `recover` continues.
    */
   final case class ClaimLost(threadId: String, token: FencingToken, current: Option[FencingToken])
       extends GraphError
