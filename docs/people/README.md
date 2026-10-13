@@ -22,6 +22,7 @@ Use `/people/<filename>` in `docs/people.md` and `docs/people/<filename>` in the
 | Iyad M. Issa | <img src="iyad-m-issa.png" alt="Iyad M. Issa" width="100"> | [iyad-m-issa.png](iyad-m-issa.png) |
 | Kannupriya Kalra | <img src="kannupriya-kalra.jpg" alt="Kannupriya Kalra" width="100"> | [kannupriya-kalra.jpg](kannupriya-kalra.jpg) |
 | Namrata Priyadarshani | <img src="namrata-priyadarshani.jpg" alt="Namrata Priyadarshani" width="100"> | [namrata-priyadarshani.jpg](namrata-priyadarshani.jpg) |
+| Olivier Nouguier | <img src="olivier-nouguier.png" alt="Olivier Nouguier" width="100"> | [olivier-nouguier.png](olivier-nouguier.png) |
 | Pavan Vamsi | <img src="pavan-vamsi.jpg" alt="Pavan Vamsi" width="100"> | [pavan-vamsi.jpg](pavan-vamsi.jpg) |
 | Pritish Yuvraj | <img src="pritish-yuvraj.jpg" alt="Pritish Yuvraj" width="100"> | [pritish-yuvraj.jpg](pritish-yuvraj.jpg) |
 | Rory Graves | <img src="rory-graves.jpg" alt="Rory Graves" width="100"> | [rory-graves.jpg](rory-graves.jpg) |
@@ -42,7 +43,3 @@ Retained for reference; the People pages use the current headshots above. Numeri
 | Kannupriya Kalra | [kannupriya-kalra-github.png](kannupriya-kalra-github.png) |
 | Rory Graves | [rory-graves-github.jpg](rory-graves-github.jpg) |
 | Vitthal Mirji | [vitthal-mirji-github.jpg](vitthal-mirji-github.jpg) |
-
-## Awaiting headshots
-
-No headshot has been supplied for Olivier Nouguier. Add their photos using the same naming convention when available.
