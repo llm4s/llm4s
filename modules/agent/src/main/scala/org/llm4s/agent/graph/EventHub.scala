@@ -174,10 +174,14 @@ private[graph] trait Dispatched extends Subscription:
  * judges a page it read: waiting, interruptibly, for a commit being handed over to finish, so it never
  * replays a commit its other subscribers have not been handed ([[Dispatcher]]'s `settled`).
  *
- * The mark is kept only while a run holds the thread: the runtime calls [[release]] when the claim
- * is released, after the run's last hand-over, so the hub keeps no state for idle threads. A live
- * event sent on a thread no run holds - only a node's own thread outliving its run sends one - is
- * held unmarked until the next commit is handed to the subscription, and placed just before it.
+ * The mark is kept only while the thread is in use: the runtime calls [[release]] when the claim is
+ * released, after the run's last hand-over - or, if a commit the run gave up on is still in flight
+ * then (an orphan, which may hang in the store), once that commit returns - so the hub keeps no state
+ * for idle threads. A mark kept for an orphan is still the top of a hand-over that has finished, and
+ * the orphan is above it, so a subscription made meanwhile joins with it and never waits for the
+ * orphan. A live event sent on a thread with no mark - only a node's own thread outliving its run
+ * sends one - is held unmarked until the next commit is handed to the subscription, and placed just
+ * before it.
  *
  * '''Commits made elsewhere''' ([[WatchPolicy]]). Another runtime or process sharing the store
  * commits without this hub knowing, so the hub hands over only this runtime's commits. While `watch`
@@ -194,8 +198,12 @@ private[graph] trait Dispatched extends Subscription:
  * keep their place before it; if they do not fit, the subscriber lags as for any durable event. The
  * hand-over then queues the commit to every subscriber in one hold of `hubLock`, or to none ([[durable]]). No
  * store call is ever made holding `hubLock`, which every thread's hand-overs and the runtime's local
- * release take: a store that stalls a subscription's read holds up at most that subscription and its
- * thread's commits. A failed watch
+ * release take: a store that stalls a read or a commit holds up at most the subscription reading,
+ * that thread's commits and, while the thread has no mark - a run's claim commit, before anything of
+ * the run is handed over - the replay of a subscription to it that joins then, which waits for that
+ * commit's hand-over to judge what it read ([[Dispatcher]]'s `settled`). A commit of a launched run
+ * that the run gave up on never holds one up that way: the run's claim was handed over, so the thread
+ * has a mark, and it is kept until that commit returns. A failed watch
  * or gap read ends the subscription once its queue is delivered, with
  * `Disconnected(lastSeq, ReplayFailed(error))`.
  *

@@ -749,6 +749,30 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       late.letRelease()
     }
 
+  "A run-scoped subscription made after a lost run ended, while the run's abandoned write still hangs in the store" should
+    "replay the run and end at once, never waiting on the hung write" in {
+      val late   = LateWrite()
+      val handle = late.start()
+      val token  = late.loseClaim()
+      await(handle).failed._2 shouldBe GraphError.ClaimLost("t", token, None)
+      writerAlive shouldBe true // the abandoned write is still in the store, holding the thread's commit lock
+
+      val replaying = RunRecorder()
+      val sub       = handle.subscribe()(replaying).value
+      // the hung write is let land only after this, so a subscription that waited on it could not end
+      replaying.ended.await(5, TimeUnit.SECONDS) shouldBe true
+      replaying.eventsOf("first") should contain(RunEvent.RunStarted(None, None))
+      replaying.eventsOf("first") should not contain RunEvent.TaskCompleted
+      writerAlive shouldBe true
+      sub.cancel()
+
+      late.hang.countDown()
+      eventually(!writerAlive)
+      // once the orphan has landed, the hub keeps no mark for the idle thread
+      late.rt.handOverMarked(thread) shouldBe false
+      late.letRelease()
+    }
+
   "A healthy Async run" should "still drain every commit before it releases its claim" in {
     val time   = ManualTime()
     val store  = Hooked(InMemoryCheckpointer(time))

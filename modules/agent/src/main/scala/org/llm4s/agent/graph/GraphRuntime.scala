@@ -189,6 +189,14 @@ final class GraphRuntime(
   private val activeLock = new java.util.concurrent.locks.ReentrantLock()
 
   /**
+   * Commits in flight that their run gave up on ([[Committer.orphan]]), by thread; guarded by
+   * `activeLock`. While a thread has one, the hub keeps its hand-over mark even with no run holding the
+   * thread, so that a subscription made meanwhile joins with a mark, and never waits for that commit
+   * - possibly hung in the store - to learn what has been handed over ([[release]]).
+   */
+  private val orphans = mutable.Map.empty[String, Int]
+
+  /**
    * The monotonic clock, in nanoseconds, by which a run judges its own lease: `System.nanoTime`. A
    * test replaces it to move a lease's end without waiting for it.
    */
@@ -910,12 +918,27 @@ final class GraphRuntime(
         case Left(_)  => joinWithin(t, deadline, interrupted = true)
 
   /**
-   * Forgets the hub's hand-over mark for `threadId` unless a run holds the thread in this runtime: for a
-   * late write of a run that has ended, after its hand-over. Checked under `activeLock`, so it never
-   * races an admission, nor falls between the two steps of [[release]], which takes the same lock.
+   * Forgets the hub's hand-over mark for `threadId` unless the thread is still in use in this runtime:
+   * held by a run, or with a commit its run gave up on still in flight ([[orphans]]). Checked under
+   * `activeLock`, so it never races an admission, nor falls between the two steps of [[release]], which
+   * takes the same lock. The caller holds `activeLock`.
    */
   private def forgetIfIdle(threadId: ThreadId): Unit =
-    withLock(activeLock)(if !active.contains(threadId.value) then hub.release(threadId))
+    if !active.contains(threadId.value) && !orphans.contains(threadId.value) then hub.release(threadId)
+
+  /** Counts an orphaned commit in flight on `threadId` ([[orphans]]). */
+  private def orphanInFlight(threadId: ThreadId): Unit =
+    withLock(activeLock)(orphans.updateWith(threadId.value)(n => Some(n.getOrElse(0) + 1))): Unit
+
+  /**
+   * An orphaned commit on `threadId` has returned from the store - and, if it landed, been handed over:
+   * the hub's mark is forgotten if nothing else uses the thread ([[forgetIfIdle]]).
+   */
+  private def orphanReturned(threadId: ThreadId): Unit =
+    withLock(activeLock) {
+      orphans.updateWith(threadId.value)(_.map(_ - 1).filter(_ > 0))
+      forgetIfIdle(threadId)
+    }
 
   private def releasing(threadId: ThreadId, token: FencingToken): Unit =
     DefaultRunHandle.guarded(checkpointer.release(threadId, token)) match
@@ -1023,14 +1046,17 @@ final class GraphRuntime(
   /**
    * Releases the thread's claim. The event hub forgets the thread's hand-over mark first, while the
    * thread is still held: every event of the run has been handed over, and no other run can claim
-   * the thread, and set a new mark, until it is released. Both happen under `activeLock`, as
-   * [[forgetIfIdle]]'s check does, so a late write of an abandoned run that recreates the mark either
-   * sees the thread still held - and the mark is then forgotten here, after its hand-over - or sees it
-   * free and forgets the mark itself.
+   * the thread, and set a new mark, until it is released - unless a commit the run gave up on is still
+   * in flight ([[orphans]]). Then the mark is kept until that commit returns: it is the top of a
+   * hand-over that has finished, and the orphan, not yet handed over, is above it, so a subscription
+   * made meanwhile is seeded with it and judges what it replays without waiting for the orphan - which
+   * holds the thread's commit lock, and may hang in the store. Both steps happen under `activeLock`, as
+   * [[orphanReturned]]'s check does, so an orphan that returns either sees the thread still held - and
+   * the mark is then forgotten here, after its hand-over - or sees it free and forgets the mark itself.
    */
   private def release(threadId: ThreadId): Unit =
     withLock(activeLock) {
-      hub.release(threadId)
+      if !orphans.contains(threadId.value) then hub.release(threadId)
       releasingLocally(threadId)
       active.remove(threadId.value)
     }: Unit
@@ -1175,8 +1201,8 @@ final class GraphRuntime(
     /** Whether a commit has begun and not returned; under `gate`. */
     private var inFlight = false
 
-    /** Set by [[orphan]]: a commit that lands from now on may land after the run has ended. */
-    @volatile private var orphaned = false
+    /** Whether the commit in flight was counted as an orphan ([[orphan]]); under `gate`. */
+    private var orphanCounted = false
 
     /**
      * From now on, every commit not yet begun is skipped, and recorded as failing with `reason`; one
@@ -1207,20 +1233,33 @@ final class GraphRuntime(
       fence match
         case Some(reason) => skipped(reason)
         case None =>
-          Using.resource(new AutoCloseable { def close(): Unit = withLock(gate) { inFlight = false } }) { _ =>
+          Using.resource(new AutoCloseable {
+            def close(): Unit =
+              val orphaned = withLock(gate) {
+                inFlight = false
+                val counted = orphanCounted
+                orphanCounted = false
+                counted
+              }
+              if orphaned then orphanReturned(threadId)
+          }) { _ =>
             GraphRuntime.this.committing(threadId, commit)
             write
           }
 
     /**
-     * Marks the run as ended without waiting for this committer: a commit that lands later must leave
-     * the hub no hand-over mark for a thread no run holds ([[forgetIfIdle]]). Set before the run lets
-     * its thread go.
+     * Marks the run as ended without waiting for this committer, once it is fenced, so no commit begins
+     * after this. A commit in flight now is counted as orphaned on its thread ([[orphans]]) until it
+     * returns: meanwhile the hub keeps its hand-over mark for the thread ([[release]]), and once it
+     * returns the mark is forgotten if no run holds the thread ([[orphanReturned]]). Called before the
+     * run lets its thread go.
      */
-    def orphan(): Unit = orphaned = true
-
-    /** Called after each commit this committer made; see [[orphan]]. */
-    protected def landed(): Unit = if orphaned then forgetIfIdle(threadId)
+    def orphan(): Unit =
+      withLock(gate) {
+        if inFlight && !orphanCounted then
+          orphanCounted = true
+          orphanInFlight(threadId)
+      }
 
     /**
      * Told when the store refuses a submitted commit as stale - proof that another run took the thread
@@ -1262,7 +1301,6 @@ final class GraphRuntime(
       if failed.get.isEmpty then
         begun(commit)(reason => failed.compareAndSet(None, Some(reason)): Unit) {
           commitAndDeliver(threadId, commit).left.foreach(refused(failed, _))
-          landed()
         }
     def failure: Option[LLMError]                 = failed.get
     def close(): Unit                             = ()
@@ -1284,9 +1322,6 @@ final class GraphRuntime(
         if failed.get.isEmpty then
           begun(commit)(reason => failed.compareAndSet(None, Some(reason)): Unit) {
             commitAndDeliver(threadId, commit).left.foreach(refused(failed, _))
-            // a write the run abandoned, landing after the run let the thread go, must leave the hub
-            // no hand-over mark for a thread no run holds
-            landed()
           }
       }
     def failure: Option[LLMError] = failed.get
@@ -1360,7 +1395,6 @@ final class GraphRuntime(
           val exit = Commit(fence, last, writes, events, retract)
           begun(exit)(reason => failed = Some(reason)) {
             failed = commitAndDeliver(threadId, exit).left.toOption
-            landed()
           }
       }
     }
@@ -1597,9 +1631,9 @@ final class GraphRuntime(
      * `llm4s-admit-<threadId>`, and waits for it: for as long as it takes while the claim holds, but once
      * the claim is found lost only until [[lossDeadline]]. Past that it is given up, and the admission
      * fails [[GraphError.ClaimLost]] without it, so that a store hung on the claim's commit cannot keep
-     * `start`, `recover` or `resume` from returning, or the thread held. A commit given up on that lands
-     * later is fenced by the claim's token, and leaves the hub no hand-over mark for a thread no run holds
-     * ([[forgetIfIdle]]); the run is never launched. An interrupt of the waiting thread is passed on to
+     * `start`, `recover` or `resume` from returning, or the thread held. A commit given up on is an
+     * orphan ([[Committer.orphan]]): if it lands later, it is fenced by the claim's token, and the hub
+     * keeps its mark for the thread only until it returns; the run is never launched. An interrupt of the waiting thread is passed on to
      * `claiming`, which a store that honours interrupts then fails, as it would on the caller's thread; one
      * left set on `claiming`'s thread is set on the caller's too. What `claiming` threw is thrown again.
      */
@@ -1609,10 +1643,9 @@ final class GraphRuntime(
       val worker = Thread.ofVirtual().name(s"llm4s-admit-${threadId.value}").start { () =>
         var outcome: Either[Throwable, Result[Run[I, O]]] =
           Left(new IllegalStateException("admission ended abnormally"))
-        // completed on every exit; a commit that lands once the caller gave it up leaves no hand-over mark
+        // completed on every exit
         Using.resource(new AutoCloseable {
-          def close(): Unit =
-            if !attempt.complete(outcome -> Thread.currentThread().isInterrupted) then forgetIfIdle(threadId)
+          def close(): Unit = attempt.complete(outcome -> Thread.currentThread().isInterrupted): Unit
         })(_ => outcome = DefaultRunHandle.guarded(claiming()))
       }
       @tailrec def waiting(interrupted: Boolean): Boolean =
@@ -1624,6 +1657,8 @@ final class GraphRuntime(
             case Some(_) =>
               val remaining = lossDeadline - System.nanoTime()
               if remaining <= 0 then
+                // the claim's commit, if in flight, is given up on: counted before the thread is released
+                committer.orphan()
                 attempt.complete(Right(Left(GraphError.ClaimLost(threadId.value, token, lostTo.get))) -> false): Unit
                 Right(())
               else DefaultRunHandle.guarded(attempt.get(remaining, TimeUnit.NANOSECONDS))
@@ -1775,7 +1810,7 @@ final class GraphRuntime(
      * The run's result when it is settled without its run thread ([[DefaultRunHandle.endWithin]]): the
      * claim was found lost, and the run thread has not ended - stuck, say, in a store call that ignores
      * interrupts. The committer is fenced and orphaned, so nothing more of the run lands but what is in
-     * the store already, and that leaves the hub no mark for an idle thread; the run's own subscriptions
+     * the store already, and the hub keeps its mark for the thread only until that returns; the run's own subscriptions
      * are cut at what the hub has handed over ([[EventHub.atMark]]), so a write landing later - or one
      * whose hand-over is still reading a subscriber's missing events - never reaches them as the run's
      * ([[AbandonedWrites]]). Fails with [[GraphError.ClaimLost]], at the last position the run reached.
