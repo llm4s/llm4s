@@ -174,6 +174,10 @@ guarantees: in order, without gap or duplicate, and only after the commit.
 - If a read of the store fails, the subscription delivers what it has queued and then ends with
   `Disconnected(lastSeq, ReplayFailed(error))`. Closing the store under it ends it this way too.
   Resubscribe with `afterSeq = lastSeq`, for example after a restart.
+- If the thread is deleted (`GraphRuntime.deleteThread`, `Agent.forget`), through this runtime or another,
+  the subscription delivers what it has queued and then ends with `Disconnected(lastSeq, ThreadDeleted)`.
+  It never delivers a new thread created under the same id; subscribe again from `afterSeq = 0` to
+  follow that one.
 
 ```scala
 import org.llm4s.agent.graph.*

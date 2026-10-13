@@ -1295,6 +1295,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **`Checkpointer.deleteThread` is fenced by a claim token, and a deleted thread's id numbers on** ([#1700](https://github.com/llm4s/llm4s/issues/1700) follow-up, BREAKING,
+  `llm4s-agent`, `llm4s-agent-testkit`, `llm4s-agent-checkpoint-sqlite`): `deleteThread(threadId)` is
+  `deleteThread(threadId, token: FencingToken)`, and a store deletes only while `token` is the thread's current claim,
+  checked atomically with the delete, returning `GraphError.StaleClaim` and deleting nothing otherwise - a thread with
+  no claim, an unknown one included, too. A store keeps a tombstone (no data) of a deleted thread that numbered any
+  event, and the next thread of its id numbers its events from one past the deleted thread's next number instead of
+  from 1. A read of the log after a number of the deleted thread is refused with the new
+  `GraphError.ThreadDeleted(threadId, afterSeq, firstSeq)` (`Checkpointer.deleted` is the rule), and a read from 0
+  starts at the current thread's first event. `DisconnectReason` gains `ThreadDeleted`, which ends every subscription
+  to a deleted thread. `CheckpointerContract` drops its "deletes regardless of claims" case for cases on the fenced
+  delete, the numbering and `ThreadDeleted`. The SQLite schema is version 2 (`first_seq`), upgraded on open. No shims;
+  see the [Stage 2 migration note](docs/reference/migration.md#durable-checkpointer-contract-1700).
 - **Workload-identity configuration is `@Stable`; `stabilityTierCheck` flags Stable signatures that name Experimental types** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
   `AuthConfig`, `IdentitySource`, `TokenExchangeConfig`, `AccessToken`, `AccessTokenProvider`,
   `OpenAIWorkloadIdentity` and `AnthropicWorkloadIdentity` were `@Experimental` while the Stable
@@ -2644,6 +2656,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`GraphRuntime.deleteThread` no longer deletes a thread another runtime took over** ([#1700](https://github.com/llm4s/llm4s/issues/1700) follow-up):
+  a runtime that stalled past its claim's `ttl` between claiming the thread and deleting it - a GC pause, a slow
+  store - while another runtime claimed the thread and ran on it deleted that run's checkpoints, events and claim, and
+  could delete another tenant's thread. The delete is now fenced by the deleter's claim token, and such a delete
+  returns `ThreadBusy` (or `TenantMismatch`) with nothing deleted.
+- **A subscription no longer crosses a deleted thread into a new thread of the same id** ([#1700](https://github.com/llm4s/llm4s/issues/1700) follow-up, [#1705](https://github.com/llm4s/llm4s/issues/1705)):
+  a subscription in another runtime that had followed a deleted thread silently skipped the first events of a new
+  thread created under the same id, then delivered the rest as if they continued the old log - another tenant's
+  events included. It now ends with `Disconnected(lastSeq, ThreadDeleted)`, as does a subscription in the deleting
+  runtime, which used to stay open.
+- **A one-shot `Agent.run` whose turn failed forgets its thread even when releasing the turn's claim failed**
+  ([#1700](https://github.com/llm4s/llm4s/issues/1700) follow-up): the store refused the forget as it refuses any live
+  claim, the turn's own run id included, so the thread - which nobody can name - was kept. `GraphRuntime.deleteThread`
+  now tries once more to release a claim of its own runtime that it failed to give back before it claims the thread.
 - **Security - `Redaction`: the password of a URL's userinfo is redacted** ([#1816](https://github.com/llm4s/llm4s/issues/1816)):
   `https://alice:s3cret@gw.example.com/v1` - a provider `baseUrl`, a proxy or a database URL in a connection error,
   an HTTP client error or the provider exchange log - came out unchanged. The password of `scheme://user:password@host`
