@@ -318,4 +318,4 @@ listener { case Checked(v) => ... } // None for another name, version or an unde
 
 See also the [observability guide](../observability/), the
 [migration note](../../reference/migration.html), and
-[Typed Agent Runtime §4.14](/design/typed-agent-runtime-design).
+[Typed Agent Runtime §4.14](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.14-stage-1-slice-3-events-and-tracing.md).

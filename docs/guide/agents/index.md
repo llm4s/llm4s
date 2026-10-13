@@ -562,7 +562,7 @@ For in-depth technical details:
 - [Phase 1.2: Guardrails](/design/phase-1.2-guardrails-framework) - Validation framework
 - [Phase 1.3: Handoffs](/design/phase-1.3-handoff-mechanism) - Agent delegation
 - [Phase 1.4: Memory](/design/phase-1.4-memory-system) - Memory architecture
-- [Typed Agent Runtime §4.13](/design/typed-agent-runtime-design) - How `Agent` runs on the graph runtime
+- [Typed Agent Runtime §4.13](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.13-stage-1-slice-2-the-agent-loop-on-the-graph-runtime.md) - How `Agent` runs on the graph runtime
 - [Phase 2.1: Streaming](/design/phase-2.1-streaming-events) - Event system
 
 ---
