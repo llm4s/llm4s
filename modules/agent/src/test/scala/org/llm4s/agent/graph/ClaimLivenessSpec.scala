@@ -1,19 +1,21 @@
 package org.llm4s.agent.graph
 
 import org.llm4s.agent.graph.GraphTestSupport.*
-import org.llm4s.error.CancelledError
+import org.llm4s.error.{ CancelledError, ProcessingError }
+import org.llm4s.types.Result
 import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.time.{ Clock, Instant, ZoneId, ZoneOffset }
-import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong }
+import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong, AtomicReference }
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import scala.concurrent.duration.*
 
 /**
- * Whether a run keeps, or knows it has lost, its claim on a thread (#1700 follow-up). So far: a
- * `recover` that takes over another run's expired claim records it on `RunRecovered`.
+ * Whether a run keeps, or knows it has lost, its claim on a thread (#1700 follow-up). So far: a run
+ * releases its claim with a clean interrupt flag, a closing run takes no late interrupt into its
+ * release, and a `recover` that takes over another run's expired claim records it on `RunRecovered`.
  *
  * Time is manual: [[ManualTime]] is the store's clock, and moves only when a test moves it.
  */
@@ -38,6 +40,36 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     def nanos(): Long                       = 1_000_000_000_000L + offset.get
     def advance(by: FiniteDuration): Unit   = offset.addAndGet(by.toNanos): Unit
     def skewStore(by: FiniteDuration): Unit = storeAhead.addAndGet(by.toNanos): Unit
+  }
+
+  /** A store that delegates to `underlying`, with hooks a test sets. */
+  private class Hooked(val underlying: Checkpointer) extends Checkpointer {
+    @volatile var onRenew: () => Option[Result[RunClaim]]                  = () => None
+    @volatile var onRelease: () => Option[Result[Unit]]                    = () => None
+    @volatile var onLatest: () => Option[Result[Option[StoredCheckpoint]]] = () => None
+    @volatile var onCommit: Commit => Option[Result[Vector[EventRecord]]]  = _ => None
+    val renewals                                                           = new AtomicInteger()
+    val renewed                                                            = new AtomicInteger()
+    val releases                                                           = new AtomicInteger()
+    def claim(threadId: ThreadId, request: ClaimRequest)                   = underlying.claim(threadId, request)
+    def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) = {
+      renewals.incrementAndGet()
+      val outcome = onRenew().getOrElse(underlying.renew(threadId, token, ttl))
+      if outcome.isRight then renewed.incrementAndGet()
+      outcome
+    }
+    def release(threadId: ThreadId, token: FencingToken) = {
+      releases.incrementAndGet()
+      onRelease().getOrElse(underlying.release(threadId, token))
+    }
+    def commit(threadId: ThreadId, commit: Commit) = onCommit(commit).getOrElse(underlying.commit(threadId, commit))
+    def latest(threadId: ThreadId)                 = onLatest().getOrElse(underlying.latest(threadId))
+    def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                            = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
   }
 
   /**
@@ -75,6 +107,131 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
   private def run(id: String) = RunConfig().withRunId(RunId(id))
 
   private def events(store: Checkpointer): Vector[EventRecord] = store.eventsAfter(thread, 0L, 10_000).value
+
+  // ---- 3: release with a clean interrupt flag; no late interrupt reaches a closing run ----
+
+  "A cancelled run" should "release its claim with the interrupt flag clear" in {
+    val time    = ManualTime()
+    val store   = Hooked(InMemoryCheckpointer(time))
+    val two     = TwoStep()
+    val flagged = new AtomicReference[Option[Boolean]](None)
+    store.onRelease = () => { flagged.set(Some(Thread.currentThread().isInterrupted)); None }
+    val handle = GraphRuntime(store, claims = slow).start(thread, two.graph, "x", run("first")).value
+    two.awaitEntered()
+    handle.cancel()
+    await(handle).failed._2 shouldBe a[GraphError.Cancelled]
+    flagged.get shouldBe Some(false)
+  }
+
+  it should "leave the thread free when the store's release honours interrupts" in {
+    val time  = ManualTime()
+    val store = Hooked(InMemoryCheckpointer(time))
+    val two   = TwoStep()
+    // a store whose I/O checks the flag (java.net.http, lockInterruptibly, Future.get)
+    store.onRelease =
+      () => if Thread.currentThread().isInterrupted then Some(Left(CancelledError("release", None))) else None
+    val handle = GraphRuntime(store, claims = slow).start(thread, two.graph, "x", run("first")).value
+    two.awaitEntered()
+    handle.cancel()
+    await(handle)
+    two.gate.countDown()
+    await(GraphRuntime(store, claims = slow).recover(thread, two.graph, run("second")).value).completed
+  }
+
+  /** Runs `handle`'s release through `store` with a cancel arriving inside it; whether it interrupted. */
+  private def cancelDuringRelease(store: Hooked): (AtomicReference[RunHandle[?]], AtomicReference[Option[Boolean]]) = {
+    val handleRef = new AtomicReference[RunHandle[?]](null)
+    val flagged   = new AtomicReference[Option[Boolean]](None)
+    store.onRelease = () => {
+      // a cancel that arrives while the run is releasing, after it settled its outcome
+      Option(handleRef.get).foreach(_.cancel())
+      flagged.set(Some(Thread.currentThread().isInterrupted))
+      None
+    }
+    (handleRef, flagged)
+  }
+
+  "A run stopping on a store failure" should "not take a late cancel's interrupt into its release" in {
+    val time                 = ManualTime()
+    val store                = Hooked(InMemoryCheckpointer(time))
+    val two                  = TwoStep()
+    val (handleRef, flagged) = cancelDuringRelease(store)
+    store.onCommit =
+      c => Option.when(c.checkpoint.isEmpty && c.pendingWrites.nonEmpty)(Left(ProcessingError("db", "down")))
+    val handle = GraphRuntime(store, claims = slow).start(thread, two.graph, "x", run("first")).value
+    handleRef.set(handle)
+    two.gate.countDown()
+    await(handle).failed._2 shouldBe a[GraphError.CheckpointWriteFailed]
+    flagged.get shouldBe Some(false)
+  }
+
+  "A run that crashed" should "not take a late cancel's interrupt into its release" in {
+    val store = Hooked(InMemoryCheckpointer())
+    // admission reads the runtime's clock twice; the run thread's first read throws
+    val reads = new AtomicInteger()
+    val clock = new Clock {
+      def getZone: ZoneId                        = ZoneOffset.UTC
+      override def withZone(zone: ZoneId): Clock = this
+      override def instant(): Instant =
+        if reads.incrementAndGet() > 2 then throw new IllegalStateException("clock exploded") else t0
+    }
+    val (handleRef, flagged) = cancelDuringRelease(store)
+    val two                  = TwoStep()
+    two.gate.countDown()
+    val handle = GraphRuntime(store, clock, slow).start(thread, two.graph, "x", run("first")).value
+    handleRef.set(handle)
+    await(handle).failed._2 shouldBe a[GraphError.RunCrashed]
+    flagged.get shouldBe Some(false)
+  }
+
+  "An admission that fails interrupted" should "give its claim back with the flag clear, and keep the flag" in {
+    val time  = ManualTime()
+    val store = Hooked(InMemoryCheckpointer(time))
+    val two   = TwoStep()
+    // a cancelled run leaves the thread Running, for recover
+    val first = GraphRuntime(store, claims = slow).start(thread, two.graph, "x", run("first")).value
+    two.awaitEntered()
+    first.cancel()
+    await(first)
+
+    val flagged = new AtomicReference[Option[Boolean]](None)
+    store.onRelease = () => { flagged.set(Some(Thread.currentThread().isInterrupted)); None }
+    // recover reads the thread, claims it, and reads it again under the claim: that read is interrupted
+    val reads = new AtomicInteger()
+    store.onLatest = () =>
+      Option.when(reads.incrementAndGet() == 2) {
+        Thread.currentThread().interrupt()
+        Left(CancelledError("read", None))
+      }
+    GraphRuntime(store, claims = slow).recover(thread, two.graph, run("second")).left.value shouldBe a[CancelledError]
+    Thread.interrupted() shouldBe true
+    flagged.get shouldBe Some(false)
+  }
+
+  "An updateState that fails interrupted" should "give its claim back with the flag clear, and keep the flag" in {
+    val time  = ManualTime()
+    val store = Hooked(InMemoryCheckpointer(time))
+    val two   = TwoStep()
+    two.gate.countDown()
+    await(GraphRuntime(store, claims = slow).start(thread, two.graph, "x", run("first")).value).completed
+    val latest = store.latest(thread).value.value.checkpoint.id
+
+    val flagged = new AtomicReference[Option[Boolean]](None)
+    store.onRelease = () => { flagged.set(Some(Thread.currentThread().isInterrupted)); None }
+    // checked before the claim, then read again under it: that read is interrupted
+    val reads = new AtomicInteger()
+    store.onLatest = () =>
+      Option.when(reads.incrementAndGet() == 2) {
+        Thread.currentThread().interrupt()
+        Left(CancelledError("read", None))
+      }
+    GraphRuntime(store, claims = slow)
+      .updateState(thread, two.graph, latest, StateUpdate.update(two.log, "fixed"))
+      .left
+      .value shouldBe a[CancelledError]
+    Thread.interrupted() shouldBe true
+    flagged.get shouldBe Some(false)
+  }
 
   // ---- 6: a takeover is recorded on RunRecovered ----
 

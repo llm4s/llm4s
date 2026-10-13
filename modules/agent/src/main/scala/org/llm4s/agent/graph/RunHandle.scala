@@ -36,10 +36,11 @@ trait RunHandle[O]:
 
   /**
    * Cancels the run by interrupting its thread; see [[GraphError.Cancelled]]. Returns at once and
-   * is idempotent. A no-op once the run has ended, and once it has begun committing its outcome
-   * (completed, suspended or failed): that commit is not interrupted, and the run ends with it. A
-   * cancel that interrupts a superstep's commit still ends the run `Cancelled`, even if the store
-   * reports that commit as failed.
+   * is idempotent. A no-op once the run has ended, and once it has begun closing: committing its
+   * outcome (completed, suspended or failed), or stopping on a store failure or a crash. What it is
+   * closing is not interrupted - neither its commits nor the release of its claim - and the run ends
+   * with it. A cancel that interrupts a superstep's commit still ends the run `Cancelled`, even if
+   * the store reports that commit as failed.
    */
   def cancel(): Unit
 
@@ -61,10 +62,11 @@ trait RunHandle[O]:
 /**
  * Why a run stops, recorded once: the first cause recorded wins. `Cancelled` and `Expired` are
  * recorded by [[DefaultRunHandle.stop]], which interrupts the run only if its cause was the first.
- * `Finishing` is recorded by the run itself just before it commits its outcome - its completed
- * or suspended checkpoint, or a failed run's `RunFailed` - so a later cancel or expiry records
- * nothing and sends no interrupt into that commit; a run that finds `Cancelled` or `Expired`
- * already recorded is stopped instead.
+ * `Finishing` is recorded by the run itself just before it closes on its own account - committing
+ * its outcome (its completed or suspended checkpoint, or a failed run's `RunFailed`), or stopping on
+ * a store failure or a crash - so a later cancel or expiry records nothing and sends no interrupt
+ * into its commits or its release; a run that finds `Cancelled` or `Expired` already recorded is
+ * stopped instead.
  */
 private[graph] enum StopCause:
   case Cancelled, Expired, Finishing
@@ -237,6 +239,8 @@ final private[graph] class DefaultRunHandle[O](
    * `crashed` for an abnormal exit, which closes the run's committer and so hands over its last
    * events - then gives the run's subscriptions their end-of-run barriers, and only then releases the
    * thread, so the barriers follow every event of the run and precede any of a later run.
+   * `release` gives the claim back with the interrupt flag clear, so that a cancelled or expired run's
+   * flag cannot make a store refuse it, and sets the flag again afterwards.
    */
   private def run(body: () => RunResult[O], crashed: Throwable => RunResult[O], release: () => Unit): Unit =
     var outcome: Option[RunResult[O]] = None

@@ -707,8 +707,16 @@ final class GraphRuntime(
   /**
    * Gives back the claim whose token is `token`, logging (never throwing) a store that fails: its
    * claim then lapses after `claims.ttl`, and until then the thread is `ThreadBusy` to every runtime.
+   * It runs with the interrupt flag clear, and sets it again afterwards: a cancelled or expired run
+   * still has its flag set as it ends, and a store whose I/O honours interrupts would refuse the
+   * release, leaving the thread busy for `ttl`.
    */
   private def releaseClaim(threadId: ThreadId, token: FencingToken): Unit =
+    val interrupted = Thread.interrupted()
+    releasing(threadId, token)
+    if interrupted then Thread.currentThread().interrupt()
+
+  private def releasing(threadId: ThreadId, token: FencingToken): Unit =
     DefaultRunHandle.guarded(checkpointer.release(threadId, token)) match
       case Right(Right(_)) => ()
       case Right(Left(error)) =>
@@ -1170,9 +1178,12 @@ final class GraphRuntime(
 
     /**
      * Ends a run that `thrown` escaped from: the committer is closed as far as it can be, and the
-     * run fails where it was, recording nothing more.
+     * run fails where it was, recording nothing more. It records [[StopCause.Finishing]] and
+     * acknowledges first, so no later cancel or expiry interrupts the close or the release.
      */
     def crashed(thrown: Throwable): RunResult[O] =
+      cause.compareAndSet(None, Some(StopCause.Finishing)): Unit
+      signal.acknowledge()
       DefaultRunHandle.guarded(committer.close()).left.foreach(thrown.addSuppressed)
       RunResult.Failed(position._1.state, GraphError.RunCrashed(threadId.value, thrown))
 
@@ -1188,6 +1199,9 @@ final class GraphRuntime(
       committer.failure match
         // a commit the stop's interrupt broke: the run was stopped, not failed by its store
         case Some(_) if stopRecorded => cancelled()
+        // recorded as Finishing first, as `fail` does, so no later cancel or expiry interrupts the
+        // close or the release; a stop recorded since the check above is closed instead
+        case Some(_) if !finishing() => cancelled()
         case Some(error)             => stop(execution, GraphError.CheckpointWriteFailed(threadId.value, error))
         case None =>
           position = execution -> checkpointId
@@ -1236,6 +1250,15 @@ final class GraphRuntime(
     /** Whether a cancel or expiry has been recorded, and so may have interrupted a commit. */
     private def stopRecorded: Boolean =
       cause.get.exists(c => c == StopCause.Cancelled || c == StopCause.Expired)
+
+    /**
+     * Records [[StopCause.Finishing]] unless a cause is already recorded, and acknowledges it, so that
+     * no stop interrupts the run's closing; whether it was recorded.
+     */
+    private def finishing(): Boolean =
+      val recorded = cause.compareAndSet(None, Some(StopCause.Finishing))
+      if recorded then signal.acknowledge()
+      recorded
 
     /**
      * Whether the deadline has passed, recording `Expired` unless a cause is already recorded. The
