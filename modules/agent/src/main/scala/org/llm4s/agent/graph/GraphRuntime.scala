@@ -5,7 +5,7 @@ import org.llm4s.types.{ Result, TryOps }
 import org.slf4j.LoggerFactory
 
 import java.time.Clock
-import java.util.concurrent.atomic.{ AtomicBoolean, AtomicLong, AtomicReference }
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
 import java.util.concurrent.{ CountDownLatch, ExecutorService, Executors, TimeUnit }
 import scala.annotation.tailrec
 import scala.collection.mutable
@@ -189,6 +189,9 @@ final class GraphRuntime(
    * not yet written and before it waits for one in flight; a no-op by default.
    */
   @volatile private[graph] var abandoning: ThreadId => Unit = _ => ()
+
+  /** A test hook run by a claim's renewal thread once it has acted on the store's answer; a no-op by default. */
+  @volatile private[graph] var renewalSettled: ThreadId => Unit = _ => ()
 
   /**
    * Replays events with `seq > afterSeq`, then delivers new events until cancelled or
@@ -1107,6 +1110,13 @@ final class GraphRuntime(
    * `lost` is called at most once, with the current claim's token when the store named one, and never
    * after the heartbeat is closed.
    *
+   * The lease's end and whether the heartbeat is over change only together, under `lock`: a landed
+   * renewal publishes its lease only while the heartbeat is not over, and the beat declares the lease
+   * passed only against the lease published at that moment, reading the clock before it takes the lock.
+   * So a renewal published before the beat's decision always counts, and one published after it - or
+   * after a loss found otherwise, or `close` - is ignored. The beat never reads the lease's end
+   * outside the lock to decide, and nothing slow (the store, the clock, `lost`) runs under it.
+   *
    * Closing stops the beat and waits for it and for a renewal in flight - no longer than `claims.ttl`
    * in all, so a store that hangs cannot hang the end of a run - so that no renewal lands after the
    * claim is released. A renewal still blocked then is left to finish on its own: its outcome is
@@ -1121,60 +1131,82 @@ final class GraphRuntime(
     consequence: String,
     lost: Option[FencingToken] => Unit
   ) extends AutoCloseable:
-    private val stopped  = new CountDownLatch(1)
-    private val over     = new AtomicBoolean(false)
-    private val leaseEnd = new AtomicLong(grantSentAt + claims.ttl.toNanos)
+    private val stopped = new CountDownLatch(1)
+
+    /** Guards `over` and `leaseEnd` together; held only to read or change them. */
+    private val lock = new java.util.concurrent.locks.ReentrantLock()
+
+    /** Set once the claim is found lost or the heartbeat closes; written under `lock`. */
+    @volatile private var over = false
+
+    /** When the lease ends, as a [[ticker]] value; written under `lock`. */
+    private var leaseEnd = grantSentAt + claims.ttl.toNanos
 
     /** The renewal in flight, if any: started only by the beat, and read by `close` once the beat ended. */
     private val renewal = AtomicReference[Option[Thread]](None)
     private val beat    = Thread.ofVirtual().name(s"llm4s-claim-${threadId.value}").start(() => beating())
 
+    /** Ends the heartbeat if `when` holds of the lease's end, atomically with any renewal's publication. */
+    private def end(when: Long => Boolean): Boolean =
+      withLock(lock) {
+        val ending = !over && when(leaseEnd)
+        if ending then over = true
+        ending
+      }
+
+    /** Reports the loss; only after [[end]] returned `true`, so once. Outside `lock`. */
     private def lose(current: Option[FencingToken], why: String): Unit =
-      if over.compareAndSet(false, true) then
-        GraphRuntime.logger.warn(
-          s"Run '${holder.value}' lost its claim on thread '${threadId.value}': $why; $consequence"
-        )
-        DefaultRunHandle.guarded(lost(current)): Unit
+      GraphRuntime.logger.warn(
+        s"Run '${holder.value}' lost its claim on thread '${threadId.value}': $why; $consequence"
+      )
+      DefaultRunHandle.guarded(lost(current)): Unit
+
+    /** How long the lease has left at `now`, or `None` once the heartbeat is over. */
+    private def remainingAt(now: Long): Option[Long] = withLock(lock)(Option.when(!over)(leaseEnd - now))
 
     @tailrec private def beating(): Unit =
-      val remaining = leaseEnd.get - ticker()
-      if over.get then ()
-      else if remaining <= 0 then lose(None, s"its lease of ${claims.ttl} passed with no renewal landing")
+      // the clock is read first: the decision below is against the lease published when it is made
+      val now = ticker()
+      if end(ends => now - ends >= 0) then lose(None, s"its lease of ${claims.ttl} passed with no renewal landing")
       else
-        DefaultRunHandle.guarded(
-          stopped.await(math.min(claims.renewEvery.toNanos, remaining), TimeUnit.NANOSECONDS)
-        ) match
-          case Right(false) =>
-            if !over.get && ticker() - leaseEnd.get < 0 && renewal.get.forall(!_.isAlive) then
-              renewal.set(Some(renewing()))
-            beating()
-          // closed; nothing else wakes or interrupts it
-          case _ => ()
+        remainingAt(now) match
+          case None => ()
+          case Some(remaining) =>
+            DefaultRunHandle.guarded(
+              stopped.await(math.max(1L, math.min(claims.renewEvery.toNanos, remaining)), TimeUnit.NANOSECONDS)
+            ) match
+              case Right(false) =>
+                if !over && renewal.get.forall(!_.isAlive) then renewal.set(Some(renewing()))
+                beating()
+              // closed; nothing else wakes or interrupts it
+              case _ => ()
 
     private def renewing(): Thread =
       Thread.ofVirtual().name(s"llm4s-claim-renew-${threadId.value}").start { () =>
         val sentAt = ticker()
         DefaultRunHandle.guarded(checkpointer.renew(threadId, token, claims.ttl)) match
           case Right(Right(_)) =>
-            if !over.get then
-              val renewed = sentAt + claims.ttl.toNanos
-              leaseEnd.accumulateAndGet(renewed, (held, next) => if next - held > 0 then next else held): Unit
-          case Right(Left(stale: GraphError.StaleClaim)) => lose(stale.current.map(FencingToken(_)), stale.message)
+            // the lease runs from when the request was sent, never from when its answer arrived
+            val renewed = sentAt + claims.ttl.toNanos
+            withLock(lock)(if !over && renewed - leaseEnd > 0 then leaseEnd = renewed)
+          case Right(Left(stale: GraphError.StaleClaim)) =>
+            if end(_ => true) then lose(stale.current.map(FencingToken(_)), stale.message)
           case Right(Left(error)) =>
-            if !over.get then
+            if !over then
               GraphRuntime.logger.warn(
                 s"Renewing run '${holder.value}''s claim on thread '${threadId.value}' failed: ${error.message}"
               )
           case Left(thrown) =>
-            if !over.get then
+            if !over then
               GraphRuntime.logger.warn(
                 s"Renewing run '${holder.value}''s claim on thread '${threadId.value}' failed",
                 thrown
               )
+        renewalSettled(threadId)
       }
 
     def close(): Unit =
-      over.set(true)
+      withLock(lock) { over = true }
       stopped.countDown()
       val deadline = System.nanoTime() + claims.ttl.toNanos
       // the beat first, so that no renewal starts after the one read below

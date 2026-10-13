@@ -231,6 +231,75 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     await(handle).completed._2 shouldBe Vector("x", "second")
   }
 
+  it should "keep its claim when a renewal publishes while the beat is deciding the lease has passed" in {
+    val time  = ManualTime()
+    val store = Hooked(InMemoryCheckpointer(time))
+    val two   = TwoStep()
+    val rt    = runtime(store, time)
+    // the beat's ticker reads: one is held, mid-decision, until the test releases it
+    val beatCalls   = new AtomicInteger()
+    val blockFrom   = new AtomicInteger(Int.MaxValue)
+    val blocked     = new AtomicBoolean(false)
+    val beatHeld    = new CountDownLatch(1)
+    val beatRelease = new CountDownLatch(1)
+    val released    = new AtomicBoolean(false)
+    val decided     = new CountDownLatch(1)
+    rt.ticker = () => {
+      if Thread.currentThread().getName == s"llm4s-claim-${thread.value}" then {
+        if released.get then decided.countDown()
+        else {
+          // the beat alternates two reads per beat; the odd one starts its expiry check
+          val n = beatCalls.incrementAndGet()
+          if n >= blockFrom.get && n % 2 == 1 && blocked.compareAndSet(false, true) then {
+            beatHeld.countDown()
+            beatRelease.await(10, TimeUnit.SECONDS): Unit
+          }
+        }
+      }
+      time.nanos()
+    }
+    val handle = rt.start(thread, two.graph, "x", run("first")).value
+    two.awaitEntered()
+    // no renewal lands after the grant's: the lease ends at 30s
+    store.onRenew = unreachable
+    time.advance(20.seconds)
+    val failing = store.renewals.get
+    eventually(store.renewals.get > failing + 1)
+
+    // the next renewal, sent at 20s, succeeds in the store but is held before the run hears of it
+    val holding  = new AtomicBoolean(true)
+    val renewing = new CountDownLatch(1)
+    val proceed  = new CountDownLatch(1)
+    store.onRenew = () => {
+      if holding.compareAndSet(true, false) then {
+        renewing.countDown()
+        proceed.await(10, TimeUnit.SECONDS): Unit
+      }
+      None
+    }
+    renewing.await(5, TimeUnit.SECONDS) shouldBe true
+    blockFrom.set(beatCalls.get + 1)
+    beatHeld.await(5, TimeUnit.SECONDS) shouldBe true
+
+    // the beat is deciding while the clock passes the grant's lease; the renewal (lease to 50s) settles
+    time.advance(11.seconds)
+    val settled = new CountDownLatch(1)
+    rt.renewalSettled = _ => settled.countDown()
+    proceed.countDown()
+    settled.await(5, TimeUnit.SECONDS) shouldBe true
+    released.set(true)
+    beatRelease.countDown()
+
+    // the beat either goes on beating, or has stopped the run
+    Thread.ofVirtual().start { () =>
+      two.interrupted.await(10, TimeUnit.SECONDS); decided.countDown()
+    }: Unit
+    decided.await(5, TimeUnit.SECONDS) shouldBe true
+    two.interrupted.getCount shouldBe 1
+    two.gate.countDown()
+    await(handle).completed._2 shouldBe Vector("x", "second")
+  }
+
   it should "keep renewing through a store clock that throws" in {
     val time   = ManualTime()
     val store  = Hooked(InMemoryCheckpointer(time))
