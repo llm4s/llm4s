@@ -172,7 +172,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   holding run; once a claim has expired - its process died - another runtime's `recover` takes the thread over,
   reusing the pending writes of the tasks that finished. Every commit carries the claim's token, and the store refuses
   a stale one atomically (`GraphError.StaleClaim`), so a run that lost its claim records nothing after its successor
-  started and ends with `CheckpointWriteFailed`. `RunPosition.fencingToken` gives a node the token. The new
+  started; it stops at once and ends with `GraphError.ClaimLost` (see Changed). `RunPosition.fencingToken` gives a node the token. The new
   **`llm4s-agent-testkit`** publishes `CheckpointerContract`, the contract every store must pass as a ScalaTest
   suite (atomic commits, conflicts, event numbering, compaction and `ReplayUnavailable`, `deleteThread`, claims and
   fencing, and two or more `GraphRuntime`s contending over one store), with the `ManualClock` it drives expiry with;
@@ -1295,6 +1295,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Breaking - a run that loses its claim stops at once and ends `GraphError.ClaimLost`** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  it used to end `CheckpointWriteFailed(_, StaleClaim, _)`, which a caller could not tell from a store outage without
+  matching on its cause. `GraphError.ClaimLost(threadId, token, current)` is new: the run's own `FencingToken`, and the
+  thread's current one when the store named it. The run finds its claim lost when its lease passes with no renewal
+  landing - judged by the runtime's own monotonic clock - or when a renewal or commit is refused as stale. Its tasks
+  are interrupted as a cancel interrupts them, it commits nothing more (not even `RunFailed`), and it drops its
+  `Async` queue and `OnExit` buffer. `StaleClaim` stays the store's refusal. `RunEvent.RunRecovered` gains
+  `takenOverFrom: Option[String]`, and `RunClaim` `takenOverFrom: Option[RunId]`: a `recover` whose claim replaced
+  another run's expired, unreleased one records that run, so the log shows the takeover; a store reports it from
+  `claim`, and `CheckpointerContract` checks it. Both default to `None`, so older logs still read. See
+  [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#fencing-a-run-that-lost-its-claim-stops-and-records-nothing)
+  and the [migration note](docs/reference/migration.md#durable-checkpointer-contract-1700).
 - **Workload-identity configuration is `@Stable`; `stabilityTierCheck` flags Stable signatures that name Experimental types** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
   `AuthConfig`, `IdentitySource`, `TokenExchangeConfig`, `AccessToken`, `AccessTokenProvider`,
   `OpenAIWorkloadIdentity` and `AnthropicWorkloadIdentity` were `@Experimental` while the Stable
@@ -2644,6 +2656,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **A run whose claim renewals fail or hang no longer runs on after another runtime takes its thread over** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  a run learned its claim was gone only from a renewal the store refused, or a refused commit, so a run partitioned
+  from its store, or whose renewal hung in it, executed every remaining superstep - under `OnExit` the whole graph -
+  and their side effects after its successor started. It now judges its own lease, from the monotonic time just
+  before the request that granted or last renewed the claim was sent, on a heartbeat that never waits on the store:
+  renewals run on their own thread, one at a time, and a failing one is retried while the lease lasts. A loss it
+  detects now interrupts the task in flight instead of waiting for the next superstep.
+- **A cancelled or expired run releases its claim with its interrupt flag clear** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  the release ran with the flag set, so a store whose I/O honours interrupts refused it and the thread stayed busy
+  for the claim's whole `ttl`, to every runtime. Admission and `fork`/`updateState` give a claim back the same way.
+  The store-failure stop and a crashed run now record a stop cause before closing, so a late cancel or deadline no
+  longer interrupts their close or their release.
+- **No claim renewal lands after a run's release** ([#1700](https://github.com/llm4s/llm4s/issues/1700)): the
+  heartbeat is stopped and joined, for at most `ttl`, before the release, so a renewal still in the store cannot
+  extend a finished run's claim after a release that failed.
+- **A claim is renewed from its grant** ([#1700](https://github.com/llm4s/llm4s/issues/1700)): the first renewal came
+  `renewEvery` after the run was launched, so slow admission work could let the lease lapse before it; `fork` and
+  `updateState` now renew the claim they hold too.
 - **Security - `Redaction`: the password of a URL's userinfo is redacted** ([#1816](https://github.com/llm4s/llm4s/issues/1816)):
   `https://alice:s3cret@gw.example.com/v1` - a provider `baseUrl`, a proxy or a database URL in a connection error,
   an HTTP client error or the provider exchange log - came out unchanged. The password of `scheme://user:password@host`

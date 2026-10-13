@@ -62,7 +62,9 @@ val b = GraphRuntime(store)
 ```
 
 `ClaimPolicy` sets how long a claim lasts (`ttl`, 30 seconds by default) and how often a running run renews it
-(`renewEvery`, 10 seconds by default; it must be shorter than `ttl`). The store judges expiry by its own clock.
+(`renewEvery`, 10 seconds by default, counted from the moment the claim is granted; it must be shorter than `ttl`).
+The store judges expiry by its own clock, and the run judges its own lease too (see
+[Fencing](#fencing-a-run-that-lost-its-claim-stops-and-records-nothing) below).
 When the store has a single clock - a database server's, or one process's - the runtimes need not agree on the
 time. An embedded store that each process opens itself, such as SQLite on a shared file, judges expiry by the
 clock of whichever process grants or renews the claim, so clock skew between hosts shortens or lengthens the
@@ -97,29 +99,57 @@ So `recover` tells a live run from a dead one by its claim. It does not wait: un
 expires - at most `ttl` after its process stopped renewing - `recover` is refused with `ThreadBusy`, and you
 retry. `resume` and `start` are refused the same way while another runtime holds the thread.
 
+A `recover` whose claim replaced another run's expired, unreleased claim records that run's id on its
+`RunEvent.RunRecovered` event, as `takenOverFrom`, so the thread's log shows the takeover. That run may have been
+paused rather than dead, and still executing; `takenOverFrom` is `None` when the thread was free.
+
 `recover` reads the dead run's pending writes again once its own claim is granted, so a task that finished in
 the last moments before the takeover is reused, not run again.
 
-## Fencing: a run that lost its claim records nothing
+## Fencing: a run that lost its claim stops and records nothing
 
 A process that was only paused - a long GC, a frozen VM - may wake up after another runtime took its thread over.
 Every commit a run makes carries its claim's token, and the store refuses any commit whose token is not the
 thread's current claim, with `GraphError.StaleClaim`. Such a run therefore cannot record anything after its
-successor started: it ends with `GraphError.CheckpointWriteFailed(StaleClaim)`, and the thread's state and event
-log are its successor's.
+successor started, and the thread's state and event log are its successor's.
 
-A run whose renewal is the first to learn that its claim is gone stops at the start of its next superstep with
-the same error, so a run with `Durability.Async` or `Durability.OnExit`, whose commits are deferred, does not go
-on executing supersteps whose results would be refused.
+A run does not wait for a refused commit to learn that its claim is gone. It judges its own lease: the lease ends
+`ttl` after the moment, by the runtime's monotonic clock (`System.nanoTime`), just before it sent the request that
+granted or last renewed the claim. The store started its own `ttl` no earlier than that, so the run's lease never
+outlives the store's, whatever the skew between their clocks. A heartbeat that never waits on the store checks it,
+so a run whose renewals keep failing, or hang - its store unreachable, or partitioned from it - still notices. A
+renewal that fails, or a store clock that throws, is retried at the next beat while the lease lasts.
+
+The run finds its claim lost when its lease passes with no renewal landing, when a renewal is refused with
+`StaleClaim`, or when a commit is. It then stops at once, in every durability mode:
+
+- its running tasks are interrupted, as `cancel` interrupts them;
+- it commits nothing more - not even `RunFailed` - and drops what it had not yet written: the queue of
+  `Durability.Async` (a commit already in flight still lands) and the buffer of `Durability.OnExit`;
+- it releases its claim, which is a no-op if another run holds the thread;
+- it ends with `GraphError.ClaimLost(threadId, token, current)`, where `current` is the thread's current claim
+  when the store named one.
+
+`ClaimLost` is not a store outage (`CheckpointWriteFailed`), and it is not yours to `recover`: another worker may
+already be running the thread, so `recover` is refused with `ThreadBusy` while it does. If nobody took the thread
+over, its last durable checkpoint is still `Running`, and `recover` continues it as after a crash.
 
 ### Limits
 
-- Its tasks that were already running still finish, so their external side effects can happen in both runs, and
-  the successor runs them again. That is the at-least-once boundary every run has; make such tools idempotent. A
-  node that writes to a system able to fence can pass the token on: it is `context.position.fencingToken`.
+- A stale worker can still act until it notices, and while its tasks see their interrupt. The loss is noticed
+  within about one `renewEvery` of the lease passing, or as soon as a renewal or commit is refused. A task already
+  running then may finish an external side effect before it checks its interrupt, and a tool that ignores
+  interrupts runs to its end. Such a side effect can happen in both the stale run and its successor, concurrently.
+  That is the at-least-once boundary every run has: make such tools idempotent. A tool or node that writes to a
+  system able to fence can pass the claim's token on: it is `context.position.fencingToken` in a node and
+  `context.run.position.fencingToken` in a tool, and it grows with every claim, so the system can refuse a token
+  lower than the highest it has seen.
 - Until it ends, such a run's live progress events (`StreamEvent.Live`, which are never stored) still reach the
-  subscribers of its own runtime. Its durable events are refused with its commits.
-- A process that dies holds its threads for up to `ttl`; so does a store that fails to release a claim.
+  subscribers of its own runtime. Its durable events are refused or dropped with its commits.
+- A run that has begun committing its outcome finishes that commit: a loss found during it does not interrupt it.
+  The commit is still fenced, so it lands only if nobody has taken the thread over.
+- A process that dies holds its threads for up to `ttl`; so does a store that fails to release a claim. A run's
+  end waits up to `ttl` for a renewal still in the store, so that none lands after its release.
 
 ## Subscriptions across runtimes
 
@@ -235,8 +265,11 @@ from which the next process resubscribes.
 A claim's expiry is judged by the clock of the store that grants or renews it - `Clock.systemUTC()` unless you pass
 one. Stores on one host share that host's clock. Processes on different hosts cannot share one SQLite file safely
 anyway (see WAL above), but if host clocks still differ - containers with skewed clocks, a clock step - a claim
-lasts longer or shorter than `ttl` as other processes see it. Fencing keeps every write safe regardless; skew only
-changes when a dead run's thread can be taken over.
+lasts longer or shorter than `ttl` as other processes see it. Fencing keeps every write safe regardless. A store
+clock running ahead lets another process take over a live run early; that run then finds its commits or renewals
+refused and stops, but tasks it was already running can repeat side effects (see
+[Limits](#limits)). A store clock running behind holds a dead run's thread longer. A run's own lease is judged by
+its monotonic clock and never outlives the store's view, so skew between hosts cannot make a run outlast its claim.
 
 ### Schema versions
 
