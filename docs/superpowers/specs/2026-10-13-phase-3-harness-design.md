@@ -80,7 +80,7 @@ core must settle before MiMa, so it is reviewed first.
 
 ## Runtime rules every slice must satisfy
 
-These are how the Stage 1-2 runtime behaves, checked against the code. A harness design that ignores one
+These are how the Stage 1-2 runtime behaves, checked against the code, and the obligations that follow. A harness design that ignores one
 of them is wrong in a way review will keep finding piecemeal, so each slice's design record states how
 it meets each rule, and its tests cover each rule that applies.
 
@@ -114,6 +114,20 @@ it meets each rule, and its tests cover each rule that applies.
    store, a memory manager, a host or workspace backend) is resolved or namespaced by tenant (§9
    "Tenant identity", "Run dependencies": captured resolvers keyed by `RunContext` identity).
 9. **Durable events carry no message content** (CLAUDE.md, Streaming Events). Content is live-only.
+10. **A failed task commits nothing.** `NodeResult.Fail` produces no pending write, and its task-scoped
+    events are discarded (`GraphRuntime.scala:1366-1377, 1455-1461`). Anything that must outlive a
+    failure (usage, model-call events) goes through a committing path: a successful task, or the
+    terminal-failure path a Block uses (a `Failed` checkpoint).
+11. **Every model call is accounted.** That covers a wrapper's retries, a hook's own calls (a
+    summariser, an LLM memory manager), and calls in a failed task. None may drop out of `usage`. C1
+    makes the loop count them rather than trusting each hook.
+12. **Everything the harness keeps is bounded on its own.** Each key, and each in-process cache, has a
+    limit that holds whatever else is configured, not one that relies on another feature (such as
+    summarisation) being on. The limit is enforced by a total update (evict or compact) or by a check
+    made under a lock when the tool runs (rules 1-2).
+13. **Every named type exists or is defined where it is introduced.** A type the spec relies on is
+    cited from the code. A new one is defined in its slice: its cases or fields, its codecs and its
+    module.
 
 ## Core slices
 
@@ -152,6 +166,17 @@ keys, prompt content, a recovery-stable key for effects, and a retraction that c
     key. It also amends §4.13 and §4.19.
   - Effects outside state (host files, a sandbox, a memory store) cannot be restored, and the docs of
     each such backend say so.
+- **Usage is counted by the loop (rule 11).**
+  - The `next` the loop hands to the innermost wrapper records each provider call's usage in a per-task
+    accumulator, whichever response finally wins. A retrying wrapper therefore cannot lose a discarded
+    call's cost.
+  - A hook that makes its own model call reports it with `context.recordUsage(TokenUsage)`, available
+    on `ModelContext` and the `afterAgent` context.
+  - A succeeding task adds the accumulator to `usage`.
+  - A failing task carries it on its durable `RunFailed` event, so cost is never silently lost (rule
+    10). This is a kernel change in `GraphRuntime.fail`.
+- **`afterAgent(answer, context: ModelContext): Result[AgentOutput]`**, where `AgentOutput` carries
+  `text` and `update`. This makes it symmetrical with `beforeAgent`.
 - **No separate `beforeModel` / `afterModel` hooks**: a wrapper covers both. §5.6 is amended.
 
 Tests (each rule that applies):
@@ -161,6 +186,8 @@ Tests (each rule that applies):
 - a `beforeAgent` update visible to the first model call
 - section order and duplicate ids
 - `taskKey` equal before and after a crash-and-`recover` of the same task
+- a retrying wrapper's two provider calls both counted in `usage`
+- a failing task's usage on `RunFailed`
 - an output Block after a turn that wrote a middleware key and a tool key restores both and keeps
   `usage`
 - every update surviving checkpoint/`recover` on SQLite
@@ -233,7 +260,8 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
   (rule 4).
 - **`StateFileBackend`** is the default.
   - A `files` key, `StateKey[Map[VPath, FileEntry], FileUpdate]`, with total `Put` / `Delete` update
-    functions (rule 2). `FileEntry` holds content and a modification `Instant`.
+    functions (rule 2). `FileEntry(content: String, modified: Instant)` holds UTF-8 text only in Stage 3:
+    a binary write is a tool error. Binary content travels as F8b content parts, not files.
   - Every mutating operation takes the backend-wide lock `state-files` (C2). So mutations in one batch
     are applied in order, each against the state the previous one committed.
   - The per-thread `maxBytes` cap is checked when the tool runs and is a tool error. Because of the
@@ -253,7 +281,11 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
   stderr, truncated)]`, at-least-once, keyed by the call's `IdempotencyKey` for sandboxes that can use
   it.
 - **`LongTermStore`** works on `(Namespace, key)`:
-  - Operations are `get`, `put`, `delete`, `list(prefix)` and `search(query)`.
+  - `Namespace(tenant: Option[TenantId], path: Vector[String])` and `key: String`.
+  - The value is `StoreItem(value: ujson.Value, updated: Instant)`, with a per-item `maxItemBytes`
+    checked on `put`.
+  - Operations are `get`, `put`, `delete`, `list(prefix)` and `search(query)`. The in-memory `search`
+    is a substring match over keys and string values; a store may do better, and says so.
   - `put` replaces, so a replayed put is idempotent.
   - `Namespace` always includes the tenant (`None` is its own single-tenant namespace) (rule 8).
   - The in-memory implementation ships here; SQLite and Postgres implementations are Stage 5.
@@ -316,7 +348,8 @@ Tests:
 
 - `TodoMiddleware` contributes:
   - a `todos` key, `Vector[Todo(id, content, status)]`, with `status` = `Pending | InProgress | Done`
-  - a `write_todos` tool that replaces the list as a whole, with the lock `todos` (C2). Two calls in
+  - a `write_todos` tool that replaces the list as a whole, with the lock `todos` (C2). It refuses a
+    list longer than `maxTodos` (default 50) or an item over `maxTodoChars`, as a tool error (rule 12). Two calls in
     one batch apply in order, so neither is lost silently.
   - a prompt section showing the current plan
 - The plan guides the model only: it never routes or overrides tool policy (§8).
@@ -333,29 +366,35 @@ Tests:
   - `(summary, throughMessageId)` is written to the middleware's own key for later calls.
 - Later requests send the summary and the messages after `throughMessageId`. When the trigger fires
   again, the summary is extended, not recomputed.
+- The summary itself has a bound, `maxSummaryTokens`. An extension that would exceed it compresses the
+  old summary and the new messages together, so the key cannot grow without limit (rule 12).
+- The compression call's usage is reported with `recordUsage` (rule 11).
 - Tool-call/result pairs are never split.
 - The stored thread is never edited.
 - A Block restores the key (C1), so a summary of a blocked turn is never kept.
 - The compression call reruns after a crash (rule 4). That costs a call, but its result is pure state,
   so nothing is duplicated.
 
-**`ToolOutputOffload(thresholdTokens, maxResultBytes, backend)`**, in `wrapToolCall`:
-- A `Success` over the threshold is written to `/large_tool_results/<toolCallId>`, truncated at
-  `maxResultBytes`. The update is merged into the outcome's update, and the model sees a preview plus the
-  path.
-- The path is unique per call and a replayed write replaces it, so offload is idempotent (rule 4).
-- **Quota.** Offload happens after the tool ran, so it cannot take a lock before the batch is scheduled.
-  So `/large_tool_results/` is outside the state backend's `maxBytes` and has its own bound:
-  `maxResultBytes` per result.
-- **Cleanup.** Offloads older than the current summary's `throughMessageId` are deleted when the summary
-  advances, which bounds them per thread.
+**`ToolOutputOffload(thresholdTokens, maxResultBytes, maxTotalBytes)`**, in `wrapToolCall`:
+- A `Success` over the threshold is stored, truncated at `maxResultBytes`, in the middleware's own
+  `offloads` key. The model sees a preview plus the path `/large_tool_results/<toolCallId>`.
+- An `OffloadBackend` serves that prefix through `CompositeBackend`. It is read-only: writes and
+  deletes there are tool errors.
+- **Bound (rule 12).** The key's update function is total and evicts the oldest entries until the total
+  is within `maxTotalBytes` (default 4 MiB).
+  - This holds with or without summarisation, and under a parallel batch, because eviction happens
+    when the update is applied, not as a check against the snapshot.
+  - Reading an evicted path returns a tool error that says it was evicted.
+- **Idempotence.** The path is unique per call and a replayed write replaces it (rule 4).
+- **Cleanup.** When summarisation is on, offloads older than the summary's `throughMessageId` are
+  dropped as the summary advances. This is extra cleanup; the bound does not depend on it.
 
 `ContextWindowMiddleware` stays as the pruning-only option.
 
 ### F5: Agent Skills (#1909)
 
 - `SkillsMiddleware(sources: Vector[VPath], backend)` discovers `<source>/*/SKILL.md` through the backend
-  on a run's first model call, and caches the result by run id. A run recovered in a fresh runtime
+  on a run's first model call, and caches the result by run id in a bounded LRU (rule 12). A run recovered in a fresh runtime
   re-reads the backend. State-backed files come back from the checkpoint; a host file may have changed
   in between, and that is documented.
 - Each skill's `name` and `description` go into one cacheable prompt section.
@@ -369,8 +408,8 @@ Tests:
 ### F6: instruction memory (#1910)
 
 - `InstructionMemoryMiddleware(paths: Vector[VPath], backend)` reads the listed `AGENTS.md` files in
-  order (for example user scope, then project scope) on a run's first model call, cached by run id and
-  re-read after recovery as F5 does, as one prompt section.
+  order (for example user scope, then project scope) on a run's first model call, cached by run id in a
+  bounded LRU and re-read after recovery as F5 does, as one prompt section.
 - A missing file is skipped.
 - When the backend and permission rules permit writes, the agent edits them with `edit_file`; the change
   shows at the next run. Instruction memory differs from semantic memory (§9 "Skills and memory
@@ -388,6 +427,8 @@ tenant, not per thread.
 - Updates to one tenant's cell are serialised.
 
 **Recall** runs `getRelevantContext` on the turn's input in `beforeAgent`.
+- The text is truncated at `maxRecallTokens` (rule 12). An LLM manager's calls are reported with
+  `recordUsage` (rule 11).
 - It writes the text to a declared `recalled` key (C1), committed with the input task, so the turn's
   first model call shows it as a prompt section (rule 3).
 - After a crash before that commit, the input task reruns and recalls again. Nothing has used the result
@@ -428,15 +469,32 @@ Tests:
 - **Validation.** An answer turn (no tool calls) is validated against the schema inside the model step.
   - A failure is retried once within the same task: the request is extended with the invalid answer and
     the error, and the corrective exchange is not stored in the thread.
-  - A second failure fails the run with a typed `GraphError`.
-  - Both calls count toward usage.
+  - A second failure ends the turn through the terminal-failure path a Block uses (rule 10).
+    - It commits a `Failed` checkpoint with both calls in `usage` and their `ModelCallCompleted`
+      events, and retracts the turn, so no invalid answer is kept.
+    - The caller gets `Left(GraphError.OutputInvalid(schemaErrors))`.
+    - `recover` refuses the thread, as for a Block: there is nothing to resume. The next `start`
+      continues from before the turn.
+    - Failing the task instead would lose the usage and events (rule 10), and a `recover` would pay for
+      both calls again.
 - **`AgentResult.decodeOutput[O: ReadWriter]: Result[O]`** decodes the answer. `Agent` stays
   non-generic; Stage 4's `TypedAgent[I, O]` builds on this.
 
 ### F8b: multimodal content parts (core) (#1913)
 
-- `ContentPart` = `Text(text) | Image(source: MediaSource, mediaType) | Document(source, mediaType)`,
-  using `org.llm4s.media`.
+- **Vocabulary (rule 13).**
+  - `ContentPart` = `Text(text) | Image(source: MediaSource, mediaType: ImageMediaType) | Document(source,
+    mediaType: DocumentMediaType)`, in core `org.llm4s.model`.
+  - `MediaSource` = `Url(uri: java.net.URI) | Inline(bytes: IArray[Byte]) | ProviderFile(provider,
+    id)`, a new ADT in `org.llm4s.media`. It is pure data, so it keeps that package's rule of no I/O and
+    no dependency.
+  - `org.llm4s.media.MediaType` gains a `DocumentMediaType` family: `Pdf`, `PlainText`, `Markdown`,
+    `Html`, `Csv`, with `fromExtension` and `fromMimeType` cases.
+  - The upickle codecs live in core beside `ContentPart`, not in `media`, which takes no third-party
+    dependency. `Inline` encodes as base64.
+- **Bound (rules 6, 12).** An `Inline` part is limited by `maxInlineBytes` (default 5 MiB), checked when
+  the part is built. Every checkpoint copies the thread's messages, so larger media must be a `Url` or
+  a `ProviderFile`, and the docs say why.
 - `UserMessage` and `ToolMessage` carry `parts: Vector[ContentPart]`; `UserMessage(text)` remains as the
   one-part constructor.
 - **Stored threads (rule 7).** Core `Message`'s reader keeps accepting the old string-content shape, as a
@@ -452,9 +510,18 @@ Tests:
 
 ### F9: typed custom streams (#1914)
 
-- `agent.stream(threadId, query, events = Set(eventTypes))(listener)` and `AgentRun.subscribe`, filtered
-  by `EventType[A]`, with typed payloads.
-- The same in `AgentIO.stream` (fs2), `AgentZ.stream` (ZIO) and the Pekko source.
+- **`EventType` is invariant, so a set of mixed types cannot keep a typed payload (rule 13).**
+  Selections are therefore typed handlers packaged with their event types:
+  `EventHandlers.on(HarnessEvents.TodosUpdated)(t => ...).on(AgentEvents.TextDelta)(d => ...)`.
+  - Each `on[A](EventType[A])(A => Unit)` keeps its own `A`.
+  - The built-in `AgentEvents` values are already `EventType`s (`AgentEvents.scala:29`).
+  - `agent.stream(threadId, query, handlers)` and `AgentRun.subscribe(handlers)` decode each event once
+    and dispatch to the matching handler. Unmatched events are skipped.
+- **Effect adapters.** These are typed per event type: `AgentIO.events(run, eventType: EventType[A]):
+  Stream[IO, A]`, the same in `AgentZ` (ZIO) and as a Pekko `Source[A, ?]`.
+  - Callers merge streams with the library's own combinators.
+  - A heterogeneous stream is `events(run, handlers)` into a caller-chosen ADT, built with `on(...)(a =>
+    MyEvent.X(a))`.
 - No new event model: `RunEvent.Custom` and `EventType` exist.
 
 ## Integration slices
