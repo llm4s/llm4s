@@ -200,6 +200,156 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     hub.liveCount(thread) shouldBe 0
   }
 
+  "A hand-over that one subscription must first read missing events for" should "reach no subscription until every read is done, so a run's cut taken meanwhile is the same for all its listeners and a replay" in {
+    // 1 is the run's, handed over; 2 was committed elsewhere. `behind` has queued 1 and is missing 2;
+    // `level` subscribes from 2, so it misses nothing. Reads: `level`'s replay, its switch to live, then
+    // the third - the hand-over's read of 2 for `behind` - is stuck in the store
+    val log         = BlockingLog(Vector(record(1), record(2, RunId("elsewhere"))), blockOn = 3)
+    val cut         = AbandonedWrites(run)
+    val behindFour  = new CountDownLatch(1)
+    val levelFour   = new CountDownLatch(1)
+    val levelLive   = new CountDownLatch(1)
+    val levelMarker = new CountDownLatch(2)
+    val behind      = Recording(countAt(4, behindFour))
+    val level = Recording { event =>
+      countAt(4, levelFour)(event)
+      event match
+        case _: StreamEvent.Live =>
+          levelLive.countDown()
+          levelMarker.countDown()
+        case _ => ()
+    }
+    def live(i: Int): StreamEvent.Live =
+      StreamEvent.Live(thread.value, run.value, "task", "node", "test.progress", 1, ujson.Num(i))
+    val hub = EventHub(log)
+    val b   = hub.observe(thread, capacity = 16, behind, cut.apply).start(lastSeq = 0L)
+    hub.durable(thread, Vector(record(1)))
+    val l = hub.subscribe(thread, afterSeq = 2L, capacity = 16, level, cut.apply).fold(e => fail(e.message), identity)
+    // a live event reaches `level` only once it has switched to live
+    hub.live(thread, live(0))
+    levelLive.await(5, TimeUnit.SECONDS) shouldBe true
+    log.records = log.records :+ record(3)
+    val handing = Thread.ofVirtual().start(() => hub.durable(thread, Vector(record(3))))
+    log.reading.await(5, TimeUnit.SECONDS) shouldBe true // `behind`'s read of 2 is stuck in the store
+    // a live event sent now follows whatever of the hand-over `level` has been given: once `level` has
+    // it, `level` has delivered anything of the run's 3 queued to it
+    hub.live(thread, live(1))
+    levelMarker.await(5, TimeUnit.SECONDS) shouldBe true
+    // the run loses its claim and stops waiting: its cut is taken, then its barrier queued to both
+    hub.atMark(thread)(cut.abandonAfter)
+    b.endOfRun(run)
+    l.endOfRun(run)
+    behind.reached.await(5, TimeUnit.SECONDS) shouldBe true
+    level.reached.await(5, TimeUnit.SECONDS) shouldBe true
+    log.release.countDown()
+    handing.join(java.time.Duration.ofSeconds(5)) shouldBe true
+    // a later commit, by another run, shows each dispatcher has delivered or skipped everything before it
+    log.records = log.records :+ record(4, RunId("next"))
+    hub.durable(thread, Vector(record(4, RunId("next"))))
+    behindFour.await(5, TimeUnit.SECONDS) shouldBe true
+    levelFour.await(5, TimeUnit.SECONDS) shouldBe true
+    // 3 was not handed over when the cut was taken: abandoned, on both subscriptions alike
+    level.seen.asScala.toVector shouldBe Vector("live", "live", "end:r1", "4")
+    behind.seen.asScala.toVector shouldBe Vector("1", "live", "live", "end:r1", "2", "4")
+    b.cancel()
+    l.cancel()
+
+    // a replay through the same cut agrees: the run's events are 1 alone
+    val replayedFourth = new CountDownLatch(1)
+    val replayed       = Recording(countAt(4, replayedFourth))
+    val again =
+      hub.subscribe(thread, afterSeq = 0L, capacity = 16, replayed, cut.apply).fold(e => fail(e.message), identity)
+    replayedFourth.await(5, TimeUnit.SECONDS) shouldBe true
+    replayed.seen.asScala.toVector shouldBe Vector("1", "2", "4")
+    again.cancel()
+    hub.liveCount(thread) shouldBe 0
+  }
+
+  /**
+   * A log whose store watch returns only when `watchGo` gives it a permit, and whose read after `stallAfter`
+   * off a subscriber's thread - a hand-over's read of missing events - signals `reading`, then blocks
+   * until `release` opens. Every read off a subscriber's thread is counted, by where it starts.
+   */
+  final private class WatchedLog(stallAfter: Long) extends Checkpointer:
+    private val underlying                                                      = InMemoryCheckpointer()
+    @volatile var records                                                       = Vector.empty[EventRecord]
+    val watchGo                                                                 = new java.util.concurrent.Semaphore(0)
+    val reading                                                                 = new CountDownLatch(1)
+    val release                                                                 = new CountDownLatch(1)
+    val handOverReads                                                           = new CopyOnWriteArrayList[Long]()
+    def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = underlying.commit(threadId, commit)
+    def claim(threadId: ThreadId, request: ClaimRequest)                        = underlying.claim(threadId, request)
+    def renew(threadId: ThreadId, token: FencingToken, ttl: scala.concurrent.duration.FiniteDuration) =
+      underlying.renew(threadId, token, ttl)
+    def release(threadId: ThreadId, token: FencingToken)             = underlying.release(threadId, token)
+    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]] = underlying.latest(threadId)
+    def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
+      if !Thread.currentThread().getName.startsWith("llm4s-") then
+        handOverReads.add(afterSeq)
+        if afterSeq == stallAfter && reading.getCount > 0 then
+          reading.countDown()
+          release.await(5, TimeUnit.SECONDS): Unit
+      Right(records.filter(_.seq > afterSeq).take(limit))
+    override def awaitEventsAfter(
+      threadId: ThreadId,
+      afterSeq: Long,
+      limit: Int,
+      timeout: scala.concurrent.duration.FiniteDuration
+    ): Result[Vector[EventRecord]] =
+      if watchGo.tryAcquire(5, TimeUnit.SECONDS) then Right(records.filter(_.seq > afterSeq).take(limit))
+      else Right(Vector.empty)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] = underlying.deleteThread(threadId, token)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
+
+  "A subscriber that switches to live behind a hand-over's read of missing events" should "have what it is missing read too, before the commit reaches anyone" in {
+    val log = WatchedLog(stallAfter = 2L)
+    val hub = EventHub(log, watch = WatchPolicy(pollInterval = scala.concurrent.duration.DurationInt(1).hour))
+    // `ahead` takes 1 from the hand-over and 2, committed elsewhere, from its watch: it is past the hub's mark
+    val aheadSaw2 = new CountDownLatch(1)
+    val aheadSaw4 = new CountDownLatch(1)
+    val ahead = Recording { event =>
+      countAt(2, aheadSaw2)(event)
+      countAt(4, aheadSaw4)(event)
+    }
+    val a = hub.observe(thread, capacity = 16, ahead).start(lastSeq = 0L)
+    log.records = Vector(record(1))
+    hub.durable(thread, Vector(record(1)))
+    log.records = log.records :+ record(2, RunId("elsewhere"))
+    log.watchGo.release()
+    aheadSaw2.await(5, TimeUnit.SECONDS) shouldBe true
+    // 3 is committed elsewhere and not watched; the run's 4 is handed over, and `ahead`'s read of 3 sticks
+    log.records = log.records :+ record(3, RunId("elsewhere")) :+ record(4)
+    val handing = Thread.ofVirtual().start(() => hub.durable(thread, Vector(record(4))))
+    log.reading.await(5, TimeUnit.SECONDS) shouldBe true
+    // meanwhile `late` subscribes: it replays to the hub's mark, 1, and switches to live there, behind `ahead`
+    val lateJoined = new CountDownLatch(1)
+    val lateSaw4   = new CountDownLatch(1)
+    val late = Recording { event =>
+      countAt(4, lateSaw4)(event)
+      event match
+        case _: StreamEvent.Live => lateJoined.countDown()
+        case _                   => ()
+    }
+    val l = hub.subscribe(thread, afterSeq = 0L, capacity = 16, late).fold(e => fail(e.message), identity)
+    hub.live(thread, StreamEvent.Live(thread.value, run.value, "task", "node", "test.progress", 1, ujson.Num(0)))
+    lateJoined.await(5, TimeUnit.SECONDS) shouldBe true
+    late.seen.asScala.toVector shouldBe Vector("1", "live")
+    log.release.countDown()
+    handing.join(java.time.Duration.ofSeconds(5)) shouldBe true
+    aheadSaw4.await(5, TimeUnit.SECONDS) shouldBe true
+    lateSaw4.await(5, TimeUnit.SECONDS) shouldBe true
+    // the hand-over read again, from `late`'s place, before queueing 4 to either
+    log.handOverReads.asScala.toVector shouldBe Vector(2L, 1L)
+    ahead.seen.asScala.toVector shouldBe Vector("1", "2", "live", "3", "4")
+    late.seen.asScala.toVector shouldBe Vector("1", "live", "2", "3", "4")
+    a.cancel()
+    l.cancel()
+    hub.liveCount(thread) shouldBe 0
+  }
+
   /** Counts `latch` down once the durable event `seq` has been recorded. */
   private def countAt(seq: Long, latch: CountDownLatch): StreamEvent => Unit = {
     case StreamEvent.Durable(r) if r.seq == seq => latch.countDown()

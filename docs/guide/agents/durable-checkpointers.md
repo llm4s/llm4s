@@ -139,8 +139,9 @@ The run finds its claim lost when its lease passes with no renewal landing, when
   only if nobody has claimed the thread since. If it lands, it lands after the run has ended: its events are an
   orphan of the run, not part of it. They are in the thread's log, and reach the thread's subscribers in sequence
   and before any later run's events, but never the run's own listeners or its tracing (see [Limits](#limits)).
-  The same holds for a commit that has landed but is still being handed to a subscriber that first reads, from
-  the store, events committed elsewhere that it has not seen yet;
+  The same holds for a commit that has landed but that this runtime has not yet handed to its subscribers, because
+  it is still reading, from the store, events committed elsewhere that one of them has not seen yet: a commit
+  reaches every subscription of the thread at once, or none, so all of them, and a replay, agree on it;
 - it releases its claim, which is a no-op if another run holds the thread. It does not wait for a renewal that
   may still be in the store, and the release runs on a thread of its own, waited for only until `2 × ttl` after
   the loss, so the run's result and the thread's release in this runtime never wait on a store that hangs; a
