@@ -110,7 +110,9 @@ private[graph] trait Dispatched extends Subscription:
  * runtime learns of the delete from the store: a read from inside the deleted log is refused with
  * [[GraphError.ThreadDeleted]] - by its watch, its replay or a hand-over's gap read - and it ends the
  * same way. A subscription from `0` takes the thread under the id from its first event, which follows
- * a deleted thread's numbers.
+ * a deleted thread's numbers. A subscription judged `Lagging` - every lag is judged by sequence numbers,
+ * which a delete makes jump - is checked against the store before it ends, on its dispatcher thread,
+ * and ends `ThreadDeleted` if its log was deleted.
  */
 final private[graph] class EventHub(
   checkpointer: Checkpointer,
@@ -603,30 +605,52 @@ final private[graph] class EventHub(
         ending match
           case End.Disconnect(reason) =>
             leave(threadId, this)
-            reportPendingGap(reason).foreach(ending =>
+            reportPendingGap(reason, classified(reason)).foreach(ending =>
               call(() => listener(StreamEvent.Disconnected(lastDeliveredSeq, ending))): Unit
             )
           case End.Cancelled => ()
       }
 
     /**
+     * The reason a subscription ends, `Lagging` checked against the store. Every lag is judged by the
+     * numbers - a gap, or a full queue - and a thread deleted and created again by another runtime
+     * leaves a gap of the deleted thread's numbers, which only the store can tell from a real backlog.
+     * So, on the dispatcher thread, once what was queued is delivered and only then, the store is read
+     * once after the last queued event: [[GraphError.ThreadDeleted]] there makes the end
+     * `ThreadDeleted`. Any other answer, a failed read or an interrupt (`cancel`, which also stops the
+     * `Disconnected`) leaves `Lagging`. Never on the commit path: a hand-over that finds a subscriber
+     * behind only marks it.
+     */
+    private def classified(reason: DisconnectReason): DisconnectReason =
+      if reason != DisconnectReason.Lagging then reason
+      else
+        val from = withLock(lock)(lastQueuedSeq)
+        CancelledError.catchInterrupt(Try(checkpointer.eventsAfter(threadId, from, 1)).toResult.flatten) match
+          case Right(Left(error)) =>
+            EventHub.disconnectFor(error) match
+              case DisconnectReason.ThreadDeleted => DisconnectReason.ThreadDeleted
+              case _                              => reason
+          case _ => reason
+
+    /**
      * A lagging subscriber can end with live events dropped since its last gap marker - the durable
      * event that did not fit would have carried them. They are reported as a
-     * [[StreamEvent.LiveGap]] just before `Disconnected`, so the count is never lost. Returns the
-     * reason the final `Disconnected` carries: `reason`, or [[DisconnectReason.ListenerFailed]] if
+     * [[StreamEvent.LiveGap]] just before `Disconnected`, so the count is never lost. `reason` is why
+     * the subscription stopped, `reported` the reason [[classified]] gives it. Returns the reason the
+     * final `Disconnected` carries: `reported`, or [[DisconnectReason.ListenerFailed]] if
      * the listener throws on that gap, as on any other event; `None` - no `Disconnected` - if the
      * subscription was cancelled meanwhile.
      */
-    private def reportPendingGap(reason: DisconnectReason): Option[DisconnectReason] =
+    private def reportPendingGap(reason: DisconnectReason, reported: DisconnectReason): Option[DisconnectReason] =
       val dropped = withLock(lock) {
         val pending = if reason == DisconnectReason.Lagging || failed.isDefined then droppedLive else 0
         droppedLive = 0
         pending
       }
-      if dropped == 0 then Some(reason)
+      if dropped == 0 then Some(reported)
       else
         deliver(StreamEvent.LiveGap(dropped)) match
-          case Right(_)                      => Some(reason)
+          case Right(_)                      => Some(reported)
           case Left(End.Disconnect(failure)) => Some(failure)
           case Left(End.Cancelled)           => None
 

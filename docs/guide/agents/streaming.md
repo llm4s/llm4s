@@ -180,7 +180,8 @@ guarantees: in order, without gap or duplicate, and only after the commit.
   with the watch disabled, its runtime's next commit on the thread). It never delivers a new thread created
   under the same id as a continuation of the deleted one; subscribe again from `afterSeq = 0` to follow
   that one. A subscription in another runtime that has delivered no event yet cannot be told from a new
-  one, and follows the new thread instead of ending.
+  one, and follows the new thread instead of ending. A subscription that falls behind while its thread is
+  deleted ends with `ThreadDeleted`, not `Lagging`: resubscribing from `lastSeq` would find the log gone.
 
 ```scala
 import org.llm4s.agent.graph.*
