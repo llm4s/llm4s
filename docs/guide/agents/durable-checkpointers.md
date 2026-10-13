@@ -166,6 +166,16 @@ The run finds its claim lost when its lease passes with no renewal landing, when
   before it landed - is a loss found then: the call returns `ClaimLost`, never `CheckpointWriteFailed`, with the
   claim released and the thread freed. If the heartbeat declared the loss meanwhile, the call still returns one
   `ClaimLost`, naming the current claim the first of the two to find the loss named.
+  `fork`, `updateState` and `deleteThread` are bounded the same way while they hold their claim: if it is found
+  lost while the change waits on the store - its next call queued behind a hung renewal in a store that serialises
+  its calls, say - the call returns `ThreadBusy` naming no checkpoint within `2 × ttl` of the loss, with the thread
+  freed in this runtime and the claim released as above. A change is not a run, so it never returns `ClaimLost`:
+  retry it once the thread is free. A change's write - its commit, or the store delete - that has not begun when
+  the loss is found never reaches the store, and the change returns `ThreadBusy` as for a commit the store refuses
+  as stale. One already in the store may still land, fenced by the token. A `deleteThread` that lands after its
+  call was given up on ends this runtime's subscriptions to the thread at once only if the call has not yet freed
+  the thread; otherwise they learn of the delete from the store, as another runtime's do (see
+  [Deleting a thread](#deleting-a-thread)).
 
 `ClaimLost` is not a store outage (`CheckpointWriteFailed`). After it, `recover` may be attempted once the thread
 is free:
@@ -432,7 +442,10 @@ yield handle
 With `asNode`, the update must stay within that node's declared write set, as if the node had returned it. The
 thread is held, with a claim in the store, while it is updated, so a live run refuses it with `ThreadBusy`. If
 that claim lapses, or another runtime takes it over, before the update's commit lands, the store refuses the commit
-and `updateState` returns `ThreadBusy` too, with nothing applied: retry it. `fork` does the same for its target.
+and `updateState` returns `ThreadBusy` too, with nothing applied: retry it. So does a claim found lost before the
+commit begins: the commit is never sent. And if the claim is found lost while the update waits on a store that
+hangs, `updateState` returns `ThreadBusy` within `2 × ttl` of the loss rather than waiting (see
+[Fencing](#fencing-a-run-that-lost-its-claim-stops-and-records-nothing)). `fork` does the same for its target.
 Neither is a run, so neither returns `ClaimLost`. Pending
 writes of tasks that already completed are carried over, so `recover` still does not run them again. They apply
 after your update when the thread is recovered, so a carried write to a key you edited can overwrite your edit on

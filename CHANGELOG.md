@@ -2734,7 +2734,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer joins a renewal still in the store before releasing, which had pushed the end to about `3 × ttl`. From
   the moment a loss is found - its lease passing, or a renewal or commit refused - `await()` and the call that
   admits a run now return, with the thread free in the runtime, within `2 × ttl`, plus only local work that never
-  calls the store.
+  calls the store. `fork`, `updateState` and `deleteThread` are bounded the same way: their work under the claim ran
+  on the caller's thread, so a renewal hung in a store that serialises its calls (SQLite) held the call and the
+  thread past the loss. Once the claim is found lost they return `ThreadBusy`, naming no checkpoint, within
+  `2 × ttl` of the loss, with the thread freed and the claim released; their write - commit or store delete - goes
+  through the same atomic fence, so one not begun at the loss never reaches the store.
 - **A commit or subscription read hung in the store holds up only its own thread** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   every commit in a `GraphRuntime` was written under one runtime-wide lock, so one thread's hung commit stalled every
   other thread's runs, their admission included. Commits are now ordered per thread. A subscription's read of the

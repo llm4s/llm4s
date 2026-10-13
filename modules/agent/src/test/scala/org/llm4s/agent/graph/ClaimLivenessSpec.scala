@@ -58,8 +58,13 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     val renewed                                   = new AtomicInteger()
     val releases                                  = new AtomicInteger()
     // releases that have returned from the store, so whose effect a later call sees
-    val released                                         = new AtomicInteger()
-    def claim(threadId: ThreadId, request: ClaimRequest) = underlying.claim(threadId, request)
+    val released = new AtomicInteger()
+    // claims the store has granted or refused
+    val claims = new AtomicInteger()
+    def claim(threadId: ThreadId, request: ClaimRequest) = {
+      claims.incrementAndGet()
+      underlying.claim(threadId, request)
+    }
     def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) = {
       renewals.incrementAndGet()
       val outcome = onRenew().getOrElse(underlying.renew(threadId, token, ttl))
@@ -93,6 +98,10 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
    * A store that serialises `renew` and `release` on one lock, as `SqliteCheckpointer` serialises every
    * call on its connection. After [[hangRenewals]], the next renewal holds the lock until [[unhang]], so a
    * release waits behind it. `released` records the token of each release that ran.
+   *
+   * After [[serialiseAfterClaim]], once the next claim is granted, `latest`, `commit` and `deleteThread`
+   * are serialised too, and `latest` first waits for a renewal to hang, so that the claim holder's next
+   * read queues behind it. `changes` counts the commits and deletes made then.
    */
   private class Serialised(val underlying: Checkpointer) extends Checkpointer {
     private val storeLock                  = new java.util.concurrent.locks.ReentrantLock()
@@ -109,7 +118,17 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       storeLock.unlock()
       outcome.get
     }
-    def claim(threadId: ThreadId, request: ClaimRequest) = underlying.claim(threadId, request)
+    private val serialising         = new AtomicBoolean(false)
+    private val claimed             = new AtomicBoolean(false)
+    val changes                     = new AtomicInteger()
+    def serialiseAfterClaim(): Unit = serialising.set(true)
+    def queued: Boolean             = storeLock.hasQueuedThreads
+    private def all: Boolean        = serialising.get && claimed.get
+    def claim(threadId: ThreadId, request: ClaimRequest) = {
+      val granted = underlying.claim(threadId, request)
+      if serialising.get then claimed.set(true)
+      granted
+    }
     def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) = serialised {
       if hanging.compareAndSet(true, false) then {
         renewing.countDown()
@@ -123,12 +142,19 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     }
     def commit(threadId: ThreadId, commit: Commit) = {
       beforeCommit()
-      underlying.commit(threadId, commit)
+      if all then serialised { changes.incrementAndGet(); underlying.commit(threadId, commit) }
+      else underlying.commit(threadId, commit)
     }
-    def latest(threadId: ThreadId)                                  = underlying.latest(threadId)
+    def latest(threadId: ThreadId) =
+      if all then {
+        renewing.await(5, TimeUnit.SECONDS): Unit
+        serialised(underlying.latest(threadId))
+      } else underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId, token: FencingToken)       = underlying.deleteThread(threadId, token)
+    def deleteThread(threadId: ThreadId, token: FencingToken) =
+      if all then serialised { changes.incrementAndGet(); underlying.deleteThread(threadId, token) }
+      else underlying.deleteThread(threadId, token)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
@@ -1277,6 +1303,108 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       rt.fork(thread, latest.checkpoint.id, target).left.value shouldBe GraphError.ThreadBusy("u", None)
       store.latest(target).value shouldBe None
       rt.heldLocally(target) shouldBe false
+    }
+
+  /** The three changes that hold a thread without running it, on the thread `first` completed. */
+  private def changes = Seq("fork", "updateState", "deleteThread")
+
+  /** The thread change `how` holds: the fork's target, otherwise the thread itself. */
+  private def heldBy(how: String): ThreadId = if how == "fork" then ThreadId("u") else thread
+
+  /** Change `how` on the thread `two` completed, whose latest checkpoint is `latest`, as run `runId`. */
+  private def changing(how: String, rt: GraphRuntime, two: TwoStep, latest: String, runId: String): Result[Any] =
+    how match {
+      case "fork" => rt.fork(thread, latest, heldBy(how), run(runId))
+      case "updateState" =>
+        rt.updateState(thread, two.graph, latest, StateUpdate.update(two.log, "fixed"), config = run(runId))
+      case _ => rt.deleteThread(thread, run(runId))
+    }
+
+  "A change whose claim is found lost while its next store call waits behind a hung renewal" should
+    "return ThreadBusy within the loss bound, free its thread, and commit nothing, for fork, updateState and deleteThread" in {
+      for how <- changes do
+        withClue(s"$how: ") {
+          val time       = ManualTime()
+          val underlying = InMemoryCheckpointer(time)
+          val store      = Serialised(underlying)
+          val two        = TwoStep()
+          two.gate.countDown()
+          await(runtime(store, time, slow).start(thread, two.graph, "x", run("first")).value).completed
+          val latest = store.latest(thread).value.value
+          val held   = heldBy(how)
+          // once the change's claim is granted, its first renewal hangs holding the store's lock, and the
+          // change's next read - every change reads its thread again under the claim - queues behind it
+          store.serialiseAfterClaim()
+          store.hangRenewals()
+          val rt       = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+          val returned = new CountDownLatch(1)
+          rt.changeReturned = id => if id == held then returned.countDown()
+          val outcome = new java.util.concurrent.LinkedBlockingQueue[Result[Any]]()
+          Thread.ofVirtual().start(() => outcome.offer(changing(how, rt, two, latest.checkpoint.id, "change")): Unit)
+          store.renewing.await(5, TimeUnit.SECONDS) shouldBe true
+          eventually(store.queued)
+
+          // the lease passes: the change must return within twice the ttl, without the store
+          time.advance(1.second)
+          Option(outcome.poll(5, TimeUnit.SECONDS)).value.left.value shouldBe GraphError.ThreadBusy(held.value, None)
+          rt.heldLocally(held) shouldBe false
+
+          // the store returns: the change's read completes, its commit finds the fence, and nothing lands
+          store.unhang()
+          returned.await(5, TimeUnit.SECONDS) shouldBe true
+          store.changes.get shouldBe 0
+          store.latest(thread).value.value shouldBe latest
+          if how == "fork" then store.latest(held).value shouldBe None
+
+          // and the thread is free for the same change in this runtime
+          changing(how, rt, two, latest.checkpoint.id, "again").isRight shouldBe true
+        }
+    }
+
+  "A change whose claim is found lost before its commit begins" should
+    "never reach the store with it, and be ThreadBusy, for fork, updateState and deleteThread" in {
+      for how <- changes do
+        withClue(s"$how: ") {
+          val time  = ManualTime()
+          val store = Hooked(InMemoryCheckpointer(time))
+          val two   = TwoStep()
+          two.gate.countDown()
+          await(runtime(store, time, slow).start(thread, two.graph, "x", run("first")).value).completed
+          val latest = store.latest(thread).value.value
+          val held   = heldBy(how)
+          val rt     = runtime(store, time)
+          // the change's renewal is refused as stale while it reads its thread under the claim: the loss is
+          // declared, and acted on, before that read returns
+          val refused  = new AtomicBoolean(false)
+          val declared = new CountDownLatch(1)
+          rt.renewalSettled = _ => if refused.get then declared.countDown()
+          val claimsBefore = store.claims.get
+          val armed        = new AtomicBoolean(true)
+          store.onLatest = () => {
+            if store.claims.get > claimsBefore && armed.compareAndSet(true, false) then {
+              store.onRenew = () => { refused.set(true); Some(Left(GraphError.StaleClaim(held.value, 0L, None))) }
+              declared.await(5, TimeUnit.SECONDS) shouldBe true
+            }
+            None
+          }
+          val reached = new AtomicInteger()
+          store.onCommit = commit => {
+            if commit.events.exists(e => e.runId == "change") then reached.incrementAndGet()
+            None
+          }
+          store.onDelete = () => reached.incrementAndGet(): Unit
+          val releasing = store.releases.get
+
+          val outcome = changing(how, rt, two, latest.checkpoint.id, "change")
+          outcome.left.value shouldBe GraphError.ThreadBusy(
+            held.value,
+            if how == "fork" then None else Some(latest.checkpoint.id)
+          )
+          reached.get shouldBe 0
+          store.latest(thread).value.value shouldBe latest
+          rt.heldLocally(held) shouldBe false
+          eventually(store.releases.get == releasing + 1)
+        }
     }
 
   "A run whose claim is found lost while a renewal hangs in the store" should
