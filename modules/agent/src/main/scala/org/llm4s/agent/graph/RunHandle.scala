@@ -242,30 +242,38 @@ final private[graph] class DefaultRunHandle[O](
   private val settling = new AtomicBoolean(false)
 
   /**
-   * Settles the run, once, by whichever comes first - the run thread as it exits, or [[endWithin]]:
-   * `outcome` is computed, then the run is taken, the subscriptions are given their end-of-run
-   * barriers, `release` runs, and the result is set. Whoever takes the run second sets nothing, so a run
-   * has one result, and its thread is freed once - never after a later run has taken it. Nothing from
-   * taking the run to setting its result waits on the store but what `release` bounds.
+   * Settles the run from the run thread as it exits, unless [[endWithin]] has taken it: `outcome` is
+   * computed, then the run is taken and [[finish]]ed. The outcome is computed before the run is taken -
+   * closing a crashed run's committer can wait on the store - so that the watchdog can still settle a
+   * run whose thread is stuck computing it. Whoever takes the run second sets nothing, so a run has one
+   * result, and its thread is freed once - never after a later run has taken it.
    */
   private def settle(outcome: () => RunResult[O], release: () => Unit): Unit =
-    // the outcome is computed before the run is taken - closing a crashed run's committer can wait on the
-    // store - so that the watchdog can still settle a run whose thread is stuck computing it
     val settled = outcome()
-    if settling.compareAndSet(false, true) then
-      DefaultRunHandle.guarded(handedOver.complete(())): Unit
-      DefaultRunHandle.guarded(release()): Unit
-      result.complete(settled): Unit
+    if settling.compareAndSet(false, true) then finish(settled, release)
+
+  /**
+   * Ends a run that has been taken: the subscriptions are given their end-of-run barriers, `release`
+   * runs, and the result is set. Nothing here waits on the store but what `release` bounds.
+   */
+  private def finish(settled: RunResult[O], release: () => Unit): Unit =
+    DefaultRunHandle.guarded(handedOver.complete(())): Unit
+    DefaultRunHandle.guarded(release()): Unit
+    result.complete(settled): Unit
 
   private val bounding = new AtomicBoolean(false)
 
   /**
    * Bounds the run's end once its claim is found lost, whatever the run is doing: a virtual thread,
    * `llm4s-lost-<threadId>`, waits for the result until `deadline` (a `System.nanoTime` value) and, if
-   * the run thread has not taken the run to settle it by then, settles it without the run thread
-   * ([[settle]]) with `outcome`, which must not throw. The run thread may be stuck in a store call that
-   * ignores interrupts, as a commit can be, even one of its outcome, which no stop interrupts; when it
-   * does return, it changes nothing. Only the first call starts the thread.
+   * the run thread has not taken the run to settle it by then, takes it, and only then computes
+   * `outcome`, which must neither throw nor wait on the store, and [[finish]]es the run with it. The run
+   * thread may be stuck in a store call that ignores interrupts, as a commit can be, even one of its
+   * outcome, which no stop interrupts; when it does return, it changes nothing. Taking the run first
+   * means `outcome` - which fences the run and cuts its own subscriptions at what the hub has handed
+   * over ([[AbandonedWrites]]) - applies only to a run the watchdog settles: a run thread that wins
+   * instead ends the run with its own outcome, and the watchdog neither fences nor cuts it. Only the first call
+   * starts the thread.
    */
   private[graph] def endWithin(deadline: Long, outcome: () => RunResult[O], release: () => Unit): Unit =
     if bounding.compareAndSet(false, true) then
@@ -275,11 +283,17 @@ final private[graph] class DefaultRunHandle[O](
         .start { () =>
           val wait = math.max(0L, deadline - System.nanoTime())
           DefaultRunHandle.guarded(result.get(wait, TimeUnit.NANOSECONDS)) match
-            // `outcome` fences and cuts the run: not once the run thread has taken it
-            case Left(_: TimeoutException) if !settling.get => settle(outcome, release)
+            // `outcome` fences and cuts the run: only once the watchdog has taken it
+            case Left(_: TimeoutException) if settling.compareAndSet(false, true) =>
+              val settled = outcome()
+              settlingWithoutRunThread()
+              finish(settled, release)
             // settled first; nothing else interrupts this thread
             case _ => ()
         }: Unit
+
+  /** A test hook run by [[endWithin]]'s thread once it has computed its outcome; a no-op by default. */
+  @volatile private[graph] var settlingWithoutRunThread: () => Unit = () => ()
 
   /** Opened as the run thread exits; for tests. */
   private[graph] val runThreadExited = new java.util.concurrent.CountDownLatch(1)

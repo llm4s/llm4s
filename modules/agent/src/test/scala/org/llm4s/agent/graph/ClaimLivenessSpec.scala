@@ -893,6 +893,48 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
         }
     }
 
+  "A run settled without its run thread" should
+    "end with the outcome its own listeners saw, even when its run thread finishes meanwhile" in {
+      val time       = ManualTime()
+      val store      = Hooked(InMemoryCheckpointer(time))
+      val two        = TwoStep()
+      val committing = new CountDownLatch(1)
+      val hang       = new CountDownLatch(1)
+      // the run's closing commit enters the store and stays there, interrupted or not, until `hang` opens
+      store.onCommit = commit => {
+        if commit.checkpoint.exists(c => c.status == CheckpointStatus.Completed && c.runId == "first") then {
+          committing.countDown()
+          stuckUntil(hang)
+        }
+        None
+      }
+      val rt     = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      val handle = rt.start(thread, two.graph, "x", run("first")).value
+      val own    = handle.asInstanceOf[DefaultRunHandle[Vector[String]]]
+      val runs   = RunRecorder()
+      handle.subscribe()(runs).value
+      // the watchdog has its outcome - the run's cut is taken - when the closing commit lands, above the
+      // cut; the run thread then settles the run, if it still can, before the watchdog goes on
+      own.settlingWithoutRunThread = () => {
+        hang.countDown()
+        own.runThreadExited.await(5, TimeUnit.SECONDS): Unit
+      }
+      two.gate.countDown()
+      committing.await(5, TimeUnit.SECONDS) shouldBe true
+
+      // the lease passes while the run is finishing; its end is bounded by the watchdog
+      store.onRenew = unreachable
+      time.advance(1.second)
+      val result = await(handle)
+      runs.ended.await(5, TimeUnit.SECONDS) shouldBe true
+      own.runThreadExited.await(5, TimeUnit.SECONDS) shouldBe true
+      val sawCompleted = runs.eventsOf("first").contains(RunEvent.RunCompleted)
+      withClue(s"result $result, the run's listener saw RunCompleted: $sawCompleted: ") {
+        result.isInstanceOf[RunResult.Completed[?]] shouldBe sawCompleted
+      }
+      result.failed._2 shouldBe a[GraphError.ClaimLost]
+    }
+
   "A change whose heartbeat cannot be joined, in a store that serialises its calls" should
     "return and free its thread without waiting for its release" in {
       val time       = ManualTime()
