@@ -55,7 +55,7 @@ streaming, checkpoint/resume, and persisted artifacts, and runs deterministicall
 | C2 | #1903 | Tool permissions and timeouts | core | - |
 | C3 | #1904 | Backend SPIs: files, sandbox, long-term store | core | - |
 | F1 | #1905 | Filesystem tool suite | feature | C2, C3 |
-| F2 | #1906 | Workspace sandbox and file backends; `WorkspaceTools` removed | feature | C3 |
+| F2 | #1906 | Workspace sandbox and file backends; `WorkspaceTools` removed | feature | C2, C3 |
 | F3 | #1907 | Todos | feature | C1 |
 | F4 | #1908 | Summarisation and tool-output offload | feature | C1, C3 |
 | F5 | #1909 | Agent Skills | feature | C1, C3 |
@@ -72,7 +72,7 @@ Parallel lanes:
 1. **From the start:** C1, C2, C3 and F8b, plus F8a and F9 whenever someone is free. None depends on
    another.
 2. **After the core slices merge:** F1-F7, up to seven lanes, each with its own files. F3 and F7 need
-   only C1; F2 needs only C3.
+   only C1; F1 and F2 need C2 and C3.
 3. **Last:** P1, then P2.
 
 The critical path is C3 → F1 → P1 → P2. F8b is the only core-API change outside the agent runtime;
@@ -101,7 +101,9 @@ memory recall need to read thread state, write their own keys, and contribute sy
   - Before each model call, the loop collects sections in stack order and puts cacheable ones first. It
     prepends them to the builder's system prompt (or replaces it: see P1 `PromptMode`) in the request
     sent, never in the stored messages.
-  - Section ids are unique per run; a duplicate fails the run with `GraphError.MiddlewareFailed`.
+  - Section ids are unique within one assembled request. The same id recurs on every model call of a
+    run, as its middleware supplies it again. A duplicate within one request fails the run with
+    `GraphError.MiddlewareFailed`.
 - No separate `beforeModel` / `afterModel` hooks: a wrapper covers both. §5.6 is amended to say so.
 - Summarisation keeps the rule that a request is pruned, never the stored thread (CLAUDE.md, Guardrails):
   F4 stores its summary in its own key and rewrites each request, so `history`, `fork` and Block
@@ -234,7 +236,9 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 ### F5: Agent Skills (#1909)
 
 - `SkillsMiddleware(sources: Vector[VPath], backend)` discovers `<source>/*/SKILL.md` through the backend
-  once per run.
+  on a run's first model call, and caches the result by run id. A run recovered in a fresh runtime
+  re-reads the backend. State-backed files come back from the checkpoint; a host file may have changed
+  in between, and that is documented.
 - Each skill's `name` and `description` go into one cacheable prompt section.
 - The model loads a skill's body and any resources with `read_file`, so no new tool is needed.
 - Frontmatter is read by a restricted parser written for it, with no YAML dependency:
@@ -246,7 +250,8 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 ### F6: instruction memory (#1910)
 
 - `InstructionMemoryMiddleware(paths: Vector[VPath], backend)` reads the listed `AGENTS.md` files in
-  order (for example user scope, then project scope) once per run, as one prompt section.
+  order (for example user scope, then project scope) on a run's first model call, cached by run id and
+  re-read after recovery as F5 does, as one prompt section.
 - A missing file is skipped.
 - When the backend and permission rules permit writes, the agent edits them with `edit_file`; the change
   shows at the next run. Instruction memory differs from semantic memory (§9 "Skills and memory
@@ -255,8 +260,10 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 ### F7: semantic memory (`llm4s-agent-memory`) (#1911)
 
 - `SemanticMemoryMiddleware(manager: MemoryManager, recall, record, consolidate)`:
-  - Recall runs `getRelevantContext` on the run input in `beforeAgent`, kept for the run, and shows it as
-    a prompt section.
+  - Recall runs `getRelevantContext` on the turn's input at its first model call, in `wrapModelCall`.
+    The recalled text is written to a declared `recalled` key (C1), and `promptSections` shows it from
+    there. It is checkpointed, so a recovered run sends the same context as before the crash.
+    `beforeAgent` is not used, because `recover` does not run it again.
   - Record runs in `afterAgent`, writing the turn.
   - Consolidation is optional, every N turns.
 - `MemoryManager` is immutable-returning, so the middleware holds the latest manager per thread behind a
@@ -272,8 +279,10 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 
 - `AgentBuilder.withOutput[O](using SchemaDefinition[O], ReadWriter[O])` records the schema.
   `withOutputOf[O: SchemaOf]` is a convenience in `schema-derivation`.
-- Every model call carries `responseFormat = JsonSchema(...)`. Where a provider drops it
-  (`RequestTransformer`), a prompt section states the schema instead.
+- Every model call carries `responseFormat = JsonSchema(...)`, and a prompt section always states the
+  schema too. `RequestTransformer` silently drops an unsupported format inside the client and reports
+  nothing to the agent, so the agent cannot add the section only when needed. The answer-turn
+  validation below is what enforces the schema.
 - An answer turn (no tool calls) is validated against the schema before the run completes:
   - A failure is sent back once as a corrective user message, and the model is asked again.
   - A second failure fails the run with a typed `GraphError`.
@@ -335,8 +344,8 @@ Both run as samples and as deterministic specs on `ScriptedLLMClient`.
   - `HarnessProfile.deepAgents` on state files, with todos, summarisation and offload of a large
     fetched page, plus one skill
   - streaming `TodosUpdated` and text deltas
-  - a SQLite checkpoint part way through, then resume in a fresh runtime, with the report file present
-    afterwards
+  - the process stopped after an intermediate SQLite checkpoint, then `recover` in a fresh runtime (no
+    pending interrupt, so not `resume`), with the report file present afterwards
 - **Coding/workspace:**
   - a workspace sandbox (fake backend in unit runs; `@Workspace` IT tier for the live container) under
     rules that `Allow` writes under `/src/**` and `Ask` on `execute`
