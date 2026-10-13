@@ -757,6 +757,37 @@ final class GraphRuntime(
     releasing(threadId, token)
     if interrupted then Thread.currentThread().interrupt()
 
+  /**
+   * Gives back the claim whose token is `token` on a detached virtual thread, `llm4s-release-<threadId>`,
+   * waiting for it at most `wait`: for a run whose end must not depend on the store answering - it lost
+   * its claim, or a renewal of it could not be joined. Best effort: a release that never lands leaves
+   * the claim to lapse after `claims.ttl`. A release is by token, so one that lands late cannot release
+   * a claim another run has taken since. Never throws, and keeps the caller's interrupt flag.
+   */
+  private def releaseDetached(threadId: ThreadId, token: FencingToken, wait: Long): Unit =
+    val releaser =
+      Thread.ofVirtual().name(s"llm4s-release-${threadId.value}").start(() => releasing(threadId, token))
+    if joinWithin(releaser, System.nanoTime() + wait, Thread.interrupted()) then Thread.currentThread().interrupt()
+
+  /**
+   * Joins `t` until `deadline` (a `System.nanoTime` value), even if interrupted; whether an interrupt
+   * arrived, counting `interrupted`.
+   */
+  @tailrec private def joinWithin(t: Thread, deadline: Long, interrupted: Boolean): Boolean =
+    val remaining = deadline - System.nanoTime()
+    if remaining <= 0 || !t.isAlive then interrupted
+    else
+      CancelledError.catchInterrupt(t.join(java.time.Duration.ofNanos(remaining))) match
+        case Right(_) => joinWithin(t, deadline, interrupted)
+        case Left(_)  => joinWithin(t, deadline, interrupted = true)
+
+  /**
+   * Forgets the hub's hand-over mark for `threadId` unless a run holds the thread in this runtime: for a
+   * late write of a run that has ended. Checked under `activeLock`, so it never races an admission.
+   */
+  private def forgetIfIdle(threadId: ThreadId): Unit =
+    withLock(activeLock)(if !active.contains(threadId.value) then hub.release(threadId))
+
   private def releasing(threadId: ThreadId, token: FencingToken): Unit =
     DefaultRunHandle.guarded(checkpointer.release(threadId, token)) match
       case Right(Right(_)) => ()
@@ -856,6 +887,9 @@ final class GraphRuntime(
   private def release(threadId: ThreadId): Unit =
     hub.release(threadId)
     withLock(activeLock)(active.remove(threadId.value)): Unit
+
+  /** Whether a run is admitting or executing on the thread in this runtime; for tests. */
+  private[graph] def heldLocally(threadId: ThreadId): Boolean = withLock(activeLock)(active.contains(threadId.value))
 
   /** Whether the event hub holds a hand-over mark for the thread; for tests. */
   private[graph] def handOverMarked(threadId: ThreadId): Boolean = hub.marked(threadId)
@@ -1018,6 +1052,9 @@ final class GraphRuntime(
 
   final private class AsyncCommitter(threadId: ThreadId) extends Committer:
     private val failed = AtomicReference[Option[LLMError]](None)
+
+    /** Set by [[abandon]]: a commit that lands after it may land after the run has ended. */
+    private val abandoned = new AtomicBoolean(false)
     private val writer: ExecutorService = Executors.newSingleThreadExecutor { runnable =>
       val thread = new Thread(runnable, s"llm4s-graph-writer-${threadId.value}")
       thread.setDaemon(true)
@@ -1026,7 +1063,11 @@ final class GraphRuntime(
     def submit(commit: Commit): Unit =
       writer.execute { () =>
         // a failed commit stops the queue: a later commit must not land on top of a lost one
-        if failed.get.isEmpty then commitAndDeliver(threadId, commit).left.foreach(refused(failed, _))
+        if failed.get.isEmpty then
+          commitAndDeliver(threadId, commit).left.foreach(refused(failed, _))
+          // a write the run abandoned, landing after the run let the thread go, must leave the hub no
+          // hand-over mark for a thread no run holds
+          if abandoned.get then forgetIfIdle(threadId)
       }
     def failure: Option[LLMError] = failed.get
 
@@ -1043,11 +1084,28 @@ final class GraphRuntime(
           case Left(_)  => drain(interrupted = true)
       if drain(interrupted = false) then Thread.currentThread().interrupt()
 
-    // a queued commit finds the failure and skips itself; only the one in flight lands
+    /**
+     * A queued commit finds the failure and skips itself; only the one in flight may land. It is waited
+     * for at most `claims.ttl`: the run lost its claim, so its end must not wait on a store that hangs.
+     * A commit still in the store then is left to finish on the writer, a daemon thread. It is fenced by
+     * the run's token, so it lands only if no other run has claimed the thread meanwhile - the store
+     * refuses it as stale otherwise - and its events, if it lands, are delivered in order under
+     * `commitLock` like any other commit's. Never throws; an interrupt is remembered and set again.
+     */
     def abandon(reason: LLMError): Unit =
       failed.set(Some(reason))
+      abandoned.set(true)
       abandoning(threadId)
-      close()
+      writer.shutdown()
+      val deadline = System.nanoTime() + claims.ttl.toNanos
+      @tailrec def await(interrupted: Boolean): Boolean =
+        val remaining = deadline - System.nanoTime()
+        if remaining <= 0 then interrupted
+        else
+          CancelledError.catchInterrupt(writer.awaitTermination(remaining, TimeUnit.NANOSECONDS)) match
+            case Right(_) => interrupted
+            case Left(_)  => await(interrupted = true)
+      if await(Thread.interrupted()) then Thread.currentThread().interrupt()
 
   final private class OnExitCommitter(threadId: ThreadId) extends Committer:
     private var durableParent: Option[Option[String]] = None
@@ -1205,22 +1263,18 @@ final class GraphRuntime(
         renewalSettled(threadId)
       }
 
-    def close(): Unit =
+    def close(): Unit = stop(): Unit
+
+    /** [[close]], returning whether the beat and any renewal in flight were joined in time. */
+    def stop(): Boolean =
       withLock(lock) { over = true }
       stopped.countDown()
       val deadline = System.nanoTime() + claims.ttl.toNanos
       // the beat first, so that no renewal starts after the one read below
-      val interrupted = joined(beat, deadline, Thread.interrupted())
-      if renewal.get.fold(interrupted)(joined(_, deadline, interrupted)) then Thread.currentThread().interrupt()
-
-    /** Joins `t` until `deadline` (a `System.nanoTime` value), even if interrupted; whether one arrived. */
-    @tailrec private def joined(t: Thread, deadline: Long, interrupted: Boolean): Boolean =
-      val remaining = deadline - System.nanoTime()
-      if remaining <= 0 || !t.isAlive then interrupted
-      else
-        CancelledError.catchInterrupt(t.join(java.time.Duration.ofNanos(remaining))) match
-          case Right(_) => joined(t, deadline, interrupted)
-          case Left(_)  => joined(t, deadline, interrupted = true)
+      val interrupted = joinWithin(beat, deadline, Thread.interrupted())
+      val all         = renewal.get.fold(interrupted)(joinWithin(_, deadline, interrupted))
+      if all then Thread.currentThread().interrupt()
+      !beat.isAlive && renewal.get.forall(!_.isAlive)
 
   /** One run: drives supersteps, recording task results, checkpoints and events as it goes. */
   final private class Run[I, O](
@@ -1371,12 +1425,22 @@ final class GraphRuntime(
      * Stops the heartbeat - waiting for a renewal in flight, so that none lands after the release - and
      * gives back the store claim, once; a no-op before the claim was granted. Never throws, and keeps
      * the caller's interrupt flag.
+     *
+     * A run that lost its claim, or whose renewal could not be joined within `claims.ttl`, must not let
+     * its end wait on the store - which may be hung, and may serialise the release behind that renewal -
+     * so it releases on a detached thread: waiting for it up to `claims.ttl` if the heartbeat was joined,
+     * so that a healthy store still frees the thread at once, and not at all otherwise.
      */
     def releaseClaim(): Unit =
-      heartbeat.foreach(_.close())
+      val joined = heartbeat.forall(_.stop())
       claim.foreach(c =>
-        if claimReleased.compareAndSet(false, true) then GraphRuntime.this.releaseClaim(threadId, c.token)
+        if claimReleased.compareAndSet(false, true) then
+          if joined && !endedLost then GraphRuntime.this.releaseClaim(threadId, c.token)
+          else releaseDetached(threadId, c.token, if joined then claims.ttl.toNanos else 0L)
       )
+
+    /** Set once the run ends because it lost its claim. */
+    @volatile private var endedLost = false
 
     /** Runs the claimed execution to its end; on the run thread. */
     def execute(): RunResult[O] =
@@ -1679,6 +1743,7 @@ final class GraphRuntime(
     private def lostClaim(execution: Execution, current: Option[FencingToken]): RunResult[O] =
       cause.compareAndSet(None, Some(StopCause.ClaimLost)): Unit
       signal.acknowledge()
+      endedLost = true
       val lost = GraphError.ClaimLost(threadId.value, token, current.orElse(lostTo.get))
       committer.abandon(lost)
       RunResult.Failed(execution.state, lost)

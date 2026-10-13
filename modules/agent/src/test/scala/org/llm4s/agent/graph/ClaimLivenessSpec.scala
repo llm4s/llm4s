@@ -76,6 +76,47 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
   }
 
   /**
+   * A store that serialises `renew` and `release` on one lock, as `SqliteCheckpointer` serialises every
+   * call on its connection. After [[hangRenewals]], the next renewal holds the lock until [[unhang]], so a
+   * release waits behind it. `released` records the token of each release that ran.
+   */
+  private class Serialised(val underlying: Checkpointer) extends Checkpointer {
+    private val storeLock    = new java.util.concurrent.locks.ReentrantLock()
+    private val hang         = new CountDownLatch(1)
+    private val hanging      = new AtomicBoolean(false)
+    val renewing             = new CountDownLatch(1)
+    val released             = new ConcurrentLinkedQueue[FencingToken]()
+    def hangRenewals(): Unit = hanging.set(true)
+    def unhang(): Unit       = hang.countDown()
+    private def serialised[A](body: => A): A = {
+      storeLock.lock()
+      val outcome = scala.util.Try(body)
+      storeLock.unlock()
+      outcome.get
+    }
+    def claim(threadId: ThreadId, request: ClaimRequest) = underlying.claim(threadId, request)
+    def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) = serialised {
+      if hanging.compareAndSet(true, false) then {
+        renewing.countDown()
+        hang.await(10, TimeUnit.SECONDS): Unit
+      }
+      underlying.renew(threadId, token, ttl)
+    }
+    def release(threadId: ThreadId, token: FencingToken) = serialised {
+      released.add(token)
+      underlying.release(threadId, token)
+    }
+    def commit(threadId: ThreadId, commit: Commit)                  = underlying.commit(threadId, commit)
+    def latest(threadId: ThreadId)                                  = underlying.latest(threadId)
+    def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                            = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
+  }
+
+  /**
    * `first` opens `entered` and waits for `gate`, opening `interrupted` if it is interrupted instead;
    * then `second` counts its executions in `later`, standing in for a tool's side effect.
    */
@@ -447,6 +488,131 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     store.latest(thread).value.value.checkpoint.id shouldBe claimCheckpoint
     events(store).map(_.event).collect { case c: RunEvent.CheckpointCommitted => c } shouldBe empty
   }
+
+  // ---- a lost run's end does not wait on a store that hangs ----
+
+  /** Whether the Async writer of thread `t` is still alive: a platform thread, so it can be listed. */
+  private def writerAlive: Boolean =
+    Thread.getAllStackTraces.keySet.asScala.exists(t => t.getName == s"llm4s-graph-writer-${thread.value}" && t.isAlive)
+
+  "A lost Async run whose commit hangs in the store" should
+    "still end and free its thread locally, and let the late write land harmlessly" in {
+      val time        = ManualTime()
+      val store       = Hooked(InMemoryCheckpointer(time))
+      val writing     = new CountDownLatch(1)
+      val hang        = new CountDownLatch(1)
+      val releasing   = new CountDownLatch(1)
+      val releaseGate = new CountDownLatch(1)
+      val releasers   = new ConcurrentLinkedQueue[Thread]()
+      val entered     = new CountDownLatch(1)
+      val log         = StateKey.appending[String]("log")
+      val b           = GraphBuilder("queued", "v1")
+      val held = b.node[Unit]("held", writes = Set(log)) { (_, _, _) =>
+        entered.countDown()
+        CancelledError.catchInterrupt(new CountDownLatch(1).await(60, TimeUnit.SECONDS)).left.foreach { _ =>
+          Thread.currentThread().interrupt()
+        }
+        continue(Command.empty.update(log, "held"))
+      }
+      val quick = b.node[String]("quick", writes = Set(log)) { (input, _, _) =>
+        continue(Command.empty.update(log, input).goto(held))
+      }
+      val graph = b.compile(quick)(_.get(log)).value
+      // `quick`'s pending write hangs in the store: the partition the heartbeat exists to survive
+      val armed = new AtomicBoolean(true)
+      store.onCommit = commit => {
+        if commit.checkpoint.isEmpty && commit.pendingWrites.nonEmpty && armed.compareAndSet(true, false) then {
+          writing.countDown()
+          hang.await(10, TimeUnit.SECONDS): Unit
+        }
+        None
+      }
+      // and the release is held too, so the late write lands while the claim is still the run's
+      store.onRelease = () => {
+        releasers.add(Thread.currentThread())
+        releasing.countDown()
+        releaseGate.await(10, TimeUnit.SECONDS): Unit
+        None
+      }
+      val rt     = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      val handle = rt.start(thread, graph, "x", run("first"), Durability.Async).value
+      entered.await(5, TimeUnit.SECONDS) shouldBe true
+      writing.await(5, TimeUnit.SECONDS) shouldBe true
+      store.onRenew = unreachable
+      val token = tokenOf(store)
+
+      time.advance(1.second)
+      // its result does not wait for the hung write, nor for its release
+      await(handle).failed._2 shouldBe GraphError.ClaimLost("t", token, None)
+      rt.heldLocally(thread) shouldBe false
+      releasing.await(5, TimeUnit.SECONDS) shouldBe true
+
+      // the hung write lands late: fenced by the token, it is accepted only because nobody took over
+      hang.countDown()
+      eventually(!writerAlive)
+      events(store).map(_.event) should contain(RunEvent.TaskCompleted)
+      // and it leaves the hub no hand-over mark for a thread no run holds
+      rt.handOverMarked(thread) shouldBe false
+      // the detached release lands once the store lets it, freeing the claim
+      releaseGate.countDown()
+      eventually(
+        store.underlying.latest(thread).isRight && store.releases.get == 1 && !releasers.asScala.exists(_.isAlive)
+      )
+      store.underlying.claim(thread, ClaimRequest(RunId("next"), 1.minute)).value.holder shouldBe RunId("next")
+    }
+
+  "A healthy Async run" should "still drain every commit before it releases its claim" in {
+    val time   = ManualTime()
+    val store  = Hooked(InMemoryCheckpointer(time))
+    val two    = TwoStep()
+    val atEnd  = new AtomicReference[Option[CheckpointStatus]](None)
+    val stalls = new CountDownLatch(1) // never opened: the closing commit waits out its stall
+    store.onCommit = commit => {
+      if commit.checkpoint.exists(_.status == CheckpointStatus.Completed) then
+        stalls.await(200, TimeUnit.MILLISECONDS): Unit
+      None
+    }
+    store.onRelease = () => {
+      atEnd.set(store.underlying.latest(thread).toOption.flatten.map(_.checkpoint.status))
+      None
+    }
+    two.gate.countDown()
+    await(runtime(store, time).start(thread, two.graph, "x", run("first"), Durability.Async).value).completed
+    atEnd.get shouldBe Some(CheckpointStatus.Completed)
+  }
+
+  "A lost run whose renewal hangs in a store that serialises its calls" should
+    "end and free its thread locally without waiting for its release, which then spares a new claim" in {
+      val time       = ManualTime()
+      val underlying = InMemoryCheckpointer(time)
+      val store      = Serialised(underlying)
+      val two        = TwoStep()
+      val rt         = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      val handle     = rt.start(thread, two.graph, "x", run("first")).value
+      two.awaitEntered()
+      val token = tokenOf(store)
+      store.hangRenewals()
+      store.renewing.await(5, TimeUnit.SECONDS) shouldBe true
+
+      // the lease passes while the renewal hangs; the release would queue behind it
+      time.advance(1.second)
+      await(handle).failed._2 shouldBe GraphError.ClaimLost("t", token, None)
+      rt.heldLocally(thread) shouldBe false
+      store.released.asScala.toVector shouldBe empty
+
+      // another runtime, on a connection of its own, takes the expired claim over
+      val next      = TwoStep()
+      val successor = runtime(underlying, time, slow).recover(thread, next.graph, run("second")).value
+      next.awaitEntered()
+      // the hung renewal ends; the old release then runs with the old token, and spares the new claim
+      store.unhang()
+      eventually(store.released.contains(token))
+      underlying.claim(thread, ClaimRequest(RunId("other"), 1.minute)).left.value should matchPattern {
+        case GraphError.ThreadBusy("t", _, Some("second")) =>
+      }
+      next.gate.countDown()
+      await(successor).completed
+    }
 
   // ---- 3: release with a clean interrupt flag; no late interrupt reaches a closing run ----
 

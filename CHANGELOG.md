@@ -2674,6 +2674,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **No claim renewal lands after a run's release** ([#1700](https://github.com/llm4s/llm4s/issues/1700)): the
   heartbeat is stopped and joined, for at most `ttl`, before the release, so a renewal still in the store cannot
   extend a finished run's claim after a release that failed.
+- **A run that lost its claim ends even when its store hangs** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  under `Durability.Async`, dropping the queue waited for a commit hung in the store forever, and a release queued
+  behind a hung renewal in a store that serialises its calls (SQLite) never returned, so the run never set its
+  result or freed its thread in the runtime. An `Async` commit in flight is now waited for at most `ttl`, then left
+  to finish fenced on the writer, and such a run releases its claim on a detached thread, waited for at most `ttl`
+  (not at all when a renewal is still hung); a release landing late is by token, so it never frees a claim another
+  run has taken since. A late write that lands leaves the event hub no state for the thread.
 - **A claim is renewed from its grant** ([#1700](https://github.com/llm4s/llm4s/issues/1700)): the first renewal came
   `renewEvery` after the run was launched, so slow admission work could let the lease lapse before it; `fork` and
   `updateState` now renew the claim they hold too.

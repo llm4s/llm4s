@@ -131,8 +131,13 @@ The run finds its claim lost when its lease passes with no renewal landing, when
 
 - its running tasks are interrupted, as `cancel` interrupts them;
 - it commits nothing more - not even `RunFailed` - and drops what it had not yet written: the queue of
-  `Durability.Async` (a commit already in flight still lands) and the buffer of `Durability.OnExit`;
-- it releases its claim, which is a no-op if another run holds the thread;
+  `Durability.Async` and the buffer of `Durability.OnExit`. An `Async` commit already in the store is waited for
+  at most `ttl`; one still there then is left to finish on its own. It is fenced by the run's token, so it lands
+  only if nobody has claimed the thread since;
+- it releases its claim, which is a no-op if another run holds the thread. The release runs on a thread of its
+  own, waited for at most `ttl` (not at all if a renewal is still hung in the store), so the run's result and the
+  thread's release in this runtime never wait on a store that hangs; a release that never lands lets the claim
+  lapse after `ttl`;
 - it ends with `GraphError.ClaimLost(threadId, token, current)`, where `current` is the thread's current claim
   when the store named one.
 
@@ -161,7 +166,8 @@ is free:
 - A run that has begun committing its outcome finishes that commit: a loss found during it does not interrupt it.
   The commit is still fenced, so it lands only if nobody has taken the thread over.
 - A process that dies holds its threads for up to `ttl`; so does a store that fails to release a claim. A run's
-  end waits up to `ttl` for a renewal still in the store, so that none lands after its release.
+  end waits up to `ttl` for a renewal still in the store, so that none lands after its release; if the renewal is
+  still there then, the run releases on a thread of its own without waiting, and its result is set at once.
 
 ## Subscriptions across runtimes
 
