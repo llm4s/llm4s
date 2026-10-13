@@ -229,7 +229,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     c.terminalSeen shouldBe true // await drained the listener
     durableRuns(c).distinct shouldBe Vector(recovered.runId.value)
     c.all.collectFirst { case StreamEvent.Durable(r) => r.event } should matchPattern {
-      case Some(RunEvent.RunRecovered(_, _, _)) =>
+      case Some(RunEvent.RunRecovered(_, _, _, _)) =>
     }
     lastIsTerminal(c, RunEvent.RunCompleted)
   }

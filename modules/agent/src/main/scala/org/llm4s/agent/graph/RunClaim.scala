@@ -13,17 +13,32 @@ import scala.concurrent.duration.*
  * in another runtime or process is refused with [[GraphError.ThreadBusy]]. Once it has expired,
  * another run may take the thread over, and the store then refuses this claim's token
  * ([[GraphError.StaleClaim]]). Until then the holder may still commit and renew, even past
- * `expiresAt`: expiry only lets another run claim the thread.
+ * `expiresAt`: expiry only lets another run claim the thread. `takenOverFrom` is the holder of the
+ * expired claim, never released, that this one replaced: `None` when the thread was free.
  */
-final case class RunClaim private (threadId: ThreadId, holder: RunId, token: FencingToken, expiresAt: Instant):
-  def withThreadId(t: ThreadId): RunClaim  = copy(threadId = t)
-  def withHolder(h: RunId): RunClaim       = copy(holder = h)
-  def withToken(t: FencingToken): RunClaim = copy(token = t)
-  def withExpiresAt(at: Instant): RunClaim = copy(expiresAt = at)
+final case class RunClaim private (
+  threadId: ThreadId,
+  holder: RunId,
+  token: FencingToken,
+  expiresAt: Instant,
+  takenOverFrom: Option[RunId]
+):
+  def withThreadId(t: ThreadId): RunClaim              = copy(threadId = t)
+  def withHolder(h: RunId): RunClaim                   = copy(holder = h)
+  def withToken(t: FencingToken): RunClaim             = copy(token = t)
+  def withExpiresAt(at: Instant): RunClaim             = copy(expiresAt = at)
+  def withTakenOverFrom(from: RunId): RunClaim         = copy(takenOverFrom = Some(from))
+  def withTakenOverFrom(from: Option[RunId]): RunClaim = copy(takenOverFrom = from)
 
 object RunClaim:
-  def apply(threadId: ThreadId, holder: RunId, token: FencingToken, expiresAt: Instant): RunClaim =
-    new RunClaim(threadId, holder, token, expiresAt)
+  def apply(
+    threadId: ThreadId,
+    holder: RunId,
+    token: FencingToken,
+    expiresAt: Instant,
+    takenOverFrom: Option[RunId] = None
+  ): RunClaim =
+    new RunClaim(threadId, holder, token, expiresAt, takenOverFrom)
 
 /**
  * What a run asks of [[Checkpointer.claim]]: who holds the claim, and for how long it lasts from the

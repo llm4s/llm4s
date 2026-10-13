@@ -256,7 +256,7 @@ final class GraphRuntime(
   ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { signal =>
     graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None =>
-        newRun(graph, threadId, config, durability, 0, signal).admit(graph.start(input), None, started(config))
+        newRun(graph, threadId, config, durability, 0, signal).admit(graph.start(input), None, _ => started(config))
       case Some(stored) =>
         checkTenant(threadId, stored, config).flatMap { _ =>
           newOnly match
@@ -271,7 +271,7 @@ final class GraphRuntime(
                       .admit(
                         graph.startAt(done.superstep, done.state, input),
                         Some(stored.checkpoint.id),
-                        started(config)
+                        _ => started(config)
                       )
                   }
         }
@@ -298,8 +298,14 @@ final class GraphRuntime(
                 run <- newRun(graph, threadId, config, durability, execution.superstep, signal).admit(
                   execution,
                   Some(stored.checkpoint.id),
-                  RunEvent
-                    .RunRecovered(stored.checkpoint.id, config.tenantId.map(_.value), config.principal.map(_.value)),
+                  // a claim that replaced another run's expired one is a takeover: that run may still be executing
+                  granted =>
+                    RunEvent.RunRecovered(
+                      stored.checkpoint.id,
+                      config.tenantId.map(_.value),
+                      config.principal.map(_.value),
+                      granted.takenOverFrom.filter(_ != config.runId).map(_.value)
+                    ),
                   // read again under the claim: a holder whose claim expired but was not yet replaced
                   // could still add pending writes after the read above, and only the claim stops it
                   () =>
@@ -342,11 +348,12 @@ final class GraphRuntime(
               run <- newRun(graph, threadId, config, durability, resumed.superstep, signal).admit(
                 resumed,
                 Some(stored.checkpoint.id),
-                RunEvent.RunResumed(
-                  suspended.parked.map(_.interrupt).filter(answers.contains).map(_.value),
-                  config.tenantId.map(_.value),
-                  config.principal.map(_.value)
-                )
+                _ =>
+                  RunEvent.RunResumed(
+                    suspended.parked.map(_.interrupt).filter(answers.contains).map(_.value),
+                    config.tenantId.map(_.value),
+                    config.principal.map(_.value)
+                  )
               )
             yield run
         }
@@ -1037,12 +1044,12 @@ final class GraphRuntime(
      * commit does not land, or anything throws, the store claim is given back before this returns.
      * `carry` is called once the store claim is granted, and returns the pending writes to carry over
      * and the task results `execute` reuses: read under the claim, nothing a fenced holder writes
-     * can be missed.
+     * can be missed. `event` is the claim's event, given the granted claim.
      */
     def admit(
       execution: Execution,
       parent: Option[String],
-      event: RunEvent,
+      event: RunClaim => RunEvent,
       carry: () => Result[(Vector[PendingWrite], Map[TaskId, TaskResult])] = () => Right(Vector.empty -> Map.empty)
     ): Result[Run[I, O]] =
       claimThread(threadId, config).flatMap { granted =>
@@ -1050,7 +1057,8 @@ final class GraphRuntime(
         parentOrdinal = GraphRuntime.ordinal(parent)
         var admitted = false
         Using.resource(new AutoCloseable { def close(): Unit = if !admitted then releaseClaim() }) { _ =>
-          val outcome = carry().flatMap((carried, reused) => committed(execution, parent, event, carried, reused))
+          val outcome =
+            carry().flatMap((carried, reused) => committed(execution, parent, event(granted), carried, reused))
           admitted = outcome.isRight
           outcome
         }

@@ -69,7 +69,8 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
         val claim = Claim(request.holder.value, nextToken(c), now.plusNanos(request.ttl.toNanos))
         ensureRow(c, threadId)
         setClaim(c, threadId, Some(claim))
-        Right(granted(threadId, claim))
+        // a claim still held here has expired: this one takes it over
+        Right(granted(threadId, claim, current.flatMap(_.claim)))
   }
 
   def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration): Result[RunClaim] = writing("renew") { c =>
@@ -509,8 +510,14 @@ object SqliteCheckpointer:
       undecodable(operation, what, Option(e.getMessage).getOrElse(e.getClass.getName), Some(e))
     )
 
-  private def granted(threadId: ThreadId, claim: Claim): RunClaim =
-    RunClaim(threadId, RunId(claim.holder), FencingToken(claim.token), claim.expiresAt)
+  private def granted(threadId: ThreadId, claim: Claim, replaced: Option[Claim] = None): RunClaim =
+    RunClaim(
+      threadId,
+      RunId(claim.holder),
+      FencingToken(claim.token),
+      claim.expiresAt,
+      replaced.map(c => RunId(c.holder))
+    )
 
   private def stale(threadId: ThreadId, current: Option[Row], token: FencingToken): GraphError =
     GraphError.StaleClaim(threadId.value, token.value, current.flatMap(_.claim).map(_.token))

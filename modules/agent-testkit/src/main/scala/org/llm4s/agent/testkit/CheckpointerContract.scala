@@ -42,7 +42,8 @@ import scala.jdk.CollectionConverters.*
  *    and read by id, ids never repeated, a blocked turn retracted (`Commit.retractTurn`), and pruning
  *    by age, by count and by event count, never the latest checkpoint; and claims and fencing - one
  *    live claim per thread, tokens strictly
- *    increasing, takeover once a claim has expired by the store's clock, renewal and release by the
+ *    increasing, takeover once a claim has expired by the store's clock (naming the expired claim's
+ *    holder as `takenOverFrom`), renewal and release by the
  *    current token only, and every commit refused with [[GraphError.StaleClaim]] unless it carries
  *    the current token - including from many threads at once - and change notification:
  *    `awaitEventsAfter` returns what is there at once, returns a commit made meanwhile through
@@ -441,6 +442,9 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     taken.holder shouldBe RunId("second")
     taken.token.value should be > first.token.value
     s.expiresAt(taken.expiresAt, 60.seconds, Some(first.expiresAt))
+    // the takeover names the expired claim's holder, so a recovering run can record it
+    taken.takenOverFrom shouldBe Some(RunId("first"))
+    first.takenOverFrom shouldBe None
 
     s.commit(
       first.token,
@@ -518,6 +522,8 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.store.release(s.thread, first.token).value shouldBe (())
     val second = s.claim("second").value
     second.token.value should be > first.token.value
+    // a released claim was not taken over
+    second.takenOverFrom shouldBe None
     // a release with the old token must not free the new holder's claim
     s.store.release(s.thread, first.token).value shouldBe (())
     s.claim("third").refused shouldBe GraphError.ThreadBusy(s.thread.value, Some("c1"), Some("second"))

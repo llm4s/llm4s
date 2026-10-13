@@ -13,7 +13,19 @@ import java.time.Instant
  */
 enum RunEvent derives ReadWriter:
   case RunStarted(tenantId: Option[String], principal: Option[String])
-  case RunRecovered(fromCheckpoint: String, tenantId: Option[String], principal: Option[String])
+
+  /**
+   * A run continued the incomplete execution at `fromCheckpoint`. `takenOverFrom` is the run id of
+   * another run whose claim on the thread had expired, unreleased, and which this run's claim replaced:
+   * a takeover, so that run may still have been executing. `None` when the thread was free; a log
+   * written before the field existed reads as `None`.
+   */
+  case RunRecovered(
+    fromCheckpoint: String,
+    tenantId: Option[String],
+    principal: Option[String],
+    takenOverFrom: Option[String] = None
+  )
   case TaskCompleted
   case TaskFailed(message: String)
 

@@ -58,7 +58,8 @@ trait Checkpointer:
    * Claims `threadId` for `request.holder` until `request.ttl` from now, by the store's clock, if no
    * other claim on it is live, and returns the claim with a new [[FencingToken]]. A live claim -
    * whoever holds it, the same holder included - is `Left(GraphError.ThreadBusy)` naming its holder,
-   * with nothing changed. A thread need not have a checkpoint to be claimed.
+   * with nothing changed. A thread need not have a checkpoint to be claimed. A claim that replaces an
+   * expired one nobody released names that claim's holder as [[RunClaim.takenOverFrom]].
    */
   def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim]
 
@@ -214,8 +215,14 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
   private def store(threadId: ThreadId, record: ThreadRecord): Unit =
     if record.isEmpty then threads.remove(threadId.value): Unit else threads.update(threadId.value, record)
 
-  private def granted(threadId: ThreadId, claim: Claim): RunClaim =
-    RunClaim(threadId, RunId(claim.holder), FencingToken(claim.token), claim.expiresAt)
+  private def granted(threadId: ThreadId, claim: Claim, replaced: Option[Claim] = None): RunClaim =
+    RunClaim(
+      threadId,
+      RunId(claim.holder),
+      FencingToken(claim.token),
+      claim.expiresAt,
+      replaced.map(c => RunId(c.holder))
+    )
 
   private def stale(threadId: ThreadId, current: ThreadRecord, token: FencingToken): GraphError =
     GraphError.StaleClaim(threadId.value, token.value, current.claim.map(_.token))
@@ -232,7 +239,8 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
         lastToken += 1
         val claim = Claim(request.holder.value, lastToken, now.plusNanos(request.ttl.toNanos))
         store(threadId, current.copy(claim = Some(claim)))
-        Right(granted(threadId, claim))
+        // a claim still held here has expired: this one takes it over
+        Right(granted(threadId, claim, current.claim))
   }
 
   def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration): Result[RunClaim] = withLock(lock) {
