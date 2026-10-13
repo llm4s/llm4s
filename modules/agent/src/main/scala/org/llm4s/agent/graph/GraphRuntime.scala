@@ -251,13 +251,13 @@ final class GraphRuntime(
    * `cancel` stops too), in the same order and with the same guarantees, and are queued only as they
    * fit, so they never make it lag. Live progress of another runtime's runs is not delivered: it is
    * never stored. With [[WatchPolicy.disabled]], another runtime's commits are seen only by
-   * subscribing again, which replays the log. A failed read of the store ends the subscription,
+   * subscribing again, which replays the log - all of it once no commit a run of this runtime gave up
+   * on is still in the store on the thread; until then the replay stops at the first event above what
+   * this runtime has handed over. A failed read of the store ends the subscription,
    * after what is queued, with [[DisconnectReason.ReplayFailed]]. Returns without
    * replaying: replay runs on the subscription's dispatcher thread, the only thread `listener` is
-   * called on, and a failed replay ends it with [[DisconnectReason.ReplayFailed]]. Joining the event
-   * hub takes its lock, which another subscription to any thread holds for its final catch-up read
-   * of the store, so `subscribe` can wait behind that one read. The subscription receives every live
-   * event sent after this returns: one sent while it replays is held - up to `capacity`, the rest
+   * called on, and a failed replay ends it with [[DisconnectReason.ReplayFailed]]. The subscription
+   * receives every live event sent after this returns: one sent while it replays is held - up to `capacity`, the rest
    * dropped and counted as a [[StreamEvent.LiveGap]] - and delivered after the durable events
    * committed before it and before those committed after it, as live events are once the replay is
    * done. A listener that throws is disconnected

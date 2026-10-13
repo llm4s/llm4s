@@ -2696,8 +2696,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   result or freed its thread in the runtime. An `Async` commit in flight is now waited for at most `ttl`, then left
   to finish fenced on the writer, and such a run releases its claim on a detached thread, waited for at most `ttl`
   (not at all when a renewal is still hung); a release landing late is by token, so it never frees a claim another
-  run has taken since. A late write that lands leaves the event hub no state for the thread, even when it lands while
-  the run is freeing the thread (the check and both steps of the run's local release share one lock). Its events are
+  run has taken since. Until a write the run gave up on returns, the event hub keeps its hand-over mark for the
+  thread, so a subscription made meanwhile - a run-scoped replay of the lost run included - joins with it and never
+  waits on that write; once the write returns the hub keeps no state for the thread, even when it returns while the
+  run is freeing the thread (the check and both steps of the run's local release share one lock). Its events are
   an orphan of a run that has ended: they reach the thread's subscribers in sequence, but never the run's own
   listeners, its observer or its tracing, live or replayed, so a `ClaimLost` run's run-scoped stream ends at its end
   and `AgentRun.await` never waits for a write it abandoned. So is a commit whose hand-over is still reading a
@@ -2708,14 +2710,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A subscription made while no run holds the thread no longer replays a commit whose hand-over has not finished - the
   next run's first commit, say - ahead of progress its other subscriptions received before that commit: it decides
   which stored events have been handed over holding the thread's commit lock, on its own dispatcher thread, and a
-  cancel ends that wait.
+  cancel ends that wait. An `Observer` takes its place in the log from its own run's claim: a lost run's late write
+  handed over during the next run's admission is no longer delivered to that run's observer ahead of its claim.
 - **A run that loses its claim while finishing, or while stuck in the store, still ends**
   ([#1700](https://github.com/llm4s/llm4s/issues/1700)): a loss found once the run had begun committing its outcome
   was discarded, because the first stop cause wins, so a `Sync`, `Async` or `OnExit` closing commit hung in the store
   held `await()` and the thread's slot in the runtime indefinitely; so did any `Sync` commit stuck in a store call
   that ignores interrupts. A loss now fences the run at any stage - a commit not yet begun is skipped - and, if the
   run has not ended within `2 × ttl`, ends it without its thread: `ClaimLost`, the thread freed in the runtime, the
-  claim released on a detached thread. The run thread, when it returns, sets no second result and frees nothing.
+  claim released on a detached thread. The run thread, when it returns, sets no second result and frees nothing; and
+  the watchdog fences and cuts the run only once it has taken it, so a run thread that settles first ends with its
+  own outcome, which its listeners see in full.
   `fork`, `updateState` and a `deleteThread` that did not delete likewise release on a detached thread when their
   heartbeat's renewal cannot be joined, so a renewal hung in a store that serialises its calls (SQLite) no longer
   keeps them from returning.
