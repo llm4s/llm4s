@@ -404,32 +404,43 @@ final private[graph] class EventHub(
           if record.seq <= lastQueuedSeq + 1 || halted then
             queueDurable(record)
             None
-          else if durableQueued + (record.seq - lastQueuedSeq) > capacity then
-            // the missing events and this one cannot all fit: behind by more than `capacity`
+          else if lastQueuedSeq > 0 && durableQueued + (record.seq - lastQueuedSeq) > capacity then
+            // the missing events and this one cannot all fit: behind by more than `capacity`. From `0`
+            // the gap cannot be told from the numbers - under a deleted thread's id the log starts past
+            // the deleted thread's - so it is read, at most as far as fits
             lagging = true
             notEmpty.signal()
             None
-          else Some(lastQueuedSeq)
+          else Some(lastQueuedSeq -> (capacity - durableQueued))
       }
       // `lastQueuedSeq` of a live dispatcher moves only under `hubLock`, which the caller holds
-      missing.foreach { after =>
-        val between = readBetween(after, record.seq)
+      missing.foreach { (after, room) =>
+        val between = readBetween(after, record.seq, room)
         withLock(lock) {
           between match
-            case Right(found) => (found :+ record).foreach(queueDurable)
-            case Left(error)  => fail(error)
+            case Right(Some(found)) => (found :+ record).foreach(queueDurable)
+            case Right(None)        =>
+              // more are missing than fit beside this one: behind by more than `capacity`
+              if !cancelled && !halted then
+                lagging = true
+                notEmpty.signal()
+            case Left(error) => fail(error)
         }
       }
 
-    /** The events with `after < seq < before`, read from the store page by page. */
-    private def readBetween(after: Long, before: Long): Result[Vector[EventRecord]] =
-      @tailrec def page(from: Long, found: Vector[EventRecord]): Result[Vector[EventRecord]] =
-        if from >= before - 1 then Right(found)
+    /**
+     * The events with `after < seq < before`, read from the store page by page; `None` once more than
+     * `room - 1` of them are found, so that they and the event at `before` cannot all fit.
+     */
+    private def readBetween(after: Long, before: Long, room: Int): Result[Option[Vector[EventRecord]]] =
+      @tailrec def page(from: Long, found: Vector[EventRecord]): Result[Option[Vector[EventRecord]]] =
+        if found.size >= room then Right(None)
+        else if from >= before - 1 then Right(Some(found))
         else
-          val limit = math.min(PageSize.toLong, before - 1 - from).toInt
+          val limit = math.min(math.min(PageSize, room - found.size).toLong, before - 1 - from).toInt
           Try(checkpointer.eventsAfter(threadId, from, limit)).toResult.flatten match
             case Left(error)                 => Left(error)
-            case Right(read) if read.isEmpty => Right(found)
+            case Right(read) if read.isEmpty => Right(Some(found))
             case Right(read)                 => page(read.last.seq, found ++ read.filter(_.seq < before))
       page(after, Vector.empty)
 

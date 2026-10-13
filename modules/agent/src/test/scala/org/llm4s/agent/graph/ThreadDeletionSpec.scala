@@ -233,6 +233,44 @@ class ThreadDeletionSpec extends AnyFlatSpec with Matchers with EitherValues wit
     sub.cancel()
   }
 
+  it should "take the new thread's first local commit as contiguous, however long the deleted log was" in {
+    // a watch that never polls: the new thread's events reach the subscription only as this runtime's hand-over
+    val runtime =
+      GraphRuntime(InMemoryCheckpointer(), Clock.systemUTC(), ClaimPolicy.default, WatchPolicy(true, 1.hour))
+    val thread   = newThread()
+    val capacity = 8
+    (1 to 3).foreach(i => await(runtime.start(thread, emitter, s"old-$i", RunConfig()).value))
+    runtime.deleteThread(thread).value shouldBe (())
+
+    val seen = Seen()
+    val sub  = runtime.subscribe(thread, afterSeq = 0L, capacity = capacity)(seen).value
+    // its watch starts once it has replayed the (empty) new thread and joined the live set
+    eventually(runtime.storeWatches(thread) shouldBe 1)
+    await(runtime.start(thread, emitter, "new", RunConfig()).value)
+
+    eventually(seen.said shouldBe Vector("new"))
+    seen.disconnected shouldBe None
+    sub.cancel()
+  }
+
+  it should "take the new thread's first commit from another runtime as contiguous, however long the deleted log was" in {
+    val store    = InMemoryCheckpointer()
+    val watching = GraphRuntime(store, Clock.systemUTC(), ClaimPolicy.default, WatchPolicy(pollInterval = 20.millis))
+    val other    = GraphRuntime(store, Clock.systemUTC(), ClaimPolicy.default, WatchPolicy.disabled)
+    val thread   = newThread()
+    (1 to 3).foreach(i => await(other.start(thread, emitter, s"old-$i", RunConfig()).value))
+    other.deleteThread(thread).value shouldBe (())
+
+    val seen = Seen()
+    val sub  = watching.subscribe(thread, afterSeq = 0L, capacity = 8)(seen).value
+    eventually(watching.storeWatches(thread) shouldBe 1)
+    await(other.start(thread, emitter, "new", RunConfig()).value)
+
+    eventually(seen.said shouldBe Vector("new"))
+    seen.disconnected shouldBe None
+    sub.cancel()
+  }
+
   it should "follow a run of the new thread from its first event, as a run handle's subscription does" in {
     val runtime = GraphRuntime(InMemoryCheckpointer(), Clock.systemUTC(), ClaimPolicy.default, WatchPolicy.disabled)
     val thread  = newThread()
