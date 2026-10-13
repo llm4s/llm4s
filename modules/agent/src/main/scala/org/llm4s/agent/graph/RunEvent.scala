@@ -176,6 +176,13 @@ enum DisconnectReason:
    */
   case ReplayFailed(error: LLMError)
 
+  /**
+   * The thread was deleted ([[GraphRuntime.deleteThread]], through this runtime or another sharing the
+   * store). A subscription follows one thread, not its id: a new thread created under the same id is
+   * not delivered to it - subscribe again, from `0`, to follow that one.
+   */
+  case ThreadDeleted
+
 /**
  * A registration with [[GraphRuntime.subscribe]] or [[RunHandle.subscribe]]. It is scoped to a
  * thread, not a run: it keeps delivering the events of every later run on the same thread, and its

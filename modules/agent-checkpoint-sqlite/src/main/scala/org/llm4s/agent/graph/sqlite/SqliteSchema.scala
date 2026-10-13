@@ -14,7 +14,11 @@ import scala.util.Using
  *    `deleteThread`, so a token is never issued twice.
  *  - `llm4s_checkpoint_threads`: one row per thread that has a checkpoint, a claim, or an event number spent - the
  *    latest checkpoint as JSON with its id (the thread's version), the next event number and the replay floor,
- *    and the claim (holder, token, expiry as epoch seconds and nanoseconds).
+ *    the first event number of the thread now under the id (`first_seq`, version 2), and the claim (holder, token,
+ *    expiry as epoch seconds and nanoseconds). `deleteThread` keeps the row of a thread that numbered any event,
+ *    emptied, as a tombstone: `next_seq`, `first_seq` and the replay floor move one past the deleted thread's next
+ *    number, so a new thread of the same id numbers its events past the deleted one's, and a read from inside the
+ *    deleted log is told so (`GraphError.ThreadDeleted`). The tombstone holds no data of the deleted thread.
  *  - `llm4s_checkpoint_history`: every checkpoint of every thread's history, latest included, as JSON, keyed by
  *    `(thread, position)` - the position counts up along the thread, so paging newest first reads the primary key
  *    backwards - and unique by `(thread, checkpoint id)`, so a read by id and the duplicate-id check use that index.
@@ -28,13 +32,20 @@ import scala.util.Using
 private[sqlite] object SqliteSchema:
 
   /** The schema version this build writes. */
-  val Current: Int = 1
+  val Current: Int = 2
 
   /** A migration from the version it is keyed by to the next. */
   type Step = Connection => Unit
 
   /** The steps, keyed by the version each upgrades from. */
-  val steps: Map[Int, Step] = Map(0 -> createTables)
+  val steps: Map[Int, Step] = Map(0 -> createTables, 1 -> addFirstSeq)
+
+  /**
+   * Version 2: the first event number of the thread now under each id, so that a thread deleted and created again
+   * numbers on past the deleted one's events. Every thread a version-1 file holds is its id's first, numbered from 1.
+   */
+  private def addFirstSeq(connection: Connection): Unit =
+    statements(connection, "ALTER TABLE llm4s_checkpoint_threads ADD COLUMN first_seq INTEGER NOT NULL DEFAULT 1")
 
   private def createTables(connection: Connection): Unit =
     statements(

@@ -36,7 +36,9 @@ import scala.jdk.CollectionConverters.*
  *  - '''The store''', called directly: commits applied atomically or not at all; a new checkpoint
  *    accepted only over the latest ([[GraphError.CheckpointConflict]]) and pending writes only for
  *    it ([[GraphError.InvalidCommit]]); events numbered contiguously in commit order and never
- *    reused, also after a refused commit, compaction or `deleteThread`; compaction and
+ *    reused, also after a refused commit, compaction or `deleteThread` - a new thread of a deleted
+ *    thread's id is numbered on past the deleted thread's events, and a read from inside the deleted
+ *    log is refused ([[GraphError.ThreadDeleted]]), also while waiting; compaction and
  *    [[GraphError.ReplayUnavailable]]; `deleteThread`, fenced by the current claim's token like a
  *    commit ([[GraphError.StaleClaim]] otherwise, deleting nothing); checkpoints, pending writes and events read
  *    back as written; the checkpoint history - every superseded checkpoint kept, newest first, paged
@@ -414,9 +416,10 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.store.deleteThread(s.thread, token).refused shouldBe GraphError.StaleClaim(s.thread.value, token.value, None)
     val again = s.claim("again").value
     again.token.value should be > token.value
-    // the id is a new thread: a first checkpoint is accepted, its events numbered from 1
+    // the id is a new thread: a first checkpoint is accepted, its events numbered on past the old ones,
+    // the deleted thread's next number skipped
     s.commit(again.token, Some(s.checkpoint("c1", None)), events = Vector(s.event("again"))).value.map(_.seq) shouldBe
-      Vector(1L)
+      Vector(3L)
     s.store.latest(s.thread).value.value.pendingWrites shouldBe empty
   }
 
@@ -462,6 +465,82 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.claim("deleter").refused shouldBe GraphError.ThreadBusy(s.thread.value, Some("c1"), Some("holder"))
     s.store.renew(s.thread, holder.token, ttl).value.token shouldBe holder.token
     s.commit(holder.token, events = Vector(s.event("b"))).value.map(_.seq) shouldBe Vector(2L)
+  }
+
+  it should "number a new thread of a deleted thread's id past the deleted thread's events, across a reopen" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.commit(token, Some(s.checkpoint("c1", None)), events = Vector(s.event("a"), s.event("b"), s.event("c"))).value
+    s.store.deleteThread(s.thread, token).value shouldBe (())
+    s.seqs() shouldBe empty
+    s.reopened()
+    s.seqs() shouldBe empty
+    val again = s.claim("again").value.token
+    // 4, the deleted thread's next number, is skipped
+    s.commit(again, Some(s.checkpoint("n1", None)), events = Vector(s.event("n1"), s.event("n2")))
+      .value
+      .map(_.seq) shouldBe
+      Vector(5L, 6L)
+    s.seqs() shouldBe Vector(5L, 6L)
+    s.store.eventsAfter(s.thread, 5L, 10).value.map(_.seq) shouldBe Vector(6L)
+    // and again: each new thread of the id is numbered on past every one before it
+    s.store.deleteThread(s.thread, again).value shouldBe (())
+    val third = s.claim("third").value.token
+    s.commit(third, events = Vector(s.event("t1"))).value.map(_.seq) shouldBe Vector(8L)
+    // a thread that numbered no event leaves no gap
+    val quiet = newThread()
+    val q1    = s.claim("q1", quiet).value.token
+    s.store.deleteThread(quiet, q1).value shouldBe (())
+    val q2 = s.claim("q2", quiet).value.token
+    s.commit(q2, events = Vector(s.event("q")), on = quiet).value.map(_.seq) shouldBe Vector(1L)
+  }
+
+  it should "refuse to read on from inside a deleted thread's log, so no reader takes a new thread for its continuation" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.commit(token, Some(s.checkpoint("c1", None)), events = Vector(s.event("a"), s.event("b"), s.event("c"))).value
+    s.store.deleteThread(s.thread, token).value shouldBe (())
+
+    // deleted, not yet created again: a reader of the old log learns that it ended
+    s.store.eventsAfter(s.thread, 3L, 10).refused shouldBe GraphError.ThreadDeleted(s.thread.value, 3L, 5L)
+    s.store.eventsAfter(s.thread, 1L, 10).refused shouldBe GraphError.ThreadDeleted(s.thread.value, 1L, 5L)
+    within("awaitEventsAfter")(s.store.awaitEventsAfter(s.thread, 3L, 10, 1.hour)).refused shouldBe
+      GraphError.ThreadDeleted(s.thread.value, 3L, 5L)
+    // a reader from the start, or from just before the new thread's first event, reads the new thread
+    s.store.eventsAfter(s.thread, 0L, 10).value shouldBe empty
+    s.store.eventsAfter(s.thread, 4L, 10).value shouldBe empty
+
+    val again = s.claim("again").value.token
+    s.commit(again, Some(s.checkpoint("n1", None)), events = Vector(s.event("n1"), s.event("n2"))).value
+    // created again: the old log's readers are still refused, by every store over the storage
+    s.store.eventsAfter(s.thread, 3L, 10).refused shouldBe GraphError.ThreadDeleted(s.thread.value, 3L, 5L)
+    within("awaitEventsAfter")(s.store.awaitEventsAfter(s.thread, 3L, 10, 1.hour)).refused shouldBe
+      GraphError.ThreadDeleted(s.thread.value, 3L, 5L)
+    s.other().eventsAfter(s.thread, 2L, 10).refused shouldBe GraphError.ThreadDeleted(s.thread.value, 2L, 5L)
+    s.store.eventsAfter(s.thread, 0L, 10).value.map(_.seq) shouldBe Vector(5L, 6L)
+    s.store.eventsAfter(s.thread, 4L, 10).value.map(_.seq) shouldBe Vector(5L, 6L)
+    s.store.eventsAfter(s.thread, 5L, 10).value.map(_.seq) shouldBe Vector(6L)
+  }
+
+  it should "end an awaitEventsAfter wait from inside a thread's log when the thread is deleted meanwhile" in {
+    val s     = Store()
+    val other = s.other()
+    val token = s.claim("run").value.token
+    s.commit(token, events = Vector(s.event("a"), s.event("b"))).value
+    val found = new LinkedBlockingQueue[Result[Vector[EventRecord]]]()
+    // waits as a subscription's watch does: one call after another, until one does not return empty
+    Thread.ofVirtual().start { () =>
+      val deadline = System.nanoTime() + contractWait.toNanos
+      var result   = s.store.awaitEventsAfter(s.thread, 2L, 10, 100.millis)
+      while result.exists(_.isEmpty) && System.nanoTime() < deadline do
+        result = s.store.awaitEventsAfter(s.thread, 2L, 10, 100.millis)
+      found.put(result)
+    }: Unit
+    Thread.sleep(50)
+    other.deleteThread(s.thread, token).value shouldBe (())
+    Option(found.poll(contractWait.toMillis + 1000, TimeUnit.MILLISECONDS))
+      .getOrElse(fail("awaitEventsAfter never returned"))
+      .refused shouldBe GraphError.ThreadDeleted(s.thread.value, 2L, 4L)
   }
 
   // ---- claims ----
@@ -684,7 +763,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
 
   // ---- compaction and deletion together ----
 
-  it should "start a deleted thread's replay floor afresh, so a new thread of the same id replays from 1" in {
+  it should "start a deleted thread's replay floor at the new thread's first event, so it replays from the start" in {
     val s     = Store()
     val token = s.claim("run").value.token
     s.commit(token, Some(s.checkpoint("c1", None)), events = (1 to 5).map(i => s.event(s"e$i")).toVector).value
@@ -696,14 +775,15 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val again = s.claim("again").value.token
     s.commit(again, Some(s.checkpoint("n1", None)), events = Vector(s.event("n1"), s.event("n2")))
       .value
-      .map(
-        _.seq
-      ) shouldBe Vector(1L, 2L)
-    s.store.eventsAfter(s.thread, 0L, 10).value.map(_.seq) shouldBe Vector(1L, 2L)
+      .map(_.seq) shouldBe
+      Vector(7L, 8L)
+    s.store.eventsAfter(s.thread, 0L, 10).value.map(_.seq) shouldBe Vector(7L, 8L)
     // and compaction on the new thread starts from its own floor
-    s.store.compactEvents(s.thread, 2L).value shouldBe (())
-    s.store.eventsAfter(s.thread, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(s.thread.value, 2L)
-    s.store.eventsAfter(s.thread, 1L, 10).value.map(_.seq) shouldBe Vector(2L)
+    s.store.compactEvents(s.thread, 8L).value shouldBe (())
+    s.store.eventsAfter(s.thread, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(s.thread.value, 8L)
+    s.store.eventsAfter(s.thread, 7L, 10).value.map(_.seq) shouldBe Vector(8L)
+    // a reader of the deleted log is told it was deleted, not that it was compacted
+    s.store.eventsAfter(s.thread, 3L, 10).refused shouldBe GraphError.ThreadDeleted(s.thread.value, 3L, 7L)
   }
 
   // ---- change notification ----
@@ -1339,6 +1419,34 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     completed(a.start(s.thread, st.graph, "two", config("a2")).value)
     Thread.sleep(watching.pollInterval.toMillis * 5)
     same(seen.all, delivered)
+  }
+
+  it should "end with ThreadDeleted when another runtime deletes the thread, delivering nothing of a new thread of its id" in {
+    val s    = Store()
+    val st   = Steps()
+    val a    = runtime(s.store)
+    val b    = runtime(s.other())
+    val seen = Seen()
+    completed(a.start(s.thread, st.graph, "old", config("a1")).value)
+    val old = log(s)
+    val sub = b.subscribe(s.thread)(seen).value
+    seen.deliveredExactly(old)
+    eventually(b.storeWatches(s.thread) == 1)
+
+    a.deleteThread(s.thread, config("deleter")).value shouldBe (())
+    completed(a.start(s.thread, st.graph, "new", config("a2")).value) shouldBe Vector("new")
+
+    eventually(seen.all.lastOption.exists(_.isInstanceOf[StreamEvent.Disconnected]))
+    seen.all.last shouldBe StreamEvent.Disconnected(old.last.seq, DisconnectReason.ThreadDeleted)
+    same(seen.durable, old)
+    eventually(b.storeWatches(s.thread) == 0)
+    sub.cancel()
+    // a subscription from the start follows the new thread, numbered on past the old one
+    val again = Seen()
+    val next  = b.subscribe(s.thread)(again).value
+    again.deliveredExactly(log(s))
+    log(s).head.seq shouldBe old.last.seq + 2
+    next.cancel()
   }
 
   it should "refuse updateState and fork into a thread whose run is live in another runtime, then fence them by their own claim" in {

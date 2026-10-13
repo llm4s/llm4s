@@ -372,10 +372,17 @@ final class GraphRuntime(
    * deleted, so no run starts on it meanwhile; and the store's delete is fenced by that claim's
    * token, so if the claim lapses before the delete lands - this runtime stalled past
    * `claims.ttl` - and another run takes the thread over, nothing of that run is deleted: the call
-   * is `ThreadBusy`, or `TenantMismatch` if the run is another tenant's. An unknown thread is `Right(())`. Cancel any
-   * [[subscribe]] to the thread first: a new thread of the same id numbers its events from 1 again.
-   * The tenant is checked once more after the store claim is granted, so a thread another runtime
-   * created for another tenant in between is `TenantMismatch`, not deleted.
+   * is `ThreadBusy`, or `TenantMismatch` if the run is another tenant's. An unknown thread is
+   * `Right(())`. The tenant is checked once more after the store claim is granted, so a thread another
+   * runtime created for another tenant in between is `TenantMismatch`, not deleted.
+   *
+   * A subscription follows a thread, not its id. Every [[subscribe]] to the deleted thread - in this
+   * runtime, or in another sharing the store - ends with `Disconnected(lastSeq,
+   * DisconnectReason.ThreadDeleted)` once it has delivered what it had queued: in this runtime at
+   * once, in another when its watch next reads the store ([[WatchPolicy]]; with the watch disabled,
+   * only when its own runtime next commits on the thread and it reads the store for the gap). It never delivers a new thread created under the same id, whose events are
+   * numbered on past the deleted thread's ([[Checkpointer.deleteThread]]); subscribe again from `0`
+   * to follow that one.
    */
   def deleteThread(threadId: ThreadId, config: RunConfig = RunConfig()): Result[Unit] = admission(threadId) {
     val holder = withLock(activeLock) {
@@ -408,11 +415,13 @@ final class GraphRuntime(
                   .flatMap { _ =>
                     // a claim that lapsed while this runtime stalled, and that another run took over:
                     // nothing of that run is deleted, and it is refused as any live claim is
+                    val following = hub.deleting(threadId)
                     val outcome = checkpointer.deleteThread(threadId, claim.token) match
                       case Left(_: GraphError.StaleClaim) =>
                         busyAt(threadId, config, holder = None, nameWithoutCheckpoint = false)
                       case other => other
                     deleted = outcome.isRight
+                    if deleted then following.deleted()
                     outcome
                   }
               }

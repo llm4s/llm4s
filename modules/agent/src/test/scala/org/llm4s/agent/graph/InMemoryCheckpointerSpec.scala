@@ -128,11 +128,12 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
     store.commit(thread, Commit(c.token)).left.value shouldBe a[GraphError.StaleClaim]
     val again = store.claim(thread, ClaimRequest(RunId("again"), ttl)).value
     again.token.value should be > otherToken.value
-    // the id is a new thread again: a first checkpoint is accepted, its events numbered from 1
+    // the id is a new thread again: a first checkpoint is accepted, its events numbered past the old
+    // thread's two, its next number skipped
     store
       .commit(thread, Commit(again.token, Some(checkpoint("c1", None)), Vector.empty, Vector(event("again"))))
       .value
-      .map(_.seq) shouldBe Vector(1L)
+      .map(_.seq) shouldBe Vector(4L)
     // a delete is fenced like a commit: an unknown thread has no claim to delete under
     store.deleteThread(ThreadId("unknown"), again.token).left.value shouldBe
       GraphError.StaleClaim("unknown", again.token.value, None)
