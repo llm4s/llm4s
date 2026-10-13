@@ -262,18 +262,25 @@ final private[graph] class EventHub(
       .map(_ => dispatcher)
 
   /**
-   * A dispatcher that joins the thread's live set now, with no replay, and is not yet running: it
-   * queues everything committed or sent on the thread from this moment. The caller holds the thread
-   * exclusively, so the next commit is its run's claim. [[Observation.start]] starts it;
-   * [[Observation.abandon]] removes it, delivering nothing.
+   * A dispatcher for run `runId`'s observer that joins the thread's live set now, with no replay, and is
+   * not yet running: it queues everything sent on the thread from this moment, and everything committed
+   * from its run's claim on. The caller holds the thread exclusively in this runtime, so the next commit
+   * it makes is that claim - but a commit of a run that gave up on it ([[AbandonedWrites]]) may still be
+   * handed over first, if the store applied it before the claim was granted. Such a commit is not the
+   * run's, nor the observer's place in the log: until the first commit holding an event of `runId` is
+   * handed to it, the dispatcher skips every commit, so it delivers what a subscription from just before
+   * the claim ([[RunHandle.subscribe]]) does. [[Observation.start]] starts it; [[Observation.abandon]]
+   * removes it, delivering nothing.
    */
   def observe(
     threadId: ThreadId,
+    runId: RunId,
     capacity: Int,
     listener: StreamEvent => Unit,
     abandoned: EventRecord => Boolean = AbandonedWrites.none
   ): Observation =
-    val dispatcher = new Dispatcher(threadId, afterSeq = 0L, capacity, listener, abandoned, preJoined = true)
+    val dispatcher =
+      new Dispatcher(threadId, afterSeq = 0L, capacity, listener, abandoned, preJoined = true, observing = Some(runId))
     withLock(hubLock)(join(threadId, dispatcher))
     new Observation(dispatcher)
 
@@ -469,7 +476,8 @@ final private[graph] class EventHub(
    * before it. After that it drains its queue, and watches the store for commits made elsewhere
    * (`watchLoop`). The listener is never called while a lock is held. A `preJoined` dispatcher
    * ([[observe]]) never replays, and only drains and watches; it takes its place in the log from the
-   * first commit handed to it - its run's claim - and its watch waits until then.
+   * first commit of its run, `observing`, handed to it - the run's claim - skipping any commit handed
+   * over before it, and its watch waits until then.
    */
   final private class Dispatcher(
     threadId: ThreadId,
@@ -477,7 +485,8 @@ final private[graph] class EventHub(
     capacity: Int,
     listener: StreamEvent => Unit,
     abandoned: EventRecord => Boolean,
-    preJoined: Boolean = false
+    preJoined: Boolean = false,
+    observing: Option[RunId] = None
   ) extends Dispatched:
     private val lock                = new ReentrantLock()
     private val notEmpty: Condition = lock.newCondition()
@@ -507,7 +516,7 @@ final private[graph] class EventHub(
 
     /**
      * Whether `lastQueuedSeq` is a place in the thread's log: from the start for a subscription, which
-     * replays from `afterSeq`; for a `preJoined` one, from the first commit handed to it.
+     * replays from `afterSeq`; for a `preJoined` one, from the first commit of its run handed to it.
      */
     private var anchored = !preJoined
 
@@ -653,12 +662,13 @@ final private[graph] class EventHub(
      * subscriber ([[EventHub.durable]]). Missing events - committed elsewhere and not yet read by the
      * watch - are queued ahead of them from the read in `reads` that answers this subscriber; if they
      * cannot all fit, the subscriber lags, and if the read failed, it ends. A replaying subscriber only
-     * notes them.
+     * notes them. An observer not yet anchored skips a commit holding no event of its run ([[observe]]).
      */
     def offerDurable(records: Vector[EventRecord], reads: Vector[GapRead]): Unit =
       withLock(lock) {
         if cancelled then ()
         else if !joined then records.foreach(record => noteDurable(record.seq))
+        else if !anchored && observing.exists(run => !records.exists(_.runId == run.value)) then ()
         else
           if !anchored then
             lastQueuedSeq = records.iterator.map(_.seq).min - 1

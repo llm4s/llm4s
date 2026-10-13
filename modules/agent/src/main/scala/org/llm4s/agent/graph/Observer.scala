@@ -5,7 +5,9 @@ package org.llm4s.agent.graph
  * no replay - so it receives every durable event of the run from its claim, and every live event,
  * of which a [[GraphRuntime.subscribe]] made after `start` returns can miss the first: a subscription
  * receives only the live events sent after it returns. `capacity` is the subscription's queue
- * size, at least 2, as for [[GraphRuntime.subscribe]]. The subscription is thread-scoped like any
+ * size, at least 2, as for [[GraphRuntime.subscribe]]. Its durable events start at the run's claim,
+ * as a [[RunHandle.subscribe]]'s do: a commit of an earlier run on the thread handed over during
+ * admission - a lost run's late write - is not delivered. The subscription is thread-scoped like any
  * other: it keeps delivering later runs until cancelled, through [[RunHandle.observation]]. A
  * refused admission abandons it, and its listener is never called.
  */

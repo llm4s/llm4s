@@ -1003,7 +1003,8 @@ final class GraphRuntime(
                 admitted.foreach(_.releaseClaim())
                 release(threadId)
             }) { _ =>
-              observation = observer.map(o => hub.observe(threadId, o.capacity, o.listener, abandoned.apply))
+              observation =
+                observer.map(o => hub.observe(threadId, config.runId, o.capacity, o.listener, abandoned.apply))
               admit(signal).map { run =>
                 admitted = Some(run)
                 val subscription = observation.map(_.start(run.claimSeq - 1))

@@ -61,7 +61,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
       case _                           => ()
     }
     val hub = EventHub(InMemoryCheckpointer())
-    val sub = hub.observe(thread, capacity = 2, listener).start(lastSeq = 0L)
+    val sub = hub.observe(thread, run, capacity = 2, listener).start(lastSeq = 0L)
     hub.durable(thread, Vector(record(1)))
     entered.await(5, TimeUnit.SECONDS) shouldBe true             // the listener holds the first event
     hub.durable(thread, Vector(record(2), record(3), record(4))) // 4 does not fit: lagging
@@ -140,7 +140,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     def live(i: Int): StreamEvent.Live =
       StreamEvent.Live(thread.value, run.value, "task", "node", "test.progress", 1, ujson.Num(i))
     val hub = EventHub(InMemoryCheckpointer())
-    val sub = hub.observe(thread, capacity, listener).start(lastSeq = 0L)
+    val sub = hub.observe(thread, run, capacity, listener).start(lastSeq = 0L)
     hub.durable(thread, Vector(record(1)))
     entered.await(5, TimeUnit.SECONDS) shouldBe true // the listener holds the first event
 
@@ -176,7 +176,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     val fourth   = new CountDownLatch(1)
     val listener = Recording(countAt(4, fourth))
     val hub      = EventHub(log)
-    val sub      = hub.observe(thread, capacity = 16, listener, cut.apply).start(lastSeq = 0L)
+    val sub      = hub.observe(thread, run, capacity = 16, listener, cut.apply).start(lastSeq = 0L)
     hub.durable(thread, Vector(record(1)))
     log.records = log.records :+ record(3)
     val handing = Thread.ofVirtual().start(() => hub.durable(thread, Vector(record(3))))
@@ -228,7 +228,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     def live(i: Int): StreamEvent.Live =
       StreamEvent.Live(thread.value, run.value, "task", "node", "test.progress", 1, ujson.Num(i))
     val hub = EventHub(log)
-    val b   = hub.observe(thread, capacity = 16, behind, cut.apply).start(lastSeq = 0L)
+    val b   = hub.observe(thread, run, capacity = 16, behind, cut.apply).start(lastSeq = 0L)
     hub.durable(thread, Vector(record(1)))
     val l = hub.subscribe(thread, afterSeq = 2L, capacity = 16, level, cut.apply).fold(e => fail(e.message), identity)
     // a live event reaches `level` only once it has switched to live
@@ -323,7 +323,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
       countAt(2, aheadSaw2)(event)
       countAt(4, aheadSaw4)(event)
     }
-    val a = hub.observe(thread, capacity = 16, ahead).start(lastSeq = 0L)
+    val a = hub.observe(thread, run, capacity = 16, ahead).start(lastSeq = 0L)
     log.records = Vector(record(1))
     hub.durable(thread, Vector(record(1)))
     log.records = log.records :+ record(2, RunId("elsewhere"))
@@ -391,7 +391,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     }
     val lateThree = new CountDownLatch(1)
     val lateSeen  = recording(countAt(3, lateThree))
-    val b         = hub.observe(thread, capacity = 16, behindSeen).start(lastSeq = 0L)
+    val b         = hub.observe(thread, run, capacity = 16, behindSeen).start(lastSeq = 0L)
     locks.withThreadLock(thread)(hub.durable(thread, Vector(record(1))))
     hub.release(thread)
     val l = hub.subscribe(thread, afterSeq = 2L, capacity = 16, levelSeen).fold(e => fail(e.message), identity)
@@ -504,6 +504,22 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     hub.liveCount(thread) shouldBe 0
     unhang.countDown()
     hung.join(java.time.Duration.ofSeconds(5)) shouldBe true
+  }
+
+  "An observer joined before its run's claim is handed over" should "not take a previous run's commit handed over first as its place in the log, nor deliver it" in {
+    // a lost run's late write, 5, is handed over after the next run's observer joined and before that
+    // run's claim, 6, which waited for the commit lock behind it
+    val hub         = EventHub(InMemoryCheckpointer())
+    val sixth       = new CountDownLatch(1)
+    val listener    = recording(countAt(6, sixth))
+    val observation = hub.observe(thread, run, capacity = 16, listener)
+    hub.durable(thread, Vector(record(5, RunId("lost"))))
+    hub.durable(thread, Vector(record(6)))
+    val sub = observation.start(lastSeq = 5L)
+    sixth.await(5, TimeUnit.SECONDS) shouldBe true
+    listener.seen.asScala.toVector shouldBe Vector("6")
+    sub.cancel()
+    hub.liveCount(thread) shouldBe 0
   }
 
   /** Counts `latch` down once the durable event `seq` has been recorded. */
