@@ -298,6 +298,44 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       }
   }
 
+  it should "interrupt the superstep in flight at once, in Sync and Async" in {
+    for durability <- Seq(Durability.Sync, Durability.Async) do
+      withClue(s"$durability: ") {
+        val time        = ManualTime()
+        val store       = InMemoryCheckpointer(time)
+        val gate        = new CountDownLatch(1)
+        val entered     = new CountDownLatch(1)
+        val interrupted = new CountDownLatch(1)
+        val log         = StateKey.appending[String]("log")
+        val b           = GraphBuilder("siblings", "v1")
+        // `quick` finishes, and its commit is refused; its sibling `long` is still running a tool loop
+        val quick = b.node[Unit]("quick", writes = Set(log)) { (_, _, _) =>
+          gate.await(10, TimeUnit.SECONDS): Unit
+          continue(Command.empty.update(log, "quick"))
+        }
+        val long = b.node[Unit]("long", writes = Set(log)) { (_, _, _) =>
+          entered.countDown()
+          val until = System.nanoTime() + 10.seconds.toNanos
+          while System.nanoTime() < until && !Thread.currentThread().isInterrupted do
+            if CancelledError.catchInterrupt(Thread.sleep(10)).isLeft then Thread.currentThread().interrupt()
+          if Thread.currentThread().isInterrupted then interrupted.countDown()
+          continue(Command.empty.update(log, "long"))
+        }
+        val fork  = b.node[String]("fork")((_, _, _) => continue(Command.empty.goto(quick).goto(long)))
+        val graph = b.compile(fork)(_.get(log)).value
+        // never renewed during the test: only the refused commit can tell the run
+        val handle = runtime(store, time, slow).start(thread, graph, "x", run("first"), durability).value
+        entered.await(5, TimeUnit.SECONDS) shouldBe true
+        val token = tokenOf(store)
+        time.skewStore(3.hours)
+        val thief = store.claim(thread, ClaimRequest(RunId("thief"), 1.hour)).value
+
+        gate.countDown()
+        interrupted.await(5, TimeUnit.SECONDS) shouldBe true
+        await(handle).failed._2 shouldBe GraphError.ClaimLost("t", token, Some(thief.token))
+      }
+  }
+
   "A lost Async run" should "drop the commits it had queued, waiting only for the one in flight" in {
     val time    = ManualTime()
     val store   = Hooked(InMemoryCheckpointer(time))

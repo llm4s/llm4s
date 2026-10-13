@@ -18,8 +18,12 @@ import scala.concurrent.duration.*
  * To the store, the holder may still commit and renew past `expiresAt` until another claim replaces
  * it: expiry only lets another run claim the thread. A [[GraphRuntime]] does not rely on that: a run
  * judges its own lease, by its monotonic clock from just before it sent the request that granted or
- * last renewed the claim, and stops with [[GraphError.ClaimLost]] once that lease has passed - which
- * is never later than the store's expiry, whatever the skew between their clocks.
+ * last renewed the claim, and stops with [[GraphError.ClaimLost]] once that lease has passed. That is no
+ * later than the store's expiry provided the store judges it by one clock that does not run faster than
+ * the runtime's monotonic clock and is not stepped forward; a constant offset does not matter. A store
+ * clock that runs ahead - stepped forward, or each process of a shared store on its own skewed clock -
+ * can expire the claim early, and another run can take the thread over while this one still runs: it
+ * then stops at its next refused renewal or commit, and fencing keeps every write safe.
  */
 final case class RunClaim private (
   threadId: ThreadId,
@@ -83,6 +87,10 @@ object ClaimRequest:
  * nothing more, and it fails with [[GraphError.ClaimLost]]. A renewal that fails is tried again at the
  * next beat while the lease lasts. Tasks already running when the loss is found may still complete a
  * side effect before they see their interrupt.
+ *
+ * A renewal must land within `ttl - renewEvery` of being due, or the run judges its lease passed and
+ * stops: keep `renewEvery` at most a third of `ttl`, as the default does, so a renewal can fail or be slow
+ * once and still be retried in time.
  *
  * Both must be positive and `renewEvery` shorter than `ttl`: `apply` and the `with*` setters throw
  * `IllegalArgumentException` otherwise, and [[ClaimPolicy.of]] returns a `ValidationError`.

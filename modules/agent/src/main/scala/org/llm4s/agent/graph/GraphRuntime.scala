@@ -710,7 +710,16 @@ final class GraphRuntime(
                   heartbeat.foreach(_.close())
                   releaseClaim(threadId, claim.token)
               }) { _ =>
-                heartbeat = Some(Heartbeat(threadId, config.runId, claim.token, sentAt, _ => ()))
+                heartbeat = Some(
+                  Heartbeat(
+                    threadId,
+                    config.runId,
+                    claim.token,
+                    sentAt,
+                    "its change is refused if not yet committed",
+                    _ => ()
+                  )
+                )
                 body(claim)
               }
             }
@@ -963,6 +972,20 @@ final class GraphRuntime(
     def failure: Option[LLMError]
 
     /**
+     * Told when the store refuses a submitted commit as stale - proof that another run took the thread
+     * over - so the run stops at once rather than at its next superstep. Set by the run; Sync and Async
+     * call it from the thread that made the commit.
+     */
+    @volatile var onStale: GraphError.StaleClaim => Unit = _ => ()
+
+    /** Records `error` as the commit failure, unless one is recorded, and reports a stale refusal. */
+    protected def refused(failed: AtomicReference[Option[LLMError]], error: LLMError): Unit =
+      failed.compareAndSet(None, Some(error)): Unit
+      error match
+        case stale: GraphError.StaleClaim => onStale(stale)
+        case _                            => ()
+
+    /**
      * Forgets a failed commit, so that the next is tried. Called only when the run is stopped,
      * because the stop's interrupt can fail a synchronous commit on the run thread; a commit that
      * fails again is reported as before. Async and OnExit commits are never made on an
@@ -984,8 +1007,7 @@ final class GraphRuntime(
   final private class SyncCommitter(threadId: ThreadId) extends Committer:
     private val failed = AtomicReference[Option[LLMError]](None)
     def submit(commit: Commit): Unit =
-      if failed.get.isEmpty then
-        commitAndDeliver(threadId, commit).left.foreach(e => failed.compareAndSet(None, Some(e)))
+      if failed.get.isEmpty then commitAndDeliver(threadId, commit).left.foreach(refused(failed, _))
     def failure: Option[LLMError]                 = failed.get
     def close(): Unit                             = ()
     override def forgetInterruptedFailure(): Unit = failed.set(None)
@@ -1001,8 +1023,7 @@ final class GraphRuntime(
     def submit(commit: Commit): Unit =
       writer.execute { () =>
         // a failed commit stops the queue: a later commit must not land on top of a lost one
-        if failed.get.isEmpty then
-          commitAndDeliver(threadId, commit).left.foreach(e => failed.compareAndSet(None, Some(e)))
+        if failed.get.isEmpty then commitAndDeliver(threadId, commit).left.foreach(refused(failed, _))
       }
     def failure: Option[LLMError] = failed.get
 
@@ -1069,8 +1090,11 @@ final class GraphRuntime(
    *
    * The lease ends `claims.ttl` after the moment, by [[ticker]] (the runtime's monotonic clock), just
    * before the request that granted the claim, or that renewed it, was sent: the store started its own
-   * `ttl` no earlier than that, so the run's lease never outlives the store's, whatever the skew between
-   * their clocks. It is conservative by the time a request takes to reach the store.
+   * `ttl` no earlier than that, so the run's lease ends no later than the store's, provided the store judges
+   * expiry by one clock that does not run faster than the runtime's and is not stepped forward (a constant
+   * offset does not matter). It is conservative by the time a request takes to reach the store. A store
+   * clock that runs ahead can expire the claim early; the run then learns of it from a refused renewal or
+   * commit.
    *
    * Two virtual threads, so that a renewal hung in the store cannot hide that the lease has passed. The
    * beat, `llm4s-claim-<threadId>`, never waits on the store: it wakes every `claims.renewEvery` - or
@@ -1079,6 +1103,7 @@ final class GraphRuntime(
    * that lands moves the lease's end. One refused with [[GraphError.StaleClaim]] - another run took the
    * thread over - declares the claim lost at once. Any other failure, returned or thrown (a store clock
    * that throws, say), is logged and tried again at the next beat, for as long as the lease lasts.
+   * `consequence` says, in the loss's WARN log, what follows for the claim's holder.
    * `lost` is called at most once, with the current claim's token when the store named one, and never
    * after the heartbeat is closed.
    *
@@ -1093,6 +1118,7 @@ final class GraphRuntime(
     holder: RunId,
     token: FencingToken,
     grantSentAt: Long,
+    consequence: String,
     lost: Option[FencingToken] => Unit
   ) extends AutoCloseable:
     private val stopped  = new CountDownLatch(1)
@@ -1106,7 +1132,7 @@ final class GraphRuntime(
     private def lose(current: Option[FencingToken], why: String): Unit =
       if over.compareAndSet(false, true) then
         GraphRuntime.logger.warn(
-          s"Run '${holder.value}' lost its claim on thread '${threadId.value}': $why; it stops and commits nothing more"
+          s"Run '${holder.value}' lost its claim on thread '${threadId.value}': $why; $consequence"
         )
         DefaultRunHandle.guarded(lost(current)): Unit
 
@@ -1224,9 +1250,8 @@ final class GraphRuntime(
               runId,
               granted.token,
               sentAt,
-              current =>
-                if current.nonEmpty then lostTo.compareAndSet(None, current): Unit
-                stopper()
+              "it stops and commits nothing more",
+              claimLost
             )
           )
           val outcome =
@@ -1298,6 +1323,14 @@ final class GraphRuntime(
      * the handle's `stop`, which also interrupts the run, as a cancel does.
      */
     @volatile var stopper: () => Unit = () => cause.compareAndSet(None, Some(StopCause.ClaimLost)): Unit
+
+    /** Records the current claim the store named, and stops the run through [[stopper]]. */
+    private def claimLost(current: Option[FencingToken]): Unit =
+      if current.nonEmpty then lostTo.compareAndSet(None, current): Unit
+      stopper()
+
+    // a commit refused as stale stops the run at once, as the heartbeat's loss does
+    committer.onStale = stale => claimLost(stale.current.map(FencingToken(_)))
 
     /** The token every commit of this run carries; set by [[admit]] before its first commit. */
     private def token: FencingToken = claim.map(_.token).getOrElse(FencingToken(0L))
@@ -1419,6 +1452,12 @@ final class GraphRuntime(
      */
     private def writeFailed(storeError: LLMError, runError: Option[LLMError]): LLMError = storeError match
       case stale: GraphError.StaleClaim =>
+        // ClaimLost carries no run error: the failure the run was recording is logged instead
+        runError.foreach(e =>
+          GraphRuntime.logger.warn(
+            s"Run '${runId.value}' on thread '${threadId.value}' lost its claim while recording its failure: ${e.message}"
+          )
+        )
         GraphError.ClaimLost(threadId.value, token, stale.current.map(FencingToken(_)).orElse(lostTo.get))
       case lost: GraphError.ClaimLost => lost
       case other                      => GraphError.CheckpointWriteFailed(threadId.value, other, runError)
