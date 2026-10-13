@@ -131,7 +131,8 @@ The run finds its claim lost when its lease passes with no renewal landing, when
 
 - its running tasks are interrupted, as `cancel` interrupts them;
 - it commits nothing more - not even `RunFailed` - and drops what it had not yet written: the queue of
-  `Durability.Async` and the buffer of `Durability.OnExit`. An `Async` commit already in the store is waited for
+  `Durability.Async` and the buffer of `Durability.OnExit`. From the moment the loss is found, a commit the run
+  has not yet begun is skipped, even one of its outcome while it is finishing. An `Async` commit already in the store is waited for
   at most `ttl`; one still there then is left to finish on its own. It is fenced by the run's token, so it lands
   only if nobody has claimed the thread since. If it lands, it lands after the run has ended: its events are an
   orphan of the run, not part of it. They are in the thread's log, and reach the thread's subscribers in sequence
@@ -141,7 +142,13 @@ The run finds its claim lost when its lease passes with no renewal landing, when
   thread's release in this runtime never wait on a store that hangs; a release that never lands lets the claim
   lapse after `ttl`;
 - it ends with `GraphError.ClaimLost(threadId, token, current)`, where `current` is the thread's current claim
-  when the store named one.
+  when the store named one;
+- its end is bounded whatever it was doing. If the run has not ended within `2 × ttl` of the loss - its thread
+  stuck in a store call that ignores interrupts, such as a `Sync` commit, `OnExit`'s exit commit, or the commit of
+  its outcome, which no stop interrupts - it is ended without its thread: it fails with `ClaimLost`, its thread is
+  freed in this runtime and its claim released as above. When the stuck call does return, it changes nothing: the
+  run has its one result, and its thread is not freed again. A write it makes that lands then is an orphan, as
+  above.
 
 `ClaimLost` is not a store outage (`CheckpointWriteFailed`). After it, `recover` may be attempted once the thread
 is free:
@@ -170,10 +177,17 @@ is free:
   that; it is then visible only through the thread's log - a thread subscription (`GraphRuntime.subscribe`) or a
   replay - never as one of the run's events, even to a run-scoped subscription made later that replays the run.
 - A run that has begun committing its outcome finishes that commit: a loss found during it does not interrupt it.
-  The commit is still fenced, so it lands only if nobody has taken the thread over.
+  The commit is still fenced, so it lands only if nobody has taken the thread over. The run's end does not wait for
+  it past `2 × ttl` of the loss: if the commit returns first the run ends with its outcome (or `ClaimLost`, if the
+  store refused it), and otherwise with `ClaimLost`.
+- Commits on one thread are written one at a time, in this runtime, so that subscribers see them in order. A commit
+  hung in the store holds up later commits on its thread - including a new run's claim commit there, until the
+  store returns - but never another thread's.
 - A process that dies holds its threads for up to `ttl`; so does a store that fails to release a claim. A run's
   end waits up to `ttl` for a renewal still in the store, so that none lands after its release; if the renewal is
   still there then, the run releases on a thread of its own without waiting, and its result is set at once.
+  `fork` and `updateState` release the claim they hold the same way, so a renewal hung in a store that serialises
+  its calls cannot keep them from returning.
 
 ## Subscriptions across runtimes
 

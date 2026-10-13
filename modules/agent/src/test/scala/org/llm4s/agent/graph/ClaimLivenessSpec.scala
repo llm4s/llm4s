@@ -81,13 +81,14 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
    * release waits behind it. `released` records the token of each release that ran.
    */
   private class Serialised(val underlying: Checkpointer) extends Checkpointer {
-    private val storeLock    = new java.util.concurrent.locks.ReentrantLock()
-    private val hang         = new CountDownLatch(1)
-    private val hanging      = new AtomicBoolean(false)
-    val renewing             = new CountDownLatch(1)
-    val released             = new ConcurrentLinkedQueue[FencingToken]()
-    def hangRenewals(): Unit = hanging.set(true)
-    def unhang(): Unit       = hang.countDown()
+    private val storeLock                  = new java.util.concurrent.locks.ReentrantLock()
+    private val hang                       = new CountDownLatch(1)
+    private val hanging                    = new AtomicBoolean(false)
+    val renewing                           = new CountDownLatch(1)
+    val released                           = new ConcurrentLinkedQueue[FencingToken]()
+    @volatile var beforeCommit: () => Unit = () => ()
+    def hangRenewals(): Unit               = hanging.set(true)
+    def unhang(): Unit                     = hang.countDown()
     private def serialised[A](body: => A): A = {
       storeLock.lock()
       val outcome = scala.util.Try(body)
@@ -106,7 +107,10 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       released.add(token)
       underlying.release(threadId, token)
     }
-    def commit(threadId: ThreadId, commit: Commit)                  = underlying.commit(threadId, commit)
+    def commit(threadId: ThreadId, commit: Commit) = {
+      beforeCommit()
+      underlying.commit(threadId, commit)
+    }
     def latest(threadId: ThreadId)                                  = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
@@ -114,6 +118,28 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
+  }
+
+  /**
+   * Waits for `latch`, at most 10 seconds, whatever interrupts the waiting thread - as a store call that
+   * ignores interrupts does - and sets the flag again afterwards if one arrived.
+   */
+  private def stuckUntil(latch: CountDownLatch): Unit = {
+    val deadline    = System.nanoTime() + 10.seconds.toNanos
+    var interrupted = false
+    while latch.getCount > 0 && System.nanoTime() < deadline do
+      CancelledError
+        .catchInterrupt(latch.await(deadline - System.nanoTime(), TimeUnit.NANOSECONDS))
+        .left
+        .foreach(_ => interrupted = true)
+    if interrupted then Thread.currentThread().interrupt()
+  }
+
+  /** Runs `body` on a virtual thread; its outcome, or `None` if it has not returned within 5 seconds. */
+  private def within[A](body: => A): Option[A] = {
+    val done = new java.util.concurrent.LinkedBlockingQueue[A]()
+    Thread.ofVirtual().start(() => done.offer(body): Unit)
+    Option(done.poll(5, TimeUnit.SECONDS))
   }
 
   /**
@@ -756,6 +782,137 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       next.gate.countDown()
       await(successor).completed
     }
+
+  // ---- a loss found while the run is finishing still bounds its end ----
+
+  "A run that loses its claim while its finishing commit hangs in the store" should
+    "still end ClaimLost and free its thread, and leave a later run's hold alone, in every durability mode" in {
+      for durability <- Durability.values do
+        withClue(s"$durability: ") {
+          val time       = ManualTime()
+          val store      = Hooked(InMemoryCheckpointer(time))
+          val two        = TwoStep()
+          val committing = new CountDownLatch(1)
+          val hang       = new CountDownLatch(1)
+          val finishing  = new CountDownLatch(1)
+          val finish     = new CountDownLatch(1)
+          // each run's closing checkpoint enters the store and stays there, interrupted or not: the
+          // first run's until `hang` opens, the later run's until `finish` does
+          store.onCommit = commit => {
+            commit.checkpoint.filter(_.status == CheckpointStatus.Completed).foreach { closing =>
+              if closing.runId == "first" then {
+                committing.countDown()
+                stuckUntil(hang)
+              } else {
+                finishing.countDown()
+                stuckUntil(finish)
+              }
+            }
+            None
+          }
+          val rt     = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+          val handle = rt.start(thread, two.graph, "x", run("first"), durability).value
+          val token  = tokenOf(store)
+          two.gate.countDown()
+          committing.await(5, TimeUnit.SECONDS) shouldBe true
+
+          // the lease passes once the run is finishing: its end must not wait on the store
+          store.onRenew = unreachable
+          time.advance(1.second)
+          await(handle).failed._2 shouldBe GraphError.ClaimLost("t", token, None)
+          rt.heldLocally(thread) shouldBe false
+          eventually(store.releases.get == 1)
+
+          // a later run takes the thread over while the old commit is still in the store
+          store.onRenew = () => None
+          val next = TwoStep()
+          next.gate.countDown()
+          val successor = new java.util.concurrent.LinkedBlockingQueue[Result[RunHandle[Vector[String]]]]()
+          Thread.ofVirtual().start(() => successor.offer(rt.recover(thread, next.graph, run("second"))): Unit)
+          eventually(rt.heldLocally(thread))
+          // the old commit returns, refused: the claim it was fenced by is gone
+          hang.countDown()
+          val second = Option(successor.poll(5, TimeUnit.SECONDS)).value.value
+          finishing.await(5, TimeUnit.SECONDS) shouldBe true
+          handle.asInstanceOf[DefaultRunHandle[?]].runThreadExited.await(5, TimeUnit.SECONDS) shouldBe true
+          // the old run, ending at last, set no second result and did not free the later run's hold
+          await(handle).failed._2 shouldBe GraphError.ClaimLost("t", token, None)
+          rt.heldLocally(thread) shouldBe true
+          events(store).filter(_.runId == "first").map(_.event) should not contain RunEvent.RunCompleted
+          finish.countDown()
+          await(second).completed
+        }
+    }
+
+  "A change whose heartbeat cannot be joined, in a store that serialises its calls" should
+    "return and free its thread without waiting for its release" in {
+      val time       = ManualTime()
+      val underlying = InMemoryCheckpointer(time)
+      val store      = Serialised(underlying)
+      val two        = TwoStep()
+      two.gate.countDown()
+      await(runtime(store, time, slow).start(thread, two.graph, "x", run("first")).value).completed
+      val latest   = store.latest(thread).value.value.checkpoint.id
+      val released = store.released.size
+      // the change's commit waits until its claim's renewal hangs, holding the store's lock
+      store.hangRenewals()
+      store.beforeCommit = () => store.renewing.await(5, TimeUnit.SECONDS): Unit
+      val rt = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+
+      val updated =
+        within(rt.updateState(thread, two.graph, latest, StateUpdate.update(two.log, "fixed"), config = run("edit")))
+      updated.value.value.runId shouldBe "edit"
+      rt.heldLocally(thread) shouldBe false
+      store.released.size shouldBe released
+      // the renewal ends; the release queued behind it then gives the claim back
+      store.unhang()
+      eventually(store.released.size == released + 1)
+      underlying.claim(thread, ClaimRequest(RunId("next"), 1.minute)).value.holder shouldBe RunId("next")
+    }
+
+  "A run whose commit hangs in the store" should "not hold up a run on another thread of the same runtime" in {
+    val time       = ManualTime()
+    val store      = Hooked(InMemoryCheckpointer(time))
+    val committing = new CountDownLatch(1)
+    val hang       = new CountDownLatch(1)
+    store.onCommit = commit => {
+      if commit.checkpoint.exists(c => c.threadId == thread.value && c.status == CheckpointStatus.Completed) then {
+        committing.countDown()
+        stuckUntil(hang)
+      }
+      None
+    }
+    val rt    = runtime(store, time, slow)
+    val stuck = TwoStep()
+    stuck.gate.countDown()
+    val handle = rt.start(thread, stuck.graph, "x", run("first")).value
+    committing.await(5, TimeUnit.SECONDS) shouldBe true
+
+    val other = TwoStep()
+    other.gate.countDown()
+    val elsewhere = within(rt.start(ThreadId("u"), other.graph, "y", run("other")).flatMap(_.await()))
+    hang.countDown()
+    elsewhere.value.value.completed
+    await(handle).completed
+  }
+
+  "ThreadLocks" should "serialise one thread id, leave others free, and keep no lock once idle" in {
+    val locks   = ThreadLocks()
+    val holding = new CountDownLatch(1)
+    val leave   = new CountDownLatch(1)
+    val holder  = Thread.ofVirtual().start(() => locks.withThreadLock(thread) { holding.countDown(); leave.await() })
+    holding.await(5, TimeUnit.SECONDS) shouldBe true
+    within(locks.withThreadLock(ThreadId("u"))(locks.withThreadLock(ThreadId("u"))("other"))) shouldBe Some("other")
+    val waiting = new AtomicBoolean(false)
+    val second  = Thread.ofVirtual().start(() => locks.withThreadLock(thread)(waiting.set(true)))
+    second.join(100)
+    waiting.get shouldBe false
+    leave.countDown()
+    holder.join(5000)
+    second.join(5000)
+    waiting.get shouldBe true
+    locks.size shouldBe 0
+  }
 
   // ---- 3: release with a clean interrupt flag; no late interrupt reaches a closing run ----
 

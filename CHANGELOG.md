@@ -2685,6 +2685,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an orphan of a run that has ended: they reach the thread's subscribers in sequence, but never the run's own
   listeners, its observer or its tracing, live or replayed, so a `ClaimLost` run's run-scoped stream ends at its end
   and `AgentRun.await` never waits for a write it abandoned.
+- **A run that loses its claim while finishing, or while stuck in the store, still ends**
+  ([#1700](https://github.com/llm4s/llm4s/issues/1700)): a loss found once the run had begun committing its outcome
+  was discarded, because the first stop cause wins, so a `Sync`, `Async` or `OnExit` closing commit hung in the store
+  held `await()` and the thread's slot in the runtime indefinitely; so did any `Sync` commit stuck in a store call
+  that ignores interrupts. A loss now fences the run at any stage - a commit not yet begun is skipped - and, if the
+  run has not ended within `2 × ttl`, ends it without its thread: `ClaimLost`, the thread freed in the runtime, the
+  claim released on a detached thread. The run thread, when it returns, sets no second result and frees nothing.
+  `fork` and `updateState` likewise release on a detached thread when their heartbeat's renewal cannot be joined, so a
+  renewal hung in a store that serialises its calls (SQLite) no longer keeps them from returning.
+- **A commit hung in the store holds up only its own thread** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  every commit in a `GraphRuntime` was written under one runtime-wide lock, so one thread's hung commit stalled every
+  other thread's runs, their admission included. Commits are now ordered per thread.
 - **A claim is renewed from its grant** ([#1700](https://github.com/llm4s/llm4s/issues/1700)): the first renewal came
   `renewEvery` after the run was launched, so slow admission work could let the lease lapse before it; `fork` and
   `updateState` now renew the claim they hold too.

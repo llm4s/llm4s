@@ -4,7 +4,7 @@ import org.llm4s.error.CancelledError
 import org.llm4s.types.Result
 
 import java.util.concurrent.{ CompletableFuture, TimeUnit, TimeoutException }
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
 import java.util.concurrent.locks.{ LockSupport, ReentrantLock }
 import scala.annotation.tailrec
 import scala.concurrent.duration.FiniteDuration
@@ -70,7 +70,8 @@ trait RunHandle[O]:
  * own account - committing its outcome (its completed or suspended checkpoint, or a failed run's
  * `RunFailed`), or stopping on a store failure or a crash - so a later cancel, expiry or lost claim
  * records nothing and sends no interrupt into its commits or its release; a run that finds another
- * cause already recorded is stopped by that cause instead.
+ * cause already recorded is stopped by that cause instead. A lost claim is acted on even when it is not
+ * the first cause: the run's committer is fenced, and its end bounded ([[DefaultRunHandle.endWithin]]).
  */
 private[graph] enum StopCause:
   case Cancelled, Expired, ClaimLost, Finishing
@@ -233,11 +234,50 @@ final private[graph] class DefaultRunHandle[O](
     var outcome: Option[RunResult[O]] = None
     Using.resource(new AutoCloseable {
       def close(): Unit =
-        val settled = outcome.getOrElse(crashed(new IllegalStateException("run thread ended abnormally")))
-        DefaultRunHandle.guarded(handedOver.complete(())): Unit
-        DefaultRunHandle.guarded(release()): Unit
-        result.complete(settled): Unit
+        settle(() => outcome.getOrElse(crashed(new IllegalStateException("run thread ended abnormally"))), release)
+        runThreadExited.countDown()
     })(_ => outcome = Some(DefaultRunHandle.guarded(body()).fold(crashed, identity)))
+
+  /** Taken by whichever settles the run: the run thread as it exits, or [[endWithin]]. */
+  private val settling = new AtomicBoolean(false)
+
+  /**
+   * Settles the run, once, by whichever comes first - the run thread as it exits, or [[endWithin]]:
+   * `outcome` is computed, the subscriptions are given their end-of-run barriers, `release` runs, and
+   * then the result is set. Whoever comes second does nothing, so a run has one result, and its thread
+   * is freed once - never after a later run has taken it.
+   */
+  private def settle(outcome: () => RunResult[O], release: () => Unit): Unit =
+    if settling.compareAndSet(false, true) then
+      val settled = outcome()
+      DefaultRunHandle.guarded(handedOver.complete(())): Unit
+      DefaultRunHandle.guarded(release()): Unit
+      result.complete(settled): Unit
+
+  private val bounding = new AtomicBoolean(false)
+
+  /**
+   * Bounds the run's end once its claim is found lost, whatever the run is doing: a virtual thread,
+   * `llm4s-lost-<threadId>`, waits up to `wait` for the result and, if the run thread has not begun to
+   * settle it by then, settles it without the run thread ([[settle]]) with `outcome`, which must not
+   * throw. The run thread may be stuck in a store call that ignores interrupts, as a commit can be,
+   * even one of its outcome, which no stop interrupts; when it does return, it changes nothing. Only the
+   * first call starts the thread.
+   */
+  private[graph] def endWithin(wait: FiniteDuration, outcome: () => RunResult[O], release: () => Unit): Unit =
+    if bounding.compareAndSet(false, true) then
+      Thread
+        .ofVirtual()
+        .name(s"llm4s-lost-${threadId.value}")
+        .start { () =>
+          DefaultRunHandle.guarded(result.get(wait.toNanos, TimeUnit.NANOSECONDS)) match
+            case Left(_: TimeoutException) => settle(outcome, release)
+            // settled first; nothing else interrupts this thread
+            case _ => ()
+        }: Unit
+
+  /** Opened as the run thread exits; for tests. */
+  private[graph] val runThreadExited = new java.util.concurrent.CountDownLatch(1)
 
 private[agent] object DefaultRunHandle:
 

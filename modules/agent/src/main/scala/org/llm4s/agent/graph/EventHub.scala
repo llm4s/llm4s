@@ -14,6 +14,42 @@ private[agent] def withLock[A](lock: ReentrantLock)(body: => A): A =
   Using.resource(new AutoCloseable { def close(): Unit = lock.unlock() })(_ => body)
 
 /**
+ * One lock per thread id, held while a commit on that thread is written and handed over (and while a
+ * store watch of that thread queues what it read), so that delivery order is commit order on each
+ * thread - the only order a subscription, which is to one thread, sees. A commit hung in the store
+ * therefore holds up only commits on its own thread, never another thread's. A lock exists only while
+ * some caller holds or waits for it, so idle threads cost nothing.
+ */
+final private[graph] class ThreadLocks:
+  final private class Held:
+    val lock  = new ReentrantLock()
+    var users = 0 // changed only inside `locks.compute`, which serialises it
+
+  private val locks = new java.util.concurrent.ConcurrentHashMap[String, Held]()
+
+  /** Runs `body` holding `threadId`'s lock, releasing it on every exit, an `InterruptedException` included. */
+  def withThreadLock[A](threadId: ThreadId)(body: => A): A =
+    val held = locks.compute(
+      threadId.value,
+      (_, existing) =>
+        val entry = Option(existing).getOrElse(new Held)
+        entry.users += 1
+        entry
+    )
+    Using.resource(new AutoCloseable {
+      def close(): Unit =
+        locks.compute(
+          threadId.value,
+          (_, entry) =>
+            entry.users -= 1
+            if entry.users == 0 then null else entry
+        ): Unit
+    })(_ => withLock(held.lock)(body))
+
+  /** How many thread ids have a lock; for tests. */
+  private[graph] def size: Int = locks.size
+
+/**
  * A run-scoped listener: one run's view of a subscription made for that run ([[RunHandle.subscribe]],
  * or the run's [[Observer]]). Its dispatcher calls [[runEnded]] - on the dispatcher thread, like any
  * listener call, but never with an event - when it reaches the run's end-of-run barrier, which
@@ -25,22 +61,23 @@ private[agent] trait RunListener extends (StreamEvent => Unit):
   def runEnded(runId: RunId): Unit
 
 /**
- * The events of run `runId` that land after the run gave up on them: a write its Async committer
- * abandoned when the run lost its claim, still in the store when the run stopped waiting for it, may
- * land after the run has ended. Such events are an orphan of a run that has ended, not events it
+ * The events of run `runId` that land after the run gave up on them: a write still in the store when a
+ * run that lost its claim stopped waiting for it - one its Async committer abandoned, or one the run's
+ * own thread or a task was still making when the run was ended without it - may land after the run
+ * has ended. Such events are an orphan of a run that has ended, not events it
  * delivered: the run's own listeners ([[RunListener]]) never receive them, live or replayed, while
  * thread-scoped subscribers receive them like any other durable event, in sequence. [[abandonAfter]]
  * sets the cut once, at the highest `seq` the hub had handed over on the thread when the run stopped
  * waiting; every event of the run with a higher `seq` is an orphan.
  */
 final private[graph] class AbandonedWrites(runId: RunId):
-  @volatile private var after = Long.MaxValue
+  private val after = new java.util.concurrent.atomic.AtomicLong(Long.MaxValue)
 
-  /** Marks every event of the run with `seq > last` as abandoned. */
-  def abandonAfter(last: Long): Unit = after = last
+  /** Marks every event of the run with `seq > last` as abandoned, unless a cut is already set. */
+  def abandonAfter(last: Long): Unit = after.compareAndSet(Long.MaxValue, last): Unit
 
   /** Whether `record` is an event of the run that landed after it was abandoned. */
-  def apply(record: EventRecord): Boolean = record.runId == runId.value && record.seq > after
+  def apply(record: EventRecord): Boolean = record.runId == runId.value && record.seq > after.get
 
 private[graph] object AbandonedWrites:
   /** For a subscription not made for a run: nothing is abandoned. */
@@ -113,10 +150,10 @@ private[graph] trait Dispatched extends Subscription:
  * commits without this hub knowing, so the hub hands over only this runtime's commits. While `watch`
  * is enabled, each live subscription therefore also watches the store, on a virtual thread of its own
  * ([[Dispatcher]]'s `watchLoop`): it waits in [[Checkpointer.awaitEventsAfter]] from the last event it
- * has queued, and queues what that returns holding `commitLock` and `hubLock`. Every commit of this
- * runtime is written and handed over under `commitLock`, so whatever the read found that this
- * runtime wrote has been handed over by then, and is dropped by `seq`: only other runtimes' events
- * are queued this way, and this runtime's keep their place among its live events. They are queued
+ * has queued, and queues what that returns holding the thread's commit lock ([[ThreadLocks]]) and
+ * `hubLock`. Every commit of this runtime is written and handed over under its thread's commit lock,
+ * so whatever the read found that this runtime wrote has been handed over by then, and is dropped by
+ * `seq`: only other runtimes' events are queued this way, and this runtime's keep their place among its live events. They are queued
  * only while they fit beside what is queued - the rest stay in the store, read again on the next
  * call - so commits made elsewhere never make a subscriber lag. A subscription queues durable events
  * contiguously: a hand-over that finds events missing before it - committed elsewhere and not yet
@@ -127,7 +164,7 @@ private[graph] trait Dispatched extends Subscription:
  */
 final private[graph] class EventHub(
   checkpointer: Checkpointer,
-  commitLock: ReentrantLock = new ReentrantLock(),
+  commitLocks: ThreadLocks = ThreadLocks(),
   watch: WatchPolicy = WatchPolicy.disabled
 ):
 
@@ -398,7 +435,7 @@ final private[graph] class EventHub(
       }
 
     /**
-     * Offers a commit this runtime has just made; called holding `commitLock` and `hubLock`. A live
+     * Offers a commit this runtime has just made; called holding the thread's commit lock and `hubLock`. A live
      * subscription queues it after the events before it: any missing - committed through another
      * runtime and not yet read by the watch - are read from the store first and queued ahead of it,
      * or make the subscriber lag if they do not fit. A replaying one only notes it.
@@ -816,7 +853,9 @@ final private[graph] class EventHub(
             case Left(error) =>
               withLock(lock)(fail(error))
             case Right(found) =>
-              val stuck = found.nonEmpty && withLock(commitLock)(withLock(hubLock)(withLock(lock)(queueWatched(found))))
+              val stuck = found.nonEmpty && commitLocks.withThreadLock(threadId)(
+                withLock(hubLock)(withLock(lock)(queueWatched(found)))
+              )
               // what did not fit stays in the store until the listener has caught up; read it again later
               if stuck then TimeUnit.NANOSECONDS.sleep(watch.pollInterval.toNanos)
               watchLoop()
@@ -826,7 +865,7 @@ final private[graph] class EventHub(
      * durable slots are never overfilled, so the watch never makes a subscriber lag. Returns whether
      * the watch should wait before reading again: it stopped for want of room, or at an event that
      * does not follow the last queued, which a store never returns but which must not make the watch
-     * spin. Holding `commitLock`, `hubLock` and `lock`.
+     * spin. Holding the thread's commit lock, `hubLock` and `lock`.
      */
     private def queueWatched(found: Vector[EventRecord]): Boolean =
       @tailrec def next(rest: List[EventRecord]): Boolean = rest match
