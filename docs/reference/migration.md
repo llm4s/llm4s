@@ -21,7 +21,7 @@ Not in a release yet. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/169
 - [#1701](https://github.com/llm4s/llm4s/issues/1701), the SQLite checkpointer - a new module, nothing to change: [below](#sqlite-checkpointer-1701).
 - [#1705](https://github.com/llm4s/llm4s/issues/1705), live subscriptions across runtimes - `Checkpointer.awaitEventsAfter` and `WatchPolicy`: [below](#live-subscriptions-across-runtimes-1705).
 
-Design: `docs/design/typed-agent-runtime-design.md` §4.16 onwards. Guide: [Durable Checkpointers](../guide/agents/durable-checkpointers.html).
+Design: `docs/design/typed-agent-runtime/4.16-stage-2-slice-1-the-durable-checkpointer-contract.md` (§4.16) onwards. Guide: [Durable Checkpointers](../guide/agents/durable-checkpointers.html).
 
 ### Durable `Checkpointer` contract (#1700)
 
@@ -200,7 +200,7 @@ A subscription now delivers the durable events of commits made through any runti
 
 ## Stage 1 migration: agent runtime
 
-Not in a release yet ([#1328](https://github.com/llm4s/llm4s/issues/1328), with [#1329](https://github.com/llm4s/llm4s/issues/1329)'s events and tracing, which restore the agent event stream #1328 removed). `Agent` now runs on `GraphRuntime`: the graph is the only agent loop, `AgentState` and the legacy loop are deleted, and nothing runs the old loop beside the new one. Tools, guardrails, handoffs and context pruning belong to the agent, set when you build it, and a conversation is carried by its `ThreadId` instead of by a value you pass back in. Design: `docs/design/typed-agent-runtime-design.md` §4.13. This note covers the whole of Stage 1 ([#1326](https://github.com/llm4s/llm4s/issues/1326)), five slices:
+Not in a release yet ([#1328](https://github.com/llm4s/llm4s/issues/1328), with [#1329](https://github.com/llm4s/llm4s/issues/1329)'s events and tracing, which restore the agent event stream #1328 removed). `Agent` now runs on `GraphRuntime`: the graph is the only agent loop, `AgentState` and the legacy loop are deleted, and nothing runs the old loop beside the new one. Tools, guardrails, handoffs and context pruning belong to the agent, set when you build it, and a conversation is carried by its `ThreadId` instead of by a value you pass back in. Design: `docs/design/typed-agent-runtime/4.13-stage-1-slice-2-the-agent-loop-on-the-graph-runtime.md` (§4.13). This note covers the whole of Stage 1 ([#1326](https://github.com/llm4s/llm4s/issues/1326)), five slices:
 
 - [#1327](https://github.com/llm4s/llm4s/issues/1327), kernel completion: [below](#kernel-completion-1327).
 - [#1328](https://github.com/llm4s/llm4s/issues/1328), the agent loop on `GraphRuntime`: this section.
@@ -337,7 +337,7 @@ Not in a release yet ([#1279](https://github.com/llm4s/llm4s/issues/1279)). The 
 takes a stack of `AgentMiddleware` in place of a `ToolCallPolicy`: one ordered extension point with
 `beforeAgent`, `afterAgent`, `wrapModelCall` and `wrapToolCall` hooks, for approval, guardrails,
 logging, retry and rate limits. The graph runtime is Experimental, so these are source breaks with
-no shims. Design: `docs/design/typed-agent-runtime-design.md` §4.8. (The `ToolLoop.build` signature shown below was generalised by #1328: see [Stage 1 migration](#stage-1-migration-agent-runtime).)
+no shims. Design: `docs/design/typed-agent-runtime/4.08-stage-0-prototype-agent-middleware.md` (§4.8). (The `ToolLoop.build` signature shown below was generalised by #1328: see [Stage 1 migration](#stage-1-migration-agent-runtime).)
 
 - **`ToolCallPolicy` and `PolicyDecision` are removed, and `ToolLoop.build` loses `policy`.** It
   takes `middleware: Seq[AgentMiddleware] = Nil` instead. A policy becomes an `AgentMiddleware`
@@ -389,7 +389,7 @@ Not in a release yet ([#1278](https://github.com/llm4s/llm4s/issues/1278)). The 
 runs `AgentTool`s, whose arguments are validated against their schema (rendered non-strict, so
 optional fields may be omitted) before any middleware or the tool runs, and legacy handoffs take an explicit id. The graph runtime is
 Experimental, so these are source breaks with no shims. Design:
-`docs/design/typed-agent-runtime-design.md` §4.7.
+`docs/design/typed-agent-runtime/4.07-stage-0-prototype-agent-tool-contract.md` (§4.7).
 
 (Since #1328, `Handoff` targets are builders and `ToolLoop.build` takes a family of `LoopAgent`s: see
 [Stage 1 migration](#stage-1-migration-agent-runtime).)
@@ -452,7 +452,7 @@ Experimental, so these are source breaks with no shims. Design:
 Not in a release yet ([#1277](https://github.com/llm4s/llm4s/issues/1277)). `GraphRuntime.start`,
 `recover` and `resume` return a `RunHandle` once the thread is claimed, and the run executes on a
 thread the runtime owns. The graph runtime is Experimental, so these are source breaks with no
-shims. Design: `docs/design/typed-agent-runtime-design.md` §4.6.
+shims. Design: `docs/design/typed-agent-runtime/4.06-stage-0-prototype-run-api-and-event-dispatch.md` (§4.6).
 
 - **`NodeContext` is `RunContext`.** `context.taskId`, `context.nodeId` and `context.superstep`
   become `context.position.taskId`, `.nodeId` and `.superstep`; `emit` and `progress` are
