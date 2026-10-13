@@ -182,9 +182,9 @@ class AgentKtPendingTest {
             return store.commit(threadId, commit)
         }
 
-        override fun deleteThread(threadId: String): Either<LLMError, BoxedUnit> {
+        override fun deleteThread(threadId: String, token: Long): Either<LLMError, BoxedUnit> {
             deleted.add(threadId)
-            return store.deleteThread(threadId)
+            return store.deleteThread(threadId, token)
         }
     }
 

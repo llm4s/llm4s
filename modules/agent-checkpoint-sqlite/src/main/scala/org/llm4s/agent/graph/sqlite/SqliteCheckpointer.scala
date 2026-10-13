@@ -310,12 +310,19 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
     Right(())
   }
 
-  def deleteThread(threadId: ThreadId): Result[Unit] = writing("deleteThread") { c =>
-    update(c, "DELETE FROM llm4s_checkpoint_events WHERE thread_id = ?", threadId.value)
-    update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
-    update(c, "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ?", threadId.value)
-    update(c, "DELETE FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)
-    Right(())
+  /**
+   * Deletes the thread in one write transaction, which first checks that `token` is the thread's current claim -
+   * so the check and the delete see one state of the file, whatever other stores on it are doing.
+   */
+  def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] = writing("deleteThread") { c =>
+    val current = readRow(c, threadId)
+    if !current.flatMap(_.claim).exists(_.token == token.value) then Left(stale(threadId, current, token))
+    else
+      update(c, "DELETE FROM llm4s_checkpoint_events WHERE thread_id = ?", threadId.value)
+      update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
+      update(c, "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ?", threadId.value)
+      update(c, "DELETE FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)
+      Right(())
   }
 
   /**

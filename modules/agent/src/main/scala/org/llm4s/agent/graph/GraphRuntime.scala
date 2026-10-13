@@ -369,7 +369,10 @@ final class GraphRuntime(
    * thread of another tenant is [[GraphError.TenantMismatch]], and one whose run is admitting or
    * executing in this runtime, or holds a live claim in any runtime, is [[GraphError.ThreadBusy]].
    * The thread is held exclusively, and claimed in the store under `config.runId`, while it is
-   * deleted, so no run starts on it meanwhile. An unknown thread is `Right(())`. Cancel any
+   * deleted, so no run starts on it meanwhile; and the store's delete is fenced by that claim's
+   * token, so if the claim lapses before the delete lands - this runtime stalled past
+   * `claims.ttl` - and another run takes the thread over, nothing of that run is deleted: the call
+   * is `ThreadBusy`, or `TenantMismatch` if the run is another tenant's. An unknown thread is `Right(())`. Cancel any
    * [[subscribe]] to the thread first: a new thread of the same id numbers its events from 1 again.
    * The tenant is checked once more after the store claim is granted, so a thread another runtime
    * created for another tenant in between is `TenantMismatch`, not deleted.
@@ -396,13 +399,19 @@ final class GraphRuntime(
                 def close(): Unit = if !deleted then releaseClaim(threadId, claim.token)
               }) { _ =>
                 // checked again under the claim: another runtime may have created the thread, for
-                // another tenant, between the read above and the claim, and nothing else stops it
-                // before the delete (the delete, unlike a commit, names no parent checkpoint)
+                // another tenant, between the read above and the claim. The delete names no parent
+                // checkpoint, but it is fenced by the claim, so nothing can be committed between this
+                // read and the delete unless the claim was lost - and then the delete is refused
                 checkpointer
                   .latest(threadId)
                   .flatMap(_.fold[Result[Unit]](Right(()))(checkTenant(threadId, _, config)))
                   .flatMap { _ =>
-                    val outcome = checkpointer.deleteThread(threadId)
+                    // a claim that lapsed while this runtime stalled, and that another run took over:
+                    // nothing of that run is deleted, and it is refused as any live claim is
+                    val outcome = checkpointer.deleteThread(threadId, claim.token) match
+                      case Left(_: GraphError.StaleClaim) =>
+                        busyAt(threadId, config, holder = None, nameWithoutCheckpoint = false)
+                      case other => other
                     deleted = outcome.isRight
                     outcome
                   }

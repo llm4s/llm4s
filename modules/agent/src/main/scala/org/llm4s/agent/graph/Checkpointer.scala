@@ -156,13 +156,16 @@ trait Checkpointer:
 
   /**
    * Removes everything stored for the thread - its checkpoint history, its pending writes, its
-   * event log and its claim - so that its id names a new thread again, whose events are numbered
-   * from 1; tokens issued after it are still greater than every token issued before. An unknown
-   * thread is `Right(())`. Use [[GraphRuntime.deleteThread]], which claims the thread first, so it
-   * refuses a thread with a live run in any runtime, and checks the tenant; the store itself checks
-   * neither.
+   * event log and its claim - so that its id names a new thread again; tokens issued after it are
+   * still greater than every token issued before. Fenced like a [[commit]]: only while `token` is
+   * the thread's current claim, checked atomically with the delete, and otherwise
+   * `Left(GraphError.StaleClaim)` with nothing deleted - so a deleter that lost its claim (it
+   * expired and another run took the thread over, or it was released) deletes nothing of the run
+   * that holds the thread now. A thread with no claim, an unknown one included, is therefore
+   * refused too: claim it first. Use [[GraphRuntime.deleteThread]], which claims the thread, so it
+   * refuses a thread with a live run in any runtime, and checks the tenant under its claim.
    */
-  def deleteThread(threadId: ThreadId): Result[Unit]
+  def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit]
 
 object Checkpointer:
 
@@ -392,9 +395,12 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     Right(())
   }
 
-  def deleteThread(threadId: ThreadId): Result[Unit] = withLock(lock) {
-    threads.remove(threadId.value)
-    Right(())
+  def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] = withLock(lock) {
+    val current = record(threadId)
+    if !current.claim.exists(_.token == token.value) then Left(stale(threadId, current, token))
+    else
+      threads.remove(threadId.value)
+      Right(())
   }
 
   private def sequence[A](results: Vector[Result[A]]): Result[Vector[A]] =

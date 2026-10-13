@@ -379,7 +379,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       store.latest(thread),
       store.eventsAfter(thread, 0L, 10),
       store.compactEvents(thread, 1L),
-      store.deleteThread(thread)
+      store.deleteThread(thread, token)
     )
     calls.foreach { result =>
       result.left.value shouldBe a[ProcessingError]
@@ -505,7 +505,8 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val reopened = SqliteCheckpointer.open(db).value
     reopened.history(thread, None, 10).value.map(_.id) shouldBe ids.reverse
     reopened.checkpoint(thread, "c1").value.map(_.id) shouldBe Some("c1")
-    reopened.deleteThread(thread).value
+    val deleting = reopened.claim(thread, ClaimRequest(RunId("deleter"), ttl)).value.token
+    reopened.deleteThread(thread, deleting).value
     scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_history WHERE thread_id = 'kept'")(_.getInt(1)) shouldBe 0
     reopened.history(thread, None, 10).value shouldBe empty
     // a new thread of the same id starts a history of its own, and reuses the old ids freely

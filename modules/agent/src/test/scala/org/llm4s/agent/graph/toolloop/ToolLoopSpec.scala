@@ -436,7 +436,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
       def latest(threadId: ThreadId)                                             = Right(stale)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int)     = store.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long)              = store.compactEvents(threadId, beforeSeq)
-      def deleteThread(threadId: ThreadId)                                = store.deleteThread(threadId)
+      def deleteThread(threadId: ThreadId, token: FencingToken)           = store.deleteThread(threadId, token)
       def history(threadId: ThreadId, before: Option[String], limit: Int) = store.history(threadId, before, limit)
       def checkpoint(threadId: ThreadId, checkpointId: String)            = store.checkpoint(threadId, checkpointId)
       def prune(threadId: ThreadId, policy: RetentionPolicy)              = store.prune(threadId, policy)

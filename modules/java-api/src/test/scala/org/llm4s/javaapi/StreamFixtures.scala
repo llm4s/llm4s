@@ -116,9 +116,10 @@ private[javaapi] object StreamFixtures {
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId): Result[Unit]                   = underlying.deleteThread(threadId)
-    def history(threadId: ThreadId, before: Option[String], limit: Int)  = underlying.history(threadId, before, limit)
-    def checkpoint(threadId: ThreadId, checkpointId: String)             = underlying.checkpoint(threadId, checkpointId)
+    def deleteThread(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken): Result[Unit] =
+      underlying.deleteThread(threadId, token)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: org.llm4s.agent.graph.RetentionPolicy) = underlying.prune(threadId, policy)
   }
 
@@ -143,9 +144,10 @@ private[javaapi] object StreamFixtures {
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId): Result[Unit]                   = underlying.deleteThread(threadId)
-    def history(threadId: ThreadId, before: Option[String], limit: Int)  = underlying.history(threadId, before, limit)
-    def checkpoint(threadId: ThreadId, checkpointId: String)             = underlying.checkpoint(threadId, checkpointId)
+    def deleteThread(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken): Result[Unit] =
+      underlying.deleteThread(threadId, token)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: org.llm4s.agent.graph.RetentionPolicy) = underlying.prune(threadId, policy)
   }
 
