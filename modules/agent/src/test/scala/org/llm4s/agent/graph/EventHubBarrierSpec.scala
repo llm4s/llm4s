@@ -306,7 +306,10 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
 
   "A subscriber that switches to live behind a hand-over's read of missing events" should "have what it is missing read too, before the commit reaches anyone" in {
     val log = WatchedLog(stallAfter = 2L)
-    val hub = EventHub(log, watch = WatchPolicy(pollInterval = scala.concurrent.duration.DurationInt(1).hour))
+    // the watch reads only when `watchGo` lets it, so the poll interval paces nothing but an observer's
+    // wait for its first commit: its watch may check before `durable` below anchors it, and then
+    // waits one interval before it looks again - an hour would leave it blind for the whole test
+    val hub = EventHub(log, watch = WatchPolicy(pollInterval = scala.concurrent.duration.DurationInt(10).millis))
     // `ahead` takes 1 from the hand-over and 2, committed elsewhere, from its watch: it is past the hub's mark
     val aheadSaw2 = new CountDownLatch(1)
     val aheadSaw4 = new CountDownLatch(1)
