@@ -995,6 +995,135 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
         }
     }
 
+  /** How a thread is admitted in [[admitting]]: `start` on a new thread, `recover` or `resume`. */
+  private def admissions = Seq("start", "recover", "resume")
+
+  /**
+   * Prepares `store`'s thread for `how`, with runs that end before this returns, and gives the call that
+   * admits run `first` on it: `start` on a new thread, `recover` of a cancelled run's `Running`
+   * checkpoint, or `resume` of a suspended one.
+   */
+  private def admitting(how: String, store: Checkpointer, time: ManualTime): GraphRuntime => Result[RunHandle[?]] =
+    how match {
+      case "start" =>
+        val two = TwoStep()
+        rt => rt.start(thread, two.graph, "x", run("first"))
+      case "recover" =>
+        val prior = TwoStep()
+        val first = runtime(store, time, slow).start(thread, prior.graph, "x", run("prior")).value
+        prior.awaitEntered()
+        first.cancel()
+        await(first)
+        rt => rt.recover(thread, prior.graph, run("first"))
+      case _ =>
+        val log     = StateKey.appending[String]("log")
+        val b       = GraphBuilder("ask", "v1")
+        val approve = b.declareResume[String, String]("approve")
+        b.implement(approve.node, writes = Set(log))((resumed, _, _) =>
+          continue(Command.empty.update(log, resumed.answer))
+        )
+        val ask    = b.node[String]("ask")((_, _, _) => NodeResult.Suspend(StateUpdate.empty, "ok?", approve))
+        val graph  = b.compile(ask)(_.get(log)).value
+        val parked = await(runtime(store, time, slow).start(thread, graph, "x", run("prior")).value).suspended
+        val answer = Map(parked.interrupts.head.id -> approve.answer("yes"))
+        rt => rt.resume(thread, graph, answer, run("first"))
+    }
+
+  "An admission whose claim commit is refused as stale" should
+    "return ClaimLost naming the current claim, release its claim and free its thread, for start, recover and resume" in {
+      for how <- admissions do
+        withClue(s"$how: ") {
+          val time  = ManualTime()
+          val store = Hooked(InMemoryCheckpointer(time))
+          val admit = admitting(how, store, time)
+          val own   = AtomicReference[Option[FencingToken]](None)
+          val thief = AtomicReference[Option[RunClaim]](None)
+          // as the claim's commit reaches the store, the store's clock has run past the claim and another took it
+          store.onCommit = commit => {
+            if commit.checkpoint.exists(_.runId == "first") && own.get.isEmpty then {
+              own.set(Some(commit.token))
+              time.skewStore(3.hours)
+              thief.set(Some(store.underlying.claim(thread, ClaimRequest(RunId("thief"), 1.hour)).value))
+            }
+            None
+          }
+          val rt        = runtime(store, time, slow)
+          val releasing = store.releases.get
+
+          admit(rt).left.value shouldBe GraphError.ClaimLost("t", own.get.value, Some(thief.get.value.token))
+          rt.heldLocally(thread) shouldBe false
+          eventually(store.releases.get == releasing + 1)
+          // the release of a stale token leaves the successor's claim alone, and nothing of the run landed
+          store.renew(thread, thief.get.value.token, 1.hour).isRight shouldBe true
+          events(store).filter(_.runId == "first") shouldBe empty
+        }
+    }
+
+  it should "return the one ClaimLost when its heartbeat declares the same loss meanwhile, for start, recover and resume" in {
+    for how <- admissions do
+      withClue(s"$how: ") {
+        val time     = ManualTime()
+        val store    = Hooked(InMemoryCheckpointer(time))
+        val admit    = admitting(how, store, time)
+        val rt       = runtime(store, time)
+        val declared = new CountDownLatch(1)
+        rt.fenced = (_, _) => declared.countDown()
+        val own   = AtomicReference[Option[FencingToken]](None)
+        val thief = AtomicReference[Option[RunClaim]](None)
+        // while the claim's commit is in the store, the lease passes, the heartbeat declares the loss, and
+        // another run takes the expired claim; the commit is then refused as stale
+        store.onCommit = commit => {
+          if commit.checkpoint.exists(_.runId == "first") && own.get.isEmpty then {
+            own.set(Some(commit.token))
+            store.onRenew = unreachable
+            time.advance(31.seconds)
+            declared.await(5, TimeUnit.SECONDS) shouldBe true
+            thief.set(Some(store.underlying.claim(thread, ClaimRequest(RunId("thief"), 1.hour)).value))
+          }
+          None
+        }
+        val releasing = store.releases.get
+
+        admit(rt).left.value shouldBe GraphError.ClaimLost("t", own.get.value, Some(thief.get.value.token))
+        declared.getCount shouldBe 0
+        rt.heldLocally(thread) shouldBe false
+        eventually(store.releases.get == releasing + 1)
+        events(store).filter(_.runId == "first") shouldBe empty
+      }
+  }
+
+  "A change whose commit is refused as stale" should
+    "be ThreadBusy, never a store outage, for updateState and fork, leaving the thread unchanged" in {
+      val time  = ManualTime()
+      val store = Hooked(InMemoryCheckpointer(time))
+      val two   = TwoStep()
+      two.gate.countDown()
+      await(runtime(store, time, slow).start(thread, two.graph, "x", run("first")).value).completed
+      val latest = store.latest(thread).value.value
+      val target = ThreadId("u")
+      // as the change's commit reaches the store, the store's clock has run past its claim and another took it
+      store.onCommit = commit => {
+        val forking  = commit.events.exists(_.event.isInstanceOf[RunEvent.ThreadForked])
+        val updating = commit.events.exists(_.event.isInstanceOf[RunEvent.StateUpdated])
+        if forking || updating then {
+          time.skewStore(3.hours)
+          store.underlying.claim(if forking then target else thread, ClaimRequest(RunId("thief"), 1.hour)).value: Unit
+        }
+        None
+      }
+      val rt = runtime(store, time, slow)
+
+      rt.updateState(thread, two.graph, latest.checkpoint.id, StateUpdate.update(two.log, "fixed"))
+        .left
+        .value shouldBe GraphError.ThreadBusy("t", Some(latest.checkpoint.id))
+      store.latest(thread).value.value shouldBe latest
+      rt.heldLocally(thread) shouldBe false
+
+      rt.fork(thread, latest.checkpoint.id, target).left.value shouldBe GraphError.ThreadBusy("u", None)
+      store.latest(target).value shouldBe None
+      rt.heldLocally(target) shouldBe false
+    }
+
   "A run whose claim is found lost while a renewal hangs in the store" should
     "end and free its thread without joining that renewal, in every durability mode" in {
       for durability <- Durability.values do

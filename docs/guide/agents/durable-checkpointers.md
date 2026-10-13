@@ -157,7 +157,10 @@ The run finds its claim lost when its lease passes with no renewal landing, when
   that claims the thread for `start`, `recover` or `resume` hangs in the store and the claim is found lost
   meanwhile, the call returns `ClaimLost` within `2 × ttl` of the loss, with the thread freed and the claim
   released as above. The run never starts, and that commit, if it lands later, is fenced by the token and is an
-  orphan.
+  orphan. A claim's commit that the store refuses as stale - the claim lapsed, or another runtime took it over,
+  before it landed - is a loss found then: the call returns `ClaimLost`, never `CheckpointWriteFailed`, with the
+  claim released and the thread freed. If the heartbeat declared the loss meanwhile, the call still returns one
+  `ClaimLost`, naming the current claim the first of the two to find the loss named.
 
 `ClaimLost` is not a store outage (`CheckpointWriteFailed`). After it, `recover` may be attempted once the thread
 is free:
@@ -380,7 +383,10 @@ yield handle
 ```
 
 With `asNode`, the update must stay within that node's declared write set, as if the node had returned it. The
-thread is held, with a claim in the store, while it is updated, so a live run refuses it with `ThreadBusy`. Pending
+thread is held, with a claim in the store, while it is updated, so a live run refuses it with `ThreadBusy`. If
+that claim lapses, or another runtime takes it over, before the update's commit lands, the store refuses the commit
+and `updateState` returns `ThreadBusy` too, with nothing applied: retry it. `fork` does the same for its target.
+Neither is a run, so neither returns `ClaimLost`. Pending
 writes of tasks that already completed are carried over, so `recover` still does not run them again. They apply
 after your update when the thread is recovered, so a carried write to a key you edited can overwrite your edit on
 `recover`. To be sure an edit stands, update a `Running` thread only in keys its completed tasks did not write.

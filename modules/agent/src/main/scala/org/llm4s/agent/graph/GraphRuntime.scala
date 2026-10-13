@@ -102,7 +102,9 @@ object GraphRuntime:
  * but still skips every commit not yet begun; and whatever the run is doing, it ends within twice `ttl`
  * of the loss: if it has not begun to by then - its thread stuck in a store call that ignores interrupts -
  * it is ended without its thread, `ClaimLost`, and the thread freed. Admission is bounded the same way: a
- * claim's commit still in the store twice `ttl` after the loss is given up, and the call fails `ClaimLost`. A `recover` that takes over an expired claim records
+ * claim's commit still in the store twice `ttl` after the loss is given up, and the call fails `ClaimLost`;
+ * one the store refuses as stale - the claim lapsed, or another run took it over, before it landed - fails
+ * `ClaimLost` too, never [[GraphError.CheckpointWriteFailed]]. A `recover` that takes over an expired claim records
  * the run it took the thread from ([[RunEvent.RunRecovered]]). A call on a thread whose run is still
  * executing in this runtime fails with `ThreadBusy` before reading the thread at all.
  *
@@ -521,7 +523,8 @@ final class GraphRuntime(
    * checkpoint not in its history [[GraphError.CheckpointNotFound]]; a target that is the source is a
    * `ValidationError`, one that exists [[GraphError.ThreadExists]] (or `TenantMismatch` if it is
    * another tenant's), and one held by a run [[GraphError.ThreadBusy]]. The target is claimed in the
-   * store while it is created.
+   * store while it is created; a fork whose claim lapses, or is taken over, before its commit lands is
+   * `ThreadBusy` too, with nothing created.
    *
    * The snapshot is copied as it is, so tool calls already issued at the forked checkpoint keep the
    * source thread's idempotency keys, which the snapshot records (once #1739 lands, in their `ToolTask`,
@@ -579,7 +582,7 @@ final class GraphRuntime(
               RunEvent.ThreadForked(source.value, checkpointId, tenant, config.principal.map(_.value))
             )
             commitAndDeliver(target, Commit(claim.token, Some(forked), events = Vector(event))).left
-              .map(GraphError.CheckpointWriteFailed(target.value, _))
+              .map(changeRefused(target, config))
               .map(_ => forked)
           }
         }
@@ -606,7 +609,8 @@ final class GraphRuntime(
    * no later model call derives a tool idempotency key an earlier one used.
    *
    * The thread is held - in this runtime and by a claim in the store, so the commit is fenced - while it
-   * is updated, and a run holding it refuses the update with [[GraphError.ThreadBusy]]. A thread of
+   * is updated, and a run holding it refuses the update with [[GraphError.ThreadBusy]], as does a claim
+   * that lapses, or is taken over, before the update's commit lands. A thread of
    * another tenant is [[GraphError.TenantMismatch]]; a thread with no checkpoint
    * [[GraphError.CheckpointNotFound]]. Every refusal leaves the thread unchanged.
    */
@@ -669,7 +673,7 @@ final class GraphRuntime(
           ).left
             .map {
               case conflict: GraphError.CheckpointConflict => conflict
-              case other                                   => GraphError.CheckpointWriteFailed(threadId.value, other)
+              case other                                   => changeRefused(threadId, config)(other)
             }
             .map(_ => saved)
         }
@@ -692,6 +696,27 @@ final class GraphRuntime(
         .flatMap(_.fold[Result[Unit]](Right(()))(checkTenant(threadId, _, config)))
         .flatMap(_ => checkpointer.prune(threadId, policy))
     }
+
+  /**
+   * A store's refusal of a change's commit - `fork`'s or `updateState`'s - as the change reports it. One
+   * refused as stale means the change's claim lapsed, or another run took the thread over, before the
+   * commit landed: nothing was applied, and the change may be retried once the thread is free, so it is
+   * [[GraphError.ThreadBusy]], as a claim refused up front is ([[claimThread]]). A change is not a run, so
+   * it never ends [[GraphError.ClaimLost]]. The thread is re-read and its tenant checked first, so a caller
+   * from another tenant gets `TenantMismatch` and learns nothing; the claim the store named is not, since
+   * its holder's tenant is unknown. A re-read that fails or throws falls back to a `ThreadBusy` naming no
+   * checkpoint. Any other refusal is [[GraphError.CheckpointWriteFailed]].
+   */
+  private def changeRefused(threadId: ThreadId, config: RunConfig)(error: LLMError): LLMError = error match
+    case _: GraphError.StaleClaim =>
+      Try(busyAt(threadId, config, None, nameWithoutCheckpoint = false)).toResult.flatten.fold(
+        {
+          case refusal @ (_: GraphError.TenantMismatch | _: GraphError.ThreadBusy) => refusal
+          case _ => GraphError.ThreadBusy(threadId.value, None)
+        },
+        identity
+      )
+    case other => GraphError.CheckpointWriteFailed(threadId.value, other)
 
   private def notFound[A](threadId: ThreadId, checkpointId: String): Result[A] =
     Left(GraphError.CheckpointNotFound(threadId.value, checkpointId))
@@ -1491,7 +1516,10 @@ final class GraphRuntime(
      * The claim's [[Heartbeat]] starts as soon as it is granted, so the first renewal is timed from the
      * grant, and the time admission takes counts against the lease. A loss found before the run is
      * launched is recorded, as [[StopCause.ClaimLost]], and the run stops before its first superstep; the
-     * claim's commit is fenced against it, and given up once the loss is old enough ([[boundedByLoss]]).
+     * claim's commit is fenced against it, and given up once the loss is old enough ([[boundedByLoss]]). A
+     * claim's commit the store refuses as stale is a loss found then: admission fails
+     * [[GraphError.ClaimLost]], naming the current claim the store named unless the heartbeat recorded the
+     * loss first, so the two agree on one claim.
      */
     def admit(
       execution: Execution,
@@ -1586,6 +1614,11 @@ final class GraphRuntime(
         // through the committer's fence, so that a claim found lost before it begins never lands
         records <- committer.begun(claim)(reason => Left(reason))(commitAndDeliver(threadId, claim)) match
           case Left(lost: GraphError.ClaimLost) => Left(lost)
+          // the claim lapsed, or another run took it over, before its commit landed: the loss is recorded
+          // as the heartbeat records one, so a loss it declared meanwhile and this refusal name one claim
+          case Left(stale: GraphError.StaleClaim) =>
+            claimLost(stale.current.map(FencingToken(_)))
+            Left(GraphError.ClaimLost(threadId.value, token, lostTo.get))
           // another run advanced the thread first: the thread is re-read so that another tenant's
           // checkpoint is not named, but the conflict's own `latest` is the authoritative one. A
           // re-read that fails or throws falls back to that ThreadBusy rather than a store error.
