@@ -51,12 +51,12 @@ streaming, checkpoint/resume, and persisted artifacts, and runs deterministicall
 
 | # | Issue | Slice | Kind | Depends on |
 |---|---|---|---|---|
-| C1 | #1902 | Middleware that sees and writes state on the model side, and contributes prompt sections | core | - |
-| C2 | #1903 | Tool permissions and timeouts | core | - |
-| C3 | #1904 | Backend SPIs: files, sandbox, long-term store | core | - |
+| C1 | #1902 | Kernel hooks: state-writing `beforeAgent`/`wrapModelCall`, prompt sections, `taskKey`, Block restores every key | core | - |
+| C2 | #1903 | Tool permissions, timeouts and batch locks | core | - |
+| C3 | #1904 | Backend SPIs: files, sandbox, long-term store | core | - (uses C2's `LockKey`) |
 | F1 | #1905 | Filesystem tool suite | feature | C2, C3 |
 | F2 | #1906 | Workspace sandbox and file backends; `WorkspaceTools` removed | feature | C2, C3 |
-| F3 | #1907 | Todos | feature | C1 |
+| F3 | #1907 | Todos | feature | C1, C2 |
 | F4 | #1908 | Summarisation and tool-output offload | feature | C1, C3 |
 | F5 | #1909 | Agent Skills | feature | C1, C3 |
 | F6 | #1910 | Instruction memory (`AGENTS.md`) | feature | C1, C3 |
@@ -70,78 +70,147 @@ streaming, checkpoint/resume, and persisted artifacts, and runs deterministicall
 Parallel lanes:
 
 1. **From the start:** C1, C2, C3 and F8b, plus F8a and F9 whenever someone is free. None depends on
-   another.
-2. **After the core slices merge:** F1-F7, up to seven lanes, each with its own files. F3 and F7 need
-   only C1; F1 and F2 need C2 and C3.
+   another, except that C3 uses C2's `LockKey`, a one-line opaque type: whichever lands first adds it.
+2. **After the core slices merge:** F1-F7, up to seven lanes, each with its own files. F7 needs only
+   C1; F3 needs C1 and C2; F1 and F2 need C2 and C3.
 3. **Last:** P1, then P2.
 
 The critical path is C3 → F1 → P1 → P2. F8b is the only core-API change outside the agent runtime;
 core must settle before MiMa, so it is reviewed first.
 
+## Runtime rules every slice must satisfy
+
+These are how the Stage 1-2 runtime behaves, checked against the code. A harness design that ignores one
+of them is wrong in a way review will keep finding piecemeal, so each slice's design record states how
+it meets each rule, and its tests cover each rule that applies.
+
+1. **One batch, one snapshot.** The tool calls of one model message run concurrently in one superstep,
+   and each sees the same committed `ThreadState` (`ToolLoop.scala:896`, `ThreadState.scala:9`). They
+   never see each other's updates. A check made against the snapshot (a quota, a file's current content)
+   is therefore not atomic across a batch, and two whole-value writes to one key lose one silently.
+2. **An update function that fails, fails the run.** A `StateKey` apply returning `Left` is
+   `GraphError.StateUpdateFailed` for the whole run, and `recover` replays the same pending writes into
+   the same failure (`ThreadState.scala:36`, `GraphRuntime.scala:1258`). So a tool-level refusal must
+   be decided when the tool runs, never when its update is applied. Harness update functions are total.
+3. **An update becomes visible from the next superstep.** A hook's update commits with its task; no hook
+   sees it in the same request. A value the current model request needs is put into that request by
+   the hook that produced it.
+4. **Hooks and tools run at least once.** `recover` runs again every task that has no committed pending
+   write. That includes `beforeAgent` (the input task), the tool calls, and `afterAgent` (the finish
+   task), and under `Async`/`OnExit` durability even work whose write was not yet durable
+   (`GraphRuntime.scala:919-946, 1338-1377`). An effect outside thread state must be idempotent under a
+   key that is stable across recovery. That key is `(threadId, superstep, taskId)`; `runId`,
+   `checkpointId` and the fencing token are not stable.
+5. **A Block retracts messages only, today.** An output Block's update is `RemoveTurn` on messages, with
+   `activeAgent` and `transfer` restored (`ToolLoop.scala:977-988`). Every other key written during the
+   turn survives. Harness keys hold content (files, todos, summaries, recalled memory), so C1 widens
+   retraction (below). Effects outside thread state cannot be retracted, and the docs say so.
+6. **Every checkpoint is a full snapshot** (`CompiledGraph.scala:152`), so each retained checkpoint
+   holds a copy of every key. Only `prune` with a `RetentionPolicy` bounds it.
+7. **Restore decodes state through each key's codec.** `Messages.key` is at `SchemaVersion.initial` with
+   no migrations (`toolloop/Messages.scala`). A change to a stored type's shape needs a reader for the
+   old shape or a migration, or existing SQLite threads fail at `restore`.
+8. **Tenant is `RunContext.config.tenantId: Option[TenantId]`.** Anything shared across threads (a
+   store, a memory manager, a host or workspace backend) is resolved or namespaced by tenant (§9
+   "Tenant identity", "Run dependencies": captured resolvers keyed by `RunContext` identity).
+9. **Durable events carry no message content** (CLAUDE.md, Streaming Events). Content is live-only.
+
 ## Core slices
 
-### C1: model-side state and prompt sections (#1902)
+### C1: kernel hooks for the harness (#1902)
 
-Today `wrapModelCall` sees only the request and returns a `Completion`. Summarisation, todos, skills and
-memory recall need to read thread state, write their own keys, and contribute system-prompt content.
+Today `wrapModelCall` sees only the request and returns a `Completion`, `beforeAgent` returns only text,
+and a Block retracts only messages. The harness needs hooks that read thread state and write their own
+keys, prompt content, a recovery-stable key for effects, and a retraction that covers every key.
 
-- `wrapModelCall(request: ModelRequest, context: ModelContext)(next: ModelRequest => Result[ModelResponse]): Result[ModelResponse]`.
+- **`wrapModelCall(request, context: ModelContext)(next: ModelRequest => Result[ModelResponse]): Result[ModelResponse]`.**
   - `ModelContext` carries `run: RunContext` and `state: ThreadState`.
   - `ModelResponse` carries `completion: Completion` and `update: StateUpdate`.
   - A breaking change to the signature, with no shim.
-- The update may touch only the middleware's declared `writes`. The `writes` Scaladoc changes from
-  "`wrapToolCall` may add" to "any hook may write". It is validated as tool writes are, and the loop's
-  own keys (`LoopKeys`) stay forbidden.
-- The update is committed in the model step's superstep, with the assistant message. When a wrapper
-  calls `next` more than once, only the response it returns counts. The outermost wrapper's response is
-  what is committed. A wrapper adds its own writes with `ModelResponse.addUpdate`, which keeps the
-  updates of the wrappers inside it; the combined update is applied innermost first.
-- New hook `promptSections(context: ModelContext): Vector[PromptSection]`.
-  - `PromptSection(id, text, cacheable: Boolean)`, a growth-prone type.
-  - Before each model call, the loop collects sections in stack order and puts cacheable ones first. It
-    prepends them to the builder's system prompt (or replaces it: see P1 `PromptMode`) in the request
-    sent, never in the stored messages.
-  - Section ids are unique within one assembled request. The same id recurs on every model call of a
-    run, as its middleware supplies it again. A duplicate within one request fails the run with
-    `GraphError.MiddlewareFailed`.
-- No separate `beforeModel` / `afterModel` hooks: a wrapper covers both. §5.6 is amended to say so.
-- Summarisation keeps the rule that a request is pruned, never the stored thread (CLAUDE.md, Guardrails):
-  F4 stores its summary in its own key and rewrites each request, so `history`, `fork` and Block
-  retraction (§4.19) are unaffected.
+- **`beforeAgent(input, context: ModelContext): Result[AgentInput]`.** `AgentInput` carries `text` and
+  `update`. The update commits with the input task, so it is visible to the turn's first model call
+  (rule 3). A breaking change to the signature, with no shim.
+- **Writes.** Any hook's update may touch only the middleware's declared `writes`, validated as tool
+  writes are; the loop's own keys (`LoopKeys`) stay forbidden.
+  - A model-call update commits with the model step's task.
+  - When a wrapper calls `next` more than once, only the response it returns counts.
+  - A wrapper adds its writes with `ModelResponse.addUpdate`, which keeps those of the wrappers inside
+    it; the combined update applies innermost first.
+- **New hook `promptSections(context: ModelContext): Vector[PromptSection]`.**
+  - `PromptSection(id, text, cacheable)`, a growth-prone type.
+  - Before each model call, the loop collects sections in stack order, cacheable ones first, into the
+    request's system prompt; they are never stored.
+  - It reads the snapshot only (rule 3).
+  - Ids are unique within one assembled request. A duplicate within one request fails the run.
+- **`RunContext.taskKey: IdempotencyKey`**, derived from `(threadId, superstep, taskId)`. It is stable
+  across `recover` (rule 4), and is what a hook's external effect is keyed by. Tool calls keep their
+  existing `IdempotencyKey`.
+- **Block restores the whole turn (rule 5).**
+  - An output Block now restores every key, including middleware and tool keys, to its value at the
+    turn's settled checkpoint. It keeps only `usage` and the loop's own bookkeeping, as today.
+  - That is a kernel change in `ToolLoop`'s Block update: a key-generic restore, not a `RemoveTurn` per
+    key. It also amends §4.13 and §4.19.
+  - Effects outside state (host files, a sandbox, a memory store) cannot be restored, and the docs of
+    each such backend say so.
+- **No separate `beforeModel` / `afterModel` hooks**: a wrapper covers both. §5.6 is amended.
 
-Tests: state read and write through a wrapper; undeclared write refused; a retrying wrapper's discarded
-updates not committed; section ordering, caching order and duplicate ids; updates surviving
-checkpoint/resume on `InMemoryCheckpointer`.
+Tests (each rule that applies):
+- state read and write through each hook
+- an undeclared write refused
+- a retrying wrapper's discarded updates not committed
+- a `beforeAgent` update visible to the first model call
+- section order and duplicate ids
+- `taskKey` equal before and after a crash-and-`recover` of the same task
+- an output Block after a turn that wrote a middleware key and a tool key restores both and keeps
+  `usage`
+- every update surviving checkpoint/`recover` on SQLite
 
-### C2: tool permissions and timeouts (#1903)
+### C2: tool permissions, timeouts and batch locks (#1903)
 
-- `AgentToolSpec.withTimeout(FiniteDuration)` (a new `timeout: Option[FiniteDuration]` field).
-  - The loop interrupts the task when it runs over and writes a tool-level
-    `ToolOutcome.Error("timed out after <n> ms")`, which the model sees. It is not `Fatal`, because the
-    model can adapt.
-  - The idempotency key is unchanged, so a timed-out side effect is still at-least-once (§10).
+**Timeouts.** `AgentToolSpec.withTimeout(FiniteDuration)` adds a `timeout: Option[FiniteDuration]`
+field.
+- The loop interrupts a task that runs over and writes a tool-level `ToolOutcome.Error("timed out after
+  <n> ms")` the model sees, not `Fatal`.
+- The idempotency key is unchanged, so the effect is at-least-once (§10).
+- Timeouts rely on interruption, as cancellation does (§4.4). The structured scope waits for a tool that
+  ignores its interrupt, so such a tool delays its batch past the timeout. This is documented, with the
+  tool-author rule: block interruptibly.
+
+**Resources and rules.**
 - `AgentToolSpec.withResources(A => Vector[ToolResource])`.
-  - `ToolResource(operation: Operation, target: String)`.
+  - `ToolResource(operation, target)`.
   - `Operation` = `Read | Write | Delete | Execute | Network | Invoke`.
-  - A spec with no resource function yields `Vector(ToolResource(Invoke, <tool name>))`.
-- `PermissionRule(operation: Operation, target: Glob, decision: Decision)`, with
-  `Decision` = `Allow | Deny | Ask`.
-- `PermissionMiddleware(rules: Vector[PermissionRule])`, in `wrapToolCall`:
-  - For each resource, the first matching rule decides. An unmatched resource is **denied** (§9
-    "Permission default").
-  - A call runs only if every resource is allowed. Any `Deny` returns
-    `ToolOutcome.Error("Denied: <op> <target>")`.
-  - Any `Ask` without `context.approved` returns `NeedsApproval`, so the call resumes through the
-    existing approval path, with typed approve/edit/reject answers.
-  - Rules are evaluated on the decoded arguments, after schema validation (§9 "Tool argument
-    validation").
-- `Glob` is agent-local, with `*`, `**` and `?` on `/`-separated targets, and is shared with F1's `glob`.
-- The docs state that sandbox `execute` is also limited by the sandbox itself (§5.6); path rules alone do
-  not secure it.
+  - The default is `(Invoke, <tool name>)`.
+- `PermissionRule(operation, target: Glob, decision: Allow | Deny | Ask)`.
+- `PermissionMiddleware(rules)`, in `wrapToolCall`:
+  - For each resource, the first matching rule decides; an unmatched resource is **denied**.
+  - A call runs only if every resource is allowed. `Deny` gives `Error("Denied: <op> <target>")`.
+  - `Ask` without `context.approved` gives `NeedsApproval`.
+  - An edited approval runs `wrapToolCall` again on the edited arguments (`ToolLoop.scala:837-846`), so
+    the rules are evaluated again. `Ask` then passes, as approved, and `Deny` still denies.
+  - The rules are evaluated after schema validation and decoding.
+- `Glob` is agent-local (`*`, `**`, `?`) and is shared with F1's `glob`.
+- The docs state that sandbox `execute` is also limited by the sandbox itself.
 
-Tests: first match wins, unmatched denied, multi-resource calls, `Ask` resumes and runs exactly once,
-timeout produces an error result and the barrier still gets one result per call, a cancelled run
-during a timed tool is `CancelledError`, not a timeout.
+**Batch locks (rules 1 and 2).**
+- `AgentToolSpec.withLocks(A => Set[LockKey])`.
+- In one batch, calls whose lock sets intersect run in successive supersteps, in call order. The others
+  run concurrently in the first superstep, as now.
+- A later call therefore sees the earlier one's committed state. Its check against the snapshot (a
+  quota, a file's content) is exact, and its update cannot lose another's.
+- The barrier is unchanged: the next model call waits for every call's one result.
+- Each locked call commits its own pending write, so `recover` resumes mid-sequence without running a
+  finished call again.
+- `RunBudgets.maxSupersteps` counts these supersteps; this is documented.
+
+Tests:
+- first match wins; unmatched denied; multi-resource calls
+- `Ask` resumes and runs exactly once
+- edited arguments re-checked, with a `Deny` after the edit
+- timeout yields one error result per call; cancellation during a timed tool is `CancelledError`
+- two locked calls in one batch: the second sees the first's write; a crash between them, then
+  `recover`, runs only the second
+- unlocked calls still run concurrently
 
 ### C3: backend SPIs (#1904)
 
@@ -149,7 +218,7 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 
 - **`VPath`**: an opaque type; absolute, normalised, `/`-separated, no `..`, no empty segment.
   Construction returns `Result`.
-- **`FileBackend`**, with `writes: Set[StateKey[?, ?]]` and:
+- **`FileBackend`**, with `writes: Set[StateKey[?, ?]]`, `locks(op): Set[LockKey]` and:
   - `ls(path)`
   - `read(path, offset, limit)`
   - `write(path, content)`
@@ -159,29 +228,43 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
   - `grep(regex, under, include)`
 
   Each takes a `FileContext` (`RunContext` and `ThreadState`) and returns `Result[(A, StateUpdate)]`.
-  State-backed files stay pure that way: the runtime commits the update, so files are part of
-  checkpoints, `history` and `fork`. Host and sandbox backends perform the effect and return
-  `StateUpdate.empty`.
+  State-backed files are committed by the runtime, so they are part of checkpoints, `history` and `fork`.
+  Host and sandbox backends perform the effect, return `StateUpdate.empty`, and are at-least-once
+  (rule 4).
 - **`StateFileBackend`** is the default.
-  - A `files` key, `StateKey[Map[VPath, FileEntry], FileUpdate]`, with `Put` / `Delete` operations.
-    `FileEntry` holds the content and its modification `Instant`.
-  - A per-thread size cap (`maxBytes`) fails a write with a tool error rather than growing checkpoints
-    without bound.
-- **`CompositeBackend(default, routes: (VPath, FileBackend)*)`** routes by longest prefix. `writes` is
-  the union. `glob` and `grep` cover every route under the requested path.
-- **`HostFileBackend(root)`** is opt-in. Paths resolve under `root` with symlink escape refused.
-- **`SandboxBackend`**: `execute(command, workdir, timeout, ctx): Result[ExecResult]`, with
-  `ExecResult(exitCode, stdout, stderr, truncated)`.
+  - A `files` key, `StateKey[Map[VPath, FileEntry], FileUpdate]`, with total `Put` / `Delete` update
+    functions (rule 2). `FileEntry` holds content and a modification `Instant`.
+  - Every mutating operation takes the backend-wide lock `state-files` (C2). So mutations in one batch
+    are applied in order, each against the state the previous one committed.
+  - The per-thread `maxBytes` cap is checked when the tool runs and is a tool error. Because of the
+    lock, it is exact (rule 1).
+  - `maxBytes` defaults to 1 MiB. Each checkpoint copies the whole map (rule 6), so the docs pair the
+    backend with a `RetentionPolicy`, and P1 sets one.
+- **`CompositeBackend(default, routes: (VPath, FileBackend)*)`** routes by longest prefix. `writes` and
+  `locks` come from the routed backend. `glob` and `grep` span the routes.
+- **`HostFileBackend(root)`** is opt-in.
+  - Paths resolve under `root`, and symlink escape is refused.
+  - Mutations lock their path, so two writes to one host file in a batch are ordered.
+  - It is not tenant-scoped: an application serving tenants builds one per tenant through
+    `FileBackend.resolved` (rule 8).
+- **`FileBackend.resolved(FileContext => FileBackend)`** and **`SandboxBackend.resolved`** are
+  captured resolvers keyed by `RunContext` identity, typically by tenant (§9 "Run dependencies").
+- **`SandboxBackend`**: `execute(command, workdir, timeout, ctx): Result[ExecResult(exitCode, stdout,
+  stderr, truncated)]`, at-least-once, keyed by the call's `IdempotencyKey` for sandboxes that can use
+  it.
 - **`LongTermStore`** works on `(Namespace, key)`:
-  - Operations are `get`, `put`, `delete`, `list(prefix)` and `search(query)` (substring search in the
-    in-memory implementation).
-  - `Namespace` always includes `RunContext.config.tenantId`, so the store is tenant-scoped by
-    construction (§9 "Tenant identity").
+  - Operations are `get`, `put`, `delete`, `list(prefix)` and `search(query)`.
+  - `put` replaces, so a replayed put is idempotent.
+  - `Namespace` always includes the tenant (`None` is its own single-tenant namespace) (rule 8).
   - The in-memory implementation ships here; SQLite and Postgres implementations are Stage 5.
-- **`StoreFileBackend(store, namespace)`** exposes a `LongTermStore` as files. A composite then routes
-  `/memories/` there across threads (§5.4).
-- **`FileBackendContract`** in `llm4s-agent-testkit`, a suite every backend passes (state, composite,
-  host, store, and F2's workspace backend), following `CheckpointerContract`.
+- **`StoreFileBackend(store, namespace)`** exposes a store as files, for `/memories/`. Its mutations
+  lock their path.
+- **`FileBackendContract`** in `llm4s-agent-testkit`, which every backend passes. It covers:
+  - the operations
+  - ordered mutations under locks in one batch
+  - the quota exact under a parallel batch
+  - replay idempotence after `recover`
+  - tenant isolation for resolved and store backends
 
 ## Feature slices
 
@@ -190,12 +273,25 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 `FileTools(backend)` yields `ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob` and `grep` as
 `AgentTool`s.
 
-- Each declares path resources (C2): `Read` for `ls`/`read_file`/`glob`/`grep`, `Write` for
-  `write_file`/`edit_file`, `Delete` for `delete`. Each also declares `ToolHints`.
-- `read_file` returns numbered lines, paged by `offset`/`limit`, and states the total line count.
-- `edit_file` fails when `old` is absent or not unique, unless `replaceAll` is set.
-- Tool names match Deep Agents. `ToolSet` rejects duplicate names, so the docs tell users not to
-  register `llm4s-agent-tools`' host file tools alongside this suite.
+- **Resources (C2).** `Read` for `ls`/`read_file`/`glob`/`grep`, `Write` for `write_file`/`edit_file`,
+  `Delete` for `delete`, and `ToolHints`.
+- **Locks.** Mutating tools take `backend.locks(op)` (C2, C3).
+  - Two edits of one file in a batch apply in order, the second against the first's result.
+  - Reads take no lock and see the batch's snapshot. This is documented: a read issued alongside a
+    write sees the file as it was before the batch.
+- **`read_file`.** Numbered lines, paged by `offset`/`limit`, with the total line count.
+- **`edit_file`.** Fails when `old` is absent or not unique, unless `replaceAll` is set. This is decided
+  when the tool runs, against the state the lock guarantees.
+- **Docs.** Do not register `llm4s-agent-tools`' host file tools alongside this suite (`ToolSet`
+  rejects duplicate names).
+
+Tests:
+- each tool on state and composite backends
+- two edits of one path in one batch, both applied
+- a write over quota in a parallel batch refused
+- permission rules on paths
+- edits visible after `recover`
+- an output Block undoing a turn's state-file edits (C1)
 
 ### F2: workspace sandbox (#1906)
 
@@ -205,6 +301,14 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
   `(Execute, <command>)` and it is `destructive` and `openWorld`.
 - `WorkspaceTools` is deleted and `codegen/CodeWorker` moves to the new tools. Migration note.
 - Related: #870, so sandbox limits are enforced in the runner as well as by tool policy.
+- **Effects.** Workspace effects are outside thread state.
+  - They are at-least-once (rule 4). `execute` passes the call's `IdempotencyKey` to the workspace,
+    which skips a command already run under it.
+  - A Block cannot undo them (rule 5), and this is documented.
+- **Locks.** `WorkspaceFileBackend` mutations lock their path, and `execute` takes a workspace-wide
+  lock, so a batch's commands and edits apply in call order.
+- **Tenants.** One workspace serves one tenant: an application serving several builds the backends
+  through the C3 resolvers (rule 8).
 - Live-container tests go in `modules/it` under the `@Workspace` tier. Unit tests use a fake
   `WorkspaceAgentInterface`.
 
@@ -212,26 +316,41 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 
 - `TodoMiddleware` contributes:
   - a `todos` key, `Vector[Todo(id, content, status)]`, with `status` = `Pending | InProgress | Done`
-  - a `write_todos` tool that replaces the list as a whole
+  - a `write_todos` tool that replaces the list as a whole, with the lock `todos` (C2). Two calls in
+    one batch apply in order, so neither is lost silently.
   - a prompt section showing the current plan
 - The plan guides the model only: it never routes or overrides tool policy (§8).
-- Each change emits a durable `HarnessEvents.TodosUpdated` custom event.
+- **Events (rule 9).** Each change emits a durable `HarnessEvents.TodosUpdated` with ids and statuses
+  only. The todo text is in state, and in a live-only progress event for streaming.
+- A Block restores the list (C1).
 
 ### F4: context management (#1908)
 
-- `SummarizationMiddleware(trigger, keepRecent, compressor)`:
-  - The trigger is a token count or message count of the outgoing request, measured with core's token
-    counting.
-  - When it fires, older messages are compressed through core's `HistoryCompressor`/`LLMCompressor`, and
-    `(summary, throughMessageId)` is stored in the middleware's own key (C1).
-  - Later requests send the summary and the messages after `throughMessageId`. A summary is extended,
-    not recomputed, when the trigger fires again.
-  - Tool-call/result pairs are never split, so requests stay provider-valid.
-- `ToolOutputOffload(thresholdTokens, backend)`:
-  - It is a `wrapToolCall`. A `Success` whose content is over the threshold is written to
-    `/large_tool_results/<toolCallId>`, and the update is merged into the outcome's update.
-  - The model sees a short preview plus that path, and reads more with `read_file`.
-- `ContextWindowMiddleware` stays as the pruning-only option.
+**`SummarizationMiddleware(trigger, keepRecent, compressor)`**, in `wrapModelCall`:
+- The trigger is a token count or message count of the outgoing request.
+- When it fires, older messages are compressed through core's `HistoryCompressor`/`LLMCompressor`.
+  - The summary goes straight into the outgoing request (rule 3).
+  - `(summary, throughMessageId)` is written to the middleware's own key for later calls.
+- Later requests send the summary and the messages after `throughMessageId`. When the trigger fires
+  again, the summary is extended, not recomputed.
+- Tool-call/result pairs are never split.
+- The stored thread is never edited.
+- A Block restores the key (C1), so a summary of a blocked turn is never kept.
+- The compression call reruns after a crash (rule 4). That costs a call, but its result is pure state,
+  so nothing is duplicated.
+
+**`ToolOutputOffload(thresholdTokens, maxResultBytes, backend)`**, in `wrapToolCall`:
+- A `Success` over the threshold is written to `/large_tool_results/<toolCallId>`, truncated at
+  `maxResultBytes`. The update is merged into the outcome's update, and the model sees a preview plus the
+  path.
+- The path is unique per call and a replayed write replaces it, so offload is idempotent (rule 4).
+- **Quota.** Offload happens after the tool ran, so it cannot take a lock before the batch is scheduled.
+  So `/large_tool_results/` is outside the state backend's `maxBytes` and has its own bound:
+  `maxResultBytes` per result.
+- **Cleanup.** Offloads older than the current summary's `throughMessageId` are deleted when the summary
+  advances, which bounds them per thread.
+
+`ContextWindowMiddleware` stays as the pruning-only option.
 
 ### F5: Agent Skills (#1909)
 
@@ -259,35 +378,60 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
 
 ### F7: semantic memory (`llm4s-agent-memory`) (#1911)
 
-- `SemanticMemoryMiddleware(manager: MemoryManager, recall, record, consolidate)`:
-  - Recall runs `getRelevantContext` on the turn's input at its first model call, in `wrapModelCall`.
-    The recalled text is written to a declared `recalled` key (C1), and `promptSections` shows it from
-    there. It is checkpointed, so a recovered run sends the same context as before the crash.
-    `beforeAgent` is not used, because `recover` does not run it again.
-  - Record runs in `afterAgent`, writing the turn.
-  - Consolidation is optional, every N turns.
-- `MemoryManager` is immutable-returning, so the middleware holds the latest manager per thread behind a
-  thread-safe cell. The docs say a durable store (SQLite, Postgres) is what makes memory survive a
-  restart.
-- New-module checklist (CLAUDE.md "Adding a module"):
-  - coverage floor, codecov flag and CI upload
-  - CHANGELOG and docs migration note
-  - `docs` project source list
-  - `hooks/pre-commit`
+`SemanticMemoryMiddleware(managers: Option[TenantId] => MemoryManager, recall, record, consolidate)`.
+
+**Tenant scope (rule 8).** The manager is resolved per tenant and held in one thread-safe cell per
+tenant, not per thread.
+- Every thread of a tenant recalls what earlier threads of that tenant recorded.
+- No tenant's recall reads another's: the resolver supplies a tenant-scoped store, or a store filtered
+  by a tenant tag the middleware writes and filters on.
+- Updates to one tenant's cell are serialised.
+
+**Recall** runs `getRelevantContext` on the turn's input in `beforeAgent`.
+- It writes the text to a declared `recalled` key (C1), committed with the input task, so the turn's
+  first model call shows it as a prompt section (rule 3).
+- After a crash before that commit, the input task reruns and recalls again. Nothing has used the result
+  yet, so that is harmless (rule 4).
+- A Block restores the key (C1).
+
+**Record** runs in `afterAgent`.
+- Each memory's `MemoryId` is derived from `RunContext.taskKey` and stored with replace-on-same-id
+  semantics, so a replayed finish task overwrites, not duplicates (rule 4).
+- F7 adds that upsert guarantee to the `MemoryStore` contract and its stores where `store` does not
+  already replace.
+- Consolidation, every N turns, is keyed the same way.
+
+**Order.** The middleware runs outside guardrail middleware (`runsBefore`). Inner `afterAgent` hooks run
+first, and a guardrail `Left` stops the fold (`MiddlewareStack.scala:40-43`), so a blocked answer is
+never recorded. P1 fixes this order.
+
+**New-module checklist** (CLAUDE.md "Adding a module"):
+- coverage floor, codecov flag and CI upload
+- CHANGELOG and docs migration note
+- `docs` project source list
+- `hooks/pre-commit`
+- root aggregate and BOM
+
+Tests:
+- two threads of one tenant share recall; two tenants do not
+- the first model call sees recall
+- a crash after record, then `recover`, leaves exactly one memory
+- a blocked answer is not recorded
 
 ### F8a: response format for the agent's answer (#1912)
 
 - `AgentBuilder.withOutput[O](using SchemaDefinition[O], ReadWriter[O])` records the schema.
   `withOutputOf[O: SchemaOf]` is a convenience in `schema-derivation`.
-- Every model call carries `responseFormat = JsonSchema(...)`, and a prompt section always states the
-  schema too. `RequestTransformer` silently drops an unsupported format inside the client and reports
-  nothing to the agent, so the agent cannot add the section only when needed. The answer-turn
-  validation below is what enforces the schema.
-- An answer turn (no tool calls) is validated against the schema before the run completes:
-  - A failure is sent back once as a corrective user message, and the model is asked again.
+- **Schema.** Every model call carries `responseFormat = JsonSchema(...)`, and a prompt section always
+  states the schema too. `RequestTransformer` silently drops an unsupported format inside the client and
+  reports nothing to the agent.
+- **Validation.** An answer turn (no tool calls) is validated against the schema inside the model step.
+  - A failure is retried once within the same task: the request is extended with the invalid answer and
+    the error, and the corrective exchange is not stored in the thread.
   - A second failure fails the run with a typed `GraphError`.
-- `AgentResult.decodeOutput[O: ReadWriter]: Result[O]` decodes the answer. `Agent` stays non-generic;
-  Stage 4's `TypedAgent[I, O]` builds on this.
+  - Both calls count toward usage.
+- **`AgentResult.decodeOutput[O: ReadWriter]: Result[O]`** decodes the answer. `Agent` stays
+  non-generic; Stage 4's `TypedAgent[I, O]` builds on this.
 
 ### F8b: multimodal content parts (core) (#1913)
 
@@ -295,6 +439,12 @@ All in `org.llm4s.agent.harness` (package name settled in the C3 design record).
   using `org.llm4s.media`.
 - `UserMessage` and `ToolMessage` carry `parts: Vector[ContentPart]`; `UserMessage(text)` remains as the
   one-part constructor.
+- **Stored threads (rule 7).** Core `Message`'s reader keeps accepting the old string-content shape, as a
+  single `Text` part. `Messages.key` and `MessageUpdate` move to a new schema version, with a migration
+  from the old one.
+  - A SQLite thread written before the change restores and continues after it.
+  - That is tested on a fixture checkpoint written by `main` before the change (as #1821 does for format
+    5).
 - Each provider module maps the parts it supports. Any other part fails the request with a typed
   `LLMError` naming the part kind, never dropped silently.
 - `ProviderModuleChecks` gains `assertContentParts`, and every chat provider module's spec calls it.
@@ -327,9 +477,11 @@ defaults and `with*` setters. Its fields:
 | `systemPrompt` | `PromptMode` = `Default \| Replace(text) \| Suffix(text)` |
 | `permissions` | `Vector[PermissionRule]` |
 | `toolTimeout` | `Option[FiniteDuration]` |
+| `retention` | `RetentionPolicy`, default: keep the latest N checkpoints (rule 6) |
 
 - `AgentBuilder.withHarness(profile)` installs the middleware in a fixed, documented order: permissions
-  outermost, then offload, summarisation, skills, instructions, todos. It adds the selected tools and
+  outermost, then offload, summarisation, skills, instructions, todos. An added
+  `SemanticMemoryMiddleware` (F7) runs outside guardrail middleware. It adds the selected tools and
   `execute` only when `sandbox` is set.
 - `HarnessProfile.deepAgents` is the opinionated preset. Its default prompt teaches plan, act and verify,
   context management, and tool safety; the delegation part is added in Stage 4.
@@ -352,7 +504,11 @@ Both run as samples and as deterministic specs on `ScriptedLLMClient`.
   - the run suspends at `execute`, resumes approved, and runs the command exactly once
   - edited files present in the workspace after resume
 
-Each example has assertions for each of the five exit capabilities.
+Each example has assertions for each of the five exit capabilities. Each also exercises the runtime
+rules:
+- a parallel batch of file edits
+- a crash before a finish commit, after which memory is recorded once and offloads are not duplicated
+- an output Block that leaves no file, todo or summary from the blocked turn
 
 ## Delivery
 
@@ -364,8 +520,10 @@ Each example has assertions for each of the five exit capabilities.
   - the permissions/timeouts row is marked as owned by C2
   - child-run cancellation moves to Stage 4
   - §5.6 notes that wrappers replace `beforeModel`/`afterModel`
+- Each slice's design record has a section on how it meets each runtime rule above.
 - One migration note covers the stage:
-  - the `wrapModelCall` signature
+  - the `wrapModelCall` and `beforeAgent` signatures
+  - a Block restores every key
   - `WorkspaceTools` removed
   - `Message` content parts
   - the new `llm4s-agent-memory` module
