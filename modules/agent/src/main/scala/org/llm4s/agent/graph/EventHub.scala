@@ -103,9 +103,10 @@ private[graph] trait Dispatched extends Subscription:
  * or gap read ends the subscription once its queue is delivered, with
  * `Disconnected(lastSeq, ReplayFailed(error))`.
  *
- * '''A deleted thread''' ([[deleting]]). A subscription follows one thread, not its id. When this
- * runtime deletes the thread, every subscription to it made before the delete ends once its queue is
- * delivered, with `Disconnected(lastSeq, ThreadDeleted)`, and takes nothing more. One in another
+ * '''A deleted thread''' ([[threadDeleted]]). A subscription follows one thread, not its id. When
+ * this runtime deletes the thread, every subscription to it in the live set once the store delete has
+ * returned - made before the delete, or while it was in flight - ends once its queue is delivered, with
+ * `Disconnected(lastSeq, ThreadDeleted)`, and takes nothing more. One in another
  * runtime learns of the delete from the store: a read from inside the deleted log is refused with
  * [[GraphError.ThreadDeleted]] - by its watch, its replay or a hand-over's gap read - and it ends the
  * same way. A subscription from `0` takes the thread under the id from its first event, which follows
@@ -208,17 +209,16 @@ final private[graph] class EventHub(
     }
 
   /**
-   * The thread's subscriptions now, to end with [[DisconnectReason.ThreadDeleted]] once the store has
-   * deleted the thread ([[Deletion.deleted]]). Taken before the store delete, so a subscription made
-   * after it - to follow the thread created next under the id - is left alone.
+   * The store has deleted the thread: every subscription to it in the live set now ends with
+   * [[DisconnectReason.ThreadDeleted]] after what it has queued. Called once the store delete has
+   * returned, so a subscription that joined while the delete was in flight - which may have replayed
+   * the deleted log - is ended too, never left following whichever thread its replay happened to read.
+   * The caller still holds the thread, so no run of the next thread under the id has committed in this
+   * runtime: a subscription made in the moment between the delete and this call has seen nothing of a
+   * new thread, and is ended as well; it subscribes again to follow one.
    */
-  def deleting(threadId: ThreadId): Deletion =
-    new Deletion(withLock(hubLock)(subscribers.getOrElse(threadId.value, Vector.empty)))
-
-  /** The subscriptions a thread had before its delete; see [[deleting]]. */
-  final class Deletion private[EventHub] (dispatchers: Vector[Dispatcher]):
-    /** The store deleted the thread: each subscription ends after what it has queued. */
-    def deleted(): Unit = dispatchers.foreach(_.threadDeleted())
+  def threadDeleted(threadId: ThreadId): Unit =
+    withLock(hubLock)(subscribers.getOrElse(threadId.value, Vector.empty)).foreach(_.threadDeleted())
 
   /** Whether the hub holds a hand-over mark for the thread; for tests. */
   private[graph] def marked(threadId: ThreadId): Boolean = withLock(hubLock)(handed.contains(threadId.value))

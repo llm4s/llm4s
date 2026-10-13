@@ -136,7 +136,8 @@ events on past the deleted thread's, one number skipped. A subscription follows 
 subscription to the deleted thread ends with `Disconnected(lastSeq, DisconnectReason.ThreadDeleted)` once it has
 delivered what it had queued, and never delivers the new thread's events as if they continued the old log:
 
-- in the deleting runtime, every subscription made before the delete ends at once;
+- in the deleting runtime, every subscription made before `deleteThread` returns - before the delete, or while it
+  is in flight - ends at once;
 - in another runtime sharing the store, a subscription ends when it next reads the store: when its watch next polls,
   or, with `WatchPolicy.disabled`, only when its own runtime next commits on the thread;
 - in another runtime, a subscription that has delivered no event yet - still at `afterSeq = 0`, as one to a thread

@@ -37,9 +37,13 @@ class ThreadDeletionSpec extends AnyFlatSpec with Matchers with EitherValues wit
     override def withZone(zone: ZoneId): Clock = this
     def advance(by: FiniteDuration): Unit      = current.updateAndGet(_.plusNanos(by.toNanos)): Unit
 
-  /** Forwards to `underlying`; `onLatest(n)` runs after the `n`th call to `latest` has read the thread. */
+  /**
+   * Forwards to `underlying`; `onLatest(n)` runs after the `n`th call to `latest` has read the thread,
+   * and `onDelete` before the store deletes it.
+   */
   private class Hooked(val underlying: Checkpointer) extends Checkpointer:
     @volatile var onLatest: Int => Unit                                     = _ => ()
+    @volatile var onDelete: () => Unit                                      = () => ()
     private val latestCalls                                                 = new AtomicInteger()
     def claim(threadId: ThreadId, request: ClaimRequest)                    = underlying.claim(threadId, request)
     def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) = underlying.renew(threadId, token, ttl)
@@ -51,7 +55,9 @@ class ThreadDeletionSpec extends AnyFlatSpec with Matchers with EitherValues wit
       read
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId, token: FencingToken)       = underlying.deleteThread(threadId, token)
+    def deleteThread(threadId: ThreadId, token: FencingToken) =
+      onDelete()
+      underlying.deleteThread(threadId, token)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
@@ -178,6 +184,32 @@ class ThreadDeletionSpec extends AnyFlatSpec with Matchers with EitherValues wit
     eventually(seen.disconnected shouldBe Some(StreamEvent.Disconnected(lastSeq, DisconnectReason.ThreadDeleted)))
     await(runtime.start(thread, emitter, "second", RunConfig()).value)
     seen.said shouldBe Vector("first")
+  }
+
+  it should "end with ThreadDeleted when it joins while the store is deleting the thread" in {
+    val store   = Hooked(InMemoryCheckpointer())
+    val runtime = GraphRuntime(store, Clock.systemUTC(), ClaimPolicy.default, WatchPolicy.disabled)
+    val thread  = newThread()
+    await(runtime.start(thread, emitter, "old", RunConfig()).value)
+    val lastOld  = store.underlying.eventsAfter(thread, 0L, 1000).value.last.seq
+    val deleting = new java.util.concurrent.CountDownLatch(1)
+    val resume   = new java.util.concurrent.CountDownLatch(1)
+    store.onDelete = () =>
+      deleting.countDown()
+      resume.await(10, java.util.concurrent.TimeUnit.SECONDS): Unit
+    val deleted = new java.util.concurrent.LinkedBlockingQueue[Result[Unit]]()
+    Thread.ofVirtual().start(() => deleted.put(runtime.deleteThread(thread))): Unit
+    deleting.await(10, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
+
+    // joins while the delete is in flight, and replays the thread about to be deleted
+    val seen = Seen()
+    val sub  = runtime.subscribe(thread)(seen).value
+    eventually(seen.said shouldBe Vector("old"))
+    resume.countDown()
+    Option(deleted.poll(10, java.util.concurrent.TimeUnit.SECONDS)).value shouldBe Right(())
+
+    eventually(seen.disconnected shouldBe Some(StreamEvent.Disconnected(lastOld, DisconnectReason.ThreadDeleted)))
+    sub.cancel()
   }
 
   "A subscription made after a delete" should "follow the new thread, whose events are numbered past the deleted thread's" in {
