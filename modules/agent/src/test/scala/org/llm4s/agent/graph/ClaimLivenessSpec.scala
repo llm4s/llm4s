@@ -53,10 +53,12 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     @volatile var onCommit: Commit => Option[Result[Vector[EventRecord]]]  = _ => None
     @volatile var onDelete: () => Unit                                     = () => ()
     // run once the store has answered a read of the log, before the answer is returned
-    @volatile var onEventsAfter: ThreadId => Unit        = _ => ()
-    val renewals                                         = new AtomicInteger()
-    val renewed                                          = new AtomicInteger()
-    val releases                                         = new AtomicInteger()
+    @volatile var onEventsAfter: ThreadId => Unit = _ => ()
+    val renewals                                  = new AtomicInteger()
+    val renewed                                   = new AtomicInteger()
+    val releases                                  = new AtomicInteger()
+    // releases that have returned from the store, so whose effect a later call sees
+    val released                                         = new AtomicInteger()
     def claim(threadId: ThreadId, request: ClaimRequest) = underlying.claim(threadId, request)
     def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) = {
       renewals.incrementAndGet()
@@ -66,7 +68,9 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     }
     def release(threadId: ThreadId, token: FencingToken) = {
       releases.incrementAndGet()
-      onRelease().getOrElse(underlying.release(threadId, token))
+      val outcome = onRelease().getOrElse(underlying.release(threadId, token))
+      released.incrementAndGet()
+      outcome
     }
     def commit(threadId: ThreadId, commit: Commit) = onCommit(commit).getOrElse(underlying.commit(threadId, commit))
     def latest(threadId: ThreadId)                 = onLatest().getOrElse(underlying.latest(threadId))
@@ -963,15 +967,17 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
           val entering  = new CountDownLatch(1)
           val hang      = new CountDownLatch(1)
           val returned  = new CountDownLatch(1)
-          val releasing = store.releases.get
+          val late      = new AtomicReference[Option[Result[Vector[EventRecord]]]](None)
+          val releasing = store.released.get
           // the claim's commit enters the store and stays there, interrupted or not, until `hang` opens
           store.onCommit = commit =>
             if commit.checkpoint.exists(_.runId == "first") && entering.getCount > 0 then {
               entering.countDown()
               stuckUntil(hang)
-              val late = store.underlying.commit(thread, commit)
+              val landing = store.underlying.commit(thread, commit)
+              late.set(Some(landing))
               returned.countDown()
-              Some(late)
+              Some(landing)
             } else None
           val rt        = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
           val admitting = new java.util.concurrent.LinkedBlockingQueue[Result[RunHandle[Vector[String]]]]()
@@ -989,13 +995,19 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
           store.onRenew = unreachable
           time.advance(1.second)
           val admitted = Option(admitting.poll(5, TimeUnit.SECONDS))
-          hang.countDown()
           admitted.value.left.value shouldBe a[GraphError.ClaimLost]
           rt.heldLocally(thread) shouldBe false
-          eventually(store.releases.get == releasing + 1)
+
+          // the claim is given back while its commit still hangs: the release is detached, so it lands
+          // with the commit in the store. The commit began before the loss, so the fence lets it go on;
+          // only the token stops it. Had it returned before the release landed, it would have landed,
+          // as a commit in flight at a loss may - so `hang` opens only once the release has landed.
+          eventually(store.released.get == releasing + 1)
+          hang.countDown()
 
           // the late commit is refused, the claim it was fenced by is gone, and it leaves no mark
           returned.await(5, TimeUnit.SECONDS) shouldBe true
+          late.get.value.left.value shouldBe a[GraphError.StaleClaim]
           eventually(!rt.handOverMarked(thread))
           two.entered.getCount shouldBe 1
           events(store).filter(_.runId == "first") shouldBe empty
