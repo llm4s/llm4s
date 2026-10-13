@@ -161,6 +161,17 @@ private[graph] trait Dispatched extends Subscription:
  * place before it; if they do not fit, the subscriber lags as for any durable event. A failed watch
  * or gap read ends the subscription once its queue is delivered, with
  * `Disconnected(lastSeq, ReplayFailed(error))`.
+ *
+ * '''A deleted thread''' ([[threadDeleted]]). A subscription follows one thread, not its id. When
+ * this runtime deletes the thread, every subscription to it in the live set once the store delete has
+ * returned - made before the delete, or while it was in flight - ends once its queue is delivered, with
+ * `Disconnected(lastSeq, ThreadDeleted)`, and takes nothing more. One in another
+ * runtime learns of the delete from the store: a read from inside the deleted log is refused with
+ * [[GraphError.ThreadDeleted]] - by its watch, its replay or a hand-over's gap read - and it ends the
+ * same way. A subscription from `0` takes the thread under the id from its first event, which follows
+ * a deleted thread's numbers. A subscription judged `Lagging` - every lag is judged by sequence numbers,
+ * which a delete makes jump - is checked against the store before it ends, on its dispatcher thread,
+ * and ends `ThreadDeleted` if its log was deleted.
  */
 final private[graph] class EventHub(
   checkpointer: Checkpointer,
@@ -271,6 +282,18 @@ final private[graph] class EventHub(
   def atMark(threadId: ThreadId)(f: Long => Unit): Unit =
     withLock(hubLock)(f(handed.getOrElse(threadId.value, 0L)))
 
+  /**
+   * The store has deleted the thread: every subscription to it in the live set now ends with
+   * [[DisconnectReason.ThreadDeleted]] after what it has queued. Called once the store delete has
+   * returned, so a subscription that joined while the delete was in flight - which may have replayed
+   * the deleted log - is ended too, never left following whichever thread its replay happened to read.
+   * The caller still holds the thread, so no run of the next thread under the id has committed in this
+   * runtime: a subscription made in the moment between the delete and this call has seen nothing of a
+   * new thread, and is ended as well; it subscribes again to follow one.
+   */
+  def threadDeleted(threadId: ThreadId): Unit =
+    withLock(hubLock)(subscribers.getOrElse(threadId.value, Vector.empty)).foreach(_.threadDeleted())
+
   /** Whether the hub holds a hand-over mark for the thread; for tests. */
   private[graph] def marked(threadId: ThreadId): Boolean = withLock(hubLock)(handed.contains(threadId.value))
 
@@ -353,8 +376,11 @@ final private[graph] class EventHub(
     private var lagging             = false
     @volatile private var cancelled = false
 
-    /** Why reading the store - the watch, or a hand-over's gap - failed; ends the subscription like `lagging`. */
-    private var failed = Option.empty[LLMError]
+    /**
+     * Why the subscription stops taking events, other than lagging: reading the store - the watch, or
+     * a hand-over's gap - failed, or the thread was deleted. Ends the subscription like `lagging`.
+     */
+    private var failed = Option.empty[DisconnectReason]
 
     /** Whether the subscription stops taking events, to end once its queue is delivered. */
     private def halted: Boolean = lagging || failed.isDefined
@@ -453,40 +479,63 @@ final private[graph] class EventHub(
           if record.seq <= lastQueuedSeq + 1 || halted then
             queueDurable(record)
             None
-          else if durableQueued + (record.seq - lastQueuedSeq) > capacity then
-            // the missing events and this one cannot all fit: behind by more than `capacity`
+          else if lastQueuedSeq > 0 && durableQueued + (record.seq - lastQueuedSeq) > capacity then
+            // the missing events and this one cannot all fit: behind by more than `capacity`. From `0`
+            // the gap cannot be told from the numbers - under a deleted thread's id the log starts past
+            // the deleted thread's - so it is read, at most as far as fits
             lagging = true
             notEmpty.signal()
             None
-          else Some(lastQueuedSeq)
+          else Some(lastQueuedSeq -> (capacity - durableQueued))
       }
       // `lastQueuedSeq` of a live dispatcher moves only under `hubLock`, which the caller holds
-      missing.foreach { after =>
-        val between = readBetween(after, record.seq)
+      missing.foreach { (after, room) =>
+        val between = readBetween(after, record.seq, room)
         withLock(lock) {
           between match
-            case Right(found) => (found :+ record).foreach(queueDurable)
-            case Left(error)  => fail(error)
+            case Right(Some(found)) => (found :+ record).foreach(queueDurable)
+            case Right(None)        =>
+              // more are missing than fit beside this one: behind by more than `capacity`
+              if !cancelled && !halted then
+                lagging = true
+                notEmpty.signal()
+            case Left(error) => fail(error)
         }
       }
 
-    /** The events with `after < seq < before`, read from the store page by page. */
-    private def readBetween(after: Long, before: Long): Result[Vector[EventRecord]] =
-      @tailrec def page(from: Long, found: Vector[EventRecord]): Result[Vector[EventRecord]] =
-        if from >= before - 1 then Right(found)
+    /**
+     * The events with `after < seq < before`, read from the store page by page; `None` once more than
+     * `room - 1` of them are found, so that they and the event at `before` cannot all fit.
+     */
+    private def readBetween(after: Long, before: Long, room: Int): Result[Option[Vector[EventRecord]]] =
+      @tailrec def page(from: Long, found: Vector[EventRecord]): Result[Option[Vector[EventRecord]]] =
+        if found.size >= room then Right(None)
+        else if from >= before - 1 then Right(Some(found))
         else
-          val limit = math.min(PageSize.toLong, before - 1 - from).toInt
+          val limit = math.min(math.min(PageSize, room - found.size).toLong, before - 1 - from).toInt
           Try(checkpointer.eventsAfter(threadId, from, limit)).toResult.flatten match
             case Left(error)                 => Left(error)
-            case Right(read) if read.isEmpty => Right(found)
+            case Right(read) if read.isEmpty => Right(Some(found))
             case Right(read)                 => page(read.last.seq, found ++ read.filter(_.seq < before))
       page(after, Vector.empty)
 
-    /** Ends the subscription, once its queue is delivered, with `ReplayFailed(error)`; holding `lock`. */
-    private def fail(error: LLMError): Unit =
+    /**
+     * Ends the subscription, once its queue is delivered, with `ReplayFailed(error)` - or `ThreadDeleted`
+     * if the store refused the read as one from inside a deleted thread's log; holding `lock`.
+     */
+    private def fail(error: LLMError): Unit = stop(EventHub.disconnectFor(error))
+
+    /** Ends the subscription, once its queue is delivered, with `reason`; holding `lock`. */
+    private def stop(reason: DisconnectReason): Unit =
       if !cancelled && !halted then
-        failed = Some(error)
+        failed = Some(reason)
         notEmpty.signal()
+
+    /**
+     * The thread was deleted through this runtime: ends the subscription with `ThreadDeleted` once
+     * what it has queued is delivered - or, while it is still replaying, at its next read.
+     */
+    def threadDeleted(): Unit = withLock(lock)(stop(DisconnectReason.ThreadDeleted))
 
     /**
      * While replaying, a commit's event is read from the store, not queued: it only marks where the
@@ -520,13 +569,21 @@ final private[graph] class EventHub(
      * dropped, and so is one past a gap, which the store is read again for.
      */
     private def queueDurable(record: EventRecord): Unit =
-      if !cancelled && !halted && record.seq == lastQueuedSeq + 1 then
+      if !cancelled && !halted && follows(record.seq) then
         if durableQueued >= capacity then lagging = true
         else
           queue.add(afterPendingGap(StreamEvent.Durable(record)))
           durableQueued += 1
           lastQueuedSeq = record.seq
         notEmpty.signal()
+
+    /**
+     * Whether `seq` is the next event of the log, holding `lock`: the one after the last queued, or,
+     * with nothing queued yet from `0`, the first the store has - which, under a deleted thread's id,
+     * follows the deleted thread's numbers. Every caller offers the store's events in order, from the
+     * first after the last queued, so the first offered from `0` is the log's first.
+     */
+    private def follows(seq: Long): Boolean = seq == lastQueuedSeq + 1 || (lastQueuedSeq == 0 && seq > 0)
 
     def offerLive(event: StreamEvent.Live): Unit = withLock(lock) {
       if cancelled then ()
@@ -621,30 +678,52 @@ final private[graph] class EventHub(
         ending match
           case End.Disconnect(reason) =>
             leave(threadId, this)
-            reportPendingGap(reason).foreach(ending =>
+            reportPendingGap(reason, classified(reason)).foreach(ending =>
               call(() => listener(StreamEvent.Disconnected(lastDeliveredSeq, ending))): Unit
             )
           case End.Cancelled => ()
       }
 
     /**
+     * The reason a subscription ends, `Lagging` checked against the store. Every lag is judged by the
+     * numbers - a gap, or a full queue - and a thread deleted and created again by another runtime
+     * leaves a gap of the deleted thread's numbers, which only the store can tell from a real backlog.
+     * So, on the dispatcher thread, once what was queued is delivered and only then, the store is read
+     * once after the last queued event: [[GraphError.ThreadDeleted]] there makes the end
+     * `ThreadDeleted`. Any other answer, a failed read or an interrupt (`cancel`, which also stops the
+     * `Disconnected`) leaves `Lagging`. Never on the commit path: a hand-over that finds a subscriber
+     * behind only marks it.
+     */
+    private def classified(reason: DisconnectReason): DisconnectReason =
+      if reason != DisconnectReason.Lagging then reason
+      else
+        val from = withLock(lock)(lastQueuedSeq)
+        CancelledError.catchInterrupt(Try(checkpointer.eventsAfter(threadId, from, 1)).toResult.flatten) match
+          case Right(Left(error)) =>
+            EventHub.disconnectFor(error) match
+              case DisconnectReason.ThreadDeleted => DisconnectReason.ThreadDeleted
+              case _                              => reason
+          case _ => reason
+
+    /**
      * A lagging subscriber can end with live events dropped since its last gap marker - the durable
      * event that did not fit would have carried them. They are reported as a
-     * [[StreamEvent.LiveGap]] just before `Disconnected`, so the count is never lost. Returns the
-     * reason the final `Disconnected` carries: `reason`, or [[DisconnectReason.ListenerFailed]] if
+     * [[StreamEvent.LiveGap]] just before `Disconnected`, so the count is never lost. `reason` is why
+     * the subscription stopped, `reported` the reason [[classified]] gives it. Returns the reason the
+     * final `Disconnected` carries: `reported`, or [[DisconnectReason.ListenerFailed]] if
      * the listener throws on that gap, as on any other event; `None` - no `Disconnected` - if the
      * subscription was cancelled meanwhile.
      */
-    private def reportPendingGap(reason: DisconnectReason): Option[DisconnectReason] =
+    private def reportPendingGap(reason: DisconnectReason, reported: DisconnectReason): Option[DisconnectReason] =
       val dropped = withLock(lock) {
         val pending = if reason == DisconnectReason.Lagging || failed.isDefined then droppedLive else 0
         droppedLive = 0
         pending
       }
-      if dropped == 0 then Some(reason)
+      if dropped == 0 then Some(reported)
       else
         deliver(StreamEvent.LiveGap(dropped)) match
-          case Right(_)                      => Some(reason)
+          case Right(_)                      => Some(reported)
           case Left(End.Disconnect(failure)) => Some(failure)
           case Left(End.Cancelled)           => None
 
@@ -735,7 +814,7 @@ final private[graph] class EventHub(
                   case _                                   => liveQueued -= 1
                 Some(item)
               }
-              .toRight(End.Disconnect(failed.fold(DisconnectReason.Lagging)(DisconnectReason.ReplayFailed(_))))
+              .toRight(End.Disconnect(failed.getOrElse(DisconnectReason.Lagging)))
         }) match
           case Right(taken) => taken
           // only `cancel` interrupts this thread; anything else is ignored
@@ -872,21 +951,35 @@ final private[graph] class EventHub(
         case Nil                                           => false
         case _ if cancelled || halted                      => false
         case record :: more if record.seq <= lastQueuedSeq => next(more)
-        case record :: _ if record.seq > lastQueuedSeq + 1 => true
+        case record :: _ if !follows(record.seq)           => true
         case _ if durableQueued >= capacity                => true
         case record :: more =>
           queueDurable(record)
           next(more)
       next(found.toList)
 
-    /** The next page after `lastQueuedSeq`; a failed or interrupted read ends the subscription. */
+    /**
+     * The next page after `lastQueuedSeq`; a failed or interrupted read ends the subscription, and so
+     * does a delete of the thread through this runtime ([[threadDeleted]]) while it replays.
+     */
     private def read(): Either[End, Vector[EventRecord]] =
-      val from = withLock(lock)(lastQueuedSeq)
+      val (from, stopped) = withLock(lock)((lastQueuedSeq, failed))
+      stopped match
+        case Some(reason) => Left(End.Disconnect(reason))
+        case None         => readFrom(from)
+
+    private def readFrom(from: Long): Either[End, Vector[EventRecord]] =
       CancelledError.catchInterrupt(
         Try(checkpointer.eventsAfter(threadId, from, PageSize)).toResult.flatMap(identity)
       ) match
         case _ if cancelled     => Left(End.Cancelled)
         case Right(Right(page)) => Right(page)
-        case Right(Left(error)) => Left(End.Disconnect(DisconnectReason.ReplayFailed(error)))
+        case Right(Left(error)) => Left(End.Disconnect(EventHub.disconnectFor(error)))
         case Left(_) =>
           Left(End.Disconnect(DisconnectReason.ReplayFailed(CancelledError(s"replay of thread ${threadId.value}"))))
+
+private[graph] object EventHub:
+  /** How a failed read of the store ends a subscription: `ThreadDeleted` for a deleted thread's log. */
+  def disconnectFor(error: LLMError): DisconnectReason = error match
+    case _: GraphError.ThreadDeleted => DisconnectReason.ThreadDeleted
+    case other                       => DisconnectReason.ReplayFailed(other)

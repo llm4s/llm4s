@@ -26,7 +26,8 @@ import scala.util.Try
  *    before - across releases, takeovers and [[deleteThread]] - so a token is never reused;
  *  - apply a [[Commit]] entirely or not at all, and only if its token is the thread's current claim
  *    ([[GraphError.StaleClaim]] otherwise, checked first) - so a writer that lost its claim, even
- *    one whose token is the highest it has seen, records nothing after another run took over;
+ *    one whose token is the highest it has seen, records nothing after another run took over - and
+ *    fence [[deleteThread]] by its token in the same way, atomically with the delete;
  *  - accept a new checkpoint only when its `parent` is the thread's latest checkpoint id - the
  *    thread version the writer expects ([[GraphError.CheckpointConflict]] otherwise) - and its id is
  *    not already in the thread's history, and only pending writes naming the resulting latest
@@ -34,8 +35,17 @@ import scala.util.Try
  *  - keep every checkpoint a commit superseded in the thread's history, newest first in [[history]]
  *    and readable by id with [[checkpoint]], until [[prune]], a commit's `retractTurn` or
  *    [[deleteThread]] removes it - but keep pending writes for the latest checkpoint only;
- *  - number a thread's events `1, 2, 3, ...` in commit order, inside the commit, never reusing
- *    a number - including after compaction, pruning or a failed commit;
+ *  - number a thread's events consecutively in commit order, inside the commit, never reusing a
+ *    number - including after compaction, pruning, a failed commit or [[deleteThread]]: a thread's
+ *    first event is `1` unless a thread of the same id that numbered events was deleted, and then it
+ *    is one past the deleted thread's next number `n` - `n` itself is skipped - so a new thread of the
+ *    id numbers on past every event of the old one;
+ *  - refuse a read of the log after a number of a deleted thread of the id - from `1` up to the
+ *    skipped `n`, exclusive ([[Checkpointer.deleted]]) - with [[GraphError.ThreadDeleted]],
+ *    from [[eventsAfter]] and [[awaitEventsAfter]] alike, so a reader that was following the deleted
+ *    thread never takes the new one for its continuation; a read from `0` reads the current thread
+ *    from its first event, and a watch waiting in [[awaitEventsAfter]] from inside a log that is
+ *    deleted gets that refusal within about its `timeout` (from its next call, for the polling default);
  *  - keep events until [[compactEvents]] or [[prune]] removes them, and report the earliest sequence
  *    still available when asked to replay from before it ([[GraphError.ReplayUnavailable]]);
  *  - store checkpoints and pending writes as data ([[Checkpoint.toJson]], `PendingWrite`'s
@@ -104,7 +114,12 @@ trait Checkpointer:
    */
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit]
 
-  /** Up to `limit` events with `seq > afterSeq`, ascending. */
+  /**
+   * Up to `limit` events with `seq > afterSeq`, ascending. `afterSeq` `0` reads from the thread's first
+   * event, as does the number just before it; one behind the replay floor is
+   * [[GraphError.ReplayUnavailable]], and one inside the log of a deleted thread of the id
+   * ([[Checkpointer.deleted]]) is [[GraphError.ThreadDeleted]].
+   */
   def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]]
 
   /**
@@ -157,15 +172,41 @@ trait Checkpointer:
 
   /**
    * Removes everything stored for the thread - its checkpoint history, its pending writes, its
-   * event log and its claim - so that its id names a new thread again, whose events are numbered
-   * from 1; tokens issued after it are still greater than every token issued before. An unknown
-   * thread is `Right(())`. Use [[GraphRuntime.deleteThread]], which claims the thread first, so it
-   * refuses a thread with a live run in any runtime, and checks the tenant; the store itself checks
-   * neither.
+   * event log and its claim - so that its id names a new thread again; tokens issued after it are
+   * still greater than every token issued before. The store keeps only where the thread's event
+   * numbering ended - a tombstone, holding nothing of the thread's data, and nothing at all for a
+   * thread that numbered no event - so that a new thread of the id numbers its events on past the
+   * deleted thread's, one number skipped, and a read of the deleted log after the
+   * delete is [[GraphError.ThreadDeleted]] (see [[eventsAfter]]); a store that wakes
+   * [[awaitEventsAfter]] on commits wakes it on a delete too. Deleting a thread whose tombstone has
+   * numbered no event since does not move the numbering on again.
+   *
+   * '''The tombstone is kept for good.''' A deleted id keeps a small record - its next event number,
+   * nothing of the thread's data - which nothing removes: neither [[prune]] nor a later delete. It is
+   * what lets a reader of the deleted log, in any process, be told the thread was deleted, and a new
+   * thread of the id be numbered past it, however long after the delete either happens. A store
+   * whose threads are deleted often - every failed one-shot `Agent.run` forgets its thread - grows by
+   * one such record per deleted thread that numbered an event. Fenced like a [[commit]]: only while `token` is
+   * the thread's current claim, checked atomically with the delete, and otherwise
+   * `Left(GraphError.StaleClaim)` with nothing deleted - so a deleter that lost its claim (it
+   * expired and another run took the thread over, or it was released) deletes nothing of the run
+   * that holds the thread now. A thread with no claim, an unknown one included, is therefore
+   * refused too: claim it first. Use [[GraphRuntime.deleteThread]], which claims the thread, so it
+   * refuses a thread with a live run in any runtime, and checks the tenant under its claim.
    */
-  def deleteThread(threadId: ThreadId): Result[Unit]
+  def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit]
 
 object Checkpointer:
+
+  /**
+   * Whether a read of a thread's log after `afterSeq` is from inside the log of a deleted thread of the
+   * id, the current thread's first event being `firstSeq`. A store that deletes a thread whose next
+   * event number was `n` numbers the next thread of the id from `n + 1`, so `n` is never an event's:
+   * the deleted thread's events are below `firstSeq - 1`, and `firstSeq - 1` - "just before the
+   * current thread's first event", as a subscriber from a run's first event asks - is never one of
+   * them. `0` reads from the start of the current thread. For a store's [[eventsAfter]].
+   */
+  def deleted(afterSeq: Long, firstSeq: Long): Boolean = afterSeq > 0 && afterSeq < firstSeq - 1
 
   /** An interrupted [[Checkpointer.awaitEventsAfter]]: the flag set again, and `CancelledError`. */
   private[graph] def waitCancelled(threadId: ThreadId, interrupted: InterruptedException): Result[Nothing] =
@@ -176,9 +217,10 @@ object Checkpointer:
  * A [[Checkpointer]] in memory. Checkpoints and pending writes are stored as JSON and decoded on
  * read, exactly as a database-backed store would, so nothing executable survives a round trip.
  * Claims expire, and [[prune]] judges age, by `clock`. Fencing tokens come from one counter for the
- * whole store, so they never repeat for a thread, even after it is deleted. [[awaitEventsAfter]] wakes
- * on the store's own commits, so every runtime sharing the instance sees a commit as soon as it lands,
- * without polling.
+ * whole store, so they never repeat for a thread, even after it is deleted; a deleted thread that
+ * numbered any event leaves a tombstone record of its next event number. [[awaitEventsAfter]] wakes
+ * on the store's own commits and deletes, so every runtime sharing the instance sees a commit as soon
+ * as it lands, without polling.
  */
 final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Checkpointer:
 
@@ -197,7 +239,9 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     events: Vector[(Long, ujson.Value)],
     nextSeq: Long,
     earliestSeq: Long,
-    claim: Option[Claim]
+    claim: Option[Claim],
+    /** The first event number of the thread now under the id: past every event of a deleted one. */
+    firstSeq: Long
   ):
     def latestId: Option[String] = history.lastOption.map(_.id)
     def isEmpty: Boolean         = history.isEmpty && claim.isEmpty && nextSeq == 1L
@@ -206,11 +250,11 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
   private var lastToken = 0L
   private val lock      = new java.util.concurrent.locks.ReentrantLock()
 
-  /** Signalled, under `lock`, whenever a commit appends events. */
+  /** Signalled, under `lock`, whenever a commit appends events or a thread is deleted. */
   private val appended = lock.newCondition()
 
   private def record(threadId: ThreadId): ThreadRecord =
-    threads.getOrElse(threadId.value, ThreadRecord(Vector.empty, Vector.empty, Vector.empty, 1L, 1L, None))
+    threads.getOrElse(threadId.value, ThreadRecord(Vector.empty, Vector.empty, Vector.empty, 1L, 1L, None, 1L))
 
   private def store(threadId: ThreadId, record: ThreadRecord): Unit =
     if record.isEmpty then threads.remove(threadId.value): Unit else threads.update(threadId.value, record)
@@ -366,7 +410,11 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
 
   def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = withLock(lock) {
     val current = record(threadId)
-    if afterSeq + 1 < current.earliestSeq then Left(GraphError.ReplayUnavailable(threadId.value, current.earliestSeq))
+    // a reader from the start reads the thread now under the id, from its first event
+    if Checkpointer.deleted(afterSeq, current.firstSeq) then
+      Left(GraphError.ThreadDeleted(threadId.value, afterSeq, current.firstSeq))
+    else if math.max(afterSeq, current.firstSeq - 1) + 1 < current.earliestSeq then
+      Left(GraphError.ReplayUnavailable(threadId.value, current.earliestSeq))
     else
       // events are held in ascending `seq`, so the first one after `afterSeq` is found by bisection
       val first: (Long, ujson.Value) = (afterSeq + 1) -> ujson.Null
@@ -400,9 +448,22 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     Right(())
   }
 
-  def deleteThread(threadId: ThreadId): Result[Unit] = withLock(lock) {
-    threads.remove(threadId.value)
-    Right(())
+  def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] = withLock(lock) {
+    val current = record(threadId)
+    if !current.claim.exists(_.token == token.value) then Left(stale(threadId, current, token))
+    else
+      // a tombstone: nothing of the thread but where its numbering ended, so a new thread of the id
+      // numbers on past it, one number skipped (see `deleted`), and a reader of the deleted log is told
+      // it was deleted; a thread that numbered no event leaves nothing, and a tombstone that numbered no
+      // event since its delete is kept as it is, so deleting it again moves nothing on
+      if current.nextSeq == 1L then threads.remove(threadId.value): Unit
+      else if current.nextSeq == current.firstSeq && current.firstSeq > 1L then
+        store(threadId, current.copy(history = Vector.empty, pendingWrites = Vector.empty, claim = None))
+      else
+        val first = current.nextSeq + 1
+        store(threadId, ThreadRecord(Vector.empty, Vector.empty, Vector.empty, first, first, None, first))
+      appended.signalAll()
+      Right(())
   }
 
   private def sequence[A](results: Vector[Result[A]]): Result[Vector[A]] =

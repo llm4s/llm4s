@@ -227,13 +227,17 @@ class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually
    * `throwOnDelete`, `deleteThread` records the thread and then throws a `LinkageError` - a store whose
    * driver class is missing - which the runtime does not turn into a `Left`.
    */
-  final private class WatchedStore(holdCompletion: Boolean = false, throwOnDelete: Boolean = false)
-      extends Checkpointer {
-    private val underlying = InMemoryCheckpointer()
-    val stored             = new CopyOnWriteArraySet[ThreadId]()
-    val deleted            = new CopyOnWriteArraySet[ThreadId]()
-    val committing         = new CountDownLatch(1)
-    val release            = new CountDownLatch(1)
+  final private class WatchedStore(
+    holdCompletion: Boolean = false,
+    throwOnDelete: Boolean = false,
+    failReleases: Int = 0
+  ) extends Checkpointer {
+    val underlying        = InMemoryCheckpointer()
+    private val releasing = new AtomicInteger(0)
+    val stored            = new CopyOnWriteArraySet[ThreadId]()
+    val deleted           = new CopyOnWriteArraySet[ThreadId]()
+    val committing        = new CountDownLatch(1)
+    val release           = new CountDownLatch(1)
 
     @scala.annotation.tailrec
     private def awaitRelease(): Unit =
@@ -254,15 +258,17 @@ class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually
       ttl: scala.concurrent.duration.FiniteDuration
     ) =
       underlying.renew(threadId, token, ttl)
-    def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
-    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]           = underlying.latest(threadId)
+    def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) =
+      if (releasing.incrementAndGet() <= failReleases) Left(ValidationError("store", "unreachable"))
+      else underlying.release(threadId, token)
+    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]] = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId): Result[Unit] = {
+    def deleteThread(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken): Result[Unit] = {
       deleted.add(threadId)
       if (throwOnDelete) throw new NoClassDefFoundError("store driver")
-      underlying.deleteThread(threadId)
+      underlying.deleteThread(threadId, token)
     }
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
@@ -362,6 +368,30 @@ class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually
     val kept = agent.run("q").value
     store.stored.asScala should contain(kept.threadId)
     store.deleted.asScala should not contain kept.threadId
+  }
+
+  it should "forget its random thread when its turn fails and giving back the turn's claim failed" in {
+    // the release fails once, transiently: the turn's claim, held by the turn's own run id, outlives it
+    val store = new WatchedStore(failReleases = 1)
+    val client = new LLMClient {
+      override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+        Left(ValidationError("model", "down"))
+      override def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions,
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = complete(conversation, options)
+      override def getContextWindow(): Int     = 8192
+      override def getReserveCompletion(): Int = 1024
+    }
+    val agent = built(Agent.builder("assistant", client).withRuntime(GraphRuntime(store)))
+
+    agent.run("q").isLeft shouldBe true
+
+    store.stored.asScala should have size 1
+    val thread = store.stored.asScala.head
+    store.underlying.latest(thread) shouldBe Right(None)
+    store.underlying.eventsAfter(thread, 0L, 10).map(_.size) shouldBe Right(0)
   }
 
   it should "leave the caller's interrupt flag set when forgetting the cancelled turn's thread throws" in {

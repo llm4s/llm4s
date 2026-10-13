@@ -163,8 +163,8 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
       def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
-      def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
-      def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+      def compactEvents(threadId: ThreadId, beforeSeq: Long)    = underlying.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId, token: FencingToken) = underlying.deleteThread(threadId, token)
       def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
       def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
       def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)

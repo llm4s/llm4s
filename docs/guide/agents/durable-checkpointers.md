@@ -195,12 +195,48 @@ is free:
 - Commits on one thread are written one at a time, in this runtime, so that subscribers see them in order. A commit
   hung in the store holds up later commits on its thread - including a new run's claim commit there, until the
   store returns - but never another thread's.
-- A process that dies holds its threads for up to `ttl`; so does a store that fails to release a claim. A run that
-  ends with its claim still held waits up to `ttl` for a renewal still in the store, so that none lands after its
-  release; if the renewal is still there then, the run releases on a thread of its own without waiting, and its
-  result is set at once. A run whose claim was lost does not wait for its renewal at all.
-  `fork` and `updateState` release the claim they hold the same way, so a renewal hung in a store that serialises
-  its calls cannot keep them from returning.
+- A process that dies holds its threads for up to `ttl`; so does a store that fails to release a claim - except to
+  its own runtime's `deleteThread`, which tries the release once more first, so `Agent.run(query)` can still forget
+  the thread of a failed turn. A run that ends with its claim still held waits up to `ttl` for a renewal still in
+  the store, so that none lands after its release; if the renewal is still there then, the run releases on a thread
+  of its own without waiting, and its result is set at once. A run whose claim was lost does not wait for its
+  renewal at all. `fork`, `updateState` and a `deleteThread` that did not delete release the claim they hold the
+  same way, so a renewal hung in a store that serialises its calls cannot keep them from returning.
+
+## Deleting a thread
+
+`GraphRuntime.deleteThread(threadId, config)` (`Agent.forget`) claims the thread, checks its tenant under that
+claim, and then has the store delete it with the claim's token, renewing the claim while the store works, as a run
+does. The store's delete is fenced like a commit: it
+deletes only while the token is the thread's current claim, atomically. So a runtime that stalls past its claim's
+`ttl` between the claim and the delete - a long GC pause, a slow store - while another runtime takes the thread over
+deletes nothing of that run: the call returns `ThreadBusy` (or `TenantMismatch`, if the run is another tenant's).
+
+A deleted thread's id names a new thread, but the new thread does not reuse the old event numbers: it numbers its
+events on past the deleted thread's, one number skipped. A subscription follows a thread, not its id, so a
+subscription to the deleted thread ends with `Disconnected(lastSeq, DisconnectReason.ThreadDeleted)` once it has
+delivered what it had queued, and never delivers the new thread's events as if they continued the old log:
+
+- in the deleting runtime, every subscription made before `deleteThread` returns - before the delete, or while it
+  is in flight - ends at once;
+- in another runtime sharing the store, a subscription ends when it next reads the store: when its watch next polls,
+  or, with `WatchPolicy.disabled`, only when its own runtime next commits on the thread;
+- in another runtime, a subscription that has delivered no event yet - still at `afterSeq = 0`, as one to a thread
+  that never numbered an event always is - cannot be told from a new subscription, so it follows the new thread
+  from its first event instead of ending.
+
+Subscribe again from `afterSeq = 0` to follow the new thread from its first event.
+
+There is no unfenced delete: to delete a thread outside a runtime, claim it and delete with the claim's token.
+
+### Limits
+
+- A deleted thread that numbered any event leaves a small record in the store for good: its next event number, and
+  nothing of its data. It is what lets a reader of the deleted log - in any process, however late - be told that the
+  thread was deleted, and a new thread of the id be numbered past it. Nothing removes it, `prune` included, so a store
+  grows by one such record per deleted thread; `Agent.run(query)` forgets the thread of every failed or cancelled
+  one-shot turn, so a long-lived store gains one per such turn. Deleting the same id again, with no event since,
+  adds nothing.
 
 ## Subscriptions across runtimes
 
@@ -213,7 +249,8 @@ is not, such as SQLite, is polled every `WatchPolicy.pollInterval` (250 ms by de
 val runtime = GraphRuntime(store, watch = WatchPolicy(pollInterval = 100.millis))
 ```
 
-Only durable events cross runtimes; live progress is never stored. See
+Only durable events cross runtimes; live progress is never stored. A thread deleted through any runtime ends its
+subscriptions with `ThreadDeleted`, with the exceptions [Deleting a thread](#deleting-a-thread) lists. See
 [Subscriptions across runtimes](streaming#subscriptions-across-runtimes) for the delivery and back-pressure rules.
 
 ## The SQLite store
@@ -325,7 +362,10 @@ next refused renewal or commit.
 
 ### Schema versions
 
-The file records its schema version. Opening a file at an older version upgrades it in one transaction, and
+The file records its schema version, 2 since the fenced delete (which added `first_seq`, where a deleted thread's id
+continues its event numbering). Stop every process running an older build before opening its file with this one: an
+older process that already has the file open is not refused, and until it stops its deletes are not fenced and drop
+the record a deleted thread's id numbers on from. Opening a file at an older version upgrades it in one transaction, and
 opening a file written by a newer build is refused with a `ProcessingError`, so an older process never misreads
 it. Checkpoints inside keep their own format version, as with every store, and are migrated when read.
 
@@ -458,12 +498,20 @@ the contract. In short:
 - grant at most one live claim per thread, by the store's clock, and replace an expired one;
 - give every claim a token greater than every token issued for that thread before, also after `deleteThread`;
 - apply a `Commit` entirely or not at all, and only with the current claim's token (`StaleClaim`, checked first);
+- delete a thread only with the current claim's token, checked in the same lock or transaction as the delete
+  (`StaleClaim` otherwise, deleting nothing); a thread with no claim is refused too;
+- keep, after `deleteThread`, where the thread's event numbering ended - a tombstone with no data, for a thread that
+  numbered any event - and number the next thread of the id from one past the deleted thread's next number;
+  refuse `eventsAfter`/`awaitEventsAfter` after a number of the deleted thread with `ThreadDeleted`
+  (`Checkpointer.deleted(afterSeq, firstSeq)` is the rule), and read from `0`, or from just before the current
+  thread's first event, from that first event. A store that wakes `awaitEventsAfter` on commits wakes it on a
+  delete too;
 - accept a new checkpoint only over the latest (`CheckpointConflict`) and with an id not already in the history,
   and pending writes only for it;
 - keep every superseded checkpoint in the history until `prune`, a commit's `retractTurn` or `deleteThread`
   removes it, and keep pending writes for the latest only;
 - on `retractTurn`, remove every checkpoint after the newest `Completed` or `Failed` one before adding the new one;
-- number events contiguously inside the commit, and never reuse a number;
+- number events contiguously inside the commit, and never reuse a number, also across `deleteThread`;
 - release only with the current token, and treat any other as a no-op;
 - return from `awaitEventsAfter` what `eventsAfter` would: at once if there is something, and otherwise within about
   its `timeout`. A store that can be told of commits, such as a database with a notification channel, overrides it
@@ -498,14 +546,15 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
     MyCheckpointer.open(freshDatabase(), clock)
 ```
 
-It runs every case against your store: commits, conflicts, event numbering, compaction, `deleteThread`, round
+It runs every case against your store: commits, conflicts, event numbering, compaction, `deleteThread` (fenced by
+the current token, and a recreated thread numbered on past the deleted one, whose log a reader cannot continue), round
 trips, the checkpoint history (paging, reads by id, unique ids, retraction and pruning by age, count and event
 count), claims and fencing (also from many threads at once), and two or more `GraphRuntime`s contending over one
 store - a live run refused elsewhere, renewal, takeover after expiry without re-running completed tasks, a stale
 run's commits refused, only one of several runtimes admitted to recover a thread, `updateState` and `fork` fenced
 against a live run, and a blocked turn leaving nothing in the history. It also checks change notification:
 `awaitEventsAfter` itself, and subscriptions in one runtime that receive another runtime's commits in order, mid-run,
-across a restart, and only until they are cancelled. `InMemoryCheckpointer` passes it.
+across a restart, and only until they are cancelled or the thread is deleted. `InMemoryCheckpointer` passes it.
 
 Three hooks fit it to a durable store:
 

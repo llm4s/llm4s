@@ -76,7 +76,8 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     def latest(threadId: ThreadId)                                  = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId) = onDelete().getOrElse(underlying.deleteThread(threadId))
+    def deleteThread(threadId: ThreadId, token: FencingToken) =
+      onDelete().getOrElse(underlying.deleteThread(threadId, token))
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)

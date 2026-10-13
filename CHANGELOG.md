@@ -1312,6 +1312,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `claim`, and `CheckpointerContract` checks it. Both default to `None`, so older logs still read. See
   [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#fencing-a-run-that-lost-its-claim-stops-and-records-nothing)
   and the [migration note](docs/reference/migration.md#durable-checkpointer-contract-1700).
+- **`Checkpointer.deleteThread` is fenced by a claim token, and a deleted thread's id numbers on** ([#1700](https://github.com/llm4s/llm4s/issues/1700) follow-up, BREAKING,
+  `llm4s-agent`, `llm4s-agent-testkit`, `llm4s-agent-checkpoint-sqlite`): `deleteThread(threadId)` is
+  `deleteThread(threadId, token: FencingToken)`, and a store deletes only while `token` is the thread's current claim,
+  checked atomically with the delete, returning `GraphError.StaleClaim` and deleting nothing otherwise - a thread with
+  no claim, an unknown one included, too. A store keeps a tombstone (no data) of a deleted thread that numbered any
+  event, and the next thread of its id numbers its events from one past the deleted thread's next number instead of
+  from 1. A read of the log after a number of the deleted thread is refused with the new
+  `GraphError.ThreadDeleted(threadId, afterSeq, firstSeq)` (`Checkpointer.deleted` is the rule), and a read from 0
+  starts at the current thread's first event. `DisconnectReason` gains `ThreadDeleted`, which ends every subscription
+  to a deleted thread. `CheckpointerContract` drops its "deletes regardless of claims" case for cases on the fenced
+  delete, the numbering and `ThreadDeleted`. A deleted id keeps that tombstone for good: nothing reclaims it yet. There
+  is no unfenced delete. The SQLite schema is version 2 (`first_seq`), upgraded on open; stop processes on an older
+  build first. No shims;
+  see the [Stage 2 migration note](docs/reference/migration.md#durable-checkpointer-contract-1700).
 - **Workload-identity configuration is `@Stable`; `stabilityTierCheck` flags Stable signatures that name Experimental types** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
   `AuthConfig`, `IdentitySource`, `TokenExchangeConfig`, `AccessToken`, `AccessTokenProvider`,
   `OpenAIWorkloadIdentity` and `AnthropicWorkloadIdentity` were `@Experimental` while the Stable
@@ -2694,8 +2708,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that ignores interrupts. A loss now fences the run at any stage - a commit not yet begun is skipped - and, if the
   run has not ended within `2 × ttl`, ends it without its thread: `ClaimLost`, the thread freed in the runtime, the
   claim released on a detached thread. The run thread, when it returns, sets no second result and frees nothing.
-  `fork` and `updateState` likewise release on a detached thread when their heartbeat's renewal cannot be joined, so a
-  renewal hung in a store that serialises its calls (SQLite) no longer keeps them from returning.
+  `fork`, `updateState` and a `deleteThread` that did not delete likewise release on a detached thread when their
+  heartbeat's renewal cannot be joined, so a renewal hung in a store that serialises its calls (SQLite) no longer
+  keeps them from returning.
 - **A lost claim bounds the end exactly, admission included** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   a commit could pass the fence's check and begin after the loss was found, so the store could accept work of a run
   already declared lost; a commit now begins, or is skipped, in one atomic step with the fence. The claim commit of
@@ -2710,8 +2725,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every commit in a `GraphRuntime` was written under one runtime-wide lock, so one thread's hung commit stalled every
   other thread's runs, their admission included. Commits are now ordered per thread.
 - **A claim is renewed from its grant** ([#1700](https://github.com/llm4s/llm4s/issues/1700)): the first renewal came
-  `renewEvery` after the run was launched, so slow admission work could let the lease lapse before it; `fork` and
-  `updateState` now renew the claim they hold too.
+  `renewEvery` after the run was launched, so slow admission work could let the lease lapse before it; `fork`,
+  `updateState` and `deleteThread` now renew the claim they hold too, so a store delete slower than `ttl` still lands.
+- **`GraphRuntime.deleteThread` no longer deletes a thread another runtime took over** ([#1700](https://github.com/llm4s/llm4s/issues/1700) follow-up):
+  a runtime that stalled past its claim's `ttl` between claiming the thread and deleting it - a GC pause, a slow
+  store - while another runtime claimed the thread and ran on it deleted that run's checkpoints, events and claim, and
+  could delete another tenant's thread. The delete is now fenced by the deleter's claim token, and such a delete
+  returns `ThreadBusy` (or `TenantMismatch`) with nothing deleted.
+- **A subscription no longer crosses a deleted thread into a new thread of the same id** ([#1700](https://github.com/llm4s/llm4s/issues/1700) follow-up, [#1705](https://github.com/llm4s/llm4s/issues/1705)):
+  a subscription in another runtime that had followed a deleted thread silently skipped the first events of a new
+  thread created under the same id, then delivered the rest as if they continued the old log - another tenant's
+  events included. It now ends with `Disconnected(lastSeq, ThreadDeleted)` at its next read of the store, as does a
+  subscription in the deleting runtime, which used to stay open. A subscription in another runtime that had
+  delivered no event yet cannot be told from a new one, and follows the new thread from its first event.
+- **A one-shot `Agent.run` whose turn failed forgets its thread even when releasing the turn's claim failed**
+  ([#1700](https://github.com/llm4s/llm4s/issues/1700) follow-up): the store refused the forget as it refuses any live
+  claim, the turn's own run id included, so the thread - which nobody can name - was kept. `GraphRuntime.deleteThread`
+  now tries once more to release a claim of its own runtime that it failed to give back before it claims the thread.
 - **Security - `Redaction`: the password of a URL's userinfo is redacted** ([#1816](https://github.com/llm4s/llm4s/issues/1816)):
   `https://alice:s3cret@gw.example.com/v1` - a provider `baseUrl`, a proxy or a database URL in a connection error,
   an HTTP client error or the provider exchange log - came out unchanged. The password of `scheme://user:password@host`

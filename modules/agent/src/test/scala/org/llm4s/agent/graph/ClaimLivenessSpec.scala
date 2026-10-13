@@ -51,6 +51,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     @volatile var onRelease: () => Option[Result[Unit]]                    = () => None
     @volatile var onLatest: () => Option[Result[Option[StoredCheckpoint]]] = () => None
     @volatile var onCommit: Commit => Option[Result[Vector[EventRecord]]]  = _ => None
+    @volatile var onDelete: () => Unit                                     = () => ()
     val renewals                                                           = new AtomicInteger()
     val renewed                                                            = new AtomicInteger()
     val releases                                                           = new AtomicInteger()
@@ -69,7 +70,10 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     def latest(threadId: ThreadId)                 = onLatest().getOrElse(underlying.latest(threadId))
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId)                            = underlying.deleteThread(threadId)
+    def deleteThread(threadId: ThreadId, token: FencingToken) = {
+      onDelete()
+      underlying.deleteThread(threadId, token)
+    }
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
@@ -114,7 +118,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     def latest(threadId: ThreadId)                                  = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId)                            = underlying.deleteThread(threadId)
+    def deleteThread(threadId: ThreadId, token: FencingToken)       = underlying.deleteThread(threadId, token)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
@@ -1425,6 +1429,30 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     }
     runtime(store, time).updateState(thread, two.graph, latest, StateUpdate.update(two.log, "fixed")).value
     during.get should be > 0
+  }
+
+  "deleteThread" should "renew the claim it holds while the store deletes, so a delete slower than ttl still lands" in {
+    val time  = ManualTime()
+    val store = Hooked(InMemoryCheckpointer(time))
+    val two   = TwoStep()
+    two.gate.countDown()
+    await(runtime(store, time, slow).start(thread, two.graph, "x", run("first")).value).completed
+    val releases = store.releases.get
+    val thief    = new AtomicReference[Option[Result[RunClaim]]](None)
+    // the delete stalls for 40s of a 30s ttl, letting a renewal land at 20s and again at 40s
+    store.onDelete = () => {
+      Seq(20.seconds, 20.seconds).foreach { step =>
+        time.advance(step)
+        val landed = store.renewed.get
+        eventually(store.renewed.get > landed)
+      }
+      thief.set(Some(store.claim(thread, ClaimRequest(RunId("thief"), 30.seconds))))
+    }
+    runtime(store, time).deleteThread(thread, run("deleter")) shouldBe Right(())
+    thief.get.value.left.value shouldBe a[GraphError.ThreadBusy]
+    store.latest(thread).value shouldBe None
+    // the delete removed the claim with the thread: nothing is given back
+    store.releases.get shouldBe releases
   }
 
   // ---- 6: a takeover is recorded on RunRecovered ----
