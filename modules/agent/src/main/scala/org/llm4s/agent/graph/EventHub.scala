@@ -157,8 +157,11 @@ private[graph] trait Dispatched extends Subscription:
  * only while they fit beside what is queued - the rest stay in the store, read again on the next
  * call - so commits made elsewhere never make a subscriber lag. A subscription queues durable events
  * contiguously: a hand-over that finds events missing before it - committed elsewhere and not yet
- * read by the watch - reads them from the store first, under the same locks, so they keep their
- * place before it; if they do not fit, the subscriber lags as for any durable event. A failed watch
+ * read by the watch - reads them from the store first, under the thread's commit lock alone, so they
+ * keep their place before it; if they do not fit, the subscriber lags as for any durable event. No
+ * store call is ever made holding `hubLock`, which every thread's hand-overs and the runtime's local
+ * release take: a store that stalls a subscription's read holds up at most that subscription and its
+ * thread's commits. A failed watch
  * or gap read ends the subscription once its queue is delivered, with
  * `Disconnected(lastSeq, ReplayFailed(error))`.
  *
@@ -256,14 +259,22 @@ final private[graph] class EventHub(
     watching = watching.updatedWith(threadId.value)(n => Some(n.getOrElse(0) + delta).filter(_ > 0))
   }
 
-  /** Offers committed `records` to the thread's subscribers; never blocks on a listener. */
+  /**
+   * Offers committed `records` to the thread's subscribers; never blocks on a listener. The caller holds
+   * the thread's commit lock ([[ThreadLocks]]). A subscriber missing events before them - committed
+   * elsewhere and not yet read by its watch - has them read from the store after `hubLock` is let go,
+   * still under the thread's commit lock: a store read that stalls holds up only this thread's commits,
+   * never the hub - another thread's hand-overs, a subscription's switch to live, or [[release]], which
+   * the runtime calls holding the lock every admission and release takes.
+   */
   def durable(threadId: ThreadId, records: Vector[EventRecord]): Unit =
     if records.nonEmpty then
-      withLock(hubLock) {
+      val gaps = withLock(hubLock) {
         val top = records.iterator.map(_.seq).max
         handed = handed.updated(threadId.value, handed.get(threadId.value).fold(top)(math.max(_, top)))
-        subscribers.getOrElse(threadId.value, Vector.empty).foreach(d => records.foreach(d.offerDurable))
+        subscribers.getOrElse(threadId.value, Vector.empty).flatMap(_.offerDurable(records))
       }
+      gaps.foreach(_.fill())
 
   /**
    * Forgets the thread's hand-over mark. The runtime calls it when a run's claim on the thread is
@@ -461,39 +472,54 @@ final private[graph] class EventHub(
       }
 
     /**
-     * Offers a commit this runtime has just made; called holding the thread's commit lock and `hubLock`. A live
-     * subscription queues it after the events before it: any missing - committed through another
-     * runtime and not yet read by the watch - are read from the store first and queued ahead of it,
-     * or make the subscriber lag if they do not fit. A replaying one only notes it.
+     * Offers a commit this runtime has just made, its events in order; called holding the thread's
+     * commit lock and `hubLock`. A live subscription queues them after the events before them: any
+     * missing - committed through another runtime and not yet read by the watch - make the subscriber
+     * lag if they cannot fit, and otherwise are to be read from the store and queued ahead of them, by
+     * the [[Gap]] returned, which the caller fills once it has let `hubLock` go. A replaying one only
+     * notes them.
      */
-    def offerDurable(record: EventRecord): Unit =
-      val missing = withLock(lock) {
-        if cancelled then None
-        else if !joined then
-          noteDurable(record.seq)
-          None
-        else
-          if !anchored then
-            lastQueuedSeq = record.seq - 1
-            anchored = true
-          if record.seq <= lastQueuedSeq + 1 || halted then
-            queueDurable(record)
-            None
-          else if lastQueuedSeq > 0 && durableQueued + (record.seq - lastQueuedSeq) > capacity then
-            // the missing events and this one cannot all fit: behind by more than `capacity`. From `0`
-            // the gap cannot be told from the numbers - under a deleted thread's id the log starts past
-            // the deleted thread's - so it is read, at most as far as fits
-            lagging = true
-            notEmpty.signal()
-            None
-          else Some(lastQueuedSeq -> (capacity - durableQueued))
+    def offerDurable(records: Vector[EventRecord]): Option[Gap] =
+      withLock(lock) {
+        @tailrec def offer(rest: List[EventRecord]): Option[Gap] = rest match
+          case Nil            => None
+          case _ if cancelled => None
+          case record :: more if !joined =>
+            noteDurable(record.seq)
+            offer(more)
+          case (record :: more) =>
+            if !anchored then
+              lastQueuedSeq = record.seq - 1
+              anchored = true
+            if record.seq <= lastQueuedSeq + 1 || halted then
+              queueDurable(record)
+              offer(more)
+            else if lastQueuedSeq > 0 && durableQueued + (record.seq - lastQueuedSeq) > capacity then
+              // the missing events and this one cannot all fit: behind by more than `capacity`. From `0`
+              // the gap cannot be told from the numbers - under a deleted thread's id the log starts past
+              // the deleted thread's - so it is read, at most as far as fits
+              lagging = true
+              notEmpty.signal()
+              None
+            else Some(Gap(lastQueuedSeq, capacity - durableQueued, rest))
+        offer(records.toList)
       }
-      // `lastQueuedSeq` of a live dispatcher moves only under `hubLock`, which the caller holds
-      missing.foreach { (after, room) =>
-        val between = readBetween(after, record.seq, room)
+
+    /**
+     * The events between `after` and `rest`'s first are missing, and at most `room - 1` of them fit
+     * beside it. [[fill]] reads them from the store, holding no lock of the hub's - the caller still
+     * holds the thread's commit lock, so no other hand-over or watch of the thread queues meanwhile -
+     * then queues them and `rest`, in order. A live event sent while it reads is queued ahead of them:
+     * it is sent while the commit is being handed over, so either order is one the commit allows.
+     */
+    final class Gap private[Dispatcher] (after: Long, room: Int, rest: List[EventRecord]):
+      def fill(): Unit =
+        val between = readBetween(after, rest.head.seq, room)
         withLock(lock) {
           between match
-            case Right(Some(found)) => (found :+ record).foreach(queueDurable)
+            // `queueDurable` queues only the event that follows the last queued, so the read's events
+            // and `rest` are queued in order, and none twice
+            case Right(Some(found)) => (found ++ rest).foreach(queueDurable)
             case Right(None)        =>
               // more are missing than fit beside this one: behind by more than `capacity`
               if !cancelled && !halted then
@@ -501,7 +527,6 @@ final private[graph] class EventHub(
                 notEmpty.signal()
             case Left(error) => fail(error)
         }
-      }
 
     /**
      * The events with `after < seq < before`, read from the store page by page; `None` once more than
@@ -755,48 +780,50 @@ final private[graph] class EventHub(
             case Left(stop)   => Left(stop)
 
     /**
-     * Under `hubLock`, queues whatever was handed over since the last read - reading on while pages
-     * come back full - with the live events held among it, then the rest of the held events, and
-     * switches to queueing what the hub hands over. An event read but not yet handed over
-     * ([[handedOver]]) ends the catch-up: commits hand over under `hubLock`, so it is handed to the
-     * dispatcher once it is in the live set, behind the held events. Live events dropped while
-     * replaying and not yet held as a gap marker were dropped after every held event, so they are
-     * reported after all of these, not with the first event caught up. A short store read under the
-     * lock; no listener call.
+     * Queues whatever was handed over since the last read - reading on while pages come back full -
+     * with the live events held among it, then the rest of the held events, and switches to queueing
+     * what the hub hands over. Each page is read from the store holding no lock, and queued under
+     * `hubLock`, which commits hand over under; the switch is made under the same hold only if every
+     * event handed over by then is queued - one handed over after the page was read sends it back to
+     * read again - so none lands between the last read and the switch. An event read but not yet handed
+     * over ([[handedOver]]) ends the catch-up: it is handed to the dispatcher once it is in the live
+     * set, behind the held events. Live events dropped while replaying and not yet held as a gap marker
+     * were dropped after every held event, so they are reported after all of these, not with the first
+     * event caught up. No store read under a lock, and no listener call: a read that stalls holds up
+     * only this subscription, never the hub.
      */
     private def switchToLive(): Either[End, Unit] =
-      withLock(hubLock) {
-        val droppedWhileReplaying = withLock(lock) {
-          val dropped = droppedLive
-          droppedLive = 0
-          dropped
-        }
-        @tailrec def catchUp(): Either[End, Unit] =
-          read() match
-            case Left(stop) => Left(stop)
-            case Right(page) =>
+      // drops not yet held as a gap marker, taken before each page is queued
+      var droppedWhileReplaying = 0
+      @tailrec def catchUp(): Either[End, Unit] =
+        read() match
+          case Left(stop) => Left(stop)
+          case Right(page) =>
+            val switched = withLock(hubLock)(withLock(lock) {
+              droppedWhileReplaying += droppedLive
+              droppedLive = 0
               val caughtUp = page.takeWhile(record => handedOver(record.seq))
-              withLock(lock) {
-                caughtUp.foreach { record =>
-                  if record.seq > lastQueuedSeq then queueHeld(takeHeldBefore(record.seq))
-                  queueDurable(record)
-                }
+              caughtUp.foreach { record =>
+                if record.seq > lastQueuedSeq then queueHeld(takeHeldBefore(record.seq))
+                queueDurable(record)
               }
-              if page.size < PageSize || caughtUp.size < page.size || withLock(lock)(lagging) then Right(())
-              else catchUp()
-        catchUp().map { _ =>
-          // live events held past the last commit, then barriers of runs that ended during the
-          // replay, go behind everything caught up
-          withLock(lock) {
-            queueHeld(held.map(_.event))
-            held = Vector.empty
-            droppedLive += droppedWhileReplaying
-            joined = true
-            pendingEnds.foreach(queueEnd)
-            pendingEnds = Vector.empty
-          }
-        }
-      }
+              val fullPage = page.size == PageSize && caughtUp.size == page.size
+              // a commit handed over after the page was read: the page cannot have reached it
+              val readTooSoon = handedSeq.exists(h => h > lastQueuedSeq && page.lastOption.forall(_.seq < h))
+              if !halted && (fullPage || readTooSoon) then false
+              else
+                // live events held past the last commit, then barriers of runs that ended during the
+                // replay, go behind everything caught up
+                queueHeld(held.map(_.event))
+                held = Vector.empty
+                droppedLive += droppedWhileReplaying
+                joined = true
+                pendingEnds.foreach(queueEnd)
+                pendingEnds = Vector.empty
+                true
+            })
+            if switched then Right(()) else catchUp()
+      catchUp()
 
     /** Takes queued events in order; ends when cancelled, or when lagging and drained. */
     @tailrec private def drain(): End =

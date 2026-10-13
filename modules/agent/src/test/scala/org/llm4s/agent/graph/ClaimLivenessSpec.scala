@@ -52,10 +52,12 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     @volatile var onLatest: () => Option[Result[Option[StoredCheckpoint]]] = () => None
     @volatile var onCommit: Commit => Option[Result[Vector[EventRecord]]]  = _ => None
     @volatile var onDelete: () => Unit                                     = () => ()
-    val renewals                                                           = new AtomicInteger()
-    val renewed                                                            = new AtomicInteger()
-    val releases                                                           = new AtomicInteger()
-    def claim(threadId: ThreadId, request: ClaimRequest)                   = underlying.claim(threadId, request)
+    // run once the store has answered a read of the log, before the answer is returned
+    @volatile var onEventsAfter: ThreadId => Unit        = _ => ()
+    val renewals                                         = new AtomicInteger()
+    val renewed                                          = new AtomicInteger()
+    val releases                                         = new AtomicInteger()
+    def claim(threadId: ThreadId, request: ClaimRequest) = underlying.claim(threadId, request)
     def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) = {
       renewals.incrementAndGet()
       val outcome = onRenew().getOrElse(underlying.renew(threadId, token, ttl))
@@ -68,8 +70,12 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     }
     def commit(threadId: ThreadId, commit: Commit) = onCommit(commit).getOrElse(underlying.commit(threadId, commit))
     def latest(threadId: ThreadId)                 = onLatest().getOrElse(underlying.latest(threadId))
-    def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
-    def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
+    def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = {
+      val read = underlying.eventsAfter(threadId, afterSeq, limit)
+      onEventsAfter(threadId)
+      read
+    }
+    def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
     def deleteThread(threadId: ThreadId, token: FencingToken) = {
       onDelete()
       underlying.deleteThread(threadId, token)
@@ -181,8 +187,13 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
   /** A claim that is never renewed during a test. */
   private val slow = ClaimPolicy(ttl = 2.hours, renewEvery = 1.hour)
 
-  private def runtime(store: Checkpointer, time: ManualTime, claims: ClaimPolicy = live): GraphRuntime = {
-    val runtime = GraphRuntime(store, claims = claims)
+  private def runtime(
+    store: Checkpointer,
+    time: ManualTime,
+    claims: ClaimPolicy = live,
+    watch: WatchPolicy = WatchPolicy.default
+  ): GraphRuntime = {
+    val runtime = GraphRuntime(store, claims = claims, watch = watch)
     runtime.ticker = () => time.nanos()
     runtime
   }
@@ -1453,6 +1464,111 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     store.latest(thread).value shouldBe None
     // the delete removed the claim with the thread: nothing is given back
     store.releases.get shouldBe releases
+  }
+
+  // ---- 5c: a store read never holds a lock another thread's run needs ----
+
+  private def other = ThreadId("other")
+
+  /** Whether the calling thread is one of `prefix`'s, as the runtime names its threads. */
+  private def onThread(prefix: String): Boolean = Thread.currentThread().getName.startsWith(prefix)
+
+  /**
+   * Subscribes to `other` in `runtime` and holds the dispatcher's second read of the store - the first
+   * after its replay found the thread empty: the read that switches it to live - until `unstall` opens.
+   */
+  private def stallGoingLive(store: Hooked, runtime: GraphRuntime, unstall: CountDownLatch): Subscription = {
+    val reads   = new AtomicInteger()
+    val stalled = new CountDownLatch(1)
+    store.onEventsAfter = threadId =>
+      if threadId == other && onThread("llm4s-subscriber-") && reads.incrementAndGet() == 2 then {
+        stalled.countDown()
+        stuckUntil(unstall)
+      }
+    val subscription = runtime.subscribe(other)(_ => ()).value
+    stalled.await(5, TimeUnit.SECONDS) shouldBe true
+    subscription
+  }
+
+  "A subscription whose switch to live is stuck in the store" should "not hold up a run on another thread: it is admitted, completes and frees its thread" in {
+    val time    = ManualTime()
+    val store   = Hooked(InMemoryCheckpointer(time))
+    val rt      = runtime(store, time, watch = WatchPolicy.disabled)
+    val unstall = new CountDownLatch(1)
+    val sub     = stallGoingLive(store, rt, unstall)
+    val two     = TwoStep()
+    two.gate.countDown()
+    val outcome = within(awaitResult(rt.start(thread, two.graph, "x", run("first")).value))
+    unstall.countDown()
+    outcome.value.value shouldBe a[RunResult.Completed[?]]
+    rt.heldLocally(thread) shouldBe false
+    sub.cancel()
+  }
+
+  it should "not hold up the end of a run on another thread that loses its claim" in {
+    val time   = ManualTime()
+    val store  = Hooked(InMemoryCheckpointer(time))
+    val rt     = runtime(store, time, watch = WatchPolicy.disabled)
+    val two    = TwoStep()
+    val handle = rt.start(thread, two.graph, "x", run("first")).value
+    two.awaitEntered()
+    val unstall = new CountDownLatch(1)
+    val sub     = stallGoingLive(store, rt, unstall)
+    store.onRenew = unreachable
+    time.advance(31.seconds)
+    val outcome = within(awaitResult(handle))
+    val held    = within(rt.heldLocally(thread))
+    unstall.countDown()
+    outcome.value.value.failed._2 shouldBe a[GraphError.ClaimLost]
+    held shouldBe Some(false)
+    sub.cancel()
+  }
+
+  "A hand-over whose read of the events missing before it is stuck in the store" should "not hold up a run on another thread, and still deliver the thread's log in order" in {
+    val time       = ManualTime()
+    val underlying = InMemoryCheckpointer(time)
+    val store      = Hooked(underlying)
+    // `here` hands its commits over; `elsewhere` commits behind its back. The watch polls once an hour,
+    // so the only read of what `elsewhere` committed is the hand-over's gap read
+    val here      = runtime(store, time, watch = WatchPolicy(pollInterval = 1.hour))
+    val elsewhere = runtime(underlying, time, watch = WatchPolicy.disabled)
+    val seen      = new ConcurrentLinkedQueue[Long]()
+    val watched   = new CountDownLatch(1)
+    store.onEventsAfter = threadId => if threadId == other && onThread("llm4s-watch-") then watched.countDown()
+    val sub = here
+      .subscribe(other) {
+        case StreamEvent.Durable(record) => seen.add(record.seq): Unit
+        case _                           => ()
+      }
+      .value
+    // live, and its watch has read the empty thread
+    watched.await(5, TimeUnit.SECONDS) shouldBe true
+    val first = TwoStep()
+    first.gate.countDown()
+    await(elsewhere.start(other, first.graph, "a", run("elsewhere")).value).completed
+    val unstall = new CountDownLatch(1)
+    val stalled = new CountDownLatch(1)
+    store.onEventsAfter = threadId =>
+      if threadId == other && !onThread("llm4s-watch-") && !onThread("llm4s-subscriber-") then {
+        stalled.countDown()
+        stuckUntil(unstall)
+      }
+    val second = TwoStep()
+    second.gate.countDown()
+    val behind = new AtomicReference[Option[RunResult[Vector[String]]]](None)
+    Thread.ofVirtual().start(() => behind.set(Some(await(here.start(other, second.graph, "b", run("here")).value))))
+    stalled.await(5, TimeUnit.SECONDS) shouldBe true
+    val two = TwoStep()
+    two.gate.countDown()
+    val outcome = within(awaitResult(here.start(thread, two.graph, "x", run("first")).value))
+    unstall.countDown()
+    outcome.value.value shouldBe a[RunResult.Completed[?]]
+    eventually(behind.get.isDefined)
+    behind.get.value shouldBe a[RunResult.Completed[?]]
+    val log = underlying.eventsAfter(other, 0L, 10_000).value.map(_.seq)
+    eventually(seen.size == log.size)
+    seen.asScala.toVector shouldBe log
+    sub.cancel()
   }
 
   // ---- 6: a takeover is recorded on RunRecovered ----

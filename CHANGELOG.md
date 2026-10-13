@@ -2721,9 +2721,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the moment a loss is found - its lease passing, or a renewal or commit refused - `await()` and the call that
   admits a run now return, with the thread free in the runtime, within `2 × ttl`, plus only local work that never
   calls the store.
-- **A commit hung in the store holds up only its own thread** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+- **A commit or subscription read hung in the store holds up only its own thread** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   every commit in a `GraphRuntime` was written under one runtime-wide lock, so one thread's hung commit stalled every
-  other thread's runs, their admission included. Commits are now ordered per thread.
+  other thread's runs, their admission included. Commits are now ordered per thread. A subscription's read of the
+  store - switching to live, or filling a gap before a commit handed over - no longer holds the event hub's lock,
+  which every thread's hand-overs and every run's local release take: a read stalled in the store froze the whole
+  runtime, and kept a lost run from ending within its bound.
 - **A claim is renewed from its grant** ([#1700](https://github.com/llm4s/llm4s/issues/1700)): the first renewal came
   `renewEvery` after the run was launched, so slow admission work could let the lease lapse before it; `fork`,
   `updateState` and `deleteThread` now renew the claim they hold too, so a store delete slower than `ttl` still lands.

@@ -194,7 +194,9 @@ is free:
   store refused it), and otherwise with `ClaimLost`.
 - Commits on one thread are written one at a time, in this runtime, so that subscribers see them in order. A commit
   hung in the store holds up later commits on its thread - including a new run's claim commit there, until the
-  store returns - but never another thread's.
+  store returns - but never another thread's. A subscription's read of the store that hangs holds up only that
+  subscription, and, for a read of events another runtime committed before this runtime's commit, that thread's
+  commits: never another thread's runs, their admission or release, nor a lost run's bounded end.
 - A process that dies holds its threads for up to `ttl`; so does a store that fails to release a claim - except to
   its own runtime's `deleteThread`, which tries the release once more first, so `Agent.run(query)` can still forget
   the thread of a failed turn. A run that ends with its claim still held waits up to `ttl` for a renewal still in
