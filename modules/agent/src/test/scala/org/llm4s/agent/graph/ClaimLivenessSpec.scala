@@ -641,25 +641,32 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
   /**
    * A run whose Async write of `quick`'s result hangs in the store until `hang` opens, and whose release
    * waits for `releaseGate`, so the late write lands while the claim is still the run's. Its `held` node
-   * waits for `heldGate`, or for the interrupt a lost claim sends.
+   * waits for `heldGate`, or for the interrupt a lost claim sends - unless `ignoresInterrupts`, when it
+   * waits for `heldGate` whatever interrupts it, so the run thread never ends while the test runs. With
+   * `hangs` false the write does not hang. `landed` opens once the write has landed;
+   * `writeInterrupted` records whether its thread was interrupted while in the store.
    */
-  final private class LateWrite {
-    val time        = ManualTime()
-    val store       = Hooked(InMemoryCheckpointer(time))
-    val writing     = new CountDownLatch(1)
-    val hang        = new CountDownLatch(1)
-    val entered     = new CountDownLatch(1)
-    val releaseGate = new CountDownLatch(1)
-    val heldGate    = new CountDownLatch(1)
-    val releasers   = new ConcurrentLinkedQueue[Thread]()
-    private val log = StateKey.appending[String]("log")
+  final private class LateWrite(ignoresInterrupts: Boolean = false, hangs: Boolean = true) {
+    val time             = ManualTime()
+    val store            = Hooked(InMemoryCheckpointer(time))
+    val writing          = new CountDownLatch(1)
+    val hang             = new CountDownLatch(1)
+    val entered          = new CountDownLatch(1)
+    val releaseGate      = new CountDownLatch(1)
+    val heldGate         = new CountDownLatch(1)
+    val releasers        = new ConcurrentLinkedQueue[Thread]()
+    val landed           = new CountDownLatch(1)
+    val writeInterrupted = new AtomicBoolean(false)
+    private val log      = StateKey.appending[String]("log")
     val graph: CompiledGraph[String, Vector[String]] = {
       val b = GraphBuilder("late", "v1")
       val held = b.node[Unit]("held", writes = Set(log)) { (_, _, _) =>
         entered.countDown()
-        CancelledError.catchInterrupt(heldGate.await(60, TimeUnit.SECONDS)).left.foreach { _ =>
-          Thread.currentThread().interrupt()
-        }
+        if ignoresInterrupts then stuckUntil(heldGate)
+        else
+          CancelledError.catchInterrupt(heldGate.await(60, TimeUnit.SECONDS)).left.foreach { _ =>
+            Thread.currentThread().interrupt()
+          }
         continue(Command.empty.update(log, "held"))
       }
       val quick = b.node[String]("quick", writes = Set(log)) { (input, _, _) =>
@@ -668,26 +675,39 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       b.compile(quick)(_.get(log)).value
     }
     private val armed = new AtomicBoolean(true)
-    store.onCommit = commit => {
+    store.onCommit = commit =>
       if commit.checkpoint.isEmpty && commit.pendingWrites.nonEmpty && armed.compareAndSet(true, false) then {
         writing.countDown()
-        hang.await(10, TimeUnit.SECONDS): Unit
-      }
-      None
-    }
+        if hangs then
+          CancelledError.catchInterrupt(hang.await(10, TimeUnit.SECONDS)).left.foreach { _ =>
+            writeInterrupted.set(true)
+            stuckUntil(hang)
+          }
+        val written = store.underlying.commit(thread, commit)
+        landed.countDown()
+        Some(written)
+      } else None
     store.onRelease = () => {
       releasers.add(Thread.currentThread())
       releaseGate.await(10, TimeUnit.SECONDS): Unit
       None
     }
     val rt: GraphRuntime = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+    // this run's own Async writer, never another test's on a thread of the same name
+    val writers = new ConcurrentLinkedQueue[Thread]()
+    rt.writerCreated = (_, created) => writers.add(created): Unit
+    def writer: Thread = Option(writers.peek()).value
 
     def start(): RunHandle[Vector[String]] = rt.start(thread, graph, "x", run("first"), Durability.Async).value
 
-    /** Waits until `quick`'s write hangs and `held` runs, then lets the lease pass; the run's token. */
+    /**
+     * Waits until `quick`'s write hangs - or, with `hangs` false, has landed - and `held` runs, then lets
+     * the lease pass; the run's token.
+     */
     def loseClaim(): FencingToken = {
       entered.await(5, TimeUnit.SECONDS) shouldBe true
       writing.await(5, TimeUnit.SECONDS) shouldBe true
+      if !hangs then landed.await(5, TimeUnit.SECONDS) shouldBe true
       store.onRenew = unreachable
       val token = tokenOf(store)
       time.advance(1.second)
@@ -802,6 +822,63 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       eventually(!writerAlive)
       // once the orphan has landed, the hub keeps no mark for the idle thread
       late.rt.handOverMarked(thread) shouldBe false
+      late.letRelease()
+    }
+
+  "A lost Async run settled without its run thread, whose writer is idle" should
+    "shut the writer down without waiting for the run thread, which may still end later" in {
+      val late   = LateWrite(ignoresInterrupts = true, hangs = false)
+      val handle = late.start()
+      val own    = handle.asInstanceOf[DefaultRunHandle[Vector[String]]]
+      val token  = late.loseClaim()
+      // the writer started, and its one write has landed: it is idle, waiting for the next
+      val writer = late.writer
+      // the run thread ignores the interrupt, so only the watchdog can settle the run
+      await(handle).failed._2 shouldBe GraphError.ClaimLost("t", token, None)
+      own.runThreadExited.getCount shouldBe 1
+      writer.join(5000)
+      withClue("the idle writer outlives a run settled without its run thread: ") {
+        writer.isAlive shouldBe false
+      }
+
+      // the run thread ends at last: its abandon finds the writer shut down, and nothing more of it lands
+      val before = events(late.store).size
+      late.heldGate.countDown()
+      own.runThreadExited.await(5, TimeUnit.SECONDS) shouldBe true
+      await(handle).failed._2 shouldBe GraphError.ClaimLost("t", token, None)
+      events(late.store).size shouldBe before
+      late.rt.heldLocally(thread) shouldBe false
+      late.letRelease()
+    }
+
+  "A lost Async run settled without its run thread, while its write is in the store" should
+    "let the write land uninterrupted as an orphan the run's listeners never get, and then end the writer" in {
+      val late   = LateWrite(ignoresInterrupts = true)
+      val handle = late.start()
+      val own    = handle.asInstanceOf[DefaultRunHandle[Vector[String]]]
+      val runs   = RunRecorder()
+      handle.subscribe()(runs).value
+      val token  = late.loseClaim()
+      val writer = late.writer
+      await(handle).failed._2 shouldBe GraphError.ClaimLost("t", token, None)
+      runs.ended.await(5, TimeUnit.SECONDS) shouldBe true
+      own.runThreadExited.getCount shouldBe 1
+      // the write is still in the store: an orphan, so the hub keeps its mark until it returns
+      late.rt.handOverMarked(thread) shouldBe true
+      writer.isAlive shouldBe true
+
+      late.hang.countDown()
+      late.landed.await(5, TimeUnit.SECONDS) shouldBe true
+      writer.join(5000)
+      writer.isAlive shouldBe false
+      late.writeInterrupted.get shouldBe false
+      events(late.store).filter(_.runId == "first").map(_.event) should contain(RunEvent.TaskCompleted)
+      runs.eventsOf("first") should not contain RunEvent.TaskCompleted
+      // once the orphan has returned, the hub keeps no mark for the idle thread
+      late.rt.handOverMarked(thread) shouldBe false
+
+      late.heldGate.countDown()
+      own.runThreadExited.await(5, TimeUnit.SECONDS) shouldBe true
       late.letRelease()
     }
 

@@ -2721,7 +2721,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run has not ended within `2 × ttl`, ends it without its thread: `ClaimLost`, the thread freed in the runtime, the
   claim released on a detached thread. The run thread, when it returns, sets no second result and frees nothing; and
   the watchdog fences and cuts the run only once it has taken it, so a run thread that settles first ends with its
-  own outcome, which its listeners see in full.
+  own outcome, which its listeners see in full. It also shuts an `Async` run's writer down, without waiting, so a run
+  thread that never returns no longer leaves the writer's platform thread parked for good: the writer ends once a
+  write still in the store returns, and that write still lands, or not, as an orphan.
   `fork`, `updateState` and a `deleteThread` that did not delete likewise release on a detached thread when their
   heartbeat's renewal cannot be joined, so a renewal hung in a store that serialises its calls (SQLite) no longer
   keeps them from returning.

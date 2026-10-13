@@ -6,10 +6,11 @@ import org.slf4j.LoggerFactory
 
 import java.time.Clock
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
-import java.util.concurrent.{ CountDownLatch, ExecutorService, Executors, TimeUnit }
+import java.util.concurrent.{ CountDownLatch, ExecutorService, Executors, RejectedExecutionException, TimeUnit }
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.util.{ Try, Using }
+import scala.util.control.Exception.catching
 
 /**
  * When a run's checkpoints and events become durable. In every mode a durable event is delivered
@@ -209,6 +210,9 @@ final class GraphRuntime(
    * not yet written and before it waits for one in flight; a no-op by default.
    */
   @volatile private[graph] var abandoning: ThreadId => Unit = _ => ()
+
+  /** A test hook given each Async committer's writer thread as it is created; a no-op by default. */
+  @volatile private[graph] var writerCreated: (ThreadId, Thread) => Unit = (_, _) => ()
 
   /** A test hook run by a claim's renewal thread once it has acted on the store's answer; a no-op by default. */
   @volatile private[graph] var renewalSettled: ThreadId => Unit = _ => ()
@@ -1422,6 +1426,18 @@ final class GraphRuntime(
       }
 
     /**
+     * Lets the committer go when its run is settled without its run thread ([[Run.endedWithoutRunThread]]):
+     * fences it with `reason`, counts every commit in flight as an orphan ([[orphan]]), and frees whatever
+     * the committer owns - an Async writer is shut down - without waiting for anything, the store above
+     * all. The run thread may never return, so nothing it would have closed may be left to it. Idempotent,
+     * and safe against the run thread's later [[abandon]] or [[close]], and against a commit in flight,
+     * which still lands, or not, as an orphan.
+     */
+    def settledWithoutRunThread(reason: LLMError): Unit =
+      fence(reason): Unit
+      orphan()
+
+    /**
      * Told when the store refuses a submitted commit as stale - proof that another run took the thread
      * over - so the run stops at once rather than at its next superstep. Set by the run; Sync and Async
      * call it from the thread that made the commit.
@@ -1474,17 +1490,36 @@ final class GraphRuntime(
     private val writer: ExecutorService = Executors.newSingleThreadExecutor { runnable =>
       val thread = new Thread(runnable, s"llm4s-graph-writer-${threadId.value}")
       thread.setDaemon(true)
+      writerCreated(threadId, thread)
       thread
     }
     def submit(commit: Commit): Unit =
-      writer.execute { () =>
-        // a failed commit stops the queue: a later commit must not land on top of a lost one
-        if failed.get.isEmpty then
-          begun(commit)(reason => failed.compareAndSet(None, Some(reason)): Unit) {
-            commitAndDeliver(threadId, commit).left.foreach(refused(failed, _))
-          }
-      }
+      // the writer refuses work only once it is shut down, and a run settled without its run thread shuts
+      // it down with the failure already recorded ([[settledWithoutRunThread]]): a run thread that comes
+      // back and submits finds the commit dropped, as a queued one would be
+      catching(classOf[RejectedExecutionException]).opt {
+        writer.execute { () =>
+          // a failed commit stops the queue: a later commit must not land on top of a lost one
+          if failed.get.isEmpty then
+            begun(commit)(reason => failed.compareAndSet(None, Some(reason)): Unit) {
+              commitAndDeliver(threadId, commit).left.foreach(refused(failed, _))
+            }
+        }
+      }: Unit
     def failure: Option[LLMError] = failed.get
+
+    /**
+     * Also shuts the writer down, without waiting for it: commits queued find the failure and skip
+     * themselves, and the writer - a platform thread - ends once the one in flight, if any, returns. The
+     * run thread, stuck in a node that ignores interrupts, say, may never reach [[abandon]], so the
+     * writer must not wait for it. `shutdown`, not `shutdownNow`: a commit in the store is fenced by the
+     * run's token already, and is left to land or fail as an orphan, as [[abandon]] leaves it -
+     * interrupting it would only fail it part-way through its hand-over to the thread's subscribers.
+     */
+    override def settledWithoutRunThread(reason: LLMError): Unit =
+      failed.set(Some(reason))
+      super.settledWithoutRunThread(reason)
+      writer.shutdown()
 
     /**
      * Waits for the queue to drain, even if interrupted: returning earlier would release the thread
@@ -1940,8 +1975,10 @@ final class GraphRuntime(
     /**
      * The run's result when it is settled without its run thread ([[DefaultRunHandle.endWithin]]): the
      * claim was found lost, and the run thread has not ended - stuck, say, in a store call that ignores
-     * interrupts. The committer is fenced and orphaned, so nothing more of the run lands but what is in
-     * the store already, and the hub keeps its mark for the thread only until that returns; the run's own subscriptions
+     * interrupts. The committer is fenced and orphaned, and an Async writer shut down without waiting
+     * ([[Committer.settledWithoutRunThread]]), so nothing more of the run lands but what is in the store
+     * already, the writer's thread ends once that returns, and the hub keeps its mark for the thread only
+     * until then; the run's own subscriptions
      * are cut at what the hub has handed over ([[EventHub.atMark]]), so a write landing later - or one
      * whose hand-over is still reading a subscriber's missing events - never reaches them as the run's
      * ([[AbandonedWrites]]). Fails with [[GraphError.ClaimLost]], at the last position the run reached.
@@ -1952,8 +1989,7 @@ final class GraphRuntime(
       val lost = GraphError.ClaimLost(threadId.value, token, lostTo.get)
       DefaultRunHandle
         .guarded {
-          committer.fence(lost): Unit
-          committer.orphan()
+          committer.settledWithoutRunThread(lost)
           abandonedWrites.foreach(cut => hub.atMark(threadId)(cut.abandonAfter))
         }
         .left
