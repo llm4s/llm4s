@@ -72,6 +72,8 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
       else if (sql == s"SELECT outcome FROM ${table}_applied WHERE key = ?")
         rows(s.applied.get(params(1).toString).map(Seq(_)).toSeq)
       else if (sql == s"SELECT COUNT(*) FROM ${table}_applied") rows(Seq(Seq(s.applied.size)))
+      else if (sql == s"SELECT 1 FROM $table WHERE id = ?")
+        rows(s.memories.get(params(1).toString).map(_ => Seq(1)).toSeq)
       else if (sql.startsWith("SELECT id, importance, created_at, content, metadata::text"))
         rows(s.memories.values.toSeq.map(r => Seq(r.id, r.importance.orNull, r.at, r.content, r.metadata)))
       else throw new UnsupportedOperationException(sql)
@@ -174,12 +176,17 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
     store.applyAtomically(AppliedWriteKey("s", "seed"), 1, Seq(m("low", 1, Some(0.1)), m("x", 2)), Nil, big).value
     val (_, out) =
       store
-        .applyAtomically(k, 1, Seq(m("y", 3), m("z", 4)), Seq(MemoryId("x"), MemoryId("absent")), MemoryBounds(2))
+        .applyAtomically(k, 1, Seq(m("y", 3), m("z", 4)), Seq(MemoryId("x")), MemoryBounds(2))
         .value
     out shouldBe AppliedWrite(Vector(MemoryId("y"), MemoryId("z")), Vector(MemoryId("x")), 1)
     db.state.memories.keySet shouldBe Set("y", "z")
     store.replace(Nil, Seq(MemoryId("y"))).value
     store.applyAtomically(k, 1, Seq(m("y", 3), m("z", 4)), Nil, big).value._2 shouldBe out
+    db.state.memories.keySet shouldBe Set("z")
+    // a replacement whose sources are partly gone writes nothing
+    val late = AppliedWriteKey("s", "late")
+    store.applyAtomically(late, 1, Seq(m("w")), Seq(MemoryId("z"), MemoryId("y")), big).value._2 shouldBe
+      AppliedWrite(Vector.empty, Vector.empty, 0)
     db.state.memories.keySet shouldBe Set("z")
   }
 

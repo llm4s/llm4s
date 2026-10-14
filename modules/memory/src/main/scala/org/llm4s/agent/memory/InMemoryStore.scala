@@ -48,6 +48,9 @@ final case class InMemoryStore private (
     fenced(key, token).map { store =>
       store.applied.get(key.value) match {
         case Some(recorded) => (store, recorded)
+        case None if remove.exists(id => !store.memories.contains(id)) =>
+          val outcome = TransactionalMemoryStore.Superseded
+          (store.copy(applied = store.applied + (key.value -> outcome)), outcome)
         case None =>
           val adds     = TransactionalMemoryStore.distinctById(add)
           val removed  = remove.distinct.filter(id => store.memories.contains(id) && !adds.exists(_.id == id)).toVector

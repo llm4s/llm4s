@@ -51,14 +51,18 @@ final class SQLiteMemoryStore private (
   ): Result[(TransactionalMemoryStore, AppliedWrite)] =
     fencedTransaction("sqlite-apply", key, token) {
       readApplied(key.value).getOrElse {
-        val adds    = TransactionalMemoryStore.distinctById(add)
-        val addIds  = adds.map(_.id).toSet
-        val removed = remove.distinct.filter(id => !addIds.contains(id) && present(id)).toVector
-        deleteIds(removed.map(_.value))
-        writeAll(adds)
-        val evicted = bounds.overflow(entries())
-        deleteIds(evicted.map(_.value))
-        val outcome = AppliedWrite(adds.map(_.id), removed, evicted.size)
+        val outcome =
+          if (!remove.forall(present)) TransactionalMemoryStore.Superseded
+          else {
+            val adds    = TransactionalMemoryStore.distinctById(add)
+            val addIds  = adds.map(_.id).toSet
+            val removed = remove.distinct.filterNot(addIds.contains).toVector
+            deleteIds(removed.map(_.value))
+            writeAll(adds)
+            val evicted = bounds.overflow(entries())
+            deleteIds(evicted.map(_.value))
+            AppliedWrite(adds.map(_.id), removed, evicted.size)
+          }
         bindAndUpdate(
           "INSERT INTO memory_applied_writes (key, scope, outcome) VALUES (?, ?, ?)",
           Seq(key.value, key.scope, ujson.write(AppliedWrite.toJson(outcome)))

@@ -85,13 +85,17 @@ final class PostgresMemoryStore private[memory] (
   ): Result[(TransactionalMemoryStore, AppliedWrite)] =
     fencedTransaction(key, token) { conn =>
       readApplied(conn, key.value).getOrElse {
-        val adds    = TransactionalMemoryStore.distinctById(add)
-        val addIds  = adds.map(_.id).toSet
-        val removed = deleteIds(conn, remove.distinct.filterNot(addIds.contains))
-        writeAll(conn, adds)
-        val evicted = bounds.overflow(entries(conn))
-        deleteIds(conn, evicted): Unit
-        val outcome = AppliedWrite(adds.map(_.id), removed, evicted.size)
+        val outcome =
+          if (!remove.distinct.forall(id => present(conn, id))) TransactionalMemoryStore.Superseded
+          else {
+            val adds    = TransactionalMemoryStore.distinctById(add)
+            val addIds  = adds.map(_.id).toSet
+            val removed = deleteIds(conn, remove.distinct.filterNot(addIds.contains))
+            writeAll(conn, adds)
+            val evicted = bounds.overflow(entries(conn))
+            deleteIds(conn, evicted): Unit
+            AppliedWrite(adds.map(_.id), removed, evicted.size)
+          }
         Using.resource(conn.prepareStatement(s"INSERT INTO $appliedTable (key, scope, outcome) VALUES (?, ?, ?)")) {
           stmt =>
             stmt.setString(1, key.value)
@@ -182,6 +186,12 @@ final class PostgresMemoryStore private[memory] (
           )
         else None
       }
+    }
+
+  private def present(conn: Connection, id: MemoryId): Boolean =
+    Using.resource(conn.prepareStatement(s"SELECT 1 FROM $tableName WHERE id = ?")) { stmt =>
+      stmt.setString(1, id.value)
+      Using.resource(stmt.executeQuery())(_.next())
     }
 
   /** Deletes `ids`, returning those that were there. */

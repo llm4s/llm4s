@@ -127,6 +127,10 @@ trait TransactionalMemoryStore extends MemoryStore {
    * In one transaction: for a `key` already applied, its recorded outcome, writing nothing - even if the memories it
    * stored have since been deleted. Otherwise stores `add`, deletes `remove`, then evicts beyond `bounds`
    * ([[MemoryBounds.overflow]], over the whole store), and records `(key, outcome)`.
+   *
+   * `remove` names what `add` replaces, as a consolidation's summary replaces its sources: if any memory of `remove`
+   * is no longer there, another writer replaced it first, so nothing is written and the outcome records that nothing
+   * was added or removed. Two writers that replace the same memories therefore never both store a replacement.
    */
   def applyAtomically(
     key: AppliedWriteKey,
@@ -151,6 +155,9 @@ private[memory] object TransactionalMemoryStore {
   /** The refusal of a token older than the scope's newest. */
   def stale(scope: String, token: Long, newest: Long): ProcessingError =
     ProcessingError("memory-fence", s"token $token is older than the newest token $newest seen for scope $scope")
+
+  /** The outcome of a replacement whose sources are partly gone: nothing written. */
+  val Superseded: AppliedWrite = AppliedWrite(Vector.empty, Vector.empty, 0)
 
   /** `add` with a repeated id kept as its last occurrence, in first-seen order. */
   def distinctById(add: Seq[Memory]): Vector[Memory] = {

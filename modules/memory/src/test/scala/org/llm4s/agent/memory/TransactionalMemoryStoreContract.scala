@@ -77,12 +77,27 @@ trait TransactionalMemoryStoreContract extends AnyFlatSpecLike with Matchers wit
     contents(s3) shouldBe Vector("summary")
   }
 
-  it should "delete only what is there, and report what it deleted" in withStore { s0 =>
+  it should "replace what it names, and report what it deleted" in withStore { s0 =>
     val a         = memory("a")
-    val (s1, _)   = applied(s0, key("add"), 1, Seq(a))
-    val (s2, out) = applied(s1, key("swap"), 1, Seq(memory("b")), Seq(a.id, MemoryId("absent")))
-    out.removed shouldBe Vector(a.id)
+    val c         = memory("c")
+    val (s1, _)   = applied(s0, key("add"), 1, Seq(a, c))
+    val (s2, out) = applied(s1, key("swap"), 1, Seq(memory("b")), Seq(a.id, c.id, a.id))
+    out.removed.toSet shouldBe Set(a.id, c.id)
     contents(s2) shouldBe Vector("b")
+  }
+
+  it should "write nothing for a replacement whose sources another writer already replaced" in withStore { s0 =>
+    val a       = memory("a")
+    val b       = memory("b")
+    val (s1, _) = applied(s0, key("add"), 1, Seq(a, b))
+    // two writers summarise the same pair; the first replaces it, the second finds it gone
+    val (s2, first)  = applied(s1, key("first", scopeA), 1, Seq(memory("summary 1")), Seq(a.id, b.id))
+    val (s3, second) = applied(s2, key("second", scopeB), 1, Seq(memory("summary 2")), Seq(a.id, b.id))
+    first.added should have size 1
+    second shouldBe AppliedWrite(Vector.empty, Vector.empty, 0)
+    contents(s3) shouldBe Vector("summary 1")
+    // and its replay returns that outcome
+    applied(s3, key("second", scopeB), 1, Seq(memory("summary 2")), Seq(a.id, b.id))._2 shouldBe second
   }
 
   it should "keep two keys of one write apart" in withStore { s0 =>
