@@ -19,8 +19,6 @@ import scala.concurrent.duration._
  */
 class MCPCancellationSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
-  private val isWindows = System.getProperty("os.name").toLowerCase.contains("win")
-
   private val request = JsonRpcRequest(jsonrpc = "2.0", id = "1", method = "tools/list", params = None)
 
   // A real MCP server with one tool that never returns, for the end-to-end case.
@@ -99,11 +97,10 @@ class MCPCancellationSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   // ---- the stdio transport
 
   "StdioTransportImpl" should "return CancelledError and stop the server it started when interrupted during startup" in {
-    assume(!isWindows, "needs a POSIX shell")
     val pidFile = Files.createTempFile("llm4s-mcp-", ".pid")
     // A server that starts and says nothing: the transport is still waiting for it to be ready.
     val transport =
-      new StdioTransportImpl(Seq("sh", "-c", "echo $$ > '" + pidFile + "'; exec sleep 30", "sh"), "silent")
+      new StdioTransportImpl(StdioTestServers.command("--pidfile=" + pidFile, "--hang"), "silent")
     ProviderModuleChecks.assertCallCancelsOnceReady("stdio sendRequest during startup")(
       transport.sendRequest(request)
     )(awaitContent(pidFile, "recorded its process id"))
@@ -114,14 +111,14 @@ class MCPCancellationSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   }
 
   it should "return CancelledError and keep no request pending when interrupted while awaiting a response" in {
-    assume(!isWindows, "needs a POSIX shell")
     val pidFile = Files.createTempFile("llm4s-mcp-", ".pid")
     val gotFile = Files.createTempFile("llm4s-mcp-", ".got")
     // A server that is ready (it prints a line) and reads a request, but never answers it: once it has
     // read the request, the transport is known to be waiting for the response.
-    val script =
-      "echo $$ > '" + pidFile + "'; echo ready; read line; echo got > '" + gotFile + "'; exec sleep 30"
-    val transport = new StdioTransportImpl(Seq("sh", "-c", script, "sh"), "mute")
+    val transport = new StdioTransportImpl(
+      StdioTestServers.command("--pidfile=" + pidFile, "--hello", "--gotfile=" + gotFile, "--hang"),
+      "mute"
+    )
     ProviderModuleChecks.assertCallCancelsOnceReady("stdio sendRequest awaiting a response")(
       transport.sendRequest(request)
     )(awaitContent(gotFile, "read the request"))

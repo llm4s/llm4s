@@ -265,7 +265,7 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
       Instant.EPOCH,
       legacy.copy(frontier = legacy.frontier.map(_.copy(lineage = "")))
     )
-    val token = store.claim(thread, ClaimRequest(RunId("old"), 1.minute)).value.token
+    val token = store.claim(thread, ClaimRequest(RunId("old"), None, 1.minute)).value.token
     store.commit(thread, Commit(token, Some(format6))).value
     // the key a format-6 writer gave the effect: its task key named no lineage
     val oldTask = IdempotencyKey(KeyDigest.of(Seq("llm4s-task-v1", thread.value, "0.0")))
@@ -660,7 +660,7 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
     val handle = GraphRuntime(store, clock, claims).start(thread, b.compile(n)(_.get(log)).value, ()).value
     entered.await(5, TimeUnit.SECONDS) shouldBe true
     clock.advance(2.hours)
-    store.claim(thread, ClaimRequest(RunId("taker"), 1.hour)).value
+    store.claim(thread, ClaimRequest(RunId("taker"), None, 1.hour)).value
     taken.countDown()
     awaitResult(handle)
     outcome.get.left.value shouldBe a[GraphError.StaleClaim]

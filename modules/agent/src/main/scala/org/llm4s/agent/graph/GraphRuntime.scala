@@ -452,7 +452,8 @@ final class GraphRuntime(
                   execution,
                   Some(stored.checkpoint.id),
                   // a claim that replaced an expired one is a takeover: its run may still be executing, even
-                  // when it had this run's id - a reused RunId names two runs, so the id is never filtered
+                  // when it had this run's id - a reused RunId names two runs, so the id is never filtered.
+                  // The store names it only if it was a claim of this run's tenant (#1926)
                   granted =>
                     RunEvent.RunRecovered(
                       stored.checkpoint.id,
@@ -583,7 +584,7 @@ final class GraphRuntime(
           // a delete not begun when the claim was found lost never reaches the store, and is refused so
           val outcome = held.committing(Commit(claim.token))(checkpointer.deleteThread(threadId, claim.token)) match
             case Left(stale: GraphError.StaleClaim) =>
-              busyAt(threadId, config, holder = afterLoss(stale.current), nameWithoutCheckpoint = false)
+              busyAt(threadId, config, holder = afterLoss(stale.current))
             case other => other
           // after the store delete, so a subscription that joined while it was in flight ends too - while
           // the thread is still held here, so no run of this runtime has begun on the next thread under
@@ -861,7 +862,7 @@ final class GraphRuntime(
   private def changeRefused(threadId: ThreadId, config: RunConfig)(error: LLMError): LLMError = error match
     case stale: GraphError.StaleClaim =>
       val holder = afterLoss(stale.current)
-      Try(busyAt(threadId, config, holder, nameWithoutCheckpoint = false)).toResult.flatten.fold(
+      Try(busyAt(threadId, config, holder)).toResult.flatten.fold(
         {
           case refusal @ (_: GraphError.TenantMismatch | _: GraphError.ThreadBusy) => refusal
           case _ => GraphError.ThreadBusy(threadId.value, None, holder)
@@ -1022,15 +1023,17 @@ final class GraphRuntime(
       }
 
   /**
-   * Asks the store for a claim on `threadId` for `config.runId`. A live claim held by another run is
-   * [[GraphError.ThreadBusy]] naming it - after the thread is re-read and its tenant checked, so a
-   * caller from another tenant gets `TenantMismatch` instead and learns nothing; for a thread with
-   * no checkpoint, whose tenant cannot be checked, the holder is not named. A re-read that fails or
-   * throws is `ThreadBusy` naming neither checkpoint nor holder: nothing unchecked is ever named. Any
-   * other failure of the store, returned or thrown (non-fatally), is [[GraphError.CheckpointWriteFailed]].
+   * Asks the store for a claim on `threadId` for `config.runId` and `config.tenantId`. A live claim held
+   * by another run is [[GraphError.ThreadBusy]]. The store names its holder only when the claim is of
+   * the caller's tenant ([[Checkpointer.claim]]), so the holder is shown as the store gave it, with or
+   * without a checkpoint. The thread is then re-read and its tenant checked, for the checkpoint the
+   * refusal names - the refusal's own is unchecked - so a caller from another tenant gets
+   * `TenantMismatch` instead and learns nothing. A re-read that fails or throws is `ThreadBusy` naming
+   * neither checkpoint nor holder: nothing unchecked is ever named. Any other failure of the store,
+   * returned or thrown (non-fatally), is [[GraphError.CheckpointWriteFailed]].
    */
   private def claimThread(threadId: ThreadId, config: RunConfig): Result[RunClaim] =
-    Try(checkpointer.claim(threadId, ClaimRequest(config.runId, claims.ttl))).toResult.flatten match
+    Try(checkpointer.claim(threadId, ClaimRequest(config.runId, config.tenantId, claims.ttl))).toResult.flatten match
       case Right(claim) =>
         val granted = s"Run ${named(config.runId)} claimed thread '${threadId.value}' with token ${claim.token.value}"
         // an operator who labels a runtime wants to find its claims; without a label it is noise
@@ -1042,7 +1045,9 @@ final class GraphRuntime(
       // the refusal's own checkpoint is unchecked - it may be another tenant's, and embeds its run's id -
       // so a re-read that fails or throws falls back to a ThreadBusy naming nothing
       case Left(GraphError.ThreadBusy(_, _, holder)) =>
-        Try(busyAt(threadId, config, holder, nameWithoutCheckpoint = false)).toResult.flatten.left.map {
+        // the store named the holder only for a claim of the caller's tenant (#1926), which a thread with
+        // no checkpoint yet cannot otherwise show: another tenant's run may hold it before its first commit
+        Try(busyAt(threadId, config, holder)).toResult.flatten.left.map {
           case refusal @ (_: GraphError.TenantMismatch | _: GraphError.ThreadBusy) => refusal
           case _ => GraphError.ThreadBusy(threadId.value, None, GraphError.BusyHolder.Unnamed)
         }
@@ -1376,25 +1381,17 @@ final class GraphRuntime(
   ): Result[Nothing] =
     val requested = config.tenantId.map(_.value)
     if holderTenant != requested then Left(GraphError.TenantMismatch(threadId.value, requested))
-    else busyAt(threadId, config, GraphError.BusyHolder.Run(holderRun), nameWithoutCheckpoint = true)
+    else busyAt(threadId, config, GraphError.BusyHolder.Run(holderRun))
 
   /**
-   * [[busy]]'s store half: the thread's latest checkpoint, tenant-checked, and `holder`. With no
-   * checkpoint a holding run is named only if `nameWithoutCheckpoint`: its tenant is then known to be the
-   * caller's, as for a run of this runtime.
+   * [[busy]]'s store half: the thread's latest checkpoint, tenant-checked, and `holder`, which the caller
+   * has already established is of the caller's tenant if it names a run: a run of this runtime, or a claim
+   * the store named because it was of the caller's tenant ([[Checkpointer.claim]]).
    */
-  private def busyAt(
-    threadId: ThreadId,
-    config: RunConfig,
-    holder: GraphError.BusyHolder,
-    nameWithoutCheckpoint: Boolean
-  ): Result[Nothing] =
+  private def busyAt(threadId: ThreadId, config: RunConfig, holder: GraphError.BusyHolder): Result[Nothing] =
     checkpointer.latest(threadId).flatMap {
       case None =>
-        val shown = holder match
-          case _: GraphError.BusyHolder.Run if !nameWithoutCheckpoint => GraphError.BusyHolder.Unnamed
-          case other                                                  => other
-        Left(GraphError.ThreadBusy(threadId.value, None, shown))
+        Left(GraphError.ThreadBusy(threadId.value, None, holder))
       case Some(stored) =>
         checkTenant(threadId, stored, config).flatMap(_ =>
           Left(GraphError.ThreadBusy(threadId.value, Some(stored.checkpoint.id), holder))
@@ -2052,7 +2049,7 @@ final class GraphRuntime(
           // naming nothing, rather than to a store error.
           case Left(_: GraphError.CheckpointConflict) =>
             Try(
-              busyAt(threadId, config, GraphError.BusyHolder.Unnamed, nameWithoutCheckpoint = false)
+              busyAt(threadId, config, GraphError.BusyHolder.Unnamed)
             ).toResult.flatten.left.map {
               case refusal @ (_: GraphError.TenantMismatch | _: GraphError.ThreadBusy) => refusal
               case _ => GraphError.ThreadBusy(threadId.value, None, GraphError.BusyHolder.Unnamed)

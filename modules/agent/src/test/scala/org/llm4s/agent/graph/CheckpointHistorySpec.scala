@@ -279,11 +279,12 @@ class CheckpointHistorySpec extends AnyFlatSpec with Matchers with EitherValues 
     val n       = Notes()
     runtime.start(thread, n.graph, "a").awaited.value.completed
     val at   = runtime.history(thread).value.head.id
-    val held = store.claim(other, ClaimRequest(RunId("elsewhere"), 1.hour)).value
+    val held = store.claim(other, ClaimRequest(RunId("elsewhere"), None, 1.hour)).value
+    // the holder's claim is of the fork's tenant (none), so it is named though the target has no checkpoint
     runtime.fork(thread, at, other).left.value shouldBe GraphError.ThreadBusy(
       other.value,
       None,
-      GraphError.BusyHolder.Unnamed
+      GraphError.BusyHolder.Run(RunId("elsewhere"))
     )
     store.release(other, held.token).value
     runtime.fork(thread, at, other).value

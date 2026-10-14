@@ -546,7 +546,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
         val token = tokenOf(store)
         // the store's clock runs ahead, so it expires the claim the run still judges live; another takes it
         time.skewStore(3.hours)
-        val thief = store.claim(thread, ClaimRequest(RunId("thief"), 1.hour)).value
+        val thief = store.claim(thread, ClaimRequest(RunId("thief"), None, 1.hour)).value
 
         two.gate.countDown()
         await(handle).failed._2 shouldBe GraphError.ClaimLost("t", token, Some(thief.token))
@@ -583,7 +583,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
         entered.await(5, TimeUnit.SECONDS) shouldBe true
         val token = tokenOf(store)
         time.skewStore(3.hours)
-        val thief = store.claim(thread, ClaimRequest(RunId("thief"), 1.hour)).value
+        val thief = store.claim(thread, ClaimRequest(RunId("thief"), None, 1.hour)).value
 
         gate.countDown()
         interrupted.await(5, TimeUnit.SECONDS) shouldBe true
@@ -703,7 +703,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       eventually(
         store.underlying.latest(thread).isRight && store.releases.get == 1 && !releasers.asScala.exists(_.isAlive)
       )
-      store.underlying.claim(thread, ClaimRequest(RunId("next"), 1.minute)).value.holder shouldBe RunId("next")
+      store.underlying.claim(thread, ClaimRequest(RunId("next"), None, 1.minute)).value.holder shouldBe RunId("next")
     }
 
   /**
@@ -1052,7 +1052,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       // the hung renewal ends; the old release then runs with the old token, and spares the new claim
       store.unhang()
       eventually(store.released.contains(token))
-      underlying.claim(thread, ClaimRequest(RunId("other"), 1.minute)).left.value should matchPattern {
+      underlying.claim(thread, ClaimRequest(RunId("other"), None, 1.minute)).left.value should matchPattern {
         case GraphError.ThreadBusy("t", _, GraphError.BusyHolder.Run(holder)) if holder == RunId("second") =>
       }
       next.gate.countDown()
@@ -1185,7 +1185,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       // the renewal ends; the release queued behind it then gives the claim back
       store.unhang()
       eventually(store.released.size == released + 1)
-      underlying.claim(thread, ClaimRequest(RunId("next"), 1.minute)).value.holder shouldBe RunId("next")
+      underlying.claim(thread, ClaimRequest(RunId("next"), None, 1.minute)).value.holder shouldBe RunId("next")
     }
 
   "A run whose commit hangs in the store" should "not hold up a run on another thread of the same runtime" in {
@@ -1429,7 +1429,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
             if commit.checkpoint.exists(_.runId == "first") && own.get.isEmpty then {
               own.set(Some(commit.token))
               time.skewStore(3.hours)
-              thief.set(Some(store.underlying.claim(thread, ClaimRequest(RunId("thief"), 1.hour)).value))
+              thief.set(Some(store.underlying.claim(thread, ClaimRequest(RunId("thief"), None, 1.hour)).value))
             }
             None
           }
@@ -1464,7 +1464,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
             store.onRenew = unreachable
             time.advance(31.seconds)
             declared.await(5, TimeUnit.SECONDS) shouldBe true
-            thief.set(Some(store.underlying.claim(thread, ClaimRequest(RunId("thief"), 1.hour)).value))
+            thief.set(Some(store.underlying.claim(thread, ClaimRequest(RunId("thief"), None, 1.hour)).value))
           }
           None
         }
@@ -1493,7 +1493,9 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
         val updating = commit.events.exists(_.event.isInstanceOf[RunEvent.StateUpdated])
         if forking || updating then {
           time.skewStore(3.hours)
-          store.underlying.claim(if forking then target else thread, ClaimRequest(RunId("thief"), 1.hour)).value: Unit
+          store.underlying
+            .claim(if forking then target else thread, ClaimRequest(RunId("thief"), None, 1.hour))
+            .value: Unit
         }
         None
       }
@@ -1532,7 +1534,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
    * claim lost: the lease, judged by the manual ticker, never passes, and no renewal is ever refused.
    */
   private def alwaysRenewed: () => Option[Result[RunClaim]] =
-    () => Some(Right(RunClaim(thread, RunId("renewed"), FencingToken(1L), t0)))
+    () => Some(Right(RunClaim(thread, RunId("renewed"), None, FencingToken(1L), t0)))
 
   /** A claim whose bound, twice its ttl, is well inside the 5 seconds a test waits. */
   private def second = ClaimPolicy(1.second, 10.millis)
@@ -1548,7 +1550,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       store.onCommit = commit => {
         if commit.checkpoint.exists(_.status == CheckpointStatus.Completed) && thief.get.isEmpty then {
           time.skewStore(3.hours)
-          thief.set(Some(store.underlying.claim(thread, ClaimRequest(RunId("thief"), 1.hour)).value))
+          thief.set(Some(store.underlying.claim(thread, ClaimRequest(RunId("thief"), None, 1.hour)).value))
         }
         None
       }
@@ -1586,7 +1588,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
           def takeOver(): Unit =
             if taken.compareAndSet(false, true) then {
               time.skewStore(3.hours)
-              store.underlying.claim(held, ClaimRequest(RunId("thief"), 1.hour)).value: Unit
+              store.underlying.claim(held, ClaimRequest(RunId("thief"), None, 1.hour)).value: Unit
             }
           store.onCommit = commit => {
             if commit.events.exists(_.runId == "change") then takeOver()
@@ -1992,7 +1994,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     finish.countDown()
     await(handle).completed
     order.asScala.toVector shouldBe Vector("renewed", "released")
-    store.underlying.claim(thread, ClaimRequest(RunId("next"), 1.minute)).value.holder shouldBe RunId("next")
+    store.underlying.claim(thread, ClaimRequest(RunId("next"), None, 1.minute)).value.holder shouldBe RunId("next")
   }
 
   it should "not hold the run's end for longer than ttl when it hangs" in {
@@ -2096,7 +2098,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
         val landed = store.renewed.get
         eventually(store.renewed.get > landed)
       }
-      thief.set(Some(store.claim(thread, ClaimRequest(RunId("thief"), 30.seconds))))
+      thief.set(Some(store.claim(thread, ClaimRequest(RunId("thief"), None, 30.seconds))))
     }
     runtime(store, time).deleteThread(thread, run("deleter")) shouldBe Right(())
     thief.get.value.left.value shouldBe a[GraphError.ThreadBusy]
@@ -2305,6 +2307,28 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     await(first).failed._2 shouldBe a[GraphError.ClaimLost]
   }
 
+  it should "record no takeover from a claim of another tenant, naming no run of it in the owner's log" in {
+    val time  = ManualTime()
+    val store = InMemoryCheckpointer(time)
+    val stale = TwoStep()
+    val mine  = (id: String) => run(id).withTenantId(TenantId("a"))
+    val first = runtime(store, time, slow).start(thread, stale.graph, "x", mine("first")).value
+    stale.awaitEntered()
+    // the owner's claim lapses; another tenant's run claims the thread id, never commits, and lapses too
+    time.skewStore(3.hours)
+    val foreign = store.claim(thread, ClaimRequest(RunId("b-secret"), Some(TenantId("b")), 1.minute)).value
+    foreign.takenOverFrom shouldBe None
+    time.skewStore(3.hours)
+    val successor = TwoStep()
+    successor.gate.countDown()
+    await(runtime(store, time, slow).recover(thread, successor.graph, mine("second")).value).completed
+    events(store).map(_.event).collect { case r: RunEvent.RunRecovered => r.takenOverFrom } shouldBe Vector(None)
+    events(store).map(_.toString).filter(_.contains("b-secret")) shouldBe empty
+
+    stale.gate.countDown()
+    await(first).failed._2 shouldBe a[GraphError.ClaimLost]
+  }
+
   it should "record no takeover when the thread was free" in {
     val time  = ManualTime()
     val store = InMemoryCheckpointer(time)
@@ -2452,11 +2476,11 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
   "InMemoryCheckpointer" should "name the holder of the expired claim a claim replaced" in {
     val time  = ManualTime()
     val store = InMemoryCheckpointer(time)
-    store.claim(thread, ClaimRequest(RunId("first"), 1.second)).value.takenOverFrom shouldBe None
+    store.claim(thread, ClaimRequest(RunId("first"), None, 1.second)).value.takenOverFrom shouldBe None
     time.advance(1.second)
-    val taken = store.claim(thread, ClaimRequest(RunId("second"), 1.second)).value
+    val taken = store.claim(thread, ClaimRequest(RunId("second"), None, 1.second)).value
     taken.takenOverFrom shouldBe Some(RunId("first"))
     store.release(thread, taken.token).value
-    store.claim(thread, ClaimRequest(RunId("third"), 1.second)).value.takenOverFrom shouldBe None
+    store.claim(thread, ClaimRequest(RunId("third"), None, 1.second)).value.takenOverFrom shouldBe None
   }
 }

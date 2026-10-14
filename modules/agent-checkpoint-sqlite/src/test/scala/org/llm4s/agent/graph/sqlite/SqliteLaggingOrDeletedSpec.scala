@@ -41,14 +41,14 @@ abstract class SqliteLaggingOrDeletedCases
 
   /** Commits `names` as one run of another runtime: claim, commit, release. */
   private def commitElsewhere(store: Checkpointer, thread: ThreadId, names: String*): Vector[EventRecord] =
-    val claim   = store.claim(thread, ClaimRequest(RunId("elsewhere"), 30.seconds)).value
+    val claim   = store.claim(thread, ClaimRequest(RunId("elsewhere"), None, 30.seconds)).value
     val records = store.commit(thread, Commit(claim.token, events = names.toVector.map(draft))).value
     store.release(thread, claim.token).value
     records
 
   /** Deletes the thread as another runtime would: under a claim of its own. */
   private def deleteElsewhere(store: Checkpointer, thread: ThreadId): Unit =
-    val claim = store.claim(thread, ClaimRequest(RunId("deleter"), 30.seconds)).value
+    val claim = store.claim(thread, ClaimRequest(RunId("deleter"), None, 30.seconds)).value
     store.deleteThread(thread, claim.token).value
 
   /** A listener that holds its first call until `release`, so what follows it stays queued. */

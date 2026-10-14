@@ -76,13 +76,17 @@ import scala.util.Try
 trait Checkpointer:
 
   /**
-   * Claims `threadId` for `request.holder` until `request.ttl` from now, by the store's clock, if no
-   * other claim on it is live, and returns the claim with a new [[FencingToken]]. A live claim -
-   * whoever holds it, the same holder included - is `Left(GraphError.ThreadBusy(threadId, latest,
-   * GraphError.BusyHolder.Run(holder)))`, naming its holder and the thread's latest checkpoint id, with
-   * nothing changed; a store never returns the runtime-level [[GraphError.BusyHolder.Unnamed]] or
-   * [[GraphError.BusyHolder.Lapsed]]. A thread need not have a checkpoint to be claimed. A claim that replaces an
-   * expired one nobody released names that claim's holder as [[RunClaim.takenOverFrom]].
+   * Claims `threadId` for `request.holder`, recording `request.tenantId` with the claim, until
+   * `request.ttl` from now, by the store's clock, if no other claim on it is live, and returns the claim
+   * with a new [[FencingToken]]. A live claim - whoever holds it, the same holder included - is
+   * `Left(GraphError.ThreadBusy(threadId, latest, holder))` with the thread's latest checkpoint id and
+   * nothing changed. `holder` is `GraphError.BusyHolder.Run(holder)` only when the live claim's tenant
+   * is `request.tenantId` (`None` and `Some` differ), and [[GraphError.BusyHolder.Unnamed]] otherwise -
+   * also for a claim that recorded no tenant, such as one persisted before claims carried one - so that
+   * a refusal never reveals another tenant's [[RunId]]; a store never returns
+   * [[GraphError.BusyHolder.Lapsed]]. A thread need not have a checkpoint to be claimed. A claim that
+   * replaces an expired one nobody released names that claim's holder as [[RunClaim.takenOverFrom]],
+   * under the same rule: only if it was of `request.tenantId`, and `None` otherwise.
    */
   def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim]
 
@@ -249,7 +253,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
   /** For callers that cannot use default arguments (Java, Kotlin): claims expire by the system clock. */
   def this() = this(Clock.systemUTC())
 
-  final private case class Claim(holder: String, token: Long, expiresAt: Instant)
+  final private case class Claim(holder: String, tenantId: Option[String], token: Long, expiresAt: Instant)
 
   /** One stored checkpoint: its JSON, with the fields the store itself reads. */
   final private case class Stored(id: String, status: CheckpointStatus, createdAt: Instant, json: ujson.Value)
@@ -285,13 +289,15 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
   private def store(threadId: ThreadId, record: ThreadRecord): Unit =
     if record.isEmpty then threads.remove(threadId.value): Unit else threads.update(threadId.value, record)
 
+  // the replaced claim's holder is named only to a claim of its own tenant
   private def granted(threadId: ThreadId, claim: Claim, replaced: Option[Claim] = None): RunClaim =
     RunClaim(
       threadId,
       RunId(claim.holder),
+      claim.tenantId.map(TenantId(_)),
       FencingToken(claim.token),
       claim.expiresAt,
-      replaced.map(c => RunId(c.holder))
+      replaced.filter(_.tenantId == claim.tenantId).map(c => RunId(c.holder))
     )
 
   private def stale(threadId: ThreadId, current: ThreadRecord, token: FencingToken): GraphError =
@@ -305,10 +311,16 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     val now     = clock.instant()
     current.claim.filter(c => now.isBefore(c.expiresAt)) match
       case Some(live) =>
-        Left(GraphError.ThreadBusy(threadId.value, current.latestId, GraphError.BusyHolder.Run(RunId(live.holder))))
+        val tenant = request.tenantId.map(_.value)
+        // another tenant's holder is never named
+        val holder =
+          if live.tenantId == tenant then GraphError.BusyHolder.Run(RunId(live.holder))
+          else GraphError.BusyHolder.Unnamed
+        Left(GraphError.ThreadBusy(threadId.value, current.latestId, holder))
       case None =>
         lastToken += 1
-        val claim = Claim(request.holder.value, lastToken, now.plusNanos(request.ttl.toNanos))
+        val claim =
+          Claim(request.holder.value, request.tenantId.map(_.value), lastToken, now.plusNanos(request.ttl.toNanos))
         store(threadId, current.copy(claim = Some(claim)))
         // a claim still held here has expired: this one takes it over
         Right(granted(threadId, claim, current.claim))
