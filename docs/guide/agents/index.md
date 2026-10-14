@@ -436,7 +436,8 @@ mutations hold, replays its external effects through `ReplayGuard`, and enforces
 **`HostFileBackend` needs a file system where one path names one file.** `HostFileBackend.open` checks this:
 it refuses a lock directory inside the root, and refuses a root whose file system resolves aliases it cannot see.
 It probes for 8.3 short names, which SMB/CIFS shares and some NTFS volumes have. Supported: local POSIX file
-systems (case-insensitive ones too) and NTFS with 8.3 names off. Elsewhere, use the workspace sandbox's file backend
+systems (case-insensitive ones too). NTFS reports no hard-link counts, so a Windows root is refused
+unless the caller passes `allowUncheckedIdentity`, vouching for no 8.3 names and no hard links. Elsewhere, use the workspace sandbox's file backend
 or a `StoreFileBackend`. Never let two backends expose one directory, or overlapping ones, under different paths (bind mounts, symlinked mount points, nested roots), in any process. Within one JVM, `open` refuses a root overlapping an open one until that one is closed.
 
 **`HostFileBackend` is not a security boundary.** It is a convenience for a directory you trust. It

@@ -24,19 +24,17 @@ object HarnessBackends:
     // a volume whose aliasing the backend cannot see (8.3 names on) is refused: nothing of it to test there
     HostFileBackend.open(dir, locks) match
       case Right(backend) => (backend, dir)
-      case Left(e) if e.message.contains("aliases") =>
+      case Left(e) if e.message.contains("aliases") || e.message.contains("link counts") =>
         org.scalatest.Assertions.cancel(s"unsupported file system: ${e.message}")
       case Left(e) => throw new IllegalStateException(e.message)
 
   def onHost(dir: Path, path: VPath): Path = dir.resolve(path.value.drop(1))
 
-  /** Why this machine's temporary volume cannot hold a host backend (8.3 names on), if it cannot. */
+  /** Why this machine's temporary volume cannot hold a host backend (no link counts, 8.3 names on), if it cannot. */
   lazy val hostUnsupported: Option[String] =
-    HostFileBackend
-      .probeAliases(Files.createTempDirectory("llm4s-probe"))
-      .toOption
-      .filter(_.nonEmpty)
-      .map(_.mkString("; "))
+    val probed = Files.createTempDirectory("llm4s-probe")
+    if !HostFileBackend.reportsLinkCounts(probed) then Some("the file system reports no hard-link counts")
+    else HostFileBackend.probeAliases(probed).toOption.filter(_.nonEmpty).map(_.mkString("; "))
 
   val memories: Namespace = Namespace(None, Vector("memories"))
 

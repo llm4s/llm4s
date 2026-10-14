@@ -34,7 +34,7 @@ import scala.util.{ Failure, Success, Try, Using }
  *
  * '''One path, one file.''' Its locks, stripes and replay assume that one path names one file, so [[HostFileBackend.open]]
  * checks it and refuses a root where it does not hold (an SMB share, a volume with 8.3 names on).
- * Supported: local POSIX file systems, case-insensitive ones included, and NTFS with 8.3 names off.
+ * Supported: local POSIX file systems, case-insensitive ones included; NTFS only with `allowUncheckedIdentity`.
  *
  * '''Not a security boundary.''' It is a convenience for a trusted directory. Never give it a root that
  * an untrusted process can write, a sandboxed command included: such a process can swap a directory for
@@ -563,6 +563,9 @@ object HostFileBackend:
   /** The largest `maxFileBytes`: a file is read into one array, which holds at most this many bytes. */
   val MaxFileBytes: Long = Int.MaxValue.toLong - 8
 
+  /** Whether `root`'s file system reports hard-link counts (the `unix` attribute view): POSIX does, NTFS not. */
+  def reportsLinkCounts(root: Path): Boolean = root.getFileSystem.supportedFileAttributeViews.contains("unix")
+
   /** 4 MiB: the default bound on one file. */
   val DefaultMaxFileBytes: Long = 4L * 1024 * 1024
 
@@ -729,11 +732,15 @@ object HostFileBackend:
    *  - `lockDirectory` must be outside the root, both resolved to their real paths, so no path of the
    *    backend can reach a lock file;
    *  - `probe` (by default [[probeAliases]]) must find no aliasing the backend cannot fold. Supported:
-   *    local POSIX file systems, case-insensitive ones included (macOS), and NTFS with 8.3 names off. An
+   *    local POSIX file systems, case-insensitive ones included (macOS); NTFS only with the opt-in below. An
    *    SMB/CIFS share or a volume with 8.3 names on is refused: use the workspace sandbox's file backend
    *    (F2) or a `StoreFileBackend` there;
-   *  - a root that cannot be probed (read-only) is refused, unless `allowUnprobed`: the caller then
-   *    vouches that its file system is a supported one;
+   *  - the file system must report hard-link counts (`countsLinks`, by default whether it has the
+   *    `unix` attribute view), so a file with another name can be refused. NTFS reports none, so on
+   *    Windows `open` is refused by default;
+   *  - a root whose identity cannot be checked - it cannot be probed (read-only), or it reports no link
+   *    counts - is refused, unless `allowUncheckedIdentity`: the caller then vouches that one path names
+   *    one file there (no 8.3 names, no hard links);
    *  - no two backends may expose one directory, or overlapping ones, under different paths - bind
    *    mounts, symlinked mount points, nested roots - in any process. Within this JVM `open` refuses a
    *    root that contains or is contained by an open one (the same real root is shared) until that one
@@ -745,7 +752,8 @@ object HostFileBackend:
     maxFileBytes: Long = DefaultMaxFileBytes,
     maxScanEntries: Int = DefaultMaxScanEntries,
     probe: Path => Result[Vector[String]] = probeAliases,
-    allowUnprobed: Boolean = false
+    countsLinks: Path => Boolean = reportsLinkCounts,
+    allowUncheckedIdentity: Boolean = false
   ): Result[HostFileBackend] =
     if maxFileBytes <= 0 then Left(ValidationError("maxFileBytes", s"must be positive, was $maxFileBytes"))
     else if maxFileBytes > MaxFileBytes then
@@ -779,7 +787,17 @@ object HostFileBackend:
                   "Use the workspace sandbox's file backend or a StoreFileBackend for it"
               )
             )
-          case Left(_) if allowUnprobed => Right(())
-          case Left(error)              => Left(error)
+          case Left(_) if allowUncheckedIdentity => Right(())
+          case Left(error)                       => Left(error)
+        _ <- Either.cond(
+          countsLinks(real) || allowUncheckedIdentity,
+          (),
+          ValidationError(
+            "root",
+            s"$real's file system reports no hard-link counts, so a file with another name cannot be refused " +
+              "and its identity cannot be checked; pass allowUncheckedIdentity only if it has no hard links, " +
+              "or use the workspace sandbox's file backend or a StoreFileBackend"
+          )
+        )
         _ <- OpenRoots.acquire(real)
       yield new HostFileBackend(real, maxFileBytes, maxScanEntries, locks)

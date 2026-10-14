@@ -35,9 +35,10 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     // the backend refuses a file system with aliases it cannot see (a runner's volume with 8.3 names on):
     // there is nothing of it to test on such a volume, so its cases are cancelled (withFixture), not failed
     HostFileBackend.open(dir, locks) match
-      case Right(b)                                 => backend = b; unsupported = None
-      case Left(e) if e.message.contains("aliases") => unsupported = Some(e.message)
-      case Left(e)                                  => fail(e.message)
+      case Right(b) => backend = b; unsupported = None
+      case Left(e) if e.message.contains("aliases") || e.message.contains("link counts") =>
+        unsupported = Some(e.message)
+      case Left(e) => fail(e.message)
   }
 
   /** Children and threads a case started, stopped after it whether it passed or not, so none outlives the JVM's tests. */
@@ -462,10 +463,19 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     aliasing.left.value.message should (include("8.3 short names").and(include("StoreFileBackend")))
   }
 
+  it should "refuse a file system that reports no link counts, unless the caller vouches for it (no probe of links)" in {
+    val noLinks = HostFileBackend.open(dir, locks, probe = _ => Right(Vector.empty), countsLinks = _ => false)
+    noLinks.left.value.message should include("hard-link counts")
+    val vouched = HostFileBackend
+      .open(dir, locks, probe = _ => Right(Vector.empty), countsLinks = _ => false, allowUncheckedIdentity = true)
+    vouched.isRight shouldBe true
+    vouched.value.close()
+  }
+
   it should "refuse a root it cannot probe, unless the caller vouches for its file system" in {
     val unprobed = (_: Path) => Left(ValidationError("root", "cannot be probed"))
     HostFileBackend.open(dir, locks, probe = unprobed).left.value.message should include("cannot be probed")
-    HostFileBackend.open(dir, locks, probe = unprobed, allowUnprobed = true).isRight shouldBe true
+    HostFileBackend.open(dir, locks, probe = unprobed, allowUncheckedIdentity = true).isRight shouldBe true
   }
 
   it should "probe a local file system and find nothing, leaving no probe file" in {
