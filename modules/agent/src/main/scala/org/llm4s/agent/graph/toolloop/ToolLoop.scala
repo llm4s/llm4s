@@ -1749,7 +1749,8 @@ object ToolLoop:
                 case Right(resources) =>
                   outsideSchedule(tool, task, request.call, args, state, context).getOrElse {
                     // an answered resume is a phase of the call of its own: its effects never replay `execute`'s
-                    val phase = IdempotencyKey.ofResume(request.idempotencyKey, request.phase, request.question, answer)
+                    val phase =
+                      IdempotencyKey.ofResume(request.idempotencyKey, request.phase, request.question, answer)
                     val toolContext = ToolContext.resuming(
                       answering(agent, context, request.answered),
                       ToolCallId(request.call.id),
