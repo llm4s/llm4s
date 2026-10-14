@@ -101,6 +101,9 @@ final case class LockSchedule(locks: Map[String, Vector[String]], waiting: Vecto
 
   def withWaiting(w: Vector[ToolTask]): LockSchedule = copy(waiting = w)
 
+  /** Whether any call of the batch was scheduled with a lock. */
+  def holdsLocks: Boolean = locks.values.exists(_.nonEmpty)
+
 object LockSchedule:
   val empty: LockSchedule = LockSchedule(Map.empty, Vector.empty)
 
@@ -595,7 +598,8 @@ object ToolLoop:
     val approval: ResumeRef[ApprovalRequest, ApprovalDecision],
     val batch: DynamicJoin,
     val askRefs: Map[String, ResumeRef[ToolQuestionRequest, ujson.Value]],
-    val askedRefs: Map[(MiddlewareId, MiddlewareHook), AskedRef[?]]
+    val askedRefs: Map[(MiddlewareId, MiddlewareHook), AskedRef[?]],
+    familyLocks: Boolean
   ):
     def agent: LoopAgent             = prepared.agent
     def tools: ToolSet               = prepared.tools
@@ -604,12 +608,13 @@ object ToolLoop:
     def asking: Vector[AgentTool[?]] = tools.tools.filter(_.spec.question.isDefined)
 
     /**
-     * [[ToolLoop.queue]], when one of the agent's tools declares locks; otherwise the key is not part of the
-     * graph, so an agent without locks keeps the structural fingerprint it had before locks existed, and
-     * restores the checkpoints written then.
+     * [[ToolLoop.queue]], when a tool of any agent of the family declares locks; otherwise the key is not
+     * part of the graph, so a family without locks keeps the structural fingerprint it had before locks
+     * existed, and restores the checkpoints written then. It is decided for the family, not per agent, so
+     * every agent reads a stored schedule whenever the graph has the key: an agent rebuilt without its
+     * locks still drains a batch scheduled with them.
      */
-    def queueKey: Option[StateKey[LockSchedule, LockSchedule]] =
-      Option.when(tools.tools.exists(_.spec.locksOf.isDefined))(queue)
+    def queueKey: Option[StateKey[LockSchedule, LockSchedule]] = Option.when(familyLocks)(queue)
 
     /** What the model node, and a model wrapper's question node, may write. */
     def modelWrites: Set[StateKey[?, ?]] = ToolLoop.modelWrites ++ queueKey
@@ -635,7 +640,7 @@ object ToolLoop:
     Set(Messages.key, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer)
   private val inputWrites: Set[StateKey[?, ?]] = Set(Messages.key, LoopKeys.activeAgent, LoopKeys.turn)
 
-  private def declare(b: GraphBuilder, prepared: Prepared): AgentNodes =
+  private def declare(b: GraphBuilder, prepared: Prepared, familyLocks: Boolean): AgentNodes =
     val prefix  = s"${prepared.agent.id.value}/"
     val collect = b.declare[Unit](s"${prefix}collect")
     val askRefs = prepared.tools.tools
@@ -663,7 +668,8 @@ object ToolLoop:
       approval = b.declareResume[ApprovalRequest, ApprovalDecision](s"${prefix}approval"),
       batch = b.dynamicJoin(s"${prefix}tool-batch", collect),
       askRefs = askRefs,
-      askedRefs = askedRefs
+      askedRefs = askedRefs,
+      familyLocks = familyLocks
     )
 
   private def hookName(hook: MiddlewareHook): String =
@@ -734,7 +740,8 @@ object ToolLoop:
   private def assemble(id: String, version: String, root: AgentId, prepared: Vector[Prepared]): Result[ToolLoop] =
     val messages = Messages.key
     val b        = GraphBuilder(id, version)
-    val agents   = prepared.map(p => p.agent.id -> declare(b, p)).toMap
+    val locking  = prepared.exists(_.tools.tools.exists(_.spec.locksOf.isDefined))
+    val agents   = prepared.map(p => p.agent.id -> declare(b, p, locking)).toMap
     // whether a transfer keeps the context, by (source, target)
     val preserves = prepared.flatMap(p => p.agent.handoffs.map(h => (p.agent.id, h.target) -> h.preserveContext)).toMap
     val steps     = prepared.map(p => p.agent.id -> implement(b, agents(p.agent.id), agents, root, preserves)).toMap
@@ -969,7 +976,9 @@ object ToolLoop:
             val tasks        = calls.map(issued(stored.id, _, context))
             val schedule     = pipeline.schedule(tasks)
             val (now, later) = pipeline.scheduled(tasks, schedule)
+            // a batch with no lock records nothing: collect then finds no schedule, and nothing waits
             nodes.queueKey
+              .filter(_ => schedule.holdsLocks)
               .fold(appended)(key => appended.update(key, schedule.withWaiting(later)))
               .fanOut(nodes.batch, nodes.callTool, now)
         case Vector(transfer) if calls.size == 1 =>

@@ -227,4 +227,40 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
     done.answer shouldBe Some("done")
     stepResults(done) shouldBe Vector("2", "1") // c2 ran first, as its schedule allowed; c1 saw its write
   }
+
+  it should "drain its recorded schedule after its agent drops its locks while another agent of the family keeps them" in {
+    import org.llm4s.agent.graph.tool.LockKey
+    val runtime = GraphRuntime.inMemory()
+    val thread  = ThreadId("locks-dropped")
+    def family(rootLocks: Boolean, replies: Completion*) = {
+      val counter = org.llm4s.agent.graph.StateKey.replace[Int]("counter", 0)
+      val spec    = SpecTools.spec("step")
+      val step = org.llm4s.agent.graph.tool.AgentTool(
+        if (rootLocks) spec.withLocks(_ => Set(LockKey("shared"))) else spec,
+        writes = Set(counter)
+      ) { (_, context) =>
+        val next = context.state.get(counter).fold(e => fail(e.message), identity) + 1
+        ToolOutcome.Success(ujson.Str(next.toString), org.llm4s.agent.graph.StateUpdate.update(counter, next))
+      }
+      val helperTool =
+        org.llm4s.agent.graph.tool.AgentTool(SpecTools.spec("other").withLocks(_ => Set(LockKey("h"))))((a, _) =>
+          ToolOutcome.Success(ujson.Str(a.text))
+        )
+      built(
+        Agent
+          .builder("root", ScriptedLLMClient.of(replies*))
+          .withTools(SpecTools.set(step))
+          .withMiddleware(new ApprovalMiddleware(r => Option.when(r.call.id == "c1")("review")))
+          .withHandoffs(Handoff.to("helper", Agent.builder("helper", client).withTools(SpecTools.set(helperTool))))
+          .withRuntime(runtime)
+      )
+    }
+    val calling = SpecTools.calling(SpecTools.call("c1", "step"), SpecTools.call("c2", "step"))
+    // c2 waits behind c1 on the shared lock; c1 waits for approval
+    val parked = family(rootLocks = true, calling).run(thread, "go").value
+    // the root drops its locks; the helper keeps the key in the graph, so the fingerprint is unchanged
+    val done = family(rootLocks = false, CompletionFixture.simple("done")).resume(thread, approveAll(parked)).value
+    done.answer shouldBe Some("done")
+    stepResults(done) shouldBe Vector("1", "2")
+  }
 }
