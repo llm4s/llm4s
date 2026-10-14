@@ -560,7 +560,8 @@ object HostFileBackend:
 
   private val Temporary = """\..+\.llm4s-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp""".r
 
-  private def isTemporary(name: String): Boolean = Temporary.matches(name)
+  // by folded identity, so a case or normalisation alias of a temporary name is one too
+  private def isTemporary(name: String): Boolean = Temporary.matches(identity(name))
 
   /** Decoded content that the text rule calls binary (NUL); a read refuses it and a search skips it. */
   final private class BinaryContent extends CharacterCodingException

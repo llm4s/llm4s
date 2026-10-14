@@ -72,6 +72,9 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     backend.write(p(s"/$tmp"), "x", call()).left.value.message should include("temporary files")
     backend.write(p(s"/$tmp/inner.txt"), "x", call()).left.value.message should include("temporary files")
     Files.exists(dir.resolve(tmp)) shouldBe false
+    // a case alias of a temporary name is one too, as a case-insensitive file system would resolve it
+    backend.read(p(s"/${tmp.toUpperCase}"), 0, 1, call()).left.value.message should include("temporary files")
+    backend.delete(p(s"/${tmp.toUpperCase}"), call()).left.value.message should include("temporary files")
   }
 
   it should "leave no temporary file behind, and never list one" in {
