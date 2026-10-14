@@ -55,6 +55,9 @@ import scala.util.Try
  *    [[effect]] reads one;
  *  - store checkpoints, pending writes and effect records as data ([[Checkpoint.toJson]], `PendingWrite`'s
  *    `ReadWriter`, [[EffectRecord.toJson]]), so nothing executable survives a round trip;
+ *  - keep what it stores apart from the values its callers hold: `ujson` values are mutable, so changing
+ *    a checkpoint, pending write or event payload after committing it, or one a read or a commit
+ *    returned, must change nothing stored or later read back;
  *  - return from [[awaitEventsAfter]] with what [[eventsAfter]] would, at once if the log already
  *    holds an event after `afterSeq`, and otherwise within about `timeout` - with the events of a
  *    commit made meanwhile through any store over the same storage, or empty;
@@ -72,8 +75,10 @@ trait Checkpointer:
   /**
    * Claims `threadId` for `request.holder` until `request.ttl` from now, by the store's clock, if no
    * other claim on it is live, and returns the claim with a new [[FencingToken]]. A live claim -
-   * whoever holds it, the same holder included - is `Left(GraphError.ThreadBusy)` naming its holder,
-   * with nothing changed. A thread need not have a checkpoint to be claimed. A claim that replaces an
+   * whoever holds it, the same holder included - is `Left(GraphError.ThreadBusy(threadId, latest,
+   * GraphError.BusyHolder.Run(holder)))`, naming its holder and the thread's latest checkpoint id, with
+   * nothing changed; a store never returns the runtime-level [[GraphError.BusyHolder.Unnamed]] or
+   * [[GraphError.BusyHolder.Lapsed]]. A thread need not have a checkpoint to be claimed. A claim that replaces an
    * expired one nobody released names that claim's holder as [[RunClaim.takenOverFrom]].
    */
   def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim]
@@ -284,7 +289,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     )
 
   private def stale(threadId: ThreadId, current: ThreadRecord, token: FencingToken): GraphError =
-    GraphError.StaleClaim(threadId.value, token.value, current.claim.map(_.token))
+    GraphError.StaleClaim(threadId.value, token, current.claim.map(c => FencingToken(c.token)))
 
   private def settled(status: CheckpointStatus): Boolean =
     status == CheckpointStatus.Completed || status == CheckpointStatus.Failed
@@ -293,7 +298,8 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     val current = record(threadId)
     val now     = clock.instant()
     current.claim.filter(c => now.isBefore(c.expiresAt)) match
-      case Some(live) => Left(GraphError.ThreadBusy(threadId.value, current.latestId, Some(live.holder)))
+      case Some(live) =>
+        Left(GraphError.ThreadBusy(threadId.value, current.latestId, GraphError.BusyHolder.Run(RunId(live.holder))))
       case None =>
         lastToken += 1
         val claim = Claim(request.holder.value, lastToken, now.plusNanos(request.ttl.toNanos))

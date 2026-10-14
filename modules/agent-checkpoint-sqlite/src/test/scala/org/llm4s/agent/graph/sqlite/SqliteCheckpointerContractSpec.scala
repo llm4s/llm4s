@@ -97,7 +97,9 @@ class SqliteTwoConnectionsContractSpec extends AnyFlatSpec with CheckpointerCont
     }
 
   final private case class Alternating(path: Path, clock: Clock, stores: Vector[SqliteCheckpointer])
-      extends Checkpointer {
+      extends Checkpointer
+      with AutoCloseable {
+    def close(): Unit              = stores.foreach(_.close())
     private val turn               = new AtomicInteger()
     private def next: Checkpointer = stores(Math.floorMod(turn.getAndIncrement(), stores.size))
     def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim] = next.claim(threadId, request)

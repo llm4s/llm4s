@@ -92,33 +92,50 @@ object ClaimRequest:
  * stops: keep `renewEvery` at most a third of `ttl`, as the default does, so a renewal can fail or be slow
  * once and still be retried in time.
  *
- * Both must be positive and `renewEvery` shorter than `ttl`: `apply` and the `with*` setters throw
- * `IllegalArgumentException` otherwise, and [[ClaimPolicy.of]] returns a `ValidationError`.
+ * `label`, when set, names the runtime to an operator: it is logged with the run id when a claim is
+ * granted (at INFO; without a label, at DEBUG) and when a renewal fails or the claim is lost, so that the
+ * holder a [[GraphError.ThreadBusy]] names can be traced to the runtime holding it - a host, a pod, a
+ * process. It goes nowhere else: not to the store, and not into an error another caller gets.
+ *
+ * Both durations must be positive and `renewEvery` shorter than `ttl`, and a label must not be blank:
+ * `apply` and the `with*` setters throw `IllegalArgumentException` otherwise, and [[ClaimPolicy.of]]
+ * returns a `ValidationError`.
  */
-final case class ClaimPolicy private (ttl: FiniteDuration, renewEvery: FiniteDuration):
-  def withTtl(t: FiniteDuration): ClaimPolicy        = ClaimPolicy(t, renewEvery)
-  def withRenewEvery(r: FiniteDuration): ClaimPolicy = ClaimPolicy(ttl, r)
+final case class ClaimPolicy private (ttl: FiniteDuration, renewEvery: FiniteDuration, label: Option[String]):
+  def withTtl(t: FiniteDuration): ClaimPolicy        = ClaimPolicy(t, renewEvery, label)
+  def withRenewEvery(r: FiniteDuration): ClaimPolicy = ClaimPolicy(ttl, r, label)
+  def withLabel(l: String): ClaimPolicy              = ClaimPolicy(ttl, renewEvery, Some(l))
+  def withLabel(l: Option[String]): ClaimPolicy      = ClaimPolicy(ttl, renewEvery, l)
 
 object ClaimPolicy:
-  private def problems(ttl: FiniteDuration, renewEvery: FiniteDuration): List[String] =
+  private def problems(ttl: FiniteDuration, renewEvery: FiniteDuration, label: Option[String]): List[String] =
     List(
       Option.when(ttl.length <= 0)(s"ttl must be positive, was $ttl"),
       Option.when(renewEvery.length <= 0)(s"renewEvery must be positive, was $renewEvery"),
       Option.when(ttl.length > 0 && renewEvery.length > 0 && renewEvery >= ttl)(
         s"renewEvery ($renewEvery) must be shorter than ttl ($ttl)"
-      )
+      ),
+      Option.when(label.exists(_.isBlank))("label must not be blank")
     ).flatten
 
   /** Throws `IllegalArgumentException` for an invalid policy; use [[of]] for untrusted input. */
-  def apply(ttl: FiniteDuration = 30.seconds, renewEvery: FiniteDuration = 10.seconds): ClaimPolicy =
-    val found = problems(ttl, renewEvery)
+  def apply(
+    ttl: FiniteDuration = 30.seconds,
+    renewEvery: FiniteDuration = 10.seconds,
+    label: Option[String] = None
+  ): ClaimPolicy =
+    val found = problems(ttl, renewEvery, label)
     require(found.isEmpty, found.mkString("; "))
-    new ClaimPolicy(ttl, renewEvery)
+    new ClaimPolicy(ttl, renewEvery, label)
 
-  def of(ttl: FiniteDuration = 30.seconds, renewEvery: FiniteDuration = 10.seconds): Result[ClaimPolicy] =
-    problems(ttl, renewEvery) match
-      case Nil   => Right(new ClaimPolicy(ttl, renewEvery))
+  def of(
+    ttl: FiniteDuration = 30.seconds,
+    renewEvery: FiniteDuration = 10.seconds,
+    label: Option[String] = None
+  ): Result[ClaimPolicy] =
+    problems(ttl, renewEvery, label) match
+      case Nil   => Right(new ClaimPolicy(ttl, renewEvery, label))
       case found => Left(ValidationError("claims", found))
 
-  /** A 30 second claim, renewed every 10 seconds. */
+  /** A 30 second claim, renewed every 10 seconds, with no label. */
   val default: ClaimPolicy = apply()

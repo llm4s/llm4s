@@ -143,9 +143,10 @@ final class Agent private[agent] (
   /**
    * Removes `threadId` - its history, usage and event log - from the agent's runtime, so that its id
    * names a new thread again. Threads are kept until forgotten, one-shot [[run]]s included.
-   * Refused, with nothing removed, for a thread whose run is active in this runtime
-   * (`GraphError.ThreadBusy`) or that belongs to another tenant than `config`'s
-   * (`GraphError.TenantMismatch`). Forgetting an unknown thread is `Right(())`.
+   * Refused, with nothing removed, for a thread that a run holds - one active in this runtime, or one
+   * holding a live claim on it in any runtime or process sharing the store (`GraphError.ThreadBusy`) - or
+   * that belongs to another tenant than `config`'s (`GraphError.TenantMismatch`). Forgetting an unknown
+   * thread is `Right(())`.
    */
   def forget(threadId: ThreadId, config: RunConfig = RunConfig()): Result[Unit] =
     runtime.deleteThread(threadId, config)

@@ -225,7 +225,9 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
     val (latest, results) = during.loneElement
     latest.value should startWith("run-1/")
-    results.map(_.left.value) shouldBe Vector.fill(3)(GraphError.ThreadBusy(thread.value, latest, Some("run-1")))
+    results.map(_.left.value) shouldBe Vector.fill(3)(
+      GraphError.ThreadBusy(thread.value, latest, GraphError.BusyHolder.Run(RunId("run-1")))
+    )
     f.callsOf("a") shouldBe 1
     f.callsOf("x") shouldBe 0
     runtime.recover(thread, f.graph, RunConfig().withRunId(RunId("run-2"))).awaited.left.value shouldBe GraphError

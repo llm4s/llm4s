@@ -417,6 +417,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.20 | [Stage 2 slice 2: the SQLite checkpointer](typed-agent-runtime/4.20-stage-2-slice-2-the-sqlite-checkpointer.md) ([#1701](https://github.com/llm4s/llm4s/issues/1701)) |
 | 4.21 | [Stage 2 slice 6: live subscriptions across runtimes](typed-agent-runtime/4.21-stage-2-slice-6-live-subscriptions-across-runtimes.md) ([#1705](https://github.com/llm4s/llm4s/issues/1705)) |
 | 4.22 | [Stage 3 slice C1: kernel hooks for the harness](typed-agent-runtime/4.22-stage-3-slice-c1-kernel-hooks.md) ([#1902](https://github.com/llm4s/llm4s/issues/1902)) |
+| 4.23 | [Stage 3 slice C2: tool permissions, timeouts and batch locks](typed-agent-runtime/4.23-stage-3-slice-c2-tool-permissions-timeouts-locks.md) ([#1903](https://github.com/llm4s/llm4s/issues/1903)) |
 | 4.24 | [Stage 3 slice C4: replay of external effects](typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md) ([#1921](https://github.com/llm4s/llm4s/issues/1921)) |
 | 4.26 | [Stage 3 slice F8a: response format for the agent's answer](typed-agent-runtime/4.26-stage-3-slice-f8a-response-format.md) ([#1912](https://github.com/llm4s/llm4s/issues/1912)) |
 | 4.28 | [Stage 3 slice F9: typed custom streams](typed-agent-runtime/4.28-stage-3-slice-f9-typed-custom-streams.md) ([#1914](https://github.com/llm4s/llm4s/issues/1914)) |
@@ -429,7 +430,7 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 |---|---|---|
 | ~~Typed middleware questions (a middleware declaring `Q`/`Ans` like `AgentTool.Asking`), suspension from model wrappers and guardrails (today: tool-call approval only)~~ **closed by #1704** (§4.18: `AgentMiddleware.Asking`, `GuardrailReviewMiddleware`) | #1279 | Stage 2, with output review and missing-information interrupts (§5.3). Not needed in Stage 1: the loop's approvals come from tools and tool wrappers (`ToolOutcome.NeedsApproval`) and its questions from tools (`ToolOutcome.Ask`), while guardrails and model wrappers block or fail |
 | ~~A guardrail Block (any run-boundary `Left`) leaves the thread `Running` with no way forward, and an output Block leaves the blocked answer in state~~ **closed by #1350 and #1328** (§4.13: `CheckpointStatus.Failed`, the blocked turn removed, `AgentStatus.Blocked`) | #1279 | Stage 1 |
-| Tool permissions and timeouts on `AgentToolSpec`, with the ordered deny-if-unmatched permission rules of §5.6 | #1279 | Stage 3: #1903 (slice C2 of #1901) |
+| ~~Tool permissions and timeouts on `AgentToolSpec`, with the ordered deny-if-unmatched permission rules of §5.6~~ **closed by #1903** (§4.23: `withResources`, `PermissionMiddleware`, `withTimeout`, and batch locks with `withLocks`) | #1279 | Stage 3: #1903 (slice C2 of #1901) |
 | `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop` and `AgentTool` (**closed by #1328**); `ModelStep` streaming through live progress, `AgentEvent` replaced (**closed by #1329**); `PlanRunner` rebuilt or removed (**closed by #1330**: removed, §4.15) | #1269 | Stage 1 |
 | ~~Delete `CancellationToken` with the `PlanRunner` rebuild~~ **closed by #1330** (§4.15) | #1270 | Stage 1 |
 | Prompt cancellation of SDK client calls on platform threads (today: prompt on virtual threads, where the runtime runs tasks) | #1270 | - |

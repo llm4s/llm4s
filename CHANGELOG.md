@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The SQLite store keeps the records in a new table (schema version 3, migrated on open).
   - Breaking: `Checkpointer.effect`, `Commit.effects` and `GraphError.EffectReplayRefused` are new. See the
     migration guide and design record §4.24.
+- **`ClaimPolicy.label`: a runtime's name in the logs of its claims** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  `ClaimPolicy.default.withLabel("worker-7")` (or `ClaimPolicy(ttl, renewEvery, label)`) makes the runtime log each
+  granted claim with its run id and label at INFO (`Run 'r1' (runtime 'worker-7') claimed thread 't' with token 1`;
+  without a label, at DEBUG), and name the label in its WARN lines for a failed renewal or a lost claim, so an
+  operator can trace the run a `ThreadBusy` names to the runtime holding it. The label is never stored and never
+  appears in an error another caller gets. A blank label is refused. See the
+  [guide](docs/guide/agents/durable-checkpointers.md#runs-claim-their-thread).
 - **An agent's answer can have a response format** ([#1912](https://github.com/llm4s/llm4s/issues/1912), design
   4.26): `AgentBuilder.withOutput(schema: SchemaDefinition[O])` (with a uPickle `ReadWriter[O]`) sends the
   strict JSON schema as the `responseFormat` of each model call that offers no tools (a call that offers tools
@@ -61,6 +68,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for a run you hold, `events(run, handlers)` a stream of the handlers' results (one ADT of yours); the same on `AgentZ`
   (`ZStream`) and `AgentPekko` (`Source[_, Future[Done]]`). It replays the run's durable events, follows it live, ends
   with it, and cancels only its subscription when stopped early. Design record: §4.28.
+- **Tool permissions, timeouts and batch locks for agent tools** ([#1903](https://github.com/llm4s/llm4s/issues/1903)):
+  `AgentToolSpec.withResources(A => Vector[ToolResource])` declares what a call touches (`Operation` is `Read`,
+  `Write`, `Delete`, `Execute`, `Network` or `Invoke`; the default is `(Invoke, <name>)`), and
+  `PermissionMiddleware(rules)` checks it with ordered `PermissionRule(operation, Glob, Allow | Deny | Ask)`s after
+  the arguments decode: the first match wins, an unmatched resource is denied, `Ask` asks for approval, and an edited
+  approval is checked again. `withTimeout(FiniteDuration)` bounds each run of a tool: past it the tool is interrupted
+  and the model sees `Tool '<name>' timed out after <n> ms`. `withLocks(A => Set[LockKey])` orders the calls of one
+  model message whose locks conflict (one key a prefix of the other): they run in successive supersteps, in call
+  order, each seeing the state the earlier committed; an approval edit that takes a lock the proposed call did not
+  hold is refused. `ToolCallRequest` gains `resources`; `tool-queue` is a new key
+  the loop owns. Design §4.23; guide: Tool Permissions, Timeouts and Locks.
 - **`llm4s-kotlin-api` is published to Maven Central with each release** ([#1494](https://github.com/llm4s/llm4s/issues/1494)):
   `org.llm4s:llm4s-kotlin-api` (no `_3` suffix: a Kotlin artifact), at the release's version, depending on
   `llm4s-java-api_3` at that same version, and managed by `llm4s-bom`, so a Gradle build that imports the BOM declares
@@ -1348,12 +1366,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Breaking - claim errors carry typed fields, and `ThreadBusy` is recoverable and says whether its holder is live** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  `GraphError.StaleClaim(threadId, token, current)` takes `token: FencingToken` and `current: Option[FencingToken]`
+  (was `Long`/`Option[Long]`), and `GraphError.ThreadBusy(threadId, latestCheckpoint, holder)` takes
+  `holder: GraphError.BusyHolder` (was `Option[String]`, default `None`): `BusyHolder.Run(runId: RunId)` names the
+  holding run when the caller may see it, `BusyHolder.Unnamed` (the default) is another run that cannot be named, and
+  the new `BusyHolder.Lapsed` is a `fork`, `updateState` or `deleteThread` whose own claim lapsed - its lease passed,
+  or the store named no current claim - before its write was known to land, with no other run known to hold the
+  thread; a write it had already sent may still land. Those used to say "held by another run" when nobody held it. `ThreadBusy` is now a `RecoverableError`, so
+  `LLMError.isRecoverable`, `RetryPolicy` and `ErrorRecovery` retry it, as its message always said to. `threadId`
+  stays a `String`, as in every `GraphError`. See the [migration guide](docs/reference/migration.md#durable-checkpointer-contract-1700).
+- **`GraphRuntime.inMemory(clock)` gives its `InMemoryCheckpointer` the same clock, and takes a `ClaimPolicy`** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  the store used the system clock, so claims ignored an injected clock and `prune(maxAge)` compared the system clock
+  with `createdAt` stamped by the injected one, pruning young checkpoints. `inMemory(clock, claims)` is new;
+  `inMemory(clock)` stays for Java and Kotlin. The guide says which timestamps the runtime's clock stamps and which
+  the store's clock judges.
+- **An observer's store watch starts as soon as its run's claim is handed to it** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  it used to poll for that every `WatchPolicy.pollInterval`, so it could begin watching for other runtimes' commits
+  up to one interval late.
+- **`CheckpointerContract` races claims across many stores, and checks more of the claim rules** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  a new `contenders(store, clock, n)` hook (default: `store` and `n - 1` `sibling`s) spreads the 16 concurrent
+  claimers of the two race cases over 16 stores over the same storage, so `SqliteCheckpointer` races 16
+  connections to one file rather than one connection's lock. New cases: a stale token is reported before a
+  duplicate checkpoint id, misdirected pending writes and a `retractTurn` with nothing to close, not only before a
+  conflict; a refused claim leaves the live claim as it was; and stored checkpoints, pending writes and events are
+  kept apart from the `ujson` values callers pass in and are given back. `InMemoryCheckpointerSpec` and
+  `SqliteCheckpointerSpec` check that a refused claim spends no token.
 - **An agent stream whose consumer stops draining fails once 1024 durable events wait** ([#1914](https://github.com/llm4s/llm4s/issues/1914)):
   the buffer under the fs2, ZIO, Pekko and Java agent streams (`AgentEventBuffer`) dropped live events past its size
   but kept durable events without limit. It now holds at most `Agent.StreamCapacity` of them waiting; one more ends the
   stream with an error naming the last `seq` taken, as the runtime's own `Disconnected(lastSeq, Lagging)` does. A
   `stream*` that fails this way cancels its turn, as any failure of those streams does. Migration note: Stage 3, typed
   custom streams.
+- **Breaking - `tool-queue` is a state key the agent loop owns** ([#1903](https://github.com/llm4s/llm4s/issues/1903)):
+  it holds a batch's calls waiting on a conflicting lock, and a tool or middleware declaring a key with that id is
+  refused at build, as `tool-results` is. See the migration guide, "Tool permissions, timeouts and batch locks".
 - **Breaking - `GraphRuntime.subscribe` is tenant-checked** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   it took no `RunConfig`, so any caller could replay and follow any tenant's thread - its `RunStarted` with tenant and
   principal, `Custom` payloads and `TaskFailed` messages - although `history`, `checkpoint`, `prune` and `fork` refuse
@@ -2766,11 +2813,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **A multi-megabyte provider error body no longer takes seconds to redact for a log line or an error**
+  ([#1680](https://github.com/llm4s/llm4s/issues/1680)): the internal `safeBody` helper behind every provider error
+  body redacted the whole body before truncating it to 2048 characters, about a second per megabyte. A body up to
+  128 KiB is still redacted whole, with exactly the output it had. A longer one is redacted only in a prefix of at
+  most 64 KiB, cut after a letter or a digit and before a separator so that no key or token is cut in two, and nothing
+  past the cut is ever shown. The prefix is shown only where its redaction runs 16 KiB past the characters shown and
+  those characters do not change when the prefix is redacted with tails that close a value still open at the cut (a
+  URL's `@`, a credential run, quotes, brackets, and each distinct quote the prefix holds behind its own run of
+  backslashes, so a value opened by a quote escaped to any depth is closed); otherwise only
+  `[response body not shown: ...] (original length: N)` is written, as it is for a prefix holding more than eight
+  distinct quotes. The cost is now bounded at about eleven 64 KiB redactions, five or six for a typical body, whatever the
+  body's size. Residual risk, documented on
+  `safeBody`: a value of 30 KiB or more opened in the shown characters, still open at the cut, and decided by none of
+  the tails, is redacted as the prefix reads it; the single-pass redesign (#1932) is to close this. The cut rule, the
+  margin and the audit of which readings depend on text past a cut come from @kannupriyakalra's analysis in #1841.
+  Behaviour change: for a body over 128 KiB the suffix is
+  `(truncated, original length: N, redacted from its first K chars)`.
 - **A refused claim no longer names another tenant's checkpoint when the thread cannot be re-read** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   when the store refused a claim, or a run's claim commit conflicted, the runtime re-read the thread to check its
   tenant before naming its checkpoint, but if that re-read failed it returned `ThreadBusy` naming the store's own,
   unchecked checkpoint id - which can be another tenant's, and embeds that tenant's run id. `start`, `recover`,
-  `resume`, `deleteThread`, `fork` and `updateState` now return `ThreadBusy(threadId, None, None)` then. A conflicting
+  `resume`, `deleteThread`, `fork` and `updateState` now return `ThreadBusy(threadId, None, BusyHolder.Unnamed)` then. A conflicting
   claim commit whose re-read succeeds now names the re-read's tenant-checked checkpoint instead of the conflict's, and
   one whose re-read finds no checkpoint (the thread was deleted meanwhile) names none: before, both named the
   conflict's.

@@ -1,7 +1,15 @@
 package org.llm4s.agent.graph.middleware
 
 import org.llm4s.agent.graph.{ Resumed, RunContext, StateKey, StateUpdate, ToolCallId, ToolName }
-import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContext, ToolOutcome, ToolQuestion, ToolSet }
+import org.llm4s.agent.graph.tool.{
+  AgentTool,
+  AgentToolSpec,
+  ToolContext,
+  ToolOutcome,
+  ToolQuestion,
+  ToolResource,
+  ToolSet
+}
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, NonRecoverableError }
 import org.llm4s.llmconnect.model.{ Completion, Message, ToolCall }
@@ -108,9 +116,11 @@ object PromptSection:
 
 /**
  * One tool call as a tool wrapper sees it, after its arguments were validated and decoded. It is
- * read-only: a wrapper cannot change a call's arguments.
+ * read-only: a wrapper cannot change a call's arguments. `resources` are what the call touches, from
+ * its decoded arguments and its tool's `AgentToolSpec.withResources`; never empty, since a call that
+ * declares none touches its tool's `defaultResource`.
  */
-final case class ToolCallRequest private (spec: AgentToolSpec[?], call: ToolCall):
+final case class ToolCallRequest private (spec: AgentToolSpec[?], call: ToolCall, resources: Vector[ToolResource]):
 
   /** The call's id, typed; core's `ToolCall` keeps a string. */
   def toolCallId: ToolCallId = ToolCallId(call.id)
@@ -120,9 +130,20 @@ final case class ToolCallRequest private (spec: AgentToolSpec[?], call: ToolCall
 
   def withSpec(s: AgentToolSpec[?]): ToolCallRequest = copy(spec = s)
   def withCall(c: ToolCall): ToolCallRequest         = copy(call = c)
+  def withResources(r: Vector[ToolResource]): ToolCallRequest =
+    copy(resources = ToolCallRequest.orDefault(spec, r))
 
 object ToolCallRequest:
-  def apply(spec: AgentToolSpec[?], call: ToolCall): ToolCallRequest = new ToolCallRequest(spec, call)
+
+  /** A request whose call touches `resources`, or the tool's `defaultResource` when that is empty. */
+  def apply(spec: AgentToolSpec[?], call: ToolCall, resources: Vector[ToolResource]): ToolCallRequest =
+    new ToolCallRequest(spec, call, orDefault(spec, resources))
+
+  /** A request whose call touches its tool's `defaultResource`. */
+  def apply(spec: AgentToolSpec[?], call: ToolCall): ToolCallRequest = apply(spec, call, Vector.empty)
+
+  private def orDefault(spec: AgentToolSpec[?], resources: Vector[ToolResource]): Vector[ToolResource] =
+    if resources.isEmpty then Vector(spec.defaultResource) else resources
 
 /**
  * A cross-cutting concern - approval, guardrails, logging, retry, rate limits - around an agent

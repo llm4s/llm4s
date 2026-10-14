@@ -136,7 +136,7 @@ class ThreadDeletionSpec extends AnyFlatSpec with Matchers with EitherValues wit
     // the other run still holds the thread, and its commits are accepted
     store.underlying.commit(thread, Commit(taken.get.token, events = Vector(event("b2")))).value should have size 1
     store.underlying.claim(thread, ClaimRequest(RunId("third"), ttl)).left.value shouldBe
-      GraphError.ThreadBusy(thread.value, Some("b1"), Some("other-run"))
+      GraphError.ThreadBusy(thread.value, Some("b1"), GraphError.BusyHolder.Run(RunId("other-run")))
   }
 
   it should "refuse another tenant's run that took the thread over as TenantMismatch, naming nothing of it" in {

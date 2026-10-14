@@ -1739,7 +1739,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val owning = middleware("owning", declares = Set(Messages.key))
     val owned  = buildSingle(ScriptedModel(summarise), set(tools.echo), Seq(owning))
     owned.left.value.message should include(
-      "middleware 'owning' declares a key the loop owns ('tool-results', 'messages', 'usage', 'active-agent', 'turn' or 'transfer')"
+      "middleware 'owning' declares a key the loop owns ('tool-results', 'tool-queue', 'messages', 'usage', 'active-agent', 'turn' or 'transfer')"
     )
   }
 
