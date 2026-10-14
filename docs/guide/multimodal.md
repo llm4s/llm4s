@@ -2,7 +2,7 @@
 layout: page
 title: Multimodal content
 parent: User Guide
-nav_order: 7
+nav_order: 30
 ---
 
 # Multimodal content: images and documents
@@ -86,6 +86,9 @@ the role. No part is dropped and none is turned into text. A `ProviderFile` goes
 providers and Ollama.
 
 A media type the wire format can name but a model rejects is the provider's error, as it is for text.
+
+An agent thread holds at most 20 MiB of inline media across its messages (`Messages.MaxInlineBytes`). Past that, the
+oldest inline parts are each replaced by a text part saying what was removed, so the model knows, and the run goes on.
 
 ## Tools that return media
 

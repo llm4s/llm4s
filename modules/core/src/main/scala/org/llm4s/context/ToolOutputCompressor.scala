@@ -119,7 +119,7 @@ object ToolOutputCompressor {
       }
       externalizedInfo = ExternalizedContent(key, contentSize.bytes, contentType, summary)
       pointer          = createContentPointer(externalizedInfo)
-    } yield message.copy(parts = ContentPart.withText(message.parts, pointer))
+    } yield message.withParts(ContentPart.withText(message.parts, pointer))
   }
 
   private def compressInlineContent(message: ToolMessage, contentType: String): Result[ToolMessage] = {
@@ -132,7 +132,7 @@ object ToolOutputCompressor {
     }
 
     compressed match {
-      case Right(content) => Right(message.copy(parts = ContentPart.withText(message.parts, content)))
+      case Right(content) => Right(message.withParts(ContentPart.withText(message.parts, content)))
       case Left(error)    => Left(error)
     }
   }

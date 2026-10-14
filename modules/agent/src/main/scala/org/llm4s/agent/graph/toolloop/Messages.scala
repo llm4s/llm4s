@@ -2,7 +2,7 @@ package org.llm4s.agent.graph.toolloop
 
 import org.llm4s.agent.graph.{ SchemaVersion, StateKey }
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.model.{ AssistantMessage, Message }
+import org.llm4s.llmconnect.model.{ AssistantMessage, ContentPart, Message, ToolMessage, UserMessage }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
@@ -44,9 +44,44 @@ object Messages:
    * the identity; the version is what makes an older runtime refuse a value that may hold parts.
    */
   val key: StateKey[Vector[StoredMessage], MessageUpdate] =
-    StateKey[Vector[StoredMessage], MessageUpdate]("messages", Vector.empty)(apply)
+    StateKey[Vector[StoredMessage], MessageUpdate]("messages", Vector.empty)((h, u) => apply(h, u).map(bounded))
       .withStateVersion(SchemaVersion(2)(1 -> Right.apply))
       .withUpdateVersion(SchemaVersion(2)(1 -> Right.apply))
+
+  /**
+   * The most inline media bytes a thread's messages hold, in total: 20 MiB, four inline parts at
+   * `ContentPart.MaxInlineBytes`. Each part and each tool result is bounded on its own, but a thread
+   * gains messages turn after turn and every checkpoint copies them all, so the history is bounded
+   * too. An update that takes it over the bound is applied, and then the oldest inline media parts
+   * are each replaced by a text part naming what was removed, until it fits again: a total update,
+   * so no run fails for it, whatever wrote the media - a tool, a caller's imported history, a batch
+   * of results that each fit on their own.
+   */
+  val MaxInlineBytes: Long = 4L * ContentPart.MaxInlineBytes
+
+  private[toolloop] def bounded(history: Vector[StoredMessage]): Vector[StoredMessage] =
+    var excess = history.map(m => inlineBytes(m.message)).sum - MaxInlineBytes
+    if excess <= 0 then history
+    else
+      history.map { stored =>
+        if excess <= 0 then stored
+        else
+          val (parts, freed) = InlineMediaEviction.evict(partsOf(stored.message), excess, MaxInlineBytes)
+          excess -= freed
+          if freed == 0 then stored else stored.copy(message = withParts(stored.message, parts))
+      }
+
+  private def partsOf(message: Message): Vector[ContentPart] = message match
+    case u: UserMessage => u.parts
+    case t: ToolMessage => t.parts
+    case _              => Vector.empty
+
+  private def withParts(message: Message, parts: Vector[ContentPart]): Message = message match
+    case u: UserMessage => u.withParts(parts)
+    case t: ToolMessage => t.withParts(parts)
+    case other          => other
+
+  private def inlineBytes(message: Message): Long = ContentPart.inlineBytes(partsOf(message))
 
   private def apply(history: Vector[StoredMessage], update: MessageUpdate): Result[Vector[StoredMessage]] =
     def indexOf(id: String) =

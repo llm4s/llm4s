@@ -20,6 +20,20 @@ class MessagePartsSpec extends AnyFlatSpec with Matchers with EitherValues {
     ToolMessage("result", "call-1").parts shouldBe Vector(ContentPart.Text("result"))
   }
 
+  "A positional pattern" should "not compile, so code that read the text from it cannot silently get the parts" in {
+    assertDoesNotCompile("UserMessage(\"x\") match { case UserMessage(content) => s\"$content\" }")
+    assertDoesNotCompile("ToolMessage(\"x\", \"c\") match { case ToolMessage(content, id) => s\"$content$id\" }")
+    assertCompiles("UserMessage(\"x\") match { case u: UserMessage => u.content }")
+  }
+
+  "withParts and equality" should "work as a case class's did" in {
+    UserMessage("a").withParts(Vector(image)) shouldBe UserMessage(Vector(image))
+    ToolMessage("a", "c").withParts(Vector(pdf)) shouldBe ToolMessage(Vector(pdf), "c")
+    ToolMessage("a", "c") should not be ToolMessage("a", "d")
+    UserMessage("a").hashCode shouldBe UserMessage("a").hashCode
+    UserMessage("a") should not be ToolMessage("a", "c")
+  }
+
   "content" should "be the text view: the text parts, joined" in {
     UserMessage(Vector(ContentPart.Text("what is"), image, ContentPart.Text("this?"))).content shouldBe "what is\nthis?"
     ToolMessage(Vector(image), "call-1").content shouldBe ""

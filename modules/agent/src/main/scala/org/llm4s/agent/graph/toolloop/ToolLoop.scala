@@ -454,10 +454,20 @@ object ToolLoop:
     StateKey[Vector[ToolResult], ToolResult]("tool-results", Vector.empty) { (recorded, result) =>
       if recorded.exists(r => r.assistantMessageId == result.assistantMessageId && r.toolCallId == result.toolCallId)
       then Left(ValidationError("tool-results", s"tool call '${result.toolCallId}' already has a result"))
-      else Right(recorded :+ result)
+      else Right(recorded :+ withinBatchBound(recorded, result))
     }
       .withStateVersion(SchemaVersion(2)(1 -> (json => Try(ujson.Arr.from(json.arr.map(textToParts))).toResult)))
       .withUpdateVersion(SchemaVersion(2)(1 -> (json => Try(textToParts(json)).toResult)))
+
+  /**
+   * `result`, with its inline media evicted (see [[Messages.MaxInlineBytes]]) as far as the batch's results would
+   * otherwise hold more than the thread's bound: each result is bounded on its own when its tool runs, but the calls
+   * of one batch run concurrently on one snapshot, so only the key can bound them together. Total, so no run fails.
+   */
+  private def withinBatchBound(recorded: Vector[ToolResult], result: ToolResult): ToolResult =
+    val excess = (recorded :+ result).map(r => ContentPart.inlineBytes(r.parts)).sum - Messages.MaxInlineBytes
+    if excess <= 0 then result
+    else result.copy(parts = InlineMediaEviction.evict(result.parts, excess, Messages.MaxInlineBytes)._1)
 
   // a version-1 ToolResult's `content` string, as the one text part version 2 holds
   private def textToParts(result: ujson.Value): ujson.Value =

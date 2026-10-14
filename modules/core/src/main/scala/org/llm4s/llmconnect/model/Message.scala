@@ -313,11 +313,27 @@ object MessageRole {
  * `UserMessage(text)` is the one-part message. A provider that cannot send one of the parts fails
  * the request with an [[org.llm4s.error.UnsupportedContentPartError]].
  *
+ * '''Not a case class, on purpose.''' It has no extractor, so `case UserMessage(content) =>` does not
+ * compile: before content parts that pattern bound the text, and an extractor of the parts would
+ * have kept code compiling that used the binder only in a string - and so sent `Vector(Text(...))`
+ * as the text, or silently dropped the media. Match the type, `case u: UserMessage`, and read
+ * `u.content` (the text) or `u.parts`. Equality is by parts.
+ *
  * @param parts the message's content, in order.
  */
 @Stable
-final case class UserMessage(parts: Vector[ContentPart]) extends Message {
+final class UserMessage(val parts: Vector[ContentPart]) extends Message with Serializable {
   val role: MessageRole = MessageRole.User
+
+  /** This message with `parts` instead. */
+  def withParts(parts: Vector[ContentPart]): UserMessage = new UserMessage(parts)
+
+  override def equals(other: Any): Boolean = other match {
+    case that: UserMessage => parts == that.parts
+    case _                 => false
+  }
+
+  override def hashCode: Int = ("UserMessage", parts).hashCode
 
   /** The message's text parts, joined by newlines; `""` when it is all media. */
   def content: String = ContentPart.text(parts)
@@ -330,6 +346,9 @@ final case class UserMessage(parts: Vector[ContentPart]) extends Message {
 }
 
 object UserMessage {
+
+  /** A user message of `parts`. */
+  def apply(parts: Vector[ContentPart]): UserMessage = new UserMessage(parts)
 
   /** A user message of one text part. */
   def apply(content: String): UserMessage = new UserMessage(Vector(ContentPart.Text(content)))
@@ -560,15 +579,29 @@ object AssistantMessage {
  * `ToolMessage(text, toolCallId)` is the one-part result. A provider that cannot send one of the
  * parts in a tool result fails the request with an [[org.llm4s.error.UnsupportedContentPartError]].
  *
+ * Not a case class, for the reason [[UserMessage]] gives: `case ToolMessage(content, id) =>` does not
+ * compile. Match `case t: ToolMessage` and read `t.content` or `t.parts`. Equality is by parts and id.
+ *
  * @param parts      the result, in order; usually one text part, e.g. a JSON response.
  * @param toolCallId Unique identifier for the tool call (as provided by the ToolCall).
  */
 @Stable
-final case class ToolMessage(
-  parts: Vector[ContentPart],
-  toolCallId: String
-) extends Message {
+final class ToolMessage(
+  val parts: Vector[ContentPart],
+  val toolCallId: String
+) extends Message
+    with Serializable {
   val role: MessageRole = MessageRole.Tool
+
+  /** This result with `parts` instead. */
+  def withParts(parts: Vector[ContentPart]): ToolMessage = new ToolMessage(parts, toolCallId)
+
+  override def equals(other: Any): Boolean = other match {
+    case that: ToolMessage => parts == that.parts && toolCallId == that.toolCallId
+    case _                 => false
+  }
+
+  override def hashCode: Int = ("ToolMessage", parts, toolCallId).hashCode
 
   /** The result's text parts, joined by newlines; `""` when it is all media. */
   def content: String = ContentPart.text(parts)
@@ -614,6 +647,9 @@ final case class ToolMessage(
 }
 
 object ToolMessage {
+
+  /** A tool result of `parts`. */
+  def apply(parts: Vector[ContentPart], toolCallId: String): ToolMessage = new ToolMessage(parts, toolCallId)
 
   /** A tool result of one text part. */
   def apply(content: String, toolCallId: String): ToolMessage =

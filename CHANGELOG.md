@@ -1307,9 +1307,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Breaking - `UserMessage` and `ToolMessage` carry `parts: Vector[ContentPart]`** ([#1913](https://github.com/llm4s/llm4s/issues/1913)):
   `UserMessage(text)` and `ToolMessage(text, toolCallId)` still build the one-text-part message, and `content` is the
-  text view (the text parts, joined by newlines). A pattern `case UserMessage(content)` now binds the parts: match
-  `case u: UserMessage` and read `u.content`, or handle `u.parts`. Interpolating the binder still compiles and now
-  prints the parts. The JSON of a one-text message is unchanged and the old shape still reads; an agent thread's
+  text view (the text parts, joined by newlines). They are no longer case classes and have no extractor, so
+  `case UserMessage(content)` is a compile error: match `case u: UserMessage` and read `u.content`, or handle
+  `u.parts`; `copy` becomes `withParts`. The JSON of a one-text message is unchanged and the old shape still reads; an agent thread's
   `messages` and `tool-results` keys move to schema version 2, migrated on restore. See the migration guide.
 - **Breaking - `ToolOutcome.Success` takes a `ToolContent`** ([#1913](https://github.com/llm4s/llm4s/issues/1913)):
   `ToolOutcome.Success(ToolContent.Json(value))` for what was `ToolOutcome.Success(value)`, or

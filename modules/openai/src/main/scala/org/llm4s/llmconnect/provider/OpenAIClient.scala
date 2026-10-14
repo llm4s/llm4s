@@ -594,10 +594,16 @@ class OpenAIClient private[provider] (
       .check(providerName, conversation.messages, userPart, PartEncoding.textOnly)
       .map(_ => conversation.messages.map(toOpenAIMessage))
 
+  // one text part goes as a plain string, as every message did before content parts
+  private def singleText(parts: Vector[ContentPart]): Boolean = parts match {
+    case Vector(ContentPart.Text(_)) => true
+    case _                           => false
+  }
+
   private def toOpenAIMessage(message: Message): ChatCompletionMessageParam =
     message match {
-      case UserMessage(Vector(ContentPart.Text(content))) =>
-        ChatCompletionMessageParam.ofUser(ChatCompletionUserMessageParam.builder().content(content).build())
+      case um: UserMessage if singleText(um.parts) =>
+        ChatCompletionMessageParam.ofUser(ChatCompletionUserMessageParam.builder().content(um.content).build())
 
       case um: UserMessage =>
         ChatCompletionMessageParam.ofUser(
@@ -626,9 +632,9 @@ class OpenAIClient private[provider] (
         }
         ChatCompletionMessageParam.ofAssistant(msg.build())
 
-      case ToolMessage(Vector(ContentPart.Text(content)), toolCallId) =>
+      case tm: ToolMessage if singleText(tm.parts) =>
         ChatCompletionMessageParam.ofTool(
-          ChatCompletionToolMessageParam.builder().content(content).toolCallId(toolCallId).build()
+          ChatCompletionToolMessageParam.builder().content(tm.content).toolCallId(tm.toolCallId).build()
         )
 
       case tm: ToolMessage =>

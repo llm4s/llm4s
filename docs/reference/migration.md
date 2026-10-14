@@ -25,7 +25,7 @@ Not in a release yet. Stage 3 slice F8b ([#1913](https://github.com/llm4s/llm4s/
   case t: ToolMessage => sendResult(t.toolCallId, t.content)
   ```
 
-  A binder used only in string interpolation (`s"$content"`) still compiles, and now prints the parts: search for these patterns rather than relying on the compiler. `msg.copy(content = ...)` becomes `msg.copy(parts = ...)`.
+  The two are no longer case classes and have no extractor, so every positional pattern is a compile error: an extractor of the parts would have kept `s"$content"` compiling and printing the parts, and one of the text would have kept a client compiling that drops media. `msg.copy(content = ...)` becomes `msg.withParts(...)`.
 - **`ToolOutcome.Success(content: ToolContent, update)`**, with `ToolContent.Json(value)` for the JSON result a tool returned before and `ToolContent.Parts(parts)` for images and documents:
 
   ```scala
