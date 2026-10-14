@@ -101,12 +101,99 @@ private[llm4s] object Redaction {
    * replaced already used; `redactForLogging` keeps its 1000-character default, `0` for no limit, a caller's
    * placeholder and its `[truncated, N chars omitted]` suffix, which `safe` and the MCP payload log rely on.
    *
+   * A body longer than 128 KiB (`SafeBodyWholeLimit`) - an HTML 5xx page from a proxy, a dumped payload - is not
+   * redacted whole, which takes about a second per megabyte (#1680). Only a prefix of at most 64 KiB is, cut right
+   * after a letter or a digit and right before a separator (whitespace or `"',;<>{}[]()`), so that no key, token or
+   * escape is cut in two, and the output says so: `... (truncated, original length: N, redacted from its first K
+   * chars)`. Nothing past the cut is ever shown. The prefix is shown only where:
+   *
+   *  - its redaction is at least `maxLength` + 16 KiB long, so a value replaced up to the end of the prefix, or a
+   *    token the cut ends, lies 16 KiB beyond what is shown; and
+   *  - its first `maxLength` characters stay the same when the prefix is redacted with each of a few tails appended
+   *    (`SafeBodyProbes`) that close, or decide, a value still open at the cut: the `@` of a URL's userinfo, a run of
+   *    credential characters in an `assertion`, the closing quote, escaped quote, bracket or comma of a string, call
+   *    or container.
+   *
+   * Otherwise no text of the body is shown, only `[response body not shown: ...] (original length: N)`: it fails closed. A `maxLength` too
+   * large for a 64 KiB prefix to serve, or a negative one, has the body redacted whole, as before.
+   *
+   * '''Residual risk.''' What is shown is the redaction of the prefix, not of the body. A reading that leaves a value
+   * unless something past the cut closes or qualifies it, and that none of the probes decides, could show the head of
+   * that value. That needs one value of 30 KiB or more, opened in the characters shown and still open at the cut. The
+   * single-pass redesign (#1932) should close this by policy - a value still open at the end of the input is masked,
+   * never left - which makes redacting a prefix exact.
+   *
    * @param body The text to redact and truncate
    * @param maxLength Maximum length of the redacted text before truncation (default: 2048)
    * @return The redacted text, truncated with metadata when it is longer than `maxLength`
    */
   def safeBody(body: String, maxLength: Int = 2048): String =
-    if (body == null) "null" else truncateForLog(redact(body), maxLength)
+    if (body == null) "null"
+    else
+      safeBodyPrefix(body, maxLength) match {
+        case Some(Some((cut, redacted))) =>
+          redacted.take(maxLength) +
+            s"... (truncated, original length: ${body.length}, redacted from its first $cut chars)"
+        case Some(None) => safeBodyOmitted(body)
+        case None       => truncateForLog(redact(body), maxLength)
+      }
+
+  /** The longest body [[safeBody]] redacts whole. */
+  private val SafeBodyWholeLimit: Int = 128 * 1024
+
+  /** The longest prefix [[safeBody]] redacts in place of a longer body; the cut is in the second half of it. */
+  private val SafeBodyPrefixLimit: Int = 64 * 1024
+
+  /** How much redacted text the prefix must hold past the characters [[safeBody]] shows. */
+  private val SafeBodyMargin: Int = 16 * 1024
+
+  /**
+   * Tails appended to the prefix, each of which closes or decides a value still open at the cut: the `@` that makes a
+   * URL's authority hold userinfo, and a run of credential characters that makes an `assertion` value a credential
+   * (#1816, #1838); the escaped quotes of #1707, the quotes, brackets and commas that close a string, a call or a
+   * container, and a key after a value. If any of them changes what is shown, nothing is shown.
+   */
+  private val SafeBodyProbes: Vector[String] = Vector(
+    "@" + "Z" * 24 + " ",
+    """\\' \' ' " ) ] } , "k": 1 """
+  )
+
+  /** Where [[safeBody]] cuts `body` and shows a prefix, or `None` where it redacts it whole or shows nothing (#1680). */
+  private[util] def safeBodyCut(body: String, maxLength: Int): Option[Int] =
+    safeBodyPrefix(body, maxLength).flatten.map(_._1)
+
+  /** What [[safeBody]] writes in place of a body of which it shows nothing. */
+  private[util] def safeBodyOmitted(body: String): String =
+    "[response body not shown: too long to redact whole, and no prefix of it could be shown safely]" +
+      s" (original length: ${body.length})"
+
+  /**
+   * `None` where [[safeBody]] redacts `body` whole: it is at most `SafeBodyWholeLimit` long, or `maxLength` is
+   * negative or too large for a prefix to serve. Otherwise `Some` of the cut and the redacted prefix, or `Some(None)`
+   * where nothing of the body may be shown.
+   */
+  private def safeBodyPrefix(body: String, maxLength: Int): Option[Option[(Int, String)]] =
+    if (
+      body.length <= SafeBodyWholeLimit || maxLength < 0 ||
+      maxLength.toLong + SafeBodyMargin > SafeBodyPrefixLimit / 2
+    ) None
+    else
+      Some {
+        val floor = SafeBodyPrefixLimit / 2
+        var cut   = SafeBodyPrefixLimit
+        while (cut > floor && !(separatesPrefix(body.charAt(cut)) && body.charAt(cut - 1).isLetterOrDigit)) cut -= 1
+        if (cut <= floor) None
+        else {
+          val prefix   = body.substring(0, cut)
+          val redacted = redact(prefix)
+          val settled = redacted.length.toLong >= maxLength.toLong + SafeBodyMargin &&
+            SafeBodyProbes.forall(tail => redact(prefix + tail).regionMatches(0, redacted, 0, maxLength))
+          if (settled) Some((cut, redacted)) else None
+        }
+      }
+
+  /** The characters [[safeBody]] ends a prefix before: whitespace and `"',;<>{}[]()`. */
+  private def separatesPrefix(c: Char): Boolean = Character.isWhitespace(c) || "\"',;<>{}[]()".indexOf(c.toInt) >= 0
 
   // ============================================================
   // Pattern-based redaction (for log messages)

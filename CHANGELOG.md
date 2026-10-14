@@ -2691,6 +2691,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **A multi-megabyte provider error body no longer takes seconds to redact for a log line or an error**
+  ([#1680](https://github.com/llm4s/llm4s/issues/1680)): the internal `safeBody` helper behind every provider error
+  body redacted the whole body before truncating it to 2048 characters, about a second per megabyte. A body up to
+  128 KiB is still redacted whole, with exactly the output it had. A longer one is redacted only in a prefix of at
+  most 64 KiB, cut after a letter or a digit and before a separator so that no key or token is cut in two, and nothing
+  past the cut is ever shown. The prefix is shown only where its redaction runs 16 KiB past the characters shown and
+  those characters do not change when the prefix is redacted with tails that close a value still open at the cut (a
+  URL's `@`, a credential run, quotes, brackets); otherwise only
+  `[response body not shown: ...] (original length: N)` is written.
+  The cost is now bounded at about three 64 KiB redactions whatever the body's size. Residual risk, documented on
+  `safeBody`: a value of 30 KiB or more opened in the shown characters, still open at the cut, and decided by none of
+  the tails, is redacted as the prefix reads it; the single-pass redesign (#1932) is to close this. The cut rule, the
+  margin and the audit of which readings depend on text past a cut come from @kannupriyakalra's analysis in #1841.
+  Behaviour change: for a body over 128 KiB the suffix is
+  `(truncated, original length: N, redacted from its first K chars)`.
 - **A refused claim no longer names another tenant's checkpoint when the thread cannot be re-read** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   when the store refused a claim, or a run's claim commit conflicted, the runtime re-read the thread to check its
   tenant before naming its checkpoint, but if that re-read failed it returned `ThreadBusy` naming the store's own,
