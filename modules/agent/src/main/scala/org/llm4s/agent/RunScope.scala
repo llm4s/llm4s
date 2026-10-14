@@ -18,8 +18,10 @@ import scala.util.Try
  * `RunHandle.subscribe`), so the first durable event of its id it is given is its own claim's; the
  * scope keeps that event's [[EventRecord.token]], and passes on a durable event only if it has both the
  * run's id and that token. A lost earlier run's late write, or a later run of the same id - one replayed
- * to a scope subscribed after its run ended without a terminal event - is never this run's. A live
- * event carries no token, so it is matched by id alone.
+ * to a scope subscribed after its run ended without a terminal event - is never this run's. A live event
+ * is matched the same way, by id and [[StreamEvent.Live.token]]: a node of a lost run that ignores the
+ * interrupt can send progress after this run's claim. A live event before the scope has its run's
+ * claim is never the run's - no node of a run runs before its claim is committed - and is dropped.
  *
  * The scope ends - once - at the first of:
  *  - the run's terminal durable event (`RunCompleted`, `RunSuspended`, `RunFailed`, `RunCancelled`,
@@ -58,10 +60,11 @@ final private[agent] class RunScope(runId: RunId, listener: StreamEvent => Unit,
         case StreamEvent.Durable(record) if record.runId == runId.value && ownIncarnation(record) =>
           deliver(event)
           if RunScope.terminal(record.event) then end()
-        case StreamEvent.Durable(_)                              => ()
-        case live: StreamEvent.Live if live.runId == runId.value => deliver(event)
-        case _: StreamEvent.Live                                 => ()
-        case disconnected: StreamEvent.Disconnected              =>
+        case StreamEvent.Durable(_) => ()
+        case live: StreamEvent.Live if live.runId == runId.value && incarnation.contains(live.token) =>
+          deliver(event)
+        case _: StreamEvent.Live                    => ()
+        case disconnected: StreamEvent.Disconnected =>
           // the subscription is over whatever the listener does with its last event
           val delivered = Try(deliver(disconnected))
           end()

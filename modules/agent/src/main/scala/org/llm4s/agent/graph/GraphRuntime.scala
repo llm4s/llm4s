@@ -2591,16 +2591,20 @@ final class GraphRuntime(
           buffered += draft(Some(checkpointId), Some(task), RunEvent.Custom(name, version, snapshot))
         }
       def discardCustom(): Unit = withLock(lock)(buffered.clear())
+      // once the claim is found lost, a node that ignores the stop sends nothing more: a later run - of the
+      // same id, perhaps - may hold the thread. Checked under the hub's lock, so never after its claim (#1918)
       def progress(name: String, version: Int, payload: ujson.Value): Unit =
         hub.live(
           threadId,
           StreamEvent.Live(
             threadId.value,
             runId.value,
+            token,
             task.id.value,
             task.node.value,
             name,
             version,
             ujson.copy(payload)
-          )
+          ),
+          () => !claimWasLost
         )

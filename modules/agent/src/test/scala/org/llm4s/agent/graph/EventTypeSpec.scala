@@ -28,7 +28,7 @@ class EventTypeSpec extends AnyFlatSpec with Matchers:
       )
     )
   private def live(name: String, version: Int, payload: ujson.Value): StreamEvent =
-    StreamEvent.Live("t", "r", "task", "node", name, version, payload)
+    StreamEvent.Live("t", "r", FencingToken(1L), "task", "node", name, version, payload)
 
   "EventType" should "match a durable custom event of its name and version" in {
     ping.unapply(durable("test.ping", 1, ujson.Obj("n" -> 3))) shouldBe Some(Ping(3))

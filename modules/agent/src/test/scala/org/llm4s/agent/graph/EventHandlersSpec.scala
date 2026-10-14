@@ -39,7 +39,7 @@ class EventHandlersSpec extends AnyFlatSpec with Matchers:
       )
     )
   private def live(name: String, version: Int, payload: ujson.Value): StreamEvent =
-    StreamEvent.Live("t", "r", "task", "node", name, version, payload)
+    StreamEvent.Live("t", "r", FencingToken(1L), "task", "node", name, version, payload)
   private val completed =
     StreamEvent.Durable(
       EventRecord("t", 2L, "r", FencingToken(1L), None, None, None, Instant.EPOCH, RunEvent.RunCompleted)

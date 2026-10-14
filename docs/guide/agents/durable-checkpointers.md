@@ -229,8 +229,12 @@ is free:
   system able to fence can pass the claim's token on: it is `context.position.fencingToken` in a node and
   `context.run.position.fencingToken` in a tool, and it grows with every claim, so the system can refuse a token
   lower than the highest it has seen.
-- Until it ends, such a run's live progress events (`StreamEvent.Live`, which are never stored) still reach the
-  subscribers of its own runtime. Its durable events are refused or dropped with its commits.
+- Until the loss is noticed, such a run's live progress events (`StreamEvent.Live`, which are never stored) still
+  reach the subscribers of its own runtime; from then on its tasks send none, even a task that ignores the interrupt
+  and outlives the run. Its durable events are refused or dropped with its commits. A live event carries its run's
+  claim token (`StreamEvent.Live.token`), so a subscription that has been handed a newer claim's commit drops an
+  older claim's progress, and a run's observer and its run-scoped streams never deliver another claim's, even under
+  the same `RunId`.
 - A `ClaimLost` run's own event stream - `AgentRun.subscribe`, `Agent.stream`, its observer and its tracing - ends
   at the run's end, which never waits on a hung store. An `Async` write the run abandoned may still land after
   that; it is then visible only through the thread's log - a thread subscription (`GraphRuntime.subscribe`) or a

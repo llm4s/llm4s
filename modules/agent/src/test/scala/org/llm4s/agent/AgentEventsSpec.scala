@@ -77,9 +77,9 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
     def all: Vector[StreamEvent]             = events.asScala.toVector
     def durable: Vector[StreamEvent.Durable] = all.collect { case d: StreamEvent.Durable => d }
     def of(runId: RunId): Vector[StreamEvent] = all.filter {
-      case StreamEvent.Durable(r)                  => r.runId == runId.value
-      case StreamEvent.Live(_, run, _, _, _, _, _) => run == runId.value
-      case _                                       => false
+      case StreamEvent.Durable(r)                     => r.runId == runId.value
+      case StreamEvent.Live(_, run, _, _, _, _, _, _) => run == runId.value
+      case _                                          => false
     }
 
   /**

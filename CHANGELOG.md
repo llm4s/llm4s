@@ -2923,6 +2923,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - An observer anchors on the first commit fenced by its run's claim, and delivers no live event sent before it.
   - An agent's run scope (stream, subscription and tracing) delivers only the run's own incarnation: a later run of
     the same id, replayed to a subscription made after the run ended without a terminal event, is not the run's.
+  - **`StreamEvent.Live` gains `token: FencingToken`, after `runId`**: the claim token of the run that sent it. A
+    lost run's node that ignores the interrupt and outlives the run sends no progress once the loss is found, which
+    is before any later run of the runtime can claim the thread; and a run's observer and run scope deliver a live
+    event only of their run's own claim, so an earlier incarnation's progress never reaches a later run under the
+    same id. Code that builds a `StreamEvent.Live` positionally, or matches one with a positional pattern, gains a
+    field after `runId`.
 - **A multi-megabyte provider error body no longer takes seconds to redact for a log line or an error**
   ([#1680](https://github.com/llm4s/llm4s/issues/1680)): the internal `safeBody` helper behind every provider error
   body redacted the whole body before truncating it to 2048 characters, about a second per megabyte. A body up to

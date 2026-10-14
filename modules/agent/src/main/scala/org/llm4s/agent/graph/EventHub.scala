@@ -297,7 +297,10 @@ final private[graph] class EventHub(
    * a token never is. So until a commit fenced by the run's own claim ([[Observation.claimed]], matched by
    * [[EventRecord.token]]) is handed to it, the dispatcher skips every commit, and every live event,
    * which no node of the run can have sent yet: it delivers what a subscription from just before the
-   * claim ([[RunHandle.subscribe]]) does. [[Observation.start]] starts it; [[Observation.abandon]]
+   * claim ([[RunHandle.subscribe]]) does. After that it still skips a live event of an older claim than
+   * its run's ([[StreamEvent.Live.token]]), which a node of a lost run that ignores the interrupt could
+   * send under the same `RunId` - [[live]] refuses one sent once the loss is found, as every in-runtime
+   * successor's claim is. A later run's, of a newer claim, it delivers. [[Observation.start]] starts it; [[Observation.abandon]]
    * removes it, delivering nothing.
    */
   def observe(
@@ -474,10 +477,17 @@ final private[graph] class EventHub(
   /** Whether the hub holds a hand-over mark for the thread; for tests. */
   private[graph] def marked(threadId: ThreadId): Boolean = withLock(hubLock)(handed.contains(threadId.value))
 
-  /** Offers live progress to the thread's subscribers; never blocks on a listener. */
-  def live(threadId: ThreadId, event: StreamEvent.Live): Unit =
+  /**
+   * Offers live progress to the thread's subscribers, if `current` - whether the sending run still holds
+   * its claim, as far as it knows - is true; never blocks on a listener. `current` is read holding
+   * `hubLock`, which every hand-over holds, so the event is either queued everywhere ahead of a later
+   * run's claim or not at all: a run of this runtime is admitted to a thread only once an earlier run's
+   * loss has been found, so a node of the lost run that ignores the interrupt and outlives it sends
+   * nothing after the next run's claim (#1918). `current` must not block, nor take a lock.
+   */
+  def live(threadId: ThreadId, event: StreamEvent.Live, current: () => Boolean = () => true): Unit =
     withLock(hubLock) {
-      subscribers.getOrElse(threadId.value, Vector.empty).foreach(_.offerLive(event))
+      if current() then subscribers.getOrElse(threadId.value, Vector.empty).foreach(_.offerLive(event))
     }
 
   /** Joins the live set; the caller holds `hubLock`. */
@@ -528,7 +538,8 @@ final private[graph] class EventHub(
    * (`watchLoop`). The listener is never called while a lock is held. A `preJoined` dispatcher
    * ([[observe]]) never replays, and only drains and watches; it takes its place in the log from the
    * first commit fenced by its run's claim (`observing`, the token) handed to it - the claim's own -
-   * skipping every commit and live event handed over before it, and its watch waits until then.
+   * skipping every commit and live event handed over before it, and its watch waits until then; it skips
+   * a live event of an older claim than its run's, a lost run's, from then on too.
    */
   final private class Dispatcher(
     threadId: ThreadId,
@@ -582,6 +593,12 @@ final private[graph] class EventHub(
 
     /** Its run's claim was granted with `token`; see [[Observation.claimed]]. */
     def claimed(token: FencingToken): Unit = withLock(lock) { observing = Some(token) }
+
+    /**
+     * Whether `event` was sent under an older claim than this observer's run's: by a node of a lost run,
+     * which ignored the interrupt and outlived it, whatever its `RunId` (#1918). Holding `lock`.
+     */
+    private def superseded(event: StreamEvent.Live): Boolean = observing.exists(_.value > event.token.value)
 
     /** The store watch, once started; and whether the dispatcher has ended, which stops it. */
     @volatile private var watcher  = Option.empty[Thread]
@@ -819,8 +836,9 @@ final private[graph] class EventHub(
     private def follows(seq: Long): Boolean = seq == lastQueuedSeq + 1 || (lastQueuedSeq == 0 && seq > 0)
 
     def offerLive(event: StreamEvent.Live): Unit = withLock(lock) {
-      // an observer not yet anchored: no node of its run has run, so the event is another run's
-      if cancelled || !anchored then ()
+      // an observer not yet anchored: no node of its run has run, so the event is another run's; and once
+      // anchored, an event of an older claim than its run's is a lost run's, whatever its `RunId` (#1918)
+      if cancelled || !anchored || superseded(event) then ()
       else if !joined then hold(event)
       else if !halted then
         // the gap marker needs one slot and the event one

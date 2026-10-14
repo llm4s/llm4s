@@ -174,9 +174,9 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
       .subscribe(thread, capacity = 4) { event =>
         collector.listener(event)
         event match {
-          case StreamEvent.Live(_, _, _, _, _, _, payload) if payload("kind").str == "burst" =>
+          case StreamEvent.Live(_, _, _, _, _, _, _, payload) if payload("kind").str == "burst" =>
             if blocked.compareAndSet(false, true) then burstDone.await(10, TimeUnit.SECONDS): Unit
-          case StreamEvent.Live(_, _, _, _, _, _, payload) =>
+          case StreamEvent.Live(_, _, _, _, _, _, _, payload) =>
             lastTick.set(payload("i").num.toInt)
             tickSignal.put(payload("i").num.toInt)
           case _: StreamEvent.LiveGap => sawGap.set(true)
@@ -217,7 +217,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     (burst.size + ticks + gaps.sum) shouldBe (50 + ticksSent.get)
     // the gap marker precedes the next accepted event
     received.indexWhere(_.isInstanceOf[StreamEvent.LiveGap]) should be > received.indexWhere {
-      case StreamEvent.Live(_, _, _, _, _, _, p) => p("kind").str == "burst"; case _ => false
+      case StreamEvent.Live(_, _, _, _, _, _, _, p) => p("kind").str == "burst"; case _ => false
     }
   }
 
@@ -291,7 +291,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
       case other                  => fail(s"expected RunStarted, got $other")
     }
     received.drop(3) match {
-      case Vector(StreamEvent.Live(_, _, _, _, _, _, payload), gap, disconnected) =>
+      case Vector(StreamEvent.Live(_, _, _, _, _, _, _, payload), gap, disconnected) =>
         payload("i").num.toInt shouldBe 1
         gap shouldBe StreamEvent.LiveGap(2) // 1 delivered + 2 reported = 3 sent
         disconnected shouldBe StreamEvent.Disconnected(3L, DisconnectReason.Lagging)
@@ -370,7 +370,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     release.countDown()
 
     val received = collector.untilRunEnds()
-    received.collect { case StreamEvent.Live(_, _, _, _, _, _, p) => p("i").num.toInt } shouldBe Vector(1, 2, 3)
+    received.collect { case StreamEvent.Live(_, _, _, _, _, _, _, p) => p("i").num.toInt } shouldBe Vector(1, 2, 3)
     received.collect { case StreamEvent.Durable(r) => r.event }.collect { case RunEvent.Custom(_, _, p) =>
       p("i").num.toInt
     } shouldBe Vector(1, 2, 3)

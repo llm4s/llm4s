@@ -181,11 +181,15 @@ enum StreamEvent:
 
   /**
    * Live-only progress from [[RunContext.progress]]: never persisted, never replayed, no `seq`.
-   * `name` and `version` identify the payload, as for [[RunEvent.Custom]].
+   * `name` and `version` identify the payload, as for [[RunEvent.Custom]]. `token` is the
+   * [[FencingToken]] of the claim the sending run held, as on its [[EventRecord]]s: a node of a run
+   * that lost its claim and ignores the interrupt may still send progress after a later run of the
+   * same `RunId` has claimed the thread, and only the token tells the two apart.
    */
   case Live(
     threadId: String,
     runId: String,
+    token: FencingToken,
     taskId: String,
     nodeId: String,
     name: String,
