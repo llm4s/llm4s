@@ -71,18 +71,38 @@ clock of whichever process grants or renews the claim, so clock skew between hos
 effective `ttl`. Fencing (below) still keeps every write safe; skew costs liveness - a live run taken over early,
 a dead one held longer - and can repeat side effects. Keep hosts' clocks synchronised.
 
-While one run holds the thread, every other `start`, `recover`, `resume` or `deleteThread` on it, from any
-runtime, is refused with `GraphError.ThreadBusy`, which names the holding run:
+`ClaimPolicy` can also carry a `label` naming the runtime to an operator - a host, pod or process name:
+`ClaimPolicy.default.withLabel("worker-7")`. The runtime then logs the run id with it, at INFO, whenever it is
+granted a claim (`Run 'r1' (runtime 'worker-7') claimed thread 't' with token 1`), and in the WARN lines for a
+failed renewal or a lost claim, so the run a `ThreadBusy` names can be traced to the runtime holding it. Without a
+label the grant is logged at DEBUG. The label goes nowhere else: not to the store, and never into an error another
+caller - another tenant's included - gets.
+
+While one run holds the thread, every other `start`, `recover`, `resume`, `deleteThread` or `updateState` on it,
+and every `fork` onto it as the target, from any runtime, is refused with `GraphError.ThreadBusy`, which names the
+holding run:
 
 ```scala
 b.recover(threadId, graph) match
-  case Left(GraphError.ThreadBusy(_, latestCheckpoint, Some(holder))) =>
+  case Left(GraphError.ThreadBusy(_, latestCheckpoint, GraphError.BusyHolder.Run(holder))) =>
     // run `holder` is live: retry once it has suspended or completed
   case other => ()
 ```
 
-Nothing is accepted or discarded: the caller retries. A thread that has no checkpoint yet cannot be checked for
-its tenant, so a refusal there does not name the holder.
+A refusal up front accepts and discards nothing, so `ThreadBusy` is a `RecoverableError`: the caller retries, and generic retry
+code (`RetryPolicy`, `ErrorRecovery`) does too. `holder` is a `GraphError.BusyHolder`:
+
+- `Run(runId)`, the holding run, when the caller may see it: the thread's latest checkpoint is the caller's
+  tenant's, or the thread has no checkpoint yet and the holder is a run of the same runtime with the caller's
+  tenant;
+- `Unnamed`, when another run holds the thread but cannot be named: the thread has no checkpoint yet in the store
+  and the holder is in another runtime, so its tenant cannot be checked, or a change's write was refused as stale
+  naming only the claim that replaced it;
+- `Lapsed`, when it is the call's own claim that was lost - a `fork`, `updateState` or `deleteThread` whose lease
+  passed, or whose store named no current claim, before its write was known to land - and no other run is known
+  to hold the thread. A write not yet sent was never applied, but one already in the store when the loss was found
+  may still land, fenced by the token: read the thread before retrying. A retry can still be refused, by the
+  call's own claim until its release lands or by a run that took the thread over meanwhile.
 
 ## Recovering a run whose process died
 
@@ -161,8 +181,11 @@ The run finds its claim lost when its lease passes with no renewal landing, when
   makes that lands then is an orphan, as above. The same bound holds while the run is admitted: if the commit
   that claims the thread for `start`, `recover` or `resume` hangs in the store and the claim is found lost
   meanwhile, the call returns `ClaimLost` within `2 × ttl` of the loss, with the thread freed and the claim
-  released as above. The run never starts, and that commit, if it lands later, is fenced by the token and is an
-  orphan. A claim's commit that the store refuses as stale - the claim lapsed, or another runtime took it over,
+  released as above. The run never starts. If that commit lands later, it is fenced by the token: once the
+  release has landed, or another run has taken the thread over, the store refuses it. But one that lands first -
+  the store still holds the claim, since nobody took it over - leaves the admission's `Running` checkpoint and its
+  `RunStarted` (or `RunRecovered` or `RunResumed`) event in the thread although the call returned `ClaimLost`, and
+  no run continues it: `recover` does, once the claim is released. A claim's commit that the store refuses as stale - the claim lapsed, or another runtime took it over,
   before it landed - is a loss found then: the call returns `ClaimLost`, never `CheckpointWriteFailed`, with the
   claim released and the thread freed. If the heartbeat declared the loss meanwhile, the call still returns one
   `ClaimLost`, naming the current claim the first of the two to find the loss named.
@@ -509,7 +532,10 @@ Removing events raises the replay floor (`ReplayUnavailable`) as `compactEvents`
 can run while a run executes; call it on a schedule that suits you.
 
 `maxAge` compares the store's clock with the `createdAt` and event timestamps the committing runtimes stamped by
-theirs, so on a store shared by several hosts, clock skew between them shifts the effective age by that much.
+theirs, so on a store shared by several hosts, clock skew between them shifts the effective age by that much. A
+runtime's `clock` stamps what it writes - checkpoints' `createdAt`, events' timestamps - and the store's clock judges
+claim expiry and retention; give a runtime and its store the same clock, as `GraphRuntime.inMemory(clock)` does for
+its `InMemoryCheckpointer`.
 
 ## Writing a store
 

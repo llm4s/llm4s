@@ -193,7 +193,10 @@ object SqliteRestartRecoveryExample {
       case Left(GraphError.ThreadBusy(_, _, holder)) =>
         if (!announced)
           println(
-            s"recover refused: ${holder.getOrElse("a run")} still holds the thread; retrying until its claim expires"
+            s"recover refused: ${holder match {
+                case GraphError.BusyHolder.Run(runId) => runId.value
+                case _                                => "a run"
+              }} still holds the thread; retrying until its claim expires"
           )
         Thread.sleep(500)
         recoverWhenFree(runtime, fetches, deadline, announced = true)

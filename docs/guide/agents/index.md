@@ -196,8 +196,8 @@ which belong to the `Agent`. `AgentResult` is a value to read, not something to 
 - A thread stays in the runtime until `agent.forget(threadId)` removes it - one-shot
   `agent.run(query)` threads too, which on the default in-memory runtime means they stay in memory.
   Forget a conversation you will not continue: `agent.run(query).flatMap(r => agent.forget(r.threadId).map(_ => r))`.
-  `forget` refuses a thread whose run is still active (`ThreadBusy`) or that belongs to another
-  tenant (`TenantMismatch`); an unknown thread is `Right(())`.
+  `forget` refuses a thread that a run still holds - in this runtime, or by a live claim in any runtime sharing
+  the store (`ThreadBusy`) - or that belongs to another tenant (`TenantMismatch`); an unknown thread is `Right(())`.
 
 ### Suspended turns from Java and Kotlin
 
@@ -370,6 +370,70 @@ model request made again because the first response was never stored. The bounda
   does the work once. A system that can fence writers can also refuse the stale one outright:
   `context.run.position.fencingToken` is the run's claim token, which grows with every claim on the
   thread, so the system keeps the highest token it has seen and refuses a lower one.
+
+### Tool Permissions, Timeouts and Locks
+
+An `AgentToolSpec` can declare what a call touches, how long one run may take, and which locks it
+holds, each from the call's decoded arguments:
+
+```scala
+import org.llm4s.agent.graph.middleware.{PermissionMiddleware, PermissionRule}
+import org.llm4s.agent.graph.tool.{LockKey, Operation, ToolResource}
+import scala.concurrent.duration.*
+
+val writeSpec = baseSpec
+  .withResources(args => Vector(ToolResource(Operation.Write, args.path)))
+  .withLocks(args => Set(LockKey("workspace", workspaceId, args.path)))
+  .withTimeout(30.seconds)
+
+val agent = Agent.builder("coder", client)
+  .withTools(tools)
+  .withMiddleware(                       // register it first, so it wraps every other middleware
+    new PermissionMiddleware(Seq(
+      PermissionRule.deny(Operation.Write, "/etc/**"),
+      PermissionRule.ask(Operation.Write, "/deploy/**"),
+      PermissionRule.allow(Operation.Write, "/src/**"),
+      PermissionRule.allow(Operation.Invoke, "*")
+    ))
+  )
+  .build()
+```
+
+**Permissions are deny-if-unmatched.** For each resource the first rule with its operation whose
+`Glob` matches the target decides, and a resource no rule matches is denied. A call runs only if
+every resource is allowed: a denial is the error result `Denied: <operation> <target>`, an `Ask`
+suspends the call for approval. A tool that declares no resources touches `(Invoke, <tool name>)`,
+so it needs an `Invoke` rule. Resources are the call's whole envelope: a tool that asks a question and lets
+the answer choose its target declares a resource covering every target it may pick (`/out/**`) and
+refuses an answer outside it, because the check runs on the declaration, not on what the tool does. Such an envelope
+is checked for every target in it: a deny rule reaching any part of it denies the call, and it is
+allowed only when allow rules cover all of it. Approval is one flag per call: once a reviewer approves the call,
+every `Ask` passes. An edited call is checked again on its new arguments, so a deny rule still
+refuses it. Rules see the arguments after the schema check and decoding. In a `Glob`, `*` and `?`
+stay within one `/`-separated segment and `**` crosses them. An `Execute` rule limits which
+commands the agent may ask to run, not what a command does once it runs: rely on the sandbox for
+that.
+
+**A timeout bounds each run of the tool.** A run past it is interrupted and the model sees the
+error `Tool '<name>' timed out after <n> ms`; the run continues. The tool runs on a thread of its
+own, and the call waits for that thread to finish, so **block interruptibly**: a tool that ignores
+its interrupt holds its whole batch past the timeout. A timed-out call may have done part of its
+work: it keeps its idempotency key if it runs again (a retrying middleware, `recover`), but if the
+model calls the tool again, that is a new call with a new key. Cancelling the run still cancels the
+call, which records nothing.
+
+**Locks order conflicting calls of one batch.** Two `LockKey`s conflict when one is a prefix of
+the other, segment by segment: `workspace/w1` conflicts with `workspace/w1/src/a.scala`, and
+`a/b` does not conflict with `a/bc`. When a model message has several calls, a call whose locks
+conflict with an earlier call's waits for it and runs in a later superstep, in call order, seeing
+what the earlier call committed. So a check against thread state (a quota, a file's content) is
+exact, and two calls writing one key no longer lose one of the writes. Calls without conflicting
+locks still run in parallel. Each further round costs two supersteps of `RunBudgets.maxSupersteps`.
+A call that waits for approval holds back the calls queued behind it, so a reviewer can see a
+batch's approvals in more than one round. Locks order calls within one batch only, not across
+threads. An approval edit may narrow a call's locks (`/prod` to `/prod/app`) but not take a lock
+its proposed arguments did not cover: such an edit is refused, the call does not run, and the model
+sees why.
 
 ---
 

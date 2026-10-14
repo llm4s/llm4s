@@ -234,7 +234,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val reopened = SqliteFiles.opened(db, clock)
     clock.set(claimed.expiresAt.minusNanos(1))
     reopened.claim(thread, ClaimRequest(RunId("second"), 1500.millis)).left.value shouldBe
-      GraphError.ThreadBusy(thread.value, None, Some("first"))
+      GraphError.ThreadBusy(thread.value, None, GraphError.BusyHolder.Run(RunId("first")))
     clock.set(claimed.expiresAt)
     val taken = reopened.claim(thread, ClaimRequest(RunId("second"), 1500.millis)).value
     taken.token.value should be > claimed.token.value
@@ -246,6 +246,22 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val third = SqliteFiles.opened(db, clock)
     third.renew(thread, taken.token, 1.nano).value.expiresAt shouldBe claimed.expiresAt.plusNanos(251)
     third.close()
+  }
+
+  it should "spend no token when refused: the next one granted is one past the last, across connections" in {
+    val db     = SqliteFiles.fresh()
+    val clock  = ManualClock(Instant.parse("2026-10-10T09:00:00Z"))
+    val store  = SqliteFiles.opened(db, clock)
+    val other  = SqliteFiles.opened(db, clock)
+    val thread = ThreadId("refused")
+    val first  = store.claim(thread, ClaimRequest(RunId("first"), 1.minute)).value
+    (1 to 3).foreach(_ =>
+      other.claim(thread, ClaimRequest(RunId("refused"), 1.minute)).left.value shouldBe a[GraphError.ThreadBusy]
+    )
+    store.release(thread, first.token).value shouldBe (())
+    other.claim(thread, ClaimRequest(RunId("next"), 1.minute)).value.token shouldBe FencingToken(first.token.value + 1)
+    store.close()
+    other.close()
   }
 
   // ---- events ----
@@ -477,7 +493,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       ) Thread.sleep(5)
 
       second.recover(thread, workers.graph).left.value match {
-        case GraphError.ThreadBusy(_, _, holder) => holder shouldBe Some("first")
+        case GraphError.ThreadBusy(_, _, holder) => holder shouldBe GraphError.BusyHolder.Run(RunId("first"))
         case other                               => fail(s"not ThreadBusy: $other")
       }
       clock.advance(claims.ttl)
