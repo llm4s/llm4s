@@ -452,7 +452,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     Files.list(dir).iterator().asScala.toVector shouldBe empty
   }
 
-  "HostFileBackend" should "hide and reserve a probe file a failed cleanup left behind" in {
+  "HostFileBackend" should "hide and reserve the file a failed alias check left behind" in {
     val left = s"ABC123-llm4s-probe-${UUID.randomUUID()}.probe"
     Files.writeString(dir.resolve(left), "")
     backend.ls(VPath.root, 10, call()).value.items shouldBe empty
