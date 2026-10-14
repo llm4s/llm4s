@@ -3,7 +3,7 @@ package org.llm4s.pekko
 import org.apache.pekko.Done
 import org.apache.pekko.stream.scaladsl.Source
 import org.llm4s.agent.{ Agent, AgentEventBuffer, AgentResult, AgentRun }
-import org.llm4s.agent.graph.{ InterruptId, RunConfig, RunStatus, StreamEvent, ThreadId }
+import org.llm4s.agent.graph.{ EventHandlers, EventType, InterruptId, RunConfig, RunStatus, StreamEvent, ThreadId }
 import org.llm4s.error.LLMError
 import org.llm4s.types.Result
 
@@ -24,7 +24,9 @@ import scala.util.control.Exception.ultimately
  * thread is free - after the stream completes, fails or is cancelled - so a `recover` sequenced after it
  * is never refused as busy by the turn it cancelled. A consumer too slow for the stream's buffer never holds the run up: it loses live events (text
  * deltas, tool progress) and receives one `StreamEvent.LiveGap` with their count where they were dropped;
- * durable events are never dropped, and the run carries on.
+ * durable events are kept, and the run carries on. A consumer that stops draining altogether fails the stream
+ * (and so cancels the turn) once more than `Agent.StreamCapacity` durable events wait, as the runtime disconnects
+ * a listener that far behind.
  *
  * A refused start (a blank query, a busy thread), a failed turn and a subscription that disconnects all
  * fail the stream with an [[LLMException]]. A turn that commits no terminal event still ends the stream.
@@ -85,6 +87,37 @@ trait AgentPekko {
     config: RunConfig = RunConfig(),
     bufferSize: Int = AgentPekko.DefaultBufferSize
   ): Source[AgentStreamItem, Future[Done]]
+
+  /**
+   * The events of `run` that `eventType` names - durable and live - decoded: `events` with
+   * `EventHandlers.on(eventType)(identity)`; see the overload taking handlers.
+   */
+  def events[A](run: AgentRun, eventType: EventType[A]): Source[A, Future[Done]]
+
+  /** `events` of `eventType` with `bufferSize` live events buffered for a slow consumer. */
+  def events[A](run: AgentRun, eventType: EventType[A], bufferSize: Int): Source[A, Future[Done]]
+
+  /**
+   * What `handlers` make of `run`'s events: one element for each event a handler takes, in delivery
+   * order. It observes the run, through [[AgentRun.subscribe]], once per materialization: it replays
+   * the run's durable events from its start and then follows it live, but misses the live events sent
+   * before the stream started - use [[stream]] to see every one. It ends after the run's terminal
+   * event, or once a run that ends without one has delivered its last event; the run's own outcome is
+   * not failed with - await the run for it. Cancelling the stream, or stopping it early, cancels its
+   * subscription only: the run carries on. The materialized `Future[Done]` completes once the
+   * subscription has been released, however the stream ended.
+   *
+   * Handlers run in the stream, not on the subscription: a slow or throwing handler slows or fails
+   * the stream, never the run. `bufferSize` live events wait for a slow consumer before the rest are
+   * counted into a `LiveGap`, which a handler sees through `otherwise`; a value below 1 fails the
+   * stream at once. A subscription that disconnects, or a consumer that falls more than
+   * `Agent.StreamCapacity` durable events behind, fails the stream with an [[LLMException]].
+   */
+  def events[R](
+    run: AgentRun,
+    handlers: EventHandlers[R],
+    bufferSize: Int = AgentPekko.DefaultBufferSize
+  ): Source[R, Future[Done]]
 }
 
 object AgentPekko {
@@ -135,6 +168,17 @@ object AgentPekko {
     def streamRecover(threadId: ThreadId, config: RunConfig, bufferSize: Int): Source[AgentStreamItem, Future[Done]] =
       streaming(bufferSize)((onEnd, listener) => agent.streamRecoverEnding(threadId, config, onEnd)(listener))
 
+    def events[A](run: AgentRun, eventType: EventType[A]): Source[A, Future[Done]] =
+      events(run, eventType, AgentPekko.DefaultBufferSize)
+
+    def events[A](run: AgentRun, eventType: EventType[A], bufferSize: Int): Source[A, Future[Done]] =
+      events(run, EventHandlers.on(eventType)(identity), bufferSize)
+
+    def events[R](run: AgentRun, handlers: EventHandlers[R], bufferSize: Int): Source[R, Future[Done]] =
+      BlockingSource("llm4s-pekko-events", HandOver)(() => new RunEventsProducer(bufferSize, run))
+        .map(handlers.dispatch)
+        .collect { case Some(r) => r }
+
     /**
      * Starts the turn with a buffer's listener, ending the buffer when the turn's subscription ends - so the
      * stream ends even for a turn that commits no terminal event.
@@ -149,6 +193,41 @@ object AgentPekko {
         case Right(result) => Future.successful(result)
         case Left(error)   => Future.failed(new LLMException(error))
       }
+  }
+
+  /**
+   * Subscribes to a run it does not own and pumps the run's events to the stream from this producer's own
+   * thread. As for [[TurnProducer]], the run's event buffer is the only queue that can fill up, and it never
+   * blocks the subscription. The subscription is cancelled and the buffer closed on this thread before `run`
+   * returns, however it returns; the run itself is left alone.
+   */
+  final private class RunEventsProducer(bufferSize: Int, agentRun: AgentRun) extends Producer[StreamEvent] {
+
+    def run(emitter: Emitter[StreamEvent]): Either[LLMError, Unit] =
+      if (bufferSize < 1)
+        Left(org.llm4s.error.ValidationError("bufferSize", s"must be at least 1, got $bufferSize"))
+      else {
+        val events = AgentEventBuffer(bufferSize)
+        agentRun.subscribeEnding(Agent.StreamCapacity, () => events.end())(events.listener).flatMap { subscription =>
+          ultimately {
+            subscription.cancel()
+            events.close()
+          }(pump(events, emitter))
+        }
+      }
+
+    @tailrec
+    private def pump(events: AgentEventBuffer, emitter: Emitter[StreamEvent]): Either[LLMError, Unit] =
+      events.take() match {
+        case Left(error) => Left(error)
+        case Right(Some(event)) =>
+          emitter.emit(event)
+          pump(events, emitter)
+        case Right(None) => Right(())
+      }
+
+    /** The stream has ended; `run`, if still running, is interrupted and releases the subscription itself. */
+    def abandon(): Unit = ()
   }
 
   /**

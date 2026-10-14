@@ -199,6 +199,18 @@ See [AGENTS.md](AGENTS.md#testing-guidelines) for details:
 - Test both happy path and error cases
 - Maintain 80%+ coverage
 
+### Performance tests
+
+A test that checks how an operation's cost grows with its input - linear, not quadratic - with
+`LinearTime.assertLinear` (or any other timing ratio) is tagged `taggedAs(PerformanceTest)`, from
+`org.llm4s.testutil`. `sbt test` and the coverage run leave the tag out, and `sbt
+testPerformance` runs only it: CI runs it once, uninstrumented, in the ubuntu `Performance tests`
+job and nightly, not on Windows or under coverage, where it cost most of each job's time and
+measured nothing more. Keep one ordinary test per such spec that pushes a single ~1 MB worst-case
+input through the same operation under a generous hang guard (`LinearTime.timed(label, hangGuard =
+...)`), so `sbt test` still catches a catastrophic regression. Details in the
+[Testing Guide](docs/reference/testing-guide.md#performance-tests-sbt-testperformance).
+
 ### Tests that need a real service
 
 Suites needing a database, a container, a local model server or an API key go in

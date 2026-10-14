@@ -14,6 +14,12 @@ by what you use. The notes below are the per-change detail it links to.
 
 Not in a release yet. Stage 3 ([#1901](https://github.com/llm4s/llm4s/issues/1901)) builds the harness on the durable runtime. Each slice adds its part here as it lands.
 
+### Typed custom streams (#1914)
+
+`EventHandlers` and the effect modules' `events(run, ...)` are additions. One behaviour changes:
+
+- **An fs2, ZIO, Pekko or Java agent stream whose consumer stops draining now fails** once more than `Agent.StreamCapacity` (1024) durable events wait for it, with an error naming the last `seq` it took, as the runtime already disconnects a listener that far behind (`Disconnected(lastSeq, Lagging)`). Before, the stream's buffer kept every durable event without limit. A `stream*` that fails this way cancels its turn, as any failure of those streams does; resume from the thread's log with `GraphRuntime.subscribe(threadId, afterSeq = lastSeq)`. A consumer that keeps up, even slowly, is unaffected: a run's own events stay far below the bound.
+
 ### Replay of external effects (#1921)
 
 Effects outside thread state replay through `ReplayGuard`: an intent and an outcome per `EffectKey`, kept in the thread's own store. Code that only runs agents or graphs compiles and works unchanged. Code that implements `Checkpointer`, or wraps one, changes:

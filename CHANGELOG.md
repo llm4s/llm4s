@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The SQLite store keeps the records in a new table (schema version 3, migrated on open).
   - Breaking: `Checkpointer.effect`, `Commit.effects` and `GraphError.EffectReplayRefused` are new. See the
     migration guide and design record §4.24.
+- **Typed custom streams: `EventHandlers`, and `events(run, ...)` on `AgentIO`, `AgentZ` and `AgentPekko`** ([#1914](https://github.com/llm4s/llm4s/issues/1914)):
+  `EventHandlers.on(eventType)(handler)` packages typed handlers with their `EventType`s, so a selection of mixed event
+  types keeps each payload's type; `.otherwise(f)` takes every event no handler took (kernel events, `LiveGap`,
+  `Disconnected`, an undecodable payload). An event is looked up once by name and version and decoded once. It is a
+  listener, so it is passed as one: `agent.stream(threadId, query)(handlers)`, `run.subscribe()(handlers)`,
+  `runtime.subscribe(threadId)(handlers)`. `agentIO.events(run, eventType)` is a `Stream[F, A]` of one type's payloads
+  for a run you hold, `events(run, handlers)` a stream of the handlers' results (one ADT of yours); the same on `AgentZ`
+  (`ZStream`) and `AgentPekko` (`Source[_, Future[Done]]`). It replays the run's durable events, follows it live, ends
+  with it, and cancels only its subscription when stopped early. Design record: §4.28.
 - **`llm4s-kotlin-api` is published to Maven Central with each release** ([#1494](https://github.com/llm4s/llm4s/issues/1494)):
   `org.llm4s:llm4s-kotlin-api` (no `_3` suffix: a Kotlin artifact), at the release's version, depending on
   `llm4s-java-api_3` at that same version, and managed by `llm4s-bom`, so a Gradle build that imports the BOM declares
@@ -1312,6 +1321,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **An agent stream whose consumer stops draining fails once 1024 durable events wait** ([#1914](https://github.com/llm4s/llm4s/issues/1914)):
+  the buffer under the fs2, ZIO, Pekko and Java agent streams (`AgentEventBuffer`) dropped live events past its size
+  but kept durable events without limit. It now holds at most `Agent.StreamCapacity` of them waiting; one more ends the
+  stream with an error naming the last `seq` taken, as the runtime's own `Disconnected(lastSeq, Lagging)` does. A
+  `stream*` that fails this way cancels its turn, as any failure of those streams does. Migration note: Stage 3, typed
+  custom streams.
 - **Breaking - `GraphRuntime.subscribe` is tenant-checked** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   it took no `RunConfig`, so any caller could replay and follow any tenant's thread - its `RunStarted` with tenant and
   principal, `Custom` payloads and `TaskFailed` messages - although `history`, `checkpoint`, `prune` and `fork` refuse
