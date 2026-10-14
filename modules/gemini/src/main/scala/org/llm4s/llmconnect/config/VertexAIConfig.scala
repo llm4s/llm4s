@@ -15,7 +15,9 @@ import org.llm4s.types.Result
  * @param model              Model identifier, e.g. `"gemini-2.0-flash"`.
  * @param credentialFilePath Optional path to a Google JSON credential file.
  *                           Falls back to `GOOGLE_APPLICATION_CREDENTIALS` env,
- *                           then `~/.config/gcloud/application_default_credentials.json`,
+ *                           then gcloud's `application_default_credentials.json`
+ *                           (`$CLOUDSDK_CONFIG` if set; else `%APPDATA%\gcloud` on Windows;
+ *                           else `~/.config/gcloud`),
  *                           then the GCE metadata server.
  * @param contextWindow      Maximum token capacity for prompt + completion combined.
  * @param reserveCompletion  Tokens reserved for the completion response.

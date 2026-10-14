@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Vertex AI finds gcloud's Application Default Credentials on Windows and under `CLOUDSDK_CONFIG`** ([#1939](https://github.com/llm4s/llm4s/issues/1939)).
+  The well-known `application_default_credentials.json` was looked for only in `~/.config/gcloud`. It is now located
+  as Google's client libraries do: `$CLOUDSDK_CONFIG` when set (any OS), else `%APPDATA%\gcloud` on Windows, else
+  `~/.config/gcloud`. `llm4s-gemini`'s `reference.conf` binds `APPDATA` and `CLOUDSDK_CONFIG` to
+  `llm4s.vertexai.adc.appData` / `cloudSdkConfig`. `GOOGLE_APPLICATION_CREDENTIALS` still wins.
+
 ### Added
 - **Phase 3 C4 follow-ups: retention against takeover admission, and one-to-one key encoding** ([#1921](https://github.com/llm4s/llm4s/issues/1921)).
   - A task's identity for its effects is now its id and its lineage: a digest of what scheduled it, namely the

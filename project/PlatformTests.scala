@@ -72,7 +72,10 @@ object PlatformTests {
       "org.llm4s.config.OpenAICompatibleListModelsWorkloadIdentitySpec",
       "org.llm4s.llmconnect.provider.ProviderExchangeLoggingGuideSpec"
     ),
-    "gemini" -> Seq("org.llm4s.llmconnect.provider.VertexAIAuthProviderSpec"),
+    "gemini" -> Seq(
+      "org.llm4s.llmconnect.provider.VertexAIAuthProviderSpec",
+      "org.llm4s.llmconnect.provider.GcloudAdcLocationSpec"
+    ),
     "configPolicy" -> Seq(
       "org.llm4s.configpolicy.DoctorSpec",
       "org.llm4s.configpolicy.CheckPoliciesSourceSpec"
