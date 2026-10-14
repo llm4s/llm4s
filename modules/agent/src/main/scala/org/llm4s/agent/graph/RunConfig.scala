@@ -155,13 +155,15 @@ final class RunContext private[graph] (
   private[graph] def effectOwner: TaskId = owner.getOrElse(position.taskId)
 
   /**
-   * This task's key: the SHA-256 of the thread and the task id (design §4.24), the same in every run of
-   * the task - a retry, `recover`, or `recover` after `updateState`. The base of a hook's
-   * [[effectKey]]s, and the key a hook gives an external system. It identifies the task among the
-   * thread's live tasks, not for all time: after `deleteThread`, or work after the last durable
-   * checkpoint planned again under `Async`/`OnExit`, a task id can name new work.
+   * This task's key: the SHA-256 of the thread and the id of the logical task (design §4.24) - for a
+   * continuation, the task it stands in for, so a hook that runs again after an answer, an approval or a
+   * breakpoint keeps its key. It is the same in every run of the task: a retry, `recover`, `recover`
+   * after `updateState`, and a resumed continuation. The base of a hook's [[effectKey]]s, and the key a
+   * hook gives an external system. It identifies the task among the thread's live tasks, not for all
+   * time: after `deleteThread`, or work after the last durable checkpoint planned again under
+   * `Async`/`OnExit`, a task id can name new work.
    */
-  lazy val taskKey: IdempotencyKey = IdempotencyKey.ofTask(position.threadId, position.taskId)
+  lazy val taskKey: IdempotencyKey = IdempotencyKey.ofTask(position.threadId, effectOwner)
 
   /**
    * The key of one external effect of this task - `operation`, such as `memory.record`, on what

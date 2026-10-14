@@ -154,11 +154,12 @@ object EffectRecord:
       "operation" -> record.key.operation,
       "scope"     -> record.key.scope,
       "taskId"    -> record.taskId.value,
-      "intent"    -> EffectBody.intentJson(record.body.intent)
+      // copied out, and copied in by fromJson: ujson values are mutable, so no caller shares a stored one
+      "intent" -> ujson.copy(EffectBody.intentJson(record.body.intent))
     )
     record.body match
       case EffectBody.Begun(_)           => ()
-      case EffectBody.Completed(_, out)  => json("outcome") = ujson.Obj("value" -> out)
+      case EffectBody.Completed(_, out)  => json("outcome") = ujson.Obj("value" -> ujson.copy(out))
       case EffectBody.Omitted(_, length) => json("outcome") = ujson.Obj("omittedBytes" -> ujson.Num(length.toDouble))
     json
 
@@ -179,7 +180,7 @@ object EffectRecord:
               case None => EffectBody.Begun(intent)
               case Some(outcome) =>
                 outcome.obj.get("value") match
-                  case Some(value) => EffectBody.Completed(intent, value)
+                  case Some(value) => EffectBody.Completed(intent, ujson.copy(value))
                   case None        => EffectBody.Omitted(intent, outcome("omittedBytes").num.toLong)
             new EffectRecord(key, TaskId(json("taskId").str), body)
           }
@@ -219,7 +220,7 @@ private[graph] object EffectBody:
         EffectIntent.Verifiable(
           upickle.default.read[StateCheck](json("before")),
           upickle.default.read[StateCheck](json("after")),
-          json("presumed")
+          ujson.copy(json("presumed"))
         )
       )
     case other => Left(ValidationError("effectRecord", s"unknown effect support '$other'"))
@@ -340,7 +341,7 @@ object ReplayGuard:
     val journal = context.journal
     def fresh(owner: TaskId): Result[A] =
       plan.flatMap { planned =>
-        val presumed = upickle.default.writeJs(planned.presumed)
+        val presumed = ujson.copy(upickle.default.writeJs(planned.presumed))
         val intent   = EffectIntent.Verifiable(planned.before, planned.after, presumed)
         for
           _       <- withinCap(key, "its presumed outcome", presumed, maxOutcomeBytes)
@@ -416,7 +417,7 @@ object ReplayGuard:
     outcome: A,
     maxOutcomeBytes: Int
   ): Result[Unit] =
-    val json   = upickle.default.writeJs(outcome)
+    val json   = ujson.copy(upickle.default.writeJs(outcome))
     val length = encodedLength(json)
     val body =
       if length > maxOutcomeBytes then EffectBody.Omitted(intent, length) else EffectBody.Completed(intent, json)
@@ -437,7 +438,7 @@ object ReplayGuard:
         case EffectBody.Begun(_) => Left(GraphError.EffectReplayRefused(key.operation, "it has no recorded outcome"))
 
   private def decode[A: ReadWriter](key: EffectKey, json: ujson.Value): Result[A] =
-    Try(upickle.default.read[A](json)).toResult.left.map(e =>
+    Try(upickle.default.read[A](ujson.copy(json))).toResult.left.map(e =>
       GraphError.EffectReplayRefused(key.operation, s"its stored outcome does not decode: ${e.message}")
     )
 

@@ -100,6 +100,55 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
     EffectRecord.fromJson(ujson.Obj()).isLeft shouldBe true
   }
 
+  it should "be the logical task's for a continuation: the task it stands in for, not the one executing" in {
+    val origin = context(task = "2.0")
+    val continuation = new RunContext(
+      RunConfig(),
+      RunPosition(ThreadId("t"), RunId("r2"), "r2/7", TaskId("5.3"), NodeId("review"), 5, Some(FencingToken(9L))),
+      NodeEventSink.none,
+      owner = Some(TaskId("2.0"))
+    )
+    continuation.taskKey shouldBe origin.taskKey
+    continuation.effectKey("memory.record", "m") shouldBe origin.effectKey("memory.record", "m")
+    continuation.effectOwner shouldBe TaskId("2.0")
+  }
+
+  "EffectRecord's JSON" should "share no mutable value with the record, in either direction" in {
+    val key    = context().effectKey("op", "x")
+    val out    = ujson.Obj("n" -> 1)
+    val record = new EffectRecord(key, TaskId("3.1"), EffectBody.Completed(EffectIntent.Transactional, out))
+    val before = ujson.write(EffectRecord.toJson(record))
+    // what toJson hands out cannot change the record
+    EffectRecord.toJson(record)("outcome")("value")("n") = 99
+    ujson.write(EffectRecord.toJson(record)) shouldBe before
+    // what fromJson was given cannot change the record it read
+    val json = EffectRecord.toJson(record)
+    val read = EffectRecord.fromJson(json).value
+    json("outcome")("value")("n") = 42
+    ujson.write(EffectRecord.toJson(read)) shouldBe before
+    val verifiable = EffectRecord.toJson(
+      new EffectRecord(
+        key,
+        TaskId("3.1"),
+        EffectBody.Begun(EffectIntent.Verifiable(StateCheck.absent, StateCheck.of("x"), ujson.Arr(1)))
+      )
+    )
+    val readV = EffectRecord.fromJson(verifiable).value
+    verifiable("intent")("presumed").arr += ujson.Num(2)
+    EffectRecord.toJson(readV)("intent")("presumed") shouldBe ujson.Arr(1)
+  }
+
+  it should "not let a replayed outcome alias the stored one" in {
+    val c   = context()
+    val key = c.effectKey("op", "json")
+    ReplayGuard.unverifiable[ujson.Value](c, key, idempotent = false)(Right(ujson.Obj("n" -> 1))).value("n") = 7
+    val first = ReplayGuard.unverifiable[ujson.Value](c, key, idempotent = false)(Right(ujson.Null)).value
+    first("n") = 5
+    ReplayGuard.unverifiable[ujson.Value](c, key, idempotent = false)(Right(ujson.Null)).value shouldBe ujson.Obj(
+      "n" -> 1
+    )
+  }
+
   "StateCheck" should "digest content, telling absent from empty" in {
     StateCheck.of("a") shouldBe StateCheck.of("a".getBytes("UTF-8"))
     StateCheck.of("a") should not be StateCheck.of("b")
