@@ -14,30 +14,19 @@ import scala.concurrent.duration.*
  * and responses could be mismatched because there was no synchronization between
  * request IDs and responses.
  *
- * These tests use a real subprocess (bash script) that echoes JSON-RPC responses.
+ * These tests use a real subprocess (`StdioTestServer`, a JVM main, so they run on Windows too) that echoes
+ * JSON-RPC responses.
  */
 class StdioTransportConcurrencySpec extends AnyFlatSpec with Matchers {
-
-  // Skip tests on Windows since they require bash
-  private val isWindows: Boolean = System.getProperty("os.name").toLowerCase.contains("win")
 
   /**
    * Test that verifies concurrent requests get correctly matched responses.
    * This is the key test for issue #326.
    */
   "StdioTransportImpl" should "correctly route responses to concurrent requests" in {
-    assume(!isWindows, "Bash not available on Windows")
-    // Use cat with a simple transformation - this is a minimal echo server
-    // The script reads JSON, extracts id, and returns a response
-    val scriptCommand = Seq(
-      "bash",
-      "-c",
-      """while IFS= read -r line; do
-           id=$(echo "$line" | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
-           if [ -n "$id" ]; then
-             echo "{\"jsonrpc\":\"2.0\",\"id\":\"$id\",\"result\":{\"echo\":\"response-$id\"}}"
-           fi
-         done"""
+    val scriptCommand = StdioTestServers.echo(
+      """{"jsonrpc":"2.0","id":"$id","result":{"echo":"response-$id"}}""",
+      "--ready"
     )
 
     val transport = new StdioTransportImpl(scriptCommand, startupTimeout = 500.millis, name = "echo-server")
@@ -112,16 +101,9 @@ class StdioTransportConcurrencySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "handle rapid sequential requests correctly" in {
-    assume(!isWindows, "Bash not available on Windows")
-    val scriptCommand = Seq(
-      "bash",
-      "-c",
-      """while IFS= read -r line; do
-           id=$(echo "$line" | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
-           if [ -n "$id" ]; then
-             echo "{\"jsonrpc\":\"2.0\",\"id\":\"$id\",\"result\":{\"seq\":\"$id\"}}"
-           fi
-         done"""
+    val scriptCommand = StdioTestServers.echo(
+      """{"jsonrpc":"2.0","id":"$id","result":{"seq":"$id"}}""",
+      "--ready"
     )
 
     val transport   = new StdioTransportImpl(scriptCommand, startupTimeout = 500.millis, name = "sequential-server")
@@ -156,18 +138,10 @@ class StdioTransportConcurrencySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "handle mixed concurrent and sequential requests" in {
-    assume(!isWindows, "Bash not available on Windows")
-    val scriptCommand = Seq(
-      "bash",
-      "-c",
-      """while IFS= read -r line; do
-           id=$(echo "$line" | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
-           if [ -n "$id" ]; then
-             # Add small random delay to simulate real server processing
-             sleep 0.0$((RANDOM % 3))
-             echo "{\"jsonrpc\":\"2.0\",\"id\":\"$id\",\"result\":{\"mixed\":\"$id\"}}"
-           fi
-         done"""
+    val scriptCommand = StdioTestServers.echo(
+      """{"jsonrpc":"2.0","id":"$id","result":{"mixed":"$id"}}""",
+      "--ready",
+      "--delay=20"
     )
 
     val transport = new StdioTransportImpl(scriptCommand, startupTimeout = 500.millis, name = "mixed-server")
@@ -228,17 +202,9 @@ class StdioTransportConcurrencySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "correctly handle notifications (which don't expect responses)" in {
-    assume(!isWindows, "Bash not available on Windows")
-    val scriptCommand = Seq(
-      "bash",
-      "-c",
-      """while IFS= read -r line; do
-           id=$(echo "$line" | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
-           if [ -n "$id" ]; then
-             echo "{\"jsonrpc\":\"2.0\",\"id\":\"$id\",\"result\":{\"ok\":true}}"
-           fi
-           # Notifications (no id) are silently accepted
-         done"""
+    val scriptCommand = StdioTestServers.echo(
+      """{"jsonrpc":"2.0","id":"$id","result":{"ok":true}}""",
+      "--ready"
     )
 
     val transport = new StdioTransportImpl(scriptCommand, startupTimeout = 500.millis, name = "notification-server")
