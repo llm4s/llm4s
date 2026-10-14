@@ -2369,7 +2369,8 @@ final class GraphRuntime(
         RunPosition(threadId, runId, checkpointId, task.id, task.node, execution.superstep, claim.map(_.token)),
         sink,
         journal = effectJournal,
-        owner = Some(task.arrivalId -> task.arrivalLineage)
+        owner = Some(task.arrivalId -> task.arrivalLineage),
+        resumeDigest = task.resumeDigest
       )
       def settled(executed: Result[TaskResult]): Result[TaskResult] =
         executed.flatMap(result => graph.encodeWrite(checkpointId, task, result).map(result -> _)) match

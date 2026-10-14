@@ -245,6 +245,35 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     restored.stampedBy(3L).frontier.map(_.lineage) shouldBe Vector(Task.rootLineage(3L, TaskId("0.0")))
   }
 
+  it should "give a continuation or question saved without its identity one of its stored encoding" in {
+    val b      = GraphBuilder("g", "v1")
+    val review = b.declareResume[String, String]("review")
+    b.implement(review.node)((_, _, _) => NodeResult.Continue(Command.empty))
+    val act = b.node[Unit]("act")((_, _, _) => NodeResult.Suspend(StateUpdate.empty, "ok?", review))
+    val g   = b.compile(act)(_ => Right(())).value
+    val parked = g.step(ThreadId("t"), g.start(()), RunConfig()) match
+      case Step.Next(next) => next
+      case other           => fail(s"did not step: $other")
+    val saved = g.snapshot(parked).value
+    saved.parked.head.questionDigest shouldBe defined
+    val question = saved.parked.head.question
+    g.restore(saved.copy(parked = saved.parked.map(_.copy(questionDigest = None))))
+      .value
+      .parked
+      .head
+      .questionDigest shouldBe
+      Some(CompiledGraph.questionDigest(Some(question)))
+    val resumed = g.resume(parked, Map(InterruptId("0.0") -> review.answer("yes"))).value
+    val pending = g.snapshot(resumed).value
+    pending.frontier.head.resumeDigest shouldBe resumed.frontier.head.resumeDigest
+    pending.frontier.head.resumeDigest shouldBe defined
+    g.restore(pending.copy(frontier = pending.frontier.map(_.copy(resumeDigest = None))))
+      .value
+      .frontier
+      .head
+      .resumeDigest shouldBe Some(CompiledGraph.storedDigest(pending.frontier.head.input))
+  }
+
   it should "round-trip the terminal Failed status" in {
     val b     = GraphBuilder("g", "v1")
     val start = b.node[Unit]("start")((_, _, _) => continue(Command.empty))

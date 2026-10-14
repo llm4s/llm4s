@@ -150,11 +150,13 @@ final class RunContext private[graph] (
   /** Where this task's [[ReplayGuard]]s keep effect records: the thread's store in a runtime, memory outside one. */
   private[graph] val journal: EffectJournal = EffectJournal.local(),
   /** The task effect records belong to: the task a continuation stands in for, else this one (design §4.24). */
-  owner: Option[(TaskId, String)] = None
+  owner: Option[(TaskId, String)] = None,
+  /** A resume continuation's identity, kept with its task ([[CompiledGraph.resumeDigest]]). */
+  private[agent] val resumeDigest: Option[String] = None
 ):
   /** This context with `next` as the answers its hooks see, recording usage in the same task's accumulator. */
   private[agent] def withAnswers(next: Map[String, (ujson.Value, ujson.Value)]): RunContext =
-    new RunContext(config, position, sink, next, usage, journal, owner)
+    new RunContext(config, position, sink, next, usage, journal, owner, resumeDigest)
 
   /** The task this task's effect records belong to ([[Commit.releasesEffect]]). */
   private[graph] def effectOwner: TaskId = owner.fold(position.taskId)(_._1)

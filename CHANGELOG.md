@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - SQLite schema 4 adds `task_lineage`.
   - A pending write records its result's digest (`PendingWrite.resultDigest`), from which its successors' lineage
     is computed. A recovery that reuses a write made by an older codec therefore keeps its successors' keys.
+    A resume's identity is likewise taken when its answer is applied and kept with the continuation
+    (`PendingTask.resumeDigest`, `ParkedContinuation.questionDigest`), so no identity digest is recomputed from a
+    decoded value.
   - The loop records a tool call's `IdempotencyKey` from the issuing model task's key, lineage included, and the
     call's id, name and arguments (`IdempotencyKey.ofCall`), so a model request asked again from the same results
     that answers alike issues the same keys.

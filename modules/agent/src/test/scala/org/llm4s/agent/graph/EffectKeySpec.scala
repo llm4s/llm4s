@@ -130,18 +130,22 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
   "An answered resume's key" should "name its phase: the asking phase, the question and the answer, by thread" in {
     val call    = IdempotencyKey("call-key")
     val state   = ThreadState.empty(Map.empty)
-    val q       = ujson.Obj("prompt" -> "sure?")
-    val first   = IdempotencyKey.ofResume(call, None, q, ujson.True)
-    val second  = IdempotencyKey.ofResume(call, Some(first), q, ujson.True)
+    val q       = CompiledGraph.questionDigest(Some(VersionedJson(1, ujson.Obj("prompt" -> "sure?"))))
+    val resume  = CompiledGraph.resumeDigest(Some(q), ujson.True)
+    val first   = IdempotencyKey.ofResume(call, None, resume)
+    val second  = IdempotencyKey.ofResume(call, Some(first), resume)
     val execute = ToolContext(context(), ToolCallId("c"), call, state)
     def resuming(phase: IdempotencyKey, thread: String = "t") =
       ToolContext.resuming(context(thread = thread), ToolCallId("c"), call, state, approved = false, phase)
     val keys = Seq(execute, resuming(first), resuming(second)).map(_.effectKey("op", "x"))
     keys.distinct should have size 3
     // stable: the same resume, recovered, derives the same key
-    resuming(IdempotencyKey.ofResume(call, None, ujson.Obj("prompt" -> "sure?"), ujson.True))
-      .effectKey("op", "x") shouldBe keys(1)
-    IdempotencyKey.ofResume(call, None, q, ujson.False) should not be first
+    val again = CompiledGraph.resumeDigest(
+      Some(CompiledGraph.questionDigest(Some(VersionedJson(1, ujson.Obj("prompt" -> "sure?"))))),
+      ujson.True
+    )
+    resuming(IdempotencyKey.ofResume(call, None, again)).effectKey("op", "x") shouldBe keys(1)
+    IdempotencyKey.ofResume(call, None, CompiledGraph.resumeDigest(Some(q), ujson.False)) should not be first
     // a fork resuming the same question is a new effect
     resuming(first, thread = "fork").effectKey("op", "x") should not be keys(1)
     // an approval re-run of execute keeps execute's key
@@ -319,12 +323,12 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
     Set(context(thread = "t\uDC00").taskKey, context(thread = "t?").taskKey).size shouldBe 2
     Set(context(task = "1.\uD800").taskKey, context(task = "1.?").taskKey).size shouldBe 2
     Set(context(thread = "t\uDC00").effectKey("op").scope, context(thread = "t?").effectKey("op").scope).size shouldBe 2
-    val call = IdempotencyKey("call")
+    def question(text: String) = Some(CompiledGraph.questionDigest(Some(VersionedJson(1, ujson.Str(text)))))
     Set(
-      IdempotencyKey.ofResume(call, None, ujson.Str("q\uD800"), ujson.Str("a")),
-      IdempotencyKey.ofResume(call, None, ujson.Str("q?"), ujson.Str("a")),
-      IdempotencyKey.ofResume(call, None, ujson.Str("q"), ujson.Str("a\uDFFF")),
-      IdempotencyKey.ofResume(call, None, ujson.Str("q"), ujson.Str("a?"))
+      CompiledGraph.resumeDigest(question("q\uD800"), ujson.Str("a")),
+      CompiledGraph.resumeDigest(question("q?"), ujson.Str("a")),
+      CompiledGraph.resumeDigest(question("q"), ujson.Str("a\uDFFF")),
+      CompiledGraph.resumeDigest(question("q"), ujson.Str("a?"))
     ).size shouldBe 4
     Set(
       IdempotencyKey.ofCall(

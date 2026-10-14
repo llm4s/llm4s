@@ -367,6 +367,55 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
     asking.keys.toArray.distinct should have size 1
   }
 
+  "A resume's identity" should "stay the same when the question or the continuation's codec migrates between runs" in {
+    // taken once, when the answer is applied, and kept with the continuation: never recomputed from what a
+    // later run decodes, which a newer codec migrates
+    final case class Old(label: String) derives upickle.default.ReadWriter
+    final case class Item(name: String) derives upickle.default.ReadWriter
+    val renamed: ujson.Value => Result[ujson.Value] = json => Right(ujson.Obj("name" -> json("label")))
+    val digests                                     = new java.util.concurrent.ConcurrentLinkedQueue[Option[String]]()
+    val failing                                     = new AtomicBoolean(false)
+    def graphOf[Q: upickle.default.ReadWriter](question: Q, versions: Option[(SchemaVersion, SchemaVersion)]) =
+      val b = GraphBuilder("migrating-resume", "v1")
+      val review = versions.fold(b.declareResume[Q, String]("review")) { (q, input) =>
+        b.declareResume[Q, String]("review", questionVersion = q, inputVersion = input)
+      }
+      b.implement(review.node, writes = Set(log)) { (resumed, _, context) =>
+        digests.add(context.resumeDigest)
+        if failing.get then NodeResult.Fail(ValidationError("review", "failed"))
+        else continue(Command.empty.update(log, resumed.answer))
+      }
+      val act = b.node[Unit]("act")((_, _, _) => NodeResult.Suspend(StateUpdate.empty, question, review))
+      b.compile(act)(_.get(log)).value -> review
+    val (older, olderReview) = graphOf(Old("x"), None)
+    val (newer, _) = graphOf(
+      Item("x"),
+      Some(
+        SchemaVersion(2)(1 -> renamed) -> SchemaVersion(2)(
+          1 -> (json =>
+            Right(ujson.Obj("question" -> ujson.Obj("name" -> json("question")("label")), "answer" -> json("answer")))
+          )
+        )
+      )
+    )
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+    def answered(on: ThreadId) =
+      val parked = runtime.start(on, older, ()).awaited.value.suspended
+      Map(parked.interrupts.head.id -> olderReview.answer("yes"))
+
+    // the continuation's input migrates: a recovery under the newer codec reads the identity it was given
+    val answer = answered(thread)
+    failing.set(true)
+    runtime.resume(thread, older, answer).awaited.value.failed
+    failing.set(false)
+    runtime.recover(thread, newer).awaited.value.completed._2 shouldBe Vector("yes")
+    // the parked question migrates: the answer applied under the newer codec takes the same identity
+    runtime.resume(other, newer, answered(other)).awaited.value.completed._2 shouldBe Vector("yes")
+    digests.asScala.toVector.flatten.distinct should have size 1
+    digests.asScala.toVector should have size 3
+  }
+
   it should "be another in a fork resumed from the suspension, whose continuation is an effect of its own" in {
     val store   = InMemoryCheckpointer()
     val runtime = GraphRuntime(store)

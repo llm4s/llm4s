@@ -1751,8 +1751,9 @@ object ToolLoop:
                       IdempotencyKey.ofResume(
                         request.idempotencyKey,
                         request.phase,
-                        request.question,
-                        answer
+                        // recorded with the continuation when the answer was applied; a resume without one is
+                        // never the same phase as another
+                        context.resumeDigest.getOrElse(s"unrecorded:${java.util.UUID.randomUUID()}")
                       )
                     val toolContext = ToolContext.resuming(
                       answering(agent, context, request.answered),

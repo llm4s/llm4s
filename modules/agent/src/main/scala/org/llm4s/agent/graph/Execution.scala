@@ -107,7 +107,12 @@ final private[graph] case class Task(
    * was admitted, of the run's claim. Work planned again after a takeover from the same results is the same
    * task, so it replays the first plan's evidence; work planned from other results is another task.
    */
-  lineage: String = Task.Unstamped
+  lineage: String = Task.Unstamped,
+  /**
+   * For a continuation of a resume node, the digest of its question and answer, taken when the answer was
+   * applied ([[CompiledGraph.resumeDigest]]) and kept with the task, never recomputed from its decoded input.
+   */
+  resumeDigest: Option[String] = None
 ):
   /** The task id a dynamic join counts this task's completion as. */
   def arrivalId: TaskId = origin.fold(id)(_.task)
@@ -146,7 +151,11 @@ final private[graph] case class Parked(
   question: Any,
   origin: Origin,
   slot: Option[JoinSlot],
-  hold: Option[Hold] = None
+  hold: Option[Hold] = None,
+  /** For a question, the digest of the question as first encoded ([[CompiledGraph.questionDigest]]). */
+  questionDigest: Option[String] = None,
+  /** For a task held before it ran, the held task's [[Task.resumeDigest]]. */
+  resumeDigest: Option[String] = None
 )
 
 /** What a static breakpoint holds: a task before it runs, or a task's routes after it ran. */
@@ -244,7 +253,9 @@ object GraphSnapshot:
     /** The task's lineage (design §4.24); empty for a task written before lineages (format 6). */
     lineage: String = "",
     /** The lineage of the task a continuation stands in for. */
-    originLineage: Option[String] = None
+    originLineage: Option[String] = None,
+    /** A resume continuation's digest of its question and answer (design §4.24); computed from `input` if absent. */
+    resumeDigest: Option[String] = None
   ) derives ReadWriter
 
   final case class StaticArrivals(joinId: String, arrived: Vector[String]) derives ReadWriter
@@ -268,7 +279,11 @@ object GraphSnapshot:
     breakpoint: Option[BreakpointPhase] = None,
     heldRoutes: Vector[EncodedRoute] = Vector.empty,
     /** The lineage of the task the continuation stands in for; empty before lineages (format 6). */
-    originLineage: String = ""
+    originLineage: String = "",
+    /** A question's digest as first encoded (design §4.24); computed from `question` if absent. */
+    questionDigest: Option[String] = None,
+    /** A task held before it ran: its resume digest, if it is a resume continuation. */
+    resumeDigest: Option[String] = None
   ) derives ReadWriter
 
 /** A result decoded from a pending write, with the digest its successors' lineage is computed from. */

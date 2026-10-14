@@ -133,10 +133,29 @@ final class CompiledGraph[I, O] private[graph] (
             val taskId = TaskId(s"${execution.superstep}.${execution.frontier.size + i}")
             p.hold match
               case Some(Hold.Before(input)) =>
-                Task(taskId, p.resumeNode, input, p.slot, Some(p.origin), passedBefore = true)
+                Task(
+                  taskId,
+                  p.resumeNode,
+                  input,
+                  p.slot,
+                  Some(p.origin),
+                  passedBefore = true,
+                  resumeDigest = p.resumeDigest
+                )
               case Some(Hold.After(routes)) =>
                 Task(taskId, p.resumeNode, (), p.slot, Some(p.origin), replay = Some(routes))
-              case None => Task(taskId, p.resumeNode, Resumed(p.question, answer), p.slot, Some(p.origin))
+              case None =>
+                // the continuation's identity is taken now, from the question as first encoded and the answer as
+                // given, and kept with the task: never recomputed from what a later run decodes (design §4.24)
+                val digest = CompiledGraph.resumeDigest(p.questionDigest, answers(p.interrupt))
+                Task(
+                  taskId,
+                  p.resumeNode,
+                  Resumed(p.question, answer),
+                  p.slot,
+                  Some(p.origin),
+                  resumeDigest = Some(digest)
+                )
           }
         Right(
           execution.copy(
@@ -169,7 +188,8 @@ final class CompiledGraph[I, O] private[graph] (
               task.passedBefore,
               task.replay.map(_.toVector.map(encodeRoute)),
               task.lineage,
-              task.origin.map(_.lineage)
+              task.origin.map(_.lineage),
+              task.resumeDigest
             )
           },
           staticJoins = execution.staticArrivals.toVector
@@ -198,7 +218,9 @@ final class CompiledGraph[I, O] private[graph] (
               p.slot.map(_.fanOutTask.value),
               p.hold.map(_.phase),
               held,
-              p.origin.lineage
+              p.origin.lineage,
+              p.questionDigest,
+              p.resumeDigest
             )
           },
           paused = execution.paused,
@@ -298,12 +320,12 @@ final class CompiledGraph[I, O] private[graph] (
     }
     val savedSlots = snapshot.dynamicJoins.flatMap(a => a.expected.map((a.joinId, a.fanOutTask, _))).toSet
     val orphanTasks = tasks.collect {
-      case task @ Task(_, _, _, Some(slot), _, _, _, _)
+      case task @ Task(_, _, _, Some(slot), _, _, _, _, _)
           if !savedSlots.contains((slot.join.value, slot.fanOutTask.value, task.arrivalId.value)) =>
         s"pending task ${task.id.value} belongs to no open activation of dynamic join '${slot.join.value}'"
     }
     val orphanParked = parked.collect {
-      case p @ Parked(_, _, _, origin, Some(slot), _)
+      case p @ Parked(_, _, _, origin, Some(slot), _, _, _)
           if !savedSlots.contains((slot.join.value, slot.fanOutTask.value, origin.task.value)) =>
         s"interrupt ${p.interrupt.value} belongs to no open activation of dynamic join '${slot.join.value}'"
     }
@@ -451,7 +473,8 @@ final class CompiledGraph[I, O] private[graph] (
           position,
           NodeEventSink.none,
           journal = execution.journal,
-          owner = Some(task.arrivalId -> task.arrivalLineage)
+          owner = Some(task.arrivalId -> task.arrivalLineage),
+          resumeDigest = task.resumeDigest
         )
         executeTask(task, execution, context).map(task -> _)
     })
@@ -801,9 +824,26 @@ final class CompiledGraph[I, O] private[graph] (
     // one interrupt per task, in frontier order, whatever parked it
     val newlyParked = results.collect {
       case (task, TaskResult.Parked(_, question, resume)) =>
-        Parked(InterruptId(task.id.value), resume.node.id, question, origin(task), task.slot)
+        // the question's digest as the task produced it, kept with the continuation (design §4.24)
+        val digest = CompiledGraph.questionDigest(Try(resume.encodeQuestion(question)).toOption)
+        Parked(
+          InterruptId(task.id.value),
+          resume.node.id,
+          question,
+          origin(task),
+          task.slot,
+          questionDigest = Some(digest)
+        )
       case (task, TaskResult.Held) =>
-        Parked(InterruptId(task.id.value), task.node, (), origin(task), task.slot, Some(Hold.Before(task.input)))
+        Parked(
+          InterruptId(task.id.value),
+          task.node,
+          (),
+          origin(task),
+          task.slot,
+          Some(Hold.Before(task.input)),
+          resumeDigest = task.resumeDigest
+        )
       case (task, TaskResult.Done(command)) if heldAfter.contains(task.id) =>
         Parked(InterruptId(task.id.value), task.node, (), origin(task), task.slot, Some(Hold.After(command.routes)))
     }
@@ -907,7 +947,21 @@ final class CompiledGraph[I, O] private[graph] (
           Right(Some(Origin(TaskId(task), NodeId(originNode), pending.originLineage.getOrElse(pending.lineage))))
         case (Some(_), Some(originNode)) => Left(s"$owner continues unknown node '$originNode'")
         case _                           => Left(s"$owner has half an origin")
-    yield Task(TaskId(pending.taskId), node.ref.id, input, slot, origin, pending.passedBefore, replay, pending.lineage)
+      // a continuation saved without its digest takes one from its input as stored, never as decoded
+      resumeDigest = pending.resumeDigest.orElse(
+        Option.when(replay.isEmpty && resumes.contains(node.ref.id))(CompiledGraph.storedDigest(pending.input))
+      )
+    yield Task(
+      TaskId(pending.taskId),
+      node.ref.id,
+      input,
+      slot,
+      origin,
+      pending.passedBefore,
+      replay,
+      pending.lineage,
+      resumeDigest
+    )
 
   /** Held or replayed routes, rebound to this graph; `Left` names the first that is not. */
   private def restoreRoutes(owner: String, routes: Vector[EncodedRoute]): Either[String, List[Route]] =
@@ -953,7 +1007,12 @@ final class CompiledGraph[I, O] private[graph] (
       (),
       Origin(TaskId(saved.originTask), NodeId(saved.originNode), saved.originLineage),
       slot,
-      Some(hold)
+      Some(hold),
+      resumeDigest = saved.resumeDigest.orElse(
+        Option.when(phase == BreakpointPhase.Before && resumes.contains(node.ref.id))(
+          CompiledGraph.storedDigest(saved.question)
+        )
+      )
     )
 
   private def restoreContinuation(saved: GraphSnapshot.ParkedContinuation, owner: String): Either[String, Parked] =
@@ -975,7 +1034,9 @@ final class CompiledGraph[I, O] private[graph] (
       resume.node.id,
       question,
       Origin(TaskId(saved.originTask), NodeId(saved.originNode), saved.originLineage),
-      slot
+      slot,
+      // a question saved without its digest takes one from the question as stored, never as decoded
+      questionDigest = Some(saved.questionDigest.getOrElse(CompiledGraph.questionDigest(Some(saved.question))))
     )
 
   private def restoreStaticArrivals(saved: GraphSnapshot.StaticArrivals): Either[String, (JoinId, Set[NodeId])] =
@@ -1043,6 +1104,30 @@ private[graph] enum TaskResult:
     case Held                 => StateUpdate.empty
 
 private[graph] object CompiledGraph:
+
+  /** The digest of stored JSON `json`, under `tag`; JSON that does not hash is never the same as other JSON. */
+  private def digestOf(tag: String, json: ujson.Value): String =
+    Try(KeyDigest.of(Seq(tag, KeyDigest.canonical(json))))
+      .getOrElse(s"unencodable:${java.util.UUID.randomUUID()}")
+
+  /** The digest of a parked question as first encoded, or as stored; none encoded is never the same as another. */
+  def questionDigest(encoded: Option[VersionedJson]): String =
+    encoded.fold(s"unencodable:${java.util.UUID.randomUUID()}")(q =>
+      digestOf("llm4s-question-v1", upickle.default.writeJs(q))
+    )
+
+  /**
+   * The identity of a resume (design §4.24): its question's digest, taken when the question was parked, and
+   * the answer as given. Taken once, when the answer is applied, and kept with the continuation.
+   */
+  def resumeDigest(questionDigest: Option[String], answer: ujson.Value): String =
+    digestOf(
+      "llm4s-resume-v1",
+      ujson.Arr(questionDigest.getOrElse(s"unrecorded:${java.util.UUID.randomUUID()}"), answer)
+    )
+
+  /** The resume digest of a continuation saved without one: of its input as stored. */
+  def storedDigest(input: VersionedJson): String = digestOf("llm4s-resumed-v1", upickle.default.writeJs(input))
 
   /**
    * The digest of pending write `write` as encoded, its checkpoint id and recorded digest aside: of the bytes a
