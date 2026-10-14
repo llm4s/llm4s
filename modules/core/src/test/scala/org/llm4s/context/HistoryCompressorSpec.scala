@@ -269,4 +269,33 @@ class HistoryCompressorSpec extends AnyFlatSpec with Matchers {
     processed.exists(m => m.isInstanceOf[SystemMessage] && m.content.startsWith("[HISTORY_SUMMARY]")) shouldBe true
     processed.exists(_.content == "Answer 3") shouldBe true
   }
+
+  it should "keep a media tool result with the call that asked for it, so the history stays valid" in {
+    val chart = ContentPart
+      .image(
+        org.llm4s.media.MediaSource.Url(java.net.URI.create("https://e.com/chart.png")),
+        org.llm4s.media.MediaType.Png
+      )
+      .toOption
+      .get
+    val call = AssistantMessage(contentOpt = None, toolCalls = Seq(ToolCall("c1", "render", ujson.Obj())))
+    val messages = Seq(
+      UserMessage("Draw it"),
+      call,
+      ToolMessage(Vector(chart), "c1"),
+      AssistantMessage("Here it is."),
+      UserMessage("Question 2"),
+      AssistantMessage("Answer 2"),
+      UserMessage("Question 3"),
+      AssistantMessage("Answer 3")
+    )
+    val processed = HistoryCompressor.compressToDigest(messages, counter, capTokens = 500, keepLastK = 1).toOption.get
+    processed should contain(call)
+    processed should contain(ToolMessage(Vector(chart), "c1"))
+    processed.indexOf(call) should be < processed.indexOf(ToolMessage(Vector(chart), "c1"))
+    // every kept call has its result, and every kept result its call
+    val calls   = processed.collect { case a: AssistantMessage => a.toolCalls.map(_.id) }.flatten.toSet
+    val results = processed.collect { case t: ToolMessage => t.toolCallId }.toSet
+    calls shouldBe results
+  }
 }

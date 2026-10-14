@@ -2,7 +2,7 @@ package org.llm4s.context
 
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model._
-import org.llm4s.types.Result
+import org.llm4s.types.{ Result, SemanticBlockId }
 import org.slf4j.LoggerFactory
 import scala.util.matching.Regex
 
@@ -118,7 +118,9 @@ object HistoryCompressor {
 
     // a block with an image or document is kept as it is, never digested: a digest is text, built from the
     // messages' text view, and would lose the media without a trace (#1913)
-    val (olderWithMedia, olderText) = older.partition(block => Message.hasMedia(block.messages))
+    // together with every block that shares a tool call with one kept, so no call loses its result or result its call
+    val keptIds                     = mediaGroups(older)
+    val (olderWithMedia, olderText) = older.partition(block => keptIds(block.id))
     val olderDigests                = olderText.map(createBlockDigest)
 
     val digestMessages: Seq[Message] =
@@ -137,6 +139,23 @@ object HistoryCompressor {
       }
 
     Right(finalDigestMsgs ++ recentMessages)
+  }
+
+  /** The ids of the blocks of `blocks` with media, and of every block linked to one by a shared tool call id. */
+  private def mediaGroups(blocks: Seq[SemanticBlock]): Set[SemanticBlockId] = {
+    def callIds(block: SemanticBlock): Set[String] =
+      block.messages.flatMap {
+        case a: AssistantMessage => a.toolCalls.map(_.id)
+        case t: ToolMessage      => Seq(t.toolCallId)
+        case _                   => Nil
+      }.toSet
+    @scala.annotation.tailrec
+    def grow(kept: Seq[SemanticBlock]): Seq[SemanticBlock] = {
+      val ids  = kept.flatMap(callIds).toSet
+      val more = blocks.filter(b => !kept.contains(b) && callIds(b).exists(ids))
+      if (more.isEmpty) kept else grow(kept ++ more)
+    }
+    grow(blocks.filter(b => Message.hasMedia(b.messages))).map(_.id).toSet
   }
 
   private def createBlockDigest(block: SemanticBlock): HistoryDigest = {
