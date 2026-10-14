@@ -169,6 +169,15 @@ Design §4.25. New, opt-in API in `org.llm4s.agent.harness`; nothing existing ch
 - **File tools over a `StateFileBackend` add the `files` key.** Every mutation holds the lock `state-files/<keyId>` (needed: it keeps two edits of one file in a batch from losing one, and the quota exact), so adding file tools over a `StateFileBackend` adds its `files` key and C2's `tool-queue`, and changes the agent's version. Under §4.29 (C5) a thread at rest continues, its files starting empty; a thread in flight (suspended, or `Running` after a crash) is refused with `RestoreRejected` until it is finished or forgotten. Taking the tools out again refuses only a thread whose files hold content: the last file's delete removes the key's entry, so a thread with no files restores.
 - A `HostFileBackend` keeps its cross-process lock files in the `lockDirectory` given to `open`; give every backend that may touch the same files, in any process, the same one. It refuses symbolic links and files with other hard links.
 
+### Event records carry their claim's token (#1918)
+
+A run is told from an earlier run with the same `RunId` by its claim's fencing token. Code that only runs agents or graphs is unaffected.
+
+- **`EventRecord` gains `token: FencingToken`, after `runId`.** A `Checkpointer` builds each record with `EventRecord.committed(threadId, seq, commit.token, draft)` (the token is a new parameter) and returns and replays it as stored. `CheckpointerContract` checks that every record carries the token of the commit that stored it.
+- **Persisted logs stay readable.** A store that keeps the record's JSON, as both shipped stores do, needs no schema change: a record written before this change has no `token` key and reads as `FencingToken(0)`, which no store issues. An older build reading a newer record ignores the key.
+- **Positional constructions and patterns gain a field.** `EventRecord(threadId, seq, runId, checkpointId, ...)` becomes `EventRecord(threadId, seq, runId, token, checkpointId, ...)`, and `case EventRecord(_, _, _, _, _, _, _, event)` gains a `_`.
+- **`StreamEvent.Live` gains `token: FencingToken`, after `runId`**: the claim token of the run that sent the progress. `StreamEvent.Live(threadId, runId, taskId, nodeId, name, version, payload)` becomes `StreamEvent.Live(threadId, runId, token, taskId, nodeId, name, version, payload)`, and a positional pattern gains a `_`. Matching with `EventType` or `EventHandlers`, as `AgentEvents.TextDelta(d)` does, needs no change. A run's observer and its run-scoped streams no longer deliver progress of another claim under their `RunId`, and a run that has lost its claim sends none.
+
 ### The tenant on a run claim (#1926)
 
 A claim records the tenant of the run that holds it, so that neither `ThreadBusy` nor `RunRecovered.takenOverFrom`

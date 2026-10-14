@@ -364,6 +364,7 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
       "thread",
       7L,
       "run",
+      FencingToken(3L),
       Some("run/1"),
       Some("1.0"),
       Some("worker"),
@@ -371,5 +372,14 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
       RunEvent.Custom("progress", 1, ujson.Obj("done" -> 3))
     )
     upickle.default.read[EventRecord](upickle.default.write(record)) shouldBe record
+  }
+
+  it should "read a record written before tokens were recorded as FencingToken(0), which no store issues (#1918)" in {
+    val json =
+      """{"threadId":"t","seq":1,"runId":"r","checkpointId":null,"taskId":null,"nodeId":null,""" +
+        """"timestamp":"2026-10-02T12:00:00Z","event":{"$type":"TaskCompleted"}}"""
+    val record = upickle.default.read[EventRecord](json)
+    record.token shouldBe FencingToken(0L)
+    record.event shouldBe RunEvent.TaskCompleted
   }
 }

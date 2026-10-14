@@ -445,6 +445,7 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 | ~~Checkpoint history, fork, `updateState`, retention by age or size (today: latest checkpoint only, explicit event compaction). History and fork must never keep or expose a snapshot whose turn a later guardrail `Block` removed (§9, "Guardrail Block outcome"), or the tool loop must guard the answer before its first commit~~ **closed by #1702** (§4.19: `history`, `checkpoint`, `fork`, `updateState`, `prune` and `RetentionPolicy`; a Block's closing commit retracts its turn) | #1268 | Stage 2 |
 | ~~Static `interruptBefore`/`interruptAfter` breakpoints~~ **closed by #1704** (§4.18) | #1269 | Stage 2 |
 | Known limits, not planned: a `Subscription` dropped without `cancel()` keeps a parked virtual thread; `cancel()` blocks while a listener ignores its interrupt; the hub lock is runtime-wide; `RunContext` has no dependency accessor (by decision) | #1277 | - |
+| Known limit, documented: another runtime's commits have no fixed position among this runtime's live events, differing per subscription (durable `seq` order holds); structural fix is one ordered per-thread log (§4.21) | #1920 | - |
 | Known limit, not planned: tools reach the provider as core `ToolFunction`s (`ToolSet.toolFunctions`), stand-ins for agent tools, because core's clients take no other form | #1278 | - |
 | Known limit, not planned: the structural fingerprint does not cover node input types; a changed input type is caught when a pending input fails to decode | #1267 | - |
 

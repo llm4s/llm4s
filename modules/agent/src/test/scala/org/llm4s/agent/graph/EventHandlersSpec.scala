@@ -26,12 +26,24 @@ class EventHandlersSpec extends AnyFlatSpec with Matchers:
 
   private def durable(name: String, version: Int, payload: ujson.Value): StreamEvent =
     StreamEvent.Durable(
-      EventRecord("t", 1L, "r", None, None, None, Instant.EPOCH, RunEvent.Custom(name, version, payload))
+      EventRecord(
+        "t",
+        1L,
+        "r",
+        FencingToken(1L),
+        None,
+        None,
+        None,
+        Instant.EPOCH,
+        RunEvent.Custom(name, version, payload)
+      )
     )
   private def live(name: String, version: Int, payload: ujson.Value): StreamEvent =
-    StreamEvent.Live("t", "r", "task", "node", name, version, payload)
+    StreamEvent.Live("t", "r", FencingToken(1L), "task", "node", name, version, payload)
   private val completed =
-    StreamEvent.Durable(EventRecord("t", 2L, "r", None, None, None, Instant.EPOCH, RunEvent.RunCompleted))
+    StreamEvent.Durable(
+      EventRecord("t", 2L, "r", FencingToken(1L), None, None, None, Instant.EPOCH, RunEvent.RunCompleted)
+    )
 
   "EventHandlers" should "dispatch a durable and a live event to the handler of its type, typed" in {
     val handlers = EventHandlers.on(ping)(p => Seen.P(p.n)).on(pong)(q => Seen.Q(q.s))

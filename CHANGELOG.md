@@ -2910,6 +2910,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **A run that reuses a lost run's `RunId` no longer streams or traces that run's late write**
+  ([#1918](https://github.com/llm4s/llm4s/issues/1918)). A run's `Observer`, `Agent.stream*`, `AgentRun.subscribe`
+  and its tracing recognised the run's own events by `RunId`. An id may be reused (`RunConfig.withRunId`, or a
+  recovery under the same id), so a write of an earlier run that lost its claim, landing while the new run was being
+  admitted, was taken as the new run's place in the log and delivered ahead of its claim, which
+  `RunHandle.subscribe` did not do. A run is now recognised by its claim's fencing token, which is never reused:
+  - `EventRecord` gains `token: FencingToken`, the token of the commit that stored it. **A `Checkpointer` must set
+    it**: build each record with `EventRecord.committed(threadId, seq, commit.token, draft)`. `CheckpointerContract`
+    checks it. A record stored before this change has no `token` key and reads as `FencingToken(0)`, which no store
+    issues; a record read by an older build ignores the key. The stored JSON is otherwise unchanged, so neither
+    store's schema moves. Code that builds an `EventRecord` positionally, or matches one with a positional pattern,
+    gains a field after `runId`.
+  - An observer anchors on the first commit fenced by its run's claim, and delivers no live event sent before it.
+  - An agent's run scope (stream, subscription and tracing) delivers only the run's own incarnation: a later run of
+    the same id, replayed to a subscription made after the run ended without a terminal event, is not the run's.
+  - **`StreamEvent.Live` gains `token: FencingToken`, after `runId`**: the claim token of the run that sent it. A
+    lost run's node that ignores the interrupt and outlives the run sends no progress once the loss is found, which
+    is before any later run of the runtime can claim the thread; and a run's observer and run scope deliver a live
+    event only of their run's own claim, so an earlier incarnation's progress never reaches a later run under the
+    same id. Code that builds a `StreamEvent.Live` positionally, or matches one with a positional pattern, gains a
+    field after `runId`.
 - **`SqliteCheckpointer`: a write no longer times out beside another store in the same process that commits back
   to back** ([#1951](https://github.com/llm4s/llm4s/issues/1951)). SQLite does not queue a connection that waits for
   a file's write lock. Its busy handler sleeps and tries again, and gets the lock only if it wakes in a gap between

@@ -101,11 +101,18 @@ final case class EventDraft(
 /**
  * A committed durable event. `seq` is per thread, allocated in the commit that stored the event,
  * contiguous and never reused; an event is delivered to subscribers only after that commit.
+ *
+ * `token` is the [[FencingToken]] of the claim the commit was fenced by ([[Commit.token]]): one
+ * incarnation of a run. A `RunId` may be reused - a recovery under the same id, or any run given one
+ * with [[RunConfig.withRunId]] - so two runs on a thread can share an id, but never a token: the
+ * store issues each claim a token above every earlier one. A record written before tokens were
+ * recorded reads as `FencingToken(0)`, which no store issues.
  */
 final case class EventRecord(
   threadId: String,
   seq: Long,
   runId: String,
+  token: FencingToken,
   checkpointId: Option[String],
   taskId: Option[String],
   nodeId: Option[String],
@@ -141,15 +148,21 @@ object EventRecord:
         record => upickle.default.writeJs(record)(using derived),
         json =>
           val upgraded = ujson.copy(json)
-          upgraded.objOpt.foreach(o => o.get("event").foreach(e => o("event") = upgradedEvent(e)))
+          upgraded.objOpt.foreach { o =>
+            o.get("event").foreach(e => o("event") = upgradedEvent(e))
+            // a record written before tokens were recorded (#1918): no claim, older than every one
+            if !o.contains("token") then o("token") = ujson.Num(0)
+          }
           upickle.default.read[EventRecord](upgraded)(using derived)
       )
 
-  def committed(threadId: String, seq: Long, draft: EventDraft): EventRecord =
+  /** The record a store keeps for `draft`, numbered `seq` in a commit fenced by `token`. */
+  def committed(threadId: String, seq: Long, token: FencingToken, draft: EventDraft): EventRecord =
     EventRecord(
       threadId,
       seq,
       draft.runId,
+      token,
       draft.checkpointId,
       draft.taskId,
       draft.nodeId,
@@ -168,11 +181,15 @@ enum StreamEvent:
 
   /**
    * Live-only progress from [[RunContext.progress]]: never persisted, never replayed, no `seq`.
-   * `name` and `version` identify the payload, as for [[RunEvent.Custom]].
+   * `name` and `version` identify the payload, as for [[RunEvent.Custom]]. `token` is the
+   * [[FencingToken]] of the claim the sending run held, as on its [[EventRecord]]s: a node of a run
+   * that lost its claim and ignores the interrupt may still send progress after a later run of the
+   * same `RunId` has claimed the thread, and only the token tells the two apart.
    */
   case Live(
     threadId: String,
     runId: String,
+    token: FencingToken,
     taskId: String,
     nodeId: String,
     name: String,

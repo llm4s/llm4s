@@ -220,7 +220,7 @@ final class SqliteCheckpointer private (
       }
       val stored = commit.events.zipWithIndex.map { (draft, i) =>
         val seq = nextSeq + i
-        seq -> upickle.default.write(EventRecord.committed(threadId.value, seq, draft))
+        seq -> upickle.default.write(EventRecord.committed(threadId.value, seq, commit.token, draft))
       }
       Using.resource(
         c.prepareStatement(

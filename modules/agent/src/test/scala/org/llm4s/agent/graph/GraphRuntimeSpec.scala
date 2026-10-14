@@ -437,7 +437,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     // the listener has tampered with everything it was handed
     tamperer.caughtUp(store)
     def customs =
-      store.eventsAfter(thread, 0L, 100).value.collect { case EventRecord(_, _, _, _, _, _, _, c: RunEvent.Custom) =>
+      store.eventsAfter(thread, 0L, 100).value.collect { case EventRecord(_, _, _, _, _, _, _, _, c: RunEvent.Custom) =>
         c.payload
       }
     customs shouldBe Vector(ujson.Obj("item" -> "a"))

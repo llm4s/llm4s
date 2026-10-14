@@ -26,6 +26,7 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
       thread.value,
       seq,
       run.value,
+      FencingToken(1L),
       None,
       None,
       None,
@@ -34,16 +35,26 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
     )
 
   private def terminal(seq: Long): EventRecord =
-    EventRecord(thread.value, seq, run.value, None, None, None, java.time.Instant.EPOCH, RunEvent.RunCompleted)
+    EventRecord(
+      thread.value,
+      seq,
+      run.value,
+      FencingToken(1L),
+      None,
+      None,
+      None,
+      java.time.Instant.EPOCH,
+      RunEvent.RunCompleted
+    )
 
   private def label(event: StreamEvent): String = event match
-    case StreamEvent.Durable(r)                => r.seq.toString
-    case StreamEvent.Disconnected(_, reason)   => s"Disconnected($reason)"
-    case StreamEvent.LiveGap(n)                => s"gap:$n"
-    case StreamEvent.Live(_, _, _, _, _, _, p) => s"live:${p.num.toInt}"
+    case StreamEvent.Durable(r)                   => r.seq.toString
+    case StreamEvent.Disconnected(_, reason)      => s"Disconnected($reason)"
+    case StreamEvent.LiveGap(n)                   => s"gap:$n"
+    case StreamEvent.Live(_, _, _, _, _, _, _, p) => s"live:${p.num.toInt}"
 
   private def live(i: Int): StreamEvent.Live =
-    StreamEvent.Live(thread.value, run.value, "task", "node", "test.progress", 1, ujson.Num(i))
+    StreamEvent.Live(thread.value, run.value, FencingToken(1L), "task", "node", "test.progress", 1, ujson.Num(i))
 
   /** A run-scoped listener recording each event's label and each barrier reached, in one sequence. */
   private class Recording extends RunListener:

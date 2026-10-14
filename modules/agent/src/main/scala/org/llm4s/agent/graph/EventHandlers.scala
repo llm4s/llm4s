@@ -56,8 +56,8 @@ final class EventHandlers[+R] private (
         record.event match
           case RunEvent.Custom(name, version, payload) => handlers.get((name, version)).flatMap(_(payload))
           case _                                       => None
-      case StreamEvent.Live(_, _, _, _, name, version, payload) => handlers.get((name, version)).flatMap(_(payload))
-      case _                                                    => None
+      case StreamEvent.Live(_, _, _, _, _, name, version, payload) => handlers.get((name, version)).flatMap(_(payload))
+      case _                                                       => None
     typed.orElse(fallback.map(_(event)))
 
   /** Runs [[dispatch]], discarding its result. */
