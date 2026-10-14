@@ -452,7 +452,14 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     Files.list(dir).iterator().asScala.toVector shouldBe empty
   }
 
-  "HostFileBackend" should "refuse a name ending in a dot or a space, which Windows reads as another" in {
+  "HostFileBackend" should "hide and reserve a probe file a failed cleanup left behind" in {
+    val left = s"ABC123-llm4s-probe-${UUID.randomUUID()}.probe"
+    Files.writeString(dir.resolve(left), "")
+    backend.ls(VPath.root, 10, call()).value.items shouldBe empty
+    backend.read(p(s"/$left"), 0, 1, call()).left.value.message should include("temporary files")
+  }
+
+  it should "refuse a name ending in a dot or a space, which Windows reads as another" in {
     backend.write(p("/a."), "x", call()).left.value.message should include("ending in a dot or a space")
     backend.write(p("/d /a.txt"), "x", call()).left.value.message should include("ending in a dot or a space")
   }

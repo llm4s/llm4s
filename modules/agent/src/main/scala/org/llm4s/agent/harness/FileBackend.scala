@@ -23,6 +23,20 @@ final class FileContext private (val run: RunContext, val state: ThreadState, va
   // how many keys of each (operation, discriminator) this context has handed out
   private val issued = new java.util.concurrent.ConcurrentHashMap[Vector[String], Int]()
 
+  // a state key's value after the updates this context's earlier operations returned, by key instance
+  private val pending = new java.util.concurrent.ConcurrentHashMap[AnyRef, Any]()
+
+  /**
+   * `key`'s value as this call has left it so far: the committed state with the updates its earlier
+   * operations returned. Several operations of one call (`write` then `write`) are thus checked against
+   * each other, a quota included; the call must commit every `StateUpdate` it got, in order.
+   */
+  private[harness] def latest[A](key: StateKey[A, ?]): Result[A] =
+    Option(pending.get(key)).fold(state.get(key))(v => Right(v.asInstanceOf[A]))
+
+  /** Records `key`'s value after an operation's update, for this call's later operations. */
+  private[harness] def advance[A](key: StateKey[A, ?], value: A): Unit = pending.put(key, value): Unit
+
   /**
    * The key of one external effect of this call: the tool call's `effectKey`, or the hook's task's
    * (C4). A backend keys every external mutation with it, and never builds a key another way.

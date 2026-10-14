@@ -599,7 +599,12 @@ object HostFileBackend:
   private val Temporary = """\.llm4s-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp""".r
 
   // by folded identity, so a case or normalisation alias of a temporary name is one too
-  private def isTemporary(name: String): Boolean = Temporary.matches(identity(name))
+  // a probe file a failed cleanup left behind is hidden and reserved like a temporary file
+  private def isTemporary(name: String): Boolean =
+    Temporary.matches(identity(name)) || Probe.matches(identity(name))
+
+  private val Probe =
+    """[0-9a-z]{6}-llm4s-probe-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.probe""".r
 
   /** Decoded content that the text rule calls binary (NUL); a read refuses it and a search skips it. */
   final private class BinaryContent extends CharacterCodingException
@@ -684,8 +689,10 @@ object HostFileBackend:
         val looked = shortNames.map(alias =>
           Try(exists(alias)).getOrElse(false) -> Try(exists(alias) && isSame(file, alias)).getOrElse(false)
         )
-        Try(Files.deleteIfExists(file))
-        if looked.exists((present, same) => present && !same) then
+        val removed = Try(Files.deleteIfExists(file))
+        if removed.isFailure then
+          Left(ValidationError("root", s"$root cannot be probed: the probe file $file could not be removed"))
+        else if looked.exists((present, same) => present && !same) then
           Left(
             ValidationError(
               "root",

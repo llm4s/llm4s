@@ -68,7 +68,12 @@ final class StateFileBackend private (
 
   def locks(path: VPath): Set[LockKey] = Set(lock)
 
-  private def current(ctx: FileContext): Result[Map[VPath, FileEntry]] = ctx.state.get(files)
+  // the files as this call has left them so far (FileContext.latest), so its operations see each other
+  private def current(ctx: FileContext): Result[Map[VPath, FileEntry]] = ctx.latest(files)
+
+  private def advanced[A](ctx: FileContext, next: Map[VPath, FileEntry], result: A, update: StateUpdate) =
+    ctx.advance(files, next)
+    (result, update)
 
   def ls(path: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
     current(ctx).flatMap(FileTree.ls(_, path, limit))
@@ -98,10 +103,14 @@ final class StateFileBackend private (
     for
       all <- current(ctx)
       _   <- admit("write", all, path, content)
-    yield (
-      FileWritten(created = !all.contains(path), Text.utf8Bytes(content)),
-      StateUpdate.update(files, FileUpdate.Put(path, FileEntry(content, clock.instant())))
-    )
+    yield
+      val entry = FileEntry(content, clock.instant())
+      advanced(
+        ctx,
+        all.updated(path, entry),
+        FileWritten(created = !all.contains(path), Text.utf8Bytes(content)),
+        StateUpdate.update(files, FileUpdate.Put(path, entry))
+      )
 
   def edit(
     path: VPath,
@@ -115,10 +124,14 @@ final class StateFileBackend private (
       entry  <- FileTree.fileOf("edit", all, path)
       edited <- Text.edited(path, entry.content, old, replacement, replaceAll)
       _      <- admit("edit", all, path, edited._1)
-    yield (
-      FileEdited(edited._2),
-      StateUpdate.update(files, FileUpdate.Put(path, FileEntry(edited._1, clock.instant())))
-    )
+    yield
+      val next = FileEntry(edited._1, clock.instant())
+      advanced(
+        ctx,
+        all.updated(path, next),
+        FileEdited(edited._2),
+        StateUpdate.update(files, FileUpdate.Put(path, next))
+      )
 
   def delete(path: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
     for
@@ -126,7 +139,9 @@ final class StateFileBackend private (
       _   <- FileTree.deletable(all, path)
     // the last file's delete removes the key's entry, so the backend can later be taken out of an agent
     // whose threads no longer hold files (§4.29); ordered by the lock, so `all` is exact
-    yield (
+    yield advanced(
+      ctx,
+      all - path,
       FileDeleted(wasDirectory = false),
       if all.size == 1 then StateUpdate.remove(files) else StateUpdate.update(files, FileUpdate.Delete(path))
     )
