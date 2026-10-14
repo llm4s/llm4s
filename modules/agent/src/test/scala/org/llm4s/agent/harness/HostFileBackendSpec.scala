@@ -67,8 +67,15 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     written(backend.delete(p("/src"), call())) shouldBe FileDeleted(wasDirectory = true)
   }
 
+  it should "write a file whose name is near the file system's limit" in {
+    val long = "n" * 250
+    written(backend.write(p(s"/$long"), "x", call())).created shouldBe true
+    written(backend.edit(p(s"/$long"), "x", "y", replaceAll = false, call())) shouldBe FileEdited(1)
+    onDisk(long) shouldBe "y"
+  }
+
   it should "refuse a path named as its temporary files, which no listing would show" in {
-    val tmp = s".a.txt.llm4s-${UUID.randomUUID()}.tmp"
+    val tmp = s".llm4s-${UUID.randomUUID()}.tmp"
     backend.write(p(s"/$tmp"), "x", call()).left.value.message should include("temporary files")
     backend.write(p(s"/$tmp/inner.txt"), "x", call()).left.value.message should include("temporary files")
     Files.exists(dir.resolve(tmp)) shouldBe false
@@ -80,7 +87,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
   it should "leave no temporary file behind, and never list one" in {
     written(backend.write(p("/a.txt"), "x", call()))
     Files.list(dir).iterator().asScala.map(_.getFileName.toString).toVector.sorted shouldBe Vector("a.txt")
-    Files.writeString(dir.resolve(s".a.txt.llm4s-${UUID.randomUUID()}.tmp"), "torn")
+    Files.writeString(dir.resolve(s".llm4s-${UUID.randomUUID()}.tmp"), "torn")
     backend.ls(VPath.root, 10, call()).value.items.map(_.path) shouldBe Vector(p("/a.txt"))
     backend.glob(Glob("**"), VPath.root, 10, call()).value.items shouldBe Vector(p("/a.txt"))
   }
@@ -159,7 +166,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     val capped = HostFileBackend.open(dir, locks, maxScanEntries = 3).value
     Seq("f", "e", "d", "c", "b").foreach(n => Files.writeString(dir.resolve(n), n))
     Seq("a1", "a2", "a3", "a4").foreach(n => Files.createSymbolicLink(dir.resolve(n), dir.resolve("b")))
-    Files.writeString(dir.resolve(s".a.llm4s-${UUID.randomUUID()}.tmp"), "torn")
+    Files.writeString(dir.resolve(s".llm4s-${UUID.randomUUID()}.tmp"), "torn")
     val listed = capped.ls(VPath.root, 10, call()).value
     listed.items.map(_.path.value) shouldBe Vector("/b", "/c", "/d")
     listed.truncated shouldBe true

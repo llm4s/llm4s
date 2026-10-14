@@ -171,6 +171,25 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     files.grep("find", VPath.root, None, 10, call()).value.items shouldBe empty
   }
 
+  it should "shape its tree by files only: an item that is not a file neither makes a directory nor is overwritten" in {
+    val store = InMemoryLongTermStore()
+    val files = StoreFileBackend(store)
+    val ns    = Namespace(None, Vector("memories"))
+    val key   = org.llm4s.agent.graph.HarnessTestSupport.runOn("another writer").effectKey("seed", "meta")
+    store
+      .modify[Unit](ns, "/docs/meta", key, FencingToken(0))(_ =>
+        Right(StoreChange.Put(ujson.Obj("kind" -> "meta"), ()))
+      )
+      .value
+    done(files.write(p("/docs"), "a file, as /docs holds no file beneath it", call())).created shouldBe true
+    files.write(p("/docs/meta"), "x", call()).left.value.message should include("not a file")
+    store.get(ns, "/docs/meta").value.map(_.value("kind").str) shouldBe Some("meta")
+    val key2 = org.llm4s.agent.graph.HarnessTestSupport.runOn("another writer").effectKey("seed", "other")
+    store.modify[Unit](ns, "/other", key2, FencingToken(0))(_ => Right(StoreChange.Put(ujson.Num(1), ()))).value
+    files.write(p("/other"), "x", call()).left.value.message should include("not a file")
+    store.get(ns, "/other").value.map(_.value.num) shouldBe Some(1)
+  }
+
   it should "edit inside the transaction, list implicit directories, glob and grep" in {
     val files = StoreFileBackend(InMemoryLongTermStore(clock = clock))
     done(files.write(p("/user/prefs.md"), "likes scala\nlikes tea", call()))

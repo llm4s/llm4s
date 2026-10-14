@@ -79,16 +79,23 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
 
   /** Whether `target` is a directory of the namespace as `view` sees it: some key lies beneath it. */
   private def isDirectory(view: StoreView, target: VPath): Result[Boolean] =
-    if target == VPath.root then Right(true) else view.hasKeyWithPrefix(target.value + "/")
+    // only the items the backend takes for files shape the tree, as only they are listed
+    if target == VPath.root then Right(true)
+    else
+      view
+        .withPrefix(target.value + "/", store.limits.maxItems)
+        .map(_.exists(e => VPath(e.key).isRight && content(e.item).isDefined))
 
-  /** Whether some ancestor of `target` is an item, so `target` would be beneath a file. */
+  /** Whether some ancestor of `target` is a file, so `target` would be beneath one. */
   private def beneathFile(view: StoreView, target: VPath): Result[Boolean] =
     Iterator
       .iterate(target.parent)(_.flatMap(_.parent))
       .takeWhile(_.isDefined)
       .flatten
       .foldLeft[Result[Boolean]](Right(false)) { (acc, ancestor) =>
-        acc.flatMap(found => if found then Right(true) else view.get(ancestor.value).map(_.isDefined))
+        acc.flatMap(found =>
+          if found then Right(true) else view.get(ancestor.value).map(_.exists(i => content(i).isDefined))
+        )
       }
 
   /**
@@ -103,7 +110,9 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
         directory <- isDirectory(view, target)
         beneath   <- beneathFile(view, target)
         _ <-
-          if view.current.isEmpty && directory then refused("write", target, "is a directory")
+          if view.current.exists(i => content(i).isEmpty) then
+            refused("write", target, "holds a store item that is not a file")
+          else if view.current.isEmpty && directory then refused("write", target, "is a directory")
           else if beneath then refused("write", target, "is beneath a file")
           else Right(())
       yield ()

@@ -220,7 +220,8 @@ final class HostFileBackend private (
   private def atomicWrite(target: Path, bytes: Array[Byte]): Result[Unit] =
     Try {
       Files.createDirectories(target.getParent)
-      val temp = target.resolveSibling(s".${target.getFileName}.llm4s-${UUID.randomUUID()}.tmp")
+      // a short name of its own, so a target near the file system's name limit still has room for it
+      val temp = target.resolveSibling(s".llm4s-${UUID.randomUUID()}.tmp")
       val written = Using(FileChannel.open(temp, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) { channel =>
         val buffer = ByteBuffer.wrap(bytes)
         while buffer.hasRemaining do channel.write(buffer)
@@ -558,7 +559,7 @@ object HostFileBackend:
   final private case class Unlock(lock: ReentrantLock) extends AutoCloseable:
     def close(): Unit = lock.unlock()
 
-  private val Temporary = """\..+\.llm4s-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp""".r
+  private val Temporary = """\.llm4s-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp""".r
 
   // by folded identity, so a case or normalisation alias of a temporary name is one too
   private def isTemporary(name: String): Boolean = Temporary.matches(identity(name))

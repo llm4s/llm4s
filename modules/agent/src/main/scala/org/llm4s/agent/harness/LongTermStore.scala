@@ -74,8 +74,8 @@ trait StoreView:
   /** Another item of the namespace. */
   def get(key: String): Result[Option[StoreItem]]
 
-  /** Whether some key of the namespace starts with `prefix`. */
-  def hasKeyWithPrefix(prefix: String): Result[Boolean]
+  /** The entries of the namespace whose key starts with `prefix`, in key order, at most `limit`. */
+  def withPrefix(prefix: String, limit: Int): Result[Vector[StoreEntry]]
 
 /**
  * Items kept across threads and runs, by `(Namespace, key)`: `/memories/` files ([[StoreFileBackend]])
@@ -210,8 +210,14 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
           val view = new StoreView:
             val current: Option[StoreItem]                    = items(ns).get(key).map(detached)
             def get(other: String): Result[Option[StoreItem]] = Right(items(ns).get(other).map(detached))
-            def hasKeyWithPrefix(prefix: String): Result[Boolean] =
-              Right(items(ns).keysIterator.exists(_.startsWith(prefix)))
+            def withPrefix(prefix: String, limit: Int): Result[Vector[StoreEntry]] =
+              Right(
+                items(ns).toVector
+                  .filter(_._1.startsWith(prefix))
+                  .sortBy(_._1)
+                  .take(limit)
+                  .map((k, i) => StoreEntry(k, detached(i)))
+              )
           change(view).flatMap { decided =>
             val (next, outcome) = decided match
               case StoreChange.Put(value, o) =>
