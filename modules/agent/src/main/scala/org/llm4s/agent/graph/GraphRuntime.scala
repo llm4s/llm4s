@@ -2233,7 +2233,9 @@ final class GraphRuntime(
       val context = new RunContext(
         config,
         RunPosition(threadId, runId, checkpointId, task.id, task.node, execution.superstep, claim.map(_.token)),
-        sink
+        sink,
+        journal = effectJournal,
+        owner = Some(task.arrivalId)
       )
       def settled(executed: Result[TaskResult]): Result[TaskResult] =
         executed.flatMap(result => graph.encodeWrite(checkpointId, task, result).map(result -> _)) match
@@ -2276,6 +2278,28 @@ final class GraphRuntime(
           )
           Right(blocked)
         case executed => settled(executed)
+
+    /**
+     * The thread's effect records, for every task's [[ReplayGuard]]s (design §4.24). A record is written
+     * at once, as a commit of its own fenced by the run's claim, whatever the durability mode - an intent
+     * must be durable before its effect - and through the committer's fence, so a run whose claim was
+     * found lost writes none. A write refused as stale stops the run at once, as a refused commit does.
+     */
+    private lazy val effectJournal: EffectJournal = new EffectJournal:
+      def lookup(key: EffectKey): Result[Option[EffectRecord]] =
+        Try(checkpointer.effect(threadId, key)).toResult.flatten
+      def write(record: EffectRecord): Result[Unit] =
+        val commit = Commit(token, effects = Vector(record))
+        committer
+          .begun(commit)(reason => Left(reason))(commitAndDeliver(threadId, commit))
+          .left
+          .map {
+            case stale: GraphError.StaleClaim =>
+              committer.onStale(stale)
+              stale
+            case other => other
+          }
+          .map(_ => ())
 
     private def newCheckpoint(
       execution: Execution,

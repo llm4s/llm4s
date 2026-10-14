@@ -35,6 +35,7 @@ class CrossRuntimeSubscriptionSpec extends AnyFlatSpec with Matchers with Either
     def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) = underlying.renew(threadId, token, ttl)
     def release(threadId: ThreadId, token: FencingToken)                    = underlying.release(threadId, token)
     def commit(threadId: ThreadId, commit: Commit)                          = underlying.commit(threadId, commit)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)    = underlying.effect(threadId, key)
     def latest(threadId: ThreadId)                                          = underlying.latest(threadId)
     def compactEvents(threadId: ThreadId, beforeSeq: Long)              = underlying.compactEvents(threadId, beforeSeq)
     def deleteThread(threadId: ThreadId, token: FencingToken)           = underlying.deleteThread(threadId, token)

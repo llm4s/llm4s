@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.tool
 
-import org.llm4s.agent.graph.{ IdempotencyKey, RunContext, StateKey, StateUpdate, ThreadState, ToolCallId }
+import org.llm4s.agent.graph.{ EffectKey, IdempotencyKey, RunContext, StateKey, StateUpdate, ThreadState, ToolCallId }
 import org.llm4s.error.LLMError
 import org.llm4s.toolapi.{ SchemaDefinition, ToolFunction, ToolHints }
 import org.llm4s.types.Result
@@ -170,6 +170,15 @@ final case class ToolContext private (
   def withIdempotencyKey(key: IdempotencyKey): ToolContext = copy(idempotencyKey = key)
   def withState(s: ThreadState): ToolContext               = copy(state = s)
   def withApproved(a: Boolean): ToolContext                = copy(approved = a)
+
+  /**
+   * The key of one external effect of this call - `operation`, such as `file.edit`, on what
+   * `discriminator` names (a path) - for [[org.llm4s.agent.graph.ReplayGuard]] (design §4.24). Its base
+   * is [[idempotencyKey]], so it is the same in every run of the call, a re-run after approval or an
+   * answer included.
+   */
+  def effectKey(operation: String, discriminator: String*): EffectKey =
+    run.effectKeyUnder(idempotencyKey, operation, discriminator)
 
 object ToolContext:
   def apply(

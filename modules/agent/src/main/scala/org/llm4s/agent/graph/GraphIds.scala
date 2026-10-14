@@ -126,6 +126,14 @@ object IdempotencyKey:
     }
     digest.digest().map(b => f"${b & 0xff}%02x").mkString
 
+  /**
+   * The key of task `taskId` on `threadId` ([[RunContext.taskKey]]): the SHA-256 of the two under a
+   * `llm4s-task-v1` tag. Not the superstep the task runs at, which `updateState` moves on while the
+   * task keeps its id; the id itself names the superstep that scheduled the task.
+   */
+  private[graph] def ofTask(threadId: ThreadId, taskId: TaskId): IdempotencyKey =
+    KeyDigest.of(Seq("llm4s-task-v1", threadId.value, taskId.value))
+
   extension (key: IdempotencyKey) def value: String = key
 
   /**

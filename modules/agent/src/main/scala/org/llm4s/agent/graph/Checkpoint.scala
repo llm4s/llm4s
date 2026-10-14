@@ -210,13 +210,19 @@ final case class StoredCheckpoint(checkpoint: Checkpoint, pendingWrites: Vector[
  *    is `Completed` or `Failed`, or all of them if there is none - so that nothing of a turn a
  *    guardrail blocked stays readable. The runtime sets it on the `Failed` checkpoint that closes a run
  *    a node blocked ([[NodeResult.Block]]).
+ *  - `effects` are upserted by key into the thread's effect records ([[Checkpointer.effect]]), each
+ *    remembered with `token` as its writer. Before they are, a commit with a `checkpoint` releases every
+ *    record for which [[releasesEffect]] holds, so replay evidence lives exactly as long as its task can
+ *    run again (design §4.24). The runtime writes each record of a [[ReplayGuard]] as a commit of its
+ *    own, with no checkpoint, pending write or event.
  */
 final case class Commit private (
   token: FencingToken,
   checkpoint: Option[Checkpoint],
   pendingWrites: Vector[PendingWrite],
   events: Vector[EventDraft],
-  retractTurn: Boolean
+  retractTurn: Boolean,
+  effects: Vector[EffectRecord]
 ):
   def withToken(t: FencingToken): Commit                 = copy(token = t)
   def withCheckpoint(c: Checkpoint): Commit              = copy(checkpoint = Some(c))
@@ -224,6 +230,23 @@ final case class Commit private (
   def withPendingWrites(w: Vector[PendingWrite]): Commit = copy(pendingWrites = w)
   def withEvents(e: Vector[EventDraft]): Commit          = copy(events = e)
   def withRetractTurn(r: Boolean): Commit                = copy(retractTurn = r)
+  def withEffects(e: Vector[EffectRecord]): Commit       = copy(effects = e)
+
+  private lazy val live: Set[String] = checkpoint.fold(Set.empty[String])(_.snapshot.liveTasks)
+
+  /**
+   * Whether this commit releases an effect record of task `taskId` that a commit fenced by `writer`
+   * wrote. Only a commit with a checkpoint releases anything. It releases a record whose task is not
+   * live in the new checkpoint ([[GraphSnapshot.liveTasks]]) and that either another claim wrote - an
+   * orphan of an earlier run, whose work after its last durable checkpoint is planned again - or whose
+   * task was scheduled no later than the new checkpoint's superstep, so it has finished. A record of
+   * this run's task scheduled later is kept: under `Async`, a commit lands while the tasks after it
+   * run and record. A store applies this to every record of the thread inside the commit.
+   */
+  def releasesEffect(taskId: TaskId, writer: FencingToken): Boolean =
+    checkpoint.exists { c =>
+      !live.contains(taskId.value) && (writer != token || Commit.scheduledAt(taskId) <= c.snapshot.superstep)
+    }
 
 object Commit:
   def apply(
@@ -231,5 +254,10 @@ object Commit:
     checkpoint: Option[Checkpoint] = None,
     pendingWrites: Vector[PendingWrite] = Vector.empty,
     events: Vector[EventDraft] = Vector.empty,
-    retractTurn: Boolean = false
-  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn)
+    retractTurn: Boolean = false,
+    effects: Vector[EffectRecord] = Vector.empty
+  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn, effects)
+
+  /** The superstep that scheduled a task: its id is `"<superstep>.<ordinal>"`; another id reads as long past. */
+  private def scheduledAt(taskId: TaskId): Int =
+    taskId.value.takeWhile(_ != '.').toIntOption.getOrElse(Int.MinValue)

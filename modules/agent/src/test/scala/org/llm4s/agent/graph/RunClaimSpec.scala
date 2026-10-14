@@ -72,8 +72,9 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
       releases.incrementAndGet()
       onRelease().getOrElse(underlying.release(threadId, token))
     }
-    def commit(threadId: ThreadId, commit: Commit)                  = underlying.commit(threadId, commit)
-    def latest(threadId: ThreadId)                                  = underlying.latest(threadId)
+    def commit(threadId: ThreadId, commit: Commit)                       = underlying.commit(threadId, commit)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey) = underlying.effect(threadId, key)
+    def latest(threadId: ThreadId)                                       = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
     def deleteThread(threadId: ThreadId, token: FencingToken) =

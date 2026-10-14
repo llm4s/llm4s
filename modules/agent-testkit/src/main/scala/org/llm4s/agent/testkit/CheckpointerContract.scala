@@ -43,7 +43,9 @@ import scala.jdk.CollectionConverters.*
  *    commit ([[GraphError.StaleClaim]] otherwise, deleting nothing); checkpoints, pending writes and events read
  *    back as written; the checkpoint history - every superseded checkpoint kept, newest first, paged
  *    and read by id, ids never repeated, a blocked turn retracted (`Commit.retractTurn`), and pruning
- *    by age, by count and by event count, never the latest checkpoint; and claims and fencing - one
+ *    by age, by count and by event count, never the latest checkpoint; effect records (design §4.24) -
+ *    upserted by key and fenced like any commit, released at a commit with a checkpoint exactly as
+ *    `Commit.releasesEffect` says, kept by `prune` and across a reopen, removed by `deleteThread`; and claims and fencing - one
  *    live claim per thread, tokens strictly
  *    increasing, takeover once a claim has expired by the store's clock (naming the expired claim's
  *    holder as `takenOverFrom`), renewal and release by the
@@ -1039,6 +1041,152 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.historyIds() shouldBe Vector("c1")
   }
 
+  // ---- effect records (design §4.24) ----
+
+  /** An effect record of task `taskId` under `key`, as a store reads it back; `completed` with an outcome. */
+  private def effectRecord(key: String, taskId: String, outcome: Option[ujson.Value] = None): EffectRecord =
+    val json = ujson.Obj(
+      "format"    -> EffectRecord.CurrentFormat,
+      "key"       -> key,
+      "operation" -> "contract.op",
+      "taskId"    -> taskId,
+      "intent"    -> ujson.Obj("support" -> "unverifiable")
+    )
+    outcome.foreach(value => json("outcome") = ujson.Obj("value" -> value))
+    EffectRecord.fromJson(json).value
+
+  private def keyOf(record: EffectRecord): EffectKey = record.key
+
+  /** A checkpoint at `superstep` whose frontier is `frontier` and whose parked continuations stand in for `parked`. */
+  private def liveCheckpoint(
+    s: Store,
+    id: String,
+    parent: Option[String],
+    superstep: Int,
+    frontier: Seq[String] = Seq.empty,
+    parked: Seq[String] = Seq.empty,
+    token: Option[FencingToken] = None
+  ): Checkpoint =
+    val task = (id: String) => GraphSnapshot.PendingTask(id, "n", VersionedJson(1, ujson.Null), None, None, None, None)
+    val park = (origin: String) =>
+      GraphSnapshot.ParkedContinuation(s"i-$origin", "n", VersionedJson(1, ujson.Null), origin, "n", None, None)
+    s.checkpoint(id, parent, token)
+      .withSnapshot(
+        GraphSnapshot(
+          "g",
+          "v1",
+          "f",
+          superstep,
+          Map.empty,
+          frontier.map(task).toVector,
+          Vector.empty,
+          Vector.empty,
+          parked.map(park).toVector,
+          false
+        )
+      )
+
+  private def effects(s: Store, records: EffectRecord*): Vector[Option[EffectRecord]] =
+    records.toVector.map(r => s.store.effect(s.thread, keyOf(r)).value)
+
+  it should "keep a commit's effect records, upserted by key and readable by key, and refuse a stale writer's" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0")))).value
+    val begun = effectRecord("k1", "0.0")
+    s.store.commit(s.thread, Commit(token, effects = Vector(begun))).value shouldBe empty
+    same(effects(s, begun), Vector(Some(begun)))
+    val done = effectRecord("k1", "0.0", Some(ujson.Num(7)))
+    s.store.commit(s.thread, Commit(token, effects = Vector(done))).value
+    same(effects(s, begun), Vector(Some(done)))
+    s.store.effect(s.thread, keyOf(effectRecord("other", "0.0"))).value shouldBe None
+    s.store.effect(newThread(), keyOf(begun)).value shouldBe None
+
+    // fenced like any commit: nothing of a stale writer's lands
+    s.advance(ttl * 2)
+    s.claim("taker").value
+    s.store.commit(s.thread, Commit(token, effects = Vector(effectRecord("k2", "0.0")))).refused shouldBe
+      a[GraphError.StaleClaim]
+    s.store.effect(s.thread, keyOf(effectRecord("k2", "0.0"))).value shouldBe None
+    same(effects(s, begun), Vector(Some(done)))
+  }
+
+  it should "release, at a commit with a checkpoint, the records of finished tasks only, judged before its own" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0", "0.1")))).value
+    val finished = effectRecord("finished", "0.0")
+    val parked   = effectRecord("parked", "0.1")
+    val ahead    = effectRecord("ahead", "2.0")
+    s.store.commit(s.thread, Commit(token, effects = Vector(finished, parked, ahead))).value
+    // a commit with no checkpoint releases nothing
+    s.commit(token, writes = Vector(s.write("c1", "0.0"))).value
+    same(effects(s, finished, parked, ahead), Vector(Some(finished), Some(parked), Some(ahead)))
+
+    // superstep 1: 0.0 finished; 0.1 parked, so it is live; 2.0 runs ahead of this commit (Async) and is kept
+    val next = effectRecord("next", "1.0")
+    s.store
+      .commit(
+        s.thread,
+        Commit(
+          token,
+          Some(liveCheckpoint(s, "c2", Some("c1"), 1, Seq("1.0"), parked = Seq("0.1"))),
+          effects = Vector(next)
+        )
+      )
+      .value
+    same(effects(s, finished, parked, ahead, next), Vector(None, Some(parked), Some(ahead), Some(next)))
+
+    // superstep 3: everything before it has finished
+    s.commit(token, Some(liveCheckpoint(s, "c3", Some("c2"), 3))).value
+    same(effects(s, parked, ahead, next), Vector(None, None, None))
+  }
+
+  it should "release an earlier claim's records that are not live at the next claim's commit, keeping the live" in {
+    val s     = Store()
+    val first = s.claim("first").value.token
+    s.commit(first, Some(liveCheckpoint(s, "c1", None, 4, Seq("4.0")))).value
+    // the first run went on past its last durable checkpoint (Async) and crashed
+    val live   = effectRecord("live", "4.0")
+    val orphan = effectRecord("orphan", "5.0")
+    s.store.commit(s.thread, Commit(first, effects = Vector(live, orphan))).value
+    s.store.release(s.thread, first).value
+    val second = s.claim("second").value.token
+    s.commit(second, Some(liveCheckpoint(s, "c2", Some("c1"), 4, Seq("4.0")))).value
+    same(effects(s, live, orphan), Vector(Some(live), None))
+  }
+
+  it should "keep effect records through prune, whatever the policy, and across a close and reopen" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0")))).value
+    val record = effectRecord("k", "0.0", Some(ujson.Str("out")))
+    s.store.commit(s.thread, Commit(token, effects = Vector(record))).value
+    s.advance(400.days)
+    s.store.prune(s.thread, RetentionPolicy().withMaxAge(1.second).withMaxCheckpoints(1).withMaxEvents(0)).value
+    same(effects(s, record), Vector(Some(record)))
+    s.reopened()
+    same(effects(s, record), Vector(Some(record)))
+    same(s.other().effect(s.thread, keyOf(record)).value, Some(record))
+  }
+
+  it should "remove a thread's effect records with the thread, so a new thread of its id has none" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0"))), events = Vector(s.event("e"))).value
+    val record = effectRecord("k", "0.0")
+    s.store.commit(s.thread, Commit(token, effects = Vector(record))).value
+    s.store.deleteThread(s.thread, token).value
+    s.store.effect(s.thread, keyOf(record)).value shouldBe None
+    // and a thread that numbered no event, which leaves no tombstone
+    val bare      = newThread()
+    val bareToken = s.claim("bare", bare).value.token
+    s.commit(bareToken, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0"))), on = bare).value
+    s.store.commit(bare, Commit(bareToken, effects = Vector(record))).value
+    s.store.deleteThread(bare, bareToken).value
+    s.store.effect(bare, keyOf(record)).value shouldBe None
+  }
+
   // ---- two runtimes over one store ----
 
   /**
@@ -1137,9 +1285,10 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
         val result = s.store.renew(threadId, token, ttl)
         if result.isRight then renewed.incrementAndGet(): Unit
         result
-      def release(threadId: ThreadId, token: FencingToken)            = s.store.release(threadId, token)
-      def commit(threadId: ThreadId, commit: Commit)                  = s.store.commit(threadId, commit)
-      def latest(threadId: ThreadId)                                  = s.store.latest(threadId)
+      def release(threadId: ThreadId, token: FencingToken)                 = s.store.release(threadId, token)
+      def commit(threadId: ThreadId, commit: Commit)                       = s.store.commit(threadId, commit)
+      def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey) = s.store.effect(threadId, key)
+      def latest(threadId: ThreadId)                                       = s.store.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = s.store.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long)          = s.store.compactEvents(threadId, beforeSeq)
       def deleteThread(threadId: ThreadId, token: FencingToken)       = s.store.deleteThread(threadId, token)
@@ -1246,6 +1395,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) = s.store.renew(threadId, token, ttl)
       def release(threadId: ThreadId, token: FencingToken)                    = s.store.release(threadId, token)
       def commit(threadId: ThreadId, commit: Commit)                          = s.store.commit(threadId, commit)
+      def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)    = s.store.effect(threadId, key)
       def latest(threadId: ThreadId) =
         if reads.incrementAndGet() == 2 then
           s.advance(neverRenewed.ttl)

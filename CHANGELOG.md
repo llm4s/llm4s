@@ -18,6 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   model message whose locks conflict (one key a prefix of the other): they run in successive supersteps, in call
   order, each seeing the state the earlier committed. `ToolCallRequest` gains `resources`; `tool-queue` is a new key
   the loop owns. Design §4.23; guide: Tool Permissions, Timeouts and Locks.
+- **Replay of external effects: `ReplayGuard`, `EffectKey` and `ReplayContract`** ([#1921](https://github.com/llm4s/llm4s/issues/1921)).
+  This is Phase 3 slice C4. A tool or hook performs an effect outside thread state through `ReplayGuard`, which has
+  one guard per `ReplaySupport`: `transactional` (the target records an applied key atomically, `AppliedKeys`),
+  `verifiable` (the target can be read as a `StateCheck` digest) and `unverifiable`. Keys come only from
+  `ToolContext.effectKey` / `RunContext.effectKey`, over the call's `IdempotencyKey` or the new `RunContext.taskKey`.
+  - The guard keeps an intent and an outcome per key as `EffectRecord`s in the thread's own `Checkpointer`, fenced
+    by the run's claim, so a replay returns the original outcome rather than repeating the effect.
+  - The commit that ends a task's window releases its records (`Commit.releasesEffect`), and `deleteThread`
+    removes them. Nothing removes them by age.
+  - `llm4s-agent-testkit` adds `ReplayContract`, which crashes a run at each point around an effect and recovers it.
+    Every external target of the harness passes it, for each support class.
+  - The SQLite store keeps the records in a new table (schema version 3, migrated on open).
+  - Breaking: `Checkpointer.effect`, `Commit.effects` and `GraphError.EffectReplayRefused` are new. See the
+    migration guide and design record §4.24.
 - **`llm4s-kotlin-api` is published to Maven Central with each release** ([#1494](https://github.com/llm4s/llm4s/issues/1494)):
   `org.llm4s:llm4s-kotlin-api` (no `_3` suffix: a Kotlin artifact), at the release's version, depending on
   `llm4s-java-api_3` at that same version, and managed by `llm4s-bom`, so a Gradle build that imports the BOM declares
