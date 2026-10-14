@@ -79,7 +79,152 @@ fresh
 printf 'object Tmp { def make() = java.nio.file.Files.createTempFile("a", "b") }\n' \
   > "$WORK/case/repo/modules/pure/src/main/scala/Tmp.scala"
 expect_fail "a new platform-sensitive file outside the whole modules fails" \
-  "modules/pure/src/main/scala/Tmp.scala calls a platform-sensitive API \(createTemp\)"
+  "modules/pure/src/main/scala/Tmp.scala calls a platform-sensitive API \(.*createTemp"
+
+fresh
+printf 'object Fx0 { def f(p: java.nio.file.Path) = Files.createDirectory(p) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx0.scala"
+expect_fail "Files.createDirectory(p) is platform-sensitive" "Fx0.scala calls a platform-sensitive API \(.*createDirectory"
+
+fresh
+printf 'object Fx1 { def f(p: java.nio.file.Path) = Files.createDirectories(p) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx1.scala"
+expect_fail "Files.createDirectories(p) is platform-sensitive" "Fx1.scala calls a platform-sensitive API \(.*createDirectories"
+
+fresh
+printf 'object Fx2 { def f(p: java.nio.file.Path) = Files.deleteIfExists(p) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx2.scala"
+expect_fail "Files.deleteIfExists(p) is platform-sensitive" "Fx2.scala calls a platform-sensitive API \(.*deleteIfExists"
+
+fresh
+printf 'object Fx3 { def f(p: java.nio.file.Path) = Files.delete(p) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx3.scala"
+expect_fail "Files.delete(p) is platform-sensitive" "Fx3.scala calls a platform-sensitive API \(.*delete"
+
+fresh
+printf 'object Fx4 { def f(p: java.nio.file.Path) = Files.createTempFile("a", "b") }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx4.scala"
+expect_fail "Files.createTempFile("a", "b") is platform-sensitive" "Fx4.scala calls a platform-sensitive API \(.*createTemp"
+
+fresh
+printf 'object Fx5 { def f(p: java.nio.file.Path) = Files.createTempDirectory("a") }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx5.scala"
+expect_fail "Files.createTempDirectory("a") is platform-sensitive" "Fx5.scala calls a platform-sensitive API \(.*createTemp"
+
+fresh
+printf 'object Fx6 { def f(p: java.nio.file.Path) = Files.newBufferedWriter(p) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx6.scala"
+expect_fail "Files.newBufferedWriter(p) is platform-sensitive" "Fx6.scala calls a platform-sensitive API \(.*newBufferedWriter"
+
+fresh
+printf 'object Fx7 { def f(p: java.nio.file.Path) = Files.move(p, p) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx7.scala"
+expect_fail "Files.move(p, p) is platform-sensitive" "Fx7.scala calls a platform-sensitive API \(.*move"
+
+fresh
+printf 'object Fx8 { def f(p: java.nio.file.Path) = Files.copy(p, p) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx8.scala"
+expect_fail "Files.copy(p, p) is platform-sensitive" "Fx8.scala calls a platform-sensitive API \(.*copy"
+
+fresh
+printf 'object Fx9 { def f(p: java.nio.file.Path) = Files.setPosixFilePermissions(p, null) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx9.scala"
+expect_fail "Files.setPosixFilePermissions(p, null) is platform-sensitive" "Fx9.scala calls a platform-sensitive API \(.*setPosixFilePermissions"
+
+fresh
+printf 'object Fx10 { def f(p: java.nio.file.Path) = p.toRealPath() }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx10.scala"
+expect_fail "p.toRealPath() is platform-sensitive" "Fx10.scala calls a platform-sensitive API \(.*toRealPath"
+
+fresh
+printf 'object Fx11 { def f(p: java.nio.file.Path) = Files.createFile(p) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx11.scala"
+expect_fail "Files.createFile(p) is platform-sensitive" "Fx11.scala calls a platform-sensitive API \(.*createFile"
+
+fresh
+printf 'object Fx12 { def f(p: java.nio.file.Path) = Files.createLink(p, p) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx12.scala"
+expect_fail "Files.createLink(p, p) is platform-sensitive" "Fx12.scala calls a platform-sensitive API \(.*createLink"
+
+fresh
+printf 'object Fx13 { def f(p: java.nio.file.Path) = Files.newOutputStream(p) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx13.scala"
+expect_fail "Files.newOutputStream(p) is platform-sensitive" "Fx13.scala calls a platform-sensitive API \(.*newOutputStream"
+
+fresh
+printf 'object Fx14 { def f(p: java.nio.file.Path) = Files.write(p, Array[Byte]()) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx14.scala"
+expect_fail "Files.write(p, Array[Byte]()) is platform-sensitive" "Fx14.scala calls a platform-sensitive API \(.*write"
+
+fresh
+printf 'object Fx15 { def f(p: java.nio.file.Path) = new java.io.File("a").renameTo(null) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx15.scala"
+expect_fail "new java.io.File("a").renameTo(null) is platform-sensitive" "Fx15.scala calls a platform-sensitive API \(.*renameTo"
+
+fresh
+printf 'object Fx16 { def f(p: java.nio.file.Path) = new java.io.File("a").mkdirs() }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx16.scala"
+expect_fail "new java.io.File("a").mkdirs() is platform-sensitive" "Fx16.scala calls a platform-sensitive API \(.*mkdirs"
+
+fresh
+printf 'object Fx17 { def f(p: java.nio.file.Path) = new java.io.FileWriter("a") }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Fx17.scala"
+expect_fail "new java.io.FileWriter("a") is platform-sensitive" "Fx17.scala calls a platform-sensitive API \(.*FileWriter"
+
+fresh
+printf 'object FxF0 { def f() = new java.io.File("a").delete() }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/FxF0.scala"
+expect_fail "java.io.File delete() is platform-sensitive" "FxF0.scala calls a platform-sensitive API \(.*delete"
+
+fresh
+printf 'object FxF1 { def f() = new java.io.File("a").createNewFile() }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/FxF1.scala"
+expect_fail "java.io.File createNewFile() is platform-sensitive" "FxF1.scala calls a platform-sensitive API \(.*createNewFile"
+
+fresh
+printf 'object FxF2 { def f() = new java.io.File("a").mkdir() }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/FxF2.scala"
+expect_fail "java.io.File mkdir() is platform-sensitive" "FxF2.scala calls a platform-sensitive API \(.*mkdir"
+
+fresh
+printf 'object FxF3 { def f() = new java.io.File("a").setLastModified(0L) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/FxF3.scala"
+expect_fail "java.io.File setLastModified(0L) is platform-sensitive" "FxF3.scala calls a platform-sensitive API \(.*setLastModified"
+
+fresh
+printf 'object FxF4 { def f() = new java.io.File("a").setReadOnly() }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/FxF4.scala"
+expect_fail "java.io.File setReadOnly() is platform-sensitive" "FxF4.scala calls a platform-sensitive API \(.*setReadOnly"
+
+fresh
+printf 'object FxF5 { def f() = new java.io.File("a").setReadable(false) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/FxF5.scala"
+expect_fail "java.io.File setReadable(false) is platform-sensitive" "FxF5.scala calls a platform-sensitive API \(.*setReadable"
+
+fresh
+printf 'object FxF6 { def f() = new java.io.File("a").setWritable(false) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/FxF6.scala"
+expect_fail "java.io.File setWritable(false) is platform-sensitive" "FxF6.scala calls a platform-sensitive API \(.*setWritable"
+
+fresh
+printf 'object FxF7 { def f() = new java.io.File("a").setExecutable(true) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/FxF7.scala"
+expect_fail "java.io.File setExecutable(true) is platform-sensitive" "FxF7.scala calls a platform-sensitive API \(.*setExecutable"
+
+fresh
+printf 'object FxF8 { def f() = new java.io.File("a").deleteOnExit() }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/FxF8.scala"
+expect_fail "java.io.File deleteOnExit() is platform-sensitive" "FxF8.scala calls a platform-sensitive API \(.*deleteOnExit"
+
+fresh
+printf 'object FxStore { def f(s: Store) = s.delete("id") }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/FxStore.scala"
+expect_pass "a store's delete(id) is not a File.delete"
+
+fresh
+printf 'object Ok { def f(p: java.nio.file.Path) = java.nio.file.Files.readString(p) + java.nio.file.Files.exists(p) }\n' \
+  > "$WORK/case/repo/modules/pure/src/main/scala/Ok.scala"
+expect_pass "reading and testing for a file is not platform-sensitive"
 
 fresh
 printf 'object More { def run() = sys.process.Process("ls").! }\n' > "$WORK/case/repo/modules/whole/src/main/scala/More.scala"
