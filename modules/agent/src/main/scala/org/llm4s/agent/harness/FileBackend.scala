@@ -192,12 +192,32 @@ final case class FileDeleted(wasDirectory: Boolean) derives ReadWriter
  * unique, a quota, binary content. Decided when the tool runs, never in an update function (rule 2).
  */
 @Experimental
-final case class BackendRefused(operation: String, target: String, reason: String)
-    extends LLMError
+final case class BackendRefused(
+  operation: String,
+  target: String,
+  reason: String,
+  kind: BackendRefused.Kind = BackendRefused.Kind.Refused
+) extends LLMError
     with NonRecoverableError:
   override val message: String = s"$operation $target: $reason"
 
 object BackendRefused:
+
+  /**
+   * What a refusal says about the tree, for a caller that must tell the shape of a path from any other
+   * refusal (a composite listing a directory a mount makes): `NotFound` and `NotADirectory`, or
+   * `Refused` for anything else - a permission, a bound, an argument.
+   */
+  enum Kind:
+    case Refused, NotFound, NotADirectory
+
+  /** `path` does not exist. */
+  def notFound(operation: String, path: VPath): BackendRefused =
+    BackendRefused(operation, path.value, "not found", Kind.NotFound)
+
+  /** `path` is a file where a directory is needed. */
+  def notADirectory(operation: String, path: VPath): BackendRefused =
+    BackendRefused(operation, path.value, "is a file, not a directory", Kind.NotADirectory)
 
   /**
    * The tool outcome of a backend's error: a refusal is an `Error` the model sees; anything else - a

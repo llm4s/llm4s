@@ -172,6 +172,14 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     unbounded.read(p("/b"), 1, Int.MaxValue, call()).value shouldBe FileLines(Vector("two"), 1, 2)
   }
 
+  it should "treat names a case-insensitive file system takes for one file as one: locks, stripes, reserved" in {
+    backend.locks(p("/A.txt")) shouldBe backend.locks(p("/a.txt"))
+    backend.locks(p("/caf\u00e9")) shouldBe backend.locks(p("/cafe\u0301")) // NFC and NFD
+    backend.lockFileOf(p("/A.txt")).value shouldBe backend.lockFileOf(p("/a.txt")).value
+    backend.read(p("/.LLM4S/locks/0"), 0, 1, call()).left.value.message should include("reserves")
+    backend.write(p("/.Llm4s/x"), "x", call()).left.value.message should include("reserves")
+  }
+
   it should "walk in sorted order, so a cut-off result is deterministic" in {
     Seq("c", "a/z", "a/b", "b").foreach(rel => written(backend.write(p(s"/$rel"), rel, call())))
     backend.glob(Glob("**"), VPath.root, 10, call()).value.items.map(_.value) shouldBe Vector(
@@ -189,7 +197,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
   it should "lock the physical path, so backends over nested roots order writes to one file" in {
     Files.createDirectories(dir.resolve("sub"))
     val nested = HostFileBackend.open(dir.resolve("sub")).value
-    val real   = dir.toRealPath().toString.replace('\\', '/')
+    val real   = HostFileBackend.identity(dir.toRealPath().toString.replace('\\', '/'))
     backend.locks(p("/sub/a.txt")) shouldBe Set(LockKey("host", real, "sub/a.txt"))
     backend.locks(p("/sub/a.txt")).head.conflictsWith(nested.locks(p("/a.txt")).head) shouldBe true
     backend.locks(p("/sub")).head.conflictsWith(backend.locks(p("/sub/a.txt")).head) shouldBe true

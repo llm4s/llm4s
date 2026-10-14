@@ -71,7 +71,8 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
     // holds where a mount makes a directory), never an invalid argument, which is checked first
     val base: Result[Listing[FileInfo]] = Text.checkLimit("ls", path.value, limit).flatMap { _ =>
       routed.backend.ls(routed.path, limit, ctx) match
-        case Left(r: BackendRefused) if mounted.nonEmpty && r.target == routed.path.value =>
+        case Left(r: BackendRefused)
+            if mounted.nonEmpty && r.target == routed.path.value && r.kind != BackendRefused.Kind.Refused =>
           Right(Listing(Vector.empty, truncated = false))
         case other => renamed(routed, path)(other)
     }

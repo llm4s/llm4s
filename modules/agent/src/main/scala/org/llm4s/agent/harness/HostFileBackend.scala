@@ -63,9 +63,14 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
 
   val writes: Set[StateKey[?, ?]] = Set.empty
 
-  private val rootLock = LockKey("host", root.toString.replace('\\', '/'))
+  private val rootLock = LockKey("host", HostFileBackend.identity(root.toString.replace('\\', '/')))
 
-  def locks(path: VPath): Set[LockKey] = Set(rootLock / path.value)
+  /**
+   * Locks name a file by its case- and normalisation-folded path ([[HostFileBackend.identity]]), so
+   * `/A` and `/a`, which one file on a case-insensitive file system, conflict. On a case-sensitive one
+   * they only conflict needlessly.
+   */
+  def locks(path: VPath): Set[LockKey] = Set(rootLock / HostFileBackend.identity(path.value))
 
   // ---- resolution
 
@@ -87,7 +92,7 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
    * backend's own lock directory.
    */
   private def resolve(operation: String, path: VPath): Result[Path] =
-    if path.segments.headOption.contains(HostFileBackend.Reserved) then
+    if path.segments.headOption.map(HostFileBackend.identity).contains(HostFileBackend.Reserved) then
       refused(operation, path, s"is beneath /${HostFileBackend.Reserved}, which the backend reserves for its locks")
     else
       path.segments
@@ -199,7 +204,9 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
    * time, because closing a channel can release every lock the JVM holds on its file, and an interrupt
    * while waiting closes the waiting channel.
    */
-  private def stripeOf(target: Path): Int = Math.floorMod(target.toString.hashCode, HostFileBackend.Stripes)
+  // by the folded path, so two names of one file on a case-insensitive file system share a stripe
+  private def stripeOf(target: Path): Int =
+    Math.floorMod(HostFileBackend.identity(target.toString).hashCode, HostFileBackend.Stripes)
 
   private def lockFile(stripe: Int): Path =
     root.resolve(HostFileBackend.Reserved).resolve("locks").resolve(stripe.toString)
@@ -367,7 +374,9 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
         val p    = entries.next()
         val name = p.getFileName.toString
         val hidden =
-          HostFileBackend.isTemporary(name) || (dir == root && name == HostFileBackend.Reserved) || aliased(p)
+          HostFileBackend.isTemporary(name) || (dir == root && HostFileBackend.identity(
+            name
+          ) == HostFileBackend.Reserved) || aliased(p)
         if !hidden then
           eligible += 1
           least.add(name -> p)
@@ -378,8 +387,8 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
   def ls(path: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
     Text.checkLimit("ls", path.value, limit).flatMap(_ => resolve("ls", path)).flatMap { dir =>
       io("ls", path)(Text.interruptibly("ls") {
-        if !exists(dir) then refused("ls", path, "not found")
-        else if !isDir(dir) then refused("ls", path, "is a file, not a directory")
+        if !exists(dir) then Left(BackendRefused.notFound("ls", path))
+        else if !isDir(dir) then Left(BackendRefused.notADirectory("ls", path))
         else
           val (entries, capped) = children(dir, math.min(limit, maxScanEntries))
           val infos = entries.flatMap { (name, p) =>
@@ -475,6 +484,17 @@ object HostFileBackend:
 
   /** The root's directory the backend keeps its lock files in; no path may reach it. */
   private val Reserved = ".llm4s"
+
+  /**
+   * A path as the most permissive file system would compare it: Unicode NFC, then case-folded in the
+   * root locale. Two names a case-insensitive or normalising file system (Windows, macOS) takes for one
+   * file fold alike, so locks, stripes and the reserved directory treat them as one.
+   */
+  private[harness] def identity(path: String): String =
+    java.text.Normalizer
+      .normalize(path, java.text.Normalizer.Form.NFC)
+      .toUpperCase(java.util.Locale.ROOT)
+      .toLowerCase(java.util.Locale.ROOT)
 
   final private case class Unlock(lock: ReentrantLock) extends AutoCloseable:
     def close(): Unit = lock.unlock()

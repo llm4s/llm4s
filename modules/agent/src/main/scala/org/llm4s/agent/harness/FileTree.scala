@@ -39,8 +39,8 @@ private[harness] object FileTree:
     for
       _ <- Text.checkLimit("ls", path.value, limit)
       _ <-
-        if all.contains(path) then Left(BackendRefused("ls", path.value, "is a file, not a directory"))
-        else if !isDirectory(all, path) then Left(BackendRefused("ls", path.value, "not found"))
+        if all.contains(path) then Left(BackendRefused.notADirectory("ls", path))
+        else if !isDirectory(all, path) then Left(BackendRefused.notFound("ls", path))
         else Right(())
     yield
       val children = all.toVector.flatMap { (p, entry) =>

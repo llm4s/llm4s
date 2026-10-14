@@ -116,6 +116,28 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
       .map(_.path.value) shouldBe Vector("/x/y")
   }
 
+  it should "list a directory a mount makes only past a refusal of its shape, never past another" in {
+    val denying = new FileBackend {
+      def writes                                      = main.writes
+      def locks(path: VPath)                          = main.locks(path)
+      def ls(path: VPath, limit: Int, c: FileContext) = Left(BackendRefused("ls", path.value, "permission denied"))
+      def read(path: VPath, offset: Int, limit: Int, c: FileContext)               = main.read(path, offset, limit, c)
+      def write(path: VPath, content: String, c: FileContext)                      = main.write(path, content, c)
+      def edit(path: VPath, old: String, r: String, all: Boolean, c: FileContext)  = main.edit(path, old, r, all, c)
+      def delete(path: VPath, c: FileContext)                                      = main.delete(path, c)
+      def find(under: VPath, accept: VPath => Boolean, limit: Int, c: FileContext) = main.find(under, accept, limit, c)
+      def search(under: VPath, regex: java.util.regex.Pattern, accept: VPath => Boolean, limit: Int, c: FileContext) =
+        main.search(under, regex, accept, limit, c)
+    }
+    val c = CompositeBackend(denying, p("/x/y") -> scratch).value
+    c.ls(p("/x"), 5, ctx).left.value.message should include("permission denied")
+    CompositeBackend(main, p("/x/y") -> scratch).value
+      .ls(p("/x"), 5, ctx)
+      .value
+      .items
+      .map(_.path.value) shouldBe Vector("/x/y")
+  }
+
   it should "refuse the root as a mount and a repeated mount" in {
     CompositeBackend(main, VPath.root -> scratch).left.value shouldBe a[ValidationError]
     CompositeBackend(main, p("/x") -> scratch, p("/x") -> deep).left.value shouldBe a[ValidationError]
