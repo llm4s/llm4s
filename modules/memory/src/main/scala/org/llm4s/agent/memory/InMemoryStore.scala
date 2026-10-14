@@ -29,8 +29,53 @@ import java.time.Instant
  */
 final case class InMemoryStore private (
   private val memories: Map[MemoryId, Memory],
-  config: MemoryStoreConfig
-) extends MemoryStore {
+  config: MemoryStoreConfig,
+  private val applied: Map[String, AppliedWrite],
+  private val fences: Map[String, Long]
+) extends TransactionalMemoryStore {
+
+  /**
+   * Applies the write to this value and returns the new one: the transaction is the value, so a caller that shares
+   * the store between threads serialises its updates (as `llm4s-agent-memory`'s tenant cell does).
+   */
+  override def applyAtomically(
+    key: AppliedWriteKey,
+    token: Long,
+    add: Seq[Memory],
+    remove: Seq[MemoryId],
+    bounds: MemoryBounds
+  ): Result[(TransactionalMemoryStore, AppliedWrite)] =
+    fenced(key, token).map { store =>
+      store.applied.get(key.value) match {
+        case Some(recorded) => (store, recorded)
+        case None =>
+          val adds     = TransactionalMemoryStore.distinctById(add)
+          val removed  = remove.distinct.filter(id => store.memories.contains(id) && !adds.exists(_.id == id)).toVector
+          val written  = store.memories -- removed ++ adds.map(m => m.id -> m)
+          val evicted  = bounds.overflow(written.values.map(MemoryBounds.Entry.of).toSeq)
+          val outcome  = AppliedWrite(adds.map(_.id), removed, evicted.size)
+          val recorded = store.copy(memories = written -- evicted, applied = store.applied + (key.value -> outcome))
+          (recorded, outcome)
+      }
+    }
+
+  override def appliedWrite(
+    key: AppliedWriteKey,
+    token: Long
+  ): Result[(TransactionalMemoryStore, Option[AppliedWrite])] =
+    fenced(key, token).map(store => (store, store.applied.get(key.value)))
+
+  override def forgetApplied(key: AppliedWriteKey, token: Long): Result[TransactionalMemoryStore] =
+    fenced(key, token).map(store => store.copy(applied = store.applied - key.value))
+
+  override def appliedWriteCount: Result[Int] = Right(applied.size)
+
+  /** This store with `token` as `key.scope`'s newest, or the refusal of a token older than it. */
+  private def fenced(key: AppliedWriteKey, token: Long): Result[InMemoryStore] =
+    fences.get(key.scope) match {
+      case Some(newest) if token < newest => Left(TransactionalMemoryStore.stale(key.scope, token, newest))
+      case _                              => Right(copy(fences = fences + (key.scope -> token)))
+    }
 
   override def store(memory: Memory): Result[MemoryStore] = {
     val updated = memories + (memory.id -> memory)
@@ -191,6 +236,7 @@ final case class InMemoryStore private (
   override def count(filter: MemoryFilter): Result[Long] =
     Right(memories.values.count(filter.matches).toLong)
 
+  /** Removes every memory; applied writes and fencing tokens are kept, as [[TransactionalMemoryStore]] requires. */
   override def clear(): Result[MemoryStore] =
     Right(copy(memories = Map.empty))
 
@@ -216,13 +262,13 @@ object InMemoryStore {
   /**
    * Create an empty in-memory store with default configuration.
    */
-  def empty: InMemoryStore = InMemoryStore(Map.empty, MemoryStoreConfig.default)
+  def empty: InMemoryStore = new InMemoryStore(Map.empty, MemoryStoreConfig.default, Map.empty, Map.empty)
 
   /**
    * Create an empty in-memory store with custom configuration.
    */
   def apply(config: MemoryStoreConfig = MemoryStoreConfig.default): InMemoryStore =
-    InMemoryStore(Map.empty, config)
+    new InMemoryStore(Map.empty, config, Map.empty, Map.empty)
 
   /**
    * Create an empty in-memory store with an embedding service.

@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Semantic memory for agents: the new `llm4s-agent-memory` module and `SemanticMemoryMiddleware`**
+  ([#1911](https://github.com/llm4s/llm4s/issues/1911)). This is Phase 3 slice F7 (design §4.31).
+  - Before each turn the middleware recalls what earlier threads of the same tenant recorded
+    (`getRelevantContext`, cut to `MemoryRecall.maxRecallTokens`) and shows it to every model call of the turn as a
+    prompt section; after the turn it records the exchange through the manager, and with `MemoryConsolidation` it
+    replaces groups of old memories with a summary.
+  - The store is resolved once per tenant (`stores: Option[TenantId] => Result[MemoryStore]`) and held in one
+    serialised cell per tenant; no two tenants may share a store instance. The manager gets the run's accounted
+    client, so an `LLMMemoryManager`'s calls count in `usage`.
+  - Each recording and each consolidation group is one C4 effect (`memory.record`, `memory.consolidate`): on a
+    `TransactionalMemoryStore` a replay after a crash returns the recorded outcome, so `recover` never records a
+    turn twice or resurrects a consolidated memory. Each write keeps the tenant's store within `MemoryBounds`
+    (`maxMemories`, `maxBytes`) by eviction in the same transaction.
+  - Durable events `MemoryEvents.Recorded`, `Consolidated` and `Skipped` carry counts and names only.
+- **`TransactionalMemoryStore` in `llm4s-memory`** ([#1911](https://github.com/llm4s/llm4s/issues/1911)):
+  `applyAtomically(key, token, add, remove, bounds)`, `appliedWrite`, `forgetApplied` and `appliedWriteCount`,
+  fenced by a token per scope, with `AppliedWriteKey`, `AppliedWrite` and `MemoryBounds`. `InMemoryStore`,
+  `SQLiteMemoryStore` and `PostgresMemoryStore` implement it. `MemoryStore.replace(add, remove)` is new, one
+  transaction in the SQL stores.
 - **Replay of external effects: `ReplayGuard`, `EffectKey` and `ReplayContract`** ([#1921](https://github.com/llm4s/llm4s/issues/1921)).
   This is Phase 3 slice C4. A tool or hook performs an effect outside thread state through `ReplayGuard`, which has
   one guard per `ReplaySupport`: `transactional` (the target records an applied key atomically, `AppliedKeys`),

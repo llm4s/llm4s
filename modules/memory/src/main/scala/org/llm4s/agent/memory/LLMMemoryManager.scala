@@ -233,13 +233,9 @@ final case class LLMMemoryManager(
           embedding = None // Will be regenerated if needed
         )
 
-        // 5. Store consolidated memory first, then delete originals
-        // This prevents data loss if delete succeeds but store fails
-        currentStore.store(consolidatedMemory).flatMap { updatedStore =>
-          group.foldLeft[Result[MemoryStore]](Right(updatedStore)) { case (accStore, memory) =>
-            accStore.flatMap(_.delete(memory.id))
-          }
-        }
+        // 5. Replace the group with its summary in one write, naming exactly the group's ids: a store
+        // that writes in place does it in one transaction, and a replayable store keys it by those ids
+        currentStore.replace(Seq(consolidatedMemory), group.map(_.id))
       }
     }
   }

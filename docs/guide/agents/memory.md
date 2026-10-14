@@ -374,7 +374,71 @@ custom `EmbeddingService` written before it existed keeps working unchanged.
 
 ## Memory with Agents
 
+### Semantic Memory Middleware
+
+{: .note }
+> Not yet published. `llm4s-agent-memory` exists in the build as of
+> [#1911](https://github.com/llm4s/llm4s/issues/1911) but ships in the next release.
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-agent-memory" % llm4sVersion // same version as llm4s-agent
+```
+
+`SemanticMemoryMiddleware` (`org.llm4s.agent.harness.memory`) does the recall and the recording for
+you, for every turn of an agent:
+
+```scala
+import org.llm4s.agent.Agent
+import org.llm4s.agent.graph.{ RunConfig, TenantId, ThreadId }
+import org.llm4s.agent.harness.memory.{ MemoryRecall, SemanticMemoryMiddleware }
+import org.llm4s.agent.memory.{ MemoryBounds, SQLiteMemoryStore, SimpleMemoryManager }
+
+val memory = new SemanticMemoryMiddleware(
+  stores = tenant => SQLiteMemoryStore(s"memory-${tenant.fold("default")(_.value)}.db"),
+  manager = (store, _) => SimpleMemoryManager.withStore(store),
+  client = client,                               // the client an LLMMemoryManager would call
+  recall = Some(MemoryRecall(maxRecallTokens = 512)),
+  bounds = MemoryBounds(maxMemories = 500)
+)
+for {
+  agent  <- Agent.builder("assistant", client).withMiddleware(memory).build()
+  result <- agent.run(ThreadId("t-1"), "What did I say my favourite colour was?",
+                      RunConfig().withTenantId(TenantId("alice")))
+} yield result.answer
+```
+
+- **Per tenant.** `stores` is asked once for each tenant (`RunConfig.tenantId`; `None` for runs
+  without one) and must return a store of that tenant's alone: every thread of a tenant recalls what
+  the tenant's earlier threads recorded, and no tenant reads another's. A resolver that returns one
+  store instance for two tenants is refused.
+- **Recall** runs `getRelevantContext` on each turn's input and shows the result to every model
+  call of the turn as a system-prompt section, cut to `maxRecallTokens` (four characters a token).
+- **Recording** stores each turn's question and answer through the manager, each memory cut to
+  `MemoryRecording.maxRecordChars` (default 2000). With an `LLMMemoryManager`, its own model calls
+  (entity extraction, summaries) go through the run's accounted client, so they count in
+  `result.usage`.
+- **Consolidation** (`consolidate = Some(MemoryConsolidation(olderThan = 1.day, minCount = 10))`)
+  replaces groups of old memories with a summary after each turn. It needs a
+  `TransactionalMemoryStore`: `InMemoryStore`, `SQLiteMemoryStore` or `PostgresMemoryStore`.
+- **Bounded.** Each write evicts the memories of lowest importance, oldest first, beyond
+  `bounds` (default 1000 memories, 4 MiB), whether or not consolidation is on.
+- **Safe across a crash.** Each recording and each consolidated group is one replayable effect of
+  the agent runtime: after a crash, `agent.recover` neither records a turn twice nor brings back a
+  memory a later consolidation removed. A store that is not transactional records too, but a
+  recording interrupted mid-write is skipped on recovery rather than repeated.
+- **Failures never cost the answer.** A store that cannot be searched or written is skipped, and
+  announced with a durable `MemoryEvents.Skipped` (the operation and the error's type, no content);
+  `MemoryEvents.Recorded` and `MemoryEvents.Consolidated` carry counts only.
+- **Register it before your guardrails** (or pass `runsBefore = Set(MiddlewareId("guardrails"))`),
+  so an answer a guardrail blocks is never recorded. A recording that already applied is not undone
+  by a later Block.
+- **Adding it to an existing agent reshapes its graph** (it registers the
+  `semantic-memory-recalled` key), so threads checkpointed before are refused with
+  `RestoreRejected`: finish or `forget` them first.
+
 ### Injecting Context
+
+To do it by hand instead, without the middleware:
 
 Put the relevant memory in the system prompt, run the agent, then record the turn. The memory half
 of this is runnable as is; `runAgent` stands for however you build and call your agent (see the
