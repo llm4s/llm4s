@@ -150,7 +150,7 @@ final class RunContext private[graph] (
   /** Where this task's [[ReplayGuard]]s keep effect records: the thread's store in a runtime, memory outside one. */
   private[graph] val journal: EffectJournal = EffectJournal.local(),
   /** The task effect records belong to: the task a continuation stands in for, else this one (design §4.24). */
-  owner: Option[(TaskId, Long)] = None
+  owner: Option[(TaskId, String)] = None
 ):
   /** This context with `next` as the answers its hooks see, recording usage in the same task's accumulator. */
   private[agent] def withAnswers(next: Map[String, (ujson.Value, ujson.Value)]): RunContext =
@@ -159,8 +159,8 @@ final class RunContext private[graph] (
   /** The task this task's effect records belong to ([[Commit.releasesEffect]]). */
   private[graph] def effectOwner: TaskId = owner.fold(position.taskId)(_._1)
 
-  /** The epoch of the task this task's effect records belong to: the claim whose run scheduled it (design §4.24). */
-  private[graph] def effectEpoch: Long = owner.fold(0L)(_._2)
+  /** The lineage of the task this task's effect records belong to (design §4.24). */
+  private[graph] def effectLineage: String = owner.fold("")(_._2)
 
   /**
    * This task's key: the SHA-256 of the thread and the id of the logical task (design §4.24) - for a
@@ -171,7 +171,7 @@ final class RunContext private[graph] (
    * time: after `deleteThread`, or work after the last durable checkpoint planned again under
    * `Async`/`OnExit`, a task id can name new work.
    */
-  lazy val taskKey: IdempotencyKey = IdempotencyKey.ofTask(position.threadId, effectOwner, effectEpoch)
+  lazy val taskKey: IdempotencyKey = IdempotencyKey.ofTask(position.threadId, effectOwner, effectLineage)
 
   /**
    * The key of one external effect of this task - `operation`, such as `memory.record`, on what
@@ -180,11 +180,11 @@ final class RunContext private[graph] (
    * a set (memory ids) sorted.
    */
   def effectKey(operation: String, discriminator: String*): EffectKey =
-    EffectKey.derive(position.threadId, effectEpoch, taskKey, operation, discriminator)
+    EffectKey.derive(position.threadId, taskKey, operation, discriminator)
 
   /** The key of an effect under `base`, by this task's thread. */
   private[graph] def effectKeyUnder(base: IdempotencyKey, operation: String, discriminator: Seq[String]): EffectKey =
-    EffectKey.derive(position.threadId, effectEpoch, base, operation, discriminator)
+    EffectKey.derive(position.threadId, base, operation, discriminator)
 
   /** Records a durable custom event; `payload` is snapshotted at the call, so the node may reuse it. */
   def emit(name: String, version: Int, payload: ujson.Value): Unit = sink.custom(name, version, payload)

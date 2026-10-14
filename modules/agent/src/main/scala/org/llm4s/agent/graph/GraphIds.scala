@@ -120,8 +120,19 @@ object IdempotencyKey:
    * `llm4s-task-v1` tag. Not the superstep the task runs at, which `updateState` moves on while the
    * task keeps its id; the id itself names the superstep that scheduled the task.
    */
-  private[graph] def ofTask(threadId: ThreadId, taskId: TaskId, epoch: Long): IdempotencyKey =
-    KeyDigest.of(Seq("llm4s-task-v2", threadId.value, taskId.value, epoch.toString))
+  private[graph] def ofTask(threadId: ThreadId, taskId: TaskId, lineage: String): IdempotencyKey =
+    KeyDigest.of(Seq("llm4s-task-v2", threadId.value, taskId.value, lineage))
+
+  /**
+   * The base of the effect keys of tool call `toolCallId` run as task `task` ([[RunContext.taskKey]], the task
+   * the call's first run was): in `execute`, or in the answered resume `phase`.
+   */
+  private[graph] def ofToolEffect(
+    task: IdempotencyKey,
+    toolCallId: ToolCallId,
+    phase: Option[IdempotencyKey]
+  ): IdempotencyKey =
+    KeyDigest.of(Seq("llm4s-tool-effect-v1", task, toolCallId.value, phase.getOrElse("")))
 
   /**
    * The key of an answered resume of the call `call` (design §4.24): the SHA-256, under a

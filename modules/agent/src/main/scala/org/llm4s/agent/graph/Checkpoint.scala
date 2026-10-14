@@ -93,9 +93,9 @@ object Checkpoint:
    * 5 -> 6: static breakpoints (#1704) park held tasks and mark their continuations; nothing to rewrite, as
    * the new fields default to none, but a build that predates them refuses format 6 rather than run a held
    * task's continuation as an ordinary task.
-   * 6 -> 7: task epochs (#1921 follow-up) give each pending task and continuation origin the token of the claim
-   * whose run scheduled it; nothing to rewrite, as tasks written before read as epoch 0, but a build that
-   * predates them refuses format 7 rather than key a task's effects without its epoch.
+   * 6 -> 7: task lineages (#1921 follow-up) give each pending task and continuation origin a digest of what
+   * scheduled it; nothing to rewrite, as tasks written before read with an empty lineage, but a build that
+   * predates them refuses format 7 rather than key a task's effects without its lineage.
    */
   private val formatVersion: SchemaVersion =
     SchemaVersion(7)(
@@ -104,7 +104,7 @@ object Checkpoint:
       3 -> addFailedStatus,
       4 -> addFencingToken,
       5 -> addBreakpoints,
-      6 -> addTaskEpochs
+      6 -> addTaskLineages
     )
 
   private def addSuspension(json: ujson.Value): Result[ujson.Value] =
@@ -151,7 +151,7 @@ object Checkpoint:
       upgraded
     }.toResult
 
-  private def addTaskEpochs(json: ujson.Value): Result[ujson.Value] =
+  private def addTaskLineages(json: ujson.Value): Result[ujson.Value] =
     Try {
       val upgraded = ujson.copy(json)
       upgraded("formatVersion") = 7
@@ -222,7 +222,7 @@ final case class StoredCheckpoint(checkpoint: Checkpoint, pendingWrites: Vector[
  *    guardrail blocked stays readable. The runtime sets it on the `Failed` checkpoint that closes a run
  *    a node blocked ([[NodeResult.Block]]).
  *  - `effects` are upserted by key into the thread's effect records ([[Checkpointer.effect]]), each
- *    remembered with its task's id and epoch. Before they are, a commit with a `checkpoint` releases every
+ *    remembered with its task's id and lineage. Before they are, a commit with a `checkpoint` releases every
  *    record for which [[releasesEffect]] holds, so replay evidence lives exactly as long as its task can
  *    run again (design §4.24). The runtime writes each record of a [[ReplayGuard]] as a commit of its
  *    own, with no checkpoint, pending write or event.
@@ -248,30 +248,28 @@ final case class Commit private (
    * writes) runs none, whatever its snapshot lists: `recover` and `resume` refuse it, so a sibling parked in
    * the superstep a Block closed can never run, and its records go too.
    */
-  private lazy val live: Set[(String, Long)] = checkpoint.fold(Set.empty[(String, Long)]) { c =>
+  private lazy val live: Set[(String, String)] = checkpoint.fold(Set.empty[(String, String)]) { c =>
     if c.status == CheckpointStatus.Completed || c.status == CheckpointStatus.Failed then Set.empty
     else c.snapshot.liveTasks
   }
 
   /**
-   * Whether this commit releases an effect record of the task `taskId` of epoch `epoch` ([[EffectRecord]]):
-   * whether that task is provably settled, so no run can look the record up again (design §4.24). Only a
-   * commit with a checkpoint releases anything, and never a record whose task - id and epoch - is live in
-   * the new checkpoint ([[GraphSnapshot.liveTasks]]; a settled checkpoint runs nothing). A task that is not
-   * live is settled when it is
-   *  - of another epoch: a task of an earlier claim's run, which has ended or been fenced out. Either it
-   *    finished, or it was scheduled after that run's last durable checkpoint, and then every run after it
-   *    plans that work again as a task of its own epoch - a new identity, with keys of its own - so the
-   *    record answers for nothing that can run; or
-   *  - of this commit's epoch and scheduled no later than the new checkpoint's superstep: it finished. A
-   *    task of this run scheduled later is kept: under `Async`, a commit lands while the tasks after it run
-   *    and record.
+   * Whether this commit releases an effect record of the task `taskId` of lineage `lineage` ([[EffectRecord]]):
+   * whether that task is provably settled, so no run can look the record up again (design §4.24). Only a commit
+   * with a checkpoint releases anything. It releases a record whose task - id and lineage - is not live in the
+   * new checkpoint ([[GraphSnapshot.liveTasks]]; a settled checkpoint runs nothing) and was scheduled no later
+   * than its superstep. That checkpoint is durable once committed, so the superstep that scheduled the task
+   * never runs again: the task finished, or the durable plan scheduled other work under its id, and nothing
+   * can plan it again. A task scheduled later is kept, whoever recorded it:
+   *  - this run's, running ahead of a commit that lands late (`Async`);
+   *  - a run's that a takeover fenced out, scheduled after its last durable checkpoint (`Async`, `OnExit`): the
+   *    successor plans that work again, and from the same results it is the same task - the same lineage and
+   *    keys - so the first plan's evidence answers for it, even while the stale run's effect is still under way.
    * A store applies this to every record of the thread inside the commit.
    */
-  def releasesEffect(taskId: TaskId, epoch: Long): Boolean =
+  def releasesEffect(taskId: TaskId, lineage: String): Boolean =
     checkpoint.exists { c =>
-      !live.contains(taskId.value -> epoch) &&
-      (epoch != token.value || Commit.scheduledAt(taskId) <= c.snapshot.superstep)
+      !live.contains(taskId.value -> lineage) && Commit.scheduledAt(taskId) <= c.snapshot.superstep
     }
 
 object Commit:

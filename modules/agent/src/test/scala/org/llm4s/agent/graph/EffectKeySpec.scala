@@ -58,28 +58,41 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
     context(task = "3.2").effectKey("file.edit", "/a") should not be key
   }
 
-  "ToolContext.effectKey" should "derive from the call's key and the executing thread, not from the task" in {
+  "ToolContext.effectKey" should "derive from the call's task and id and the executing thread" in {
     val call = IdempotencyKey("call-key")
     val here = ToolContext(context(), ToolCallId("call_0"), call, ThreadState.empty(Map.empty))
-    val again =
-      ToolContext(context(task = "5.0", superstep = 5), ToolCallId("call_0"), call, ThreadState.empty(Map.empty))
-    // a re-run after approval is another task with the call's key: the same effect
+    // a re-run after approval is a continuation standing in for the call's first task: the same effect
+    val continuation = new RunContext(
+      RunConfig(),
+      RunPosition(ThreadId("t"), RunId("r"), "r/5", TaskId("5.0"), NodeId("n"), 5),
+      NodeEventSink.none,
+      owner = Some(TaskId("3.1") -> "")
+    )
+    val again = ToolContext(continuation, ToolCallId("call_0"), call, ThreadState.empty(Map.empty))
     again.effectKey("file.write", "/a") shouldBe here.effectKey("file.write", "/a")
     // a fork re-running the call keeps its key, but is a new effect in the fork
     val forked = ToolContext(context(thread = "fork"), ToolCallId("call_0"), call, ThreadState.empty(Map.empty))
     forked.effectKey("file.write", "/a") should not be here.effectKey("file.write", "/a")
     here.effectKey("file.write", "/a") should not be context().effectKey("file.write", "/a")
+    ToolContext(context(), ToolCallId("call_1"), call, ThreadState.empty(Map.empty))
+      .effectKey("file.write", "/a") should
+      not be here.effectKey("file.write", "/a")
   }
 
   "EffectRecord" should "round-trip through its JSON, and refuse a newer format or an unknown support class" in {
     val key = context().effectKey("op", "x")
     val records = Vector(
-      new EffectRecord(key, TaskId("3.1"), 7L, EffectBody.Begun(EffectIntent.Unverifiable)),
-      new EffectRecord(key, TaskId("3.1"), 7L, EffectBody.Completed(EffectIntent.Transactional, ujson.Obj("n" -> 1))),
+      new EffectRecord(key, TaskId("3.1"), "lin", EffectBody.Begun(EffectIntent.Unverifiable)),
       new EffectRecord(
         key,
         TaskId("3.1"),
-        7L,
+        "lin",
+        EffectBody.Completed(EffectIntent.Transactional, ujson.Obj("n" -> 1))
+      ),
+      new EffectRecord(
+        key,
+        TaskId("3.1"),
+        "lin",
         EffectBody.Omitted(EffectIntent.Verifiable(StateCheck.absent, StateCheck.of("x"), ujson.Num(1)), 99L)
       )
     )
@@ -107,7 +120,7 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
       RunConfig(),
       RunPosition(ThreadId("t"), RunId("r2"), "r2/7", TaskId("5.3"), NodeId("review"), 5, Some(FencingToken(9L))),
       NodeEventSink.none,
-      owner = Some(TaskId("2.0") -> 0L)
+      owner = Some(TaskId("2.0") -> "")
     )
     continuation.taskKey shouldBe origin.taskKey
     continuation.effectKey("memory.record", "m") shouldBe origin.effectKey("memory.record", "m")
@@ -154,16 +167,16 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
       java.time.Instant.EPOCH,
       snapshot(4, Vector(pending("4.0")), Vector("3.1"))
     )
-    Commit(token, Some(failed)).releasesEffect(TaskId("3.1"), 0L) shouldBe true
-    Commit(token, Some(failed)).releasesEffect(TaskId("4.0"), 0L) shouldBe true
+    Commit(token, Some(failed)).releasesEffect(TaskId("3.1"), "") shouldBe true
+    Commit(token, Some(failed)).releasesEffect(TaskId("4.0"), "") shouldBe true
     Commit(token, Some(failed.withStatus(CheckpointStatus.Suspended)))
-      .releasesEffect(TaskId("3.1"), 0L) shouldBe false
+      .releasesEffect(TaskId("3.1"), "") shouldBe false
   }
 
   "EffectRecord's JSON" should "share no mutable value with the record, in either direction" in {
     val key    = context().effectKey("op", "x")
     val out    = ujson.Obj("n" -> 1)
-    val record = new EffectRecord(key, TaskId("3.1"), 7L, EffectBody.Completed(EffectIntent.Transactional, out))
+    val record = new EffectRecord(key, TaskId("3.1"), "lin", EffectBody.Completed(EffectIntent.Transactional, out))
     val before = ujson.write(EffectRecord.toJson(record))
     // what toJson hands out cannot change the record
     EffectRecord.toJson(record)("outcome")("value")("n") = 99
@@ -177,7 +190,7 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
       new EffectRecord(
         key,
         TaskId("3.1"),
-        7L,
+        "lin",
         EffectBody.Begun(EffectIntent.Verifiable(StateCheck.absent, StateCheck.of("x"), ujson.Arr(1)))
       )
     )
@@ -197,33 +210,53 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
     )
   }
 
-  "A task's epoch" should "be part of its identity: the same id planned by another claim's run has other keys" in {
-    def at(epoch: Long) = new RunContext(
+  "A task's lineage" should "be part of its identity: work planned from other results has other keys" in {
+    def at(lineage: String) = new RunContext(
       RunConfig(),
       RunPosition(ThreadId("t"), RunId("r"), "r/3", TaskId("5.0"), NodeId("n"), 5),
       NodeEventSink.none,
-      owner = Some(TaskId("5.0") -> epoch)
+      owner = Some(TaskId("5.0") -> lineage)
     )
-    at(3L).taskKey should not be at(4L).taskKey
-    at(3L).effectKey("op") should not be at(4L).effectKey("op")
-    at(3L).effectKeyUnder(IdempotencyKey("call"), "op", Seq("x")) should not be
-      at(4L).effectKeyUnder(IdempotencyKey("call"), "op", Seq("x"))
-    at(3L).taskKey shouldBe at(3L).taskKey
+    at("a").taskKey should not be at("b").taskKey
+    at("a").effectKey("op") should not be at("b").effectKey("op")
+    at("a").taskKey shouldBe at("a").taskKey
+    val call  = IdempotencyKey("call")
+    val state = ThreadState.empty(Map.empty)
+    ToolContext(at("a"), ToolCallId("c"), call, state).effectKey("op") should not be
+      ToolContext(at("b"), ToolCallId("c"), call, state).effectKey("op")
   }
 
-  it should "be stamped by the run that admits an execution, only on tasks created for that run" in {
+  it should "be a root lineage of the admitting claim for a task created before admission, kept on restore" in {
     val b     = GraphBuilder("g", "v1")
     val n     = b.node[Unit]("n")((_, _, _) => NodeResult.Continue(Command.empty))
     val graph = b.compile(n)(_ => Right(())).value
     val fresh = graph.start(())
-    fresh.frontier.map(_.epoch) shouldBe Vector(Task.Unstamped)
+    fresh.frontier.map(_.lineage) shouldBe Vector(Task.Unstamped)
     val stamped = fresh.stampedBy(9L)
-    stamped.frontier.map(_.epoch) shouldBe Vector(9L)
-    stamped.epoch shouldBe 9L
-    // a restored task keeps the epoch it was scheduled in
+    stamped.frontier.map(_.lineage) shouldBe Vector(Task.rootLineage(9L, TaskId("0.0")))
     val restored = graph.restore(graph.snapshot(stamped).value).value
-    restored.frontier.map(_.epoch) shouldBe Vector(9L)
-    restored.stampedBy(12L).frontier.map(_.epoch) shouldBe Vector(9L)
+    restored.frontier.map(_.lineage) shouldBe stamped.frontier.map(_.lineage)
+    restored.stampedBy(12L).frontier.map(_.lineage) shouldBe stamped.frontier.map(_.lineage)
+  }
+
+  it should "follow what scheduled a task: the same results, the same lineage; other results, another" in {
+    val log = StateKey.appending[String]("log")
+    def graph(next: String) = {
+      val b      = GraphBuilder("g", "v1")
+      val second = b.node[Unit]("second", writes = Set(log))((_, _, _) => NodeResult.Continue(Command.empty))
+      val first = b.node[Unit]("first", writes = Set(log)) { (_, _, _) =>
+        NodeResult.Continue(Command.empty.update(log, next))
+      }
+      b.edge(first, second)
+      b.compile(first)(_.get(log)).value
+    }
+    def scheduled(g: CompiledGraph[Unit, Vector[String]]) =
+      g.step(ThreadId("t"), g.start(()).stampedBy(5L), RunConfig()) match
+        case Step.Next(next) => next.frontier.map(t => t.id -> t.lineage)
+        case other           => fail(s"did not step: $other")
+    scheduled(graph("x")) shouldBe scheduled(graph("x"))
+    scheduled(graph("x")).map(_._1) shouldBe scheduled(graph("y")).map(_._1)
+    scheduled(graph("x")) should not be scheduled(graph("y"))
   }
 
   "Key and digest encoding" should "be one-to-one, unpaired surrogates included, and unchanged for well-formed text" in {
@@ -282,7 +315,12 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
       false
     )
 
-  private def pending(id: String, origin: Option[String] = None, epoch: Long = 0L, originEpoch: Option[Long] = None) =
+  private def pending(
+    id: String,
+    origin: Option[String] = None,
+    lineage: String = "",
+    originLineage: Option[String] = None
+  ) =
     GraphSnapshot.PendingTask(
       id,
       "n",
@@ -291,22 +329,24 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
       None,
       origin,
       origin.map(_ => "n"),
-      epoch = epoch,
-      originEpoch = originEpoch
+      lineage = lineage,
+      originLineage = originLineage
     )
 
-  "GraphSnapshot.liveTasks" should "be the frontier, and the tasks resumed and parked continuations stand in for, by id and epoch" in {
+  "GraphSnapshot.liveTasks" should "be the frontier, and the tasks resumed and parked continuations stand in for, by id and lineage" in {
     snapshot(
       4,
-      Vector(pending("4.0", epoch = 9L), pending("3.2", origin = Some("1.0"), epoch = 9L, originEpoch = Some(3L))),
+      Vector(
+        pending("4.0", lineage = "L4"),
+        pending("3.2", origin = Some("1.0"), lineage = "L3", originLineage = Some("L1"))
+      ),
       Vector("2.1")
     ).liveTasks shouldBe
-      Set("4.0" -> 9L, "3.2" -> 9L, "1.0" -> 3L, "2.1" -> 0L)
+      Set("4.0" -> "L4", "3.2" -> "L3", "1.0" -> "L1", "2.1" -> "")
   }
 
-  "Commit.releasesEffect" should "release only at a checkpoint, finished tasks and an earlier claim's orphans" in {
+  "Commit.releasesEffect" should "release only the provably settled: not live, and scheduled no later than the checkpoint" in {
     val token = FencingToken(5L)
-    val other = FencingToken(4L)
     val c = Checkpoint(
       Checkpoint.CurrentFormat,
       "c",
@@ -315,17 +355,17 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
       "r",
       CheckpointStatus.Running,
       java.time.Instant.EPOCH,
-      snapshot(4, Vector(pending("4.0", epoch = other.value)), Vector("2.1"))
+      snapshot(4, Vector(pending("4.0", lineage = "recovered")), Vector("2.1"))
     )
-    Commit(token).releasesEffect(TaskId("1.0"), token.value) shouldBe false
+    Commit(token).releasesEffect(TaskId("1.0"), "x") shouldBe false
     val commit = Commit(token, Some(c))
-    commit.releasesEffect(TaskId("4.0"), other.value) shouldBe false // live: an earlier run's, recovered
-    commit.releasesEffect(TaskId("2.1"), 0L) shouldBe false          // parked
-    commit.releasesEffect(TaskId("3.0"), token.value) shouldBe true  // finished
-    commit.releasesEffect(TaskId("5.0"), token.value) shouldBe false // this run's, ahead of the commit
-    commit.releasesEffect(TaskId("5.0"), other.value) shouldBe true  // an earlier run's, planned again as new work
-    // the same id in another epoch is another task: live 4.0 of epoch 4 keeps nothing of 4.0 of epoch 3
-    commit.releasesEffect(TaskId("4.0"), 3L) shouldBe true
-    commit.releasesEffect(TaskId("updateState"), token.value) shouldBe true
+    commit.releasesEffect(TaskId("4.0"), "recovered") shouldBe false // live
+    commit.releasesEffect(TaskId("2.1"), "") shouldBe false          // parked
+    commit.releasesEffect(TaskId("3.0"), "any") shouldBe true        // finished
+    // the durable plan scheduled other work as 4.0: the superstep that scheduled 4.0 never runs again
+    commit.releasesEffect(TaskId("4.0"), "other") shouldBe true
+    // scheduled after the checkpoint - running ahead of it, or work a takeover may plan again identically
+    commit.releasesEffect(TaskId("5.0"), "any") shouldBe false
+    commit.releasesEffect(TaskId("updateState"), "") shouldBe true
   }
 }

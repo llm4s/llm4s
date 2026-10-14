@@ -23,36 +23,30 @@ final class Execution private[graph] (
    * it suspended. Inside a [[GraphRuntime]] the thread's store holds them instead. Not part of a snapshot:
    * an execution restored from one starts with none, as a process restarted without a durable store would.
    */
-  private[graph] val journal: EffectJournal.Local = EffectJournal.local(),
-  /**
-   * The epoch of the tasks this execution schedules: the fencing token of the claim whose run schedules them
-   * (design §4.24), set when a [[GraphRuntime]] admits the run; `0` outside a runtime. Not part of a snapshot:
-   * each task carries its own epoch there.
-   */
-  private[graph] val epoch: Long = 0L
+  private[graph] val journal: EffectJournal.Local = EffectJournal.local()
 ):
 
   /** The tasks that can still run from here, as [[GraphSnapshot.liveTasks]] says of a snapshot. */
-  private[graph] def liveTasks: Set[(String, Long)] =
-    frontier.iterator.flatMap(t => Iterator(t.id.value -> t.epoch, t.arrivalId.value -> t.arrivalEpoch)).toSet ++
-      parked.map(p => p.origin.task.value -> p.origin.epoch)
+  private[graph] def liveTasks: Set[(String, String)] =
+    frontier.iterator.flatMap(t => Iterator(t.id.value -> t.lineage, t.arrivalId.value -> t.arrivalLineage)).toSet ++
+      parked.map(p => p.origin.task.value -> p.origin.lineage)
 
   /**
-   * This execution as run `token` schedules it: its epoch is `token`, and so is that of every task created for
-   * this run before it was admitted (a new entry task, a resumed continuation). Restored tasks keep theirs.
+   * This execution as run `token` admits it: every task created for the run before it was admitted - a new
+   * entry task, a resumed continuation - gets a root lineage of the run's claim (design §4.24). The claim's
+   * checkpoint holds them, so they keep it in every later run. Restored and scheduled tasks keep theirs.
    */
   private[graph] def stampedBy(token: Long): Execution =
     new Execution(
       owner,
       superstep,
       state,
-      frontier.map(t => if t.epoch == Task.Unstamped then t.copy(epoch = token) else t),
+      frontier.map(t => if t.lineage == Task.Unstamped then t.copy(lineage = Task.rootLineage(token, t.id)) else t),
       staticArrivals,
       dynamicActivations,
       parked,
       paused,
-      journal,
-      token
+      journal
     )
 
   /** No task is ready: the next step completes the run, suspends it, or reports an unsatisfied join. */
@@ -72,16 +66,16 @@ final class Execution private[graph] (
     parked: Vector[Parked] = parked,
     paused: Boolean = paused
   ): Execution =
-    new Execution(owner, superstep, state, frontier, staticArrivals, dynamicActivations, parked, paused, journal, epoch)
+    new Execution(owner, superstep, state, frontier, staticArrivals, dynamicActivations, parked, paused, journal)
 
   /** This execution with `state` in place of its own, at superstep `at`; everything scheduled stays. */
   private[graph] def edited(state: ThreadState, at: Int): Execution =
-    new Execution(owner, at, state, frontier, staticArrivals, dynamicActivations, parked, paused, journal, epoch)
+    new Execution(owner, at, state, frontier, staticArrivals, dynamicActivations, parked, paused, journal)
 
 final private[graph] case class JoinSlot(join: JoinId, fanOutTask: TaskId)
 
 /** The suspended task a continuation stands in for: its join arrivals are made in this name. */
-final private[graph] case class Origin(task: TaskId, node: NodeId, epoch: Long = 0L)
+final private[graph] case class Origin(task: TaskId, node: NodeId, lineage: String = "")
 
 /**
  * A scheduled task. `passedBefore` is set on the continuation of a task an `interruptBefore` breakpoint
@@ -98,17 +92,18 @@ final private[graph] case class Task(
   passedBefore: Boolean = false,
   replay: Option[List[Route]] = None,
   /**
-   * The fencing token of the claim whose run scheduled the task (design §4.24): with the id, the task's
-   * identity for its effects. A task planned again by another run - work after the last durable checkpoint
-   * under `Async` or `OnExit` - has another epoch, so it never shares replay evidence with the first plan.
+   * With the id, the task's identity for its effects (design §4.24): a digest of what scheduled it - the
+   * tasks of the superstep before, their ids, lineages and results - or, for a task created before its run
+   * was admitted, of the run's claim. Work planned again after a takeover from the same results is the same
+   * task, so it replays the first plan's evidence; work planned from other results is another task.
    */
-  epoch: Long = Task.Unstamped
+  lineage: String = Task.Unstamped
 ):
   /** The task id a dynamic join counts this task's completion as. */
   def arrivalId: TaskId = origin.fold(id)(_.task)
 
-  /** The epoch of the task a continuation stands in for, else this task's. */
-  def arrivalEpoch: Long = origin.fold(epoch)(_.epoch)
+  /** The lineage of the task a continuation stands in for, else this task's. */
+  def arrivalLineage: String = origin.fold(lineage)(_.lineage)
 
   /** The node a static join counts this task's completion as. */
   def arrivalNode: NodeId = origin.fold(node)(_.node)
@@ -118,8 +113,19 @@ final private[graph] case class Task(
  * `hold` says what continues it, `resumeNode` is the held task's own node and `question` is unused.
  */
 private[graph] object Task:
-  /** The epoch of a task created before its run was admitted; admission stamps it with the run's token. */
-  val Unstamped: Long = -1L
+  /** The lineage of a task created before its run was admitted; admission stamps it ([[rootLineage]]). */
+  val Unstamped: String = ""
+
+  /** The lineage of task `id` created for the run of claim `token` before it was admitted. */
+  def rootLineage(token: Long, id: TaskId): String =
+    KeyDigest.of(Seq("llm4s-lineage-root-v1", token.toString, id.value))
+
+  /**
+   * The lineage of task `id` scheduled by a superstep whose tasks and their results digest to `superstep`
+   * ([[CompiledGraph.schedule]]).
+   */
+  def scheduledLineage(superstep: String, id: TaskId): String =
+    KeyDigest.of(Seq("llm4s-lineage-v1", superstep, id.value))
 
 final private[graph] case class Parked(
   interrupt: InterruptId,
@@ -199,12 +205,12 @@ final case class GraphSnapshot(
    * frontier's and the parked continuations stand in for. Their effect records are kept; every other
    * task of the thread has finished, or will be planned again ([[Commit.releasesEffect]]).
    */
-  def liveTasks: Set[(String, Long)] =
+  def liveTasks: Set[(String, String)] =
     frontier.iterator
       .flatMap(task =>
-        Iterator(task.taskId -> task.epoch) ++ task.originTask.map(_ -> task.originEpoch.getOrElse(task.epoch))
+        Iterator(task.taskId -> task.lineage) ++ task.originTask.map(_ -> task.originLineage.getOrElse(task.lineage))
       )
-      .toSet ++ parked.map(p => p.originTask -> p.originEpoch)
+      .toSet ++ parked.map(p => p.originTask -> p.originLineage)
 
 object GraphSnapshot:
   /**
@@ -222,10 +228,10 @@ object GraphSnapshot:
     originNode: Option[String],
     passedBefore: Boolean = false,
     replay: Option[Vector[EncodedRoute]] = None,
-    /** The fencing token of the claim that scheduled the task; `0` for a task written before epochs (format 6). */
-    epoch: Long = 0L,
-    /** The epoch of the task a continuation stands in for. */
-    originEpoch: Option[Long] = None
+    /** The task's lineage (design §4.24); empty for a task written before lineages (format 6). */
+    lineage: String = "",
+    /** The lineage of the task a continuation stands in for. */
+    originLineage: Option[String] = None
   ) derives ReadWriter
 
   final case class StaticArrivals(joinId: String, arrived: Vector[String]) derives ReadWriter
@@ -248,6 +254,6 @@ object GraphSnapshot:
     fanOutTask: Option[String],
     breakpoint: Option[BreakpointPhase] = None,
     heldRoutes: Vector[EncodedRoute] = Vector.empty,
-    /** The epoch of the task the continuation stands in for; `0` before epochs (format 6). */
-    originEpoch: Long = 0L
+    /** The lineage of the task the continuation stands in for; empty before lineages (format 6). */
+    originLineage: String = ""
   ) derives ReadWriter

@@ -66,14 +66,12 @@ object EffectKey:
   /** The key of `operation` on `discriminator`, by thread `threadId`, under `base`. */
   private[graph] def derive(
     threadId: ThreadId,
-    epoch: Long,
     base: IdempotencyKey,
     operation: String,
     discriminator: Seq[String]
   ): EffectKey =
-    // v2 added the epoch of the task the effect belongs to: a task planned again by another run is new work
-    val parts =
-      Seq("llm4s-effect-v2", threadId.value, epoch.toString, base.value, operation, discriminator.size.toString)
+    // v2: the base names the effect's task by its lineage (design §4.24)
+    val parts = Seq("llm4s-effect-v2", threadId.value, base.value, operation, discriminator.size.toString)
     new EffectKey(KeyDigest.of(parts ++ discriminator), operation, scopeOf(threadId))
 
   /** The scope of every effect key of thread `threadId`. */
@@ -146,16 +144,15 @@ trait AppliedKeys:
 
 /**
  * The replay evidence of one effect, as the thread's [[Checkpointer]] keeps it: begun (an intent) or
- * completed (an outcome). `taskId` and `epoch` name the task the evidence belongs to - for a
- * continuation, the task it stands in for - by its id and the fencing token of the claim whose run
- * scheduled it; they decide when a commit releases it ([[Commit.releasesEffect]]). A store persists
+ * completed (an outcome). `taskId` and `lineage` name the task the evidence belongs to - for a
+ * continuation, the task it stands in for - by its id and a digest of what scheduled it; they decide when a commit releases it ([[Commit.releasesEffect]]). A store persists
  * [[EffectRecord.toJson]] and reads it back with [[EffectRecord.fromJson]]; the body is the guard's.
  */
 @Experimental
 final class EffectRecord private[graph] (
   val key: EffectKey,
   val taskId: TaskId,
-  val epoch: Long,
+  val lineage: String,
   private[graph] val body: EffectBody
 ):
 
@@ -184,7 +181,7 @@ object EffectRecord:
       "operation" -> record.key.operation,
       "scope"     -> record.key.scope,
       "taskId"    -> record.taskId.value,
-      "epoch"     -> ujson.Num(record.epoch.toDouble),
+      "lineage"   -> record.lineage,
       // copied out, and copied in by fromJson: ujson values are mutable, so no caller shares a stored one
       "intent" -> ujson.copy(EffectBody.intentJson(record.body.intent))
     )
@@ -213,8 +210,8 @@ object EffectRecord:
                 outcome.obj.get("value") match
                   case Some(value) => EffectBody.Completed(intent, ujson.copy(value))
                   case None        => EffectBody.Omitted(intent, outcome("omittedBytes").num.toLong)
-            val epoch = json.obj.get("epoch").fold(0L)(_.num.toLong)
-            new EffectRecord(key, TaskId(json("taskId").str), epoch, body)
+            val lineage = json.obj.get("lineage").fold("")(_.str)
+            new EffectRecord(key, TaskId(json("taskId").str), lineage, body)
           }
         }.toResult.flatten
     }
@@ -257,12 +254,12 @@ private[graph] object EffectBody:
       )
     case other => Left(ValidationError("effectRecord", s"unknown effect support '$other'"))
 
-/** The task an effect record belongs to: its id and its epoch (design §4.24). */
-final private[graph] case class EffectOwner(task: TaskId, epoch: Long)
+/** The task an effect record belongs to: its id and its lineage (design §4.24). */
+final private[graph] case class EffectOwner(task: TaskId, lineage: String)
 
 private[graph] object EffectOwner:
-  def of(context: RunContext): EffectOwner  = EffectOwner(context.effectOwner, context.effectEpoch)
-  def of(record: EffectRecord): EffectOwner = EffectOwner(record.taskId, record.epoch)
+  def of(context: RunContext): EffectOwner  = EffectOwner(context.effectOwner, context.effectLineage)
+  def of(record: EffectRecord): EffectOwner = EffectOwner(record.taskId, record.lineage)
 
 /** Where a task's guards read and write effect records: the thread's store in a runtime, memory outside one. */
 private[graph] trait EffectJournal:
@@ -278,8 +275,8 @@ private[graph] object EffectJournal:
     def write(record: EffectRecord): Result[Unit]            = Right(records.put(record.key.value, record): Unit)
 
     /** Drops the records of every task not in `live`: they can no longer run. */
-    def keepOnly(live: Set[(String, Long)]): Unit =
-      records.values.removeIf(r => !live.contains(r.taskId.value -> r.epoch)): Unit
+    def keepOnly(live: Set[(String, String)]): Unit =
+      records.values.removeIf(r => !live.contains(r.taskId.value -> r.lineage)): Unit
 
   def local(): Local = new Local()
 
@@ -360,7 +357,7 @@ object ReplayGuard:
         for
           _ <- caught(applied.forget(key, token))
           _ <- journal
-            .write(new EffectRecord(key, owner.task, owner.epoch, EffectBody.Begun(EffectIntent.Transactional)))
+            .write(new EffectRecord(key, owner.task, owner.lineage, EffectBody.Begun(EffectIntent.Transactional)))
           outcome <- apply(owner)
         yield outcome
       case Some(record) =>
@@ -408,7 +405,7 @@ object ReplayGuard:
             _ <- withinCap(key, "its presumed outcome", presumed, maxOutcomeBytes)
             _ <-
               if recorded.isDefined then Right(())
-              else journal.write(new EffectRecord(key, owner.task, owner.epoch, EffectBody.Begun(intent)))
+              else journal.write(new EffectRecord(key, owner.task, owner.lineage, EffectBody.Begun(intent)))
             _       <- notCancelled(context, key)
             outcome <- caught(planned.effect())
             _       <- complete(journal, key, owner, intent, outcome, maxOutcomeBytes)
@@ -426,7 +423,7 @@ object ReplayGuard:
               else if current == after then
                 decode[A](key, presumed).flatMap { outcome =>
                   journal
-                    .write(new EffectRecord(key, record.taskId, record.epoch, EffectBody.Completed(intent, presumed)))
+                    .write(new EffectRecord(key, record.taskId, record.lineage, EffectBody.Completed(intent, presumed)))
                     .map(_ => outcome)
                 }
               else
@@ -456,8 +453,10 @@ object ReplayGuard:
     val journal = context.journal
     def fresh(owner: EffectOwner): Result[A] =
       for
-        _ <- journal.write(new EffectRecord(key, owner.task, owner.epoch, EffectBody.Begun(EffectIntent.Unverifiable)))
-        _ <- notCancelled(context, key)
+        _ <- journal.write(
+          new EffectRecord(key, owner.task, owner.lineage, EffectBody.Begun(EffectIntent.Unverifiable))
+        )
+        _       <- notCancelled(context, key)
         outcome <- caught(effect)
         _       <- complete(journal, key, owner, EffectIntent.Unverifiable, outcome, maxOutcomeBytes)
       yield outcome
@@ -485,7 +484,7 @@ object ReplayGuard:
       val length = encodedLength(json)
       val body =
         if length > maxOutcomeBytes then EffectBody.Omitted(intent, length) else EffectBody.Completed(intent, json)
-      journal.write(new EffectRecord(key, owner.task, owner.epoch, body))
+      journal.write(new EffectRecord(key, owner.task, owner.lineage, body))
     }
 
   /**

@@ -173,10 +173,10 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
       if commit.checkpoint.isDefined then
         query(
           c,
-          "SELECT effect_key, task_id, task_epoch FROM llm4s_checkpoint_effects WHERE thread_id = ?",
+          "SELECT effect_key, task_id, task_lineage FROM llm4s_checkpoint_effects WHERE thread_id = ?",
           threadId.value
-        )(row => (row.getString(1), TaskId(row.getString(2)), row.getLong(3)))
-          .filter((_, task, epoch) => commit.releasesEffect(task, epoch))
+        )(row => (row.getString(1), TaskId(row.getString(2)), row.getString(3)))
+          .filter((_, task, lineage) => commit.releasesEffect(task, lineage))
           .foreach { (key, _, _) =>
             update(
               c,
@@ -188,15 +188,15 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
       commit.effects.foreach { record =>
         update(
           c,
-          """INSERT INTO llm4s_checkpoint_effects (thread_id, effect_key, task_id, task_epoch, writer_token, record_json)
+          """INSERT INTO llm4s_checkpoint_effects (thread_id, effect_key, task_id, task_lineage, writer_token, record_json)
             |VALUES (?, ?, ?, ?, ?, ?)
             |ON CONFLICT (thread_id, effect_key) DO UPDATE SET
-            |  task_id = excluded.task_id, task_epoch = excluded.task_epoch, writer_token = excluded.writer_token,
+            |  task_id = excluded.task_id, task_lineage = excluded.task_lineage, writer_token = excluded.writer_token,
             |  record_json = excluded.record_json""".stripMargin,
           threadId.value,
           record.key.value,
           record.taskId.value,
-          record.epoch,
+          record.lineage,
           commit.token.value,
           ujson.write(EffectRecord.toJson(record))
         )

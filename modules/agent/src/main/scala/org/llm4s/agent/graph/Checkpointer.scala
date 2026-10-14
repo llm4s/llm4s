@@ -49,7 +49,7 @@ import scala.util.Try
  *  - keep events until [[compactEvents]] or [[prune]] removes them, and report the earliest sequence
  *    still available when asked to replay from before it ([[GraphError.ReplayUnavailable]]);
  *  - keep a thread's effect records ([[EffectRecord]]), upserted by key by a commit's `effects` and
- *    remembered with the task they belong to (`taskId`, `epoch`), until a commit with a checkpoint releases
+ *    remembered with the task they belong to (`taskId`, `lineage`), until a commit with a checkpoint releases
  *    them ([[Commit.releasesEffect]], judged before that commit's own records are applied) or
  *    [[deleteThread]] removes them - never [[prune]], never by age - and copy none of them anywhere;
  *    [[effect]] reads one;
@@ -264,7 +264,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     def latestId: Option[String] = history.lastOption.map(_.id)
     def isEmpty: Boolean         = history.isEmpty && claim.isEmpty && nextSeq == 1L && effects.isEmpty
 
-  final private case class StoredEffect(taskId: TaskId, epoch: Long, json: ujson.Value)
+  final private case class StoredEffect(taskId: TaskId, lineage: String, json: ujson.Value)
 
   private val threads   = mutable.Map.empty[String, ThreadRecord]
   private var lastToken = 0L
@@ -359,8 +359,8 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
         else current.history
       val added = commit.checkpoint.map(c => Stored(c.id, c.status, c.createdAt, Checkpoint.toJson(c)))
       // released before this commit's own records are applied
-      val effects = current.effects.filterNot((_, e) => commit.releasesEffect(e.taskId, e.epoch)) ++
-        commit.effects.map(r => r.key.value -> StoredEffect(r.taskId, r.epoch, EffectRecord.toJson(r)))
+      val effects = current.effects.filterNot((_, e) => commit.releasesEffect(e.taskId, e.lineage)) ++
+        commit.effects.map(r => r.key.value -> StoredEffect(r.taskId, r.lineage, EffectRecord.toJson(r)))
       store(
         threadId,
         current.copy(

@@ -488,7 +488,7 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
     val runtime = GraphRuntime(Crashing(base, None, keys), clock, claims)
     runtime.deleteThread(thread, config("delete")).value
     val again = completed(runtime.start(thread, g, (), config("again")))
-    // a new thread's tasks are of a new epoch: new keys, so its effects run, and are never refused or replayed
+    // a new thread's first task has the root lineage of a new claim: new keys, so its effects run, never replayed
     Slots.foreach(slot => if again(slot.toString) == Refused then fail(s"slot $slot was refused on the new thread"))
     if !idempotent then subject.observe(0).value should not be subject.once(0)
     once(Ran(again, subject, Crashing(base, None, keys), thread), 1) // slot 1 never ran on the first thread

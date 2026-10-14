@@ -196,7 +196,7 @@ final case class ToolContext private (
    * of the call, a resume that asks again included.
    */
   def effectKey(operation: String, discriminator: String*): EffectKey =
-    run.effectKeyUnder(phase.getOrElse(idempotencyKey), operation, discriminator)
+    run.effectKeyUnder(IdempotencyKey.ofToolEffect(run.taskKey, toolCallId, phase), operation, discriminator)
 
 object ToolContext:
   def apply(

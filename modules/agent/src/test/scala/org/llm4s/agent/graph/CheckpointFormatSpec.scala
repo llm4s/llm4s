@@ -226,7 +226,7 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     Checkpoint.CurrentFormat shouldBe 7
   }
 
-  it should "read a format-6 checkpoint, written before task epochs, with every task of epoch 0" in {
+  it should "read a format-6 checkpoint, written before task lineages, with every task of an empty lineage" in {
     val b   = GraphBuilder("g", "v1")
     val n   = b.node[Unit]("n")((_, _, _) => NodeResult.Continue(Command.empty))
     val g   = b.compile(n)(_ => Right(())).value
@@ -235,11 +235,11 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
       Checkpoint(Checkpoint.CurrentFormat, "c", None, "t", "r", CheckpointStatus.Running, Instant.EPOCH, now)
     )
     json("formatVersion") = 6
-    json("snapshot")("frontier").arr.foreach(t => t.obj.remove("epoch"): Unit)
+    json("snapshot")("frontier").arr.foreach(t => t.obj.remove("lineage"): Unit)
     val read = Checkpoint.fromJson(json).value
     read.formatVersion shouldBe 7
-    read.snapshot.frontier.map(_.epoch) shouldBe Vector(0L)
-    g.restore(read.snapshot).value.frontier.map(_.epoch) shouldBe Vector(0L)
+    read.snapshot.frontier.map(_.lineage) shouldBe Vector("")
+    g.restore(read.snapshot).value.frontier.map(_.lineage) shouldBe Vector("")
   }
 
   it should "round-trip the terminal Failed status" in {

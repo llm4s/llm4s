@@ -9,13 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Phase 3 C4 follow-ups: retention against takeover admission, and one-to-one key encoding** ([#1921](https://github.com/llm4s/llm4s/issues/1921)).
-  - A task's identity for its effects is now its id and its epoch: the token of the claim whose run scheduled it
-    (`PendingTask.epoch`, checkpoint format 7). Work that a takeover plans again after the last durable checkpoint
-    (`Async`, `OnExit`) is a new task with new keys.
+  - A task's identity for its effects is now its id and its lineage: a digest of what scheduled it, namely the
+    previous superstep's tasks and their results (`PendingTask.lineage`, checkpoint format 7). Work that a takeover
+    plans again after the last durable checkpoint (`Async`, `OnExit`) keeps its identity when planned from the same
+    results, so it replays the first plan's evidence instead of repeating its effect. Planned from other results,
+    it is a new task.
   - A commit releases an effect record only when its task is provably settled (`Commit.releasesEffect(taskId,
-    epoch)`). A stale claimant's in-flight effect therefore never loses evidence that a running task needs, and
-    a replanned task is never answered by the first plan's evidence.
-  - SQLite schema 4 adds `task_epoch`.
+    lineage)`): not live, and scheduled no later than the new durable checkpoint. A takeover's admission no longer
+    releases the evidence of a stale claimant's in-flight effect.
+  - SQLite schema 4 adds `task_lineage`.
   - Key and `StateCheck` hashing encode unpaired surrogates one-to-one. Well-formed text hashes as before.
 - **A checkpoint restores after its graph gains a key** ([#1934](https://github.com/llm4s/llm4s/issues/1934), Stage 3
   slice C5, design §4.29): every `GraphSnapshot` now records its graph's `GraphShape` (entry, nodes, edges, joins,

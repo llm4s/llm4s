@@ -44,11 +44,11 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       "UPDATE llm4s_checkpoint_schema SET version = 1"
     )
 
-  /** The file as a version-3 build left it: effect records without their task's epoch (#1921 follow-up). */
+  /** The file as a version-3 build left it: effect records without their task's lineage (#1921 follow-up). */
   private def asVersionThree(path: Path): Unit =
     exec(
       path,
-      "ALTER TABLE llm4s_checkpoint_effects DROP COLUMN task_epoch",
+      "ALTER TABLE llm4s_checkpoint_effects DROP COLUMN task_lineage",
       "UPDATE llm4s_checkpoint_schema SET version = 3"
     )
 
@@ -331,7 +331,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     reopened.close()
   }
 
-  "A version-3 file" should "open at version 4, its effect records of epoch 0" in {
+  "A version-3 file" should "open at version 4, its effect records of an empty lineage" in {
     val db     = SqliteFiles.fresh()
     val thread = ThreadId("v3-thread")
     val first  = SqliteCheckpointer.open(db).value
@@ -355,7 +355,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
 
     val reopened = SqliteCheckpointer.open(db).value
     scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe 4
-    scalar(db, "SELECT task_epoch FROM llm4s_checkpoint_effects")(_.getLong(1)) shouldBe 0L
+    scalar(db, "SELECT task_lineage FROM llm4s_checkpoint_effects")(_.getString(1)) shouldBe ""
     reopened.effect(thread, record.key).value shouldBe Some(record)
     reopened.close()
   }

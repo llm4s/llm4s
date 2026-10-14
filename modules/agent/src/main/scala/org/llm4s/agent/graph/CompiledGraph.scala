@@ -168,8 +168,8 @@ final class CompiledGraph[I, O] private[graph] (
               task.origin.map(_.node.value),
               task.passedBefore,
               task.replay.map(_.toVector.map(encodeRoute)),
-              task.epoch,
-              task.origin.map(_.epoch)
+              task.lineage,
+              task.origin.map(_.lineage)
             )
           },
           staticJoins = execution.staticArrivals.toVector
@@ -198,7 +198,7 @@ final class CompiledGraph[I, O] private[graph] (
               p.slot.map(_.fanOutTask.value),
               p.hold.map(_.phase),
               held,
-              p.origin.epoch
+              p.origin.lineage
             )
           },
           paused = execution.paused,
@@ -451,7 +451,7 @@ final class CompiledGraph[I, O] private[graph] (
           position,
           NodeEventSink.none,
           journal = execution.journal,
-          owner = Some(task.arrivalId -> task.arrivalEpoch)
+          owner = Some(task.arrivalId -> task.arrivalLineage)
         )
         executeTask(task, execution, context).map(task -> _)
     })
@@ -742,6 +742,11 @@ final class CompiledGraph[I, O] private[graph] (
     config: RunConfig
   ): Execution =
     val next = execution.superstep + 1
+    // what scheduled the next tasks, as data: each task of this superstep, in frontier order, with its lineage
+    // and its result. A replan from the same results schedules the same tasks; one from other results, others
+    val content = KeyDigest.of(results.flatMap { (task, result) =>
+      Seq(task.id.value, task.lineage, resultDigest(task, result))
+    })
     // a task an interruptAfter breakpoint holds has committed its update, but makes no route, edge or arrival yet
     val heldAfter = results.collect { case (task, TaskResult.Done(_)) if holdsAfter(task, config) => task.id }.toSet
     val completed = results.collect {
@@ -757,7 +762,8 @@ final class CompiledGraph[I, O] private[graph] (
         }
     }
     val routedTasks = routed.zipWithIndex.map { case ((node, input, slot), i) =>
-      Task(TaskId(s"$next.$i"), node, input, slot, epoch = execution.epoch)
+      val id = TaskId(s"$next.$i")
+      Task(id, node, input, slot, lineage = Task.scheduledLineage(content, id))
     }
 
     val arrivedNodes = completed.map(_._1.arrivalNode).toSet
@@ -782,9 +788,11 @@ final class CompiledGraph[I, O] private[graph] (
     val (released, stillOpen) = (advanced ++ opened).partition(_.isComplete)
 
     val releasedTasks = (staticReleased ++ released.map(a => dynamicJoins(a.join).target.id)).zipWithIndex.map {
-      (node, i) => Task(TaskId(s"$next.${routedTasks.size + i}"), node, (), None, epoch = execution.epoch)
+      (node, i) =>
+        val id = TaskId(s"$next.${routedTasks.size + i}")
+        Task(id, node, (), None, lineage = Task.scheduledLineage(content, id))
     }
-    def origin(task: Task) = task.origin.getOrElse(Origin(task.id, task.node, task.epoch))
+    def origin(task: Task) = task.origin.getOrElse(Origin(task.id, task.node, task.lineage))
     // one interrupt per task, in frontier order, whatever parked it
     val newlyParked = results.collect {
       case (task, TaskResult.Parked(_, question, resume)) =>
@@ -803,12 +811,21 @@ final class CompiledGraph[I, O] private[graph] (
       stillOpen,
       execution.parked ++ newlyParked,
       paused = newlyParked.nonEmpty,
-      journal = execution.journal,
-      epoch = execution.epoch
+      journal = execution.journal
     )
     // the records of tasks that cannot run again go, as a store's commit releases them
     execution.journal.keepOnly(nextExecution.liveTasks)
     nextExecution
+
+  /** A task's result as data, for its successors' lineage: its pending write, without the checkpoint id. */
+  private def resultDigest(task: Task, result: TaskResult): String = result match
+    case TaskResult.Held          => "held"
+    case TaskResult.Blocked(_, e) => s"blocked:${e.message}"
+    case _ =>
+      encodeWrite("", task, result).fold(
+        e => s"unencodable:${task.id.value}:${e.message}",
+        write => ujson.write(upickle.default.writeJs(write), escapeUnicode = true)
+      )
 
   private def suspended(execution: Execution): RunResult[O] =
     RunResult.Suspended(execution.state, pendingInterrupts(execution), execution)
@@ -878,10 +895,10 @@ final class CompiledGraph[I, O] private[graph] (
       origin <- (pending.originTask, pending.originNode) match
         case (None, None) => Right(None)
         case (Some(task), Some(originNode)) if nodes.contains(NodeId(originNode)) =>
-          Right(Some(Origin(TaskId(task), NodeId(originNode), pending.originEpoch.getOrElse(pending.epoch))))
+          Right(Some(Origin(TaskId(task), NodeId(originNode), pending.originLineage.getOrElse(pending.lineage))))
         case (Some(_), Some(originNode)) => Left(s"$owner continues unknown node '$originNode'")
         case _                           => Left(s"$owner has half an origin")
-    yield Task(TaskId(pending.taskId), node.ref.id, input, slot, origin, pending.passedBefore, replay, pending.epoch)
+    yield Task(TaskId(pending.taskId), node.ref.id, input, slot, origin, pending.passedBefore, replay, pending.lineage)
 
   /** Held or replayed routes, rebound to this graph; `Left` names the first that is not. */
   private def restoreRoutes(owner: String, routes: Vector[EncodedRoute]): Either[String, List[Route]] =
@@ -925,7 +942,7 @@ final class CompiledGraph[I, O] private[graph] (
       InterruptId(saved.interruptId),
       node.ref.id,
       (),
-      Origin(TaskId(saved.originTask), NodeId(saved.originNode), saved.originEpoch),
+      Origin(TaskId(saved.originTask), NodeId(saved.originNode), saved.originLineage),
       slot,
       Some(hold)
     )
@@ -948,7 +965,7 @@ final class CompiledGraph[I, O] private[graph] (
       InterruptId(saved.interruptId),
       resume.node.id,
       question,
-      Origin(TaskId(saved.originTask), NodeId(saved.originNode), saved.originEpoch),
+      Origin(TaskId(saved.originTask), NodeId(saved.originNode), saved.originLineage),
       slot
     )
 

@@ -132,14 +132,14 @@ Effects outside thread state replay through `ReplayGuard`: an intent and an outc
 
 - **`Commit` gains `effects: Vector[EffectRecord]`**, defaulted in `apply`, so existing calls compile. A store must do three things with it:
   - Upsert a commit's records by `key`.
-  - On every commit that carries a checkpoint, first remove each record for which `commit.releasesEffect(record.taskId, record.epoch)` holds.
+  - On every commit that carries a checkpoint, first remove each record for which `commit.releasesEffect(record.taskId, record.lineage)` holds.
   - Remove a thread's records in `deleteThread`. Never remove them in `prune`.
 
   Persist records with `EffectRecord.toJson` and read them with `EffectRecord.fromJson`. `CheckpointerContract` gains the cases that check all of this.
 - **`GraphError` gains `EffectReplayRefused(operation, reason)`.** A `match` on `GraphError` that must be exhaustive gains a case.
 - **The SQLite schema moves to version 3** (`llm4s_checkpoint_effects`). A version-2 file is migrated when it is opened. A build from before this change refuses a version-3 file, as it refuses any newer schema.
 - **A `Transactional` target fences itself by the claim token.** `AppliedKeys.forget(key, token)` and the effect given to `ReplayGuard.transactional` (`token => ...`) refuse a token older than the newest seen for `key.scope`. A `Verifiable` target's effect is a compare-and-set against the plan's `before`.
-- **A store keys release by the record's task and epoch.** `Commit.releasesEffect(taskId, epoch)` replaces `releasesEffect(taskId, writer)`; persist `EffectRecord.epoch` with the record (SQLite: schema 4, `task_epoch`). `GraphSnapshot.liveTasks` is a set of `(id, epoch)`. The checkpoint format moves to 7 (`PendingTask.epoch`, `originEpoch`); a format-6 checkpoint reads as epoch 0.
+- **A store keys release by the record's task and lineage.** `Commit.releasesEffect(taskId, lineage)` replaces `releasesEffect(taskId, writer)`; persist `EffectRecord.lineage` with the record (SQLite: schema 4, `task_lineage`). `GraphSnapshot.liveTasks` is a set of `(id, lineage)` pairs. The checkpoint format moves to 7 (`PendingTask.lineage`, `originLineage`); a format-6 checkpoint reads with empty lineages.
 - **`ToolQuestionRequest` gains `phase: Option[IdempotencyKey]`** (defaulted; a stored request without it decodes as `None`). An asking tool's `resume` gets effect keys of its own, distinct from `execute`'s.
 - **New, opt-in API**: `RunContext.taskKey`, `RunContext.effectKey` and `ToolContext.effectKey`; `ReplayGuard` and its `Plan`; `ReplaySupport`, `StateCheck`, `AppliedKeys` and `EffectRecord`; and, in `llm4s-agent-testkit`, `ReplayContract`, which every external target of the harness passes. See [Tool side effects](../guide/agents/#tool-side-effects).
 
