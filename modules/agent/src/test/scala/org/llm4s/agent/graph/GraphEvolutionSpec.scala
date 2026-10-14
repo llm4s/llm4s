@@ -31,7 +31,8 @@ class GraphEvolutionSpec extends AnyFlatSpec with Matchers with EitherValues wit
     retargetWorkers: Boolean = false,
     addDynamic: Boolean = false,
     newEntry: Boolean = false,
-    manyKeys: Int = 0
+    manyKeys: Int = 0,
+    joins: Vector[String] = Vector.empty
   )
 
   /**
@@ -74,6 +75,7 @@ class GraphEvolutionSpec extends AnyFlatSpec with Matchers with EitherValues wit
       if v.edgeToLoose then b.edge(nodeA, loose)
       if v.joinOverAdded then b.staticJoin("added-only", Set(loose), nodeB)
     if v.joinOverStored then b.staticJoin("pair", Set(nodeA, worker), nodeB)
+    v.joins.foreach(id => b.staticJoin(id, Set(nodeA, worker), nodeB))
     val start = b.node[String]("start", writes = Set(log)) { (in, _, _) =>
       val logged = StateUpdate.update(log, s"start:$in")
       in match {
@@ -240,6 +242,19 @@ class GraphEvolutionSpec extends AnyFlatSpec with Matchers with EitherValues wit
     val changed =
       s.copy(shape = s.shape.map(sh => sh.copy(staticJoins = Vector(GraphShape.StaticJoin("pair", Vector("a"), "b")))))
     problems(g.restore(changed)) shouldBe List("static join 'pair' changed: a -> b, then a, worker -> b")
+  }
+
+  it should "be refused in flight when stored joins change their order, which orders the targets they release" in {
+    val g = graph(Variant(joins = Vector("p", "q")))
+    val s = g.step(thread, g.start("go"), RunConfig()) match {
+      case Step.Next(next) => g.snapshot(next).value
+      case other           => fail(other.toString)
+    }
+    g.restore(s).value
+    problems(graph(Variant(joins = Vector("q", "p"))).restore(s)) shouldBe List(
+      "the static joins over stored nodes changed their order: p, q, then q, p"
+    )
+    graph(Variant(joins = Vector("q", "p"))).restore(atRest).value
   }
 
   it should "restore in flight when added over added nodes only" in {

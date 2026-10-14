@@ -9,7 +9,8 @@ import scala.util.Try
 /**
  * A compiled graph's declared structure, as data: what a [[GraphSnapshot]] records of the graph that wrote it, so a
  * restore can tell what changed since. `nodes`, `resumes`, `keys` and each static join's `sources` are sorted;
- * `edges` holds each node's static successors in declaration order, and only nodes that have some.
+ * `edges` holds each node's static successors in declaration order, and only nodes that have some; `staticJoins` is
+ * in declaration order, which is the order joins released in one superstep schedule their targets.
  * [[CompiledGraph.restore]] says which differences keep a snapshot restorable.
  */
 final case class GraphShape(
@@ -79,13 +80,19 @@ private[graph] object GraphEvolution:
           case (None, Some(after)) if overStored(after) => Some(s"static join '$id', over stored nodes, was added")
           case _                                        => None
       }
+      // joins released in one superstep schedule their targets in declaration order: task ids and commit order
+      val kept    = stored.staticJoins.map(_.id).filter(currentJoins.contains)
+      val keptNow = current.staticJoins.map(_.id).filter(storedJoins.contains)
+      val reordered = Option.when(kept != keptNow)(
+        s"the static joins over stored nodes changed their order: ${kept.mkString(", ")}, then ${keptNow.mkString(", ")}"
+      )
       val dynamics = stored.dynamicJoins.toVector.sortBy(_._1).flatMap { (id, target) =>
         current.dynamicJoins.get(id) match
           case None                       => Some(s"dynamic join '$id' was removed from this graph")
           case Some(now) if now != target => Some(s"dynamic join '$id' changed its target: $target, then $now")
           case Some(_)                    => None
       }
-      versioned.toVector ++ removed ++ edges ++ statics ++ dynamics
+      versioned.toVector ++ removed ++ edges ++ statics ++ reordered ++ dynamics
 
   /**
    * The problems with restoring `snapshot`, written before snapshots recorded a shape, into a graph whose
