@@ -230,13 +230,14 @@ events. Commits made by another runtime or process sharing the store are the exc
 subscription receives them through its own store watch, or through a hand-over's gap read, so where
 one falls among this runtime's live events depends on when that subscription read it, and two
 subscriptions can place it differently. Durable `seq` order is preserved for every subscription. The
-common interleaving therefore holds exactly when nothing outside this runtime commits to the thread.
+common interleaving is guaranteed when nothing outside this runtime commits to the thread. An external
+commit allows subscriptions to place it differently; it does not necessarily make them differ.
 
-If you need one order across runtimes, order by durable `seq` only. There is no durable-only
-subscription option; filter in the listener: ignore `StreamEvent.Live` and `StreamEvent.LiveGap`, and
-take the position of every `StreamEvent.Durable(record)` from `record.seq` (or collect events and sort
-by `seq`). Live events have no `seq` and are not stored, so they cannot be placed in a cross-runtime
-order. The structural fix, one ordered per-thread log shared by all subscriptions, is recorded as future
+If you need one order across runtimes, order only `StreamEvent.Durable(record)` by `record.seq` (or
+collect those events and sort by `seq`). There is no durable-only subscription option, so filter in the
+listener. Ignore `StreamEvent.Live` and `StreamEvent.LiveGap`: live events have no `seq` and are not
+stored, so they cannot be placed in a cross-runtime order. Treat `StreamEvent.Disconnected` as the end
+of the subscription, not as a record: it carries `lastSeq` and a reason, not an `EventRecord`. The structural fix, one ordered per-thread log shared by all subscriptions, is recorded as future
 work in the design record ([#1920](https://github.com/llm4s/llm4s/issues/1920)).
 
 ## fs2, ZIO and Pekko Streams

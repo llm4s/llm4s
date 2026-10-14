@@ -178,10 +178,12 @@ object GraphRuntime:
  * interleaving of durable and live events. A commit made elsewhere reaches each subscription through
  * that subscription's own store watch, or through a hand-over's gap read, so its position among this
  * runtime's live events can differ from one subscription to another; each still sees the durable
- * events in `seq` order. The common interleaving therefore holds exactly when nothing outside this
- * runtime commits to the thread. A consumer that needs one order across runtimes orders by durable
- * `seq` alone: it ignores [[StreamEvent.Live]] and [[StreamEvent.LiveGap]], and reads the position of
- * everything else from `EventRecord.seq`.
+ * events in `seq` order. The common interleaving is guaranteed when nothing outside this runtime
+ * commits to the thread; an external commit allows subscriptions to place it differently, not
+ * necessarily make them differ. A consumer that needs one order across runtimes orders only
+ * [[StreamEvent.Durable]] records by `EventRecord.seq`. It ignores [[StreamEvent.Live]] and
+ * [[StreamEvent.LiveGap]], which have no `seq`, and treats [[StreamEvent.Disconnected]] as the end of
+ * the subscription, not as a record: it carries `lastSeq` and a reason.
  */
 final class GraphRuntime(
   checkpointer: Checkpointer,
@@ -293,8 +295,10 @@ final class GraphRuntime(
    * they fit, so they never make it lag. Where such a commit falls among this runtime's live events
    * is not fixed: it depends on when this subscription's watch (or a hand-over's gap read) read it, so
    * two subscriptions can place it differently - the common live/durable interleaving of subscriptions
-   * in one runtime holds only while nothing outside the runtime commits to the thread. Order by
-   * `seq` alone, ignoring [[StreamEvent.Live]], where one order across runtimes matters (#1920). Live progress of another runtime's runs is not delivered: it is
+   * in one runtime is guaranteed while nothing outside the runtime commits to the thread, and an
+   * external commit allows it to differ rather than making it differ. Where one order across runtimes
+   * matters, order only [[StreamEvent.Durable]] records by `seq`, ignoring [[StreamEvent.Live]] and
+   * [[StreamEvent.LiveGap]], and end at [[StreamEvent.Disconnected]] (#1920). Live progress of another runtime's runs is not delivered: it is
    * never stored. With [[WatchPolicy.disabled]], another runtime's commits are seen only by
    * subscribing again, which replays the log - all of it once no commit a run of this runtime gave up
    * on is still in the store on the thread; until then the replay stops at the first event above what
