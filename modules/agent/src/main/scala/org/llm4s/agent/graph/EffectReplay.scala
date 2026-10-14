@@ -29,6 +29,18 @@ private[graph] object KeyDigest:
    * which `String.getBytes` would replace with `?` - so `"a\uD800"` and `"a?"` would share bytes - is the byte
    * `0xFF`, which starts no UTF-8 encoding, then its UTF-16 code units, big-endian.
    */
+  /**
+   * `json` as text that two equal values share and two different values never do: object members sorted by
+   * key, recursively, and every non-ASCII character escaped. A serializer keeps members in insertion order, so
+   * equal objects built in another order would otherwise digest apart.
+   */
+  def canonical(json: ujson.Value): String =
+    def sorted(value: ujson.Value): ujson.Value = value match
+      case ujson.Obj(members) => ujson.Obj.from(members.toSeq.sortBy(_._1).map((k, v) => k -> sorted(v)))
+      case ujson.Arr(items)   => ujson.Arr.from(items.map(sorted))
+      case other              => other
+    ujson.write(sorted(json), escapeUnicode = true)
+
   def encoded(text: String): Array[Byte] =
     val encoder = StandardCharsets.UTF_8
       .newEncoder()

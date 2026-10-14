@@ -145,7 +145,7 @@ object IdempotencyKey:
         modelTask,
         call.id,
         call.name,
-        ujson.write(call.arguments, escapeUnicode = true)
+        KeyDigest.canonical(call.arguments)
       )
     )
 
@@ -167,8 +167,15 @@ object IdempotencyKey:
     if legacy then
       KeyDigest.of(Seq("llm4s-tool-resume-v1", call, asking.getOrElse(""), ujson.write(question), ujson.write(answer)))
     else
-      def text(value: ujson.Value) = ujson.write(value, escapeUnicode = true)
-      KeyDigest.of(Seq("llm4s-tool-resume-v2", call, asking.getOrElse(""), text(question), text(answer)))
+      KeyDigest.of(
+        Seq(
+          "llm4s-tool-resume-v2",
+          call,
+          asking.getOrElse(""),
+          KeyDigest.canonical(question),
+          KeyDigest.canonical(answer)
+        )
+      )
 
   extension (key: IdempotencyKey) def value: String = key
 

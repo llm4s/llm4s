@@ -266,6 +266,53 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
     scheduled(graph("x")) should not be scheduled(graph("y"))
   }
 
+  it should "digest results canonically, the order of a JSON object's members aside" in {
+    val doc = StateKey.replace[ujson.Value]("doc", ujson.Null)
+    def graph(value: ujson.Value) = {
+      val b      = GraphBuilder("g", "v1")
+      val second = b.node[Unit]("second", writes = Set(doc))((_, _, _) => NodeResult.Continue(Command.empty))
+      val first =
+        b.node[Unit]("first", writes = Set(doc))((_, _, _) => NodeResult.Continue(Command.empty.update(doc, value)))
+      b.edge(first, second)
+      b.compile(first)(_.get(doc)).value
+    }
+    def scheduled(g: CompiledGraph[Unit, ujson.Value]) =
+      g.step(ThreadId("t"), g.start(()).stampedBy(5L), RunConfig()) match
+        case Step.Next(next) => next.frontier.map(_.lineage)
+        case other           => fail(s"did not step: $other")
+    scheduled(graph(ujson.Obj("a" -> 1, "b" -> ujson.Obj("x" -> 1, "y" -> 2)))) shouldBe
+      scheduled(graph(ujson.Obj("b" -> ujson.Obj("y" -> 2, "x" -> 1), "a" -> 1)))
+    scheduled(graph(ujson.Obj("a" -> 1))) should not be scheduled(graph(ujson.Obj("a" -> 2)))
+    // and a call's key, whatever the order of its arguments' members
+    val task = IdempotencyKey("model-task")
+    IdempotencyKey.ofCall(
+      ThreadId("t"),
+      task,
+      org.llm4s.llmconnect.model.ToolCall("c", "w", ujson.Obj("p" -> 1, "q" -> 2))
+    ) shouldBe
+      IdempotencyKey.ofCall(
+        ThreadId("t"),
+        task,
+        org.llm4s.llmconnect.model.ToolCall("c", "w", ujson.Obj("q" -> 2, "p" -> 1))
+      )
+  }
+
+  it should "keep a run begun before lineages under the old identity: a format-6 superstep schedules legacy tasks" in {
+    val log    = StateKey.appending[String]("log")
+    val b      = GraphBuilder("g", "v1")
+    val second = b.node[Unit]("second", writes = Set(log))((_, _, _) => NodeResult.Continue(Command.empty))
+    val first =
+      b.node[Unit]("first", writes = Set(log))((_, _, _) => NodeResult.Continue(Command.empty.update(log, "x")))
+    b.edge(first, second)
+    val g        = b.compile(first)(_.get(log)).value
+    val snapshot = g.snapshot(g.start(())).value
+    val legacy   = g.restore(snapshot.copy(frontier = snapshot.frontier.map(_.copy(lineage = Task.Legacy)))).value
+    legacy.stampedBy(5L).frontier.map(_.lineage) shouldBe Vector(Task.Legacy)
+    g.step(ThreadId("t"), legacy.stampedBy(5L), RunConfig()) match
+      case Step.Next(next) => next.frontier.map(_.lineage) shouldBe Vector(Task.Legacy)
+      case other           => fail(s"did not step: $other")
+  }
+
   "Key and digest encoding" should "be one-to-one, unpaired surrogates included, and unchanged for well-formed text" in {
     val c = context()
     // String.getBytes(UTF_8) would turn each unpaired surrogate into '?'

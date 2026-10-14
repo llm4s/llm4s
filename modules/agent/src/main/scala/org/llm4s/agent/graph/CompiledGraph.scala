@@ -747,6 +747,11 @@ final class CompiledGraph[I, O] private[graph] (
     val content = KeyDigest.of(results.flatMap { (task, result) =>
       Seq(task.id.value, task.lineage, resultDigest(task, result))
     })
+    // a superstep of tasks from a checkpoint written before lineages (format 6) - a run an upgrade interrupted -
+    // schedules its successors as that writer did, with no lineage, so the records it may have written for them,
+    // running ahead under Async or OnExit, still answer; the run's next turn starts lineages afresh
+    val legacy                = results.nonEmpty && results.forall((task, _) => task.arrivalLineage == Task.Legacy)
+    def lineageOf(id: TaskId) = if legacy then Task.Legacy else Task.scheduledLineage(content, id)
     // a task an interruptAfter breakpoint holds has committed its update, but makes no route, edge or arrival yet
     val heldAfter = results.collect { case (task, TaskResult.Done(_)) if holdsAfter(task, config) => task.id }.toSet
     val completed = results.collect {
@@ -763,7 +768,7 @@ final class CompiledGraph[I, O] private[graph] (
     }
     val routedTasks = routed.zipWithIndex.map { case ((node, input, slot), i) =>
       val id = TaskId(s"$next.$i")
-      Task(id, node, input, slot, lineage = Task.scheduledLineage(content, id))
+      Task(id, node, input, slot, lineage = lineageOf(id))
     }
 
     val arrivedNodes = completed.map(_._1.arrivalNode).toSet
@@ -790,7 +795,7 @@ final class CompiledGraph[I, O] private[graph] (
     val releasedTasks = (staticReleased ++ released.map(a => dynamicJoins(a.join).target.id)).zipWithIndex.map {
       (node, i) =>
         val id = TaskId(s"$next.${routedTasks.size + i}")
-        Task(id, node, (), None, lineage = Task.scheduledLineage(content, id))
+        Task(id, node, (), None, lineage = lineageOf(id))
     }
     def origin(task: Task) = task.origin.getOrElse(Origin(task.id, task.node, task.lineage))
     // one interrupt per task, in frontier order, whatever parked it
@@ -824,7 +829,7 @@ final class CompiledGraph[I, O] private[graph] (
     case _ =>
       encodeWrite("", task, result).fold(
         e => s"unencodable:${task.id.value}:${e.message}",
-        write => ujson.write(upickle.default.writeJs(write), escapeUnicode = true)
+        write => KeyDigest.canonical(upickle.default.writeJs(write))
       )
 
   private def suspended(execution: Execution): RunResult[O] =
