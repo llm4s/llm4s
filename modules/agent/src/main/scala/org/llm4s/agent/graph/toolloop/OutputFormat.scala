@@ -14,15 +14,15 @@ import scala.util.Try
 
 /**
  * The response format of an agent's answer (design 4.26): the JSON schema its final answer must match, and
- * the type it must read as. Every model call of the agent carries the schema as its `responseFormat`, the
- * system prompt states it, and an answer is checked inside the model step: an invalid one is retried once,
+ * the type it must read as. A model call of the agent that offers no tools carries the schema as its
+ * `responseFormat` (see `ModelStep.fromClient`), the system prompt always states it, and an answer is checked inside the model step: an invalid one is retried once,
  * and a second ends the turn with [[org.llm4s.agent.graph.GraphError.OutputInvalid]]. Build one with
  * [[OutputFormat.of]]; `AgentBuilder.withOutput` does.
  */
 @Experimental
 final class OutputFormat private (val schema: ujson.Value, reads: ujson.Value => Option[String]):
 
-  /** The `responseFormat` every model call of the agent is made with. */
+  /** The `responseFormat` a model call of the agent that offers no tools is made with. */
   def responseFormat: ResponseFormat.JsonSchema = ResponseFormat.JsonSchema(schema)
 
   /** The system prompt section that states the schema, after the agent's own prompt. */

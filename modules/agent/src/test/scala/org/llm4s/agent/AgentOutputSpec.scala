@@ -48,15 +48,60 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
           AgentEvents.ModelCallCompleted.decode(payload).getOrElse(fail(s"undecodable payload $payload"))
       }
 
-  "withOutput" should "send the schema as the response format on every model call, tool steps included" in {
+  private val format = Some(ResponseFormat.JsonSchema(invoiceSchema.toJsonSchema(strict = true)))
+
+  "withOutput" should "send the schema as the response format on every call that offers no tools, the retry included" in {
+    val client = answers(invalid, valid)
+    built(withFormat(client)).run("bill Acme").value
+
+    client.calls.map(_._2.responseFormat) shouldBe Vector(format, format)
+  }
+
+  // a format on a request that offers tools conflicts with tool use for several providers (Codex, #1924)
+  it should "send no response format on a call that offers the agent's tools, so the model can still call them" in {
     val echo   = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
     val client = new ScriptedLLMClient(Right(calling(call("c1", "echo"))), Right(CompletionFixture.simple(valid)))
-    built(withFormat(client).withTools(SpecTools.set(echo))).run("bill Acme").value
+    val result = built(withFormat(client).withTools(SpecTools.set(echo))).run("bill Acme").value
 
-    client.callCount shouldBe 2
-    client.calls.map(_._2.responseFormat) shouldBe Vector.fill(2)(
-      Some(ResponseFormat.JsonSchema(invoiceSchema.toJsonSchema(strict = true)))
-    )
+    result.decodeOutput[Invoice] shouldBe Right(Invoice("Acme", 12.5))
+    client.calls.map(_._2.tools.nonEmpty) shouldBe Vector(true, true)
+    client.calls.map(_._2.responseFormat) shouldBe Vector(None, None)
+    // the prompt still states the schema on every call
+    client.sent.foreach(_.head.content should include("JSON Schema"))
+  }
+
+  it should "send no response format on a call that offers only a handoff" in {
+    val client = answers(valid)
+    built(withFormat(client).withHandoffs(Handoff.to("helper", Agent.builder("helper", client)))).run("bill Acme").value
+
+    client.calls.head._2.tools.map(_.name) shouldBe Seq("handoff_to_helper")
+    client.calls.head._2.responseFormat shouldBe None
+  }
+
+  it should "send the format when a model wrapper removes the tools from the request" in {
+    val echo = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
+    val toolless = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("toolless")
+      override def wrapModelCall(request: ModelRequest, context: RunContext)(
+        next: ModelRequest => Result[Completion]
+      ): Result[Completion] = next(request.withTools(ToolSet.empty))
+    }
+    val client = answers(valid)
+    built(withFormat(client).withTools(SpecTools.set(echo)).withMiddleware(toolless)).run("bill Acme").value
+
+    client.calls.head._2.responseFormat shouldBe format
+  }
+
+  it should "send no response format of the completion options on a tool call either" in {
+    val echo   = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
+    val client = new ScriptedLLMClient(Right(calling(call("c1", "echo"))), Right(CompletionFixture.simple(valid)))
+    built(
+      withFormat(client)
+        .withTools(SpecTools.set(echo))
+        .withCompletionOptions(CompletionOptions().withResponseFormat(ResponseFormat.Json))
+    ).run("bill Acme").value
+
+    client.calls.map(_._2.responseFormat) shouldBe Vector(None, None)
   }
 
   it should "replace a response format given with the completion options" in {

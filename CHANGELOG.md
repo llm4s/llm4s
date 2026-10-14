@@ -10,7 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **An agent's answer can have a response format** ([#1912](https://github.com/llm4s/llm4s/issues/1912), design
   4.26): `AgentBuilder.withOutput(schema: SchemaDefinition[O])` (with a uPickle `ReadWriter[O]`) sends the
-  strict JSON schema as the `responseFormat` of every model call of the agent and states it in the system prompt.
+  strict JSON schema as the `responseFormat` of each model call that offers no tools (a call that offers tools
+  carries no format, since several providers cannot combine the two) and states it in the system prompt.
+  `ModelStep.fromClient` gains `output`.
   A final answer must be JSON that matches the schema and reads as `O`, and is stored as that JSON alone. An invalid
   answer is retried once in the same model step, with its problems, and neither is stored; a second ends the turn as
   a Block with `Left(GraphError.OutputInvalid(errors))`: the turn removed from the thread, both calls in `usage` and

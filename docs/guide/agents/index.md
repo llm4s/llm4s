@@ -146,8 +146,9 @@ history, never a system prompt) and `usage`.
 
 `withOutput(schema)` gives the agent a response format: a `SchemaDefinition[O]`, with a uPickle
 `ReadWriter[O]` in scope. Write the schema by hand, or derive it with `llm4s-schema-derivation`:
-`withOutput(SchemaOf[Invoice].definition)`. Every model call carries the schema as its `responseFormat`, and the system prompt states it,
-for a client that cannot enforce it. `decodeOutput[O]` reads the answer:
+`withOutput(SchemaOf[Invoice].definition)`. The system prompt states the schema on every model call,
+and a call that offers no tools also carries it as its `responseFormat`. A call that offers tools carries
+no format, because several providers cannot combine one with tool calls. `decodeOutput[O]` reads the answer:
 
 ```scala
 case class Invoice(customer: String, total: Double) derives ReadWriter

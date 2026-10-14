@@ -109,9 +109,10 @@ final class AgentBuilder private (
   /**
    * The response format of this agent's answers (design 4.26): `schema`, rendered strict, replacing any set
    * before - a hand-written `ObjectSchema[O]`, or one derived with `llm4s-schema-derivation`:
-   * `withOutput(SchemaOf[Invoice].definition)`. Every model call of the agent carries it as `responseFormat` - replacing one given with
-   * [[withCompletionOptions]] - and the system prompt states it, since a client that cannot enforce it drops
-   * it. A final answer must be JSON that matches the schema and reads as `O`, and is stored as that JSON
+   * `withOutput(SchemaOf[Invoice].definition)`. The system prompt states it on every model call, and a call
+   * that offers no tools carries it as `responseFormat`, replacing one given with [[withCompletionOptions]]; a
+   * call that offers tools carries none, since providers that cannot combine the two would refuse or suppress
+   * the tool calls (see `ModelStep.fromClient`). A final answer must be JSON that matches the schema and reads as `O`, and is stored as that JSON
    * alone. An invalid answer is retried once in the same model step, with its problems; a second invalid
    * answer ends the turn with `Left(GraphError.OutputInvalid)`, the turn removed and both calls counted.
    * Read the answer with [[AgentResult.decodeOutput]]. The format belongs to this agent only: a handoff
@@ -210,8 +211,7 @@ final class AgentBuilder private (
       loopHandoffs <- handoffs.foldLeft[Result[Vector[LoopHandoff]]](Right(Vector.empty)) { (acc, h) =>
         acc.flatMap(done => loopHandoff(h).map(done :+ _))
       }
-      sent = output.fold(options)(format => options.withResponseFormat(format.responseFormat))
-    yield LoopAgent(agentId, ModelStep.fromClient(client, sent, streaming), toolSet)
+    yield LoopAgent(agentId, ModelStep.fromClient(client, options, streaming, output.map(_.responseFormat)), toolSet)
       .withSystemPrompt(systemPrompt)
       .withOutput(output)
       .withMaxSteps(maxSteps)

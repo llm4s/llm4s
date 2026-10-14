@@ -231,14 +231,24 @@ object ModelStep:
    * [[org.llm4s.agent.graph.tool.ToolSet.toolFunctions]]. With `streaming`, it calls
    * `streamComplete`, sending each chunk's text as a `TextDelta` and its thinking as a
    * `ThinkingDelta`, and returns the accumulated completion; otherwise `complete`.
+   *
+   * `output`, an agent's response format (design 4.26), replaces `options`' `responseFormat`: it is sent on
+   * a request that offers no tools, and no format is sent on one that does. A format on a tool-calling request
+   * conflicts with tool use for several providers - Gemini refuses a JSON response type with function
+   * declarations, and Anthropic's fallback tells the model to answer only in JSON - so the loop never sends
+   * one there; the prompt states the schema and the model step validates the answer either way.
    */
   def fromClient(
     client: LLMClient,
     options: CompletionOptions = CompletionOptions(),
-    streaming: Boolean = false
+    streaming: Boolean = false,
+    output: Option[ResponseFormat] = None
   ): ModelStep =
     (messages, tools, call) =>
-      val withTools = options.withTools(tools.toolFunctions)
+      val offered = options.withTools(tools.toolFunctions)
+      val withTools =
+        if output.isEmpty then offered
+        else offered.withResponseFormat(output.filter(_ => tools.toolFunctions.isEmpty))
       if !streaming then client.complete(Conversation(messages), withTools)
       else
         client.streamComplete(
