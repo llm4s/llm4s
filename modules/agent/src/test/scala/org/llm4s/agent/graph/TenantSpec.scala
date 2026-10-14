@@ -271,17 +271,38 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
       Some(aClaim.token)
     )
     underlying.commit(thread, Commit(aClaim.token, Some(aCheckpoint))).value
+    // tenant b's first read of the thread is stale - it missed tenant a's checkpoint, or still sees the
+    // thread tenant b had under the id before it was deleted - and the re-read after the refusal fails
+    val first = new java.util.concurrent.atomic.AtomicReference[Option[StoredCheckpoint]](None)
     val reads = new java.util.concurrent.atomic.AtomicInteger()
-    // tenant b's admission read missed tenant a's checkpoint, and the re-read after the refusal fails
     val failing = new ForwardingCheckpointer(underlying) {
       override def latest(threadId: ThreadId) =
-        if reads.incrementAndGet() == 1 then Right(None) else Left(ValidationError("store", "down"))
+        if threadId != thread then underlying.latest(threadId)
+        else if reads.incrementAndGet() == 1 then Right(first.get)
+        else Left(ValidationError("store", "down"))
     }
-    val refusal = GraphRuntime(failing).start(thread, f.graph, "y", tenant("b")).awaited.left.value
-    refusal shouldBe GraphError.ThreadBusy("t", None, None)
-    // and the same for the changes that claim the thread: a delete, a fork's target, an update
+    val busy = GraphError.ThreadBusy("t", None, None)
+    GraphRuntime(failing).start(thread, f.graph, "y", tenant("b")).awaited.left.value shouldBe busy
+
+    // the changes that claim the thread take the same path: a delete,
     reads.set(0)
-    GraphRuntime(failing).deleteThread(thread, tenant("b")).left.value shouldBe GraphError.ThreadBusy("t", None, None)
+    GraphRuntime(failing).deleteThread(thread, tenant("b")).left.value shouldBe busy
+
+    // a fork into it as the target, from a thread of tenant b's own,
+    val source = ThreadId("b-source")
+    GraphRuntime(underlying).start(source, f.graph, "s", tenant("b")).awaited.value.completed
+    val from = underlying.latest(source).value.value.checkpoint.id
+    reads.set(0)
+    GraphRuntime(failing).fork(source, from, thread, tenant("b")).left.value shouldBe busy
+
+    // and an update, by a caller whose stale read still shows tenant b's earlier thread under the id
+    first.set(Some(StoredCheckpoint(aCheckpoint.withTenantId(Some("b")), Vector.empty)))
+    reads.set(0)
+    GraphRuntime(failing)
+      .updateState(thread, f.graph, aCheckpoint.id, StateUpdate.empty, config = tenant("b"))
+      .left
+      .value shouldBe busy
+    underlying.latest(thread).value.value.checkpoint shouldBe aCheckpoint
   }
 
   it should "refuse another tenant while a first admission on a new thread is still reading it" in {
