@@ -65,23 +65,31 @@ private[pekko] object BlockingSource {
 
   /**
    * A source of the items `newProducer()` produces. `newProducer` is called once per materialization.
-   * A `capacity` below 1 gives a stream that fails at once with a [[ValidationError]].
+   * A `capacity` below 1 gives a stream that fails at once with a [[ValidationError]]. `beforeEnd` is a test hook,
+   * called on the producer's thread with the materialized `Future[Done]` just before the stream can see how the
+   * producer ended; it lets a spec hold the producer there and check the ordering deterministically.
    */
-  def apply[T](name: String, capacity: Int)(newProducer: () => Producer[T]): Source[T, Future[Done]] =
+  def apply[T](name: String, capacity: Int, beforeEnd: Future[Done] => Unit = _ => ())(
+    newProducer: () => Producer[T]
+  ): Source[T, Future[Done]] =
     if (capacity < 1)
       Source
         .failed[T](new LLMException(ValidationError("bufferSize", s"must be at least 1, got $capacity")))
         .mapMaterializedValue(_ => Future.successful(Done))
     else
-      Source.fromGraph(new Stage[T](name, capacity, newProducer)).named(name)
+      Source.fromGraph(new Stage[T](name, capacity, beforeEnd, newProducer)).named(name)
 
   /** How a producer ended. */
   sealed private trait Outcome
   private case object Completed                     extends Outcome
   final private case class Failed(cause: Throwable) extends Outcome
 
-  final private class Stage[T](name: String, capacity: Int, newProducer: () => Producer[T])
-      extends GraphStageWithMaterializedValue[SourceShape[T], Future[Done]] {
+  final private class Stage[T](
+    name: String,
+    capacity: Int,
+    beforeEnd: Future[Done] => Unit,
+    newProducer: () => Producer[T]
+  ) extends GraphStageWithMaterializedValue[SourceShape[T], Future[Done]] {
 
     private val out: Outlet[T]                 = Outlet[T](s"$name.out")
     override val shape: SourceShape[T]         = SourceShape(out)
@@ -118,13 +126,16 @@ private[pekko] object BlockingSource {
 
         /**
          * Runs on the producer thread; always records how it ended, so the stream cannot hang. `released` is
-         * completed before the stream is told, so it is complete by the time the stream has ended normally.
+         * completed before `outcome` is published, because any drain (one woken by an earlier `emit`, or a pull)
+         * that reads the outcome may end the stream: the future is therefore complete by the time the stream ends,
+         * whether it completes, fails or is cancelled.
          */
         private def produce(emitter: Emitter[T], callback: AsyncCallback[Unit]): Unit = {
           val result = attempt(emitter)
-          outcome.set(result)
           finished.set(true)
           released.trySuccess(Done): Unit
+          beforeEnd(released.future)
+          outcome.set(result)
           callback.invoke(())
         }
 
