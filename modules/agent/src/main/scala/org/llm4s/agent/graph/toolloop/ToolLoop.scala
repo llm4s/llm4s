@@ -768,26 +768,28 @@ object ToolLoop:
     sections: Vector[(MiddlewareId, PromptSection)],
     budget: Int
   ): Result[Option[String]] =
-    def tokens(chars: Int) = (chars + 3) / 4
-    val duplicates = sections.groupBy(_._2.id).toVector.sortBy(_._1).collect {
+    def tokens(chars: Long): Long = (chars + 3) / 4
+    def each = sections
+      .map((owner, section) => s"${owner.value}/${section.id}: ${tokens(section.text.length.toLong)}")
+      .mkString(", ")
+    lazy val duplicates = sections.groupBy(_._2.id).toVector.sortBy(_._1).collect {
       case (id, uses) if uses.size > 1 =>
         s"prompt section id '$id' is used more than once in one request, by middleware ${uses.map(u => s"'${u._1.value}'").distinct.mkString(", ")}"
     }
-    val (cacheable, rest) = sections.partition(_._2.cacheable)
-    val ordered           = cacheable ++ rest
-    val parts             = prompt.toVector ++ ordered.map(_._2.text)
-    val rendered          = Option.when(parts.nonEmpty)(parts.mkString(PromptSeparator))
-    val added             = tokens(rendered.fold(0)(_.length) - prompt.fold(0)(_.length))
-    def each =
-      ordered.map((owner, section) => s"${owner.value}/${section.id}: ${tokens(section.text.length)}").mkString(", ")
-    if duplicates.nonEmpty then Left(ValidationError("prompt sections", duplicates.toList))
-    else if sections.size > LoopAgent.MaxPromptSections then
+    // what the sections add to the prompt as sent - their text and a separator before each - computed from the
+    // lengths, so a request over the limits is refused before anything of it is built
+    lazy val added = tokens(
+      sections.map(_._2.text.length.toLong).sum +
+        PromptSeparator.length.toLong * (if prompt.isDefined then sections.size else (sections.size - 1).max(0))
+    )
+    if sections.size > LoopAgent.MaxPromptSections then
       Left(
         ValidationError(
           "prompt sections",
-          s"the request has ${sections.size} prompt sections, over the limit of ${LoopAgent.MaxPromptSections} ($each)"
+          s"the request has ${sections.size} prompt sections, over the limit of ${LoopAgent.MaxPromptSections}"
         )
       )
+    else if duplicates.nonEmpty then Left(ValidationError("prompt sections", duplicates.toList))
     else if added > budget then
       Left(
         ValidationError(
@@ -795,7 +797,10 @@ object ToolLoop:
           s"the request's prompt sections add $added estimated tokens to the prompt sent, separators included, over the agent's maxPromptSectionTokens of $budget ($each)"
         )
       )
-    else Right(rendered)
+    else
+      val (cacheable, rest) = sections.map(_._2).partition(_.cacheable)
+      val parts             = prompt.toVector ++ (cacheable ++ rest).map(_.text)
+      Right(Option.when(parts.nonEmpty)(parts.mkString(PromptSeparator)))
 
   /**
    * Suspends the asking task at the resume node of `owner`'s middleware that asked, for `hook`. Nothing of
