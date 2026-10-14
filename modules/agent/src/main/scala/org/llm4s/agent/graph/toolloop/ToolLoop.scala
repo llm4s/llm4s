@@ -584,6 +584,17 @@ object ToolLoop:
     def stack: MiddlewareStack       = prepared.stack
     def asking: Vector[AgentTool[?]] = tools.tools.filter(_.spec.question.isDefined)
 
+    /**
+     * [[ToolLoop.queue]], when one of the agent's tools declares locks; otherwise the key is not part of the
+     * graph, so an agent without locks keeps the structural fingerprint it had before locks existed, and
+     * restores the checkpoints written then.
+     */
+    def queueKey: Option[StateKey[Vector[ToolTask], Vector[ToolTask]]] =
+      Option.when(tools.tools.exists(_.spec.locksOf.isDefined))(queue)
+
+    /** What the model node, and a model wrapper's question node, may write. */
+    def modelWrites: Set[StateKey[?, ?]] = ToolLoop.modelWrites ++ queueKey
+
     /** What the call-tool, approval and ask nodes may write: any tool's keys; each call is checked against its own tool's. */
     def callWrites: Set[StateKey[?, ?]] =
       tools.tools.flatMap(_.writes).toSet ++ stack.writes ++ Set(results, Messages.key)
@@ -600,7 +611,7 @@ object ToolLoop:
 
   /** What a node writes when it runs a middleware hook again: the model's and the finish's write sets. */
   private val modelWrites: Set[StateKey[?, ?]] =
-    Set(Messages.key, LoopKeys.usage, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer, queue)
+    Set(Messages.key, LoopKeys.usage, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer)
   private val finishWrites: Set[StateKey[?, ?]] =
     Set(Messages.key, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer)
   private val inputWrites: Set[StateKey[?, ?]] = Set(Messages.key, LoopKeys.activeAgent, LoopKeys.turn)
@@ -760,7 +771,7 @@ object ToolLoop:
     def implementAsked[A](owner: AgentNodes, hook: MiddlewareHook, asked: AskedRef[A]): Unit =
       val writes = hook match
         case MiddlewareHook.BeforeAgent   => inputWrites
-        case MiddlewareHook.WrapModelCall => modelWrites
+        case MiddlewareHook.WrapModelCall => owner.modelWrites
         case MiddlewareHook.WrapToolCall  => owner.callWrites
         case MiddlewareHook.AfterAgent    => finishWrites
       b.implement(asked.ref.node, writes = writes) { (resumed, state, context) =>
@@ -993,7 +1004,7 @@ object ToolLoop:
       }
       outcome.fold(NodeResult.Fail(_), identity)
 
-    b.implement(nodes.model, writes = modelWrites)((_, state, context) => modelStep(state, context, Vector.empty))
+    b.implement(nodes.model, writes = nodes.modelWrites)((_, state, context) => modelStep(state, context, Vector.empty))
 
     // this agent's afterAgent stack, then - for a handoff target - the root's, which guards the whole family
     val boundaryOwners = if agent.id == root then Vector(nodes) else Vector(nodes, family(root))
@@ -1078,11 +1089,13 @@ object ToolLoop:
           .remove(results)
           .goto(nodes.model)
 
-    b.implement(nodes.collect, writes = Set(messages, results, queue)) { (_, state, context) =>
+    b.implement(nodes.collect, writes = Set(messages, results) ++ nodes.queueKey) { (_, state, context) =>
       NodeResult.fromResult(
-        state
-          .get(queue)
-          .flatMap(waiting => if waiting.nonEmpty then Right(nextRound(waiting)) else collected(state, context))
+        nodes.queueKey.fold(collected(state, context)) { key =>
+          state
+            .get(key)
+            .flatMap(waiting => if waiting.nonEmpty then Right(nextRound(waiting)) else collected(state, context))
+        }
       )
     }
 
@@ -1466,7 +1479,9 @@ object ToolLoop:
       }
 
     private def locksOf[A](tool: AgentTool[A], call: ToolCall): Set[LockKey] =
-      decode(tool, call).fold(_ => Set.empty, args => Try(tool.spec.locksOf(args)).getOrElse(Set(LockKey(""))))
+      tool.spec.locksOf.fold(Set.empty[LockKey]) { locks =>
+        decode(tool, call).fold(_ => Set.empty, args => Try(locks(args)).getOrElse(Set(LockKey(""))))
+      }
 
     private def decode[A](tool: AgentTool[A], call: ToolCall): Either[String, A] =
       read(argumentsOf(tool, call))(using tool.spec.codec)
