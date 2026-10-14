@@ -59,7 +59,13 @@ PATTERN = Regexp.new([
   'lineSeparator', 'FileChannel', 'FileLock', 'tryLock',
   'PosixFilePermission', 'setExecutable', 'setReadable', 'setWritable', 'toRealPath', 'LinkOption',
   'createSymbolicLink', 'createTemp', 'java\.io\.tmpdir', 'user\.home', 'user\.dir', 'jdbc:sqlite',
-  'Files\.(?:delete|move|copy|createDirector|createFile|newOutputStream|newBufferedWriter|write|writeString)\b'
+  # Whole method names, each ended by \b: a prefix such as `delete` or `createDirector` would miss
+  # `deleteIfExists` and `createDirectory`/`createDirectories`.
+  'Files\.(?:delete|deleteIfExists|move|copy|createDirectory|createDirectories|createFile|createLink|' \
+    'createTempFile|createTempDirectory|newOutputStream|newBufferedWriter|write|writeString|' \
+    'setPosixFilePermissions|setAttribute|setLastModifiedTime|setOwner)\b',
+  # java.io.File and its streams: the same operations without java.nio.file.Files.
+  '\.(?:renameTo|mkdirs?|deleteOnExit)\(', 'FileOutputStream', 'FileWriter', 'RandomAccessFile'
 ].join('|'))
 # A test that asks which OS it is on was written to behave differently on Windows.
 OS_PROBE = /os\.name|isWin|IS_OS_WINDOWS/

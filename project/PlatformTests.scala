@@ -76,8 +76,19 @@ object PlatformTests {
     "configPolicy" -> Seq(
       "org.llm4s.configpolicy.DoctorSpec",
       "org.llm4s.configpolicy.CheckPoliciesSourceSpec"
+    ),
+    // `it` holds integration suites by tier. Only `@Local` ones (no Docker, model server or API key) belong here, as
+    // in `sbt test`; of those, the vision clients' file-encoding paths create, write, read and delete temp files.
+    // The other Local suites (OpenTelemetry, MCP, smoke contract, OkHttp classpath, tier helpers) are pure logic or
+    // loopback HTTP and stay on ubuntu.
+    "it" -> Seq(
+      "org.llm4s.imageprocessing.provider.OpenAIVisionClientTest",
+      "org.llm4s.imageprocessing.provider.AnthropicVisionClientTest"
     )
   )
+
+  /** The tier filter `sbt test` applies to `it` (`it / Test / test / testOptions`), which `testOnly` does not apply. */
+  private val itLocalTag = "org.llm4s.it.tags.Local"
 
   /**
    * `testPlatform`, defined on the root project. Every module's tests are started together, as `sbt test` starts
@@ -91,7 +102,9 @@ object PlatformTests {
       .dependsOn(
         (unmatchedSuitesCheck +: (wholeModules.map(m => (LocalProject(m) / Test / test): Def.Initialize[Task[Unit]]) ++
           suites.map { case (m, names) =>
-            (LocalProject(m) / Test / testOnly).toTask(names.mkString(" ", " ", s" -- -l $excludeTag"))
+            // `it` is also restricted to its Local tier, so a suite retagged to Docker/Cloud drops out, not runs.
+            val tier = if (m == "it") s" -n $itLocalTag" else ""
+            (LocalProject(m) / Test / testOnly).toTask(names.mkString(" ", " ", s" -- -l $excludeTag$tier"))
           })): _*
       )
       .value
