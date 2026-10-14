@@ -9,6 +9,7 @@ import upickle.default.ReadWriter
 
 import java.time.Instant
 import java.util.regex.Pattern
+import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
 /**
@@ -224,6 +225,34 @@ private[harness] object Text:
       (if content.endsWith("\n") then parts.dropRight(1) else parts).map(_.stripSuffix("\r"))
 
   def utf8Bytes(s: String): Long = s.getBytes(java.nio.charset.StandardCharsets.UTF_8).length.toLong
+
+  /**
+   * The bytes the code point `cp` takes inside a JSON string as ujson writes it: a quote, backslash or
+   * short-escaped control character 2, any other control character (and, conservatively, a lone
+   * surrogate) 6 (`\u00XX`), anything else its UTF-8 bytes.
+   */
+  def jsonWidth(cp: Int): Int =
+    if cp == '"' || cp == '\\' || cp == '\n' || cp == '\r' || cp == '\t' || cp == '\b' || cp == '\f' then 2
+    else if cp < 0x20 || (cp >= 0xd800 && cp <= 0xdfff) then 6
+    else if cp < 0x80 then 1
+    else if cp < 0x800 then 2
+    else if cp < 0x10000 then 3
+    else 4
+
+  /** The bytes `s` takes encoded as a JSON string, quotes excluded: what a checkpoint or record stores. */
+  def jsonBytes(s: String): Long = s.codePoints.iterator.asScala.map(cp => jsonWidth(cp.intValue).toLong).sum
+
+  /** `s` cut to at most `max` [[jsonBytes]] on a character boundary, and whether it was cut. */
+  def cutEncoded(s: String, max: Long): (String, Boolean) =
+    @annotation.tailrec
+    def loop(i: Int, bytes: Long): Int =
+      if i >= s.length then i
+      else
+        val cp    = s.codePointAt(i)
+        val width = jsonWidth(cp)
+        if bytes + width > max then i else loop(i + Character.charCount(cp), bytes + width)
+    val end = loop(0, 0L)
+    (s.substring(0, end), end < s.length)
 
   /** Non-overlapping occurrences of `old` in `content`. */
   def occurrences(content: String, old: String): Int =

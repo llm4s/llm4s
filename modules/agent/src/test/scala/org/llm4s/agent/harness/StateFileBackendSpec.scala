@@ -146,6 +146,13 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     backend.write(p("/c"), "", f.ctx).left.value.message should include("3 files")
   }
 
+  it should "count what a checkpoint stores: content as a JSON string, escapes included" in {
+    val (backend, f) = fixture(StateFileBackend(maxBytes = 20, clock = clock))
+    // 2 path bytes + 3 control characters at 6 encoded bytes each = 20
+    f.write("/a", "\u0001\u0001\u0001")
+    backend.write(p("/b"), "", f.ctx).left.value.message should include("22 bytes")
+  }
+
   it should "lock every mutation on one backend-wide key, distinct per key id" in {
     val a = StateFileBackend()
     a.locks(p("/x")) shouldBe Set(LockKey("state-files", "files"))

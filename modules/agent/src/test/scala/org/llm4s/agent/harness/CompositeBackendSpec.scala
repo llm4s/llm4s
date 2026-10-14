@@ -84,6 +84,28 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     composite.ls(p("/scratch/deep"), 10, sctx).value.items.map(_.path.value) shouldBe Vector("/scratch/deep/c.txt")
   }
 
+  it should "treat an ancestor of a mount as a directory, whatever the default holds there" in {
+    // /scratch/deep is mounted; with only that route, /scratch would route to the default
+    val onlyDeep = CompositeBackend(main, p("/scratch/deep") -> deep).value
+    onlyDeep.write(p("/scratch"), "x", ctx).left.value.message should include("is a directory")
+    onlyDeep.read(p("/scratch"), 0, 1, ctx).left.value.message should include("is a directory")
+    onlyDeep.edit(p("/scratch"), "x", "y", replaceAll = false, ctx).left.value.message should include("is a directory")
+    onlyDeep.delete(p("/scratch"), ctx).left.value.message should include("is a directory")
+    // a file the default already holds there is never listed as one
+    val (_, update) = main.write(p("/scratch"), "stale", ctx).value
+    val sctx        = FileContext(testRunContext(), committed(state, update).value)
+    onlyDeep.ls(VPath.root, 10, sctx).value.items.map(i => (i.path.value, i.isDirectory)) should contain(
+      "/scratch" -> true
+    )
+    onlyDeep
+      .ls(VPath.root, 10, sctx)
+      .value
+      .items
+      .map(i => (i.path.value, i.isDirectory)) should not contain ("/scratch" -> false)
+    onlyDeep.glob(Glob("**"), VPath.root, 10, sctx).value.items.map(_.value) should not contain "/scratch"
+    onlyDeep.grep("stale", VPath.root, None, 10, sctx).value.items shouldBe empty
+  }
+
   it should "refuse the root as a mount and a repeated mount" in {
     CompositeBackend(main, VPath.root -> scratch).left.value shouldBe a[ValidationError]
     CompositeBackend(main, p("/x") -> scratch, p("/x") -> deep).left.value shouldBe a[ValidationError]

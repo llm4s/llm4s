@@ -34,8 +34,8 @@ enum FileUpdate derives ReadWriter:
  *
  * Directories are implicit: a path is a directory when an entry lies beneath it. Every mutation holds
  * the lock `state-files/<keyId>`, so the mutations of one batch apply in call order, each against the
- * state the previous one committed. That makes the bounds exact: the total UTF-8 bytes of paths and
- * contents is at most `maxBytes`, and the number of files at most `maxFiles`, checked when the tool
+ * state the previous one committed. That makes the bounds exact: the total bytes of paths and contents,
+ * as JSON strings (what a checkpoint stores, escapes included), is at most `maxBytes`, and the number of files at most `maxFiles`, checked when the tool
  * runs (rules 1, 2, 12).
  *
  * Each checkpoint copies the whole map (rule 6), so pair the backend with a `RetentionPolicy`.
@@ -70,7 +70,8 @@ final class StateFileBackend private (
   def read(path: VPath, offset: Int, limit: Int, ctx: FileContext): Result[FileLines] =
     current(ctx).flatMap(FileTree.read(_, path, offset, limit))
 
-  private def entryBytes(path: VPath, content: String): Long = Text.utf8Bytes(path.value) + Text.utf8Bytes(content)
+  // what each checkpoint stores: the path, and the content as a JSON string, escapes included
+  private def entryBytes(path: VPath, content: String): Long = Text.jsonBytes(path.value) + Text.jsonBytes(content)
 
   /** `path` may hold `content`: text, a writable path, and within this thread's bounds. */
   private def admit(operation: String, all: Map[VPath, FileEntry], path: VPath, content: String): Result[Unit] =

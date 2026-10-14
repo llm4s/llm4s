@@ -216,6 +216,17 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     an[IllegalArgumentException] should be thrownBy SandboxBackend(new CountingRunner(), maxOutputBytes = 1 << 20)
   }
 
+  it should "bound each stream's encoded size, so an output of control characters still fits a record" in {
+    val sandbox = SandboxBackend(new CountingRunner("\u0001" * 100), maxOutputBytes = 60)
+    val result  = sandbox.execute("cmd", VPath.root, 1.second, call()).value
+    result.stdout shouldBe "\u0001" * 10 // 6 encoded bytes each
+    result.truncated shouldBe true
+    Text.jsonBytes(result.stdout) should be <= 60L
+    val worst = SandboxBackend(new CountingRunner("\u0001" * (1 << 20)), maxOutputBytes = SandboxBackend.MaxOutputBytes)
+    val recorded = upickle.default.write(worst.execute("x" * 1000, VPath.root, 1.second, call()).value)
+    recorded.length should be < org.llm4s.agent.graph.ReplayGuard.DefaultMaxOutcomeBytes
+  }
+
   it should "resolve its runner per call" in {
     val runnerA = new CountingRunner("a")
     val sandbox = SandboxBackend.resolved(_ => Set(LockKey("sandbox")))(ctx =>

@@ -6,7 +6,6 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
-import java.nio.charset.StandardCharsets.UTF_8
 import scala.concurrent.duration.FiniteDuration
 
 /** What a command did; each stream cut at the backend's `maxOutputBytes`, `truncated` when one was. */
@@ -49,7 +48,9 @@ trait SandboxRunner:
  * `ReplayGuard.unverifiable` under `ctx.effectKey("sandbox.execute", command, workdir)`, never as
  * idempotent, so a completed command replays its stored [[ExecResult]] and one whose run may have begun
  * without recording its outcome is refused (`GraphError.EffectReplayRefused`, a tool error), never run
- * again. Each stream is cut at `maxOutputBytes` UTF-8 bytes before the outcome is recorded (rule 12).
+ * again. Each stream is cut, on a character boundary, so that its JSON encoding - what the guard records -
+ * is at most `maxOutputBytes`, before the outcome is recorded; so a recorded `ExecResult` always fits C4's
+ * record, whatever the output's characters (rule 12).
  * A command's effects stay when a Block retracts its turn (rule 5).
  */
 @Experimental
@@ -71,8 +72,8 @@ final class SandboxBackend private (
     )
 
   private def bounded(result: ExecResult): ExecResult =
-    val (out, cutOut) = SandboxBackend.cut(result.stdout, maxOutputBytes)
-    val (err, cutErr) = SandboxBackend.cut(result.stderr, maxOutputBytes)
+    val (out, cutOut) = Text.cutEncoded(result.stdout, maxOutputBytes.toLong)
+    val (err, cutErr) = Text.cutEncoded(result.stderr, maxOutputBytes.toLong)
     ExecResult(result.exitCode, out, err, result.truncated || cutOut || cutErr)
 
 object SandboxBackend:
@@ -103,16 +104,3 @@ object SandboxBackend:
       maxOutputBytes > 0 && maxOutputBytes <= MaxOutputBytes,
       s"maxOutputBytes must be in 1..$MaxOutputBytes, was $maxOutputBytes"
     )
-
-  /** `s` cut to at most `max` UTF-8 bytes on a character boundary, and whether it was cut. */
-  private[harness] def cut(s: String, max: Int): (String, Boolean) =
-    if s.length <= max / 3 || s.getBytes(UTF_8).length <= max then (s, false)
-    else
-      @annotation.tailrec
-      def loop(i: Int, bytes: Int): Int =
-        if i >= s.length then i
-        else
-          val cp    = s.codePointAt(i)
-          val width = new String(Character.toChars(cp)).getBytes(UTF_8).length
-          if bytes + width > max then i else loop(i + Character.charCount(cp), bytes + width)
-      (s.substring(0, loop(0, 0)), true)

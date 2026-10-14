@@ -33,9 +33,22 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
     val (mount, backend) = mounts.find((m, _) => path.isWithin(m)).get // the root mount takes every path
     Routed(mount, backend, path.rebase(mount, VPath.root).get)
 
-  /** `path` (a path of the backend mounted at `mount`) as a composite path, unless a deeper mount shadows it. */
+  /**
+   * Whether `path` is a strict ancestor of a mount: a directory of the composite, whatever the backend it
+   * routes to holds there. It is never read, written or deleted as a file, and never listed as one.
+   */
+  private def holdsMount(path: VPath): Boolean = routes.exists((m, _) => m != path && m.isWithin(path))
+
+  /** `path` (a path of the backend mounted at `mount`) as a composite path, unless a mount shadows it. */
   private def visible(mount: VPath, path: VPath): Option[VPath] =
-    path.rebase(VPath.root, mount).filter(cp => route(cp).mount == mount)
+    path.rebase(VPath.root, mount).filter(cp => route(cp).mount == mount && !holdsMount(cp))
+
+  /** `body` on `path` as a file, unless `path` holds a mount. */
+  private def asFile[A](operation: String, path: VPath)(body: Routed => Result[A]): Result[A] =
+    if holdsMount(path) then Left(BackendRefused(operation, path.value, "is a directory"))
+    else
+      val routed = route(path)
+      renamed(routed, path)(body(routed))
 
   /** A routed backend's refusal, naming the composite path rather than the routed one. */
   private def renamed[A](routed: Routed, path: VPath)(result: Result[A]): Result[A] =
@@ -67,12 +80,10 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
     }
 
   def read(path: VPath, offset: Int, limit: Int, ctx: FileContext): Result[FileLines] =
-    val routed = route(path)
-    renamed(routed, path)(routed.backend.read(routed.path, offset, limit, ctx))
+    asFile("read", path)(routed => routed.backend.read(routed.path, offset, limit, ctx))
 
   def write(path: VPath, content: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
-    val routed = route(path)
-    renamed(routed, path)(routed.backend.write(routed.path, content, ctx))
+    asFile("write", path)(routed => routed.backend.write(routed.path, content, ctx))
 
   def edit(
     path: VPath,
@@ -81,12 +92,10 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
     replaceAll: Boolean,
     ctx: FileContext
   ): Result[(FileEdited, StateUpdate)] =
-    val routed = route(path)
-    renamed(routed, path)(routed.backend.edit(routed.path, old, replacement, replaceAll, ctx))
+    asFile("edit", path)(routed => routed.backend.edit(routed.path, old, replacement, replaceAll, ctx))
 
   def delete(path: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
-    val routed = route(path)
-    renamed(routed, path)(routed.backend.delete(routed.path, ctx))
+    asFile("delete", path)(routed => routed.backend.delete(routed.path, ctx))
 
   /** Each backend `under` reaches, with the path to ask it under: `under`'s own, then every mount beneath. */
   private def spanned(under: VPath): Vector[Routed] =
