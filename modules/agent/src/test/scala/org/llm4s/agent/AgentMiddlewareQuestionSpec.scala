@@ -56,7 +56,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
       .eventsAfter(threadId, 0L, 1000)
       .fold(e => fail(e.message), identity)
       .collect {
-        case EventRecord(_, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ModelCallCompleted.name, _, payload)) =>
+        case EventRecord(_, _, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ModelCallCompleted.name, _, payload)) =>
           AgentEvents.ModelCallCompleted.decode(payload).getOrElse(fail(s"undecodable payload $payload"))
       }
 

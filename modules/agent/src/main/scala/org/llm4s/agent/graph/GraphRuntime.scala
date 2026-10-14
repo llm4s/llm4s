@@ -168,10 +168,24 @@ object GraphRuntime:
  * the run ([[RunHandle.observation]]).
  *
  * A subscription also sees the durable events of commits made through another runtime or process
- * sharing the checkpointer, in the same order and with the same guarantees: each live subscription
- * watches the store ([[WatchPolicy]], [[Checkpointer.awaitEventsAfter]]), so they arrive as soon as
- * the store reports them - at once from a store that is told of commits, within `pollInterval` from
- * one that is polled. Live progress events are never stored, so another runtime's do not arrive.
+ * sharing the checkpointer, with the same durable guarantees (ascending `seq`, no gap or duplicate):
+ * each live subscription watches the store ([[WatchPolicy]], [[Checkpointer.awaitEventsAfter]]), so
+ * they arrive as soon as the store reports them - at once from a store that is told of commits,
+ * within `pollInterval` from one that is polled. Live progress events are never stored, so another
+ * runtime's do not arrive.
+ *
+ * '''Ordering across runtimes.''' Concurrently active subscriptions to a thread that stay caught up see one
+ * interleaving of durable and live events within one runtime: every event handed to several of them has the same
+ * relative placement for each. A subscription that attaches later misses earlier live events, and a slower one can lose
+ * live events ([[StreamEvent.LiveGap]]) or be disconnected as `Lagging`; the guarantee does not cover those cases. A
+ * commit made elsewhere reaches each subscription through that subscription's own store watch, through a hand-over's
+ * gap read, or, while the subscription is still in its initial replay (one created after the commit included), directly
+ * from that replay, so its position among this runtime's live events can differ from one subscription to another; each still
+ * sees the durable events in `seq` order. The guarantee holds when nothing outside this runtime commits to the thread;
+ * an external commit allows subscriptions to place it differently, not necessarily make them differ. A consumer that
+ * needs one order across runtimes orders only [[StreamEvent.Durable]] records by `EventRecord.seq`. It ignores
+ * [[StreamEvent.Live]] and [[StreamEvent.LiveGap]], which have no `seq`, and treats [[StreamEvent.Disconnected]] as the
+ * end of the subscription, not as a record: it carries `lastSeq` and a reason.
  */
 final class GraphRuntime(
   checkpointer: Checkpointer,
@@ -279,8 +293,15 @@ final class GraphRuntime(
    * see there for how cancel waits on a running listener. Commits made through this runtime are
    * handed over as they land; those of another runtime or process sharing the checkpointer are read
    * from the store by the subscription's watch ([[WatchPolicy]]: a second virtual thread, which
-   * `cancel` stops too), in the same order and with the same guarantees, and are queued only as they
-   * fit, so they never make it lag. Live progress of another runtime's runs is not delivered: it is
+   * `cancel` stops too), in `seq` order and with the same durable guarantees, and are queued only as
+   * they fit, so they never make it lag. Where such a commit falls among this runtime's live events
+   * is not fixed: it depends on which read reached this subscription first (its initial replay, its watch, or a
+   * hand-over's gap read), so
+   * two subscriptions can place it differently. The guarantee that caught-up subscriptions in one runtime see one
+   * live/durable interleaving holds while nothing outside the runtime commits to the thread; an external commit
+   * allows it to differ rather than making it differ. Where one order across runtimes
+   * matters, order only [[StreamEvent.Durable]] records by `seq`, ignoring [[StreamEvent.Live]] and
+   * [[StreamEvent.LiveGap]], and end at [[StreamEvent.Disconnected]] (#1920). Live progress of another runtime's runs is not delivered: it is
    * never stored. With [[WatchPolicy.disabled]], another runtime's commits are seen only by
    * subscribing again, which replays the log - all of it once no commit a run of this runtime gave up
    * on is still in the store on the thread; until then the replay stops at the first event above what
@@ -406,10 +427,10 @@ final class GraphRuntime(
     durability: Durability,
     newOnly: Option[() => LLMError],
     observer: Option[Observer]
-  ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { signal =>
+  ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { admitting =>
     graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None =>
-        newRun(graph, threadId, config, durability, 0, signal).admit(graph.start(input), None, _ => started(config))
+        newRun(graph, threadId, config, durability, 0, admitting).admit(graph.start(input), None, _ => started(config))
       case Some(stored) =>
         checkTenant(threadId, stored, config).flatMap { _ =>
           newOnly match
@@ -420,7 +441,7 @@ final class GraphRuntime(
                 case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
                 case CheckpointStatus.Completed | CheckpointStatus.Failed =>
                   graph.restoreAtRest(stored.checkpoint.snapshot).flatMap { done =>
-                    newRun(graph, threadId, config, durability, done.superstep, signal)
+                    newRun(graph, threadId, config, durability, done.superstep, admitting)
                       .admit(
                         graph.startAt(done.superstep, done.state, input),
                         Some(stored.checkpoint.id),
@@ -438,7 +459,7 @@ final class GraphRuntime(
     config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync,
     observer: Option[Observer] = None
-  ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { signal =>
+  ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { admitting =>
     graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None => Left(GraphError.NothingToRecover(threadId.value))
       case Some(stored) =>
@@ -448,7 +469,7 @@ final class GraphRuntime(
               for
                 execution <- graph.restoreStored(stored.checkpoint)
                 reused    <- reusableWrites(graph, execution, stored)
-                run <- newRun(graph, threadId, config, durability, execution.superstep, signal).admit(
+                run <- newRun(graph, threadId, config, durability, execution.superstep, admitting).admit(
                   execution,
                   Some(stored.checkpoint.id),
                   // a claim that replaced an expired one is a takeover: its run may still be executing, even
@@ -490,7 +511,7 @@ final class GraphRuntime(
     config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync,
     observer: Option[Observer] = None
-  ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { signal =>
+  ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { admitting =>
     graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None => Left(GraphError.NotSuspended(threadId.value))
       case Some(stored) =>
@@ -500,7 +521,7 @@ final class GraphRuntime(
             for
               suspended <- graph.restoreStored(stored.checkpoint)
               resumed   <- graph.resume(suspended, answers)
-              run <- newRun(graph, threadId, config, durability, resumed.superstep, signal).admit(
+              run <- newRun(graph, threadId, config, durability, resumed.superstep, admitting).admit(
                 resumed,
                 Some(stored.checkpoint.id),
                 _ =>
@@ -1248,7 +1269,7 @@ final class GraphRuntime(
    * nothing.
    */
   private def exclusively[I, O](threadId: ThreadId, config: RunConfig, observer: Option[Observer])(
-    admit: StopSignal => Result[Run[I, O]]
+    admit: Admitting => Result[Run[I, O]]
   ): Result[RunHandle[O]] = admission(threadId) {
     observer.filter(_.capacity < 2) match
       case Some(o) =>
@@ -1282,10 +1303,9 @@ final class GraphRuntime(
                 admitted.foreach(_.releaseClaim())
                 release(threadId)
             }) { _ =>
-              observation = observer.map(o =>
-                hub.observe(threadId, config.runId, o.capacity, o.listener, abandoned.apply, runScope)
-              )
-              admit(signal).map { run =>
+              observation = observer.map(o => hub.observe(threadId, o.capacity, o.listener, abandoned.apply, runScope))
+              // the observer takes its place in the log at the first commit fenced by the run's claim
+              admit(Admitting(signal, token => observation.foreach(_.claimed(token)))).map { run =>
                 admitted = Some(run)
                 val subscription = observation.map(_.start(run.claimSeq - 1))
                 val handle = DefaultRunHandle[O](
@@ -1417,9 +1437,16 @@ final class GraphRuntime(
     config: RunConfig,
     durability: Durability,
     firstSuperstep: Int,
-    signal: StopSignal
+    admitting: Admitting
   ): Run[I, O] =
-    new Run(graph, threadId, config, committer(threadId, durability), firstSuperstep, signal)
+    new Run(graph, threadId, config, committer(threadId, durability), firstSuperstep, admitting)
+
+  /**
+   * What admission gives the run it admits: the run's stop signal, and `claimed`, told the token the
+   * run's claim is granted with before the claim's commit begins - so the run's observer
+   * ([[EventHub.observe]]) knows which commit is its place in the log.
+   */
+  final private class Admitting(val signal: StopSignal, val claimed: FencingToken => Unit)
 
   private def reusableWrites(
     graph: CompiledGraph[?, ?],
@@ -1920,8 +1947,9 @@ final class GraphRuntime(
     config: RunConfig,
     committer: Committer,
     firstSuperstep: Int,
-    signal: StopSignal
+    admitting: Admitting
   ):
+    private val signal      = admitting.signal
     val runId               = config.runId
     private val cause       = signal.cause
     private var checkpoints = 0L
@@ -1971,6 +1999,7 @@ final class GraphRuntime(
       val sentAt = ticker()
       claimThread(threadId, config).flatMap { granted =>
         claim = Some(granted)
+        admitting.claimed(granted.token)
         parentOrdinal = GraphRuntime.ordinal(parent)
         var admitted = false
         Using.resource(new AutoCloseable { def close(): Unit = if !admitted then releaseClaim() }) { _ =>
@@ -2583,16 +2612,20 @@ final class GraphRuntime(
           buffered += draft(Some(checkpointId), Some(task), RunEvent.Custom(name, version, snapshot))
         }
       def discardCustom(): Unit = withLock(lock)(buffered.clear())
+      // once the claim is found lost, a node that ignores the stop sends nothing more: a later run - of the
+      // same id, perhaps - may hold the thread. Checked under the hub's lock, so never after its claim (#1918)
       def progress(name: String, version: Int, payload: ujson.Value): Unit =
         hub.live(
           threadId,
           StreamEvent.Live(
             threadId.value,
             runId.value,
+            token,
             task.id.value,
             task.node.value,
             name,
             version,
             ujson.copy(payload)
-          )
+          ),
+          () => !claimWasLost
         )

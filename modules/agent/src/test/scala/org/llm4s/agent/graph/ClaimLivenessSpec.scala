@@ -63,8 +63,11 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     val released = new AtomicInteger()
     // claims the store has granted or refused
     val claims = new AtomicInteger()
+    // run as a claim reaches the store, before it is granted or refused
+    @volatile var beforeClaim: () => Unit = () => ()
     def claim(threadId: ThreadId, request: ClaimRequest) = {
       claims.incrementAndGet()
+      beforeClaim()
       underlying.claim(threadId, request)
     }
     def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) = {
@@ -2338,6 +2341,260 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     await(runtime(store, time, slow).recover(thread, two.graph, run("second")).value).completed
     events(store).map(_.event).collect { case r: RunEvent.RunRecovered => r.takenOverFrom } shouldBe Vector(None)
   }
+
+  // ---- #1918: a reused RunId names two runs; a fencing token names one ----
+
+  /** Runs `body` the first time it is called, and never again. */
+  private def once(body: => Unit): () => Unit = {
+    val armed = new AtomicBoolean(true)
+    () => if armed.compareAndSet(true, false) then body
+  }
+
+  "A run that reuses a lost run's RunId, admitted while the lost run's late write lands" should
+    "deliver to its observer what its handle's subscription does: never that write (#1918)" in {
+      val late   = LateWrite()
+      val handle = late.start()
+      val token  = late.loseClaim()
+      await(handle).failed._2 shouldBe GraphError.ClaimLost("t", token, None)
+      late.store.onRenew = () => None
+      late.heldGate.countDown()
+      // only the lost run's release is held back; the successor's goes straight to the store
+      late.store.onReleaseOf =
+        released => Option.when(released != token)(late.store.underlying.release(thread, released))
+      // the late write lands as the successor asks for its claim: after its observer joined the hub, and
+      // before its claim is granted - the lost claim is still the store's, its release held back
+      late.store.beforeClaim = once {
+        late.hang.countDown()
+        late.landed.await(5, TimeUnit.SECONDS) shouldBe true
+      }
+      val observed  = RunRecorder()
+      val successor = late.rt.recover(thread, late.graph, run("first"), observer = Some(Observer(16, observed))).value
+      await(successor).completed
+      observed.ended.await(5, TimeUnit.SECONDS) shouldBe true
+      val subscribed = RunRecorder()
+      successor.subscribe()(subscribed).value
+      subscribed.ended.await(5, TimeUnit.SECONDS) shouldBe true
+
+      // the late write is in the log, under the lost run's id and token, ahead of the successor's claim
+      val orphan = events(late.store).find(r => r.runId == "first" && r.event == RunEvent.TaskCompleted).value
+      orphan.token shouldBe token
+      val claimed = events(late.store).find(_.event.isInstanceOf[RunEvent.RunRecovered]).value
+      orphan.seq should be < claimed.seq
+      claimed.token.value should be > token.value
+      // the observer starts at the successor's claim, as the handle's subscription does
+      observed.records.map(_.seq) shouldBe subscribed.records.map(_.seq)
+      observed.records.headOption.map(_.seq) shouldBe Some(claimed.seq)
+      observed.records.map(_.token).distinct shouldBe Vector(claimed.token)
+      late.letRelease()
+    }
+
+  "An Agent turn that reuses a lost turn's RunId, admitted while the lost turn's late write lands" should
+    "stream none of that write, and stream what a subscription to the turn replays (#1918)" in {
+      val time    = ManualTime()
+      val store   = Hooked(InMemoryCheckpointer(time))
+      val writing = new CountDownLatch(1)
+      val hang    = new CountDownLatch(1)
+      val landed  = new CountDownLatch(1)
+      // the lost turn's first write after its claim - its model call's result - hangs in the store
+      store.onCommit = {
+        val armed = new AtomicBoolean(true)
+        commit =>
+          if commit.checkpoint.isEmpty && commit.pendingWrites.nonEmpty && armed.compareAndSet(true, false) then {
+            writing.countDown()
+            stuckUntil(hang)
+            val written = store.underlying.commit(thread, commit)
+            landed.countDown()
+            Some(written)
+          } else None
+      }
+      val releaseGate = new CountDownLatch(1)
+      val client = new org.llm4s.llmconnect.LLMClient {
+        import org.llm4s.llmconnect.model.*
+        override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+          Right(Completion("answer", 0L, "done", "test-model", AssistantMessage("done")))
+        override def streamComplete(
+          conversation: Conversation,
+          options: CompletionOptions,
+          onChunk: StreamedChunk => Unit
+        ): Result[Completion] = complete(conversation, options)
+        override def getContextWindow(): Int     = 4096
+        override def getReserveCompletion(): Int = 1024
+      }
+      val rt    = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      val agent = org.llm4s.agent.Agent.builder("assistant", client).withRuntime(rt).build().value
+      val turn  = RunConfig().withRunId(RunId("turn"))
+      val lost  = agent.start(thread, "hello", turn).value
+      writing.await(5, TimeUnit.SECONDS) shouldBe true
+      store.onRenew = unreachable
+      val token = tokenOf(store)
+      // and its release is held back, so its claim is still the store's when the write lands
+      store.onReleaseOf = released => {
+        if released == token then releaseGate.await(10, TimeUnit.SECONDS): Unit
+        None
+      }
+      time.advance(1.second)
+      lost.await().left.value shouldBe a[GraphError.ClaimLost]
+      store.onRenew = () => None
+
+      store.beforeClaim = once {
+        hang.countDown()
+        landed.await(5, TimeUnit.SECONDS) shouldBe true
+      }
+      val streamed = new ConcurrentLinkedQueue[StreamEvent]()
+      val again    = agent.streamRecover(thread, turn)(event => streamed.add(event): Unit).value
+      again.await().value.answer shouldBe Some("done")
+      val replayed = new ConcurrentLinkedQueue[StreamEvent]()
+      val ended    = new CountDownLatch(1)
+      again
+        .subscribeEnding(org.llm4s.agent.Agent.StreamCapacity, () => ended.countDown())(event =>
+          replayed.add(event): Unit
+        )
+        .value
+      ended.await(5, TimeUnit.SECONDS) shouldBe true
+
+      def durable(events: ConcurrentLinkedQueue[StreamEvent]): Vector[EventRecord] =
+        events.asScala.toVector.collect { case StreamEvent.Durable(r) => r }
+      val orphan = events(store).find(r => r.runId == "turn" && r.token == token && r.seq > 1L).value
+      val claim  = events(store).find(_.event.isInstanceOf[RunEvent.RunRecovered]).value
+      orphan.seq should be < claim.seq
+      durable(streamed).map(_.seq) should not contain orphan.seq
+      durable(streamed).map(_.seq) shouldBe durable(replayed).map(_.seq)
+      durable(streamed).headOption.map(_.seq) shouldBe Some(claim.seq)
+      durable(streamed).lastOption.map(_.event) shouldBe Some(RunEvent.RunCompleted)
+      releaseGate.countDown()
+    }
+
+  /** The payloads, rendered, of the live events in `events`. */
+  private def livePayloads(events: Iterable[StreamEvent]): Vector[String] =
+    events.toVector.collect { case StreamEvent.Live(_, _, _, _, _, _, _, payload) => payload.render() }
+
+  "A run that reuses a lost run's RunId, while a node of the lost run that ignores the interrupt still runs" should
+    "never deliver that node's progress to its observer or its handle's subscription (#1918)" in {
+      val time     = ManualTime()
+      val store    = Hooked(InMemoryCheckpointer(time))
+      val rt       = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      val log      = StateKey.appending[String]("log")
+      val calls    = new AtomicInteger(0)
+      val entered  = new CountDownLatch(1) // the lost run's node is running
+      val stale    = new CountDownLatch(1) // lets the lost run's node go on, after the successor's claim
+      val emitted  = new CountDownLatch(1) // the lost run's node has sent its progress
+      val watching = new CountDownLatch(1) // the successor's handle has a subscription
+      val graph: CompiledGraph[String, Vector[String]] = {
+        val b = GraphBuilder("stale", "v1")
+        val work = b.node[Unit]("work", writes = Set(log)) { (_, _, context) =>
+          if calls.incrementAndGet() == 1 then {
+            entered.countDown()
+            stuckUntil(stale)
+            context.progress("probe", 1, ujson.Str("stale"))
+            emitted.countDown()
+          } else {
+            // the successor's node: its claim is committed and handed over, its observer anchored
+            watching.await(5, TimeUnit.SECONDS) shouldBe true
+            stale.countDown()
+            emitted.await(5, TimeUnit.SECONDS) shouldBe true
+            context.progress("probe", 1, ujson.Str("fresh"))
+          }
+          continue(Command.empty.update(log, "work"))
+        }
+        val quick = b.node[String]("quick", writes = Set(log)) { (input, _, _) =>
+          continue(Command.empty.update(log, input).goto(work))
+        }
+        b.compile(quick)(_.get(log)).value
+      }
+      val handle = rt.start(thread, graph, "x", run("first")).value
+      val own    = handle.asInstanceOf[DefaultRunHandle[Vector[String]]]
+      entered.await(5, TimeUnit.SECONDS) shouldBe true
+      store.onRenew = unreachable
+      val token = tokenOf(store)
+      time.advance(1.second)
+      // the node ignores the interrupt, so the run is settled without its run thread, and the thread released
+      await(handle).failed._2 shouldBe GraphError.ClaimLost("t", token, None)
+      own.runThreadExited.getCount shouldBe 1
+      store.onRenew = () => None
+
+      val observed   = RunRecorder()
+      val successor  = rt.recover(thread, graph, run("first"), observer = Some(Observer(16, observed))).value
+      val subscribed = RunRecorder()
+      successor.subscribe()(subscribed).value
+      watching.countDown()
+      await(successor).completed
+      observed.ended.await(5, TimeUnit.SECONDS) shouldBe true
+      subscribed.ended.await(5, TimeUnit.SECONDS) shouldBe true
+      own.runThreadExited.await(5, TimeUnit.SECONDS) shouldBe true
+
+      // the lost run's node did send its progress, after the successor's claim, under the same run id
+      emitted.getCount shouldBe 0
+      val claimed = events(store).find(_.event.isInstanceOf[RunEvent.RunRecovered]).value
+      claimed.token.value should be > token.value
+      livePayloads(observed.received.asScala) shouldBe Vector("\"fresh\"")
+      livePayloads(subscribed.received.asScala) shouldBe Vector("\"fresh\"")
+    }
+
+  "An Agent turn that reuses a lost turn's RunId, while the lost turn's model call ignores the interrupt" should
+    "stream none of that call's text deltas, nor pass them to a subscription to the turn (#1918)" in {
+      val time     = ManualTime()
+      val store    = Hooked(InMemoryCheckpointer(time))
+      val calls    = new AtomicInteger(0)
+      val entered  = new CountDownLatch(1)
+      val stale    = new CountDownLatch(1)
+      val emitted  = new CountDownLatch(1)
+      val watching = new CountDownLatch(1)
+      val client = new org.llm4s.llmconnect.LLMClient {
+        import org.llm4s.llmconnect.model.*
+        private def done = Completion("answer", 0L, "done", "test-model", AssistantMessage("done"))
+        override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+          Right(done)
+        override def streamComplete(
+          conversation: Conversation,
+          options: CompletionOptions,
+          onChunk: StreamedChunk => Unit
+        ): Result[Completion] = {
+          if calls.incrementAndGet() == 1 then {
+            entered.countDown()
+            stuckUntil(stale)
+            onChunk(StreamedChunk("c", Some("stale")))
+            emitted.countDown()
+          } else {
+            watching.await(5, TimeUnit.SECONDS)
+            stale.countDown()
+            emitted.await(5, TimeUnit.SECONDS)
+            onChunk(StreamedChunk("c", Some("fresh")))
+          }
+          Right(done)
+        }
+        override def getContextWindow(): Int     = 4096
+        override def getReserveCompletion(): Int = 1024
+      }
+      val rt    = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      val agent = org.llm4s.agent.Agent.builder("assistant", client).withRuntime(rt).withStreaming().build().value
+      val turn  = RunConfig().withRunId(RunId("turn"))
+      val lost  = agent.start(thread, "hello", turn).value
+      entered.await(5, TimeUnit.SECONDS) shouldBe true
+      store.onRenew = unreachable
+      time.advance(1.second)
+      lost.await().left.value shouldBe a[GraphError.ClaimLost]
+      store.onRenew = () => None
+
+      val streamed = new ConcurrentLinkedQueue[StreamEvent]()
+      val again    = agent.streamRecover(thread, turn)(event => streamed.add(event): Unit).value
+      val ended    = new CountDownLatch(1)
+      val watched  = new ConcurrentLinkedQueue[StreamEvent]()
+      again
+        .subscribeEnding(org.llm4s.agent.Agent.StreamCapacity, () => ended.countDown())(event =>
+          watched.add(event): Unit
+        )
+        .value
+      watching.countDown()
+      again.await().value.answer shouldBe Some("done")
+      ended.await(5, TimeUnit.SECONDS) shouldBe true
+
+      emitted.getCount shouldBe 0
+      val deltas = (events: ConcurrentLinkedQueue[StreamEvent]) => livePayloads(events.asScala)
+      deltas(streamed).exists(_.contains("fresh")) shouldBe true
+      deltas(streamed).filter(_.contains("stale")) shouldBe empty
+      deltas(watched).exists(_.contains("fresh")) shouldBe true
+      deltas(watched).filter(_.contains("stale")) shouldBe empty
+    }
 
   "RunRecovered" should "read a log written before takenOverFrom, and round-trip it" in {
     val json =

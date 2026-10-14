@@ -160,9 +160,12 @@ sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ## Reading files and output efficiently
 
 Every token read stays in context for the rest of the session, so read narrowly.
-- **Locate, then read a range.** `grep -n` first, then `sed -n 'a,bp'` or Read with `offset`/`limit`. Never print all of `CHANGELOG.md` (4.5k lines), `build.sbt` (1.6k), `docs/reference/migration.md` or a design document.
+- **Locate, then read a range.** `grep -n` first, then `sed -n 'a,bp'` or Read with `offset`/`limit`. Never print all of `CHANGELOG.md`, `build.sbt` (1.6k), `docs/reference/migration.md` or a design document.
 - **Don't re-read** a file already read in this session unless it has changed since. Keep the line numbers from the first read.
-- **CHANGELOG.md: never read it.** `grep -n '^## \|^### ' CHANGELOG.md | head -8` lists the `## [Unreleased]` subsections (`Added`, `Changed`, `Removed`, `Fixed`). Insert a new entry as the first bullet under the right heading, with an Edit anchored on that heading. To find an existing entry, grep for its issue number.
+- **CHANGELOG.md: never read it whole.** `[Unreleased]` is the net change since the last release, organised by area; `grep -n '^## \|^### ' CHANGELOG.md | head -20` lists the areas. Grep the area heading and the issue number, then Edit.
+  - Add an entry to its area's list, starting **Added**, **Changed**, **Removed** or **Fixed**. Never create a duplicate heading. A breaking change also gets one line under `### Breaking changes`.
+  - An entry is 1-2 lines: the user-visible change plus the issue and design-record links. Detail goes in the design records and `docs/reference/migration.md`.
+  - A fix or follow-up to something not yet released edits that feature's existing entry (grep its issue number) or adds nothing. It never adds a new entry.
 - **Typed agent runtime design:** `docs/design/typed-agent-runtime-design.md` holds the model and roadmap, with one file per slice (§4.2 onwards) under `docs/design/typed-agent-runtime/`. Open only the § you need.
 - **Filter command output at the source:**
   - sbt: `... 2>&1 | tail -40`, or `grep -E '\[error\]|\*\*\* FAILED|Tests: |Failed tests'`.

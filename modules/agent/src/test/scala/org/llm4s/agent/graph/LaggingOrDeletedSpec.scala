@@ -62,7 +62,7 @@ abstract class LaggingOrDeletedCases
       seen.asScala.collectFirst { case d: StreamEvent.Disconnected => d }
 
   private def probe(thread: ThreadId): StreamEvent.Live =
-    StreamEvent.Live(thread.value, run.value, "task", "node", "probe", 1, ujson.Null)
+    StreamEvent.Live(thread.value, run.value, FencingToken(1L), "task", "node", "probe", 1, ujson.Null)
 
   /**
    * A live subscription with a disabled watch, from after `old`'s last event, capacity 2, whose

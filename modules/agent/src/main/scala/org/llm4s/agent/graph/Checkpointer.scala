@@ -40,6 +40,9 @@ import scala.util.Try
  *    first event is `1` unless a thread of the same id that numbered events was deleted, and then it
  *    is one past the deleted thread's next number `n` - `n` itself is skipped - so a new thread of the
  *    id numbers on past every event of the old one;
+ *  - record on each event the token of the commit that stored it ([[EventRecord.token]],
+ *    [[EventRecord.committed]]), so a run's events can be told from those of an earlier run that had
+ *    the same `RunId`;
  *  - refuse a read of the log after a number of a deleted thread of the id - from `1` up to the
  *    skipped `n`, exclusive ([[Checkpointer.deleted]]) - with [[GraphError.ThreadDeleted]],
  *    from [[eventsAfter]] and [[awaitEventsAfter]] alike, so a reader that was following the deleted
@@ -101,7 +104,10 @@ trait Checkpointer:
    */
   def release(threadId: ThreadId, token: FencingToken): Result[Unit]
 
-  /** Applies `commit` atomically, fenced by its token, and returns its events with their sequence numbers. */
+  /**
+   * Applies `commit` atomically, fenced by its token, and returns its events with their sequence numbers,
+   * each recording that token.
+   */
   def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]]
 
   /** The thread's latest checkpoint and its pending writes; `None` for a new thread. */
@@ -361,7 +367,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
       // records handed back can alias what is durable
       val stored = commit.events.zipWithIndex.map { (draft, i) =>
         val seq = current.nextSeq + i
-        seq -> upickle.default.writeJs(EventRecord.committed(threadId.value, seq, draft))
+        seq -> upickle.default.writeJs(EventRecord.committed(threadId.value, seq, commit.token, draft))
       }
       val records = stored.map((_, json) => upickle.default.read[EventRecord](json))
       val writes  = commit.pendingWrites.map(upickle.default.writeJs(_))

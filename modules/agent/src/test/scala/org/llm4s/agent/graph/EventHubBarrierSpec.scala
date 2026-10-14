@@ -17,12 +17,15 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
 
   private val thread = ThreadId("t")
   private val run    = RunId("r1")
+  // the token of `run`'s claim: every record of the tests' run is committed under it
+  private val claim = FencingToken(2L)
 
-  private def record(seq: Long, runId: RunId = run): EventRecord =
+  private def record(seq: Long, runId: RunId = run, token: FencingToken = claim): EventRecord =
     EventRecord(
       thread.value,
       seq,
       runId.value,
+      token,
       None,
       None,
       None,
@@ -62,7 +65,10 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     }
     val hub = EventHub(InMemoryCheckpointer())
     val sub =
-      hub.observe(thread, run, capacity = 2, listener, AbandonedWrites.none, TenantScope.Unscoped).start(lastSeq = 0L)
+      hub
+        .observe(thread, capacity = 2, listener, AbandonedWrites.none, TenantScope.Unscoped)
+        .claimed(claim)
+        .start(lastSeq = 0L)
     hub.durable(thread, Vector(record(1)))
     entered.await(5, TimeUnit.SECONDS) shouldBe true             // the listener holds the first event
     hub.durable(thread, Vector(record(2), record(3), record(4))) // 4 does not fit: lagging
@@ -142,10 +148,13 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
       case _ => ()
     }
     def live(i: Int): StreamEvent.Live =
-      StreamEvent.Live(thread.value, run.value, "task", "node", "test.progress", 1, ujson.Num(i))
+      StreamEvent.Live(thread.value, run.value, claim, "task", "node", "test.progress", 1, ujson.Num(i))
     val hub = EventHub(InMemoryCheckpointer())
     val sub =
-      hub.observe(thread, run, capacity, listener, AbandonedWrites.none, TenantScope.Unscoped).start(lastSeq = 0L)
+      hub
+        .observe(thread, capacity, listener, AbandonedWrites.none, TenantScope.Unscoped)
+        .claimed(claim)
+        .start(lastSeq = 0L)
     hub.durable(thread, Vector(record(1)))
     entered.await(5, TimeUnit.SECONDS) shouldBe true // the listener holds the first event
 
@@ -181,7 +190,8 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     val fourth   = new CountDownLatch(1)
     val listener = Recording(countAt(4, fourth))
     val hub      = EventHub(log)
-    val sub = hub.observe(thread, run, capacity = 16, listener, cut.apply, TenantScope.Unscoped).start(lastSeq = 0L)
+    val sub =
+      hub.observe(thread, capacity = 16, listener, cut.apply, TenantScope.Unscoped).claimed(claim).start(lastSeq = 0L)
     hub.durable(thread, Vector(record(1)))
     log.records = log.records :+ record(3)
     val handing = Thread.ofVirtual().start(() => hub.durable(thread, Vector(record(3))))
@@ -233,9 +243,10 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
         case _ => ()
     }
     def live(i: Int): StreamEvent.Live =
-      StreamEvent.Live(thread.value, run.value, "task", "node", "test.progress", 1, ujson.Num(i))
+      StreamEvent.Live(thread.value, run.value, claim, "task", "node", "test.progress", 1, ujson.Num(i))
     val hub = EventHub(log)
-    val b   = hub.observe(thread, run, capacity = 16, behind, cut.apply, TenantScope.Unscoped).start(lastSeq = 0L)
+    val b =
+      hub.observe(thread, capacity = 16, behind, cut.apply, TenantScope.Unscoped).claimed(claim).start(lastSeq = 0L)
     hub.durable(thread, Vector(record(1)))
     val l = hub
       .subscribe(thread, afterSeq = 2L, capacity = 16, level, cut.apply, TenantScope.Unscoped)
@@ -333,7 +344,10 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     hub.awaitingAnchor = _ => parked.countDown()
     val listener = Recording()
     val sub =
-      hub.observe(thread, run, capacity = 16, listener, AbandonedWrites.none, TenantScope.Unscoped).start(lastSeq = 0L)
+      hub
+        .observe(thread, capacity = 16, listener, AbandonedWrites.none, TenantScope.Unscoped)
+        .claimed(claim)
+        .start(lastSeq = 0L)
     // the watch has found the observer not yet anchored, and is about to wait for it
     parked.await(5, TimeUnit.SECONDS) shouldBe true
     log.records = Vector(record(1))
@@ -356,7 +370,10 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
       countAt(4, aheadSaw4)(event)
     }
     val a =
-      hub.observe(thread, run, capacity = 16, ahead, AbandonedWrites.none, TenantScope.Unscoped).start(lastSeq = 0L)
+      hub
+        .observe(thread, capacity = 16, ahead, AbandonedWrites.none, TenantScope.Unscoped)
+        .claimed(claim)
+        .start(lastSeq = 0L)
     log.records = Vector(record(1))
     hub.durable(thread, Vector(record(1)))
     log.records = log.records :+ record(2, RunId("elsewhere"))
@@ -378,7 +395,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     val l = hub
       .subscribe(thread, afterSeq = 0L, capacity = 16, late, AbandonedWrites.none, TenantScope.Unscoped)
       .fold(e => fail(e.message), identity)
-    hub.live(thread, StreamEvent.Live(thread.value, run.value, "task", "node", "test.progress", 1, ujson.Num(0)))
+    hub.live(thread, StreamEvent.Live(thread.value, run.value, claim, "task", "node", "test.progress", 1, ujson.Num(0)))
     lateJoined.await(5, TimeUnit.SECONDS) shouldBe true
     late.seen.asScala.toVector shouldBe Vector("1", "live")
     log.release.countDown()
@@ -394,8 +411,8 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     hub.liveCount(thread) shouldBe 0
   }
 
-  private def live(i: Int): StreamEvent.Live =
-    StreamEvent.Live(thread.value, run.value, "task", "node", "test.progress", 1, ujson.Num(i))
+  private def live(i: Int, token: FencingToken = claim): StreamEvent.Live =
+    StreamEvent.Live(thread.value, run.value, token, "task", "node", "test.progress", 1, ujson.Num(i))
 
   /** A thread-scoped listener recording each event's label, as [[Recording]] does. */
   private def recording(onEvent: StreamEvent => Unit = _ => ()): Recording = Recording(onEvent)
@@ -427,7 +444,8 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     val lateThree = new CountDownLatch(1)
     val lateSeen  = recording(countAt(3, lateThree))
     val b = hub
-      .observe(thread, run, capacity = 16, behindSeen, AbandonedWrites.none, TenantScope.Unscoped)
+      .observe(thread, capacity = 16, behindSeen, AbandonedWrites.none, TenantScope.Unscoped)
+      .claimed(claim)
       .start(lastSeq = 0L)
     locks.withThreadLock(thread)(hub.durable(thread, Vector(record(1))))
     hub.release(thread)
@@ -559,12 +577,95 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     val hub         = EventHub(InMemoryCheckpointer())
     val sixth       = new CountDownLatch(1)
     val listener    = recording(countAt(6, sixth))
-    val observation = hub.observe(thread, run, capacity = 16, listener, AbandonedWrites.none, TenantScope.Unscoped)
-    hub.durable(thread, Vector(record(5, RunId("lost"))))
+    val observation = hub.observe(thread, capacity = 16, listener, AbandonedWrites.none, TenantScope.Unscoped)
+    hub.durable(thread, Vector(record(5, RunId("lost"), FencingToken(1L))))
+    observation.claimed(claim)
     hub.durable(thread, Vector(record(6)))
     val sub = observation.start(lastSeq = 5L)
     sixth.await(5, TimeUnit.SECONDS) shouldBe true
     listener.seen.asScala.toVector shouldBe Vector("6")
+    sub.cancel()
+    hub.liveCount(thread) shouldBe 0
+  }
+
+  it should "not take one by a lost run with the same RunId either, handed over before or after the claim is granted (#1918)" in {
+    // a run id may be reused; a token never is. The lost run's writes, 4 and 5, are its own run id's,
+    // fenced by its older claim; 4 lands before the next run's claim is granted, 5 after
+    val hub         = EventHub(InMemoryCheckpointer())
+    val sixth       = new CountDownLatch(1)
+    val listener    = recording(countAt(6, sixth))
+    val observation = hub.observe(thread, capacity = 16, listener, AbandonedWrites.none, TenantScope.Unscoped)
+    hub.durable(thread, Vector(record(4, run, FencingToken(1L))))
+    observation.claimed(claim)
+    hub.durable(thread, Vector(record(5, run, FencingToken(1L))))
+    hub.durable(thread, Vector(record(6), record(7)))
+    val sub = observation.start(lastSeq = 5L)
+    sixth.await(5, TimeUnit.SECONDS) shouldBe true
+    sub.endOfRun(run)
+    listener.reached.await(5, TimeUnit.SECONDS) shouldBe true
+    listener.seen.asScala.toVector shouldBe Vector("6", "7", "end:r1")
+    sub.cancel()
+    hub.liveCount(thread) shouldBe 0
+  }
+
+  it should "not deliver a live event sent before its run's claim is handed over: no node of its run has run" in {
+    val hub         = EventHub(InMemoryCheckpointer())
+    val listener    = recording()
+    val observation = hub.observe(thread, capacity = 16, listener, AbandonedWrites.none, TenantScope.Unscoped)
+    // an earlier run's node, outliving its run, still sends progress under the same run id
+    hub.live(thread, live(0))
+    observation.claimed(claim)
+    hub.live(thread, live(1))
+    hub.durable(thread, Vector(record(6)))
+    hub.live(thread, live(2))
+    val sub = observation.start(lastSeq = 5L)
+    sub.endOfRun(run)
+    listener.reached.await(5, TimeUnit.SECONDS) shouldBe true
+    listener.seen.asScala.toVector shouldBe Vector("6", "live", "end:r1")
+    sub.cancel()
+    hub.liveCount(thread) shouldBe 0
+  }
+
+  it should "not deliver a live event of an older claim sent after its run's claim, though it has its RunId, but a newer claim's (#1918)" in {
+    // a lost run's node ignores the interrupt and outlives its run: it sends progress under the same run
+    // id after the next run's claim, 6, was handed over. A later run's progress, of a newer claim, is
+    // delivered, as its durable events are
+    val hub         = EventHub(InMemoryCheckpointer())
+    val listener    = recording()
+    val observation = hub.observe(thread, capacity = 16, listener, AbandonedWrites.none, TenantScope.Unscoped)
+    observation.claimed(claim)
+    hub.durable(thread, Vector(record(6)))
+    hub.live(thread, live(0, FencingToken(1L)))
+    hub.live(thread, live(1))
+    hub.durable(thread, Vector(record(7)))
+    hub.live(thread, live(2, FencingToken(1L)))
+    hub.live(thread, live(3, FencingToken(3L)))
+    val sub = observation.start(lastSeq = 5L)
+    sub.endOfRun(run)
+    listener.reached.await(5, TimeUnit.SECONDS) shouldBe true
+    listener.seen.asScala.toVector shouldBe Vector("6", "live", "7", "live", "end:r1")
+    sub.cancel()
+    hub.liveCount(thread) shouldBe 0
+  }
+
+  "A live event whose run no longer holds its claim" should "be offered to no subscription: a lost run's node, outliving its run (#1918)" in {
+    val hub    = EventHub(InMemoryCheckpointer())
+    val joined = new CountDownLatch(1)
+    val first  = new CountDownLatch(1)
+    val listener = recording {
+      case _: StreamEvent.Live => joined.countDown()
+      case event               => countAt(1, first)(event)
+    }
+    val sub = hub
+      .subscribe(thread, afterSeq = 0L, capacity = 16, listener, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
+    hub.live(thread, live(0))
+    // delivered only once the subscription has switched to live, so the commit below is handed to it
+    joined.await(5, TimeUnit.SECONDS) shouldBe true
+    hub.live(thread, live(1, FencingToken(1L)), () => false)
+    hub.durable(thread, Vector(record(1)))
+    first.await(5, TimeUnit.SECONDS) shouldBe true
+    listener.seen.asScala.toVector shouldBe Vector("live", "1")
     sub.cancel()
     hub.liveCount(thread) shouldBe 0
   }

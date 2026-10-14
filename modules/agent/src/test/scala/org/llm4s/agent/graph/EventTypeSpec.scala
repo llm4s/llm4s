@@ -15,10 +15,20 @@ class EventTypeSpec extends AnyFlatSpec with Matchers:
 
   private def durable(name: String, version: Int, payload: ujson.Value): StreamEvent =
     StreamEvent.Durable(
-      EventRecord("t", 1L, "r", None, None, None, Instant.EPOCH, RunEvent.Custom(name, version, payload))
+      EventRecord(
+        "t",
+        1L,
+        "r",
+        FencingToken(1L),
+        None,
+        None,
+        None,
+        Instant.EPOCH,
+        RunEvent.Custom(name, version, payload)
+      )
     )
   private def live(name: String, version: Int, payload: ujson.Value): StreamEvent =
-    StreamEvent.Live("t", "r", "task", "node", name, version, payload)
+    StreamEvent.Live("t", "r", FencingToken(1L), "task", "node", name, version, payload)
 
   "EventType" should "match a durable custom event of its name and version" in {
     ping.unapply(durable("test.ping", 1, ujson.Obj("n" -> 3))) shouldBe Some(Ping(3))
@@ -40,7 +50,9 @@ class EventTypeSpec extends AnyFlatSpec with Matchers:
   it should "not match kernel events or markers" in {
     ping.unapply(StreamEvent.LiveGap(2)) shouldBe None
     ping.unapply(
-      StreamEvent.Durable(EventRecord("t", 1L, "r", None, None, None, Instant.EPOCH, RunEvent.RunCompleted))
+      StreamEvent.Durable(
+        EventRecord("t", 1L, "r", FencingToken(1L), None, None, None, Instant.EPOCH, RunEvent.RunCompleted)
+      )
     ) shouldBe None
   }
 
