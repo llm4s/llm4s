@@ -246,9 +246,9 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
 
   it should "lock every mutation on one backend-wide key, distinct per key id" in {
     val a = StateFileBackend()
-    a.locks(p("/x")) shouldBe Set(LockKey("state-files", "files"))
+    a.locks(p("/x")) shouldBe Set(LockKey("files/state/files"))
     a.locks(p("/x")) shouldBe a.locks(p("/y"))
-    StateFileBackend(keyId = "scratch").locks(p("/x")) shouldBe Set(LockKey("state-files/scratch"))
+    StateFileBackend(keyId = "scratch").locks(p("/x")) shouldBe Set(LockKey("files/state/scratch"))
     a.writes shouldBe Set(a.files)
   }
 

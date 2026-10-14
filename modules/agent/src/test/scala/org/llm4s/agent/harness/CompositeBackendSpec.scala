@@ -90,8 +90,8 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "take writes from every backend and locks from the routed one" in {
     composite.writes shouldBe Set(main.files, scratch.files, deep.files)
-    composite.locks(p("/scratch/x")) shouldBe Set(LockKey("state-files/scratch"))
-    composite.locks(p("/scratchy")) shouldBe Set(LockKey("state-files/files"))
+    composite.locks(p("/scratch/x")) shouldBe Set(LockKey("files/state/scratch"))
+    composite.locks(p("/scratchy")) shouldBe Set(LockKey("files/state/files"))
   }
 
   it should "list mounts as directories, even where the routed backend has nothing" in {
@@ -210,7 +210,7 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     resolved.read(p("/x"), 0, 1, in("b")).left.value shouldBe a[BackendRefused]
     resolved.read(p("/x"), 0, 1, FileContext(testRunContext(), s)).left.value shouldBe a[ValidationError]
     // backend-wide, whatever the resolved backend: a state backend's quota needs every mutation ordered
-    resolved.locks(p("/x/y")) shouldBe Set(LockKey("resolved/by-tenant"))
+    resolved.locks(p("/x/y")) shouldBe Set(FileBackend.LockRoot)
     resolved.locks(p("/x/y")) shouldBe resolved.locks(p("/z"))
     resolved.writes shouldBe Set(forA.files, forB.files)
   }
@@ -221,4 +221,41 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     error shouldBe a[ValidationError]
     BackendRefused.toolOutcome(error) shouldBe a[org.llm4s.agent.graph.tool.ToolOutcome.Fatal]
   }
+
+  it should "order its mutations with every other route to the same backend, another wrapper or a mount" in {
+    val shared                                     = StateFileBackend(keyId = "shared")
+    val one                                        = FileBackend.resolved("one", Set(shared.files))(_ => Right(shared))
+    val two                                        = FileBackend.resolved("two", Set(shared.files))(_ => Right(shared))
+    val direct                                     = CompositeBackend(main, p("/s") -> shared).value
+    def conflict(a: Set[LockKey], b: Set[LockKey]) = a.exists(x => b.exists(_.conflictsWith(x)))
+    conflict(one.locks(p("/x")), two.locks(p("/x"))) shouldBe true
+    conflict(one.locks(p("/x")), direct.locks(p("/s/x"))) shouldBe true
+    conflict(one.locks(p("/x")), shared.locks(p("/x"))) shouldBe true
+  }
+
+  it should "fail when the resolved backend locks outside the file lock root" in {
+    final class Outside extends FileBackend {
+      private val inner                                                = StateFileBackend()
+      def writes                                                       = inner.writes
+      def locks(path: VPath): Set[LockKey]                             = Set(LockKey("elsewhere"))
+      def ls(path: VPath, limit: Int, ctx: FileContext)                = inner.ls(path, limit, ctx)
+      def read(path: VPath, offset: Int, limit: Int, ctx: FileContext) = inner.read(path, offset, limit, ctx)
+      def write(path: VPath, content: String, ctx: FileContext)        = inner.write(path, content, ctx)
+      def edit(path: VPath, old: String, replacement: String, replaceAll: Boolean, ctx: FileContext) =
+        inner.edit(path, old, replacement, replaceAll, ctx)
+      def delete(path: VPath, ctx: FileContext) = inner.delete(path, ctx)
+      def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext) =
+        inner.find(under, accept, limit, ctx)
+      def search(
+        under: VPath,
+        regex: java.util.regex.Pattern,
+        accept: VPath => Boolean,
+        limit: Int,
+        ctx: FileContext
+      ) = inner.search(under, regex, accept, limit, ctx)
+    }
+    val outside = FileBackend.resolved("outside", Set(main.files))(_ => Right(new Outside))
+    outside.write(p("/x"), "y", ctx).left.value.message should include("locks outside files")
+  }
+
 }

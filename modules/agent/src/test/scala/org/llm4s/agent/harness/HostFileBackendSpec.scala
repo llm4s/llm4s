@@ -339,11 +339,11 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     val real = HostFileBackend.identity(dir.toRealPath().toString.replace('\\', '/'))
     backend.locks(p("/sub")).head.conflictsWith(backend.locks(p("/sub/a.txt")).head) shouldBe true
     if posix then
-      backend.locks(p("/sub/a.txt")) shouldBe Set(LockKey("host", real, "sub/a.txt"))
+      backend.locks(p("/sub/a.txt")) shouldBe Set(LockKey("files", "host", real, "sub/a.txt"))
       backend.locks(p("/a")).head.conflictsWith(backend.locks(p("/ab")).head) shouldBe false
     else
       // Windows aliases (8.3 names, trailing dots) cannot be folded lexically: one lock for the root
-      backend.locks(p("/a")) shouldBe Set(LockKey("host", real))
+      backend.locks(p("/a")) shouldBe Set(LockKey("files", "host", real))
       backend.locks(p("/a")) shouldBe backend.locks(p("/ab"))
   }
 

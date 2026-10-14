@@ -188,10 +188,12 @@ object LongTermStore:
   // scalafix:off DisableSyntax.NoKeywordCatch
   private[harness] def encoded[A: ReadWriter](outcome: A, maxBytes: Long): Either[Unencoded, ujson.Value] =
     try
-      // rendered first into a counter that stops past `maxBytes`, so an outcome over the cap is refused
-      // before its tree is built (rule 12); only one within it is then encoded as a tree
-      upickle.default.writeToOutputStream(outcome, new Capped(maxBytes))
-      Right(upickle.default.writeJs(outcome))
+      // the codec runs once, into a buffer that stops past `maxBytes`, so an outcome over the cap is
+      // refused before more of it is held (rule 12); the tree is parsed from those very bytes, so what is
+      // recorded is what was sized, whatever a stateful codec would emit a second time
+      val buffer = new Capped(maxBytes)
+      upickle.default.writeToOutputStream(outcome, buffer)
+      Right(ujson.read(buffer.toByteArray))
     catch {
       case _: Capped.Over        => Left(Unencoded.Over)
       case _: StackOverflowError => Left(Unencoded.Failed(s"the outcome is nested deeper than $MaxDepth levels"))
@@ -204,14 +206,15 @@ object LongTermStore:
     case Over
     case Failed(reason: String)
 
-  /** An output stream that keeps nothing and stops the writer once more than `max` bytes are written. */
-  final private class Capped(max: Long) extends java.io.OutputStream:
-    private var count = 0L
-    private def add(n: Int): Unit =
-      count += n
-      if count > max then throw new Capped.Over
-    override def write(b: Int): Unit                             = add(1)
-    override def write(b: Array[Byte], off: Int, len: Int): Unit = add(len)
+  /** A buffer that stops the writer, before keeping them, once more than `max` bytes are written. */
+  final private class Capped(max: Long) extends java.io.ByteArrayOutputStream:
+    private def check(n: Int): Unit = if size().toLong + n > max then throw new Capped.Over
+    override def write(b: Int): Unit =
+      check(1)
+      super.write(b)
+    override def write(b: Array[Byte], off: Int, len: Int): Unit =
+      check(len)
+      super.write(b, off, len)
 
   private object Capped:
     final class Over extends RuntimeException("over the cap", null, false, false)

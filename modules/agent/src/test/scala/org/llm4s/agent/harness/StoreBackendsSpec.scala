@@ -337,7 +337,7 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     val files = StoreFileBackend(InMemoryLongTermStore(StoreLimits(maxItemBytes = 40)), Vector("mem"))
     val error = files.write(p("/big.md"), "x" * 50, call()).left.value
     BackendRefused.toolOutcome(error) shouldBe a[org.llm4s.agent.graph.tool.ToolOutcome.Error]
-    files.locks(p("/a/b.md")) shouldBe Set(LockKey("store/mem/a/b.md"))
+    files.locks(p("/a/b.md")) shouldBe Set(LockKey("files/store/mem/a/b.md"))
   }
 
   // Sandbox
@@ -437,4 +437,24 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     BackendRefused.toolOutcome(GraphError.EffectReplayRefused("op", "why")) shouldBe a[ToolOutcome.Error]
     BackendRefused.toolOutcome(org.llm4s.error.ProcessingError("x", "y")) shouldBe a[ToolOutcome.Fatal]
   }
+
+  "InMemoryLongTermStore.modify" should "record the outcome its codec emitted once, whatever a second run would emit" in {
+    final case class Shifty(v: String)
+    val calls = new AtomicInteger()
+    given upickle.default.ReadWriter[Shifty] = upickle.default
+      .readwriter[ujson.Value]
+      .bimap[Shifty](
+        s => if calls.incrementAndGet() == 1 then ujson.Str(s.v) else ujson.Str("x" * 2000000),
+        j => Shifty(j.str)
+      )
+    val store = InMemoryLongTermStore()
+    val key   = org.llm4s.agent.graph.HarnessTestSupport.runOn("t").effectKey("shifty", "k")
+    store.modify[Shifty](ns, "k", key, FencingToken(0))(_ => Right(StoreChange.Keep(Shifty("small")))).value shouldBe
+      Shifty("small")
+    calls.get shouldBe 1
+    // replayed: the recorded outcome, the one that was sized
+    store.modify[Shifty](ns, "k", key, FencingToken(0))(_ => Right(StoreChange.Keep(Shifty("other")))).value shouldBe
+      Shifty("small")
+  }
+
 }

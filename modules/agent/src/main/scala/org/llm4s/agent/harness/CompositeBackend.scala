@@ -168,15 +168,22 @@ final private[harness] class ResolvedFileBackend(
   resolve: FileContext => Result[FileBackend]
 ) extends FileBackend:
 
-  private val lock = LockKey("resolved", id)
+  // the root of every file backend's locks: the resolved backend is unknown here, and another wrapper or
+  // a direct route may reach the same one, so it conflicts with every file lock, theirs included
+  def locks(path: VPath): Set[LockKey] = Set(FileBackend.LockRoot)
 
-  // backend-wide: the resolved backend is unknown here, and its own locks may be backend-wide too
-  def locks(path: VPath): Set[LockKey] = Set(lock)
-
-  private def backend(ctx: FileContext): Result[FileBackend] =
+  private def backend(ctx: FileContext, path: VPath): Result[FileBackend] =
     resolve(ctx).flatMap { b =>
       val undeclared = b.writes -- writes
-      if undeclared.isEmpty then Right(b)
+      if !b.locks(path).forall(FileBackend.withinLockRoot) then
+        Left(
+          ValidationError(
+            "locks",
+            s"resolved backend '$id' locks outside ${FileBackend.LockRoot.segments.mkString("/")}, " +
+              "so its mutations would not be ordered with those of other routes to it"
+          ): LLMError
+        )
+      else if undeclared.isEmpty then Right(b)
       else
         Left(
           ValidationError(
@@ -187,13 +194,13 @@ final private[harness] class ResolvedFileBackend(
     }
 
   def ls(path: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
-    backend(ctx).flatMap(_.ls(path, limit, ctx))
+    backend(ctx, path).flatMap(_.ls(path, limit, ctx))
 
   def read(path: VPath, offset: Int, limit: Int, ctx: FileContext): Result[FileLines] =
-    backend(ctx).flatMap(_.read(path, offset, limit, ctx))
+    backend(ctx, path).flatMap(_.read(path, offset, limit, ctx))
 
   def write(path: VPath, content: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
-    backend(ctx).flatMap(_.write(path, content, ctx))
+    backend(ctx, path).flatMap(_.write(path, content, ctx))
 
   def edit(
     path: VPath,
@@ -202,13 +209,13 @@ final private[harness] class ResolvedFileBackend(
     replaceAll: Boolean,
     ctx: FileContext
   ): Result[(FileEdited, StateUpdate)] =
-    backend(ctx).flatMap(_.edit(path, old, replacement, replaceAll, ctx))
+    backend(ctx, path).flatMap(_.edit(path, old, replacement, replaceAll, ctx))
 
   def delete(path: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
-    backend(ctx).flatMap(_.delete(path, ctx))
+    backend(ctx, path).flatMap(_.delete(path, ctx))
 
   def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
-    backend(ctx).flatMap(_.find(under, accept, limit, ctx))
+    backend(ctx, under).flatMap(_.find(under, accept, limit, ctx))
 
   def search(
     under: VPath,
@@ -217,4 +224,4 @@ final private[harness] class ResolvedFileBackend(
     limit: Int,
     ctx: FileContext
   ): Result[Listing[GrepMatch]] =
-    backend(ctx).flatMap(_.search(under, regex, accept, limit, ctx))
+    backend(ctx, under).flatMap(_.search(under, regex, accept, limit, ctx))

@@ -33,7 +33,7 @@ enum FileUpdate derives ReadWriter:
  * and of `fork`, and a mutation needs no replay guard: its effect is the update the runtime commits.
  *
  * Directories are implicit: a path is a directory when an entry lies beneath it. Every mutation holds
- * the lock `state-files/<keyId>`, so the mutations of one batch apply in call order, each against the
+ * the lock `files/state/<keyId>`, so the mutations of one batch apply in call order, each against the
  * state the previous one committed. That makes the bounds exact: the total bytes of paths and contents,
  * as JSON strings (what a checkpoint stores, escapes included), is at most `maxBytes`, and the number of files at most `maxFiles`, checked when the tool
  * runs (rules 1, 2, 12).
@@ -62,7 +62,7 @@ final class StateFileBackend private (
         case FileUpdate.Delete(path)     => Right(current - path)
     }
 
-  private val lock = LockKey("state-files", keyId)
+  private val lock = FileBackend.LockRoot / "state" / keyId
 
   val writes: Set[StateKey[?, ?]] = Set(files)
 

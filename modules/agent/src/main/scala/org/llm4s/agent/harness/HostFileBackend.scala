@@ -60,7 +60,7 @@ import scala.util.{ Failure, Success, Try, Using }
  *    over the target atomically, so a crash leaves the target at its digest before or after, never torn
  *    (a torn file would match neither, and its replay would be refused for ever). `delete` removes a file
  *    or an empty directory, each atomic; a non-empty directory is refused.
- *  - '''Order.''' A mutation locks `host/<root>/<path>`, so two mutations of one file in a batch, or a
+ *  - '''Order.''' A mutation locks `files/host/<root>/<path>`, so two mutations of one file in a batch, or a
  *    directory's and a file's beneath it, apply in call order. Across threads and processes the effect is
  *    a compare-and-set under the file's JVM and OS locks: it writes only if the file is still as planned,
  *    and is refused (`EffectReplayRefused`) otherwise, so no edit is lost.
@@ -128,7 +128,7 @@ final class HostFileBackend private (
 
   val writes: Set[StateKey[?, ?]] = Set.empty
 
-  private val rootLock = LockKey("host", HostFileBackend.identity(root.toString.replace('\\', '/')))
+  private val rootLock = FileBackend.LockRoot / "host" / HostFileBackend.identity(root.toString.replace('\\', '/'))
 
   /**
    * Locks name a file by its case- and normalisation-folded path ([[HostFileBackend.identity]]), so

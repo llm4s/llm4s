@@ -14,7 +14,7 @@ import java.util.regex.Pattern
  * files, whatever the application configures (rule 8).
  *
  * A file is an item keyed by its path, with value `{"content": ...}`; directories are implicit, as in
- * [[StateFileBackend]]. Mutations lock `store/<path>/<file>` and run through `ReplayGuard.transactional`
+ * [[StateFileBackend]]. Mutations lock `files/store/<path>/<file>` and run through `ReplayGuard.transactional`
  * under `ctx.effectKey("file.write" | "file.edit" | "file.delete", file)`, each as one `store.modify`, so
  * an edit decides "`old` was not found", and a write the tree's shape, inside the store's transaction, and a replay whose first attempt
  * landed returns the first outcome. The store's bounds hold, and an over-limit write is a tool error.
@@ -25,7 +25,7 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
 
   val writes: Set[StateKey[?, ?]] = Set.empty
 
-  private val lock = LockKey("store", path.mkString("/"))
+  private val lock = FileBackend.LockRoot / "store" / path.mkString("/")
 
   def locks(file: VPath): Set[LockKey] = Set(lock / file.value)
 

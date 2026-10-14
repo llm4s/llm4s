@@ -177,15 +177,27 @@ trait FileBackend:
 object FileBackend:
 
   /**
+   * The root of every file backend's locks (`files/state/<keyId>`, `files/host/<root>/...`,
+   * `files/store/<path>/...`); a backend of one's own locks under it too, so a resolved backend's lock
+   * orders it with every other route to it.
+   */
+  val LockRoot: LockKey = LockKey("files")
+
+  /** Whether `key` is [[LockRoot]] or beneath it. */
+  private[harness] def withinLockRoot(key: LockKey): Boolean = key.segments.startsWith(LockRoot.segments)
+
+  /**
    * A backend chosen per operation by `resolve`, typically by `ctx.run.config.tenantId`: an application
    * serving tenants builds one host or workspace backend per tenant, and this picks it (rule 8). Caching
    * is the resolver's.
    *
    * Locks are computed from a call's arguments, before any context exists, so they cannot ask the
-   * resolved backend for its own. Every mutation therefore holds the one backend-wide lock
-   * `resolved/<id>`, which covers whatever locking the resolved backend needs: a `StateFileBackend`'s
-   * backend-wide lock (its quota is exact only if every mutation is ordered) as much as a host
-   * backend's per-path locks. The cost is that a batch's mutations through it run one after another. `writes` must hold every key a resolved backend's updates touch, since a graph
+   * resolved backend for its own. Every mutation therefore holds [[LockRoot]], the root of every file
+   * backend's locks, which conflicts with whatever locking the resolved backend needs - a
+   * `StateFileBackend`'s backend-wide lock as much as a host backend's per-path locks - and with every
+   * other route to the same backend: another resolved wrapper or a direct mount. A resolved backend
+   * whose locks are not under [[LockRoot]] is refused when used. The cost is that a batch's file
+   * mutations run one after another while one goes through a resolved backend. `writes` must hold every key a resolved backend's updates touch, since a graph
    * registers its keys when it is built; a resolved backend that writes another is a failure when used.
    */
   def resolved(id: String, writes: Set[StateKey[?, ?]] = Set.empty)(
