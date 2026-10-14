@@ -92,8 +92,8 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
     LLMError.isRecoverable(result.failed._2) shouldBe true
     f.interrupted.toArray.toSet shouldBe Set("b", "c")
     latest.checkpoint.status shouldBe CheckpointStatus.Running
-    events(store) should contain(RunEvent.RunTimedOut)
-    events(store) should not contain RunEvent.RunCancelled
+    events(store) should contain(RunEvent.RunTimedOut(None))
+    events(store) should not contain RunEvent.RunCancelled(None)
 
     f.blocking.set(false)
     await(runtime.recover(thread, f.graph).value).completed._2.toSet shouldBe Set("A", "B", "C")
@@ -109,7 +109,7 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
     val result  = await(runtime.start(thread, g, "x", budgets(RunBudgets(timeout = Some(1.nanosecond)))).value)
     result.failed._2 shouldBe a[GraphError.DeadlineExceeded]
     runs.get shouldBe 0
-    events(store) should contain(RunEvent.RunTimedOut)
+    events(store) should contain(RunEvent.RunTimedOut(None))
     await(runtime.recover(thread, g).value).completed._2 shouldBe "x"
     runs.get shouldBe 1
   }
@@ -129,14 +129,14 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
       }
       val result = await(handle)
       canceller.join(5_000)
-      val stops = events(store).filter(e => e == RunEvent.RunCancelled || e == RunEvent.RunTimedOut)
+      val stops = events(store).filter(e => e == RunEvent.RunCancelled(None) || e == RunEvent.RunTimedOut(None))
       result.failed._2 match {
         case _: GraphError.Cancelled =>
           cancelled += 1
-          stops shouldBe Vector(RunEvent.RunCancelled)
+          stops shouldBe Vector(RunEvent.RunCancelled(None))
         case _: GraphError.DeadlineExceeded =>
           expired += 1
-          stops shouldBe Vector(RunEvent.RunTimedOut)
+          stops shouldBe Vector(RunEvent.RunTimedOut(None))
         case other => fail(s"iteration $i: $other")
       }
     }
@@ -149,7 +149,7 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
     // the exit commit holding RunCancelled outlasts the deadline; an interrupt would throw out of it
     val slow = new Checkpointer {
       def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = {
-        if commit.events.exists(_.event == RunEvent.RunCancelled) then Thread.sleep(300)
+        if commit.events.exists(_.event == RunEvent.RunCancelled(None)) then Thread.sleep(300)
         underlying.commit(threadId, commit)
       }
       def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
@@ -178,8 +178,8 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
     val config = budgets(RunBudgets(timeout = Some(100.millis)))
     val result = await(GraphRuntime(slow).start(thread, g, (), config, Durability.OnExit).value)
     result.failed._2 shouldBe a[GraphError.Cancelled]
-    val stops = events(underlying).filter(e => e == RunEvent.RunCancelled || e == RunEvent.RunTimedOut)
-    stops shouldBe Vector(RunEvent.RunCancelled)
+    val stops = events(underlying).filter(e => e == RunEvent.RunCancelled(None) || e == RunEvent.RunTimedOut(None))
+    stops shouldBe Vector(RunEvent.RunCancelled(None))
   }
 
   "maxConcurrency" should "bound the tasks of a superstep that run at once" in {

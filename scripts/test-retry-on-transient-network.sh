@@ -107,6 +107,10 @@ rc=$(run); expect "a marker in a passing run does not matter" 0 1 "$rc"
 plan "1\n$COLOURED_LINE" "0\nok"
 rc=$(run); expect "coloured [error] output is recognised" 0 2 "$rc"
 
+# 9b. So is the thin client's (`sbt --client`), which starts each line with a line erase, ESC[0J.
+plan "1\n${ESC}[0J${COLOURED_LINE}${ESC}[0J" "0\nok"
+rc=$(run); expect "the thin client's [error] output is recognised" 0 2 "$rc"
+
 # 10. An unknown command is a real failure (127), not retried.
 CASE=$((CASE + 1)); SLEEP_LOG="$WORK/sleep-$CASE"; : > "$SLEEP_LOG"; export SLEEP_LOG
 PATH="$WORK/bin:$PATH" "$WRAPPER" /no/such/command > /dev/null 2>&1; rc=$?

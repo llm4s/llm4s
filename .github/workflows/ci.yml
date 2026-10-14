@@ -75,7 +75,12 @@ jobs:
           LLM_REGION: eastus
         run: sbt "configPolicy/runMain org.llm4s.configpolicy.EnvCheckPolicies --env=dev --preset=dev-sandbox"
 
-  # Quick checks that should fail fast
+  # Checks that need no tests run: formatting, scalafix, compile, the build's policy checks and the scripts' own
+  # tests. No job waits for it: the test, coverage and other jobs start alongside it, so a PR's wall clock is the
+  # longest job, not Quick Checks plus the longest job. It used to gate them all, which put its ~10 minutes in
+  # front of every one. A compile error still fails fast without it, in every job that compiles; what the gate
+  # saved was runner minutes on a PR that fails only formatting or a policy check, and concurrency already cancels
+  # a superseded run. It still gates the merge, through `All Tests Pass`.
   quick-checks:
     name: Quick Checks
     runs-on: ubuntu-latest
@@ -124,16 +129,32 @@ jobs:
           scripts/test-check-docs-site-links.sh
           scripts/check-docs-site-links.sh
 
+      # Every sbt step below talks to this one sbt server through the thin client (`sbt --client`), instead of each
+      # starting its own sbt: loading this build (65k settings) took 12-15 s per invocation, and there are some fifteen.
+      # Each check stays its own step, so a failure is reported under the step's name, and its exit status is the
+      # command's. The server keeps its state between steps: compiled classes, the resolved dependencies, the loaded
+      # build. Nothing here uses `set` or `reload`, so a later step sees the build exactly as a fresh sbt would.
+      - name: Start the sbt server
+        run: sbt --client about
+
       # Fails when the docs state a Scala or JDK version, a module or an sbt command the build does not have.
       # The Scala 2.13 thread began with exactly that kind of claim (#874, #1134); this keeps it corrected.
       # The build's side is what sbt loaded (project/BuildModel.scala), not a reading of build.sbt's text.
       - name: Write the build model
-        run: sbt -batch "dumpBuildModel target/build-model.json"
+        run: sbt --client "dumpBuildModel target/build-model.json"
 
       - name: Check the documented support matrix matches the build
         run: |
           scripts/test-check-doc-support.sh target/build-model.json
           scripts/check-doc-support.sh --model target/build-model.json
+
+      # Fails when a module with a coverage floor is in no leg of the `coverage-leg` job below (so nothing enforces
+      # its floor), in two, or lacks its one Codecov upload step. It reads the build model, so a new module with
+      # `coverageFloor(n)` in build.sbt fails here until a leg takes it.
+      - name: Check every coverage floor is enforced by a coverage leg
+        run: |
+          scripts/test-check-coverage-legs.sh target/build-model.json
+          scripts/check-coverage-legs.sh --model target/build-model.json
 
       # The wrapper below re-runs a step only when its `[error]` output shows a transient download failure and
       # never otherwise; this runs it against a fake command, with no network, to keep that true.
@@ -168,44 +189,46 @@ jobs:
       # with a warm 450 MB sbt cache restored, so a cache would not have prevented them). The wrapper re-runs it,
       # at most twice, on exactly that kind of error; a real formatting failure still fails on the first attempt.
       - name: Check formatting
-        run: scripts/retry-on-transient-network.sh sbt scalafmtCheckAll scalafmtSbtCheck
+        run: scripts/retry-on-transient-network.sh sbt --client "scalafmtCheckAll; scalafmtSbtCheck"
 
       - name: Run Scalafix
-        run: sbt scalafixAll
+        run: sbt --client scalafixAll
 
       # Fails when any module declares neither a coverage floor nor an explicit opt-out.
       # Coverage floors are per-module and never inherited, so a new (e.g. carved-out)
       # module must make the decision visible in build.sbt rather than pick up a default.
       - name: Check coverage policy is declared for every module
-        run: sbt coveragePolicyCheck
+        run: sbt --client coveragePolicyCheck
 
       # Fails when a published llm4s-* artifact has no tier row in v1-scope.md or no install line in
       # installation.md. A release cannot be amended, so a module that ships undocumented stays so.
       - name: Check every published artifact is documented
-        run: sbt publishedArtifactsCheck
+        run: sbt --client publishedArtifactsCheck
 
       # Fails when the generated llm4s-bom does not list exactly the artifacts the build publishes
       # (project/Bom.scala). A release cannot be amended, so a BOM that omits a module stays that way.
       - name: Check the BOM lists every published artifact
-        run: sbt bomCheck
+        run: sbt --client bomCheck
 
       # Fails when a published POM lacks what Maven Central requires (name, description, https URL, licence,
       # developer, SCM) or points its <scm> anywhere but https://github.com/llm4s/llm4s, which is how Scaladex
       # finds the project (#1455). It reads the generated POMs (project/PomMetadata.scala).
       - name: Check every published POM has its metadata
-        run: sbt pomMetadataCheck
+        run: sbt --client pomMetadataCheck
 
       - name: Compile
-        run: sbt compile
+        run: sbt --client compile
 
       # Builds the CycloneDX SBOMs that the release workflow attaches to a GitHub release (docs/reference/sbom.md), so a
       # change that breaks their generation fails here and not on release day. It also fails when a published module has
       # no BOM, or a BOM names a build-machine path or a test framework. The dependencies are resolved by now, so this is
       # a few seconds of sbt, not a second build.
+      # The thin client passes the server's terminal codes through, so they are stripped before the listing is read.
       - name: Generate and check the SBOMs
         run: |
-          sbt -batch publishedSboms
-          sbt -batch -error listPublishedArtifacts | grep -E '^(artifact|stub) ' > target/published-artifacts.txt
+          set -o pipefail
+          sbt --client publishedSboms
+          sbt --client listPublishedArtifacts | sed 's/\x1b\[[0-9;?]*[A-Za-z]//g' | grep -E '^(artifact|stub) ' > target/published-artifacts.txt
           scripts/test-check-sbom.sh
           scripts/test-osv-scan.sh
           scripts/check-sbom.sh target/sboms target/published-artifacts.txt
@@ -222,17 +245,17 @@ jobs:
       # observability-backend or foreign vendor-SDK dependency, so the programme's definition of done
       # (#1126) stays true until the 1.0 freeze.
       - name: Check no frozen module resolves a dependency the modularisation moved out
-        run: sbt frozenDependencyCheck
+        run: sbt --client frozenDependencyCheck
 
       # Fails when an integration suite in modules/it declares no tier, i.e. when no command
       # and no CI job below would run it. Eleven of eighteen suites were in that state.
       - name: Check every integration suite declares a test tier
-        run: sbt it/itTierCheck
+        run: sbt --client it/itTierCheck
 
       # Fails when a top-level public type of a frozen module is not marked @Stable or @Experimental,
       # so the tier lives in the code and cannot drift from docs/reference/v1-scope.md.
       - name: Check every frozen type declares a stability tier
-        run: sbt stabilityTierCheck
+        run: sbt --client stabilityTierCheck
 
       # The staged-deployment template (deploy/, .github/workflows/deploy-staged.yml) is never run by CI, so
       # these keep it from rotting: every overlay must render with the image, namespace, replica count and
@@ -243,12 +266,11 @@ jobs:
 
       - name: Check the deploy-service image definition
         run: |
-          sbt deployService/Docker/stage
+          sbt --client deployService/Docker/stage
           grep -qx 'USER 1001:0' modules/deploy-service/target/docker/stage/Dockerfile
 
   scaladoc:
     name: ScalaDoc
-    needs: quick-checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -271,16 +293,49 @@ jobs:
         # disappearing from the published Scaladoc.
         run: sbt doc docs/doc
 
-  # Code coverage (runs on one configuration to avoid duplication)
-  coverage:
-    name: Code Coverage
-    needs: [quick-checks]
+  # Code coverage, measured on one configuration (ubuntu) to avoid duplication, in four legs that run in parallel.
+  #
+  # `<module>/coverageReport` is what enforces each module's floor (build.sbt: coverageFloor(n)); the aggregate
+  # report is informational only, since a build-wide average is not a meaningful gate. A leg runs, for each module
+  # it owns, `<module>/test <module>/coverageReport`. A report counts every measurement taken so far in the leg, so
+  # each leg keeps the order the single job used, and modules whose tests exercise another's code mostly stay in its
+  # leg (rag before knowledgegraph, media and observability; image before observabilityPrometheus; the providers
+  # before providerTestkit; docs/reference/test-coverage.md names the two pairs that are split). The legs used to be one job running some 40 commands in series (19 minutes after #1935); split
+  # by dependency cluster, each leg is a few minutes of tests plus one instrumented compile of core. `sbt test`'s
+  # exclusion of `PerformanceTest` (commonSettings) applies here too, because the legs run `<module>/test`.
+  #
+  # Every module with a coverage floor is in exactly one leg, and uploads its Codecov flag from that leg and nowhere
+  # else; `scripts/check-coverage-legs.sh` (in Quick Checks) fails when a floor is in no leg, in two, or has no
+  # upload step, so a new module cannot drop out of measurement. A new module joins the leg holding its dependencies
+  # (the order inside a leg matters: a new module goes after the modules it depends on).
+  #
+  # The legs are summarised by the `Code Coverage` job below, which `All Tests Pass` needs.
+  coverage-leg:
+    name: Code Coverage (${{ matrix.leg }})
     runs-on: ubuntu-latest
-    # Healthy runs take about 40 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
-    timeout-minutes: 90
+    # Healthy legs take about 10 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
+    timeout-minutes: 45
     permissions:
       contents: read
+    strategy:
+      # Every leg runs to the end, so one failing floor does not hide another leg's result.
+      fail-fast: false
+      matrix:
+        # Balanced by the per-module times of the single job (#1935's run): about 5 minutes of sbt each.
+        include:
+          - leg: core
+            modules: [core, memory, memoryPostgres, schemaDerivation, testkit, observabilityMicrometer, agentTools,
+                      traceOpentelemetry, gradleDemo]
+          - leg: rag
+            modules: [rag, knowledgegraph, mcp, media, image, speech, observability, observabilityPrometheus]
+          - leg: providers
+            modules: [ollama, gemini, anthropic, openai, openaiCompatible, voyage, bedrock, jina, jev, cohere, watsonx,
+                      providerTestkit, javaApi, springBootStarter, deployService]
+          - leg: agent
+            modules: [agent, agentTestkit, agentCheckpointSqlite, llm4sEffect, llm4sZio, llm4sPekko]
 
+    # rag's and memory-postgres's pgvector suites need it. A service cannot be given to some legs only; on the
+    # others it costs a few seconds of start-up.
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -308,61 +363,24 @@ jobs:
 
       - name: Run tests with coverage
         env:
+          MODULES: ${{ join(matrix.modules, ' ') }}
           PGVECTOR_TEST_URL: jdbc:postgresql://localhost:5432/postgres
           PGVECTOR_USER: postgres
           PGVECTOR_PASSWORD: postgres
           PGVECTOR_TEST_USER: postgres
           PGVECTOR_TEST_PASSWORD: postgres
-        # `<module>/coverageReport` is what enforces each module's per-module floor
-        # (build.sbt: coverageFloor(n)) - the aggregate report is informational only, since a
-        # build-wide average is not a meaningful gate. Each carve slice adds its new modules
-        # here, so the code it moved keeps a floor instead of dropping out of measurement.
-        run: >-
-          sbt coverage
-          core/test core/coverageReport
-          rag/test rag/coverageReport
-          knowledgegraph/test knowledgegraph/coverageReport
-          memory/test memory/coverageReport
-          memoryPostgres/test memoryPostgres/coverageReport
-          mcp/test mcp/coverageReport
-          media/test media/coverageReport
-          image/test image/coverageReport
-          speech/test speech/coverageReport
-          ollama/test ollama/coverageReport
-          gemini/test gemini/coverageReport
-          anthropic/test anthropic/coverageReport
-          openai/test openai/coverageReport
-          openaiCompatible/test openaiCompatible/coverageReport
-          voyage/test voyage/coverageReport
-          bedrock/test bedrock/coverageReport
-          jina/test jina/coverageReport
-          jev/test jev/coverageReport
-          cohere/test cohere/coverageReport
-          watsonx/test watsonx/coverageReport
-          providerTestkit/test providerTestkit/coverageReport
-          schemaDerivation/test schemaDerivation/coverageReport
-          testkit/test testkit/coverageReport
-          observability/test observability/coverageReport
-          observabilityPrometheus/test observabilityPrometheus/coverageReport
-          observabilityMicrometer/test observabilityMicrometer/coverageReport
-          agentTools/test agentTools/coverageReport
-          agent/test agent/coverageReport
-          agentTestkit/test agentTestkit/coverageReport
-          agentCheckpointSqlite/test agentCheckpointSqlite/coverageReport
-          traceOpentelemetry/test traceOpentelemetry/coverageReport
-          gradleDemo/test gradleDemo/coverageReport
-          javaApi/test javaApi/coverageReport
-          springBootStarter/test springBootStarter/coverageReport
-          deployService/test deployService/coverageReport
-          llm4sEffect/test llm4sEffect/coverageReport
-          llm4sZio/test llm4sZio/coverageReport
-          llm4sPekko/test llm4sPekko/coverageReport
-          coverageAggregate
+        run: |
+          args=()
+          for m in $MODULES; do args+=("$m/test" "$m/coverageReport"); done
+          echo "sbt coverage ${args[*]}"
+          sbt coverage "${args[@]}"
 
-      # One upload per measured module, each carrying that module's flag - Codecov attributes
-      # a file to a flag whose `paths` contain it, so a module uploaded under someone else's
-      # flag is worse than not uploaded. Flags are defined in codecov.yml.
+      # One upload per measured module, each carrying that module's flag - Codecov attributes a file to a flag whose
+      # `paths` contain it, so a module uploaded under someone else's flag is worse than not uploaded. Flags are
+      # defined in codecov.yml. Each step runs only in the leg that owns its module, so each flag is uploaded once.
+      # Leg `core`
       - name: Upload core coverage to Codecov
+        if: contains(matrix.modules, 'core')
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -372,27 +390,8 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
-      - name: Upload rag coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/rag/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: rag
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload knowledgegraph coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/knowledgegraph/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: knowledgegraph
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
       - name: Upload memory coverage to Codecov
+        if: contains(matrix.modules, 'memory')
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -403,6 +402,7 @@ jobs:
           verbose: true
 
       - name: Upload memory-postgres coverage to Codecov
+        if: contains(matrix.modules, 'memoryPostgres')
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -412,151 +412,8 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
-      - name: Upload mcp coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/mcp/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: mcp
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload media coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/media/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: media
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload image coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/image/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: image
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload speech coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/speech/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: speech
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload ollama coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/ollama/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: ollama
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload gemini coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/gemini/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: gemini
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload anthropic coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/anthropic/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: anthropic
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload openai coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/openai/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: openai
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload openai-compatible coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/openai-compatible/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: openai-compatible
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload voyage coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/providers/voyage/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: voyage
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload bedrock coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/providers/bedrock/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: bedrock
-      - name: Upload jina coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/providers/jina/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: jina
-      - name: Upload jev coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/providers/jev/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: jev
-      - name: Upload cohere coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/providers/cohere/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: cohere
-      - name: Upload watsonx coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/providers/watsonx/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: watsonx
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload provider-testkit coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/provider-testkit/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: provider-testkit
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
       - name: Upload schema-derivation coverage to Codecov
+        if: contains(matrix.modules, 'schemaDerivation')
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -567,6 +424,7 @@ jobs:
           verbose: true
 
       - name: Upload testkit coverage to Codecov
+        if: contains(matrix.modules, 'testkit')
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -576,27 +434,8 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
-      - name: Upload observability coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/observability/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: observability
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload observability-prometheus coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/observability-prometheus/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: observability-prometheus
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
       - name: Upload observability-micrometer coverage to Codecov
+        if: contains(matrix.modules, 'observabilityMicrometer')
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -606,37 +445,8 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
-      - name: Upload agent coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/agent/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: agent
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload agent-testkit coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/agent-testkit/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: agent-testkit
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload agent-checkpoint-sqlite coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/agent-checkpoint-sqlite/target/scala-3.7.1/scoverage-report/scoverage.xml
-          flags: agent-checkpoint-sqlite
-          slug: llm4s/llm4s
-          fail_ci_if_error: false
-          verbose: true
-
       - name: Upload agent-tools coverage to Codecov
+        if: contains(matrix.modules, 'agentTools')
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -647,6 +457,7 @@ jobs:
           verbose: true
 
       - name: Upload trace-opentelemetry coverage to Codecov
+        if: contains(matrix.modules, 'traceOpentelemetry')
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -657,6 +468,7 @@ jobs:
           verbose: true
 
       - name: Upload gradle-demo coverage to Codecov
+        if: contains(matrix.modules, 'gradleDemo')
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -666,7 +478,230 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      # Leg `rag`
+      - name: Upload rag coverage to Codecov
+        if: contains(matrix.modules, 'rag')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/rag/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: rag
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload knowledgegraph coverage to Codecov
+        if: contains(matrix.modules, 'knowledgegraph')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/knowledgegraph/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: knowledgegraph
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload mcp coverage to Codecov
+        if: contains(matrix.modules, 'mcp')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/mcp/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: mcp
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload media coverage to Codecov
+        if: contains(matrix.modules, 'media')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/media/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: media
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload image coverage to Codecov
+        if: contains(matrix.modules, 'image')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/image/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: image
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload speech coverage to Codecov
+        if: contains(matrix.modules, 'speech')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/speech/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: speech
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload observability coverage to Codecov
+        if: contains(matrix.modules, 'observability')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/observability/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: observability
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload observability-prometheus coverage to Codecov
+        if: contains(matrix.modules, 'observabilityPrometheus')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/observability-prometheus/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: observability-prometheus
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      # Leg `providers`
+      - name: Upload ollama coverage to Codecov
+        if: contains(matrix.modules, 'ollama')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/ollama/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: ollama
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload gemini coverage to Codecov
+        if: contains(matrix.modules, 'gemini')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/gemini/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: gemini
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload anthropic coverage to Codecov
+        if: contains(matrix.modules, 'anthropic')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/anthropic/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: anthropic
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload openai coverage to Codecov
+        if: contains(matrix.modules, 'openai')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/openai/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: openai
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload openai-compatible coverage to Codecov
+        if: contains(matrix.modules, 'openaiCompatible')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/openai-compatible/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: openai-compatible
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload voyage coverage to Codecov
+        if: contains(matrix.modules, 'voyage')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/voyage/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: voyage
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload bedrock coverage to Codecov
+        if: contains(matrix.modules, 'bedrock')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/bedrock/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: bedrock
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload jina coverage to Codecov
+        if: contains(matrix.modules, 'jina')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/jina/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: jina
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload jev coverage to Codecov
+        if: contains(matrix.modules, 'jev')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/jev/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: jev
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload cohere coverage to Codecov
+        if: contains(matrix.modules, 'cohere')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/cohere/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: cohere
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload watsonx coverage to Codecov
+        if: contains(matrix.modules, 'watsonx')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/watsonx/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: watsonx
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload provider-testkit coverage to Codecov
+        if: contains(matrix.modules, 'providerTestkit')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/provider-testkit/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: provider-testkit
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
       - name: Upload java-api coverage to Codecov
+        if: contains(matrix.modules, 'javaApi')
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -677,6 +712,7 @@ jobs:
           verbose: true
 
       - name: Upload spring-boot-starter coverage to Codecov
+        if: contains(matrix.modules, 'springBootStarter')
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -687,6 +723,7 @@ jobs:
           verbose: true
 
       - name: Upload deploy-service coverage to Codecov
+        if: contains(matrix.modules, 'deployService')
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -696,7 +733,42 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      # Leg `agent`
+      - name: Upload agent coverage to Codecov
+        if: contains(matrix.modules, 'agent')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/agent/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: agent
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload agent-testkit coverage to Codecov
+        if: contains(matrix.modules, 'agentTestkit')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/agent-testkit/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: agent-testkit
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload agent-checkpoint-sqlite coverage to Codecov
+        if: contains(matrix.modules, 'agentCheckpointSqlite')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/agent-checkpoint-sqlite/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: agent-checkpoint-sqlite
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
       - name: Upload llm4s-effect coverage to Codecov
+        if: contains(matrix.modules, 'llm4sEffect')
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -707,6 +779,7 @@ jobs:
           verbose: true
 
       - name: Upload llm4s-zio coverage to Codecov
+        if: contains(matrix.modules, 'llm4sZio')
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -717,6 +790,7 @@ jobs:
           verbose: true
 
       - name: Upload llm4s-pekko coverage to Codecov
+        if: contains(matrix.modules, 'llm4sPekko')
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -726,19 +800,85 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      # The data and report of each module this leg reported on, for the `Code Coverage` job's aggregate report. On a
+      # fresh runner only those modules have a scoverage-report. A dependency's data (compiled and measured here too)
+      # is left out: its statement ids differ from one compile to the next, so it must not overwrite the owning leg's.
+      - name: Collect this leg's coverage data
+        env:
+          MODULES: ${{ join(matrix.modules, ' ') }}
+        run: |
+          mkdir -p coverage-out
+          n=0
+          while IFS= read -r report; do
+            dir="${report%/scoverage-report}"
+            mkdir -p "coverage-out/$dir"
+            cp -R "$report" "$dir/scoverage-data" "coverage-out/$dir/"
+            n=$((n + 1))
+          done < <(find modules -type d -path '*/target/scala-3.7.1/scoverage-report')
+          read -ra owned <<< "$MODULES"
+          expected=${#owned[@]}
+          echo "collected $n module report(s); the leg owns $expected"
+          [ "$n" -eq "$expected" ]
+
+      - name: Upload this leg's coverage data
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-data-${{ matrix.leg }}
+          path: coverage-out/
+          retention-days: 1
+          if-no-files-found: error
+
+  # The coverage gate: green only when every leg is. `All Tests Pass` needs this job, so the required-check story is
+  # what it was with one coverage job, and the check is still called `Code Coverage`. It also writes the
+  # informational aggregate report, from the legs' coverage data (statement files and measurements; no compile).
+  coverage:
+    name: Code Coverage
+    needs: [coverage-leg]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check every coverage leg passed
+        run: |
+          if [[ "${{ needs.coverage-leg.result }}" != "success" ]]; then
+            echo "A coverage leg failed (result: ${{ needs.coverage-leg.result }}); see the Code Coverage (<leg>) jobs"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Download the legs' coverage data
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-data-*
+          merge-multiple: true
+
+      - name: Aggregate the coverage report
+        run: sbt coverageAggregate
+
       - name: Upload coverage report artifact
         uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: |
             target/scala-3.7.1/scoverage-report/
-            modules/*/target/scala-3.7.1/scoverage-report/
+            modules/**/target/scala-3.7.1/scoverage-report/
           retention-days: 14
 
   # Main test matrix
   test:
     name: Test
-    needs: [quick-checks]
     permissions:
       contents: read
     strategy:
@@ -785,7 +925,6 @@ jobs:
   # `sbt test` keeps only megabyte hang guards.
   performance-tests:
     name: Performance tests
-    needs: [quick-checks]
     runs-on: ubuntu-latest
     # Healthy runs take about 15 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
     timeout-minutes: 45
@@ -823,7 +962,6 @@ jobs:
   # the same silent non-execution that #1143 was about.
   integration-tests:
     name: Integration Tests
-    needs: quick-checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -917,7 +1055,6 @@ jobs:
   # artifact; use `+mimaReportBinaryIssues` if a second Scala version returns (#1126).
   mima-check:
     name: Binary Compatibility (MiMa)
-    needs: quick-checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -943,7 +1080,6 @@ jobs:
   # llm4s-java-api from local Maven, so they share one publish of the library.
   kotlin-api:
     name: Kotlin API
-    needs: quick-checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1028,7 +1164,6 @@ jobs:
   # specs against the latest 3.x, so the documented range (docs/guide/spring-boot.md) is tested at both ends (#1467).
   spring-boot-latest:
     name: Spring Boot 3.x (latest)
-    needs: quick-checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1051,7 +1186,7 @@ jobs:
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, performance-tests, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest]
+    needs: [quick-checks, test, performance-tests, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1059,6 +1194,10 @@ jobs:
     steps:
       - name: Check all tests passed
         run: |
+          if [[ "${{ needs.quick-checks.result }}" != "success" ]]; then
+            echo "Quick checks failed"
+            exit 1
+          fi
           if [[ "${{ needs.test.result }}" != "success" ]]; then
             echo "Some tests failed"
             exit 1
@@ -1106,7 +1245,6 @@ jobs:
   # belongs to has to supply the rest.
   ollama-integration:
     name: Ollama Integration
-    needs: quick-checks
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
@@ -1176,7 +1314,6 @@ jobs:
   # itself — `it / Test / envVars` passes `workspaceRunner / Docker / version` to the suite.
   workspace-integration:
     name: Workspace Integration
-    needs: quick-checks
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
@@ -1224,7 +1361,6 @@ jobs:
   # Not in `all-tests-pass` for the same reason.
   mcp-reference-integration:
     name: MCP Reference Server Integration
-    needs: quick-checks
     runs-on: ubuntu-latest
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     permissions:

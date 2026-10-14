@@ -1,6 +1,5 @@
 package org.llm4s.agent.graph.middleware
 
-import org.llm4s.agent.graph.RunContext
 import org.llm4s.agent.guardrails.{ Guardrail, InputGuardrail, OutputGuardrail }
 import org.llm4s.error.LLMError
 import org.llm4s.types.Result
@@ -23,20 +22,27 @@ final class GuardrailMiddleware(
   val id: MiddlewareId = MiddlewareId("guardrails")
 ) extends AgentMiddleware:
 
-  override def beforeAgent(text: String, context: RunContext): Result[String] = GuardrailMiddleware.run(input, text)
+  override def beforeAgent(text: String, context: ModelContext): Result[BoundaryResult] =
+    GuardrailMiddleware.run(input, text, context).map(BoundaryResult(_))
 
-  override def afterAgent(answer: String, context: RunContext): Result[String] = GuardrailMiddleware.run(output, answer)
+  override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
+    GuardrailMiddleware.run(output, answer, context).map(BoundaryResult(_))
 
 object GuardrailMiddleware:
 
   /**
    * Threads `value` through `guardrails`; a failing guardrail leaves it unchanged for the next.
-   * The block names the first failing guardrail and joins every failure's formatted error.
+   * The block names the first failing guardrail and joins every failure's formatted error. Each guardrail validates
+   * with the hook's `context`, so a judge's model calls are counted in the thread's usage.
    */
-  private[middleware] def run(guardrails: Seq[Guardrail[String]], value: String): Result[String] =
+  private[middleware] def run(
+    guardrails: Seq[Guardrail[String]],
+    value: String,
+    context: ModelContext
+  ): Result[String] =
     val (last, failures) = guardrails.foldLeft((value, Vector.empty[(String, LLMError)])) {
       case ((current, failed), guardrail) =>
-        guardrail.validate(current) match
+        guardrail.validate(current, context) match
           case Right(next) => (next, failed)
           case Left(err)   => (current, failed :+ (guardrail.name -> err))
     }
