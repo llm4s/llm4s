@@ -687,74 +687,115 @@ object ToolLoop:
   private def usageOf(context: RunContext): StateUpdate =
     if context.usage.isEmpty then StateUpdate.empty else StateUpdate.update(LoopKeys.usage, context.usage.summary)
 
+  /** The fingerprint of `key`'s stored value in `state`: its encoded form's SHA-256, or `None` with no entry. */
+  private def fingerprint(key: StateKey[?, ?], state: ThreadState): Option[String] =
+    if state.isSet(key) then state.get(key).toOption.map(v => Sha256.hex(upickle.default.write(key.encode(v))))
+    else None
+
   /**
-   * `prior` with the value each of `keys` holds in `state` - the snapshot the step read, from before any write
-   * of this superstep - recorded for an output Block to restore, unless the turn recorded it already.
+   * `prior` with each of `keys` recorded for an output Block, unless the turn recorded it already: its value in
+   * `state` - the snapshot the step read, before any write of this superstep - and, as the value the turn last
+   * left, its fingerprint there.
    */
   private def remembered(
-    prior: Map[String, Option[VersionedJson]],
+    prior: Map[String, PriorValue],
     keys: Iterable[StateKey[?, ?]],
     state: ThreadState
-  ): Map[String, Option[VersionedJson]] =
+  ): Map[String, PriorValue] =
     keys.foldLeft(prior) { (recorded, key) =>
       if recorded.contains(key.id.value) then recorded
       else
         val value = if state.isSet(key) then state.get(key).toOption.map(key.encode) else None
-        recorded + (key.id.value -> value)
+        recorded + (key.id.value -> PriorValue(value, fingerprint(key, state)))
+    }
+
+  /**
+   * `prior` with the fingerprint of each of `keys` that the turn recorded set to its value in `state`: what the
+   * turn's own writes left there. A step calls it with the state its own writes produced, or - for a batch's
+   * tools, which commit concurrently - with the snapshot after the batch, so a later write by anyone else, such as
+   * `updateState` while the turn waits for review, no longer matches.
+   */
+  private def written(
+    prior: Map[String, PriorValue],
+    keys: Iterable[StateKey[?, ?]],
+    state: ThreadState
+  ): Map[String, PriorValue] =
+    keys.foldLeft(prior) { (recorded, key) =>
+      recorded
+        .get(key.id.value)
+        .fold(recorded)(p => recorded.updated(key.id.value, p.copy(written = fingerprint(key, state))))
     }
 
   /** The keys an update writes. */
   private def keysOf(update: StateUpdate): Vector[StateKey[?, ?]] = update.operations.map(_.key).distinct
 
   /**
-   * The restore of every key a blocked turn recorded in `prior`: each to its value before the turn, decoded with
-   * its codec, or its entry removed when it had none.
+   * The restore of every key a blocked turn recorded in `prior` that still holds what the turn left there: each to
+   * its value before the turn, decoded with its codec, or its entry removed when it had none. A key someone else
+   * wrote since - its fingerprint in `state` no longer the one the turn recorded - keeps that newer value: a Block
+   * undoes the turn's own writes, never another's.
    */
   private def restored(
-    prior: Map[String, Option[VersionedJson]],
-    restorable: Map[StateKeyId, StateKey[?, ?]]
+    prior: Map[String, PriorValue],
+    restorable: Map[StateKeyId, StateKey[?, ?]],
+    state: ThreadState
   ): Result[StateUpdate] =
     def one[A](key: StateKey[A, ?], value: Option[VersionedJson]): Result[StateUpdate] =
       value.fold[Result[Option[A]]](Right(None))(json => key.decode(json).map(Some(_))).map(StateUpdate.restore(key, _))
-    prior.toVector.sortBy(_._1).foldLeft[Result[StateUpdate]](Right(StateUpdate.empty)) { case (acc, (id, value)) =>
+    prior.toVector.sortBy(_._1).foldLeft[Result[StateUpdate]](Right(StateUpdate.empty)) { case (acc, (id, recorded)) =>
       for
         done <- acc
         key <- restorable
           .get(StateKeyId(id))
           .toRight(ValidationError("tool loop", s"the turn recorded '$id', which no tool or middleware writes"))
-        next <- one(key, value)
+        next <-
+          if fingerprint(key, state) == recorded.written then one(key, recorded.value) else Right(StateUpdate.empty)
       yield done.combine(next)
     }
 
+  /** The separator between the parts of a system prompt. */
+  private val PromptSeparator = "\n\n"
+
   /**
    * The system prompt of one request: the agent's, then every middleware's sections - cacheable ones first, each
-   * group in stack order. Refused when two sections share an id, or when together they are over `budget` estimated
-   * tokens (four characters a token), naming every section's size: a configuration error, never truncated.
+   * group in stack order - joined by blank lines. Refused when two sections share an id, when there are more than
+   * [[LoopAgent.MaxPromptSections]], or when what the sections add to the prompt as sent - their text and the
+   * separators between them - is over `budget` estimated tokens (four characters a token), naming every section's
+   * size: a configuration error, never truncated.
    */
   private def systemPrompt(
     prompt: Option[String],
     sections: Vector[(MiddlewareId, PromptSection)],
     budget: Int
   ): Result[Option[String]] =
+    def tokens(chars: Int) = (chars + 3) / 4
     val duplicates = sections.groupBy(_._2.id).toVector.sortBy(_._1).collect {
       case (id, uses) if uses.size > 1 =>
         s"prompt section id '$id' is used more than once in one request, by middleware ${uses.map(u => s"'${u._1.value}'").distinct.mkString(", ")}"
     }
-    val sizes = sections.map((owner, section) => (owner, section, (section.text.length + 3) / 4))
-    val total = sizes.map(_._3).sum
+    val (cacheable, rest) = sections.partition(_._2.cacheable)
+    val ordered           = cacheable ++ rest
+    val parts             = prompt.toVector ++ ordered.map(_._2.text)
+    val rendered          = Option.when(parts.nonEmpty)(parts.mkString(PromptSeparator))
+    val added             = tokens(rendered.fold(0)(_.length) - prompt.fold(0)(_.length))
+    def each =
+      ordered.map((owner, section) => s"${owner.value}/${section.id}: ${tokens(section.text.length)}").mkString(", ")
     if duplicates.nonEmpty then Left(ValidationError("prompt sections", duplicates.toList))
-    else if total > budget then
-      val each = sizes.map((owner, section, size) => s"${owner.value}/${section.id}: $size").mkString(", ")
+    else if sections.size > LoopAgent.MaxPromptSections then
       Left(
         ValidationError(
           "prompt sections",
-          s"the request's prompt sections total $total estimated tokens, over the agent's maxPromptSectionTokens of $budget ($each)"
+          s"the request has ${sections.size} prompt sections, over the limit of ${LoopAgent.MaxPromptSections} ($each)"
         )
       )
-    else
-      val (cacheable, rest) = sections.map(_._2).partition(_.cacheable)
-      val parts             = prompt.toVector ++ (cacheable ++ rest).map(_.text)
-      Right(Option.when(parts.nonEmpty)(parts.mkString("\n\n")))
+    else if added > budget then
+      Left(
+        ValidationError(
+          "prompt sections",
+          s"the request's prompt sections add $added estimated tokens to the prompt sent, separators included, over the agent's maxPromptSectionTokens of $budget ($each)"
+        )
+      )
+    else Right(rendered)
 
   /**
    * Suspends the asking task at the resume node of `owner`'s middleware that asked, for `hook`. Nothing of
@@ -842,13 +883,18 @@ object ToolLoop:
               GuardrailPhase.Input
             )
           case Right((transformed, Right(hooks))) =>
-            val turn = TurnState(0, None, Some(agentId), transfer, remembered(Map.empty, keysOf(hooks), state))
-            NodeResult.Continue(
-              Command(seeded.update.combine(hooks).combine(usageOf(context)), seeded.routes)
-                .update(messages, MessageUpdate.Append(StoredMessage(s"$taskId/user", UserMessage(transformed))))
-                .update(LoopKeys.turn, turn)
-                .goto(nodes.model)
-            )
+            // the hooks' keys as they were, and as the hooks leave them: an output Block restores only the latter
+            state.applyUpdate(hooks) match
+              case Left(failed) => NodeResult.Fail(failed)
+              case Right(after) =>
+                val keys  = keysOf(hooks)
+                val prior = written(remembered(Map.empty, keys, state), keys, after)
+                NodeResult.Continue(
+                  Command(seeded.update.combine(hooks).combine(usageOf(context)), seeded.routes)
+                    .update(messages, MessageUpdate.Append(StoredMessage(s"$taskId/user", UserMessage(transformed))))
+                    .update(LoopKeys.turn, TurnState(0, None, Some(agentId), transfer, prior))
+                    .goto(nodes.model)
+                )
       outcome.fold(NodeResult.Fail(_), identity)
 
     val input = b.node[AgentInput]("input", writes = inputWrites ++ family.writes) { (in, state, context) =>
@@ -1000,13 +1046,14 @@ object ToolLoop:
       completion: Completion,
       update: StateUpdate,
       state: ThreadState,
+      after: ThreadState,
       context: RunContext
     ): Command =
       val assistant = completion.message
       val taskId    = context.position.taskId.value
       val stored    = StoredMessage(s"$taskId/assistant", assistant)
       def appended(batch: Set[StateKey[?, ?]]) =
-        val prior = remembered(turn.priorValues, keysOf(update) ++ batch, state)
+        val prior = written(remembered(turn.priorValues, keysOf(update) ++ batch, state), keysOf(update), after)
         Command(update.combine(usageOf(context)), Nil)
           .update(messages, MessageUpdate.Append(stored))
           .update(LoopKeys.turn, turn.copy(steps = turn.steps + 1, priorValues = prior))
@@ -1082,7 +1129,9 @@ object ToolLoop:
                     update <- stack.checkWrites(response.parts)
                     _      <- response.completion.message.validate
                     _      <- ToolResultRule.callIdsUsable(response.completion.message)
-                  yield stored(turn, response.completion, update, state, context)
+                    // the wrappers' keys as they leave them, for an output Block to tell the turn's writes from another's
+                    after <- state.applyUpdate(update)
+                  yield stored(turn, response.completion, update, state, after, context)
                 )
       }
       outcome.fold(NodeResult.Fail(_), identity)
@@ -1119,7 +1168,7 @@ object ToolLoop:
         )
         // a prior value that does not decode fails the run rather than leave the blocked turn's value in place
         def blocked(error: LLMError) =
-          restored(turn.priorValues, harness.byId).fold(
+          restored(turn.priorValues, harness.byId, state).fold(
             NodeResult.Fail(_),
             restore =>
               val rollback = restore
@@ -1148,8 +1197,9 @@ object ToolLoop:
       finishStep(state, context, Vector.empty)
     )
 
-    b.implement(nodes.collect, writes = Set(messages, results)) { (_, state, context) =>
+    b.implement(nodes.collect, writes = Set(messages, results, LoopKeys.turn)) { (_, state, context) =>
       NodeResult.fromResult(for
+        turn     <- state.get(LoopKeys.turn)
         history  <- state.get(messages)
         recorded <- state.get(results)
         source <- history.reverseIterator
@@ -1176,9 +1226,13 @@ object ToolLoop:
           val content = if r.isError then ujson.Obj("error" -> r.content).render() else r.content
           StoredMessage(s"${context.position.taskId.value}/tool/${r.toolCallId}", ToolMessage(content, r.toolCallId))
         }
+        // what the batch's tools left in the keys they may write, now committed: an output Block restores a key only
+        // while it still holds what the turn left there
+        val left = turn.copy(priorValues = written(turn.priorValues, batchWrites(assistant.toolCalls.toVector), state))
         toolMessages
           .foldLeft(Command.empty)((command, m) => command.update(messages, MessageUpdate.Append(m)))
           .remove(results)
+          .update(LoopKeys.turn, left)
           .goto(nodes.model)
       )
     }

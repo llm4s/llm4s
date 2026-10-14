@@ -14,7 +14,10 @@ import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.util.concurrent.CopyOnWriteArrayList
+import org.llm4s.agent.guardrails.{ CompositeGuardrail, LLMGuardrail }
+
+import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
+import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
 /**
@@ -286,7 +289,7 @@ class KernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues with O
       runInMemory(loopOf(model, Seq(a, b), configure = _.withMaxPromptSectionTokens(100)).graph, AgentInput("go"))
     causeOf(result).message should (include("a/big: 100")
       .and(include("b/small: 10"))
-      .and(include("110"))
+      .and(include("add 111 estimated tokens"))
       .and(
         include(
           "100"
@@ -402,5 +405,174 @@ class KernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val old = upickle.default.writeJs[RunEvent](RunEvent.RunFailed("boom"))
     old.obj.remove("usage")
     upickle.default.read[RunEvent](old) shouldBe RunEvent.RunFailed("boom")
+  }
+
+  // ---- round 2: bounds measured on what is sent, a Block undoing only the turn's own writes, usage of every attempt
+
+  they should "count the separators between sections, so many empty sections cannot pass the budget" in {
+    val many  = middleware("many", sections = _ => Right(Vector.tabulate(30)(i => PromptSection(s"s$i", ""))))
+    val model = ScriptedModel(answer("hi"))
+    val result =
+      runInMemory(loopOf(model, Seq(many), configure = _.withMaxPromptSectionTokens(10)).graph, AgentInput("go"))
+    // 29 separators of two characters: 58 characters, 15 estimated tokens, though every section's text is empty
+    causeOf(result).message should include("add 15 estimated tokens")
+    model.calls shouldBe 0
+  }
+
+  they should "be refused beyond the most one request may carry, whatever their size" in {
+    val count = LoopAgent.MaxPromptSections + 1
+    val many  = middleware("many", sections = _ => Right(Vector.tabulate(count)(i => PromptSection(s"s$i", "x"))))
+    val model = ScriptedModel(answer("hi"))
+    val result =
+      runInMemory(loopOf(model, Seq(many), configure = _.withMaxPromptSectionTokens(100000)).graph, AgentInput("go"))
+    causeOf(result).message should include(s"$count prompt sections, over the limit of ${LoopAgent.MaxPromptSections}")
+    model.calls shouldBe 0
+  }
+
+  "An output Block after an updateState edit" should "keep the edit, restoring only keys that still hold the turn's writes" in {
+    val scratch: StateKey[Option[String], Option[String]] = StateKey.replace[Option[String]]("scratch", None)
+    val reviewing = new AgentMiddleware.Asking[String, Boolean] {
+      val id: MiddlewareId                     = MiddlewareId("review")
+      override def writes: Set[StateKey[?, ?]] = Set(notes, scratch)
+      override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
+        Right(BoundaryResult(input, StateUpdate.update(scratch, Some(input))))
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] = next(request).map(_.addUpdate(StateUpdate.update(notes, "model")))
+      override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
+        answered(context).fold(ask("block?"))(_ => Left(GuardrailBlocked("review", "rejected")))
+    }
+    val loop  = loopOf(ScriptedModel(answer("hi")), Seq(reviewing))
+    val store = new InMemoryCheckpointer
+    val rt    = GraphRuntime(store)
+    val t     = ThreadId("edited-while-reviewed")
+
+    val parked = rt.start(t, loop.graph, AgentInput("go")).awaited.value.suspended
+    parked.state.get(scratch).value shouldBe Some("go")
+    // a reviewer corrects the scratch key while the turn waits for review
+    val latest = store.latest(t).value.value.checkpoint.id
+    rt.updateState(t, loop.graph, latest, StateUpdate.update(scratch, Some("edited"))).isRight shouldBe true
+    val (asked, _) = loop.middlewareQuestions(parked).value.head
+    val (state, error) =
+      rt.resume(t, loop.graph, Map(asked -> ujson.Bool(true))).awaited.value.failed
+    error shouldBe a[GuardrailBlocked]
+    // the edit is newer than the turn's write: the Block keeps it
+    state.get(scratch).value shouldBe Some("edited")
+    // the turn's own write is undone
+    state.isSet(notes) shouldBe false
+  }
+
+  "A cancelled run" should "carry the usage of the calls its interrupted task made on RunCancelled" in {
+    val called = new CountDownLatch(1)
+    val hanging = middleware(
+      "hanging",
+      writing = Set.empty,
+      model = (r, _, next) =>
+        next(r).flatMap { _ =>
+          called.countDown()
+          Thread.sleep(30000)
+          Left(ValidationError("never", "reached"))
+        }
+    )
+    val store = new InMemoryCheckpointer
+    val t     = ThreadId("cancelled-usage")
+    val handle =
+      GraphRuntime(store).start(t, loopOf(ScriptedModel(answer("hi")), Seq(hanging)).graph, AgentInput("go")).value
+    called.await(5, TimeUnit.SECONDS) shouldBe true
+    handle.cancel()
+    awaitResult(handle).value.failed
+    val cancelled = store.eventsAfter(t, 0L, 1000).value.collect {
+      case EventRecord(_, _, _, _, _, _, _, c: RunEvent.RunCancelled) => c
+    }
+    cancelled.map(_.usage.map(_.requestCount)) shouldBe Vector(Some(1L))
+  }
+
+  "A timed-out run" should "carry the usage of the calls its interrupted task made on RunTimedOut" in {
+    val hanging = middleware(
+      "hanging",
+      writing = Set.empty,
+      model = (r, _, next) =>
+        next(r).flatMap { _ =>
+          Thread.sleep(30000)
+          Left(ValidationError("never", "reached"))
+        }
+    )
+    val store  = new InMemoryCheckpointer
+    val t      = ThreadId("timed-out-usage")
+    val config = RunConfig().withBudgets(RunBudgets(timeout = Some(300.millis)))
+    GraphRuntime(store)
+      .start(t, loopOf(ScriptedModel(answer("hi")), Seq(hanging)).graph, AgentInput("go"), config)
+      .awaited
+      .value
+      .failed
+    val timedOut = store.eventsAfter(t, 0L, 1000).value.collect {
+      case EventRecord(_, _, _, _, _, _, _, e: RunEvent.RunTimedOut) => e
+    }
+    timedOut.map(_.usage.map(_.requestCount)) shouldBe Vector(Some(1L))
+  }
+
+  "A stored RunCancelled or RunTimedOut from before usage" should "decode as one with none" in {
+    upickle.default.read[RunEvent]("\"RunCancelled\"") shouldBe RunEvent.RunCancelled(None)
+    upickle.default.read[RunEvent]("\"RunTimedOut\"") shouldBe RunEvent.RunTimedOut(None)
+    upickle.default.read[RunEvent](
+      upickle.default.write[RunEvent](RunEvent.RunCancelled(Some(UsageSummary())))
+    ) shouldBe
+      RunEvent.RunCancelled(Some(UsageSummary()))
+  }
+
+  "A wrapper that calls next several times, then fails" should "leave every completed call's usage on RunFailed" in {
+    val retrying = middleware(
+      "corrective",
+      writing = Set.empty,
+      model = (r, _, next) =>
+        for
+          _ <- next(r)
+          _ <- next(r)
+          _ <- Left(ValidationError("check", "still wrong"))
+        yield fail("unreachable")
+    )
+    val store = new InMemoryCheckpointer
+    val t     = ThreadId("corrective-usage")
+    GraphRuntime(store)
+      .start(t, loopOf(ScriptedModel(answer("one"), answer("two")), Seq(retrying)).graph, AgentInput("go"))
+      .awaited
+      .value
+      .failed
+    val failed =
+      store.eventsAfter(t, 0L, 1000).value.collect { case EventRecord(_, _, _, _, _, _, _, f: RunEvent.RunFailed) => f }
+    failed.map(_.usage.map(_.requestCount)) shouldBe Vector(Some(2L))
+  }
+
+  "An LLM-judge guardrail in GuardrailMiddleware" should "have its judge call counted, also inside a composite" in {
+    val judge = new LLMClient {
+      def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+        Right(completion(AssistantMessage("0.9"), prompt = 50, completion = 1))
+      def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions,
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = complete(conversation, options)
+      def getContextWindow(): Int     = 1000
+      def getReserveCompletion(): Int = 100
+    }
+    val direct    = LLMGuardrail(judge, "is it fine?")
+    val composite = CompositeGuardrail.all(Seq(LLMGuardrail(judge, "is it kind?", guardrailName = "kind")))
+    val guard = new GuardrailMiddleware(
+      Nil,
+      Seq(
+        direct,
+        new org.llm4s.agent.guardrails.OutputGuardrail {
+          val name: String                            = "composite"
+          def validate(value: String): Result[String] = composite.validate(value)
+          override def validate(value: String, context: ModelContext): Result[String] =
+            composite.validate(value, context)
+        }
+      )
+    )
+    val (state, text) = runInMemory(loopOf(ScriptedModel(answer("hi")), Seq(guard)).graph, AgentInput("go")).answered
+    text shouldBe "hi"
+    val usage = state.get(LoopKeys.usage).value
+    usage.requestCount shouldBe 3
+    usage.inputTokens shouldBe 10 + 50 + 50
   }
 }

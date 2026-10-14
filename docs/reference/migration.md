@@ -53,11 +53,19 @@ Code that only builds agents with the built-in middleware needs no change. A mid
   `ModelCallCompleted` is one event per provider call, `attempts` that call's attempt number (0 for a hook's own call
   through `ModelContext.accounted`). A hook that calls a model itself - or hands a client to a library that does -
   wraps the client with `context.accounted(client)`, so its calls are counted.
-- **`RunEvent.RunFailed` gains `usage`**, the calls of the tasks that failed with the run. Match it as
-  `RunFailed(message, _)`. Events stored before decode with `None`.
+- **`RunEvent.RunFailed` gains `usage`; `RunCancelled` and `RunTimedOut` become case classes with `usage`**: the
+  calls of the attempts that committed nothing - a task that failed, or one the cancel or deadline cut short. Match
+  them as `RunFailed(message, _)`, `RunCancelled(_)` and `RunTimedOut(_)`; build them as `RunCancelled()`. Events
+  stored before decode with `None`.
+- **Guardrails take the hook's context.** `Guardrail` gains `validate(value, context: ModelContext)`, defaulting to
+  `validate(value)`; `GuardrailMiddleware` calls it. A guardrail of your own that calls a model overrides it to call
+  through `context.accounted(client)`; one that combines guardrails passes `context` on. A subclass of
+  `LLMGuardrail` that called `evaluateWithLLM(content)` passes the client too: `evaluateWithLLM(content, llmClient)`.
+- **An output Block keeps edits made by others.** A key `updateState` changed while the turn waited for review keeps
+  the edit; only keys still holding the turn's writes are restored.
 - **New hook `promptSections`** adds system-prompt content per request, never stored; together the sections are
-  capped by `AgentBuilder.withMaxPromptSectionTokens` (default 8192, four characters a token), over which the run
-  fails. `LoopAgent` gains `maxPromptSectionTokens` and `TurnState` gains `priorValues`; a stored `TurnState` without
+  capped by `AgentBuilder.withMaxPromptSectionTokens` (default 8192, four characters a token, measured on the
+  rendered prompt, separators included) and to 64 per request, over which the run fails. `LoopAgent` gains `maxPromptSectionTokens` and `TurnState` gains `priorValues`; a stored `TurnState` without
   it decodes.
 
 ## Stage 2 migration: durable execution

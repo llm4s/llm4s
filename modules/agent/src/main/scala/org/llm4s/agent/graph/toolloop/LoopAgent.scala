@@ -39,6 +39,9 @@ object LoopAgent:
   /** The prompt section budget of an agent that sets none. */
   val DefaultMaxPromptSectionTokens: Int = 8192
 
+  /** The most prompt sections one request may carry, whatever their size: more fail the run. */
+  val MaxPromptSections: Int = 64
+
   /**
    * An agent with no system prompt, no middleware, no handoffs, a limit of 50 steps a turn and the default prompt
    * section budget.
@@ -68,17 +71,25 @@ enum TurnOutcome derives ReadWriter:
   case StepLimitReached
 
 /**
+ * What an output Block needs to undo a turn's writes to one key: its `value` before the turn first wrote it,
+ * encoded with the key's codec (`None`: no stored entry), and the fingerprint of what the turn's own writes last
+ * left there (`written`; `None`: no stored entry). A Block restores the key only while it still holds `written`,
+ * so a later write by anyone else - `updateState` while the turn waits for review - is kept (design §4.22).
+ */
+final case class PriorValue(value: Option[VersionedJson], written: Option[String]) derives ReadWriter
+
+/**
  * The current turn: the model calls it has made, its outcome once it has one, and what an output Block restores
- * when it retracts the turn - the agent and transfer it started with, and `priorValues`: by key id, the value each
- * key the turn may write held before the turn first wrote it, encoded with the key's codec, or `None` for a key
- * with no stored entry. Reset by each turn's input; a turn that ends clears `priorValues` (design §4.22).
+ * when it retracts the turn - the agent and transfer it started with, and `priorValues`: by key id, each key the
+ * turn may write, as it was before the turn and as the turn left it ([[PriorValue]]), one entry per key. Reset by
+ * each turn's input; a turn that ends clears `priorValues` (design §4.22).
  */
 final case class TurnState(
   steps: Int,
   outcome: Option[TurnOutcome],
   startAgent: Option[AgentId] = None,
   startTransfer: Option[Transfer] = None,
-  priorValues: Map[String, Option[VersionedJson]] = Map.empty
+  priorValues: Map[String, PriorValue] = Map.empty
 ) derives ReadWriter
 
 /** A turn's result: how it ended, and the agent active at its end - the one the next turn starts with. */

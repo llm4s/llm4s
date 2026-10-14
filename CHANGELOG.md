@@ -1329,7 +1329,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discarded ones included, and no longer counts a completion a wrapper returned without calling the model; each
   provider call is its own `ModelCallCompleted` event, `attempts` its attempt number. `RunEvent.RunFailed` gains
   `usage` (a pattern `RunFailed(msg)` becomes `RunFailed(msg, _)`); `TurnState` gains `priorValues`; `LoopAgent`
-  gains `maxPromptSectionTokens`. Stored threads and events decode unchanged.
+  gains `maxPromptSectionTokens`. Stored threads and events decode unchanged. `RunEvent.RunCancelled` and
+  `RunTimedOut` become `RunCancelled(usage)` / `RunTimedOut(usage)`, carrying the usage of the attempts the stop cut
+  short (match `RunCancelled(_)`; old events decode). `Guardrail` gains `validate(value, context: ModelContext)`,
+  which `GuardrailMiddleware` calls, and `LLMGuardrail.evaluateWithLLM` takes the client to call, so a judge's calls
+  are counted. An output Block keeps a key someone else (`updateState`) wrote while the turn waited. Prompt sections
+  are bounded on the rendered prompt, separators included, and to `LoopAgent.MaxPromptSections` (64) per request.
 - **Breaking - a run that loses its claim stops at once and ends `GraphError.ClaimLost`** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   it used to end `CheckpointWriteFailed(_, StaleClaim, _)`, which a caller could not tell from a store outage without
   matching on its cause. `GraphError.ClaimLost(threadId, token, current)` is new: the run's own `FencingToken`, and the

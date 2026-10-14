@@ -50,10 +50,11 @@ final class GuardrailReviewMiddleware(
 ) extends AgentMiddleware.Asking[GuardrailReview, GuardrailVerdict]:
 
   override def beforeAgent(text: String, context: ModelContext): Result[BoundaryResult] =
-    reviewed(GuardrailPhase.Input, text, context)(GuardrailMiddleware.run(input, text)).map(BoundaryResult(_))
+    reviewed(GuardrailPhase.Input, text, context)(GuardrailMiddleware.run(input, text, context)).map(BoundaryResult(_))
 
   override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
-    reviewed(GuardrailPhase.Output, answer, context)(GuardrailMiddleware.run(output, answer)).map(BoundaryResult(_))
+    reviewed(GuardrailPhase.Output, answer, context)(GuardrailMiddleware.run(output, answer, context))
+      .map(BoundaryResult(_))
 
   // A verdict is matched on the refused text and phase, not on the refusal's wording: a guardrail whose reason
   // varies between runs (an LLM judge) would otherwise be asked about forever. Once a verdict is given, the

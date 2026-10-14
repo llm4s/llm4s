@@ -74,8 +74,8 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with Matchers:
       e match
         case StreamEvent.Durable(record) =>
           record.event match
-            case RunEvent.RunCompleted | RunEvent.RunFailed(_, _) | RunEvent.RunSuspended(_) | RunEvent.RunCancelled |
-                RunEvent.RunTimedOut =>
+            case RunEvent.RunCompleted | RunEvent.RunFailed(_, _) | RunEvent.RunSuspended(_) |
+                RunEvent.RunCancelled(_) | RunEvent.RunTimedOut(_) =>
               ended.countDown()
             case _ => ()
         case _ => ()
