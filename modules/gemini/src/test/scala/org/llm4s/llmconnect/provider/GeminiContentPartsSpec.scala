@@ -97,14 +97,20 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
       Right(())
   }
 
-  it should "refuse a request whose inline media together is over Gemini's 20 MB request limit" in {
+  "GeminiClient" should "refuse, before sending, a request over 20 MB as rendered: media, text, tools and schema" in {
+    val http = stub[Llm4sHttpClient]
     val four = ContentPart.image(MediaSource.Inline(IArray.fill[Byte](4 * 1024 * 1024)(1)), MediaType.Png).value
-    GeminiParts.check("gemini", Seq(UserMessage(Vector.fill(3)(four))), gemini) shouldBe Right(())
-    GeminiParts.check("gemini", Seq(UserMessage(Vector.fill(4)(four))), gemini).left.value.message should
-      include(s"a request of at most ${GeminiParts.MaxRequestBytes} bytes")
-    // text counts toward the request too: three 4 MiB images and enough prompt to pass 20 MB
-    val prompt = ContentPart.Text("p" * 3500000)
-    GeminiParts.check("gemini", Seq(UserMessage(Vector(prompt) ++ Vector.fill(3)(four))), gemini).isLeft shouldBe true
+    // three 4 MiB images are about 16.8 MB base64-encoded: a 4 MB response schema takes the request over
+    val schema  = ujson.Obj("type" -> "object", "description" -> ("d" * 4000000))
+    val options = CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(schema))
+    val error   = client(http).complete(Conversation(Seq(UserMessage(Vector.fill(3)(four)))), options).left.value
+    error.message should include(s"a request of at most ${GeminiParts.MaxRequestBytes} bytes")
+    client(http)
+      .complete(Conversation(Seq(UserMessage(Vector.fill(5)(four)))), CompletionOptions())
+      .isLeft shouldBe true
+    (http.post _).verify(*, *, *, *).never()
+    GeminiParts.withinRequestLimit("gemini", "x" * 10) shouldBe Right(())
+    GeminiParts.withinRequestLimit("gemini", "é" * 10000001).left.value.message should include("this one is 20000002")
   }
 
   "GeminiClient" should "send a user message's parts in order, and a tool result's text" in {

@@ -32,15 +32,29 @@ private[provider] object GeminiParts {
 
   /** `Right` when a client with `fileUri` can send every part of `messages`. */
   def check(provider: String, messages: Seq[Message], fileUri: FileUri): Result[Unit] =
-    PartEncoding
-      .check(provider, messages, user(fileUri), PartEncoding.textOnly)
-      .flatMap(_ => PartEncoding.checkRequestSize(provider, messages, MaxRequestBytes))
+    PartEncoding.check(provider, messages, user(fileUri), PartEncoding.textOnly)
 
   /**
    * Gemini and Vertex AI take a request of at most 20 MB, its text and inline data together: each part is
    * within `ContentPart.MaxInlineBytes`, but several may not be together, so the whole request is bounded too.
    */
   val MaxRequestBytes: Long = 20000000L
+
+  /**
+   * `Right` when the rendered request `requestText` is at most [[MaxRequestBytes]] as UTF-8: measured on the
+   * bytes that are sent, so its tools, response schema, escaping and media all count. Checked before it is sent.
+   */
+  def withinRequestLimit(provider: String, requestText: String): Result[Unit] = {
+    val size = requestText.getBytes(java.nio.charset.StandardCharsets.UTF_8).length.toLong
+    if (size <= MaxRequestBytes) Right(())
+    else
+      Left(
+        org.llm4s.error.ValidationError(
+          "parts",
+          s"$provider takes a request of at most $MaxRequestBytes bytes; this one is $size"
+        )
+      )
+  }
 
   /**
    * The Gemini API's references: a web URL (`http`/`https`), or a file uploaded to `provider` through the

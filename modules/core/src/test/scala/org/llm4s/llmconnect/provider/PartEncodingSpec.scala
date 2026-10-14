@@ -39,18 +39,11 @@ class PartEncodingSpec extends AnyFlatSpec with Matchers with EitherValues {
       .value shouldBe UnsupportedContentPartError("p", image.kind, "tool")
   }
 
-  "checkInlineLimits and checkRequestSize" should "apply a provider's own per-part and per-request limits" in {
+  "checkInlineLimits" should "apply a provider's own per-part limits" in {
     val messages = Seq(UserMessage(Vector(ContentPart.Text("x"), image, image)))
     PartEncoding.checkInlineLimits("p", messages, _ => Some(3L)) shouldBe Right(())
     PartEncoding.checkInlineLimits("p", messages, _ => Some(2L)).left.value.message should include("at most 2 bytes")
     PartEncoding.checkInlineLimits("p", messages, _ => None) shouldBe Right(())
-    // two 3-byte images are 8 bytes base64-encoded, and the text "x" one more
-    PartEncoding.checkRequestSize("p", messages, 9L) shouldBe Right(())
-    PartEncoding.checkRequestSize("p", messages, 8L).left.value.message should include("this one has 9")
-    val withSystem = SystemMessage("abcd") +: messages
-    PartEncoding.checkRequestSize("p", withSystem, 9L).left.value.message should include("this one has 13")
-    val call = AssistantMessage(None, Seq(ToolCall("c", "t", ujson.Obj("a" -> 1))))
-    PartEncoding.checkRequestSize("p", Seq(call), 1L).left.value.message should include("this one has 8")
     PartEncoding.base64Length(3) shouldBe 4
     PartEncoding.base64Length(4) shouldBe 8
   }
