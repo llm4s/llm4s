@@ -15,10 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tenant scoping; `BackendRefused.toolOutcome` turns a refusal into a tool error and anything else into `Fatal`.
   - `StateFileBackend`: files in a thread-state key, bounded by `maxBytes` and `maxFiles` under one backend-wide
     lock, so the bound is exact across a parallel batch.
-  - `HostFileBackend`: opt-in host directory, `Verifiable`; every symbolic link refused, writes atomic (temporary
-    file and atomic move), per-file locks, JVM-wide serialisation of each plan and effect.
+  - `HostFileBackend`: opt-in host directory, `Verifiable`; every symbolic link and multiply-linked file refused,
+    writes atomic (temporary file and atomic move), per-file locks, and each mutation serialised per file across
+    threads and processes (JVM and OS advisory locks, lock files under the reserved `/.llm4s`).
   - `CompositeBackend` routes by longest mount; `FileBackend.resolved` picks a backend per run (per tenant).
-  - `LongTermStore` (`Transactional`, one read-modify-write primitive `modify`, bounds per item and namespace) with
+  - `LongTermStore` (`Transactional`, one read-modify-write primitive `modify` over a `StoreView`, bounds per item and
+    namespace, values copied in and out) with
     `InMemoryLongTermStore`; `StoreFileBackend` exposes a namespace of the run's tenant as files.
   - `SandboxBackend` wraps a `SandboxRunner` in the `Unverifiable` guard and cuts each stream at `maxOutputBytes`.
   - `llm4s-agent-testkit` adds `FileBackendContract` and `FileBackendContract.EditSubject` for `ReplayContract`, and

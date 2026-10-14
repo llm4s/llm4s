@@ -3,7 +3,7 @@ package org.llm4s.agent.harness
 import org.llm4s.agent.graph.{ ReplayGuard, ReplaySupport, StateCheck, StateKey, StateUpdate }
 import org.llm4s.agent.graph.tool.LockKey
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
+import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.types.{ Result, TryOps }
 
 import java.nio.ByteBuffer
@@ -67,20 +67,38 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
   private def refused(operation: String, path: VPath, reason: String): Left[BackendRefused, Nothing] =
     Left(BackendRefused(operation, path.value, reason))
 
-  /** `path` under the root, refusing a symbolic link at any component that exists. */
+  private val countsLinks = root.getFileSystem.supportedFileAttributeViews.contains("unix")
+
+  /** How many hard links name the regular file `p`; 1 where the file system cannot say. */
+  private def linkCount(p: Path): Int =
+    if countsLinks then Files.getAttribute(p, "unix:nlink", LinkOption.NOFOLLOW_LINKS).asInstanceOf[Int] else 1
+
+  /** A file another name also reaches: a symbolic link, or a regular file with more than one hard link. */
+  private def aliased(p: Path): Boolean = Files.isSymbolicLink(p) || (isFile(p) && linkCount(p) > 1)
+
+  /**
+   * `path` under the root, refusing a symbolic link at any component that exists, a regular file with
+   * other hard links (which may be outside the root, and which locks by path would not order), and the
+   * backend's own lock directory.
+   */
   private def resolve(operation: String, path: VPath): Result[Path] =
-    path.segments
-      .foldLeft[Result[Path]](Right(root)) { (acc, segment) =>
-        acc.flatMap { parent =>
-          val next = parent.resolve(segment)
-          if Files.isSymbolicLink(next) then
-            refused(operation, path, "is or is beneath a symbolic link, which is refused")
-          else Right(next)
+    if path.segments.headOption.contains(HostFileBackend.Reserved) then
+      refused(operation, path, s"is beneath /${HostFileBackend.Reserved}, which the backend reserves for its locks")
+    else
+      path.segments
+        .foldLeft[Result[Path]](Right(root)) { (acc, segment) =>
+          acc.flatMap { parent =>
+            val next = parent.resolve(segment)
+            if Files.isSymbolicLink(next) then
+              refused(operation, path, "is or is beneath a symbolic link, which is refused")
+            else Right(next)
+          }
         }
-      }
-      .flatMap(p =>
-        if p.normalize().startsWith(root) then Right(p) else refused(operation, path, "resolves outside the root")
-      )
+        .flatMap(p =>
+          if !p.normalize().startsWith(root) then refused(operation, path, "resolves outside the root")
+          else if isFile(p) && linkCount(p) > 1 then refused(operation, path, "has other hard links, which are refused")
+          else Right(p)
+        )
 
   /** Every existing ancestor of `target` below the root is a directory. */
   private def underDirectories(operation: String, path: VPath, target: Path): Result[Unit] =
@@ -146,26 +164,58 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
 
   // ---- serialisation of plan and effect across threads of this JVM
 
+  /**
+   * `body` holding the target's stripe: first the JVM's lock of that stripe, then the OS's advisory lock
+   * on the root's lock file of that stripe (`.llm4s/locks/<stripe>`), so every process mutating this
+   * root through a backend is ordered too. One lock file per stripe, used by one thread of this JVM at a
+   * time, because closing a channel can release every lock the JVM holds on its file, and an interrupt
+   * while waiting closes the waiting channel.
+   */
+  private def stripeOf(target: Path): Int = Math.floorMod(target.toString.hashCode, HostFileBackend.Stripes)
+
+  private def lockFile(stripe: Int): Path =
+    root.resolve(HostFileBackend.Reserved).resolve("locks").resolve(stripe.toString)
+
+  /** The OS lock file a mutation of `path` takes; for tests that hold it from another process. */
+  private[harness] def lockFileOf(path: VPath): Result[Path] = resolve("lock", path).map(t => lockFile(stripeOf(t)))
+
   private def exclusively[A](target: Path)(body: => Result[A]): Result[A] =
-    val lock = HostFileBackend.stripes(Math.floorMod(target.toString.hashCode, HostFileBackend.stripes.length))
+    val stripe = stripeOf(target)
+    val lock   = HostFileBackend.stripes(stripe)
+    def cancelled: Result[A] =
+      Thread.currentThread().interrupt()
+      Left(CancelledError("host file mutation"))
     Try(lock.lockInterruptibly()) match
-      case Failure(_) =>
-        Thread.currentThread().interrupt()
-        Left(CancelledError("host file mutation"))
-      case Success(_) => Using.resource(HostFileBackend.Unlock(lock))(_ => body)
+      case Failure(_) => cancelled
+      case Success(_) =>
+        Using.resource(HostFileBackend.Unlock(lock)) { _ =>
+          val file = lockFile(stripe)
+          Try {
+            Files.createDirectories(file.getParent)
+            FileChannel.open(file, StandardOpenOption.CREATE, StandardOpenOption.WRITE)
+          } match
+            case Failure(e) => Left(ProcessingError("host-lock", s"cannot open the lock file $file: $e"))
+            case Success(channel) =>
+              Using.resource(channel) { open =>
+                Try(open.lock()) match
+                  case Failure(_: java.nio.channels.ClosedByInterruptException) => cancelled
+                  case Failure(e)    => Left(ProcessingError("host-lock", s"cannot lock $file: $e"))
+                  case Success(held) => Using.resource(held)(_ => body)
+              }
+        }
 
   private def guarded[A: upickle.default.ReadWriter](operation: String, path: VPath, ctx: FileContext)(
     plan: Path => Result[ReplayGuard.Plan[A]]
   ): Result[(A, StateUpdate)] =
-    resolve(operation, path)
-      .flatMap { target =>
-        exclusively(target) {
-          ReplayGuard.verifiable[A](ctx.run, ctx.effectKey(s"file.$operation", path.value))(
-            io(operation, path)(digest(operation, path, target))
-          )(io(operation, path)(plan(target)))
-        }
+    // the stripe is the lexical target's, so the resolution's checks (links, the reserved directory) are
+    // made under the lock too, not raced between the check and the effect
+    exclusively(path.segments.foldLeft(root)(_.resolve(_))) {
+      resolve(operation, path).flatMap { target =>
+        ReplayGuard.verifiable[A](ctx.run, ctx.effectKey(s"file.$operation", path.value))(
+          io(operation, path)(digest(operation, path, target))
+        )(io(operation, path)(plan(target)))
       }
-      .map(a => (a, StateUpdate.empty))
+    }.map(a => (a, StateUpdate.empty))
 
   // ---- mutations
 
@@ -233,21 +283,38 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
   // ---- reads
 
   /** The listable children of `dir`, in name order: no links, no temporary files, at most `max`. */
+  /**
+   * The first `max` listable children of `dir` in name order, and whether there were more. A directory
+   * stream has no order, so the whole directory is read, keeping only the `max + 1` least names, and
+   * entries that are not listed (links, temporary files, the lock directory) are dropped before they
+   * count. Memory is bounded by `max`; the time a huge directory takes, by the tool's timeout, as the
+   * read stops when its thread is interrupted.
+   */
   private def children(dir: Path, max: Int): (Vector[(String, Path)], Boolean) =
-    val names = Using.resource(Files.newDirectoryStream(dir)) { stream =>
-      stream.iterator().asScala.take(max + 1).toVector
+    val least = new java.util.PriorityQueue[(String, Path)](max + 1, Ordering.by[(String, Path), String](_._1).reverse)
+    var eligible = 0
+    Using.resource(Files.newDirectoryStream(dir)) { stream =>
+      val entries = stream.iterator()
+      while entries.hasNext do
+        if Thread.currentThread().isInterrupted then throw new java.util.concurrent.CancellationException("interrupted")
+        val p    = entries.next()
+        val name = p.getFileName.toString
+        val hidden =
+          HostFileBackend.isTemporary(name) || (dir == root && name == HostFileBackend.Reserved) || aliased(p)
+        if !hidden then
+          eligible += 1
+          least.add(name -> p)
+          if least.size > max then least.poll(): Unit
     }
-    val kept =
-      names.take(max).filterNot(p => Files.isSymbolicLink(p) || HostFileBackend.isTemporary(p.getFileName.toString))
-    (kept.map(p => p.getFileName.toString -> p).sortBy(_._1), names.size > max)
+    (least.asScala.toVector.sortBy(_._1), eligible > max)
 
   def ls(path: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
     Text.checkLimit("ls", path.value, limit).flatMap(_ => resolve("ls", path)).flatMap { dir =>
-      io("ls", path) {
+      io("ls", path)(Text.interruptibly("ls") {
         if !exists(dir) then refused("ls", path, "not found")
         else if !isDir(dir) then refused("ls", path, "is a file, not a directory")
         else
-          val (entries, capped) = children(dir, maxScanEntries)
+          val (entries, capped) = children(dir, math.min(limit, maxScanEntries))
           val infos = entries.flatMap { (name, p) =>
             (path / name).toOption.map { child =>
               val directory = isDir(p)
@@ -261,7 +328,7 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
           }
           val listing = Listing.of(infos.iterator, limit)
           Right(listing.copy(truncated = listing.truncated || capped))
-      }
+      })
     }
 
   def read(path: VPath, offset: Int, limit: Int, ctx: FileContext): Result[FileLines] =
@@ -334,7 +401,12 @@ object HostFileBackend:
   val DefaultMaxScanEntries: Int = 100_000
 
   /** Per-file mutual exclusion across the JVM, striped by the file's real path. */
-  private val stripes: Vector[ReentrantLock] = Vector.fill(256)(new ReentrantLock())
+  private val Stripes = 64
+
+  private val stripes: Vector[ReentrantLock] = Vector.fill(Stripes)(new ReentrantLock())
+
+  /** The root's directory the backend keeps its lock files in; no path may reach it. */
+  private val Reserved = ".llm4s"
 
   final private case class Unlock(lock: ReentrantLock) extends AutoCloseable:
     def close(): Unit = lock.unlock()

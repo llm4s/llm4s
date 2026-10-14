@@ -75,8 +75,8 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     val same  = call()
     val key   = same.effectKey("test.put", "k")
     val runs  = new AtomicInteger()
-    def change(current: Option[StoreItem]) = {
-      runs.incrementAndGet(); Right(StoreChange.Put(ujson.Str("first"), current.isEmpty))
+    def change(view: StoreView) = {
+      runs.incrementAndGet(); Right(StoreChange.Put(ujson.Str("first"), view.current.isEmpty))
     }
     store.modify[Boolean](ns, "k", key)(change).value shouldBe true
     store.put(ns, "k", ujson.Str("someone else"), call()).value
@@ -136,6 +136,44 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     done(files.edit(p("/a.md"), "x", "z", replaceAll = false, same)) shouldBe FileEdited(1)
     done(files.edit(p("/a.md"), "x", "z", replaceAll = false, same)) shouldBe FileEdited(1)
     files.read(p("/a.md"), 0, 1, call()).value.lines shouldBe Vector("z y")
+  }
+
+  it should "decide the tree's shape in the transaction: of a file and a path beneath it written at once, one wins" in {
+    (1 to 50).foreach { _ =>
+      val files = StoreFileBackend(InMemoryLongTermStore())
+      val start = new java.util.concurrent.CyclicBarrier(2)
+      val pool  = java.util.concurrent.Executors.newFixedThreadPool(2)
+      val writes = Vector("/a", "/a/b").map(path =>
+        pool.submit { () =>
+          start.await(); files.write(p(path), "x", call())
+        }
+      )
+      val results = writes.map(_.get(10, java.util.concurrent.TimeUnit.SECONDS))
+      pool.shutdown()
+      results.count(_.isRight) shouldBe 1
+      results.collect { case Left(e) => e }.head shouldBe a[BackendRefused]
+    }
+  }
+
+  "InMemoryLongTermStore" should "copy values in and out, so no caller can change what it stores" in {
+    val store = InMemoryLongTermStore()
+    val input = ujson.Obj("n" -> 1)
+    store.put(ns, "k", input, call()).value
+    input("n") = 2
+    store.get(ns, "k").value.get.value("n").num shouldBe 1
+    store.get(ns, "k").value.get.value("n") = 3
+    store.list(ns, "", 10).value.items.head.item.value("n") = 4
+    store.search(ns, "k", 10).value.items.head.item.value("n") = 5
+    store.get(ns, "k").value.get.value("n").num shouldBe 1
+    val key = call().effectKey("test.put", "k")
+    store
+      .modify[Unit](ns, "k", key) { view =>
+        view.current.get.value("n") = 6
+        Left(BackendRefused("put", "k", "no"))
+      }
+      .left
+      .value shouldBe a[BackendRefused]
+    store.get(ns, "k").value.get.value("n").num shouldBe 1
   }
 
   it should "refuse a write over the store's bounds as a tool error, and lock by path" in {

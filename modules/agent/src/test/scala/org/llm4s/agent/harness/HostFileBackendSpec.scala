@@ -65,7 +65,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
 
   it should "leave no temporary file behind, and never list one" in {
     written(backend.write(p("/a.txt"), "x", call()))
-    Files.list(dir).iterator().asScala.map(_.getFileName.toString).toVector shouldBe Vector("a.txt")
+    Files.list(dir).iterator().asScala.map(_.getFileName.toString).toVector.sorted shouldBe Vector(".llm4s", "a.txt")
     Files.writeString(dir.resolve(s".a.txt.llm4s-${UUID.randomUUID()}.tmp"), "torn")
     backend.ls(VPath.root, 10, call()).value.items.map(_.path) shouldBe Vector(p("/a.txt"))
     backend.glob(Glob("**"), VPath.root, 10, call()).value.items shouldBe Vector(p("/a.txt"))
@@ -132,6 +132,21 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     backend.glob(Glob("*"), VPath.root, 100, call()).value.truncated shouldBe false
   }
 
+  it should "list the first names in order however large the directory, unlisted entries not counting" in {
+    val capped = HostFileBackend.open(dir, maxScanEntries = 3).value
+    Seq("f", "e", "d", "c", "b").foreach(n => Files.writeString(dir.resolve(n), n))
+    Seq("a1", "a2", "a3", "a4").foreach(n => Files.createSymbolicLink(dir.resolve(n), dir.resolve("b")))
+    Files.writeString(dir.resolve(s".a.llm4s-${UUID.randomUUID()}.tmp"), "torn")
+    val listed = capped.ls(VPath.root, 10, call()).value
+    listed.items.map(_.path.value) shouldBe Vector("/b", "/c", "/d")
+    listed.truncated shouldBe true
+    capped.glob(Glob("*"), VPath.root, 10, call()).value shouldBe Listing(
+      Vector(p("/b"), p("/c"), p("/d")),
+      truncated = true
+    )
+    backend.ls(VPath.root, 2, call()).value.items.map(_.path.value) shouldBe Vector("/b", "/c")
+  }
+
   it should "walk in sorted order, so a cut-off result is deterministic" in {
     Seq("c", "a/z", "a/b", "b").foreach(rel => written(backend.write(p(s"/$rel"), rel, call())))
     backend.glob(Glob("**"), VPath.root, 10, call()).value.items.map(_.value) shouldBe Vector(
@@ -172,6 +187,60 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     Files.writeString(dir.resolve("a.txt"), "someone else")
     written(backend.write(p("/a.txt"), "first", same)) shouldBe FileWritten(created = true, 5)
     onDisk("a.txt") shouldBe "someone else"
+  }
+
+  it should "refuse a file with other hard links, inside the root or out, and never list one" in {
+    val outside = Files.createTempDirectory("llm4s-outside")
+    Files.writeString(outside.resolve("secret.txt"), "secret")
+    Files.createLink(dir.resolve("out.txt"), outside.resolve("secret.txt"))
+    Files.writeString(dir.resolve("a.txt"), "a")
+    Files.createLink(dir.resolve("b.txt"), dir.resolve("a.txt"))
+    backend.read(p("/out.txt"), 0, 10, call()).left.value.message should include("hard links")
+    backend.write(p("/out.txt"), "x", call()).left.value.message should include("hard links")
+    backend.edit(p("/b.txt"), "a", "x", replaceAll = false, call()).left.value.message should include("hard links")
+    backend.delete(p("/a.txt"), call()).left.value.message should include("hard links")
+    new String(Files.readAllBytes(outside.resolve("secret.txt")), UTF_8) shouldBe "secret"
+    backend.ls(VPath.root, 10, call()).value.items shouldBe empty
+    backend.grep("secret|a", VPath.root, None, 10, call()).value.items shouldBe empty
+    Files.delete(dir.resolve("out.txt"))
+    Files.delete(outside.resolve("secret.txt"))
+    Files.delete(outside)
+  }
+
+  it should "reserve /.llm4s for its locks: no path reaches it, and no listing shows it" in {
+    written(backend.write(p("/a.txt"), "x", call()))
+    Files.isDirectory(dir.resolve(".llm4s/locks")) shouldBe true
+    backend.read(p("/.llm4s/locks/0"), 0, 1, call()).left.value.message should include("reserves")
+    backend.write(p("/.llm4s/x"), "x", call()).left.value.message should include("reserves")
+    backend.ls(VPath.root, 10, call()).value.items.map(_.path) shouldBe Vector(p("/a.txt"))
+    backend.glob(Glob("**"), VPath.root, 10, call()).value.items shouldBe Vector(p("/a.txt"))
+  }
+
+  "A mutation" should "wait while another process holds the OS lock of its file's stripe" in {
+    written(backend.write(p("/a.txt"), "x", call()))
+    val lockFile = backend.lockFileOf(p("/a.txt")).value
+    val javaBin  = Path.of(System.getProperty("java.home"), "bin", "java").toString
+    val child = new ProcessBuilder(
+      javaBin,
+      "-cp",
+      System.getProperty("java.class.path"),
+      "org.llm4s.agent.harness.HoldLock",
+      lockFile.toString
+    )
+      .redirectErrorStream(true)
+      .start()
+    val out = new java.io.BufferedReader(new java.io.InputStreamReader(child.getInputStream))
+    out.readLine() shouldBe "locked"
+    val pool = Executors.newSingleThreadExecutor()
+    val edit = pool.submit(() => backend.edit(p("/a.txt"), "x", "y", replaceAll = false, call()))
+    Thread.sleep(500)
+    edit.isDone shouldBe false
+    onDisk("a.txt") shouldBe "x"
+    child.getOutputStream.close() // the other process releases its lock and exits
+    edit.get(10, TimeUnit.SECONDS).isRight shouldBe true
+    onDisk("a.txt") shouldBe "y"
+    child.waitFor(10, TimeUnit.SECONDS) shouldBe true
+    pool.shutdown()
   }
 
   "Concurrent edits of one file from different threads" should "never lose one" in {

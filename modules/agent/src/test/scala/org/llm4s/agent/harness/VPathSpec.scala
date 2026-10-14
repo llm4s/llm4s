@@ -60,6 +60,13 @@ class VPathSpec extends AnyFlatSpec with Matchers with EitherValues {
     p("/other").rebase(p("/memories"), VPath.root) shouldBe None
   }
 
+  it should "not rebase onto a path too long to be one" in {
+    val longMount = p("/" + "m" * 255 + "/" + "n" * 255 + "/" + "o" * 255)
+    val longFile  = p("/" + "a" * 255 + "/" + "b" * 255)
+    longFile.rebase(VPath.root, longMount) shouldBe None
+    p("/x").rebase(VPath.root, longMount).map(_.value.length) shouldBe Some(longMount.value.length + 2)
+  }
+
   it should "round-trip as a JSON string, and refuse an invalid one on read" in {
     upickle.default.write(p("/a/b")) shouldBe "\"/a/b\""
     upickle.default.read[VPath]("\"/a/b\"") shouldBe p("/a/b")

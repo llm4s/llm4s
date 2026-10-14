@@ -60,16 +60,35 @@ enum StoreChange[+A]:
   case Keep(outcome: A)
 
 /**
+ * What a [[LongTermStore.modify]] change sees, inside its transaction: the item being modified, and the
+ * rest of its namespace, so a check that spans keys (a file's ancestors and descendants) is atomic with
+ * the write. Values are copies: changing one changes nothing stored.
+ */
+@Experimental
+trait StoreView:
+
+  /** The item at the key being modified. */
+  def current: Option[StoreItem]
+
+  /** Another item of the namespace. */
+  def get(key: String): Result[Option[StoreItem]]
+
+  /** Whether some key of the namespace starts with `prefix`. */
+  def hasKeyWithPrefix(prefix: String): Result[Boolean]
+
+/**
  * Items kept across threads and runs, by `(Namespace, key)`: `/memories/` files ([[StoreFileBackend]])
  * and semantic memory (F7). Its target is `Transactional` (C4).
  *
- * The one mutation primitive is [[modify]], a read-modify-write in the store's own transaction: the
- * outcome already recorded for the effect's key, or the change applied, bounds checked and
- * `(key, outcome)` recorded with it. An edit therefore never loses a concurrent write, and a replay
+ * The one mutation primitive is [[modify]], a read-modify-write in the store's own transaction,
+ * serialisable within its namespace: the outcome already recorded for the effect's key, or the change
+ * decided against a [[StoreView]] and applied, bounds checked and `(key, outcome)` recorded with it. An
+ * edit therefore never loses a concurrent write, a check that spans keys cannot be raced, and a replay
  * whose first attempt landed returns the first outcome before it re-reads anything. [[put]] and
  * [[delete]] wrap it in `ReplayGuard.transactional`; a backend over the store uses `modify` the same
  * way with its own keys.
  *
+ * `ujson.Value` is mutable, so a store copies every value it is given and every value it hands out.
  * An implementation keeps its applied keys only until C4's guard forgets them, and never by age.
  */
 @Experimental
@@ -89,29 +108,28 @@ trait LongTermStore extends AppliedKeys:
   def search(ns: Namespace, query: String, limit: Int): Result[Listing[StoreEntry]]
 
   /**
-   * In one transaction: if `effect` was applied, its recorded outcome and no write; otherwise `change`
-   * of the current item, which may refuse (`Left`: nothing written or recorded), then the namespace's
-   * and item's bounds, then the write and `(effect, outcome)` recorded together. An over-limit change is
-   * a [[BackendRefused]].
+   * In one transaction, serialisable within `ns`: if `effect` was applied, its recorded outcome and no
+   * write; otherwise `change`, decided against the namespace as it is now, which may refuse (`Left`:
+   * nothing written or recorded), then the namespace's and item's bounds, then the write and
+   * `(effect, outcome)` recorded together. An over-limit change is a [[BackendRefused]].
    */
   def modify[A: ReadWriter](ns: Namespace, key: String, effect: EffectKey)(
-    change: Option[StoreItem] => Result[StoreChange[A]]
+    change: StoreView => Result[StoreChange[A]]
   ): Result[A]
 
   /** Writes `value` at `key`, guarded under `store.put`: `true` when the key was new. */
   final def put(ns: Namespace, key: String, value: ujson.Value, ctx: FileContext): Result[Boolean] =
     val effect = ctx.effectKey("store.put", ns.render, key)
     ReplayGuard.transactional[Boolean](ctx.run, effect, this)(
-      modify[Boolean](ns, key, effect)(current => Right(StoreChange.Put(value, current.isEmpty)))
+      modify[Boolean](ns, key, effect)(view => Right(StoreChange.Put(value, view.current.isEmpty)))
     )
 
   /** Deletes `key`, guarded under `store.delete`: `true` when it existed. */
   final def delete(ns: Namespace, key: String, ctx: FileContext): Result[Boolean] =
     val effect = ctx.effectKey("store.delete", ns.render, key)
     ReplayGuard.transactional[Boolean](ctx.run, effect, this)(
-      modify[Boolean](ns, key, effect) {
-        case Some(_) => Right(StoreChange.Remove(true))
-        case None    => Right(StoreChange.Keep(false))
+      modify[Boolean](ns, key, effect) { view =>
+        Right(if view.current.isDefined then StoreChange.Remove(true) else StoreChange.Keep(false))
       }
     )
 
@@ -131,12 +149,16 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
 
   private def items(ns: Namespace): Map[String, StoreItem] = namespaces.getOrElse(ns, Map.empty)
 
-  def get(ns: Namespace, key: String): Result[Option[StoreItem]] = synchronized(Right(items(ns).get(key)))
+  /** A detached copy: nothing a caller does to it reaches the store. */
+  private def detached(item: StoreItem): StoreItem = StoreItem(ujson.copy(item.value), item.updated)
+
+  def get(ns: Namespace, key: String): Result[Option[StoreItem]] = synchronized(Right(items(ns).get(key).map(detached)))
 
   def list(ns: Namespace, prefix: String, limit: Int): Result[Listing[StoreEntry]] =
     Text.checkLimit("list", prefix, limit).map { _ =>
-      val all = synchronized(items(ns))
-      Listing.of(all.toVector.filter(_._1.startsWith(prefix)).sortBy(_._1).iterator.map(StoreEntry(_, _)), limit)
+      val all  = synchronized(items(ns))
+      val hits = all.toVector.filter(_._1.startsWith(prefix)).sortBy(_._1).iterator
+      Listing.of(hits.map((k, item) => StoreEntry(k, detached(item))), limit)
     }
 
   def search(ns: Namespace, query: String, limit: Int): Result[Listing[StoreEntry]] =
@@ -150,7 +172,7 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
       val all = synchronized(items(ns))
       val hits = all.toVector.sortBy(_._1).iterator.collect {
         case (k, item) if (Iterator(k) ++ strings(item.value)).exists(_.toLowerCase.contains(needle)) =>
-          StoreEntry(k, item)
+          StoreEntry(k, detached(item))
       }
       Listing.of(hits, limit)
     }
@@ -159,17 +181,23 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
     Text.utf8Bytes(key) + Text.utf8Bytes(ujson.write(value))
 
   def modify[A: ReadWriter](ns: Namespace, key: String, effect: EffectKey)(
-    change: Option[StoreItem] => Result[StoreChange[A]]
+    change: StoreView => Result[StoreChange[A]]
   ): Result[A] = synchronized {
     applied.get(effect.value) match
       case Some(recorded) => Try(upickle.default.read[A](recorded)).toResult
       case None =>
         val current = items(ns)
-        change(current.get(key)).flatMap { decided =>
+        val view = new StoreView:
+          val current: Option[StoreItem]                    = items(ns).get(key).map(detached)
+          def get(other: String): Result[Option[StoreItem]] = Right(items(ns).get(other).map(detached))
+          def hasKeyWithPrefix(prefix: String): Result[Boolean] =
+            Right(items(ns).keysIterator.exists(_.startsWith(prefix)))
+        change(view).flatMap { decided =>
           val (next, outcome) = decided match
-            case StoreChange.Put(value, o) => (Some(current.updated(key, StoreItem(value, clock.instant()))), o)
-            case StoreChange.Remove(o)     => (Some(current - key), o)
-            case StoreChange.Keep(o)       => (None, o)
+            case StoreChange.Put(value, o) =>
+              (Some(current.updated(key, StoreItem(ujson.copy(value), clock.instant()))), o)
+            case StoreChange.Remove(o) => (Some(current - key), o)
+            case StoreChange.Keep(o)   => (None, o)
           within(key, next).map { _ =>
             next.foreach(n => namespaces = if n.isEmpty then namespaces - ns else namespaces.updated(ns, n))
             applied = applied.updated(effect.value, upickle.default.writeJs(outcome))

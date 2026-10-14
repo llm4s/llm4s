@@ -82,9 +82,12 @@ object VPath:
       else if ancestor == root then Some(path.drop(1))
       else Some(path.drop(ancestor.length + 1))
 
-    /** This path moved from beneath `from` to beneath `to`; `None` when it is not within `from`. */
+    /** This path moved from beneath `from` to beneath `to`; `None` when it is not within `from`, or too long there. */
     def rebase(from: VPath, to: VPath): Option[VPath] =
-      relativeTo(from).map(rel => if rel.isEmpty then to else if to == root then s"/$rel" else s"$to/$rel")
+      // through the constructor: two valid paths joined can be longer than a path may be
+      relativeTo(from).flatMap(rel =>
+        if rel.isEmpty then Some(to) else VPath(if to == root then s"/$rel" else s"$to/$rel").toOption
+      )
 
   given Ordering[VPath] = Ordering.String
 

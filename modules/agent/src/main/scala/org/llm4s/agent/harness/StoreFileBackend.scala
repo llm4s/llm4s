@@ -16,7 +16,7 @@ import java.util.regex.Pattern
  * A file is an item keyed by its path, with value `{"content": ...}`; directories are implicit, as in
  * [[StateFileBackend]]. Mutations lock `store/<path>/<file>` and run through `ReplayGuard.transactional`
  * under `ctx.effectKey("file.write" | "file.edit" | "file.delete", file)`, each as one `store.modify`, so
- * an edit decides "`old` was not found" inside the store's transaction, and a replay whose first attempt
+ * an edit decides "`old` was not found", and a write the tree's shape, inside the store's transaction, and a replay whose first attempt
  * landed returns the first outcome. The store's bounds hold, and an over-limit write is a tool error.
  * Listings read at most the store's `maxItems` entries.
  */
@@ -63,7 +63,7 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
     all(ctx).flatMap(FileTree.search(_, under, regex, accept, limit))
 
   private def guarded[A: ReadWriter](operation: String, file: VPath, ctx: FileContext)(
-    change: Option[StoreItem] => Result[StoreChange[A]]
+    change: StoreView => Result[StoreChange[A]]
   ): Result[(A, StateUpdate)] =
     val effect = ctx.effectKey(s"file.$operation", file.value)
     ReplayGuard
@@ -72,20 +72,56 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
 
   private def file(text: String): ujson.Value = ujson.Obj("content" -> text)
 
+  private def refused(operation: String, target: VPath, reason: String) =
+    Left(BackendRefused(operation, target.value, reason))
+
+  /** Whether `target` is a directory of the namespace as `view` sees it: some key lies beneath it. */
+  private def isDirectory(view: StoreView, target: VPath): Result[Boolean] =
+    if target == VPath.root then Right(true) else view.hasKeyWithPrefix(target.value + "/")
+
+  /** Whether some ancestor of `target` is an item, so `target` would be beneath a file. */
+  private def beneathFile(view: StoreView, target: VPath): Result[Boolean] =
+    Iterator
+      .iterate(target.parent)(_.flatMap(_.parent))
+      .takeWhile(_.isDefined)
+      .flatten
+      .foldLeft[Result[Boolean]](Right(false)) { (acc, ancestor) =>
+        acc.flatMap(found => if found then Right(true) else view.get(ancestor.value).map(_.isDefined))
+      }
+
   /**
-   * The tree's shape - not the root, not a directory, not beneath a file - is checked against the
-   * namespace before the transaction: a write's own replay never changes it, and within a batch the
-   * path's lock orders it.
+   * `target` may be written as a file: not the root, not a directory, not beneath a file. Decided in the
+   * store's transaction, so a concurrent write of an ancestor or descendant cannot slip between the
+   * check and the write.
    */
+  private def writable(view: StoreView, target: VPath): Result[Unit] =
+    if target == VPath.root then refused("write", target, "is the root directory")
+    else
+      for
+        directory <- isDirectory(view, target)
+        beneath   <- beneathFile(view, target)
+        _ <-
+          if view.current.isEmpty && directory then refused("write", target, "is a directory")
+          else if beneath then refused("write", target, "is beneath a file")
+          else Right(())
+      yield ()
+
+  /** The current file's text, or why there is none: missing, a directory, or not a file. */
+  private def currentText(operation: String, view: StoreView, target: VPath): Result[String] =
+    view.current match
+      case Some(item) => content(item).toRight(BackendRefused(operation, target.value, "is not a file"))
+      case None =>
+        isDirectory(view, target).flatMap(dir =>
+          refused(operation, target, if dir then "is a directory; delete the files in it" else "not found")
+        )
+
   def write(target: VPath, text: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
-    for
-      _ <- Text.binaryReason(text).fold[Result[Unit]](Right(()))(r => Left(BackendRefused("write", target.value, r)))
-      files <- all(ctx)
-      _     <- FileTree.writable("write", files, target)
-      done <- guarded[FileWritten]("write", target, ctx)(current =>
-        Right(StoreChange.Put(file(text), FileWritten(current.isEmpty, Text.utf8Bytes(text))))
+    Text.binaryReason(text).fold[Result[Unit]](Right(()))(r => refused("write", target, r)).flatMap { _ =>
+      guarded[FileWritten]("write", target, ctx)(view =>
+        writable(view, target)
+          .map(_ => StoreChange.Put(file(text), FileWritten(view.current.isEmpty, Text.utf8Bytes(text))))
       )
-    yield done
+    }
 
   def edit(
     target: VPath,
@@ -94,26 +130,16 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
     replaceAll: Boolean,
     ctx: FileContext
   ): Result[(FileEdited, StateUpdate)] =
-    guarded[FileEdited]("edit", target, ctx) {
-      case None => Left(BackendRefused("edit", target.value, "not found"))
-      case Some(item) =>
-        content(item)
-          .toRight(BackendRefused("edit", target.value, "is not a file"))
-          .flatMap(Text.edited(target, _, old, replacement, replaceAll))
-          .map((next, n) => StoreChange.Put(file(next), FileEdited(n)))
+    guarded[FileEdited]("edit", target, ctx) { view =>
+      currentText("edit", view, target)
+        .flatMap(Text.edited(target, _, old, replacement, replaceAll))
+        .map((next, n) => StoreChange.Put(file(next), FileEdited(n)))
     }
 
   def delete(target: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
-    all(ctx).flatMap { files =>
-      // a directory stays one under this delete's own replay; a missing file is decided in the transaction
-      if !files.contains(target) && FileTree.isDirectory(files, target) then
-        Left(BackendRefused("delete", target.value, "is a directory; delete the files in it"))
-      else
-        guarded[FileDeleted]("delete", target, ctx) {
-          case Some(_) => Right(StoreChange.Remove(FileDeleted(wasDirectory = false)))
-          case None    => Left(BackendRefused("delete", target.value, "not found"))
-        }
-    }
+    guarded[FileDeleted]("delete", target, ctx)(view =>
+      currentText("delete", view, target).map(_ => StoreChange.Remove(FileDeleted(wasDirectory = false)))
+    )
 
 object StoreFileBackend:
 
