@@ -139,14 +139,25 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
       p("/src/sub/b.scala")
     )
     backend.grep("val", VPath.root, None, 2, f.ctx).value.truncated shouldBe true
-    backend.grep("(", VPath.root, None, 2, f.ctx).left.value.message should include("not a valid regular expression")
+    backend.grep("(", VPath.root, None, 2, f.ctx).left.value shouldBe a[BackendRefused]
+  }
+
+  it should "refuse a catastrophic or deeply recursing pattern as a tool error, never a thrown error" in {
+    val (backend, f) = fixture()
+    f.write("/a.txt", "a" * 50000)
+    backend.grep("(a|aa)*b", VPath.root, None, 10, f.ctx).left.value shouldBe a[BackendRefused]
+    backend.grep("(a+)+b", VPath.root, None, 10, f.ctx).left.value shouldBe a[BackendRefused]
+    // a pattern past the pre-screen that still recurses: the overflow is contained as a refusal
+    val recursing = backend.grep("(?:a(?=a)|a)*b", VPath.root, None, 10, f.ctx)
+    recursing.isLeft shouldBe true
+    recursing.left.value shouldBe a[BackendRefused]
   }
 
   it should "stop a grep whose thread is interrupted, as a cancellation" in {
     val (backend, f) = fixture()
     f.write("/a.txt", "a" * 30)
     Thread.currentThread().interrupt()
-    val result = backend.grep("(a+)+b", VPath.root, None, 10, f.ctx)
+    val result = backend.grep("a", VPath.root, None, 10, f.ctx)
     Thread.interrupted() shouldBe true
     result.left.value shouldBe a[org.llm4s.error.CancelledError]
   }

@@ -305,12 +305,12 @@ final class HostFileBackend private (
     // between them (one that has lost its claim) must not block its successor. The effect alone is
     // locked, as a compare-and-set (casPlan), so a file another writer changed since the plan is refused,
     // never overwritten.
-    resolve(operation, path)
-      .flatMap { target =>
-        ReplayGuard.verifiable[A](ctx.run, ctx.effectKey(s"file.$operation", path.value))(
-          io(operation, path)(digest(operation, path, target))
-        )(io(operation, path)(plan(target)))
-      }
+    // Resolution is inside the probe and the plan, which the guard runs only for an effect that is new or
+    // incomplete: a completed one returns its recorded outcome whatever the file's shape has become since.
+    ReplayGuard
+      .verifiable[A](ctx.run, ctx.effectKey(s"file.$operation", path.value))(
+        resolve(operation, path).flatMap(target => io(operation, path)(digest(operation, path, target)))
+      )(resolve(operation, path).flatMap(target => io(operation, path)(plan(target))))
       .map(a => (a, StateUpdate.empty))
 
   // ---- mutations

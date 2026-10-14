@@ -63,12 +63,16 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
       Vector("/a.txt", "/scratch/b.txt", "/scratch/deep/c.txt")
     composite.glob(Glob("deep/*.txt"), p("/scratch"), 10, ctx).value.items.map(_.value) shouldBe
       Vector("/scratch/deep/c.txt")
-    composite.grep(" ", VPath.root, None, 10, ctx).value.items.map(m => (m.path.value, m.text)) shouldBe Vector(
+    composite
+      .grep("[a-z] [a-z]", VPath.root, None, 10, ctx)
+      .value
+      .items
+      .map(m => (m.path.value, m.text)) shouldBe Vector(
       "/a.txt"              -> "main a",
       "/scratch/b.txt"      -> "scratch b",
       "/scratch/deep/c.txt" -> "deep c"
     )
-    composite.grep(" ", VPath.root, None, 2, ctx).value.truncated shouldBe true
+    composite.grep("[a-z] [a-z]", VPath.root, None, 2, ctx).value.truncated shouldBe true
   }
 
   it should "never list a path of a backend that a deeper mount shadows" in {

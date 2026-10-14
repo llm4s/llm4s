@@ -261,6 +261,16 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     onDisk("x") shouldBe "second"
   }
 
+  "A completed write replayed after its target became a link" should "return its recorded outcome" in {
+    assume(posix)
+    val same = call().tool.get
+    written(backend.write(p("/a.txt"), "first", FileContext(same))) shouldBe FileWritten(created = true, 5)
+    Files.delete(dir.resolve("a.txt"))
+    Files.writeString(dir.resolve("b.txt"), "b")
+    Files.createSymbolicLink(dir.resolve("a.txt"), dir.resolve("b.txt"))
+    written(backend.write(p("/a.txt"), "first", FileContext(same))) shouldBe FileWritten(created = true, 5)
+  }
+
   "A replayed write" should "not write again over a later writer's content" in {
     val same = call().tool.get
     written(backend.write(p("/a.txt"), "first", FileContext(same)))

@@ -145,6 +145,24 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     store.appliedKeys shouldBe 0
   }
 
+  it should "keep a recorded outcome its caller cannot change, and bound an outcome's depth" in {
+    val store = InMemoryLongTermStore()
+    val key   = call().effectKey("test.json", "k")
+    def run() =
+      store.modify[ujson.Value](ns, "k", key, FencingToken(0))(_ => Right(StoreChange.Keep(ujson.Obj("n" -> 1))))
+    run().value("n") = 2
+    run().value("n") = 3
+    run().value("n").num shouldBe 1
+    val deep  = (1 to 100000).foldLeft[ujson.Value](ujson.Num(1))((v, _) => ujson.Arr(v))
+    val other = call().effectKey("test.json", "deep")
+    store
+      .modify[ujson.Value](ns, "d", other, FencingToken(0))(_ => Right(StoreChange.Keep(deep)))
+      .left
+      .value
+      .message should
+      include("nested deeper")
+  }
+
   it should "record nothing for a refused change" in {
     val store = InMemoryLongTermStore()
     val key   = call().effectKey("test.put", "k")

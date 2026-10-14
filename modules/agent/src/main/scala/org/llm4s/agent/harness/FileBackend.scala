@@ -110,7 +110,11 @@ trait FileBackend:
   /** The files within `under` that `accept` takes, in path order, at most `limit`. */
   def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]]
 
-  /** The lines matching `regex` of the files within `under` that `accept` takes, in path then line order. */
+  /**
+   * The lines matching `regex` of the files within `under` that `accept` takes, in path then line order.
+   * `regex` is the model's: match it with `org.llm4s.security.RegexSafetyManager.safeFind`, never a bare
+   * matcher, so a catastrophic pattern is bounded and cannot overflow the stack.
+   */
   def search(
     under: VPath,
     regex: Pattern,
@@ -134,8 +138,12 @@ trait FileBackend:
     limit: Int,
     ctx: FileContext
   ): Result[Listing[GrepMatch]] =
-    Try(Pattern.compile(regex)).toResult.left
-      .map(e => BackendRefused("grep", regex, s"not a valid regular expression: ${e.message}"))
+    // the model's pattern: compiled and later matched through core's RegexSafetyManager, which refuses
+    // known catastrophic shapes, bounds each match's steps and contains a recursing matcher's stack overflow
+    org.llm4s.security.RegexSafetyManager
+      .safeCompile(regex)
+      .left
+      .map(reason => BackendRefused("grep", regex, reason))
       .flatMap { compiled =>
         val accept: VPath => Boolean = include match
           case None                                      => _ => true
@@ -332,13 +340,22 @@ private[harness] object Text:
     content.substring(0, i) + replacement + content.substring(i + old.length)
 
   /** Matches of `regex` in `content`'s lines, checking the thread's interrupt flag as it matches. */
+  /**
+   * The matches of `regex` in `content`'s lines, each matched by `RegexSafetyManager.safeFind` (bounded
+   * steps, a stack overflow contained); a match it aborts ends the search as a refusal
+   * ([[interruptibly]]), and an interrupt between lines as a cancellation.
+   */
   def matches(path: VPath, content: String, regex: Pattern): Iterator[GrepMatch] =
-    lines(content).iterator.zipWithIndex.collect {
-      case (line, i) if regex.matcher(Interruptible(line)).find() => GrepMatch(path, i + 1, line)
+    lines(content).iterator.zipWithIndex.flatMap { (line, i) =>
+      if Thread.currentThread().isInterrupted then throw new java.util.concurrent.CancellationException("interrupted")
+      org.llm4s.security.RegexSafetyManager.safeFind(regex, line) match
+        case Right(true)  => Iterator(GrepMatch(path, i + 1, line))
+        case Right(false) => Iterator.empty
+        case Left(reason) => throw new RegexAborted(s"${path.value}:${i + 1}: $reason")
     }
 
   /**
-   * `body`, with a match stopped by an interrupt ([[Interruptible]]) as a `CancelledError`, the flag
+   * `body`, with a search stopped by an interrupt as a `CancelledError`, the flag
    * kept set, and any other throw as the error it is.
    */
   def interruptibly[A](operation: String)(body: => Result[A]): Result[A] =
@@ -347,7 +364,8 @@ private[harness] object Text:
       case scala.util.Failure(_: java.util.concurrent.CancellationException) =>
         Thread.currentThread().interrupt()
         Left(org.llm4s.error.CancelledError(operation))
-      case failure => failure.toResult.flatten
+      case scala.util.Failure(e: RegexAborted) => Left(BackendRefused(operation, "pattern", e.getMessage))
+      case failure                             => failure.toResult.flatten
 
   /** Lines `offset` to `offset + limit` of `lines`, the sum taken without overflow. */
   def page(lines: Vector[String], offset: Int, limit: Int): Vector[String] =
@@ -356,14 +374,5 @@ private[harness] object Text:
   def checkLimit(operation: String, target: String, limit: Int): Result[Unit] =
     if limit >= 1 then Right(()) else Left(BackendRefused(operation, target, s"limit must be at least 1, was $limit"))
 
-/**
- * A `CharSequence` that stops a regex match when its thread is interrupted. Java's matcher never checks
- * the flag, so without it a catastrophic pattern would outlive the tool's timeout.
- */
-final private[harness] class Interruptible(underlying: CharSequence) extends CharSequence:
-  def charAt(index: Int): Char =
-    if Thread.currentThread().isInterrupted then throw new java.util.concurrent.CancellationException("interrupted")
-    underlying.charAt(index)
-  def length: Int                                     = underlying.length
-  def subSequence(start: Int, end: Int): CharSequence = new Interruptible(underlying.subSequence(start, end))
-  override def toString: String                       = underlying.toString
+/** A match `RegexSafetyManager` aborted; [[Text.interruptibly]] makes it a refusal. */
+final private[harness] class RegexAborted(message: String) extends RuntimeException(message)

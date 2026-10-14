@@ -142,6 +142,21 @@ object LongTermStore:
   /** The deepest a stored value may nest arrays and objects. */
   val MaxDepth: Int = 64
 
+  /**
+   * `outcome` encoded with its codec, or why not. A codec recurses once per nesting level, and a
+   * `StackOverflowError` is not an `Exception`, so `Try` does not stop it: it is caught here, as core's
+   * `RegexSafetyManager` catches a recursing matcher's. By then the codec's frames have unwound, so
+   * continuing on this thread is safe; every other fatal error still propagates.
+   */
+  // scalafix:off DisableSyntax.NoKeywordCatch
+  private[harness] def encoded[A: ReadWriter](outcome: A): Either[String, ujson.Value] =
+    try Right(upickle.default.writeJs(outcome))
+    catch {
+      case _: StackOverflowError          => Left(s"the outcome is nested deeper than $MaxDepth levels")
+      case scala.util.control.NonFatal(e) => Left(s"the outcome does not encode: $e")
+    }
+  // scalafix:on DisableSyntax.NoKeywordCatch
+
 /**
  * The in-memory [[LongTermStore]], for tests and single-process applications: one lock for the store.
  * `search` is a case-insensitive substring match over keys and string values.
@@ -209,7 +224,8 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
       Left(BackendRefused("put", key, "the key is not valid Unicode (an unpaired surrogate)"))
     else
       applied.get(effect.value) match
-        case Some(recorded) => Try(upickle.default.read[A](recorded)).toResult
+        // decoded from a copy: `A` may be `ujson.Value`, whose reader hands back the tree it is given
+        case Some(recorded) => Try(upickle.default.read[A](ujson.copy(recorded))).toResult
         case None =>
           val current = items(ns)
           val view = new StoreView:
@@ -234,22 +250,31 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
                   (Some(current.updated(key, StoreItem(ujson.copy(value), clock.instant()))), o)
                 case StoreChange.Remove(o) => (Some(current - key), o)
                 case StoreChange.Keep(o)   => (None, o)
-              val recorded = upickle.default.writeJs(outcome)
-              // the applied key outlives a crash before the guard forgets it, so its outcome is bounded too
-              val size = Text.utf8Bytes(ujson.write(recorded))
-              if size > ReplayGuard.DefaultMaxOutcomeBytes then
-                Left(
-                  ValidationError(
-                    "outcome",
-                    s"the outcome is $size bytes, over the replay cap of ${ReplayGuard.DefaultMaxOutcomeBytes}"
+              // the applied key outlives a crash before the guard forgets it, so its outcome is bounded too:
+              // encoded (contained, as `A`'s codec recurses), checked in depth without recursion, then copied
+              // (it may be the caller's own tree) and sized
+              LongTermStore.encoded(outcome).left.map(reason => BackendRefused("put", key, reason)).flatMap {
+                case encoded if !Text.depthWithin(encoded, LongTermStore.MaxDepth) =>
+                  Left(
+                    BackendRefused("put", key, s"the outcome is nested deeper than ${LongTermStore.MaxDepth} levels")
                   )
-                )
-              else
-                within(key, next).map { _ =>
-                  next.foreach(n => namespaces = if n.isEmpty then namespaces - ns else namespaces.updated(ns, n))
-                  applied = applied.updated(effect.value, recorded)
-                  outcome
-                }
+                case encoded =>
+                  val recorded = ujson.copy(encoded)
+                  val size     = Text.utf8Bytes(ujson.write(recorded))
+                  if size > ReplayGuard.DefaultMaxOutcomeBytes then
+                    Left(
+                      ValidationError(
+                        "outcome",
+                        s"the outcome is $size bytes, over the replay cap of ${ReplayGuard.DefaultMaxOutcomeBytes}"
+                      )
+                    )
+                  else
+                    within(key, next).map { _ =>
+                      next.foreach(n => namespaces = if n.isEmpty then namespaces - ns else namespaces.updated(ns, n))
+                      applied = applied.updated(effect.value, recorded)
+                      outcome
+                    }
+              }
           }
   })
 
