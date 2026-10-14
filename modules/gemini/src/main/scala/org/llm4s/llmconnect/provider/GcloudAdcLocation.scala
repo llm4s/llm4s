@@ -1,9 +1,4 @@
-// scalafix:off DisableSyntax.NoPureConfigDefault
 package org.llm4s.llmconnect.provider
-
-import org.llm4s.error.ConfigurationError
-import org.llm4s.types.Result
-import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
 
 /**
  * The well-known file `gcloud auth application-default login` writes, found the way Google's
@@ -14,10 +9,11 @@ import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
  *  - otherwise on Windows the directory is `%APPDATA%\gcloud`;
  *  - otherwise `~/.config/gcloud`.
  *
- * The environment reaches this object through `llm4s-gemini`'s `reference.conf`, which binds
- * `llm4s.vertexai.adc.appData` to `${?APPDATA}` and `llm4s.vertexai.adc.cloudSdkConfig` to
- * `${?CLOUDSDK_CONFIG}`; the OS and home directory are the `os.name` and `user.home` system
- * properties. [[wellKnownPath]] is pure, so all three cases are testable on any OS.
+ * This object is pure and reads no configuration. The environment reaches it through
+ * [[org.llm4s.config.VertexAIAdcConfigLoader]], which reads `llm4s-gemini`'s `reference.conf`
+ * (`llm4s.vertexai.adc.appData` bound to `${?APPDATA}`, `cloudSdkConfig` to `${?CLOUDSDK_CONFIG}`)
+ * together with the `os.name` and `user.home` system properties, and hands the resolved path to
+ * the client through `VertexAIConfig.wellKnownCredentialPath`. All three cases are testable on any OS.
  */
 private[llm4s] object GcloudAdcLocation {
 
@@ -29,11 +25,6 @@ private[llm4s] object GcloudAdcLocation {
   object Settings {
     val empty: Settings = Settings(None, None)
   }
-
-  private val ConfigPath = "llm4s.vertexai.adc"
-
-  implicit private val settingsReader: PureConfigReader[Settings] =
-    PureConfigReader.forProduct2("appData", "cloudSdkConfig")(Settings.apply)
 
   def isWindows(osName: String): Boolean = osName.toLowerCase(java.util.Locale.ROOT).startsWith("windows")
 
@@ -65,23 +56,4 @@ private[llm4s] object GcloudAdcLocation {
     }
     join(dir, FileName)
   }
-
-  /** Reads the `llm4s.vertexai.adc` block of `source`. */
-  def loadSettings(source: ConfigSource): Result[Settings] =
-    source.at(ConfigPath).load[Settings].left.map { failures =>
-      ConfigurationError(s"Failed to load $ConfigPath: ${failures.toList.map(_.description).mkString("; ")}")
-    }
-
-  /** [[wellKnownPath]] for this JVM's OS and home directory and `settings`. */
-  def forThisPlatform(settings: Settings): String =
-    wellKnownPath(
-      Option(System.getProperty("os.name")).getOrElse(""),
-      Option(System.getProperty("user.home")).getOrElse(""),
-      settings.appData,
-      settings.cloudSdkConfig
-    )
-
-  /** The path for the current environment (system properties, `application.conf`, every `reference.conf`). */
-  def systemDefault(): String =
-    forThisPlatform(loadSettings(ConfigSource.default).getOrElse(Settings.empty))
 }

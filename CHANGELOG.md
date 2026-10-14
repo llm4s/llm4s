@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as Google's client libraries do: `$CLOUDSDK_CONFIG` when set (any OS), else `%APPDATA%\gcloud` on Windows, else
   `~/.config/gcloud`. `llm4s-gemini`'s `reference.conf` binds `APPDATA` and `CLOUDSDK_CONFIG` to
   `llm4s.vertexai.adc.appData` / `cloudSdkConfig`. `GOOGLE_APPLICATION_CREDENTIALS` still wins.
+  `VertexAIAdcConfigLoader` (`org.llm4s.config`) reads that block and `os.name`/`user.home` at the edge, and the
+  descriptor injects the path as the new `VertexAIConfig.wellKnownCredentialPath`; `VertexAIAuthProvider`'s
+  `wellKnownCredentialPath` parameter is now an `Option[String]` (default `None`: no well-known lookup), so a
+  hand-built `VertexAIClient` sets `VertexAIConfig.withWellKnownCredentialPath(VertexAIAdcConfigLoader.load()...)`
+  to keep the gcloud fallback.
 
 ### Added
 - **Phase 3 C4 follow-ups: retention against takeover admission, and one-to-one key encoding** ([#1921](https://github.com/llm4s/llm4s/issues/1921)).

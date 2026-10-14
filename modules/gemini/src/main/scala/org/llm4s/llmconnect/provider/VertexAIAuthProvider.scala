@@ -29,7 +29,8 @@ import org.llm4s.util.Redaction
  *     gcloud's well-known `application_default_credentials.json`, found as Google's client
  *     libraries find it: in `$CLOUDSDK_CONFIG` when that is set (any OS), else
  *     `%APPDATA%\gcloud` on Windows, else `~/.config/gcloud`. `APPDATA` and `CLOUDSDK_CONFIG`
- *     are read through the `llm4s.vertexai.adc` config block, not [[envReader]].
+ *     are resolved at the config edge ([[org.llm4s.config.VertexAIAdcConfigLoader]]) and arrive as
+ *     [[wellKnownCredentialPath]], not through [[envReader]].
  *     Supports both `authorized_user` (refresh-token flow) and `service_account`
  *     (RS256 JWT assertion flow, no extra dependencies).
  *  3. GCE / GKE metadata server — Workload Identity path for production deployments.
@@ -52,7 +53,7 @@ import org.llm4s.util.Redaction
  * @param httpClient         HTTP client for token-endpoint calls.
  * @param envReader          Environment variable reader; injectable for testing.
  * @param fileReader         File reader; injectable for testing.
- * @param wellKnownCredentialPath Location of gcloud's well-known credential file; injectable for testing.
+ * @param wellKnownCredentialPath Location of gcloud's well-known credential file, as resolved by the config loader; `None` skips that lookup.
  */
 @Stable
 class VertexAIAuthProvider(
@@ -61,7 +62,7 @@ class VertexAIAuthProvider(
   envReader: String => Option[String] = key => Option(System.getenv(key)),
   fileReader: String => Result[String] = path =>
     Try(new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8)).toEither.left.map(_.toLLMError),
-  wellKnownCredentialPath: () => String = () => GcloudAdcLocation.systemDefault()
+  wellKnownCredentialPath: Option[String] = None
 ) {
   import VertexAIAuthProvider._
 
@@ -105,8 +106,7 @@ class VertexAIAuthProvider(
     credentialFilePath
       .orElse(envReader("GOOGLE_APPLICATION_CREDENTIALS"))
       .orElse {
-        val defaultPath = wellKnownCredentialPath()
-        if (new java.io.File(defaultPath).exists()) Some(defaultPath) else None
+        wellKnownCredentialPath.filter(p => new java.io.File(p).exists())
       }
 
   private def fetchTokenFromCredentialFile(content: String): Result[CachedToken] =

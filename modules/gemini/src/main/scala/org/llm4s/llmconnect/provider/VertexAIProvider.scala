@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.VertexAIAdcConfigLoader
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig, VertexAIConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -80,4 +81,11 @@ object VertexAIProvider extends ProviderDescriptor:
   ): Result[LLMClient] =
     ProviderDescriptor
       .expectConfig[VertexAIConfig](id, config)
+      .flatMap(withWellKnownCredentialPath)
       .flatMap(VertexAIClient(_, options.metrics, options.exchangeLogging))
+
+  /** Fills in gcloud's well-known ADC path, from the configuration edge, unless the config already has one. */
+  private def withWellKnownCredentialPath(config: VertexAIConfig): Result[VertexAIConfig] =
+    config.wellKnownCredentialPath match
+      case Some(_) => Right(config)
+      case None    => VertexAIAdcConfigLoader.load().map(config.withWellKnownCredentialPath)

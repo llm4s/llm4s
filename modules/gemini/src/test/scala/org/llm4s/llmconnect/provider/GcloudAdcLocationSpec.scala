@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import com.typesafe.config.ConfigFactory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.llm4s.config.VertexAIAdcConfigLoader
 import pureconfig.ConfigSource
 
 import java.nio.file.Paths
@@ -37,25 +38,41 @@ class GcloudAdcLocationSpec extends AnyFlatSpec with Matchers {
       s"""C:\\Users\\me\\AppData\\Roaming\\gcloud\\$File"""
   }
 
-  "loadSettings" should "read the APPDATA and CLOUDSDK_CONFIG bindings" in {
+  "VertexAIAdcConfigLoader" should "read the APPDATA and CLOUDSDK_CONFIG bindings" in {
     val source = ConfigSource.fromConfig(
       ConfigFactory.parseString("""llm4s.vertexai.adc { appData = "A", cloudSdkConfig = "C" }""")
     )
-    loadSettings(source) shouldBe Right(Settings(Some("A"), Some("C")))
-    loadSettings(ConfigSource.fromConfig(ConfigFactory.parseString("llm4s.vertexai.adc {}"))) shouldBe
-      Right(Settings.empty)
+    VertexAIAdcConfigLoader.loadSettings(source) shouldBe Right(Settings(Some("A"), Some("C")))
+    VertexAIAdcConfigLoader.loadSettings(
+      ConfigSource.fromConfig(ConfigFactory.parseString("llm4s.vertexai.adc {}"))
+    ) shouldBe Right(Settings.empty)
   }
 
-  "systemDefault" should "name the ADC file under a gcloud directory on this OS" in {
-    val path = Paths.get(systemDefault())
+  it should "resolve the configured CLOUDSDK_CONFIG into the path, on this OS" in {
+    val source = ConfigSource.fromConfig(
+      ConfigFactory.parseString("""llm4s.vertexai.adc { cloudSdkConfig = "/opt/gcloud-cfg" }""")
+    )
+    VertexAIAdcConfigLoader.load(source) shouldBe Right(
+      wellKnownPath(
+        System.getProperty("os.name"),
+        System.getProperty("user.home"),
+        None,
+        Some("/opt/gcloud-cfg")
+      )
+    )
+  }
+
+  it should "name the ADC file under a gcloud directory for the application's configuration on this OS" in {
+    val path = Paths.get(VertexAIAdcConfigLoader.load().value)
     path.isAbsolute shouldBe true
     path.getFileName.toString shouldBe File
-    val expectedDir =
-      if (isWindows(System.getProperty("os.name"))) "gcloud" else "gcloud"
     // CLOUDSDK_CONFIG may relocate the directory; only its name under the default layouts is fixed
-    val settings = loadSettings(ConfigSource.default).getOrElse(Settings.empty)
+    val settings = VertexAIAdcConfigLoader.loadSettings(ConfigSource.default).value
     if (settings.cloudSdkConfig.forall(_.trim.isEmpty))
-      path.getParent.getFileName.toString shouldBe expectedDir
-    systemDefault() shouldBe forThisPlatform(settings)
+      path.getParent.getFileName.toString shouldBe "gcloud"
+  }
+
+  implicit private class ResultOps[A](r: org.llm4s.types.Result[A]) {
+    def value: A = r.fold(e => fail(e.message), identity)
   }
 }
