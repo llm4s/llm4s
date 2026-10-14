@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
+import org.llm4s.media.MediaSource
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
@@ -102,8 +103,10 @@ class OllamaClient(
     connect(conversation, options)
   }
 
-  private def connect(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
-    val requestBody = createRequestBody(conversation, options, stream = false)
+  private def connect(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+    createRequestBody(conversation, options, stream = false).flatMap(body => send(body, options))
+
+  private def send(requestBody: ujson.Obj, options: CompletionOptions): Result[Completion] = {
     val requestText = requestBody.render()
     val url         = s"${config.baseUrl}/api/chat"
     val headers     = Map("Content-Type" -> "application/json")
@@ -182,7 +185,14 @@ class OllamaClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
-    val requestBody = createRequestBody(conversation, options, stream = true)
+    createRequestBody(conversation, options, stream = true).flatMap(stream(_, options, onChunk))
+  }
+
+  private def stream(
+    requestBody: ujson.Obj,
+    options: CompletionOptions,
+    onChunk: StreamedChunk => Unit
+  ): Result[Completion] = {
     val requestText = requestBody.render()
     val url         = s"${config.baseUrl}/api/chat"
     val headers     = Map("Content-Type" -> "application/json")
@@ -281,7 +291,12 @@ class OllamaClient(
     conversation: Conversation,
     options: CompletionOptions,
     stream: Boolean
-  ): ujson.Obj = {
+  ): Result[ujson.Obj] =
+    PartEncoding
+      .check(providerName, conversation.messages, OllamaClient.userPart, PartEncoding.textOnly)
+      .map(_ => requestBody(conversation, options, stream))
+
+  private def requestBody(conversation: Conversation, options: CompletionOptions, stream: Boolean): ujson.Obj = {
     val toolNames = conversation.messages
       .collect { case am: AssistantMessage => am.toolCalls }
       .flatten
@@ -289,7 +304,14 @@ class OllamaClient(
       .toMap
     val msgs = ujson.Arr.from(conversation.messages.map {
       case SystemMessage(content) => ujson.Obj("role" -> "system", "content" -> content)
-      case UserMessage(content)   => ujson.Obj("role" -> "user", "content" -> content)
+      case um: UserMessage        =>
+        // checked above: every part is text or an inline image
+        val encoded = um.parts.map(OllamaClient.userPart)
+        val message =
+          ujson.Obj("role" -> "user", "content" -> encoded.collect { case Left(text) => text }.mkString("\n"))
+        val images = encoded.collect { case Right(image) => ujson.Str(image) }
+        if (images.nonEmpty) message("images") = ujson.Arr.from(images)
+        message
       case am: AssistantMessage =>
         val message = ujson.Obj("role" -> "assistant", "content" -> am.content)
         am.thinkingText.foreach(thinking => message("thinking") = thinking)
@@ -305,8 +327,9 @@ class OllamaClient(
             )
           })
         message
-      case ToolMessage(content, toolCallId) =>
-        val message = ujson.Obj("role" -> "tool", "content" -> content, "tool_call_id" -> toolCallId)
+      case tm: ToolMessage =>
+        val toolCallId = tm.toolCallId
+        val message    = ujson.Obj("role" -> "tool", "content" -> tm.content, "tool_call_id" -> toolCallId)
         toolNames.get(toolCallId).foreach(name => message("tool_name") = name)
         message
     })
@@ -374,6 +397,15 @@ class OllamaClient(
 }
 
 object OllamaClient {
+
+  /**
+   * The user-message parts Ollama's `/api/chat` takes: text, joined into `content`, and inline images,
+   * sent raw base64 in `images`. It fetches no URL and has no files, and takes no documents.
+   */
+  private[provider] val userPart: PartialFunction[ContentPart, Either[String, String]] = {
+    case ContentPart.Text(text)                           => Left(text)
+    case ContentPart.Image(inline: MediaSource.Inline, _) => Right(PartEncoding.base64(inline))
+  }
 
   /** The timeout of a non-streaming call when the section sets no `timeouts.request`: two minutes. */
   val DefaultRequestTimeout: FiniteDuration = 120.seconds
