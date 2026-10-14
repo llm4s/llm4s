@@ -287,6 +287,20 @@ private[harness] object Text:
     val end = loop(0, 0L)
     (s.substring(0, end), end < s.length)
 
+  /** Whether `value` nests arrays and objects at most `max` deep, found without recursion. */
+  def depthWithin(value: ujson.Value, max: Int): Boolean =
+    val stack = scala.collection.mutable.Stack[(ujson.Value, Int)](value -> 1)
+    var ok    = true
+    while ok && stack.nonEmpty do
+      val (v, depth) = stack.pop()
+      v match
+        case ujson.Arr(items) =>
+          if depth > max then ok = false else items.foreach(i => stack.push(i -> (depth + 1)))
+        case ujson.Obj(fields) =>
+          if depth > max then ok = false else fields.valuesIterator.foreach(f => stack.push(f -> (depth + 1)))
+        case _ => ()
+    ok
+
   /** Non-overlapping occurrences of `old` in `content`. */
   def occurrences(content: String, old: String): Int =
     @annotation.tailrec

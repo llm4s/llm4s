@@ -136,6 +136,15 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     store.appliedKeys shouldBe 0
   }
 
+  it should "refuse a value nested deeper than MaxDepth, without overflowing the stack" in {
+    val store = InMemoryLongTermStore()
+    val deep  = (1 to 100000).foldLeft[ujson.Value](ujson.Num(1))((v, _) => ujson.Arr(v))
+    store.put(ns, "deep", deep, call()).left.value.message should include("nested deeper")
+    val ok = (1 to LongTermStore.MaxDepth - 1).foldLeft[ujson.Value](ujson.Num(1))((v, _) => ujson.Arr(v))
+    store.put(ns, "ok", ok, call()).value shouldBe true
+    store.appliedKeys shouldBe 0
+  }
+
   it should "record nothing for a refused change" in {
     val store = InMemoryLongTermStore()
     val key   = call().effectKey("test.put", "k")

@@ -137,6 +137,11 @@ trait LongTermStore extends AppliedKeys:
       }
     )
 
+object LongTermStore:
+
+  /** The deepest a stored value may nest arrays and objects. */
+  val MaxDepth: Int = 64
+
 /**
  * The in-memory [[LongTermStore]], for tests and single-process applications: one lock for the store.
  * `search` is a case-insensitive substring match over keys and string values.
@@ -218,28 +223,33 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
                   .take(limit)
                   .map((k, i) => StoreEntry(k, detached(i)))
               )
-          change(view).flatMap { decided =>
-            val (next, outcome) = decided match
-              case StoreChange.Put(value, o) =>
-                (Some(current.updated(key, StoreItem(ujson.copy(value), clock.instant()))), o)
-              case StoreChange.Remove(o) => (Some(current - key), o)
-              case StoreChange.Keep(o)   => (None, o)
-            val recorded = upickle.default.writeJs(outcome)
-            // the applied key outlives a crash before the guard forgets it, so its outcome is bounded too
-            val size = Text.utf8Bytes(ujson.write(recorded))
-            if size > ReplayGuard.DefaultMaxOutcomeBytes then
-              Left(
-                ValidationError(
-                  "outcome",
-                  s"the outcome is $size bytes, over the replay cap of ${ReplayGuard.DefaultMaxOutcomeBytes}"
+          change(view).flatMap {
+            // a value is walked recursively by every copy, encoding and search, so its depth is checked
+            // first, without recursion: a deep one would overflow the stack past any `Try`
+            case StoreChange.Put(value, _) if !Text.depthWithin(value, LongTermStore.MaxDepth) =>
+              Left(BackendRefused("put", key, s"the value is nested deeper than ${LongTermStore.MaxDepth} levels"))
+            case decided =>
+              val (next, outcome) = decided match
+                case StoreChange.Put(value, o) =>
+                  (Some(current.updated(key, StoreItem(ujson.copy(value), clock.instant()))), o)
+                case StoreChange.Remove(o) => (Some(current - key), o)
+                case StoreChange.Keep(o)   => (None, o)
+              val recorded = upickle.default.writeJs(outcome)
+              // the applied key outlives a crash before the guard forgets it, so its outcome is bounded too
+              val size = Text.utf8Bytes(ujson.write(recorded))
+              if size > ReplayGuard.DefaultMaxOutcomeBytes then
+                Left(
+                  ValidationError(
+                    "outcome",
+                    s"the outcome is $size bytes, over the replay cap of ${ReplayGuard.DefaultMaxOutcomeBytes}"
+                  )
                 )
-              )
-            else
-              within(key, next).map { _ =>
-                next.foreach(n => namespaces = if n.isEmpty then namespaces - ns else namespaces.updated(ns, n))
-                applied = applied.updated(effect.value, recorded)
-                outcome
-              }
+              else
+                within(key, next).map { _ =>
+                  next.foreach(n => namespaces = if n.isEmpty then namespaces - ns else namespaces.updated(ns, n))
+                  applied = applied.updated(effect.value, recorded)
+                  outcome
+                }
           }
   })
 
