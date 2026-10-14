@@ -119,4 +119,18 @@ class RedactionPatternsSpec extends AnyFlatSpec with Matchers with ScalaCheckPro
       }
     }
   }
+
+  "RedactionScanner.Edits" should "join overlapping replacements and sort those added out of order" in {
+    val e = new RedactionScanner.Edits("[R]")
+    e.add(2, 4, "[R]")
+    e.add(3, 6, "\"[R]\"") // overlaps the last: joined into one placeholder
+    e.add(8, 9, "[R]")
+    e.applyTo("0123456789") shouldBe "01[R]67[R]9"
+    val o = new RedactionScanner.Edits("[R]")
+    o.add(6, 8, "[R]")
+    o.add(1, 3, "[R]") // out of order: sorted when applied
+    o.add(2, 7, "[R]") // overlaps both
+    o.add(9, 9, "[R]") // empty: ignored
+    o.applyTo("0123456789") shouldBe "0[R]89"
+  }
 }

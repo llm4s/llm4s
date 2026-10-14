@@ -309,23 +309,28 @@ private[util] object RedactionScanner {
    *
    *  1. A string followed by `:` is a key. A sensitive one has its value replaced (`readValue`): a string's content,
    *     a container's or a call's leaves (`walk`), or a number or bare word, which is written as the placeholder in
-   *     the key's own quote. Any other string is a level of its own, scanned in turn.
+   *     the key's own quote. Any other string is a level of its own, scanned in turn (`scanString`). A key whose
+   *     quotes a stray quote paired otherwise (`""apikey":"x"`) is read as a key all the same (`misalignedField`).
+   *  1. `Bearer` or `Basic` and its token, both replaced, unless the token is the key of a sensitive pair.
    *  1. A word followed by `=` is the key of a pair (`key=value`, `key = value`): a sensitive one has its value
    *     replaced - a string's content, a container's or call's leaves, or the text up to whitespace or one of `,;<>`,
    *     or an `&` that another pair follows.
    *  1. A word followed by `:` is a header: `Authorization`, `Proxy-Authorization`, `Cookie` and `Set-Cookie`
    *     anywhere in a line, and any other sensitive name at the start of a line (after indentation and a YAML `- `).
-   *     Its value runs to the end of the line.
-   *  1. `Bearer` or `Basic` and its token, both replaced.
+   *     Its value runs to the end of the line, or over the indented lines after it where it is empty on its own. A
+   *     sensitive name inside a line is a field where a separator or a bracket comes before it, or where its value
+   *     looks like a credential (`credentialLike`), up to whitespace, `,` or `;`.
    *  1. After `?`, `&`, a URL's `#`, `;jsessionid` or an HTML escape of `&` or `?`, a query parameter: its key runs
    *     to `=`, and a sensitive one (by substring, as a credential name, or a short-lived credential's name) has its
-   *     value replaced, up to `&`, whitespace, `#` or a `,` before JSON.
+   *     value replaced, up to `&` that another parameter follows, whitespace, `#` or a `,` before JSON.
    *  1. `scheme://` and its authority: the password of its userinfo is replaced.
    *  1. The vendor key shapes of [[SecretPatterns.SecretType.default]], matched without a regex.
    *
-   * A value still open where this level ends is replaced to that end: at the top level, the end of the input. The
-   * scanner reports it (`openFrom`) to the level around, which carries it on past a string that closed where it
-   * cannot have (`extendOpenValue`).
+   * A value still open where this level ends is replaced to that end - at the top level, the end of the input - and
+   * reported (`openFrom`, `openKind`) to the level around, which carries it on past a string that closed where it
+   * cannot have (`extendOpenValue`): a quote glued to the next word, or to closing brackets and a word, is a quote of
+   * the value, not the string's end. A string value whose own close is glued so (`" here | token="x"`) runs on the
+   * same way (`stringValue`).
    *
    * @param atInputEnd whether this level runs to the end of the input unclosed
    * @param carried    a container left open by the string before, which this level's text goes on (a notebook's
