@@ -200,9 +200,10 @@ sbt ~test                # continuous feedback as you code
 
 ### Performance tests (`sbt testPerformance`)
 
-Some tests check how an operation's cost grows with its input rather than what it returns: that
-`Redaction.redact`, a guardrail's PII pattern or the error mapper's status patterns take linear
-time on adversarial input, never quadratic (a ReDoS). They use
+Some tests check how an operation's cost grows with its input rather than what it returns: that a
+guardrail's PII pattern or the error mapper's status patterns take linear time on adversarial input,
+never quadratic (a ReDoS). `Redaction.redact` is linear by construction - one forward pass, no regex
+(#1932) - and keeps two such tests as a backstop (`RedactionScalingSpec`). They use
 `org.llm4s.testutil.LinearTime.assertLinear`, which compares the thread CPU time of an input with
 that of one four times its size; its Scaladoc explains the noise model.
 
@@ -221,7 +222,7 @@ platform, so running these tests on Windows and under coverage instrumentation m
 cost - most of each CI test job's time - without adding a signal. `sbt testPerformance` runs only
 the tagged tests, in every module; CI runs it in the ubuntu-only `Performance tests` job on every
 pull request, in parallel with the other test jobs, and nightly (`performance-nightly.yml`).
-`sbt "core/testOnly *RedactionShapesSpec"` runs a whole suite, tagged tests included: the
+`sbt "core/testOnly *RedactionScalingSpec"` runs a whole suite, tagged tests included: the
 exclusion applies to `test`, not to a suite named explicitly.
 
 Each spec whose scaling tests are tagged keeps one ordinary test that pushes a single ~1 MB

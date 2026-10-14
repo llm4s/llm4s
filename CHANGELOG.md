@@ -1427,6 +1427,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Credential redaction is one forward pass over a small tokenizer, linear in its input by construction**
+  ([#1932](https://github.com/llm4s/llm4s/issues/1932)). `org.llm4s.util.Redaction` (`redact`, `safeBody`,
+  `redactForLogging`, `remoteBody`, `scrubRemote`, `isSensitiveKey`, `isCredentialName`, ...) keeps its surface; its
+  some 50 regex passes and their merged readings of the input are replaced by `RedactionScanner`. A lexer finds string
+  literals, and a string's content is read as a text of its own, so JSON inside a string, at any depth, is lexed with
+  bare quotes; escapes in plain text (`token=\"...\"`, Gson's `&`) are decoded a level at a time. One policy
+  masks the value of every sensitive key, whatever the shape: a string's content, a number or bare word in the key's
+  quote, or every leaf of an array, object, tuple or call; and Bearer and Basic tokens, URL userinfo passwords and the
+  vendor key shapes, matched without regexes. A value still open where its text ends is masked to that end. Closes
+  [#1657](https://github.com/llm4s/llm4s/issues/1657), [#1689](https://github.com/llm4s/llm4s/issues/1689),
+  [#1752](https://github.com/llm4s/llm4s/issues/1752), [#1765](https://github.com/llm4s/llm4s/issues/1765),
+  [#1777](https://github.com/llm4s/llm4s/issues/1777), [#1782](https://github.com/llm4s/llm4s/issues/1782),
+  [#1788](https://github.com/llm4s/llm4s/issues/1788), [#1799](https://github.com/llm4s/llm4s/issues/1799),
+  [#1800](https://github.com/llm4s/llm4s/issues/1800) and [#1844](https://github.com/llm4s/llm4s/issues/1844). Over
+  a generated corpus of 20,000 documents with 40,174 planted credentials the old passes left 6,562 readable and broke
+  1,168 JSON documents; the pass leaves 72 (none the passes hid) and breaks none. Changes callers can see:
+  - JSON escaped twice or more (`\\\"api_key\\\": ...`) is redacted, as are an indented YAML key
+    (`  password: ...`), a block of indented lines under a sensitive key (`credentials:\n  user: ...`), a
+    `key: value` inside a line whose value looks like a credential (`... token: Zq81x9`), and a URL password that
+    holds an unencoded `#`, `"`, `'`, `\`, `[`, `]`, `{` or `}`.
+  - A container that a text only mentions is left, outside a string too: `see 'token': [ for details` is kept,
+    where every word after it was replaced (#1657). Inside a string a container is read as any is, so a bare word
+    that is its leaf is replaced there too (`{"content": "{\"token\": [abc]}"}` masks `abc`).
+  - Quotes around a value are kept as written, escaped ones too: `password='[REDACTED]'`,
+    `password=\\'[REDACTED]\\'`; and a value is replaced as one placeholder: `password=p&ssW0rd` gives
+    `password=[REDACTED]`, not `[REDACTED]&[REDACTED]`.
+  - A word right before a sensitive pair is no Bearer or Basic token: `Bearer password=x` gives
+    `Bearer password=[REDACTED]`, not `[REDACTED]=[REDACTED]`. A call's name and a container's brackets under a
+    sensitive keyword argument are kept: `Settings(token=SecretStr('[REDACTED]'))`, `token=['[REDACTED]']`.
+  - A string after `'password':` in prose is read as its value (`say 'password': "abc"` masks `abc`), and a value
+    open at the end of a string with no open bracket ends with that string, where it ran to the next `'` in the
+    document.
+  - A query value holding a quote before `,`, `)`, `;` or `:` (`?token=ab',cd`) is masked whole, where it was masked
+    only up to the quote; one written right before JSON (`?token=abc,{"api_key": ...}`) ends at the `,`, and the
+    JSON after it is read as JSON.
+  - An empty value at the end of a nested string (`{"o":"{\"a\":\"password=\",\"b\":1}"}`) leaves the inner JSON
+    whole (#1800); a cookie value inside a nested string ends with that string, which keeps its closing quote.
+  - `Redaction.safeBody` redacts the prefix of a body over 128 KiB as a text that was cut, which decides nothing
+    open at the cut in a value's favour, so it shows what the whole body's redaction would and no more: the probe
+    tails, the 16 KiB margin and the eight-quote cap are gone, and a prefix that held more quotes, or that a value
+    collapses, is shown redacted where nothing was shown.
+  - The redaction's timing tests are two scaling backstops (`RedactionScalingSpec`, `sbt testPerformance`) in place
+    of twenty per-shape ones; ScalaCheck properties (`RedactionPropertySpec`) check that no planted secret survives
+    across generated JSON, Python repr, query and `key=value` mixtures at depths 0-3, idempotence and JSON validity.
 - **A completed thread restores into a new graph version** ([#1934](https://github.com/llm4s/llm4s/issues/1934)):
   `GraphRuntime.start` on a `Completed` or `Failed` thread keeps only its state, so it no longer refuses the thread
   when the graph's `version` or edges changed, or when it gained nodes or keys. For an agent, a thread at rest now

@@ -5,8 +5,9 @@ import org.llm4s.annotation.Stable
 import scala.util.matching.Regex
 
 /**
- * Library of credential-detection patterns used by [[org.llm4s.agent.guardrails.builtin.SecretLeakGuardrail]]
- * and `Redaction`.
+ * Library of credential-detection patterns used by [[org.llm4s.agent.guardrails.builtin.SecretLeakGuardrail]].
+ * `Redaction` matches the shapes of [[SecretType.default]] by hand, with no regex, so that its cost stays linear in its
+ * input (#1932); a change to a pattern here is a change to `RedactionScanner.vendorAt` too.
  *
  * All regex matching is performed via [[SecretType]] instances.  Each type
  * knows its own pattern, human-readable name, and the placeholder text to use

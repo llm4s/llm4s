@@ -47,11 +47,11 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 **Risk:** A provider's error response body may contain or echo back the API key. If that body is forwarded into an `LLMError.message`, the key leaks into application logs.
 
 **Mitigation (implemented):**
-- `HttpErrorMapper.sanitize()` runs `Redaction.redact()` on the raw provider error body before constructing any `LLMError`. This strips OpenAI, Anthropic, Google, Voyage, Langfuse, AWS, and JWT patterns.
-- `Redaction.scala` and `SecretPatterns.scala` maintain the canonical set of credential regexes used across the codebase.
+- `HttpErrorMapper.sanitize()` runs `Redaction.redact()` on the raw provider error body before constructing any `LLMError`. This strips the value of every sensitive key - in JSON, Python reprs, `key=value` pairs, query strings and header lines, at any depth of escaped strings - and OpenAI, Anthropic, Google, Voyage, Langfuse, AWS and JWT key shapes.
+- `Redaction.scala` keeps the canonical list of sensitive key names; its engine (`RedactionScanner.scala`) reads the text in one forward pass with no regex, so its cost is linear in the input (#1932). `SecretPatterns.scala` keeps the vendor key patterns that the secret-leak guardrail matches, and that the redaction matches by hand.
 - Provider `ProviderConfig` `toString` implementations mask API keys with `***`.
 
-**Residual risk:** Plain-text secrets not matching any known regex pattern would not be redacted.
+**Residual risk:** A plain-text secret that is under no sensitive key and not shaped like a known provider key is not redacted.
 
 ### 2. Prompt Injection via User Input
 

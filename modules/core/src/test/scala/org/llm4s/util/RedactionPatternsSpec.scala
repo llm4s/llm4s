@@ -1,7 +1,9 @@
 package org.llm4s.util
 
+import org.scalacheck.Gen
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
 import scala.util.matching.Regex
 
@@ -11,7 +13,22 @@ import scala.util.matching.Regex
  * a pattern, and the patterns that remain in `SecretPatterns` - the `SecretLeakGuardrail`'s, which the redaction
  * matches by hand - hold no nested quantifier, the shape that makes a backtracking match grow faster than linearly.
  */
-class RedactionPatternsSpec extends AnyFlatSpec with Matchers {
+class RedactionPatternsSpec extends AnyFlatSpec with Matchers with ScalaCheckPropertyChecks {
+
+  implicit override val generatorDrivenConfig: PropertyCheckConfiguration =
+    PropertyCheckConfiguration(minSuccessful = 3000)
+
+  /** Text of the pieces the vendor key shapes are made of, joined at random: prefixes, runs, dots, dashes. */
+  private val genKeyText: Gen[String] =
+    Gen
+      .listOf(
+        Gen.oneOf(
+          Gen.oneOf("sk-", "sk-proj-", "sk-ant-", "sk-lf-", "pk-lf-", "pa-", "AIza", "AKIA", "eyJ", ".", "-", "_", " "),
+          Gen.choose(1, 40).flatMap(k => Gen.listOfN(k, Gen.alphaNumChar).map(_.mkString)),
+          Gen.choose(1, 20).flatMap(k => Gen.listOfN(k, Gen.oneOf('A', 'Z', '0', '9')).map(_.mkString))
+        )
+      )
+      .map(_.mkString)
 
   /**
    * Whether `pattern` repeats a group that holds a quantifier itself - `(a+)+`, `(?:\w*)*`, `(x{2,})?` - read past
@@ -90,6 +107,16 @@ class RedactionPatternsSpec extends AnyFlatSpec with Matchers {
   "SecretPatterns" should "hold no nested quantifier in any pattern (#1932)" in {
     SecretPatterns.SecretType.all.foreach { t =>
       withClue(s"${t.name}: ${t.pattern.regex}: ")(hasNestedQuantifier(t.pattern.regex) shouldBe false)
+    }
+  }
+
+  it should "be matched by the redaction wherever a default pattern matches (#1932)" in {
+    // The redaction matches the default shapes by hand; a match of a pattern is never left readable.
+    forAll(genKeyText) { text =>
+      val out = Redaction.redact(text)
+      SecretPatterns.detect(text).foreach { m =>
+        withClue(s"${m.secretType.name} in $text, redacted $out: ")((out should not).include(m.value))
+      }
     }
   }
 }
