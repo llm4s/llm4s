@@ -298,9 +298,9 @@ jobs:
   # `<module>/coverageReport` is what enforces each module's floor (build.sbt: coverageFloor(n)); the aggregate
   # report is informational only, since a build-wide average is not a meaningful gate. A leg runs, for each module
   # it owns, `<module>/test <module>/coverageReport`. A report counts every measurement taken so far in the leg, so
-  # each leg keeps the order the single job used, and modules whose tests exercise another's code stay in its leg
-  # (rag before knowledgegraph, media and observability; image before observabilityPrometheus; the providers before
-  # providerTestkit). The legs used to be one job running some 40 commands in series (19 minutes after #1935); split
+  # each leg keeps the order the single job used, and modules whose tests exercise another's code mostly stay in its
+  # leg (rag before knowledgegraph, media and observability; image before observabilityPrometheus; the providers
+  # before providerTestkit; docs/reference/test-coverage.md names the two pairs that are split). The legs used to be one job running some 40 commands in series (19 minutes after #1935); split
   # by dependency cluster, each leg is a few minutes of tests plus one instrumented compile of core. `sbt test`'s
   # exclusion of `PerformanceTest` (commonSettings) applies here too, because the legs run `<module>/test`.
   #

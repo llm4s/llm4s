@@ -48,9 +48,11 @@ Coverage runs in four parallel legs, the `Code Coverage (<leg>)` jobs (`coverage
 `.github/workflows/ci.yml`). Each leg lists the modules it owns in the job's matrix and runs
 `<module>/test <module>/coverageReport` for each, in order; `<module>/coverageReport` is the step that enforces that
 module's floor. A report counts every measurement taken so far in the leg, so a module's floor is judged on its own
-tests plus those of modules that ran ahead of it in the same leg; the legs keep the order the single coverage job
-used, and keep the modules whose tests exercise another's code (`rag` before `knowledgegraph`, `media` and
-`observability`; `image` before `observabilityPrometheus`; the providers before `providerTestkit`) in one leg. Each leg uploads its modules' Codecov flags, and only
+tests plus those of modules that ran ahead of it in the same leg. The legs keep the order the single coverage job
+used, and mostly keep a module with the modules whose tests exercise its code (`rag` before `knowledgegraph`,
+`media` and `observability`; `image` before `observabilityPrometheus`; the providers before `providerTestkit`).
+Two such pairs are now split: `providerTestkit` no longer counts `rag`'s, `mcp`'s, `speech`'s and `image`'s tests
+(96.66% to 96.46%, floor 90), nor `agent` `observability`'s (93.19% to 93.14%, floor 90). Each leg uploads its modules' Codecov flags, and only
 those, so every flag is uploaded once. The `Code Coverage` job passes only when every leg does, and is what
 `All Tests Pass` waits for. It also writes the aggregate report from the legs' coverage data, which is informational
 only, because a build-wide average is not a meaningful gate.
