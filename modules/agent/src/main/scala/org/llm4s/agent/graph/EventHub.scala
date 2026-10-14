@@ -270,8 +270,8 @@ final private[graph] class EventHub(
     afterSeq: Long,
     capacity: Int,
     listener: StreamEvent => Unit,
-    abandoned: EventRecord => Boolean = AbandonedWrites.none,
-    scope: TenantScope = TenantScope.Unscoped
+    abandoned: EventRecord => Boolean,
+    scope: TenantScope
   ): Result[Dispatched] =
     val dispatcher = new Dispatcher(threadId, afterSeq, capacity, listener, abandoned, scope)
     // joined before the dispatcher starts, so no live event sent after this returns is missed, and
@@ -305,8 +305,8 @@ final private[graph] class EventHub(
     runId: RunId,
     capacity: Int,
     listener: StreamEvent => Unit,
-    abandoned: EventRecord => Boolean = AbandonedWrites.none,
-    scope: TenantScope = TenantScope.Unscoped
+    abandoned: EventRecord => Boolean,
+    scope: TenantScope
   ): Observation =
     val dispatcher =
       new Dispatcher(
