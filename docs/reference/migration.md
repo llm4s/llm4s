@@ -119,7 +119,7 @@ Design §4.25. New, opt-in API in `org.llm4s.agent.harness`; nothing existing ch
 
 - **`llm4s-agent-testkit` depends on `llm4s-testkit`**, whose `ScriptedLLMClient` drives `FileBackendContract`'s agent runs. A build that excludes `llm4s-testkit` from its test classpath adds it back.
 - **File tools over a `StateFileBackend` reshape the agent's graph.** Every mutation holds the lock `state-files/<keyId>` (needed: it keeps two edits of one file in a batch from losing one, and the quota exact), so the loop registers `tool-queue`, as for any tool with locks: threads checkpointed before are refused with `RestoreRejected`; finish or `forget` them first.
-- A `HostFileBackend` keeps its cross-process lock files in `lockDirectory` (default `llm4s-host-locks` in `java.io.tmpdir`); processes that share a root but not a temporary directory (other users, containers) must be given one they share. It refuses symbolic links and files with other hard links.
+- A `HostFileBackend` keeps its cross-process lock files in the `lockDirectory` given to `open`; give every backend that may touch the same files, in any process, the same one. It refuses symbolic links and files with other hard links.
 
 ## Stage 2 migration: durable execution
 

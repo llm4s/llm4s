@@ -389,6 +389,19 @@ final class HostFileBackend private (
 
   // ---- reads
 
+  /**
+   * `read`, or nothing for a file `search` skips (not UTF-8, unreadable); a cancellation is never
+   * skipped: it propagates, so the search ends as cancelled rather than as an incomplete success.
+   */
+  private def unreadableSkipped[A](read: => Option[A]): Option[A] =
+    Try(read) match
+      case Success(result) => result
+      case Failure(e: java.nio.channels.ClosedByInterruptException) =>
+        throw new java.util.concurrent.CancellationException(e.toString)
+      case Failure(e: java.util.concurrent.CancellationException) => throw e
+      case Failure(_: InterruptedException) => throw new java.util.concurrent.CancellationException("interrupted")
+      case Failure(_)                       => None
+
   /** The listable children of `dir`, in name order: no links, no temporary files, at most `max`. */
   /**
    * The first `max` listable children of `dir` in name order, and whether there were more. A directory
@@ -500,7 +513,7 @@ final class HostFileBackend private (
   ): Result[Listing[GrepMatch]] =
     walked("grep", under, limit)(_.filter((v, _) => accept(v)).flatMap { (v, p) =>
       // a file over the bound, or not UTF-8 text, is skipped; the bound is on what is read
-      Try(bounded(p).map(text)).toOption.flatten.iterator.flatMap(content => Text.matches(v, content, regex))
+      unreadableSkipped(bounded(p).map(text)).iterator.flatMap(content => Text.matches(v, content, regex))
     })
 
 object HostFileBackend:
@@ -515,13 +528,6 @@ object HostFileBackend:
   private val Stripes = 64
 
   private val stripes: Vector[ReentrantLock] = Vector.fill(Stripes)(new ReentrantLock())
-
-  /**
-   * Where backends keep their OS lock files by default: `llm4s-host-locks` in `java.io.tmpdir`, one
-   * place for every root, so processes of one user on one host share it. Processes that do not share a
-   * temporary directory (other users, containers) must be given one `lockDirectory` they all share.
-   */
-  def DefaultLockDirectory: Path = Path.of(System.getProperty("java.io.tmpdir"), "llm4s-host-locks")
 
   /**
    * A path as the most permissive file system would compare it: Unicode NFC, then case-folded in the
@@ -541,12 +547,17 @@ object HostFileBackend:
 
   private def isTemporary(name: String): Boolean = Temporary.matches(name)
 
-  /** A backend over the existing directory `root`, resolved to its real path. */
+  /**
+   * A backend over the existing directory `root`, resolved to its real path, keeping its OS lock files
+   * in `lockDirectory` (created if absent). Give every backend that may touch the same files - in this
+   * process or another, over the same or an overlapping root - one lock directory: the application
+   * chooses it, as a setting, since only it knows which processes share files.
+   */
   def open(
     root: Path,
+    lockDirectory: Path,
     maxFileBytes: Long = DefaultMaxFileBytes,
-    maxScanEntries: Int = DefaultMaxScanEntries,
-    lockDirectory: Path = DefaultLockDirectory
+    maxScanEntries: Int = DefaultMaxScanEntries
   ): Result[HostFileBackend] =
     if maxFileBytes <= 0 then Left(ValidationError("maxFileBytes", s"must be positive, was $maxFileBytes"))
     else if maxScanEntries <= 0 then Left(ValidationError("maxScanEntries", s"must be positive, was $maxScanEntries"))

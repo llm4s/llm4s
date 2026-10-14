@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * {{{
  * class HostFileBackendContractSpec extends AnyFlatSpec with FileBackendContract:
- *   protected def newBackend(): FileBackend = HostFileBackend.open(Files.createTempDirectory("c")).toOption.get
+ *   protected def newBackend(): FileBackend = HostFileBackend.open(Files.createTempDirectory("c"), Files.createTempDirectory("locks")).toOption.get
  * }}}
  *
  * It checks each operation and its refusals; that two mutations of one path in one batch both apply,

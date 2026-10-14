@@ -18,11 +18,12 @@ import scala.jdk.CollectionConverters._
 class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues with BeforeAndAfterEach {
 
   private var dir: Path                = _
+  private val locks: Path              = Files.createTempDirectory("llm4s-host-locks")
   private var backend: HostFileBackend = _
 
   override def beforeEach(): Unit = {
     dir = Files.createTempDirectory("llm4s-host-backend")
-    backend = HostFileBackend.open(dir).value
+    backend = HostFileBackend.open(dir, locks).value
   }
 
   override def afterEach(): Unit =
@@ -47,10 +48,10 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
 
   "HostFileBackend.open" should "resolve the root to its real path and refuse a missing or non-directory root" in {
     backend.root shouldBe dir.toRealPath()
-    HostFileBackend.open(dir.resolve("missing")).left.value shouldBe a[ValidationError]
+    HostFileBackend.open(dir.resolve("missing"), locks).left.value shouldBe a[ValidationError]
     Files.writeString(dir.resolve("f"), "x")
-    HostFileBackend.open(dir.resolve("f")).left.value shouldBe a[ValidationError]
-    HostFileBackend.open(dir, maxFileBytes = 0).left.value shouldBe a[ValidationError]
+    HostFileBackend.open(dir.resolve("f"), locks).left.value shouldBe a[ValidationError]
+    HostFileBackend.open(dir, locks, maxFileBytes = 0).left.value shouldBe a[ValidationError]
     backend.replaySupport shouldBe ReplaySupport.Verifiable
   }
 
@@ -121,7 +122,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
   }
 
   it should "bound files by maxFileBytes and walks by maxScanEntries" in {
-    val small = HostFileBackend.open(dir, maxFileBytes = 4, maxScanEntries = 3).value
+    val small = HostFileBackend.open(dir, locks, maxFileBytes = 4, maxScanEntries = 3).value
     small.write(p("/big"), "12345", call()).left.value.message should include("larger than the limit of 4")
     written(small.write(p("/ok"), "1234", call()))
     small.edit(p("/ok"), "1", "11", replaceAll = false, call()).left.value.message should include(
@@ -138,7 +139,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
 
   it should "list the first names in order however large the directory, unlisted entries not counting" in {
     assume(posix)
-    val capped = HostFileBackend.open(dir, maxScanEntries = 3).value
+    val capped = HostFileBackend.open(dir, locks, maxScanEntries = 3).value
     Seq("f", "e", "d", "c", "b").foreach(n => Files.writeString(dir.resolve(n), n))
     Seq("a1", "a2", "a3", "a4").foreach(n => Files.createSymbolicLink(dir.resolve(n), dir.resolve("b")))
     Files.writeString(dir.resolve(s".a.llm4s-${UUID.randomUUID()}.tmp"), "torn")
@@ -153,7 +154,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
   }
 
   it should "bound what it reads, not a size checked before reading" in {
-    val small = HostFileBackend.open(dir, maxFileBytes = 4).value
+    val small = HostFileBackend.open(dir, locks, maxFileBytes = 4).value
     Files.writeString(dir.resolve("exact"), "1234")
     Files.writeString(dir.resolve("over"), "12345")
     small.read(p("/exact"), 0, 1, call()).value.lines shouldBe Vector("1234")
@@ -162,7 +163,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
   }
 
   it should "take Int.MaxValue as a limit and as its scan bound, without overflow" in {
-    val unbounded = HostFileBackend.open(dir, maxScanEntries = Int.MaxValue).value
+    val unbounded = HostFileBackend.open(dir, locks, maxScanEntries = Int.MaxValue).value
     Seq("a/x", "b").foreach(rel => written(unbounded.write(p(s"/$rel"), "one\ntwo", call())))
     unbounded.glob(Glob("**"), VPath.root, Int.MaxValue, call()).value shouldBe Listing(
       Vector(p("/a/x"), p("/b")),
@@ -176,6 +177,14 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     backend.locks(p("/A.txt")) shouldBe backend.locks(p("/a.txt"))
     backend.locks(p("/caf\u00e9")) shouldBe backend.locks(p("/cafe\u0301")) // NFC and NFD
     backend.lockFileOf(p("/A.txt")).value shouldBe backend.lockFileOf(p("/a.txt")).value
+  }
+
+  it should "end a search interrupted while reading a file as cancelled, not as an empty success" in {
+    Files.writeString(dir.resolve("only.txt"), "needle")
+    Thread.currentThread().interrupt()
+    val result = backend.grep("needle", p("/only.txt"), None, 10, call())
+    Thread.interrupted() shouldBe true
+    result.left.value shouldBe a[org.llm4s.error.CancelledError]
   }
 
   it should "walk in sorted order, so a cut-off result is deterministic" in {
@@ -194,7 +203,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
 
   it should "lock the physical path, so backends over nested roots order writes to one file" in {
     Files.createDirectories(dir.resolve("sub"))
-    val nested = HostFileBackend.open(dir.resolve("sub")).value
+    val nested = HostFileBackend.open(dir.resolve("sub"), locks).value
     val real   = HostFileBackend.identity(dir.toRealPath().toString.replace('\\', '/'))
     backend.locks(p("/sub/a.txt")) shouldBe Set(LockKey("host", real, "sub/a.txt"))
     backend.locks(p("/sub/a.txt")).head.conflictsWith(nested.locks(p("/a.txt")).head) shouldBe true
@@ -257,15 +266,15 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
 
   it should "share one lock file per target with every backend on an overlapping root, and keep it out of reach" in {
     Files.createDirectories(dir.resolve("sub"))
-    val locks  = Files.createTempDirectory("llm4s-locks")
-    val outer  = HostFileBackend.open(dir, lockDirectory = locks).value
-    val nested = HostFileBackend.open(dir.resolve("sub"), lockDirectory = locks).value
+    val shared = Files.createTempDirectory("llm4s-locks")
+    val outer  = HostFileBackend.open(dir, shared).value
+    val nested = HostFileBackend.open(dir.resolve("sub"), shared).value
     outer.lockFileOf(p("/sub/a.txt")).value shouldBe nested.lockFileOf(p("/a.txt")).value
-    outer.lockFileOf(p("/sub/a.txt")).value.getParent shouldBe locks.toRealPath()
+    outer.lockFileOf(p("/sub/a.txt")).value.getParent shouldBe shared.toRealPath()
     written(outer.write(p("/a.txt"), "x", call()))
     Files.list(dir).iterator().asScala.map(_.getFileName.toString).toVector.sorted shouldBe Vector("a.txt", "sub")
     // a lock directory inside the root is neither reachable nor listed
-    val inside = HostFileBackend.open(dir, lockDirectory = dir.resolve(".locks")).value
+    val inside = HostFileBackend.open(dir, dir.resolve(".locks")).value
     written(inside.write(p("/b.txt"), "y", call()))
     inside.read(p("/.locks/stripe-0.lock"), 0, 1, call()).left.value.message should include("lock directory")
     inside.read(p("/.LOCKS/stripe-0.lock"), 0, 1, call()).left.value.message should include("lock directory")
@@ -275,7 +284,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
   }
 
   it should "replace or delete a file over maxFileBytes, though it cannot read or edit one" in {
-    val small = HostFileBackend.open(dir, maxFileBytes = 4).value
+    val small = HostFileBackend.open(dir, locks, maxFileBytes = 4).value
     Files.writeString(dir.resolve("big"), "123456789")
     Files.writeString(dir.resolve("big2"), "123456789")
     small.read(p("/big"), 0, 1, call()).left.value.message should include("larger than the limit")

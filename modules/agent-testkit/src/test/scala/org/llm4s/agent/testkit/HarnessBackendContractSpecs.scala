@@ -15,10 +15,13 @@ import scala.concurrent.duration.*
 object HarnessBackends:
   def p(s: String): VPath = VPath(s).fold(e => throw new IllegalArgumentException(e.message), identity)
 
+  /** One lock directory for every host backend of the suite, as an application gives its backends. */
+  private val locks: Path = Files.createTempDirectory("llm4s-contract-locks")
+
   def host(): (HostFileBackend, Path) =
     val dir = Files.createTempDirectory("llm4s-contract")
     dir.toFile.deleteOnExit()
-    (HostFileBackend.open(dir).fold(e => throw new IllegalStateException(e.message), identity), dir)
+    (HostFileBackend.open(dir, locks).fold(e => throw new IllegalStateException(e.message), identity), dir)
 
   def onHost(dir: Path, path: VPath): Path = dir.resolve(path.value.drop(1))
 
