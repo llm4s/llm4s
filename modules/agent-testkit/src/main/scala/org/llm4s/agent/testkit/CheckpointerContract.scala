@@ -1606,14 +1606,19 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
   }
 
   it should "keep renewing a live run's claim, so it is not taken over while it runs" in {
-    val s       = Store()
-    val w       = Workers()
-    val renewed = new AtomicInteger()
+    val s = Store()
+    val w = Workers()
+    // Renewals are counted by when their store call began, not when it returned: one already in flight at
+    // the advance read the clock before it, so it extended the claim only from the old time.
+    val entered      = new AtomicInteger()
+    val advancedAt   = new AtomicInteger(Int.MaxValue)
+    val renewedAfter = new AtomicInteger()
     val counted = new Checkpointer:
       def claim(threadId: ThreadId, request: ClaimRequest) = s.store.claim(threadId, request)
       def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) =
-        val result = s.store.renew(threadId, token, ttl)
-        if result.isRight then renewed.incrementAndGet(): Unit
+        val ordinal = entered.incrementAndGet()
+        val result  = s.store.renew(threadId, token, ttl)
+        if result.isRight && ordinal > advancedAt.get then renewedAfter.incrementAndGet(): Unit
         result
       def release(threadId: ThreadId, token: FencingToken)                 = s.store.release(threadId, token)
       def commit(threadId: ThreadId, commit: Commit)                       = s.store.commit(threadId, commit)
@@ -1632,8 +1637,9 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     w.awaitEntered("a")
 
     s.advance(20.seconds)
-    val before = renewed.get
-    eventually(renewed.get > before)
+    // every renewal numbered above this began after the advance, so read the advanced clock
+    advancedAt.set(entered.get)
+    eventually(renewedAfter.get > 0)
     s.advance(20.seconds) // past the first claim's expiry, not the renewed one's
     second.recover(s.thread, w.graph, config("second")).refused shouldBe a[GraphError.ThreadBusy]
 
