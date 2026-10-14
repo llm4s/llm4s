@@ -1,6 +1,6 @@
 package org.llm4s.agent.harness
 
-import org.llm4s.agent.graph.{ ReplayGuard, ReplaySupport, StateCheck, StateKey, StateUpdate }
+import org.llm4s.agent.graph.{ GraphError, ReplayGuard, ReplaySupport, StateCheck, StateKey, StateUpdate }
 import org.llm4s.agent.graph.tool.LockKey
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
@@ -40,9 +40,9 @@ import scala.util.{ Failure, Success, Try, Using }
  *    (a torn file would match neither, and its replay would be refused for ever). `delete` removes a file
  *    or an empty directory, each atomic; a non-empty directory is refused.
  *  - '''Order.''' A mutation locks `host/<root>/<path>`, so two mutations of one file in a batch, or a
- *    directory's and a file's beneath it, apply in call order. Calls of different threads in one JVM are
- *    serialised per file around plan and effect, so neither loses the other's edit. Other processes are
- *    not ordered: give each its own root.
+ *    directory's and a file's beneath it, apply in call order. Across threads and processes the effect is
+ *    a compare-and-set under the file's JVM and OS locks: it writes only if the file is still as planned,
+ *    and is refused (`EffectReplayRefused`) otherwise, so no edit is lost.
  *  - '''Bounds.''' A file over `maxFileBytes` cannot be read, written or edited, and `search` skips it.
  *    `ls`, `find` and `search` visit at most `maxScanEntries` entries, in sorted order, and report a
  *    walk they cut short as `truncated`.
@@ -207,17 +207,49 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
   private def guarded[A: upickle.default.ReadWriter](operation: String, path: VPath, ctx: FileContext)(
     plan: Path => Result[ReplayGuard.Plan[A]]
   ): Result[(A, StateUpdate)] =
-    // the stripe is the lexical target's, so the resolution's checks (links, the reserved directory) are
-    // made under the lock too, not raced between the check and the effect
-    exclusively(path.segments.foldLeft(root)(_.resolve(_))) {
-      resolve(operation, path).flatMap { target =>
+    // No lock is held across the guard: its intent and outcome are store commits, and a run stalled
+    // between them (one that has lost its claim) must not block its successor. The effect alone is
+    // locked, as a compare-and-set (casPlan), so a file another writer changed since the plan is refused,
+    // never overwritten.
+    resolve(operation, path)
+      .flatMap { target =>
         ReplayGuard.verifiable[A](ctx.run, ctx.effectKey(s"file.$operation", path.value))(
           io(operation, path)(digest(operation, path, target))
         )(io(operation, path)(plan(target)))
       }
-    }.map(a => (a, StateUpdate.empty))
+      .map(a => (a, StateUpdate.empty))
 
   // ---- mutations
+
+  /**
+   * A plan whose effect is a compare-and-set against `before` (C4): under the file's JVM and OS locks,
+   * which every backend writer takes, it resolves the path again (so a link swapped in since is refused),
+   * and writes only if the file's digest is still `before`; otherwise it writes nothing and is refused
+   * (`EffectReplayRefused`), and the model sees that the file changed.
+   */
+  private def casPlan[A](operation: String, path: VPath, target: Path)(
+    before: StateCheck,
+    after: StateCheck,
+    presumed: A
+  )(
+    effect: => Result[A]
+  ): ReplayGuard.Plan[A] =
+    ReplayGuard.Plan(before, after, presumed)(
+      exclusively(target) {
+        resolve(operation, path)
+          .flatMap(again => io(operation, path)(digest(operation, path, again)))
+          .flatMap { now =>
+            if now == before then effect
+            else
+              Left(
+                GraphError.EffectReplayRefused(
+                  s"file.$operation",
+                  s"${path.value} changed after it was planned: it is now ${now.value}, not ${before.value}"
+                )
+              )
+          }
+      }
+    )
 
   def write(path: VPath, content: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
     guarded[FileWritten]("write", path, ctx) { target =>
@@ -233,7 +265,11 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
             for
               _      <- underDirectories("write", path, target)
               before <- digest("write", path, target)
-            yield ReplayGuard.Plan(before, fileCheck(bytes), FileWritten(!exists(target), bytes.length.toLong))(
+            yield casPlan("write", path, target)(
+              before,
+              fileCheck(bytes),
+              FileWritten(!exists(target), bytes.length.toLong)
+            )(
               atomicWrite(target, bytes).map(_ => FileWritten(before == StateCheck.absent, bytes.length.toLong))
             )
     }
@@ -254,7 +290,7 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
           if next.length > maxFileBytes then
             refused("edit", path, s"the result is larger than the limit of $maxFileBytes bytes")
           else Right(())
-      yield ReplayGuard.Plan(fileCheck(bytes), fileCheck(next), FileEdited(edited._2))(
+      yield casPlan("edit", path, target)(fileCheck(bytes), fileCheck(next), FileEdited(edited._2))(
         atomicWrite(target, next).map(_ => FileEdited(edited._2))
       )
     }
@@ -268,13 +304,13 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
           refused("delete", path, "is a directory that is not empty; delete the files in it")
         else
           Right(
-            ReplayGuard.Plan(directoryCheck, StateCheck.absent, FileDeleted(wasDirectory = true))(
+            casPlan("delete", path, target)(directoryCheck, StateCheck.absent, FileDeleted(wasDirectory = true))(
               Try(Files.delete(target)).toResult.map(_ => FileDeleted(wasDirectory = true))
             )
           )
       else
         digest("delete", path, target).map(before =>
-          ReplayGuard.Plan(before, StateCheck.absent, FileDeleted(wasDirectory = false))(
+          casPlan("delete", path, target)(before, StateCheck.absent, FileDeleted(wasDirectory = false))(
             Try(Files.delete(target)).toResult.map(_ => FileDeleted(wasDirectory = false))
           )
         )

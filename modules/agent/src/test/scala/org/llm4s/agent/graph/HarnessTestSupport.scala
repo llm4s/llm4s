@@ -10,4 +10,13 @@ object HarnessTestSupport {
 
   /** `state` with `update` applied, as the runtime commits it. */
   def committed(state: ThreadState, update: StateUpdate): Result[ThreadState] = state.applyUpdate(update)
+
+  /** A `RunContext` outside any runtime, on thread `thread`. */
+  def runOn(thread: String): RunContext =
+    val config = RunConfig()
+    new RunContext(
+      config,
+      RunPosition(ThreadId(thread), config.runId, "", TaskId("task"), NodeId("node"), 0),
+      NodeEventSink.none
+    )
 }

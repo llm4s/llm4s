@@ -1,6 +1,6 @@
 package org.llm4s.agent.testkit
 
-import org.llm4s.agent.graph.{ ReplayKeys, ReplaySupport, RunContext }
+import org.llm4s.agent.graph.{ FencingToken, ReplayKeys, ReplaySupport, RunContext }
 import org.llm4s.agent.graph.tool.LockKey
 import org.llm4s.agent.harness.*
 import org.llm4s.types.Result
@@ -27,8 +27,8 @@ object HarnessBackends:
   /** `change` applied straight to the store, as another writer would, leaving no applied key. */
   def raw(store: LongTermStore, ns: Namespace, key: String)(change: StoreChange[Unit]): Unit =
     val effect = ReplayKeys.unguarded(s"$key-${System.nanoTime()}")
-    store.modify[Unit](ns, key, effect)(_ => Right(change)): Unit
-    store.forget(effect): Unit
+    store.modify[Unit](ns, key, effect, FencingToken(0))(_ => Right(change)): Unit
+    store.forget(effect, FencingToken(0)): Unit
 
 class StateFileBackendContractSpec extends AnyFlatSpec with FileBackendContract:
   protected def newBackend(): FileBackend = StateFileBackend(maxBytes = 200)

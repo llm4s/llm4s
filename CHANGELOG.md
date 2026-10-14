@@ -16,8 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `StateFileBackend`: files in a thread-state key, bounded by `maxBytes` and `maxFiles` under one backend-wide
     lock, so the bound is exact across a parallel batch.
   - `HostFileBackend`: opt-in host directory, `Verifiable`; every symbolic link and multiply-linked file refused,
-    writes atomic (temporary file and atomic move), per-file locks, and each mutation serialised per file across
-    threads and processes (JVM and OS advisory locks, lock files under the reserved `/.llm4s`).
+    writes atomic (temporary file and atomic move), per-file locks, and each effect a compare-and-set against its
+    plan under JVM and OS advisory locks (lock files under the reserved `/.llm4s`), across threads and processes.
   - `CompositeBackend` routes by longest mount; `FileBackend.resolved` picks a backend per run (per tenant).
   - `LongTermStore` (`Transactional`, one read-modify-write primitive `modify` over a `StoreView`, bounds per item and
     namespace, values copied in and out) with

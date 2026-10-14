@@ -67,7 +67,9 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
   ): Result[(A, StateUpdate)] =
     val effect = ctx.effectKey(s"file.$operation", file.value)
     ReplayGuard
-      .transactional[A](ctx.run, effect, store)(store.modify[A](namespace(ctx), file.value, effect)(change))
+      .transactional[A](ctx.run, effect, store)(token =>
+        store.modify[A](namespace(ctx), file.value, effect, token)(change)
+      )
       .map(a => (a, StateUpdate.empty))
 
   private def file(text: String): ujson.Value = ujson.Obj("content" -> text)

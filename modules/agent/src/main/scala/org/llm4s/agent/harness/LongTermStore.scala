@@ -1,7 +1,8 @@
 package org.llm4s.agent.harness
 
-import org.llm4s.agent.graph.{ AppliedKeys, EffectKey, ReplayGuard, ReplaySupport, TenantId }
+import org.llm4s.agent.graph.{ AppliedKeys, EffectKey, FencingToken, ReplayGuard, ReplaySupport, TenantId }
 import org.llm4s.annotation.Experimental
+import org.llm4s.error.ProcessingError
 import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
@@ -108,27 +109,30 @@ trait LongTermStore extends AppliedKeys:
   def search(ns: Namespace, query: String, limit: Int): Result[Listing[StoreEntry]]
 
   /**
-   * In one transaction, serialisable within `ns`: if `effect` was applied, its recorded outcome and no
+   * In one transaction, serialisable within `ns`, fenced by `token` (C4's [[AppliedKeys]]): a `token`
+   * older than the newest seen for `effect.scope` is refused with a `Left` and changes nothing;
+   * otherwise it becomes the newest, and then: if `effect` was applied, its recorded outcome and no
    * write; otherwise `change`, decided against the namespace as it is now, which may refuse (`Left`:
    * nothing written or recorded), then the namespace's and item's bounds, then the write and
-   * `(effect, outcome)` recorded together. An over-limit change is a [[BackendRefused]].
+   * `(effect, outcome)` recorded together. An over-limit change is a [[BackendRefused]]. The newest
+   * token per scope is kept as long as the store keeps that thread's data: durably, in a real store.
    */
-  def modify[A: ReadWriter](ns: Namespace, key: String, effect: EffectKey)(
+  def modify[A: ReadWriter](ns: Namespace, key: String, effect: EffectKey, token: FencingToken)(
     change: StoreView => Result[StoreChange[A]]
   ): Result[A]
 
   /** Writes `value` at `key`, guarded under `store.put`: `true` when the key was new. */
   final def put(ns: Namespace, key: String, value: ujson.Value, ctx: FileContext): Result[Boolean] =
     val effect = ctx.effectKey("store.put", ns.render, key)
-    ReplayGuard.transactional[Boolean](ctx.run, effect, this)(
-      modify[Boolean](ns, key, effect)(view => Right(StoreChange.Put(value, view.current.isEmpty)))
+    ReplayGuard.transactional[Boolean](ctx.run, effect, this)(token =>
+      modify[Boolean](ns, key, effect, token)(view => Right(StoreChange.Put(value, view.current.isEmpty)))
     )
 
   /** Deletes `key`, guarded under `store.delete`: `true` when it existed. */
   final def delete(ns: Namespace, key: String, ctx: FileContext): Result[Boolean] =
     val effect = ctx.effectKey("store.delete", ns.render, key)
-    ReplayGuard.transactional[Boolean](ctx.run, effect, this)(
-      modify[Boolean](ns, key, effect) { view =>
+    ReplayGuard.transactional[Boolean](ctx.run, effect, this)(token =>
+      modify[Boolean](ns, key, effect, token) { view =>
         Right(if view.current.isDefined then StoreChange.Remove(true) else StoreChange.Keep(false))
       }
     )
@@ -141,11 +145,22 @@ trait LongTermStore extends AppliedKeys:
 final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock) extends LongTermStore:
   private var namespaces = Map.empty[Namespace, Map[String, StoreItem]]
   private var applied    = Map.empty[String, ujson.Value]
+  private var newest     = Map.empty[String, FencingToken]
+
+  /** Refuses `token` if older than the newest seen for `key.scope`; otherwise makes it the newest. Locked. */
+  private def fenced[A](key: EffectKey, token: FencingToken)(body: => Result[A]): Result[A] =
+    newest.get(key.scope) match
+      case Some(seen) if token.value < seen.value =>
+        Left(ProcessingError("long-term-store", s"stale claim: token ${token.value} is older than ${seen.value}"))
+      case _ =>
+        newest = newest.updated(key.scope, token)
+        body
 
   /** How many applied keys the store holds: C4's guard forgets each once its outcome is recorded. */
   def appliedKeys: Int = synchronized(applied.size)
 
-  def forget(key: EffectKey): Result[Unit] = synchronized { applied -= key.value; Right(()) }
+  def forget(key: EffectKey, token: FencingToken): Result[Unit] =
+    synchronized(fenced(key, token) { applied -= key.value; Right(()) })
 
   private def items(ns: Namespace): Map[String, StoreItem] = namespaces.getOrElse(ns, Map.empty)
 
@@ -180,9 +195,9 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
   private def itemBytes(key: String, value: ujson.Value): Long =
     Text.utf8Bytes(key) + Text.utf8Bytes(ujson.write(value))
 
-  def modify[A: ReadWriter](ns: Namespace, key: String, effect: EffectKey)(
+  def modify[A: ReadWriter](ns: Namespace, key: String, effect: EffectKey, token: FencingToken)(
     change: StoreView => Result[StoreChange[A]]
-  ): Result[A] = synchronized {
+  ): Result[A] = synchronized(fenced(effect, token) {
     applied.get(effect.value) match
       case Some(recorded) => Try(upickle.default.read[A](recorded)).toResult
       case None =>
@@ -204,7 +219,7 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
             outcome
           }
         }
-  }
+  })
 
   /** The bounds of `next`, the namespace after a change; `None` changes nothing. */
   private def within(key: String, next: Option[Map[String, StoreItem]]): Result[Unit] =

@@ -249,7 +249,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     pool.shutdown()
   }
 
-  "Concurrent edits of one file from different threads" should "never lose one" in {
+  "Concurrent edits of one file from different threads" should "never lose one: each applies or is refused" in {
     written(backend.write(p("/log.txt"), "end", call()))
     val n     = 24
     val pool  = Executors.newFixedThreadPool(n)
@@ -257,12 +257,19 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     val done = (1 to n).map { i =>
       pool.submit { () =>
         start.await()
-        backend.edit(p("/log.txt"), "end", s"$i\nend", replaceAll = false, call())
+        i -> backend.edit(p("/log.txt"), "end", s"$i\nend", replaceAll = false, call())
       }
     }
     start.countDown()
-    done.foreach(_.get(30, TimeUnit.SECONDS).isRight shouldBe true)
+    val results = done.map(_.get(30, TimeUnit.SECONDS))
     pool.shutdown()
-    onDisk("log.txt").split("\n").toSet shouldBe ((1 to n).map(_.toString).toSet + "end")
+    // a refusal is the compare-and-set seeing another edit land since its plan: never a silent loss
+    results
+      .collect { case (_, Left(e)) => e }
+      .foreach(_ shouldBe a[org.llm4s.agent.graph.GraphError.EffectReplayRefused])
+    val applied = results.collect { case (i, Right(_)) => i.toString }.toSet
+    applied should not be empty
+    onDisk("log.txt").split("\n").toSet shouldBe (applied + "end")
   }
+
 }

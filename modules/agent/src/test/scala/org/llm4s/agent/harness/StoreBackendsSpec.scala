@@ -2,7 +2,16 @@ package org.llm4s.agent.harness
 
 import org.llm4s.agent.graph.GraphTestSupport.testRunContext
 import org.llm4s.agent.graph.HarnessTestSupport.stateOf
-import org.llm4s.agent.graph.{ GraphError, IdempotencyKey, ReplaySupport, RunConfig, StateUpdate, TenantId, ToolCallId }
+import org.llm4s.agent.graph.{
+  FencingToken,
+  GraphError,
+  IdempotencyKey,
+  ReplaySupport,
+  RunConfig,
+  StateUpdate,
+  TenantId,
+  ToolCallId
+}
 import org.llm4s.agent.graph.tool.{ Glob, LockKey, ToolContext }
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
@@ -78,21 +87,38 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     def change(view: StoreView) = {
       runs.incrementAndGet(); Right(StoreChange.Put(ujson.Str("first"), view.current.isEmpty))
     }
-    store.modify[Boolean](ns, "k", key)(change).value shouldBe true
+    store.modify[Boolean](ns, "k", key, FencingToken(0))(change).value shouldBe true
     store.put(ns, "k", ujson.Str("someone else"), call()).value
-    store.modify[Boolean](ns, "k", key)(change).value shouldBe true
+    store.modify[Boolean](ns, "k", key, FencingToken(0))(change).value shouldBe true
     runs.get shouldBe 1
     store.get(ns, "k").value.map(_.value.str) shouldBe Some("someone else")
     store.appliedKeys shouldBe 1
-    store.forget(key).value
+    store.forget(key, FencingToken(0)).value
     store.appliedKeys shouldBe 0
+  }
+
+  it should "refuse an older claim's token per thread, changing nothing, for modify and forget alike" in {
+    val store = InMemoryLongTermStore()
+    val ctx   = call()
+    val key   = ctx.effectKey("test.put", "k")
+    def put(token: Long, value: String) =
+      store.modify[Unit](ns, "k", key, FencingToken(token))(_ => Right(StoreChange.Put(ujson.Str(value), ())))
+    put(5, "new claimant").value
+    store.forget(key, FencingToken(5)).value
+    put(3, "stale").left.value.message should include("stale claim")
+    store.get(ns, "k").value.map(_.value.str) shouldBe Some("new claimant")
+    store.forget(key, FencingToken(3)).left.value.message should include("stale claim")
+    // another thread's keys have a scope of their own
+    val other = FileContext(org.llm4s.agent.graph.HarnessTestSupport.runOn("another thread"), stateOf())
+      .effectKey("test.put", "k")
+    store.modify[Unit](ns, "k2", other, FencingToken(1))(_ => Right(StoreChange.Keep(()))).isRight shouldBe true
   }
 
   it should "record nothing for a refused change" in {
     val store = InMemoryLongTermStore()
     val key   = call().effectKey("test.put", "k")
     store
-      .modify[Boolean](ns, "k", key)(_ => Left(BackendRefused("put", "k", "no")))
+      .modify[Boolean](ns, "k", key, FencingToken(0))(_ => Left(BackendRefused("put", "k", "no")))
       .left
       .value shouldBe a[BackendRefused]
     store.appliedKeys shouldBe 0
@@ -167,7 +193,7 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     store.get(ns, "k").value.get.value("n").num shouldBe 1
     val key = call().effectKey("test.put", "k")
     store
-      .modify[Unit](ns, "k", key) { view =>
+      .modify[Unit](ns, "k", key, FencingToken(0)) { view =>
         view.current.get.value("n") = 6
         Left(BackendRefused("put", "k", "no"))
       }
