@@ -126,9 +126,9 @@ trait FileBackend:
       .map(e => BackendRefused("grep", regex, s"not a valid regular expression: ${e.message}"))
       .flatMap { compiled =>
         val accept: VPath => Boolean = include match
-          case None                                     => _ => true
+          case None                                      => _ => true
           case Some(glob) if !glob.pattern.contains('/') => p => glob.matches(p.name)
-          case Some(glob)                               => p => p.relativeTo(under).exists(glob.matches)
+          case Some(glob)                                => p => p.relativeTo(under).exists(glob.matches)
         search(under, compiled, accept, limit, ctx)
       }
 
@@ -202,7 +202,7 @@ object BackendRefused:
    * nothing, and `recover` replays it from its replay records.
    */
   def toolOutcome(error: LLMError): ToolOutcome = error match
-    case refused: BackendRefused                  => ToolOutcome.Error(refused.message)
+    case refused: BackendRefused                 => ToolOutcome.Error(refused.message)
     case refused: GraphError.EffectReplayRefused => ToolOutcome.Error(refused.message)
     case other                                   => ToolOutcome.Fatal(other)
 
@@ -227,14 +227,20 @@ private[harness] object Text:
 
   /** Non-overlapping occurrences of `old` in `content`. */
   def occurrences(content: String, old: String): Int =
-    @annotation.tailrec def loop(from: Int, n: Int): Int =
+    @annotation.tailrec
+    def loop(from: Int, n: Int): Int =
       val i = content.indexOf(old, from)
       if i < 0 then n else loop(i + old.length, n + 1)
     loop(0, 0)
 
   /** The edited content, or a refusal. */
-  def edited(path: VPath, content: String, old: String, replacement: String, replaceAll: Boolean)
-    : Result[(String, Int)] =
+  def edited(
+    path: VPath,
+    content: String,
+    old: String,
+    replacement: String,
+    replaceAll: Boolean
+  ): Result[(String, Int)] =
     if old.isEmpty then Left(BackendRefused("edit", path.value, "`old` is empty"))
     else
       occurrences(content, old) match

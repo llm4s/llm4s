@@ -16,7 +16,8 @@ import scala.util.Try
 final case class Namespace(tenant: Option[TenantId], path: Vector[String]):
 
   /** The namespace as a JSON array, tenant (or `null`) first: two namespaces never render alike. */
-  def render: String = ujson.write(ujson.Arr.from(tenant.fold[ujson.Value](ujson.Null)(t => ujson.Str(t.value)) +: path.map(ujson.Str(_))))
+  def render: String =
+    ujson.write(ujson.Arr.from(tenant.fold[ujson.Value](ujson.Null)(t => ujson.Str(t.value)) +: path.map(ujson.Str(_))))
 
 /** A stored value, and when it was last written. */
 @Experimental
@@ -154,7 +155,8 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
       Listing.of(hits, limit)
     }
 
-  private def itemBytes(key: String, value: ujson.Value): Long = Text.utf8Bytes(key) + Text.utf8Bytes(ujson.write(value))
+  private def itemBytes(key: String, value: ujson.Value): Long =
+    Text.utf8Bytes(key) + Text.utf8Bytes(ujson.write(value))
 
   def modify[A: ReadWriter](ns: Namespace, key: String, effect: EffectKey)(
     change: Option[StoreItem] => Result[StoreChange[A]]

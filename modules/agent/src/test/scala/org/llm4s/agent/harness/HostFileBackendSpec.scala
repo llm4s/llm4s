@@ -83,14 +83,18 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     backend.read(p("/out/secret.txt"), 0, 10, call()).left.value.message should include("symbolic link")
     backend.write(p("/out/new.txt"), "x", call()).left.value.message should include("symbolic link")
     backend.read(p("/alias/inside.txt"), 0, 10, call()).left.value.message should include("symbolic link")
-    backend.edit(p("/file-link.txt"), "inside", "x", replaceAll = false, call()).left.value.message should include("symbolic link")
+    backend.edit(p("/file-link.txt"), "inside", "x", replaceAll = false, call()).left.value.message should include(
+      "symbolic link"
+    )
     backend.delete(p("/file-link.txt"), call()).left.value.message should include("symbolic link")
     Files.exists(outside.resolve("new.txt")) shouldBe false
     onDisk("real/inside.txt") shouldBe "inside"
 
     backend.ls(VPath.root, 10, call()).value.items.map(_.path) shouldBe Vector(p("/real"))
     backend.glob(Glob("**"), VPath.root, 10, call()).value.items shouldBe Vector(p("/real/inside.txt"))
-    backend.grep("secret|inside", VPath.root, None, 10, call()).value.items.map(_.path) shouldBe Vector(p("/real/inside.txt"))
+    backend.grep("secret|inside", VPath.root, None, 10, call()).value.items.map(_.path) shouldBe Vector(
+      p("/real/inside.txt")
+    )
     Files.delete(outside.resolve("secret.txt"))
     Files.delete(outside)
   }
@@ -116,7 +120,9 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     val small = HostFileBackend.open(dir, maxFileBytes = 4, maxScanEntries = 3).value
     small.write(p("/big"), "12345", call()).left.value.message should include("larger than the limit of 4")
     written(small.write(p("/ok"), "1234", call()))
-    small.edit(p("/ok"), "1", "11", replaceAll = false, call()).left.value.message should include("larger than the limit")
+    small.edit(p("/ok"), "1", "11", replaceAll = false, call()).left.value.message should include(
+      "larger than the limit"
+    )
     Files.writeString(dir.resolve("huge"), "1234567")
     small.read(p("/huge"), 0, 1, call()).left.value.message should include("larger than the limit")
     small.grep("1", VPath.root, None, 10, call()).value.items.map(_.path) shouldBe Vector(p("/ok"))
@@ -128,8 +134,16 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
 
   it should "walk in sorted order, so a cut-off result is deterministic" in {
     Seq("c", "a/z", "a/b", "b").foreach(rel => written(backend.write(p(s"/$rel"), rel, call())))
-    backend.glob(Glob("**"), VPath.root, 10, call()).value.items.map(_.value) shouldBe Vector("/a/b", "/a/z", "/b", "/c")
-    backend.glob(Glob("**"), VPath.root, 2, call()).value shouldBe Listing(Vector(p("/a/b"), p("/a/z")), truncated = true)
+    backend.glob(Glob("**"), VPath.root, 10, call()).value.items.map(_.value) shouldBe Vector(
+      "/a/b",
+      "/a/z",
+      "/b",
+      "/c"
+    )
+    backend.glob(Glob("**"), VPath.root, 2, call()).value shouldBe Listing(
+      Vector(p("/a/b"), p("/a/z")),
+      truncated = true
+    )
   }
 
   it should "lock the physical path, so backends over nested roots order writes to one file" in {
@@ -166,10 +180,10 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     val pool  = Executors.newFixedThreadPool(n)
     val start = new CountDownLatch(1)
     val done = (1 to n).map { i =>
-      pool.submit(() => {
+      pool.submit { () =>
         start.await()
         backend.edit(p("/log.txt"), "end", s"$i\nend", replaceAll = false, call())
-      })
+      }
     }
     start.countDown()
     done.foreach(_.get(30, TimeUnit.SECONDS).isRight shouldBe true)

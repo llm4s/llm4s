@@ -108,7 +108,8 @@ object SandboxBackend:
   private[harness] def cut(s: String, max: Int): (String, Boolean) =
     if s.length <= max / 3 || s.getBytes(UTF_8).length <= max then (s, false)
     else
-      @annotation.tailrec def loop(i: Int, bytes: Int): Int =
+      @annotation.tailrec
+      def loop(i: Int, bytes: Int): Int =
         if i >= s.length then i
         else
           val cp    = s.codePointAt(i)

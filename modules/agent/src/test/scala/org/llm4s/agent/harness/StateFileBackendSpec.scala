@@ -22,9 +22,9 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
   private def p(s: String): VPath = VPath(s).value
 
   /** A backend, and a context over a state with its key, as a tool call sees it. */
-  private final class Fixture(backend: StateFileBackend) {
-    var state: ThreadState = stateOf(backend.files)
-    def ctx: FileContext   = FileContext(testRunContext(), state)
+  final private class Fixture(backend: StateFileBackend) {
+    var state: ThreadState                = stateOf(backend.files)
+    def ctx: FileContext                  = FileContext(testRunContext(), state)
     def commit(update: StateUpdate): Unit = state = committed(state, update).value
     def write(path: String, content: String): FileWritten = {
       val (written, update) = backend.write(p(path), content, ctx).value
@@ -61,7 +61,10 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     val listing = backend.ls(VPath.root, 10, f.ctx).value
     listing.items.map(i => (i.path.value, i.isDirectory)) shouldBe Vector("/a" -> true, "/b.txt" -> false)
     listing.items(1).size shouldBe 2
-    backend.ls(p("/a"), 1, f.ctx).value shouldBe Listing(Vector(FileInfo(p("/a/x.txt"), false, 1, Some(clock.instant()))), true)
+    backend.ls(p("/a"), 1, f.ctx).value shouldBe Listing(
+      Vector(FileInfo(p("/a/x.txt"), false, 1, Some(clock.instant()))),
+      true
+    )
     backend.ls(p("/b.txt"), 10, f.ctx).left.value.message should include("not a directory")
     backend.ls(p("/c"), 10, f.ctx).left.value.message should include("not found")
   }
@@ -108,13 +111,18 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     f.write("/src/a.scala", "val x = 1\nval y = 2")
     f.write("/src/sub/b.scala", "val yy = 3")
     f.write("/src/c.txt", "val y = 4")
-    backend.glob(Glob("**/*.scala"), p("/src"), 10, f.ctx).value.items shouldBe Vector(p("/src/a.scala"), p("/src/sub/b.scala"))
+    backend.glob(Glob("**/*.scala"), p("/src"), 10, f.ctx).value.items shouldBe Vector(
+      p("/src/a.scala"),
+      p("/src/sub/b.scala")
+    )
     backend.glob(Glob("*.scala"), p("/src"), 10, f.ctx).value.items shouldBe Vector(p("/src/a.scala"))
     backend.grep("val y", VPath.root, Some(Glob("*.scala")), 10, f.ctx).value.items shouldBe Vector(
       GrepMatch(p("/src/a.scala"), 2, "val y = 2"),
       GrepMatch(p("/src/sub/b.scala"), 1, "val yy = 3")
     )
-    backend.grep("val y", p("/src"), Some(Glob("sub/*.scala")), 10, f.ctx).value.items.map(_.path) shouldBe Vector(p("/src/sub/b.scala"))
+    backend.grep("val y", p("/src"), Some(Glob("sub/*.scala")), 10, f.ctx).value.items.map(_.path) shouldBe Vector(
+      p("/src/sub/b.scala")
+    )
     backend.grep("val", VPath.root, None, 2, f.ctx).value.truncated shouldBe true
     backend.grep("(", VPath.root, None, 2, f.ctx).left.value.message should include("not a valid regular expression")
   }
@@ -151,7 +159,9 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     upickle.default.read[FileEntry](upickle.default.write(entry)) shouldBe entry
     val put: FileUpdate = FileUpdate.Put(p("/a"), entry)
     upickle.default.read[FileUpdate](upickle.default.write(put)) shouldBe put
-    an[Exception] should be thrownBy upickle.default.read[FileUpdate](upickle.default.write(put).replace("/a", "a/../b"))
+    an[Exception] should be thrownBy upickle.default.read[FileUpdate](
+      upickle.default.write(put).replace("/a", "a/../b")
+    )
   }
 
   // Through the agent loop: calls of one message under the backend's lock.
@@ -161,18 +171,21 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     def lockOf(path: String) = VPath(path).fold(_ => Set(LockKey("")), backend.locks)
     def outcome[A](r: org.llm4s.types.Result[(A, StateUpdate)]): ToolOutcome =
       r.fold(BackendRefused.toolOutcome, (a, u) => ToolOutcome.Success(ujson.Str(a.toString), u))
-    val write = AgentTool(SpecTools.spec("write_file").withLocks(t => lockOf(t.text.takeWhile(_ != '|'))), backend.writes) {
-      (args, context) =>
-        val Array(path, content) = args.text.split('|')
-        outcome(backend.write(p(path), content, FileContext(context)))
-    }
-    val edit = AgentTool(SpecTools.spec("edit_file").withLocks(t => lockOf(t.text.takeWhile(_ != '|'))), backend.writes) {
-      (args, context) =>
-        val Array(path, old, next) = args.text.split('|')
-        outcome(backend.edit(p(path), old, next, replaceAll = false, FileContext(context)))
-    }
+    val write =
+      AgentTool(SpecTools.spec("write_file").withLocks(t => lockOf(t.text.takeWhile(_ != '|'))), backend.writes) {
+        (args, context) =>
+          val Array(path, content) = args.text.split('|')
+          outcome(backend.write(p(path), content, FileContext(context)))
+      }
+    val edit =
+      AgentTool(SpecTools.spec("edit_file").withLocks(t => lockOf(t.text.takeWhile(_ != '|'))), backend.writes) {
+        (args, context) =>
+          val Array(path, old, next) = args.text.split('|')
+          outcome(backend.edit(p(path), old, next, replaceAll = false, FileContext(context)))
+      }
     val read = AgentTool(SpecTools.spec("read_file")) { (args, context) =>
-      backend.read(p(args.text), 0, 100, FileContext(context))
+      backend
+        .read(p(args.text), 0, 100, FileContext(context))
         .fold(BackendRefused.toolOutcome, lines => ToolOutcome.Success(ujson.Str(lines.lines.mkString("\n"))))
     }
     SpecTools.set(write, edit, read)
@@ -199,7 +212,7 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
       calling(
         call("a", "write_file", "/a|0123456789"), // 12
         call("b", "write_file", "/b|0123456789"), // 24
-        call("c", "write_file", "/c|0123456789") // 36: over
+        call("c", "write_file", "/c|0123456789")  // 36: over
       ),
       CompletionFixture.simple("done")
     )

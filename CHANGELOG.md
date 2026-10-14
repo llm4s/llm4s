@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Harness backend SPIs: files, sandbox, long-term store** ([#1904](https://github.com/llm4s/llm4s/issues/1904)):
+  Phase 3 slice C3, in `org.llm4s.agent.harness` (`llm4s-agent`). `VPath` is a validated absolute path. A
+  `FileBackend` (`ls`, `read`, `write`, `edit`, `delete`, `glob`, `grep`) owns its mutations' locks (`locks(path)`,
+  for `AgentToolSpec.withLocks`), their replay (C4's guard, keyed by `FileContext.effectKey`), its bounds and its
+  tenant scoping; `BackendRefused.toolOutcome` turns a refusal into a tool error and anything else into `Fatal`.
+  - `StateFileBackend`: files in a thread-state key, bounded by `maxBytes` and `maxFiles` under one backend-wide
+    lock, so the bound is exact across a parallel batch.
+  - `HostFileBackend`: opt-in host directory, `Verifiable`; every symbolic link refused, writes atomic (temporary
+    file and atomic move), per-file locks, JVM-wide serialisation of each plan and effect.
+  - `CompositeBackend` routes by longest mount; `FileBackend.resolved` picks a backend per run (per tenant).
+  - `LongTermStore` (`Transactional`, one read-modify-write primitive `modify`, bounds per item and namespace) with
+    `InMemoryLongTermStore`; `StoreFileBackend` exposes a namespace of the run's tenant as files.
+  - `SandboxBackend` wraps a `SandboxRunner` in the `Unverifiable` guard and cuts each stream at `maxOutputBytes`.
+  - `llm4s-agent-testkit` adds `FileBackendContract` and `FileBackendContract.EditSubject` for `ReplayContract`, and
+    now depends on `llm4s-testkit`. Design record §4.25.
 - **Tool permissions, timeouts and batch locks for agent tools** ([#1903](https://github.com/llm4s/llm4s/issues/1903)):
   `AgentToolSpec.withResources(A => Vector[ToolResource])` declares what a call touches (`Operation` is `Read`,
   `Write`, `Delete`, `Execute`, `Network` or `Invoke`; the default is `(Invoke, <name>)`), and

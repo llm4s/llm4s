@@ -19,8 +19,7 @@ import java.util.regex.Pattern
  * `under`, and a path of one backend that a deeper mount shadows is never listed.
  */
 @Experimental
-final class CompositeBackend private (default: FileBackend, routes: Vector[(VPath, FileBackend)])
-    extends FileBackend:
+final class CompositeBackend private (default: FileBackend, routes: Vector[(VPath, FileBackend)]) extends FileBackend:
 
   // deepest first, so the first mount a path is within is its longest
   private val mounts: Vector[(VPath, FileBackend)] =
@@ -28,7 +27,7 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
 
   val writes: Set[StateKey[?, ?]] = mounts.iterator.flatMap(_._2.writes).toSet
 
-  private final case class Routed(mount: VPath, backend: FileBackend, path: VPath)
+  final private case class Routed(mount: VPath, backend: FileBackend, path: VPath)
 
   private def route(path: VPath): Routed =
     val (mount, backend) = mounts.find((m, _) => path.isWithin(m)).get // the root mount takes every path

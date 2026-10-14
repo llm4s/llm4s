@@ -44,7 +44,8 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
       }.toMap
     }
 
-  def ls(dir: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] = all(ctx).flatMap(FileTree.ls(_, dir, limit))
+  def ls(dir: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
+    all(ctx).flatMap(FileTree.ls(_, dir, limit))
 
   def read(file: VPath, offset: Int, limit: Int, ctx: FileContext): Result[FileLines] =
     all(ctx).flatMap(FileTree.read(_, file, offset, limit))

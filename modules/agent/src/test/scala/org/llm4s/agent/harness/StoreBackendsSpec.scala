@@ -22,7 +22,9 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private def call(tenant: Option[String] = None): FileContext = {
     val config = RunConfig().withTenantId(tenant.map(TenantId(_)))
-    FileContext(ToolContext(testRunContext(config), ToolCallId("c"), IdempotencyKey(UUID.randomUUID().toString), stateOf()))
+    FileContext(
+      ToolContext(testRunContext(config), ToolCallId("c"), IdempotencyKey(UUID.randomUUID().toString), stateOf())
+    )
   }
 
   private def done[A](r: Result[(A, StateUpdate)]): A = r.value._1
@@ -61,7 +63,9 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     store.put(ns, "a", ujson.Str("0123456789"), call()).value // 1 + 12
     store.put(ns, "b", ujson.Str("0123456789"), call()).value // 26
     store.put(ns, "c", ujson.Str(""), call()).left.value.message should include("3 items")
-    store.put(ns, "b", ujson.Str("0123456789012345"), call()).left.value.message should include("bytes, over its limit of 30")
+    store.put(ns, "b", ujson.Str("0123456789012345"), call()).left.value.message should include(
+      "bytes, over its limit of 30"
+    )
     store.get(ns, "c").value shouldBe None
     an[IllegalArgumentException] should be thrownBy StoreLimits(maxItemBytes = 2 << 20)
   }
@@ -71,7 +75,9 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     val same  = call()
     val key   = same.effectKey("test.put", "k")
     val runs  = new AtomicInteger()
-    def change(current: Option[StoreItem]) = { runs.incrementAndGet(); Right(StoreChange.Put(ujson.Str("first"), current.isEmpty)) }
+    def change(current: Option[StoreItem]) = {
+      runs.incrementAndGet(); Right(StoreChange.Put(ujson.Str("first"), current.isEmpty))
+    }
     store.modify[Boolean](ns, "k", key)(change).value shouldBe true
     store.put(ns, "k", ujson.Str("someone else"), call()).value
     store.modify[Boolean](ns, "k", key)(change).value shouldBe true
@@ -85,7 +91,10 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "record nothing for a refused change" in {
     val store = InMemoryLongTermStore()
     val key   = call().effectKey("test.put", "k")
-    store.modify[Boolean](ns, "k", key)(_ => Left(BackendRefused("put", "k", "no"))).left.value shouldBe a[BackendRefused]
+    store
+      .modify[Boolean](ns, "k", key)(_ => Left(BackendRefused("put", "k", "no")))
+      .left
+      .value shouldBe a[BackendRefused]
     store.appliedKeys shouldBe 0
   }
 
@@ -103,11 +112,17 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     val files = StoreFileBackend(InMemoryLongTermStore(clock = clock))
     done(files.write(p("/user/prefs.md"), "likes scala\nlikes tea", call()))
     done(files.edit(p("/user/prefs.md"), "tea", "coffee", replaceAll = false, call())) shouldBe FileEdited(1)
-    files.edit(p("/user/prefs.md"), "tea", "x", replaceAll = false, call()).left.value.message should include("not found")
+    files.edit(p("/user/prefs.md"), "tea", "x", replaceAll = false, call()).left.value.message should include(
+      "not found"
+    )
     files.edit(p("/nope"), "a", "b", replaceAll = false, call()).left.value.message should include("not found")
-    files.ls(VPath.root, 10, call()).value.items.map(i => (i.path.value, i.isDirectory)) shouldBe Vector("/user" -> true)
+    files.ls(VPath.root, 10, call()).value.items.map(i => (i.path.value, i.isDirectory)) shouldBe Vector(
+      "/user" -> true
+    )
     files.glob(Glob("**/*.md"), VPath.root, 10, call()).value.items shouldBe Vector(p("/user/prefs.md"))
-    files.grep("coffee", VPath.root, None, 10, call()).value.items shouldBe Vector(GrepMatch(p("/user/prefs.md"), 2, "likes coffee"))
+    files.grep("coffee", VPath.root, None, 10, call()).value.items shouldBe Vector(
+      GrepMatch(p("/user/prefs.md"), 2, "likes coffee")
+    )
     files.write(p("/user"), "x", call()).left.value.message should include("is a directory")
     files.delete(p("/user"), call()).left.value.message should include("is a directory")
     done(files.delete(p("/user/prefs.md"), call())) shouldBe FileDeleted(wasDirectory = false)
@@ -132,9 +147,9 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   // Sandbox
 
-  private final class CountingRunner(output: String = "ok") extends SandboxRunner {
-    val runs                                 = new AtomicInteger()
-    def locks(workdir: VPath): Set[LockKey]  = Set(LockKey("workspace", "w"))
+  final private class CountingRunner(output: String = "ok") extends SandboxRunner {
+    val runs                                = new AtomicInteger()
+    def locks(workdir: VPath): Set[LockKey] = Set(LockKey("workspace", "w"))
     def run(command: String, workdir: VPath, timeout: FiniteDuration, ctx: FileContext): Result[ExecResult] = {
       runs.incrementAndGet()
       Right(ExecResult(0, output, s"$command in ${workdir.value}"))
@@ -166,7 +181,11 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "resolve its runner per call" in {
     val runnerA = new CountingRunner("a")
     val sandbox = SandboxBackend.resolved(_ => Set(LockKey("sandbox")))(ctx =>
-      ctx.run.config.tenantId.map(_.value).filter(_ == "a").map(_ => runnerA).toRight(BackendRefused("execute", "x", "no sandbox"))
+      ctx.run.config.tenantId
+        .map(_.value)
+        .filter(_ == "a")
+        .map(_ => runnerA)
+        .toRight(BackendRefused("execute", "x", "no sandbox"))
     )
     sandbox.execute("ls", VPath.root, 1.second, call(Some("a"))).value.stdout shouldBe "a"
     sandbox.execute("ls", VPath.root, 1.second, call(Some("b"))).left.value shouldBe a[BackendRefused]

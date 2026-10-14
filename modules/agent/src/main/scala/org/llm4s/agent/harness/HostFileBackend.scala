@@ -73,7 +73,8 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
       .foldLeft[Result[Path]](Right(root)) { (acc, segment) =>
         acc.flatMap { parent =>
           val next = parent.resolve(segment)
-          if Files.isSymbolicLink(next) then refused(operation, path, "is or is beneath a symbolic link, which is refused")
+          if Files.isSymbolicLink(next) then
+            refused(operation, path, "is or is beneath a symbolic link, which is refused")
           else Right(next)
         }
       }
@@ -96,12 +97,12 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
   /** An I/O step that has changed nothing: a file-system refusal is the model's; anything else fails. */
   private def io[A](operation: String, path: VPath)(body: => Result[A]): Result[A] =
     Try(body) match
-      case Success(result)                   => result
-      case Failure(_: NoSuchFileException)   => refused(operation, path, "not found")
-      case Failure(_: AccessDeniedException) => refused(operation, path, "permission denied")
-      case Failure(e: FileSystemException)   => refused(operation, path, Option(e.getReason).getOrElse(e.toString))
+      case Success(result)                      => result
+      case Failure(_: NoSuchFileException)      => refused(operation, path, "not found")
+      case Failure(_: AccessDeniedException)    => refused(operation, path, "permission denied")
+      case Failure(e: FileSystemException)      => refused(operation, path, Option(e.getReason).getOrElse(e.toString))
       case Failure(_: CharacterCodingException) => refused(operation, path, "is not UTF-8 text")
-      case failure                           => failure.toResult.flatten
+      case failure                              => failure.toResult.flatten
 
   // ---- content
 
@@ -109,7 +110,8 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
     if !exists(p) then refused(operation, path, "not found")
     else if isDir(p) then refused(operation, path, "is a directory")
     else if !isFile(p) then refused(operation, path, "is not a regular file")
-    else if Files.size(p) > maxFileBytes then refused(operation, path, s"is larger than the limit of $maxFileBytes bytes")
+    else if Files.size(p) > maxFileBytes then
+      refused(operation, path, s"is larger than the limit of $maxFileBytes bytes")
     else Right(Files.readAllBytes(p))
 
   private def text(bytes: Array[Byte]): String =
@@ -155,13 +157,15 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
   private def guarded[A: upickle.default.ReadWriter](operation: String, path: VPath, ctx: FileContext)(
     plan: Path => Result[ReplayGuard.Plan[A]]
   ): Result[(A, StateUpdate)] =
-    resolve(operation, path).flatMap { target =>
-      exclusively(target) {
-        ReplayGuard.verifiable[A](ctx.run, ctx.effectKey(s"file.$operation", path.value))(
-          io(operation, path)(digest(operation, path, target))
-        )(io(operation, path)(plan(target)))
+    resolve(operation, path)
+      .flatMap { target =>
+        exclusively(target) {
+          ReplayGuard.verifiable[A](ctx.run, ctx.effectKey(s"file.$operation", path.value))(
+            io(operation, path)(digest(operation, path, target))
+          )(io(operation, path)(plan(target)))
+        }
       }
-    }.map(a => (a, StateUpdate.empty))
+      .map(a => (a, StateUpdate.empty))
 
   // ---- mutations
 
@@ -171,9 +175,10 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
       if path == VPath.root then refused("write", path, "is the root directory")
       else
         Text.binaryReason(content) match
-          case Some(reason)                                 => refused("write", path, reason)
-          case None if bytes.length > maxFileBytes          => refused("write", path, s"content is larger than the limit of $maxFileBytes bytes")
-          case None if isDir(target)                        => refused("write", path, "is a directory")
+          case Some(reason) => refused("write", path, reason)
+          case None if bytes.length > maxFileBytes =>
+            refused("write", path, s"content is larger than the limit of $maxFileBytes bytes")
+          case None if isDir(target) => refused("write", path, "is a directory")
           case None =>
             for
               _      <- underDirectories("write", path, target)
@@ -196,7 +201,8 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
         edited <- Text.edited(path, text(bytes), old, replacement, replaceAll)
         next = edited._1.getBytes(StandardCharsets.UTF_8)
         _ <-
-          if next.length > maxFileBytes then refused("edit", path, s"the result is larger than the limit of $maxFileBytes bytes")
+          if next.length > maxFileBytes then
+            refused("edit", path, s"the result is larger than the limit of $maxFileBytes bytes")
           else Right(())
       yield ReplayGuard.Plan(fileCheck(bytes), fileCheck(next), FileEdited(edited._2))(
         atomicWrite(target, next).map(_ => FileEdited(edited._2))
@@ -211,9 +217,11 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
         if Using.resource(Files.list(target))(_.findAny().isPresent) then
           refused("delete", path, "is a directory that is not empty; delete the files in it")
         else
-          Right(ReplayGuard.Plan(directoryCheck, StateCheck.absent, FileDeleted(wasDirectory = true))(
-            Try(Files.delete(target)).toResult.map(_ => FileDeleted(wasDirectory = true))
-          ))
+          Right(
+            ReplayGuard.Plan(directoryCheck, StateCheck.absent, FileDeleted(wasDirectory = true))(
+              Try(Files.delete(target)).toResult.map(_ => FileDeleted(wasDirectory = true))
+            )
+          )
       else
         digest("delete", path, target).map(before =>
           ReplayGuard.Plan(before, StateCheck.absent, FileDeleted(wasDirectory = false))(
@@ -229,7 +237,8 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
     val names = Using.resource(Files.newDirectoryStream(dir)) { stream =>
       stream.iterator().asScala.take(max + 1).toVector
     }
-    val kept = names.take(max).filterNot(p => Files.isSymbolicLink(p) || HostFileBackend.isTemporary(p.getFileName.toString))
+    val kept =
+      names.take(max).filterNot(p => Files.isSymbolicLink(p) || HostFileBackend.isTemporary(p.getFileName.toString))
     (kept.map(p => p.getFileName.toString -> p).sortBy(_._1), names.size > max)
 
   def ls(path: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
@@ -242,7 +251,12 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
           val infos = entries.flatMap { (name, p) =>
             (path / name).toOption.map { child =>
               val directory = isDir(p)
-              FileInfo(child, directory, if directory then 0L else Files.size(p), Some(Files.getLastModifiedTime(p).toInstant))
+              FileInfo(
+                child,
+                directory,
+                if directory then 0L else Files.size(p),
+                Some(Files.getLastModifiedTime(p).toInstant)
+              )
             }
           }
           val listing = Listing.of(infos.iterator, limit)
@@ -259,10 +273,11 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
     yield FileLines(lines.slice(offset, offset + limit), offset, lines.size)
 
   /** The files within `under`, depth first in name order, stopping after `maxScanEntries` entries. */
-  private final class Walk(start: Path, from: VPath):
+  final private class Walk(start: Path, from: VPath):
     private var visited = 0
     private var cut     = false
     private def full    = visited > maxScanEntries
+
     /** Whether the walk stopped before seeing every entry. */
     def capped: Boolean = full || cut
     def files: Iterator[(VPath, Path)] =
@@ -277,10 +292,10 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
           if full then Iterator.empty
           else
             (at / name).toOption match
-              case None                => Iterator.empty
-              case Some(v) if isDir(p) => within(p, v)
+              case None                 => Iterator.empty
+              case Some(v) if isDir(p)  => within(p, v)
               case Some(v) if isFile(p) => Iterator(v -> p)
-              case _                   => Iterator.empty
+              case _                    => Iterator.empty
         }
 
   private def walked[A](operation: String, under: VPath, limit: Int)(

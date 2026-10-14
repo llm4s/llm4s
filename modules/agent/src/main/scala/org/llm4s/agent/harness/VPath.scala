@@ -30,14 +30,15 @@ object VPath:
 
   /** `s` as a path, or a `ValidationError` saying why it is not one. */
   def apply(s: String): Result[VPath] =
-    val trimmed = if s.length > 1 && s.endsWith("/") then s.dropRight(1) else s
+    val trimmed                 = if s.length > 1 && s.endsWith("/") then s.dropRight(1) else s
     def invalid(reason: String) = Left(ValidationError("path", s"'$s' $reason"))
     if !trimmed.startsWith("/") then invalid("is not absolute")
     else if trimmed.getBytes(UTF_8).length > MaxBytes then invalid(s"is longer than $MaxBytes bytes")
     else if trimmed == "/" then Right(root)
-    else trimmed.drop(1).split("/", -1).iterator.map(segmentError).collectFirst { case Some(r) => r } match
-      case Some(reason) => invalid(reason)
-      case None         => Right(trimmed)
+    else
+      trimmed.drop(1).split("/", -1).iterator.map(segmentError).collectFirst { case Some(r) => r } match
+        case Some(reason) => invalid(reason)
+        case None         => Right(trimmed)
 
   private def segmentError(segment: String): Option[String] =
     if segment.isEmpty then Some("has an empty segment")

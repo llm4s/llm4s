@@ -108,7 +108,10 @@ final class StateFileBackend private (
       entry  <- FileTree.fileOf("edit", all, path)
       edited <- Text.edited(path, entry.content, old, replacement, replaceAll)
       _      <- admit("edit", all, path, edited._1)
-    yield (FileEdited(edited._2), StateUpdate.update(files, FileUpdate.Put(path, FileEntry(edited._1, clock.instant()))))
+    yield (
+      FileEdited(edited._2),
+      StateUpdate.update(files, FileUpdate.Put(path, FileEntry(edited._1, clock.instant())))
+    )
 
   def delete(path: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
     for

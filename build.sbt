@@ -1576,10 +1576,11 @@ lazy val agent = (project in file("modules/agent"))
 // `deleteThread`, run-claim leases and fencing, and two `GraphRuntime`s contending over one store -
 // plus the `ManualClock` it drives claim expiry with. It is published so that a store outside this
 // repository proves itself the way the in-repo ones do, as `llm4s-provider-testkit` is for providers.
+// It also has `FileBackendContract` (#1904), whose agent runs are driven by `llm4s-testkit`'s `ScriptedLLMClient`.
 // A test library, so ScalaTest is a compile dependency. `llm4s-agent`'s own tests cannot use it - that
 // would be a project cycle - so `InMemoryCheckpointer` passes it here, in the testkit's own tests.
 lazy val agentTestkit = (project in file("modules/agent-testkit"))
-  .dependsOn(agent)
+  .dependsOn(agent, testkit)
   .settings(
     name := "llm4s-agent-testkit",
     commonSettings,

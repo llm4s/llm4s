@@ -52,7 +52,10 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "list mounts as directories, even where the routed backend has nothing" in {
     composite.ls(VPath.root, 10, ctx).value.items.map(i => (i.path.value, i.isDirectory)) shouldBe
       Vector("/a.txt" -> false, "/scratch" -> true)
-    composite.ls(p("/scratch"), 10, ctx).value.items.map(_.path.value) shouldBe Vector("/scratch/b.txt", "/scratch/deep")
+    composite.ls(p("/scratch"), 10, ctx).value.items.map(_.path.value) shouldBe Vector(
+      "/scratch/b.txt",
+      "/scratch/deep"
+    )
   }
 
   it should "glob and grep across every backend beneath `under`, in path order" in {
@@ -73,7 +76,11 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     val (_, update) = scratch.write(p("/deep/hidden.txt"), "hidden", ctx).value
     val shadowed    = committed(state, update).value
     val sctx        = FileContext(testRunContext(), shadowed)
-    composite.glob(Glob("**"), VPath.root, 10, sctx).value.items.map(_.value) should not contain "/scratch/deep/hidden.txt"
+    composite
+      .glob(Glob("**"), VPath.root, 10, sctx)
+      .value
+      .items
+      .map(_.value) should not contain "/scratch/deep/hidden.txt"
     composite.ls(p("/scratch/deep"), 10, sctx).value.items.map(_.path.value) shouldBe Vector("/scratch/deep/c.txt")
   }
 
@@ -92,9 +99,9 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
         case other     => Left(ValidationError("tenant", s"no backend for $other"))
       }
     }
-    var s        = stateOf(forA.files, forB.files)
+    var s             = stateOf(forA.files, forB.files)
     def in(t: String) = FileContext(testRunContext(RunConfig().withTenantId(TenantId(t))), s)
-    val (_, update) = resolved.write(p("/x"), "for a", in("a")).value
+    val (_, update)   = resolved.write(p("/x"), "for a", in("a")).value
     s = committed(s, update).value
     resolved.read(p("/x"), 0, 1, in("a")).value.lines shouldBe Vector("for a")
     resolved.read(p("/x"), 0, 1, in("b")).left.value shouldBe a[BackendRefused]
