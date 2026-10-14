@@ -81,6 +81,12 @@ Design §4.23. Additive, bar one reserved key: an agent without `PermissionMiddl
 - **Adopting locks reshapes the agent's graph.** The loop registers `tool-queue` only for an agent with a tool that declares `withLocks`, so the first tool to adopt locks changes the agent's structural fingerprint and refuses the threads checkpointed before with `RestoreRejected`: finish or `forget` them first. Once an agent has the key, changing lock functions is safe for threads in flight: a batch keeps the lock schedule it was made with. Agents without locks, timeouts and resources included, restore their existing threads unchanged.
 - **Locked calls cost supersteps.** Each further round of a batch whose calls hold conflicting locks costs two supersteps; raise `RunBudgets.maxSupersteps` if a long batch of conflicting calls reaches it.
 
+### Typed custom streams (#1914)
+
+`EventHandlers` and the effect modules' `events(run, ...)` are additions. One behaviour changes:
+
+- **An fs2, ZIO, Pekko or Java agent stream whose consumer stops draining now fails** once more than `Agent.StreamCapacity` (1024) durable events wait for it, with an error naming the last `seq` it took, as the runtime already disconnects a listener that far behind (`Disconnected(lastSeq, Lagging)`). Before, the stream's buffer kept every durable event without limit. A `stream*` that fails this way cancels its turn, as any failure of those streams does; resume from the thread's log with `GraphRuntime.subscribe(threadId, afterSeq = lastSeq)`. A consumer that keeps up, even slowly, is unaffected: a run's own events stay far below the bound.
+
 ### Replay of external effects (#1921)
 
 Effects outside thread state replay through `ReplayGuard`: an intent and an outcome per `EffectKey`, kept in the thread's own store. Code that only runs agents or graphs compiles and works unchanged. Code that implements `Checkpointer`, or wraps one, changes:
