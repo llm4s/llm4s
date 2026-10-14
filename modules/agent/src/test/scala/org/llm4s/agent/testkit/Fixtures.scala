@@ -5,7 +5,8 @@ import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReferen
 import java.util.concurrent.locks.LockSupport
 
 import org.llm4s.agent.{ Agent, AgentBuilder }
-import org.llm4s.agent.graph.{ GraphError, RunContext, ThreadId }
+import org.llm4s.agent.graph.{ EventHandlers, EventType, GraphError, RunContext, StreamEvent, ThreadId }
+import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContext, ToolOutcome, ToolSet }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId }
 import org.llm4s.error.{ CancelledError, LLMError, SimpleError, UnknownError }
 import org.llm4s.llmconnect.LLMClient
@@ -15,8 +16,10 @@ import org.llm4s.llmconnect.model.{
   CompletionOptions,
   Conversation,
   StreamedChunk,
+  ToolCall,
   UserMessage
 }
+import org.llm4s.toolapi.Schema
 import org.llm4s.types.Result
 
 /**
@@ -191,4 +194,73 @@ object Fixtures {
   }
 
   val boom: Result[Completion] = Left(SimpleError("boom"))
+
+  /** A tool's own typed events, for the typed-stream specs of the effect modules. */
+  object Pings {
+    final case class Ping(n: Int) derives upickle.default.ReadWriter
+    final case class Arg(text: String) derives upickle.default.ReadWriter
+
+    /** Emitted durably by the tools below. */
+    val Pinged: EventType[Ping] = EventType[Ping]("test.pinged", 1)
+
+    /** Sent live by the tools below. */
+    val Progressed: EventType[Ping] = EventType[Ping]("test.progressed", 1)
+
+    /**
+     * An agent whose first `turns` model calls each call the tool `pinger`, which runs `body`, and whose
+     * next call answers "done"; every later call fails.
+     */
+    def agent(body: ToolContext => ToolOutcome, turns: Int = 1): Agent = {
+      val calls = new AtomicInteger(0)
+      val client = new Scripted(
+        onComplete = () => {
+          val n = calls.getAndIncrement()
+          if (n < turns) {
+            val call = ToolCall(s"call-$n", "pinger", ujson.Obj("text" -> "x"))
+            Right(Completion(s"c$n", 0L, "", "m", AssistantMessage(None, Seq(call)), toolCalls = List(call)))
+          } else if (n == turns) Right(Completion(s"c$n", 0L, "done", "m", AssistantMessage(Some("done"))))
+          else boom
+        }
+      )
+      val spec =
+        AgentToolSpec[Arg](
+          "pinger",
+          "Pings",
+          Schema.`object`[Arg]("pinger").withRequiredField("text", Schema.string("t"))
+        )
+      val tools = ToolSet.of(AgentTool(spec)((_, context) => body(context))) match {
+        case Right(set) => set
+        case Left(e)    => throw new AssertionError(e.message)
+      }
+      agentOf(client)(_.withTools(tools))
+    }
+
+    /**
+     * An agent whose run commits more durable events than a stream holds for a stalled consumer: 25 tool
+     * calls, one per model call, each committing 50 `Pinged` events - each commit small enough to fit a
+     * subscription's queue, all of them together more than `Agent.StreamCapacity`.
+     */
+    def flooding(): Agent =
+      agent(
+        context => {
+          (1 to 50).foreach(i => Pinged.emit(context.run, Ping(i)))
+          ToolOutcome.Success(ujson.Str("ok"))
+        },
+        turns = 25
+      )
+
+    /** The `seq` of every durable event, so a spec can tell which the consumer received. */
+    val seqs: EventHandlers[Option[Long]] =
+      EventHandlers.on(Progressed)(_ => Option.empty[Long]).otherwise {
+        case StreamEvent.Durable(record) => Some(record.seq)
+        case _                           => None
+      }
+
+    /** Emits `Pinged(1)` durably and `Progressed(2)` live, then succeeds. */
+    val pinging: ToolContext => ToolOutcome = context => {
+      Pinged.emit(context.run, Ping(1))
+      Progressed.progress(context.run, Ping(2))
+      ToolOutcome.Success(ujson.Str("ok"))
+    }
+  }
 }

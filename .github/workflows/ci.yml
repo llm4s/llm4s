@@ -776,6 +776,46 @@ jobs:
             **/target/scala-3.7.1/test-reports/
           retention-days: 5
 
+  # The performance tier: tests tagged `PerformanceTest` (org.llm4s.testutil.TestTags), which check how an
+  # operation's cost grows with its input - linear, not quadratic - with `LinearTime.assertLinear`. `sbt test`
+  # and the coverage run leave them out: algorithmic growth is the same on every platform, so running them on
+  # Windows and under coverage instrumentation only multiplied their cost (they were most of each test job's
+  # time, #1932). Here they run once, uninstrumented, on Linux, in parallel with the other test jobs, and nightly
+  # in performance-nightly.yml. Gating, through `All Tests Pass`: it is the only check of linear-time growth;
+  # `sbt test` keeps only megabyte hang guards.
+  performance-tests:
+    name: Performance tests
+    needs: [quick-checks]
+    runs-on: ubuntu-latest
+    # Healthy runs take about 15 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Run performance tests
+        run: sbt testPerformance
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-performance
+          path: |
+            **/target/test-reports/
+            **/target/scala-3.7.1/test-reports/
+          retention-days: 5
+
   # Tier 2: containerised integration tests — pgvector, Qdrant and Neo4j as service
   # containers. Reproducible and secret-free, so unlike the Ollama and cloud tiers this
   # runs on every PR. `LLM4S_IT_STRICT=true` makes a suite that cannot reach its service
@@ -1011,7 +1051,7 @@ jobs:
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest]
+    needs: [test, performance-tests, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1021,6 +1061,10 @@ jobs:
         run: |
           if [[ "${{ needs.test.result }}" != "success" ]]; then
             echo "Some tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.performance-tests.result }}" != "success" ]]; then
+            echo "Performance tests failed"
             exit 1
           fi
           if [[ "${{ needs.coverage.result }}" != "success" ]]; then
