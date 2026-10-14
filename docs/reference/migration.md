@@ -78,6 +78,14 @@ Design §4.23. Additive, bar one reserved key: an agent without `PermissionMiddl
 - **Adopting locks reshapes the agent's graph.** The loop registers `tool-queue` only for an agent with a tool that declares `withLocks`, so the first tool to adopt locks changes the agent's structural fingerprint and refuses the threads checkpointed before with `RestoreRejected`: finish or `forget` them first. Once an agent has the key, changing lock functions is safe for threads in flight: a batch keeps the lock schedule it was made with. Agents without locks, timeouts and resources included, restore their existing threads unchanged.
 - **Locked calls cost supersteps.** Each further round of a batch whose calls hold conflicting locks costs two supersteps; raise `RunBudgets.maxSupersteps` if a long batch of conflicting calls reaches it.
 
+### Todos (#1907)
+
+Design §4.30. Additive: `TodoMiddleware` (`org.llm4s.agent.harness`) gives an agent a `write_todos` tool and a plan prompt section.
+
+- **Adding `TodoMiddleware` to an existing agent reshapes its graph.** It registers the `todos` key, and its tool's lock registers `tool-queue`, so the agent's structural fingerprint changes and threads checkpointed before are refused with `RestoreRejected`: finish or `forget` them first. Agents without it are unchanged.
+- **`todos` is a key id the middleware owns.** A `StateKey` of your own with id `todos` in a family that also uses `TodoMiddleware` is refused at build, as two keys with one id are. Rename it.
+- **With `PermissionMiddleware`, allow the tool**: `PermissionRule.allow(Operation.Invoke, "write_todos")`.
+
 ## Stage 2 migration: durable execution
 
 Not in a release yet. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/1699)) makes agent and graph threads durable and adds human review. One note covers the whole stage; each slice adds its part here as it lands:

@@ -420,6 +420,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.23 | [Stage 3 slice C2: tool permissions, timeouts and batch locks](typed-agent-runtime/4.23-stage-3-slice-c2-tool-permissions-timeouts-locks.md) ([#1903](https://github.com/llm4s/llm4s/issues/1903)) |
 | 4.26 | [Stage 3 slice F8a: response format for the agent's answer](typed-agent-runtime/4.26-stage-3-slice-f8a-response-format.md) ([#1912](https://github.com/llm4s/llm4s/issues/1912)) |
 | 4.28 | [Stage 3 slice F9: typed custom streams](typed-agent-runtime/4.28-stage-3-slice-f9-typed-custom-streams.md) ([#1914](https://github.com/llm4s/llm4s/issues/1914)) |
+| 4.30 | [Stage 3 slice F3: todos](typed-agent-runtime/4.30-stage-3-slice-f3-todos.md) ([#1907](https://github.com/llm4s/llm4s/issues/1907)) |
 
 ### 4.9 Stage 0 carry-forward
 

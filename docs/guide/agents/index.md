@@ -435,6 +435,40 @@ threads. An approval edit may narrow a call's locks (`/prod` to `/prod/app`) but
 its proposed arguments did not cover: such an edit is refused, the call does not run, and the model
 sees why.
 
+### Todos
+
+`TodoMiddleware` gives an agent a plan: a `write_todos` tool that replaces the thread's todo list,
+and a prompt section that shows the list to the model on every model step.
+
+```scala
+import org.llm4s.agent.harness.{HarnessEvents, TodoMiddleware}
+
+val agent = Agent.builder("researcher", client)
+  .withMiddleware(new TodoMiddleware(maxTodos = 20, maxTodoChars = 200))
+  .build()
+
+agent.stream(threadId, "Write a report on ...") {
+  case HarnessEvents.TodosProgress(p) => p.todos.foreach(t => println(s"[${t.status.wire}] ${t.content}"))
+  case _                               => ()
+}
+```
+
+- **The model sends the whole list** - each item's `content`, `status` (`pending`, `in_progress`,
+  `done`) and, to keep an item, its `id` - and it replaces the plan. The tool assigns ids: an item
+  without one keeps the id of an item with the same content, or gets a new one, and an id is never
+  reused within a thread. An unknown id, an id given twice, a list over `maxTodos` (default 50) or an
+  item over `maxTodoChars` code points (default 200) is refused as an error the model sees.
+- **The plan is thread state**, in `TodoMiddleware.key` (a `TodoList`): it is checkpointed, read
+  by the next turn, and restored by an output Block with the rest of the turn. Two `write_todos`
+  calls in one message run in turn (the tool locks `todos`), the second seeing the first's list.
+- **Events.** Each change emits a durable `HarnessEvents.TodosUpdated` with ids and statuses only,
+  and a live `HarnessEvents.TodosProgress` with the whole list.
+- **The plan guides the model only.** It changes no route and no permission: a
+  `PermissionMiddleware` needs `PermissionRule.allow(Operation.Invoke, "write_todos")` for the tool.
+- **Adding it to an existing agent reshapes its graph** (it registers the `todos` key, and the
+  tool's lock registers `tool-queue`), so threads checkpointed before are refused with
+  `RestoreRejected`: finish or `forget` them first.
+
 ---
 
 ## Features
