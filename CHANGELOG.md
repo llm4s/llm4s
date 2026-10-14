@@ -16,6 +16,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (pending tasks, parked continuations, open joins) also needs the same version, unchanged out-edges for every stored
   node and unchanged joins over stored nodes, so a node added is one the restored run cannot reach. A snapshot written
   before this change (`shape` absent) restores into its own version when the graph only gained keys.
+- **Replay of external effects: `ReplayGuard`, `EffectKey` and `ReplayContract`** ([#1921](https://github.com/llm4s/llm4s/issues/1921)).
+  This is Phase 3 slice C4. A tool or hook performs an effect outside thread state through `ReplayGuard`, which has
+  one guard per `ReplaySupport`: `transactional` (the target records an applied key atomically, `AppliedKeys`),
+  `verifiable` (the target can be read as a `StateCheck` digest) and `unverifiable`. Keys come only from
+  `ToolContext.effectKey` / `RunContext.effectKey`, over the call's `IdempotencyKey` or the new `RunContext.taskKey`.
+  - The guard keeps an intent and an outcome per key as `EffectRecord`s in the thread's own `Checkpointer`, fenced
+    by the run's claim, so a replay returns the original outcome rather than repeating the effect.
+  - Targets fence a run that lost its claim themselves. A transactional target refuses a claim token older than the
+    newest it has seen for the key's `scope` (`AppliedKeys.forget(key, token)`, effect `token => ...`). A verifiable
+    target's effect is a compare-and-set against the plan's `before`.
+  - Effect identity names the phase of a call: `execute` and its re-runs (approval, `recover`) share one, and
+    each answered `resume` of an asking tool has its own (`ToolQuestionRequest.phase`). A hook keys by its
+    logical task, the one a continuation stands in for.
+  - The commit that ends a task's window releases its records (`Commit.releasesEffect`), and `deleteThread`
+    removes them. Nothing removes them by age.
+  - `llm4s-agent-testkit` adds `ReplayContract`, which crashes a run at each point around an effect and recovers it.
+    Every external target of the harness passes it, for each support class.
+  - The SQLite store keeps the records in a new table (schema version 3, migrated on open).
+  - Breaking: `Checkpointer.effect`, `Commit.effects` and `GraphError.EffectReplayRefused` are new. See the
+    migration guide and design record §4.24.
 - **Todos: a `write_todos` tool, the thread's plan and a plan prompt section** ([#1907](https://github.com/llm4s/llm4s/issues/1907),
   design §4.30): `new TodoMiddleware(maxTodos = 50, maxTodoChars = 200)` (`org.llm4s.agent.harness`, `llm4s-agent`)
   gives an agent a `write_todos` tool that replaces the plan (`TodoMiddleware.key`, a `TodoList` of

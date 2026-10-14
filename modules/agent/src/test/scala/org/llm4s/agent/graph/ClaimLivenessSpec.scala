@@ -80,7 +80,8 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       outcome
     }
     def commit(threadId: ThreadId, commit: Commit) = onCommit(commit).getOrElse(underlying.commit(threadId, commit))
-    def latest(threadId: ThreadId)                 = onLatest().getOrElse(underlying.latest(threadId))
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey) = underlying.effect(threadId, key)
+    def latest(threadId: ThreadId) = onLatest().getOrElse(underlying.latest(threadId))
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = {
       val read = underlying.eventsAfter(threadId, afterSeq, limit)
       onEventsAfter(threadId)
@@ -149,6 +150,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       if all then serialised { changes.incrementAndGet(); underlying.commit(threadId, commit) }
       else underlying.commit(threadId, commit)
     }
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey) = underlying.effect(threadId, key)
     def latest(threadId: ThreadId) =
       if all then {
         renewing.await(5, TimeUnit.SECONDS): Unit

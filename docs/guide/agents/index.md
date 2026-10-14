@@ -371,6 +371,61 @@ model request made again because the first response was never stored. The bounda
   `context.run.position.fencingToken` is the run's claim token, which grows with every claim on the
   thread, so the system keeps the highest token it has seen and refuses a lower one.
 
+**Guarded effects: replay without repeating.** For a target that does not take an idempotency key,
+such as a file, a sandbox or a store, perform the effect through `ReplayGuard`. The guard records an
+intent before the effect and its outcome after, in the thread's own store, under the run's claim. A
+call that runs again then gets its original outcome back instead of repeating the work. The target
+declares one `ReplaySupport`, and each has its own guard:
+
+- `ReplayGuard.transactional` is for a target that records the key with the outcome in the same
+  transaction as the effect, and implements `AppliedKeys`. The effect and `forget` are given the
+  run's claim token, and the target refuses a token older than the newest it has seen for the
+  key's `scope` (its thread). So a run that lost its claim can neither apply, nor read back, nor
+  forget anything once its successor has touched the target.
+- `ReplayGuard.verifiable` is for a target that can read a digest (`StateCheck`) of what the effect
+  touches. If the effect began but its outcome was not recorded, the guard checks the target. It
+  returns the presumed outcome if the effect landed, runs the effect again if it did not, and
+  refuses if another thread changed the target in between. The effect must be a compare-and-set
+  against `before`, so that a stalled run's write cannot land on its successor's.
+- `ReplayGuard.unverifiable` is for everything else. If the effect began but its outcome was not
+  recorded, the guard refuses to run it again ("it may already have run"), unless the tool is
+  idempotent.
+
+```scala
+import org.llm4s.agent.graph.{GraphError, ReplayGuard, StateCheck}
+
+val append = AgentTool(appendSpec) { (args, context) =>
+  val key = context.effectKey("file.append", args.path)
+  ReplayGuard.verifiable[Int](context.run, key)(Right(StateCheck.of(read(args.path)))) {
+    val before = read(args.path)
+    val after  = before + args.text
+    Right(ReplayGuard.Plan(StateCheck.of(before), StateCheck.of(after), after.length) {
+      // under a lock every writer takes: write only if the file is still what the plan read
+      writeIfUnchanged(args.path, StateCheck.of(before), after).map(_ => after.length)
+    })
+  } match
+    case Right(length)                           => ToolOutcome.Success(ujson.Num(length))
+    case Left(r: GraphError.EffectReplayRefused) => ToolOutcome.Error(r.message)
+    case Left(other)                             => ToolOutcome.Fatal(other) // outcome unknown: recover replays it
+}
+```
+
+What each guard does when the run crashed at each point, and why, is in design record
+[§4.24](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md). The
+rules a caller relies on:
+
+- **Build each key with `effectKey`.** In a tool, `context.effectKey(operation, discriminator*)`
+  derives the key from the call's idempotency key. In a hook or node, `RunContext.effectKey` derives
+  it from the task's `taskKey`. Give each effect of a task its own operation or discriminator.
+- **A fork's re-run of a call is a new effect.** The key includes the thread.
+- **The evidence is kept exactly as long as the task can run again.** That is until the commit that
+  finishes the task, however long the thread waits. `prune` never removes it, and `deleteThread`
+  removes it with the thread.
+- **A Block does not undo an external effect.** A guardrail that blocks a turn restores every state
+  key the turn wrote, its messages included (§4.22), but a file the turn wrote on the host, a
+  command it ran or a record it stored stays as it is. The turn's replay evidence goes with its
+  closing commit, so nothing replays it either.
+
 ### Tool Permissions, Timeouts and Locks
 
 An `AgentToolSpec` can declare what a call touches, how long one run may take, and which locks it

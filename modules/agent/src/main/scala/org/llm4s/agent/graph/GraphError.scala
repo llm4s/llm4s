@@ -312,3 +312,11 @@ object GraphError:
    */
   final case class RunCrashed(threadId: String, cause: Throwable) extends GraphError with NonRecoverableError:
     override val message: String = s"Run on thread '$threadId' crashed: $cause"
+
+  /**
+   * [[ReplayGuard]] did not perform or replay effect `operation`, for `reason`: its target changed after
+   * the effect began, it may already have run and cannot be checked, or its outcome was not kept. A
+   * refusal the model should see: a tool maps it to `ToolOutcome.Error` (design §4.24).
+   */
+  final case class EffectReplayRefused(operation: String, reason: String) extends GraphError with NonRecoverableError:
+    override val message: String = s"The effect '$operation' was not replayed: $reason"

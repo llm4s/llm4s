@@ -206,6 +206,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
       ) =
         underlying.renew(threadId, token, ttl)
       def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+      def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = underlying.effect(threadId, key)
       def latest(threadId: ThreadId) = if stale.getAndSet(false) then Right(None) else underlying.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
@@ -238,6 +239,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
       ) =
         underlying.renew(threadId, token, ttl)
       def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+      def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = underlying.effect(threadId, key)
       def latest(threadId: ThreadId) =
         if reads.incrementAndGet() == 1 then Right(None) else Left(ValidationError("store", "down"))
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
@@ -323,6 +325,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
       ) =
         underlying.renew(threadId, token, ttl)
       def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+      def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = underlying.effect(threadId, key)
       def latest(threadId: ThreadId) = {
         if armed.compareAndSet(true, false) then {
           reading.countDown()

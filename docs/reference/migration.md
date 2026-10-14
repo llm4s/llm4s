@@ -19,6 +19,12 @@ and tools on `AgentBuilder`. Each slice adds its part here as it lands:
   sections, accounted model calls, and a Block that restores the whole turn: [below](#kernel-hooks-for-the-harness-1902).
 - [#1934](https://github.com/llm4s/llm4s/issues/1934), restoring a checkpoint after the graph gains a key - which
   shape changes keep a thread restorable: [below](#restoring-after-the-graph-changes-1934).
+- [#1903](https://github.com/llm4s/llm4s/issues/1903), tool permissions, timeouts and batch locks:
+  [below](#tool-permissions-timeouts-and-batch-locks-1903).
+- [#1907](https://github.com/llm4s/llm4s/issues/1907), todos: [below](#todos-1907).
+- [#1914](https://github.com/llm4s/llm4s/issues/1914), typed custom streams: [below](#typed-custom-streams-1914).
+- [#1921](https://github.com/llm4s/llm4s/issues/1921), replay of external effects - `ReplayGuard`, `Checkpointer.effect`
+  and `Commit.effects`: [below](#replay-of-external-effects-1921).
 
 Design: `docs/design/typed-agent-runtime/4.22-stage-3-slice-c1-kernel-hooks.md` (§4.22) onwards.
 
@@ -86,6 +92,8 @@ changes the restored run cannot observe (design §4.29). No code change is neede
 - **Snapshots written before this change** carry no shape. They restore into their own version when the graph only
   gained keys, and are refused for anything else until they run once more.
 - `RestoreRejected` problems name the change; "snapshot's graph structure differs from this graph's" is gone.
+- **Effect records (#1921) stay valid.** A thread restored in flight keeps its task ids, so a task `recover` runs again
+  replays its recorded effects; a refused restore commits nothing and leaves them in place.
 - A harness key that should stay removable `Remove`s its entry when it is empty again: removal is judged by the stored
   entry, which cannot be decoded once its key is gone.
 ### Tool permissions, timeouts and batch locks (#1903)
@@ -105,6 +113,36 @@ Design §4.30. Additive: `TodoMiddleware` (`org.llm4s.agent.harness`) gives an a
 - **Adding `TodoMiddleware` to an existing agent** registers the `todos` key, and its tool's lock registers `tool-queue`. Since #1934 a thread at rest continues, its plan starting empty. A thread in flight (suspended, or `Running` after a crash) is refused with `RestoreRejected`: resume or recover it with the old agent first. So is a thread last checkpointed before #1934, until it has run once under the agent it was written by. Removing `TodoMiddleware` refuses a thread whose plan holds items. Agents without it are unchanged.
 - **`todos` is a key id the middleware owns.** A `StateKey` of your own with id `todos` in a family that also uses `TodoMiddleware` is refused at build, as two keys with one id are. Rename it.
 - **With `PermissionMiddleware`, allow the tool**: `PermissionRule.allow(Operation.Invoke, "write_todos")`.
+
+### Typed custom streams (#1914)
+
+`EventHandlers` and the effect modules' `events(run, ...)` are additions. One behaviour changes:
+
+- **An fs2, ZIO, Pekko or Java agent stream whose consumer stops draining now fails** once more than `Agent.StreamCapacity` (1024) durable events wait for it, with an error naming the last `seq` it took, as the runtime already disconnects a listener that far behind (`Disconnected(lastSeq, Lagging)`). Before, the stream's buffer kept every durable event without limit. A `stream*` that fails this way cancels its turn, as any failure of those streams does; resume from the thread's log with `GraphRuntime.subscribe(threadId, afterSeq = lastSeq)`. A consumer that keeps up, even slowly, is unaffected: a run's own events stay far below the bound.
+
+### Replay of external effects (#1921)
+
+Effects outside thread state replay through `ReplayGuard`: an intent and an outcome per `EffectKey`, kept in the thread's own store. Code that only runs agents or graphs compiles and works unchanged. Code that implements `Checkpointer`, or wraps one, changes:
+
+- **`Checkpointer` gains `effect(threadId, key): Result[Option[EffectRecord]]`.** A wrapper forwards it:
+
+  ```scala
+  def effect(threadId: ThreadId, key: EffectKey) = underlying.effect(threadId, key)
+  ```
+
+- **`Commit` gains `effects: Vector[EffectRecord]`**, defaulted in `apply`, so existing calls compile. A store must do three things with it:
+  - Upsert a commit's records by `key`, remembering the commit's token as each record's writer.
+  - On every commit that carries a checkpoint, first remove each record for which `commit.releasesEffect(record.taskId, writer)` holds.
+  - Remove a thread's records in `deleteThread`. Never remove them in `prune`.
+
+  Persist records with `EffectRecord.toJson` and read them with `EffectRecord.fromJson`. `CheckpointerContract` gains the cases that check all of this.
+- **`GraphError` gains `EffectReplayRefused(operation, reason)`.** A `match` on `GraphError` that must be exhaustive gains a case.
+- **The SQLite schema moves to version 3** (`llm4s_checkpoint_effects`). A version-2 file is migrated when it is opened. A build from before this change refuses a version-3 file, as it refuses any newer schema.
+- **A `Transactional` target fences itself by the claim token.** `AppliedKeys.forget(key, token)` and the effect given to `ReplayGuard.transactional` (`token => ...`) refuse a token older than the newest seen for `key.scope`. A `Verifiable` target's effect is a compare-and-set against the plan's `before`.
+- **`ToolQuestionRequest` gains `phase: Option[IdempotencyKey]`** (defaulted; a stored request without it decodes as `None`). An asking tool's `resume` gets effect keys of its own, distinct from `execute`'s.
+- **New, opt-in API**: `RunContext.taskKey`, `RunContext.effectKey` and `ToolContext.effectKey`; `ReplayGuard` and its `Plan`; `ReplaySupport`, `StateCheck`, `AppliedKeys` and `EffectRecord`; and, in `llm4s-agent-testkit`, `ReplayContract`, which every external target of the harness passes. See [Tool side effects](../guide/agents/#tool-side-effects).
+
+Design: `docs/design/typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md` (§4.24).
 
 ## Stage 2 migration: durable execution
 
@@ -299,14 +337,6 @@ A subscription now delivers the durable events of commits made through any runti
 - **A subscription can now end with `Disconnected(lastSeq, ReplayFailed(error))` after its replay**, when a read of the store fails, for instance because the store was closed under it. Before, only a failed replay ended this way. Resubscribe with `afterSeq = lastSeq`.
 - **Other runtimes' durable events arrive; their live events do not.** A listener that assumed every durable event came from its own runtime's runs should check `record.runId`.
 - **`CheckpointerContract` gains change-notification cases and a `sibling(store, clock)` hook.** A durable store's spec overrides `sibling` to open another store over the same storage, so that the cases run between connections.
-
-## Stage 3 migration: the harness
-
-### Typed custom streams (#1914)
-
-`EventHandlers` and the effect modules' `events(run, ...)` are additions. One behaviour changes:
-
-- **An fs2, ZIO, Pekko or Java agent stream whose consumer stops draining now fails** once more than `Agent.StreamCapacity` (1024) durable events wait for it, with an error naming the last `seq` it took, as the runtime already disconnects a listener that far behind (`Disconnected(lastSeq, Lagging)`). Before, the stream's buffer kept every durable event without limit. A `stream*` that fails this way cancels its turn, as any failure of those streams does; resume from the thread's log with `GraphRuntime.subscribe(threadId, afterSeq = lastSeq)`. A consumer that keeps up, even slowly, is unaffected: a run's own events stay far below the bound.
 
 ## Stage 1 migration: agent runtime
 

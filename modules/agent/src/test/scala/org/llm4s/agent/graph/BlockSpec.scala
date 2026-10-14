@@ -151,6 +151,7 @@ class BlockSpec extends AnyFlatSpec with Matchers with EitherValues with OptionV
       ) =
         underlying.renew(threadId, token, ttl)
       def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+      def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = underlying.effect(threadId, key)
       def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)

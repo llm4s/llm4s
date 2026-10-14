@@ -37,11 +37,16 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
 
   /** Turns a closed file back into one a version-1 build wrote: no `first_seq` column, at version 1. */
   private def asVersionOne(path: Path): Unit =
+    asVersionTwo(path)
     exec(
       path,
       "ALTER TABLE llm4s_checkpoint_threads DROP COLUMN first_seq",
       "UPDATE llm4s_checkpoint_schema SET version = 1"
     )
+
+  /** The file as a version-2 build left it: no effect records table (#1921). */
+  private def asVersionTwo(path: Path): Unit =
+    exec(path, "DROP TABLE llm4s_checkpoint_effects", "UPDATE llm4s_checkpoint_schema SET version = 2")
 
   private def checkpoint(thread: ThreadId, id: String, parent: Option[String], token: FencingToken): Checkpoint =
     Checkpoint(
@@ -287,7 +292,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     reopened.close()
   }
 
-  "A version-1 file" should "open at version 2, its threads numbering on, and a deleted thread's id numbering past it" in {
+  "A version-1 file" should "open at the current version, its threads numbering on, and a deleted thread's id numbering past it" in {
     val db      = SqliteFiles.fresh()
     val thread  = ThreadId("v1-thread")
     val first   = SqliteCheckpointer.open(db).value
@@ -298,7 +303,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     asVersionOne(db)
 
     val reopened = SqliteCheckpointer.open(db).value
-    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe 2
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
     scalar(db, "SELECT first_seq FROM llm4s_checkpoint_threads WHERE thread_id = 'v1-thread'")(_.getLong(1)) shouldBe 1L
     reopened.eventsAfter(thread, 0L, 10).value.map(_.seq) shouldBe Vector(1L, 2L)
     val token = reopened.claim(thread, ClaimRequest(RunId("next"), ttl)).value.token
@@ -316,6 +321,91 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val again = reopened.claim(thread, ClaimRequest(RunId("again"), ttl)).value.token
     reopened.commit(thread, Commit(again, events = Vector(event("d")))).value.map(_.seq) shouldBe Vector(5L)
     reopened.close()
+  }
+
+  "A version-2 file" should "open at version 3 with no effect records, and keep the ones written after" in {
+    val db     = SqliteFiles.fresh()
+    val thread = ThreadId("v2-thread")
+    val first  = SqliteCheckpointer.open(db).value
+    val token  = first.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    first.commit(thread, Commit(token, Some(checkpoint(thread, "c1", None, token)))).value
+    first.close()
+    asVersionTwo(db)
+
+    val reopened = SqliteCheckpointer.open(db).value
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe 3
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_effects")(_.getInt(1)) shouldBe 0
+    reopened.latest(thread).value.value.checkpoint.id shouldBe "c1"
+    val record = EffectRecord
+      .fromJson(
+        ujson.Obj(
+          "format"    -> 1,
+          "key"       -> "k",
+          "operation" -> "op",
+          "scope"     -> "s",
+          "taskId"    -> "0.0",
+          "intent"    -> ujson.Obj("support" -> "unverifiable")
+        )
+      )
+      .value
+    reopened.commit(thread, Commit(token, effects = Vector(record))).value
+    reopened.effect(thread, record.key).value shouldBe Some(record)
+    reopened.close()
+  }
+
+  "A thread holding only effect records" should "keep its row when its claim is released, as the in-memory store does" in {
+    val db     = SqliteFiles.fresh()
+    val thread = ThreadId("effects-only")
+    val store  = SqliteCheckpointer.open(db).value
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val record = EffectRecord
+      .fromJson(
+        ujson.Obj(
+          "format"    -> 1,
+          "key"       -> "k",
+          "operation" -> "op",
+          "scope"     -> "s",
+          "taskId"    -> "0.0",
+          "intent"    -> ujson.Obj("support" -> "unverifiable")
+        )
+      )
+      .value
+    store.commit(thread, Commit(token, effects = Vector(record))).value
+    store.release(thread, token).value
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_threads WHERE thread_id = 'effects-only'")(_.getInt(1)) shouldBe 1
+    store.effect(thread, record.key).value shouldBe Some(record)
+    // deleted with the thread, the row goes too
+    val again = store.claim(thread, ClaimRequest(RunId("again"), ttl)).value.token
+    store.deleteThread(thread, again).value
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_threads WHERE thread_id = 'effects-only'")(_.getInt(1)) shouldBe 0
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_effects WHERE thread_id = 'effects-only'")(_.getInt(1)) shouldBe 0
+    store.close()
+  }
+
+  "A stored effect record" should "be a ProcessingError naming the file when it does not decode" in {
+    val db     = SqliteFiles.fresh()
+    val thread = ThreadId("bad-effect")
+    val store  = SqliteCheckpointer.open(db).value
+    exec(
+      db,
+      "INSERT INTO llm4s_checkpoint_effects (thread_id, effect_key, task_id, writer_token, record_json) VALUES ('bad-effect', 'k', '0.0', 1, '{\"format\": 1}')"
+    )
+    val probe = EffectRecord
+      .fromJson(
+        ujson.Obj(
+          "format"    -> 1,
+          "key"       -> "k",
+          "operation" -> "op",
+          "scope"     -> "s",
+          "taskId"    -> "0.0",
+          "intent"    -> ujson.Obj("support" -> "unverifiable")
+        )
+      )
+      .value
+    val error = store.effect(thread, probe.key).left.value
+    error shouldBe a[org.llm4s.error.ProcessingError]
+    error.message should include("effect record")
+    store.close()
   }
 
   "The schema migrations" should "run each step in turn up to the target, and report a missing step" in {

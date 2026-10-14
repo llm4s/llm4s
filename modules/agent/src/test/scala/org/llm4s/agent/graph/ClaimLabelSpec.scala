@@ -80,6 +80,7 @@ class ClaimLabelSpec extends AnyFlatSpec with Matchers with EitherValues with Be
     def release(threadId: ThreadId, token: FencingToken)            = underlying.release(threadId, token)
     def commit(threadId: ThreadId, commit: Commit)                  = underlying.commit(threadId, commit)
     def latest(threadId: ThreadId)                                  = underlying.latest(threadId)
+    def effect(threadId: ThreadId, key: EffectKey)                  = underlying.effect(threadId, key)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
     def deleteThread(threadId: ThreadId, token: FencingToken)       = underlying.deleteThread(threadId, token)
