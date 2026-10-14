@@ -170,8 +170,8 @@ which belong to the `Agent`. `AgentResult` is a value to read, not something to 
 - A thread stays in the runtime until `agent.forget(threadId)` removes it - one-shot
   `agent.run(query)` threads too, which on the default in-memory runtime means they stay in memory.
   Forget a conversation you will not continue: `agent.run(query).flatMap(r => agent.forget(r.threadId).map(_ => r))`.
-  `forget` refuses a thread whose run is still active (`ThreadBusy`) or that belongs to another
-  tenant (`TenantMismatch`); an unknown thread is `Right(())`.
+  `forget` refuses a thread that a run still holds - in this runtime, or by a live claim in any runtime sharing
+  the store (`ThreadBusy`) - or that belongs to another tenant (`TenantMismatch`); an unknown thread is `Right(())`.
 
 ### Suspended turns from Java and Kotlin
 

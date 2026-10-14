@@ -234,7 +234,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val reopened = SqliteFiles.opened(db, clock)
     clock.set(claimed.expiresAt.minusNanos(1))
     reopened.claim(thread, ClaimRequest(RunId("second"), 1500.millis)).left.value shouldBe
-      GraphError.ThreadBusy(thread.value, None, Some("first"))
+      GraphError.ThreadBusy(thread.value, None, GraphError.BusyHolder.Run(RunId("first")))
     clock.set(claimed.expiresAt)
     val taken = reopened.claim(thread, ClaimRequest(RunId("second"), 1500.millis)).value
     taken.token.value should be > claimed.token.value
@@ -477,7 +477,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       ) Thread.sleep(5)
 
       second.recover(thread, workers.graph).left.value match {
-        case GraphError.ThreadBusy(_, _, holder) => holder shouldBe Some("first")
+        case GraphError.ThreadBusy(_, _, holder) => holder shouldBe GraphError.BusyHolder.Run(RunId("first"))
         case other                               => fail(s"not ThreadBusy: $other")
       }
       clock.advance(claims.ttl)

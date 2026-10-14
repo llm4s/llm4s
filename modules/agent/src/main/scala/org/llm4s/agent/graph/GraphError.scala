@@ -4,8 +4,8 @@ import org.llm4s.error.{ LLMError, NonRecoverableError, RecoverableError }
 
 /**
  * Errors raised while building, running or restoring a typed graph. Every case is a
- * [[NonRecoverableError]] except [[GraphError.DeadlineExceeded]]: `recover` with a new budget
- * continues that run.
+ * [[NonRecoverableError]] except [[GraphError.DeadlineExceeded]] - `recover` with a new budget
+ * continues that run - and [[GraphError.ThreadBusy]], which a retry may get past once the thread is free.
  */
 sealed trait GraphError extends LLMError
 
@@ -203,19 +203,58 @@ object GraphError:
     override val message: String = s"Thread '$threadId' has no suspended run to resume"
 
   /**
-   * Another run holds the thread: it is still executing in this runtime, another runtime or process
-   * holds a live claim on it ([[RunClaim]]), or it claimed the thread between this call reading it
-   * and claiming it. Nothing was accepted or discarded - retry once that run has suspended or
-   * completed, or once its claim has expired. `holder` is the run id of the claim's holder when it
-   * is known and the caller may see it: it is never named for a thread that has no checkpoint yet in
-   * the store, whose tenant cannot be checked.
+   * Who holds a thread that a call was refused with [[ThreadBusy]], as far as the caller may know.
    */
-  final case class ThreadBusy(threadId: String, latestCheckpoint: Option[String], holder: Option[String] = None)
-      extends GraphError
-      with NonRecoverableError:
+  enum BusyHolder:
+    /**
+     * Run `runId` holds the thread: it is executing in this runtime, or holds a live claim on it. Named
+     * only when the caller may see it - the thread's latest checkpoint is the caller's tenant's, or, for a
+     * thread with no checkpoint yet, the holder is a run of the same runtime with the caller's tenant.
+     */
+    case Run(runId: RunId)
+
+    /**
+     * Another run holds the thread, or took it over, but is not named: the thread has no checkpoint yet
+     * in the store and the holder is not a run of this runtime, so its tenant cannot be checked; or the
+     * store refused the call's write as stale naming only the claim that replaced its own.
+     */
+    case Unnamed
+
+    /**
+     * No other run is known to hold the thread: the call's own claim lapsed - its lease passed with no
+     * renewal landing, or the store found no current claim - before its write landed. Nothing was
+     * applied, and a retry will likely be admitted at once.
+     */
+    case Lapsed
+
+  /**
+   * The thread is held, so the call was refused: another run is still executing on it in this runtime,
+   * another runtime or process holds a live claim on it ([[RunClaim]]), or it claimed the thread
+   * between this call reading it and claiming it; or the call's own claim lapsed before its write
+   * landed. `start`, `recover`, `resume`, `deleteThread`, `updateState` and `fork` (on its target
+   * thread) are refused this way. Nothing was accepted, applied or discarded, so it is recoverable:
+   * retry once that run has suspended or completed, or once its claim has expired.
+   *
+   * `holder` says who holds the thread as far as the caller may know ([[BusyHolder]]): a run's id when
+   * it is known and the caller may see it - the thread's latest checkpoint is the caller's tenant's, or,
+   * for a thread with no checkpoint yet in the store, the holder is a run of this runtime with the
+   * caller's tenant; [[BusyHolder.Unnamed]] when another run holds it but cannot be named; and
+   * [[BusyHolder.Lapsed]] when it is the call's own claim that lapsed, with no other run known to hold
+   * the thread. A caller of another tenant is refused with [[TenantMismatch]] instead, and learns nothing.
+   */
+  final case class ThreadBusy(
+    threadId: String,
+    latestCheckpoint: Option[String],
+    holder: BusyHolder = BusyHolder.Unnamed
+  ) extends GraphError
+      with RecoverableError:
     override val message: String =
-      s"Thread '$threadId' is held by ${holder.fold("another run")(h => s"run '$h'")} (now at ${latestCheckpoint
-          .getOrElse("<none>")}); retry"
+      val at = latestCheckpoint.getOrElse("<none>")
+      holder match
+        case BusyHolder.Run(runId) => s"Thread '$threadId' is held by run '${runId.value}' (now at $at); retry"
+        case BusyHolder.Unnamed    => s"Thread '$threadId' is held by another run (now at $at); retry"
+        case BusyHolder.Lapsed =>
+          s"Thread '$threadId' was left unchanged: this call's claim on it lapsed before its write landed, and no other run is known to hold it (now at $at); retry"
 
   /**
    * A commit, renewal or release presented a fencing token that is not the thread's current claim:
@@ -224,11 +263,11 @@ object GraphError:
    * writer that lost its claim cannot record anything after another run took the thread over.
    * `current` is the token of the thread's current claim, if there is one.
    */
-  final case class StaleClaim(threadId: String, token: Long, current: Option[Long])
+  final case class StaleClaim(threadId: String, token: FencingToken, current: Option[FencingToken])
       extends GraphError
       with NonRecoverableError:
     override val message: String =
-      s"Claim token $token on thread '$threadId' is stale (current: ${current.fold("none")(_.toString)})"
+      s"Claim token ${token.value} on thread '$threadId' is stale (current: ${current.fold("none")(_.value.toString)})"
 
   /**
    * The run lost its claim on the thread, so it stopped: its lease passed with no renewal landing (the

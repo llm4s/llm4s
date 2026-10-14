@@ -280,7 +280,11 @@ class CheckpointHistorySpec extends AnyFlatSpec with Matchers with EitherValues 
     runtime.start(thread, n.graph, "a").awaited.value.completed
     val at   = runtime.history(thread).value.head.id
     val held = store.claim(other, ClaimRequest(RunId("elsewhere"), 1.hour)).value
-    runtime.fork(thread, at, other).left.value shouldBe GraphError.ThreadBusy(other.value, None, None)
+    runtime.fork(thread, at, other).left.value shouldBe GraphError.ThreadBusy(
+      other.value,
+      None,
+      GraphError.BusyHolder.Unnamed
+    )
     store.release(other, held.token).value
     runtime.fork(thread, at, other).value
     // the fork gave its claim back: a run can start on the new thread at once
@@ -423,9 +427,9 @@ class CheckpointHistorySpec extends AnyFlatSpec with Matchers with EitherValues 
     entered.await(5, TimeUnit.SECONDS) shouldBe true
     val at = store.latest(thread).value.value.checkpoint.id
     runtime.updateState(thread, graph, at, StateUpdate.update(log, "x")).left.value shouldBe
-      GraphError.ThreadBusy("t", Some(at), Some("holder"))
+      GraphError.ThreadBusy("t", Some(at), GraphError.BusyHolder.Run(RunId("holder")))
     GraphRuntime(store).updateState(thread, graph, at, StateUpdate.update(log, "x")).left.value shouldBe
-      GraphError.ThreadBusy("t", Some(at), Some("holder"))
+      GraphError.ThreadBusy("t", Some(at), GraphError.BusyHolder.Run(RunId("holder")))
     gate.countDown()
     await(running).completed
     val done = store.latest(thread).value.value.checkpoint.id

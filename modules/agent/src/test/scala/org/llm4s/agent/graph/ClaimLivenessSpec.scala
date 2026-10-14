@@ -523,7 +523,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     entered.await(5, TimeUnit.SECONDS) shouldBe true
     val token = tokenOf(store)
 
-    store.onRenew = () => Some(Left(GraphError.StaleClaim("t", token.value, Some(99L))))
+    store.onRenew = () => Some(Left(GraphError.StaleClaim("t", token, Some(FencingToken(99L)))))
     interrupted.await(5, TimeUnit.SECONDS) shouldBe true
     await(handle).failed._2 shouldBe GraphError.ClaimLost("t", token, Some(FencingToken(99L)))
   }
@@ -1046,7 +1046,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       store.unhang()
       eventually(store.released.contains(token))
       underlying.claim(thread, ClaimRequest(RunId("other"), 1.minute)).left.value should matchPattern {
-        case GraphError.ThreadBusy("t", _, Some("second")) =>
+        case GraphError.ThreadBusy("t", _, GraphError.BusyHolder.Run(holder)) if holder == RunId("second") =>
       }
       next.gate.countDown()
       await(successor).completed
@@ -1314,6 +1314,66 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
         }
     }
 
+  "An admission given up on, whose claim commit lands before its detached release" should
+    "leave its Running checkpoint and RunStarted although it returned ClaimLost, for recover to continue" in {
+      val time      = ManualTime()
+      val store     = Hooked(InMemoryCheckpointer(time))
+      val two       = TwoStep()
+      val entering  = new CountDownLatch(1)
+      val hang      = new CountDownLatch(1)
+      val landed    = new CountDownLatch(1)
+      val releasing = new CountDownLatch(1)
+      val late      = new AtomicReference[Option[Result[Vector[EventRecord]]]](None)
+      // the claim's commit enters the store and stays there, interrupted or not, until `hang` opens
+      store.onCommit = commit =>
+        if commit.checkpoint.exists(_.runId == "first") && entering.getCount > 0 then {
+          entering.countDown()
+          stuckUntil(hang)
+          val landing = store.underlying.commit(thread, commit)
+          late.set(Some(landing))
+          landed.countDown()
+          Some(landing)
+        } else None
+      // the detached release reaches the store only once the late commit has landed
+      store.onRelease = () => {
+        releasing.countDown()
+        landed.await(5, TimeUnit.SECONDS): Unit
+        None
+      }
+      val rt        = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      val admitting = new java.util.concurrent.LinkedBlockingQueue[Result[RunHandle[Vector[String]]]]()
+      Thread.ofVirtual().start(() => admitting.offer(rt.start(thread, two.graph, "x", run("first"))): Unit)
+      entering.await(5, TimeUnit.SECONDS) shouldBe true
+
+      // the lease passes while the claim's commit hangs: the admission is given up on
+      store.onRenew = unreachable
+      time.advance(1.second)
+      Option(admitting.poll(5, TimeUnit.SECONDS)).value.left.value shouldBe a[GraphError.ClaimLost]
+      rt.heldLocally(thread) shouldBe false
+
+      // nobody took the thread over, so the store still holds the claim: the commit lands before the release
+      releasing.await(5, TimeUnit.SECONDS) shouldBe true
+      hang.countDown()
+      landed.await(5, TimeUnit.SECONDS) shouldBe true
+      late.get.value.isRight shouldBe true
+      eventually(store.released.get == 1)
+      eventually(!rt.handOverMarked(thread))
+
+      // the thread holds the admission's Running checkpoint and RunStarted, though no run ever ran it
+      val stored = store.latest(thread).value.value
+      stored.checkpoint.runId shouldBe "first"
+      stored.checkpoint.status shouldBe CheckpointStatus.Running
+      events(store).filter(_.runId == "first").map(_.event) should matchPattern {
+        case Vector(RunEvent.RunStarted(_, _)) =>
+      }
+      two.entered.getCount shouldBe 1
+
+      // the claim is released, so recover continues it as after a crash
+      store.onRenew = () => None
+      two.gate.countDown()
+      await(rt.recover(thread, two.graph, run("next")).value).completed._2 shouldBe Vector("x", "second")
+    }
+
   /** How a thread is admitted in [[admitting]]: `start` on a new thread, `recover` or `resume`. */
   private def admissions = Seq("start", "recover", "resume")
 
@@ -1568,7 +1628,9 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
 
           // the lease passes: the change must return within twice the ttl, without the store
           time.advance(1.second)
-          Option(outcome.poll(5, TimeUnit.SECONDS)).value.left.value shouldBe GraphError.ThreadBusy(held.value, None)
+          // its own lease passed and no other run is known to hold the thread: it says so, not "held by another run"
+          Option(outcome.poll(5, TimeUnit.SECONDS)).value.left.value shouldBe
+            GraphError.ThreadBusy(held.value, None, GraphError.BusyHolder.Lapsed)
           rt.heldLocally(held) shouldBe false
 
           // the store returns: the change's read completes, its commit finds the fence, and nothing lands
@@ -1604,7 +1666,9 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
           val armed        = new AtomicBoolean(true)
           store.onLatest = () => {
             if store.claims.get > claimsBefore && armed.compareAndSet(true, false) then {
-              store.onRenew = () => { refused.set(true); Some(Left(GraphError.StaleClaim(held.value, 0L, None))) }
+              store.onRenew = () => {
+                refused.set(true); Some(Left(GraphError.StaleClaim(held.value, FencingToken(0L), None)))
+              }
               declared.await(5, TimeUnit.SECONDS) shouldBe true
             }
             None
@@ -1618,9 +1682,11 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
           val releasing = store.releases.get
 
           val outcome = changing(how, rt, two, latest.checkpoint.id, "change")
+          // the store named no current claim: no other run is known to hold the thread
           outcome.left.value shouldBe GraphError.ThreadBusy(
             held.value,
-            if how == "fork" then None else Some(latest.checkpoint.id)
+            if how == "fork" then None else Some(latest.checkpoint.id),
+            GraphError.BusyHolder.Lapsed
           )
           reached.get shouldBe 0
           store.latest(thread).value.value shouldBe latest

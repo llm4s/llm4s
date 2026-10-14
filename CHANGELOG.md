@@ -1295,6 +1295,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Breaking - claim errors carry typed fields, and `ThreadBusy` is recoverable and says whether its holder is live** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  `GraphError.StaleClaim(threadId, token, current)` takes `token: FencingToken` and `current: Option[FencingToken]`
+  (was `Long`/`Option[Long]`), and `GraphError.ThreadBusy(threadId, latestCheckpoint, holder)` takes
+  `holder: GraphError.BusyHolder` (was `Option[String]`, default `None`): `BusyHolder.Run(runId: RunId)` names the
+  holding run when the caller may see it, `BusyHolder.Unnamed` (the default) is another run that cannot be named, and
+  the new `BusyHolder.Lapsed` is a `fork`, `updateState` or `deleteThread` whose own claim lapsed - its lease passed,
+  or the store named no current claim - before its write landed, with no other run known to hold the thread. Those
+  used to say "held by another run" when nobody held it. `ThreadBusy` is now a `RecoverableError`, so
+  `LLMError.isRecoverable`, `RetryPolicy` and `ErrorRecovery` retry it, as its message always said to. `threadId`
+  stays a `String`, as in every `GraphError`. See the [migration guide](docs/reference/migration.md#durable-checkpointer-contract-1700).
+- **`GraphRuntime.inMemory(clock)` gives its `InMemoryCheckpointer` the same clock, and takes a `ClaimPolicy`** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  the store used the system clock, so claims ignored an injected clock and `prune(maxAge)` compared the system clock
+  with `createdAt` stamped by the injected one, pruning young checkpoints. `inMemory(clock, claims)` is new;
+  `inMemory(clock)` stays for Java and Kotlin. The guide says which timestamps the runtime's clock stamps and which
+  the store's clock judges.
 - **Breaking - a run that loses its claim stops at once and ends `GraphError.ClaimLost`** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   it used to end `CheckpointWriteFailed(_, StaleClaim, _)`, which a caller could not tell from a store outage without
   matching on its cause. `GraphError.ClaimLost(threadId, token, current)` is new: the run's own `FencingToken`, and the

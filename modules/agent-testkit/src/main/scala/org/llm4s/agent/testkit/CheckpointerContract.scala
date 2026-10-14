@@ -414,7 +414,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     // the claim went with the thread: its token is stale, and the thread can be claimed at once
     s.commit(token, events = Vector(s.event("late"))).refused shouldBe a[GraphError.StaleClaim]
     s.store.renew(s.thread, token, ttl).refused shouldBe a[GraphError.StaleClaim]
-    s.store.deleteThread(s.thread, token).refused shouldBe GraphError.StaleClaim(s.thread.value, token.value, None)
+    s.store.deleteThread(s.thread, token).refused shouldBe GraphError.StaleClaim(s.thread.value, token, None)
     val again = s.claim("again").value
     again.token.value should be > token.value
     // the id is a new thread: a first checkpoint is accepted, its events numbered on past the old ones,
@@ -431,24 +431,28 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     // released: the token is no longer the thread's claim, and nobody holds it
     s.store.release(s.thread, first.token).value shouldBe (())
     s.store.deleteThread(s.thread, first.token).refused shouldBe
-      GraphError.StaleClaim(s.thread.value, first.token.value, None)
+      GraphError.StaleClaim(s.thread.value, first.token, None)
     // taken over after expiry: the old holder's delete is refused, naming the current token
     val second = s.claim("second").value
     s.advance(ttl)
     val third = s.claim("third").value
     s.store.deleteThread(s.thread, second.token).refused shouldBe
-      GraphError.StaleClaim(s.thread.value, second.token.value, Some(third.token.value))
+      GraphError.StaleClaim(s.thread.value, second.token, Some(third.token))
     s.store.deleteThread(s.thread, FencingToken(third.token.value + 1000)).refused shouldBe a[GraphError.StaleClaim]
     // nothing was deleted, and the current holder is untouched
     s.latestId() shouldBe Some("c1")
     s.store.latest(s.thread).value.value.pendingWrites.map(_.taskId) shouldBe Vector("0.0")
     s.seqs() shouldBe Vector(1L)
-    s.claim("fourth").refused shouldBe GraphError.ThreadBusy(s.thread.value, Some("c1"), Some("third"))
+    s.claim("fourth").refused shouldBe GraphError.ThreadBusy(
+      s.thread.value,
+      Some("c1"),
+      GraphError.BusyHolder.Run(RunId("third"))
+    )
     s.commit(third.token, events = Vector(s.event("b"))).value.map(_.seq) shouldBe Vector(2L)
     // an unknown thread has no claim to delete under
     val unknown = newThread()
     s.store.deleteThread(unknown, third.token).refused shouldBe
-      GraphError.StaleClaim(unknown.value, third.token.value, None)
+      GraphError.StaleClaim(unknown.value, third.token, None)
   }
 
   it should "refuse a delete over another holder's live claim, deleting nothing and leaving the claim live" in {
@@ -458,12 +462,16 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     // a deleter holding a claim on another thread, or a token from before, cannot delete this one
     val elsewhere = s.claim("deleter", newThread()).value
     s.store.deleteThread(s.thread, elsewhere.token).refused shouldBe
-      GraphError.StaleClaim(s.thread.value, elsewhere.token.value, Some(holder.token.value))
+      GraphError.StaleClaim(s.thread.value, elsewhere.token, Some(holder.token))
     s.store.deleteThread(s.thread, FencingToken(holder.token.value - 1)).refused shouldBe
-      GraphError.StaleClaim(s.thread.value, holder.token.value - 1, Some(holder.token.value))
+      GraphError.StaleClaim(s.thread.value, FencingToken(holder.token.value - 1), Some(holder.token))
     s.latestId() shouldBe Some("c1")
     s.seqs() shouldBe Vector(1L)
-    s.claim("deleter").refused shouldBe GraphError.ThreadBusy(s.thread.value, Some("c1"), Some("holder"))
+    s.claim("deleter").refused shouldBe GraphError.ThreadBusy(
+      s.thread.value,
+      Some("c1"),
+      GraphError.BusyHolder.Run(RunId("holder"))
+    )
     s.store.renew(s.thread, holder.token, ttl).value.token shouldBe holder.token
     s.commit(holder.token, events = Vector(s.event("b"))).value.map(_.seq) shouldBe Vector(2L)
   }
@@ -559,13 +567,25 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     granted.threadId shouldBe s.thread
     granted.holder shouldBe RunId("first")
     s.expiresAt(granted.expiresAt, 30.seconds)
-    s.claim("second").refused shouldBe GraphError.ThreadBusy(s.thread.value, None, Some("first"))
+    s.claim("second").refused shouldBe GraphError.ThreadBusy(
+      s.thread.value,
+      None,
+      GraphError.BusyHolder.Run(RunId("first"))
+    )
     // the same holder is refused too: a claim is not re-entrant
-    s.claim("first").refused shouldBe GraphError.ThreadBusy(s.thread.value, None, Some("first"))
+    s.claim("first").refused shouldBe GraphError.ThreadBusy(
+      s.thread.value,
+      None,
+      GraphError.BusyHolder.Run(RunId("first"))
+    )
     s.advance(ttl - 1.milli)
     s.claim("second").refused shouldBe a[GraphError.ThreadBusy]
     s.commit(granted.token, Some(s.checkpoint("c1", None))).value
-    s.claim("second").refused shouldBe GraphError.ThreadBusy(s.thread.value, Some("c1"), Some("first"))
+    s.claim("second").refused shouldBe GraphError.ThreadBusy(
+      s.thread.value,
+      Some("c1"),
+      GraphError.BusyHolder.Run(RunId("first"))
+    )
     s.claim("third", newThread()).value.holder shouldBe RunId("third")
   }
 
@@ -587,12 +607,16 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       Some(s.checkpoint("stale", Some("c1"))),
       Vector(s.write("stale", "1.0")),
       Vector(s.event("x"))
-    ).refused shouldBe GraphError.StaleClaim(s.thread.value, first.token.value, Some(taken.token.value))
+    ).refused shouldBe GraphError.StaleClaim(s.thread.value, first.token, Some(taken.token))
     s.commit(first.token, None, Vector(s.write("c1", "1.0"))).refused shouldBe a[GraphError.StaleClaim]
     s.commit(first.token, events = Vector(s.event("y"))).refused shouldBe a[GraphError.StaleClaim]
     s.store.renew(s.thread, first.token, ttl).refused shouldBe a[GraphError.StaleClaim]
     s.store.release(s.thread, first.token).value shouldBe (())
-    s.claim("third").refused shouldBe GraphError.ThreadBusy(s.thread.value, Some("c1"), Some("second"))
+    s.claim("third").refused shouldBe GraphError.ThreadBusy(
+      s.thread.value,
+      Some("c1"),
+      GraphError.BusyHolder.Run(RunId("second"))
+    )
 
     // nothing of the stale holder landed, and no sequence number was spent on it
     s.latestId() shouldBe Some("c1")
@@ -617,7 +641,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       a[GraphError.StaleClaim]
     val granted = s.claim("run").value
     s.commit(FencingToken(granted.token.value + 1000), Some(s.checkpoint("c1", None))).refused shouldBe
-      GraphError.StaleClaim(s.thread.value, granted.token.value + 1000, Some(granted.token.value))
+      GraphError.StaleClaim(s.thread.value, FencingToken(granted.token.value + 1000), Some(granted.token))
     s.store.latest(s.thread).value shouldBe None
     s.seqs() shouldBe empty
   }
@@ -641,7 +665,11 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.advance(20.seconds)
     s.expiresAt(s.store.renew(s.thread, first.token, ttl).value.expiresAt, 50.seconds, Some(first.expiresAt))
     s.advance(20.seconds) // 40s after the claim, 20s after the renewal
-    s.claim("second").refused shouldBe GraphError.ThreadBusy(s.thread.value, None, Some("first"))
+    s.claim("second").refused shouldBe GraphError.ThreadBusy(
+      s.thread.value,
+      None,
+      GraphError.BusyHolder.Run(RunId("first"))
+    )
     s.advance(10.seconds)
     s.claim("second").value.token.value should be > first.token.value
   }
@@ -652,9 +680,9 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.commit(first.token, Some(s.checkpoint("c1", None))).value
     s.store.release(s.thread, first.token).value shouldBe (())
     s.commit(first.token, events = Vector(s.event("late"))).refused shouldBe
-      GraphError.StaleClaim(s.thread.value, first.token.value, None)
+      GraphError.StaleClaim(s.thread.value, first.token, None)
     s.store.renew(s.thread, first.token, ttl).refused shouldBe
-      GraphError.StaleClaim(s.thread.value, first.token.value, None)
+      GraphError.StaleClaim(s.thread.value, first.token, None)
     s.store.release(s.thread, first.token).value shouldBe (())
     val second = s.claim("second").value
     second.token.value should be > first.token.value
@@ -662,7 +690,11 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     second.takenOverFrom shouldBe None
     // a release with the old token must not free the new holder's claim
     s.store.release(s.thread, first.token).value shouldBe (())
-    s.claim("third").refused shouldBe GraphError.ThreadBusy(s.thread.value, Some("c1"), Some("second"))
+    s.claim("third").refused shouldBe GraphError.ThreadBusy(
+      s.thread.value,
+      Some("c1"),
+      GraphError.BusyHolder.Run(RunId("second"))
+    )
     s.latestId() shouldBe Some("c1")
     s.seqs() shouldBe empty
   }
@@ -700,7 +732,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val (winner, claim) = granted.head
     claim.holder shouldBe RunId(s"run-$winner")
     all.collect { case (_, Left(error)) => error }.foreach {
-      _ shouldBe GraphError.ThreadBusy(s.thread.value, None, Some(s"run-$winner"))
+      _ shouldBe GraphError.ThreadBusy(s.thread.value, None, GraphError.BusyHolder.Run(RunId(s"run-$winner")))
     }
   }
 
@@ -727,11 +759,11 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     claim.holder shouldBe RunId(s"run-$winner")
     claim.token.value should be > first.token.value
     all.collect { case (_, Left(error)) => error }.foreach {
-      _ shouldBe GraphError.ThreadBusy(s.thread.value, Some("c1"), Some(s"run-$winner"))
+      _ shouldBe GraphError.ThreadBusy(s.thread.value, Some("c1"), GraphError.BusyHolder.Run(RunId(s"run-$winner")))
     }
     // the old holder is fenced off, and the winner alone can commit
     s.commit(first.token, events = Vector(s.event("stale"))).refused shouldBe
-      GraphError.StaleClaim(s.thread.value, first.token.value, Some(claim.token.value))
+      GraphError.StaleClaim(s.thread.value, first.token, Some(claim.token))
     s.commit(claim.token, events = Vector(s.event("won"))).value.map(_.seq) shouldBe Vector(1L)
   }
 
@@ -742,7 +774,11 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val first = s.claim("first").value
     s.commit(first.token, Some(s.checkpoint("c1", None)), events = Vector(s.event("a"))).value
     s.reopened()
-    s.claim("second").refused shouldBe GraphError.ThreadBusy(s.thread.value, Some("c1"), Some("first"))
+    s.claim("second").refused shouldBe GraphError.ThreadBusy(
+      s.thread.value,
+      Some("c1"),
+      GraphError.BusyHolder.Run(RunId("first"))
+    )
     s.commit(first.token, events = Vector(s.event("b"))).value.map(_.seq) shouldBe Vector(2L)
     s.store.renew(s.thread, first.token, ttl).value.token shouldBe first.token
     s.store.release(s.thread, first.token).value shouldBe (())
@@ -760,10 +796,14 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val taken = s.claim("second").value
     s.reopened()
     s.commit(first.token, Some(s.checkpoint("stale", Some("c1"))), events = Vector(s.event("x"))).refused shouldBe
-      GraphError.StaleClaim(s.thread.value, first.token.value, Some(taken.token.value))
+      GraphError.StaleClaim(s.thread.value, first.token, Some(taken.token))
     s.store.renew(s.thread, first.token, ttl).refused shouldBe a[GraphError.StaleClaim]
     s.store.release(s.thread, first.token).value shouldBe (())
-    s.claim("third").refused shouldBe GraphError.ThreadBusy(s.thread.value, Some("c1"), Some("second"))
+    s.claim("third").refused shouldBe GraphError.ThreadBusy(
+      s.thread.value,
+      Some("c1"),
+      GraphError.BusyHolder.Run(RunId("second"))
+    )
     s.commit(taken.token, events = Vector(s.event("ok"))).value.map(_.seq) shouldBe Vector(1L)
 
     // a token issued after a reopen is greater than every token before it, on this thread and after a delete
@@ -1113,9 +1153,9 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val seqs   = s.seqs()
 
     second.recover(s.thread, w.graph, config("second")).refused shouldBe
-      GraphError.ThreadBusy(s.thread.value, latest, Some("first"))
+      GraphError.ThreadBusy(s.thread.value, latest, GraphError.BusyHolder.Run(RunId("first")))
     second.deleteThread(s.thread, config("second")).refused shouldBe
-      GraphError.ThreadBusy(s.thread.value, latest, Some("first"))
+      GraphError.ThreadBusy(s.thread.value, latest, GraphError.BusyHolder.Run(RunId("first")))
     second.start(s.thread, w.graph, Vector("b"), config("second")).refused shouldBe a[GraphError.IncompleteRun]
     s.latestId() shouldBe latest
     s.seqs() shouldBe seqs
@@ -1268,7 +1308,11 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val other = Option(taken.poll(contractWait.toMillis, TimeUnit.MILLISECONDS)).getOrElse(fail("no takeover"))
     s.latestId() shouldBe Some("b1")
     s.seqs() shouldBe seqs :+ (seqs.last + 1)
-    s.claim("third").refused shouldBe GraphError.ThreadBusy(s.thread.value, Some("b1"), Some("other"))
+    s.claim("third").refused shouldBe GraphError.ThreadBusy(
+      s.thread.value,
+      Some("b1"),
+      GraphError.BusyHolder.Run(RunId("other"))
+    )
     s.commit(other.token, events = Vector(s.event("b2"))).value.map(_.seq) shouldBe Vector(seqs.last + 2)
   }
 
@@ -1477,7 +1521,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     second
       .updateState(s.thread, w.graph, live.value, StateUpdate.update(w.results, "X"), config = config("edit"))
       .refused shouldBe
-      GraphError.ThreadBusy(s.thread.value, live, Some("second-turn"))
+      GraphError.ThreadBusy(s.thread.value, live, GraphError.BusyHolder.Run(RunId("second-turn")))
     // a fork only reads its source, so it may fork a thread that is running
     val forked = second.fork(s.thread, done, target, config("fork")).value
     forked.threadId shouldBe target.value

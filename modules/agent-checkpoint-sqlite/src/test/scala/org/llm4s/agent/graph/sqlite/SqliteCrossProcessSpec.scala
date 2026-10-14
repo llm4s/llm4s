@@ -78,7 +78,11 @@ class SqliteCrossProcessSpec extends AnyFlatSpec with Matchers with EitherValues
           store.latest(thread).value.exists(_.pendingWrites.exists(_.nodeId == "worker"))
         }
         runtime.recover(thread, workers.graph).left.value shouldBe
-          GraphError.ThreadBusy(thread.value, store.latest(thread).value.map(_.checkpoint.id), Some("child"))
+          GraphError.ThreadBusy(
+            thread.value,
+            store.latest(thread).value.map(_.checkpoint.id),
+            GraphError.BusyHolder.Run(RunId("child"))
+          )
         runtime.start(thread, workers.graph, Vector("c")).left.value shouldBe a[GraphError.IncompleteRun]
         runtime.deleteThread(thread).left.value shouldBe a[GraphError.ThreadBusy]
         // the live run's events so far have reached this process's subscriber, in order, from the other process

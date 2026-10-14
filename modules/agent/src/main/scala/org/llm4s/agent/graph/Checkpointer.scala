@@ -269,7 +269,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     )
 
   private def stale(threadId: ThreadId, current: ThreadRecord, token: FencingToken): GraphError =
-    GraphError.StaleClaim(threadId.value, token.value, current.claim.map(_.token))
+    GraphError.StaleClaim(threadId.value, token, current.claim.map(c => FencingToken(c.token)))
 
   private def settled(status: CheckpointStatus): Boolean =
     status == CheckpointStatus.Completed || status == CheckpointStatus.Failed
@@ -278,7 +278,8 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     val current = record(threadId)
     val now     = clock.instant()
     current.claim.filter(c => now.isBefore(c.expiresAt)) match
-      case Some(live) => Left(GraphError.ThreadBusy(threadId.value, current.latestId, Some(live.holder)))
+      case Some(live) =>
+        Left(GraphError.ThreadBusy(threadId.value, current.latestId, GraphError.BusyHolder.Run(RunId(live.holder))))
       case None =>
         lastToken += 1
         val claim = Claim(request.holder.value, lastToken, now.plusNanos(request.ttl.toNanos))

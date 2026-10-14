@@ -136,14 +136,14 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
       .map(_.seq) shouldBe Vector(4L)
     // a delete is fenced like a commit: an unknown thread has no claim to delete under
     store.deleteThread(ThreadId("unknown"), again.token).left.value shouldBe
-      GraphError.StaleClaim("unknown", again.token.value, None)
+      GraphError.StaleClaim("unknown", again.token, None)
   }
 
   it should "grant one live claim per thread, by its own clock, and let an expired one be taken over" in {
     val c     = Claimed()
     val store = c.store
     store.claim(thread, ClaimRequest(RunId("thief"), ttl)).left.value shouldBe
-      GraphError.ThreadBusy("t", None, Some("run"))
+      GraphError.ThreadBusy("t", None, GraphError.BusyHolder.Run(RunId("run")))
     c.clock.advance(ttl)
     val taken = store.claim(thread, ClaimRequest(RunId("thief"), ttl)).value
     taken.holder shouldBe RunId("thief")
@@ -151,11 +151,11 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
     taken.expiresAt shouldBe now.plusSeconds(60)
     // the first holder's token is fenced off: no commit, no renewal, and its release is a no-op
     c.commit(None, Vector.empty, Vector(event("late"))).left.value shouldBe
-      GraphError.StaleClaim("t", c.token.value, Some(taken.token.value))
+      GraphError.StaleClaim("t", c.token, Some(taken.token))
     store.renew(thread, c.token, ttl).left.value shouldBe a[GraphError.StaleClaim]
     store.release(thread, c.token).value shouldBe (())
     store.claim(thread, ClaimRequest(RunId("third"), ttl)).left.value shouldBe
-      GraphError.ThreadBusy("t", None, Some("thief"))
+      GraphError.ThreadBusy("t", None, GraphError.BusyHolder.Run(RunId("thief")))
     store.eventsAfter(thread, 0L, 10).value shouldBe empty
   }
 
@@ -168,15 +168,15 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
     renewed.expiresAt shouldBe now.plusSeconds(61)
     c.commit(Some(checkpoint("c1", None)), Vector.empty, Vector.empty).value shouldBe empty
     store.claim(thread, ClaimRequest(RunId("thief"), ttl)).left.value shouldBe
-      GraphError.ThreadBusy("t", Some("c1"), Some("run"))
+      GraphError.ThreadBusy("t", Some("c1"), GraphError.BusyHolder.Run(RunId("run")))
   }
 
   it should "free a released thread at once, and keep nothing for a thread that only held a claim" in {
     val c     = Claimed()
     val store = c.store
     store.release(thread, c.token).value shouldBe (())
-    store.commit(thread, Commit(c.token)).left.value shouldBe GraphError.StaleClaim("t", c.token.value, None)
-    store.renew(thread, c.token, ttl).left.value shouldBe GraphError.StaleClaim("t", c.token.value, None)
+    store.commit(thread, Commit(c.token)).left.value shouldBe GraphError.StaleClaim("t", c.token, None)
+    store.renew(thread, c.token, ttl).left.value shouldBe GraphError.StaleClaim("t", c.token, None)
     val next = store.claim(thread, ClaimRequest(RunId("next"), ttl)).value
     next.token.value shouldBe c.token.value + 1
     store.release(thread, next.token).value shouldBe (())

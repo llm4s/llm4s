@@ -294,7 +294,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     runtime.start(thread, f.graph, "y").left.value shouldBe GraphError.TenantMismatch("t", None)
     // the first admission is this runtime's own, so its run is named although the thread has no checkpoint yet
     runtime.start(thread, f.graph, "y", tenant("a")).left.value should matchPattern {
-      case GraphError.ThreadBusy("t", None, Some(_)) =>
+      case GraphError.ThreadBusy("t", None, GraphError.BusyHolder.Run(_)) =>
     }
 
     release.countDown()
