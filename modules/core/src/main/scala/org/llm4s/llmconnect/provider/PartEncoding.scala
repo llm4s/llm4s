@@ -122,6 +122,16 @@ private[llm4s] object PartEncoding {
    */
   val ChatImageTypes: Set[ImageMediaType] = Set(MediaType.Png, MediaType.Jpeg, MediaType.WebP, MediaType.Gif)
 
+  /**
+   * `Right` when the rendered request `requestText` is at most `maxBytes` as UTF-8: a provider's limit on a whole
+   * request, measured on the bytes that are sent - text, tools, schema, escaping and media - before they are.
+   */
+  def withinRequestLimit(provider: String, requestText: String, maxBytes: Long): Result[Unit] = {
+    val size = requestText.getBytes(java.nio.charset.StandardCharsets.UTF_8).length.toLong
+    if (size <= maxBytes) Right(())
+    else Left(ValidationError("parts", s"$provider takes a request of at most $maxBytes bytes; this one is $size"))
+  }
+
   /** Covers text parts only, as their text: for a role whose wire format takes nothing else. */
   val textOnly: PartialFunction[ContentPart, String] = { case ContentPart.Text(text) => text }
 

@@ -196,11 +196,13 @@ class OpenAIClient private[provider] (
         OpenAIModelRules.requiresMaxCompletionTokens(model),
         streaming = false
       )
+      body = serializeParams(params)
+      _        <- PartEncoding.withinRequestLimit(providerName, body, OpenAIClient.MaxRequestBytes)
       response <- call("completion")(transport.createChatCompletion(params))
       completion = convertFromOpenAIFormat(response)
       _ = recordExchange(
         startedAt,
-        Some(serializeParams(params)),
+        Some(body),
         Some(serialize(response)),
         Right(completion)
       )
@@ -239,8 +241,10 @@ class OpenAIClient private[provider] (
       .tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
       .flatMap { (transformed, params) =>
         val requestBody = serializeParams(params)
-        if (transformed.requiresFakeStreaming) executeFakeStreaming(startedAt, requestBody, params, onChunk)
-        else executeNativeStreaming(startedAt, requestBody, params, onChunk)
+        PartEncoding.withinRequestLimit(providerName, requestBody, OpenAIClient.MaxRequestBytes).flatMap { _ =>
+          if (transformed.requiresFakeStreaming) executeFakeStreaming(startedAt, requestBody, params, onChunk)
+          else executeNativeStreaming(startedAt, requestBody, params, onChunk)
+        }
       }
   }
 
@@ -777,6 +781,9 @@ class OpenAIClient private[provider] (
  */
 object OpenAIClient {
   import org.llm4s.types.TryOps
+
+  /** Chat Completions' limit on a request's total payload: 50 MB. */
+  private[provider] val MaxRequestBytes: Long = 50000000L
 
   private[provider] def forTest(
     model: String,

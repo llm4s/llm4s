@@ -157,4 +157,15 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
         .value shouldBe a[UnsupportedContentPartError]
     }
   }
+
+  "complete" should "refuse, before sending, a request over the Messages API's 32 MB as rendered" in {
+    // seven images at the per-image limit are each allowed, and together over 36 MB base64-encoded
+    val atLimit = image(MediaSource.Inline(IArray.fill[Byte](AnthropicClient.MaxInlineImageBytes.toInt)(1)))
+    val message = UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(7)(atLimit))
+    AnthropicClient.checkParts("anthropic", Seq(message)) shouldBe Right(())
+    client.complete(Conversation(Seq(message)), CompletionOptions()).left.value.message should
+      include(s"a request of at most ${AnthropicClient.MaxRequestBytes} bytes")
+    client.streamComplete(Conversation(Seq(message)), CompletionOptions(), _ => ()).left.value.message should
+      include("a request of at most")
+  }
 }

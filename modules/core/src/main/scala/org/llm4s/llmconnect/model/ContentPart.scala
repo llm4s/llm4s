@@ -108,6 +108,31 @@ object ContentPart {
       case media      => media
     }
 
+  /**
+   * The tokens a media part is estimated to cost a model, for context budgets: a message's text view leaves its
+   * media out, so a counter that read only the text would let images and documents overflow the window. The
+   * true cost is the provider's and depends on the image's size or the document's pages; these err high, which
+   * only prunes early:
+   *  - an image, [[EstimatedImageTokens]] (a large image on Anthropic; more than OpenAI's high-detail cost);
+   *  - an inline text document (plain text, Markdown, HTML, CSV), its bytes over four;
+   *  - an inline PDF, its bytes over 32, at least [[EstimatedDocumentTokens]];
+   *  - a document at a URL or in a provider file, whose size is unknown here, [[EstimatedDocumentTokens]].
+   * Text parts are 0: they are counted by the tokenizer.
+   */
+  private[llm4s] def estimatedTokens(part: ContentPart): Int = part match {
+    case _: Text                                             => 0
+    case _: Image                                            => EstimatedImageTokens
+    case Document(inline: MediaSource.Inline, MediaType.Pdf) => math.max(EstimatedDocumentTokens, inline.length / 32)
+    case Document(inline: MediaSource.Inline, _)             => inline.length / 4
+    case _: Document                                         => EstimatedDocumentTokens
+  }
+
+  /** What [[estimatedTokens]] gives an image. */
+  private[llm4s] val EstimatedImageTokens: Int = 1600
+
+  /** What [[estimatedTokens]] gives a document of unknown size, and the least it gives an inline PDF. */
+  private[llm4s] val EstimatedDocumentTokens: Int = 3000
+
   /** Whether `part` is an image or a document. */
   def isMedia(part: ContentPart): Boolean = !part.isInstanceOf[Text]
 

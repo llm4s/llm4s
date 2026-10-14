@@ -116,4 +116,13 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
     }
     sent(Conversation(Seq(UserMessage(Vector(imageOf(MediaType.Gif)))))).isRight shouldBe true
   }
+
+  it should "refuse, before sending, a request over Chat Completions' 50 MB as rendered" in {
+    val big =
+      ContentPart.image(MediaSource.Inline(IArray.fill[Byte](ContentPart.MaxInlineBytes)(1)), MediaType.Png).value
+    val message = UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(8)(big))
+    sent(Conversation(Seq(message))).left.value.message should include(
+      s"a request of at most ${OpenAIClient.MaxRequestBytes} bytes"
+    )
+  }
 }

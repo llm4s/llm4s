@@ -220,20 +220,23 @@ class AnthropicClient(
         // Build the parameters
         val messageParams = paramsBuilder.build()
         val requestBody   = serializeRequestBody(messageParams)
+        // the limit is on the request as sent: its text, tools and media, JSON-encoded
+        PartEncoding.withinRequestLimit(providerName, requestBody, AnthropicClient.MaxRequestBytes).flatMap { _ =>
 
-        val messageService = client.messages()
-        // Make API call
-        val attempt = Try(
-          requestOptions.fold(messageService.create(messageParams))(messageService.create(messageParams, _))
-        ).toEither.left.map(AnthropicClient.mapError(_, credentialSecrets))
-        // sealed thinking is bound to the request it answers, so it is replayed only while that holds
-        val result = attempt
-          .flatMap(convertFromAnthropicResponse)
-          .map(c =>
-            c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, transformed.messages, transformed.options))
-          )
-        val responseBody = attempt.toOption.map(serializeResponseBody)
-        recordingExchange(startedAt, requestBody)(result)(responseBody)
+          val messageService = client.messages()
+          // Make API call
+          val attempt = Try(
+            requestOptions.fold(messageService.create(messageParams))(messageService.create(messageParams, _))
+          ).toEither.left.map(AnthropicClient.mapError(_, credentialSecrets))
+          // sealed thinking is bound to the request it answers, so it is replayed only while that holds
+          val result = attempt
+            .flatMap(convertFromAnthropicResponse)
+            .map(c =>
+              c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, transformed.messages, transformed.options))
+            )
+          val responseBody = attempt.toOption.map(serializeResponseBody)
+          recordingExchange(startedAt, requestBody)(result)(responseBody)
+        }
       }
   }
 
@@ -307,188 +310,191 @@ curl https://api.anthropic.com/v1/messages \
         // Build the parameters
         val messageParams = paramsBuilder.build()
         val requestBody   = serializeRequestBody(messageParams)
+        // the limit is on the request as sent: its text, tools and media, JSON-encoded
+        PartEncoding.withinRequestLimit(providerName, requestBody, AnthropicClient.MaxRequestBytes).flatMap { _ =>
 
-        // Create accumulator for building the final completion
-        val accumulator                      = StreamingAccumulator.create()
-        var currentMessageId: Option[String] = None
-        val blockIndexToToolId               = mutable.Map.empty[Long, String]
-        // thinking blocks by content-block index, so each keeps its own text and signature
-        val thinkingBlocks = mutable.TreeMap.empty[Long, AnthropicClient.StreamedThinking]
-        val rawStream      = StringBuilder()
+          // Create accumulator for building the final completion
+          val accumulator                      = StreamingAccumulator.create()
+          var currentMessageId: Option[String] = None
+          val blockIndexToToolId               = mutable.Map.empty[Long, String]
+          // thinking blocks by content-block index, so each keeps its own text and signature
+          val thinkingBlocks = mutable.TreeMap.empty[Long, AnthropicClient.StreamedThinking]
+          val rawStream      = StringBuilder()
 
-        // Process the stream
-        val attempt = Try {
-          val messageService = client.messages()
-          Using.resource(
-            streamOptions.fold(messageService.createStreaming(messageParams))(
-              messageService.createStreaming(messageParams, _)
-            )
-          ) { streamResponse =>
-            import scala.jdk.StreamConverters._
-            val stream: Iterator[RawMessageStreamEvent] = streamResponse.stream().toScala(Iterator)
-            stream.foreach { event =>
-              rawStream.append(serializeStreamEvent(event)).append('\n')
-              // Process different event types using the event's accessor methods
-              // Check for message start event
-              val messageStartOpt = event.messageStart()
-              if (messageStartOpt != null && messageStartOpt.isPresent) {
-                val msgStart = messageStartOpt.get()
-                currentMessageId = Some(msgStart.message().id())
-              }
+          // Process the stream
+          val attempt = Try {
+            val messageService = client.messages()
+            Using.resource(
+              streamOptions.fold(messageService.createStreaming(messageParams))(
+                messageService.createStreaming(messageParams, _)
+              )
+            ) { streamResponse =>
+              import scala.jdk.StreamConverters._
+              val stream: Iterator[RawMessageStreamEvent] = streamResponse.stream().toScala(Iterator)
+              stream.foreach { event =>
+                rawStream.append(serializeStreamEvent(event)).append('\n')
+                // Process different event types using the event's accessor methods
+                // Check for message start event
+                val messageStartOpt = event.messageStart()
+                if (messageStartOpt != null && messageStartOpt.isPresent) {
+                  val msgStart = messageStartOpt.get()
+                  currentMessageId = Some(msgStart.message().id())
+                }
 
-              // Check for content block delta event
-              val contentDeltaOpt = event.contentBlockDelta()
-              if (contentDeltaOpt != null && contentDeltaOpt.isPresent) {
-                val contentDelta = contentDeltaOpt.get()
-                val delta        = contentDelta.delta()
+                // Check for content block delta event
+                val contentDeltaOpt = event.contentBlockDelta()
+                if (contentDeltaOpt != null && contentDeltaOpt.isPresent) {
+                  val contentDelta = contentDeltaOpt.get()
+                  val delta        = contentDelta.delta()
 
-                // Handle text content delta
-                Try(delta.text()).foreach { textOpt =>
-                  if (textOpt != null && textOpt.isPresent) {
-                    val textDelta = textOpt.get()
-                    val text      = textDelta.text()
-                    if (text != null && text.nonEmpty) {
-                      val chunk = StreamedChunk(
-                        id = currentMessageId.getOrElse(""),
-                        content = Some(text),
-                        toolCall = None,
-                        finishReason = None
-                      )
-                      accumulator.addChunk(chunk)
-                      onChunk(chunk)
+                  // Handle text content delta
+                  Try(delta.text()).foreach { textOpt =>
+                    if (textOpt != null && textOpt.isPresent) {
+                      val textDelta = textOpt.get()
+                      val text      = textDelta.text()
+                      if (text != null && text.nonEmpty) {
+                        val chunk = StreamedChunk(
+                          id = currentMessageId.getOrElse(""),
+                          content = Some(text),
+                          toolCall = None,
+                          finishReason = None
+                        )
+                        accumulator.addChunk(chunk)
+                        onChunk(chunk)
+                      }
+                    }
+                  }
+
+                  // Handle thinking content delta
+                  Try(delta.thinking()).foreach { thinkingOpt =>
+                    if (thinkingOpt != null && thinkingOpt.isPresent) {
+                      val thinkingDelta = thinkingOpt.get()
+                      val thinkingText  = thinkingDelta.thinking()
+                      if (thinkingText != null && thinkingText.nonEmpty) {
+                        thinkingBlocks
+                          .getOrElseUpdate(contentDelta.index(), AnthropicClient.StreamedThinking())
+                          .text
+                          .append(thinkingText)
+                        val chunk = StreamedChunk(
+                          id = currentMessageId.getOrElse(""),
+                          content = None,
+                          toolCall = None,
+                          finishReason = None,
+                          thinkingDelta = Some(thinkingText)
+                        )
+                        accumulator.addChunk(chunk)
+                        onChunk(chunk)
+                      }
+                    }
+                  }
+
+                  // The signature closes a thinking block; it is needed to send the block back
+                  Try(delta.signature()).foreach { signatureOpt =>
+                    if (signatureOpt != null && signatureOpt.isPresent) {
+                      val signature = signatureOpt.get().signature()
+                      if (signature != null && signature.nonEmpty)
+                        thinkingBlocks
+                          .getOrElseUpdate(contentDelta.index(), AnthropicClient.StreamedThinking())
+                          .signature = Some(signature)
+                    }
+                  }
+
+                  // Handle input_json_delta for tool call arguments
+                  Try(delta.inputJson()).foreach { inputJsonOpt =>
+                    if (inputJsonOpt != null && inputJsonOpt.isPresent) {
+                      val fragment   = inputJsonOpt.get().partialJson()
+                      val toolCallId = blockIndexToToolId.getOrElse(contentDelta.index(), "")
+                      if (fragment != null && fragment.nonEmpty && toolCallId.nonEmpty) {
+                        val chunk = StreamedChunk(
+                          id = currentMessageId.getOrElse(""),
+                          content = None,
+                          toolCall = Some(ToolCall(id = toolCallId, name = "", arguments = ujson.Str(fragment))),
+                          finishReason = None
+                        )
+                        accumulator.addChunk(chunk)
+                        onChunk(chunk)
+                      }
                     }
                   }
                 }
 
-                // Handle thinking content delta
-                Try(delta.thinking()).foreach { thinkingOpt =>
-                  if (thinkingOpt != null && thinkingOpt.isPresent) {
-                    val thinkingDelta = thinkingOpt.get()
-                    val thinkingText  = thinkingDelta.thinking()
-                    if (thinkingText != null && thinkingText.nonEmpty) {
-                      thinkingBlocks
-                        .getOrElseUpdate(contentDelta.index(), AnthropicClient.StreamedThinking())
-                        .text
-                        .append(thinkingText)
-                      val chunk = StreamedChunk(
-                        id = currentMessageId.getOrElse(""),
-                        content = None,
-                        toolCall = None,
-                        finishReason = None,
-                        thinkingDelta = Some(thinkingText)
-                      )
-                      accumulator.addChunk(chunk)
-                      onChunk(chunk)
-                    }
+                val contentStartOpt = event.contentBlockStart()
+                if (contentStartOpt != null && contentStartOpt.isPresent) {
+                  val contentStart = contentStartOpt.get()
+                  val block        = contentStart.contentBlock()
+                  if (block.isThinking) {
+                    thinkingBlocks.getOrElseUpdate(contentStart.index(), AnthropicClient.StreamedThinking())
+                  } else if (block.isRedactedThinking) {
+                    thinkingBlocks(contentStart.index()) =
+                      AnthropicClient.StreamedThinking(redacted = Some(block.asRedactedThinking().data()))
+                  }
+                  if (block.isToolUse) {
+                    val toolUse = block.asToolUse()
+                    blockIndexToToolId(contentStart.index()) = toolUse.id()
+                    val chunk = StreamedChunk(
+                      id = currentMessageId.getOrElse(""),
+                      content = None,
+                      toolCall = Some(ToolCall(id = toolUse.id(), name = toolUse.name(), arguments = ujson.Obj())),
+                      finishReason = None
+                    )
+                    accumulator.addChunk(chunk)
+                    onChunk(chunk)
                   }
                 }
 
-                // The signature closes a thinking block; it is needed to send the block back
-                Try(delta.signature()).foreach { signatureOpt =>
-                  if (signatureOpt != null && signatureOpt.isPresent) {
-                    val signature = signatureOpt.get().signature()
-                    if (signature != null && signature.nonEmpty)
-                      thinkingBlocks
-                        .getOrElseUpdate(contentDelta.index(), AnthropicClient.StreamedThinking())
-                        .signature = Some(signature)
-                  }
-                }
-
-                // Handle input_json_delta for tool call arguments
-                Try(delta.inputJson()).foreach { inputJsonOpt =>
-                  if (inputJsonOpt != null && inputJsonOpt.isPresent) {
-                    val fragment   = inputJsonOpt.get().partialJson()
-                    val toolCallId = blockIndexToToolId.getOrElse(contentDelta.index(), "")
-                    if (fragment != null && fragment.nonEmpty && toolCallId.nonEmpty) {
-                      val chunk = StreamedChunk(
-                        id = currentMessageId.getOrElse(""),
-                        content = None,
-                        toolCall = Some(ToolCall(id = toolCallId, name = "", arguments = ujson.Str(fragment))),
-                        finishReason = None
-                      )
-                      accumulator.addChunk(chunk)
-                      onChunk(chunk)
-                    }
-                  }
-                }
-              }
-
-              val contentStartOpt = event.contentBlockStart()
-              if (contentStartOpt != null && contentStartOpt.isPresent) {
-                val contentStart = contentStartOpt.get()
-                val block        = contentStart.contentBlock()
-                if (block.isThinking) {
-                  thinkingBlocks.getOrElseUpdate(contentStart.index(), AnthropicClient.StreamedThinking())
-                } else if (block.isRedactedThinking) {
-                  thinkingBlocks(contentStart.index()) =
-                    AnthropicClient.StreamedThinking(redacted = Some(block.asRedactedThinking().data()))
-                }
-                if (block.isToolUse) {
-                  val toolUse = block.asToolUse()
-                  blockIndexToToolId(contentStart.index()) = toolUse.id()
+                val messageStopOpt = event.messageStop()
+                if (messageStopOpt != null && messageStopOpt.isPresent) {
                   val chunk = StreamedChunk(
                     id = currentMessageId.getOrElse(""),
                     content = None,
-                    toolCall = Some(ToolCall(id = toolUse.id(), name = toolUse.name(), arguments = ujson.Obj())),
-                    finishReason = None
+                    toolCall = None,
+                    finishReason = Some("stop")
                   )
                   accumulator.addChunk(chunk)
                   onChunk(chunk)
                 }
-              }
 
-              val messageStopOpt = event.messageStop()
-              if (messageStopOpt != null && messageStopOpt.isPresent) {
-                val chunk = StreamedChunk(
-                  id = currentMessageId.getOrElse(""),
-                  content = None,
-                  toolCall = None,
-                  finishReason = Some("stop")
-                )
-                accumulator.addChunk(chunk)
-                onChunk(chunk)
-              }
-
-              val messageDeltaOpt = event.messageDelta()
-              if (messageDeltaOpt != null && messageDeltaOpt.isPresent) {
-                val msgDelta = messageDeltaOpt.get()
-                Try(msgDelta.usage()).foreach { usage =>
-                  if (usage != null) {
-                    val inputTokens = Option(usage.inputTokens()) match {
-                      case Some(opt: java.util.Optional[_]) if opt.isPresent =>
-                        Option(opt.get())
-                          .collect { case n: java.lang.Number => n.intValue() }
-                          .getOrElse(0)
-                      case _ => 0
+                val messageDeltaOpt = event.messageDelta()
+                if (messageDeltaOpt != null && messageDeltaOpt.isPresent) {
+                  val msgDelta = messageDeltaOpt.get()
+                  Try(msgDelta.usage()).foreach { usage =>
+                    if (usage != null) {
+                      val inputTokens = Option(usage.inputTokens()) match {
+                        case Some(opt: java.util.Optional[_]) if opt.isPresent =>
+                          Option(opt.get())
+                            .collect { case n: java.lang.Number => n.intValue() }
+                            .getOrElse(0)
+                        case _ => 0
+                      }
+                      val outputTokens = Option(usage.outputTokens()).map(_.toInt).getOrElse(0)
+                      if (inputTokens > 0 || outputTokens > 0) accumulator.updateTokens(inputTokens, outputTokens)
                     }
-                    val outputTokens = Option(usage.outputTokens()).map(_.toInt).getOrElse(0)
-                    if (inputTokens > 0 || outputTokens > 0) accumulator.updateTokens(inputTokens, outputTokens)
                   }
                 }
               }
             }
-          }
-        }.toEither.left
-          .map(AnthropicClient.mapError(_, credentialSecrets))
+          }.toEither.left
+            .map(AnthropicClient.mapError(_, credentialSecrets))
 
-        // Return the accumulated completion
-        val result = attempt.flatMap(_ =>
-          accumulator.toCompletion.map { c =>
-            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-            // the accumulator knows only the thinking text; the blocks carry their signatures
-            val message =
-              if (thinkingBlocks.isEmpty) c.message
-              else c.message.withThinking(thinkingBlocks.values.map(_.toBlock).toSeq)
-            c.withModel(config.model)
-              .withMessage(ThinkingReplay.bind(replayOrigin, message, transformed.messages, transformed.options))
-              .withEstimatedCost(cost)
-          }
-        )
+          // Return the accumulated completion
+          val result = attempt.flatMap(_ =>
+            accumulator.toCompletion.map { c =>
+              val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+              // the accumulator knows only the thinking text; the blocks carry their signatures
+              val message =
+                if (thinkingBlocks.isEmpty) c.message
+                else c.message.withThinking(thinkingBlocks.values.map(_.toBlock).toSeq)
+              c.withModel(config.model)
+                .withMessage(ThinkingReplay.bind(replayOrigin, message, transformed.messages, transformed.options))
+                .withEstimatedCost(cost)
+            }
+          )
 
-        recordingExchange(startedAt, requestBody)(result)(
-          successResponse = Some(rawStream.result()),
-          failureResponse = Option.when(rawStream.nonEmpty)(rawStream.result())
-        )
+          recordingExchange(startedAt, requestBody)(result)(
+            successResponse = Some(rawStream.result()),
+            failureResponse = Option.when(rawStream.nonEmpty)(rawStream.result())
+          )
+        }
       }
   }
 
@@ -946,6 +952,9 @@ object AnthropicClient {
    * `ContentPart.MaxInlineBytes`; a larger one fails here rather than at the API.
    */
   private[provider] val MaxInlineImageBytes: Long = 5L * 1024 * 1024 / 4 * 3
+
+  /** The Messages API's limit on a whole request: 32 MB. */
+  private[provider] val MaxRequestBytes: Long = 32000000L
 
   private def inlineLimit(part: ContentPart): Option[Long] = part match {
     case _: ContentPart.Image => Some(MaxInlineImageBytes)
