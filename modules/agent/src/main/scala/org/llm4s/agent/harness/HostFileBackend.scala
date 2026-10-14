@@ -128,9 +128,32 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
     if !exists(p) then refused(operation, path, "not found")
     else if isDir(p) then refused(operation, path, "is a directory")
     else if !isFile(p) then refused(operation, path, "is not a regular file")
-    else if Files.size(p) > maxFileBytes then
-      refused(operation, path, s"is larger than the limit of $maxFileBytes bytes")
-    else Right(Files.readAllBytes(p))
+    else
+      bounded(p)
+        .toRight(())
+        .left
+        .flatMap(_ => refused(operation, path, s"is larger than the limit of $maxFileBytes bytes"))
+
+  /**
+   * At most `maxFileBytes` of `p`, read through one handle that does not follow a final link, or `None`
+   * when there are more: the bound holds for what is read, not for a size checked before, so a file that
+   * grows or is replaced meanwhile cannot make a read larger.
+   */
+  private def bounded(p: Path): Option[Array[Byte]] =
+    Using.resource(FileChannel.open(p, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) { channel =>
+      val out    = new java.io.ByteArrayOutputStream()
+      val buffer = ByteBuffer.allocate(64 * 1024)
+      var total  = 0L
+      var more   = true
+      while more && total <= maxFileBytes do
+        buffer.clear()
+        val n = channel.read(buffer)
+        if n < 0 then more = false
+        else
+          total += n
+          if total <= maxFileBytes then out.write(buffer.array(), 0, n)
+      Option.when(total <= maxFileBytes)(out.toByteArray)
+    }
 
   private def text(bytes: Array[Byte]): String =
     StandardCharsets.UTF_8
@@ -424,8 +447,9 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
     limit: Int,
     ctx: FileContext
   ): Result[Listing[GrepMatch]] =
-    walked("grep", under, limit)(_.filter((v, p) => accept(v) && Files.size(p) <= maxFileBytes).flatMap { (v, p) =>
-      Try(text(Files.readAllBytes(p))).toOption.iterator.flatMap(content => Text.matches(v, content, regex))
+    walked("grep", under, limit)(_.filter((v, _) => accept(v)).flatMap { (v, p) =>
+      // a file over the bound, or not UTF-8 text, is skipped; the bound is on what is read
+      Try(bounded(p).map(text)).toOption.flatten.iterator.flatMap(content => Text.matches(v, content, regex))
     })
 
 object HostFileBackend:

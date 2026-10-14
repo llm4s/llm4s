@@ -152,6 +152,15 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     backend.ls(VPath.root, 2, call()).value.items.map(_.path.value) shouldBe Vector("/b", "/c")
   }
 
+  it should "bound what it reads, not a size checked before reading" in {
+    val small = HostFileBackend.open(dir, maxFileBytes = 4).value
+    Files.writeString(dir.resolve("exact"), "1234")
+    Files.writeString(dir.resolve("over"), "12345")
+    small.read(p("/exact"), 0, 1, call()).value.lines shouldBe Vector("1234")
+    small.read(p("/over"), 0, 1, call()).left.value.message should include("larger than the limit")
+    small.grep("1", VPath.root, None, 10, call()).value.items.map(_.path) shouldBe Vector(p("/exact"))
+  }
+
   it should "walk in sorted order, so a cut-off result is deterministic" in {
     Seq("c", "a/z", "a/b", "b").foreach(rel => written(backend.write(p(s"/$rel"), rel, call())))
     backend.glob(Glob("**"), VPath.root, 10, call()).value.items.map(_.value) shouldBe Vector(

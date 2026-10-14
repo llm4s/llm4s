@@ -178,7 +178,8 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
 
   def search(ns: Namespace, query: String, limit: Int): Result[Listing[StoreEntry]] =
     Text.checkLimit("search", query, limit).map { _ =>
-      val needle = query.toLowerCase
+      // locale-independent, so a Turkish JVM matches `I` to `i` as every other does
+      val needle = query.toLowerCase(java.util.Locale.ROOT)
       def strings(v: ujson.Value): Iterator[String] = v match
         case ujson.Str(s) => Iterator(s)
         case ujson.Arr(a) => a.iterator.flatMap(strings)
@@ -186,7 +187,8 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
         case _            => Iterator.empty
       val all = synchronized(items(ns))
       val hits = all.toVector.sortBy(_._1).iterator.collect {
-        case (k, item) if (Iterator(k) ++ strings(item.value)).exists(_.toLowerCase.contains(needle)) =>
+        case (k, item)
+            if (Iterator(k) ++ strings(item.value)).exists(_.toLowerCase(java.util.Locale.ROOT).contains(needle)) =>
           StoreEntry(k, detached(item))
       }
       Listing.of(hits, limit)
@@ -198,27 +200,30 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
   def modify[A: ReadWriter](ns: Namespace, key: String, effect: EffectKey, token: FencingToken)(
     change: StoreView => Result[StoreChange[A]]
   ): Result[A] = synchronized(fenced(effect, token) {
-    applied.get(effect.value) match
-      case Some(recorded) => Try(upickle.default.read[A](recorded)).toResult
-      case None =>
-        val current = items(ns)
-        val view = new StoreView:
-          val current: Option[StoreItem]                    = items(ns).get(key).map(detached)
-          def get(other: String): Result[Option[StoreItem]] = Right(items(ns).get(other).map(detached))
-          def hasKeyWithPrefix(prefix: String): Result[Boolean] =
-            Right(items(ns).keysIterator.exists(_.startsWith(prefix)))
-        change(view).flatMap { decided =>
-          val (next, outcome) = decided match
-            case StoreChange.Put(value, o) =>
-              (Some(current.updated(key, StoreItem(ujson.copy(value), clock.instant()))), o)
-            case StoreChange.Remove(o) => (Some(current - key), o)
-            case StoreChange.Keep(o)   => (None, o)
-          within(key, next).map { _ =>
-            next.foreach(n => namespaces = if n.isEmpty then namespaces - ns else namespaces.updated(ns, n))
-            applied = applied.updated(effect.value, upickle.default.writeJs(outcome))
-            outcome
+    if !java.nio.charset.StandardCharsets.UTF_8.newEncoder().canEncode(key) then
+      Left(BackendRefused("put", key, "the key is not valid Unicode (an unpaired surrogate)"))
+    else
+      applied.get(effect.value) match
+        case Some(recorded) => Try(upickle.default.read[A](recorded)).toResult
+        case None =>
+          val current = items(ns)
+          val view = new StoreView:
+            val current: Option[StoreItem]                    = items(ns).get(key).map(detached)
+            def get(other: String): Result[Option[StoreItem]] = Right(items(ns).get(other).map(detached))
+            def hasKeyWithPrefix(prefix: String): Result[Boolean] =
+              Right(items(ns).keysIterator.exists(_.startsWith(prefix)))
+          change(view).flatMap { decided =>
+            val (next, outcome) = decided match
+              case StoreChange.Put(value, o) =>
+                (Some(current.updated(key, StoreItem(ujson.copy(value), clock.instant()))), o)
+              case StoreChange.Remove(o) => (Some(current - key), o)
+              case StoreChange.Keep(o)   => (None, o)
+            within(key, next).map { _ =>
+              next.foreach(n => namespaces = if n.isEmpty then namespaces - ns else namespaces.updated(ns, n))
+              applied = applied.updated(effect.value, upickle.default.writeJs(outcome))
+              outcome
+            }
           }
-        }
   })
 
   /** The bounds of `next`, the namespace after a change; `None` changes nothing. */

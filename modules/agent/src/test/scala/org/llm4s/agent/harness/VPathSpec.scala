@@ -20,7 +20,21 @@ class VPathSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "refuse a relative path, an empty segment, '.', '..', NUL, a backslash and control characters" in {
-    Seq("", "src/a", "//a", "/a//b", "/a/./b", "/a/../b", "/..", "/a\u0000b", "/a\\b", "/a\nb", "/a//")
+    Seq(
+      "",
+      "src/a",
+      "/a\ud800b",
+      "/\udc00",
+      "//a",
+      "/a//b",
+      "/a/./b",
+      "/a/../b",
+      "/..",
+      "/a\u0000b",
+      "/a\\b",
+      "/a\nb",
+      "/a//"
+    )
       .foreach(s => withClue(s"'$s': ")(VPath(s).isLeft shouldBe true))
   }
 

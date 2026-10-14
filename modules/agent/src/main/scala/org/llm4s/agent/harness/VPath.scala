@@ -45,6 +45,7 @@ object VPath:
     else if segment == "." || segment == ".." then Some(s"has a '$segment' segment")
     else if segment.exists(c => c == '\\' || Character.isISOControl(c)) then
       Some("has a backslash or control character")
+    else if !UTF_8.newEncoder().canEncode(segment) then Some("is not valid Unicode (an unpaired surrogate)")
     else if segment.getBytes(UTF_8).length > MaxSegmentBytes then
       Some(s"has a segment longer than $MaxSegmentBytes bytes")
     else None

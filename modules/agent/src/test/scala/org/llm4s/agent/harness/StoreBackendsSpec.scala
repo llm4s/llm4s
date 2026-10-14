@@ -114,6 +114,17 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     store.modify[Unit](ns, "k2", other, FencingToken(1))(_ => Right(StoreChange.Keep(()))).isRight shouldBe true
   }
 
+  it should "match case-insensitively whatever the JVM's locale, and refuse a key that is not valid Unicode" in {
+    val store = InMemoryLongTermStore()
+    store.put(ns, "title", ujson.Str("istanbul"), call()).value
+    val previous = java.util.Locale.getDefault
+    java.util.Locale.setDefault(java.util.Locale.forLanguageTag("tr"))
+    val hits = store.search(ns, "ISTANBUL", 10)
+    java.util.Locale.setDefault(previous)
+    hits.value.items.map(_.key) shouldBe Vector("title")
+    store.put(ns, "bad\ud800", ujson.Str("x"), call()).left.value.message should include("not valid Unicode")
+  }
+
   it should "record nothing for a refused change" in {
     val store = InMemoryLongTermStore()
     val key   = call().effectKey("test.put", "k")
