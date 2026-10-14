@@ -35,6 +35,12 @@ sealed trait AudioMediaType extends MediaType {
   final def category: MediaCategory = MediaCategory.Audio
 }
 
+/**
+ * A [[MediaType]] statically known to be a document a model can read, so document APIs can
+ * require one. PDF is an `application` type; the others are `text`.
+ */
+sealed trait DocumentMediaType extends MediaType
+
 object MediaType {
 
   case object Png extends ImageMediaType {
@@ -87,14 +93,47 @@ object MediaType {
     val extension = "ogg"
   }
 
+  case object Pdf extends DocumentMediaType {
+    val mimeType  = "application/pdf"
+    val extension = "pdf"
+    val category  = MediaCategory.Application
+  }
+
+  case object PlainText extends DocumentMediaType {
+    val mimeType  = "text/plain"
+    val extension = "txt"
+    val category  = MediaCategory.Text
+  }
+
+  case object Markdown extends DocumentMediaType {
+    val mimeType  = "text/markdown"
+    val extension = "md"
+    val category  = MediaCategory.Text
+  }
+
+  case object Html extends DocumentMediaType {
+    val mimeType  = "text/html"
+    val extension = "html"
+    val category  = MediaCategory.Text
+  }
+
+  case object Csv extends DocumentMediaType {
+    val mimeType  = "text/csv"
+    val extension = "csv"
+    val category  = MediaCategory.Text
+  }
+
   /** Every known image type, in declaration order. */
   val images: Seq[ImageMediaType] = Seq(Png, Jpeg, Gif, WebP, Bmp, Tiff)
 
   /** Every known audio type, in declaration order. */
   val audio: Seq[AudioMediaType] = Seq(Wav, Mp3, Flac, Ogg)
 
+  /** Every known document type, in declaration order. */
+  val documents: Seq[DocumentMediaType] = Seq(Pdf, PlainText, Markdown, Html, Csv)
+
   /** Every known media type. */
-  val all: Seq[MediaType] = images ++ audio
+  val all: Seq[MediaType] = images ++ audio ++ documents
 
   /**
    * Extensions that name a type but are not its canonical [[MediaType.extension]].
@@ -103,7 +142,7 @@ object MediaType {
    * rather than in whichever call site happened to remember them.
    */
   private val extensionAliases: Map[String, MediaType] =
-    Map("jpeg" -> Jpeg, "tif" -> Tiff, "wave" -> Wav, "oga" -> Ogg)
+    Map("jpeg" -> Jpeg, "tif" -> Tiff, "wave" -> Wav, "oga" -> Ogg, "markdown" -> Markdown, "htm" -> Html)
 
   private val byExtension: Map[String, MediaType] =
     all.map(t => t.extension -> t).toMap ++ extensionAliases
@@ -114,7 +153,8 @@ object MediaType {
       "image/jpg"    -> Jpeg,
       "audio/x-wav"  -> Wav,
       "audio/mp3"    -> Mp3,
-      "audio/x-flac" -> Flac
+      "audio/x-flac"    -> Flac,
+      "text/x-markdown" -> Markdown
     )
 
   /** The media type named by a file extension, with or without a leading dot. */

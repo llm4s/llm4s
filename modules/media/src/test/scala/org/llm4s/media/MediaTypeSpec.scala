@@ -19,10 +19,28 @@ class MediaTypeSpec extends AnyFlatSpec with Matchers {
     MediaType.all.foreach(t => MediaType.fromMimeType(t.mimeType) shouldBe Some(t))
   }
 
-  it should "partition all into images and audio" in {
+  it should "partition all into images, audio and documents" in {
     MediaType.images.foreach(_.category shouldBe MediaCategory.Image)
     MediaType.audio.foreach(_.category shouldBe MediaCategory.Audio)
-    MediaType.all should contain theSameElementsAs (MediaType.images ++ MediaType.audio)
+    MediaType.all should contain theSameElementsAs (MediaType.images ++ MediaType.audio ++ MediaType.documents)
+  }
+
+  "the document types" should "be PDF, an application type, and four text types" in {
+    MediaType.documents shouldBe Seq(MediaType.Pdf, MediaType.PlainText, MediaType.Markdown, MediaType.Html, MediaType.Csv)
+    MediaType.Pdf.category shouldBe MediaCategory.Application
+    MediaType.documents.tail.foreach(_.category shouldBe MediaCategory.Text)
+  }
+
+  they should "resolve from their extensions, aliases and MIME strings" in {
+    MediaType.fromExtension("pdf") shouldBe Some(MediaType.Pdf)
+    MediaType.fromExtension("txt") shouldBe Some(MediaType.PlainText)
+    MediaType.fromExtension("md") shouldBe Some(MediaType.Markdown)
+    MediaType.fromExtension("markdown") shouldBe Some(MediaType.Markdown)
+    MediaType.fromExtension("htm") shouldBe Some(MediaType.Html)
+    MediaType.fromPath("data/report.csv") shouldBe Some(MediaType.Csv)
+    MediaType.fromMimeType("application/pdf") shouldBe Some(MediaType.Pdf)
+    MediaType.fromMimeType("text/x-markdown") shouldBe Some(MediaType.Markdown)
+    MediaType.fromMimeType("text/html; charset=utf-8") shouldBe Some(MediaType.Html)
   }
 
   "fromExtension" should "be case insensitive and tolerate a leading dot" in {
@@ -65,7 +83,7 @@ class MediaTypeSpec extends AnyFlatSpec with Matchers {
 
   "fromMimeType" should "ignore parameters and case" in {
     MediaType.fromMimeType("IMAGE/PNG") shouldBe Some(MediaType.Png)
-    MediaType.fromMimeType("text/plain; charset=utf-8") shouldBe None
+    MediaType.fromMimeType("TEXT/PLAIN; charset=utf-8") shouldBe Some(MediaType.PlainText)
     MediaType.fromMimeType("image/png; charset=binary") shouldBe Some(MediaType.Png)
   }
 
@@ -75,7 +93,7 @@ class MediaTypeSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return None for a MIME type it does not model" in {
-    MediaType.fromMimeType("application/pdf") shouldBe None
+    MediaType.fromMimeType("application/json") shouldBe None
     MediaType.fromMimeType("video/mp4") shouldBe None
   }
 
