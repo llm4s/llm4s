@@ -89,6 +89,26 @@ enum ApprovalDecision derives ReadWriter:
 final case class ToolTask(assistantMessageId: String, call: ToolCall, idempotencyKey: IdempotencyKey) derives ReadWriter
 
 /**
+ * One batch's lock schedule (`AgentToolSpec.withLocks`), stored in [[ToolLoop.queue]]: the locks each call
+ * was scheduled with, by call id and rendered (`LockKey.render`, which `LockKey(_)` reads back), and the
+ * calls still to run, in call order. The batch keeps the order its schedule gives, whatever the lock
+ * functions say by the time a later round, a resume or a recover runs.
+ */
+final case class LockSchedule(locks: Map[String, Vector[String]], waiting: Vector[ToolTask]) derives ReadWriter:
+
+  /** The locks call `callId` was scheduled with; none if it is not in the schedule. */
+  def locksOf(callId: String): Set[LockKey] = locks.getOrElse(callId, Vector.empty).map(LockKey(_)).toSet
+
+  def withWaiting(w: Vector[ToolTask]): LockSchedule = copy(waiting = w)
+
+object LockSchedule:
+  val empty: LockSchedule = LockSchedule(Map.empty, Vector.empty)
+
+  /** The schedule of calls with these locks, none waiting yet. */
+  def of(locks: Map[String, Set[LockKey]]): LockSchedule =
+    LockSchedule(locks.view.mapValues(_.map(_.render).toVector.sorted).toMap, Vector.empty)
+
+/**
  * The question a tool's `Ask` interrupt carries: the call that asked, from one assistant message,
  * the question encoded with the tool's declared question codec, the call's
  * [[org.llm4s.agent.graph.IdempotencyKey]], and whether the call was approved before it asked -
@@ -467,12 +487,11 @@ object ToolLoop:
     }
 
   /**
-   * The calls of the current batch still to run, in call order, each with the idempotency key the model
-   * step gave it: calls that wait for an earlier call holding a conflicting lock
-   * (`AgentToolSpec.withLocks`). Empty between batches; each update replaces it.
+   * The current batch's lock schedule (`AgentToolSpec.withLocks`): the locks each call was scheduled
+   * with, and the calls still to run. Removed when the batch is collected; each update replaces it.
+   * Registered only for an agent with a tool that declares locks.
    */
-  val queue: StateKey[Vector[ToolTask], Vector[ToolTask]] =
-    StateKey.replace[Vector[ToolTask]]("tool-queue", Vector.empty)
+  val queue: StateKey[LockSchedule, LockSchedule] = StateKey.replace[LockSchedule]("tool-queue", LockSchedule.empty)
 
   /**
    * The loop for a family of `agents`, a new thread starting with `root`. Refuses an empty family,
@@ -589,7 +608,7 @@ object ToolLoop:
      * graph, so an agent without locks keeps the structural fingerprint it had before locks existed, and
      * restores the checkpoints written then.
      */
-    def queueKey: Option[StateKey[Vector[ToolTask], Vector[ToolTask]]] =
+    def queueKey: Option[StateKey[LockSchedule, LockSchedule]] =
       Option.when(tools.tools.exists(_.spec.locksOf.isDefined))(queue)
 
     /** What the model node, and a model wrapper's question node, may write. */
@@ -868,6 +887,10 @@ object ToolLoop:
         case Some(tool) => pipeline.admit(tool, task, state, context)
     }
 
+    // the batch's lock schedule, as the model step recorded it: none for an agent without locks
+    def scheduledWith(state: ThreadState): LockSchedule =
+      nodes.queueKey.flatMap(key => state.get(key).toOption).getOrElse(LockSchedule.empty)
+
     b.implement(nodes.approval.node, writes = callWrites) { (resumed, state, context) =>
       val request = resumed.question
       val task    = ToolTask(request.assistantMessageId, request.call, request.idempotencyKey)
@@ -877,7 +900,8 @@ object ToolLoop:
         // the call was scheduled with its proposed locks: an edit that would take a lock they do not cover
         // could run it out of order with a call of its batch that has committed or runs beside it, so it is
         // refused, the call unrun and its stored arguments unchanged
-        case ApprovalDecision.Edit(arguments) if !pipeline.locksCovered(request.call, arguments) =>
+        case ApprovalDecision.Edit(arguments)
+            if !pipeline.locksCovered(request.call, arguments, scheduledWith(state)) =>
           pipeline.error(task, ToolLoop.EditTakesLocks, context)
         case ApprovalDecision.Edit(arguments) =>
           val edit = StateUpdate.update(
@@ -939,10 +963,15 @@ object ToolLoop:
         case none if none.isEmpty =>
           if calls.isEmpty then appended.goto(nodes.finish)
           else
-            // a call whose locks conflict with an earlier call's waits in the queue, for collect to run
-            val (now, later) = pipeline.scheduled(calls.map(issued(stored.id, _, context)))
-            val queued       = if later.isEmpty then appended else appended.update(queue, later)
-            queued.fanOut(nodes.batch, nodes.callTool, now)
+            // the batch is scheduled once, with the locks its calls have now: they are recorded, so a later
+            // round, a resume or a recover - even under a rebuilt agent whose lock functions changed - keeps
+            // this order; a call whose locks conflict with an earlier call's waits for collect to run it
+            val tasks        = calls.map(issued(stored.id, _, context))
+            val schedule     = pipeline.schedule(tasks)
+            val (now, later) = pipeline.scheduled(tasks, schedule)
+            nodes.queueKey
+              .fold(appended)(key => appended.update(key, schedule.withWaiting(later)))
+              .fanOut(nodes.batch, nodes.callTool, now)
         case Vector(transfer) if calls.size == 1 =>
           val target = handoffs(transfer.name)
           AgentEvents.HandedOff.emit(context, events.HandedOff(agent.id.value, target.agent.id.value))
@@ -1051,9 +1080,9 @@ object ToolLoop:
     b.implement(nodes.finish, writes = finishWrites)((_, state, context) => finishStep(state, context, Vector.empty))
 
     // the batch's next round of locked calls, while any wait in the queue; then every result, in call order
-    def nextRound(waiting: Vector[ToolTask]): Command =
-      val (now, later) = pipeline.scheduled(waiting)
-      Command.empty.update(queue, later).fanOut(nodes.batch, nodes.callTool, now)
+    def nextRound(schedule: LockSchedule): Command =
+      val (now, later) = pipeline.scheduled(schedule.waiting, schedule)
+      Command.empty.update(queue, schedule.withWaiting(later)).fanOut(nodes.batch, nodes.callTool, now)
 
     // every result, appended in call order, once no call waits in the queue
     def collected(state: ThreadState, context: RunContext): Result[Command] =
@@ -1094,7 +1123,10 @@ object ToolLoop:
         nodes.queueKey.fold(collected(state, context)) { key =>
           state
             .get(key)
-            .flatMap(waiting => if waiting.nonEmpty then Right(nextRound(waiting)) else collected(state, context))
+            .flatMap(schedule =>
+              if schedule.waiting.nonEmpty then Right(nextRound(schedule))
+              else collected(state, context).map(_.remove(key))
+            )
         }
       )
     }
@@ -1458,21 +1490,28 @@ object ToolLoop:
      * `n` rounds. A call that fails its argument checks holds no lock (it is refused, touching nothing);
      * one whose lock function throws holds the root lock, which conflicts with every lock.
      */
-    def scheduled(tasks: Vector[ToolTask]): (Vector[ToolTask], Vector[ToolTask]) =
-      val locks = tasks.map(t => tools.get(t.call.name).fold(Set.empty[LockKey])(locksOf(_, t.call)))
+    def scheduled(tasks: Vector[ToolTask], schedule: LockSchedule): (Vector[ToolTask], Vector[ToolTask]) =
+      val locks                                      = tasks.map(t => schedule.locksOf(t.call.id))
       def conflict(a: Set[LockKey], b: Set[LockKey]) = a.exists(x => b.exists(_.conflictsWith(x)))
       tasks.indices.toVector.partitionMap { i =>
         if (0 until i).exists(j => conflict(locks(i), locks(j))) then Right(tasks(i)) else Left(tasks(i))
       }
 
+    /** The locks of each of a batch's calls, computed once, when the model step schedules it. */
+    def schedule(tasks: Vector[ToolTask]): LockSchedule =
+      LockSchedule.of(
+        tasks.map(t => t.call.id -> tools.get(t.call.name).fold(Set.empty[LockKey])(locksOf(_, t.call))).toMap
+      )
+
     /**
-     * Whether `call` with its arguments replaced by `edited` takes only locks its proposed arguments'
-     * locks cover: each edited lock has a proposed one as a prefix, so every call that conflicts with
-     * the edited call conflicted with the proposed one, and the batch's order still holds.
+     * Whether `call` with its arguments replaced by `edited` takes only locks that those it was scheduled
+     * with (in `schedule`; none if it is not there) cover: each edited lock has a scheduled one as a
+     * prefix, so every call that conflicts with the edited call conflicted with the scheduled one, and
+     * the batch's order still holds.
      */
-    def locksCovered(call: ToolCall, edited: ujson.Value): Boolean =
+    def locksCovered(call: ToolCall, edited: ujson.Value, schedule: LockSchedule): Boolean =
       tools.get(call.name).forall { tool =>
-        val proposed = locksOf(tool, call)
+        val proposed = schedule.locksOf(call.id)
         locksOf(tool, call.copy(arguments = edited)).forall(k =>
           proposed.exists(p => k.segments.startsWith(p.segments))
         )

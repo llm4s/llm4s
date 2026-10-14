@@ -218,9 +218,7 @@ final class AgentBuilder private (
       "systemPrompt" -> systemPrompt.fold[ujson.Value](ujson.Null)(ujson.Str(_)),
       "maxSteps"     -> maxSteps,
       "tools" -> ujson.Arr.from(
-        tools
-          .sortBy(_.spec.name)
-          .map(t => AgentBuilder.locked(t, ujson.Obj("name" -> t.spec.name, "definition" -> t.spec.toolDefinition)))
+        tools.sortBy(_.spec.name).map(t => ujson.Obj("name" -> t.spec.name, "definition" -> t.spec.toolDefinition))
       ),
       // each middleware's id and contributed tools, so a changed middleware tool schema changes the version
       "middleware" -> ujson.Arr.from(
@@ -230,10 +228,7 @@ final class AgentBuilder private (
             "tools" -> ujson.Arr.from(
               m.tools
                 .sortBy(_.spec.name)
-                .map(t =>
-                  AgentBuilder
-                    .locked(t, ujson.Obj("name" -> t.spec.name, "definition" -> t.spec.toolDefinition.render()))
-                )
+                .map(t => ujson.Obj("name" -> t.spec.name, "definition" -> t.spec.toolDefinition.render()))
             )
           )
         )
@@ -305,23 +300,12 @@ object AgentBuilder:
 
   /**
    * The graph version of a family: the hex SHA-256 of its agents' settings, sorted by id - each
-   * agent's id, system prompt and max steps, its tools' names, definitions and whether they declare locks
-   * sorted by name, its
+   * agent's id, system prompt and max steps, its tools' names and definitions sorted by name, its
    * middleware ids in registration order with each middleware's contributed tools' names and
    * definitions, and its handoff targets with `preserveContext`. Completion
    * options, streaming, breakpoints and the model client are not part of it: they are rebound when a thread is
    * restored.
    */
-  /**
-   * A tool's canonical entry, marked `"locked": true` when the tool declares locks: lock adoption changes
-   * how a batch is scheduled, so a thread checkpointed mid-batch under other declarations is refused rather
-   * than resumed out of order. Unmarked when it declares none, so an agent without locks keeps the version
-   * it had before locks existed.
-   */
-  private def locked(tool: AgentTool[?], entry: ujson.Obj): ujson.Obj =
-    if tool.spec.locksOf.isDefined then entry("locked") = ujson.True
-    entry
-
   private[agent] def fingerprint(family: Vector[AgentBuilder]): String =
     val canonical = ujson.Arr.from(family.sortBy(_.id).map(_.canonical)).render()
     MessageDigest

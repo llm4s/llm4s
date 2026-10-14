@@ -147,7 +147,7 @@ object AgentToolSpec:
       None,
       ToolHints.default,
       None,
-      _ => Vector.empty,
+      _ => Vector(ToolResource(Operation.Invoke, name)),
       None
     )
 

@@ -68,6 +68,13 @@ class PermissionMiddlewareSpec extends AnyFlatSpec with Matchers {
     decide(Seq(PermissionRule.allow(Invoke, "other")), false) shouldBe ToolOutcome.Error("Denied: invoke files")
   }
 
+  "A spec's resourcesOf" should "return the advertised default, invoking the tool, until withResources replaces it" in {
+    spec.resourcesOf(ujson.Obj()) shouldBe Vector(ToolResource(Invoke, "files"))
+    spec.resourcesOf(ujson.Obj()) shouldBe Vector(spec.defaultResource)
+    spec.withResources(_ => Vector(ToolResource(Read, "/a"))).resourcesOf(ujson.Obj()) shouldBe
+      Vector(ToolResource(Read, "/a"))
+  }
+
   "ToolCallRequest(spec, call)" should "carry the tool's default resource" in {
     ToolCallRequest(spec, call).resources shouldBe Vector(ToolResource(Invoke, "files"))
   }

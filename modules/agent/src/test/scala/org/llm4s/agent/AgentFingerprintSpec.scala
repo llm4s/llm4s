@@ -156,48 +156,75 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
       .answer shouldBe Some("done")
   }
 
-  "The graph version" should "change when any tool adopts locks, even where the queue key is already registered" in {
-    val lockedEcho = echoWith(SpecTools.spec("echo").withLocks(_ => Set.empty))
-    val lockedOther = org.llm4s.agent.graph.tool.AgentTool(SpecTools.spec("other").withLocks(_ => Set.empty))((a, _) =>
-      ToolOutcome.Success(ujson.Str(a.text))
-    )
-    def agentWith(tools: org.llm4s.agent.graph.tool.AgentTool[?]*) =
-      Agent.builder("root", client).withTools(SpecTools.set(tools*))
-    // a second tool of the same agent adopting locks
-    version(agentWith(lockedEcho, lockedOther)) should not be version(agentWith(lockedEcho, other))
-    // an agent adopting locks while another agent of the family already has them
-    def family(root: org.llm4s.agent.graph.tool.AgentTool[?]) =
-      agentWith(root).withHandoffs(
-        Handoff.to("helper", Agent.builder("helper", client).withTools(SpecTools.set(lockedOther)))
-      )
-    version(family(lockedEcho)) should not be version(family(echo))
-    // timeouts and resources are not part of it
+  "The graph version" should "not cover timeouts, resources or lock functions: a batch keeps its recorded schedule" in {
     import scala.concurrent.duration._
+    def agentWith(tool: org.llm4s.agent.graph.tool.AgentTool[?]) =
+      Agent.builder("root", client).withTools(SpecTools.set(tool))
     version(agentWith(echoWith(SpecTools.spec("echo").withTimeout(1.second)))) shouldBe version(agentWith(echo))
+    version(agentWith(echoWith(SpecTools.spec("echo").withLocks(_ => Set.empty)))) shouldBe version(agentWith(echo))
   }
 
-  "A thread parked in a batch" should "be refused once another tool of its agent adopts locks" in {
-    val runtime    = GraphRuntime.inMemory()
-    val thread     = ThreadId("adopting")
-    val lockedEcho = echoWith(SpecTools.spec("echo").withLocks(_ => Set.empty))
-    def agent(otherTool: org.llm4s.agent.graph.tool.AgentTool[?], replies: Completion*) =
-      built(
-        Agent
-          .builder("root", ScriptedLLMClient.of(replies*))
-          .withTools(SpecTools.set(lockedEcho, otherTool))
-          .withMiddleware(new ApprovalMiddleware(_ => Some("review")))
-          .withRuntime(runtime)
-      )
-    val parked = agent(other, SpecTools.calling(SpecTools.call("c1", "other"), SpecTools.call("c2", "echo")))
-      .run(thread, "go")
-      .value
-    val approvals = parked.status match {
-      case AgentStatus.Suspended(pending, _, _, _) => pending.map(p => parked.approve(p._1)).toMap
-      case other                                   => fail(s"expected Suspended, got $other")
+  /** `step` writes the counter (read from its snapshot, plus one), locked by `policy`; the root asks approval for c1. */
+  private def stepAgent(
+    runtime: GraphRuntime,
+    policy: SpecTools.Text => Set[org.llm4s.agent.graph.tool.LockKey],
+    replies: Completion*
+  ) = {
+    val counter = org.llm4s.agent.graph.StateKey.replace[Int]("counter", 0)
+    val step = org.llm4s.agent.graph.tool.AgentTool(SpecTools.spec("step").withLocks(policy), writes = Set(counter)) {
+      (_, context) =>
+        val next = context.state.get(counter).fold(e => fail(e.message), identity) + 1
+        ToolOutcome.Success(ujson.Str(next.toString), org.llm4s.agent.graph.StateUpdate.update(counter, next))
     }
-    val lockedOther = org.llm4s.agent.graph.tool.AgentTool(SpecTools.spec("other").withLocks(_ => Set.empty))((a, _) =>
-      ToolOutcome.Success(ujson.Str(a.text))
+    built(
+      Agent
+        .builder("root", ScriptedLLMClient.of(replies*))
+        .withTools(SpecTools.set(step))
+        .withMiddleware(new ApprovalMiddleware(r => Option.when(r.call.id == "c1")("review")))
+        .withRuntime(runtime)
     )
-    agent(lockedOther).resume(thread, approvals).error shouldBe a[GraphError.RestoreRejected]
+  }
+
+  private def approveAll(parked: AgentResult) = parked.status match {
+    case AgentStatus.Suspended(pending, _, _, _) => pending.map(p => parked.approve(p._1)).toMap
+    case other                                   => fail(s"expected Suspended, got $other")
+  }
+
+  private def stepResults(result: AgentResult) = result.messages.collect { case t: ToolMessage => t.content }.toVector
+
+  "A batch parked across a rebuild" should "keep the lock schedule it was made with when the lock functions change" in {
+    import org.llm4s.agent.graph.tool.LockKey
+    val runtime = GraphRuntime.inMemory()
+    val thread  = ThreadId("policy-change")
+    val calling = SpecTools.calling(
+      SpecTools.call("c1", "step", "a"),
+      SpecTools.call("c2", "step", "a"),
+      SpecTools.call("c3", "step", "a")
+    )
+    // scheduled with every call on lock "a": c2 and c3 wait in turn behind c1, which waits for approval
+    val parked = stepAgent(runtime, t => Set(LockKey(t.text)), calling).run(thread, "go").value
+    // rebuilt with lock functions that would let c2 and c3 run side by side
+    val done =
+      stepAgent(runtime, _ => Set(LockKey(java.util.UUID.randomUUID().toString)), CompletionFixture.simple("done"))
+        .resume(thread, approveAll(parked))
+        .value
+    done.answer shouldBe Some("done")
+    // c2 and c3 still ran one after the other, each seeing the last write; recomputed, they would share a round
+    stepResults(done) shouldBe Vector("1", "2", "3")
+  }
+
+  it should "not reorder calls a changed lock function would now make conflict" in {
+    import org.llm4s.agent.graph.tool.LockKey
+    val runtime = GraphRuntime.inMemory()
+    val thread  = ThreadId("policy-merge")
+    val calling = SpecTools.calling(SpecTools.call("c1", "step", "a"), SpecTools.call("c2", "step", "b"))
+    // scheduled apart: c2 commits beside c1, which waits for approval
+    val parked = stepAgent(runtime, t => Set(LockKey(t.text)), calling).run(thread, "go").value
+    // rebuilt so both would share one lock: c1 is not refused or reordered, it runs as scheduled
+    val done = stepAgent(runtime, _ => Set(LockKey("shared")), CompletionFixture.simple("done"))
+      .resume(thread, approveAll(parked))
+      .value
+    done.answer shouldBe Some("done")
+    stepResults(done) shouldBe Vector("2", "1") // c2 ran first, as its schedule allowed; c1 saw its write
   }
 }
