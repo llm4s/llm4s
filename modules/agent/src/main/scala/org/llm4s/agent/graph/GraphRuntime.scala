@@ -178,8 +178,9 @@ object GraphRuntime:
  * interleaving of durable and live events within one runtime: every event handed to several of them has the same
  * relative placement for each. A subscription that attaches later misses earlier live events, and a slower one can lose
  * live events ([[StreamEvent.LiveGap]]) or be disconnected as `Lagging`; the guarantee does not cover those cases. A
- * commit made elsewhere reaches each subscription through that subscription's own store watch, or through a hand-over's
- * gap read, so its position among this runtime's live events can differ from one subscription to another; each still
+ * commit made elsewhere reaches each subscription through that subscription's own store watch, through a hand-over's
+ * gap read, or, while the subscription is still in its initial replay (one created after the commit included), directly
+ * from that replay, so its position among this runtime's live events can differ from one subscription to another; each still
  * sees the durable events in `seq` order. The guarantee holds when nothing outside this runtime commits to the thread;
  * an external commit allows subscriptions to place it differently, not necessarily make them differ. A consumer that
  * needs one order across runtimes orders only [[StreamEvent.Durable]] records by `EventRecord.seq`. It ignores
@@ -294,7 +295,8 @@ final class GraphRuntime(
    * from the store by the subscription's watch ([[WatchPolicy]]: a second virtual thread, which
    * `cancel` stops too), in `seq` order and with the same durable guarantees, and are queued only as
    * they fit, so they never make it lag. Where such a commit falls among this runtime's live events
-   * is not fixed: it depends on when this subscription's watch (or a hand-over's gap read) read it, so
+   * is not fixed: it depends on which read reached this subscription first (its initial replay, its watch, or a
+   * hand-over's gap read), so
    * two subscriptions can place it differently. The guarantee that caught-up subscriptions in one runtime see one
    * live/durable interleaving holds while nothing outside the runtime commits to the thread; an external commit
    * allows it to differ rather than making it differ. Where one order across runtimes

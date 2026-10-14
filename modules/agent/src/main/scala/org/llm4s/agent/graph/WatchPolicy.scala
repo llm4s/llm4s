@@ -21,7 +21,7 @@ import scala.concurrent.duration.*
  * only one using its store can disable it to save the watching thread and its reads.
  *
  * '''Ordering.''' Each subscription reads on its own cursor, so a commit made elsewhere falls at a
- * point among the runtime's live events that depends on when that subscription's watch read it: two
+ * point among the runtime's live events that depends on which read reached that subscription (its initial replay, its watch, or a hand-over's gap read): two
  * subscriptions can place it differently, though each delivers the durable events in `seq` order.
  * Concurrently active subscriptions of one runtime that stay caught up share one live/durable interleaving, every event
  * handed to several of them having the same relative placement for each, while nothing outside the runtime commits to

@@ -165,7 +165,8 @@ private[graph] trait Dispatched extends Subscription:
  * in one interleaving: every event handed to several of them has the same relative placement for each. A subscription
  * that attaches later misses earlier live events, and a slower one can lose live events or be disconnected as
  * `Lagging`; that guarantee does not cover those cases. A commit made by another runtime or process is the exception:
- * it reaches each subscription through that subscription's own store watch, or through a hand-over's gap read, so where
+ * it reaches each subscription through that subscription's own store watch, through a hand-over's gap read, or, while
+ * the subscription is still in its initial replay, directly from that replay, so where
  * it falls among this runtime's live events can differ per subscription (its `seq` order never does). The guarantee
  * holds when nothing outside this runtime commits to the thread; an external commit allows subscriptions to differ, not
  * necessarily makes them differ. The structural fix would be one ordered per-thread log (#1920). The queue holds up to
