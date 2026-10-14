@@ -395,8 +395,10 @@ rules a caller relies on:
 - **The evidence is kept exactly as long as the task can run again.** That is until the commit that
   finishes the task, however long the thread waits. `prune` never removes it, and `deleteThread`
   removes it with the thread.
-- **A Block does not undo an external effect.** A guardrail that blocks a turn retracts its
-  messages, but a file the turn wrote, or a command it ran, stays as it is.
+- **A Block does not undo an external effect.** A guardrail that blocks a turn restores every state
+  key the turn wrote, its messages included (§4.22), but a file the turn wrote on the host, a
+  command it ran or a record it stored stays as it is. The turn's replay evidence goes with its
+  closing commit, so nothing replays it either.
 
 ---
 

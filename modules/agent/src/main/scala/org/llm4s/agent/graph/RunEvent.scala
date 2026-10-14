@@ -1,6 +1,7 @@
 package org.llm4s.agent.graph
 
 import org.llm4s.error.LLMError
+import org.llm4s.llmconnect.model.UsageSummary
 import upickle.default.ReadWriter
 
 import java.time.Instant
@@ -11,7 +12,7 @@ import java.time.Instant
  * The three events that begin a run record the run's `tenantId` and `principal` (as supplied in its
  * [[RunConfig]]); the log reads events written before they existed as having neither.
  */
-enum RunEvent derives ReadWriter:
+enum RunEvent:
   case RunStarted(tenantId: Option[String], principal: Option[String])
 
   /**
@@ -40,13 +41,25 @@ enum RunEvent derives ReadWriter:
 
   /** A run began by answering these interrupts. */
   case RunResumed(answered: Vector[String], tenantId: Option[String], principal: Option[String])
-  case RunFailed(message: String)
 
-  /** The run was cancelled by interrupting its thread; its checkpoint stays `Running` for `recover`. */
-  case RunCancelled
+  /**
+   * The run failed with `message`. `usage` is the model usage of the attempts of its tasks that committed nothing -
+   * a task that failed, or was cut short - which is the only durable record of their calls' cost (design §4.22).
+   * `None` when they made none.
+   */
+  case RunFailed(message: String, usage: Option[UsageSummary] = None)
 
-  /** The run's deadline expired, stopping it as a cancel does; its checkpoint stays `Running` for `recover`. */
-  case RunTimedOut
+  /**
+   * The run was cancelled by interrupting its thread; its checkpoint stays `Running` for `recover`. `usage` is the
+   * model usage of the attempts the cancel cut short, as on [[RunFailed]].
+   */
+  case RunCancelled(usage: Option[UsageSummary] = None)
+
+  /**
+   * The run's deadline expired, stopping it as a cancel does; its checkpoint stays `Running` for `recover`. `usage`
+   * is the model usage of the attempts the deadline cut short, as on [[RunFailed]].
+   */
+  case RunTimedOut(usage: Option[UsageSummary] = None)
 
   /**
    * [[GraphRuntime.updateState]] committed a new checkpoint over `fromCheckpoint`, with a state update
@@ -228,3 +241,21 @@ trait Subscription:
    * dispatcher stops when the call returns.
    */
   def cancel(): Unit
+
+object RunEvent:
+  private val derivedCodec: ReadWriter[RunEvent] = ReadWriter.derived
+
+  /**
+   * The derived codec, reading a `RunCancelled` or `RunTimedOut` stored before they carried usage - a bare JSON
+   * string - as one with none.
+   */
+  given ReadWriter[RunEvent] = upickle.default
+    .readwriter[ujson.Value]
+    .bimap[RunEvent](
+      event => upickle.default.writeJs(event)(using derivedCodec),
+      {
+        case ujson.Str("RunCancelled") => RunCancelled()
+        case ujson.Str("RunTimedOut")  => RunTimedOut()
+        case json                      => upickle.default.read[RunEvent](json)(using derivedCodec)
+      }
+    )

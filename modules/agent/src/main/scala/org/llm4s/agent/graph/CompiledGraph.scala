@@ -540,6 +540,9 @@ final class CompiledGraph[I, O] private[graph] (
         case update: StateOperation.Update[?, ?] =>
           EncodedOperation.Update(update.key.id.value, update.key.encodeUpdate(update.value))
         case StateOperation.Remove(key) => EncodedOperation.Remove(key.id.value)
+        // only a Block update restores, and a blocked task has no pending write
+        case StateOperation.Restore(key, _) =>
+          throw new IllegalStateException(s"task ${task.id.value} restores '${key.id.value}' outside a Block")
       }
       result match
         case TaskResult.Done(command) =>

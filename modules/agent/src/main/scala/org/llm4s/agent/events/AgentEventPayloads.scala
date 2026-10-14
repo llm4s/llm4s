@@ -18,8 +18,10 @@ object CallUsage:
     CallUsage(u.promptTokens, u.completionTokens, u.totalTokens, u.thinkingTokens)
 
 /**
- * `agent`'s model call returned. `attempts` counts the calls its model wrappers made to the model,
- * the last one succeeding; it is 0 when a model middleware answered without calling the model.
+ * A model call of `agent`'s returned a completion: one event per provider call, whichever response the model
+ * wrappers kept, so the events sum to the thread's usage. `attempts` is the call's attempt number within its model
+ * step, from 1 - a retrying wrapper's calls are 1, 2, ... - and 0 for a call a hook made through
+ * `ModelContext.accounted`, or usage it recorded with `ModelContext.recordUsage`. `toolCalls` is the completion's.
  * `usage` and `estimatedCost` (USD) are the completion's, when the provider reported them.
  */
 final case class ModelCallCompleted(
