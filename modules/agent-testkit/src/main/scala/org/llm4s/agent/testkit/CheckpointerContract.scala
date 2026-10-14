@@ -278,6 +278,20 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.seqs() shouldBe Vector(1L, 2L, 3L)
   }
 
+  it should "record on each event the token of the commit that stored it, so two claims under one run id differ" in {
+    val s     = Store()
+    val first = s.claim("run").value
+    s.commit(first.token, Some(s.checkpoint("c1", None)), events = Vector(s.event("a"), s.event("b")))
+      .value
+      .map(_.token) shouldBe Vector(first.token, first.token)
+    // the same run id claims again, after a takeover: its events carry the new claim's token
+    s.advance(ttl)
+    val again = s.claim("run").value
+    s.commit(again.token, events = Vector(s.event("c"))).value.map(_.token) shouldBe Vector(again.token)
+    s.store.eventsAfter(s.thread, 0L, 10).value.map(r => r.runId -> r.token) shouldBe
+      Vector("run" -> first.token, "run" -> first.token, "run" -> again.token)
+  }
+
   it should "refuse a checkpoint whose parent is not the latest, applying nothing and numbering nothing" in {
     val s     = Store()
     val token = s.claim("run").value.token
@@ -364,6 +378,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       s.thread.value,
       1L,
       draft.runId,
+      token,
       draft.checkpointId,
       draft.taskId,
       draft.nodeId,
@@ -804,7 +819,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       )
       .value
     val stored = StoredCheckpoint(checkpoint(payload()), Vector(write(payload())))
-    val logged = Vector(EventRecord(s.thread.value, 1L, "run", Some("c1"), None, None, start, event(payload())))
+    val logged = Vector(EventRecord(s.thread.value, 1L, "run", token, Some("c1"), None, None, start, event(payload())))
     def readsBack(): Assertion =
       same(s.store.latest(s.thread).value.value, stored)
       same(s.store.history(s.thread, None, 10).value, Vector(stored.checkpoint))
@@ -1606,14 +1621,19 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
   }
 
   it should "keep renewing a live run's claim, so it is not taken over while it runs" in {
-    val s       = Store()
-    val w       = Workers()
-    val renewed = new AtomicInteger()
+    val s = Store()
+    val w = Workers()
+    // Renewals are counted by when their store call began, not when it returned: one already in flight at
+    // the advance read the clock before it, so it extended the claim only from the old time.
+    val entered      = new AtomicInteger()
+    val advancedAt   = new AtomicInteger(Int.MaxValue)
+    val renewedAfter = new AtomicInteger()
     val counted = new Checkpointer:
       def claim(threadId: ThreadId, request: ClaimRequest) = s.store.claim(threadId, request)
       def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) =
-        val result = s.store.renew(threadId, token, ttl)
-        if result.isRight then renewed.incrementAndGet(): Unit
+        val ordinal = entered.incrementAndGet()
+        val result  = s.store.renew(threadId, token, ttl)
+        if result.isRight && ordinal > advancedAt.get then renewedAfter.incrementAndGet(): Unit
         result
       def release(threadId: ThreadId, token: FencingToken)                 = s.store.release(threadId, token)
       def commit(threadId: ThreadId, commit: Commit)                       = s.store.commit(threadId, commit)
@@ -1632,8 +1652,9 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     w.awaitEntered("a")
 
     s.advance(20.seconds)
-    val before = renewed.get
-    eventually(renewed.get > before)
+    // every renewal numbered above this began after the advance, so read the advanced clock
+    advancedAt.set(entered.get)
+    eventually(renewedAfter.get > 0)
     s.advance(20.seconds) // past the first claim's expiry, not the renewed one's
     second.recover(s.thread, w.graph, config("second")).refused shouldBe a[GraphError.ThreadBusy]
 

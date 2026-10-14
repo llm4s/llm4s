@@ -148,7 +148,7 @@ class SubscriptionTenantSpec extends AnyFlatSpec with Matchers with EitherValues
     await(runtime.start(thread, emitter, "mine", tenant("a", "a2")).value).completed
 
     val events = seen.until(completedRun)
-    events.head should matchPattern { case StreamEvent.Durable(EventRecord(_, 1L, _, _, _, _, _, _)) => }
+    events.head should matchPattern { case StreamEvent.Durable(EventRecord(_, 1L, _, _, _, _, _, _, _)) => }
     payloads(events) should contain("mine")
     events.exists(disconnection) shouldBe false
     sub.cancel()

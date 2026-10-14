@@ -176,7 +176,8 @@ tenant.
 Several `GraphRuntime`s, in one process or several, can share one checkpoint store
 ([Durable Checkpointers](durable-checkpointers)). A `GraphRuntime.subscribe` on any of them delivers
 the durable events of every commit on the thread, whichever runtime made it, with the same
-guarantees: in order, without gap or duplicate, and only after the commit.
+durable guarantees: in `seq` order, without gap or duplicate, and only after the commit. How those
+events interleave with live ones is the exception: see [Ordering across runtimes](#ordering-across-runtimes).
 
 - The subscription's own runtime hands it that runtime's commits as they land. Other runtimes' commits
   it reads from the store, on a second virtual thread (`llm4s-watch-<threadId>`) that runs while the
@@ -220,6 +221,19 @@ subscriptions then see other runtimes' commits only by subscribing again, which 
 `Agent.stream*` and `AgentRun.subscribe`, and the fs2, ZIO, Java and Kotlin streams built on them, follow
 a run that their own runtime started, so they work as before. To follow a thread whose runs execute in
 another process, subscribe with `GraphRuntime.subscribe` on a runtime over the same store.
+
+
+### Ordering across runtimes
+
+Concurrently active subscriptions to a thread that stay caught up see one interleaving of durable and live events within one runtime: every event handed to several of them has the same relative placement for each. That guarantee does not cover a subscription that attaches later, which misses earlier live events, or a slower one, which can lose live events (`LiveGap`) or be disconnected as `Lagging`. Durable `seq` order is preserved for every subscription. The guarantee holds when nothing outside this runtime commits to the thread. A commit made by another runtime or process reaches each subscription through its own store watch, through a hand-over's gap read, or, for a subscription still in
+its initial replay, directly from that replay, so two subscriptions can place it differently; an external commit allows that, but does not necessarily make them differ.
+
+If you need one order across runtimes, order only `StreamEvent.Durable(record)` by `record.seq` (or
+collect those events and sort by `seq`). There is no durable-only subscription option, so filter in the
+listener. Ignore `StreamEvent.Live` and `StreamEvent.LiveGap`: live events have no `seq` and are not
+stored, so they cannot be placed in a cross-runtime order. Treat `StreamEvent.Disconnected` as the end
+of the subscription, not as a record: it carries `lastSeq` and a reason, not an `EventRecord`. The structural fix, one ordered per-thread log shared by all subscriptions, is recorded as future
+work in the design record ([#1920](https://github.com/llm4s/llm4s/issues/1920)).
 
 ## fs2, ZIO and Pekko Streams
 

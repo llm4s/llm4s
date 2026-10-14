@@ -437,7 +437,9 @@ class KernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val loop  = loopOf(ScriptedModel(answer("hi"), answer("again")), Seq(failing))
     GraphRuntime(store).start(t, loop.graph, AgentInput("go")).awaited.value.failed
     val failed =
-      store.eventsAfter(t, 0L, 1000).value.collect { case EventRecord(_, _, _, _, _, _, _, f: RunEvent.RunFailed) => f }
+      store.eventsAfter(t, 0L, 1000).value.collect { case EventRecord(_, _, _, _, _, _, _, _, f: RunEvent.RunFailed) =>
+        f
+      }
     failed.size shouldBe 1
     val usage = failed.head.usage.value
     usage.requestCount shouldBe 1
@@ -525,7 +527,7 @@ class KernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues with O
     handle.cancel()
     awaitResult(handle).value.failed
     val cancelled = store.eventsAfter(t, 0L, 1000).value.collect {
-      case EventRecord(_, _, _, _, _, _, _, c: RunEvent.RunCancelled) => c
+      case EventRecord(_, _, _, _, _, _, _, _, c: RunEvent.RunCancelled) => c
     }
     cancelled.map(_.usage.map(_.requestCount)) shouldBe Vector(Some(1L))
   }
@@ -549,7 +551,7 @@ class KernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues with O
       .value
       .failed
     val timedOut = store.eventsAfter(t, 0L, 1000).value.collect {
-      case EventRecord(_, _, _, _, _, _, _, e: RunEvent.RunTimedOut) => e
+      case EventRecord(_, _, _, _, _, _, _, _, e: RunEvent.RunTimedOut) => e
     }
     timedOut.map(_.usage.map(_.requestCount)) shouldBe Vector(Some(1L))
   }
@@ -582,7 +584,9 @@ class KernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues with O
       .value
       .failed
     val failed =
-      store.eventsAfter(t, 0L, 1000).value.collect { case EventRecord(_, _, _, _, _, _, _, f: RunEvent.RunFailed) => f }
+      store.eventsAfter(t, 0L, 1000).value.collect { case EventRecord(_, _, _, _, _, _, _, _, f: RunEvent.RunFailed) =>
+        f
+      }
     failed.map(_.usage.map(_.requestCount)) shouldBe Vector(Some(2L))
   }
 

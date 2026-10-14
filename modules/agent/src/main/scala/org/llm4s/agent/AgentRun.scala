@@ -73,7 +73,9 @@ final class AgentRun private[agent] (
    * Subscribes `listener` to this turn's events: its durable events replayed from the turn's start,
    * then live; its live events from now on (a live event sent before this call is missed - use
    * [[Agent.stream]] to receive every one). Run-scoped: nothing of another run on the thread is
-   * delivered, and the subscription ends itself after the turn's terminal event, or after a
+   * delivered - so the cross-runtime ordering caveat of
+   * [[org.llm4s.agent.graph.GraphRuntime.subscribe]] does not arise here: another runtime's commits
+   * are not part of this turn - and the subscription ends itself after the turn's terminal event, or after a
    * `Disconnected` - which reaches the listener only if it fell behind (`Lagging`), threw
    * (`ListenerFailed`), or the replay could not read the thread's log (`ReplayFailed`). A turn
    * that ends without a terminal event (a crash, or a failed commit) ends the subscription as soon
