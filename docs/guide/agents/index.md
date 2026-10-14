@@ -401,7 +401,9 @@ exact, and two calls writing one key no longer lose one of the writes. Calls wit
 locks still run in parallel. Each further round costs two supersteps of `RunBudgets.maxSupersteps`.
 A call that waits for approval holds back the calls queued behind it, so a reviewer can see a
 batch's approvals in more than one round. Locks order calls within one batch only, not across
-threads.
+threads. An approval edit may narrow a call's locks (`/prod` to `/prod/app`) but not take a lock
+its proposed arguments did not cover: such an edit is refused, the call does not run, and the model
+sees why.
 
 ---
 

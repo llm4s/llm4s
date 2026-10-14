@@ -431,6 +431,13 @@ final class ToolLoop private (
 
 object ToolLoop:
 
+  /**
+   * The error result of an approval whose edited arguments take a lock the proposed arguments' locks do
+   * not cover (`AgentToolSpec.withLocks`): the call was scheduled with those locks, so it does not run.
+   */
+  val EditTakesLocks: String =
+    "Edit refused: the edited arguments take locks the call was not scheduled with; the call did not run"
+
   /** The tool a durable `ToolExecuted` names for a call to a tool the agent does not have. */
   val UnknownTool: String = "<unknown>"
 
@@ -856,6 +863,11 @@ object ToolLoop:
       resumed.answer match
         case ApprovalDecision.Approve        => pipeline.approved(task, request.call, state, context, request.answered)
         case ApprovalDecision.Reject(reason) => pipeline.rejected(task, reason, context)
+        // the call was scheduled with its proposed locks: an edit that would take a lock they do not cover
+        // could run it out of order with a call of its batch that has committed or runs beside it, so it is
+        // refused, the call unrun and its stored arguments unchanged
+        case ApprovalDecision.Edit(arguments) if !pipeline.locksCovered(request.call, arguments) =>
+          pipeline.error(task, ToolLoop.EditTakesLocks, context)
         case ApprovalDecision.Edit(arguments) =>
           val edit = StateUpdate.update(
             messages,
@@ -1438,6 +1450,19 @@ object ToolLoop:
       def conflict(a: Set[LockKey], b: Set[LockKey]) = a.exists(x => b.exists(_.conflictsWith(x)))
       tasks.indices.toVector.partitionMap { i =>
         if (0 until i).exists(j => conflict(locks(i), locks(j))) then Right(tasks(i)) else Left(tasks(i))
+      }
+
+    /**
+     * Whether `call` with its arguments replaced by `edited` takes only locks its proposed arguments'
+     * locks cover: each edited lock has a proposed one as a prefix, so every call that conflicts with
+     * the edited call conflicted with the proposed one, and the batch's order still holds.
+     */
+    def locksCovered(call: ToolCall, edited: ujson.Value): Boolean =
+      tools.get(call.name).forall { tool =>
+        val proposed = locksOf(tool, call)
+        locksOf(tool, call.copy(arguments = edited)).forall(k =>
+          proposed.exists(p => k.segments.startsWith(p.segments))
+        )
       }
 
     private def locksOf[A](tool: AgentTool[A], call: ToolCall): Set[LockKey] =
