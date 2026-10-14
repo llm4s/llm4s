@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.testutil.{ LinearTime, PerformanceTest }
+import org.llm4s.testutil.LinearTime
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -139,15 +139,13 @@ class RedactionUrlUserinfoSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "replace all it replaces without the added readings, and the password too (#1816)" in {
+  it should "redact the password of URLs in mixed shapes (#1816)" in {
     docs(1816, 2000).foreach { case (input, secret) =>
-      val (out, added) = Redaction.redactedWithRanges(input, singleQuotedFromInput = true)
-      val (base, kept) = Redaction.redactedWithRanges(input, singleQuotedFromInput = true, addedReadings = false)
-      withClue(s"input $input, output $out, without $base: ") {
-        Redaction.redact(input) shouldBe out
-        kept.filterNot(added.contains) shouldBe empty
+      val out = Redaction.redact(input)
+      withClue(s"input $input, output $out: ") {
         (out should not).include(secret)
         if (parses(input)) parses(out) shouldBe true
+        Redaction.redact(out) shouldBe out
       }
     }
   }
@@ -168,25 +166,6 @@ class RedactionUrlUserinfoSpec extends AnyFlatSpec with Matchers {
         })
         .mkString
       withClue(s"input $input: ")(Try(Redaction.redact(input)).isSuccess shouldBe true)
-    }
-  }
-
-  // PerformanceTest, run by `sbt testPerformance`; the megabyte below stays in `sbt test`.
-  it should "read URLs in time linear in the input (#1816)" taggedAs PerformanceTest in {
-    val shapes: Seq[(String, Int => String)] = Seq(
-      "schemes"          -> (n => "a://" * n),
-      "userinfo"         -> (n => "x://u:p@" * n),
-      "colons"           -> (n => "https://" + ":" * (4 * n) + "@"),
-      "unclosed"         -> (n => "https://u:" + "p" * (4 * n)),
-      "escaped slashes"  -> (n => "a:\\/\\/u:p@h " * n),
-      "deep backslashes" -> (n => ("a:" + "\\" * 30 + "/") * n),
-      "list"             -> (n => "redis://u:p@h," * n),
-      "list items"       -> (n => "https://u:p@h1," + "a:b@c," * n),
-      "nested schemes"   -> (n => "https://u:p@" + "a:" * n + "//x"),
-      "commas"           -> (n => "https://u:p@h" + ",@" * n)
-    )
-    shapes.foreach { case (name, build) =>
-      LinearTime.assertLinear(name, build(1000), build(4000))(Redaction.redact(_))
     }
   }
 

@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.testutil.{ LinearTime, PerformanceTest }
+import org.llm4s.testutil.LinearTime
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -89,9 +89,11 @@ class RedactionPythonReprSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "redact every leaf of a keyword argument that holds a container (#1706)" in {
-    Redaction.redact("Settings(token=['a:b', 'QQSECRETZZ'])") shouldBe s"Settings(token=$R'$R', '$R'])"
+    // #1932: the container is walked as any is, keeping its brackets, where the passes replaced its opening bracket and
+    // first quote with the pair's value
+    Redaction.redact("Settings(token=['a:b', 'QQSECRETZZ'])") shouldBe s"Settings(token=['$R', '$R'])"
     Redaction.redact("Settings(token=('a:b', 'QZSECRET'), retries=3)") shouldBe
-      s"Settings(token=$R'$R', '$R'), retries=3)"
+      s"Settings(token=('$R', '$R'), retries=3)"
     (Redaction.redact("Settings(credentials={'user': 'bob', 'pw': 'QZSECRET'})") should not).include("QZSECRET")
     (Redaction.redact("""{"code": "Config(token='a:b\\'c=d\"QZSECRET')"}""") should not).include("QZSECRET")
   }
@@ -243,60 +245,33 @@ class RedactionPythonReprSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "replace all it replaces without the added readings, and more (#1706)" in {
-    // The reading of #1706 adds edits only where no edit already is: every range the passes and the readings before
-    // it replace is replaced as before, nothing they redact is written out, and JSON that parses without it - and
-    // every JSON document inside a string of it - still parses. Deterministic.
-    val docs   = new Docs(1706)
-    var closed = 0
+  it should "redact every credential of #1706's shapes, keep JSON valid and redact its own output to itself" in {
+    // #1932: the reading of #1706 is part of the one pass, so the check is no longer that it only adds to the passes
+    // but that no credential is left, and that every JSON document inside a string still parses. Deterministic.
+    val docs = new Docs(1706)
     (1 to 2000).foreach { _ =>
       val (input, secrets) = docs.next()
-      val (out, added)     = Redaction.redactedWithRanges(input, singleQuotedFromInput = true)
-      val (base, kept)     = Redaction.redactedWithRanges(input, singleQuotedFromInput = true, addedReadings = false)
-      withClue(s"input $input, output $out, without $base: ") {
-        Redaction.redact(input) shouldBe out
-        kept.filterNot(added.contains) shouldBe empty
-        added.filterNot(kept.contains).foreach { case (s, e) =>
-          kept.exists { case (ks, ke) => ke > s && ks < e } shouldBe false
-        }
-        secrets.filterNot(base.contains).filter(out.contains) shouldBe empty
-        if (parses(base)) {
+      val out              = Redaction.redact(input)
+      withClue(s"input $input, output $out: ") {
+        secrets.filter(out.contains) shouldBe empty
+        if (parses(input)) {
           parses(out) shouldBe true
-          innerDocuments(out).count(identity) should be >= innerDocuments(base).count(identity)
+          innerDocuments(out).count(identity) should be >= innerDocuments(input).count(identity)
         }
+        Redaction.redact(out) shouldBe out
       }
-      closed += secrets.count(s => base.contains(s) && !out.contains(s))
-    }
-    // and it is the reading that redacts what the passes left
-    closed should be > 500
-  }
-
-  it should "read Python values in time linear in the input (#1706)" taggedAs PerformanceTest in {
-    val bs = "\\"
-    val shapes: Seq[(String, Int => String)] = Seq(
-      "values never closed"   -> (n => "{'password': 'a, " * n),
-      "values after a comma"  -> (n => "{" + "'password': \"x'y\", " * n + "'n': 1}"),
-      "nested containers"     -> (n => "{'token': " + "[" * n + "'x'" + "]" * n + "}"),
-      "containers never shut" -> (n => "{'token': [" + "'a', [" * n),
-      "runs before quotes"    -> (n => "{'password': '" + (bs * 7 + "'") * n + "'}"),
-      "escaped keys"          -> (n => (bs * 5 + "'password" + bs * 5 + "': " + bs * 5 + "'x" + bs * 5 + "', ") * n),
-      "quotes and spaces"     -> (n => ("\"" + " " * 30) * n + "{'password': 'x'}"),
-      "notebook lines" -> (n => "{\"text/plain\": [\"{'token': ['a',\\n\", " + "\"  'b',\\n\", " * n + "\"'c']}\"]}"),
-      "pytest lines"   -> (n => "E   {'token': ['a',\n" + "E    'b',\n" * n + "E    'c']}"),
-      "keyword arguments" -> (n => "Settings(" + "token=['a', " * n),
-      "joined strings"    -> (n => "{'password': " + "'a' " * n + "}")
-    )
-    shapes.foreach { case (name, build) =>
-      LinearTime.assertLinear(name, build(1000), build(4000))(Redaction.redact(_))
     }
   }
 
   it should "redact a keyword argument or a dict key whose value is a call (#1813)" in {
+    // #1932: a call's arguments are its leaves, and its name, which names a wrapper and no credential, is kept, where
+    // the pair's value took it and the call's opening bracket
     Redaction.redact("Settings(token=SecretStr('hunter2abc'), user='bob')") shouldBe
-      s"Settings(token=$R'$R'), user='bob')"
+      s"Settings(token=SecretStr('$R'), user='bob')"
     Redaction.redact("""Settings(password=Wrapper("hunter2abc"), retries=3)""") shouldBe
-      s"""Settings(password=$R"$R"), retries=3)"""
-    Redaction.redact("Client(api_key=pydantic.SecretStr('hunter2abc'))") shouldBe s"Client(api_key=$R'$R'))"
+      s"""Settings(password=Wrapper("$R"), retries=3)"""
+    Redaction.redact("Client(api_key=pydantic.SecretStr('hunter2abc'))") shouldBe
+      s"Client(api_key=pydantic.SecretStr('$R'))"
     // the call's own keyword arguments are leaves of the value too
     val kw = Redaction.redact("Client(api_key=my_mod.Secret(value='hunter2abc', kind='k1x'), user='bob')")
     (kw should not).include("hunter2abc")
@@ -305,7 +280,7 @@ class RedactionPythonReprSpec extends AnyFlatSpec with Matchers {
     (Redaction.redact("{'api_key': Secret(value='hunter2abc')}") should not).include("hunter2abc")
     // inside a JSON string, in either quote
     val json = Redaction.redact("""{"m": "Settings(token=SecretStr(\"hunter2abc\"), user='bob')"}""")
-    json shouldBe s"""{"m": "Settings(token=$R\\"$R\\"), user='bob')"}"""
+    json shouldBe s"""{"m": "Settings(token=SecretStr(\\"$R\\"), user='bob')"}"""
     parses(json) shouldBe true
   }
 
@@ -376,13 +351,11 @@ class RedactionPythonReprSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "redact every call and quote shape whole, as a superset of what it replaced before (#1813)" in {
+  it should "redact every call and quote shape whole (#1813)" in {
     callDocs(1813, 3000).foreach { case (input, words) =>
-      val (out, added) = Redaction.redactedWithRanges(input, singleQuotedFromInput = true)
-      val (base, kept) = Redaction.redactedWithRanges(input, singleQuotedFromInput = true, addedReadings = false)
-      withClue(s"input $input, output $out, without $base: ") {
+      val out = Redaction.redact(input)
+      withClue(s"input $input, output $out: ") {
         words.filter(out.contains) shouldBe empty
-        kept.filterNot(added.contains) shouldBe empty
         out should include("'bob'")
         if (parses(input)) {
           parses(out) shouldBe true
@@ -393,21 +366,7 @@ class RedactionPythonReprSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "read calls in time linear in the input (#1813)" taggedAs PerformanceTest in {
-    val shapes: Seq[(String, Int => String)] = Seq(
-      "keyword calls"      -> (n => "token=S(" * n),
-      "keyword arguments"  -> (n => "token=S(value=" * n),
-      "calls never closed" -> (n => "token=S(" + "'a', " * n),
-      "dict key calls"     -> (n => "{'token': S(" * n),
-      "long names"         -> (n => ("token=" + "a" * 100 + "(") * n),
-      "quotes in strings"  -> (n => "{'password': 'a\\'\"b', " * n)
-    )
-    shapes.foreach { case (name, build) =>
-      LinearTime.assertLinear(name, build(1000), build(4000))(Redaction.redact(_))
-    }
-  }
-
-  // The scaling tests above are PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test` and fails
+  // The timing backstop is RedactionScalingSpec (`sbt testPerformance`); this one stays in `sbt test` and fails
   // on a catastrophic regression in one run of a megabyte, under a generous hang guard.
   it should "read a megabyte of Python values after commas well inside the hang guard (#1706)" in {
     val input = "{" + ("'password': \"x'y\", " * 54000) + "'n': 1}"

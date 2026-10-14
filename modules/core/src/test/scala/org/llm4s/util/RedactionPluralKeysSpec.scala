@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.testutil.{ LinearTime, PerformanceTest }
+import org.llm4s.testutil.LinearTime
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -226,15 +226,13 @@ class RedactionPluralKeysSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "replace all it replaced before, and the plural keys' values too (#1646)" in {
+  it should "redact the plural keys' values and the credential parameters in mixed shapes (#1646)" in {
     docs(1646, 3000).foreach { case (input, secret) =>
-      val (out, added) = Redaction.redactedWithRanges(input, singleQuotedFromInput = true)
-      val (base, kept) = Redaction.redactedWithRanges(input, singleQuotedFromInput = true, addedReadings = false)
-      withClue(s"input $input, output $out, without $base: ") {
-        Redaction.redact(input) shouldBe out
-        kept.filterNot(added.contains) shouldBe empty
+      val out = Redaction.redact(input)
+      withClue(s"input $input, output $out: ") {
         (out should not).include(secret)
         if (parses(input)) parses(out) shouldBe true
+        Redaction.redact(out) shouldBe out
       }
     }
   }
@@ -249,19 +247,7 @@ class RedactionPluralKeysSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  // A timing test, run by `sbt testPerformance`. One size pair, three shapes.
-  it should "read plural keys and credential parameters in time linear in the input (#1646)" taggedAs PerformanceTest in {
-    val shapes: Seq[(String, Int => String)] = Seq(
-      "plural arrays"     -> (n => "{\"api_keys\": [\"a\", " * n),
-      "matrix parameters" -> (n => ";jsessionid=a" * n),
-      "one long word"     -> (n => "a" * (8 * n) + "secrets")
-    )
-    shapes.foreach { case (name, build) =>
-      LinearTime.assertLinear(name, build(1000), build(4000))(Redaction.redact(_))
-    }
-  }
-
-  // The scaling test above is PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test` and fails on
+  // The timing backstop is RedactionScalingSpec (`sbt testPerformance`); this one stays in `sbt test` and fails on
   // a catastrophic regression of its worst shapes in one run, under a generous hang guard.
   it should "redact a megabyte of plural keys and credential parameters well inside the hang guard (#1646)" in {
     val inputs = Seq(

@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.testutil.{ LinearTime, PerformanceTest }
+import org.llm4s.testutil.LinearTime
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -203,21 +203,7 @@ class RedactionEqualsPairSpec extends AnyFlatSpec with Matchers {
     parses(out) shouldBe true
   }
 
-  it should "read values in escaped quotes in time linear in the input" taggedAs PerformanceTest in {
-    val shapes: Seq[(String, Int => String)] = Seq(
-      "many never closed"             -> (n => "password=\\\"a " * n),
-      "many never closed in a string" -> (n => "{\"m\":\"" + "token=\\\"x " * n + "\"}"),
-      "a long backslash run"          -> (n => "password=\\\"" + "\\" * (n * 10) + "x\\\""),
-      "quotes escaped deeper"         -> (n => "secret=\\\"" + "a\\\\\\\"b" * n),
-      "quotes escaped less deep"      -> (n => "secret=\\\\\\\"a\\\"" * n),
-      "closed, many times"            -> (n => "token=\\'a b\\' " * n)
-    )
-    shapes.foreach { case (name, build) =>
-      LinearTime.assertLinear(name, build(5000), build(20000))(Redaction.redact(_))
-    }
-  }
-
-  // The scaling test above is PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test` and fails on
+  // The timing backstop is RedactionScalingSpec (`sbt testPerformance`); this one stays in `sbt test` and fails on
   // a catastrophic regression in one run of a megabyte, under a generous hang guard.
   it should "read a megabyte of escaped quotes never closed, in a string, well inside the hang guard" in {
     val input = "{\"m\":\"" + ("token=\\\"x " * 100000) + "\"}"
@@ -240,9 +226,12 @@ class RedactionEqualsPairSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "redact a key=value before a megabyte-long run of backslashes, and many '=', on a small stack" in {
-    onSmallStack("token=a" + ("\\" * 1000001) + "\"") shouldBe s"token=$R\\\""
-    onSmallStack("token=a" + ("\\" * 1000000) + "\"") shouldBe s"token=$R\""
-    onSmallStack("token=" * 200000 + "\\\"") shouldBe s"token=$R\\\""
+    // #1932: a run of backslashes in plain text is decoded, a level at a time, to `MaxDepth`, and what is left of it
+    // is the value's: the value runs to the end, and the escape of the quote after it, which it no longer ends at, is
+    // replaced with it.
+    onSmallStack("token=a" + ("\\" * 1000001) + "\"") shouldBe s"token=$R"
+    onSmallStack("token=a" + ("\\" * 1000000) + "\"") shouldBe s"token=$R"
+    onSmallStack("token=" * 200000 + "\\\"") shouldBe s"token=$R"
     onSmallStack("a=" * 500000) shouldBe "a=" * 500000
     val pairs = onSmallStack(nested(1, "note" -> ("token=hunter2value " * 50000), "x" -> "y"))
     (pairs should not).include("hunter2value")

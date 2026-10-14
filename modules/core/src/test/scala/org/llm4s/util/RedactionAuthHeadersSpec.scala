@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.testutil.{ LinearTime, PerformanceTest }
+import org.llm4s.testutil.LinearTime
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -94,16 +94,19 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
     Redaction.redact(multiline) shouldBe s"""[\n  "Cookie: $R",\n  "Accept: keep"\n]"""
     val curl = s"""{"request":"curl -H 'Cookie: sid=$session' https://x","status":200}"""
     Redaction.redact(curl) shouldBe s"""{"request":"curl -H 'Cookie: $R","status":200}"""
+    // #1932: the inner string's content is a level of its own, so the value ends where it does, and the inner document
+    // keeps its closing `\"}`, which was replaced with the value
     val nested = s"""{"outer":"{\\"log\\":\\"Cookie: sid=$session\\"}","k":"keep"}"""
-    Redaction.redact(nested) shouldBe s"""{"outer":"{\\"log\\":\\"Cookie: $R","k":"keep"}"""
+    Redaction.redact(nested) shouldBe s"""{"outer":"{\\"log\\":\\"Cookie: $R\\"}","k":"keep"}"""
     val last = s"""{"headers":["Accept: */*","Set-Cookie: sid=$session"]}"""
     Redaction.redact(last) shouldBe s"""{"headers":["Accept: */*","Set-Cookie: $R"]}"""
     val key = s"""{"Cookie: sid=$session": 1, "k": "keep"}"""
     Redaction.redact(key) shouldBe s"""{"Cookie: $R": 1, "k": "keep"}"""
     val beforeNumber = s"""["Cookie: sid=$session", 1, "Cookie: sid=$session", null]"""
     Redaction.redact(beforeNumber) shouldBe s"""["Cookie: $R", 1, "Cookie: $R", null]"""
+    // #1932: the inner string ends the value, and keeps its own end and the inner array's, which were replaced
     val inArrayString = s"""["[\\"debug Cookie: sid=$session; lang=en\\",1]",1]"""
-    Redaction.redact(inArrayString) shouldBe s"""["[\\"debug Cookie: $R",1]"""
+    Redaction.redact(inArrayString) shouldBe s"""["[\\"debug Cookie: $R\\",1]",1]"""
     Seq(array, multiline, curl, nested, last, key, beforeNumber, inArrayString).foreach(in =>
       assertJson(Redaction.redact(in))
     )
@@ -119,9 +122,10 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
     Redaction.redact(afterBreak) shouldBe s"""{"log":"Cookie:\\n $R","n":1}"""
     val python = s"""{'log': 'Cookie: sid=$session\\r\\nAccept: x', 'k': 'keep'}"""
     Redaction.redact(python) shouldBe s"""{'log': 'Cookie: $R\\r\\nAccept: x', 'k': 'keep'}"""
-    // After the escape of a quote, as HTML-safe serialisers write it.
+    // After the escape of a quote, as HTML-safe serialisers write it. #1932: the escaped quotes are read as the string
+    // they open and close, so the closing one is kept.
     val unicodeQuote = s"""{"o":"\\u0022Cookie: sid=$session\\u0022","k":"keep"}"""
-    Redaction.redact(unicodeQuote) shouldBe s"""{"o":"\\u0022Cookie: $R","k":"keep"}"""
+    Redaction.redact(unicodeQuote) shouldBe s"""{"o":"\\u0022Cookie: $R\\u0022","k":"keep"}"""
   }
 
   it should "read a cookie header outside a JSON string to the end of its line, quotes and all" in {
@@ -406,41 +410,7 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
   // Cost
   // ---------------------------------------------------------------------------------------------
 
-  it should "redact many such headers in time linear in the input" taggedAs PerformanceTest in {
-    val units = Seq(
-      "Cookie: a=b; c=d\n",
-      "x Cookie:\n",
-      s"""{"Proxy-Authorization": "$negotiate"}, """,
-      "cookie_policy=strict&Cookie",
-      "CookieCookieCookie:",
-      """{"log":"Cookie: a\r\nCookie: b\"c\"", "x": 1}, """,
-      """["Cookie: x", "y"], "Cookie:\n\r\t """ + "\\u000a\"\n"
-    )
-    units.foreach(unit => LinearTime.assertLinear(s"unit $unit", unit * 5000, unit * 20000)(Redaction.redact(_)))
-  }
-
-  it should "read one long cookie value in time linear in its length" taggedAs PerformanceTest in {
-    // One value each, which nothing ends early: no line break, quotes that end no string, runs of backslashes.
-    val open = """{"log":"Cookie: """
-    val shapes: Seq[(String, Int => String)] = Seq(
-      "plain, no line break"       -> (n => "Cookie: " + "a=b; " * n),
-      "in a string, never closed"  -> (n => open + "a=b; " * n),
-      "backslash runs"             -> (n => open + """\\\\n\\""" * n),
-      "escaped quotes"             -> (n => open + """\" , [x""" * n),
-      "quotes before a word"       -> (n => open + ("\"" + " " * 20 + "," + " " * 20 + "x") * n),
-      "quotes and commas"          -> (n => open + """" , x""" * n),
-      "string in a string"         -> (n => """{"o":"{\"l\":\"Cookie: """ + """\\\\n\"x""" * n),
-      "a quote open on each line"  -> (n => "\"Cookie: a\"b\n" * n),
-      "escaped escapes, no header" -> (n => """{"o":"\"Cookie: """ + """\\nX\\r\\nY""" * n),
-      "closing brackets"           -> (n => open + "\"" + "} ] " * n + "x"),
-      "a stray quote on each line" -> (n => "5\" Cookie: a=\"b\"; c=d\n" * n)
-    )
-    shapes.foreach { case (name, build) =>
-      LinearTime.assertLinear(name, build(5000), build(20000))(Redaction.redact(_))
-    }
-  }
-
-  // The scaling tests above are PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test` and fails
+  // The timing backstop is RedactionScalingSpec (`sbt testPerformance`); this one stays in `sbt test` and fails
   // on a catastrophic regression in one run of a megabyte, under a generous hang guard.
   it should "read a megabyte-long cookie value of escaped quotes well inside the hang guard" in {
     val input = """{"log":"Cookie: """ + ("""\" , [x""" * 150000)

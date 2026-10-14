@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.testutil.{ LinearTime, PerformanceTest }
+import org.llm4s.testutil.LinearTime
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -47,24 +47,29 @@ class RedactionAddedReadingsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "redact the rest of a value after a literal & that no other pair follows (#1695)" in {
-    Redaction.redact("password=p&ssW0rd") shouldBe s"password=$R&$R"
-    Redaction.redact("x password=p&ssW0rd y") shouldBe s"x password=$R&$R y"
-    Redaction.redact("password=p&ss&W0rd") shouldBe s"password=$R&$R&$R"
-    Redaction.redact("password=&ssW0rd") shouldBe s"password=&$R"
-    Redaction.redact("""{"form":"password=p&ssW0rd"}""") shouldBe s"""{"form":"password=$R&$R"}"""
+    // #1932: the value runs over an `&` that no pair follows, and is replaced as one: one placeholder, where there was
+    // one on each side of the `&`, which told that the credential held one
+    Redaction.redact("password=p&ssW0rd") shouldBe s"password=$R"
+    Redaction.redact("x password=p&ssW0rd y") shouldBe s"x password=$R y"
+    Redaction.redact("password=p&ss&W0rd") shouldBe s"password=$R"
+    Redaction.redact("password=&ssW0rd") shouldBe s"password=$R"
+    Redaction.redact("""{"form":"password=p&ssW0rd"}""") shouldBe s"""{"form":"password=$R"}"""
     Redaction.redact(s"""{"form":"password${Eq}p&ssW0rd${Amp}user${Eq}bob"}""") shouldBe
-      s"""{"form":"password$Eq$R&$R${Amp}user${Eq}bob"}"""
+      s"""{"form":"password$Eq$R${Amp}user${Eq}bob"}"""
     // a pair after the `&` is a pair, and its value is read as before
-    Redaction.redact("password=p&ssW0rd&user=bob&token=t&ok") shouldBe s"password=$R&$R&user=bob&token=$R&$R"
+    Redaction.redact("password=p&ssW0rd&user=bob&token=t&ok") shouldBe s"password=$R&user=bob&token=$R"
     Redaction.redact("password=abc&user=bob") shouldBe s"password=$R&user=bob"
     Redaction.redact("user=bob&page=2&lang=en") shouldBe "user=bob&page=2&lang=en"
   }
 
   it should "redact the field after a query value written right before JSON (#1695)" in {
+    // #1932: the query value ends at the `,` before JSON, and the JSON after it is read as JSON, keys and all, where
+    // the value took the key of the field after it
     Redaction.redact("""?a=1&token=abc,{\"api_key\":\"S3CR3T\"}""") shouldBe
-      s"""?a=1&token=$R\\":\\"$R\\"}"""
-    Redaction.redact("""?a=1&token=abc,{"api_key":"S3CR3T"}""") shouldBe s"""?a=1&token=$R":"$R"}"""
-    Redaction.redact("""GET /x?a=1&token=abc,"api_key": "S3CR3T"""") shouldBe s"""GET /x?a=1&token=$R": "$R""""
+      s"""?a=1&token=$R,{\\"api_key\\":\\"$R\\"}"""
+    Redaction.redact("""?a=1&token=abc,{"api_key":"S3CR3T"}""") shouldBe s"""?a=1&token=$R,{"api_key":"$R"}"""
+    Redaction.redact("""GET /x?a=1&token=abc,"api_key": "S3CR3T"""") shouldBe
+      s"""GET /x?a=1&token=$R,"api_key": "$R""""
     (Redaction.redact("""?token=abc,{'password': 'S3CR3T'}""") should not).include("S3CR3T")
     // no sensitive key in the query, or no JSON after the comma: as before
     Redaction.redact("""?next=/x,{"a":1}""") shouldBe """?next=/x,{"a":1}"""
@@ -72,14 +77,16 @@ class RedactionAddedReadingsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "redact the value of a pair after a Bearer or Basic scheme word (#1695)" in {
-    Redaction.redact("Bearer password=x") shouldBe s"$R=$R"
-    Redaction.redact("using Bearer password=hunter2 more") shouldBe s"using $R=$R more"
-    Redaction.redact("bearer api_key=x&token=y") shouldBe s"$R=$R&token=$R"
+    // #1932: a scheme word before a sensitive pair is no scheme with its token but a word before the pair: the pair's
+    // value is replaced, and the scheme word and the key are kept, where both were replaced
+    Redaction.redact("Bearer password=x") shouldBe s"Bearer password=$R"
+    Redaction.redact("using Bearer password=hunter2 more") shouldBe s"using Bearer password=$R more"
+    Redaction.redact("bearer api_key=x&token=y") shouldBe s"bearer api_key=$R&token=$R"
     (Redaction.redact(s"Bearer password${Eq}hunter2") should not).include("hunter2")
     (Redaction.redact("Basic token=\"hunter 2\"") should not).include("hunter")
     (Redaction.redact("""header Bearer secret='hunter2'""") should not).include("hunter2")
     val inJson = Redaction.redact("""{"h":"Bearer password=hunter2","n":1}""")
-    inJson shouldBe s"""{"h":"$R=$R","n":1}"""
+    inJson shouldBe s"""{"h":"Bearer password=$R","n":1}"""
     // a token that is no key of a pair, as before
     Redaction.redact("Bearer abc.def-123") shouldBe R
     Redaction.redact("Basic dXNlcjpwYXNz") shouldBe R
@@ -134,52 +141,22 @@ class RedactionAddedReadingsSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "replace all it replaces without the added readings, and more (#1695)" in {
-    // Each added reading's edits are made only where the passes made none: every range the passes replace is
-    // replaced as before, nothing they redact is written out, and JSON that parses without the readings still
-    // parses. Deterministic.
-    val docs   = new Docs(1695)
-    var closed = 0
+  it should "redact every credential of #1695's shapes, keep JSON valid and redact its own output to itself" in {
+    // #1932: the readings of #1695 are part of the one pass, so the check is no longer that each only adds to the
+    // passes but that no credential is left. Deterministic.
+    val docs = new Docs(1695)
     (1 to 2000).foreach { _ =>
       val (input, secrets) = docs.next()
-      val (out, ranges)    = Redaction.redactedWithRanges(input, singleQuotedFromInput = true)
-      val (base, kept)     = Redaction.redactedWithRanges(input, singleQuotedFromInput = true, addedReadings = false)
-      withClue(s"input $input, output $out, without $base: ") {
-        Redaction.redact(input) shouldBe out
-        kept.filterNot(ranges.contains) shouldBe empty
-        val added = ranges.filterNot(kept.contains)
-        added.foreach { case (s, e) => kept.exists { case (ks, ke) => ke >= s && ks <= e } shouldBe false }
-        secrets.filterNot(base.contains).filter(out.contains) shouldBe empty
-        if (parses(base)) parses(out) shouldBe true
+      val out              = Redaction.redact(input)
+      withClue(s"input $input, output $out: ") {
+        secrets.filter(out.contains) shouldBe empty
+        if (parses(input)) parses(out) shouldBe true
+        Redaction.redact(out) shouldBe out
       }
-      closed += secrets.count(s => base.contains(s) && !out.contains(s))
-    }
-    // and it is the readings that redact what the passes left
-    closed should be > 1000
-  }
-
-  it should "read the added readings in time linear in the input (#1695)" taggedAs PerformanceTest in {
-    val shapes: Seq[(String, Int => String)] = Seq(
-      "values with a literal &"          -> (n => "password=p&ssW0rd " * n),
-      "one tail of many &"               -> (n => "password=a" + "&b" * n),
-      "pairs after every &"              -> (n => "password=a&b&user=c " * n),
-      "empty values before &"            -> (n => "password=&" * n),
-      "& before a long backslash run"    -> (n => "password=a&" + "\\" * (n * 4)),
-      "Gson log lines"                   -> (n => "{\"log\":\"" + "user\\u003dbob\\ntoken\\u003dabc " * n + "\"}"),
-      "escapes of line breaks"           -> (n => "\\n" * n + "token=x"),
-      "escaped line breaks before words" -> (n => "\\nabcdefgh" * n),
-      "queries before JSON"              -> (n => "?a=1&token=abc,{\\\"api_key\\\":\\\"S\\\"} " * n),
-      "commas before quotes"             -> (n => "?token=a" + ",\"" * n),
-      "Bearer pairs"                     -> (n => "Bearer password=x " * n),
-      "Bearer before a backslash run"    -> (n => "Bearer password" + "\\" * (n * 4)),
-      "Basic pairs in a string"          -> (n => "{\"h\":\"" + "Basic token=x " * n + "\"}")
-    )
-    shapes.foreach { case (name, build) =>
-      LinearTime.assertLinear(name, build(2500), build(10000))(Redaction.redact(_))
     }
   }
 
-  // The scaling test above is PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test` and fails on
+  // The timing backstop is RedactionScalingSpec (`sbt testPerformance`); this one stays in `sbt test` and fails on
   // a catastrophic regression in one run of a megabyte, under a generous hang guard.
   it should "read a megabyte of Gson log lines well inside the hang guard (#1695)" in {
     val input = "{\"log\":\"" + ("user\\u003dbob\\ntoken\\u003dabc " * 34000) + "\"}"

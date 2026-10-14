@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.testutil.{ LinearTime, PerformanceTest }
+import org.llm4s.testutil.LinearTime
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -98,7 +98,7 @@ class RedactionScrubSpec extends AnyFlatSpec with Matchers {
   private def echoing(tokens: Seq[String]): String =
     tokens.map(t => s"""{"access_token":"$t","token_type":"Bearer"}""").mkString("[", ",", "]")
 
-  // An ordinary test with a generous hang guard; how the cost scales is measured by the PerformanceTest below, run by
+  // An ordinary test with a generous hang guard; how the cost scales is measured by RedactionScalingSpec, run by
   // `sbt testPerformance` (it was a 3 s bound on this one run, which a slow runner can exceed).
   "Redaction.scrubRemote" should "scrub a megabyte body echoing 17,000 access tokens well inside the hang guard" in {
     val echoed = tokens(17000)
@@ -113,9 +113,4 @@ class RedactionScrubSpec extends AnyFlatSpec with Matchers {
     elapsed should be < LinearTime.MegabyteHangGuard
   }
 
-  it should "scrub a body echoing many access tokens in time linear in the input" taggedAs PerformanceTest in {
-    LinearTime.assertLinear("access tokens, 2,000 vs 8,000", echoing(tokens(2000)), echoing(tokens(8000)))(
-      Redaction.scrubRemote(_, Seq("configured-secret"))
-    )
-  }
 }

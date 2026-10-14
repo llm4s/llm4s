@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.testutil.{ LinearTime, PerformanceTest }
+import org.llm4s.testutil.LinearTime
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -192,13 +192,15 @@ class RedactionQueryParamSpec extends AnyFlatSpec with Matchers {
     Redaction.redact("{'url': 'https://h/x?token=SECRETAA': 1}") shouldBe s"{'url': 'https://h/x?token=$R': 1}"
   }
 
-  // The stated exception: a quote before `,`, `)`, `;` or `:` cannot be told from the quote that ends a string
-  // (`fetch('...?token=ab')`), so a value that holds one is redacted only up to it, and the rest is written.
-  it should "redact a sensitive query value only up to a quote before ',', ')', ';' or ':' (stated exception)" in {
-    Redaction.redact("?token=ab',cd") shouldBe s"?token=$R',cd"
-    Redaction.redact("?token=ab')cd") shouldBe s"?token=$R')cd"
-    Redaction.redact("?token=ab';cd") shouldBe s"?token=$R';cd"
-    Redaction.redact("?token=ab':cd") shouldBe s"?token=$R':cd"
+  // Was a stated exception: a quote before `,`, `)`, `;` or `:` could not be told from the quote that ends a string
+  // (`fetch('...?token=ab')`), so a value that held one was redacted only up to it. #1932: the string a URL sits in
+  // is a level of its own, and its closing quote is no character of the value, so a quote inside the value is one.
+  it should "redact the whole of a sensitive query value with a quote before ',', ')', ';' or ':' (#1932)" in {
+    Redaction.redact("?token=ab',cd") shouldBe s"?token=$R"
+    Redaction.redact("?token=ab')cd") shouldBe s"?token=$R"
+    Redaction.redact("?token=ab';cd") shouldBe s"?token=$R"
+    Redaction.redact("?token=ab':cd") shouldBe s"?token=$R"
+    Redaction.redact("fetch('https://h/x?token=SECRETAA')") shouldBe s"fetch('https://h/x?token=$R')"
   }
 
   it should "redact a sensitive parameter of a URL nested in the value of a parameter that is kept" in {
@@ -317,15 +319,17 @@ class RedactionQueryParamSpec extends AnyFlatSpec with Matchers {
       u(raw"""{"form":"password=$R~26user~3dbob"}""")
   }
 
+  // #1932: escaped quotes are decoded and read as quotes are, so they are kept around the placeholder, as bare quotes
+  // are (`password='[REDACTED]'`), where the passes replaced them with the value.
   it should "redact a key=value credential in escaped quotes in full, whatever pairs it seems to hold" in {
     Redaction.redact(u("""{"msg":"login DB_PASSWORD=~27aUFQs~26$n~26ZScH85~27 user=bob"}""")) shouldBe
-      s"""{"msg":"login DB_PASSWORD=$R user=bob"}"""
+      u(raw"""{"msg":"login DB_PASSWORD=~27$R~27 user=bob"}""")
     Redaction.redact(u("""{"msg":"login password=~27p~26user=x~27 n=1"}""")) shouldBe
-      s"""{"msg":"login password=$R n=1"}"""
+      u(raw"""{"msg":"login password=~27$R~27 n=1"}""")
     Redaction.redact(u("""{"msg":"login password=~22p~26user=x~22 n=1"}""")) shouldBe
-      s"""{"msg":"login password=$R n=1"}"""
+      u(raw"""{"msg":"login password=~22$R~22 n=1"}""")
     Redaction.redact(u("""{"msg":"login password=~27pQZXJ~27~26user=bob"}""")) shouldBe
-      u(raw"""{"msg":"login password=$R~26user=bob"}""")
+      u(raw"""{"msg":"login password=~27$R~27~26user=bob"}""")
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -335,30 +339,32 @@ class RedactionQueryParamSpec extends AnyFlatSpec with Matchers {
 
   it should "redact a quoted query credential that holds '&' in full, as System.Text.Json writes it" in {
     // `GET https://h/x?password='p&ss=QZXJ'` serialised by System.Text.Json's default encoder
+    // #1932: the escaped quotes around the value are kept
     val out = Redaction.redact(u("""{"msg":"GET https://h/x?password=~27p~26ss=QZXJ~27"}"""))
-    out shouldBe s"""{"msg":"GET https://h/x?password=$R"}"""
+    out shouldBe u(raw"""{"msg":"GET https://h/x?password=~27$R~27"}""")
     parses(out) shouldBe true
     Redaction.redact(u("""{"msg":"GET https://h/x?a=1~26password=~27p~26ss=QZXJ~27"}""")) shouldBe
-      u(raw"""{"msg":"GET https://h/x?a=1~26password=$R"}""")
+      u(raw"""{"msg":"GET https://h/x?a=1~26password=~27$R~27"}""")
   }
 
   it should "redact a quoted query credential that holds '&' in full, after '?', after '&' and with '\"'" in {
-    Redaction.redact(u("x=1~26password=~27p~26ss=QZXJ~27 n=1")) shouldBe u(s"x=1~26password=$R n=1")
-    Redaction.redact(u("x=1&password=~27p~26ss=QZXJ~27 n=1")) shouldBe s"x=1&password=$R n=1"
-    Redaction.redact(u("https://h/p?password=~27p~26ss=QZXJ~27 n=1")) shouldBe s"https://h/p?password=$R n=1"
-    Redaction.redact(u("q?password=~27p~26ss=QZXJ~27 n=1")) shouldBe s"q?password=$R n=1"
-    Redaction.redact(u("x=1~26password=~22p~26ss=QZXJ~22 n=1")) shouldBe u(s"x=1~26password=$R n=1")
-    Redaction.redact(u("a~26b;password=~27p~26ss=QZXJ~27;n=1")) shouldBe u(s"a~26b;password=$R")
-    Redaction.redact(u("a;password=~27p~26ss=QZXJ~27;n=1")) shouldBe s"a;password=$R;n=1"
+    // #1932: the escaped quotes around the value are kept, and `;n=1` after it is read as a pair of its own
+    Redaction.redact(u("x=1~26password=~27p~26ss=QZXJ~27 n=1")) shouldBe u(s"x=1~26password=~27$R~27 n=1")
+    Redaction.redact(u("x=1&password=~27p~26ss=QZXJ~27 n=1")) shouldBe u(s"x=1&password=~27$R~27 n=1")
+    Redaction.redact(u("https://h/p?password=~27p~26ss=QZXJ~27 n=1")) shouldBe u(s"https://h/p?password=~27$R~27 n=1")
+    Redaction.redact(u("q?password=~27p~26ss=QZXJ~27 n=1")) shouldBe u(s"q?password=~27$R~27 n=1")
+    Redaction.redact(u("x=1~26password=~22p~26ss=QZXJ~22 n=1")) shouldBe u(s"x=1~26password=~22$R~22 n=1")
+    Redaction.redact(u("a~26b;password=~27p~26ss=QZXJ~27;n=1")) shouldBe u(s"a~26b;password=~27$R~27;n=1")
+    Redaction.redact(u("a;password=~27p~26ss=QZXJ~27;n=1")) shouldBe u(s"a;password=~27$R~27;n=1")
   }
 
   it should "redact a quoted query credential that holds several escaped '&' in full" in {
     Redaction.redact(
       u("""{"msg":"GET https://h/x?a=1~26password=~27p~26ss=QZXJ~26tt=WXYZ~26uu=KLMN~27 n=1"}""")
     ) shouldBe
-      u(raw"""{"msg":"GET https://h/x?a=1~26password=$R n=1"}""")
+      u(raw"""{"msg":"GET https://h/x?a=1~26password=~27$R~27 n=1"}""")
     Redaction.redact(u("""{"msg":"GET https://h/x?password=~22p~26ss=QZXJ~26tt=WXYZ~22"}""")) shouldBe
-      s"""{"msg":"GET https://h/x?password=$R"}"""
+      u(raw"""{"msg":"GET https://h/x?password=~22$R~22"}""")
   }
 
   it should "run a query value over an escaped '&' after a bare quote, as before #1676" in {
@@ -369,9 +375,9 @@ class RedactionQueryParamSpec extends AnyFlatSpec with Matchers {
 
   it should "redact a key=value credential in escaped quotes up to its closing quote, over ';' and spaces" in {
     Redaction.redact(u("""{"msg":"GET https://h/x?a=1~26tt=2;client_secret=~27KZYZ;TTLGFR17504~27"}""")) shouldBe
-      u(raw"""{"msg":"GET https://h/x?a=1~26tt=2;client_secret=$R"}""")
+      u(raw"""{"msg":"GET https://h/x?a=1~26tt=2;client_secret=~27$R~27"}""")
     Redaction.redact(u("""{"msg":"login password=~27pa ss,wo;rd~27 user=bob"}""")) shouldBe
-      s"""{"msg":"login password=$R user=bob"}"""
+      u(raw"""{"msg":"login password=~27$R~27 user=bob"}""")
     Redaction.redact(u("""{"msg":"note=~27hi there~27 password=SECRETQZ"}""")) shouldBe
       u(raw"""{"msg":"note=~27hi there~27 password=$R"}""")
   }
@@ -382,34 +388,7 @@ class RedactionQueryParamSpec extends AnyFlatSpec with Matchers {
     Redaction.redact(u("x;password~3d'SECRET QZ' n=1")) shouldBe u(s"x;password~3d'$R' n=1")
   }
 
-  it should "read a quoted credential holding escaped '&' in time linear in its length" taggedAs PerformanceTest in {
-    // Each value is read in one forward scan: no search for a matching quote starts again from each character, which
-    // would make four times the input take sixteen times as long.
-    val shapes = Seq(
-      ("?password=~27", "a~26b=1;c,d", ""),
-      ("x;password=~27", "a b;c,d&e~26f=", ""),
-      ("", "?token=~27a~26b~27", ""),
-      ("", "x;password=~27a;b~27 ", ""),
-      ("", "~26password~3d~22a~26b ", ""),
-      ("?token=ab'", "c~26d", "")
-    ).map { case (prefix, unit, suffix) => (u(prefix), u(unit), u(suffix)) }
-    shapes.foreach { case (prefix, unit, suffix) =>
-      def time(repeats: Int): Long = {
-        val input = prefix + (unit * repeats) + suffix
-        Redaction.redact(input) // warm up
-        val start = System.nanoTime()
-        Redaction.redact(input)
-        System.nanoTime() - start
-      }
-      val small = time(5000)
-      val large = time(20000)
-      withClue(s"unit $unit: 5000 took ${small / 1000000} ms, 20000 took ${large / 1000000} ms: ") {
-        large should be < (small * 12 + 50000000L)
-      }
-    }
-  }
-
-  // The scaling test above is PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test` and fails on
+  // The timing backstop is RedactionScalingSpec (`sbt testPerformance`); this one stays in `sbt test` and fails on
   // a catastrophic regression in one run of a megabyte, under a generous hang guard.
   it should "read a megabyte-long quoted credential holding escaped '&' well inside the hang guard" in {
     val input = u("x;password=~27") + (u("a b;c,d&e~26f=") * 60000)
