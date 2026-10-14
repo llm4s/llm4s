@@ -124,6 +124,14 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     store +: Vector.fill(n - 1)(sibling(store, clock))
 
   /**
+   * Closes a store a case opened besides its own - a [[contenders]] store - once the case is done with it.
+   * The default closes an `AutoCloseable` store and leaves any other alone.
+   */
+  protected def closeExtra(store: Checkpointer): Unit = store match
+    case closeable: AutoCloseable => closeable.close()
+    case _                        => ()
+
+  /**
    * Makes the store's claims expire as if its clock had moved forward by `by`. The default moves
    * `clock`, the clock [[newCheckpointer]] was given; a store that judges expiry by a clock of its
    * own, such as a database server's, overrides this.
@@ -163,6 +171,10 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
 
     /** `n` stores over the same storage, this one first; see [[CheckpointerContract.contenders]]. */
     def contending(n: Int): Vector[Checkpointer] = contenders(current, clock, n)
+
+    /** Closes the stores [[contending]] opened besides this one; see [[CheckpointerContract.closeExtra]]. */
+    def closeContenders(stores: Vector[Checkpointer]): Unit =
+      stores.filterNot(_ eq current).distinct.foreach(closeExtra)
 
     /** Moves the store's clock; see [[CheckpointerContract.advanceStoreClock]]. */
     def advance(by: FiniteDuration): Unit = advanceStoreClock(current, clock, by)
@@ -846,6 +858,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       }
     }
     threads.foreach(_.join(contractWait.toMillis))
+    s.closeContenders(stores)
     val all     = Iterator.continually(results.poll()).takeWhile(_ != null).toVector
     val granted = all.collect { case (i, Right(claim)) => i -> claim }
     all should have size claimers.toLong
@@ -873,6 +886,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       }
     }
     threads.foreach(_.join(contractWait.toMillis))
+    s.closeContenders(stores)
     val all     = Iterator.continually(results.poll()).takeWhile(_ != null).toVector
     val granted = all.collect { case (i, Right(claim)) => i -> claim }
     all should have size claimers.toLong

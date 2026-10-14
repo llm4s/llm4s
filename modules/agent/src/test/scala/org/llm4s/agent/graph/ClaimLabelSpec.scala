@@ -51,7 +51,7 @@ class ClaimLabelSpec extends AnyFlatSpec with Matchers with EitherValues with Be
   /** Waits, at most 5 seconds, for `condition`, an observable of another thread's progress. */
   private def eventually(condition: => Boolean): Unit = {
     val deadline = System.nanoTime() + 5.seconds.toNanos
-    while !condition && System.nanoTime() < deadline do Thread.onSpinWait()
+    while !condition && System.nanoTime() < deadline do java.util.concurrent.locks.LockSupport.parkNanos(1_000_000L)
     condition shouldBe true
   }
 

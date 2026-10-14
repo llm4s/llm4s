@@ -303,6 +303,12 @@ final private[graph] class EventHub(
   /** A test hook run on a dispatcher thread just before it waits for its thread's commit lock. */
   @volatile private[graph] var settling: ThreadId => Unit = _ => ()
 
+  /**
+   * A test hook run by an observer's store watch that found its dispatcher not yet anchored, just before
+   * it waits to be; a no-op by default.
+   */
+  @volatile private[graph] var awaitingAnchor: ThreadId => Unit = _ => ()
+
   /** Running store watches, by thread; guarded by `hubLock`. */
   private var watching = Map.empty[String, Int]
 
@@ -1104,6 +1110,7 @@ final private[graph] class EventHub(
         case Some(None) =>
           // an Observer's dispatcher, before its run's claim is handed to it: woken as soon as it is, and
           // otherwise every `pollInterval`, to check again; an interrupt - `cancel`, the end - stops it
+          awaitingAnchor(threadId)
           withLock(lock) {
             if !anchored && !cancelled && !finished && !halted then
               anchoring.awaitNanos(watch.pollInterval.toNanos): Unit

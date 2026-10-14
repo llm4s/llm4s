@@ -316,10 +316,13 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
   "An observer's store watch" should "start watching the store once its run's first commit is handed to it, not a poll interval later" in {
     val log = WatchedLog(stallAfter = Long.MaxValue)
     // an hour: a watch that waited one interval for its observer's first commit would not watch in this test
-    val hub      = EventHub(log, watch = WatchPolicy(pollInterval = 1.hour))
+    val hub    = EventHub(log, watch = WatchPolicy(pollInterval = 1.hour))
+    val parked = new CountDownLatch(1)
+    hub.awaitingAnchor = _ => parked.countDown()
     val listener = Recording()
     val sub      = hub.observe(thread, run, capacity = 16, listener).start(lastSeq = 0L)
-    eventually(hub.watchCount(thread) == 1)
+    // the watch has found the observer not yet anchored, and is about to wait for it
+    parked.await(5, TimeUnit.SECONDS) shouldBe true
     log.records = Vector(record(1))
     hub.durable(thread, Vector(record(1)))
     log.watching.await(5, TimeUnit.SECONDS) shouldBe true
@@ -573,12 +576,6 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     la.cancel()
     hub.liveCount(thread) shouldBe 0
   }
-
-  /** Waits, at most 5 seconds, for `condition`, an observable of another thread's progress. */
-  private def eventually(condition: => Boolean): Unit =
-    val deadline = System.nanoTime() + 5.seconds.toNanos
-    while !condition && System.nanoTime() < deadline do Thread.onSpinWait()
-    condition shouldBe true
 
   /** Counts `latch` down once the durable event `seq` has been recorded. */
   private def countAt(seq: Long, latch: CountDownLatch): StreamEvent => Unit = {
