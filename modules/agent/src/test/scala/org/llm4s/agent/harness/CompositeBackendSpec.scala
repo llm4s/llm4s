@@ -138,7 +138,9 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     resolved.read(p("/x"), 0, 1, in("a")).value.lines shouldBe Vector("for a")
     resolved.read(p("/x"), 0, 1, in("b")).left.value shouldBe a[BackendRefused]
     resolved.read(p("/x"), 0, 1, FileContext(testRunContext(), s)).left.value shouldBe a[ValidationError]
-    resolved.locks(p("/x/y")) shouldBe Set(LockKey("resolved/by-tenant/x/y"))
+    // backend-wide, whatever the resolved backend: a state backend's quota needs every mutation ordered
+    resolved.locks(p("/x/y")) shouldBe Set(LockKey("resolved/by-tenant"))
+    resolved.locks(p("/x/y")) shouldBe resolved.locks(p("/z"))
     resolved.writes shouldBe Set(forA.files, forB.files)
   }
 

@@ -91,7 +91,8 @@ object SandboxBackend:
 
   /**
    * A backend whose runner `resolve` picks per call, typically by `ctx.run.config.tenantId` (rule 8).
-   * Locks are computed before any context exists, so they are given here.
+   * Locks are computed before any context exists, so they are given here, and must cover the locks of
+   * every runner `resolve` can pick.
    */
   def resolved(locks: VPath => Set[LockKey], maxOutputBytes: Int = DefaultMaxOutputBytes)(
     resolve: FileContext => Result[SandboxRunner]

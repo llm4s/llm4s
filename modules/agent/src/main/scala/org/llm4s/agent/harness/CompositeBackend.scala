@@ -163,7 +163,8 @@ final private[harness] class ResolvedFileBackend(
 
   private val lock = LockKey("resolved", id)
 
-  def locks(path: VPath): Set[LockKey] = Set(lock / path.value)
+  // backend-wide: the resolved backend is unknown here, and its own locks may be backend-wide too
+  def locks(path: VPath): Set[LockKey] = Set(lock)
 
   private def backend(ctx: FileContext): Result[FileBackend] =
     resolve(ctx).flatMap { b =>

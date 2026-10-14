@@ -60,6 +60,14 @@ class ResolvedBackendContractSpec extends AnyFlatSpec with FileBackendContract:
     }
   override protected def tenantScoped: Boolean = true
 
+class ResolvedStateBackendContractSpec extends AnyFlatSpec with FileBackendContract:
+  // a resolver may pick a state backend: its quota stays exact only if the resolved lock orders every write
+  protected def newBackend(): FileBackend =
+    val state = StateFileBackend(maxBytes = 200)
+    FileBackend.resolved("state", writes = state.writes)(_ => Right(state))
+  override protected def boundedBatch: Option[Vector[(String, String)]] =
+    Some(Vector("/a" -> "x" * 78, "/b" -> "x" * 78, "/c" -> "x" * 78))
+
 // Replay: each external backend through its own guarded path.
 
 class HostFileBackendReplaySpec extends AnyFlatSpec with ReplayContract:

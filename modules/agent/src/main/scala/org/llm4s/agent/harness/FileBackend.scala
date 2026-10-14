@@ -140,10 +140,11 @@ object FileBackend:
    * serving tenants builds one host or workspace backend per tenant, and this picks it (rule 8). Caching
    * is the resolver's.
    *
-   * Locks are computed from a call's arguments, before any context exists, so they cannot name the
-   * resolved backend: a mutation locks `resolved/<id>/<path>`. That orders every conflict, because the
-   * calls of one batch belong to one thread, so one tenant, and a shipped backend maps distinct paths to
-   * distinct files. `writes` must hold every key a resolved backend's updates touch, since a graph
+   * Locks are computed from a call's arguments, before any context exists, so they cannot ask the
+   * resolved backend for its own. Every mutation therefore holds the one backend-wide lock
+   * `resolved/<id>`, which covers whatever locking the resolved backend needs: a `StateFileBackend`'s
+   * backend-wide lock (its quota is exact only if every mutation is ordered) as much as a host
+   * backend's per-path locks. The cost is that a batch's mutations through it run one after another. `writes` must hold every key a resolved backend's updates touch, since a graph
    * registers its keys when it is built; a resolved backend that writes another is a failure when used.
    */
   def resolved(id: String, writes: Set[StateKey[?, ?]] = Set.empty)(
