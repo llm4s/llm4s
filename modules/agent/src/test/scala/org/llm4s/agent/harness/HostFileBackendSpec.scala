@@ -30,6 +30,9 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
 
   private def p(s: String): VPath = VPath(s).value
 
+  /** Links need a POSIX file system: Windows creates symbolic links only with a privilege, and reports no link count. */
+  private val posix = java.nio.file.FileSystems.getDefault.supportedFileAttributeViews.contains("unix")
+
   /** A fresh tool call: its own key, so its own effects. */
   private def call(): FileContext =
     FileContext(ToolContext(testRunContext(), ToolCallId("c"), IdempotencyKey(UUID.randomUUID().toString), stateOf()))
@@ -72,6 +75,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
   }
 
   it should "refuse every symbolic link, inside the root or out, at any component" in {
+    assume(posix)
     val outside = Files.createTempDirectory("llm4s-outside")
     Files.writeString(outside.resolve("secret.txt"), "secret")
     Files.createDirectories(dir.resolve("real"))
@@ -133,6 +137,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
   }
 
   it should "list the first names in order however large the directory, unlisted entries not counting" in {
+    assume(posix)
     val capped = HostFileBackend.open(dir, maxScanEntries = 3).value
     Seq("f", "e", "d", "c", "b").foreach(n => Files.writeString(dir.resolve(n), n))
     Seq("a1", "a2", "a3", "a4").foreach(n => Files.createSymbolicLink(dir.resolve(n), dir.resolve("b")))
@@ -164,7 +169,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
   it should "lock the physical path, so backends over nested roots order writes to one file" in {
     Files.createDirectories(dir.resolve("sub"))
     val nested = HostFileBackend.open(dir.resolve("sub")).value
-    val real   = dir.toRealPath().toString
+    val real   = dir.toRealPath().toString.replace('\\', '/')
     backend.locks(p("/sub/a.txt")) shouldBe Set(LockKey("host", real, "sub/a.txt"))
     backend.locks(p("/sub/a.txt")).head.conflictsWith(nested.locks(p("/a.txt")).head) shouldBe true
     backend.locks(p("/sub")).head.conflictsWith(backend.locks(p("/sub/a.txt")).head) shouldBe true
@@ -190,6 +195,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
   }
 
   it should "refuse a file with other hard links, inside the root or out, and never list one" in {
+    assume(posix)
     val outside = Files.createTempDirectory("llm4s-outside")
     Files.writeString(outside.resolve("secret.txt"), "secret")
     Files.createLink(dir.resolve("out.txt"), outside.resolve("secret.txt"))
