@@ -416,6 +416,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.19 | [Stage 2 slice 3: checkpoint history, fork, `updateState` and retention](typed-agent-runtime/4.19-stage-2-slice-3-checkpoint-history-fork-and-retention.md) ([#1702](https://github.com/llm4s/llm4s/issues/1702)) |
 | 4.20 | [Stage 2 slice 2: the SQLite checkpointer](typed-agent-runtime/4.20-stage-2-slice-2-the-sqlite-checkpointer.md) ([#1701](https://github.com/llm4s/llm4s/issues/1701)) |
 | 4.21 | [Stage 2 slice 6: live subscriptions across runtimes](typed-agent-runtime/4.21-stage-2-slice-6-live-subscriptions-across-runtimes.md) ([#1705](https://github.com/llm4s/llm4s/issues/1705)) |
+| 4.24 | [Stage 3 slice C4: replay of external effects](typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md) ([#1921](https://github.com/llm4s/llm4s/issues/1921)) |
 
 ### 4.9 Stage 0 carry-forward
 
