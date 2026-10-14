@@ -1,7 +1,7 @@
 package org.llm4s.zio
 
 import org.llm4s.agent.{ Agent, AgentEventBuffer, AgentResult, AgentRun }
-import org.llm4s.agent.graph.{ InterruptId, RunConfig, RunStatus, StreamEvent, ThreadId }
+import org.llm4s.agent.graph.{ EventHandlers, EventType, InterruptId, RunConfig, RunStatus, StreamEvent, ThreadId }
 import org.llm4s.error.LLMError
 import org.llm4s.types.Result
 import zio.ZIO
@@ -21,7 +21,9 @@ import zio.stream.ZStream
  * cancels the turn as interrupting `run` does. Stopping early (`take(n)`, `runHead`) also cancels the
  * turn. A consumer too slow for the stream's buffer never holds the run up: it loses live events
  * (text deltas, tool progress) and receives one `StreamEvent.LiveGap` with their count where they
- * were dropped; durable events are never dropped, and the run carries on.
+ * were dropped; durable events are kept, and the run carries on. A consumer that stops draining
+ * altogether fails the stream (and so cancels the turn) once more than `Agent.StreamCapacity` durable
+ * events wait, as the runtime disconnects a listener that far behind.
  *
  * A model call that throws instead of returning `Left` ends the turn with a
  * `GraphError.NodeFailed` whose `cause` is the `LLMError` the runtime made of the throwable; it
@@ -75,6 +77,29 @@ trait AgentZ {
 
   /** [[recover]] as a stream; see [[stream]]. */
   def streamRecover(threadId: ThreadId, config: RunConfig = RunConfig()): ZStream[Any, LLMError, AgentStreamItem]
+
+  /**
+   * The events of `run` that `eventType` names - durable and live - decoded: `events` with
+   * `EventHandlers.on(eventType)(identity)`; see the overload taking handlers.
+   */
+  def events[A](run: AgentRun, eventType: EventType[A]): ZStream[Any, LLMError, A]
+
+  /**
+   * What `handlers` make of `run`'s events: one element for each event a handler takes, in delivery
+   * order. It observes the run, through [[AgentRun.subscribe]]: it replays the run's durable events
+   * from its start and then follows it live, but misses the live events sent before the stream
+   * started - use [[stream]] to see every one. It ends after the run's terminal event, or once a run
+   * that ends without one has delivered its last event; the run's own outcome is not failed with -
+   * await the run for it. Ending the stream early, or interrupting it, cancels its subscription only:
+   * the run carries on.
+   *
+   * Handlers run on the stream, not on the subscription: a slow handler slows the stream, never the
+   * run, and one that throws dies the stream (a defect). A consumer too slow for the stream's buffer
+   * loses live events, as [[stream]]'s does - a `LiveGap`, which a handler sees through `otherwise`.
+   * A subscription that disconnects, or a consumer that falls more than `Agent.StreamCapacity`
+   * durable events behind, fails the stream with an `LLMError`.
+   */
+  def events[R](run: AgentRun, handlers: EventHandlers[R]): ZStream[Any, LLMError, R]
 }
 
 object AgentZ {
@@ -163,6 +188,43 @@ object AgentZ {
             ZStream
               .fromZIO(ZIO.attemptBlockingInterrupt(run.await()).orDie.flatMap(ZIO.fromEither(_)))
               .map(AgentStreamItem.Done(_))
+        }
+    }
+
+    def events[A](run: AgentRun, eventType: EventType[A]): ZStream[Any, LLMError, A] =
+      events(run, EventHandlers.on(eventType)(identity))
+
+    /**
+     * Subscribes a buffer's listener to `run`, ending the buffer when the subscription ends; the
+     * release cancels the subscription - never the run - and closes the buffer.
+     */
+    def events[R](run: AgentRun, handlers: EventHandlers[R]): ZStream[Any, LLMError, R] = {
+      val acquire =
+        ZIO
+          .attemptBlocking {
+            val buffer = AgentEventBuffer(StreamBufferSize)
+            run.subscribeEnding(Agent.StreamCapacity, () => buffer.end())(buffer.listener).map(s => (buffer, s))
+          }
+          .orDie
+          .flatMap(ZIO.fromEither(_))
+      ZStream
+        .acquireReleaseWith(acquire) { case (buffer, subscription) =>
+          ZIO.attemptBlocking {
+            subscription.cancel()
+            buffer.close()
+          }.ignore
+        }
+        .flatMap { case (buffer, _) =>
+          ZStream
+            .repeatZIOOption(
+              ZIO.attemptBlockingInterrupt(buffer.take()).orDie.flatMap {
+                case Right(Some(event)) => ZIO.succeed(event)
+                case Right(None)        => ZIO.fail(None)
+                case Left(error)        => ZIO.fail(Some(error))
+              }
+            )
+            .mapZIO(event => ZIO.succeed(handlers.dispatch(event)))
+            .collectSome
         }
     }
 

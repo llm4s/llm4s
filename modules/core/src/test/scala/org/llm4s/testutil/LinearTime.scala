@@ -288,6 +288,14 @@ object LinearTime {
     scaling
   }
 
+  /**
+   * The wall-time bound of a spec's guard test: one run of an operation on a single ~1 MB worst-case input, which
+   * stays in `sbt test` when the spec's scaling tests are tagged [[PerformanceTest]]. A linear run takes a fraction
+   * of a second, so this is far from flaking on a slow runner, under coverage instrumentation or on Windows; a
+   * quadratic regression on a megabyte takes minutes, so it still fails.
+   */
+  val MegabyteHangGuard: FiniteDuration = 60.seconds
+
   /** How long `body` took in wall time; fails if it took `hangGuard` or longer. */
   def timed(label: String, hangGuard: FiniteDuration = 10.seconds)(body: => Any): FiniteDuration = {
     val start = System.nanoTime()

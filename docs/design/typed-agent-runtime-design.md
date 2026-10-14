@@ -417,6 +417,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.20 | [Stage 2 slice 2: the SQLite checkpointer](typed-agent-runtime/4.20-stage-2-slice-2-the-sqlite-checkpointer.md) ([#1701](https://github.com/llm4s/llm4s/issues/1701)) |
 | 4.21 | [Stage 2 slice 6: live subscriptions across runtimes](typed-agent-runtime/4.21-stage-2-slice-6-live-subscriptions-across-runtimes.md) ([#1705](https://github.com/llm4s/llm4s/issues/1705)) |
 | 4.22 | [Stage 3 slice C1: kernel hooks for the harness](typed-agent-runtime/4.22-stage-3-slice-c1-kernel-hooks.md) ([#1902](https://github.com/llm4s/llm4s/issues/1902)) |
+| 4.28 | [Stage 3 slice F9: typed custom streams](typed-agent-runtime/4.28-stage-3-slice-f9-typed-custom-streams.md) ([#1914](https://github.com/llm4s/llm4s/issues/1914)) |
 
 ### 4.9 Stage 0 carry-forward
 

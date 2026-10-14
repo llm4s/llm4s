@@ -150,7 +150,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     val appender = new ListAppender[ILoggingEvent]()
     appender.start()
     logger.addAppender(appender)
-    val took = Using.resource(new AutoCloseable { def close(): Unit = logger.detachAppender(appender): Unit }) { _ =>
+    Using.resource(new AutoCloseable { def close(): Unit = logger.detachAppender(appender): Unit }) { _ =>
       val gate  = new CountDownLatch(1)
       val agent = agentOf(Scripted(gate, Right(answer("hi"))))
       val run   = ok(agent.start(ThreadId("s1f"), "hello"))
@@ -158,12 +158,11 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
       val sub   = ok(run.subscribe()(c.listener))
       sub.cancel()
       gate.countDown()
-      val started = System.nanoTime()
       ok(run.await()).answer shouldBe Some("hi")
       c.terminalSeen shouldBe false
-      (System.nanoTime() - started).nanos
     }
-    took should be < 1.second
+    // a drain that waited for the cancelled listener would wait out `AgentRun.Drain` and then warn: the
+    // missing warning is the proof, with no wall-clock bound that a loaded machine could break
     appender.list.asScala.filter(_.getLevel == Level.WARN) shouldBe empty
   }
 
