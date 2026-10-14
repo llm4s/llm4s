@@ -1,10 +1,12 @@
 package org.llm4s.util
 
+import org.llm4s.testutil.{ LinearTime, PerformanceTest }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import scala.concurrent.duration.*
 import scala.util.Random
 
 class RedactionScrubSpec extends AnyFlatSpec with Matchers {
@@ -92,16 +94,28 @@ class RedactionScrubSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  "Redaction.scrubRemote" should "scrub a body echoing 8,000 access tokens in linear time" in {
-    val tokens = (1 to 8000).map(i => f"tok-$i%06d-${i * 7919}%08d")
-    val body   = tokens.map(t => s"""{"access_token":"$t","token_type":"Bearer"}""").mkString("[", ",", "]")
+  private def tokens(n: Int): Seq[String] = (1 to n).map(i => f"tok-$i%06d-${i * 7919}%08d")
+  private def echoing(tokens: Seq[String]): String =
+    tokens.map(t => s"""{"access_token":"$t","token_type":"Bearer"}""").mkString("[", ",", "]")
+
+  // An ordinary test with a generous hang guard; how the cost scales is measured by the PerformanceTest below, run by
+  // `sbt testPerformance` (it was a 3 s bound on this one run, which a slow runner can exceed).
+  "Redaction.scrubRemote" should "scrub a body echoing 8,000 access tokens well inside the hang guard" in {
+    val echoed = tokens(8000)
+    val body   = echoing(echoed)
     body.length should be > 350000
-    val started   = System.nanoTime()
-    val out       = Redaction.scrubRemote(body, Seq("configured-secret"))
-    val elapsedMs = (System.nanoTime() - started) / 1000000
-    tokens.foreach(t => (out should not).include(t))
-    out should include(s""""access_token":"$P"""")
-    info(s"scrubbed ${body.length} chars in $elapsedMs ms")
-    elapsedMs should be < 3000L
+    val started  = System.nanoTime()
+    val scrubbed = Redaction.scrubRemote(body, Seq("configured-secret"))
+    val elapsed  = (System.nanoTime() - started).nanos
+    echoed.foreach(t => (scrubbed should not).include(t))
+    scrubbed should include(s""""access_token":"$P"""")
+    info(s"scrubbed ${body.length} chars in ${elapsed.toMillis} ms")
+    elapsed should be < LinearTime.MegabyteHangGuard
+  }
+
+  it should "scrub a body echoing many access tokens in time linear in the input" taggedAs PerformanceTest in {
+    LinearTime.assertLinear("access tokens, 2,000 vs 8,000", echoing(tokens(2000)), echoing(tokens(8000)))(
+      Redaction.scrubRemote(_, Seq("configured-secret"))
+    )
   }
 }
