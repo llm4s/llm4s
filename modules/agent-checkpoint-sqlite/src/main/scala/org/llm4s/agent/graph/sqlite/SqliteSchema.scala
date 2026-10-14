@@ -15,7 +15,9 @@ import scala.util.Using
  *  - `llm4s_checkpoint_threads`: one row per thread that has a checkpoint, a claim, or an event number spent - the
  *    latest checkpoint as JSON with its id (the thread's version), the next event number and the replay floor,
  *    the first event number of the thread now under the id (`first_seq`, version 2), and the claim (holder, token,
- *    expiry as epoch seconds and nanoseconds). `deleteThread` keeps the row of a thread that numbered any event,
+ *    expiry as epoch seconds and nanoseconds, and from version 5 its tenant: `claim_tenant`, with
+ *    `claim_tenant_token` the token of the claim it was recorded for, so the tenant is the claim's only when the two
+ *    tokens agree). `deleteThread` keeps the row of a thread that numbered any event,
  *    emptied, as a tombstone: `next_seq`, `first_seq` and the replay floor move one past the deleted thread's next
  *    number, so a new thread of the same id numbers its events past the deleted one's, and a read from inside the
  *    deleted log is told so (`GraphError.ThreadDeleted`). The tombstone holds no data of the deleted thread.
@@ -35,13 +37,33 @@ import scala.util.Using
 private[sqlite] object SqliteSchema:
 
   /** The schema version this build writes. */
-  val Current: Int = 4
+  val Current: Int = 5
 
   /** A migration from the version it is keyed by to the next. */
   type Step = Connection => Unit
 
   /** The steps, keyed by the version each upgrades from. */
-  val steps: Map[Int, Step] = Map(0 -> createTables, 1 -> addFirstSeq, 2 -> addEffects, 3 -> addEffectLineages)
+  val steps: Map[Int, Step] = Map(
+    0 -> createTables,
+    1 -> addFirstSeq,
+    2 -> addEffects,
+    3 -> addEffectLineages,
+    4 -> addClaimTenants
+  )
+
+  /**
+   * Version 5: the tenant of each claim (#1926), so that a refusal or a takeover names the claim's holder only to a
+   * caller of the same tenant. `claim_tenant` is the tenant, NULL for a claim of no tenant, and `claim_tenant_token`
+   * the token of the claim it was recorded for. A claim a version-4 file holds has no `claim_tenant_token`, so its
+   * tenant reads as unknown: it matches no tenant, and its holder is never named - not in a refusal, and not as
+   * `takenOverFrom` once it lapses. Such a claim is no older than its `ttl`, so this lasts at most that long.
+   */
+  private def addClaimTenants(connection: Connection): Unit =
+    statements(
+      connection,
+      "ALTER TABLE llm4s_checkpoint_threads ADD COLUMN claim_tenant TEXT",
+      "ALTER TABLE llm4s_checkpoint_threads ADD COLUMN claim_tenant_token INTEGER"
+    )
 
   /**
    * Version 4: the lineage of the task each effect record belongs to (#1921 follow-up), which decides with its

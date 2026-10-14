@@ -44,8 +44,18 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       "UPDATE llm4s_checkpoint_schema SET version = 1"
     )
 
+  /** The file as a version-4 build left it: claims without their tenant (#1926). */
+  private def asVersionFour(path: Path): Unit =
+    exec(
+      path,
+      "ALTER TABLE llm4s_checkpoint_threads DROP COLUMN claim_tenant",
+      "ALTER TABLE llm4s_checkpoint_threads DROP COLUMN claim_tenant_token",
+      "UPDATE llm4s_checkpoint_schema SET version = 4"
+    )
+
   /** The file as a version-3 build left it: effect records without their task's lineage (#1921 follow-up). */
   private def asVersionThree(path: Path): Unit =
+    asVersionFour(path)
     exec(
       path,
       "ALTER TABLE llm4s_checkpoint_effects DROP COLUMN task_lineage",
@@ -54,6 +64,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
 
   /** The file as a version-2 build left it: no effect records table (#1921). */
   private def asVersionTwo(path: Path): Unit =
+    asVersionFour(path)
     exec(path, "DROP TABLE llm4s_checkpoint_effects", "UPDATE llm4s_checkpoint_schema SET version = 2")
 
   private def checkpoint(thread: ThreadId, id: String, parent: Option[String], token: FencingToken): Checkpoint =
@@ -172,7 +183,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val db      = dir.resolve(name)
     val store   = SqliteCheckpointer.open(db).value
     val thread  = ThreadId("odd-path")
-    store.claim(thread, ClaimRequest(RunId("run"), ttl)).value: Unit
+    store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value: Unit
     Files.exists(db) shouldBe true
     new String(Files.readAllBytes(db).take(15), "US-ASCII") shouldBe "SQLite format 3"
     // nothing else was created beside it but SQLite's own WAL and shared-memory files
@@ -238,7 +249,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val clock   = ManualClock(begun)
     val store   = SqliteFiles.opened(db, clock)
     val thread  = ThreadId("sub-second")
-    val claimed = store.claim(thread, ClaimRequest(RunId("first"), 1500.millis)).value
+    val claimed = store.claim(thread, ClaimRequest(RunId("first"), None, 1500.millis)).value
     claimed.expiresAt shouldBe Instant.parse("2026-10-10T09:00:01.623456789Z")
     scalar(db, "SELECT claim_expires_second, claim_expires_nano FROM llm4s_checkpoint_threads") { rows =>
       (rows.getLong(1), rows.getLong(2))
@@ -247,10 +258,10 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     // read back by another store, as after a restart: live one nanosecond before the expiry, lapsed at it
     val reopened = SqliteFiles.opened(db, clock)
     clock.set(claimed.expiresAt.minusNanos(1))
-    reopened.claim(thread, ClaimRequest(RunId("second"), 1500.millis)).left.value shouldBe
+    reopened.claim(thread, ClaimRequest(RunId("second"), None, 1500.millis)).left.value shouldBe
       GraphError.ThreadBusy(thread.value, None, GraphError.BusyHolder.Run(RunId("first")))
     clock.set(claimed.expiresAt)
-    val taken = reopened.claim(thread, ClaimRequest(RunId("second"), 1500.millis)).value
+    val taken = reopened.claim(thread, ClaimRequest(RunId("second"), None, 1500.millis)).value
     taken.token.value should be > claimed.token.value
     // a renewal stores its expiry exactly too
     clock.set(claimed.expiresAt.plusNanos(250))
@@ -268,12 +279,14 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val store  = SqliteFiles.opened(db, clock)
     val other  = SqliteFiles.opened(db, clock)
     val thread = ThreadId("refused")
-    val first  = store.claim(thread, ClaimRequest(RunId("first"), 1.minute)).value
+    val first  = store.claim(thread, ClaimRequest(RunId("first"), None, 1.minute)).value
     (1 to 3).foreach(_ =>
-      other.claim(thread, ClaimRequest(RunId("refused"), 1.minute)).left.value shouldBe a[GraphError.ThreadBusy]
+      other.claim(thread, ClaimRequest(RunId("refused"), None, 1.minute)).left.value shouldBe a[GraphError.ThreadBusy]
     )
     store.release(thread, first.token).value shouldBe (())
-    other.claim(thread, ClaimRequest(RunId("next"), 1.minute)).value.token shouldBe FencingToken(first.token.value + 1)
+    other.claim(thread, ClaimRequest(RunId("next"), None, 1.minute)).value.token shouldBe FencingToken(
+      first.token.value + 1
+    )
     store.close()
     other.close()
   }
@@ -284,7 +297,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val db     = SqliteFiles.fresh()
     val store  = SqliteFiles.opened(db, ManualClock(start))
     val thread = ThreadId("compacted")
-    val token  = store.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     store.commit(thread, Commit(token, events = (1 to 5).map(i => event(s"e$i")).toVector)).value: Unit
     store.compactEvents(thread, 4L).value
     store.close()
@@ -305,7 +318,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val db      = SqliteFiles.fresh()
     val thread  = ThreadId("v1-thread")
     val first   = SqliteCheckpointer.open(db).value
-    val written = first.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val written = first.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     first.commit(thread, Commit(written, events = Vector(event("a"), event("b")))).value
     first.release(thread, written).value
     first.close()
@@ -315,7 +328,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
     scalar(db, "SELECT first_seq FROM llm4s_checkpoint_threads WHERE thread_id = 'v1-thread'")(_.getLong(1)) shouldBe 1L
     reopened.eventsAfter(thread, 0L, 10).value.map(_.seq) shouldBe Vector(1L, 2L)
-    val token = reopened.claim(thread, ClaimRequest(RunId("next"), ttl)).value.token
+    val token = reopened.claim(thread, ClaimRequest(RunId("next"), None, ttl)).value.token
     reopened.commit(thread, Commit(token, events = Vector(event("c")))).value.map(_.seq) shouldBe Vector(3L)
     reopened.deleteThread(thread, token).value
     // the tombstone keeps the numbering, and nothing else
@@ -327,16 +340,16 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       _.getBoolean(1)
     ) shouldBe true
     reopened.eventsAfter(thread, 3L, 10).left.value shouldBe GraphError.ThreadDeleted(thread.value, 3L, 5L)
-    val again = reopened.claim(thread, ClaimRequest(RunId("again"), ttl)).value.token
+    val again = reopened.claim(thread, ClaimRequest(RunId("again"), None, ttl)).value.token
     reopened.commit(thread, Commit(again, events = Vector(event("d")))).value.map(_.seq) shouldBe Vector(5L)
     reopened.close()
   }
 
-  "A version-3 file" should "open at version 4, its effect records of an empty lineage" in {
+  "A version-3 file" should "open at the current version, its effect records of an empty lineage" in {
     val db     = SqliteFiles.fresh()
     val thread = ThreadId("v3-thread")
     val first  = SqliteCheckpointer.open(db).value
-    val token  = first.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val token  = first.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     first.commit(thread, Commit(token, Some(checkpoint(thread, "c1", None, token)))).value
     val record = EffectRecord
       .fromJson(
@@ -355,17 +368,62 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     asVersionThree(db)
 
     val reopened = SqliteCheckpointer.open(db).value
-    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe 4
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
     scalar(db, "SELECT task_lineage FROM llm4s_checkpoint_effects")(_.getString(1)) shouldBe ""
     reopened.effect(thread, record.key).value shouldBe Some(record)
     reopened.close()
+  }
+
+  "A version-4 file" should "open at the current version, a claim it holds of no tenant: its holder never named" in {
+    val db     = SqliteFiles.fresh()
+    val clock  = ManualClock(start)
+    val thread = ThreadId("v4-thread")
+    val b      = Some(TenantId("b"))
+    val first  = SqliteFiles.opened(db, clock)
+    val held   = first.claim(thread, ClaimRequest(RunId("b-run"), b, ttl)).value
+    first.commit(thread, Commit(held.token, Some(checkpoint(thread, "c1", None, held.token)))).value
+    first.close()
+    asVersionFour(db)
+
+    val reopened = SqliteFiles.opened(db, clock)
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
+    // the claim is still live and still fences, but its tenant is unknown: not even its own tenant is told its holder
+    reopened.claim(thread, ClaimRequest(RunId("b-other"), b, ttl)).left.value shouldBe
+      GraphError.ThreadBusy(thread.value, Some("c1"), GraphError.BusyHolder.Unnamed)
+    reopened.claim(thread, ClaimRequest(RunId("none"), None, ttl)).left.value shouldBe
+      GraphError.ThreadBusy(thread.value, Some("c1"), GraphError.BusyHolder.Unnamed)
+    reopened.renew(thread, held.token, ttl).value.tenantId shouldBe None
+    clock.advance(ttl)
+    val taken = reopened.claim(thread, ClaimRequest(RunId("b-next"), b, ttl)).value
+    (taken.tenantId, taken.takenOverFrom) shouldBe ((b, None))
+    // a claim made since the migration records its tenant
+    clock.advance(ttl)
+    reopened.claim(thread, ClaimRequest(RunId("b-last"), b, ttl)).value.takenOverFrom shouldBe Some(RunId("b-next"))
+    reopened.close()
+  }
+
+  it should "not take the tenant of an earlier claim for a claim a version-4 build wrote over it" in {
+    val db     = SqliteFiles.fresh()
+    val thread = ThreadId("v4-writer")
+    val b      = Some(TenantId("b"))
+    val store  = SqliteFiles.opened(db, ManualClock(start))
+    store.claim(thread, ClaimRequest(RunId("b-run"), b, ttl)).value
+    // a version-4 build, still open on the file, replaces the claim: it writes no tenant columns
+    exec(
+      db,
+      "UPDATE llm4s_checkpoint_meta SET value = value + 1 WHERE key = 'last_token'",
+      "UPDATE llm4s_checkpoint_threads SET claim_holder = 'old-build', claim_token = claim_token + 1"
+    )
+    store.claim(thread, ClaimRequest(RunId("b-other"), b, ttl)).left.value shouldBe
+      GraphError.ThreadBusy(thread.value, None, GraphError.BusyHolder.Unnamed)
+    store.close()
   }
 
   "A version-2 file" should "open at the current version with no effect records, and keep the ones written after" in {
     val db     = SqliteFiles.fresh()
     val thread = ThreadId("v2-thread")
     val first  = SqliteCheckpointer.open(db).value
-    val token  = first.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val token  = first.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     first.commit(thread, Commit(token, Some(checkpoint(thread, "c1", None, token)))).value
     first.close()
     asVersionTwo(db)
@@ -395,7 +453,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val db     = SqliteFiles.fresh()
     val thread = ThreadId("effects-only")
     val store  = SqliteCheckpointer.open(db).value
-    val token  = store.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     val record = EffectRecord
       .fromJson(
         ujson.Obj(
@@ -413,7 +471,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_threads WHERE thread_id = 'effects-only'")(_.getInt(1)) shouldBe 1
     store.effect(thread, record.key).value shouldBe Some(record)
     // deleted with the thread, the row goes too
-    val again = store.claim(thread, ClaimRequest(RunId("again"), ttl)).value.token
+    val again = store.claim(thread, ClaimRequest(RunId("again"), None, ttl)).value.token
     store.deleteThread(thread, again).value
     scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_threads WHERE thread_id = 'effects-only'")(_.getInt(1)) shouldBe 0
     scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_effects WHERE thread_id = 'effects-only'")(_.getInt(1)) shouldBe 0
@@ -470,7 +528,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val db     = SqliteFiles.fresh()
     val store  = SqliteFiles.opened(db, ManualClock(start))
     val thread = ThreadId("atomic")
-    val token  = store.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     store.commit(thread, Commit(token, Some(checkpoint(thread, "c1", None, token)), events = Vector(event("ok")))).value
     // a trigger stands in for a failure in the middle of the transaction: the second event cannot be stored
     exec(
@@ -502,7 +560,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val db     = SqliteFiles.fresh()
     val store  = SqliteFiles.opened(db, ManualClock(start))
     val thread = ThreadId("data")
-    val token  = store.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     store
       .commit(
         thread,
@@ -557,7 +615,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     store.isClosed shouldBe true
     val token = FencingToken(1L)
     val calls = Vector(
-      store.claim(thread, ClaimRequest(RunId("run"), ttl)),
+      store.claim(thread, ClaimRequest(RunId("run"), None, ttl)),
       store.renew(thread, token, ttl),
       store.release(thread, token),
       store.commit(thread, Commit(token)),
@@ -577,7 +635,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val store =
       SqliteCheckpointer.open(db, ManualClock(start), SqliteCheckpointerConfig(busyTimeout = 200.millis)).value
     val thread = ThreadId("busy")
-    val token  = store.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     store.commit(thread, Commit(token, Some(checkpoint(thread, "c1", None, token)))).value
     Using.resource(jdbc(db)) { other =>
       Using.resource(other.createStatement())(_.execute("BEGIN IMMEDIATE"): Unit)
@@ -646,7 +704,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
 
   /** Claims `thread` on `store` and commits `n` checkpoints in a chain, returning their ids, oldest first. */
   private def chain(store: SqliteCheckpointer, thread: ThreadId, n: Int, prefix: String = "c"): Vector[String] = {
-    val token = store.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val token = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     val ids   = (1 to n).map(i => s"$prefix$i").toVector
     ids.foldLeft(store.latest(thread).value.map(_.checkpoint.id)) { (parent, id) =>
       store.commit(thread, Commit(token, Some(checkpoint(thread, id, parent, token)))).value
@@ -690,7 +748,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val reopened = SqliteCheckpointer.open(db).value
     reopened.history(thread, None, 10).value.map(_.id) shouldBe ids.reverse
     reopened.checkpoint(thread, "c1").value.map(_.id) shouldBe Some("c1")
-    val deleting = reopened.claim(thread, ClaimRequest(RunId("deleter"), ttl)).value.token
+    val deleting = reopened.claim(thread, ClaimRequest(RunId("deleter"), None, ttl)).value.token
     reopened.deleteThread(thread, deleting).value
     scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_history WHERE thread_id = 'kept'")(_.getInt(1)) shouldBe 0
     reopened.history(thread, None, 10).value shouldBe empty
@@ -716,7 +774,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     reopened.checkpoint(kept, "c3").value.map(_.id) shouldBe Some("c3")
     reopened.latest(kept).value.map(_.checkpoint.id) shouldBe Some("c3")
     // and the thread goes on: a commit lands in the history after the seeded latest
-    val token = reopened.claim(kept, ClaimRequest(RunId("next"), ttl)).value.token
+    val token = reopened.claim(kept, ClaimRequest(RunId("next"), None, ttl)).value.token
     reopened.commit(kept, Commit(token, Some(checkpoint(kept, "c4", Some("c3"), token)))).value
     reopened.commit(kept, Commit(token, Some(checkpoint(kept, "c3", Some("c4"), token)))).left.value shouldBe
       a[GraphError.InvalidCommit]
@@ -743,7 +801,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
           case Left(e)  => failure.add(e.message): Unit
       }
     }
-    val token = writer.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val token = writer.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     val ids   = (1 to rounds).map(i => s"c$i").toVector
     ids.foldLeft(Option.empty[String]) { (parent, id) =>
       writer.commit(

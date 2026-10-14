@@ -123,6 +123,31 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
     result.left.toOption.get.message should include("Token refresh failed")
   }
 
+  it should "read the well-known credential file it is given, and only an existing one (#1939)" in {
+    val file = java.nio.file.Files.createTempFile("adc", ".json")
+    file.toFile.deleteOnExit()
+    {
+      val read     = collection.mutable.Buffer.empty[String]
+      val mockHttp = stub[Llm4sHttpClient]
+      (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenResponseBody, Map.empty)))
+      (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(404, "Not Found", Map.empty)))
+      def provider(path: Option[String]) = new VertexAIAuthProvider(
+        credentialFilePath = None,
+        httpClient = mockHttp,
+        envReader = _ => None,
+        fileReader = p => {
+          read += p; Right("""{"type":"authorized_user","client_id":"i","client_secret":"s","refresh_token":"r"}""")
+        },
+        wellKnownCredentialPath = path
+      )
+      provider(Some(file.toString)).getAccessToken().isRight shouldBe true
+      read.toList shouldBe List(file.toString)
+      provider(Some(file.toString + ".missing")).getAccessToken().isLeft shouldBe true
+      provider(None).getAccessToken().isLeft shouldBe true
+      read.toList shouldBe List(file.toString)
+    }
+  }
+
   it should "redact credentials the token endpoint echoes in its error body (#1674)" in {
     val credFileContent =
       """{"type": "authorized_user", "client_id": "id", "client_secret": "s", "refresh_token": "r"}"""

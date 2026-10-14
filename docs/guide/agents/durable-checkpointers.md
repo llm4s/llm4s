@@ -92,11 +92,11 @@ b.recover(threadId, graph) match
 A refusal up front accepts and discards nothing, so `ThreadBusy` is a `RecoverableError`: the caller retries, and generic retry
 code (`RetryPolicy`, `ErrorRecovery`) does too. `holder` is a `GraphError.BusyHolder`:
 
-- `Run(runId)`, the holding run, when the caller may see it: the thread's latest checkpoint is the caller's
-  tenant's, or the thread has no checkpoint yet and the holder is a run of the same runtime with the caller's
-  tenant;
-- `Unnamed`, when another run holds the thread but cannot be named: the thread has no checkpoint yet in the store
-  and the holder is in another runtime, so its tenant cannot be checked, or a change's write was refused as stale
+- `Run(runId)`, the holding run, when it is of the caller's tenant: a run of the same runtime with the caller's
+  tenant, or a claim the store recorded for the caller's tenant - each claim records its run's
+  `RunConfig.tenantId` - and the thread's latest checkpoint, if it has one, is the caller's tenant's too;
+- `Unnamed`, when another run holds the thread but cannot be named: its claim is another tenant's, or recorded no
+  tenant (a claim a SQLite file held when it was upgraded to schema 5), or a change's write was refused as stale
   naming only the claim that replaced it;
 - `Lapsed`, when it is the call's own claim that was lost - a `fork`, `updateState` or `deleteThread` whose lease
   passed, or whose store named no current claim, before its write was known to land - and no other run is known
@@ -123,7 +123,14 @@ A `recover` whose claim replaced another run's expired, unreleased claim records
 `RunEvent.RunRecovered` event, as `takenOverFrom`, so the thread's log shows the takeover. That run may have been
 paused rather than dead, and still executing. It is recorded even when it is the recovering run's own id - a
 `RunId` reused with `RunConfig.withRunId` - since the expired claim was still another, earlier run's;
-`takenOverFrom` is `None` when the thread was free.
+`takenOverFrom` is `None` when the thread was free. It is `None` too when the claim replaced was another tenant's,
+or recorded no tenant: the log belongs to the thread's tenant, and never names another tenant's run. A thread's
+id can be claimed by another tenant's run - one admitted before the thread existed, say - and such a claim can lapse
+unreleased; the owner's recovery then replaces it without naming it.
+
+So a run of another tenant is never named to the thread's tenant: not by `ThreadBusy`, also in the moment between
+its claim and its first checkpoint, not by `takenOverFrom`, and not by `GraphError.ClaimLost`, whose `current` is
+only the fencing token of the claim that replaced the run's, a per-thread counter that names no run or tenant.
 
 `recover` reads the dead run's pending writes again once its own claim is granted, so a task that finished in
 the last moments before the takeover is reused, not run again.
@@ -413,8 +420,12 @@ next refused renewal or commit.
 
 ### Schema versions
 
-The file records its schema version, 2 since the fenced delete (which added `first_seq`, where a deleted thread's id
-continues its event numbering). Stop every process running an older build before opening its file with this one: an
+The file records its schema version: 2 since the fenced delete (which added `first_seq`, where a deleted thread's id
+continues its event numbering), 3 and 4 for effect records, and 5 since claims record their tenant (`claim_tenant`,
+with `claim_tenant_token`, the token of the claim the tenant belongs to). A claim a version-4 file holds when it is
+upgraded has no tenant recorded, so it matches no tenant: its holder is named to nobody, not even its own tenant,
+and a recovery that takes it over records no `takenOverFrom`. Such a claim is no older than its `ttl`, so this lasts
+at most that long. Stop every process running an older build before opening its file with this one: an
 older process that already has the file open is not refused, and until it stops its deletes are not fenced and drop
 the record a deleted thread's id numbers on from. Opening a file at an older version upgrades it in one transaction, and
 opening a file written by a newer build is refused with a `ProcessingError`, so an older process never misreads
@@ -553,6 +564,11 @@ subscriptions use to watch the store, has a default that polls `eventsAfter`. Th
 the contract. In short:
 
 - grant at most one live claim per thread, by the store's clock, and replace an expired one;
+- record each claim's tenant (`ClaimRequest.tenantId`, returned as `RunClaim.tenantId`), and name a claim's holder
+  to a later claim - as `BusyHolder.Run` in its `ThreadBusy`, or as its `RunClaim.takenOverFrom` - only when that
+  claim is of the same tenant (`None` and `Some` differ); otherwise refuse with `BusyHolder.Unnamed` and leave
+  `takenOverFrom` empty. A claim whose tenant the store cannot tell - stored before it recorded tenants - is of no
+  tenant;
 - give every claim a token greater than every token issued for that thread before, also after `deleteThread`;
 - apply a `Commit` entirely or not at all, and only with the current claim's token (`StaleClaim`, checked first);
 - delete a thread only with the current claim's token, checked in the same lock or transaction as the delete
@@ -606,10 +622,12 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
 It runs every case against your store: commits, conflicts, event numbering, compaction, `deleteThread` (fenced by
 the current token, and a recreated thread numbered on past the deleted one, whose log a reader cannot continue), round
 trips, the checkpoint history (paging, reads by id, unique ids, retraction and pruning by age, count and event
-count), claims and fencing (also from many threads at once), and two or more `GraphRuntime`s contending over one
+count), claims and fencing (also from many threads at once), each claim's tenant (a holder named only to a claim of
+its own tenant, also across a reopen), and two or more `GraphRuntime`s contending over one
 store - a live run refused elsewhere, renewal, takeover after expiry without re-running completed tasks, a stale
 run's commits refused, only one of several runtimes admitted to recover a thread, `updateState` and `fork` fenced
-against a live run, and a blocked turn leaving nothing in the history. It also checks change notification:
+against a live run, a blocked turn leaving nothing in the history, and another tenant's claim on a thread never
+revealing its run to the thread's tenant through `ThreadBusy`, `RunRecovered.takenOverFrom` or `ClaimLost`. It also checks change notification:
 `awaitEventsAfter` itself, and subscriptions in one runtime that receive another runtime's commits in order, mid-run,
 across a restart, and only until they are cancelled or the thread is deleted. `InMemoryCheckpointer` passes it.
 

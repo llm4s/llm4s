@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Vertex AI finds gcloud's Application Default Credentials on Windows and under `CLOUDSDK_CONFIG`** ([#1939](https://github.com/llm4s/llm4s/issues/1939)).
+  The well-known `application_default_credentials.json` was looked for only in `~/.config/gcloud`. It is now located
+  as Google's client libraries do: `$CLOUDSDK_CONFIG` when set (any OS), else `%APPDATA%\gcloud` on Windows, else
+  `~/.config/gcloud`. `llm4s-gemini`'s `reference.conf` binds `APPDATA` and `CLOUDSDK_CONFIG` to
+  `llm4s.vertexai.adc.appData` / `cloudSdkConfig`. `GOOGLE_APPLICATION_CREDENTIALS` still wins.
+  `VertexAIAdcConfigLoader` (`org.llm4s.config`) reads that block and `os.name`/`user.home` at the edge, and the
+  descriptor injects the path as the new `VertexAIConfig.wellKnownCredentialPath`; `VertexAIAuthProvider`'s
+  `wellKnownCredentialPath` parameter is now an `Option[String]` (default `None`: no well-known lookup), so a
+  hand-built `VertexAIClient` sets `VertexAIConfig.withWellKnownCredentialPath(VertexAIAdcConfigLoader.load()...)`
+  to keep the gcloud fallback.
+
 ### Added
 - **Phase 3 C4 follow-ups: retention against takeover admission, and one-to-one key encoding** ([#1921](https://github.com/llm4s/llm4s/issues/1921)).
   - A task's identity for its effects is now its id and its lineage: a digest of what scheduled it, namely the
@@ -1427,6 +1439,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Breaking - a run claim records its tenant, so a takeover and `ThreadBusy` never name another tenant's run** ([#1926](https://github.com/llm4s/llm4s/issues/1926)):
+  `ClaimRequest(holder, ttl)` is `ClaimRequest(holder, tenantId: Option[TenantId], ttl)` (`ClaimRequest.of` too), and
+  `RunClaim` gains `tenantId: Option[TenantId]` after `holder`; both have `withTenantId`. A `Checkpointer` records the
+  tenant with each claim and names a claim's holder only to a claim of the same tenant: a refusal is
+  `ThreadBusy(..., BusyHolder.Run(holder))` only then, `BusyHolder.Unnamed` otherwise, and `RunClaim.takenOverFrom` -
+  and so `RunEvent.RunRecovered.takenOverFrom` in the owner's durable log - is `None` for a takeover of another
+  tenant's claim. Before, another tenant's run could be named in both: by `ThreadBusy` in the moment after it
+  claimed the owner's thread and before its claim commit conflicted, and as `takenOverFrom` once such a claim lapsed
+  unreleased. The runtime now names a holder of the caller's own tenant on a thread with no checkpoint yet, which it
+  used to leave `Unnamed`. `GraphError.ClaimLost.current` is unchanged: a fencing token, it names no run or tenant.
+  `InMemoryCheckpointer`, `SqliteCheckpointer` and `CheckpointerContract` (new cases for the rule, through the store
+  and through runtimes) are updated. The SQLite schema moves to version 5 (`claim_tenant`, `claim_tenant_token`); a
+  claim a version-4 file holds when it is migrated is of no tenant, so its holder is named to nobody until it is
+  released or lapses. A build from before this change refuses a version-5 file.
 - **A completed thread restores into a new graph version** ([#1934](https://github.com/llm4s/llm4s/issues/1934)):
   `GraphRuntime.start` on a `Completed` or `Failed` thread keeps only its state, so it no longer refuses the thread
   when the graph's `version` or edges changed, or when it gained nodes or keys. For an agent, a thread at rest now

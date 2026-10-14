@@ -82,15 +82,18 @@ final class SqliteCheckpointer private (
     val now     = clock.instant()
     current.flatMap(_.claim).filter(live => now.isBefore(live.expiresAt)) match
       case Some(live) =>
-        Left(
-          GraphError.ThreadBusy(
-            threadId.value,
-            current.flatMap(_.checkpointId),
-            GraphError.BusyHolder.Run(RunId(live.holder))
-          )
-        )
+        // another tenant's holder, or one whose tenant is not recorded, is never named
+        val holder =
+          if live.of(request.tenantId) then GraphError.BusyHolder.Run(RunId(live.holder))
+          else GraphError.BusyHolder.Unnamed
+        Left(GraphError.ThreadBusy(threadId.value, current.flatMap(_.checkpointId), holder))
       case None =>
-        val claim = Claim(request.holder.value, nextToken(c), now.plusNanos(request.ttl.toNanos))
+        val claim = Claim(
+          request.holder.value,
+          Some(request.tenantId.map(_.value)),
+          nextToken(c),
+          now.plusNanos(request.ttl.toNanos)
+        )
         ensureRow(c, threadId)
         setClaim(c, threadId, Some(claim))
         // a claim still held here has expired: this one takes it over
@@ -418,7 +421,8 @@ final class SqliteCheckpointer private (
           |    next_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
           |    first_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
           |    earliest_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
-          |    claim_holder = NULL, claim_token = NULL, claim_expires_second = NULL, claim_expires_nano = NULL
+          |    claim_holder = NULL, claim_token = NULL, claim_expires_second = NULL, claim_expires_nano = NULL,
+          |    claim_tenant = NULL, claim_tenant_token = NULL
           |WHERE thread_id = ?""".stripMargin,
         threadId.value
       )
@@ -631,7 +635,13 @@ object SqliteCheckpointer:
 
   // ---- rows ----
 
-  final private case class Claim(holder: String, token: Long, expiresAt: Instant)
+  /**
+   * A stored claim. `tenant` is the tenant it was requested for, or `None` when the row does not record it: a claim
+   * a version-4 file held when it was migrated (see [[SqliteSchema]]). Such a claim is of no tenant: its holder is
+   * never named.
+   */
+  final private case class Claim(holder: String, tenant: Option[Option[String]], token: Long, expiresAt: Instant):
+    def of(tenantId: Option[TenantId]): Boolean = tenant.contains(tenantId.map(_.value))
 
   final private case class Row(
     checkpointId: Option[String],
@@ -659,13 +669,16 @@ object SqliteCheckpointer:
       undecodable(operation, what, Option(e.getMessage).getOrElse(e.getClass.getName), Some(e))
     )
 
+  // a granted or renewed claim always records its tenant; the replaced one is named only if it is of that tenant
   private def granted(threadId: ThreadId, claim: Claim, replaced: Option[Claim] = None): RunClaim =
+    val tenant = claim.tenant.flatten.map(TenantId(_))
     RunClaim(
       threadId,
       RunId(claim.holder),
+      tenant,
       FencingToken(claim.token),
       claim.expiresAt,
-      replaced.map(c => RunId(c.holder))
+      replaced.filter(r => claim.tenant.isDefined && r.of(tenant)).map(r => RunId(r.holder))
     )
 
   private def stale(threadId: ThreadId, current: Option[Row], token: FencingToken): GraphError =
@@ -675,12 +688,17 @@ object SqliteCheckpointer:
     query(
       c,
       """SELECT checkpoint_id, next_seq, earliest_seq, first_seq, claim_holder, claim_token, claim_expires_second,
-        |claim_expires_nano FROM llm4s_checkpoint_threads WHERE thread_id = ?""".stripMargin,
+        |claim_expires_nano, claim_tenant, claim_tenant_token FROM llm4s_checkpoint_threads WHERE thread_id = ?""".stripMargin,
       threadId.value
     ) { rows =>
       val token = rows.getLong(6)
       val claim = Option.when(!rows.wasNull()) {
-        Claim(rows.getString(5), token, Instant.ofEpochSecond(rows.getLong(7), rows.getLong(8)))
+        val tenant      = Option(rows.getString(9))
+        val tenantToken = rows.getLong(10)
+        // the tenant is the claim's only if it was recorded with this claim's token: a row migrated from version 4
+        // has none, and a build without the column that claimed since would have left another claim's behind
+        val recorded = Option.when(!rows.wasNull() && tenantToken == token)(tenant)
+        Claim(rows.getString(5), recorded, token, Instant.ofEpochSecond(rows.getLong(7), rows.getLong(8)))
       }
       Row(Option(rows.getString(1)), rows.getLong(2), rows.getLong(3), rows.getLong(4), claim)
     }.headOption
@@ -696,12 +714,15 @@ object SqliteCheckpointer:
     update(
       c,
       """UPDATE llm4s_checkpoint_threads
-        |SET claim_holder = ?, claim_token = ?, claim_expires_second = ?, claim_expires_nano = ?
+        |SET claim_holder = ?, claim_token = ?, claim_expires_second = ?, claim_expires_nano = ?,
+        |    claim_tenant = ?, claim_tenant_token = ?
         |WHERE thread_id = ?""".stripMargin,
       claim.map(_.holder),
       claim.map(_.token),
       claim.map(_.expiresAt.getEpochSecond),
       claim.map(_.expiresAt.getNano.toLong),
+      claim.flatMap(_.tenant).flatten,
+      claim.filter(_.tenant.isDefined).map(_.token),
       threadId.value
     )
 
