@@ -109,7 +109,7 @@ class CrossRuntimeSubscriptionSpec extends AnyFlatSpec with Matchers with Either
   "Checkpointer.awaitEventsAfter's default" should "poll: return what is there at once, else wait the timeout and return nothing" in {
     val store  = Polled(InMemoryCheckpointer())
     val thread = newThread()
-    val token  = store.claim(thread, ClaimRequest(RunId("r"), 1.minute)).value.token
+    val token  = store.claim(thread, ClaimRequest(RunId("r"), None, 1.minute)).value.token
     store
       .commit(
         thread,
@@ -140,7 +140,7 @@ class CrossRuntimeSubscriptionSpec extends AnyFlatSpec with Matchers with Either
   "InMemoryCheckpointer.awaitEventsAfter" should "wake on a commit instead of waiting out its timeout" in {
     val store  = InMemoryCheckpointer()
     val thread = newThread()
-    val token  = store.claim(thread, ClaimRequest(RunId("r"), 1.minute)).value.token
+    val token  = store.claim(thread, ClaimRequest(RunId("r"), None, 1.minute)).value.token
     val found  = new ConcurrentLinkedQueue[Result[Vector[EventRecord]]]()
     val waiter = Thread.ofVirtual().start(() => found.add(store.awaitEventsAfter(thread, 0L, 10, 1.hour)): Unit)
     Thread.sleep(50)

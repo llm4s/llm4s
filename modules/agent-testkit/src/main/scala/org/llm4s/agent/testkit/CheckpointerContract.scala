@@ -48,7 +48,8 @@ import scala.jdk.CollectionConverters.*
  *    `Commit.releasesEffect` says, kept by `prune` and across a reopen, removed by `deleteThread`; and claims and fencing - one
  *    live claim per thread, tokens strictly
  *    increasing, takeover once a claim has expired by the store's clock (naming the expired claim's
- *    holder as `takenOverFrom`), renewal and release by the
+ *    holder as `takenOverFrom`), the tenant recorded on each claim - a holder named, in a refusal or as
+ *    `takenOverFrom`, only to a claim of its own tenant, also across a reopen - renewal and release by the
  *    current token only, a refused claim leaving the live one as it was, and every commit refused
  *    with [[GraphError.StaleClaim]] unless it carries the current token - checked before any other
  *    refusal, and including from many threads at once; one claim granted of many raced at once from
@@ -64,7 +65,10 @@ import scala.jdk.CollectionConverters.*
  *    ends with [[GraphError.ClaimLost]] and leaves nothing in the thread; and of several
  *    runtimes recovering one thread at once, exactly one is admitted; `updateState` and `fork` from a
  *    second runtime are refused while a run is live in the first, and fenced by their own claim; and
- *    a run a node blocks leaves nothing of its turn in the history.
+ *    a run a node blocks leaves nothing of its turn in the history; and a claim of another tenant on a
+ *    thread never reveals its run id to the thread's own tenant - not through `ThreadBusy`, also while it
+ *    has claimed but not yet checkpointed, not as `RunRecovered.takenOverFrom` once it lapses, and not
+ *    through `ClaimLost` when it takes over a run of the owner.
  *  - '''Subscriptions across runtimes''', each runtime over a store of its own on the same storage
  *    ([[sibling]]): a subscription in one runtime receives the durable events of runs another
  *    runtime commits - in order, without gap or duplicate, when it joined before or mid-run - while
@@ -188,8 +192,8 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       if exactExpiry then actual shouldBe start.plusNanos(offset.toNanos)
       else previous.fold(succeed)(before => actual.isAfter(before) shouldBe true)
 
-    def claim(holder: String, on: ThreadId = thread): Result[RunClaim] =
-      store.claim(on, ClaimRequest(RunId(holder), ttl))
+    def claim(holder: String, on: ThreadId = thread, tenant: Option[String] = None): Result[RunClaim] =
+      store.claim(on, ClaimRequest(RunId(holder), tenant.map(TenantId(_)), ttl))
 
     def commit(
       token: FencingToken,
@@ -711,6 +715,56 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.seqs() shouldBe Vector(1L, 2L)
   }
 
+  it should "record a claim's tenant, and name a live claim's holder only to a claim of the same tenant" in {
+    val s       = Store()
+    val granted = s.claim("b-run", tenant = Some("b")).value
+    granted.tenantId shouldBe Some(TenantId("b"))
+    def refusals(latest: Option[String]): Assertion =
+      // another tenant, and no tenant, which differs from every tenant, learn only that the thread is held
+      s.claim("a-run", tenant = Some("a")).refused shouldBe
+        GraphError.ThreadBusy(s.thread.value, latest, GraphError.BusyHolder.Unnamed)
+      s.claim("none-run").refused shouldBe GraphError.ThreadBusy(s.thread.value, latest, GraphError.BusyHolder.Unnamed)
+      s.claim("b-other", tenant = Some("b")).refused shouldBe
+        GraphError.ThreadBusy(s.thread.value, latest, GraphError.BusyHolder.Run(RunId("b-run")))
+    // before the holder's first checkpoint, the moment the thread has no tenant of its own to check
+    refusals(None)
+    s.commit(granted.token, Some(s.checkpoint("c1", None))).value
+    refusals(Some("c1"))
+    // the tenant is stored with the claim: it survives a reopen, as the claim does
+    s.reopened()
+    refusals(Some("c1"))
+    s.store.renew(s.thread, granted.token, ttl).value.tenantId shouldBe Some(TenantId("b"))
+    // and a claim of no tenant is named to a claim of no tenant only
+    val other = newThread()
+    s.claim("plain", other).value.tenantId shouldBe None
+    s.claim("again", other).refused shouldBe
+      GraphError.ThreadBusy(other.value, None, GraphError.BusyHolder.Run(RunId("plain")))
+    s.claim("a-run", other, Some("a")).refused shouldBe
+      GraphError.ThreadBusy(other.value, None, GraphError.BusyHolder.Unnamed)
+  }
+
+  it should "name the holder a takeover replaced only to a claim of the same tenant" in {
+    val s = Store()
+    s.claim("b-run", tenant = Some("b")).value
+    s.advance(ttl)
+    // another tenant's takeover learns nothing of the run it replaced
+    val foreign = s.claim("a-run", tenant = Some("a")).value
+    foreign.takenOverFrom shouldBe None
+    foreign.tenantId shouldBe Some(TenantId("a"))
+    s.advance(ttl)
+    s.claim("plain").value.takenOverFrom shouldBe None
+    s.advance(ttl)
+    s.claim("plain-2").value.takenOverFrom shouldBe Some(RunId("plain"))
+    s.advance(ttl)
+    s.claim("a-run", tenant = Some("a")).value.takenOverFrom shouldBe None
+    // across a reopen too, the replaced claim's tenant decides
+    s.reopened()
+    s.advance(ttl)
+    s.claim("a-next", tenant = Some("a")).value.takenOverFrom shouldBe Some(RunId("a-run"))
+    s.advance(ttl)
+    s.claim("b-next", tenant = Some("b")).value.takenOverFrom shouldBe None
+  }
+
   it should "keep what it stores apart from the values its callers pass in and are given back" in {
     val s     = Store()
     val token = s.claim("run").value.token
@@ -858,7 +912,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val threads = (1 to claimers).map { i =>
       Thread.ofVirtual().start { () =>
         barrier.await(contractWait.toMillis, TimeUnit.MILLISECONDS): Unit
-        results.put(i -> stores(i - 1).claim(s.thread, ClaimRequest(RunId(s"run-$i"), ttl)))
+        results.put(i -> stores(i - 1).claim(s.thread, ClaimRequest(RunId(s"run-$i"), None, ttl)))
       }
     }
     threads.foreach(_.join(contractWait.toMillis))
@@ -886,7 +940,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val threads = (1 to claimers).map { i =>
       Thread.ofVirtual().start { () =>
         barrier.await(contractWait.toMillis, TimeUnit.MILLISECONDS): Unit
-        results.put(i -> stores(i - 1).claim(s.thread, ClaimRequest(RunId(s"run-$i"), ttl)))
+        results.put(i -> stores(i - 1).claim(s.thread, ClaimRequest(RunId(s"run-$i"), None, ttl)))
       }
     }
     threads.foreach(_.join(contractWait.toMillis))
@@ -1754,6 +1808,78 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       GraphError.BusyHolder.Run(RunId("other"))
     )
     s.commit(other.token, events = Vector(s.event("b2"))).value.map(_.seq) shouldBe Vector(seqs.last + 2)
+  }
+
+  it should "never reveal another tenant's claim on a thread: not through ThreadBusy, RunRecovered.takenOverFrom or ClaimLost" in {
+    val s                 = Store()
+    val w                 = Workers()
+    val owner             = GraphRuntime(s.store, claims = neverRenewed)
+    def mine(run: String) = config(run).withTenantId(TenantId("a"))
+    // the run id of tenant b, which nothing tenant a is given may contain
+    val secret = "b-secret-run"
+    def hidden(error: org.llm4s.error.LLMError): Assertion =
+      withClue(error.toString)(error.toString.contains(secret) || error.message.contains(secret) shouldBe false)
+
+    // ThreadBusy: tenant b's run has claimed the owner's thread - its admission read the thread before the owner's
+    // run released it - and has not checkpointed yet, so the thread's latest checkpoint is still the owner's
+    completed(owner.start(s.thread, w.graph, Vector("a"), mine("a1")).value) shouldBe Vector("A")
+    val latest  = s.latestId()
+    val foreign = s.claim(secret, tenant = Some("b")).value
+    val busy    = GraphError.ThreadBusy(s.thread.value, latest, GraphError.BusyHolder.Unnamed)
+    owner.start(s.thread, w.graph, Vector("b"), mine("a2")).refused shouldBe busy
+    owner.deleteThread(s.thread, mine("a3")).refused shouldBe busy
+    s.store.release(s.thread, foreign.token).value
+    // a thread with no checkpoint yet: unnamed for another tenant, named for the claim's own
+    val fresh = newThread()
+    s.claim(secret, fresh, Some("b")).value
+    owner.start(fresh, w.graph, Vector("b"), mine("a4")).refused shouldBe
+      GraphError.ThreadBusy(fresh.value, None, GraphError.BusyHolder.Unnamed)
+    val ours = newThread()
+    s.claim("a-elsewhere", ours, Some("a")).value
+    owner.start(ours, w.graph, Vector("b"), mine("a5")).refused shouldBe
+      GraphError.ThreadBusy(ours.value, None, GraphError.BusyHolder.Run(RunId("a-elsewhere")))
+
+    // RunRecovered.takenOverFrom: tenant b's claim on the owner's incomplete thread lapses unreleased, and the
+    // owner's recovery replaces it. A failed run leaves its thread Running with nothing holding it
+    val failing = new java.util.concurrent.atomic.AtomicBoolean(true)
+    val b       = GraphBuilder("contract-tenant-takeover", "v1")
+    val log     = StateKey.appending[String]("log")
+    val step = b.node[String]("step", writes = Set(log)) { (input, _, _) =>
+      if failing.get then NodeResult.Fail(ValidationError("step", "failed once"))
+      else NodeResult.Continue(Command.empty.update(log, input))
+    }
+    val graph   = b.compile(step)(_.get(log)).value
+    val stalled = newThread()
+    owner.start(stalled, graph, "x", mine("a6")).value.await().value shouldBe a[RunResult.Failed]
+    failing.set(false)
+    s.claim(secret, stalled, Some("b")).value
+    s.advance(ttl)
+    completed(owner.recover(stalled, graph, mine("a7")).value) shouldBe Vector("x")
+    val recovered = s.store.eventsAfter(stalled, 0L, 1000).value.map(_.event).collect { case r: RunEvent.RunRecovered =>
+      r.takenOverFrom
+    }
+    recovered shouldBe Vector(None)
+
+    // ClaimLost: tenant b's claim takes over the owner's live run, whose next commit is then refused
+    val taken   = newThread()
+    val gate    = w.gate("t")
+    val running = owner.start(taken, w.graph, Vector("t"), mine("a8")).value
+    w.awaitEntered("t")
+    s.advance(neverRenewed.ttl)
+    val thief = s.claim(secret, taken, Some("b")).value
+    thief.takenOverFrom shouldBe None
+    gate.countDown()
+    outcome(running).value match
+      case RunResult.Failed(_, lost: GraphError.ClaimLost) =>
+        lost.current shouldBe Some(thief.token)
+        hidden(lost)
+      case other => fail(s"the run did not lose its claim: $other")
+    s.store.release(taken, thief.token).value
+
+    // nothing of tenant b reached any of the owner's logs
+    Vector(s.thread, stalled, taken).foreach { t =>
+      s.store.eventsAfter(t, 0L, 1000).value.map(_.toString).filter(_.contains(secret)) shouldBe empty
+    }
   }
 
   // ---- subscriptions across runtimes ----

@@ -242,7 +242,7 @@ object BackendRefused:
    * `Refused` for anything else - a permission, a bound, an argument.
    */
   enum Kind:
-    case Refused, NotFound, NotADirectory
+    case Refused, NotFound, NotADirectory, Closed
 
   /** `path` does not exist. */
   def notFound(operation: String, path: VPath): BackendRefused =

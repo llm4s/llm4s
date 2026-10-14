@@ -94,7 +94,7 @@ class ThreadDeletionSpec extends AnyFlatSpec with Matchers with EitherValues wit
     store.onLatest = n =>
       if n == 2 then
         clock.advance(ttl + 1.second)
-        val claim = store.underlying.claim(thread, ClaimRequest(RunId("other-run"), ttl)).value
+        val claim = store.underlying.claim(thread, ClaimRequest(RunId("other-run"), None, ttl)).value
         store.underlying.commit(thread, Commit(claim.token, Some(checkpoint(thread, "b1", tenant)))).value
         taken.set(claim)
     (store, runtime, taken)
@@ -135,7 +135,7 @@ class ThreadDeletionSpec extends AnyFlatSpec with Matchers with EitherValues wit
     store.underlying.latest(thread).value.map(_.checkpoint.id) shouldBe Some("b1")
     // the other run still holds the thread, and its commits are accepted
     store.underlying.commit(thread, Commit(taken.get.token, events = Vector(event("b2")))).value should have size 1
-    store.underlying.claim(thread, ClaimRequest(RunId("third"), ttl)).left.value shouldBe
+    store.underlying.claim(thread, ClaimRequest(RunId("third"), None, ttl)).left.value shouldBe
       GraphError.ThreadBusy(thread.value, Some("b1"), GraphError.BusyHolder.Run(RunId("other-run")))
   }
 

@@ -27,6 +27,8 @@ and tools on `AgentBuilder`. Each slice adds its part here as it lands:
 - [#1914](https://github.com/llm4s/llm4s/issues/1914), typed custom streams: [below](#typed-custom-streams-1914).
 - [#1921](https://github.com/llm4s/llm4s/issues/1921), replay of external effects - `ReplayGuard`, `Checkpointer.effect`
   and `Commit.effects`: [below](#replay-of-external-effects-1921).
+- [#1926](https://github.com/llm4s/llm4s/issues/1926), the tenant on a run claim - `ClaimRequest` and `RunClaim`
+  carry it: [below](#the-tenant-on-a-run-claim-1926).
 
 Design: `docs/design/typed-agent-runtime/4.22-stage-3-slice-c1-kernel-hooks.md` (§4.22) onwards.
 
@@ -167,6 +169,32 @@ Design §4.25. New, opt-in API in `org.llm4s.agent.harness`; nothing existing ch
 - **File tools over a `StateFileBackend` add the `files` key.** Every mutation holds the lock `state-files/<keyId>` (needed: it keeps two edits of one file in a batch from losing one, and the quota exact), so adding file tools over a `StateFileBackend` adds its `files` key and C2's `tool-queue`, and changes the agent's version. Under §4.29 (C5) a thread at rest continues, its files starting empty; a thread in flight (suspended, or `Running` after a crash) is refused with `RestoreRejected` until it is finished or forgotten. Taking the tools out again refuses only a thread whose files hold content: the last file's delete removes the key's entry, so a thread with no files restores.
 - A `HostFileBackend` keeps its cross-process lock files in the `lockDirectory` given to `open`; give every backend that may touch the same files, in any process, the same one. It refuses symbolic links and files with other hard links.
 
+### The tenant on a run claim (#1926)
+
+A claim records the tenant of the run that holds it, so that neither `ThreadBusy` nor `RunRecovered.takenOverFrom`
+ever names another tenant's run. Code that only runs agents or graphs needs no change. Code that calls
+`Checkpointer.claim` itself, builds a `RunClaim`, or implements `Checkpointer` changes:
+
+- **`ClaimRequest(holder, ttl)` is `ClaimRequest(holder, tenantId, ttl)`**, `tenantId: Option[TenantId]`, also in
+  `ClaimRequest.of`; `withTenantId` sets it. Pass the run's `RunConfig.tenantId`, or `None` for a run of no tenant.
+  `claim`'s signature is unchanged, so a wrapper that forwards it needs no change.
+- **`RunClaim(threadId, holder, token, expiresAt, takenOverFrom)` is `RunClaim(threadId, holder, tenantId, token,
+  expiresAt, takenOverFrom)`**: the claim's own tenant, with `withTenantId`.
+- **A store records the tenant with each claim, and names a claim's holder only to a claim of the same tenant**: a
+  refusal is `ThreadBusy(..., BusyHolder.Run(holder))` only then, and `BusyHolder.Unnamed` otherwise, and a
+  takeover's `takenOverFrom` is `None` when the replaced claim was another tenant's. A claim whose tenant the store
+  cannot tell - one stored before it recorded tenants - is of no tenant. `CheckpointerContract` checks all of this.
+- **`ThreadBusy` from a runtime now names a holder of the caller's own tenant on a thread with no checkpoint yet**:
+  before, a holder in another runtime was `Unnamed` until the thread's first checkpoint. A holder of another tenant
+  is `Unnamed`, also when the thread's latest checkpoint is the caller's.
+- **`RunEvent.RunRecovered.takenOverFrom` is `None` for a takeover of another tenant's claim.**
+- **The SQLite schema moves to version 5** (`claim_tenant`, `claim_tenant_token` on `llm4s_checkpoint_threads`). A
+  version-4 file is migrated when it is opened; a claim it holds then is of no tenant, so its holder is named to
+  nobody until it is released or lapses, at most `ttl` later. A build from before this change refuses a version-5
+  file.
+
+Design: `docs/design/typed-agent-runtime/4.16-stage-2-slice-1-the-durable-checkpointer-contract.md` (§4.16).
+
 ## Stage 2 migration: durable execution
 
 Not in a release yet. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/1699)) makes agent and graph threads durable and adds human review. One note covers the whole stage; each slice adds its part here as it lands:
@@ -193,7 +221,7 @@ A run now holds a lease on its thread - a `RunClaim` with an expiry and a `Fenci
   ```
 
   Test a store with `CheckpointerContract` from the new `llm4s-agent-testkit` (see the guide).
-- **`Commit(checkpoint, pendingWrites, events)` is `Commit(token, checkpoint, pendingWrites, events)`**, with a private constructor: build it with `Commit(token, ...)` (all but the token default to empty) and change it with `withCheckpoint`, `withPendingWrites`, `withEvents` and `withToken`. A commit to `InMemoryCheckpointer` - or any store - now needs a claim first: `store.claim(threadId, ClaimRequest(runId, ttl))` returns the `RunClaim` whose `token` it carries.
+- **`Commit(checkpoint, pendingWrites, events)` is `Commit(token, checkpoint, pendingWrites, events)`**, with a private constructor: build it with `Commit(token, ...)` (all but the token default to empty) and change it with `withCheckpoint`, `withPendingWrites`, `withEvents` and `withToken`. A commit to `InMemoryCheckpointer` - or any store - now needs a claim first: `store.claim(threadId, ClaimRequest(runId, tenantId, ttl))` (the tenant since [#1926](#the-tenant-on-a-run-claim-1926)) returns the `RunClaim` whose `token` it carries.
 - **`Checkpoint` and `RunPosition` have private constructors and gain `fencingToken: Option[FencingToken]`.** Build them with `Checkpoint(...)` and `RunPosition(...)` as before (the new field defaults to `None`) and change them with `with*` setters; `checkpoint.copy(parent = p)` is `checkpoint.withParent(p)`. A run's position carries its claim's token; `None` outside a runtime.
 - **`Checkpoint.CurrentFormat` is 5.** Format 4 and earlier checkpoints still read (as written by no claim, `fencingToken = None`); a build before this change refuses format 5.
 - **`GraphError.ThreadBusy(threadId, latestCheckpoint)` gains `holder: GraphError.BusyHolder`** (default `BusyHolder.Unnamed`): `BusyHolder.Run(runId)` names the holding run when the caller may see it; `Unnamed` is another run that cannot be named; `Lapsed` is a `fork`, `updateState` or `deleteThread` whose own claim lapsed before its write was known to land, with no other run known to hold the thread - a write it had already sent may still land, so read the thread before retrying. A pattern `case GraphError.ThreadBusy(t, c)` becomes `case GraphError.ThreadBusy(t, c, _)`, and one on a named holder `case GraphError.ThreadBusy(_, _, GraphError.BusyHolder.Run(runId))`. `ThreadBusy` is now also returned when another runtime or process holds a live claim on the thread, and by `updateState` and a `fork` onto a held target.

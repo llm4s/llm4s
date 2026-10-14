@@ -69,8 +69,16 @@ final class HostFileBackend private (
 
   private val closed = new java.util.concurrent.atomic.AtomicBoolean(false)
 
-  /** Releases the root, so a backend over an overlapping one may open; idempotent. */
+  /**
+   * Releases the root, so a backend over an overlapping one may open; idempotent. Every later operation
+   * is refused (`BackendRefused.Kind.Closed`): a closed backend no longer holds its root, so letting it
+   * go on would let two backends name one file by two paths.
+   */
   def close(): Unit = if closed.compareAndSet(false, true) then HostFileBackend.OpenRoots.release(root)
+
+  private def whileOpen[A](operation: String, path: VPath)(body: => Result[A]): Result[A] =
+    if closed.get then Left(BackendRefused(operation, path.value, "the backend is closed", BackendRefused.Kind.Closed))
+    else body
 
   /** C4's class for this target. */
   val replaySupport: ReplaySupport = ReplaySupport.Verifiable
@@ -309,6 +317,10 @@ final class HostFileBackend private (
 
   private def guarded[A: upickle.default.ReadWriter](operation: String, path: VPath, ctx: FileContext)(
     plan: Path => Result[ReplayGuard.Plan[A]]
+  ): Result[(A, StateUpdate)] = whileOpen(operation, path)(guardedOpen[A](operation, path, ctx)(plan))
+
+  private def guardedOpen[A: upickle.default.ReadWriter](operation: String, path: VPath, ctx: FileContext)(
+    plan: Path => Result[ReplayGuard.Plan[A]]
   ): Result[(A, StateUpdate)] =
     // No lock is held across the guard: its intent and outcome are store commits, and a run stalled
     // between them (one that has lost its claim) must not block its successor. The effect alone is
@@ -359,6 +371,9 @@ final class HostFileBackend private (
     )
 
   def write(path: VPath, content: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
+    whileOpen("write", path)(writeOpen(path, content, ctx))
+
+  private def writeOpen(path: VPath, content: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
     guarded[FileWritten]("write", path, ctx) { target =>
       val bytes = content.getBytes(StandardCharsets.UTF_8)
       if path == VPath.root then refused("write", path, "is the root directory")
@@ -403,6 +418,9 @@ final class HostFileBackend private (
     }
 
   def delete(path: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
+    whileOpen("delete", path)(deleteOpen(path, ctx))
+
+  private def deleteOpen(path: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
     guarded[FileDeleted]("delete", path, ctx) { target =>
       if path == VPath.root then refused("delete", path, "is the root directory")
       else if !exists(target) then refused("delete", path, "not found")
@@ -473,6 +491,9 @@ final class HostFileBackend private (
     (least.asScala.toVector.sortBy(_._1).map((_, name, p) => name -> p), eligible > max)
 
   def ls(path: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
+    whileOpen("ls", path)(lsOpen(path, limit))
+
+  private def lsOpen(path: VPath, limit: Int): Result[Listing[FileInfo]] =
     Text.checkLimit("ls", path.value, limit).flatMap(_ => resolve("ls", path)).flatMap { dir =>
       io("ls", path)(Text.interruptibly("ls") {
         if !exists(dir) then Left(BackendRefused.notFound("ls", path))
@@ -496,6 +517,9 @@ final class HostFileBackend private (
     }
 
   def read(path: VPath, offset: Int, limit: Int, ctx: FileContext): Result[FileLines] =
+    whileOpen("read", path)(readOpen(path, offset, limit))
+
+  private def readOpen(path: VPath, offset: Int, limit: Int): Result[FileLines] =
     for
       _      <- Text.checkLimit("read", path.value, limit)
       _      <- Either.cond(offset >= 0, (), BackendRefused("read", path.value, s"offset must be >= 0, was $offset"))
@@ -533,18 +557,20 @@ final class HostFileBackend private (
   private def walked[A](operation: String, under: VPath, limit: Int)(
     select: Iterator[(VPath, Path)] => Iterator[A]
   ): Result[Listing[A]] =
-    Text.checkLimit(operation, under.value, limit).flatMap(_ => resolve(operation, under)).flatMap { start =>
-      io(operation, under) {
-        Text.interruptibly(operation) {
-          val walk    = new Walk(start, under)
-          val listing = Listing.of(select(walk.files), limit)
-          Right(listing.copy(truncated = listing.truncated || walk.capped))
+    whileOpen(operation, under)(Text.checkLimit(operation, under.value, limit))
+      .flatMap(_ => resolve(operation, under))
+      .flatMap { start =>
+        io(operation, under) {
+          Text.interruptibly(operation) {
+            val walk    = new Walk(start, under)
+            val listing = Listing.of(select(walk.files), limit)
+            Right(listing.copy(truncated = listing.truncated || walk.capped))
+          }
         }
       }
-    }
 
   def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
-    walked("glob", under, limit)(_.collect { case (v, _) if accept(v) => v })
+    whileOpen("glob", under)(walked("glob", under, limit)(_.collect { case (v, _) if accept(v) => v }))
 
   def search(
     under: VPath,

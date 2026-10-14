@@ -347,6 +347,25 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
       backend.locks(p("/a")) shouldBe backend.locks(p("/ab"))
   }
 
+  it should "refuse every operation once closed, and close idempotently" in {
+    written(backend.write(p("/a.txt"), "x", call()))
+    backend.close()
+    backend.close()
+    def closed[A](r: org.llm4s.types.Result[A]) =
+      r.left.value match
+        case refused: BackendRefused => refused.kind shouldBe BackendRefused.Kind.Closed
+        case other                   => fail(s"expected a refusal, got $other")
+    closed(backend.read(p("/a.txt"), 0, 1, call()))
+    closed(backend.ls(VPath.root, 10, call()))
+    closed(backend.write(p("/b.txt"), "y", call()))
+    closed(backend.edit(p("/a.txt"), "x", "y", replaceAll = false, call()))
+    closed(backend.delete(p("/a.txt"), call()))
+    closed(backend.glob(Glob("*"), VPath.root, 10, call()))
+    closed(backend.grep("x", VPath.root, None, 10, call()))
+    onDisk("a.txt") shouldBe "x"
+    backend = HostFileBackend.open(dir, locks).value
+  }
+
   it should "refuse, in this JVM, a root overlapping an open one, and share the same real root" in {
     Files.createDirectories(dir.resolve("sub"))
     HostFileBackend.open(dir.resolve("sub"), locks).left.value.message should include("overlaps")
