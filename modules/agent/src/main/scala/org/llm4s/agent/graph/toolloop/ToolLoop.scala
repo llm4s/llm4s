@@ -1454,6 +1454,11 @@ object ToolLoop:
       case Right(Failure(thrown)) => Left(thrown)
       case Left(interrupted)      => Left(interrupted)
 
+  /** Why a call's arguments were not admitted: a refusal the model sees, or a cancellation. */
+  private enum Refusal:
+    case Invalid(message: String)
+    case Cancelled(cancellation: CancelledError)
+
   /** The call pipeline (design #1278, "The call pipeline"; #1279): one call's checks, chain, tool and outcome. */
   final private class Pipeline(
     agent: AgentId,
@@ -1657,9 +1662,8 @@ object ToolLoop:
         case _ => error(task, s"Tool '$name' does not take answers", context)
 
     /**
-     * Steps 2-4: validate the raw arguments, decode them, run the tool's own check; then the resources
-     * the call touches, for the wrappers. `Left` is the task's result instead: an error result, or a
-     * cancellation.
+     * Steps 2-4 as the call's task result: an error result, or a cancellation, when [[admission]] refuses
+     * the call; otherwise its decoded arguments and resources.
      */
     private def checked[A](
       tool: AgentTool[A],
@@ -1667,16 +1671,32 @@ object ToolLoop:
       call: ToolCall,
       context: RunContext
     ): Either[NodeResult, (A, Vector[ToolResource])] =
-      def refused(message: String): NodeResult = invalid(tool, task, message, context)
+      admission(tool, call).left.map {
+        case Refusal.Invalid(message)        => invalid(tool, task, message, context)
+        case Refusal.Cancelled(cancellation) => cancelled(cancellation)
+      }
+
+    /**
+     * Whether `call` is admitted, as pure data: validate the raw arguments, decode them, run the tool's
+     * own check, then compute the resources it touches, in that order. The one definition both the run of a
+     * call ([[checked]]) and its scheduling ([[locksOf]]) use, so a call scheduling admits is a call the run
+     * admits, and the reverse. The validator, the check and the resource function are caller code: a throw
+     * is a refusal, unless it is a cancellation.
+     */
+    private def admission[A](tool: AgentTool[A], call: ToolCall): Either[Refusal, (A, Vector[ToolResource])] =
+      def code[T](run: => T): Either[Refusal, T] =
+        Try(run).toEither.left.map { thrown =>
+          CancelledError
+            .fromThrowable(thrown, s"tool ${tool.spec.name}")
+            .fold[Refusal](Refusal.Invalid(describe(thrown)))(Refusal.Cancelled(_))
+        }
       for
-        violations <- callerCode(tool, task, context)(
-          tools.validator.validate(tool.spec.argumentSchema, argumentsOf(tool, call))
-        )
-        _         <- Either.cond(violations.isEmpty, (), refused(violations.mkString("; ")))
-        args      <- decode(tool, call).left.map(refused)
-        check     <- callerCode(tool, task, context)(tool.spec.validateDecoded(args))
-        _         <- check.left.map(e => refused(e.message))
-        resources <- resourcesOf(tool, task, args, context)
+        violations <- code(tools.validator.validate(tool.spec.argumentSchema, argumentsOf(tool, call)))
+        _          <- Either.cond(violations.isEmpty, (), Refusal.Invalid(violations.mkString("; ")))
+        args       <- decode(tool, call).left.map(Refusal.Invalid(_))
+        check      <- code(tool.spec.validateDecoded(args))
+        _          <- check.left.map(e => Refusal.Invalid(e.message))
+        resources  <- code(tool.spec.resourcesOf(args))
       yield (args, resources)
 
     /** The resources a call with decoded `args` touches, from its tool's `withResources`. */
@@ -1740,22 +1760,19 @@ object ToolLoop:
       }
 
     /**
-     * The locks `call` holds: none unless it passes the same checks it will be run behind - schema
-     * validation, decoding and the tool's own check, in that order, so no caller code runs before the
-     * validation boundary - because a refused call touches nothing and must not take a round of its own.
-     * A lock function that throws gives the root lock.
+     * The locks `call` holds: none unless [[admission]] admits it - the same checks, in the same order, it
+     * will be run behind, so no caller code runs before the validation boundary - because a refused call
+     * touches nothing and must not take a round of its own. A lock function that throws gives the root lock;
+     * a cancellation keeps the interrupt flag set, so the run is still cancelled.
      */
     private def locksOf[A](tool: AgentTool[A], call: ToolCall): Set[LockKey] =
       tool.spec.locksOf.fold(Set.empty[LockKey]) { locks =>
-        val arguments = argumentsOf(tool, call)
-        val admitted = for
-          violations <- Try(tools.validator.validate(tool.spec.argumentSchema, arguments)).toOption
-          if violations.isEmpty
-          args  <- read(arguments)(using tool.spec.codec).toOption
-          check <- Try(tool.spec.validateDecoded(args)).toOption
-          if check.isRight
-        yield args
-        admitted.fold(Set.empty)(args => Try(locks(args)).getOrElse(Set(LockKey(""))))
+        admission(tool, call) match
+          case Left(Refusal.Cancelled(_)) =>
+            Thread.currentThread().interrupt()
+            Set.empty
+          case Left(_)          => Set.empty
+          case Right((args, _)) => Try(locks(args)).getOrElse(Set(LockKey("")))
       }
 
     private def decode[A](tool: AgentTool[A], call: ToolCall): Either[String, A] =
