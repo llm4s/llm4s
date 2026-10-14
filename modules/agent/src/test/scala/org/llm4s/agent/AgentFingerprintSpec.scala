@@ -200,14 +200,13 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
         SpecTools.spec("echo").withTimeout(1.second).withResources(t => Vector(ToolResource(Operation.Read, t.text)))
       )
     ) shouldBe plain
-    // a tool with locks adds the loop's tool-queue key, a change of structure
+    // a tool with locks adds the loop's tool-queue key, a change of structure that old threads survive (§4.29)
     fingerprint(echoWith(SpecTools.spec("echo").withLocks(_ => Set.empty))) should not be plain
   }
 
-  "A thread checkpointed without locks" should "resume in a rebuild with timeouts, and be refused by one with locks" in {
+  "A thread checkpointed without locks" should "resume in a rebuild with timeouts, and in one with locks" in {
     import scala.concurrent.duration._
     val runtime = GraphRuntime.inMemory()
-    val thread  = ThreadId("unlocked")
     def agent(spec: org.llm4s.agent.graph.tool.AgentToolSpec[SpecTools.Text], replies: Completion*) =
       built(
         Agent
@@ -216,19 +215,54 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
           .withMiddleware(new ApprovalMiddleware(_ => Some("review")))
           .withRuntime(runtime)
       )
-    val parked =
-      agent(SpecTools.spec("echo"), SpecTools.calling(SpecTools.call("c1", "echo"))).run(thread, "go").value
-    val approve = parked.status match {
-      case AgentStatus.Suspended(approvals, _, _, _) => parked.approve(approvals.head._1)
-      case other                                     => fail(s"expected Suspended, got $other")
+    def parkedOn(thread: ThreadId) = {
+      val parked =
+        agent(SpecTools.spec("echo"), SpecTools.calling(SpecTools.call("c1", "echo"))).run(thread, "go").value
+      parked.status match {
+        case AgentStatus.Suspended(approvals, _, _, _) => parked.approve(approvals.head._1)
+        case other                                     => fail(s"expected Suspended, got $other")
+      }
     }
 
-    agent(SpecTools.spec("echo").withLocks(_ => Set.empty)).resume(thread, Map(approve)).error shouldBe
-      a[GraphError.RestoreRejected]
-    agent(SpecTools.spec("echo").withTimeout(5.seconds), CompletionFixture.simple("done"))
-      .resume(thread, Map(approve))
+    // adopting locks adds the tool-queue key, which a suspended thread reads as an empty schedule (design §4.29)
+    val locked = ThreadId("unlocked-then-locked")
+    agent(SpecTools.spec("echo").withLocks(_ => Set.empty), CompletionFixture.simple("done"))
+      .resume(locked, Map(parkedOn(locked)))
       .value
       .answer shouldBe Some("done")
+    val timed = ThreadId("unlocked-then-timed")
+    agent(SpecTools.spec("echo").withTimeout(5.seconds), CompletionFixture.simple("done"))
+      .resume(timed, Map(parkedOn(timed)))
+      .value
+      .answer shouldBe Some("done")
+  }
+
+  "A thread with calls queued behind a lock" should "be refused by a rebuild that dropped every lock, and drain in its own" in {
+    import org.llm4s.agent.graph.tool.LockKey
+    val runtime = GraphRuntime.inMemory()
+    val thread  = ThreadId("locks-removed")
+    val calling = SpecTools.calling(SpecTools.call("c1", "step", "a"), SpecTools.call("c2", "step", "a"))
+    // c2 waits behind c1 on lock "a"; c1 waits for approval
+    val parked  = stepAgent(runtime, t => Set(LockKey(t.text)), calling).run(thread, "go").value
+    val refused = stepAgent(runtime, None, CompletionFixture.simple("never")).resume(thread, approveAll(parked)).error
+    refused shouldBe a[GraphError.RestoreRejected]
+    refused.message should include("'tool-queue' was removed from this graph, and the snapshot holds a value for it")
+    val done =
+      stepAgent(runtime, t => Set(LockKey(t.text)), CompletionFixture.simple("done")).resume(thread, approveAll(parked))
+    stepResults(done.value) shouldBe Vector("1", "2")
+  }
+
+  it should "restore in a rebuild without locks once its batch is collected" in {
+    import org.llm4s.agent.graph.tool.LockKey
+    val runtime = GraphRuntime.inMemory()
+    val thread  = ThreadId("locks-removed-later")
+    val calling = SpecTools.calling(SpecTools.call("c1", "step", "a"), SpecTools.call("c2", "step", "a"))
+    val parked  = stepAgent(runtime, t => Set(LockKey(t.text)), calling).run(thread, "go").value
+    stepAgent(runtime, t => Set(LockKey(t.text)), CompletionFixture.simple("done"))
+      .resume(thread, approveAll(parked))
+      .value
+    stepAgent(runtime, None, CompletionFixture.simple("unlocked")).run(thread, "again").value.answer shouldBe
+      Some("unlocked")
   }
 
   "The graph version" should "not cover timeouts, resources or lock functions: a batch keeps its recorded schedule" in {
@@ -244,12 +278,19 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
     runtime: GraphRuntime,
     policy: SpecTools.Text => Set[org.llm4s.agent.graph.tool.LockKey],
     replies: Completion*
-  ) = {
+  ): Agent = stepAgent(runtime, Some(policy), replies*)
+
+  /** As above; with no policy, `step` declares no locks, and the graph has no `tool-queue` key. */
+  private def stepAgent(
+    runtime: GraphRuntime,
+    policy: Option[SpecTools.Text => Set[org.llm4s.agent.graph.tool.LockKey]],
+    replies: Completion*
+  ): Agent = {
     val counter = org.llm4s.agent.graph.StateKey.replace[Int]("counter", 0)
-    val step = org.llm4s.agent.graph.tool.AgentTool(SpecTools.spec("step").withLocks(policy), writes = Set(counter)) {
-      (_, context) =>
-        val next = context.state.get(counter).fold(e => fail(e.message), identity) + 1
-        ToolOutcome.Success(ujson.Str(next.toString), org.llm4s.agent.graph.StateUpdate.update(counter, next))
+    val spec    = policy.fold(SpecTools.spec("step"))(SpecTools.spec("step").withLocks(_))
+    val step = org.llm4s.agent.graph.tool.AgentTool(spec, writes = Set(counter)) { (_, context) =>
+      val next = context.state.get(counter).fold(e => fail(e.message), identity) + 1
+      ToolOutcome.Success(ujson.Str(next.toString), org.llm4s.agent.graph.StateUpdate.update(counter, next))
     }
     built(
       Agent

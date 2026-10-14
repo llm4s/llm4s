@@ -1359,7 +1359,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when the graph's `version` or edges changed, or when it gained nodes or keys. For an agent, a thread at rest now
   continues after its family gains a prompt, tool, middleware or handoff; a suspended or `Running` thread still needs
   the same family. `RestoreRejected` problems now name the change (a removed node or key, a stored node's changed
-  out-edges, a changed join) instead of "snapshot's graph structure differs from this graph's".
+  out-edges, a changed join) instead of "snapshot's graph structure differs from this graph's". Adopting
+  `withLocks` (#1903) no longer refuses an agent's existing threads: `tool-queue` is an added key; dropping every
+  lock refuses only a thread whose `tool-queue` still holds queued calls.
 - **Breaking - claim errors carry typed fields, and `ThreadBusy` is recoverable and says whether its holder is live** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   `GraphError.StaleClaim(threadId, token, current)` takes `token: FencingToken` and `current: Option[FencingToken]`
   (was `Long`/`Option[Long]`), and `GraphError.ThreadBusy(threadId, latestCheckpoint, holder)` takes
