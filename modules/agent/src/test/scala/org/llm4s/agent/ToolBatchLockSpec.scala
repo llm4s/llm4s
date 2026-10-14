@@ -374,6 +374,30 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
     toolResults(done) shouldBe Vector("1", "2")
   }
 
+  "Calls that fail their argument checks" should "take no lock and no round, and lock functions never see them" in {
+    val lockedOn = new CopyOnWriteArrayList[String]()
+    val schema = org.llm4s.toolapi.Schema
+      .`object`[Text]("pick")
+      .withRequiredField("text", org.llm4s.toolapi.Schema.string("Text").withEnum(Seq("a", "b")))
+    val spec = AgentToolSpec[Text]("pick", "Picks", schema)
+      .withValidation(t => if (t.text == "b") Left(ValidationError("pick", "b is refused")) else Right(()))
+      .withLocks { t =>
+        lockedOn.add(t.text); Set(LockKey("shared"))
+      }
+    val tool = AgentTool(spec)((t, _) => ToolOutcome.Success(ujson.Str(t.text)))
+    val client = ScriptedLLMClient.of(
+      // c1 decodes but breaks the schema's enum; c2 fails the tool's own check; c3 and c4 are valid
+      calling(call("c1", "pick", "zzz"), call("c2", "pick", "b"), call("c3", "pick", "a"), call("c4", "pick", "a")),
+      CompletionFixture.simple("done")
+    )
+    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(tool)))
+    // input, model, round one (c1, c2, c3) and its collect, round two (c4) and its collect, model, finish
+    val result = agent.run(ThreadId("invalid-locks"), "go", RunConfig().withBudgets(RunBudgets(8))).value
+    result.answer shouldBe Some("done")
+    toolResults(result).take(2).foreach(_ should include("Invalid arguments for 'pick'"))
+    lockedOn.asScala.toSet shouldBe Set("a")
+  }
+
   "The tool queue" should "be a key the loop owns" in {
     val sneaky =
       AgentTool(SpecTools.spec("sneaky"), writes = Set(ToolLoop.queue))((_, _) => ToolOutcome.Success(ujson.Str("x")))

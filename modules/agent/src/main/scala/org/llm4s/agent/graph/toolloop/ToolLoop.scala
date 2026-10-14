@@ -1455,7 +1455,7 @@ object ToolLoop:
      * Splits `tasks`, calls of one batch not yet run, in call order, into those that run now and those
      * that wait: a call waits while an earlier call of `tasks` holds a lock conflicting with one of its
      * own. The first always runs, so every round makes progress and a batch of `n` calls takes at most
-     * `n` rounds. A call whose arguments do not decode holds no lock (it is refused, touching nothing);
+     * `n` rounds. A call that fails its argument checks holds no lock (it is refused, touching nothing);
      * one whose lock function throws holds the root lock, which conflicts with every lock.
      */
     def scheduled(tasks: Vector[ToolTask]): (Vector[ToolTask], Vector[ToolTask]) =
@@ -1478,9 +1478,23 @@ object ToolLoop:
         )
       }
 
+    /**
+     * The locks `call` holds: none unless it passes the same checks it will be run behind - schema
+     * validation, decoding and the tool's own check, in that order, so no caller code runs before the
+     * validation boundary - because a refused call touches nothing and must not take a round of its own.
+     * A lock function that throws gives the root lock.
+     */
     private def locksOf[A](tool: AgentTool[A], call: ToolCall): Set[LockKey] =
       tool.spec.locksOf.fold(Set.empty[LockKey]) { locks =>
-        decode(tool, call).fold(_ => Set.empty, args => Try(locks(args)).getOrElse(Set(LockKey(""))))
+        val arguments = argumentsOf(tool, call)
+        val admitted = for
+          violations <- Try(tools.validator.validate(tool.spec.argumentSchema, arguments)).toOption
+          if violations.isEmpty
+          args  <- read(arguments)(using tool.spec.codec).toOption
+          check <- Try(tool.spec.validateDecoded(args)).toOption
+          if check.isRight
+        yield args
+        admitted.fold(Set.empty)(args => Try(locks(args)).getOrElse(Set(LockKey(""))))
       }
 
     private def decode[A](tool: AgentTool[A], call: ToolCall): Either[String, A] =
