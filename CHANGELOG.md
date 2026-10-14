@@ -1313,6 +1313,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An observer's store watch starts as soon as its run's claim is handed to it** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   it used to poll for that every `WatchPolicy.pollInterval`, so it could begin watching for other runtimes' commits
   up to one interval late.
+- **`CheckpointerContract` races claims across many stores, and checks more of the claim rules** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  a new `contenders(store, clock, n)` hook (default: `store` and `n - 1` `sibling`s) spreads the 16 concurrent
+  claimers of the two race cases over 16 stores over the same storage, so `SqliteCheckpointer` races 16
+  connections to one file rather than one connection's lock. New cases: a stale token is reported before a
+  duplicate checkpoint id, misdirected pending writes and a `retractTurn` with nothing to close, not only before a
+  conflict; a refused claim leaves the live claim as it was; and stored checkpoints, pending writes and events are
+  kept apart from the `ujson` values callers pass in and are given back. `InMemoryCheckpointerSpec` and
+  `SqliteCheckpointerSpec` check that a refused claim spends no token.
 - **Breaking - a run that loses its claim stops at once and ends `GraphError.ClaimLost`** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   it used to end `CheckpointWriteFailed(_, StaleClaim, _)`, which a caller could not tell from a store outage without
   matching on its cause. `GraphError.ClaimLost(threadId, token, current)` is new: the run's own `FencingToken`, and the

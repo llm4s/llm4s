@@ -248,6 +248,22 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     third.close()
   }
 
+  it should "spend no token when refused: the next one granted is one past the last, across connections" in {
+    val db     = SqliteFiles.fresh()
+    val clock  = ManualClock(Instant.parse("2026-10-10T09:00:00Z"))
+    val store  = SqliteFiles.opened(db, clock)
+    val other  = SqliteFiles.opened(db, clock)
+    val thread = ThreadId("refused")
+    val first  = store.claim(thread, ClaimRequest(RunId("first"), 1.minute)).value
+    (1 to 3).foreach(_ =>
+      other.claim(thread, ClaimRequest(RunId("refused"), 1.minute)).left.value shouldBe a[GraphError.ThreadBusy]
+    )
+    store.release(thread, first.token).value shouldBe (())
+    other.claim(thread, ClaimRequest(RunId("next"), 1.minute)).value.token shouldBe FencingToken(first.token.value + 1)
+    store.close()
+    other.close()
+  }
+
   // ---- events ----
 
   "Compacting the event log" should "keep its replay floor in the file, so a reopened store refuses below it" in {

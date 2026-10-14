@@ -159,6 +159,16 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
     store.eventsAfter(thread, 0L, 10).value shouldBe empty
   }
 
+  it should "spend no token on a refused claim: the next one granted is the next of its counter" in {
+    val c     = Claimed()
+    val store = c.store
+    (1 to 3).foreach(_ =>
+      store.claim(thread, ClaimRequest(RunId("refused"), ttl)).left.value shouldBe a[GraphError.ThreadBusy]
+    )
+    store.release(thread, c.token).value shouldBe (())
+    store.claim(thread, ClaimRequest(RunId("next"), ttl)).value.token shouldBe FencingToken(c.token.value + 1)
+  }
+
   it should "renew a claim from the store's clock, even after it expired if nobody took it over" in {
     val c     = Claimed()
     val store = c.store
