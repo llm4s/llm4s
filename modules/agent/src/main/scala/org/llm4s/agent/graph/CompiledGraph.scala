@@ -167,7 +167,9 @@ final class CompiledGraph[I, O] private[graph] (
               task.origin.map(_.task.value),
               task.origin.map(_.node.value),
               task.passedBefore,
-              task.replay.map(_.toVector.map(encodeRoute))
+              task.replay.map(_.toVector.map(encodeRoute)),
+              task.epoch,
+              task.origin.map(_.epoch)
             )
           },
           staticJoins = execution.staticArrivals.toVector
@@ -195,7 +197,8 @@ final class CompiledGraph[I, O] private[graph] (
               p.slot.map(_.join.value),
               p.slot.map(_.fanOutTask.value),
               p.hold.map(_.phase),
-              held
+              held,
+              p.origin.epoch
             )
           },
           paused = execution.paused,
@@ -295,7 +298,7 @@ final class CompiledGraph[I, O] private[graph] (
     }
     val savedSlots = snapshot.dynamicJoins.flatMap(a => a.expected.map((a.joinId, a.fanOutTask, _))).toSet
     val orphanTasks = tasks.collect {
-      case task @ Task(_, _, _, Some(slot), _, _, _)
+      case task @ Task(_, _, _, Some(slot), _, _, _, _)
           if !savedSlots.contains((slot.join.value, slot.fanOutTask.value, task.arrivalId.value)) =>
         s"pending task ${task.id.value} belongs to no open activation of dynamic join '${slot.join.value}'"
     }
@@ -448,7 +451,7 @@ final class CompiledGraph[I, O] private[graph] (
           position,
           NodeEventSink.none,
           journal = execution.journal,
-          owner = Some(task.arrivalId)
+          owner = Some(task.arrivalId -> task.arrivalEpoch)
         )
         executeTask(task, execution, context).map(task -> _)
     })
@@ -754,7 +757,7 @@ final class CompiledGraph[I, O] private[graph] (
         }
     }
     val routedTasks = routed.zipWithIndex.map { case ((node, input, slot), i) =>
-      Task(TaskId(s"$next.$i"), node, input, slot)
+      Task(TaskId(s"$next.$i"), node, input, slot, epoch = execution.epoch)
     }
 
     val arrivedNodes = completed.map(_._1.arrivalNode).toSet
@@ -779,9 +782,9 @@ final class CompiledGraph[I, O] private[graph] (
     val (released, stillOpen) = (advanced ++ opened).partition(_.isComplete)
 
     val releasedTasks = (staticReleased ++ released.map(a => dynamicJoins(a.join).target.id)).zipWithIndex.map {
-      (node, i) => Task(TaskId(s"$next.${routedTasks.size + i}"), node, (), None)
+      (node, i) => Task(TaskId(s"$next.${routedTasks.size + i}"), node, (), None, epoch = execution.epoch)
     }
-    def origin(task: Task) = task.origin.getOrElse(Origin(task.id, task.node))
+    def origin(task: Task) = task.origin.getOrElse(Origin(task.id, task.node, task.epoch))
     // one interrupt per task, in frontier order, whatever parked it
     val newlyParked = results.collect {
       case (task, TaskResult.Parked(_, question, resume)) =>
@@ -800,7 +803,8 @@ final class CompiledGraph[I, O] private[graph] (
       stillOpen,
       execution.parked ++ newlyParked,
       paused = newlyParked.nonEmpty,
-      journal = execution.journal
+      journal = execution.journal,
+      epoch = execution.epoch
     )
     // the records of tasks that cannot run again go, as a store's commit releases them
     execution.journal.keepOnly(nextExecution.liveTasks)
@@ -874,10 +878,10 @@ final class CompiledGraph[I, O] private[graph] (
       origin <- (pending.originTask, pending.originNode) match
         case (None, None) => Right(None)
         case (Some(task), Some(originNode)) if nodes.contains(NodeId(originNode)) =>
-          Right(Some(Origin(TaskId(task), NodeId(originNode))))
+          Right(Some(Origin(TaskId(task), NodeId(originNode), pending.originEpoch.getOrElse(pending.epoch))))
         case (Some(_), Some(originNode)) => Left(s"$owner continues unknown node '$originNode'")
         case _                           => Left(s"$owner has half an origin")
-    yield Task(TaskId(pending.taskId), node.ref.id, input, slot, origin, pending.passedBefore, replay)
+    yield Task(TaskId(pending.taskId), node.ref.id, input, slot, origin, pending.passedBefore, replay, pending.epoch)
 
   /** Held or replayed routes, rebound to this graph; `Left` names the first that is not. */
   private def restoreRoutes(owner: String, routes: Vector[EncodedRoute]): Either[String, List[Route]] =
@@ -921,7 +925,7 @@ final class CompiledGraph[I, O] private[graph] (
       InterruptId(saved.interruptId),
       node.ref.id,
       (),
-      Origin(TaskId(saved.originTask), NodeId(saved.originNode)),
+      Origin(TaskId(saved.originTask), NodeId(saved.originNode), saved.originEpoch),
       slot,
       Some(hold)
     )
@@ -944,7 +948,7 @@ final class CompiledGraph[I, O] private[graph] (
       InterruptId(saved.interruptId),
       resume.node.id,
       question,
-      Origin(TaskId(saved.originTask), NodeId(saved.originNode)),
+      Origin(TaskId(saved.originTask), NodeId(saved.originNode), saved.originEpoch),
       slot
     )
 

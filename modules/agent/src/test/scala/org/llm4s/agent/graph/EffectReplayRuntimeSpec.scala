@@ -10,6 +10,7 @@ import java.time.{ Clock, Instant, ZoneOffset }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReference }
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import scala.concurrent.duration.*
+import scala.jdk.CollectionConverters.*
 
 import GraphTestSupport.*
 
@@ -40,6 +41,44 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
 
   private def record(store: Checkpointer, on: ThreadId, key: EffectKey): Option[EffectRecord] =
     store.effect(on, key).value
+
+  "A task planned again after a takeover" should "be a task of its own epoch, never answered by the first plan's evidence" in {
+    // Async: the checkpoint that scheduled `b` never became durable, so a recovery plans `b` again
+    val store   = InMemoryCheckpointer()
+    val effect  = new Effect
+    val keys    = new java.util.concurrent.ConcurrentLinkedQueue[EffectKey]()
+    val epochs  = new java.util.concurrent.ConcurrentLinkedQueue[Long]()
+    val failing = new AtomicBoolean(true)
+    val lossy = new ForwardingCheckpointer(store) {
+      override def commit(threadId: ThreadId, commit: Commit) =
+        if failing.get && commit.checkpoint.exists(_.snapshot.superstep == 1) then
+          Left(ValidationError("store", "lost the checkpoint that scheduled b"))
+        else store.commit(threadId, commit)
+    }
+    val b = GraphBuilder("replanned", "v1")
+    val last = b.node[Unit]("b", writes = Set(log)) { (_, _, context) =>
+      epochs.add(context.effectEpoch)
+      NodeResult.fromResult(effect.perform(context).map { n =>
+        keys.add(effect.key.get)
+        Command.empty.update(log, s"b:$n")
+      })
+    }
+    val a = b.node[Unit]("a", writes = Set(log))((_, _, _) => continue(Command.empty.update(log, "a")))
+    b.edge(a, last)
+    val graph = b.compile(a)(_.get(log)).value
+
+    GraphRuntime(lossy).start(thread, graph, (), durability = Durability.Async).awaited.value.failed
+    effect.applied.get shouldBe 1
+    record(store, thread, keys.peek()).value.completed shouldBe true
+    failing.set(false)
+    // the recovery claims at the durable checkpoint, where b is not yet scheduled, and plans b in its own epoch
+    GraphRuntime(store).recover(thread, graph, durability = Durability.Async).awaited.value.completed._2 shouldBe
+      Vector("a", "b:2")
+    epochs.asScala.toVector.distinct should have size 2
+    keys.asScala.toVector.distinct should have size 2
+    // the first plan's record went at the claim: no run can reach it; the second's with its run
+    keys.asScala.toVector.flatMap(record(store, thread, _)) shouldBe empty
+  }
 
   "A run under Async" should "keep the record of a task running ahead of a commit that lands late" in {
     val store   = InMemoryCheckpointer()

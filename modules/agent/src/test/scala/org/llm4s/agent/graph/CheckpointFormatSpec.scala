@@ -223,7 +223,23 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     migrated.fencingToken shouldBe Some(FencingToken(7L))
     migrated.snapshot.frontier.head.passedBefore shouldBe false
     migrated.snapshot.frontier.head.replay shouldBe None
-    Checkpoint.CurrentFormat shouldBe 6
+    Checkpoint.CurrentFormat shouldBe 7
+  }
+
+  it should "read a format-6 checkpoint, written before task epochs, with every task of epoch 0" in {
+    val b   = GraphBuilder("g", "v1")
+    val n   = b.node[Unit]("n")((_, _, _) => NodeResult.Continue(Command.empty))
+    val g   = b.compile(n)(_ => Right(())).value
+    val now = g.snapshot(g.start(())).value
+    val json = Checkpoint.toJson(
+      Checkpoint(Checkpoint.CurrentFormat, "c", None, "t", "r", CheckpointStatus.Running, Instant.EPOCH, now)
+    )
+    json("formatVersion") = 6
+    json("snapshot")("frontier").arr.foreach(t => t.obj.remove("epoch"): Unit)
+    val read = Checkpoint.fromJson(json).value
+    read.formatVersion shouldBe 7
+    read.snapshot.frontier.map(_.epoch) shouldBe Vector(0L)
+    g.restore(read.snapshot).value.frontier.map(_.epoch) shouldBe Vector(0L)
   }
 
   it should "round-trip the terminal Failed status" in {
@@ -245,8 +261,8 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "refuse a format it does not know" in {
-    val newer = ujson.Obj("formatVersion" -> 7, "id" -> "x")
-    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(7, Checkpoint.CurrentFormat)
+    val newer = ujson.Obj("formatVersion" -> 8, "id" -> "x")
+    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(8, Checkpoint.CurrentFormat)
     Checkpoint.fromJson(ujson.Obj("id" -> "x")).left.value shouldBe
       GraphError.UnsupportedCheckpointFormat(0, Checkpoint.CurrentFormat)
   }

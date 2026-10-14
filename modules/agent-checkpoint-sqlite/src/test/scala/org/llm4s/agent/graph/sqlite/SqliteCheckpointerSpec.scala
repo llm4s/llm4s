@@ -44,6 +44,14 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       "UPDATE llm4s_checkpoint_schema SET version = 1"
     )
 
+  /** The file as a version-3 build left it: effect records without their task's epoch (#1921 follow-up). */
+  private def asVersionThree(path: Path): Unit =
+    exec(
+      path,
+      "ALTER TABLE llm4s_checkpoint_effects DROP COLUMN task_epoch",
+      "UPDATE llm4s_checkpoint_schema SET version = 3"
+    )
+
   /** The file as a version-2 build left it: no effect records table (#1921). */
   private def asVersionTwo(path: Path): Unit =
     exec(path, "DROP TABLE llm4s_checkpoint_effects", "UPDATE llm4s_checkpoint_schema SET version = 2")
@@ -323,7 +331,36 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     reopened.close()
   }
 
-  "A version-2 file" should "open at version 3 with no effect records, and keep the ones written after" in {
+  "A version-3 file" should "open at version 4, its effect records of epoch 0" in {
+    val db     = SqliteFiles.fresh()
+    val thread = ThreadId("v3-thread")
+    val first  = SqliteCheckpointer.open(db).value
+    val token  = first.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    first.commit(thread, Commit(token, Some(checkpoint(thread, "c1", None, token)))).value
+    val record = EffectRecord
+      .fromJson(
+        ujson.Obj(
+          "format"    -> 1,
+          "key"       -> "k",
+          "operation" -> "op",
+          "scope"     -> "s",
+          "taskId"    -> "0.0",
+          "intent"    -> ujson.Obj("support" -> "unverifiable")
+        )
+      )
+      .value
+    first.commit(thread, Commit(token, effects = Vector(record))).value
+    first.close()
+    asVersionThree(db)
+
+    val reopened = SqliteCheckpointer.open(db).value
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe 4
+    scalar(db, "SELECT task_epoch FROM llm4s_checkpoint_effects")(_.getLong(1)) shouldBe 0L
+    reopened.effect(thread, record.key).value shouldBe Some(record)
+    reopened.close()
+  }
+
+  "A version-2 file" should "open at the current version with no effect records, and keep the ones written after" in {
     val db     = SqliteFiles.fresh()
     val thread = ThreadId("v2-thread")
     val first  = SqliteCheckpointer.open(db).value
@@ -333,7 +370,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     asVersionTwo(db)
 
     val reopened = SqliteCheckpointer.open(db).value
-    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe 3
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
     scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_effects")(_.getInt(1)) shouldBe 0
     reopened.latest(thread).value.value.checkpoint.id shouldBe "c1"
     val record = EffectRecord

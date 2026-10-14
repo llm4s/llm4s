@@ -109,30 +109,19 @@ object IdempotencyKey:
     taskId: TaskId,
     toolCallId: ToolCallId
   ): IdempotencyKey =
-    val digest = java.security.MessageDigest.getInstance("SHA-256")
-    // each part length-prefixed, so no two different inputs share a digest input; v2 added the
+    // each part length-prefixed, so no two different inputs share a digest input (KeyDigest); v2 added the
     // superstep and task, as checkpoint ids repeat across runs that reuse a RunId
-    Seq(
-      "llm4s-tool-call-v2",
-      threadId.value,
-      checkpointId,
-      superstep.toString,
-      taskId.value,
-      toolCallId.value
-    ).foreach { part =>
-      val bytes = part.getBytes(java.nio.charset.StandardCharsets.UTF_8)
-      digest.update(java.nio.ByteBuffer.allocate(4).putInt(bytes.length).array())
-      digest.update(bytes)
-    }
-    digest.digest().map(b => f"${b & 0xff}%02x").mkString
+    KeyDigest.of(
+      Seq("llm4s-tool-call-v2", threadId.value, checkpointId, superstep.toString, taskId.value, toolCallId.value)
+    )
 
   /**
    * The key of task `taskId` on `threadId` ([[RunContext.taskKey]]): the SHA-256 of the two under a
    * `llm4s-task-v1` tag. Not the superstep the task runs at, which `updateState` moves on while the
    * task keeps its id; the id itself names the superstep that scheduled the task.
    */
-  private[graph] def ofTask(threadId: ThreadId, taskId: TaskId): IdempotencyKey =
-    KeyDigest.of(Seq("llm4s-task-v1", threadId.value, taskId.value))
+  private[graph] def ofTask(threadId: ThreadId, taskId: TaskId, epoch: Long): IdempotencyKey =
+    KeyDigest.of(Seq("llm4s-task-v2", threadId.value, taskId.value, epoch.toString))
 
   /**
    * The key of an answered resume of the call `call` (design §4.24): the SHA-256, under a
@@ -146,7 +135,9 @@ object IdempotencyKey:
     question: ujson.Value,
     answer: ujson.Value
   ): IdempotencyKey =
-    KeyDigest.of(Seq("llm4s-tool-resume-v1", call, asking.getOrElse(""), ujson.write(question), ujson.write(answer)))
+    // escaped to ASCII: JSON text is one-to-one with its value only when no character is re-encoded on the way
+    def text(value: ujson.Value) = ujson.write(value, escapeUnicode = true)
+    KeyDigest.of(Seq("llm4s-tool-resume-v2", call, asking.getOrElse(""), text(question), text(answer)))
 
   extension (key: IdempotencyKey) def value: String = key
 

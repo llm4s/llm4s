@@ -39,7 +39,7 @@ class ReplayGuardSpec extends AnyFlatSpec with Matchers with EitherValues with O
       RunPosition(ThreadId("t"), RunId("r"), "r/1", TaskId(task), NodeId("n"), 1),
       NodeEventSink.none,
       journal = journal,
-      owner = owner.map(TaskId(_))
+      owner = owner.map(o => TaskId(o) -> 0L)
     )
 
   /** A counter store whose increments record their key, atomically. */

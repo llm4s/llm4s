@@ -1984,7 +1984,10 @@ final class GraphRuntime(
             )
           )
           val outcome = boundedByLoss(() =>
-            carry().flatMap((carried, reused) => committed(execution, parent, event(granted), carried, reused))
+            // the run's tasks are scheduled in its claim's epoch (design §4.24)
+            carry().flatMap((carried, reused) =>
+              committed(execution.stampedBy(granted.token.value), parent, event(granted), carried, reused)
+            )
           )
           admitted = outcome.isRight
           outcome
@@ -2360,7 +2363,7 @@ final class GraphRuntime(
         RunPosition(threadId, runId, checkpointId, task.id, task.node, execution.superstep, claim.map(_.token)),
         sink,
         journal = effectJournal,
-        owner = Some(task.arrivalId)
+        owner = Some(task.arrivalId -> task.arrivalEpoch)
       )
       def settled(executed: Result[TaskResult]): Result[TaskResult] =
         executed.flatMap(result => graph.encodeWrite(checkpointId, task, result).map(result -> _)) match

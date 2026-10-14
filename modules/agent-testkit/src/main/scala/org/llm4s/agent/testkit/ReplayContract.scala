@@ -265,14 +265,15 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
    */
   private def crashAndRecover(
     point: Option[Crash],
-    between: (Subject, ManualClock, Checkpointer, ThreadId) => Unit = (_, _, _, _) => ()
+    between: (Subject, ManualClock, Checkpointer, ThreadId) => Unit = (_, _, _, _) => (),
+    durability: Durability = Durability.Sync
   ): Ran =
     val subject = newSubject()
     val clock   = ManualClock(start)
     val store   = Crashing(newCheckpointer(clock), point)
     val thread  = ThreadId(s"replay-contract-${java.util.UUID.randomUUID()}")
     val g       = graph(subject)
-    val first   = GraphRuntime(store, clock, claims).start(thread, g, (), config("first"))
+    val first   = GraphRuntime(store, clock, claims).start(thread, g, (), config("first"), durability)
     point match
       case None =>
         Ran(completed(first), subject, store, thread)
@@ -282,7 +283,8 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
         store.dead.get shouldBe true
         between(subject, clock, store.underlying, thread)
         clock.advance(claims.ttl + 1.minute)
-        val recovered = GraphRuntime(store.underlying, clock, claims).recover(thread, g, config("recover"))
+        val recovered =
+          GraphRuntime(store.underlying, clock, claims).recover(thread, g, config("recover"), durability)
         Ran(completed(recovered), subject, store, thread)
 
   private lazy val clean: Map[String, ujson.Value] =
@@ -452,6 +454,45 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
     same(ran, 1)
     keys.size shouldBe Slots.size
     released(ran)
+  }
+
+  for durability <- Vector(Durability.Async, Durability.OnExit) do
+    it should s"replay, under $durability durability, an effect its run recorded before it crashed" in {
+      // the task's frontier is durable from the run's claim, so its records belong to a task a recovery runs
+      Vector(Crash.AfterIntent, Crash.AfterEffect).foreach { point =>
+        val ran = crashAndRecover(Some(point), durability = durability)
+        if point == Crash.AfterIntent && support == ReplaySupport.Unverifiable && !idempotent then
+          refused(ran, 0)
+          ran.subject.observe(0).value shouldBe ran.subject.initial(0)
+        else
+          once(ran, 0)
+          if support == ReplaySupport.Unverifiable && !idempotent then refused(ran, 0) else same(ran, 0)
+        once(ran, 1)
+        same(ran, 1)
+        released(ran)
+      }
+    }
+
+  it should "perform its effects anew on a thread deleted and created again, never answered by the first's evidence" in {
+    // the first thread crashed after its effect, leaving its intent - and a transactional target its applied key
+    val subject = newSubject()
+    val clock   = ManualClock(start)
+    val keys    = ConcurrentHashMap.newKeySet[EffectKey]()
+    val base    = newCheckpointer(clock)
+    val store   = Crashing(base, Some(Crash.AfterEffect), keys)
+    val thread  = ThreadId(s"replay-contract-${java.util.UUID.randomUUID()}")
+    val g       = graph(subject)
+    awaitRun(GraphRuntime(store, clock, claims).start(thread, g, (), config("first")).value) shouldBe
+      a[RunResult.Failed]
+    clock.advance(claims.ttl + 1.minute)
+    val runtime = GraphRuntime(Crashing(base, None, keys), clock, claims)
+    runtime.deleteThread(thread, config("delete")).value
+    val again = completed(runtime.start(thread, g, (), config("again")))
+    // a new thread's tasks are of a new epoch: new keys, so its effects run, and are never refused or replayed
+    Slots.foreach(slot => if again(slot.toString) == Refused then fail(s"slot $slot was refused on the new thread"))
+    if !idempotent then subject.observe(0).value should not be subject.once(0)
+    once(Ran(again, subject, Crashing(base, None, keys), thread), 1) // slot 1 never ran on the first thread
+    keys.asScala.toVector.flatMap(key => base.effect(thread, key).value) shouldBe empty
   }
 
   it should "replay from its records a run left recoverable for a year, its thread pruned by age meanwhile" in {
