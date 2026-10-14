@@ -374,7 +374,14 @@ final class CompiledGraph[I, O] private[graph] (
       if holdsBefore(task, config) then Right(task -> TaskResult.Held)
       else
         val position = RunPosition(threadId, config.runId, "", task.id, task.node, execution.superstep)
-        executeTask(task, execution, new RunContext(config, position, NodeEventSink.none)).map(task -> _)
+        val context = new RunContext(
+          config,
+          position,
+          NodeEventSink.none,
+          journal = execution.journal,
+          owner = Some(task.arrivalId)
+        )
+        executeTask(task, execution, context).map(task -> _)
     })
     // A cancelled task wins over an earlier task's failure: the run was cancelled, not failed.
     outcomes
@@ -712,7 +719,7 @@ final class CompiledGraph[I, O] private[graph] (
       case (task, TaskResult.Done(command)) if heldAfter.contains(task.id) =>
         Parked(InterruptId(task.id.value), task.node, (), origin(task), task.slot, Some(Hold.After(command.routes)))
     }
-    new Execution(
+    val nextExecution = new Execution(
       owner,
       next,
       state,
@@ -720,8 +727,12 @@ final class CompiledGraph[I, O] private[graph] (
       staticArrivals,
       stillOpen,
       execution.parked ++ newlyParked,
-      paused = newlyParked.nonEmpty
+      paused = newlyParked.nonEmpty,
+      journal = execution.journal
     )
+    // the records of tasks that cannot run again go, as a store's commit releases them
+    execution.journal.keepOnly(nextExecution.liveTasks)
+    nextExecution
 
   private def suspended(execution: Execution): RunResult[O] =
     RunResult.Suspended(execution.state, pendingInterrupts(execution), execution)

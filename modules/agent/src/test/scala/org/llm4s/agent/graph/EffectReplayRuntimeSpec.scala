@@ -205,6 +205,20 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
     asking.keys.toArray.distinct should have size 2
   }
 
+  it should "stay the task's when the graph is stepped in memory, the continuation replaying from the execution" in {
+    val effect = new Effect
+    val asking = new HookAsking(effect)
+    val parked = drive(asking.graph, asking.graph.start(())).suspended
+    val resumed = asking.graph
+      .resume(parked.execution, Map(parked.interrupts.head.id -> asking.review.answer("yes")))
+      .value
+    drive(asking.graph, resumed).completed._2 shouldBe Vector("act:1", "yes:1")
+    effect.applied.get shouldBe 1
+    asking.keys.toArray.distinct should have size 1
+    // and the execution's records went with the tasks that finished
+    resumed.journal.lookup(effect.key.get).value shouldBe None
+  }
+
   /** A node that performs the effect and then fails while `failing`: the thread stays recoverable. */
   final private class Failing(effect: Effect) {
     val failing = new AtomicBoolean(true)

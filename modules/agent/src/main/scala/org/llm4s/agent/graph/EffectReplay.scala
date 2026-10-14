@@ -232,11 +232,16 @@ private[graph] trait EffectJournal:
 
 private[graph] object EffectJournal:
 
-  /** Records kept for one `RunContext`'s lifetime: retries of its node replay, nothing else does. */
-  def local(): EffectJournal = new EffectJournal:
+  /** Records in memory: an in-memory execution's, carried across its supersteps and continuations. */
+  final class Local private[EffectJournal] () extends EffectJournal:
     private val records                                      = new ConcurrentHashMap[String, EffectRecord]()
     def lookup(key: EffectKey): Result[Option[EffectRecord]] = Right(Option(records.get(key.value)))
     def write(record: EffectRecord): Result[Unit]            = Right(records.put(record.key.value, record): Unit)
+
+    /** Drops the records of every task not in `live`: they can no longer run. */
+    def keepOnly(live: Set[String]): Unit = records.values.removeIf(r => !live.contains(r.taskId.value)): Unit
+
+  def local(): Local = new Local()
 
 /**
  * The only way the harness performs an effect outside thread state (design §4.24, runtime rule 4). A
@@ -339,11 +344,22 @@ object ReplayGuard:
     probe: => Result[StateCheck]
   )(plan: => Result[Plan[A]]): Result[A] =
     val journal = context.journal
-    def fresh(owner: TaskId): Result[A] =
+    // `baseline`: on a replay, the `before` the effect began against. A plan that read anything else saw a
+    // change made after the probe, which the effect must not overwrite
+    def fresh(owner: TaskId, baseline: Option[StateCheck]): Result[A] =
       plan.flatMap { planned =>
         val presumed = ujson.copy(upickle.default.writeJs(planned.presumed))
         val intent   = EffectIntent.Verifiable(planned.before, planned.after, presumed)
         for
+          _ <- baseline.filter(_ != planned.before).fold[Result[Unit]](Right(())) { expected =>
+            Left(
+              GraphError.EffectReplayRefused(
+                key.operation,
+                s"its target changed after the effect began: it is now ${planned.before.value}, not " +
+                  s"${expected.value} (not applied)"
+              )
+            )
+          }
           _       <- withinCap(key, "its presumed outcome", presumed, maxOutcomeBytes)
           _       <- journal.write(new EffectRecord(key, owner, EffectBody.Begun(intent)))
           _       <- notCancelled(context, key)
@@ -352,14 +368,14 @@ object ReplayGuard:
         yield outcome
       }
     journal.lookup(key).flatMap {
-      case None => fresh(context.effectOwner)
+      case None => fresh(context.effectOwner, None)
       case Some(record) =>
         record.body match
           case EffectBody.Begun(intent @ EffectIntent.Verifiable(before, after, presumed)) =>
             probe.flatMap { current =>
               // `before` first: when the two digests are equal the probe cannot tell whether the effect
               // ran, and running it again - a compare-and-set that changes no digest - is what is safe
-              if current == before then fresh(record.taskId)
+              if current == before then fresh(record.taskId, Some(before))
               else if current == after then
                 decode[A](key, presumed).flatMap { outcome =>
                   journal
