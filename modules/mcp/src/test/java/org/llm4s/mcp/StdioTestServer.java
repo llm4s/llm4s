@@ -33,6 +33,15 @@ import java.util.regex.Pattern;
  *   <li>{@code --hang} - after the above, sleep for 30 seconds instead of answering.</li>
  *   <li>{@code --exit-after-read} - read one line, then exit 0.</li>
  *   <li>{@code --stderr-flood} - read one line, write about 3 KB of JSON with a secret to stderr, exit 1.</li>
+ *   <li>{@code --stderr-kb=N} - on the first request, write N KB to stderr in 100-byte lines, ending with
+ *       {@code last-words-marker}, before replying. The transport must read stderr while the request is in flight,
+ *       or this blocks once the pipe is full.</li>
+ *   <li>{@code --die-after-stderr} - with {@code --stderr-kb}, exit 1 after that write instead of replying.</li>
+ *   <li>{@code --stderr-secret-line} - on the first request, write one line of about 6 KB to stderr whose
+ *       {@code "api_key":"} key ends at the 4096th character, so a read of 4096 ends between the key and its value;
+ *       then exit 1.</li>
+ *   <li>{@code --stderr-endless} - on the first request, write 1 MB to stderr with no newline, starting
+ *       with a {@code "api_key":"} value and ending {@code tail-SENTINEL}, then exit 1.</li>
  *   <li>{@code --exit=N} - exit N at once.</li>
  * </ul>
  * Lines are read with {@code readLine}, so CRLF and LF both work; replies end in {@code \n}.
@@ -46,7 +55,8 @@ public final class StdioTestServer {
   public static void main(String[] args) throws Exception {
     Map<String, String> replies = new LinkedHashMap<>();
     boolean ready = false, hello = false, hang = false, exitAfterRead = false, flood = false;
-    int delay = 0;
+    int delay = 0, stderrKb = 0;
+    boolean dieAfterStderr = false, secretLine = false, endless = false;
     String pidFile = null, gotFile = null;
     for (String a : args) {
       if (a.equals("--ready")) ready = true;
@@ -54,6 +64,10 @@ public final class StdioTestServer {
       else if (a.equals("--hang")) hang = true;
       else if (a.equals("--exit-after-read")) exitAfterRead = true;
       else if (a.equals("--stderr-flood")) flood = true;
+      else if (a.equals("--die-after-stderr")) dieAfterStderr = true;
+      else if (a.equals("--stderr-secret-line")) secretLine = true;
+      else if (a.equals("--stderr-endless")) endless = true;
+      else if (a.startsWith("--stderr-kb=")) stderrKb = Integer.parseInt(a.substring(12));
       else if (a.startsWith("--delay=")) delay = Integer.parseInt(a.substring(8));
       else if (a.startsWith("--pidfile=")) pidFile = a.substring(10);
       else if (a.startsWith("--gotfile=")) gotFile = a.substring(10);
@@ -94,9 +108,36 @@ public final class StdioTestServer {
       return;
     }
     String line;
+    boolean stderrWritten = false;
     while ((line = in.readLine()) != null) {
       Matcher id = ID.matcher(line);
       if (!id.find()) continue;
+      if (secretLine || endless) {
+        // Assembled at run time: the transport logs its command line, and the secret must not be in it.
+        String key = "\"api_key\":\"";
+        String secret = "hunter2-SENT" + "INEL";
+        if (secretLine) {
+          System.err.print("x".repeat(4096 - key.length()) + key);
+          System.err.flush();
+          System.err.print(secret + "\",\"y\":\"" + "y".repeat(2000) + "\"}\n");
+        } else {
+          System.err.print(key + secret + "\"");
+          for (int i = 0; i < 1024; i++) System.err.print("z".repeat(1024));
+          System.err.print("tail-SENTINEL");
+        }
+        System.err.flush();
+        System.exit(1);
+      }
+      if (stderrKb > 0 && !stderrWritten) {
+        stderrWritten = true;
+        String filler = "x".repeat(88);
+        for (int i = 0; i < stderrKb * 10; i++) {
+          System.err.print(String.format("%08d ", i) + filler + "\n");
+        }
+        System.err.print("last-words-marker\n");
+        System.err.flush();
+        if (dieAfterStderr) System.exit(1);
+      }
       Matcher method = METHOD.matcher(line);
       String m = method.find() ? method.group(1) : "";
       String reply = replies.containsKey(m) ? replies.get(m) : replies.get("any");

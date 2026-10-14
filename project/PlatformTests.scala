@@ -67,6 +67,7 @@ object PlatformTests {
       "org.llm4s.mcp.MCPCancellationSpec",
       "org.llm4s.mcp.MCPErrorPathsSpec",
       "org.llm4s.mcp.PayloadLogSpec",
+      "org.llm4s.mcp.StdioStderrDrainSpec",
       "org.llm4s.mcp.MCPClientImplSpec"
     ),
     "anthropic" -> Seq("org.llm4s.llmconnect.provider.AnthropicWorkloadIdentitySpec"),
