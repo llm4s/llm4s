@@ -36,6 +36,7 @@ private[graph] object KeyDigest:
    */
   def canonical(json: ujson.Value): String =
     def sorted(value: ujson.Value): ujson.Value = value match
+      case null               => ujson.Null // a Java caller's null hashes as JSON null
       case ujson.Obj(members) => ujson.Obj.from(members.toSeq.sortBy(_._1).map((k, v) => k -> sorted(v)))
       case ujson.Arr(items)   => ujson.Arr.from(items.map(sorted))
       case other              => other

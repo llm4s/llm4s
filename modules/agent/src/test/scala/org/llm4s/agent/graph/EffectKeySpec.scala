@@ -297,6 +297,15 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
       )
   }
 
+  it should "hash a call's null parts, as a Java caller may build it, rather than fail" in {
+    val task  = IdempotencyKey("model-task")
+    val nulls = org.llm4s.llmconnect.model.ToolCall(null, null, null)
+    IdempotencyKey.ofCall(ThreadId("t"), task, nulls) shouldBe IdempotencyKey.ofCall(ThreadId("t"), task, nulls)
+    KeyDigest.canonical(ujson.Obj("a" -> (null: ujson.Value))) shouldBe KeyDigest.canonical(
+      ujson.Obj("a" -> ujson.Null)
+    )
+  }
+
   it should "keep a run begun before lineages under the old identity: a format-6 superstep schedules legacy tasks" in {
     val log    = StateKey.appending[String]("log")
     val b      = GraphBuilder("g", "v1")

@@ -143,9 +143,10 @@ object IdempotencyKey:
         "llm4s-tool-call-v3",
         threadId.value,
         modelTask,
-        call.id,
-        call.name,
-        KeyDigest.canonical(call.arguments)
+        // a call built in Java may carry null parts: they hash as empty or JSON null, never as an error
+        Option(call.id).getOrElse(""),
+        Option(call.name).getOrElse(""),
+        KeyDigest.canonical(Option(call.arguments).getOrElse(ujson.Null))
       )
     )
 

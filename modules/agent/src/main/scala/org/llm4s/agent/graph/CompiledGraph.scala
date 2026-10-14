@@ -826,11 +826,14 @@ final class CompiledGraph[I, O] private[graph] (
   private def resultDigest(task: Task, result: TaskResult): String = result match
     case TaskResult.Held          => "held"
     case TaskResult.Blocked(_, e) => s"blocked:${e.message}"
-    case _ =>
-      encodeWrite("", task, result).fold(
-        e => s"unencodable:${task.id.value}:${e.message}",
-        write => KeyDigest.canonical(upickle.default.writeJs(write))
-      )
+    case _                        =>
+      // a result that does not encode cannot be compared: it is never the same work as another (no false replay)
+      encodeWrite("", task, result)
+        .flatMap(write => Try(KeyDigest.canonical(upickle.default.writeJs(write))).toResult)
+        .fold(
+          _ => s"unencodable:${java.util.UUID.randomUUID()}",
+          identity
+        )
 
   private def suspended(execution: Execution): RunResult[O] =
     RunResult.Suspended(execution.state, pendingInterrupts(execution), execution)
