@@ -172,7 +172,9 @@ The run finds its claim lost when its lease passes with no renewal landing, when
   freed in this runtime and the claim released as above. A change is not a run, so it never returns `ClaimLost`:
   retry it once the thread is free. A change's write - its commit, or the store delete - that has not begun when
   the loss is found never reaches the store, and the change returns `ThreadBusy` as for a commit the store refuses
-  as stale. One already in the store may still land, fenced by the token. A `deleteThread` that lands after its
+  as stale. A write the store refuses as stale is itself a loss found then, as a run's is: the change returns
+  `ThreadBusy` within `2 × ttl` of it, and gives its claim back as above, without waiting on the store. One already
+  in the store may still land, fenced by the token. A `deleteThread` that lands after its
   call was given up on ends this runtime's subscriptions to the thread at once only if the call has not yet freed
   the thread; otherwise they learn of the delete from the store, as another runtime's do (see
   [Deleting a thread](#deleting-a-thread)).

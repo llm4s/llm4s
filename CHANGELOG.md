@@ -2740,7 +2740,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on the caller's thread, so a renewal hung in a store that serialises its calls (SQLite) held the call and the
   thread past the loss. Once the claim is found lost they return `ThreadBusy`, naming no checkpoint, within
   `2 × ttl` of the loss, with the thread freed and the claim released; their write - commit or store delete - goes
-  through the same atomic fence, so one not begun at the loss never reaches the store.
+  through the same atomic fence, so one not begun at the loss never reaches the store. Every stale refusal now counts
+  as the loss it is: an `OnExit` run's exit commit, or a change's commit or store delete, refused as stale after
+  another runtime took the thread over was reported, but not recorded as a loss, so the run or change went on to
+  release its claim synchronously, as if it still held it, and a store hung on that release held `await()` or the
+  call, and the thread, indefinitely. They are now bounded by `2 × ttl` from the refusal, and the claim released on a
+  detached thread, as a refused `Sync` or `Async` commit or renewal already was.
 - **A commit or subscription read hung in the store holds up only its own thread** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   every commit in a `GraphRuntime` was written under one runtime-wide lock, so one thread's hung commit stalled every
   other thread's runs, their admission included. Commits are now ordered per thread. A subscription's read of the

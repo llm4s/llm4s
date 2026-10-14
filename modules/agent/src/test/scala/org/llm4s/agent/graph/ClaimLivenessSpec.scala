@@ -1397,6 +1397,90 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       case _ => rt.deleteThread(thread, run(runId))
     }
 
+  // ---- a stale refusal is a loss found then, wherever the store returns it ----
+
+  /**
+   * A renewal the store grants without being asked, so that only a refused commit or delete can find the
+   * claim lost: the lease, judged by the manual ticker, never passes, and no renewal is ever refused.
+   */
+  private def alwaysRenewed: () => Option[Result[RunClaim]] =
+    () => Some(Right(RunClaim(thread, RunId("renewed"), FencingToken(1L), t0)))
+
+  /** A claim whose bound, twice its ttl, is well inside the 5 seconds a test waits. */
+  private def second = ClaimPolicy(1.second, 10.millis)
+
+  "An OnExit run whose exit commit is refused as stale after a takeover, while its release hangs" should
+    "end ClaimLost within the loss bound and free its thread, without waiting on the release" in {
+      val time  = ManualTime()
+      val store = Hooked(InMemoryCheckpointer(time))
+      store.onRenew = alwaysRenewed
+      val two   = TwoStep()
+      val thief = AtomicReference[Option[RunClaim]](None)
+      // as the exit commit reaches the store, the store's clock has run past the claim and another took it
+      store.onCommit = commit => {
+        if commit.checkpoint.exists(_.status == CheckpointStatus.Completed) && thief.get.isEmpty then {
+          time.skewStore(3.hours)
+          thief.set(Some(store.underlying.claim(thread, ClaimRequest(RunId("thief"), 1.hour)).value))
+        }
+        None
+      }
+      val releasing = new CountDownLatch(1)
+      val hang      = new CountDownLatch(1)
+      store.onRelease = () => { releasing.countDown(); stuckUntil(hang); None }
+      val rt     = runtime(store, time, second)
+      val handle = rt.start(thread, two.graph, "x", run("first"), Durability.OnExit).value
+      val token  = tokenOf(store)
+      two.gate.countDown()
+
+      within(handle.await()).value.value.failed._2 shouldBe
+        GraphError.ClaimLost("t", token, Some(thief.get.value.token))
+      rt.heldLocally(thread) shouldBe false
+      releasing.await(5, TimeUnit.SECONDS) shouldBe true
+      hang.countDown()
+      events(store).filter(_.runId == "first").map(_.event) should not contain RunEvent.RunCompleted
+      store.underlying.renew(thread, thief.get.value.token, 1.hour).isRight shouldBe true
+    }
+
+  "A change whose commit is refused as stale after a takeover, while its release hangs" should
+    "be ThreadBusy within the loss bound and free its thread, for fork, updateState and deleteThread" in {
+      for how <- changes do
+        withClue(s"$how: ") {
+          val time  = ManualTime()
+          val store = Hooked(InMemoryCheckpointer(time))
+          val two   = TwoStep()
+          two.gate.countDown()
+          await(runtime(store, time, slow).start(thread, two.graph, "x", run("first")).value).completed
+          val latest = store.latest(thread).value.value
+          val held   = heldBy(how)
+          store.onRenew = alwaysRenewed
+          // as the change's write reaches the store, the store's clock has run past its claim and another took it
+          val taken = new AtomicBoolean(false)
+          def takeOver(): Unit =
+            if taken.compareAndSet(false, true) then {
+              time.skewStore(3.hours)
+              store.underlying.claim(held, ClaimRequest(RunId("thief"), 1.hour)).value: Unit
+            }
+          store.onCommit = commit => {
+            if commit.events.exists(_.runId == "change") then takeOver()
+            None
+          }
+          store.onDelete = () => takeOver()
+          val releasing = new CountDownLatch(1)
+          val hang      = new CountDownLatch(1)
+          store.onRelease = () => { releasing.countDown(); stuckUntil(hang); None }
+          val rt = runtime(store, time, second)
+
+          within(changing(how, rt, two, latest.checkpoint.id, "change")).value.left.value shouldBe
+            GraphError.ThreadBusy(held.value, if how == "fork" then None else Some(latest.checkpoint.id))
+          taken.get shouldBe true
+          rt.heldLocally(held) shouldBe false
+          releasing.await(5, TimeUnit.SECONDS) shouldBe true
+          hang.countDown()
+          store.latest(thread).value.value shouldBe latest
+          if how == "fork" then store.latest(held).value shouldBe None
+        }
+    }
+
   "A change whose claim is found lost while its next store call waits behind a hung renewal" should
     "return ThreadBusy within the loss bound, free its thread, and commit nothing, for fork, updateState and deleteThread" in {
       for how <- changes do

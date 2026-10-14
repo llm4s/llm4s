@@ -815,7 +815,8 @@ final class GraphRuntime(
    * that a store hung on a renewal, which a store serialising its calls queues `body`'s next call behind,
    * cannot hold the change or its thread. The loss fences `body`'s write, atomically with its start
    * ([[Committer.fence]]): one not yet begun never reaches the store, and is refused as a commit the
-   * store refuses as stale ([[GraphError.StaleClaim]]), which `body` maps to `ThreadBusy`. One already in
+   * store refuses as stale ([[GraphError.StaleClaim]]), which `body` maps to `ThreadBusy`. A write the store
+   * does refuse as stale is a loss found then, acted on as the heartbeat's is ([[Held.committing]]). One already in
    * the store may still land; a write given up on is counted as an orphan ([[Committer.orphan]]), so the
    * hub keeps its mark for the thread only until it returns.
    *
@@ -862,6 +863,15 @@ final class GraphRuntime(
                   if outcome.exists(consumesClaim) then heartbeat.foreach(_.halt())
                   else stopAndRelease(threadId, claim.token, heartbeat, lost.get)
               }) { _ =>
+                // the loss, found by the heartbeat or by a write the store refused as stale; idempotent
+                def claimLost(): Unit =
+                  lost.compareAndSet(None, Some(System.nanoTime())): Unit
+                  // fenced before the caller is woken, so no write begins once the loss is acted on
+                  if gate.fence(GraphError.StaleClaim(threadId.value, claim.token.value, None)) then
+                    GraphRuntime.logger.warn(
+                      s"Change '${config.runId.value}' on thread '${threadId.value}' lost its claim with its write in the store; it may still land"
+                    )
+                  lossSignal.complete(()): Unit
                 heartbeat = Some(
                   Heartbeat(
                     threadId,
@@ -869,14 +879,7 @@ final class GraphRuntime(
                     claim.token,
                     sentAt,
                     "its change is refused if not yet committed",
-                    _ =>
-                      lost.compareAndSet(None, Some(System.nanoTime())): Unit
-                      // fenced before the caller is woken, so no write begins once the loss is acted on
-                      if gate.fence(GraphError.StaleClaim(threadId.value, claim.token.value, None)) then
-                        GraphRuntime.logger.warn(
-                          s"Change '${config.runId.value}' on thread '${threadId.value}' lost its claim with its write in the store; it may still land"
-                        )
-                      lossSignal.complete(()): Unit
+                    _ => claimLost()
                   )
                 )
                 val result =
@@ -885,7 +888,7 @@ final class GraphRuntime(
                       // the write, if in flight, is given up on: counted before the thread is released
                       gate.orphan()
                       Left(GraphError.ThreadBusy(threadId.value, None))
-                  }(() => body(Held(threadId, claim, gate, reservation)))
+                  }(() => body(Held(threadId, claim, gate, reservation, () => claimLost())))
                 outcome = Some(result)
                 result
               }
@@ -899,15 +902,22 @@ final class GraphRuntime(
     threadId: ThreadId,
     val claim: RunClaim,
     gate: Committer,
-    reservation: (Option[String], RunId)
+    reservation: (Option[String], RunId),
+    lost: () => Unit
   ):
     /**
      * Makes `write`, the change's write to the store, unless the claim has been found lost: then it is
      * never begun, and is [[GraphError.StaleClaim]], as a write the store refused for a lost claim would
-     * be. `commit` names the write for the `committing` test hook.
+     * be. `commit` names the write for the `committing` test hook. A write the store refuses as stale is a
+     * loss found then: it is acted on as the heartbeat's is (`lost`), before the change goes on, so the
+     * change's end is bounded by it and its claim given back without waiting on the store.
      */
     def committing[B](commit: Commit)(write: => Result[B]): Result[B] =
-      gate.begun(commit)(reason => Left(reason))(write)
+      val outcome = gate.begun(commit)(reason => Left(reason))(write)
+      outcome match
+        case Left(_: GraphError.StaleClaim) => lost()
+        case _                              => ()
+      outcome
 
     /**
      * Runs `f` holding `activeLock` if this change still holds its thread in this runtime - its caller has
@@ -1439,8 +1449,9 @@ final class GraphRuntime(
 
     /**
      * Told when the store refuses a submitted commit as stale - proof that another run took the thread
-     * over - so the run stops at once rather than at its next superstep. Set by the run; Sync and Async
-     * call it from the thread that made the commit.
+     * over - so the run stops at once rather than at its next superstep, and its end is bounded by the loss.
+     * Set by the run; every mode calls it from the thread that made the commit - OnExit from its `close`,
+     * before the run releases its claim.
      */
     @volatile var onStale: GraphError.StaleClaim => Unit = _ => ()
 
@@ -1583,16 +1594,27 @@ final class GraphRuntime(
       retract = retract || commit.retractTurn
     }
     def failure: Option[LLMError] = withLock(lock)(failed)
-    def close(): Unit = withLock(lock) {
-      val last = checkpoint.map(_.withParent(durableParent.flatten))
-      token.foreach { fence =>
-        if last.isDefined || writes.nonEmpty || events.nonEmpty then
-          val exit = Commit(fence, last, writes, events, retract)
-          begun(exit)(reason => failed = Some(reason)) {
-            failed = commitAndDeliver(threadId, exit).left.toOption
-          }
+
+    /**
+     * Makes the one exit commit. One the store refuses as stale is reported as Sync's and Async's are
+     * ([[onStale]]) - once the lock is let go, and before the run goes on to release its claim - so the
+     * loss is recorded and the run's end bounded by it, rather than its release waiting on the store.
+     */
+    def close(): Unit =
+      val refusal = withLock(lock) {
+        val last = checkpoint.map(_.withParent(durableParent.flatten))
+        token.foreach { fence =>
+          if last.isDefined || writes.nonEmpty || events.nonEmpty then
+            val exit = Commit(fence, last, writes, events, retract)
+            begun(exit)(reason => failed = Some(reason)) {
+              failed = commitAndDeliver(threadId, exit).left.toOption
+            }
+        }
+        failed
       }
-    }
+      refusal match
+        case Some(stale: GraphError.StaleClaim) => onStale(stale)
+        case _                                  => ()
     def abandon(reason: LLMError): Boolean = withLock(lock) {
       checkpoint = None
       writes = Vector.empty
