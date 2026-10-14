@@ -207,6 +207,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       s.executeUpdate("INSERT INTO other_app VALUES (1)"): Unit
     }
     val opened  = new LinkedBlockingQueue[Connection]()
+    val busy    = new CountDownLatch(1)
     val outcome = new LinkedBlockingQueue[(Either[LLMError, SqliteCheckpointer], Boolean)]()
     val opener = Thread.ofPlatform().start { () =>
       val result = SqliteCheckpointer.openWith(
@@ -217,17 +218,17 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
           val c = DriverManager.getConnection(url)
           opened.add(c)
           c
-        }
+        },
+        onBusy = () => busy.countDown()
       )
       // `add`, not `put`: the interrupt flag is set, and `put` would throw
       outcome.add(result -> Thread.currentThread().isInterrupted): Unit
     }
-    // interrupted only once it is waiting between retries, not inside a native call, which no interrupt reaches
-    val deadline = System.nanoTime() + 10.seconds.toNanos
-    def retrying = opener.getState == Thread.State.TIMED_WAITING &&
-      opener.getStackTrace.exists(_.getMethodName.contains("retryingBusy"))
-    while !retrying && System.nanoTime() < deadline do Thread.sleep(5)
-    retrying shouldBe true
+    // interrupted once it has found the file busy and is about to pause: asleep, or about to sleep, or back in an
+    // attempt that fails at once with SQLITE_BUSY - the pause ends with the InterruptedException in every case. The
+    // test used to sample the thread's state twice, waiting for one sample and asserting on another, and failed
+    // when the opener woke between them (#1951)
+    busy.await(10, TimeUnit.SECONDS) shouldBe true
     opener.interrupt()
     val (result, flagged) = Option(outcome.poll(10, TimeUnit.SECONDS)).value
     val cancelled         = result.left.value
@@ -824,6 +825,137 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     writer.eventsAfter(thread, 0L, 100).left.value shouldBe a[GraphError.ReplayUnavailable]
     writer.close()
     pruner.close()
+  }
+
+  // ---- turn-taking between the stores of one process (#1951) ----
+
+  /** A connection on which the trigger function `test_hold()` runs `hold`, standing in for a slow disk. */
+  private def holding(hold: () => Unit)(url: String): Connection =
+    val c = DriverManager.getConnection(url)
+    org.sqlite.Function.create(
+      c,
+      "test_hold",
+      new org.sqlite.Function {
+        protected def xFunc(): Unit =
+          hold()
+          result(0)
+      }
+    )
+    c
+
+  "A write beside a store committing back to back" should "take its turn, not wait out its busy timeout" in {
+    // SQLite's busy handler sleeps and tries again, and wins only if it wakes between two of the other store's
+    // transactions. With each commit held open by a slow disk - Windows' FlushFileBuffers on CI, here a trigger -
+    // those gaps are microseconds wide, and the prune timed out although each commit took milliseconds (#1951).
+    val db        = SqliteFiles.fresh()
+    val committed = new CountDownLatch(1)
+    val pruned    = new CountDownLatch(1)
+    // the hold is the slow disk, not a synchronisation: the prune is admitted after at most one commit, however long
+    val slowDisk = holding { () =>
+      committed.countDown()
+      Thread.sleep(20)
+    }
+    val writer = SqliteCheckpointer.openWith(db, ManualClock(start), SqliteCheckpointerConfig.default, slowDisk).value
+    val pruner =
+      SqliteCheckpointer.openWith(db, ManualClock(start), SqliteCheckpointerConfig(2.seconds), slowDisk).value
+    exec(db, "CREATE TRIGGER slow_disk AFTER INSERT ON llm4s_checkpoint_events BEGIN SELECT test_hold(); END")
+    val thread  = ThreadId("steady")
+    val token   = writer.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
+    val written = new LinkedBlockingQueue[Either[LLMError, Int]]()
+    Thread.ofPlatform().start { () =>
+      // back to back until the prune is done - and for long past the prune's busy timeout if it never is
+      val failed = Iterator
+        .from(1)
+        .takeWhile(i => i <= 500 && pruned.getCount > 0)
+        .map(i => writer.commit(thread, Commit(token, events = Vector(event(s"e$i")))).map(_ => i))
+        .find(_.isLeft)
+      written.add(failed.getOrElse(Right(0))): Unit
+    }
+    committed.await(10, TimeUnit.SECONDS) shouldBe true
+    val prune = pruner.prune(thread, RetentionPolicy().withMaxEvents(1))
+    pruned.countDown()
+    prune shouldBe Right(())
+    Option(written.poll(30, TimeUnit.SECONDS)).value shouldBe Right(0)
+    writer.close()
+    pruner.close()
+  }
+
+  "The stores of one process" should "share one write gate per file, however its path is spelled, until the last closes" in {
+    val db       = SqliteFiles.fresh()
+    val absolute = SqliteFiles.opened(db, ManualClock(start))
+    // the same file through `.` and through `..`, spellings that stay on the file's own root on every OS
+    val dir = db.getParent
+    Files.createDirectories(dir.resolve("sub"))
+    val relative = SqliteFiles.opened(dir.resolve(".").resolve(db.getFileName), ManualClock(start))
+    val dotted   = SqliteFiles.opened(dir.resolve("sub").resolve("..").resolve(db.getFileName), ManualClock(start))
+    val gate     = WriteGate.of(db).value
+    WriteGate.of(relative.path).value shouldBe theSameInstanceAs(gate)
+    WriteGate.of(dotted.path).value shouldBe theSameInstanceAs(gate)
+    WriteGate.of(SqliteFiles.fresh()) shouldBe None
+    absolute.close()
+    relative.close()
+    relative.close() // closing again gives back nothing
+    WriteGate.of(db).value shouldBe theSameInstanceAs(gate)
+    dotted.close()
+    WriteGate.of(db) shouldBe None
+    // a refused open gives its gate back too
+    exec(db, "UPDATE llm4s_checkpoint_schema SET version = 99")
+    SqliteCheckpointer.open(db).left.value shouldBe a[ProcessingError]
+    WriteGate.of(db) shouldBe None
+  }
+
+  it should "share the gate of a file reached through a symbolic link" in {
+    val db   = SqliteFiles.fresh()
+    val link = db.getParent.resolve("link.db")
+    // a link needs a privilege on Windows: skip where it cannot be made
+    assume(Try(Files.createSymbolicLink(link, db)).isSuccess)
+    val direct = SqliteFiles.opened(db, ManualClock(start))
+    val linked = SqliteFiles.opened(link, ManualClock(start))
+    WriteGate.of(link).value shouldBe theSameInstanceAs(WriteGate.of(db).value)
+    direct.close()
+    linked.close()
+    WriteGate.of(db) shouldBe None
+  }
+
+  "A write" should "fail changing nothing when the process's other stores hold the file past its busy timeout" in {
+    val db     = SqliteFiles.fresh()
+    val store  = SqliteCheckpointer.open(db, ManualClock(start), SqliteCheckpointerConfig(100.millis)).value
+    val thread = ThreadId("gated")
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
+    // the gate held, as another store's write holds it
+    val failed = WriteGate.of(db).value.holding(1.minute) {
+      val result = new LinkedBlockingQueue[Either[LLMError, Vector[EventRecord]]]()
+      Thread.ofPlatform().start { () =>
+        result.add(store.commit(thread, Commit(token, events = Vector(event("x"))))): Unit
+      }
+      Option(result.poll(30, TimeUnit.SECONDS)).value
+    }
+    val error = failed.value.left.value
+    error shouldBe a[ProcessingError]
+    error.message should (include("busy").and(include(db.toString)))
+    store.eventsAfter(thread, 0L, 10).value shouldBe empty
+    store.commit(thread, Commit(token, events = Vector(event("after")))).value.map(_.seq) shouldBe Vector(1L)
+    store.close()
+  }
+
+  it should "return CancelledError, with the flag set and nothing written, when interrupted waiting for its turn" in {
+    val db     = SqliteFiles.fresh()
+    val store  = SqliteFiles.opened(db, ManualClock(start))
+    val thread = ThreadId("interrupted")
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
+    val result = new LinkedBlockingQueue[(Either[LLMError, Vector[EventRecord]], Boolean)]()
+    // interrupted before it asks for the gate, so the wait for its turn ends at once
+    Thread.ofPlatform().start { () =>
+      Thread.currentThread().interrupt()
+      val committed = store.commit(thread, Commit(token, events = Vector(event("x"))))
+      result.add(committed -> Thread.currentThread().isInterrupted): Unit
+    }
+    val (committed, flagged) = Option(result.poll(30, TimeUnit.SECONDS)).value
+    committed.left.value shouldBe a[CancelledError]
+    committed.left.value.context("operation") shouldBe "sqlite-checkpointer.commit"
+    flagged shouldBe true
+    store.eventsAfter(thread, 0L, 10).value shouldBe empty
+    store.close()
   }
 
   "SqliteCheckpointerConfig" should "default to a 5 second busy timeout and refuse a non-positive or oversized one" in {

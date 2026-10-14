@@ -386,6 +386,14 @@ applied, so two stores cannot both pass the checks.
   write that finds another in progress waits for it - up to `SqliteCheckpointerConfig.busyTimeout`, 5 seconds by
   default - and only then fails, with a `ProcessingError` and nothing changed. Raise it if many processes write to
   one file at once: `SqliteCheckpointer.open(path, clock, SqliteCheckpointerConfig(busyTimeout = 15.seconds))`.
+- **Writes take turns within a process.** SQLite does not queue a waiting writer. It sleeps and tries again, and
+  gets the lock only if it wakes between two of the other connection's transactions. A store beside one that
+  commits back to back could therefore wait out its whole `busyTimeout`, even though each write was short. The
+  stores in one JVM that open the same file take turns through a fair lock for the file, first come, first served,
+  before each write. A write waits for the writes queued ahead of it, up to `busyTimeout`, and then up to
+  `busyTimeout` again for SQLite's lock if another process holds it. Writes from different processes are still
+  ordered by SQLite's polling, so a process that writes steadily can starve another process's write. Raise
+  `busyTimeout` there. A write interrupted while it waits for its turn returns a `CancelledError`.
 - **Durable commits.** `synchronous = FULL`: a commit that returned survives a crash or a power loss.
 - **Calls within one store are serialised.** A store is one connection; it is safe to share between threads, and
   a busy runtime gains from a store of its own rather than from sharing another runtime's.

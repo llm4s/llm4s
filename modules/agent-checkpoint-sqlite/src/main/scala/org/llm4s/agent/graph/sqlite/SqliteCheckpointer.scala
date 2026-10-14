@@ -9,7 +9,7 @@ import java.nio.file.Path
 import java.sql.{ Connection, DriverManager, PreparedStatement, ResultSet }
 import java.time.{ Clock, Instant }
 import java.util.concurrent.locks.ReentrantLock
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.*
 import scala.util.{ Try, Using }
 
 /**
@@ -48,11 +48,25 @@ import scala.util.{ Try, Using }
  * `ProcessingError`, changing nothing. WAL needs shared memory between the processes that open the file, so keep
  * the file on a local disk - not on a network file system.
  *
+ * '''Fair writes within a process.''' SQLite does not queue a waiting writer: it sleeps and tries again, and wins
+ * only if it wakes while no other connection is writing, so a store beside one that writes back to back can wait
+ * out its whole busy timeout although every write is short (#1951). The stores in one JVM that opened the same path
+ * therefore take turns through a fair, first-come-first-served lock for the file before they begin a write (and an
+ * opener before its migration): each waits for the writes queued ahead of it, up to the busy timeout, and only
+ * then for SQLite's lock, which another process may hold - up to the busy timeout again. Between processes SQLite's
+ * polling still decides the order, so a process writing steadily can starve another's write; raise `busyTimeout`
+ * there.
+ *
  * One store is one connection, and its calls are serialised: it is safe to call from any number of threads.
  * Every failure of the database itself is a `ProcessingError`, and so is any call after [[close]].
  */
-final class SqliteCheckpointer private (val path: Path, clock: Clock, connection: Connection)
-    extends Checkpointer
+final class SqliteCheckpointer private (
+  val path: Path,
+  clock: Clock,
+  connection: Connection,
+  busyTimeout: FiniteDuration,
+  gate: WriteGate
+) extends Checkpointer
     with AutoCloseable:
 
   import SqliteCheckpointer.*
@@ -423,6 +437,7 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
   def close(): Unit = locked {
     if !shut then
       shut = true
+      WriteGate.release(gate)
       connection.close()
   }
 
@@ -449,16 +464,30 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
    * when it throws. `IMMEDIATE` takes the write lock before the first read, so the checks a write makes and the
    * write itself see the same state, and a busy file is waited for (up to the busy timeout) before anything is
    * read: a deferred transaction that read first could not wait for the lock.
+   *
+   * The transaction runs holding the file's [[WriteGate]], so the stores of this process write in turn rather than
+   * by SQLite's polling; a wait for the gate that outlasts the busy timeout fails as a busy file does, and one that
+   * is interrupted returns a `CancelledError`, with the interrupt flag set again.
    */
   private def writing[A](operation: String)(body: Connection => Result[A]): Result[A] =
     guarded(operation) { c =>
-      transaction(c, "BEGIN IMMEDIATE") { guard =>
-        val result = body(c)
-        if result.isRight then
-          execute(c, "COMMIT")
-          guard.committed = true
-        result
+      val written = CancelledError.catchInterrupt {
+        gate.holding(busyTimeout) {
+          transaction(c, "BEGIN IMMEDIATE") { guard =>
+            val result = body(c)
+            if result.isRight then
+              execute(c, "COMMIT")
+              guard.committed = true
+            result
+          }
+        }
       }
+      written match
+        case Right(Some(result)) => result
+        case Right(None)         => Left(failure(operation, gateTimedOut(busyTimeout), None))
+        case Left(interrupted) =>
+          Thread.currentThread().interrupt()
+          Left(CancelledError(s"sqlite-checkpointer.$operation", Some(interrupted)))
     }
 
   /** `body` in one read transaction, so the rows it reads are from one snapshot of the file. */
@@ -495,12 +524,16 @@ object SqliteCheckpointer:
   def open(path: Path, clock: Clock, config: SqliteCheckpointerConfig): Result[SqliteCheckpointer] =
     openWith(path, clock, config, url => DriverManager.getConnection(url))
 
-  /** [[open]] on a connection from `connect`, so a test can see that a failed open closes what it opened. */
+  /**
+   * [[open]] on a connection from `connect`, so a test can see that a failed open closes what it opened; `onBusy`
+   * runs each time the open finds the file busy, just before it pauses to try again.
+   */
   private[sqlite] def openWith(
     path: Path,
     clock: Clock,
     config: SqliteCheckpointerConfig,
-    connect: String => Connection
+    connect: String => Connection,
+    onBusy: () => Unit = () => ()
   ): Result[SqliteCheckpointer] =
     given ErrorContext = ErrorContext(path)
     Try {
@@ -509,28 +542,36 @@ object SqliteCheckpointer:
     }.toEither.left.map(e => failure("open", Option(e.getMessage).getOrElse(e.getClass.getName), Some(e))).flatMap {
       connection =>
         val deadline = System.nanoTime() + config.busyTimeout.toNanos
+        val gate     = WriteGate.acquire(path)
         // an interrupt while waiting out a busy file is not NonFatal, so `Try` would let it escape and leak the
         // connection: `attempt` returns it as a CancelledError, with the thread's interrupt flag set again
         val prepared = CancelledError
           .attempt("sqlite-checkpointer.open") {
             Try {
-              prepare(connection, config, deadline)
-              retryingBusy(deadline) {
-                transaction(connection, "BEGIN IMMEDIATE") { guard =>
-                  val migrated = SqliteSchema.migrate(connection)
-                  if migrated.isRight then
-                    execute(connection, "COMMIT")
-                    guard.committed = true
-                  migrated
+              prepare(connection, config, deadline, onBusy)
+              // in turn with the writes of this process's stores on the file, as a write is
+              gate
+                .holding(math.max(deadline - System.nanoTime(), 0L).nanos) {
+                  retryingBusy(deadline, onBusy) {
+                    transaction(connection, "BEGIN IMMEDIATE") { guard =>
+                      val migrated = SqliteSchema.migrate(connection)
+                      if migrated.isRight then
+                        execute(connection, "COMMIT")
+                        guard.committed = true
+                      migrated
+                    }
+                  }
                 }
-              }
+                .getOrElse(Left(gateTimedOut(config.busyTimeout)))
             }.toEither.left
               .map(e => failure("open", Option(e.getMessage).getOrElse(e.getClass.getName), Some(e)))
               .flatMap(_.left.map(problem => failure("open", problem, None)))
           }
-          .map(_ => new SqliteCheckpointer(path, clock, connection))
+          .map(_ => new SqliteCheckpointer(path, clock, connection, config.busyTimeout, gate))
         // a connection that is not handed out must not leak: an open handle keeps the file locked
-        if prepared.isLeft then Try(connection.close()): Unit
+        if prepared.isLeft then
+          WriteGate.release(gate)
+          Try(connection.close()): Unit
         prepared
     }
 
@@ -549,9 +590,14 @@ object SqliteCheckpointer:
    * once with `SQLITE_BUSY`. The switch is therefore retried, with a short pause, until `deadline` (the busy timeout
    * from the start of the open), as a transaction would have waited.
    */
-  private def prepare(connection: Connection, config: SqliteCheckpointerConfig, deadline: Long): Unit =
+  private def prepare(
+    connection: Connection,
+    config: SqliteCheckpointerConfig,
+    deadline: Long,
+    onBusy: () => Unit
+  ): Unit =
     execute(connection, s"PRAGMA busy_timeout = ${DurationRounding.ceilMillisInt(config.busyTimeout)}")
-    val mode = retryingBusy(deadline) {
+    val mode = retryingBusy(deadline, onBusy) {
       Using.resource(connection.createStatement()) { statement =>
         Using.resource(statement.executeQuery("PRAGMA journal_mode = WAL")) { rows =>
           if rows.next() then rows.getString(1) else ""
@@ -560,6 +606,9 @@ object SqliteCheckpointer:
     }
     require(mode.equalsIgnoreCase("wal"), s"the database's journal could not be switched to WAL (it is '$mode')")
     execute(connection, "PRAGMA synchronous = FULL")
+
+  private def gateTimedOut(busyTimeout: FiniteDuration): String =
+    s"the database file is busy: other stores in this process were writing it for the whole busy timeout ($busyTimeout)"
 
   /** `SQLITE_BUSY`: the low byte of the (possibly extended) result code sqlite-jdbc reports as the error code. */
   private val SqliteBusy = 5
@@ -575,12 +624,13 @@ object SqliteCheckpointer:
    * not passed; any other failure, or a busy one past the deadline, is thrown as it was.
    */
   @scala.annotation.tailrec
-  private def retryingBusy[A](deadline: Long, pauseMillis: Long = 1)(body: => A): A =
+  private def retryingBusy[A](deadline: Long, onBusy: () => Unit, pauseMillis: Long = 1)(body: => A): A =
     Try(body) match
       case scala.util.Success(value) => value
       case scala.util.Failure(e) if isBusy(e) && System.nanoTime() < deadline =>
+        onBusy()
         Thread.sleep(pauseMillis + java.util.concurrent.ThreadLocalRandom.current().nextLong(pauseMillis + 1))
-        retryingBusy(deadline, math.min(pauseMillis * 2, 25L))(body)
+        retryingBusy(deadline, onBusy, math.min(pauseMillis * 2, 25L))(body)
       case scala.util.Failure(e) => throw e
 
   // ---- rows ----

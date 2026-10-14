@@ -2929,6 +2929,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     event only of their run's own claim, so an earlier incarnation's progress never reaches a later run under the
     same id. Code that builds a `StreamEvent.Live` positionally, or matches one with a positional pattern, gains a
     field after `runId`.
+- **`SqliteCheckpointer`: a write no longer times out beside another store in the same process that commits back
+  to back** ([#1951](https://github.com/llm4s/llm4s/issues/1951)). SQLite does not queue a connection that waits for
+  a file's write lock. Its busy handler sleeps and tries again, and gets the lock only if it wakes in a gap between
+  the other connection's transactions. When a store commits back to back on a slow disk, those gaps are microseconds
+  wide, so a short `prune` or `commit` could wait out its whole `busyTimeout` and fail with `SQLITE_BUSY`. This
+  happened in CI on Windows. The stores in one JVM that open the same file (by any spelling of its path, symbolic links included) now take
+  turns through a fair lock for that file before each write transaction and before an open's migration. A write
+  waits for the writes queued ahead of it, up to `busyTimeout`, and fails with a `ProcessingError` naming the busy
+  file if they take longer. It then waits up to `busyTimeout` again for SQLite's lock, which another process may
+  hold. A write interrupted while it waits for its turn returns `CancelledError` with the interrupt flag set. Writes
+  from different processes are still ordered by SQLite's polling.
 - **A multi-megabyte provider error body no longer takes seconds to redact for a log line or an error**
   ([#1680](https://github.com/llm4s/llm4s/issues/1680)): the internal `safeBody` helper behind every provider error
   body redacted the whole body before truncating it to 2048 characters, about a second per megabyte. A body up to
