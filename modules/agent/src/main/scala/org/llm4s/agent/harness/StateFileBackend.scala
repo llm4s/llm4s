@@ -39,6 +39,11 @@ enum FileUpdate derives ReadWriter:
  * runs (rules 1, 2, 12).
  *
  * Each checkpoint copies the whole map (rule 6), so pair the backend with a `RetentionPolicy`.
+ *
+ * The lock is what keeps two edits of one file in a batch from losing one, and the bounds exact: the
+ * calls of a batch otherwise share one snapshot. Declaring it registers the loop's `tool-queue`, so adding
+ * tools over this backend to an existing agent changes its graph, and a thread checkpointed before is
+ * refused at restore (`RestoreRejected`).
  */
 @Experimental
 final class StateFileBackend private (

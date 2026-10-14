@@ -23,9 +23,6 @@ Design §4.23. Additive, bar one reserved key: an agent without `PermissionMiddl
 - **`PermissionMiddleware` denies what no rule allows**, a tool without `withResources` included: add `PermissionRule.allow(Operation.Invoke, "<name>")` (or `"*"`) for each tool the agent may call. See [Tool Permissions, Timeouts and Locks](/guide/agents/#tool-permissions-timeouts-and-locks).
 - **Adopting locks reshapes the agent's graph.** The loop registers `tool-queue` only for an agent with a tool that declares `withLocks`, so its structural fingerprint changes and threads it checkpointed before are refused with `RestoreRejected`: finish or `forget` them first. Agents without locks, timeouts and resources included, restore their existing threads unchanged.
 - **Locked calls cost supersteps.** Each further round of a batch whose calls hold conflicting locks costs two supersteps; raise `RunBudgets.maxSupersteps` if a long batch of conflicting calls reaches it.
-## Stage 3 migration: the Deep Agents harness
-
-Not in a release yet. Stage 3 ([#1901](https://github.com/llm4s/llm4s/issues/1901)) builds the harness on the durable runtime. Each slice adds its part here as it lands.
 
 ### Replay of external effects (#1921)
 
@@ -48,6 +45,14 @@ Effects outside thread state replay through `ReplayGuard`: an intent and an outc
 - **New, opt-in API**: `RunContext.taskKey`, `RunContext.effectKey` and `ToolContext.effectKey`; `ReplayGuard` and its `Plan`; `ReplaySupport`, `StateCheck`, `AppliedKeys` and `EffectRecord`; and, in `llm4s-agent-testkit`, `ReplayContract`, which every external target of the harness passes. See [Tool side effects](../guide/agents/#tool-side-effects).
 
 Design: `docs/design/typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md` (§4.24).
+
+### Harness backend SPIs (#1904)
+
+Design §4.25. New, opt-in API in `org.llm4s.agent.harness`; nothing existing changes, except:
+
+- **`llm4s-agent-testkit` depends on `llm4s-testkit`**, whose `ScriptedLLMClient` drives `FileBackendContract`'s agent runs. A build that excludes `llm4s-testkit` from its test classpath adds it back.
+- **File tools over a `StateFileBackend` reshape the agent's graph.** Every mutation holds the lock `state-files/<keyId>` (needed: it keeps two edits of one file in a batch from losing one, and the quota exact), so the loop registers `tool-queue`, as for any tool with locks: threads checkpointed before are refused with `RestoreRejected`; finish or `forget` them first.
+- A `HostFileBackend` creates `/.llm4s/locks/` in its root for its cross-process lock files on the first mutation, reserves `/.llm4s`, and refuses symbolic links and files with other hard links.
 
 ## Stage 2 migration: durable execution
 
