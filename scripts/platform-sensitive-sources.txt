@@ -1,0 +1,30 @@
+# Platform-sensitive main sources outside the modules that run whole on Windows, and the suite that tests each one
+# there. CI's `Test (windows-latest, 21)` job runs `sbt testPlatform` (project/PlatformTests.scala): every suite of
+# the modules in `PlatformTests.wholeModules`, and the suites `PlatformTests.suites` names in other modules.
+#
+# scripts/check-platform-tests.sh fails when a main source file calls a platform-sensitive API (its PATTERN:
+# processes, path separators, file permissions and links, temporary files, writing, moving or deleting files, file
+# locks, SQLite, line separators, the OS name, the user's home), is outside the whole modules, and is not listed
+# here - so such code cannot reach main without a test that runs on Windows. A listed file need not match the
+# pattern: list any file whose behaviour differs by platform.
+#
+# Each line is `<path> <coverage>`; a path ending in `/` covers every file under it. The coverage is either
+#   <module>:<suite>    a suite name (or glob) that PlatformTests.suites lists for that module, or
+#   none: <reason>      nothing runs it on Windows, and why that is acceptable.
+
+modules/agent/src/main/scala/org/llm4s/agent/graph/Checkpointer.scala                              none: matches only a Scaladoc mention of FileChannel; the SQLite checkpointer's file I/O is agentCheckpointSqlite's
+modules/agent/src/main/scala/org/llm4s/assistant/SessionManager.scala                              agent:org.llm4s.assistant.*
+modules/anthropic/src/main/scala/org/llm4s/llmconnect/config/AnthropicWorkloadIdentity.scala       anthropic:org.llm4s.llmconnect.provider.AnthropicWorkloadIdentitySpec
+modules/config-policy/src/main/scala/org/llm4s/configpolicy/Doctor.scala                           configPolicy:org.llm4s.configpolicy.DoctorSpec
+modules/core/src/main/scala/org/llm4s/config/NamedProviderConfigNormalizer.scala                   core:org.llm4s.config.ProviderAuthConfigSpec
+modules/core/src/main/scala/org/llm4s/config/ProviderExchangeLoggingConfigLoader.scala             core:org.llm4s.config.ProviderExchangeLoggingConfigLoaderSpec
+modules/core/src/main/scala/org/llm4s/http/Llm4sHttpClient.scala                                   core:org.llm4s.http.Llm4sHttpClientSpec
+modules/core/src/main/scala/org/llm4s/llmconnect/ProviderExchangeSink.scala                        core:org.llm4s.llmconnect.ProviderExchangeSinkSpec
+modules/core/src/main/scala/org/llm4s/llmconnect/auth/IdentityTokenSource.scala                    core:org.llm4s.llmconnect.auth.IdentityTokenSourceSpec
+modules/core/src/main/scala/org/llm4s/model/ModelRegistryService.scala                             core:org.llm4s.model.ModelRegistryServiceSpec
+modules/gemini/src/main/scala/org/llm4s/llmconnect/provider/VertexAIAuthProvider.scala             gemini:org.llm4s.llmconnect.provider.VertexAIAuthProviderSpec
+modules/knowledgegraph/src/main/scala/org/llm4s/knowledgegraph/storage/JsonGraphStore.scala        knowledgegraph:org.llm4s.knowledgegraph.storage.JsonGraphStoreSpec
+modules/mcp/src/main/scala/org/llm4s/mcp/MCPTransport.scala                                        mcp:org.llm4s.mcp.StdioTransportConcurrencySpec
+modules/openai-compatible/src/main/scala/org/llm4s/llmconnect/config/OpenAIWorkloadIdentity.scala  openaiCompatible:org.llm4s.llmconnect.provider.OpenAICompatibleWorkloadIdentitySpec
+modules/samples/                                                                                   none: unpublished examples, run by hand; the library code they call is tested in its own module
+modules/workspace/workspaceSamples/                                                                none: unpublished examples, run by hand; the workspace runner and client they drive run whole on Windows
