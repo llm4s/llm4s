@@ -64,7 +64,13 @@ final class HostFileBackend private (
   val maxFileBytes: Long,
   val maxScanEntries: Int,
   val lockDirectory: Path
-) extends FileBackend:
+) extends FileBackend
+    with AutoCloseable:
+
+  private val closed = new java.util.concurrent.atomic.AtomicBoolean(false)
+
+  /** Releases the root, so a backend over an overlapping one may open; idempotent. */
+  def close(): Unit = if closed.compareAndSet(false, true) then HostFileBackend.OpenRoots.release(root)
 
   /** C4's class for this target. */
   val replaySupport: ReplaySupport = ReplaySupport.Verifiable
@@ -611,6 +617,36 @@ object HostFileBackend:
     case _: java.util.concurrent.CancellationException      => true
     case _                                                  => false
 
+  /**
+   * The real roots of this JVM's open backends, with how many backends hold each. A root that contains or
+   * is contained by an open one is refused: two backends would then name one file by two paths, with two
+   * lock keys and possibly two stripes. The same real root is shared (its paths, locks and stripes agree).
+   * Across processes this is a documented precondition only.
+   */
+  private object OpenRoots:
+    private val held = scala.collection.mutable.Map.empty[Path, Int]
+
+    def acquire(root: Path): Result[Unit] = synchronized {
+      held.keysIterator.find(r => r != root && (r.startsWith(root) || root.startsWith(r))) match
+        case Some(other) =>
+          Left(
+            ValidationError(
+              "root",
+              s"$root overlaps the root $other of another open HostFileBackend; one file must have one path"
+            )
+          )
+        case None =>
+          held.update(root, held.getOrElse(root, 0) + 1)
+          Right(())
+    }
+
+    def release(root: Path): Unit = synchronized {
+      held.get(root) match
+        case Some(1) => held.remove(root): Unit
+        case Some(n) => held.update(root, n - 1)
+        case None    => ()
+    }
+
   /** A name Windows reads as another (a trailing dot or space is dropped); the backend never uses one. */
   private[harness] def trailing(name: String): Boolean = name.endsWith(".") || name.endsWith(" ")
 
@@ -622,20 +658,43 @@ object HostFileBackend:
    * them. Trailing-dot and trailing-space aliases are not either: the backend refuses such names.
    */
   def probeAliases(root: Path): Result[Vector[String]] =
-    val id   = UUID.randomUUID().toString.replace("-", "")
-    val name = s"llm4sprobe$id.probe"
-    val file = root.resolve(name)
+    val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    val random   = new java.security.SecureRandom()
+    val prefix   = Vector.fill(6)(alphabet.charAt(random.nextInt(alphabet.length))).mkString
+    probeAliasesWith(root, prefix, p => Files.exists(p), (a, b) => Files.isSameFile(a, b))
+
+  /**
+   * The probe, with its prefix and file-system lookups given: a probe file `<prefix>-llm4s-probe-<uuid>.probe`,
+   * whose 8.3 short name, where the volume makes one, is `<prefix>~<n>.PRO` for a small `n`. Each of
+   * `~1` to `~4` is looked up: one that is the probe file is an alias found; one that names another,
+   * existing file means the short name cannot be established (a random six-character prefix makes that
+   * vanishingly rare), and the probe refuses rather than guess.
+   */
+  private[harness] def probeAliasesWith(
+    root: Path,
+    prefix: String,
+    exists: Path => Boolean,
+    isSame: (Path, Path) => Boolean
+  ): Result[Vector[String]] =
+    val file = root.resolve(s"$prefix-llm4s-probe-${UUID.randomUUID()}.probe")
     Try(Files.createFile(file)).toResult.left
       .map(e => ValidationError("root", s"$root cannot be probed for file-name aliasing: ${e.message}"): LLMError)
-      .map { _ =>
-        val shortName = name.take(6).toUpperCase(java.util.Locale.ROOT) + "~1." + "PRO"
-        val short     = Try(root.resolve(shortName)).toOption
-        val found = Vector(
-          short.exists(alias => Try(Files.exists(alias) && Files.isSameFile(file, alias)).getOrElse(false)) ->
-            "8.3 short names (a file is also reachable by a generated short name)"
-        ).collect { case (true, behaviour) => behaviour }
+      .flatMap { _ =>
+        val shortNames = (1 to 4).flatMap(n => Try(root.resolve(s"$prefix~$n.PRO")).toOption)
+        val looked = shortNames.map(alias =>
+          Try(exists(alias)).getOrElse(false) -> Try(exists(alias) && isSame(file, alias)).getOrElse(false)
+        )
         Try(Files.deleteIfExists(file))
-        found
+        if looked.exists((present, same) => present && !same) then
+          Left(
+            ValidationError(
+              "root",
+              s"$root cannot be probed for 8.3 short names: another entry already has the probe's short-name prefix $prefix"
+            )
+          )
+        else if looked.exists(_._2) then
+          Right(Vector("8.3 short names (a file is also reachable by a generated short name)"))
+        else Right(Vector.empty)
       }
 
   /**
@@ -653,7 +712,11 @@ object HostFileBackend:
    *    SMB/CIFS share or a volume with 8.3 names on is refused: use the workspace sandbox's file backend
    *    (F2) or a `StoreFileBackend` there;
    *  - a root that cannot be probed (read-only) is refused, unless `allowUnprobed`: the caller then
-   *    vouches that its file system is a supported one.
+   *    vouches that its file system is a supported one;
+   *  - no two backends may expose one directory, or overlapping ones, under different paths - bind
+   *    mounts, symlinked mount points, nested roots - in any process. Within this JVM `open` refuses a
+   *    root that contains or is contained by an open one (the same real root is shared) until that one
+   *    is closed; across processes it is the caller's to keep.
    */
   def open(
     root: Path,
@@ -690,4 +753,5 @@ object HostFileBackend:
             )
           case Left(_) if allowUnprobed => Right(())
           case Left(error)              => Left(error)
+        _ <- OpenRoots.acquire(real)
       yield new HostFileBackend(real, maxFileBytes, maxScanEntries, locks)

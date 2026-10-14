@@ -44,6 +44,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
   private val cleanups = scala.collection.mutable.ListBuffer.empty[() => Unit]
 
   override def afterEach(): Unit =
+    Option(backend).foreach(_.close())
     cleanups.foreach(c => scala.util.Try(c()))
     cleanups.clear()
     Files.walk(dir).iterator().asScala.toVector.reverse.foreach(p => Files.deleteIfExists(p))
@@ -311,11 +312,8 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     )
   }
 
-  it should "lock the physical path, so backends over nested roots order writes to one file" in {
-    Files.createDirectories(dir.resolve("sub"))
-    val nested = HostFileBackend.open(dir.resolve("sub"), locks).value
-    val real   = HostFileBackend.identity(dir.toRealPath().toString.replace('\\', '/'))
-    backend.locks(p("/sub/a.txt")).head.conflictsWith(nested.locks(p("/a.txt")).head) shouldBe true
+  it should "lock the folded physical path" in {
+    val real = HostFileBackend.identity(dir.toRealPath().toString.replace('\\', '/'))
     backend.locks(p("/sub")).head.conflictsWith(backend.locks(p("/sub/a.txt")).head) shouldBe true
     if posix then
       backend.locks(p("/sub/a.txt")) shouldBe Set(LockKey("host", real, "sub/a.txt"))
@@ -324,6 +322,25 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
       // Windows aliases (8.3 names, trailing dots) cannot be folded lexically: one lock for the root
       backend.locks(p("/a")) shouldBe Set(LockKey("host", real))
       backend.locks(p("/a")) shouldBe backend.locks(p("/ab"))
+  }
+
+  it should "refuse, in this JVM, a root overlapping an open one, and share the same real root" in {
+    Files.createDirectories(dir.resolve("sub"))
+    HostFileBackend.open(dir.resolve("sub"), locks).left.value.message should include("overlaps")
+    // and one containing an open one: a root whose child is open
+    val base  = Files.createTempDirectory("llm4s-overlap")
+    val child = HostFileBackend.open(Files.createDirectories(base.resolve("child")), locks).value
+    HostFileBackend.open(base, locks).left.value.message should include("overlaps")
+    child.close()
+    HostFileBackend.open(base, locks).value.close()
+    val again = HostFileBackend.open(dir, locks).value // the same real root: shared
+    again.lockFileOf(p("/a.txt")).value shouldBe backend.lockFileOf(p("/a.txt")).value
+    again.close()
+    HostFileBackend.open(dir.resolve("sub"), locks).left.value.message should include("overlaps")
+    backend.close()
+    val nested = HostFileBackend.open(dir.resolve("sub"), locks).value // released: now it may open
+    nested.close()
+    backend = HostFileBackend.open(dir, locks).value
   }
 
   // Replay, through C4's verifiable guard.
@@ -389,15 +406,11 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     Files.delete(outside)
   }
 
-  it should "share one lock file per target with every backend on an overlapping root, and keep it out of reach" in {
-    Files.createDirectories(dir.resolve("sub"))
-    val shared = Files.createTempDirectory("llm4s-locks")
-    val outer  = HostFileBackend.open(dir, shared).value
-    val nested = HostFileBackend.open(dir.resolve("sub"), shared).value
-    outer.lockFileOf(p("/sub/a.txt")).value shouldBe nested.lockFileOf(p("/a.txt")).value
-    outer.lockFileOf(p("/sub/a.txt")).value.getParent shouldBe shared.toRealPath()
-    written(outer.write(p("/a.txt"), "x", call()))
-    Files.list(dir).iterator().asScala.map(_.getFileName.toString).toVector.sorted shouldBe Vector("a.txt", "sub")
+  it should "keep its lock files outside the root" in {
+    written(backend.write(p("/a.txt"), "x", call()))
+    backend.lockFileOf(p("/a.txt")).value.getParent shouldBe locks.toRealPath()
+    Files.list(dir).iterator().asScala.map(_.getFileName.toString).toVector.sorted shouldBe Vector("a.txt")
+    backend.close()
     // a lock directory inside the root is refused: no path of the backend may reach a lock file
     HostFileBackend.open(dir, dir.resolve(".locks")).left.value.message should include("inside the root")
     HostFileBackend.open(dir, dir).left.value.message should include("inside the root")
@@ -405,6 +418,21 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     Files.createDirectories(dir.resolve("ws"))
     val below = HostFileBackend.open(dir.resolve("ws"), dir).value
     written(below.write(p("/stripe-0.lock"), "not a lock file of mine", call())).created shouldBe true
+    below.close()
+    backend = HostFileBackend.open(dir, locks).value
+  }
+
+  "HostFileBackend.probeAliasesWith" should "refuse to guess when another entry already has the probe's short-name prefix" in {
+    val taken = dir.resolve("ABC123~1.PRO")
+    val probe = HostFileBackend.probeAliasesWith(dir, "ABC123", p => p == taken, (_, _) => false)
+    probe.left.value.message should include("ABC123")
+  }
+
+  it should "report an alias found at any of ~1 to ~4, and leave no probe file" in {
+    val probe =
+      HostFileBackend.probeAliasesWith(dir, "ABC123", p => p.getFileName.toString == "ABC123~3.PRO", (_, _) => true)
+    probe.value should have size 1
+    Files.list(dir).iterator().asScala.toVector shouldBe empty
   }
 
   "HostFileBackend.open" should "refuse a file system whose probe finds aliasing it cannot see" in {
