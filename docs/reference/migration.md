@@ -45,9 +45,13 @@ and tools on `AgentBuilder`. Each slice adds its part here as it lands:
 
 - [#1902](https://github.com/llm4s/llm4s/issues/1902), kernel hooks for the harness - state-writing hooks, prompt
   sections, accounted model calls, and a Block that restores the whole turn: [below](#kernel-hooks-for-the-harness-1902).
+- [#1934](https://github.com/llm4s/llm4s/issues/1934), restoring a checkpoint after the graph gains a key - which
+  shape changes keep a thread restorable: [below](#restoring-after-the-graph-changes-1934).
 - [#1903](https://github.com/llm4s/llm4s/issues/1903), tool permissions, timeouts and batch locks:
   [below](#tool-permissions-timeouts-and-batch-locks-1903).
 - [#1907](https://github.com/llm4s/llm4s/issues/1907), todos: [below](#todos-1907).
+- [#1911](https://github.com/llm4s/llm4s/issues/1911), semantic memory - the new `llm4s-agent-memory` module and
+  `TransactionalMemoryStore`: [below](#semantic-memory-1911).
 - [#1914](https://github.com/llm4s/llm4s/issues/1914), typed custom streams: [below](#typed-custom-streams-1914).
 - [#1921](https://github.com/llm4s/llm4s/issues/1921), replay of external effects - `ReplayGuard`, `Checkpointer.effect`
   and `Commit.effects`: [below](#replay-of-external-effects-1921).
@@ -102,6 +106,26 @@ Code that only builds agents with the built-in middleware needs no change. A mid
   rendered prompt, separators included) and to 64 per request, over which the run fails. `LoopAgent` gains `maxPromptSectionTokens` and `TurnState` gains `priorValues`; a stored `TurnState` without
   it decodes.
 
+### Restoring after the graph changes (#1934)
+
+Each checkpoint now records its graph's shape (`GraphSnapshot.shape`, `CompiledGraph.shape`), and a restore accepts the
+changes the restored run cannot observe (design §4.29). No code change is needed; what is refused changes:
+
+- **Now restored:** a thread at rest (`Completed`, or `Failed` after a Block) into a graph of another `version`, with
+  other edges or joins, or more nodes or keys - for an agent, a family with another prompt, or with a tool, middleware
+  or handoff added. Any thread into a graph that only gained keys (each reads its initial value) or gained nodes no
+  stored node has a static edge or join to.
+- **Still refused:** a node removed; a key removed while the thread holds a value for it (finish with the old graph,
+  `Remove` the entry, or `forget` the thread); and, for a thread in flight (suspended, or `Running` after a crash),
+  another version, a stored node's changed out-edges, or a changed join over stored nodes. Resume or recover such a
+  thread with the graph it was written by before changing it.
+- **Snapshots written before this change** carry no shape. They restore into their own version when the graph only
+  gained keys, and are refused for anything else until they run once more.
+- `RestoreRejected` problems name the change; "snapshot's graph structure differs from this graph's" is gone.
+- **Effect records (#1921) stay valid.** A thread restored in flight keeps its task ids, so a task `recover` runs again
+  replays its recorded effects; a refused restore commits nothing and leaves them in place.
+- A harness key that should stay removable `Remove`s its entry when it is empty again: removal is judged by the stored
+  entry, which cannot be decoded once its key is gone.
 ### Tool permissions, timeouts and batch locks (#1903)
 
 Design §4.23. Additive, bar one reserved key: an agent without `PermissionMiddleware`, `withTimeout` or `withLocks` behaves as before.
@@ -109,16 +133,27 @@ Design §4.23. Additive, bar one reserved key: an agent without `PermissionMiddl
 - **`tool-queue` is a key the loop owns.** A tool or middleware that declares a `StateKey` with id `tool-queue` is refused at build, as `tool-results` is. Rename it.
 - **`ToolCallRequest` carries `resources`.** `ToolCallRequest(spec, call)` still compiles and gives the tool's `defaultResource`, `(Invoke, <name>)`; the loop builds every request with the call's own resources. A wrapper that builds one for a tool with `withResources` passes them: `ToolCallRequest(spec, call, resources)`.
 - **`PermissionMiddleware` denies what no rule allows**, a tool without `withResources` included: add `PermissionRule.allow(Operation.Invoke, "<name>")` (or `"*"`) for each tool the agent may call. See [Tool Permissions, Timeouts and Locks](/guide/agents/#tool-permissions-timeouts-and-locks).
-- **Adopting locks reshapes the agent's graph.** The loop registers `tool-queue` only for an agent with a tool that declares `withLocks`, so the first tool to adopt locks changes the agent's structural fingerprint and refuses the threads checkpointed before with `RestoreRejected`: finish or `forget` them first. Once an agent has the key, changing lock functions is safe for threads in flight: a batch keeps the lock schedule it was made with. Agents without locks, timeouts and resources included, restore their existing threads unchanged.
+- **Adopting locks adds the `tool-queue` key.** The loop registers `tool-queue` only for an agent with a tool that declares `withLocks`. Since #1934 an added key keeps old checkpoints restorable, so threads checkpointed before the first tool adopted locks continue, at rest or suspended. Dropping every lock while a suspended thread still has calls queued in `tool-queue` is refused with `RestoreRejected` rather than stranding them: resume such a thread with its locks first. Once an agent has the key, changing lock functions is safe for threads in flight: a batch keeps the lock schedule it was made with. Agents without locks, timeouts and resources included, restore their existing threads unchanged.
 - **Locked calls cost supersteps.** Each further round of a batch whose calls hold conflicting locks costs two supersteps; raise `RunBudgets.maxSupersteps` if a long batch of conflicting calls reaches it.
 
 ### Todos (#1907)
 
 Design §4.30. Additive: `TodoMiddleware` (`org.llm4s.agent.harness`) gives an agent a `write_todos` tool and a plan prompt section.
 
-- **Adding `TodoMiddleware` to an existing agent reshapes its graph.** It registers the `todos` key, and its tool's lock registers `tool-queue`, so the agent's structural fingerprint changes and threads checkpointed before are refused with `RestoreRejected`: finish or `forget` them first. Agents without it are unchanged.
+- **Adding `TodoMiddleware` to an existing agent** registers the `todos` key, and its tool's lock registers `tool-queue`. Since #1934 a thread at rest continues, its plan starting empty. A thread in flight (suspended, or `Running` after a crash) is refused with `RestoreRejected`: resume or recover it with the old agent first. So is a thread last checkpointed before #1934, until it has run once under the agent it was written by. Removing `TodoMiddleware` refuses a thread whose plan holds items. Agents without it are unchanged.
 - **`todos` is a key id the middleware owns.** A `StateKey` of your own with id `todos` in a family that also uses `TodoMiddleware` is refused at build, as two keys with one id are. Rename it.
 - **With `PermissionMiddleware`, allow the tool**: `PermissionRule.allow(Operation.Invoke, "write_todos")`.
+
+### Semantic memory (#1911)
+
+Design §4.31. `SemanticMemoryMiddleware` is in a new module, `llm4s-agent-memory` (package `org.llm4s.agent.harness.memory`); add the dependency to use it. In `llm4s-memory`:
+
+- **`InMemoryStore`, `SQLiteMemoryStore` and `PostgresMemoryStore` are `TransactionalMemoryStore`s.** Nothing changes for code that only stores and recalls. `InMemoryStore` carries its applied writes and fencing tokens in its value, and `clear()` keeps them.
+- **`MemoryStore.replace(add, remove)` is new**, with a default that stores, then deletes; the SQL stores override it as one transaction. A store of your own that writes in place should override it too.
+- **`LLMMemoryManager.consolidateMemories` replaces each group with one `store.replace(Seq(summary), groupIds)`** instead of a store followed by one delete per memory. A store of your own that overrides `store` and `delete` but not `replace` gets the same writes as before, in the same order.
+- **`PostgresMemoryStore.Config.tableName` is at most 55 characters** (was 63), so the names derived from it (`<table>_applied`, `<table>_fences`, the `idx_<table>_...` indexes) stay distinct within PostgreSQL's 63-byte identifier limit. A longer name is refused when the config is built: give the table a shorter name.
+- **SQLite memory files move to schema version 2.** Opening a file creates its two new tables, `memory_applied_writes` and `memory_fences`, and records version 2 beside version 1 in `schema_version`. A Postgres store creates `<table>_applied` and `<table>_fences` beside its table.
+- **Adding `SemanticMemoryMiddleware` to an existing agent** registers the `semantic-memory-recalled` key and changes the agent's version (§4.29). A thread at rest restores, with nothing recalled until its next turn, and restores again if the middleware is removed (the key is cleared at the end of each turn). A thread in flight - suspended, or `Running` after a crash - is refused with `RestoreRejected`: resume or recover it with the old agent first. Agents without it are unchanged.
 
 ### Typed custom streams (#1914)
 
@@ -137,14 +172,16 @@ Effects outside thread state replay through `ReplayGuard`: an intent and an outc
   ```
 
 - **`Commit` gains `effects: Vector[EffectRecord]`**, defaulted in `apply`, so existing calls compile. A store must do three things with it:
-  - Upsert a commit's records by `key`, remembering the commit's token as each record's writer.
-  - On every commit that carries a checkpoint, first remove each record for which `commit.releasesEffect(record.taskId, writer)` holds.
+  - Upsert a commit's records by `key`.
+  - On every commit that carries a checkpoint, first remove each record for which `commit.releasesEffect(record.taskId, record.lineage)` holds.
   - Remove a thread's records in `deleteThread`. Never remove them in `prune`.
 
   Persist records with `EffectRecord.toJson` and read them with `EffectRecord.fromJson`. `CheckpointerContract` gains the cases that check all of this.
 - **`GraphError` gains `EffectReplayRefused(operation, reason)`.** A `match` on `GraphError` that must be exhaustive gains a case.
 - **The SQLite schema moves to version 3** (`llm4s_checkpoint_effects`). A version-2 file is migrated when it is opened. A build from before this change refuses a version-3 file, as it refuses any newer schema.
 - **A `Transactional` target fences itself by the claim token.** `AppliedKeys.forget(key, token)` and the effect given to `ReplayGuard.transactional` (`token => ...`) refuse a token older than the newest seen for `key.scope`. A `Verifiable` target's effect is a compare-and-set against the plan's `before`.
+- **A store keys release by the record's task and lineage.** `Commit.releasesEffect(taskId, lineage)` replaces `releasesEffect(taskId, writer)`; persist `EffectRecord.lineage` with the record (SQLite: schema 4, `task_lineage`), and `PendingWrite.resultDigest` with the write. A store that persists the write's and the snapshot's JSON whole needs no change; the snapshot gains `PendingTask.resumeDigest` and `ParkedContinuation.questionDigest` / `resumeDigest`. `GraphSnapshot.liveTasks` is a set of `(id, lineage)` pairs. The checkpoint format moves to 7 (`PendingTask.lineage`, `originLineage`); format 6 never shipped (v0.4.1 has no graph checkpoints), so a format-6 checkpoint restores with no legacy keys: each task gets a fresh root lineage at admission, and any effect record it wrote is ignored.
+- **A tool call's idempotency key now names the issuing model task and the call itself** (`IdempotencyKey.ofCall`), not the model call's checkpoint: a request asked again that answers with the same call gets the same key. `IdempotencyKey.derive` is removed: the loop no longer uses it, and a test builds a key with `IdempotencyKey("...")`.
 - **`ToolQuestionRequest` gains `phase: Option[IdempotencyKey]`** (defaulted; a stored request without it decodes as `None`). An asking tool's `resume` gets effect keys of its own, distinct from `execute`'s.
 - **New, opt-in API**: `RunContext.taskKey`, `RunContext.effectKey` and `ToolContext.effectKey`; `ReplayGuard` and its `Plan`; `ReplaySupport`, `StateCheck`, `AppliedKeys` and `EffectRecord`; and, in `llm4s-agent-testkit`, `ReplayContract`, which every external target of the harness passes. See [Tool side effects](../guide/agents/#tool-side-effects).
 
@@ -220,7 +257,7 @@ ToolQuestionRequest(messageId, call, question, IdempotencyKey("key-1"))
 
 - **`ToolContext` takes the call's key**, after `toolCallId`: `ToolContext(run, toolCallId, idempotencyKey, state,
   approved)`, with `withIdempotencyKey`. You build one only to unit-test a tool; any key will do there
-  (`IdempotencyKey("test")`, or `IdempotencyKey.derive(threadId, checkpointId, superstep, taskId, toolCallId)`).
+  (`IdempotencyKey("test")`).
 - **`ToolTask`, `ApprovalRequest` and `ToolQuestionRequest` gain `idempotencyKey`** - last in `ApprovalRequest` and
   `ToolTask`, before the defaulted `approved` in `ToolQuestionRequest`. Code that only reads them (`AgentResult`'s
   `Suspended`, `ToolLoop.requests`/`questions`, the Java and Kotlin `PendingInterrupt`) is unchanged.

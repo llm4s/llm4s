@@ -166,7 +166,8 @@ final class GraphBuilder private (val id: String, val version: String):
         new CompiledGraph[I, O](
           id = id,
           version = version,
-          fingerprint = fingerprint(entry, keys),
+          shape = shape(entry, keys),
+          legacy = new LegacyFingerprint(structure(entry), keys.map(_.id.value)),
           owner = owner,
           entry = entry,
           nodes = implemented.toMap,
@@ -187,21 +188,40 @@ final class GraphBuilder private (val id: String, val version: String):
     if (staticJoins.map(_.id) ++ dynamicJoins.map(_.id)).contains(JoinId(joinId)) then
       problems += s"join '$joinId' is declared twice"
 
-  /** A digest of the graph's structure, so a snapshot is not restored into a reshaped graph. */
-  private def fingerprint(entry: NodeRef[?], keys: Vector[StateKey[?, ?]]): String =
-    val structure = Vector(s"graph:$id:$version", s"entry:${entry.id.value}") ++
+  /**
+   * The lines a snapshot's fingerprint digests before its keys: the fingerprint is the hex SHA-256 of these and one
+   * `key:<id>` line per key, sorted ([[LegacyFingerprint]]). Unchanged since §4.2, so snapshots written before graph
+   * shapes were recorded can still be matched.
+   */
+  private def structure(entry: NodeRef[?]): Vector[String] =
+    Vector(s"graph:$id:$version", s"entry:${entry.id.value}") ++
       declared.keys.map(n => s"node:${n.value}").toVector.sorted ++
       edges.map((from, to) => s"edge:${from.value}->${to.value}") ++
       staticJoins.map(j =>
         s"static:${j.id.value}:${j.sources.map(_.value).toVector.sorted.mkString(",")}->${j.target.id.value}"
       ) ++
       dynamicJoins.map(j => s"dynamic:${j.id.value}->${j.target.id.value}") ++
-      resumes.keys.map(n => s"resume:${n.value}").toVector.sorted ++
-      keys.map(k => s"key:${k.id.value}").sorted
-    Sha256.hex(structure.mkString("\n"))
+      resumes.keys.map(n => s"resume:${n.value}").toVector.sorted
+
+  /** The graph's structure as data, recorded in every snapshot so a restore can tell what changed. */
+  private def shape(entry: NodeRef[?], keys: Vector[StateKey[?, ?]]): GraphShape =
+    GraphShape(
+      entry = entry.id.value,
+      nodes = declared.keys.map(_.value).toVector.sorted,
+      edges = edges.toVector.groupMap(_._1.value)(_._2.value),
+      staticJoins = staticJoins.toVector.map(j =>
+        GraphShape.StaticJoin(j.id.value, j.sources.map(_.value).toVector.sorted, j.target.id.value)
+      ),
+      dynamicJoins = dynamicJoins.map(j => j.id.value -> j.target.id.value).toMap,
+      resumes = resumes.keys.map(_.value).toVector.sorted,
+      keys = keys.map(_.id.value).sorted
+    )
 
 object GraphBuilder:
-  /** `version` names the graph's behaviour; bump it when node logic changes incompatibly. */
+  /**
+   * `version` names the graph's behaviour; bump it when node logic changes incompatibly. A snapshot of a run in
+   * flight restores only into its own version; one at rest into any (see [[CompiledGraph.restore]]).
+   */
   def apply(id: String, version: String): GraphBuilder = new GraphBuilder(id, version)
 
 /**

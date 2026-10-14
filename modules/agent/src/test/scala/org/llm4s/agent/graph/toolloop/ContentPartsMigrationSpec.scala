@@ -51,4 +51,31 @@ class ContentPartsMigrationSpec extends AnyFlatSpec with Matchers with EitherVal
     val withImage = ToolResult("7.0/assistant", "c3", Vector(image), isError = false)
     results.decode(results.encode(Vector(withImage))).value shouldBe Vector(withImage)
   }
+
+  "A tool result's parts" should "be digested from their stored encoding, inline bytes as base64 (C4, #1947)" in {
+    import org.llm4s.agent.graph.{ CompiledGraph, EncodedOperation, PendingWrite }
+    def mediaOf(byte: Byte) =
+      ContentPart
+        .image(MediaSource.Inline(IArray.fill[Byte](16)(byte)), MediaType.Png)
+        .fold(e => fail(e.message), identity)
+    def write(byte: Byte) = PendingWrite(
+      "cp",
+      "3.0",
+      "assistant/call-tool",
+      Vector(
+        EncodedOperation.Update(
+          "tool-results",
+          ToolLoop.results.encodeUpdate(ToolResult("2.0/assistant", "c1", Vector(mediaOf(byte)), isError = false))
+        )
+      ),
+      Vector.empty
+    )
+    val stored = write(1)
+    stored.operations.head.asInstanceOf[EncodedOperation.Update].update.value("parts")(0)("source")("data").str shouldBe
+      java.util.Base64.getEncoder.encodeToString(Array.fill[Byte](16)(1))
+    // the digest is of the bytes a store holds: equal across a round trip, different for other media
+    val reread = upickle.default.read[PendingWrite](upickle.default.write(stored))
+    CompiledGraph.writeDigest(reread) shouldBe CompiledGraph.writeDigest(stored)
+    CompiledGraph.writeDigest(write(2)) should not be CompiledGraph.writeDigest(stored)
+  }
 }

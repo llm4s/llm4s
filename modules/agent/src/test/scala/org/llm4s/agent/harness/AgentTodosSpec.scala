@@ -92,6 +92,68 @@ class AgentTodosSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     plain.loop.graph.fingerprint should not be planned.loop.graph.fingerprint
   }
 
+  "An agent's existing thread" should "continue at rest once TodoMiddleware is added, its plan starting empty (§4.29)" in {
+    val store                        = new InMemoryCheckpointer
+    val thread                       = ThreadId("upgraded")
+    def agent(builder: AgentBuilder) = built(builder.withRuntime(GraphRuntime(store)))
+    agent(Agent.builder("assistant", ScriptedLLMClient.of(CompletionFixture.simple("hi")))).run(thread, "q").value
+    store.latest(thread).value.value.checkpoint.snapshot.state.keySet should not contain "todos"
+
+    val client  = ScriptedLLMClient.of(writing("A" -> "pending"), CompletionFixture.simple("planned"))
+    val planned = agent(Agent.builder("assistant", client).withMiddleware(new TodoMiddleware()))
+    planned.run(thread, "plan").value.answer shouldBe Some("planned")
+    val state = planned.loop.graph.restore(store.latest(thread).value.value.checkpoint.snapshot).value.state
+    state.get(TodoMiddleware.key).value.todos.map(_.content) shouldBe Vector("A")
+  }
+
+  it should "be refused by an agent that dropped TodoMiddleware while its plan holds items" in {
+    val store                        = new InMemoryCheckpointer
+    val thread                       = ThreadId("downgraded")
+    def agent(builder: AgentBuilder) = built(builder.withRuntime(GraphRuntime(store)))
+    val client = ScriptedLLMClient.of(writing("A" -> "pending"), CompletionFixture.simple("planned"))
+    agent(Agent.builder("assistant", client).withMiddleware(new TodoMiddleware())).run(thread, "plan").value
+    val refused = agent(Agent.builder("assistant", ScriptedLLMClient.of(CompletionFixture.simple("never"))))
+      .run(thread, "again")
+      .left
+      .value
+    refused shouldBe a[GraphError.RestoreRejected]
+    refused.message should include("'todos' was removed from this graph")
+  }
+
+  it should "be refused in flight, suspended for an approval, by an agent that added TodoMiddleware" in {
+    val store  = new InMemoryCheckpointer
+    val thread = ThreadId("parked")
+    def agent(builder: AgentBuilder) =
+      built(
+        builder
+          .withTools(
+            org.llm4s.agent.SpecTools.set(
+              org.llm4s.agent.SpecTools.tool("echo")((a, _) =>
+                org.llm4s.agent.graph.tool.ToolOutcome
+                  .Success(org.llm4s.agent.graph.tool.ToolContent.Json(ujson.Str(a.text)))
+              )
+            )
+          )
+          .withMiddleware(new org.llm4s.agent.graph.middleware.ApprovalMiddleware(_ => Some("review")))
+          .withRuntime(GraphRuntime(store))
+      )
+    val calling = org.llm4s.agent.SpecTools.calling(org.llm4s.agent.SpecTools.call("c1", "echo"))
+    val parked  = agent(Agent.builder("assistant", ScriptedLLMClient.of(calling))).run(thread, "go").value
+    val answers = parked.status match {
+      case org.llm4s.agent.AgentStatus.Suspended(approvals, _, _, _) => approvals.map(a => parked.approve(a._1)).toMap
+      case other                                                     => fail(s"expected Suspended, got $other")
+    }
+    // the family's version changed: a turn in flight resumes only under the family it started in
+    agent(Agent.builder("assistant", ScriptedLLMClient.of()).withMiddleware(new TodoMiddleware()))
+      .resume(thread, answers)
+      .left
+      .value shouldBe a[GraphError.RestoreRejected]
+    agent(Agent.builder("assistant", ScriptedLLMClient.of(CompletionFixture.simple("done"))))
+      .resume(thread, answers)
+      .value
+      .answer shouldBe Some("done")
+  }
+
   "The guide's Todos example" should "compile and run as written" in {
     val client   = ScriptedLLMClient.of(writing("Outline" -> "pending"), CompletionFixture.simple("report"))
     val threadId = ThreadId("guide")

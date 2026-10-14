@@ -683,6 +683,20 @@ writes, event logs and run claims - in one SQLite file, so a run survives a rest
 in a new process. It brings the SQLite JDBC driver (`org.xerial:sqlite-jdbc`), which `llm4s-agent` itself does
 not depend on. See [Durable Checkpointers](../guide/agents/durable-checkpointers#the-sqlite-store).
 
+### For semantic memory in agents
+
+{: .note }
+> Not yet published. `llm4s-agent-memory` exists in the build as of
+> [#1911](https://github.com/llm4s/llm4s/issues/1911) but ships in the next release.
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-agent-memory" % llm4sVersion // same version as llm4s-agent
+```
+
+`SemanticMemoryMiddleware` (`org.llm4s.agent.harness.memory`) recalls a tenant's memories before each turn and
+records the turn after it, on an `llm4s-memory` store. It depends on `llm4s-agent` and `llm4s-memory`. See
+[Semantic Memory Middleware](../guide/agents/memory#semantic-memory-middleware).
+
 ### For built-in tools (web search, HTTP, filesystem, shell)
 
 {: .note }

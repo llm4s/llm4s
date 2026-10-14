@@ -567,6 +567,10 @@ val result = for {
 } yield context
 ```
 
+`SemanticMemoryMiddleware`, in `llm4s-agent-memory`, recalls a tenant's memories before each turn
+and records the turn after it, safely across `recover`:
+[Semantic Memory Middleware](memory#semantic-memory-middleware).
+
 [Learn more about memory →](memory)
 
 ### [Handoffs](handoffs)

@@ -1221,14 +1221,23 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
 
   // ---- effect records (design §4.24) ----
 
-  /** An effect record of task `taskId` under `key`, as a store reads it back; `completed` with an outcome. */
-  private def effectRecord(key: String, taskId: String, outcome: Option[ujson.Value] = None): EffectRecord =
+  /**
+   * An effect record of the task `taskId` of lineage `lineage` under `key`, as a store reads it back; completed
+   * with `outcome` when one is given.
+   */
+  private def effectRecord(
+    key: String,
+    taskId: String,
+    lineage: String,
+    outcome: Option[ujson.Value] = None
+  ): EffectRecord =
     val json = ujson.Obj(
       "format"    -> EffectRecord.CurrentFormat,
       "key"       -> key,
       "operation" -> "contract.op",
       "scope"     -> "contract-scope",
       "taskId"    -> taskId,
+      "lineage"   -> lineage,
       "intent"    -> ujson.Obj("support" -> "unverifiable")
     )
     outcome.foreach(value => json("outcome") = ujson.Obj("value" -> value))
@@ -1236,19 +1245,32 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
 
   private def keyOf(record: EffectRecord): EffectKey = record.key
 
-  /** A checkpoint at `superstep` whose frontier is `frontier` and whose parked continuations stand in for `parked`. */
+  /**
+   * A checkpoint at `superstep` whose frontier holds the tasks `frontier` and whose parked continuations stand in
+   * for the tasks `parked`, each an id and its lineage.
+   */
   private def liveCheckpoint(
     s: Store,
     id: String,
     parent: Option[String],
     superstep: Int,
-    frontier: Seq[String] = Seq.empty,
-    parked: Seq[String] = Seq.empty,
+    frontier: Seq[(String, String)] = Seq.empty,
+    parked: Seq[(String, String)] = Seq.empty,
     token: Option[FencingToken] = None
   ): Checkpoint =
-    val task = (id: String) => GraphSnapshot.PendingTask(id, "n", VersionedJson(1, ujson.Null), None, None, None, None)
-    val park = (origin: String) =>
-      GraphSnapshot.ParkedContinuation(s"i-$origin", "n", VersionedJson(1, ujson.Null), origin, "n", None, None)
+    val task = (id: String, lineage: String) =>
+      GraphSnapshot.PendingTask(id, "n", VersionedJson(1, ujson.Null), None, None, None, None, lineage = lineage)
+    val park = (origin: String, lineage: String) =>
+      GraphSnapshot.ParkedContinuation(
+        s"i-$origin",
+        "n",
+        VersionedJson(1, ujson.Null),
+        origin,
+        "n",
+        None,
+        None,
+        originLineage = lineage
+      )
     s.checkpoint(id, parent, token)
       .withSnapshot(
         GraphSnapshot(
@@ -1257,10 +1279,10 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
           "f",
           superstep,
           Map.empty,
-          frontier.map(task).toVector,
+          frontier.map(task.tupled).toVector,
           Vector.empty,
           Vector.empty,
-          parked.map(park).toVector,
+          parked.map(park.tupled).toVector,
           false
         )
       )
@@ -1271,45 +1293,45 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
   it should "keep a commit's effect records, upserted by key and readable by key, and refuse a stale writer's" in {
     val s     = Store()
     val token = s.claim("run").value.token
-    s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0")))).value
-    val begun = effectRecord("k1", "0.0")
+    s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0" -> "a")))).value
+    val begun = effectRecord("k1", "0.0", "a")
     s.store.commit(s.thread, Commit(token, effects = Vector(begun))).value shouldBe empty
     same(effects(s, begun), Vector(Some(begun)))
-    val done = effectRecord("k1", "0.0", Some(ujson.Num(7)))
+    val done = effectRecord("k1", "0.0", "a", Some(ujson.Num(7)))
     s.store.commit(s.thread, Commit(token, effects = Vector(done))).value
     same(effects(s, begun), Vector(Some(done)))
-    s.store.effect(s.thread, keyOf(effectRecord("other", "0.0"))).value shouldBe None
+    s.store.effect(s.thread, keyOf(effectRecord("other", "0.0", "a"))).value shouldBe None
     s.store.effect(newThread(), keyOf(begun)).value shouldBe None
 
     // fenced like any commit: nothing of a stale writer's lands
     s.advance(ttl * 2)
     s.claim("taker").value
-    s.store.commit(s.thread, Commit(token, effects = Vector(effectRecord("k2", "0.0")))).refused shouldBe
+    s.store.commit(s.thread, Commit(token, effects = Vector(effectRecord("k2", "0.0", "a")))).refused shouldBe
       a[GraphError.StaleClaim]
-    s.store.effect(s.thread, keyOf(effectRecord("k2", "0.0"))).value shouldBe None
+    s.store.effect(s.thread, keyOf(effectRecord("k2", "0.0", "a"))).value shouldBe None
     same(effects(s, begun), Vector(Some(done)))
   }
 
   it should "release, at a commit with a checkpoint, the records of finished tasks only, judged before its own" in {
     val s     = Store()
     val token = s.claim("run").value.token
-    s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0", "0.1")))).value
-    val finished = effectRecord("finished", "0.0")
-    val parked   = effectRecord("parked", "0.1")
-    val ahead    = effectRecord("ahead", "2.0")
+    s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0" -> "a", "0.1" -> "b")))).value
+    val finished = effectRecord("finished", "0.0", "a")
+    val parked   = effectRecord("parked", "0.1", "b")
+    val ahead    = effectRecord("ahead", "2.0", "c")
     s.store.commit(s.thread, Commit(token, effects = Vector(finished, parked, ahead))).value
     // a commit with no checkpoint releases nothing
     s.commit(token, writes = Vector(s.write("c1", "0.0"))).value
     same(effects(s, finished, parked, ahead), Vector(Some(finished), Some(parked), Some(ahead)))
 
     // superstep 1: 0.0 finished; 0.1 parked, so it is live; 2.0 runs ahead of this commit (Async) and is kept
-    val next = effectRecord("next", "1.0")
+    val next = effectRecord("next", "1.0", "d")
     s.store
       .commit(
         s.thread,
         Commit(
           token,
-          Some(liveCheckpoint(s, "c2", Some("c1"), 1, Seq("1.0"), parked = Seq("0.1"))),
+          Some(liveCheckpoint(s, "c2", Some("c1"), 1, Seq("1.0" -> "d"), parked = Seq("0.1" -> "b"))),
           effects = Vector(next)
         )
       )
@@ -1321,25 +1343,71 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     same(effects(s, parked, ahead, next), Vector(None, None, None))
   }
 
-  it should "release an earlier claim's records that are not live at the next claim's commit, keeping the live" in {
+  it should "keep, through a takeover, the records of work after the last durable checkpoint, until it is planned" in {
+    // the first run went on past its last durable checkpoint (Async or OnExit) and was taken over: its task 5.0
+    // recorded an intent and may still be running. The second run plans that work again; from the same results
+    // it is the same task, and the record must answer for it
     val s     = Store()
     val first = s.claim("first").value.token
-    s.commit(first, Some(liveCheckpoint(s, "c1", None, 4, Seq("4.0")))).value
-    // the first run went on past its last durable checkpoint (Async) and crashed
-    val live   = effectRecord("live", "4.0")
-    val orphan = effectRecord("orphan", "5.0")
-    s.store.commit(s.thread, Commit(first, effects = Vector(live, orphan))).value
-    s.store.release(s.thread, first).value
+    s.commit(first, Some(liveCheckpoint(s, "c1", None, 4, Seq("4.0" -> "a")))).value
+    val recovered = effectRecord("recovered", "4.0", "a")
+    val same5     = effectRecord("same", "5.0", "b")
+    val other5    = effectRecord("other", "5.1", "c")
+    s.store.commit(s.thread, Commit(first, effects = Vector(recovered, same5, other5))).value
+    s.advance(ttl * 2)
     val second = s.claim("second").value.token
-    s.commit(second, Some(liveCheckpoint(s, "c2", Some("c1"), 4, Seq("4.0")))).value
-    same(effects(s, live, orphan), Vector(Some(live), None))
+    s.commit(second, Some(liveCheckpoint(s, "c2", Some("c1"), 4, Seq("4.0" -> "a")))).value
+    same(effects(s, recovered, same5, other5), Vector(Some(recovered), Some(same5), Some(other5)))
+    // the first run's late writes are refused: nothing of it lands after the takeover
+    s.store.commit(s.thread, Commit(first, effects = Vector(same5))).refused shouldBe a[GraphError.StaleClaim]
+    // the second run's plan is durable: 5.0 is the same task, 5.1 was planned as other work, which the record
+    // can never answer for, since the superstep that scheduled 5.1 never runs again
+    s.commit(second, Some(liveCheckpoint(s, "c3", Some("c2"), 5, Seq("5.0" -> "b", "5.1" -> "z")))).value
+    same(effects(s, recovered, same5, other5), Vector(None, Some(same5), None))
+  }
+
+  it should "release at a takeover's settled checkpoint the records a stale claimant made at later supersteps" in {
+    // the first run went past its last durable checkpoint to superstep 7 (Async or OnExit) and was taken over;
+    // the second run took a shorter path and settled at superstep 5. A settled thread is never recovered or
+    // resumed, so no task can look up those records again, whatever superstep scheduled them
+    for status <- Seq(CheckpointStatus.Completed, CheckpointStatus.Failed) do
+      val s     = Store()
+      val first = s.claim("first").value.token
+      s.commit(first, Some(liveCheckpoint(s, "c1", None, 4, Seq("4.0" -> "a")))).value
+      val ahead = Seq(
+        effectRecord("five", "5.0", "b"),
+        effectRecord("six", "6.0", "c", Some(ujson.Str("out"))),
+        effectRecord("seven", "7.0", "d")
+      )
+      s.store.commit(s.thread, Commit(first, effects = ahead.toVector)).value
+      s.advance(ttl * 2)
+      val second = s.claim("second").value.token
+      s.commit(second, Some(liveCheckpoint(s, "c2", Some("c1"), 4, Seq("4.0" -> "a")))).value
+      same(effects(s, ahead*), ahead.toVector.map(Some(_)))
+      s.commit(second, Some(liveCheckpoint(s, "c3", Some("c2"), 5).withStatus(status))).value
+      withClue(s"at a $status checkpoint: ")(same(effects(s, ahead*), Vector(None, None, None)))
+  }
+
+  it should "release at a run's single exit commit what its tasks recorded, keeping a parked one's (OnExit)" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0" -> "a")))).value
+    val zero  = effectRecord("zero", "0.0", "a")
+    val one   = effectRecord("one", "1.0", "b")
+    val asked = effectRecord("asked", "2.0", "c")
+    s.store.commit(s.thread, Commit(token, effects = Vector(zero, one, asked))).value
+    // the run's intermediate checkpoints were never written: its exit commit suspends at superstep 3
+    val exit = liveCheckpoint(s, "c4", Some("c1"), 3, parked = Seq("2.0" -> "c"))
+      .withStatus(CheckpointStatus.Suspended)
+    s.commit(token, Some(exit)).value
+    same(effects(s, zero, one, asked), Vector(None, None, Some(asked)))
   }
 
   it should "keep effect records through prune, whatever the policy, and across a close and reopen" in {
     val s     = Store()
     val token = s.claim("run").value.token
-    s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0")))).value
-    val record = effectRecord("k", "0.0", Some(ujson.Str("out")))
+    s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0" -> "a")))).value
+    val record = effectRecord("k", "0.0", "a", Some(ujson.Str("out")))
     s.store.commit(s.thread, Commit(token, effects = Vector(record))).value
     s.advance(400.days)
     s.store.prune(s.thread, RetentionPolicy().withMaxAge(1.second).withMaxCheckpoints(1).withMaxEvents(0)).value
@@ -1353,10 +1421,11 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     // a Block closes the run Failed while a sibling of its superstep parked: nothing can run that sibling again
     val s     = Store()
     val token = s.claim("run").value.token
-    s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0", "0.1")))).value
-    val parked = effectRecord("parked", "0.1")
+    s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0" -> "a", "0.1" -> "b")))).value
+    val parked = effectRecord("parked", "0.1", "b")
     s.store.commit(s.thread, Commit(token, effects = Vector(parked))).value
-    val closing = liveCheckpoint(s, "c2", Some("c1"), 1, parked = Seq("0.1")).withStatus(CheckpointStatus.Failed)
+    val closing =
+      liveCheckpoint(s, "c2", Some("c1"), 1, parked = Seq("0.1" -> "b")).withStatus(CheckpointStatus.Failed)
     s.store.commit(s.thread, Commit(token, Some(closing), retractTurn = true)).value
     same(effects(s, parked), Vector(None))
   }
@@ -1365,30 +1434,30 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     // an effect-only commit on a fresh claim, then the claim released: the thread holds only the record
     val s      = Store()
     val first  = s.claim("first").value.token
-    val record = effectRecord("orphan", "0.0")
+    val record = effectRecord("orphan", "0.0", "a")
     s.store.commit(s.thread, Commit(first, effects = Vector(record))).value
     s.store.release(s.thread, first).value
     same(effects(s, record), Vector(Some(record)))
     s.reopened()
     same(effects(s, record), Vector(Some(record)))
-    // the next claim's first checkpoint does not hold its task live, and another claim wrote it: released
+    // the next claim's first checkpoint schedules 0.0 as a task of its own lineage: the record answers for none
     val next = s.claim("next").value.token
-    s.commit(next, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.1")))).value
+    s.commit(next, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0" -> "b")))).value
     same(effects(s, record), Vector(None))
   }
 
   it should "remove a thread's effect records with the thread, so a new thread of its id has none" in {
     val s     = Store()
     val token = s.claim("run").value.token
-    s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0"))), events = Vector(s.event("e"))).value
-    val record = effectRecord("k", "0.0")
+    s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0" -> "a"))), events = Vector(s.event("e"))).value
+    val record = effectRecord("k", "0.0", "a")
     s.store.commit(s.thread, Commit(token, effects = Vector(record))).value
     s.store.deleteThread(s.thread, token).value
     s.store.effect(s.thread, keyOf(record)).value shouldBe None
     // and a thread that numbered no event, which leaves no tombstone
     val bare      = newThread()
     val bareToken = s.claim("bare", bare).value.token
-    s.commit(bareToken, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0"))), on = bare).value
+    s.commit(bareToken, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0" -> "a"))), on = bare).value
     s.store.commit(bare, Commit(bareToken, effects = Vector(record))).value
     s.store.deleteThread(bare, bareToken).value
     s.store.effect(bare, keyOf(record)).value shouldBe None
@@ -1588,6 +1657,60 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     admitted.collect { case Left(error) => error }.foreach(_ shouldBe a[GraphError.ThreadBusy])
     gate.countDown()
     completed(admitted.collectFirst { case Right(handle) => handle }.value) shouldBe Vector("x")
+  }
+
+  /**
+   * Graph `contract-evolving`: `plan` logs its input and suspends at `approve` for `ask`; `approve` logs the answer.
+   * `gained` adds key `tally`, which `plan` and `approve` read, and a node nothing reaches; `dropped` removes `log`.
+   */
+  private def evolving(gained: Boolean = false, dropped: Boolean = false) =
+    val log     = StateKey.appending[String]("log")
+    val tally   = StateKey.replace[Int]("tally", 41)
+    val b       = GraphBuilder("contract-evolving", "v1")
+    val logs    = if dropped then Set.empty[StateKey[?, ?]] else Set[StateKey[?, ?]](log)
+    val approve = b.declareResume[String, String]("approve")
+    def logged(state: ThreadState, line: String): StateUpdate =
+      if dropped then StateUpdate.empty
+      else StateUpdate.update(log, if gained then s"$line/${state.get(tally).getOrElse(-1)}" else line)
+    if gained then
+      b.stateKey(tally)
+      b.node[Unit]("unreached")((_, _, _) => NodeResult.Continue(Command.empty))
+    b.implement(approve.node, writes = logs)((resumed, state, _) =>
+      NodeResult.Continue(Command(logged(state, s"approved:${resumed.answer}"), Nil))
+    )
+    val plan = b.node[String]("plan", writes = logs) { (input, state, _) =>
+      if input == "ask" then NodeResult.Suspend(logged(state, input), input, approve)
+      else NodeResult.Continue(Command(logged(state, input), Nil))
+    }
+    b.compile(plan)(state => if dropped then Right(Vector.empty[String]) else state.get(log)).value -> approve
+
+  it should "restore its threads, across a reopen, into a graph that gained a key and a node it cannot reach" in {
+    val s            = Store()
+    val (before, _)  = evolving()
+    val (after, ask) = evolving(gained = true)
+    val waiting      = newThread()
+    completed(GraphRuntime(s.store).start(s.thread, before, "hello", config("first")).value) shouldBe Vector("hello")
+    outcome(GraphRuntime(s.store).start(waiting, before, "ask", config("ask")).value).value shouldBe
+      a[RunResult.Suspended]
+    s.store.latest(s.thread).value.value.checkpoint.snapshot.shape shouldBe Some(before.shape)
+
+    val reopened = GraphRuntime(s.reopened())
+    completed(reopened.start(s.thread, after, "again", config("second")).value) shouldBe Vector("hello", "again/41")
+    completed(
+      reopened.resume(waiting, after, Map(InterruptId("0.0") -> ask.answer("yes")), config("resumed")).value
+    ) shouldBe
+      Vector("ask", "approved:yes/41")
+    s.store.latest(s.thread).value.value.checkpoint.snapshot.shape shouldBe Some(after.shape)
+  }
+
+  it should "refuse a thread to a graph that removed a key the thread holds a value for, leaving it unchanged" in {
+    val s           = Store()
+    val (before, _) = evolving()
+    completed(GraphRuntime(s.store).start(s.thread, before, "hello", config("first")).value)
+    val latest = s.latestId()
+    GraphRuntime(s.reopened()).start(s.thread, evolving(dropped = true)._1, "again", config("second")).refused shouldBe
+      a[GraphError.RestoreRejected]
+    s.latestId() shouldBe latest
   }
 
   it should "delete nothing through a runtime whose claim another runtime took over before the delete" in {

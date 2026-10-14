@@ -709,10 +709,11 @@ object ToolLoop:
 
     /**
      * [[ToolLoop.queue]], when a tool of any agent of the family declares locks; otherwise the key is not
-     * part of the graph, so a family without locks keeps the structural fingerprint it had before locks
-     * existed, and restores the checkpoints written then. It is decided for the family, not per agent, so
-     * every agent reads a stored schedule whenever the graph has the key: an agent rebuilt without its
-     * locks still drains a batch scheduled with them.
+     * part of the graph. Adopting locks adds the key, which a thread checkpointed before reads as an empty
+     * schedule; dropping every lock removes it, which refuses a thread whose stored schedule still holds
+     * queued calls rather than stranding them (design §4.29). It is decided for the family, not per agent,
+     * so every agent reads a stored schedule whenever the graph has the key: an agent rebuilt without its
+     * locks still drains a batch scheduled with them while another agent keeps the key.
      */
     def queueKey: Option[StateKey[LockSchedule, LockSchedule]] = Option.when(familyLocks)(queue)
 
@@ -1580,11 +1581,8 @@ object ToolLoop:
    */
   private def issued(messageId: String, call: ToolCall, context: RunContext): ToolTask =
     val at = context.position
-    ToolTask(
-      messageId,
-      call,
-      IdempotencyKey.derive(at.threadId, at.checkpointId, at.superstep, at.taskId, ToolCallId(call.id))
-    )
+    // the model task's identity, lineage included, so the same work issues the same keys (design §4.24)
+    ToolTask(messageId, call, IdempotencyKey.ofCall(at.threadId, context.taskKey, call))
 
   /**
    * Runs `body`, returning what it throws as `Left`: a NonFatal exception, or a bare
@@ -1788,7 +1786,13 @@ object ToolLoop:
                   outsideSchedule(tool, task, request.call, args, state, context).getOrElse {
                     // an answered resume is a phase of the call of its own: its effects never replay `execute`'s
                     val phase =
-                      IdempotencyKey.ofResume(request.idempotencyKey, request.phase, request.question, answer)
+                      IdempotencyKey.ofResume(
+                        request.idempotencyKey,
+                        request.phase,
+                        // recorded with the continuation when the answer was applied; a resume without one is
+                        // never the same phase as another
+                        context.resumeDigest.getOrElse(s"unrecorded:${java.util.UUID.randomUUID()}")
+                      )
                     val toolContext = ToolContext.resuming(
                       answering(agent, context, request.answered),
                       ToolCallId(request.call.id),

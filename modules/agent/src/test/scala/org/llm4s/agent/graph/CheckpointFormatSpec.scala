@@ -223,7 +223,55 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     migrated.fencingToken shouldBe Some(FencingToken(7L))
     migrated.snapshot.frontier.head.passedBefore shouldBe false
     migrated.snapshot.frontier.head.replay shouldBe None
-    Checkpoint.CurrentFormat shouldBe 6
+    Checkpoint.CurrentFormat shouldBe 7
+  }
+
+  it should "read a format-6 checkpoint, written before task lineages, with every task of an empty lineage" in {
+    val b   = GraphBuilder("g", "v1")
+    val n   = b.node[Unit]("n")((_, _, _) => NodeResult.Continue(Command.empty))
+    val g   = b.compile(n)(_ => Right(())).value
+    val now = g.snapshot(g.start(())).value
+    val json = Checkpoint.toJson(
+      Checkpoint(Checkpoint.CurrentFormat, "c", None, "t", "r", CheckpointStatus.Running, Instant.EPOCH, now)
+    )
+    json("formatVersion") = 6
+    json("snapshot")("frontier").arr.foreach(t => t.obj.remove("lineage"): Unit)
+    val read = Checkpoint.fromJson(json).value
+    read.formatVersion shouldBe 7
+    read.snapshot.frontier.map(_.lineage) shouldBe Vector("")
+    val restored = g.restore(read.snapshot).value
+    restored.frontier.map(_.lineage) shouldBe Vector(Task.Unstamped)
+    // format 6 never shipped, so its task is stamped like one of a fresh run: a root lineage of the claim
+    restored.stampedBy(3L).frontier.map(_.lineage) shouldBe Vector(Task.rootLineage(3L, TaskId("0.0")))
+  }
+
+  it should "give a continuation or question saved without its identity one of its stored encoding" in {
+    val b      = GraphBuilder("g", "v1")
+    val review = b.declareResume[String, String]("review")
+    b.implement(review.node)((_, _, _) => NodeResult.Continue(Command.empty))
+    val act = b.node[Unit]("act")((_, _, _) => NodeResult.Suspend(StateUpdate.empty, "ok?", review))
+    val g   = b.compile(act)(_ => Right(())).value
+    val parked = g.step(ThreadId("t"), g.start(()), RunConfig()) match
+      case Step.Next(next) => next
+      case other           => fail(s"did not step: $other")
+    val saved = g.snapshot(parked).value
+    saved.parked.head.questionDigest shouldBe defined
+    val question = saved.parked.head.question
+    g.restore(saved.copy(parked = saved.parked.map(_.copy(questionDigest = None))))
+      .value
+      .parked
+      .head
+      .questionDigest shouldBe
+      Some(CompiledGraph.questionDigest(Some(question)))
+    val resumed = g.resume(parked, Map(InterruptId("0.0") -> review.answer("yes"))).value
+    val pending = g.snapshot(resumed).value
+    pending.frontier.head.resumeDigest shouldBe resumed.frontier.head.resumeDigest
+    pending.frontier.head.resumeDigest shouldBe defined
+    g.restore(pending.copy(frontier = pending.frontier.map(_.copy(resumeDigest = None))))
+      .value
+      .frontier
+      .head
+      .resumeDigest shouldBe Some(CompiledGraph.storedDigest(pending.frontier.head.input))
   }
 
   it should "round-trip the terminal Failed status" in {
@@ -245,8 +293,8 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "refuse a format it does not know" in {
-    val newer = ujson.Obj("formatVersion" -> 7, "id" -> "x")
-    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(7, Checkpoint.CurrentFormat)
+    val newer = ujson.Obj("formatVersion" -> 8, "id" -> "x")
+    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(8, Checkpoint.CurrentFormat)
     Checkpoint.fromJson(ujson.Obj("id" -> "x")).left.value shouldBe
       GraphError.UnsupportedCheckpointFormat(0, Checkpoint.CurrentFormat)
   }

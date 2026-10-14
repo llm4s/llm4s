@@ -179,7 +179,7 @@ class BlockSpec extends AnyFlatSpec with Matchers with EitherValues with OptionV
     val checkpoint = store.latest(thread).value.value.checkpoint
 
     checkpoint.formatVersion shouldBe Checkpoint.CurrentFormat
-    Checkpoint.CurrentFormat shouldBe 6
+    Checkpoint.CurrentFormat shouldBe 7
     Checkpoint.fromJson(Checkpoint.toJson(checkpoint)).value shouldBe checkpoint
   }
 }

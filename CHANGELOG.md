@@ -18,6 +18,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ToolOutcome.Success(ToolContent.Parts(...))`. `llm4s-provider-testkit` gains `assertContentParts` and
   `ContentPartCase`, which every chat provider module's spec runs. `llm4s-core` now depends on `llm4s-media`, which
   has no dependency. Design record: `docs/design/typed-agent-runtime/4.27-stage-3-slice-f8b-multimodal-content-parts.md`.
+- **Phase 3 C4 follow-ups: retention against takeover admission, and one-to-one key encoding** ([#1921](https://github.com/llm4s/llm4s/issues/1921)).
+  - A task's identity for its effects is now its id and its lineage: a digest of what scheduled it, namely the
+    previous superstep's tasks and their results (`PendingTask.lineage`, checkpoint format 7). Work that a takeover
+    plans again after the last durable checkpoint (`Async`, `OnExit`) keeps its identity when planned from the same
+    results, so it replays the first plan's evidence instead of repeating its effect. Planned from other results,
+    it is a new task.
+  - A commit releases an effect record only when its task is provably settled (`Commit.releasesEffect(taskId,
+    lineage)`): not live, and scheduled no later than the new durable checkpoint. A settled (`Completed` or
+    `Failed`) checkpoint releases every record, ahead-of-checkpoint ones included. A takeover's admission no longer
+    releases the evidence of a stale claimant's in-flight effect.
+  - SQLite schema 4 adds `task_lineage`.
+  - A pending write records its result's digest (`PendingWrite.resultDigest`), from which its successors' lineage
+    is computed. A recovery that reuses a write made by an older codec therefore keeps its successors' keys.
+    A resume's identity is likewise taken when its answer is applied and kept with the continuation
+    (`PendingTask.resumeDigest`, `ParkedContinuation.questionDigest`), so no identity digest is recomputed from a
+    decoded value.
+  - The loop records a tool call's `IdempotencyKey` from the issuing model task's key, lineage included, and the
+    call's id, name and arguments (`IdempotencyKey.ofCall`), so a model request asked again from the same results
+    that answers alike issues the same keys.
+    `IdempotencyKey.derive` is removed. Format 6 never shipped: a format-6 task restores with a fresh root lineage,
+    and its effect records are ignored.
+  - Key and `StateCheck` hashing encode unpaired surrogates one-to-one. Well-formed text hashes as before.
+- **Semantic memory for agents: the new `llm4s-agent-memory` module and `SemanticMemoryMiddleware`**
+  ([#1911](https://github.com/llm4s/llm4s/issues/1911)). This is Phase 3 slice F7 (design §4.31).
+  - Before each turn the middleware recalls what earlier threads of the same tenant recorded
+    (`getRelevantContext`, cut to `MemoryRecall.maxRecallTokens`) and shows it to every model call of the turn as a
+    prompt section; after the turn it records the exchange through the manager, and with `MemoryConsolidation` it
+    replaces groups of old memories with a summary.
+  - The store is resolved once per tenant (`stores: Option[TenantId] => Result[MemoryStore]`) and held in one
+    serialised cell per tenant; no two tenants may share a store instance. The manager gets the run's accounted
+    client, so an `LLMMemoryManager`'s calls count in `usage`.
+  - Each recording and each consolidation group is one C4 effect (`memory.record`, `memory.consolidate`): on a
+    `TransactionalMemoryStore` a replay after a crash returns the recorded outcome, so `recover` never records a
+    turn twice or resurrects a consolidated memory. Each write keeps the tenant's store within `MemoryBounds`
+    (`maxMemories`, `maxBytes`) by eviction in the same transaction.
+  - Durable events `MemoryEvents.Recorded`, `Consolidated` and `Skipped` carry counts and names only.
+- **`TransactionalMemoryStore` in `llm4s-memory`** ([#1911](https://github.com/llm4s/llm4s/issues/1911)):
+  `applyAtomically(key, token, add, remove, bounds)`, `appliedWrite`, `forgetApplied` and `appliedWriteCount`,
+  fenced by a token per scope, with `AppliedWriteKey`, `AppliedWrite` and `MemoryBounds`. `InMemoryStore`,
+  `SQLiteMemoryStore` and `PostgresMemoryStore` implement it. `MemoryStore.replace(add, remove)` is new, one
+  transaction in the SQL stores.
+  - `PostgresMemoryStore.Config.tableName` is now at most 55 characters (was 63), so the derived names
+    `<table>_applied`, `<table>_fences` and the `idx_<table>_...` indexes stay distinct within PostgreSQL's 63-byte
+    identifier limit, which truncates silently.
+- **A checkpoint restores after its graph gains a key** ([#1934](https://github.com/llm4s/llm4s/issues/1934), Stage 3
+  slice C5, design §4.29): every `GraphSnapshot` now records its graph's `GraphShape` (entry, nodes, edges, joins,
+  resume nodes, keys; `CompiledGraph.shape`), and `CompiledGraph.restore` judges a shape change by what the restored
+  run can observe instead of refusing any change of the structural fingerprint. A key added reads its initial value; a
+  key removed is refused only while the thread holds a value for it; a node is never removed. A snapshot in flight
+  (pending tasks, parked continuations, open joins) also needs the same version, unchanged out-edges for every stored
+  node and unchanged joins over stored nodes, so a node added is one the restored run cannot reach. A snapshot written
+  before this change (`shape` absent) restores into its own version when the graph only gained keys.
 - **Replay of external effects: `ReplayGuard`, `EffectKey` and `ReplayContract`** ([#1921](https://github.com/llm4s/llm4s/issues/1921)).
   This is Phase 3 slice C4. A tool or hook performs an effect outside thread state through `ReplayGuard`, which has
   one guard per `ReplaySupport`: `transactional` (the target records an applied key atomically, `AppliedKeys`),
@@ -1394,6 +1446,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking - `ToolOutcome.Success` takes a `ToolContent`** ([#1913](https://github.com/llm4s/llm4s/issues/1913)):
   `ToolOutcome.Success(ToolContent.Json(value))` for what was `ToolOutcome.Success(value)`, or
   `ToolContent.Parts(parts)` for images and documents. No shim. `AgentTool.fromToolFunction` returns `Json`.
+- **A completed thread restores into a new graph version** ([#1934](https://github.com/llm4s/llm4s/issues/1934)):
+  `GraphRuntime.start` on a `Completed` or `Failed` thread keeps only its state, so it no longer refuses the thread
+  when the graph's `version` or edges changed, or when it gained nodes or keys. For an agent, a thread at rest now
+  continues after its family gains a prompt, tool, middleware or handoff; a suspended or `Running` thread still needs
+  the same family. `RestoreRejected` problems now name the change (a removed node or key, a stored node's changed
+  out-edges, a changed join) instead of "snapshot's graph structure differs from this graph's". Adopting
+  `withLocks` (#1903) no longer refuses an agent's existing threads: `tool-queue` is an added key; dropping every
+  lock refuses only a thread whose `tool-queue` still holds queued calls.
 - **Breaking - claim errors carry typed fields, and `ThreadBusy` is recoverable and says whether its holder is live** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   `GraphError.StaleClaim(threadId, token, current)` takes `token: FencingToken` and `current: Option[FencingToken]`
   (was `Long`/`Option[Long]`), and `GraphError.ThreadBusy(threadId, latestCheckpoint, holder)` takes
