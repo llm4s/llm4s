@@ -328,6 +328,12 @@ sbt testMcpReference
 
 If your test fails in CI but not locally, it is usually a **non-determinism issue**.
 
+The jobs of `.github/workflows/ci.yml` start together; none waits for another. `Quick Checks` (formatting,
+scalafix, compile and the build's policy checks) runs beside `Test` (ubuntu and Windows), `Performance tests`,
+the four `Code Coverage (<leg>)` jobs and the rest, and `All Tests Pass`, the check a merge needs, waits for all
+of them. Coverage floors are enforced per module in the coverage legs; see
+[Test Coverage](test-coverage#what-ci-runs).
+
 ---
 
 ## 11. When to Add or Update Tests
