@@ -670,7 +670,8 @@ private[util] object RedactionScanner {
      * a pair's (after `=`). Returns the index after it.
      */
     private def readValue(v: Int, field: Boolean, quote: String, key: String): Int =
-      if (v >= n) { if (!field) open(v, OpenPair, 0); v }
+      // nothing after the key but the end of this level: the value may follow the string's close (`"x={'k': "v"}"`)
+      if (v >= n) { open(v, OpenPair, 0); v }
       else if (placeholderAt(v)) v + ph.length
       else if (t.stringEnd(v) >= 0 && !field && t.closed(v) && colonAfter(t.stringEnd(v))) v // the next field's key
       else if (t.stringEnd(v) >= 0 && (field || !gluedString(v))) stringValue(v, key, field)
