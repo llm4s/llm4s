@@ -18,9 +18,9 @@ import scala.util.{ Try, Using }
  * within one process the waiting is done here, in order, and SQLite's lock is free when a store asks for it -
  * unless another process holds it.
  *
- * Gates are shared by path - the real path of the file's directory and the file's name - and counted, so the gate
- * goes once the last store using it has closed. Stores that reach one file through different names (a hard link)
- * get different gates and fall back on SQLite's polling.
+ * Gates are shared by the file's real path - symbolic links, `.` and `..` resolved - and counted, so the gate goes
+ * once the last store using it has closed. Stores that reach one file through a hard link, or through a copy of
+ * this class from another classloader, get different gates and fall back on SQLite's polling.
  */
 final private[sqlite] class WriteGate private (val key: Path):
   private val lock  = new ReentrantLock(true)
@@ -58,13 +58,17 @@ private[sqlite] object WriteGate:
   private[sqlite] def of(path: Path): Option[WriteGate] = synchronized(gates.get(keyOf(path)))
 
   /**
-   * The file's directory by its real path, so `/var/...` and `/private/var/...` on macOS, or a relative and an
-   * absolute path, name one gate; the file itself may not exist yet, so its name is taken as given.
+   * The file's real path, so a symbolic link, `/var/...` and `/private/var/...` on macOS, or a relative and an
+   * absolute path, name one gate. A store acquires its gate after its connection opened, and SQLite creates the
+   * file on open, so it exists; if it does not, the real path of its directory and its name as given.
    */
   private def keyOf(path: Path): Path =
     val absolute = path.toAbsolutePath.normalize
-    Option(absolute.getParent)
-      .flatMap(dir => Try(dir.toRealPath().resolve(absolute.getFileName)).toOption)
+    Try(absolute.toRealPath()).toOption
+      .orElse(
+        Option(absolute.getParent)
+          .flatMap(dir => Try(dir.toRealPath().resolve(absolute.getFileName)).toOption)
+      )
       .getOrElse(absolute)
 
   final private class Unlock(lock: ReentrantLock) extends AutoCloseable:

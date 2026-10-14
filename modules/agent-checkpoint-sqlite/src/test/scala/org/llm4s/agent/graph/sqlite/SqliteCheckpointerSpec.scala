@@ -860,7 +860,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       SqliteCheckpointer.openWith(db, ManualClock(start), SqliteCheckpointerConfig(2.seconds), slowDisk).value
     exec(db, "CREATE TRIGGER slow_disk AFTER INSERT ON llm4s_checkpoint_events BEGIN SELECT test_hold(); END")
     val thread  = ThreadId("steady")
-    val token   = writer.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val token   = writer.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     val written = new LinkedBlockingQueue[Either[LLMError, Int]]()
     Thread.ofPlatform().start { () =>
       // back to back until the prune is done - and for long past the prune's busy timeout if it never is
@@ -883,13 +883,12 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
   "The stores of one process" should "share one write gate per file, however its path is spelled, until the last closes" in {
     val db       = SqliteFiles.fresh()
     val absolute = SqliteFiles.opened(db, ManualClock(start))
-    // the same file by a relative path, and through `..`
-    val relative = SqliteFiles.opened(Path.of("").toAbsolutePath.relativize(db), ManualClock(start))
-    val dotted = SqliteFiles.opened(
-      db.getParent.resolve("..").resolve(db.getParent.getFileName).resolve(db.getFileName),
-      ManualClock(start)
-    )
-    val gate = WriteGate.of(db).value
+    // the same file through `.` and through `..`, spellings that stay on the file's own root on every OS
+    val dir = db.getParent
+    Files.createDirectories(dir.resolve("sub"))
+    val relative = SqliteFiles.opened(dir.resolve(".").resolve(db.getFileName), ManualClock(start))
+    val dotted   = SqliteFiles.opened(dir.resolve("sub").resolve("..").resolve(db.getFileName), ManualClock(start))
+    val gate     = WriteGate.of(db).value
     WriteGate.of(relative.path).value shouldBe theSameInstanceAs(gate)
     WriteGate.of(dotted.path).value shouldBe theSameInstanceAs(gate)
     WriteGate.of(SqliteFiles.fresh()) shouldBe None
@@ -905,11 +904,24 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     WriteGate.of(db) shouldBe None
   }
 
+  it should "share the gate of a file reached through a symbolic link" in {
+    val db   = SqliteFiles.fresh()
+    val link = db.getParent.resolve("link.db")
+    // a link needs a privilege on Windows: skip where it cannot be made
+    assume(Try(Files.createSymbolicLink(link, db)).isSuccess)
+    val direct = SqliteFiles.opened(db, ManualClock(start))
+    val linked = SqliteFiles.opened(link, ManualClock(start))
+    WriteGate.of(link).value shouldBe theSameInstanceAs(WriteGate.of(db).value)
+    direct.close()
+    linked.close()
+    WriteGate.of(db) shouldBe None
+  }
+
   "A write" should "fail changing nothing when the process's other stores hold the file past its busy timeout" in {
     val db     = SqliteFiles.fresh()
     val store  = SqliteCheckpointer.open(db, ManualClock(start), SqliteCheckpointerConfig(100.millis)).value
     val thread = ThreadId("gated")
-    val token  = store.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     // the gate held, as another store's write holds it
     val failed = WriteGate.of(db).value.holding(1.minute) {
       val result = new LinkedBlockingQueue[Either[LLMError, Vector[EventRecord]]]()
@@ -930,7 +942,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val db     = SqliteFiles.fresh()
     val store  = SqliteFiles.opened(db, ManualClock(start))
     val thread = ThreadId("interrupted")
-    val token  = store.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     val result = new LinkedBlockingQueue[(Either[LLMError, Vector[EventRecord]], Boolean)]()
     // interrupted before it asks for the gate, so the wait for its turn ends at once
     Thread.ofPlatform().start { () =>

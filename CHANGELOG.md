@@ -2913,7 +2913,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a file's write lock. Its busy handler sleeps and tries again, and gets the lock only if it wakes in a gap between
   the other connection's transactions. When a store commits back to back on a slow disk, those gaps are microseconds
   wide, so a short `prune` or `commit` could wait out its whole `busyTimeout` and fail with `SQLITE_BUSY`. This
-  happened in CI on Windows. The stores in one JVM that open the same file (by any spelling of its path) now take
+  happened in CI on Windows. The stores in one JVM that open the same file (by any spelling of its path, symbolic links included) now take
   turns through a fair lock for that file before each write transaction and before an open's migration. A write
   waits for the writes queued ahead of it, up to `busyTimeout`, and fails with a `ProcessingError` naming the busy
   file if they take longer. It then waits up to `busyTimeout` again for SQLite's lock, which another process may
