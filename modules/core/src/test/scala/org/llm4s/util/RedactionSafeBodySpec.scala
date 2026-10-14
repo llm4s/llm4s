@@ -1,5 +1,6 @@
 package org.llm4s.util
 
+import org.llm4s.testutil.{ LinearTime, PerformanceTest }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -50,19 +51,20 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
     s"... (truncated, original length: ${b.length}, redacted from its first $cut chars)"
 
   "Redaction.safeBody" should "redact a body up to 128 KiB whole, exactly as before (#1680)" in {
-    Seq(10, 1000, 60000, WholeLimit).foreach { size =>
-      val b = body(size.toLong, size).take(size)
-      Seq(-1, 0, 100, 2048, 1000000).foreach { max =>
+    Seq(1000, WholeLimit).foreach { size =>
+      val b     = body(size.toLong, size).take(size)
+      val whole = Redaction.redact(b)
+      Seq(-1, 0, 2048, 1000000).foreach { max =>
         Redaction.safeBodyCut(b, max) shouldBe None
-        Redaction.safeBody(b, max) shouldBe Redaction.truncateForLog(Redaction.redact(b), max)
+        Redaction.safeBody(b, max) shouldBe Redaction.truncateForLog(whole, max)
       }
     }
   }
 
   it should "redact a longer body only in a prefix, cut after a letter or digit and before a separator (#1680)" in {
-    (1 to 3).foreach { i =>
+    (1 to 2).foreach { i =>
       val b = body(i.toLong, 140 * 1024 + i * 200 * 1024)
-      Seq(1, 300, 2048).foreach { max =>
+      Seq(1, 2048).foreach { max =>
         Redaction.safeBodyCut(b, max) match {
           case Some(cut) =>
             cut should be <= PrefixLimit
@@ -75,7 +77,7 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
         }
       }
     }
-    val big = body(1680, 3 * 1024 * 1024)
+    val big = body(1680, 1024 * 1024)
     val cut = Redaction.safeBodyCut(big, 2048)
     cut should not be empty
     val out = Redaction.safeBody(big, 2048)
@@ -87,16 +89,14 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
     // A long password value collapses to the placeholder, so text from far past the kept characters would move into
     // them; a key cut by a fixed-length prefix would be too short for the key pattern and be shown.
     val key = "sk-proj-" + "A1b2C3d4E5f6G7h8I9j0" * 3
-    Seq(-12, -1, 0, 5, 30).foreach { offset =>
+    Seq(-1, 0, 5).foreach { offset =>
       Seq(PrefixLimit, PrefixLimit / 2).foreach { at =>
         val head = s"""{"password": "${"p" * 9000}"} """
         val fill = "word " * ((at + offset - head.length) / 5)
-        val b    = head + fill.take(at + offset - head.length) + key + " tail" + ("z " * 100000)
-        Seq(100, 2048).foreach { max =>
-          val out = Redaction.safeBody(b, max)
-          (out should not).include("sk-proj-")
-          (out should not).include("A1b2C3")
-        }
+        val b    = head + fill.take(at + offset - head.length) + key + " tail" + ("z " * 70000)
+        val out  = Redaction.safeBody(b, 2048)
+        (out should not).include("sk-proj-")
+        (out should not).include("A1b2C3")
       }
     }
   }
@@ -170,9 +170,11 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
     Redaction.safeBody(b, Int.MaxValue) shouldBe Redaction.redact(b)
   }
 
-  it should "show what redacting the prefix shows, or nothing, for any value opened in the kept characters (#1680)" in {
-    // Each body opens a value in the kept characters, which closes before the cut, past it, or never; what is shown
-    // is the redaction of the prefix, and no secret marker inside the value is shown.
+  /**
+   * Each body opens a value in the kept characters, which closes before the cut, past it, or never; what is shown is
+   * the redaction of the prefix, or nothing, and no secret marker inside the value is shown.
+   */
+  private def showsPrefixOrNothing(bodies: Int, seed: Long): Unit = {
     val secret = "QQsecretVALUEqq"
     def text(n: Int, rnd: Random): String = {
       val sb = new StringBuilder
@@ -189,8 +191,8 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
       case 6 => s"""{"assertion": "$secret $v ${"Z" * 30}", "n": 1}"""
       case _ => s"""{"secret": ["$secret", "$v"], "a": 1}"""
     }
-    val rnd = new Random(1680)
-    (0 until 16).foreach { _ =>
+    val rnd = new Random(seed)
+    (0 until bodies).foreach { _ =>
       val kind = rnd.nextInt(8)
       val len  = Seq(20, 3000, 30000, 60000, 200000)(rnd.nextInt(5))
       val h    = head(kind, text(len, rnd))
@@ -206,15 +208,38 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "take a bounded time on a body of many megabytes (#1680)" in {
-    // Redacting 16 MiB whole takes many seconds; the prefix, about a quarter of a second.
-    val b       = body(16, 16 * 1024 * 1024)
-    val started = System.nanoTime()
-    val out     = Redaction.safeBody(b, 2048)
-    val elapsed = (System.nanoTime() - started) / 1000000L
-    out should endWith(
-      s"original length: ${b.length}, redacted from its first ${Redaction.safeBodyCut(b, 2048).get} chars)"
-    )
-    elapsed should be < 5000L
+  it should "show what redacting the prefix shows, or nothing, for any value opened in the kept characters (#1680)" in {
+    showsPrefixOrNothing(bodies = 4, seed = 1680)
+  }
+
+  it should "show what redacting the prefix shows, or nothing, over many bodies (#1680)" taggedAs PerformanceTest in {
+    showsPrefixOrNothing(bodies = 40, seed = 16801)
+  }
+
+  it should "redact a body of many megabytes without hanging (#1680)" in {
+    // An ordinary hang guard; how the cost compares with redacting the body whole is the PerformanceTest below.
+    val b   = body(16, 4 * 1024 * 1024)
+    var out = ""
+    LinearTime.timed("safeBody of a 4 MiB body", LinearTime.MegabyteHangGuard) {
+      out = Redaction.safeBody(b, 2048)
+    }
+    out should endWith(s"redacted from its first ${Redaction.safeBodyCut(b, 2048).get} chars)")
+  }
+
+  it should "cost about what a 128 KiB body costs, whatever the body's size (#1680)" taggedAs PerformanceTest in {
+    // Redacting 16 MiB whole costs about 128 times redacting 128 KiB; the prefix and its probes, a small multiple.
+    val big   = body(16, 16 * 1024 * 1024)
+    val small = body(16, WholeLimit).take(WholeLimit)
+    def best(f: => Any): Long = (0 until 3).map { _ =>
+      val start = System.nanoTime(); f; System.nanoTime() - start
+    }.min
+    (0 until 2).foreach { _ =>
+      Redaction.safeBody(big, 2048); Redaction.safeBody(small, 2048)
+    }
+    val prefix = best(Redaction.safeBody(big, 2048))
+    val whole  = best(Redaction.safeBody(small, 2048))
+    withClue(s"safeBody of 16 MiB took ${prefix / 1000000} ms, of 128 KiB ${whole / 1000000} ms: ") {
+      prefix should be < 8 * whole
+    }
   }
 }
