@@ -49,6 +49,8 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
     val keys     = new java.util.concurrent.ConcurrentLinkedQueue[EffectKey]()
     val lineages = new java.util.concurrent.ConcurrentLinkedQueue[String]()
     val failing  = new AtomicBoolean(true)
+    // the writer holds the lost checkpoint until b has run its effect, so the run sees the loss only after
+    val bRan = new CountDownLatch(1)
     val lossy = new ForwardingCheckpointer(store) {
       override def commit(threadId: ThreadId, commit: Commit) =
         if failing.get && commit.checkpoint.exists(_.snapshot.superstep == 1) then
@@ -58,7 +60,7 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
     val b = GraphBuilder("replanned", "v1")
     val last = b.node[Unit]("b", writes = Set(log)) { (_, _, context) =>
       lineages.add(context.effectLineage)
-      NodeResult.fromResult(effect.perform(context).map { n =>
+      NodeResult.fromResult(effect.perform(context, during = () => bRan.countDown()).map { n =>
         keys.add(effect.key.get)
         Command.empty.update(log, s"b:$n")
       })
@@ -67,7 +69,14 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
     b.edge(a, last)
     val graph = b.compile(a)(_.get(log)).value
 
-    GraphRuntime(lossy).start(thread, graph, (), durability = Durability.Async).awaited.value.failed
+    {
+      val runtime = GraphRuntime(lossy)
+      runtime.committing = (_, commit) =>
+        if Thread.currentThread().getName.startsWith("llm4s-graph-writer-") &&
+          commit.checkpoint.exists(_.snapshot.superstep == 1)
+        then bRan.await(5, TimeUnit.SECONDS): Unit
+      runtime
+    }.start(thread, graph, (), durability = Durability.Async).awaited.value.failed
     effect.applied.get shouldBe 1
     record(store, thread, keys.peek()).value.completed shouldBe true
     failing.set(false)
@@ -99,6 +108,8 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
     val keys     = new java.util.concurrent.ConcurrentLinkedQueue[EffectKey]()
     val lineages = new java.util.concurrent.ConcurrentLinkedQueue[String]()
     val failing  = new AtomicBoolean(true)
+    // the writer holds the lost checkpoint until b has run its effect, so the run sees the loss only after
+    val bRan = new CountDownLatch(1)
     val lossy = new ForwardingCheckpointer(store) {
       override def commit(threadId: ThreadId, commit: Commit) =
         if failing.get && commit.checkpoint.exists(_.snapshot.superstep == 1) then
@@ -109,7 +120,7 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
       val b = GraphBuilder("migrated", "v1")
       val last = b.node[Unit]("b", writes = Set(log)) { (_, _, context) =>
         lineages.add(context.effectLineage)
-        NodeResult.fromResult(effect.perform(context).map { n =>
+        NodeResult.fromResult(effect.perform(context, during = () => bRan.countDown()).map { n =>
           keys.add(effect.key.get)
           Command.empty.update(log, s"b:$n")
         })
@@ -118,7 +129,14 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
       b.edge(a, last)
       b.compile(a)(_.get(log)).value
 
-    GraphRuntime(lossy)
+    {
+      val runtime = GraphRuntime(lossy)
+      runtime.committing = (_, commit) =>
+        if Thread.currentThread().getName.startsWith("llm4s-graph-writer-") &&
+          commit.checkpoint.exists(_.snapshot.superstep == 1)
+        then bRan.await(5, TimeUnit.SECONDS): Unit
+      runtime
+    }
       .start(thread, graphWith(oldItems, Old("x")), (), durability = Durability.Async)
       .awaited
       .value
