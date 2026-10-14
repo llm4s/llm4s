@@ -211,14 +211,14 @@ object CompressionRule {
 
   private def compressRedundantPhrases(message: Message): Message =
     message match {
-      case msg: UserMessage      => msg.copy(content = cleanupRedundancy(msg.content))
+      case msg: UserMessage      => msg.copy(parts = ContentPart.withText(msg.parts, cleanupRedundancy(msg.content)))
       case msg: AssistantMessage => msg.withContent(cleanupRedundancy(msg.content))
       case other                 => other
     }
 
   private def compressRepetitiveText(message: Message): Message =
     message match {
-      case msg: UserMessage      => msg.copy(content = reduceRepetition(msg.content))
+      case msg: UserMessage      => msg.copy(parts = ContentPart.withText(msg.parts, reduceRepetition(msg.content)))
       case msg: AssistantMessage => msg.withContent(reduceRepetition(msg.content))
       case other                 => other
     }
@@ -344,7 +344,7 @@ object CompressionRule {
             case Some(examples)                         => accumulated ++ examples
             case None                                   => accumulated
           }
-        case msg +: tail if containsExample(msg) =>
+        case msg +: tail if containsExample(msg) && !Message.hasMedia(Seq(msg)) => // media is never consolidated away
           val newBlock = currentExampleBlock.getOrElse(Seq.empty) :+ msg
           groupExampleBlocks(tail, accumulated, Some(newBlock))
         case msg +: tail =>
@@ -380,7 +380,7 @@ object CompressionRule {
       examples.head match {
         case _: UserMessage        => UserMessage(consolidatedContent)
         case msg: AssistantMessage => msg.withContent(consolidatedContent)
-        case tool: ToolMessage     => tool.copy(content = consolidatedContent)
+        case tool: ToolMessage     => ToolMessage(consolidatedContent, tool.toolCallId)
         case _                     => UserMessage(consolidatedContent)
       }
     }

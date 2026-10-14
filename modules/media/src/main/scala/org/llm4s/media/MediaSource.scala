@@ -34,8 +34,9 @@ object MediaSource {
     def length: Int = bytes.length
 
     override def equals(other: Any): Boolean = other match {
-      case that: Inline => java.util.Arrays.equals(bytes.asInstanceOf[Array[Byte]], that.bytes.asInstanceOf[Array[Byte]])
-      case _            => false
+      case that: Inline =>
+        java.util.Arrays.equals(bytes.asInstanceOf[Array[Byte]], that.bytes.asInstanceOf[Array[Byte]])
+      case _ => false
     }
 
     override def hashCode: Int = java.util.Arrays.hashCode(bytes.asInstanceOf[Array[Byte]])

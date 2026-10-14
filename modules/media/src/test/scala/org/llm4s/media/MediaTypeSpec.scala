@@ -26,7 +26,13 @@ class MediaTypeSpec extends AnyFlatSpec with Matchers {
   }
 
   "the document types" should "be PDF, an application type, and four text types" in {
-    MediaType.documents shouldBe Seq(MediaType.Pdf, MediaType.PlainText, MediaType.Markdown, MediaType.Html, MediaType.Csv)
+    MediaType.documents shouldBe Seq(
+      MediaType.Pdf,
+      MediaType.PlainText,
+      MediaType.Markdown,
+      MediaType.Html,
+      MediaType.Csv
+    )
     MediaType.Pdf.category shouldBe MediaCategory.Application
     MediaType.documents.tail.foreach(_.category shouldBe MediaCategory.Text)
   }

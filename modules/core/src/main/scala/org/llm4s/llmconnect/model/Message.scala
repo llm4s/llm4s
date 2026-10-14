@@ -12,10 +12,12 @@ import upickle.default.{ macroRW, read, readwriter, write, ReadWriter => RW }
  * Each concrete subtype corresponds to one participant role:
  * [[UserMessage]], [[SystemMessage]], [[AssistantMessage]], [[ToolMessage]].
  *
- * `content` is always a non-null, non-empty string for well-formed messages —
- * use [[validate]] or the smart constructors on the [[Message]] companion to
- * ensure this invariant. `AssistantMessage.content` returns `""` rather than
- * `null` when the LLM response contains only tool calls and no text.
+ * A [[UserMessage]] and a [[ToolMessage]] carry [[ContentPart]]s - text, images and documents;
+ * a [[SystemMessage]] and an [[AssistantMessage]] carry text. `content` is a message's text: for
+ * a user or tool message, its text parts joined by newlines, so `""` for one that is all media.
+ * Use [[validate]] or the smart constructors on the [[Message]] companion to ensure a message has
+ * content. `AssistantMessage.content` returns `""` rather than `null` when the LLM response
+ * contains only tool calls and no text.
  */
 @Stable
 sealed trait Message {
@@ -49,28 +51,66 @@ sealed trait Message {
  */
 object Message {
 
+  // A user or tool message whose parts are one Text is written as `content`, the shape it had before
+  // parts (#1913), and any other as `parts`; both are read. So JSON written before parts reads, and
+  // a text-only conversation serialises as it did - which keeps every ThinkingReplay binding, a
+  // digest of this JSON, made before the change valid.
+  private[model] def partsJson(parts: Vector[ContentPart], obj: ujson.Obj): ujson.Obj = {
+    parts match {
+      case Vector(ContentPart.Text(text)) => obj("content") = text
+      case _                              => obj("parts") = ujson.read(write(parts))
+    }
+    obj
+  }
+
+  private[model] def readParts(obj: collection.Map[String, ujson.Value]): Vector[ContentPart] =
+    obj.get("parts") match {
+      case Some(parts) => read[Vector[ContentPart]](parts)
+      case None        => Vector(ContentPart.Text(obj("content").str))
+    }
+
   implicit val rw: RW[Message] = readwriter[ujson.Value].bimap[Message](
     {
-      case um: UserMessage      => ujson.Obj("type" -> ujson.Str("user"), "content" -> ujson.Str(um.content))
+      case um: UserMessage      => partsJson(um.parts, ujson.Obj("type" -> ujson.Str("user")))
       case sm: SystemMessage    => ujson.Obj("type" -> ujson.Str("system"), "content" -> ujson.Str(sm.content))
       case am: AssistantMessage => ujson.Obj("type" -> ujson.Str("assistant"), "data" -> ujson.read(write(am)))
       case tm: ToolMessage =>
-        ujson.Obj(
-          "type"       -> ujson.Str("tool"),
-          "toolCallId" -> ujson.Str(tm.toolCallId),
-          "content"    -> ujson.Str(tm.content)
-        )
+        partsJson(tm.parts, ujson.Obj("type" -> ujson.Str("tool"), "toolCallId" -> ujson.Str(tm.toolCallId)))
     },
     json => {
       val obj = json.obj
       obj("type").str match {
-        case "user"      => UserMessage(obj("content").str)
+        case "user"      => UserMessage(readParts(obj))
         case "system"    => SystemMessage(obj("content").str)
         case "assistant" => read[AssistantMessage](obj("data"))
-        case "tool"      => ToolMessage(obj("content").str, obj("toolCallId").str)
+        case "tool"      => ToolMessage(readParts(obj), obj("toolCallId").str)
       }
     }
   )
+
+  /** Whether any of `messages` carries an image or a document. */
+  def hasMedia(messages: Seq[Message]): Boolean =
+    messages.exists {
+      case um: UserMessage => um.parts.exists(ContentPart.isMedia)
+      case tm: ToolMessage => tm.parts.exists(ContentPart.isMedia)
+      case _               => false
+    }
+
+  /** A message's content with each media part named by its kind, for `toString`. */
+  private[model] def describe(parts: Vector[ContentPart]): String =
+    parts
+      .map {
+        case ContentPart.Text(text) => text
+        case media                  => s"[${media.kind}]"
+      }
+      .mkString(" ")
+
+  /** Whether `parts` has content: at least one part that is media or non-blank text. */
+  private[model] def hasContent(parts: Vector[ContentPart]): Boolean =
+    parts.exists {
+      case ContentPart.Text(text) => text.trim.nonEmpty
+      case _                      => true
+    }
 
   /**
    * Validates structural consistency of a full conversation.
@@ -268,17 +308,36 @@ object MessageRole {
 }
 
 /**
- * Represents a user message in the conversation.
+ * A user message: text, images and documents, as [[ContentPart]]s.
  *
- * @param content Content of the user message.
+ * `UserMessage(text)` is the one-part message. A provider that cannot send one of the parts fails
+ * the request with an [[org.llm4s.error.UnsupportedContentPartError]].
+ *
+ * @param parts the message's content, in order.
  */
 @Stable
-final case class UserMessage(content: String) extends Message {
+final case class UserMessage(parts: Vector[ContentPart]) extends Message {
   val role: MessageRole = MessageRole.User
+
+  /** The message's text parts, joined by newlines; `""` when it is all media. */
+  def content: String = ContentPart.text(parts)
+
+  override def toString: String = s"$role: ${Message.describe(parts)}"
+
+  override def validate: Result[Message] =
+    if (Message.hasContent(parts)) Right(this)
+    else Left(ValidationError("content", s"$role message content cannot be empty"))
 }
 
 object UserMessage {
-  implicit val rw: RW[UserMessage] = macroRW
+
+  /** A user message of one text part. */
+  def apply(content: String): UserMessage = new UserMessage(Vector(ContentPart.Text(content)))
+
+  implicit val rw: RW[UserMessage] = readwriter[ujson.Value].bimap[UserMessage](
+    um => Message.partsJson(um.parts, ujson.Obj()),
+    json => UserMessage(Message.readParts(json.obj))
+  )
 }
 
 /**
@@ -496,17 +555,25 @@ object AssistantMessage {
 }
 
 /**
- * Represents a message from a tool, typically containing the result of a tool call.
+ * The result of a tool call: text, images and documents, as [[ContentPart]]s.
  *
- * @param content    Content of the tool message, usually the result of the tool execution, e.g. a json response.
+ * `ToolMessage(text, toolCallId)` is the one-part result. A provider that cannot send one of the
+ * parts in a tool result fails the request with an [[org.llm4s.error.UnsupportedContentPartError]].
+ *
+ * @param parts      the result, in order; usually one text part, e.g. a JSON response.
  * @param toolCallId Unique identifier for the tool call (as provided by the ToolCall).
  */
 @Stable
 final case class ToolMessage(
-  content: String,
+  parts: Vector[ContentPart],
   toolCallId: String
 ) extends Message {
   val role: MessageRole = MessageRole.Tool
+
+  /** The result's text parts, joined by newlines; `""` when it is all media. */
+  def content: String = ContentPart.text(parts)
+
+  override def toString: String = s"$role: ${Message.describe(parts)}"
 
   /**
    * Resolves the tool name for this response by scanning `contextMessages` for
@@ -529,7 +596,7 @@ final case class ToolMessage(
 
   override def validate: Result[Message] = {
     val validations = List(
-      if (content.trim.isEmpty) Some("Tool message content cannot be empty") else None,
+      if (!Message.hasContent(parts)) Some("Tool message content cannot be empty") else None,
       if (toolCallId.trim.isEmpty) Some("Tool call ID cannot be empty") else None
     ).flatten
 
@@ -547,7 +614,15 @@ final case class ToolMessage(
 }
 
 object ToolMessage {
-  implicit val rw: RW[ToolMessage] = macroRW
+
+  /** A tool result of one text part. */
+  def apply(content: String, toolCallId: String): ToolMessage =
+    new ToolMessage(Vector(ContentPart.Text(content)), toolCallId)
+
+  implicit val rw: RW[ToolMessage] = readwriter[ujson.Value].bimap[ToolMessage](
+    tm => Message.partsJson(tm.parts, ujson.Obj("toolCallId" -> ujson.Str(tm.toolCallId))),
+    json => ToolMessage(Message.readParts(json.obj), json("toolCallId").str)
+  )
 }
 
 /**

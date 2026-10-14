@@ -40,7 +40,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       options: CompletionOptions
     ): Result[Completion] = {
       // Extract the prompt to determine what kind of consolidation
-      val prompt = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse("")
+      val prompt = conversation.messages.collectFirst { case u: UserMessage => u.content }.getOrElse("")
 
       val response = if (prompt.contains("Return JSON array only")) {
         """[
@@ -104,7 +104,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       conversation: Conversation,
       options: CompletionOptions
     ): Result[Completion] = {
-      val prompt = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse("")
+      val prompt = conversation.messages.collectFirst { case u: UserMessage => u.content }.getOrElse("")
       val response =
         if (prompt.contains("Return JSON array only")) "{not-valid-json]" else "Consolidated memory content."
 
@@ -140,7 +140,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       conversation: Conversation,
       options: CompletionOptions
     ): Result[Completion] = {
-      val prompt   = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse("")
+      val prompt   = conversation.messages.collectFirst { case u: UserMessage => u.content }.getOrElse("")
       val response = if (prompt.contains("Return JSON array only")) "[]" else "Consolidated memory content."
 
       Right(

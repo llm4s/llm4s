@@ -8,6 +8,23 @@ import org.scalatest.matchers.should.Matchers
 
 class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
 
+  "ToolOutputCompressor" should "rewrite a tool result's text and keep its image" in {
+    val image = ContentPart
+      .image(
+        org.llm4s.media.MediaSource.Url(java.net.URI.create("https://example.com/plot.png")),
+        org.llm4s.media.MediaType.Png
+      )
+      .toOption
+      .get
+    val message = ToolMessage(Vector(ContentPart.Text("x" * 20000), image), "call_1")
+
+    val result = ToolOutputCompressor.compressToolOutputs(Seq(message), ArtifactStore.inMemory()).toOption.get
+
+    val compressed = result.head.asInstanceOf[ToolMessage]
+    compressed.parts.last shouldBe image
+    compressed.content.length should be < 20000
+  }
+
   // ============ Content Type Detection ============
 
   "ToolOutputCompressor content type detection" should "identify JSON objects" in {

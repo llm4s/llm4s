@@ -150,9 +150,9 @@ object MediaType {
   private val byMimeType: Map[String, MediaType] =
     all.map(t => t.mimeType -> t).toMap ++ Map(
       // Registered alternates that appear in the wild for types we already model.
-      "image/jpg"    -> Jpeg,
-      "audio/x-wav"  -> Wav,
-      "audio/mp3"    -> Mp3,
+      "image/jpg"       -> Jpeg,
+      "audio/x-wav"     -> Wav,
+      "audio/mp3"       -> Mp3,
       "audio/x-flac"    -> Flac,
       "text/x-markdown" -> Markdown
     )

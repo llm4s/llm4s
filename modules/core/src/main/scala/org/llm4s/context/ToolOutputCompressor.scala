@@ -2,7 +2,7 @@ package org.llm4s.context
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.ContextError
-import org.llm4s.llmconnect.model.{ Message, ToolMessage }
+import org.llm4s.llmconnect.model.{ ContentPart, Message, ToolMessage }
 import org.llm4s.types.{ ArtifactKey, ContentSize, ExternalizationThreshold, ExternalizedContent, Result }
 import org.llm4s.util.BoundedJson
 import org.slf4j.LoggerFactory
@@ -119,7 +119,7 @@ object ToolOutputCompressor {
       }
       externalizedInfo = ExternalizedContent(key, contentSize.bytes, contentType, summary)
       pointer          = createContentPointer(externalizedInfo)
-    } yield message.copy(content = pointer)
+    } yield message.copy(parts = ContentPart.withText(message.parts, pointer))
   }
 
   private def compressInlineContent(message: ToolMessage, contentType: String): Result[ToolMessage] = {
@@ -132,7 +132,7 @@ object ToolOutputCompressor {
     }
 
     compressed match {
-      case Right(content) => Right(message.copy(content = content))
+      case Right(content) => Right(message.copy(parts = ContentPart.withText(message.parts, content)))
       case Left(error)    => Left(error)
     }
   }

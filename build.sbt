@@ -564,6 +564,9 @@ lazy val llm4sPekko = (project in file("modules/llm4s-pekko"))
   )
 
 lazy val core = (project in file("modules/core"))
+  // `media` for the content parts of a message (#1913): an image or document part names its
+  // `MediaSource` and `ImageMediaType` / `DocumentMediaType`. `llm4s-media` has no dependency.
+  .dependsOn(media)
   .settings(
     name := "llm4s-core",
     commonSettings,
@@ -649,8 +652,8 @@ lazy val knowledgegraph = (project in file("modules/knowledgegraph"))
   )
 
 lazy val rag = (project in file("modules/rag"))
-  // `media` is declared explicitly, not inherited through core: core's edge to it is
-  // temporary and goes away with the `llm4s-image` carve, but `MediaExtractor`'s does not.
+  // `media` is declared explicitly, not inherited through core: `MediaExtractor` uses it
+  // directly, whatever core's content parts need.
   // `openai` is test-only: `RAGConfig.default` names the `openai` embedding provider, which
   // left core with `llm4s-openai` (#1132), and the mocked RAG suites build from that default.
   // `llm4s-rag` itself does not depend on it - a user names whichever provider they ship.
