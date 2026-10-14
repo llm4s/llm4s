@@ -20,7 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - SQLite schema 4 adds `task_lineage`.
   - The loop records a tool call's `IdempotencyKey` from the issuing model task's key, lineage included, and the
     call's id, name and arguments (`IdempotencyKey.ofCall`), so a model request asked again from the same results
-    that answers alike issues the same keys. Tasks and calls of a format-6 checkpoint keep their earlier keys.
+    that answers alike issues the same keys.
+    `IdempotencyKey.derive` is removed. Format 6 never shipped: a format-6 task restores with a fresh root lineage,
+    and its effect records are ignored.
   - Key and `StateCheck` hashing encode unpaired surrogates one-to-one. Well-formed text hashes as before.
 - **Semantic memory for agents: the new `llm4s-agent-memory` module and `SemanticMemoryMiddleware`**
   ([#1911](https://github.com/llm4s/llm4s/issues/1911)). This is Phase 3 slice F7 (design §4.31).

@@ -41,10 +41,20 @@ final class Execution private[graph] (
       owner,
       superstep,
       state,
-      frontier.map(t => if t.lineage == Task.Unstamped then t.copy(lineage = Task.rootLineage(token, t.id)) else t),
+      frontier.map { t =>
+        val origin = t.origin.map(o =>
+          if o.lineage == Task.Unstamped then o.copy(lineage = Task.rootLineage(token, o.task)) else o
+        )
+        val lineage = if t.lineage == Task.Unstamped then Task.rootLineage(token, t.id) else t.lineage
+        t.copy(lineage = lineage, origin = origin)
+      },
       staticArrivals,
       dynamicActivations,
-      parked,
+      parked.map { p =>
+        if p.origin.lineage == Task.Unstamped then
+          p.copy(origin = p.origin.copy(lineage = Task.rootLineage(token, p.origin.task)))
+        else p
+      },
       paused,
       journal
     )
@@ -114,14 +124,10 @@ final private[graph] case class Task(
  */
 private[graph] object Task:
   /**
-   * The lineage of a task created before its run was admitted; admission stamps it ([[rootLineage]]). Not the
-   * empty lineage, which is a task of a format-6 checkpoint: that keeps its empty lineage, and with it the keys
-   * it had before lineages (see `RunContext.taskKey`).
+   * The lineage of a task created before its run was admitted, and of a task of a format-6 checkpoint, which has
+   * none (format 6 never shipped); admission stamps it with a root lineage of its claim ([[rootLineage]]).
    */
-  val Unstamped: String = "unstamped"
-
-  /** The lineage of a task restored from a checkpoint written before lineages (format 6). */
-  val Legacy: String = ""
+  val Unstamped: String = ""
 
   /** The lineage of task `id` created for the run of claim `token` before it was admitted. */
   def rootLineage(token: Long, id: TaskId): String =

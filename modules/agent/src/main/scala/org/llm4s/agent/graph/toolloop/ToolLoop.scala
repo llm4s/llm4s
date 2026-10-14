@@ -1547,13 +1547,8 @@ object ToolLoop:
    */
   private def issued(messageId: String, call: ToolCall, context: RunContext): ToolTask =
     val at = context.position
-    // the model task's identity, lineage included, so the same work issues the same keys (design §4.24); a
-    // model task of a format-6 checkpoint issues them as it did then
-    val key =
-      if context.effectLineage == Task.Legacy then
-        IdempotencyKey.derive(at.threadId, at.checkpointId, at.superstep, at.taskId, ToolCallId(call.id))
-      else IdempotencyKey.ofCall(at.threadId, context.taskKey, call)
-    ToolTask(messageId, call, key)
+    // the model task's identity, lineage included, so the same work issues the same keys (design §4.24)
+    ToolTask(messageId, call, IdempotencyKey.ofCall(at.threadId, context.taskKey, call))
 
   /**
    * Runs `body`, returning what it throws as `Left`: a NonFatal exception, or a bare
@@ -1757,8 +1752,7 @@ object ToolLoop:
                         request.idempotencyKey,
                         request.phase,
                         request.question,
-                        answer,
-                        legacy = context.effectLineage == Task.Legacy
+                        answer
                       )
                     val toolContext = ToolContext.resuming(
                       answering(agent, context, request.answered),

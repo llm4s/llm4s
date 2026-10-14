@@ -306,22 +306,6 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
     )
   }
 
-  it should "keep a run begun before lineages under the old identity: a format-6 superstep schedules legacy tasks" in {
-    val log    = StateKey.appending[String]("log")
-    val b      = GraphBuilder("g", "v1")
-    val second = b.node[Unit]("second", writes = Set(log))((_, _, _) => NodeResult.Continue(Command.empty))
-    val first =
-      b.node[Unit]("first", writes = Set(log))((_, _, _) => NodeResult.Continue(Command.empty.update(log, "x")))
-    b.edge(first, second)
-    val g        = b.compile(first)(_.get(log)).value
-    val snapshot = g.snapshot(g.start(())).value
-    val legacy   = g.restore(snapshot.copy(frontier = snapshot.frontier.map(_.copy(lineage = Task.Legacy)))).value
-    legacy.stampedBy(5L).frontier.map(_.lineage) shouldBe Vector(Task.Legacy)
-    g.step(ThreadId("t"), legacy.stampedBy(5L), RunConfig()) match
-      case Step.Next(next) => next.frontier.map(_.lineage) shouldBe Vector(Task.Legacy)
-      case other           => fail(s"did not step: $other")
-  }
-
   "Key and digest encoding" should "be one-to-one, unpaired surrogates included, and unchanged for well-formed text" in {
     val c = context()
     // String.getBytes(UTF_8) would turn each unpaired surrogate into '?'
@@ -343,8 +327,16 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
       IdempotencyKey.ofResume(call, None, ujson.Str("q"), ujson.Str("a?"))
     ).size shouldBe 4
     Set(
-      IdempotencyKey.derive(ThreadId("t"), "c", 1, TaskId("1.0"), ToolCallId("call_\uD800")),
-      IdempotencyKey.derive(ThreadId("t"), "c", 1, TaskId("1.0"), ToolCallId("call_?"))
+      IdempotencyKey.ofCall(
+        ThreadId("t"),
+        IdempotencyKey("m"),
+        org.llm4s.llmconnect.model.ToolCall("call_\uD800", "f", ujson.Obj())
+      ),
+      IdempotencyKey.ofCall(
+        ThreadId("t"),
+        IdempotencyKey("m"),
+        org.llm4s.llmconnect.model.ToolCall("call_?", "f", ujson.Obj())
+      )
     ).size shouldBe 2
     StateCheck.of("a\uD800") should not be StateCheck.of("a?")
     // well-formed text keeps its UTF-8 digest, so keys and checks recorded before are unchanged

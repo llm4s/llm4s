@@ -78,9 +78,9 @@ object ToolCallId:
  * or a crash), and different for a call from another model request, even one that reuses the
  * provider's call id.
  *
- * The agent loop derives it with [[IdempotencyKey.derive]] from where on the thread the model
- * call that issued the call ran - its checkpoint, superstep and task - and the call's id, and
- * records it with the call, so it reaches the tool as `ToolContext.idempotencyKey`. It de-duplicates only where the external
+ * The agent loop derives it with `IdempotencyKey.ofCall` from the model task that issued the
+ * call (its key, lineage included) and the call's id, name and arguments, and records it with the
+ * call, so it reaches the tool as `ToolContext.idempotencyKey`. It de-duplicates only where the external
  * system honours it: the runtime runs a tool at least once, never exactly once (design §4.1).
  */
 opaque type IdempotencyKey = String
@@ -91,39 +91,12 @@ object IdempotencyKey:
   def apply(value: String): IdempotencyKey = value
 
   /**
-   * The key of the call `toolCallId` issued by a model call that ran on `threadId` at checkpoint
-   * `checkpointId`, in superstep `superstep`, as task `taskId` (its `RunContext.position`): 64
-   * lowercase hexadecimal characters, the SHA-256 of the five values, so it is deterministic, of
-   * fixed length and reveals none of them.
-   *
-   * Together they name one model call on the thread, whatever the provider's call ids and run ids
-   * (design §5.3). The superstep counts on across a thread's runs, so a later turn's model call has
-   * a later one even when its run reuses a [[RunId]] - and so the checkpoint ids of an earlier run;
-   * the task tells apart model calls running side by side in one superstep; and the checkpoint tells
-   * apart a model request made again after its response was lost, which runs at a new checkpoint.
-   */
-  def derive(
-    threadId: ThreadId,
-    checkpointId: String,
-    superstep: Int,
-    taskId: TaskId,
-    toolCallId: ToolCallId
-  ): IdempotencyKey =
-    // each part length-prefixed, so no two different inputs share a digest input (KeyDigest); v2 added the
-    // superstep and task, as checkpoint ids repeat across runs that reuse a RunId
-    KeyDigest.of(
-      Seq("llm4s-tool-call-v2", threadId.value, checkpointId, superstep.toString, taskId.value, toolCallId.value)
-    )
-
-  /**
-   * The key of task `taskId` on `threadId` ([[RunContext.taskKey]]): the SHA-256 of the two under a
-   * `llm4s-task-v1` tag. Not the superstep the task runs at, which `updateState` moves on while the
-   * task keeps its id; the id itself names the superstep that scheduled the task.
+   * The key of task `taskId` of lineage `lineage` on `threadId` ([[RunContext.taskKey]]): the SHA-256 of the
+   * three under a `llm4s-task-v2` tag. Not the superstep the task runs at, which `updateState` moves on while
+   * the task keeps its id and lineage.
    */
   private[graph] def ofTask(threadId: ThreadId, taskId: TaskId, lineage: String): IdempotencyKey =
-    // a task of a format-6 checkpoint keeps the key it had then, so the records it wrote still answer for it
-    if lineage == Task.Legacy then KeyDigest.of(Seq("llm4s-task-v1", threadId.value, taskId.value))
-    else KeyDigest.of(Seq("llm4s-task-v2", threadId.value, taskId.value, lineage))
+    KeyDigest.of(Seq("llm4s-task-v2", threadId.value, taskId.value, lineage))
 
   /**
    * The key of tool call `call` issued by the model task whose key is `modelTask` ([[RunContext.taskKey]]):
@@ -160,23 +133,18 @@ object IdempotencyKey:
     call: IdempotencyKey,
     asking: Option[IdempotencyKey],
     question: ujson.Value,
-    answer: ujson.Value,
-    legacy: Boolean = false
+    answer: ujson.Value
   ): IdempotencyKey =
-    // escaped to ASCII: JSON text is one-to-one with its value only when no character is re-encoded on the way;
-    // a call of a format-6 checkpoint keeps the phase key it had then
-    if legacy then
-      KeyDigest.of(Seq("llm4s-tool-resume-v1", call, asking.getOrElse(""), ujson.write(question), ujson.write(answer)))
-    else
-      KeyDigest.of(
-        Seq(
-          "llm4s-tool-resume-v2",
-          call,
-          asking.getOrElse(""),
-          KeyDigest.canonical(question),
-          KeyDigest.canonical(answer)
-        )
+    // canonical: JSON text is one-to-one with its value only with members sorted and nothing re-encoded
+    KeyDigest.of(
+      Seq(
+        "llm4s-tool-resume-v2",
+        call,
+        asking.getOrElse(""),
+        KeyDigest.canonical(question),
+        KeyDigest.canonical(answer)
       )
+    )
 
   extension (key: IdempotencyKey) def value: String = key
 

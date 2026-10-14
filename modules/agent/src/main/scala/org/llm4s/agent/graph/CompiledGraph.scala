@@ -747,11 +747,7 @@ final class CompiledGraph[I, O] private[graph] (
     val content = KeyDigest.of(results.flatMap { (task, result) =>
       Seq(task.id.value, task.lineage, resultDigest(task, result))
     })
-    // a superstep of tasks from a checkpoint written before lineages (format 6) - a run an upgrade interrupted -
-    // schedules its successors as that writer did, with no lineage, so the records it may have written for them,
-    // running ahead under Async or OnExit, still answer; the run's next turn starts lineages afresh
-    val legacy                = results.nonEmpty && results.forall((task, _) => task.arrivalLineage == Task.Legacy)
-    def lineageOf(id: TaskId) = if legacy then Task.Legacy else Task.scheduledLineage(content, id)
+    def lineageOf(id: TaskId) = Task.scheduledLineage(content, id)
     // a task an interruptAfter breakpoint holds has committed its update, but makes no route, edge or arrival yet
     val heldAfter = results.collect { case (task, TaskResult.Done(_)) if holdsAfter(task, config) => task.id }.toSet
     val completed = results.collect {

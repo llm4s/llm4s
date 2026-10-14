@@ -45,8 +45,8 @@ private[sqlite] object SqliteSchema:
 
   /**
    * Version 4: the lineage of the task each effect record belongs to (#1921 follow-up), which decides with its
-   * id when a commit releases the record. A version-3 file's records read with an empty lineage, as tasks of a
-   * format-6 checkpoint do.
+   * id when a commit releases the record. A version-3 file's records read with an empty lineage, which no task
+   * of a restored run has, so they never answer for one (format 6 never shipped).
    */
   private def addEffectLineages(connection: Connection): Unit =
     statements(connection, "ALTER TABLE llm4s_checkpoint_effects ADD COLUMN task_lineage TEXT NOT NULL DEFAULT ''")

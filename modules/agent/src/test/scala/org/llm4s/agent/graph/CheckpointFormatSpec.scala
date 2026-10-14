@@ -239,7 +239,10 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     val read = Checkpoint.fromJson(json).value
     read.formatVersion shouldBe 7
     read.snapshot.frontier.map(_.lineage) shouldBe Vector("")
-    g.restore(read.snapshot).value.frontier.map(_.lineage) shouldBe Vector("")
+    val restored = g.restore(read.snapshot).value
+    restored.frontier.map(_.lineage) shouldBe Vector(Task.Unstamped)
+    // format 6 never shipped, so its task is stamped like one of a fresh run: a root lineage of the claim
+    restored.stampedBy(3L).frontier.map(_.lineage) shouldBe Vector(Task.rootLineage(3L, TaskId("0.0")))
   }
 
   it should "round-trip the terminal Failed status" in {

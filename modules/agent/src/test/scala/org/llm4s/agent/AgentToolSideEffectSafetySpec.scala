@@ -24,33 +24,8 @@ import scala.jdk.CollectionConverters._
 class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
 
   private val thread = ThreadId("t")
-  private val callId = ToolCallId("call_0")
 
-  private val task = TaskId("1.0")
-
-  "IdempotencyKey.derive" should "be 64 lowercase hex characters, the same for the same call" in {
-    val key = IdempotencyKey.derive(thread, "run/1", 1, task, callId)
-    (key.value should fullyMatch).regex("[0-9a-f]{64}")
-    IdempotencyKey.derive(thread, "run/1", 1, task, callId) shouldBe key
-  }
-
-  it should "differ when the thread, the checkpoint, the superstep, the task or the call differs" in {
-    val key = IdempotencyKey.derive(thread, "run/1", 1, task, callId)
-    IdempotencyKey.derive(ThreadId("u"), "run/1", 1, task, callId) should not be key
-    IdempotencyKey.derive(thread, "run/2", 1, task, callId) should not be key
-    IdempotencyKey.derive(thread, "run/1", 2, task, callId) should not be key
-    IdempotencyKey.derive(thread, "run/1", 1, TaskId("1.1"), callId) should not be key
-    IdempotencyKey.derive(thread, "run/1", 1, task, ToolCallId("call_1")) should not be key
-  }
-
-  it should "not confuse inputs whose parts concatenate alike" in {
-    IdempotencyKey.derive(ThreadId("ab"), "c", 1, task, callId) should not be
-      IdempotencyKey.derive(ThreadId("a"), "bc", 1, task, callId)
-    IdempotencyKey.derive(thread, "run/1", 11, TaskId("1.0"), callId) should not be
-      IdempotencyKey.derive(thread, "run/1", 1, TaskId("11.0"), callId)
-  }
-
-  it should "encode as a plain JSON string" in {
+  "IdempotencyKey" should "encode as a plain JSON string" in {
     val key = IdempotencyKey("k-1")
     upickle.default.write(key) shouldBe "\"k-1\""
     upickle.default.read[IdempotencyKey]("\"k-1\"") shouldBe key
