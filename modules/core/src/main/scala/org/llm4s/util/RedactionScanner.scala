@@ -455,11 +455,15 @@ private[util] object RedactionScanner {
      *
      * No rule asks for a key and its delimiter to touch: each finds the delimiter past the whitespace its site allows.
      * The adjacency checks left are those where touching is the stricter reading, and failing it masks more, not
-     * less: `Bearer` and a header name glued to its `:` (not a token), a call's name glued to its `(` (kept, where a
-     * name apart from its `(` is replaced too), `key=` after an `&` (else the value runs on), a quote glued to a key
-     * whose quotes the lexer paired otherwise, and the comparison `a == b`. One reads less on purpose: outside a
-     * bracket, a blank after a glued `=` before a lone word that does not look like a credential is prose (`token=
+     * less: `Bearer` and a sensitive header name glued to its `:` (not a token), a call's name glued to its `(` (kept
+     * where it reads as a type's, where a name apart from its `(` is replaced too), `key=` after an `&` (else the value
+     * runs on), and a quote glued to a key whose quotes the lexer paired otherwise. One reads less on purpose: outside
+     * a bracket, a blank after a glued `=` before a lone word that does not look like a credential is prose (`token=
      * see the docs`).
+     *
+     * Every early exit - the placeholder already there, the next field's key, the end of a value, prose - skips a value
+     * only on positive evidence that what it skips is no part of it, and otherwise replaces it
+     * (`RedactionEarlyExitsSpec` pins each kept boundary).
      */
     private def skipBlanks(from: Int): Int = {
       var k = from
@@ -539,11 +543,13 @@ private[util] object RedactionScanner {
         }
         // a quoted key's `=` (`"password" = "x"`, TOML's quoted keys): read as a pair's, with the whitespace of one
         val e = afterKey(end)
-        if (e < n && t.ch(e) == '=' && !(e + 1 < n && t.ch(e + 1) == '=')) {
+        if (e < n && t.ch(e) == '=') {
           val key = keyName(s)
           if (Redaction.isCredentialName(key)) {
             pending = null
-            return readValue(afterKey(e + 1), field = false, null, key)
+            // `"password" == "x"` too: a comparison's right side is the credential as much
+            val eq = if (e + 1 < n && t.ch(e + 1) == '=') e + 1 else e
+            return readValue(afterKey(eq + 1), field = false, null, key)
           }
         }
       }
@@ -739,8 +745,20 @@ private[util] object RedactionScanner {
     private def readValue(v: Int, field: Boolean, quote: String, key: String): Int =
       // nothing after the key but the end of this level: the value may follow the string's close (`"x={'k': "v"}"`)
       if (v >= n) { open(v, OpenPair, 0); v }
-      else if (placeholderAt(v)) v + ph.length
-      else if (t.stringEnd(v) >= 0 && !field && t.closed(v) && colonAfter(t.stringEnd(v))) v // the next field's key
+      // already masked: only where the placeholder is the whole value (not `password=[REDACTED]hunter2`)
+      else if (placeholderAt(v)) {
+        val p = v + ph.length
+        // a name already replaced, before its bracket (`[REDACTED](['x'])`): the bracket is walked as a call's
+        if (p < n && "([{".indexOf(t.ch(p).toInt) >= 0) walk(new Walk(new java.lang.StringBuilder, quote), p)
+        else {
+          val e = placeholderValueEnd(p, field)
+          if (e > p) mask(v, e)
+          e
+        }
+      }
+      // A pair whose `=` ends its line, inside a bracket, is empty where a key follows on the next line
+      // (`{password=\n"user": 1}`). On the same line a quoted value before a `:` is the value (`password="x": failed`).
+      else if (t.stringEnd(v) >= 0 && !field && t.closed(v) && colonAfter(t.stringEnd(v)) && breakBefore(v)) v
       else if (t.stringEnd(v) >= 0 && (field || !gluedString(v))) stringValue(v, key, field)
       else {
         val c = t.ch(v)
@@ -749,12 +767,37 @@ private[util] object RedactionScanner {
           val call = callAt(v)
           if (call >= 0) {
             // a name apart from its `(` may be no call's but a value before a bracket of prose: replaced too
-            if (isSpace(t.ch(call - 1))) mask(v, callNameEnd(v))
+            // and so is a name that reads as no type's (`password=hunter2(x)`): a value with a `(` in it
+            if (isSpace(t.ch(call - 1)) || !wrapperName(v, callNameEnd(v))) mask(v, callNameEnd(v))
             walk(new Walk(new java.lang.StringBuilder, quote), call)
           } else if (field) bareValue(v, quote)
           else pairValue(v, key)
         }
       }
+
+    /**
+     * The end of a value that starts with the placeholder, from `from`, right after it: `from` itself where the
+     * placeholder is the whole value - whitespace, the end, or what ends a value follows it - else the end of the rest,
+     * read as an unquoted value is (`[REDACTED]hunter2`, `[REDACTED]"x"`), to be replaced with it.
+     */
+    private def placeholderValueEnd(from: Int, field: Boolean): Int =
+      if (from >= n || isSpace(t.ch(from)) || ",;<>)]}".indexOf(t.ch(from).toInt) >= 0) from
+      else if (t.ch(from) == '&' && parameterAfter(from)) from
+      else if (!field) pairValueEnd(from)
+      else {
+        var e = from
+        while (e < n && !isSpace(t.ch(e)) && ",;)]}".indexOf(t.ch(e).toInt) < 0)
+          e = if (t.stringEnd(e) > e) t.stringEnd(e) else e + 1
+        e
+      }
+
+    /** Whether a line break is among the whitespace right before `v`. */
+    private def breakBefore(v: Int): Boolean = {
+      var k     = v - 1
+      var found = false
+      while (!found && k >= 0 && isSpace(t.ch(k))) { found = isBreak(k); k -= 1 }
+      found
+    }
 
     /** The string value at `s`, replaced in full: to the end of this level where it does not close. */
     private def stringValue(s: Int, key: String, field: Boolean): Int = {
@@ -775,8 +818,9 @@ private[util] object RedactionScanner {
         }
         // A close glued to more text (`"password": " here | token="Kv,x" ...`) was no close but the opening quote of the
         // value of a key the string swallowed: that value is replaced too, to its own close or, where none follows on
-        // the line, as an unquoted value. Not the rest of a quoted key (`" here {"x-api-key": ...`), which is read so.
-        if (glued(end) && !quotedKeyAt(end, t.ch(s))) {
+        // the line, as an unquoted value. Not the rest of a sensitive quoted key (`" here {"x-api-key": ...`), which is
+        // read so and has its own value replaced; a key that names no credential may be the value's tail, and goes.
+        if (glued(end) && !sensitiveQuotedKeyAt(end, t.ch(s))) {
           val close = closerOf(t.ch(s), end, lineEnd(end))
           val e     = if (close >= 0) close else pairValueEnd(end)
           mask(end, e)
@@ -797,11 +841,14 @@ private[util] object RedactionScanner {
         var more  = field
         while (more) {
           // Python joins the strings written right after a string, as `pprint` splits a long one
+          // A string before a `:` is the next field's key where a line break comes before it (`'x'\n 'user': 1`); on
+          // the same line, with no `,` between, it is still the value's (`'abc' 'hunter2': 1`) and goes too.
           val k = skipSpace(after)
-          if (k < n && t.stringEnd(k) >= 0 && t.closed(k) && !colonAfter(t.stringEnd(k))) {
+          if (k < n && t.stringEnd(k) >= 0 && t.closed(k) && !(colonAfter(t.stringEnd(k)) && hasBreak(after, k))) {
             val e = t.stringEnd(k)
             if (e - 1 > k + 1 && !placeholderOnly(k + 1, e - 1)) mask(k + 1, e - 1)
             after = e
+            if (colonAfter(e)) more = false
           } else more = false
         }
         after
@@ -820,11 +867,14 @@ private[util] object RedactionScanner {
       }
     }
 
-    /** Whether a key, its closing `q` and `:` follow `at`: the rest of a quoted key whose opening quote was paired otherwise. */
-    private def quotedKeyAt(at: Int, q: Char): Boolean = {
+    /**
+     * Whether a key that names a credential, its closing `q` and `:` follow `at`: the rest of a quoted key whose opening
+     * quote was paired otherwise, which `onWord` reads as a field (`misalignedField`).
+     */
+    private def sensitiveQuotedKeyAt(at: Int, q: Char): Boolean = {
       var j = at
       while (j < n && isKeyChar(t.ch(j))) j += 1
-      j > at && j < n && t.ch(j) == q && colonAfter(j + 1)
+      j > at && j < n && t.ch(j) == q && colonAfter(j + 1) && credentialWord(at, j)
     }
 
     /** Whether a run of `]`, `}` or `)` at `at` is glued to a letter, a digit or `_`: `"]]x`, no string's end. */
@@ -857,7 +907,12 @@ private[util] object RedactionScanner {
 
     /** An unquoted pair value: up to whitespace, one of `,;<>`, or an `&` that another pair follows. */
     private def pairValue(v: Int, key: String): Int = {
-      val e = pairValueEnd(v)
+      val e =
+        if (v < n && t.ch(v) == '<') {
+          // a value in angle brackets (`password=<hunter2>`), not an empty one before a tag
+          val c = pairValueEnd(v + 1)
+          if (c < n && t.ch(c) == '>') c + 1 else c
+        } else pairValueEnd(v)
       if (e == v) { if (e == n) open(v, OpenPair, 0); e } // `token=` right before a string's close: see extendOpenValue
       else if (placeholderOnly(v, e)) e
       else if (isProse(key, v, e)) v
@@ -909,6 +964,20 @@ private[util] object RedactionScanner {
         if (k < n && t.ch(k) == '(' && callArgs(k)) k else -1
       }
 
+    /**
+     * Whether the dotted name `from until to` reads as a type's, which a value is wrapped in (`SecretStr`,
+     * `pydantic.SecretStr`, `Some`): its last part starts with an upper-case letter and holds no digit. Any other name
+     * glued to a `(` under a sensitive key may be the credential itself (`hunter2(x)`, `Pa55(word)`) and is replaced.
+     */
+    private def wrapperName(from: Int, to: Int): Boolean = {
+      var p = to - 1
+      while (p > from && t.ch(p - 1) != '.') p -= 1
+      var digit = false
+      var k     = p
+      while (k < to) { if (t.ch(k) >= '0' && t.ch(k) <= '9') digit = true; k += 1 }
+      p < to && Character.isUpperCase(t.ch(p)) && !digit
+    }
+
     /** The end of the dotted name that starts at `v`. */
     private def callNameEnd(v: Int): Int = {
       var k = v + 1
@@ -928,7 +997,10 @@ private[util] object RedactionScanner {
 
     /** A container under a sensitive key at `v`: its leaves are replaced, unless it is no container but prose. */
     private def container(v: Int, quote: String, field: Boolean, key: String): Int =
-      if (plausible(v)) walk(new Walk(new java.lang.StringBuilder, quote), v)
+      // A bracket glued to a bare first word is a container too, as Go prints a slice (`password=[abc hunter2]`);
+      // prose puts a blank after a bracket it mentions (`'token': [ for details`)
+      if (plausible(v) || (v + 1 < n && isWordStart(t.ch(v + 1))))
+        walk(new Walk(new java.lang.StringBuilder, quote), v)
       else if (!field) pairValue(v, key)
       else {
         val g = gluedElement(v)
@@ -1020,8 +1092,9 @@ private[util] object RedactionScanner {
      * Replaces the leaves of the container `w`, from `start`: every string that is not a key (followed by `:`, or by
      * `=` in a call) and every bare word that is not a key, a call's name or a literal (`true`, `None`, ...); a bare
      * word is written as the placeholder in `w`'s quote, its escaped first character kept. The walk ends where its
-     * outermost bracket closes; at a value right after a value, where the text is no container any more; or at a
-     * sensitive `key=` inside it, whose value it replaces (`[password=:a]x`). Left open at the end of this level, it is
+     * outermost bracket closes; at a value right after a value, where the text is no container any more - bar a bare
+     * word after a bare word, or a container after a container, on the same line, as Go prints a slice (`[a b]`,
+     * `[[a b] [c d]]`); or at a sensitive `key=` inside it, whose value it replaces (`[password=:a]x`). Left open at the end of this level, it is
      * reported (`openWalk`) and may go on in the next string. Brackets are counted on `w`'s own stack, so the depth of
      * the container does not grow the call stack. The index to go on from.
      */
@@ -1031,11 +1104,24 @@ private[util] object RedactionScanner {
       var lastValue = false
       var lastStr   = false
       var done      = false
+      var lastBare  = false // the last value was a bare word
+      var lastClose = false // the last value was a container, closed
+      var broke     = false // a line break since the last value
       while (!done && i < n) {
         val inCall = stack.length > 0 && stack.charAt(stack.length - 1) == '('
         val se     = t.stringEnd(i)
-        if (placeholderAt(i)) { i += ph.length; lastValue = true; lastStr = false }
-        else if (se >= 0) {
+        if (placeholderAt(i)) {
+          // already masked where the placeholder is the whole leaf, or a call's name before its bracket; a leaf that
+          // only starts with it goes whole
+          val p = i + ph.length
+          if (p < n && "([{".indexOf(t.ch(p).toInt) >= 0) { i = p; lastValue = false }
+          else {
+            val e = placeholderValueEnd(p, field = true)
+            if (e > p) mask(i, e)
+            i = e; lastValue = true; lastBare = true; lastClose = false; broke = false
+          }
+          lastStr = false
+        } else if (se >= 0) {
           if (lastValue && !lastStr) done = true
           else {
             val closed = t.closed(i)
@@ -1048,6 +1134,8 @@ private[util] object RedactionScanner {
               if (!closed && se == n) { open(i + 1, OpenQuoted, t.ch(i)); openNested = true }
               i = se
               lastValue = true
+              lastBare = false
+              lastClose = false; broke = false
               // a leaf written as the placeholder in quotes may have been a bare word: a string after it is no
               // string joined to it, as it was not after the word
               lastStr = !masked
@@ -1056,38 +1144,51 @@ private[util] object RedactionScanner {
         } else {
           val c = t.ch(i)
           if (c == '[' || c == '{' || c == '(') {
-            if (lastValue) done = true
-            else { stack.append(c); i += 1 }
+            // a container right after a container, on the same line, is another of Go's (`[[a b] [c d]]`)
+            if (lastValue && !(lastClose && !broke)) done = true
+            else { stack.append(c); i += 1; lastValue = false; lastClose = false }
           } else if (c == ']' || c == '}' || c == ')') {
             if (stack.length > 0) stack.setLength(stack.length - 1)
             i += 1
             if (stack.length == 0) done = true
             lastValue = true
             lastStr = false
+            lastBare = false
+            lastClose = true
+            broke = false
           } else if (c == ',' || c == ':' || c == '=') { i += 1; lastValue = false; lastStr = false }
-          else if (c == '\n' || c == '\r') i = skipLinePrefix(i + 1)
+          else if (c == '\n' || c == '\r') { broke = true; i = skipLinePrefix(i + 1) }
           else if (Character.isWhitespace(c) || c == '\\') i += 1
-          else if (lastValue) done = true
+          // A value right after a value ends the walk, where the text is no container any more; but a bare word after a
+          // bare word on the same line is a leaf of a slice Go prints without commas (`password=[abc hunter2]`).
+          else if (lastValue && !(lastBare && !broke)) done = true
           else {
             val pair = if (inCall) -1 else inlinePair(i)
             if (pair >= 0) {
-              val v = skipSpace(pair + 1)
-              val e = pairValueEnd(v)
-              mask(v, e)
+              val v  = skipSpace(pair + 1)
+              val se = if (v < n) t.stringEnd(v) else -1
+              // a quoted value keeps its quotes (`[x, password='a']`), as a pair's does outside a container
+              val e = if (se > v + 1 && t.closed(v) && !gluedString(v)) se else pairValueEnd(v)
+              if (e == se) mask(v + 1, se - 1) else mask(v, e)
               i = e
               // a value that ran over a closing bracket (`[password=:a]x`) ends the container; else the walk goes on
               var k = v
               while (k < e && "]})".indexOf(t.ch(k).toInt) < 0) k = if (t.stringEnd(k) > k) t.stringEnd(k) else k + 1
               if (k < e || e == v) { done = true; stack.setLength(0) }
-              else lastValue = true
+              else { lastValue = true; lastBare = false; lastClose = false; broke = false }
             } else {
               // a leaf ends at `=` in any container, as `=` separates there (`[note= x]`, `[a=b]`)
               val e    = leafEnd(i, inCall = true)
               val k    = skipSpace(e) // inside a container, a key's `:` or `=` may follow on the next line
               val next = if (k < n) t.ch(k) else 0.toChar
-              if (next == ':' || (inCall && next == '=') || (k == e && next == '(')) lastValue = false
+              // a key where one can stand, not glued on after a value (`[a hunter2: x]`)
+              if (
+                !lastValue && (next == ':' || (inCall && next == '=') || (k == e && next == '(' && wrapperName(i, e)))
+              )
+                lastValue = false
               else if (next == '(') {
-                // a name apart from its `(` (`SecretStr ('x')`, `hunter2 (old)`): replaced, and the bracket walked
+                // a name apart from its `(` (`SecretStr ('x')`, `hunter2 (old)`), or one that reads as no type's
+                // (`hunter2(x)`): replaced, and the bracket walked
                 if (!KeptLiterals.contains(text(i, e))) {
                   val from = if (escapedBefore(i)) i + 1 else i
                   if (e > from) { if (w.quote == null) mask(from, e) else maskWith(from, e, w.quote + ph + w.quote) }
@@ -1101,6 +1202,8 @@ private[util] object RedactionScanner {
                   if (e > from) { if (w.quote == null) mask(from, e) else maskWith(from, e, w.quote + ph + w.quote) }
                 }
                 lastValue = true
+                lastBare = true
+                lastClose = false; broke = false
               }
               lastStr = false
               i = math.max(e, i + 1)
@@ -1141,8 +1244,9 @@ private[util] object RedactionScanner {
       if (k < n) {
         val c                   = t.ch(k)
         def spansLines: Boolean = depth > 0 && (hasBreak(j, k) || hasBreak(k + 1, afterKey(k + 1)))
-        // `key=value`, `key = value`, `key==value`; not the comparison `a == b`
-        if (c == '=' && !(k > j && k + 1 < n && t.ch(k + 1) == '=')) return onPair(i, j, k)
+        // `key=value`, `key = value`, `key==value`, and the comparison `password == 'x'`, whose right side is as much
+        // the credential (a test's source line, a `pytest` report)
+        if (c == '=') return onPair(i, j, if (k > j && k + 1 < n && t.ch(k + 1) == '=') k + 1 else k)
         // `key:`, `key :` and, inside a bracket, `key\n:` (`afterKey`); not a URL's `scheme://`
         if (c == ':' && !(k + 2 < n && t.ch(k + 1) == '/' && t.ch(k + 2) == '/')) {
           // a key whose `:` or value is on another line, inside a bracket, is code (`{\n  password\n  :\n  'x'}`): a field
@@ -1361,7 +1465,16 @@ private[util] object RedactionScanner {
     private def onAuthScheme(i: Int, j: Int, bearer: Boolean): Int = {
       val k = skipBlanks(j)
       if (k == j || k >= n) -1
-      else {
+      else if (t.stringEnd(k) >= 0) {
+        // a quoted token (`Bearer "x"`): its content is replaced, as a string value's is; not a key after the scheme
+        val se = t.stringEnd(k)
+        if (t.closed(k) && colonAfter(se)) -1
+        else {
+          val ce = if (t.closed(k)) se - 1 else se
+          if (ce > k + 1 && !placeholderOnly(k + 1, ce)) mask(k + 1, ce)
+          se
+        }
+      } else {
         var e = k
         while (
           e < n && {
@@ -1376,8 +1489,16 @@ private[util] object RedactionScanner {
           while (kk < n && isKeyChar(t.ch(kk))) kk += 1
           val eq = skipBlanks(kk)
           if (kk > k && eq < n && t.ch(eq) == '=' && Redaction.isCredentialName(text(k, kk))) -1
-          else if (e < n && t.ch(e) == ':') -1 // a header's name (`Bearer Authorization: ...`), not a token
-          else { mask(i, e); e }
+          // a sensitive header's name (`Bearer Authorization: ...`), whose own value is replaced, or a URL's scheme,
+          // whose password is; not a token that only goes on with a `:` (`Basic alice:hunter2`, `Bearer hunter2: x`)
+          else if (
+            e < n && t.ch(e) == ':' &&
+            (anywhereHeader(k, e) || credentialWord(k, e) || (e + 2 < n && t.ch(e + 1) == '/' && t.ch(e + 2) == '/'))
+          ) -1
+          else {
+            val end = if (e < n && t.ch(e) == ':') math.max(e, inlineValueEnd(e)) else e
+            mask(i, end); end
+          }
         }
       }
     }

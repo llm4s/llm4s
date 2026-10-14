@@ -304,6 +304,69 @@ class RedactionPropertySpec extends AnyFlatSpec with Matchers with ScalaCheckPro
     }
   }
 
+  /**
+   * The early exits of the scan - "already masked", "this is the next field's key", "the value ends here", "this is
+   * prose" - over a value that only starts like what they skip (#1932): the placeholder with a secret glued to it, a
+   * quoted secret followed by `:`, a secret followed by prose, a secret inside a Go-style `[a b]` slice, glued to a
+   * `(`, or in angle brackets. Each value form, under every sensitive key, in every key shape, raw and inside a JSON
+   * string: the secret is never left readable, and a second redaction changes nothing. Every case is checked, and
+   * every failure reported at once.
+   */
+  it should "leave no secret readable in a value that only begins like what an early exit skips" in {
+    val ph = Redaction.RedactionPlaceholder
+    val s  = "Zq9s3cretXy"
+    val values = Seq(
+      ph + s,
+      s"$ph$s tail",
+      s"[$ph$s]",
+      s"($ph$s)",
+      s""""$s": failed""",
+      s"'$s': failed",
+      s"$s the rest of it",
+      s""""$s" and more""",
+      s"[a $s]",
+      s"[$s b]",
+      s"(a $s)",
+      s"[a, b $s]",
+      s"[[a b] [c $s]]",
+      s"$s(x)",
+      s"<$s>"
+    )
+    def contexts(key: String, v: String): Seq[String] = {
+      val ident = key.replace('-', '_')
+      Seq(
+        s"$key=$v",
+        s"login $key=$v ok",
+        s"$key = $v",
+        s"assert $key == $v",
+        s"{$key=$v}",
+        s""""$key": $v""",
+        s"""{"$key": $v}""",
+        s"{'$key': $v}",
+        s"{$key: $v}",
+        s"\n$key: $v\n",
+        s"Settings($ident=$v)",
+        s""""$key"=$v""",
+        s""""$key" == $v"""
+      ) ++ {
+        // a URL holds no raw whitespace, so a query value ends at the first: a secret after one is no value's
+        val before = v.indexOf(s)
+        if (v.substring(0, before).exists(_.isWhitespace)) Nil else Seq(s"https://h.example/p?a=1&$key=$v")
+      }
+    }
+    val cases = for {
+      key  <- sensitiveKeys
+      v    <- values
+      doc  <- contexts(key, v)
+      wrap <- Seq[String => String](identity, d => ujson.Obj("msg" -> d).render())
+    } yield wrap(doc)
+    val outs     = cases.map(in => in -> Redaction.redact(in))
+    val leaks    = outs.collect { case (in, out) if out.contains(s) => s"$in\n  => $out" }
+    val unstable = outs.collect { case (in, out) if Redaction.redact(out) != out => s"$in\n  => $out" }
+    withClue(s"${leaks.size} of ${cases.size} leak:\n${leaks.take(60).mkString("\n")}\n")(leaks shouldBe empty)
+    withClue(s"${unstable.size} not idempotent:\n${unstable.take(20).mkString("\n")}\n")(unstable shouldBe empty)
+  }
+
   /** `doc` put `layers` times inside a JSON string, as a log that is logged again is. */
   private def encoded(doc: String, layers: Int): String =
     (1 to layers).foldLeft(doc)((inner, k) => ujson.Obj(s"m$k" -> inner, "n" -> k).render())

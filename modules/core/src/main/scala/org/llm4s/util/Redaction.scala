@@ -332,8 +332,9 @@ private[llm4s] object Redaction {
    * Redact sensitive information from a string: see the policy described on this object and on `RedactionScanner`.
    *
    * Redacting the output again changes nothing: a value that is already the placeholder is left as it is, and the
-   * placeholder in a string, a pair or a container leaf is such a value. (A caller's own placeholder that holds a
-   * quote, a backslash or a bracket may read differently the second time.)
+   * placeholder in a string, a pair or a container leaf is such a value. Only a value the placeholder is the whole of
+   * is skipped: one that merely starts with it (`password=[REDACTED]hunter2`) is replaced whole. (A caller's own
+   * placeholder that holds a quote, a backslash or a bracket may read differently the second time.)
    *
    * @param input The input string potentially containing sensitive data
    * @param placeholder The placeholder to use for redacted content

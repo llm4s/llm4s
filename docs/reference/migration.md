@@ -67,13 +67,19 @@ Update anything that asserts on redacted strings:
 - Quotes around a value are kept as written, escaped ones too (`password='[REDACTED]'`, `password=\\'[REDACTED]\\'`),
   and a value is one placeholder (`password=p&ssW0rd` gives `password=[REDACTED]`).
 - A call's name and a container's brackets under a sensitive key are kept (`Settings(token=SecretStr('[REDACTED]'))`,
-  `token=['[REDACTED]']`); a bare leaf is written as the placeholder in the key's quote.
+  `token=['[REDACTED]']`); a bare leaf is written as the placeholder in the key's quote. A call's name is kept only
+  where it reads as a type's (its last part starts upper-case and holds no digit): `password=hunter2(x)` gives
+  `password=[REDACTED]([REDACTED])`.
 - `Bearer password=x` gives `Bearer password=[REDACTED]`. A container a text only mentions (`see 'token': [ for
   details`) is left alone.
 - Newly masked: JSON escaped twice or more, indented YAML keys and blocks under a sensitive key, a `key: value` inside a
   line whose value looks like a credential, URL passwords with unencoded `#`, quotes or brackets, values over line
   breaks inside a container or call, and whitespace between any key and its `:` or `=` (`{password : 'x'}`,
   `"password" = "x"`).
+- A value is skipped as already masked only where the placeholder is the whole of it (`password=[REDACTED]x` gives
+  `password=[REDACTED]`). Also newly masked: a quoted pair value before a `:` (`password="x": failed`), the right side
+  of a sensitive key's `==` (`assert password == 'x'`), a value in angle brackets (`password=<x>`), `Basic user:pass`,
+  `Bearer "x"`, and a Go slice's words (`password=[a b]` gives `password=[[REDACTED] [REDACTED]]`).
 - Strings are decoded up to 16 JSON string encodings deep. Past that, a string that still holds an escape is replaced
   whole.
 - `safeBody` redacts the prefix of a body over 128 KiB as cut text, deciding nothing open at the cut in a value's
