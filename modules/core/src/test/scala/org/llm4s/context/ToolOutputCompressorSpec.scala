@@ -48,6 +48,22 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
     compressed.parts.head.asInstanceOf[ContentPart.Text].text.length should be < 24000
   }
 
+  it should "bring a result split into small parts under the inline bound, keeping their places" in {
+    val chart = ContentPart
+      .image(
+        org.llm4s.media.MediaSource.Url(java.net.URI.create("https://example.com/a.png")),
+        org.llm4s.media.MediaType.Png
+      )
+      .toOption
+      .get
+    val parts   = Vector.fill(5)(ContentPart.Text("z " * 250)) :+ chart
+    val result  = ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(parts, "c")), ArtifactStore.inMemory())
+    val message = result.toOption.get.head.asInstanceOf[ToolMessage]
+    message.parts.size shouldBe 6
+    message.parts.last shouldBe chart
+    message.content.getBytes("UTF-8").length should be <= 2048
+  }
+
   it should "apply its thresholds to the result's text in total, not to each part" in {
     val parts   = Vector.fill(5)(ContentPart.Text("y" * 2048))
     val result  = ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(parts, "c")), ArtifactStore.inMemory())

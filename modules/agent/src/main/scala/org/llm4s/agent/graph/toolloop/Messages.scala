@@ -44,7 +44,7 @@ object Messages:
    * the identity; the version is what makes an older runtime refuse a value that may hold parts.
    */
   val key: StateKey[Vector[StoredMessage], MessageUpdate] =
-    StateKey[Vector[StoredMessage], MessageUpdate]("messages", Vector.empty)((h, u) => apply(h, u).map(bounded))
+    StateKey[Vector[StoredMessage], MessageUpdate]("messages", Vector.empty)(apply)
       .withStateVersion(SchemaVersion(2)(1 -> Right.apply))
       .withUpdateVersion(SchemaVersion(2)(1 -> Right.apply))
 
@@ -52,24 +52,22 @@ object Messages:
    * The most inline media bytes a thread's messages hold, in total: 20 MiB, four inline parts at
    * `ContentPart.MaxInlineBytes`. Each part and each tool result is bounded on its own, but a thread
    * gains messages turn after turn and every checkpoint copies them all, so the history is bounded
-   * too. An update that takes it over the bound is applied, and then the oldest inline media parts
-   * are each replaced by a text part naming what was removed, until it fits again: a total update,
-   * so no run fails for it, whatever wrote the media - a tool, a caller's imported history, a batch
-   * of results that each fit on their own.
+   * too. A message appended (or replaced) past the bound is kept with its own inline media parts
+   * replaced, first to last, by a text part naming what was removed, until the history fits: a total
+   * update, so no run fails for it, whatever wrote the media - a tool, a caller's imported history, a
+   * batch of results that each fit on their own. Only the incoming message is changed, never the
+   * history before it, so an output Block's `RemoveTurn` retracts a turn without having to restore
+   * anything it evicted.
    */
   val MaxInlineBytes: Long = 4L * ContentPart.MaxInlineBytes
 
-  private[toolloop] def bounded(history: Vector[StoredMessage]): Vector[StoredMessage] =
-    var excess = history.map(m => inlineBytes(m.message)).sum - MaxInlineBytes
-    if excess <= 0 then history
+  /** `incoming`, with its inline media evicted as far as `history` plus it would be over [[MaxInlineBytes]]. */
+  private[toolloop] def admitted(history: Vector[StoredMessage], incoming: StoredMessage): StoredMessage =
+    val excess = (history :+ incoming).map(m => inlineBytes(m.message)).sum - MaxInlineBytes
+    if excess <= 0 then incoming
     else
-      history.map { stored =>
-        if excess <= 0 then stored
-        else
-          val (parts, freed) = InlineMediaEviction.evict(partsOf(stored.message), excess, MaxInlineBytes)
-          excess -= freed
-          if freed == 0 then stored else stored.copy(message = withParts(stored.message, parts))
-      }
+      val (parts, freed) = InlineMediaEviction.evict(partsOf(incoming.message), excess, MaxInlineBytes)
+      if freed == 0 then incoming else incoming.copy(message = withParts(incoming.message, parts))
 
   private def partsOf(message: Message): Vector[ContentPart] = message match
     case u: UserMessage => u.parts
@@ -90,9 +88,9 @@ object Messages:
       case MessageUpdate.Append(message) =>
         if history.exists(_.id == message.id) then
           Left(ValidationError("messages", s"message '${message.id}' already exists"))
-        else Right(history :+ message)
+        else Right(history :+ admitted(history, message))
       case MessageUpdate.Replace(id, message) =>
-        indexOf(id).map(i => history.updated(i, message))
+        indexOf(id).map(i => history.updated(i, admitted(history.patch(i, Nil, 1), message)))
       case MessageUpdate.RemoveThrough(id) =>
         indexOf(id).map(i => history.drop(i + 1))
       case MessageUpdate.RemoveTurn(id) =>

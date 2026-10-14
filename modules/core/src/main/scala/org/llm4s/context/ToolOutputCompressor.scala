@@ -105,16 +105,28 @@ object ToolOutputCompressor {
         Some(text => compressInlineContent(text, message.toolCallId, detectContentType(text)))
       case _ => None
     }
-    rewrite.fold[Result[Message]](Right(message)) { f =>
-      message.parts
-        .foldLeft[Result[Vector[ContentPart]]](Right(Vector.empty)) { (acc, part) =>
-          acc.flatMap { done =>
-            part match {
-              case ContentPart.Text(text) => f(text).map(t => done :+ ContentPart.Text(t))
-              case media                  => Right(done :+ media)
-            }
+    def rewriteEach(f: String => Result[String]): Result[Vector[ContentPart]] =
+      message.parts.foldLeft[Result[Vector[ContentPart]]](Right(Vector.empty)) { (acc, part) =>
+        acc.flatMap { done =>
+          part match {
+            case ContentPart.Text(text) => f(text).map(t => done :+ ContentPart.Text(t))
+            case media                  => Right(done :+ media)
           }
         }
+      }
+    def textBytes(parts: Vector[ContentPart]): Long =
+      parts.collect { case ContentPart.Text(t) => ContentSize.fromString(t).bytes }.sum
+    val textParts = message.parts.count(_.isInstanceOf[ContentPart.Text])
+    val externalize: String => Result[String] = text =>
+      externalizeToolOutput(text, artifactStore, detectContentType(text))
+    rewrite.fold[Result[Message]](Right(message)) { f =>
+      rewriteEach(f)
+        // compressing several parts each on its own can leave their total over the inline bound - small parts
+        // are kept as they are - so then each part is externalized instead, still in place; one part is
+        // compressed as it always was
+        .flatMap(parts =>
+          if (textParts > 1 && textBytes(parts) > MaxInlineToolOutput) rewriteEach(externalize) else Right(parts)
+        )
         .map(message.withParts)
     }
   }

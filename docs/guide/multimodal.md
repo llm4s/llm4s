@@ -91,8 +91,9 @@ providers and Ollama.
 
 A media type the wire format can name but a model rejects is the provider's error, as it is for text.
 
-An agent thread holds at most 20 MiB of inline media across its messages (`Messages.MaxInlineBytes`). Past that, the
-oldest inline parts are each replaced by a text part saying what was removed, so the model knows, and the run goes on.
+An agent thread holds at most 20 MiB of inline media across its messages (`Messages.MaxInlineBytes`). A message added past
+that keeps its text, and each of its inline parts that does not fit is replaced by a text part saying what was
+removed, so the model knows, and the run goes on. Earlier messages are never changed.
 
 ## Tools that return media
 

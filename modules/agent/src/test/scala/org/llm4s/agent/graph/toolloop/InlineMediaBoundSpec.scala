@@ -22,7 +22,7 @@ class InlineMediaBoundSpec extends AnyFlatSpec with Matchers with EitherValues {
       }
       .sum
 
-  "The messages key" should "evict the oldest inline media once the thread is over its bound, and keep the rest" in {
+  "The messages key" should "admit media while the thread is within its bound, and evict it from a message past the bound, never from earlier ones" in {
     Messages.MaxInlineBytes shouldBe 4L * ContentPart.MaxInlineBytes
     val history = (1 to 6).foldLeft(Vector.empty[StoredMessage]) { (h, i) =>
       Messages.key
@@ -33,11 +33,11 @@ class InlineMediaBoundSpec extends AnyFlatSpec with Matchers with EitherValues {
         .value
     }
     total(history) should be <= Messages.MaxInlineBytes
-    history.map(_.message.asInstanceOf[UserMessage].parts.last).take(2).foreach { evicted =>
+    history.take(4).map(_.message.asInstanceOf[UserMessage].parts.last) shouldBe Vector.fill(4)(part)
+    history.drop(4).map(_.message.asInstanceOf[UserMessage].parts.last).foreach { evicted =>
       evicted shouldBe a[ContentPart.Text]
       evicted.asInstanceOf[ContentPart.Text].text should include("image (inline, image/png) removed")
     }
-    history.drop(2).map(_.message.asInstanceOf[UserMessage].parts.last) shouldBe Vector.fill(4)(part)
     history.map(_.message.content.linesIterator.next()) shouldBe (1 to 6).map(i => s"turn $i").toVector
   }
 
@@ -46,8 +46,8 @@ class InlineMediaBoundSpec extends AnyFlatSpec with Matchers with EitherValues {
       .applyUpdate(Vector.empty, MessageUpdate.Append(StoredMessage("m", UserMessage(Vector.fill(6)(part)))))
       .value
     total(big) should be <= Messages.MaxInlineBytes
-    val small = Vector(StoredMessage("m", UserMessage(Vector(part))))
-    (Messages.bounded(small) should be).theSameInstanceAs(small)
+    val small = StoredMessage("m", UserMessage(Vector(part)))
+    (Messages.admitted(Vector.empty, small) should be).theSameInstanceAs(small)
   }
 
   "tool-results" should "evict inline media from the results of a batch that would together be over the bound" in {
@@ -57,5 +57,30 @@ class InlineMediaBoundSpec extends AnyFlatSpec with Matchers with EitherValues {
     recorded.map(r => ContentPart.inlineBytes(r.parts)).sum should be <= Messages.MaxInlineBytes
     recorded.take(4).map(_.parts) shouldBe Vector.fill(4)(Vector(part))
     recorded.drop(4).foreach(_.parts.head shouldBe a[ContentPart.Text])
+  }
+
+  "A blocked turn's retraction" should "leave the history before it as it was, media included" in {
+    val before = (1 to 4).foldLeft(Vector.empty[StoredMessage]) { (h, i) =>
+      Messages.key.applyUpdate(h, MessageUpdate.Append(StoredMessage(s"m$i", UserMessage(Vector(part))))).value
+    }
+    val turn = Messages.key
+      .applyUpdate(
+        before,
+        MessageUpdate.Append(StoredMessage("t/user", UserMessage(Vector(ContentPart.Text("x"), part))))
+      )
+      .value
+    turn.take(4) shouldBe before
+    Messages.key.applyUpdate(turn, MessageUpdate.RemoveTurn("t/user")).value shouldBe before
+  }
+
+  it should "bound a replaced message too, against the rest of the history" in {
+    val full = (1 to 4).foldLeft(Vector.empty[StoredMessage]) { (h, i) =>
+      Messages.key.applyUpdate(h, MessageUpdate.Append(StoredMessage(s"m$i", UserMessage(Vector(part))))).value
+    }
+    val replaced = Messages.key
+      .applyUpdate(full, MessageUpdate.Replace("m1", StoredMessage("m1", UserMessage(Vector(part, part)))))
+      .value
+    total(replaced) should be <= Messages.MaxInlineBytes
+    replaced.drop(1) shouldBe full.drop(1)
   }
 }
