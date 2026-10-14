@@ -153,6 +153,18 @@ class Llm4sBedrockModuleSpec extends AnyWordSpec with Matchers with ProviderModu
       }
     }
 
+    "send the content parts Converse takes and refuse the rest before sending" in {
+      import org.llm4s.testkit.ContentPartCase.*
+      // the contract's URLs are https, which Converse cannot fetch; s3:// is in BedrockContentPartsSpec
+      assertContentParts("bedrock", sendJsonResponse(_, 200, converseResponse("ok")))(
+        UserImageInline,
+        UserPdfInline,
+        UserTextDocumentInline,
+        ToolImageInline,
+        ToolPdfInline
+      )(clientAt)
+    }
+
     "complete a request" in {
       withServer("/")(sendJsonResponse(_, 200, converseResponse("pong"))) { url =>
         clientAt(url)

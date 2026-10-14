@@ -15,6 +15,7 @@ import org.llm4s.error.ThrowableOps.*
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.config.{ BedrockConfig, ProviderConfig }
 import org.llm4s.llmconnect.model.*
+import org.llm4s.media.{ DocumentMediaType, ImageMediaType, MediaSource, MediaType }
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
@@ -45,6 +46,13 @@ import software.amazon.awssdk.services.bedrockruntime.model.{
   BedrockRuntimeException,
   ContentBlock,
   ConversationRole,
+  DocumentBlock,
+  DocumentFormat,
+  DocumentSource,
+  ImageBlock,
+  ImageFormat,
+  ImageSource,
+  S3Location,
   ConverseRequest,
   ConverseResponse,
   ConverseStreamRequest,
@@ -404,15 +412,18 @@ class BedrockClient(
     // sealed thinking goes back only while the history before it is the one it was produced after;
     // any other is unsealed here, before the system messages are lifted out (see ThinkingReplay)
     val replayable = ThinkingReplay.replayable(replayOrigin, conversation.messages, options)
-    val messages   = mergeAdjacentRoles(convertMessages(replayable.filterNot(_.isInstanceOf[SystemMessage])))
-    if (messages.isEmpty)
-      Left(
-        ValidationError(
-          "messages",
-          "Bedrock needs at least one user or assistant message; a system-only conversation has none"
+    // a part Converse cannot take fails the request here, before anything is sent
+    BedrockClient.checkParts(providerName, replayable).flatMap { _ =>
+      val messages = mergeAdjacentRoles(convertMessages(replayable.filterNot(_.isInstanceOf[SystemMessage])))
+      if (messages.isEmpty)
+        Left(
+          ValidationError(
+            "messages",
+            "Bedrock needs at least one user or assistant message; a system-only conversation has none"
+          )
         )
-      )
-    else Right((systemTexts, messages))
+      else Right((systemTexts, messages))
+    }
   }
 
   private def inferenceConfig(options: CompletionOptions): InferenceConfiguration = {
@@ -479,9 +490,13 @@ class BedrockClient(
    */
   private def convertMessages(messages: Seq[Message]): Seq[BedrockMessage] = {
     val pairing = ToolResultPairing.of(messages)
+    // each document needs a name unique in the request: numbered in conversation order, so stable
+    var documents          = 0
+    def nextName(): String = { documents += 1; s"document-$documents" }
     messages.zipWithIndex.flatMap {
-      case (UserMessage(content), _) =>
-        Some(BedrockMessage.builder().role(ConversationRole.USER).content(ContentBlock.fromText(content)).build())
+      case (um: UserMessage, _) =>
+        val blocks = um.parts.map(BedrockClient.userPart(nextName()))
+        Some(BedrockMessage.builder().role(ConversationRole.USER).content(blocks.asJava).build())
 
       case (original: AssistantMessage, index) =>
         // only the paired calls; dropping one unseals the thinking (see ToolResultPairing.replayable)
@@ -515,14 +530,16 @@ class BedrockClient(
         )
 
       case (msg: ToolMessage, index) if !pairing.resultPaired(index) =>
-        val text = s"[Tool result for ${msg.toolCallId}]: ${msg.content}"
-        Some(BedrockMessage.builder().role(ConversationRole.USER).content(ContentBlock.fromText(text)).build())
+        // no call to answer here, so it goes as text, followed by its media
+        val text  = ContentBlock.fromText(s"[Tool result for ${msg.toolCallId}]: ${msg.content}")
+        val media = msg.parts.filter(ContentPart.isMedia).map(BedrockClient.userPart(nextName()))
+        Some(BedrockMessage.builder().role(ConversationRole.USER).content((text +: media).asJava).build())
 
       case (msg: ToolMessage, _) =>
         val resultBlock = ToolResultBlock
           .builder()
           .toolUseId(msg.toolCallId)
-          .content(ToolResultContentBlock.fromText(msg.content))
+          .content(msg.parts.map(BedrockClient.toolPart(nextName())).asJava)
           .build()
         Some(
           BedrockMessage.builder().role(ConversationRole.USER).content(ContentBlock.fromToolResult(resultBlock)).build()
@@ -649,12 +666,22 @@ class BedrockClient(
 
   // ---- exchange logging ----
 
+  // the text, with each media part named by its kind: the log never carries the bytes
+  private def describeParts(parts: Vector[ContentPart]): String =
+    parts
+      .map {
+        case ContentPart.Text(text) => text
+        case media                  => s"[${media.kind}]"
+      }
+      .mkString(" ")
+
   private def serializeRequestForLogging(conversation: Conversation, options: CompletionOptions): String = {
     val msgs = conversation.messages.map {
       case SystemMessage(content) => ujson.Obj("role" -> "system", "content" -> content)
-      case UserMessage(content)   => ujson.Obj("role" -> "user", "content" -> content)
+      case msg: UserMessage       => ujson.Obj("role" -> "user", "content" -> describeParts(msg.parts))
       case msg: AssistantMessage  => ujson.Obj("role" -> "assistant", "content" -> msg.content)
-      case msg: ToolMessage => ujson.Obj("role" -> "tool", "toolCallId" -> msg.toolCallId, "content" -> msg.content)
+      case msg: ToolMessage =>
+        ujson.Obj("role" -> "tool", "toolCallId" -> msg.toolCallId, "content" -> describeParts(msg.parts))
     }
     ujson
       .Obj(
@@ -696,6 +723,75 @@ class BedrockClient(
 }
 
 object BedrockClient {
+
+  // ---- content parts ----
+
+  private def imageFormat(mt: ImageMediaType): Option[ImageFormat] = mt match {
+    case MediaType.Png  => Some(ImageFormat.PNG)
+    case MediaType.Jpeg => Some(ImageFormat.JPEG)
+    case MediaType.Gif  => Some(ImageFormat.GIF)
+    case MediaType.WebP => Some(ImageFormat.WEBP)
+    case _              => None
+  }
+
+  private def documentFormat(mt: DocumentMediaType): DocumentFormat = mt match {
+    case MediaType.Pdf       => DocumentFormat.PDF
+    case MediaType.PlainText => DocumentFormat.TXT
+    case MediaType.Markdown  => DocumentFormat.MD
+    case MediaType.Html      => DocumentFormat.HTML
+    case MediaType.Csv       => DocumentFormat.CSV
+  }
+
+  private def isS3(source: MediaSource): Boolean = source match {
+    case MediaSource.Url(uri) => Option(uri.getScheme).exists(_.equalsIgnoreCase("s3"))
+    case _                    => false
+  }
+
+  // Converse reads media from bytes or from S3; it fetches no other URL and takes no provider file
+  private def readable(source: MediaSource): Boolean = source.isInstanceOf[MediaSource.Inline] || isS3(source)
+
+  private def s3(source: MediaSource): S3Location =
+    S3Location.builder().uri(source.asInstanceOf[MediaSource.Url].uri.toString).build()
+
+  private def imageSource(source: MediaSource): ImageSource = source match {
+    case inline: MediaSource.Inline => ImageSource.fromBytes(SdkBytes.fromByteArray(PartEncoding.bytes(inline)))
+    case other                      => ImageSource.fromS3Location(s3(other))
+  }
+
+  private def documentSource(source: MediaSource): DocumentSource = source match {
+    case inline: MediaSource.Inline => DocumentSource.fromBytes(SdkBytes.fromByteArray(PartEncoding.bytes(inline)))
+    case other                      => DocumentSource.fromS3Location(s3(other))
+  }
+
+  /**
+   * The media Converse takes, in a user turn and in a tool result alike: a PNG, JPEG, GIF or WebP image
+   * and a PDF, text, Markdown, HTML or CSV document, from inline bytes or an `s3://` URL. A document
+   * is sent under `name`, which Converse requires.
+   */
+  private def media(name: => String): PartialFunction[ContentPart, Either[ImageBlock, DocumentBlock]] = {
+    case ContentPart.Image(source, mt) if readable(source) && imageFormat(mt).isDefined =>
+      Left(ImageBlock.builder().format(imageFormat(mt).get).source(imageSource(source)).build())
+    case ContentPart.Document(source, mt) if readable(source) =>
+      Right(DocumentBlock.builder().format(documentFormat(mt)).name(name).source(documentSource(source)).build())
+  }
+
+  /** A part of a user turn as a content block; `name` names a document. */
+  private[provider] def userPart(name: => String): PartialFunction[ContentPart, ContentBlock] = {
+    case ContentPart.Text(text) => ContentBlock.fromText(text)
+    case part if media(name).isDefinedAt(part) =>
+      media(name)(part).fold(ContentBlock.fromImage, ContentBlock.fromDocument)
+  }
+
+  /** A part of a tool result as a tool-result content block; `name` names a document. */
+  private[provider] def toolPart(name: => String): PartialFunction[ContentPart, ToolResultContentBlock] = {
+    case ContentPart.Text(text) => ToolResultContentBlock.fromText(text)
+    case part if media(name).isDefinedAt(part) =>
+      media(name)(part).fold(ToolResultContentBlock.fromImage, ToolResultContentBlock.fromDocument)
+  }
+
+  /** `Right` when every part of `messages` is one Converse takes, else the error naming the first that is not. */
+  private[provider] def checkParts(provider: String, messages: Seq[Message]): Result[Unit] =
+    PartEncoding.check(provider, messages, userPart("document"), toolPart("document"))
   import org.llm4s.types.TryOps
 
   /** What the SDK's stream callbacks hand to the thread that is waiting on the stream. */
