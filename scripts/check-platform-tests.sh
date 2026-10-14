@@ -65,7 +65,9 @@ PATTERN = Regexp.new([
     'createTempFile|createTempDirectory|newOutputStream|newBufferedWriter|write|writeString|' \
     'setPosixFilePermissions|setAttribute|setLastModifiedTime|setOwner)\b',
   # java.io.File and its streams: the same operations without java.nio.file.Files.
-  '\.(?:renameTo|mkdirs?|deleteOnExit)\(', 'FileOutputStream', 'FileWriter', 'RandomAccessFile'
+  # `delete()` is File's: it takes no argument, unlike a store's or HTTP client's `delete(id)`.
+  '\.delete\(\)', '\.(?:renameTo|mkdirs?|deleteOnExit|createNewFile|setLastModified|setReadOnly)\(',
+  'FileOutputStream', 'FileWriter', 'RandomAccessFile'
 ].join('|'))
 # A test that asks which OS it is on was written to behave differently on Windows.
 OS_PROBE = /os\.name|isWin|IS_OS_WINDOWS/
