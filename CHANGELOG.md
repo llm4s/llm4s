@@ -1300,11 +1300,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   principal, `Custom` payloads and `TaskFailed` messages - although `history`, `checkpoint`, `prune` and `fork` refuse
   another tenant. `subscribe(threadId, afterSeq, capacity, config)(listener)` and
   `TracingSubscriber.attach(runtime, threadId, tracing, afterSeq, config)` now take the caller's `RunConfig` (default
-  `RunConfig()`, no tenant) and return `GraphError.TenantMismatch` for a thread whose latest checkpoint, or whose run
-  admitting or executing in the runtime, is another tenant's, before joining. Because a thread can change hands under
+  `RunConfig()`, no tenant) and return `GraphError.TenantMismatch` for a thread whose latest checkpoint is another
+  tenant's - or, for a thread with no checkpoint yet, whose run admitting or executing in the runtime is - before
+  joining. Because a thread can change hands under
   its id after that - created by another tenant after the subscription was made, or deleted and created again through
   another runtime - each subscription also screens every event: by the tenant the events that begin a run, a fork or a
-  state update name, and otherwise, until the thread is confirmed as the caller's, by its latest checkpoint. An event
+  state update name, and otherwise, until the first event delivered confirms the thread as the caller's, by its latest
+  checkpoint, read again then. An event
   of another tenant's thread ends it, before that event, with the new `DisconnectReason.TenantMismatch`.
   `RunHandle.subscribe`, `AgentRun.subscribe`, a run's `Observer` and agent tracing are scoped to their run's tenant
   and keep their signatures. See the [migration guide](docs/reference/migration.md#durable-checkpointer-contract-1700).

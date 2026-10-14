@@ -281,14 +281,15 @@ final class GraphRuntime(
    * that precedes it, so with one slot no live event could ever be accepted.
    *
    * A subscription reads the thread, so it is tenant-checked as [[history]] is: a thread whose latest
-   * checkpoint, or whose run admitting or executing in this runtime, is another tenant's than
-   * `config.tenantId` is refused with [[GraphError.TenantMismatch]] before the subscription joins, and a
-   * failed read of the thread is returned as it is. A thread can still change hands under its id once
+   * checkpoint is another tenant's than `config.tenantId` - or, for a thread with no checkpoint yet,
+   * whose run admitting or executing in this runtime is - is refused with [[GraphError.TenantMismatch]]
+   * before the subscription joins. A read of the thread that fails is returned as it is; one that throws
+   * is [[GraphError.RunCrashed]], as for `history`. A thread can still change hands under its id once
    * subscribed: one with no checkpoint yet is created by whichever tenant runs first, and one deleted
    * through another runtime can be created again before the subscription learns of the delete. So
    * every event is screened before it is delivered - by the tenant the event names, for the events a
-   * run, a fork or a state update begins with, and otherwise, until the thread is known to be the
-   * caller's, by its latest checkpoint's - and an event of another tenant's thread ends the
+   * run, a fork or a state update begins with, and otherwise, until the first event delivered has
+   * confirmed the thread as the caller's, by its latest checkpoint's, read again then - and an event of another tenant's thread ends the
    * subscription before it with `Disconnected(lastSeq, DisconnectReason.TenantMismatch)`. A thread
    * with no checkpoint any more ends it with `ThreadDeleted`, and a failed read with `ReplayFailed`.
    */
@@ -297,23 +298,34 @@ final class GraphRuntime(
   ): Result[Subscription] = admission(threadId) {
     val requested = config.tenantId.map(_.value)
     validCapacity(capacity).flatMap { _ =>
-      // a run admitting or executing here is the thread's tenant's, even before its first checkpoint
-      val holderTenant = withLock(activeLock)(active.get(threadId.value).map(_._1))
-      if holderTenant.exists(_ != requested) then Left(GraphError.TenantMismatch(threadId.value, requested))
-      else
-        checkpointer
-          .latest(threadId)
-          .flatMap(_.fold[Result[Boolean]](Right(false))(checkTenant(threadId, _, config).map(_ => true)))
-          .flatMap(confirmed =>
-            dispatched(
-              threadId,
-              afterSeq,
-              capacity,
-              listener,
-              AbandonedWrites.none,
-              TenantScope.Of(requested, confirmed)
+      checkpointer
+        .latest(threadId)
+        .flatMap {
+          // the checkpoint decides: a run reserved in this runtime may be another tenant's call that its
+          // own admission is about to refuse, and must not make the owner's subscription fail
+          case Some(stored) => checkTenant(threadId, stored, config)
+          // with none yet, a run admitting or executing here is the only owner there is: it has passed
+          // every check a new thread has, and will create the thread for its tenant
+          case None =>
+            val holderTenant = withLock(activeLock)(active.get(threadId.value).map(_._1))
+            Either.cond(
+              holderTenant.forall(_ == requested),
+              (),
+              GraphError.TenantMismatch(threadId.value, requested)
             )
+        }
+        .flatMap(_ =>
+          // unconfirmed even when the checkpoint matched: the thread can change hands before the first
+          // event is read, so the first event delivered is screened against the store again
+          dispatched(
+            threadId,
+            afterSeq,
+            capacity,
+            listener,
+            AbandonedWrites.none,
+            TenantScope.Of(requested, confirmed = false)
           )
+        )
     }
   }
 

@@ -204,6 +204,63 @@ class SubscriptionTenantSpec extends AnyFlatSpec with Matchers with EitherValues
     sub.cancel()
   }
 
+  it should "accept the owner while another tenant's doomed call is admitting on its thread" in {
+    val underlying = InMemoryCheckpointer()
+    val thread     = newThread()
+    GraphRuntime(underlying).start(thread, emitter, "mine", tenant("a", "a1")).awaited.value.completed
+    val reading = new CountDownLatch(1)
+    val gate    = new CountDownLatch(1)
+    val armed   = new AtomicBoolean(true)
+    // tenant b's start holds the thread in this runtime while it reads the thread, before it is refused
+    val slow = new ForwardingCheckpointer(underlying) {
+      override def latest(threadId: ThreadId) = {
+        if armed.compareAndSet(true, false) then {
+          reading.countDown()
+          gate.await(10, TimeUnit.SECONDS): Unit
+        }
+        underlying.latest(threadId)
+      }
+    }
+    val runtime = GraphRuntime(slow)
+    val probe   = new LinkedBlockingQueue[Result[RunHandle[Vector[String]]]]()
+    Thread.ofVirtual().start(() => probe.put(runtime.start(thread, emitter, "x", tenant("b", "b1"))))
+    reading.await(10, TimeUnit.SECONDS) shouldBe true
+
+    // the checkpoint says the thread is tenant a's: b's reservation does not make it b's
+    val seen = Seen()
+    val sub  = runtime.subscribe(thread, config = tenant("a", "a2"))(seen).value
+    payloads(seen.until(completedRun)) should contain("mine")
+    sub.cancel()
+
+    gate.countDown()
+    Option(probe.poll(10, TimeUnit.SECONDS)).value.left.value shouldBe GraphError.TenantMismatch(
+      thread.value,
+      Some("b")
+    )
+  }
+
+  it should "not deliver another tenant's thread recreated past a cursor ahead of the owner's log" in {
+    val store = InMemoryCheckpointer()
+    val mine =
+      GraphRuntime(store, java.time.Clock.systemUTC(), ClaimPolicy.default, WatchPolicy(pollInterval = 10.millis))
+    val theirs = GraphRuntime(store)
+    val thread = newThread()
+    await(mine.start(thread, emitter, "a-input", tenant("a", "a1")).value).completed
+    val head = store.eventsAfter(thread, 0L, 1000).value.last.seq
+    // a cursor ahead of the log: past the recreated thread's RunStarted (numbered head + 2)
+    val seen = Seen()
+    val sub  = mine.subscribe(thread, afterSeq = head + 2, config = tenant("a", "a2"))(seen).value
+
+    theirs.deleteThread(thread, tenant("a", "a-del")).value
+    await(theirs.start(thread, emitter, "b-secret", tenant("b", "b1")).value).completed
+
+    // up to the first of: the end, or anything of tenant b's thread's content
+    val delivered = seen.until(e => disconnection(e) || payloads(Vector(e)).nonEmpty)
+    payloads(delivered) shouldBe empty
+    delivered.last shouldBe StreamEvent.Disconnected(head + 2, DisconnectReason.TenantMismatch)
+    sub.cancel()
+  }
+
   "TracingSubscriber.attach" should "refuse another tenant's thread" in {
     val runtime = GraphRuntime.inMemory()
     val thread  = newThread()
