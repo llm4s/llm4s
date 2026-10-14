@@ -129,11 +129,19 @@ jobs:
           scripts/test-check-docs-site-links.sh
           scripts/check-docs-site-links.sh
 
+      # Every sbt step below talks to this one sbt server through the thin client (`sbt --client`), instead of each
+      # starting its own sbt: loading this build (65k settings) took 12-15 s per invocation, and there are some fifteen.
+      # Each check stays its own step, so a failure is reported under the step's name, and its exit status is the
+      # command's. The server keeps its state between steps: compiled classes, the resolved dependencies, the loaded
+      # build. Nothing here uses `set` or `reload`, so a later step sees the build exactly as a fresh sbt would.
+      - name: Start the sbt server
+        run: sbt --client about
+
       # Fails when the docs state a Scala or JDK version, a module or an sbt command the build does not have.
       # The Scala 2.13 thread began with exactly that kind of claim (#874, #1134); this keeps it corrected.
       # The build's side is what sbt loaded (project/BuildModel.scala), not a reading of build.sbt's text.
       - name: Write the build model
-        run: sbt -batch "dumpBuildModel target/build-model.json"
+        run: sbt --client "dumpBuildModel target/build-model.json"
 
       - name: Check the documented support matrix matches the build
         run: |
@@ -181,44 +189,46 @@ jobs:
       # with a warm 450 MB sbt cache restored, so a cache would not have prevented them). The wrapper re-runs it,
       # at most twice, on exactly that kind of error; a real formatting failure still fails on the first attempt.
       - name: Check formatting
-        run: scripts/retry-on-transient-network.sh sbt scalafmtCheckAll scalafmtSbtCheck
+        run: scripts/retry-on-transient-network.sh sbt --client "scalafmtCheckAll; scalafmtSbtCheck"
 
       - name: Run Scalafix
-        run: sbt scalafixAll
+        run: sbt --client scalafixAll
 
       # Fails when any module declares neither a coverage floor nor an explicit opt-out.
       # Coverage floors are per-module and never inherited, so a new (e.g. carved-out)
       # module must make the decision visible in build.sbt rather than pick up a default.
       - name: Check coverage policy is declared for every module
-        run: sbt coveragePolicyCheck
+        run: sbt --client coveragePolicyCheck
 
       # Fails when a published llm4s-* artifact has no tier row in v1-scope.md or no install line in
       # installation.md. A release cannot be amended, so a module that ships undocumented stays so.
       - name: Check every published artifact is documented
-        run: sbt publishedArtifactsCheck
+        run: sbt --client publishedArtifactsCheck
 
       # Fails when the generated llm4s-bom does not list exactly the artifacts the build publishes
       # (project/Bom.scala). A release cannot be amended, so a BOM that omits a module stays that way.
       - name: Check the BOM lists every published artifact
-        run: sbt bomCheck
+        run: sbt --client bomCheck
 
       # Fails when a published POM lacks what Maven Central requires (name, description, https URL, licence,
       # developer, SCM) or points its <scm> anywhere but https://github.com/llm4s/llm4s, which is how Scaladex
       # finds the project (#1455). It reads the generated POMs (project/PomMetadata.scala).
       - name: Check every published POM has its metadata
-        run: sbt pomMetadataCheck
+        run: sbt --client pomMetadataCheck
 
       - name: Compile
-        run: sbt compile
+        run: sbt --client compile
 
       # Builds the CycloneDX SBOMs that the release workflow attaches to a GitHub release (docs/reference/sbom.md), so a
       # change that breaks their generation fails here and not on release day. It also fails when a published module has
       # no BOM, or a BOM names a build-machine path or a test framework. The dependencies are resolved by now, so this is
       # a few seconds of sbt, not a second build.
+      # The thin client passes the server's terminal codes through, so they are stripped before the listing is read.
       - name: Generate and check the SBOMs
         run: |
-          sbt -batch publishedSboms
-          sbt -batch -error listPublishedArtifacts | grep -E '^(artifact|stub) ' > target/published-artifacts.txt
+          set -o pipefail
+          sbt --client publishedSboms
+          sbt --client listPublishedArtifacts | sed 's/\x1b\[[0-9;?]*[A-Za-z]//g' | grep -E '^(artifact|stub) ' > target/published-artifacts.txt
           scripts/test-check-sbom.sh
           scripts/test-osv-scan.sh
           scripts/check-sbom.sh target/sboms target/published-artifacts.txt
@@ -235,17 +245,17 @@ jobs:
       # observability-backend or foreign vendor-SDK dependency, so the programme's definition of done
       # (#1126) stays true until the 1.0 freeze.
       - name: Check no frozen module resolves a dependency the modularisation moved out
-        run: sbt frozenDependencyCheck
+        run: sbt --client frozenDependencyCheck
 
       # Fails when an integration suite in modules/it declares no tier, i.e. when no command
       # and no CI job below would run it. Eleven of eighteen suites were in that state.
       - name: Check every integration suite declares a test tier
-        run: sbt it/itTierCheck
+        run: sbt --client it/itTierCheck
 
       # Fails when a top-level public type of a frozen module is not marked @Stable or @Experimental,
       # so the tier lives in the code and cannot drift from docs/reference/v1-scope.md.
       - name: Check every frozen type declares a stability tier
-        run: sbt stabilityTierCheck
+        run: sbt --client stabilityTierCheck
 
       # The staged-deployment template (deploy/, .github/workflows/deploy-staged.yml) is never run by CI, so
       # these keep it from rotting: every overlay must render with the image, namespace, replica count and
@@ -256,7 +266,7 @@ jobs:
 
       - name: Check the deploy-service image definition
         run: |
-          sbt deployService/Docker/stage
+          sbt --client deployService/Docker/stage
           grep -qx 'USER 1001:0' modules/deploy-service/target/docker/stage/Dockerfile
 
   scaladoc:

@@ -18,7 +18,7 @@
 #   RETRY_MAX              retries after the first attempt (default 2, so at most 3 attempts)
 #   RETRY_BACKOFF_SECONDS  wait before retry N is N times this (default 15: 15 s, then 30 s)
 #
-# What counts as transient: a line that starts with `[error]` (after stripping colour codes) and contains one
+# What counts as transient: a line that starts with `[error]` (after stripping terminal codes) and contains one
 # of the markers in TRANSIENT_PATTERN below - sbt and coursier print their resolution failures that way.
 # A marker on any other line (an `[info]` test name, a log line from the code under test) is ignored, so a
 # test about timeouts cannot cause a retry, and a run that exits 0 is never looked at.
@@ -50,8 +50,9 @@ trap 'rm -f "$OUT"' EXIT
 ESC="$(printf '\033')"
 
 is_transient() {
-  # Strip colour codes, keep only `[error]` lines, then look for a network marker.
-  sed "s/${ESC}\\[[0-9;]*m//g" "$OUT" | grep -E '^\[error\]' | grep -Eq "$TRANSIENT_PATTERN"
+  # Strip terminal codes - sbt's colours, and the line erases (`ESC[0J`) sbt's thin client (`sbt --client`) puts
+  # before each line - keep only `[error]` lines, then look for a network marker.
+  sed "s/${ESC}\\[[0-9;?]*[A-Za-z]//g" "$OUT" | grep -E '^\[error\]' | grep -Eq "$TRANSIENT_PATTERN"
 }
 
 attempt=1
