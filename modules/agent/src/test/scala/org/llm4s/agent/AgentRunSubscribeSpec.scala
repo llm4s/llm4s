@@ -56,7 +56,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
       e match
         case StreamEvent.Durable(record) =>
           record.event match
-            case RunEvent.RunCompleted | RunEvent.RunFailed(_) | RunEvent.RunSuspended(_) | RunEvent.RunCancelled |
+            case RunEvent.RunCompleted | RunEvent.RunFailed(_, _) | RunEvent.RunSuspended(_) | RunEvent.RunCancelled |
                 RunEvent.RunTimedOut =>
               terminal.set(true)
             case _ => ()

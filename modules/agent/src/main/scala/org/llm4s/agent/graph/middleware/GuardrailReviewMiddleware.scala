@@ -1,7 +1,6 @@
 package org.llm4s.agent.graph.middleware
 
 import org.llm4s.agent.events.GuardrailPhase
-import org.llm4s.agent.graph.RunContext
 import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
@@ -50,16 +49,16 @@ final class GuardrailReviewMiddleware(
   val id: MiddlewareId = MiddlewareId("guardrail-review")
 ) extends AgentMiddleware.Asking[GuardrailReview, GuardrailVerdict]:
 
-  override def beforeAgent(text: String, context: RunContext): Result[String] =
-    reviewed(GuardrailPhase.Input, text, context)(GuardrailMiddleware.run(input, text))
+  override def beforeAgent(text: String, context: ModelContext): Result[BoundaryResult] =
+    reviewed(GuardrailPhase.Input, text, context)(GuardrailMiddleware.run(input, text)).map(BoundaryResult(_))
 
-  override def afterAgent(answer: String, context: RunContext): Result[String] =
-    reviewed(GuardrailPhase.Output, answer, context)(GuardrailMiddleware.run(output, answer))
+  override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
+    reviewed(GuardrailPhase.Output, answer, context)(GuardrailMiddleware.run(output, answer)).map(BoundaryResult(_))
 
   // A verdict is matched on the refused text and phase, not on the refusal's wording: a guardrail whose reason
   // varies between runs (an LLM judge) would otherwise be asked about forever. Once a verdict is given, the
   // guardrails do not run on that text again - the reviewer has decided it - so a judge is not called again.
-  private def reviewed(phase: GuardrailPhase, text: String, context: RunContext)(
+  private def reviewed(phase: GuardrailPhase, text: String, context: ModelContext)(
     guarded: => Result[String]
   ): Result[String] =
     answered(context).filter(r => r.question.phase == phase && r.question.text == text) match

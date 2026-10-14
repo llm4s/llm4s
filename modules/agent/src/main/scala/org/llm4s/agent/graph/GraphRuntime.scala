@@ -1,6 +1,7 @@
 package org.llm4s.agent.graph
 
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
+import org.llm4s.llmconnect.model.UsageSummary
 import org.llm4s.types.{ Result, TryOps }
 import org.slf4j.LoggerFactory
 
@@ -2026,6 +2027,12 @@ final class GraphRuntime(
     /** The thread's current claim, when the store named it as this run's claim was found lost. */
     private val lostTo = AtomicReference[Option[FencingToken]](None)
 
+    // the model usage of the tasks that failed: they commit nothing, so it goes on the run's RunFailed (§4.22)
+    private val failedUsage = AtomicReference(UsageSummary())
+
+    private def failed(message: String): RunEvent =
+      RunEvent.RunFailed(message, Option.when(failedUsage.get.requestCount > 0)(failedUsage.get))
+
     /**
      * When the claim was found lost, at any stage of the run, as a `System.nanoTime` value; set once. The
      * run's end is bounded from it: see [[lossDeadline]].
@@ -2289,7 +2296,7 @@ final class GraphRuntime(
         case Right(_) if !cause.compareAndSet(None, Some(StopCause.Finishing)) => cancelled()
         case Right(saved)                                                      =>
           // the blocked turn leaves the history with it: nothing of it stays readable or forkable
-          submit(saved, RunEvent.RunFailed(error.message), retractTurn = true)
+          submit(saved, failed(error.message), retractTurn = true)
           committer.close()
           committer.failure.fold[RunResult[O]](RunResult.Failed(execution.state, error))(e =>
             RunResult.Failed(execution.state, writeFailed(e, Some(error)))
@@ -2318,6 +2325,7 @@ final class GraphRuntime(
             )
             Right(result)
           case Left(error) =>
+            if !context.usage.isEmpty then failedUsage.updateAndGet(_.merge(context.usage.summary)): Unit
             committer.submit(
               Commit(
                 token,
@@ -2447,7 +2455,7 @@ final class GraphRuntime(
       if !cause.compareAndSet(None, Some(StopCause.Finishing)) then cancelled()
       else
         committer.submit(
-          Commit(token, None, Vector.empty, Vector(draft(None, None, RunEvent.RunFailed(error.message))))
+          Commit(token, None, Vector.empty, Vector(draft(None, None, failed(error.message))))
         )
         stop(execution, error)
 

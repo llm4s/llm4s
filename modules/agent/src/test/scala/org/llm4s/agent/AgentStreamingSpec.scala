@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.agent.graph.middleware.{ ModelContext, ModelResponse }
 import org.llm4s.agent.events.AgentEvents
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelRequest }
@@ -58,7 +59,7 @@ class AgentStreamingSpec extends AnyFlatSpec with Matchers:
       e match
         case StreamEvent.Durable(record) =>
           record.event match
-            case RunEvent.RunCompleted | RunEvent.RunFailed(_) | RunEvent.RunSuspended(_) | RunEvent.RunCancelled |
+            case RunEvent.RunCompleted | RunEvent.RunFailed(_, _) | RunEvent.RunSuspended(_) | RunEvent.RunCancelled |
                 RunEvent.RunTimedOut =>
               ended.countDown()
             case _ => ()
@@ -111,9 +112,9 @@ class AgentStreamingSpec extends AnyFlatSpec with Matchers:
       override def getReserveCompletion(): Int = 1024
     val retry = new AgentMiddleware:
       val id = MiddlewareId("retry")
-      override def wrapModelCall(request: ModelRequest, context: RunContext)(
-        next: ModelRequest => Result[Completion]
-      ): Result[Completion] = next(request).orElse(next(request))
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] = next(request).orElse(next(request))
     val (result, c) = streamed(Agent.builder("assistant", FlakyOnce()).withStreaming().withMiddleware(retry), "hi")
     result.map(_.answer) shouldBe Right(Some("x"))
     c.all.collect { case AgentEvents.ModelCallStarted(s) => s.attempt } shouldBe Vector(1, 2)

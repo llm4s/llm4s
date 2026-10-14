@@ -21,7 +21,7 @@ object EventCollectionExample:
 
   private def isTerminal(e: RunEvent): Boolean = e match
     case RunEvent.RunCompleted | RunEvent.RunSuspended(_) | RunEvent.RunCancelled | RunEvent.RunTimedOut => true
-    case RunEvent.RunFailed(_)                                                                           => true
+    case RunEvent.RunFailed(_, _)                                                                        => true
     case _                                                                                               => false
 
   private def nameOf(e: RunEvent): String = e match

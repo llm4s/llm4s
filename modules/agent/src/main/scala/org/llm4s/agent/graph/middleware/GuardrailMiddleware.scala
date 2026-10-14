@@ -1,6 +1,5 @@
 package org.llm4s.agent.graph.middleware
 
-import org.llm4s.agent.graph.RunContext
 import org.llm4s.agent.guardrails.{ Guardrail, InputGuardrail, OutputGuardrail }
 import org.llm4s.error.LLMError
 import org.llm4s.types.Result
@@ -23,9 +22,11 @@ final class GuardrailMiddleware(
   val id: MiddlewareId = MiddlewareId("guardrails")
 ) extends AgentMiddleware:
 
-  override def beforeAgent(text: String, context: RunContext): Result[String] = GuardrailMiddleware.run(input, text)
+  override def beforeAgent(text: String, context: ModelContext): Result[BoundaryResult] =
+    GuardrailMiddleware.run(input, text).map(BoundaryResult(_))
 
-  override def afterAgent(answer: String, context: RunContext): Result[String] = GuardrailMiddleware.run(output, answer)
+  override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
+    GuardrailMiddleware.run(output, answer).map(BoundaryResult(_))
 
 object GuardrailMiddleware:
 

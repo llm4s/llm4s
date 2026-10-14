@@ -74,7 +74,7 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with Matchers:
       e match
         case StreamEvent.Durable(record) =>
           record.event match
-            case RunEvent.RunCompleted | RunEvent.RunFailed(_) | RunEvent.RunSuspended(_) | RunEvent.RunCancelled |
+            case RunEvent.RunCompleted | RunEvent.RunFailed(_, _) | RunEvent.RunSuspended(_) | RunEvent.RunCancelled |
                 RunEvent.RunTimedOut =>
               ended.countDown()
             case _ => ()
@@ -191,7 +191,7 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with Matchers:
     val events     = c.durable.map(_.record.event)
 
     events.head should matchPattern { case RunEvent.RunStarted(_, _) => }
-    events.last should matchPattern { case RunEvent.RunFailed(message) if message.contains("RuleA") => }
+    events.last should matchPattern { case RunEvent.RunFailed(message, _) if message.contains("RuleA") => }
     events should not contain RunEvent.RunCompleted
     blockIndex(events) should ((be > 0).and(be < events.size - 1))
     modelCallIndex(events) shouldBe -1 // the model was never called
@@ -209,7 +209,7 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with Matchers:
     val events = c.durable.map(_.record.event)
 
     events should not contain RunEvent.RunCompleted
-    events.last should matchPattern { case RunEvent.RunFailed(message) if message.contains("RuleA") => }
+    events.last should matchPattern { case RunEvent.RunFailed(message, _) if message.contains("RuleA") => }
     modelCallIndex(events) should be >= 0
     blockIndex(events) should be > modelCallIndex(events)
     blockIndex(events) should be < events.size - 1
@@ -254,7 +254,7 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with Matchers:
     result.isLeft shouldBe true
     events.head should matchPattern { case RunEvent.RunStarted(_, _) => }
     events should contain(RunEvent.TaskFailed("Node 'assistant/model' (task 1.0) failed: provider down"))
-    events.last should matchPattern { case RunEvent.RunFailed(message) if message.contains("provider down") => }
+    events.last should matchPattern { case RunEvent.RunFailed(message, _) if message.contains("provider down") => }
   }
 
   // ---- finding 7: events after a handoff

@@ -9,7 +9,10 @@ import org.llm4s.agent.graph.middleware.{
   MiddlewareAsked,
   MiddlewareId,
   MiddlewareStack,
+  ModelContext,
   ModelRequest,
+  ModelResponse,
+  PromptSection,
   ToolCallRequest
 }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome, ToolQuestion, ToolSet }
@@ -282,10 +285,15 @@ object ModelStep:
  *    *block* the run (design 4.13): it ends as a finished failure, `RunResult.Failed`, carrying
  *    that error, and the thread stays usable; a cancellation is not a Block. An input Block
  *    commits only a new thread's seed - its imported history and the root as active agent - and an
- *    output Block removes the blocked turn from the history, restoring the agent and transfer the
- *    turn started with. `wrapModelCall` and `wrapToolCall` stay per agent. A middleware's `tools`
- *    join the loop's [[org.llm4s.agent.graph.tool.ToolSet]], and its
- *    `writes` are keys its `wrapToolCall` may add to a `Success` update.
+ *    output Block retracts the blocked turn: every key the turn wrote, a middleware's or a tool's,
+ *    returns to its value before the turn (recorded in [[TurnState.priorValues]]), the turn is
+ *    removed from the history, and the agent and transfer the turn started with are restored; only
+ *    usage is kept (design §4.22). `wrapModelCall` and `wrapToolCall` stay per agent. A middleware's
+ *    `tools` join the loop's [[org.llm4s.agent.graph.tool.ToolSet]], and its `writes` are the keys
+ *    every one of its hooks may update: the boundary hooks' updates commit with the input and the
+ *    finish, a model wrapper's with the model step, a tool wrapper's with a `Success`. Before each
+ *    model step every middleware's `promptSections` join the agent's system prompt, never stored.
+ *    Every provider call is counted in the thread's usage, whichever response the wrappers keep.
  *  - Each call is its own task. Its tool is looked up, its raw arguments validated against the
  *    tool's `argumentSchema`, decoded and checked by the tool's `validateDecoded` - any failure is an
  *    error result the model sees, before any middleware or the tool runs. Then the middleware
@@ -472,6 +480,11 @@ object ToolLoop:
       Option.when(agents.isEmpty)("a family needs at least one agent").toVector ++
         Option.when(agents.nonEmpty && !ids.contains(root))(s"the root agent '${root.value}' is not in the family") ++
         ids.distinct.filter(i => ids.count(_ == i) > 1).map(i => s"duplicate agent id '${i.value}'") ++
+        agents
+          .filter(_.maxPromptSectionTokens < 1)
+          .map(a =>
+            s"agent '${a.id.value}': maxPromptSectionTokens must be at least 1, was ${a.maxPromptSectionTokens}"
+          ) ++
         agents.flatMap(handoffProblems(_, ids.toSet))
     if problems.isEmpty then Right(()) else Left(ValidationError("tool loop", problems.toList))
 
@@ -537,6 +550,10 @@ object ToolLoop:
       case Nil      => Right(())
       case problems => Left(ValidationError("tool loop", problems))
 
+  /** What the whole family's tools and middleware may write: what the input and the finish write, and restore. */
+  final private case class Family(writes: Set[StateKey[?, ?]]):
+    val byId: Map[StateKeyId, StateKey[?, ?]] = writes.map(k => k.id -> k).toMap
+
   /** One agent's node handles, issued before any node is implemented so that agents can route to each other. */
   final private class AgentNodes(
     val prepared: Prepared,
@@ -559,6 +576,9 @@ object ToolLoop:
     def callWrites: Set[StateKey[?, ?]] =
       tools.tools.flatMap(_.writes).toSet ++ stack.writes ++ Set(results, Messages.key)
 
+    /** The keys this agent's tools and middleware may write: what an output Block may have to restore. */
+    def harnessWrites: Set[StateKey[?, ?]] = tools.tools.flatMap(_.writes).toSet ++ stack.writes
+
   /**
    * The resume node of one middleware question, for one hook, with the middleware's answer codec: the
    * kernel decodes an answer with it, refusing one that does not decode, and the node encodes it again
@@ -569,12 +589,17 @@ object ToolLoop:
     def suspend(request: MiddlewareQuestionRequest, update: StateUpdate = StateUpdate.empty): NodeResult =
       NodeResult.Suspend(update, request, ref)
 
-  /** What a node writes when it runs a middleware hook again: the model's and the finish's write sets. */
+  /**
+   * The loop keys each step writes, before the middleware keys: the model's and the finish's, also when a
+   * middleware question runs them again. The input and the finish add every key of the family - the input runs the
+   * root's stack and the active agent's, and the finish restores whatever any agent's tools or middleware wrote in
+   * a blocked turn - and the model its own agent's middleware keys.
+   */
   private val modelWrites: Set[StateKey[?, ?]] =
     Set(Messages.key, LoopKeys.usage, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer)
   private val finishWrites: Set[StateKey[?, ?]] =
-    Set(Messages.key, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer)
-  private val inputWrites: Set[StateKey[?, ?]] = Set(Messages.key, LoopKeys.activeAgent, LoopKeys.turn)
+    Set(Messages.key, LoopKeys.usage, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer)
+  private val inputWrites: Set[StateKey[?, ?]] = Set(Messages.key, LoopKeys.usage, LoopKeys.activeAgent, LoopKeys.turn)
 
   private def declare(b: GraphBuilder, prepared: Prepared): AgentNodes =
     val prefix  = s"${prepared.agent.id.value}/"
@@ -624,20 +649,116 @@ object ToolLoop:
       answers.filter(_.agent == owner).map(g => g.middleware.value -> (g.question, g.answer)).toMap
     )
 
+  /** The context of `owner`'s hooks: its answers, the task's snapshot, and the task's usage. */
+  private def hookContext(
+    owner: AgentId,
+    context: RunContext,
+    answers: Vector[GivenAnswer],
+    state: ThreadState
+  ): ModelContext =
+    ModelContext(answering(owner, context, answers), state, owner)
+
   /**
-   * Threads `text` through each owner's stack in order, each seeing the answers its own middleware were
-   * given; a `Left` names the owner whose stack returned it.
+   * Threads `text` through each owner's stack in order, each seeing the answers its own middleware were given; a
+   * `Left` names the owner whose stack returned it. On the way through, each owner's middleware updates are checked
+   * against their own `writes` and combined: an undeclared write is the `Right`'s `Left`, which fails the run
+   * rather than blocking it.
    */
-  private def threaded(owners: Vector[AgentNodes], text: String, context: RunContext, answers: Vector[GivenAnswer])(
-    hook: (MiddlewareStack, String, RunContext) => Result[String]
-  ): Either[(AgentNodes, LLMError), String] =
-    owners.foldLeft[Either[(AgentNodes, LLMError), String]](Right(text)) { (acc, owner) =>
-      acc.flatMap(t => hook(owner.stack, t, answering(owner.agent.id, context, answers)).left.map(owner -> _))
+  private def threaded(
+    owners: Vector[AgentNodes],
+    text: String,
+    context: RunContext,
+    answers: Vector[GivenAnswer],
+    state: ThreadState
+  )(
+    hook: (MiddlewareStack, String, ModelContext) => Result[MiddlewareStack.Hooked]
+  ): Either[(AgentNodes, LLMError), (String, Result[StateUpdate])] =
+    owners.foldLeft[Either[(AgentNodes, LLMError), (String, Result[StateUpdate])]](
+      Right(text -> Right(StateUpdate.empty))
+    ) { (acc, owner) =>
+      acc.flatMap { (t, updates) =>
+        hook(owner.stack, t, hookContext(owner.agent.id, context, answers, state)).left
+          .map(owner -> _)
+          .map(h => h.text -> updates.flatMap(u => owner.stack.checkWrites(h.parts).map(u.combine)))
+      }
+    }
+
+  /** The usage the task recorded, as its update to [[LoopKeys.usage]]; nothing when it recorded none. */
+  private def usageOf(context: RunContext): StateUpdate =
+    if context.usage.isEmpty then StateUpdate.empty else StateUpdate.update(LoopKeys.usage, context.usage.summary)
+
+  /**
+   * `prior` with the value each of `keys` holds in `state` - the snapshot the step read, from before any write
+   * of this superstep - recorded for an output Block to restore, unless the turn recorded it already.
+   */
+  private def remembered(
+    prior: Map[String, Option[VersionedJson]],
+    keys: Iterable[StateKey[?, ?]],
+    state: ThreadState
+  ): Map[String, Option[VersionedJson]] =
+    keys.foldLeft(prior) { (recorded, key) =>
+      if recorded.contains(key.id.value) then recorded
+      else
+        val value = if state.isSet(key) then state.get(key).toOption.map(key.encode) else None
+        recorded + (key.id.value -> value)
+    }
+
+  /** The keys an update writes. */
+  private def keysOf(update: StateUpdate): Vector[StateKey[?, ?]] = update.operations.map(_.key).distinct
+
+  /**
+   * The restore of every key a blocked turn recorded in `prior`: each to its value before the turn, decoded with
+   * its codec, or its entry removed when it had none.
+   */
+  private def restored(
+    prior: Map[String, Option[VersionedJson]],
+    restorable: Map[StateKeyId, StateKey[?, ?]]
+  ): Result[StateUpdate] =
+    def one[A](key: StateKey[A, ?], value: Option[VersionedJson]): Result[StateUpdate] =
+      value.fold[Result[Option[A]]](Right(None))(json => key.decode(json).map(Some(_))).map(StateUpdate.restore(key, _))
+    prior.toVector.sortBy(_._1).foldLeft[Result[StateUpdate]](Right(StateUpdate.empty)) { case (acc, (id, value)) =>
+      for
+        done <- acc
+        key <- restorable
+          .get(StateKeyId(id))
+          .toRight(ValidationError("tool loop", s"the turn recorded '$id', which no tool or middleware writes"))
+        next <- one(key, value)
+      yield done.combine(next)
     }
 
   /**
+   * The system prompt of one request: the agent's, then every middleware's sections - cacheable ones first, each
+   * group in stack order. Refused when two sections share an id, or when together they are over `budget` estimated
+   * tokens (four characters a token), naming every section's size: a configuration error, never truncated.
+   */
+  private def systemPrompt(
+    prompt: Option[String],
+    sections: Vector[(MiddlewareId, PromptSection)],
+    budget: Int
+  ): Result[Option[String]] =
+    val duplicates = sections.groupBy(_._2.id).toVector.sortBy(_._1).collect {
+      case (id, uses) if uses.size > 1 =>
+        s"prompt section id '$id' is used more than once in one request, by middleware ${uses.map(u => s"'${u._1.value}'").distinct.mkString(", ")}"
+    }
+    val sizes = sections.map((owner, section) => (owner, section, (section.text.length + 3) / 4))
+    val total = sizes.map(_._3).sum
+    if duplicates.nonEmpty then Left(ValidationError("prompt sections", duplicates.toList))
+    else if total > budget then
+      val each = sizes.map((owner, section, size) => s"${owner.value}/${section.id}: $size").mkString(", ")
+      Left(
+        ValidationError(
+          "prompt sections",
+          s"the request's prompt sections total $total estimated tokens, over the agent's maxPromptSectionTokens of $budget ($each)"
+        )
+      )
+    else
+      val (cacheable, rest) = sections.map(_._2).partition(_.cacheable)
+      val parts             = prompt.toVector ++ (cacheable ++ rest).map(_.text)
+      Right(Option.when(parts.nonEmpty)(parts.mkString("\n\n")))
+
+  /**
    * Suspends the asking task at the resume node of `owner`'s middleware that asked, for `hook`. Nothing of
-   * the step is committed - only `update`, the usage of model calls made before the question - and the
+   * the step is committed - only `update`, the usage of model calls the hooks made before the question - and the
    * task runs again from the start once answered. A question from a middleware the stack does not hold
    * as asking - one asked through another middleware's instance - fails the run.
    */
@@ -646,8 +767,8 @@ object ToolLoop:
     asked: MiddlewareAsked,
     hook: MiddlewareHook,
     answers: Vector[GivenAnswer],
-    input: Option[AgentInput] = None,
-    update: StateUpdate = StateUpdate.empty
+    input: Option[AgentInput],
+    update: StateUpdate
   ): NodeResult =
     owner.askedRefs.get((asked.middleware, hook)) match
       case Some(ref) =>
@@ -678,11 +799,15 @@ object ToolLoop:
     val agents   = prepared.map(p => p.agent.id -> declare(b, p)).toMap
     // whether a transfer keeps the context, by (source, target)
     val preserves = prepared.flatMap(p => p.agent.handoffs.map(h => (p.agent.id, h.target) -> h.preserveContext)).toMap
-    val steps     = prepared.map(p => p.agent.id -> implement(b, agents(p.agent.id), agents, root, preserves)).toMap
+    // every key a tool or middleware of the family may write: the input and the finish write them all
+    val family = Family(agents.values.flatMap(_.harnessWrites).toSet)
+    val steps = prepared.map(p => p.agent.id -> implement(b, agents(p.agent.id), agents, root, preserves, family)).toMap
 
     // An input Block (a beforeAgent `Left`, or a blank query) stores nothing of the turn: the run ends as a
-    // finished failure, committing only a new thread's seed - its imported history and the root as active agent.
-    // A middleware question stores nothing either: the input runs again, with the answers, once it is answered.
+    // finished failure, committing only a new thread's seed - its imported history and the root as active agent -
+    // and the usage of the hooks' own model calls. A middleware question stores nothing else either: the input runs
+    // again, with the answers, once it is answered. The hooks' updates commit with the input, so the turn's first
+    // model call sees them, and the turn records each key's value before them, for an output Block to restore.
     def inputStep(in: AgentInput, state: ThreadState, context: RunContext, answers: Vector[GivenAnswer]): NodeResult =
       val taskId = context.position.taskId.value
       val outcome = for
@@ -702,38 +827,41 @@ object ToolLoop:
       yield
         // the root's boundary hooks guard the whole family; the active agent's own run inside them
         val owners = if agentId == root then Vector(nodes) else Vector(agents(root), nodes)
-        threaded(owners, in.query, context, answers)(_.beforeAgent(_, _)) match
+        threaded(owners, in.query, context, answers, state)(_.beforeAgent(_, _)) match
           case Left((owner, asked: MiddlewareAsked)) =>
-            askedSuspend(owner, asked, MiddlewareHook.BeforeAgent, answers, Some(in))
-          case Left((_, error)) => boundary(error, seeded.update, context, GuardrailPhase.Input)
-          case Right(transformed) if transformed.trim.isEmpty =>
+            askedSuspend(owner, asked, MiddlewareHook.BeforeAgent, answers, Some(in), usageOf(context))
+          case Left((_, error)) =>
+            boundary(error, seeded.update.combine(usageOf(context)), context, GuardrailPhase.Input)
+          case Right((_, Left(undeclared)))                        => NodeResult.Fail(undeclared)
+          case Right((transformed, _)) if transformed.trim.isEmpty =>
             // stored, a blank query would fail every model call and every recover after it
             boundary(
               ValidationError("query", "beforeAgent returned a blank query"),
-              seeded.update,
+              seeded.update.combine(usageOf(context)),
               context,
               GuardrailPhase.Input
             )
-          case Right(transformed) =>
+          case Right((transformed, Right(hooks))) =>
+            val turn = TurnState(0, None, Some(agentId), transfer, remembered(Map.empty, keysOf(hooks), state))
             NodeResult.Continue(
-              seeded
+              Command(seeded.update.combine(hooks).combine(usageOf(context)), seeded.routes)
                 .update(messages, MessageUpdate.Append(StoredMessage(s"$taskId/user", UserMessage(transformed))))
-                .update(LoopKeys.turn, TurnState(0, None, Some(agentId), transfer))
+                .update(LoopKeys.turn, turn)
                 .goto(nodes.model)
             )
       outcome.fold(NodeResult.Fail(_), identity)
 
-    val input = b.node[AgentInput]("input", writes = inputWrites) { (in, state, context) =>
+    val input = b.node[AgentInput]("input", writes = inputWrites ++ family.writes) { (in, state, context) =>
       inputStep(in, state, context, Vector.empty)
     }
 
     /** A middleware question's resume node: the asking task's step again, with every answer given so far. */
     def implementAsked[A](owner: AgentNodes, hook: MiddlewareHook, asked: AskedRef[A]): Unit =
       val writes = hook match
-        case MiddlewareHook.BeforeAgent   => inputWrites
-        case MiddlewareHook.WrapModelCall => modelWrites
+        case MiddlewareHook.BeforeAgent   => inputWrites ++ family.writes
+        case MiddlewareHook.WrapModelCall => modelWrites ++ owner.stack.writes
         case MiddlewareHook.WrapToolCall  => owner.callWrites
-        case MiddlewareHook.AfterAgent    => finishWrites
+        case MiddlewareHook.AfterAgent    => finishWrites ++ family.writes
       b.implement(asked.ref.node, writes = writes) { (resumed, state, context) =>
         val request = resumed.question
         val answers = request.answered :+
@@ -813,7 +941,8 @@ object ToolLoop:
     nodes: AgentNodes,
     family: Map[AgentId, AgentNodes],
     root: AgentId,
-    preserves: Map[(AgentId, AgentId), Boolean]
+    preserves: Map[(AgentId, AgentId), Boolean],
+    harness: Family
   ): AgentSteps =
     val messages   = Messages.key
     val agent      = nodes.agent
@@ -852,52 +981,47 @@ object ToolLoop:
       }
     }
 
-    val prompt = agent.systemPrompt.map(SystemMessage(_)).toVector
     // this agent's handoff tool names, to their targets' nodes
     val handoffs: Map[String, AgentNodes] =
       agent.handoffs.map(h => HandoffTools.toolName(h.target) -> family(h.target)).toMap
 
-    /**
-     * A completed model call, announced durably with `ModelCallCompleted` (counts and usage only, never
-     * content), and its usage, for [[LoopKeys.usage]]. AgentTracing builds a run's usage from its
-     * `ModelCallCompleted` events the same way, so the two agree.
-     */
-    def completed(completion: Completion, attempts: Int, context: RunContext): UsageSummary =
-      AgentEvents.ModelCallCompleted.emit(
-        context,
-        events.ModelCallCompleted(
-          agent.id.value,
-          completion.model,
-          attempts,
-          completion.message.toolCalls.size,
-          completion.usage.map(events.CallUsage.fromTokenUsage),
-          completion.estimatedCost
-        )
-      )
-      UsageSummary().add(completion.model, completion.usage.getOrElse(TokenUsage(0, 0, 0)), completion.estimatedCost)
+    /** What a tool of this agent may write, by name: the keys a batch calling it may change. */
+    def batchWrites(calls: Vector[ToolCall]): Set[StateKey[?, ?]] =
+      calls.flatMap(c => tools.get(c.name).toVector.flatMap(_.writes)).toSet ++ stack.writes
 
-    /** The model's answer stored, its usage recorded, and routed: to finish, to its tool calls, or to a handoff. */
-    def stored(turn: TurnState, completion: Completion, attempts: Int, context: RunContext): Command =
+    /**
+     * The model's answer stored with the wrappers' `update` and the step's usage, and routed: to finish, to its
+     * tool calls, or to a handoff. The turn records the value before this step of each key the step's wrappers
+     * write and, for a batch, of each key its tools and tool wrappers may write - here, in the one model task,
+     * from the snapshot its batch also reads - for an output Block to restore.
+     */
+    def stored(
+      turn: TurnState,
+      completion: Completion,
+      update: StateUpdate,
+      state: ThreadState,
+      context: RunContext
+    ): Command =
       val assistant = completion.message
-      // every successful call, whatever it routes to
-      val call   = completed(completion, attempts, context)
-      val taskId = context.position.taskId.value
-      val stored = StoredMessage(s"$taskId/assistant", assistant)
-      val appended = Command.empty
-        .update(messages, MessageUpdate.Append(stored))
-        .update(LoopKeys.usage, call)
-        .update(LoopKeys.turn, turn.copy(steps = turn.steps + 1))
+      val taskId    = context.position.taskId.value
+      val stored    = StoredMessage(s"$taskId/assistant", assistant)
+      def appended(batch: Set[StateKey[?, ?]]) =
+        val prior = remembered(turn.priorValues, keysOf(update) ++ batch, state)
+        Command(update.combine(usageOf(context)), Nil)
+          .update(messages, MessageUpdate.Append(stored))
+          .update(LoopKeys.turn, turn.copy(steps = turn.steps + 1, priorValues = prior))
       val calls = assistant.toolCalls.toVector
       def toolMessage(call: ToolCall, content: String) =
         MessageUpdate.Append(StoredMessage(s"$taskId/tool/${call.id}", ToolMessage(content, call.id)))
       calls.filter(c => handoffs.contains(c.name)) match
         case none if none.isEmpty =>
-          if calls.isEmpty then appended.goto(nodes.finish)
-          else appended.fanOut(nodes.batch, nodes.callTool, calls.map(issued(stored.id, _, context)))
+          if calls.isEmpty then appended(Set.empty).goto(nodes.finish)
+          else
+            appended(batchWrites(calls)).fanOut(nodes.batch, nodes.callTool, calls.map(issued(stored.id, _, context)))
         case Vector(transfer) if calls.size == 1 =>
           val target = handoffs(transfer.name)
           AgentEvents.HandedOff.emit(context, events.HandedOff(agent.id.value, target.agent.id.value))
-          appended
+          appended(Set.empty)
             .update(messages, toolMessage(transfer, HandoffTools.transferred(target.agent.id)))
             .update(LoopKeys.activeAgent, target.agent.id)
             .update(LoopKeys.transfer, Some(Transfer(agent.id, target.agent.id, stored.id)))
@@ -907,64 +1031,75 @@ object ToolLoop:
           val error = ujson.Obj("error" -> HandoffTools.MixedBatch).render()
           calls.filterNot(c => handoffs.contains(c.name)).foreach(pipeline.refusedInBatch(_, error, context))
           calls
-            .foldLeft(appended)((command, c) => command.update(messages, toolMessage(c, error)))
+            .foldLeft(appended(Set.empty))((command, c) => command.update(messages, toolMessage(c, error)))
             .goto(nodes.model)
 
+    /**
+     * One model step. Every middleware's prompt sections join the agent's system prompt, from the snapshot; the
+     * request runs through every `wrapModelCall`, and every provider call `next` makes is counted in the task's
+     * usage and announced with `ModelCallCompleted`, whichever response the wrappers return.
+     */
     def modelStep(state: ThreadState, context: RunContext, answers: Vector[GivenAnswer]): NodeResult =
       val outcome = state.get(LoopKeys.turn).flatMap { turn =>
         // at the limit the turn ends here: no route, so the run completes without calling the model
         if turn.steps >= agent.maxSteps then
           Right(
             NodeResult.Continue(
-              Command.empty.update(LoopKeys.turn, turn.copy(outcome = Some(TurnOutcome.StepLimitReached)))
+              Command.empty.update(
+                LoopKeys.turn,
+                turn.copy(outcome = Some(TurnOutcome.StepLimitReached), priorValues = Map.empty)
+              )
             )
           )
         else
+          val hooks = hookContext(agent.id, context, answers, state)
           for
             history  <- state.get(messages)
             _        <- Message.validateConversation(history.map(_.message).toList)
             transfer <- state.get(LoopKeys.transfer)
             view     <- sent(agent.id, history, transfer, root, preserves)
+            sections <- stack.promptSections(hooks)
+            system   <- systemPrompt(agent.systemPrompt, sections, agent.maxPromptSectionTokens)
           yield
-            val request  = ModelRequest(prompt ++ view, nodes.offered)
+            val request  = ModelRequest(system.map(SystemMessage(_)).toVector ++ view, nodes.offered)
             val attempts = AtomicInteger(0)
-            // every completion the model returned in this step, with its attempt number
-            val returned = AtomicReference(Vector.empty[(Completion, Int)])
-            stack.wrapModelCall(request, answering(agent.id, context, answers)) { req =>
-              val result = callModel(agent.model, agent.id, context, attempts)(req)
-              result.foreach(c => returned.updateAndGet(_ :+ (c -> attempts.get)))
-              result
+            stack.wrapModelCall(request, hooks) { req =>
+              callModel(agent.model, agent.id, context, attempts)(req).map { (completion, attempt) =>
+                hooks.recordCall(completion, attempt)
+                ModelResponse(completion)
+              }
             } match
               // nothing of the step is stored while the question waits - it runs again once answered - but
               // the model calls a wrapper made before asking were made, and are counted
               case Left(asked: MiddlewareAsked) =>
-                val usage = returned.get.map((c, n) => completed(c, n, context))
-                val update =
-                  if usage.isEmpty then StateUpdate.empty
-                  else StateUpdate.update(LoopKeys.usage, usage.reduce(_.merge(_)))
-                askedSuspend(nodes, asked, MiddlewareHook.WrapModelCall, answers, update = update)
+                askedSuspend(nodes, asked, MiddlewareHook.WrapModelCall, answers, None, usageOf(context))
               case Left(error) => NodeResult.Fail(error)
               // a blank answer without tool calls is refused before it is stored, so the history stays valid
               // and recover asks the model again; so are calls whose ids could not each be given one result
-              case Right(completion) =>
+              case Right(response) =>
                 NodeResult.fromResult(
-                  completion.message.validate
-                    .flatMap(_ => ToolResultRule.callIdsUsable(completion.message))
-                    .map(_ => stored(turn, completion, attempts.get, context))
+                  for
+                    update <- stack.checkWrites(response.parts)
+                    _      <- response.completion.message.validate
+                    _      <- ToolResultRule.callIdsUsable(response.completion.message)
+                  yield stored(turn, response.completion, update, state, context)
                 )
       }
       outcome.fold(NodeResult.Fail(_), identity)
 
-    b.implement(nodes.model, writes = modelWrites)((_, state, context) => modelStep(state, context, Vector.empty))
+    b.implement(nodes.model, writes = modelWrites ++ stack.writes)((_, state, context) =>
+      modelStep(state, context, Vector.empty)
+    )
 
     // this agent's afterAgent stack, then - for a handoff target - the root's, which guards the whole family
     val boundaryOwners = if agent.id == root then Vector(nodes) else Vector(nodes, family(root))
 
-    // the final answer, through every afterAgent; a changed answer replaces the stored message's content.
-    // An output Block (an afterAgent `Left`, or a blank answer) ends the run as a finished failure and removes the
-    // blocked turn from the history, so no blocked content is stored and the thread continues from before it, with
-    // the agent and transfer the turn started with. A middleware question stores nothing, and the answer is
-    // guarded again, with the answers, once it is answered.
+    // the final answer, through every afterAgent; a changed answer replaces the stored message's content, and the
+    // hooks' updates commit with it. An output Block (an afterAgent `Left`, or a blank answer) ends the run as a
+    // finished failure and retracts the blocked turn: every key the turn wrote returns to its value before the
+    // turn (design §4.22), the turn's messages are removed, and the agent and transfer the turn started with are
+    // restored - only the usage of its model calls is kept. A middleware question stores nothing but that usage,
+    // and the answer is guarded again, with the answers, once it is answered.
     def finishStep(state: ThreadState, context: RunContext, answers: Vector[GivenAnswer]): NodeResult =
       val outcome = for
         history <- state.get(messages)
@@ -977,29 +1112,41 @@ object ToolLoop:
         val removeTurn = history.reverseIterator
           .collectFirst { case StoredMessage(id, _: UserMessage) => id }
           .fold(StateUpdate.empty)(id => StateUpdate.update(messages, MessageUpdate.RemoveTurn(id)))
-        val rollback = turn.startAgent.fold(removeTurn)(agentId =>
+        val rolledBack = turn.startAgent.fold(removeTurn)(agentId =>
           removeTurn
             .combine(StateUpdate.update(LoopKeys.activeAgent, agentId))
             .combine(StateUpdate.update(LoopKeys.transfer, turn.startTransfer))
         )
-        val completed = Command.empty.update(LoopKeys.turn, turn.copy(outcome = Some(TurnOutcome.Completed)))
-        threaded(boundaryOwners, assistant.content, context, answers)(_.afterAgent(_, _)) match
-          case Left((owner, asked: MiddlewareAsked)) => askedSuspend(owner, asked, MiddlewareHook.AfterAgent, answers)
-          case Left((_, error))                      => boundary(error, rollback, context, GuardrailPhase.Output)
-          case Right(changed) if changed.trim.isEmpty =>
-            boundary(
-              ValidationError("tool loop", "afterAgent returned a blank answer"),
-              rollback,
-              context,
-              GuardrailPhase.Output
-            )
-          case Right(changed) if changed == assistant.content => NodeResult.Continue(completed)
-          case Right(changed) =>
+        // a prior value that does not decode fails the run rather than leave the blocked turn's value in place
+        def blocked(error: LLMError) =
+          restored(turn.priorValues, harness.byId).fold(
+            NodeResult.Fail(_),
+            restore =>
+              val rollback = restore
+                .combine(rolledBack)
+                .combine(StateUpdate.update(LoopKeys.turn, turn.copy(priorValues = Map.empty)))
+                .combine(usageOf(context))
+              boundary(error, rollback, context, GuardrailPhase.Output)
+          )
+        val ended = turn.copy(outcome = Some(TurnOutcome.Completed), priorValues = Map.empty)
+        def completed(update: StateUpdate) =
+          Command(update.combine(usageOf(context)), Nil).update(LoopKeys.turn, ended)
+        threaded(boundaryOwners, assistant.content, context, answers, state)(_.afterAgent(_, _)) match
+          case Left((owner, asked: MiddlewareAsked)) =>
+            askedSuspend(owner, asked, MiddlewareHook.AfterAgent, answers, None, usageOf(context))
+          case Left((_, error))             => blocked(error)
+          case Right((_, Left(undeclared))) => NodeResult.Fail(undeclared)
+          case Right((changed, _)) if changed.trim.isEmpty =>
+            blocked(ValidationError("tool loop", "afterAgent returned a blank answer"))
+          case Right((changed, Right(update))) if changed == assistant.content => NodeResult.Continue(completed(update))
+          case Right((changed, Right(update))) =>
             val replaced = StoredMessage(answerId, assistant.withContent(changed))
-            NodeResult.Continue(completed.update(messages, MessageUpdate.Replace(answerId, replaced)))
+            NodeResult.Continue(completed(update).update(messages, MessageUpdate.Replace(answerId, replaced)))
       outcome.fold(NodeResult.Fail(_), identity)
 
-    b.implement(nodes.finish, writes = finishWrites)((_, state, context) => finishStep(state, context, Vector.empty))
+    b.implement(nodes.finish, writes = finishWrites ++ harness.writes)((_, state, context) =>
+      finishStep(state, context, Vector.empty)
+    )
 
     b.implement(nodes.collect, writes = Set(messages, results)) { (_, state, context) =>
       NodeResult.fromResult(for
@@ -1086,8 +1233,8 @@ object ToolLoop:
 
   /**
    * The model wrappers' innermost function: `model.next`, guarded, since the stack guards only its
-   * hooks. Each invocation is an attempt, numbered from 1 by `attempts` (one counter per model task)
-   * and announced live with `ModelCallStarted`. It refuses to call the model while the thread is
+   * hooks. Each invocation is an attempt, numbered from 1 by `attempts` (one counter per model task),
+   * announced live with `ModelCallStarted` and returned with its completion, for the caller to count. It refuses to call the model while the thread is
    * interrupted, returning `Left(CancelledError)`, so a wrapper that retries never calls a cancelled
    * model again. It refuses a request - as every wrapper left it - in which a tool call lacks
    * exactly one result straight after its message ([[ToolResultRule]]), so no provider is sent a
@@ -1097,13 +1244,13 @@ object ToolLoop:
    */
   private def callModel(model: ModelStep, agent: AgentId, context: RunContext, attempts: AtomicInteger)(
     request: ModelRequest
-  ): Result[Completion] =
+  ): Result[(Completion, Int)] =
     if Thread.currentThread().isInterrupted then Left(CancelledError("model"))
     else
       ToolResultRule.check(request.messages).flatMap { _ =>
         val n = attempts.incrementAndGet()
         AgentEvents.ModelCallStarted.progress(context, events.ModelCallStarted(agent.value, n))
-        attempt(model.next(request.messages, request.tools, ModelCall(context, agent, n))) match
+        val result = attempt(model.next(request.messages, request.tools, ModelCall(context, agent, n))) match
           case Right(result) => result
           case Left(thrown) =>
             CancelledError.fromThrowable(thrown, "model") match
@@ -1111,6 +1258,7 @@ object ToolLoop:
                 Thread.currentThread().interrupt()
                 Left(cancellation)
               case None => Failure[Completion](thrown).toResult
+        result.map(_ -> n)
       }
 
   /**

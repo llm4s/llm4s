@@ -1,9 +1,8 @@
 package org.llm4s.agent.graph.middleware
 
-import org.llm4s.agent.graph.{ GraphError, RunContext, StateKey }
+import org.llm4s.agent.graph.{ GraphError, StateKey, StateUpdate }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome }
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
-import org.llm4s.llmconnect.model.Completion
 import org.llm4s.types.Result
 
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -22,7 +21,7 @@ import scala.util.{ Failure, Success, Try }
  * `next`'s result. The innermost function is not guarded; its caller guards it.
  */
 final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
-  import MiddlewareStack.ToolChainResult
+  import MiddlewareStack.{ Hooked, ToolChainResult }
 
   /** Every middleware's contributed tools, in stack order. */
   val tools: Vector[AgentTool[?]] = ordered.flatMap(_.tools)
@@ -30,26 +29,59 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
   /** The union of every middleware's `writes`. */
   val writes: Set[StateKey[?, ?]] = ordered.flatMap(_.writes).toSet
 
-  /** Runs each `beforeAgent` in stack order, threading the input; the first `Left` stops. */
-  private[graph] def beforeAgent(input: String, context: RunContext): Result[String] =
-    ordered.foldLeft[Result[String]](Right(input))((acc, m) =>
-      acc.flatMap(value => guarded(m)(m.beforeAgent(value, context)))
-    )
+  /**
+   * Runs each `beforeAgent` in stack order, threading the input; the first `Left` stops. Each middleware's
+   * update is kept with its id, in the order the hooks ran.
+   */
+  private[graph] def beforeAgent(input: String, context: ModelContext): Result[Hooked] =
+    boundary(ordered, input)((m, text) => m.beforeAgent(text, context))
 
   /** Runs each `afterAgent` in reverse stack order, threading the answer; the first `Left` stops. */
-  private[graph] def afterAgent(answer: String, context: RunContext): Result[String] =
-    ordered.reverse.foldLeft[Result[String]](Right(answer))((acc, m) =>
-      acc.flatMap(value => guarded(m)(m.afterAgent(value, context)))
+  private[graph] def afterAgent(answer: String, context: ModelContext): Result[Hooked] =
+    boundary(ordered.reverse, answer)((m, text) => m.afterAgent(text, context))
+
+  private def boundary(in: Vector[AgentMiddleware], text: String)(
+    hook: (AgentMiddleware, String) => Result[BoundaryResult]
+  ): Result[Hooked] =
+    in.foldLeft[Result[Hooked]](Right(Hooked(text, Vector.empty)))((acc, m) =>
+      acc.flatMap(done => guarded(m)(hook(m, done.text)).map(r => Hooked(r.text, done.updates :+ (m.id -> r.update))))
     )
 
-  /** Runs the model call through every `wrapModelCall`, the first outermost, with `innermost` at the centre. */
-  private[graph] def wrapModelCall(request: ModelRequest, context: RunContext)(
-    innermost: ModelRequest => Result[Completion]
-  ): Result[Completion] =
+  /** Every middleware's prompt sections, in stack order, each with the id of the middleware that gave it. */
+  private[graph] def promptSections(context: ModelContext): Result[Vector[(MiddlewareId, PromptSection)]] =
+    ordered.foldLeft[Result[Vector[(MiddlewareId, PromptSection)]]](Right(Vector.empty))((acc, m) =>
+      acc.flatMap(done => guarded(m)(m.promptSections(context)).map(found => done ++ found.map(m.id -> _)))
+    )
+
+  /**
+   * Runs the model call through every `wrapModelCall`, the first outermost, with `innermost` at the centre. The
+   * update parts a wrapper adds are attributed to it as it returns, so [[checkWrites]] can check each against its
+   * own middleware's `writes`.
+   */
+  private[graph] def wrapModelCall(request: ModelRequest, context: ModelContext)(
+    innermost: ModelRequest => Result[ModelResponse]
+  ): Result[ModelResponse] =
     val chain = ordered.foldRight(innermost) { (m, next) => (req: ModelRequest) =>
-      guarded(m)(m.wrapModelCall(req, context)(next))
+      guarded(m)(m.wrapModelCall(req, context)(next)).map(_.claimedBy(m.id))
     }
     chain(request)
+
+  /**
+   * The updates, combined in order, if each touches only the `writes` of the middleware it is attributed to; a
+   * `ValidationError` naming each middleware and key otherwise. An unattributed part cannot occur: every wrapper's
+   * response is attributed as it returns.
+   */
+  private[graph] def checkWrites(parts: Vector[(Option[MiddlewareId], StateUpdate)]): Result[StateUpdate] =
+    val problems = parts.flatMap { (owner, update) =>
+      val declared = owner.flatMap(id => ordered.find(_.id == id)).fold(Set.empty[StateKey[?, ?]])(_.writes)
+      update.operations
+        .map(_.key.id)
+        .filterNot(k => declared.exists(_.id == k))
+        .distinct
+        .map(k => s"middleware '${owner.fold("<unknown>")(_.value)}' updated '${k.value}', which it does not declare")
+    }.distinct
+    if problems.isEmpty then Right(parts.foldLeft(StateUpdate.empty)((acc, p) => acc.combine(p._2)))
+    else Left(ValidationError("middleware update", problems.toList))
 
   /**
    * Runs the tool call through every `wrapToolCall`, the first outermost, with `innermost` at the
@@ -106,6 +138,10 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
         ToolOutcome.Fatal(error)
 
 object MiddlewareStack:
+
+  /** What a boundary hook's stack returned: the threaded text, and each middleware's update in the order the hooks ran. */
+  final private[graph] case class Hooked(text: String, updates: Vector[(MiddlewareId, StateUpdate)]):
+    def parts: Vector[(Option[MiddlewareId], StateUpdate)] = updates.map((id, u) => Some(id) -> u)
 
   /** What a tool call's chain returned; for a `NeedsApproval` or an `Ask`, `raisedBy` says who: `None` = the tool, `Some(id)` = that middleware. */
   final private[graph] case class ToolChainResult(outcome: ToolOutcome, raisedBy: Option[MiddlewareId])

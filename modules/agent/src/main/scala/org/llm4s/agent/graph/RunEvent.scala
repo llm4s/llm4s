@@ -1,6 +1,7 @@
 package org.llm4s.agent.graph
 
 import org.llm4s.error.LLMError
+import org.llm4s.llmconnect.model.UsageSummary
 import upickle.default.ReadWriter
 
 import java.time.Instant
@@ -40,7 +41,12 @@ enum RunEvent derives ReadWriter:
 
   /** A run began by answering these interrupts. */
   case RunResumed(answered: Vector[String], tenantId: Option[String], principal: Option[String])
-  case RunFailed(message: String)
+
+  /**
+   * The run failed with `message`. `usage` is the model usage of the tasks that failed with it, which commit
+   * nothing else: it is the only durable record of their calls' cost (design §4.22). `None` when they made none.
+   */
+  case RunFailed(message: String, usage: Option[UsageSummary] = None)
 
   /** The run was cancelled by interrupting its thread; its checkpoint stays `Running` for `recover`. */
   case RunCancelled
