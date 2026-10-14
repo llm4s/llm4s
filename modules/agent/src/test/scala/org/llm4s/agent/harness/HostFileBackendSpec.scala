@@ -67,6 +67,13 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     written(backend.delete(p("/src"), call())) shouldBe FileDeleted(wasDirectory = true)
   }
 
+  it should "refuse a path named as its temporary files, which no listing would show" in {
+    val tmp = s".a.txt.llm4s-${UUID.randomUUID()}.tmp"
+    backend.write(p(s"/$tmp"), "x", call()).left.value.message should include("temporary files")
+    backend.write(p(s"/$tmp/inner.txt"), "x", call()).left.value.message should include("temporary files")
+    Files.exists(dir.resolve(tmp)) shouldBe false
+  }
+
   it should "leave no temporary file behind, and never list one" in {
     written(backend.write(p("/a.txt"), "x", call()))
     Files.list(dir).iterator().asScala.map(_.getFileName.toString).toVector.sorted shouldBe Vector("a.txt")

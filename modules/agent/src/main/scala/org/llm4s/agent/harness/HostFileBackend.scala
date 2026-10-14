@@ -93,24 +93,32 @@ final class HostFileBackend private (
   /**
    * `path` under the root, refusing a symbolic link at any component that exists, a regular file with
    * other hard links (which may be outside the root, and which locks by path would not order), and the
-   * backend's lock files, should the lock directory lie inside the root.
+   * backend's lock files, should the lock directory lie inside the root, and any segment named as the
+   * backend's temporary files are (which listings hide, so such a file could never be found again).
+   * Its file-system reads are inside [[io]], so a file that vanishes meanwhile is a refusal, not a throw.
    */
   private def resolve(operation: String, path: VPath): Result[Path] =
-    path.segments
-      .foldLeft[Result[Path]](Right(root)) { (acc, segment) =>
-        acc.flatMap { parent =>
-          val next = parent.resolve(segment)
-          if Files.isSymbolicLink(next) then
-            refused(operation, path, "is or is beneath a symbolic link, which is refused")
-          else Right(next)
-        }
+    if path.segments.exists(HostFileBackend.isTemporary) then
+      refused(operation, path, "has a segment named as the backend's temporary files, which is refused")
+    else
+      io(operation, path) {
+        path.segments
+          .foldLeft[Result[Path]](Right(root)) { (acc, segment) =>
+            acc.flatMap { parent =>
+              val next = parent.resolve(segment)
+              if Files.isSymbolicLink(next) then
+                refused(operation, path, "is or is beneath a symbolic link, which is refused")
+              else Right(next)
+            }
+          }
+          .flatMap(p =>
+            if !p.normalize().startsWith(root) then refused(operation, path, "resolves outside the root")
+            else if isLockFile(p) then refused(operation, path, "is one of the backend's lock files")
+            else if isFile(p) && linkCount(p) > 1 then
+              refused(operation, path, "has other hard links, which are refused")
+            else Right(p)
+          )
       }
-      .flatMap(p =>
-        if !p.normalize().startsWith(root) then refused(operation, path, "resolves outside the root")
-        else if isLockFile(p) then refused(operation, path, "is one of the backend's lock files")
-        else if isFile(p) && linkCount(p) > 1 then refused(operation, path, "has other hard links, which are refused")
-        else Right(p)
-      )
 
   /** Every existing ancestor of `target` below the root is a directory. */
   private def underDirectories(operation: String, path: VPath, target: Path): Result[Unit] =
