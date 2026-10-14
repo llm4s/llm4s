@@ -187,20 +187,9 @@ final class HostFileBackend private (
    * grows or is replaced meanwhile cannot make a read larger.
    */
   private def bounded(p: Path): Option[Array[Byte]] =
-    Using.resource(FileChannel.open(p, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) { channel =>
-      val out    = new java.io.ByteArrayOutputStream()
-      val buffer = ByteBuffer.allocate(64 * 1024)
-      var total  = 0L
-      var more   = true
-      while more && total <= maxFileBytes do
-        buffer.clear()
-        val n = channel.read(buffer)
-        if n < 0 then more = false
-        else
-          total += n
-          if total <= maxFileBytes then out.write(buffer.array(), 0, n)
-      Option.when(total <= maxFileBytes)(out.toByteArray)
-    }
+    Using.resource(FileChannel.open(p, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS))(
+      HostFileBackend.readAtMost(_, maxFileBytes)
+    )
 
   /** `bytes` as text under the backend's one text rule (`Text.binaryReason`), as a write applies it. */
   private def text(bytes: Array[Byte]): String =
@@ -651,6 +640,26 @@ object HostFileBackend:
         case Some(n) => held.update(root, n - 1)
         case None    => ()
     }
+
+  /**
+   * At most `max` bytes of `channel`, or `None` when it holds more. Each read asks for no more than the
+   * bytes still allowed plus one, so an over-limit file is detected after reading `max + 1` bytes, never a
+   * whole buffer past the cap (rule 12: a bound checked before each unit of work, not after it).
+   */
+  private[harness] def readAtMost(channel: java.nio.channels.ReadableByteChannel, max: Long): Option[Array[Byte]] =
+    val out    = new java.io.ByteArrayOutputStream()
+    val buffer = ByteBuffer.allocate(64 * 1024)
+    var total  = 0L
+    var more   = true
+    while more && total <= max do
+      buffer.clear()
+      buffer.limit(math.min(buffer.capacity.toLong, max - total + 1).toInt)
+      val n = channel.read(buffer)
+      if n < 0 then more = false
+      else
+        total += n
+        if total <= max then out.write(buffer.array(), 0, n)
+    Option.when(total <= max)(out.toByteArray)
 
   /** A name Windows reads as another (a trailing dot or space is dropped); the backend never uses one. */
   private[harness] def trailing(name: String): Boolean = name.endsWith(".") || name.endsWith(" ")
