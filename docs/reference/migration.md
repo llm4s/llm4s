@@ -19,6 +19,7 @@ and tools on `AgentBuilder`. Each slice adds its part here as it lands:
   sections, accounted model calls, and a Block that restores the whole turn: [below](#kernel-hooks-for-the-harness-1902).
 - [#1903](https://github.com/llm4s/llm4s/issues/1903), tool permissions, timeouts and batch locks:
   [below](#tool-permissions-timeouts-and-batch-locks-1903).
+- [#1907](https://github.com/llm4s/llm4s/issues/1907), todos: [below](#todos-1907).
 - [#1914](https://github.com/llm4s/llm4s/issues/1914), typed custom streams: [below](#typed-custom-streams-1914).
 - [#1921](https://github.com/llm4s/llm4s/issues/1921), replay of external effects - `ReplayGuard`, `Checkpointer.effect`
   and `Commit.effects`: [below](#replay-of-external-effects-1921).
@@ -82,6 +83,14 @@ Design §4.23. Additive, bar one reserved key: an agent without `PermissionMiddl
 - **`PermissionMiddleware` denies what no rule allows**, a tool without `withResources` included: add `PermissionRule.allow(Operation.Invoke, "<name>")` (or `"*"`) for each tool the agent may call. See [Tool Permissions, Timeouts and Locks](/guide/agents/#tool-permissions-timeouts-and-locks).
 - **Adopting locks reshapes the agent's graph.** The loop registers `tool-queue` only for an agent with a tool that declares `withLocks`, so the first tool to adopt locks changes the agent's structural fingerprint and refuses the threads checkpointed before with `RestoreRejected`: finish or `forget` them first. Once an agent has the key, changing lock functions is safe for threads in flight: a batch keeps the lock schedule it was made with. Agents without locks, timeouts and resources included, restore their existing threads unchanged.
 - **Locked calls cost supersteps.** Each further round of a batch whose calls hold conflicting locks costs two supersteps; raise `RunBudgets.maxSupersteps` if a long batch of conflicting calls reaches it.
+
+### Todos (#1907)
+
+Design §4.30. Additive: `TodoMiddleware` (`org.llm4s.agent.harness`) gives an agent a `write_todos` tool and a plan prompt section.
+
+- **Adding `TodoMiddleware` to an existing agent reshapes its graph.** It registers the `todos` key, and its tool's lock registers `tool-queue`, so the agent's structural fingerprint changes and threads checkpointed before are refused with `RestoreRejected`: finish or `forget` them first. Agents without it are unchanged.
+- **`todos` is a key id the middleware owns.** A `StateKey` of your own with id `todos` in a family that also uses `TodoMiddleware` is refused at build, as two keys with one id are. Rename it.
+- **With `PermissionMiddleware`, allow the tool**: `PermissionRule.allow(Operation.Invoke, "write_todos")`.
 
 ### Typed custom streams (#1914)
 

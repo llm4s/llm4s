@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The SQLite store keeps the records in a new table (schema version 3, migrated on open).
   - Breaking: `Checkpointer.effect`, `Commit.effects` and `GraphError.EffectReplayRefused` are new. See the
     migration guide and design record §4.24.
+- **Todos: a `write_todos` tool, the thread's plan and a plan prompt section** ([#1907](https://github.com/llm4s/llm4s/issues/1907),
+  design §4.30): `new TodoMiddleware(maxTodos = 50, maxTodoChars = 200)` (`org.llm4s.agent.harness`, `llm4s-agent`)
+  gives an agent a `write_todos` tool that replaces the plan (`TodoMiddleware.key`, a `TodoList` of
+  `Todo(id, content, status)`, `TodoStatus` = `Pending | InProgress | Done`), shows it to the model in a prompt
+  section on every model step, and announces each change with a durable `HarnessEvents.TodosUpdated` (ids and
+  statuses only) and a live `HarnessEvents.TodosProgress` (the whole list). The tool assigns ids and never reuses
+  one within a thread, refuses a list over its limits as an error the model sees, and locks `todos`, so two calls in
+  one message apply in order. An output Block restores the plan. Adding it to an existing agent changes the agent's
+  graph structure: see the migration guide.
 - **`ClaimPolicy.label`: a runtime's name in the logs of its claims** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   `ClaimPolicy.default.withLabel("worker-7")` (or `ClaimPolicy(ttl, renewEvery, label)`) makes the runtime log each
   granted claim with its run id and label at INFO (`Run 'r1' (runtime 'worker-7') claimed thread 't' with token 1`;
