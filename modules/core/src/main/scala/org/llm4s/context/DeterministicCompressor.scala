@@ -211,14 +211,14 @@ object CompressionRule {
 
   private def compressRedundantPhrases(message: Message): Message =
     message match {
-      case msg: UserMessage      => msg.withParts(ContentPart.withText(msg.parts, cleanupRedundancy(msg.content)))
+      case msg: UserMessage      => msg.withParts(ContentPart.mapText(msg.parts)(cleanupRedundancy))
       case msg: AssistantMessage => msg.withContent(cleanupRedundancy(msg.content))
       case other                 => other
     }
 
   private def compressRepetitiveText(message: Message): Message =
     message match {
-      case msg: UserMessage      => msg.withParts(ContentPart.withText(msg.parts, reduceRepetition(msg.content)))
+      case msg: UserMessage      => msg.withParts(ContentPart.mapText(msg.parts)(reduceRepetition))
       case msg: AssistantMessage => msg.withContent(reduceRepetition(msg.content))
       case other                 => other
     }

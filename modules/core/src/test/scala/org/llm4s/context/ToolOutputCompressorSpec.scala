@@ -25,6 +25,29 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
     compressed.content.length should be < 20000
   }
 
+  it should "compress each text part of an interleaved result in place, beside its own image" in {
+    val chart = ContentPart
+      .image(
+        org.llm4s.media.MediaSource.Url(java.net.URI.create("https://example.com/a.png")),
+        org.llm4s.media.MediaType.Png
+      )
+      .toOption
+      .get
+    val message =
+      ToolMessage(Vector(ContentPart.Text("first " * 4000), chart, ContentPart.Text("second caption"), chart), "c")
+    val compressed =
+      ToolOutputCompressor
+        .compressToolOutputs(Seq(message), ArtifactStore.inMemory())
+        .toOption
+        .get
+        .head
+        .asInstanceOf[ToolMessage]
+    compressed.parts.map(_.getClass) shouldBe message.parts.map(_.getClass)
+    compressed.parts(1) shouldBe chart
+    compressed.parts(2) shouldBe ContentPart.Text("second caption")
+    compressed.parts.head.asInstanceOf[ContentPart.Text].text.length should be < 24000
+  }
+
   // ============ Content Type Detection ============
 
   "ToolOutputCompressor content type detection" should "identify JSON objects" in {

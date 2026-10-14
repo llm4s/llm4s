@@ -86,56 +86,68 @@ object ToolOutputCompressor {
     }
   }
 
+  // each text part is compressed on its own, in place: a part's text stays beside the media it describes
   private def compressToolMessage(
     message: ToolMessage,
     artifactStore: ArtifactStore,
     threshold: ExternalizationThreshold
-  ): Result[Message] = {
-    val contentSize = ContentSize.fromString(message.content)
-    val contentType = detectContentType(message.content)
+  ): Result[Message] =
+    message.parts
+      .foldLeft[Result[Vector[ContentPart]]](Right(Vector.empty)) { (acc, part) =>
+        acc.flatMap { done =>
+          part match {
+            case ContentPart.Text(text) =>
+              compressText(text, message.toolCallId, artifactStore, threshold).map(t => done :+ ContentPart.Text(t))
+            case media => Right(done :+ media)
+          }
+        }
+      }
+      .map(parts => if (parts == message.parts) message else message.withParts(parts))
+
+  private def compressText(
+    content: String,
+    toolCallId: String,
+    artifactStore: ArtifactStore,
+    threshold: ExternalizationThreshold
+  ): Result[String] = {
+    val contentSize = ContentSize.fromString(content)
+    val contentType = detectContentType(content)
 
     contentSize.bytes match {
       case size if size > threshold =>
-        externalizeToolOutput(message, artifactStore, contentType)
+        externalizeToolOutput(content, artifactStore, contentType)
       case size if size > MaxInlineToolOutput =>
-        compressInlineContent(message, contentType)
+        compressInlineContent(content, toolCallId, contentType)
       case _ =>
-        Right(message)
+        Right(content)
     }
   }
 
   private def externalizeToolOutput(
-    message: ToolMessage,
+    content: String,
     artifactStore: ArtifactStore,
     contentType: String
-  ): Result[ToolMessage] = {
-    val key         = ArtifactKey.fromContent(message.content)
-    val contentSize = ContentSize.fromString(message.content)
-    val summary     = generateContentSummary(message.content, contentType)
+  ): Result[String] = {
+    val key         = ArtifactKey.fromContent(content)
+    val contentSize = ContentSize.fromString(content)
+    val summary     = generateContentSummary(content, contentType)
 
     for {
-      _ <- artifactStore.store(key, message.content).left.map { error =>
+      _ <- artifactStore.store(key, content).left.map { error =>
         ContextError.artifactStoreFailed("store", key.value, error.message)
       }
       externalizedInfo = ExternalizedContent(key, contentSize.bytes, contentType, summary)
-      pointer          = createContentPointer(externalizedInfo)
-    } yield message.withParts(ContentPart.withText(message.parts, pointer))
+    } yield createContentPointer(externalizedInfo)
   }
 
-  private def compressInlineContent(message: ToolMessage, contentType: String): Result[ToolMessage] = {
-    val compressed = contentType match {
-      case "json" | "yaml" => compressStructuredData(message.content)
-      case "log" | "trace" => compressLogContent(message.content)
-      case "error"         => compressErrorContent(message.content)
-      case "binary"        => externalizeBinaryContent(message)
-      case _               => compressGenericText(message.content)
+  private def compressInlineContent(content: String, toolCallId: String, contentType: String): Result[String] =
+    contentType match {
+      case "json" | "yaml" => compressStructuredData(content)
+      case "log" | "trace" => compressLogContent(content)
+      case "error"         => compressErrorContent(content)
+      case "binary"        => externalizeBinaryContent(content, toolCallId)
+      case _               => compressGenericText(content)
     }
-
-    compressed match {
-      case Right(content) => Right(message.withParts(ContentPart.withText(message.parts, content)))
-      case Left(error)    => Left(error)
-    }
-  }
 
   private def detectContentType(content: String): String = {
     val trimmed = content.trim
@@ -238,9 +250,9 @@ object ToolOutputCompressor {
     }
   }
 
-  private def externalizeBinaryContent(message: ToolMessage): Result[String] =
+  private def externalizeBinaryContent(content: String, toolCallId: String): Result[String] =
     // Binary content should never be inline
-    Right(s"[BINARY CONTENT - ${message.content.length} bytes - externalized: ${message.toolCallId}]")
+    Right(s"[BINARY CONTENT - ${content.length} bytes - externalized: $toolCallId]")
 
   private def compressGenericText(content: String): Result[String] =
     content.length match {

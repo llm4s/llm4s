@@ -71,11 +71,10 @@ class ContentPartSpec extends AnyFlatSpec with Matchers with EitherValues {
     ContentPart.text(Vector(image)) shouldBe ""
   }
 
-  "withText" should "replace the text parts with one, where the first was, and keep the media" in {
+  "mapText" should "rewrite each text part in place and keep the media beside it" in {
     val image = ContentPart.image(png, MediaType.Png).value
-    ContentPart.withText(Vector(image, ContentPart.Text("a"), image, ContentPart.Text("b")), "ab") shouldBe
-      Vector(image, ContentPart.Text("ab"), image)
-    ContentPart.withText(Vector(image), "x") shouldBe Vector(image)
+    ContentPart.mapText(Vector(ContentPart.Text("a"), image, ContentPart.Text("b"), image))(_.toUpperCase) shouldBe
+      Vector(ContentPart.Text("A"), image, ContentPart.Text("B"), image)
   }
 
   "inlineBytes" should "total the inline parts" in {

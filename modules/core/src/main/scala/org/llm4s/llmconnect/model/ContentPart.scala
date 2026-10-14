@@ -88,18 +88,14 @@ object ContentPart {
     }.sum
 
   /**
-   * `parts` with its text parts replaced by one part, `text`, where the first of them was; the
-   * media parts are kept as they are, in place. Unchanged when there is no text part. For code
-   * that rewrites a message's text view - a compressor - and must not touch its media.
+   * `parts` with `f` applied to each text part, in place, and every media part kept as it is: for
+   * code that rewrites a message's text - a compressor - and must leave each text beside the media it
+   * describes.
    */
-  private[llm4s] def withText(parts: Vector[ContentPart], text: String): Vector[ContentPart] =
-    parts.indexWhere(_.isInstanceOf[Text]) match {
-      case -1 => parts
-      case first =>
-        parts.zipWithIndex.collect {
-          case (_: Text, `first`)           => Text(text)
-          case (media, _) if isMedia(media) => media
-        }
+  private[llm4s] def mapText(parts: Vector[ContentPart])(f: String => String): Vector[ContentPart] =
+    parts.map {
+      case Text(text) => Text(f(text))
+      case media      => media
     }
 
   /** Whether `part` is an image or a document. */
