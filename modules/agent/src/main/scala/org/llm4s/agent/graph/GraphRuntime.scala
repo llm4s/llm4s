@@ -901,7 +901,7 @@ final class GraphRuntime(
                   // fenced before the caller is woken, so no write begins once the loss is acted on
                   if gate.fence(GraphError.StaleClaim(threadId.value, claim.token, lostTo.get)) then
                     GraphRuntime.logger.warn(
-                      s"Change '${config.runId.value}' on thread '${threadId.value}' lost its claim with its write in the store; it may still land"
+                      s"Change ${named(config.runId)} on thread '${threadId.value}' lost its claim with its write in the store; it may still land"
                     )
                   lossSignal.complete(()): Unit
                 heartbeat = Some(
@@ -973,6 +973,9 @@ final class GraphRuntime(
   private def claimThread(threadId: ThreadId, config: RunConfig): Result[RunClaim] =
     Try(checkpointer.claim(threadId, ClaimRequest(config.runId, claims.ttl))).toResult.flatten match
       case Right(claim) =>
+        val granted = s"Run ${named(config.runId)} claimed thread '${threadId.value}' with token ${claim.token.value}"
+        // an operator who labels a runtime wants to find its claims; without a label it is noise
+        if claims.label.isDefined then GraphRuntime.logger.info(granted) else GraphRuntime.logger.debug(granted)
         // any claim this runtime failed to give back has lapsed and been replaced: every one older than
         // this grant, which is all of them, as the store issues each token above every earlier one
         unreleased.updateWith(threadId.value)(_.filter(_.value > claim.token.value)): Unit
@@ -983,6 +986,9 @@ final class GraphRuntime(
           case _ => GraphError.ThreadBusy(threadId.value, latest)
         }
       case Left(other) => Left(GraphError.CheckpointWriteFailed(threadId.value, other))
+
+  /** A run id as the runtime's logs name it: with the runtime's label ([[ClaimPolicy.label]]), if it has one. */
+  private def named(runId: RunId): String = s"'${runId.value}'" + claims.label.fold("")(l => s" (runtime '$l')")
 
   /**
    * Gives back the claim whose token is `token`, logging (never throwing) a store that fails: its
@@ -1746,7 +1752,7 @@ final class GraphRuntime(
     /** Reports the loss; only after [[end]] returned `true`, so once. Outside `lock`. */
     private def lose(current: Option[FencingToken], why: String): Unit =
       GraphRuntime.logger.warn(
-        s"Run '${holder.value}' lost its claim on thread '${threadId.value}': $why; $consequence"
+        s"Run ${named(holder)} lost its claim on thread '${threadId.value}': $why; $consequence"
       )
       DefaultRunHandle.guarded(lost(current)): Unit
 
@@ -1806,12 +1812,12 @@ final class GraphRuntime(
           case Right(Left(error)) =>
             if !over then
               GraphRuntime.logger.warn(
-                s"Renewing run '${holder.value}''s claim on thread '${threadId.value}' failed: ${error.message}"
+                s"Renewing the claim of run ${named(holder)} on thread '${threadId.value}' failed: ${error.message}"
               )
           case Left(thrown) =>
             if !over then
               GraphRuntime.logger.warn(
-                s"Renewing run '${holder.value}''s claim on thread '${threadId.value}' failed",
+                s"Renewing the claim of run ${named(holder)} on thread '${threadId.value}' failed",
                 thrown
               )
         renewalSettled(threadId)
@@ -2036,7 +2042,7 @@ final class GraphRuntime(
       // fenced before the loss is acted on, so no commit starts once the run is stopped or settled
       if committer.fence(GraphError.ClaimLost(threadId.value, token, lostTo.get)) then
         GraphRuntime.logger.warn(
-          s"Run '${runId.value}' on thread '${threadId.value}' lost its claim with a commit in the store; it may still land"
+          s"Run ${named(runId)} on thread '${threadId.value}' lost its claim with a commit in the store; it may still land"
         )
       lossSignal.complete(()): Unit
       stopper()
@@ -2206,7 +2212,7 @@ final class GraphRuntime(
         // ClaimLost carries no run error: the failure the run was recording is logged instead
         runError.foreach(e =>
           GraphRuntime.logger.warn(
-            s"Run '${runId.value}' on thread '${threadId.value}' lost its claim while recording its failure: ${e.message}"
+            s"Run ${named(runId)} on thread '${threadId.value}' lost its claim while recording its failure: ${e.message}"
           )
         )
         GraphError.ClaimLost(threadId.value, token, stale.current.orElse(lostTo.get))

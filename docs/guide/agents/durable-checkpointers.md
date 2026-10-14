@@ -71,6 +71,13 @@ clock of whichever process grants or renews the claim, so clock skew between hos
 effective `ttl`. Fencing (below) still keeps every write safe; skew costs liveness - a live run taken over early,
 a dead one held longer - and can repeat side effects. Keep hosts' clocks synchronised.
 
+`ClaimPolicy` can also carry a `label` naming the runtime to an operator - a host, pod or process name:
+`ClaimPolicy.default.withLabel("worker-7")`. The runtime then logs the run id with it, at INFO, whenever it is
+granted a claim (`Run 'r1' (runtime 'worker-7') claimed thread 't' with token 1`), and in the WARN lines for a
+failed renewal or a lost claim, so the run a `ThreadBusy` names can be traced to the runtime holding it. Without a
+label the grant is logged at DEBUG. The label goes nowhere else: not to the store, and never into an error another
+caller - another tenant's included - gets.
+
 While one run holds the thread, every other `start`, `recover`, `resume`, `deleteThread` or `updateState` on it,
 and every `fork` onto it as the target, from any runtime, is refused with `GraphError.ThreadBusy`, which names the
 holding run:

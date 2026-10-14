@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`ClaimPolicy.label`: a runtime's name in the logs of its claims** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  `ClaimPolicy.default.withLabel("worker-7")` (or `ClaimPolicy(ttl, renewEvery, label)`) makes the runtime log each
+  granted claim with its run id and label at INFO (`Run 'r1' (runtime 'worker-7') claimed thread 't' with token 1`;
+  without a label, at DEBUG), and name the label in its WARN lines for a failed renewal or a lost claim, so an
+  operator can trace the run a `ThreadBusy` names to the runtime holding it. The label is never stored and never
+  appears in an error another caller gets. A blank label is refused. See the
+  [guide](docs/guide/agents/durable-checkpointers.md#runs-claim-their-thread).
 - **`llm4s-kotlin-api` is published to Maven Central with each release** ([#1494](https://github.com/llm4s/llm4s/issues/1494)):
   `org.llm4s:llm4s-kotlin-api` (no `_3` suffix: a Kotlin artifact), at the release's version, depending on
   `llm4s-java-api_3` at that same version, and managed by `llm4s-bom`, so a Gradle build that imports the BOM declares
