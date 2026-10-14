@@ -22,11 +22,11 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
   private var backend: HostFileBackend    = _
   private var unsupported: Option[String] = None
 
-  // the cases of `open` with an injected probe run anywhere; the rest need a supported file system
   // (beforeEach has run when this does, as BeforeAndAfterEach wraps it)
   override def withFixture(test: NoArgTest) =
     unsupported match
-      case Some(why) if !test.name.startsWith("HostFileBackend.open") =>
+      // only the cases with an injected probe need no supported file system
+      case Some(why) if !test.name.contains("probe") =>
         org.scalatest.Canceled(s"unsupported file system: $why")
       case _ => super.withFixture(test)
 

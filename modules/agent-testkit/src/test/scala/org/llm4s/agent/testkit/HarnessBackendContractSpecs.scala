@@ -92,6 +92,20 @@ class HostFileBackendReplaySpec extends AnyFlatSpec with ReplayContract:
       org.scalatest.Canceled(s"unsupported file system: $why")
     )
   protected def newSubject(): ReplayContract.Subject =
+    // the contract names its subject when it registers its cases; on a volume the backend refuses, a
+    // stand-in names it, and withFixture cancels every case before one could use it
+    HarnessBackends.hostUnsupported.fold(hostSubject())(why =>
+      new ReplayContract.Subject:
+        def name: String           = s"a host file backend (unsupported here: $why)"
+        def support: ReplaySupport = ReplaySupport.Verifiable
+        def perform(context: RunContext, slot: Int): Result[ujson.Value] = Left(BackendRefused("perform", "", why))
+        def observe(slot: Int): Result[String]                           = Left(BackendRefused("observe", "", why))
+        def initial(slot: Int): String                                   = ""
+        def once(slot: Int): String                                      = ""
+        def interfere(slot: Int): Unit                                   = ()
+    )
+
+  private def hostSubject(): ReplayContract.Subject =
     val (backend, dir) = HarnessBackends.host()
     FileBackendContract.EditSubject(
       "a host file backend",
