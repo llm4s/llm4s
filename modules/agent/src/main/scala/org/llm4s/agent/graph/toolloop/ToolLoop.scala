@@ -660,9 +660,9 @@ object ToolLoop:
 
   /**
    * Threads `text` through each owner's stack in order, each seeing the answers its own middleware were given; a
-   * `Left` names the owner whose stack returned it. On the way through, each owner's middleware updates are checked
-   * against their own `writes` and combined: an undeclared write is the `Right`'s `Left`, which fails the run
-   * rather than blocking it.
+   * `Left` names the owner whose stack returned it, and a `Right` combines every update. Each hook's update is
+   * checked against its own middleware's `writes` as the hook returns: an undeclared write is the outer `Left`,
+   * whatever the hooks did after it, and fails the run rather than blocking or suspending it.
    */
   private def threaded(
     owners: Vector[AgentNodes],
@@ -671,17 +671,19 @@ object ToolLoop:
     answers: Vector[GivenAnswer],
     state: ThreadState
   )(
-    hook: (MiddlewareStack, String, ModelContext) => Result[MiddlewareStack.Hooked]
-  ): Either[(AgentNodes, LLMError), (String, Result[StateUpdate])] =
-    owners.foldLeft[Either[(AgentNodes, LLMError), (String, Result[StateUpdate])]](
-      Right(text -> Right(StateUpdate.empty))
-    ) { (acc, owner) =>
-      acc.flatMap { (t, updates) =>
-        hook(owner.stack, t, hookContext(owner.agent.id, context, answers, state)).left
-          .map(owner -> _)
-          .map(h => h.text -> updates.flatMap(u => owner.stack.checkWrites(h.parts).map(u.combine)))
+    hook: (MiddlewareStack, String, ModelContext, MiddlewareStack.WriteCheck) => Result[MiddlewareStack.Hooked]
+  ): Either[ValidationError, Either[(AgentNodes, LLMError), (String, StateUpdate)]] =
+    val check = MiddlewareStack.WriteCheck()
+    val outcome =
+      owners.foldLeft[Either[(AgentNodes, LLMError), (String, StateUpdate)]](Right(text -> StateUpdate.empty)) {
+        (acc, owner) =>
+          acc.flatMap { (t, update) =>
+            hook(owner.stack, t, hookContext(owner.agent.id, context, answers, state), check).left
+              .map(owner -> _)
+              .map(h => h.text -> update.combine(h.update))
+          }
       }
-    }
+    check.failure.toLeft(outcome)
 
   /** The usage the task recorded, as its update to [[LoopKeys.usage]]; nothing when it recorded none. */
   private def usageOf(context: RunContext): StateUpdate =
@@ -873,13 +875,13 @@ object ToolLoop:
       yield
         // the root's boundary hooks guard the whole family; the active agent's own run inside them
         val owners = if agentId == root then Vector(nodes) else Vector(agents(root), nodes)
-        threaded(owners, in.query, context, answers, state)(_.beforeAgent(_, _)) match
-          case Left((owner, asked: MiddlewareAsked)) =>
+        threaded(owners, in.query, context, answers, state)(_.beforeAgent(_, _, _)) match
+          case Left(undeclared) => NodeResult.Fail(undeclared)
+          case Right(Left((owner, asked: MiddlewareAsked))) =>
             askedSuspend(owner, asked, MiddlewareHook.BeforeAgent, answers, Some(in), usageOf(context))
-          case Left((_, error)) =>
+          case Right(Left((_, error))) =>
             boundary(error, seeded.update.combine(usageOf(context)), context, GuardrailPhase.Input)
-          case Right((_, Left(undeclared)))                        => NodeResult.Fail(undeclared)
-          case Right((transformed, _)) if transformed.trim.isEmpty =>
+          case Right(Right((transformed, _))) if transformed.trim.isEmpty =>
             // stored, a blank query would fail every model call and every recover after it
             boundary(
               ValidationError("query", "beforeAgent returned a blank query"),
@@ -887,7 +889,7 @@ object ToolLoop:
               context,
               GuardrailPhase.Input
             )
-          case Right((transformed, Right(hooks))) =>
+          case Right(Right((transformed, hooks))) =>
             // the hooks' keys as they were, and as the hooks leave them: an output Block restores only the latter
             state.applyUpdate(hooks) match
               case Left(failed) => NodeResult.Fail(failed)
@@ -1115,12 +1117,16 @@ object ToolLoop:
           yield
             val request  = ModelRequest(system.map(SystemMessage(_)).toVector ++ view, nodes.offered)
             val attempts = AtomicInteger(0)
-            stack.wrapModelCall(request, hooks) { req =>
+            // every wrapper's update is checked as it returns, so one in a discarded response fails the run too
+            val check = MiddlewareStack.WriteCheck()
+            val result = stack.wrapModelCall(request, hooks, check) { req =>
               callModel(agent.model, agent.id, context, attempts)(req).map { (completion, attempt) =>
                 hooks.recordCall(completion, attempt)
                 ModelResponse(completion)
               }
-            } match
+            }
+            // an undeclared write fails the step whatever the wrappers returned
+            check.failure.fold(result)(Left(_)) match
               // nothing of the step is stored while the question waits - it runs again once answered - but
               // the model calls a wrapper made before asking were made, and are counted
               case Left(asked: MiddlewareAsked) =>
@@ -1131,7 +1137,7 @@ object ToolLoop:
               case Right(response) =>
                 NodeResult.fromResult(
                   for
-                    update <- stack.checkWrites(response.parts)
+                    update <- Right(response.update)
                     _      <- response.completion.message.validate
                     _      <- ToolResultRule.callIdsUsable(response.completion.message)
                     // the wrappers' keys as they leave them, for an output Block to tell the turn's writes from another's
@@ -1185,15 +1191,16 @@ object ToolLoop:
         val ended = turn.copy(outcome = Some(TurnOutcome.Completed), priorValues = Map.empty)
         def completed(update: StateUpdate) =
           Command(update.combine(usageOf(context)), Nil).update(LoopKeys.turn, ended)
-        threaded(boundaryOwners, assistant.content, context, answers, state)(_.afterAgent(_, _)) match
-          case Left((owner, asked: MiddlewareAsked)) =>
+        threaded(boundaryOwners, assistant.content, context, answers, state)(_.afterAgent(_, _, _)) match
+          case Left(undeclared) => NodeResult.Fail(undeclared)
+          case Right(Left((owner, asked: MiddlewareAsked))) =>
             askedSuspend(owner, asked, MiddlewareHook.AfterAgent, answers, None, usageOf(context))
-          case Left((_, error))             => blocked(error)
-          case Right((_, Left(undeclared))) => NodeResult.Fail(undeclared)
-          case Right((changed, _)) if changed.trim.isEmpty =>
+          case Right(Left((_, error))) => blocked(error)
+          case Right(Right((changed, _))) if changed.trim.isEmpty =>
             blocked(ValidationError("tool loop", "afterAgent returned a blank answer"))
-          case Right((changed, Right(update))) if changed == assistant.content => NodeResult.Continue(completed(update))
-          case Right((changed, Right(update))) =>
+          case Right(Right((changed, update))) if changed == assistant.content =>
+            NodeResult.Continue(completed(update))
+          case Right(Right((changed, update))) =>
             val replaced = StoredMessage(answerId, assistant.withContent(changed))
             NodeResult.Continue(completed(update).update(messages, MessageUpdate.Replace(answerId, replaced)))
       outcome.fold(NodeResult.Fail(_), identity)

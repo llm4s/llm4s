@@ -170,6 +170,46 @@ class KernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues with O
     }
   }
 
+  it should "fail the run on an undeclared write even when a later hook blocks, asks or discards it" in {
+    val undeclared = StateUpdate.update(notes, "x")
+    val sneaky = middleware(
+      "sneaky",
+      writing = Set.empty,
+      before = (t, _) => Right(BoundaryResult(t, undeclared)),
+      after = (t, _) => Right(BoundaryResult(t, undeclared)),
+      model = (r, _, next) => next(r).map(_.addUpdate(undeclared))
+    )
+    val blockingIn  = middleware("blocking", before = (_, _) => Left(GuardrailBlocked("in", "no")))
+    val blockingOut = middleware("blocking", after = (_, _) => Left(GuardrailBlocked("out", "no")))
+    // outermost: discards the inner response, then fails the call
+    val discarding =
+      middleware("discarding", model = (r, _, next) => next(r).flatMap(_ => Left(ValidationError("x", "y"))))
+    val cases: Seq[(String, Seq[AgentMiddleware])] = Seq(
+      // beforeAgent runs in stack order: the sneaky write, then the block
+      "beforeAgent then a Block" -> Seq(sneaky, blockingIn),
+      // afterAgent runs in reverse: the sneaky write, then the block
+      "afterAgent then a Block" -> Seq(
+        blockingOut,
+        middleware("sneaky", writing = Set.empty, after = (t, _) => Right(BoundaryResult(t, undeclared)))
+      ),
+      "a model wrapper's response discarded" -> Seq(
+        discarding,
+        middleware("sneaky", writing = Set.empty, model = (r, _, next) => next(r).map(_.addUpdate(undeclared)))
+      )
+    )
+    cases.foreach { (what, stack) =>
+      val result =
+        runInMemory(loopOf(ScriptedModel(answer("hi")), middleware("owner") +: stack).graph, AgentInput("go"))
+      withClue(what) {
+        result match {
+          case RunResult.Failed(_, GraphError.NodeFailed(_, _, v: ValidationError)) =>
+            v.message should include("middleware 'sneaky'")
+          case other => fail(s"$what: not an undeclared-write failure: $other")
+        }
+      }
+    }
+  }
+
   "A model wrapper that calls next twice" should "commit only the returned response's updates, and count both calls" in {
     val inner = middleware(
       "inner",

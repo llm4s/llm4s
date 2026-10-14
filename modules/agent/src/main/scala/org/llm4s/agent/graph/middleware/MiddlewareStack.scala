@@ -21,7 +21,7 @@ import scala.util.{ Failure, Success, Try }
  * `next`'s result. The innermost function is not guarded; its caller guards it.
  */
 final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
-  import MiddlewareStack.{ Hooked, ToolChainResult }
+  import MiddlewareStack.{ Hooked, ToolChainResult, WriteCheck }
 
   /** Every middleware's contributed tools, in stack order. */
   val tools: Vector[AgentTool[?]] = ordered.flatMap(_.tools)
@@ -31,20 +31,26 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
 
   /**
    * Runs each `beforeAgent` in stack order, threading the input; the first `Left` stops. Each middleware's
-   * update is kept with its id, in the order the hooks ran.
+   * update is kept with its id, in the order the hooks ran, and checked by `check` as its hook returns: an
+   * undeclared write stops the fold too, and is in `check` whatever the caller makes of the `Left`.
    */
-  private[graph] def beforeAgent(input: String, context: ModelContext): Result[Hooked] =
-    boundary(ordered, input)((m, text) => m.beforeAgent(text, context))
+  private[graph] def beforeAgent(input: String, context: ModelContext, check: WriteCheck): Result[Hooked] =
+    boundary(ordered, input, check)((m, text) => m.beforeAgent(text, context))
 
-  /** Runs each `afterAgent` in reverse stack order, threading the answer; the first `Left` stops. */
-  private[graph] def afterAgent(answer: String, context: ModelContext): Result[Hooked] =
-    boundary(ordered.reverse, answer)((m, text) => m.afterAgent(text, context))
+  /** Runs each `afterAgent` in reverse stack order, threading the answer, as [[beforeAgent]] does. */
+  private[graph] def afterAgent(answer: String, context: ModelContext, check: WriteCheck): Result[Hooked] =
+    boundary(ordered.reverse, answer, check)((m, text) => m.afterAgent(text, context))
 
-  private def boundary(in: Vector[AgentMiddleware], text: String)(
+  private def boundary(in: Vector[AgentMiddleware], text: String, check: WriteCheck)(
     hook: (AgentMiddleware, String) => Result[BoundaryResult]
   ): Result[Hooked] =
     in.foldLeft[Result[Hooked]](Right(Hooked(text, Vector.empty)))((acc, m) =>
-      acc.flatMap(done => guarded(m)(hook(m, done.text)).map(r => Hooked(r.text, done.updates :+ (m.id -> r.update))))
+      acc.flatMap(done =>
+        guarded(m)(hook(m, done.text)).flatMap { r =>
+          if check(m, r.update) then Right(Hooked(r.text, done.updates :+ (m.id -> r.update)))
+          else Left(check.failure.getOrElse(ValidationError("middleware update", "undeclared write")))
+        }
+      )
     )
 
   /** Every middleware's prompt sections, in stack order, each with the id of the middleware that gave it. */
@@ -55,33 +61,20 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
 
   /**
    * Runs the model call through every `wrapModelCall`, the first outermost, with `innermost` at the centre. The
-   * update parts a wrapper adds are attributed to it as it returns, so [[checkWrites]] can check each against its
-   * own middleware's `writes`.
+   * update parts a wrapper adds are attributed to it as it returns, and `check` checks them against its own
+   * `writes` then - so an undeclared write is found also in a response an outer wrapper discards, or turns into a
+   * `Left` or a question.
    */
-  private[graph] def wrapModelCall(request: ModelRequest, context: ModelContext)(
+  private[graph] def wrapModelCall(request: ModelRequest, context: ModelContext, check: WriteCheck)(
     innermost: ModelRequest => Result[ModelResponse]
   ): Result[ModelResponse] =
     val chain = ordered.foldRight(innermost) { (m, next) => (req: ModelRequest) =>
-      guarded(m)(m.wrapModelCall(req, context)(next)).map(_.claimedBy(m.id))
+      guarded(m)(m.wrapModelCall(req, context)(next)).map { r =>
+        r.parts.collect { case (None, u) => u }.foreach(check(m, _))
+        r.claimedBy(m.id)
+      }
     }
     chain(request)
-
-  /**
-   * The updates, combined in order, if each touches only the `writes` of the middleware it is attributed to; a
-   * `ValidationError` naming each middleware and key otherwise. An unattributed part cannot occur: every wrapper's
-   * response is attributed as it returns.
-   */
-  private[graph] def checkWrites(parts: Vector[(Option[MiddlewareId], StateUpdate)]): Result[StateUpdate] =
-    val problems = parts.flatMap { (owner, update) =>
-      val declared = owner.flatMap(id => ordered.find(_.id == id)).fold(Set.empty[StateKey[?, ?]])(_.writes)
-      update.operations
-        .map(_.key.id)
-        .filterNot(k => declared.exists(_.id == k))
-        .distinct
-        .map(k => s"middleware '${owner.fold("<unknown>")(_.value)}' updated '${k.value}', which it does not declare")
-    }.distinct
-    if problems.isEmpty then Right(parts.foldLeft(StateUpdate.empty)((acc, p) => acc.combine(p._2)))
-    else Left(ValidationError("middleware update", problems.toList))
 
   /**
    * Runs the tool call through every `wrapToolCall`, the first outermost, with `innermost` at the
@@ -141,7 +134,28 @@ object MiddlewareStack:
 
   /** What a boundary hook's stack returned: the threaded text, and each middleware's update in the order the hooks ran. */
   final private[graph] case class Hooked(text: String, updates: Vector[(MiddlewareId, StateUpdate)]):
-    def parts: Vector[(Option[MiddlewareId], StateUpdate)] = updates.map((id, u) => Some(id) -> u)
+    def update: StateUpdate = updates.foldLeft(StateUpdate.empty)((acc, u) => acc.combine(u._2))
+
+  /**
+   * The undeclared writes a step's hooks returned, recorded as each hook returns - whatever the step's outcome, so
+   * neither a later hook's `Left` or question nor a wrapper that discards a response hides one. Thread-safe.
+   */
+  final private[graph] class WriteCheck:
+    private val problems = new ConcurrentLinkedQueue[String]()
+
+    /** Whether `update` touches only `m`'s `writes`; records each key it does not declare. */
+    def apply(m: AgentMiddleware, update: StateUpdate): Boolean =
+      val undeclared =
+        update.operations.map(_.key.id).filterNot(k => m.writes.exists(_.id == k)).distinct
+      undeclared.foreach(k =>
+        problems.add(s"middleware '${m.id.value}' updated '${k.value}', which it does not declare"): Unit
+      )
+      undeclared.isEmpty
+
+    /** Every undeclared write recorded, as one `ValidationError`; `None` when there was none. */
+    def failure: Option[ValidationError] =
+      val found = problems.asScala.toList.distinct
+      Option.when(found.nonEmpty)(ValidationError("middleware update", found))
 
   /** What a tool call's chain returned; for a `NeedsApproval` or an `Ask`, `raisedBy` says who: `None` = the tool, `Some(id)` = that middleware. */
   final private[graph] case class ToolChainResult(outcome: ToolOutcome, raisedBy: Option[MiddlewareId])

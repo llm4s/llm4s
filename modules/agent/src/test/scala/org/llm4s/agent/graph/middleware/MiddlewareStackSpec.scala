@@ -296,10 +296,12 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
   "wrapModelCall" should "nest the first middleware outermost and pass each rewritten request inward" in {
     val log    = newLog
     val answer = ToolLoopFixtures.completion(AssistantMessage("hi"))
-    val result = stack(Rec("a", log), Rec("b", log)).wrapModelCall(modelRequest, modelContext) { req =>
-      log.add(s"model:${req.messages.map(_.content).mkString(",")}")
-      Right(ModelResponse(answer))
-    }
+    val result =
+      stack(Rec("a", log), Rec("b", log)).wrapModelCall(modelRequest, modelContext, MiddlewareStack.WriteCheck()) {
+        req =>
+          log.add(s"model:${req.messages.map(_.content).mkString(",")}")
+          Right(ModelResponse(answer))
+      }
     result.map(_.completion) shouldBe Right(answer)
     log.asScala.toList shouldBe List("a:before", "b:before", "model:a,b", "b:after", "a:after")
   }
@@ -316,10 +318,12 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
         val r = next(request)
         seen.add(r.toString)
         r
-    val result = stack(a, new Throwing("b", () => boom)).wrapModelCall(modelRequest, modelContext) { _ =>
-      log.add("model")
-      Right(ModelResponse(ToolLoopFixtures.completion(AssistantMessage("hi"))))
-    }
+    val result =
+      stack(a, new Throwing("b", () => boom)).wrapModelCall(modelRequest, modelContext, MiddlewareStack.WriteCheck()) {
+        _ =>
+          log.add("model")
+          Right(ModelResponse(ToolLoopFixtures.completion(AssistantMessage("hi"))))
+      }
     result shouldBe Left(GraphError.MiddlewareFailed("b", boom))
     seen.asScala.toList shouldBe List(Left(GraphError.MiddlewareFailed("b", boom)).toString)
     log.asScala.toList shouldBe Nil
@@ -329,7 +333,7 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     Seq[() => Throwable](() => new RuntimeException(new InterruptedException()), () => new InterruptedException())
       .foreach { thrown =>
         val result =
-          stack(new Throwing("b", thrown)).wrapModelCall(modelRequest, modelContext)(_ =>
+          stack(new Throwing("b", thrown)).wrapModelCall(modelRequest, modelContext, MiddlewareStack.WriteCheck())(_ =>
             Right(ModelResponse(ToolLoopFixtures.completion(AssistantMessage("hi"))))
           )
         Thread.interrupted() shouldBe true
@@ -339,7 +343,9 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "beforeAgent" should "run in stack order, threading the transformed input" in {
     val log = newLog
-    stack(Rec("a", log), Rec("b", log), Rec("c", log)).beforeAgent("in", modelContext).map(_.text) shouldBe
+    stack(Rec("a", log), Rec("b", log), Rec("c", log))
+      .beforeAgent("in", modelContext, MiddlewareStack.WriteCheck())
+      .map(_.text) shouldBe
       Right("in>a>b>c")
     log.asScala.toList shouldBe List("a:beforeAgent", "b:beforeAgent", "c:beforeAgent")
   }
@@ -350,30 +356,36 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     val blocking = new Rec("b", log) {
       override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] = Left(err)
     }
-    stack(Rec("a", log), blocking, Rec("c", log)).beforeAgent("in", modelContext) shouldBe Left(err)
+    stack(Rec("a", log), blocking, Rec("c", log)).beforeAgent(
+      "in",
+      modelContext,
+      MiddlewareStack.WriteCheck()
+    ) shouldBe Left(err)
     log.asScala.toList shouldBe List("a:beforeAgent")
   }
 
   it should "turn a throw into Left(MiddlewareFailed) and a cancellation into Left(CancelledError)" in {
     val boom = new IllegalStateException("boom")
-    stack(new Throwing("b", () => boom)).beforeAgent("in", modelContext) shouldBe
+    stack(new Throwing("b", () => boom)).beforeAgent("in", modelContext, MiddlewareStack.WriteCheck()) shouldBe
       Left(GraphError.MiddlewareFailed("b", boom))
     val cancelled = stack(new Throwing("b", () => new RuntimeException(new InterruptedException())))
-      .beforeAgent("in", modelContext)
+      .beforeAgent("in", modelContext, MiddlewareStack.WriteCheck())
     Thread.interrupted() shouldBe true
     cancelled.left.value shouldBe a[CancelledError]
   }
 
   "afterAgent" should "run in reverse stack order, threading the transformed answer" in {
     val log = newLog
-    stack(Rec("a", log), Rec("b", log), Rec("c", log)).afterAgent("out", modelContext).map(_.text) shouldBe
+    stack(Rec("a", log), Rec("b", log), Rec("c", log))
+      .afterAgent("out", modelContext, MiddlewareStack.WriteCheck())
+      .map(_.text) shouldBe
       Right("out<c<b<a")
     log.asScala.toList shouldBe List("c:afterAgent", "b:afterAgent", "a:afterAgent")
   }
 
   it should "turn a throw into Left(MiddlewareFailed)" in {
     val boom = new IllegalStateException("boom")
-    stack(new Throwing("b", () => boom)).afterAgent("out", modelContext) shouldBe
+    stack(new Throwing("b", () => boom)).afterAgent("out", modelContext, MiddlewareStack.WriteCheck()) shouldBe
       Left(GraphError.MiddlewareFailed("b", boom))
   }
 
@@ -401,27 +413,57 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "A boundary hook's updates" should "be kept per middleware, in the order the hooks ran" in {
     val s = stack(new Noting("a"), new Noting("b"))
-    s.beforeAgent("in", modelContext).value.updates.map((id, u) => id.value -> notesOf(u)) shouldBe
+    s.beforeAgent("in", modelContext, MiddlewareStack.WriteCheck())
+      .value
+      .updates
+      .map((id, u) => id.value -> notesOf(u)) shouldBe
       Vector("a" -> Vector("a"), "b" -> Vector("b"))
-    s.afterAgent("out", modelContext).value.updates.map((id, u) => id.value -> notesOf(u)) shouldBe
+    s.afterAgent("out", modelContext, MiddlewareStack.WriteCheck())
+      .value
+      .updates
+      .map((id, u) => id.value -> notesOf(u)) shouldBe
       Vector("b" -> Vector("b"), "a" -> Vector("a"))
   }
 
   "A model wrapper's update" should "be attributed to the wrapper that added it, innermost first" in {
     val s        = stack(new Noting("outer"), new Noting("inner"))
-    val response = s.wrapModelCall(modelRequest, modelContext)(_ => hi).value
+    val check    = MiddlewareStack.WriteCheck()
+    val response = s.wrapModelCall(modelRequest, modelContext, check)(_ => hi).value
     response.parts.map((owner, u) => owner.map(_.value) -> notesOf(u)) shouldBe
       Vector(Some("inner") -> Vector("inner"), Some("outer") -> Vector("outer"))
     notesOf(response.update) shouldBe Vector("inner", "outer")
-    notesOf(s.checkWrites(response.parts).value) shouldBe Vector("inner", "outer")
+    check.failure shouldBe None
   }
 
   it should "be refused when its middleware does not declare the key, naming both" in {
-    val s        = stack(new Noting("declares"), new Noting("sneaky", declares = false))
-    val response = s.wrapModelCall(modelRequest, modelContext)(_ => hi).value
-    val refused  = s.checkWrites(response.parts).left.value
+    val s       = stack(new Noting("declares"), new Noting("sneaky", declares = false))
+    val check   = MiddlewareStack.WriteCheck()
+    val _       = s.wrapModelCall(modelRequest, modelContext, check)(_ => hi)
+    val refused = check.failure.getOrElse(fail("no undeclared write found"))
     refused.message should (include("middleware 'sneaky'").and(include("'note'")))
     (refused.message should not).include("'declares'")
+  }
+
+  it should "be found in a response an outer wrapper discards" in {
+    val discarding = new AgentMiddleware:
+      val id: MiddlewareId = MiddlewareId("discarding")
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] = next(request).flatMap(_ => hi)
+    val check = MiddlewareStack.WriteCheck()
+    val _ =
+      stack(discarding, new Noting("sneaky", declares = false)).wrapModelCall(modelRequest, modelContext, check)(_ =>
+        hi
+      )
+    check.failure.map(_.message).getOrElse(fail("hidden")) should include("middleware 'sneaky'")
+  }
+
+  "A boundary hook's undeclared write" should "stop the fold and stay recorded, whatever a later hook would do" in {
+    val check = MiddlewareStack.WriteCheck()
+    val result =
+      stack(new Noting("sneaky", declares = false), new Noting("later")).beforeAgent("in", modelContext, check)
+    result.isLeft shouldBe true
+    check.failure.map(_.message).getOrElse(fail("hidden")) should include("middleware 'sneaky'")
   }
 
   "ModelResponse.withCompletion" should "keep the update" in {
