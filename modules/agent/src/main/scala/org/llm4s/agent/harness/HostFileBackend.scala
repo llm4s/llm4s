@@ -132,10 +132,16 @@ final class HostFileBackend private (
   private def isFile(p: Path) = Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)
   private def exists(p: Path) = Files.exists(p, LinkOption.NOFOLLOW_LINKS)
 
-  /** An I/O step that has changed nothing: a file-system refusal is the model's; anything else fails. */
+  /**
+   * An I/O step that has changed nothing: a file-system refusal is the model's, an interrupt is a
+   * cancellation (the flag kept set), and anything else fails.
+   */
   private def io[A](operation: String, path: VPath)(body: => Result[A]): Result[A] =
     Try(body) match
-      case Success(result)                   => result
+      case Success(result) => result
+      case Failure(e) if HostFileBackend.isInterrupt(e) =>
+        Thread.currentThread().interrupt()
+        Left(CancelledError(s"$operation ${path.value}"))
       case Failure(_: NoSuchFileException)   => refused(operation, path, "not found")
       case Failure(_: AccessDeniedException) => refused(operation, path, "permission denied")
       case Failure(e: FileSystemException)   => refused(operation, path, Option(e.getReason).getOrElse(e.toString))
@@ -281,11 +287,12 @@ final class HostFileBackend private (
             Files.createDirectories(file.getParent)
             FileChannel.open(file, StandardOpenOption.CREATE, StandardOpenOption.WRITE)
           } match
+            case Failure(e) if HostFileBackend.isInterrupt(e) => cancelled
             case Failure(e) => Left(ProcessingError("host-lock", s"cannot open the lock file $file: $e"))
             case Success(channel) =>
               Using.resource(channel) { open =>
                 Try(open.lock()) match
-                  case Failure(_: java.nio.channels.ClosedByInterruptException) => cancelled
+                  case Failure(e) if HostFileBackend.isInterrupt(e) => cancelled
                   case Failure(e)    => Left(ProcessingError("host-lock", s"cannot lock $file: $e"))
                   case Success(held) => Using.resource(held)(_ => body)
               }
@@ -412,11 +419,9 @@ final class HostFileBackend private (
   private def unreadableSkipped[A](read: => Option[A]): Option[A] =
     Try(read) match
       case Success(result) => result
-      case Failure(e: java.nio.channels.ClosedByInterruptException) =>
+      case Failure(e) if HostFileBackend.isInterrupt(e) =>
         throw new java.util.concurrent.CancellationException(e.toString)
-      case Failure(e: java.util.concurrent.CancellationException) => throw e
-      case Failure(_: InterruptedException) => throw new java.util.concurrent.CancellationException("interrupted")
-      case Failure(_)                       => None
+      case Failure(_) => None
 
   /** The listable children of `dir`, in name order: no links, no temporary files, at most `max`. */
   /**
@@ -566,6 +571,19 @@ object HostFileBackend:
 
   /** Decoded content that the text rule calls binary (NUL); a read refuses it and a search skips it. */
   final private class BinaryContent extends CharacterCodingException
+
+  /**
+   * Whether `e` is how the JDK reports an interrupt of a blocking call: one class for a closed channel,
+   * one for a file lock, one for a thread, and the `CancellationException` an [[Interruptible]] match
+   * throws. Each is a cancellation, never a file-system failure.
+   */
+  private[harness] def isInterrupt(e: Throwable): Boolean = e match
+    case _: java.nio.channels.ClosedByInterruptException    => true
+    case _: java.nio.channels.FileLockInterruptionException => true
+    case _: InterruptedException                            => true
+    case _: java.io.InterruptedIOException                  => true
+    case _: java.util.concurrent.CancellationException      => true
+    case _                                                  => false
 
   /** A lock file's folded name. */
   private val LockFileName = """stripe-[0-9]+\.lock""".r

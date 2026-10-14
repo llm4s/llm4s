@@ -354,6 +354,30 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     pool.shutdown()
   }
 
+  it should "end as cancelled, not as a lock failure, when interrupted while another process holds the lock" in {
+    written(backend.write(p("/a.txt"), "x", call()))
+    val lockFile = backend.lockFileOf(p("/a.txt")).value
+    val javaBin  = Path.of(System.getProperty("java.home"), "bin", "java").toString
+    val child = new ProcessBuilder(
+      javaBin,
+      "-cp",
+      System.getProperty("java.class.path"),
+      "org.llm4s.agent.harness.HoldLock",
+      lockFile.toString
+    )
+      .redirectErrorStream(true)
+      .start()
+    new java.io.BufferedReader(new java.io.InputStreamReader(child.getInputStream)).readLine() shouldBe "locked"
+    val pool = Executors.newSingleThreadExecutor()
+    val edit = pool.submit(() => backend.edit(p("/a.txt"), "x", "y", replaceAll = false, call()))
+    Thread.sleep(300)
+    pool.shutdownNow() // interrupts the waiting edit
+    edit.get(10, TimeUnit.SECONDS).left.value shouldBe a[org.llm4s.error.CancelledError]
+    onDisk("a.txt") shouldBe "x"
+    child.getOutputStream.close()
+    child.waitFor(10, TimeUnit.SECONDS) shouldBe true
+  }
+
   "Concurrent edits of one file from different threads" should "never lose one: each applies or is refused" in {
     written(backend.write(p("/log.txt"), "end", call()))
     val n     = 24
