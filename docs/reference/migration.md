@@ -124,7 +124,7 @@ Design §4.31. `SemanticMemoryMiddleware` is in a new module, `llm4s-agent-memor
 - **`MemoryStore.replace(add, remove)` is new**, with a default that stores, then deletes; the SQL stores override it as one transaction. A store of your own that writes in place should override it too.
 - **`LLMMemoryManager.consolidateMemories` replaces each group with one `store.replace(Seq(summary), groupIds)`** instead of a store followed by one delete per memory. A store of your own that overrides `store` and `delete` but not `replace` gets the same writes as before, in the same order.
 - **SQLite memory files move to schema version 2.** Opening a file creates its two new tables, `memory_applied_writes` and `memory_fences`, and records version 2 beside version 1 in `schema_version`. A Postgres store creates `<table>_applied` and `<table>_fences` beside its table.
-- **Adding `SemanticMemoryMiddleware` to an existing agent reshapes its graph.** It registers the `semantic-memory-recalled` key, so threads checkpointed before are refused with `RestoreRejected`: finish or `forget` them first. Agents without it are unchanged.
+- **Adding `SemanticMemoryMiddleware` to an existing agent** registers the `semantic-memory-recalled` key and changes the agent's version (§4.29). A thread at rest restores, with nothing recalled until its next turn, and restores again if the middleware is removed (the key is cleared at the end of each turn). A thread in flight - suspended, or `Running` after a crash - is refused with `RestoreRejected`: resume or recover it with the old agent first. Agents without it are unchanged.
 
 ### Typed custom streams (#1914)
 

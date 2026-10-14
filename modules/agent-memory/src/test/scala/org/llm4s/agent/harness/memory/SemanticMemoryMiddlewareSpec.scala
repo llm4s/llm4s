@@ -95,12 +95,14 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     )
     val client     = answering("one", "two")
     val checkpoint = new InMemoryCheckpointer
-    val agent      = agentWith(client, m, Some(GraphRuntime(checkpoint)))
+    val peek       = new Peek
+    val agent = built(Agent.builder("assistant", client).withMiddleware(m, peek).withRuntime(GraphRuntime(checkpoint)))
     agent.run(ThreadId("cut"), "zebra").value
-    val first = systemPrompt(client.sent.head)
-    first should include("zebra")
-    val state = agent.loop.graph.restore(checkpoint.latest(ThreadId("cut")).value.value.checkpoint.snapshot).value.state
-    state.get(SemanticMemoryMiddleware.RecalledKey).value.length should be <= 40
+    systemPrompt(client.sent.head) should include("zebra")
+    peek.seen.asScala.toVector.map(_.length) shouldBe Vector(40)
+    // the recall served its turn only: the thread at rest holds no entry for it
+    checkpoint.latest(ThreadId("cut")).value.value.checkpoint.snapshot.state.keySet should not contain
+      SemanticMemoryMiddleware.RecalledKey.id.value
     agent.run(ThreadId("cut"), "unrelated").value
     (systemPrompt(client.sent(1)) should not).include("zebra")
   }
@@ -333,24 +335,70 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     val m          = new SemanticMemoryMiddleware(_ => Right(store), simple, answering(), record = None)
     val guard      = new GuardrailMiddleware(Nil, Seq(new LengthCheck(0, 5)))
     val checkpoint = new InMemoryCheckpointer
+    val peek       = new Peek
     val agent = built(
       Agent
         .builder("assistant", answering("short", "much too long"))
-        .withMiddleware(m, guard)
+        .withMiddleware(m, guard, peek)
         .withRuntime(GraphRuntime(checkpoint))
     )
     val thread = ThreadId("restore")
+    def stored = checkpoint.latest(thread).value.value.checkpoint.snapshot.state.keySet
     agent.run(thread, "apples").value
-    def recalled = agent.loop.graph
-      .restore(checkpoint.latest(thread).value.value.checkpoint.snapshot)
-      .value
-      .state
-      .get(SemanticMemoryMiddleware.RecalledKey)
-      .value
-    val before = recalled
-    before should include("apples are red")
-    agent.run(thread, "pears").value.status shouldBe a[AgentStatus.Blocked]
-    recalled shouldBe before
+    stored should not contain SemanticMemoryMiddleware.RecalledKey.id.value
+    // the blocked turn recalled, and its Block takes the recall away with the rest of the turn
+    agent.run(thread, "apples").value.status shouldBe a[AgentStatus.Blocked]
+    peek.seen.asScala.last should include("apples are red")
+    stored should not contain SemanticMemoryMiddleware.RecalledKey.id.value
+  }
+
+  "An agent's existing thread" should "continue at rest once the middleware is added, and after it is removed (§4.29)" in {
+    val checkpoint                   = new InMemoryCheckpointer
+    val thread                       = ThreadId("evolving")
+    def agent(builder: AgentBuilder) = built(builder.withRuntime(GraphRuntime(checkpoint)))
+    agent(Agent.builder("assistant", answering("hi"))).run(thread, "My dog is called Rex").value
+    checkpoint.latest(thread).value.value.checkpoint.snapshot.state.keySet should not contain
+      SemanticMemoryMiddleware.RecalledKey.id.value
+    val store  = InMemoryStore.withMemories(Seq(Memory.userFact("The dog is called Rex"))).value
+    val client = answering("Rex")
+    val remembering = agent(
+      Agent
+        .builder("assistant", client)
+        .withMiddleware(new SemanticMemoryMiddleware(_ => Right(store), simple, answering()))
+    )
+    remembering.run(thread, "What is my dog called?").value.answer shouldBe Some("Rex")
+    systemPrompt(client.sent.head) should include("The dog is called Rex")
+    // and back: the thread at rest holds no recall, so an agent without the middleware takes it again
+    agent(Agent.builder("assistant", answering("bye"))).run(thread, "Goodbye").value.answer shouldBe Some("bye")
+  }
+
+  it should "be refused in flight, suspended for an approval, by an agent that added the middleware" in {
+    val checkpoint = new InMemoryCheckpointer
+    val thread     = ThreadId("parked")
+    def agent(builder: AgentBuilder) =
+      built(
+        builder
+          .withTools(
+            org.llm4s.agent.SpecTools.set(
+              org.llm4s.agent.SpecTools.tool("echo")((a, _) =>
+                org.llm4s.agent.graph.tool.ToolOutcome.Success(ujson.Str(a.text))
+              )
+            )
+          )
+          .withMiddleware(new org.llm4s.agent.graph.middleware.ApprovalMiddleware(_ => Some("review")))
+          .withRuntime(GraphRuntime(checkpoint))
+      )
+    val calling = org.llm4s.agent.SpecTools.calling(org.llm4s.agent.SpecTools.call("c1", "echo"))
+    val parked  = agent(Agent.builder("assistant", ScriptedLLMClient.of(calling))).run(thread, "go").value
+    val answers = parked.status match {
+      case AgentStatus.Suspended(approvals, _, _, _) => approvals.map(a => parked.approve(a._1)).toMap
+      case other                                     => fail(s"expected Suspended, got $other")
+    }
+    val memory = new SemanticMemoryMiddleware(_ => Right(InMemoryStore.empty), simple, answering())
+    agent(Agent.builder("assistant", answering()).withMiddleware(memory))
+      .resume(thread, answers)
+      .left
+      .value shouldBe a[GraphError.RestoreRejected]
   }
 
   "An agent without SemanticMemoryMiddleware" should "register no memory key, so its structure is unchanged (rule 7)" in {
@@ -478,3 +526,13 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     java.nio.file.Files.exists(dir.resolve("memory-alice.db")) shouldBe true
   }
 }
+
+/** Records what `RecalledKey` holds whenever a model step's sections are collected. */
+final class Peek extends org.llm4s.agent.graph.middleware.AgentMiddleware:
+  val id   = org.llm4s.agent.graph.middleware.MiddlewareId("peek")
+  val seen = new java.util.concurrent.CopyOnWriteArrayList[String]()
+  override def promptSections(context: org.llm4s.agent.graph.middleware.ModelContext) =
+    context.state.get(SemanticMemoryMiddleware.RecalledKey).map { text =>
+      seen.add(text)
+      Vector.empty
+    }

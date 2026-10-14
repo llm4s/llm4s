@@ -432,9 +432,11 @@ for {
 - **Register it before your guardrails** (or pass `runsBefore = Set(MiddlewareId("guardrails"))`),
   so an answer a guardrail blocks is never recorded. A recording that already applied is not undone
   by a later Block.
-- **Adding it to an existing agent reshapes its graph** (it registers the
-  `semantic-memory-recalled` key), so threads checkpointed before are refused with
-  `RestoreRejected`: finish or `forget` them first.
+- **Adding it to an existing agent** registers the `semantic-memory-recalled` key, which starts
+  empty: a thread at rest continues under the agent that added it, and, since the recall is
+  cleared at the end of each turn, under an agent that removed it again. A thread in flight
+  (suspended, or after a crash) is refused with `RestoreRejected` by the changed agent: resume or
+  recover it first.
 
 ### Injecting Context
 

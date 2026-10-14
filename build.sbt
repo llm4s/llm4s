@@ -1644,10 +1644,11 @@ lazy val agentCheckpointSqlite = (project in file("modules/agent-checkpoint-sqli
 // `llm4s-agent-memory` (#1911, design 4.31) is semantic memory for agents: `SemanticMemoryMiddleware` recalls a
 // tenant's memories before a turn and records the turn after it, each write one replayable effect (C4) on a
 // `TransactionalMemoryStore`. Its own module because `llm4s-memory` depends on core only and `llm4s-agent` must not
-// depend on `llm4s-memory`. Test scope: the agent's test fixtures (`ScriptedLLMClient`) and the testkit's
-// `ReplayContract`. SQLite needs no service, so every suite runs here under `sbt test`.
+// depend on `llm4s-memory`. Test scope: the agent's test fixtures (`ScriptedLLMClient`), the SQLite checkpointer
+// (a thread restored after the middleware is added, C5) and the testkit's `ReplayContract`. SQLite needs no
+// service, so every suite runs here under `sbt test`.
 lazy val agentMemory = (project in file("modules/agent-memory"))
-  .dependsOn(agent % "compile->compile;test->test", memory, agentTestkit % Test)
+  .dependsOn(agent % "compile->compile;test->test", memory, agentTestkit % Test, agentCheckpointSqlite % "test->test")
   .settings(
     name := "llm4s-agent-memory",
     commonSettings,

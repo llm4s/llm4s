@@ -101,11 +101,11 @@ final class SemanticMemoryMiddleware(
             .getRelevantContext(input, settings.maxRecallTokens, settings.filter)
         ) match
           case Right(text) =>
-            Right(BoundaryResult(input, StateUpdate.update(RecalledKey, clip(text, settings.maxChars))))
+            Right(BoundaryResult(input, recalled(clip(text, settings.maxChars))))
           case Left(cancelled: CancelledError) => Left(cancelled)
           case Left(error) =>
             skipped(context, "memory.recall", error)
-            Right(BoundaryResult(input, StateUpdate.update(RecalledKey, "")))
+            Right(BoundaryResult(input, recalled("")))
       }
     }
 
@@ -118,7 +118,9 @@ final class SemanticMemoryMiddleware(
     }
 
   override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
-    if record.isEmpty && consolidate.isEmpty then Right(BoundaryResult(answer))
+    // the recall served this turn only: the key is removed as the turn ends, so a thread at rest holds no recall
+    val ended = BoundaryResult(answer, if recall.isDefined then StateUpdate.remove(RecalledKey) else StateUpdate.empty)
+    if record.isEmpty && consolidate.isEmpty then Right(ended)
     else
       val done = cell(context.run.config.tenantId) match
         case Left(error) => skip(context, "memory.resolve", error)
@@ -127,7 +129,7 @@ final class SemanticMemoryMiddleware(
             _ <- record.fold(Right(()))(r => skip(context, "memory.record", recordTurn(tenant, r, answer, context)))
             _ <- consolidate.fold(Right(()))(k => skip(context, "memory.consolidate", consolidated(tenant, k, context)))
           yield ()
-      done.map(_ => BoundaryResult(answer))
+      done.map(_ => ended)
 
   /** The turn - its last user message and `answer` - recorded through the manager as one `memory.record` effect. */
   private def recordTurn(
@@ -230,10 +232,17 @@ object SemanticMemoryMiddleware:
   val DefaultId: MiddlewareId = MiddlewareId("semantic-memory")
 
   /**
-   * What the turn's recall found, cut to `maxRecallTokens * 4` characters, written by `beforeAgent` on every turn. One
-   * key for every instance, registered only by an agent family with a `SemanticMemoryMiddleware`.
+   * What the turn's recall found, cut to `maxRecallTokens * 4` characters: written by `beforeAgent` (removed when it
+   * found nothing) and removed by `afterAgent` as the turn ends, so a thread at rest holds no entry. Its initial value
+   * means "nothing recalled", so a thread checkpointed before the middleware was added restores (design §4.29), and
+   * one checkpointed with it restores after it is removed. One key for every instance, registered only by an agent
+   * family with a `SemanticMemoryMiddleware`.
    */
   val RecalledKey: StateKey[String, String] = StateKey.replace[String]("semantic-memory-recalled", "")
+
+  /** The turn's recall as an update: the text, or the key's removal when there is none (C5, §4.29). */
+  private def recalled(text: String): StateUpdate =
+    if text.isEmpty then StateUpdate.remove(RecalledKey) else StateUpdate.update(RecalledKey, text)
 
   /** The prompt section's id. */
   val SectionId: String = "semantic-memory"
