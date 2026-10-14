@@ -418,6 +418,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.21 | [Stage 2 slice 6: live subscriptions across runtimes](typed-agent-runtime/4.21-stage-2-slice-6-live-subscriptions-across-runtimes.md) ([#1705](https://github.com/llm4s/llm4s/issues/1705)) |
 | 4.23 | [Stage 3 slice C2: tool permissions, timeouts and batch locks](typed-agent-runtime/4.23-stage-3-slice-c2-tool-permissions-timeouts-locks.md) ([#1903](https://github.com/llm4s/llm4s/issues/1903)) |
 | 4.24 | [Stage 3 slice C4: replay of external effects](typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md) ([#1921](https://github.com/llm4s/llm4s/issues/1921)) |
+| 4.25 | [Stage 3 slice C3: backend SPIs](typed-agent-runtime/4.25-stage-3-slice-c3-backend-spis.md) ([#1904](https://github.com/llm4s/llm4s/issues/1904)) |
 
 ### 4.9 Stage 0 carry-forward
 
