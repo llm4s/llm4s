@@ -232,11 +232,16 @@ private[graph] trait EffectJournal:
 
 private[graph] object EffectJournal:
 
-  /** Records kept for one `RunContext`'s lifetime: retries of its node replay, nothing else does. */
-  def local(): EffectJournal = new EffectJournal:
+  /** Records in memory: an in-memory execution's, carried across its supersteps and continuations. */
+  final class Local private[EffectJournal] () extends EffectJournal:
     private val records                                      = new ConcurrentHashMap[String, EffectRecord]()
     def lookup(key: EffectKey): Result[Option[EffectRecord]] = Right(Option(records.get(key.value)))
     def write(record: EffectRecord): Result[Unit]            = Right(records.put(record.key.value, record): Unit)
+
+    /** Drops the records of every task not in `live`: they can no longer run. */
+    def keepOnly(live: Set[String]): Unit = records.values.removeIf(r => !live.contains(r.taskId.value)): Unit
+
+  def local(): Local = new Local()
 
 /**
  * The only way the harness performs an effect outside thread state (design §4.24, runtime rule 4). A

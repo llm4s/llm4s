@@ -16,8 +16,19 @@ final class Execution private[graph] (
   private[graph] val staticArrivals: Map[JoinId, Set[NodeId]],
   private[graph] val dynamicActivations: Vector[DynamicActivation],
   private[graph] val parked: Vector[Parked],
-  private[graph] val paused: Boolean
+  private[graph] val paused: Boolean,
+  /**
+   * Effect records of guards run by [[CompiledGraph.step]] outside a runtime (design §4.24): carried from
+   * each execution to the next, so a continuation resumed in memory replays what its task recorded before
+   * it suspended. Inside a [[GraphRuntime]] the thread's store holds them instead. Not part of a snapshot:
+   * an execution restored from one starts with none, as a process restarted without a durable store would.
+   */
+  private[graph] val journal: EffectJournal.Local = EffectJournal.local()
 ):
+
+  /** The tasks that can still run from here, by id, as [[GraphSnapshot.liveTasks]] says of a snapshot. */
+  private[graph] def liveTasks: Set[String] =
+    frontier.iterator.flatMap(t => Iterator(t.id.value, t.arrivalId.value)).toSet ++ parked.map(_.origin.task.value)
 
   /** No task is ready: the next step completes the run, suspends it, or reports an unsatisfied join. */
   def isQuiescent: Boolean = frontier.isEmpty
@@ -36,11 +47,11 @@ final class Execution private[graph] (
     parked: Vector[Parked] = parked,
     paused: Boolean = paused
   ): Execution =
-    new Execution(owner, superstep, state, frontier, staticArrivals, dynamicActivations, parked, paused)
+    new Execution(owner, superstep, state, frontier, staticArrivals, dynamicActivations, parked, paused, journal)
 
   /** This execution with `state` in place of its own, at superstep `at`; everything scheduled stays. */
   private[graph] def edited(state: ThreadState, at: Int): Execution =
-    new Execution(owner, at, state, frontier, staticArrivals, dynamicActivations, parked, paused)
+    new Execution(owner, at, state, frontier, staticArrivals, dynamicActivations, parked, paused, journal)
 
 final private[graph] case class JoinSlot(join: JoinId, fanOutTask: TaskId)
 
