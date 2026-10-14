@@ -790,15 +790,31 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
-      # The data and reports of every module this leg compiled, for the `Code Coverage` job's aggregate report. The
-      # artifact's root is `modules/`.
+      # The data and report of each module this leg reported on, for the `Code Coverage` job's aggregate report. On a
+      # fresh runner only those modules have a scoverage-report. A dependency's data (compiled and measured here too)
+      # is left out: its statement ids differ from one compile to the next, so it must not overwrite the owning leg's.
+      - name: Collect this leg's coverage data
+        env:
+          MODULES: ${{ join(matrix.modules, ' ') }}
+        run: |
+          mkdir -p coverage-out
+          n=0
+          while IFS= read -r report; do
+            dir="${report%/scoverage-report}"
+            mkdir -p "coverage-out/$dir"
+            cp -R "$report" "$dir/scoverage-data" "coverage-out/$dir/"
+            n=$((n + 1))
+          done < <(find modules -type d -path '*/target/scala-3.7.1/scoverage-report')
+          read -ra owned <<< "$MODULES"
+          expected=${#owned[@]}
+          echo "collected $n module report(s); the leg owns $expected"
+          [ "$n" -eq "$expected" ]
+
       - name: Upload this leg's coverage data
         uses: actions/upload-artifact@v7
         with:
           name: coverage-data-${{ matrix.leg }}
-          path: |
-            modules/**/target/scala-3.7.1/scoverage-data/
-            modules/**/target/scala-3.7.1/scoverage-report/
+          path: coverage-out/
           retention-days: 1
           if-no-files-found: error
 
@@ -837,7 +853,6 @@ jobs:
         with:
           pattern: coverage-data-*
           merge-multiple: true
-          path: modules
 
       - name: Aggregate the coverage report
         run: sbt coverageAggregate
