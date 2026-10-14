@@ -115,13 +115,23 @@ final class HostFileBackend private (
       if inFlight == 0 then drained.signalAll()
     }
 
+  // how deep this thread is inside an admitted operation: a helper beneath one is never admitted again,
+  // so an operation admitted before close() always finishes as it would have
+  private val admittedDepth = ThreadLocal.withInitial[Integer](() => 0)
+
   private def whileOpen[A](operation: String, path: VPath)(body: => Result[A]): Result[A] =
-    val admitted = underLifecycle {
-      if !closed then inFlight += 1
-      !closed
-    }
-    if !admitted then Left(BackendRefused(operation, path.value, "the backend is closed", BackendRefused.Kind.Closed))
-    else Using.resource(new Lease)(_ => body)
+    if admittedDepth.get > 0 then body
+    else
+      val admitted = underLifecycle {
+        if !closed then inFlight += 1
+        !closed
+      }
+      if !admitted then Left(BackendRefused(operation, path.value, "the backend is closed", BackendRefused.Kind.Closed))
+      else
+        Using.resource(new Lease) { _ =>
+          admittedDepth.set(1)
+          Using.resource(HostFileBackend.Unnest(admittedDepth))(_ => body)
+        }
 
   /** C4's class for this target. */
   val replaySupport: ReplaySupport = ReplaySupport.Verifiable
@@ -473,7 +483,7 @@ final class HostFileBackend private (
     )
 
   def write(path: VPath, content: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
-    whileOpen("write", path)(writeOpen(path, content, ctx))
+    writeOpen(path, content, ctx) // admitted once, by `guarded`
 
   private def writeOpen(path: VPath, content: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
     guarded[FileWritten]("write", path, ctx) { target =>
@@ -523,7 +533,7 @@ final class HostFileBackend private (
     }
 
   def delete(path: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
-    whileOpen("delete", path)(deleteOpen(path, ctx))
+    deleteOpen(path, ctx) // admitted once, by `guarded`
 
   private def deleteOpen(path: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
     guarded[FileDeleted]("delete", path, ctx) { target =>
@@ -685,7 +695,7 @@ final class HostFileBackend private (
     )
 
   def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
-    whileOpen("glob", under)(walked("glob", under, limit)(_.collect { case (v, _) if accept(v) => v }))
+    walked("glob", under, limit)(_.collect { case (v, _) if accept(v) => v }) // admitted once, by `walked`
 
   def search(
     under: VPath,
@@ -732,6 +742,10 @@ object HostFileBackend:
   final private case class Unlock(lock: ReentrantLock) extends AutoCloseable:
     def close(): Unit = lock.unlock()
 
+  /** Leaves an admitted operation: the thread is no longer inside one. */
+  final private case class Unnest(depth: ThreadLocal[Integer]) extends AutoCloseable:
+    def close(): Unit = depth.set(0)
+
   private val Temporary = """\.llm4s-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp""".r
 
   // by folded identity, so a case or normalisation alias of a temporary name is one too
@@ -773,10 +787,12 @@ object HostFileBackend:
           view.setAcl(entries)
           if view.getOwner() != owner then view.setOwner(owner)
         }
+        // only a flag that is set is written: a new file has neither, and writing `false` would need
+        // extended attributes a file system without DOS flags may not have
         dos.foreach { (hidden, system) =>
           val view = Files.getFileAttributeView(temp, classOf[DosFileAttributeView], LinkOption.NOFOLLOW_LINKS)
-          view.setHidden(hidden)
-          view.setSystem(system)
+          if hidden then view.setHidden(true)
+          if system then view.setSystem(true)
         }
         posix.forall { (perms, owner, group) =>
           val now = Files.readAttributes(temp, classOf[PosixFileAttributes], LinkOption.NOFOLLOW_LINKS)
@@ -808,7 +824,18 @@ object HostFileBackend:
           }
           // both where both exist: a POSIX mode does not carry an ACL's named entries
           val acl = view(classOf[AclFileAttributeView]).map(v => (v.getOwner(), v.getAcl()))
-          val dos = if posix.isDefined then None else view(classOf[DosFileAttributeView]).map(_.readAttributes())
+          // beside POSIX too (Linux keeps DOS flags in extended attributes); unreadable only where the file
+          // store has no extended attributes, so no flag can be set to lose
+          val dos = view(classOf[DosFileAttributeView]).flatMap { v =>
+            Try(v.readAttributes()) match
+              case Success(a) => Some(a)
+              case Failure(_)
+                  if posix.isDefined && !Files
+                    .getFileStore(target)
+                    .supportsFileAttributeView(classOf[java.nio.file.attribute.UserDefinedFileAttributeView]) =>
+                None
+              case Failure(e) => throw e
+          }
           if special.contains(true) then Left("has a setuid, setgid or sticky bit, which a replacement cannot keep")
           else if dos.exists(_.isReadOnly) then Left("is read-only")
           else if posix.isEmpty && acl.isEmpty then
@@ -954,7 +981,17 @@ object HostFileBackend:
    */
   def mountPointsBeneath(root: Path): Result[Vector[Path]] =
     val table = Path.of("/proc/self/mountinfo")
-    if !Files.isReadable(table) then Right(Vector.empty)
+    if !Files.isReadable(table) then
+      // no table is no mounts only where there is none to read; on Linux it is an unknown
+      if System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).startsWith("linux") then
+        Left(
+          ValidationError(
+            "root",
+            s"$table cannot be read, so mounts beneath $root (a bind mount makes one file two paths) cannot be checked; " +
+              "pass allowUncheckedIdentity only if there are none"
+          )
+        )
+      else Right(Vector.empty)
     else Try(Using.resource(Files.lines(table))(lines => mountPointsIn(lines.iterator.asScala, root))).toResult
 
   /** The mount points in `mountinfo` lines strictly beneath `root`. */
@@ -1068,8 +1105,13 @@ object HostFileBackend:
               "or use the workspace sandbox's file backend or a StoreFileBackend"
           )
         )
-        _ <- mountsBeneath(real).flatMap(found =>
+        // a mount table that cannot be read is waived only by `allowUncheckedIdentity`; a mount found never is
+        mounts = (p: Path) =>
+          mountsBeneath(p) match
+            case Left(_) if allowUncheckedIdentity => Right(Vector.empty)
+            case other                             => other
+        _ <- mounts(real).flatMap(found =>
           Either.cond(found.isEmpty, (), ValidationError("root", mountedReason(real, found)))
         )
         _ <- OpenRoots.acquire(real)
-      yield new HostFileBackend(real, maxFileBytes, maxScanEntries, locks, fileSystemId, mountsBeneath)
+      yield new HostFileBackend(real, maxFileBytes, maxScanEntries, locks, fileSystemId, mounts)

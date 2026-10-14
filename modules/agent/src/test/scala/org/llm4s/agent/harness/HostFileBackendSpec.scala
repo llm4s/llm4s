@@ -753,4 +753,62 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     onDisk("a.txt") shouldBe "x"
   }
 
+  it should "refuse a root whose mount table cannot be read, unless identity checks are waived" in {
+    backend.close()
+    val unreadable: Path => org.llm4s.types.Result[Vector[Path]] =
+      _ => Left(ValidationError("root", "the mount table cannot be read"))
+    HostFileBackend.open(dir, locks, mountsBeneath = unreadable).left.value.message should include("mount table")
+    backend = HostFileBackend.open(dir, locks, mountsBeneath = unreadable, allowUncheckedIdentity = true).value
+    written(backend.write(p("/a.txt"), "x", call()))
+    // a mount found is never waived
+    backend.close()
+    val found: Path => org.llm4s.types.Result[Vector[Path]] = r => Right(Vector(r.resolve("m")))
+    HostFileBackend.open(dir, locks, mountsBeneath = found, allowUncheckedIdentity = true).left.value.message should
+      include("mounted beneath it")
+    backend = HostFileBackend.open(dir, locks).value
+  }
+
+  "An operation admitted before close" should "finish as it would have, its nested steps never admitted again" in {
+    backend.close()
+    @volatile var armed = false
+    val closing         = new java.util.concurrent.atomic.AtomicReference[java.util.concurrent.Future[Unit]]()
+    val nested          = new java.util.concurrent.atomic.AtomicReference[org.llm4s.types.Result[FileLines]]()
+    lazy val b: HostFileBackend = HostFileBackend
+      .open(
+        dir,
+        locks,
+        mountsBeneath = _ => {
+          // inside the write's effect: close() begins, and a nested step of the same operation runs
+          if (armed) {
+            armed = false
+            closing.set(worker().submit(new java.util.concurrent.Callable[Unit] { def call(): Unit = b.close() }))
+            Thread.sleep(200)
+            nested.set(b.read(p("/a.txt"), 0, 1, call()))
+          }
+          Right(Vector.empty)
+        }
+      )
+      .value
+    backend = b
+    written(b.write(p("/a.txt"), "x", call()))
+    armed = true
+    written(b.write(p("/a.txt"), "y", call())).created shouldBe false
+    nested.get.value.lines shouldBe Vector("x")
+    closing.get.get(10, TimeUnit.SECONDS)
+    onDisk("a.txt") shouldBe "y"
+    b.read(p("/a.txt"), 0, 1, call()).left.value match
+      case refused: BackendRefused => refused.kind shouldBe BackendRefused.Kind.Closed
+      case other                   => fail(s"expected a refusal, got $other")
+    backend = HostFileBackend.open(dir, locks).value
+  }
+
+  "A replaced file's DOS flags" should "be kept beside its POSIX permissions, where the file system has both" in {
+    val f = dir.resolve("hidden.txt")
+    Files.writeString(f, "x")
+    val dos = Option(Files.getFileAttributeView(f, classOf[java.nio.file.attribute.DosFileAttributeView]))
+    assume(dos.isDefined && scala.util.Try(dos.get.setHidden(true)).isSuccess)
+    written(backend.write(p("/hidden.txt"), "y", call()))
+    Files.readAttributes(f, classOf[java.nio.file.attribute.DosFileAttributes]).isHidden shouldBe true
+  }
+
 }
