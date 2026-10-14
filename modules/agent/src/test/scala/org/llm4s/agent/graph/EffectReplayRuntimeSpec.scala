@@ -127,6 +127,84 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
     record(store, thread, effect.key.get) shouldBe None
   }
 
+  /**
+   * A hook-style effect keyed by `RunContext.effectKey` (so by `taskKey`): `act` performs it and suspends;
+   * the continuation `review` performs it again, then fails while `failing`.
+   */
+  final private class HookAsking(effect: Effect) {
+    val failing = new AtomicBoolean(false)
+    val keys    = new java.util.concurrent.ConcurrentLinkedQueue[EffectKey]()
+    private def perform(context: RunContext): Result[Int] = {
+      val result = effect.perform(context)
+      keys.add(effect.key.get)
+      result
+    }
+    val (graph, review) = {
+      val b      = GraphBuilder("hook-asking", "v1")
+      val review = b.declareResume[String, String]("review")
+      b.implement(review.node, writes = Set(log)) { (resumed, _, context) =>
+        perform(context) match {
+          case Left(error)             => NodeResult.Fail(error)
+          case Right(_) if failing.get => NodeResult.Fail(ValidationError("review", "failed after its effect"))
+          case Right(n)                => continue(Command.empty.update(log, s"${resumed.answer}:$n"))
+        }
+      }
+      val act = b.node[Unit]("act", writes = Set(log)) { (_, _, context) =>
+        perform(context).fold(
+          NodeResult.Fail(_),
+          n => NodeResult.Suspend(StateUpdate.update(log, s"act:$n"), "ok?", review)
+        )
+      }
+      (b.compile(act)(_.get(log)).value, review)
+    }
+  }
+
+  "A hook's effect key" should "stay the task's across a suspension, so the continuation replays the effect" in {
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+    val effect  = new Effect
+    val asking  = new HookAsking(effect)
+    val parked  = runtime.start(thread, asking.graph, ()).awaited.value.suspended
+    val answer  = Map(parked.interrupts.head.id -> asking.review.answer("yes"))
+    runtime.resume(thread, asking.graph, answer).awaited.value.completed._2 shouldBe Vector("act:1", "yes:1")
+    effect.applied.get shouldBe 1
+    asking.keys.toArray.distinct should have size 1
+    record(store, thread, effect.key.get) shouldBe None
+  }
+
+  it should "stay the same when the continuation is recovered after a failure" in {
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+    val effect  = new Effect
+    val asking  = new HookAsking(effect)
+    val parked  = runtime.start(thread, asking.graph, ()).awaited.value.suspended
+    asking.failing.set(true)
+    runtime
+      .resume(thread, asking.graph, Map(parked.interrupts.head.id -> asking.review.answer("yes")))
+      .awaited
+      .value
+      .failed
+    record(store, thread, effect.key.get).value.completed shouldBe true
+    asking.failing.set(false)
+    runtime.recover(thread, asking.graph).awaited.value.completed._2 shouldBe Vector("act:1", "yes:1")
+    effect.applied.get shouldBe 1
+    asking.keys.toArray.distinct should have size 1
+  }
+
+  it should "be another in a fork resumed from the suspension, whose continuation is an effect of its own" in {
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+    val effect  = new Effect
+    val asking  = new HookAsking(effect)
+    val parked  = runtime.start(thread, asking.graph, ()).awaited.value.suspended
+    val answer  = Map(parked.interrupts.head.id -> asking.review.answer("yes"))
+    runtime.fork(thread, store.latest(thread).value.value.checkpoint.id, other).value
+    runtime.resume(other, asking.graph, answer).awaited.value.completed._2 shouldBe Vector("act:1", "yes:2")
+    runtime.resume(thread, asking.graph, answer).awaited.value.completed._2 shouldBe Vector("act:1", "yes:1")
+    effect.applied.get shouldBe 2
+    asking.keys.toArray.distinct should have size 2
+  }
+
   /** A node that performs the effect and then fails while `failing`: the thread stays recoverable. */
   final private class Failing(effect: Effect) {
     val failing = new AtomicBoolean(true)
