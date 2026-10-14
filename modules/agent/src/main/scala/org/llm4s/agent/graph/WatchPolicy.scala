@@ -23,9 +23,10 @@ import scala.concurrent.duration.*
  * '''Ordering.''' Each subscription reads on its own cursor, so a commit made elsewhere falls at a
  * point among the runtime's live events that depends on when that subscription's watch read it: two
  * subscriptions can place it differently, though each delivers the durable events in `seq` order.
- * Subscriptions of one runtime share a common live/durable interleaving when nothing outside the
- * runtime commits to the thread (#1920); an external commit allows them to differ, not necessarily
- * makes them differ. Where one order across runtimes matters, order durable events by `seq` (see
+ * Concurrently active subscriptions of one runtime that stay caught up share one live/durable interleaving, every event
+ * handed to several of them having the same relative placement for each, while nothing outside the runtime commits to
+ * the thread (#1920); an external commit allows them to differ, not necessarily make them differ. Where one order
+ * across runtimes matters, order durable events by `seq` (see
  * `GraphRuntime.subscribe`).
  *
  * `pollInterval` must be at least one millisecond - a shorter one would have every subscription

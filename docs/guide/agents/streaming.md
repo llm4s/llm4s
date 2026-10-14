@@ -225,13 +225,7 @@ another process, subscribe with `GraphRuntime.subscribe` on a runtime over the s
 
 ### Ordering across runtimes
 
-Within one runtime, every subscription to a thread sees the same interleaving of durable and live
-events. Commits made by another runtime or process sharing the store are the exception. Each
-subscription receives them through its own store watch, or through a hand-over's gap read, so where
-one falls among this runtime's live events depends on when that subscription read it, and two
-subscriptions can place it differently. Durable `seq` order is preserved for every subscription. The
-common interleaving is guaranteed when nothing outside this runtime commits to the thread. An external
-commit allows subscriptions to place it differently; it does not necessarily make them differ.
+Concurrently active subscriptions to a thread that stay caught up see one interleaving of durable and live events within one runtime: every event handed to several of them has the same relative placement for each. That guarantee does not cover a subscription that attaches later, which misses earlier live events, or a slower one, which can lose live events (`LiveGap`) or be disconnected as `Lagging`. Durable `seq` order is preserved for every subscription. The guarantee holds when nothing outside this runtime commits to the thread. A commit made by another runtime or process reaches each subscription through its own store watch, or through a hand-over's gap read, so two subscriptions can place it differently; an external commit allows that, but does not necessarily make them differ.
 
 If you need one order across runtimes, order only `StreamEvent.Durable(record)` by `record.seq` (or
 collect those events and sort by `seq`). There is no durable-only subscription option, so filter in the

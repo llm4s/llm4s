@@ -174,16 +174,17 @@ object GraphRuntime:
  * within `pollInterval` from one that is polled. Live progress events are never stored, so another
  * runtime's do not arrive.
  *
- * '''Ordering across runtimes.''' Within one runtime, every subscription to a thread sees the same
- * interleaving of durable and live events. A commit made elsewhere reaches each subscription through
- * that subscription's own store watch, or through a hand-over's gap read, so its position among this
- * runtime's live events can differ from one subscription to another; each still sees the durable
- * events in `seq` order. The common interleaving is guaranteed when nothing outside this runtime
- * commits to the thread; an external commit allows subscriptions to place it differently, not
- * necessarily make them differ. A consumer that needs one order across runtimes orders only
- * [[StreamEvent.Durable]] records by `EventRecord.seq`. It ignores [[StreamEvent.Live]] and
- * [[StreamEvent.LiveGap]], which have no `seq`, and treats [[StreamEvent.Disconnected]] as the end of
- * the subscription, not as a record: it carries `lastSeq` and a reason.
+ * '''Ordering across runtimes.''' Concurrently active subscriptions to a thread that stay caught up see one
+ * interleaving of durable and live events within one runtime: every event handed to several of them has the same
+ * relative placement for each. A subscription that attaches later misses earlier live events, and a slower one can lose
+ * live events ([[StreamEvent.LiveGap]]) or be disconnected as `Lagging`; the guarantee does not cover those cases. A
+ * commit made elsewhere reaches each subscription through that subscription's own store watch, or through a hand-over's
+ * gap read, so its position among this runtime's live events can differ from one subscription to another; each still
+ * sees the durable events in `seq` order. The guarantee holds when nothing outside this runtime commits to the thread;
+ * an external commit allows subscriptions to place it differently, not necessarily make them differ. A consumer that
+ * needs one order across runtimes orders only [[StreamEvent.Durable]] records by `EventRecord.seq`. It ignores
+ * [[StreamEvent.Live]] and [[StreamEvent.LiveGap]], which have no `seq`, and treats [[StreamEvent.Disconnected]] as the
+ * end of the subscription, not as a record: it carries `lastSeq` and a reason.
  */
 final class GraphRuntime(
   checkpointer: Checkpointer,
@@ -294,9 +295,9 @@ final class GraphRuntime(
    * `cancel` stops too), in `seq` order and with the same durable guarantees, and are queued only as
    * they fit, so they never make it lag. Where such a commit falls among this runtime's live events
    * is not fixed: it depends on when this subscription's watch (or a hand-over's gap read) read it, so
-   * two subscriptions can place it differently - the common live/durable interleaving of subscriptions
-   * in one runtime is guaranteed while nothing outside the runtime commits to the thread, and an
-   * external commit allows it to differ rather than making it differ. Where one order across runtimes
+   * two subscriptions can place it differently. The guarantee that caught-up subscriptions in one runtime see one
+   * live/durable interleaving holds while nothing outside the runtime commits to the thread; an external commit
+   * allows it to differ rather than making it differ. Where one order across runtimes
    * matters, order only [[StreamEvent.Durable]] records by `seq`, ignoring [[StreamEvent.Live]] and
    * [[StreamEvent.LiveGap]], and end at [[StreamEvent.Disconnected]] (#1920). Live progress of another runtime's runs is not delivered: it is
    * never stored. With [[WatchPolicy.disabled]], another runtime's commits are seen only by

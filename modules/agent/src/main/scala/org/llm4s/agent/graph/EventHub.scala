@@ -160,14 +160,16 @@ private[graph] trait Dispatched extends Subscription:
  * takes one slot beyond `capacity`, so it never makes a subscriber lag; a subscriber already
  * lagging gets none and ends with its `Disconnected`.
  *
- * Durable events reach each subscriber in ascending `seq`, at most once, and only after the commit
- * that numbered them. Every subscription of this runtime also sees this runtime's own durable and live
- * events in one interleaving. A commit made by another runtime or process is the exception: it
- * reaches each subscription through that subscription's own store watch, or through a hand-over's gap
- * read, so where it falls among this runtime's live events can differ per subscription (its `seq`
- * order never does). The common interleaving is guaranteed when nothing outside this runtime commits
- * to the thread; an external commit allows subscriptions to differ, not necessarily makes them differ.
- * The structural fix would be one ordered per-thread log (#1920). The queue holds up to `capacity` durable events and, separately, up to
+ * Durable events reach each subscriber in ascending `seq`, at most once, and only after the commit that numbered them.
+ * Concurrently active subscriptions of this runtime that stay caught up see this runtime's own durable and live events
+ * in one interleaving: every event handed to several of them has the same relative placement for each. A subscription
+ * that attaches later misses earlier live events, and a slower one can lose live events or be disconnected as
+ * `Lagging`; that guarantee does not cover those cases. A commit made by another runtime or process is the exception:
+ * it reaches each subscription through that subscription's own store watch, or through a hand-over's gap read, so where
+ * it falls among this runtime's live events can differ per subscription (its `seq` order never does). The guarantee
+ * holds when nothing outside this runtime commits to the thread; an external commit allows subscriptions to differ, not
+ * necessarily makes them differ. The structural fix would be one ordered per-thread log (#1920). The queue holds up to
+ * `capacity` durable events and, separately, up to
  * `capacity` live events and gap markers, so live traffic - a burst of text deltas the dispatcher
  * has not drained yet - never crowds out a durable event: only a subscriber more than `capacity`
  * durable events behind lags. A durable event that does not fit disconnects the subscriber as
