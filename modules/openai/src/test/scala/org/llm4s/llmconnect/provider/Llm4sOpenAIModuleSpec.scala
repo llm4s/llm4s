@@ -8,8 +8,9 @@ import org.llm4s.llmconnect.provider.OpenAISdkFixtures.{ chunk, stream, transpor
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.testkit.{
+  ContentPartCase,
   CredentialsRoundTrip,
   LocalProviderTestServer,
   ProviderModuleChecks,
@@ -172,6 +173,26 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
     "return CancelledError when a call is interrupted" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
         assertCancelsWhenInterrupted(openAIClientAt(baseUrl))
+      }
+    }
+
+    "send the content parts Chat Completions takes and refuse the rest before sending (#1913)" in {
+      val supported = Seq(
+        ContentPartCase.UserImageUrl,
+        ContentPartCase.UserImageInline,
+        ContentPartCase.UserPdfInline,
+        ContentPartCase.UserPdfFile
+      )
+      val respond = LocalProviderTestServer.sendJsonResponse(_, 200, LocalProviderTestServer.openAICompletion("done"))
+      assertContentParts("openai", respond)(supported*)(openAIClientAt)
+      assertContentParts("requesty", respond)(supported*) { baseUrl =>
+        val config = OpenAIConfig.fromValues("openai/gpt-4o-mini", "rq-key", None, baseUrl).toOption.get
+        RequestyProvider.buildClient(config, LlmClientOptions.default).toOption.get
+      }
+      assertContentParts("azure", respond)(supported*) { baseUrl =>
+        val config =
+          AzureConfig.fromValues("my-deploy", baseUrl, "azure-key", AzureConfig.DEFAULT_API_VERSION).toOption.get
+        AzureProvider.buildClient(config, LlmClientOptions.default).toOption.get
       }
     }
 
