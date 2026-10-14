@@ -71,4 +71,30 @@ class PermissionMiddlewareSpec extends AnyFlatSpec with Matchers {
   "ToolCallRequest(spec, call)" should "carry the tool's default resource" in {
     ToolCallRequest(spec, call).resources shouldBe Vector(ToolResource(Invoke, "files"))
   }
+
+  /** Runs `body` with the default locale set to `locale`, restoring the previous default afterwards. */
+  private def inLocale[T](locale: java.util.Locale)(body: => T): T = {
+    val previous = java.util.Locale.getDefault
+    java.util.Locale.setDefault(locale)
+    val result = scala.util.Try(body)
+    java.util.Locale.setDefault(previous)
+    result.get
+  }
+
+  "Operation labels, messages and globs" should "not depend on the default locale (Turkish dotless i)" in {
+    val turkish = java.util.Locale.forLanguageTag("tr")
+    "INVOKE".toLowerCase(turkish) should not be "invoke" // the hazard the root locale avoids
+    inLocale(turkish) {
+      Operation.values.map(_.label).toVector shouldBe
+        Vector("read", "write", "delete", "execute", "network", "invoke")
+      decide(Seq.empty, false, ToolResource(Invoke, "files")) shouldBe ToolOutcome.Error("Denied: invoke files")
+      decide(Seq(PermissionRule.ask(Write, "/INDEX")), false, ToolResource(Write, "/INDEX")) shouldBe
+        ToolOutcome.NeedsApproval("Permission required: write /INDEX")
+      // globs match case-sensitively, by character, in every locale
+      Glob("/Index/*").matches("/Index/a") shouldBe true
+      Glob("/Index/*").matches("/index/a") shouldBe false
+      Glob("/ı*").matches("/I") shouldBe false
+    }
+    java.util.Locale.getDefault should not be turkish
+  }
 }
