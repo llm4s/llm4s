@@ -326,6 +326,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
           "format"    -> 1,
           "key"       -> "k",
           "operation" -> "op",
+          "scope"     -> "s",
           "taskId"    -> "0.0",
           "intent"    -> ujson.Obj("support" -> "unverifiable")
         )
@@ -350,6 +351,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
           "format"    -> 1,
           "key"       -> "k",
           "operation" -> "op",
+          "scope"     -> "s",
           "taskId"    -> "0.0",
           "intent"    -> ujson.Obj("support" -> "unverifiable")
         )

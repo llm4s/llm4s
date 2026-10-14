@@ -44,10 +44,13 @@ class ReplayGuardSpec extends AnyFlatSpec with Matchers with EitherValues with O
 
   /** A counter store whose increments record their key, atomically. */
   final private class Counters extends AppliedKeys {
-    var value                   = 0
-    val applied                 = mutable.Map.empty[String, Int]
-    val forgotten               = mutable.Buffer.empty[String]
-    def forget(key: EffectKey)  = { forgotten += key.value; applied.remove(key.value); Right(()) }
+    var value     = 0
+    val applied   = mutable.Map.empty[String, Int]
+    val forgotten = mutable.Buffer.empty[String]
+    val tokens    = mutable.Buffer.empty[Long]
+    def forget(key: EffectKey, token: FencingToken) = {
+      tokens += token.value; forgotten += key.value; applied.remove(key.value); Right(())
+    }
     def add(key: EffectKey)     = Right(applied.getOrElseUpdate(key.value, { value += 1; value }))
     def addFailing: Result[Int] = Left(ProcessingError("store", "down"))
   }
@@ -62,10 +65,10 @@ class ReplayGuardSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val store   = new Counters
     val c       = context(journal)
     val key     = c.effectKey("counter.add", "a")
-    ReplayGuard.transactional[Int](c, key, store)(store.add(key)).value shouldBe 1
+    ReplayGuard.transactional[Int](c, key, store)(_ => store.add(key)).value shouldBe 1
     store.applied shouldBe empty
     journal.record(key).value.completed shouldBe true
-    ReplayGuard.transactional[Int](c, key, store)(store.add(key)).value shouldBe 1
+    ReplayGuard.transactional[Int](c, key, store)(_ => store.add(key)).value shouldBe 1
     store.value shouldBe 1
   }
 
@@ -81,14 +84,42 @@ class ReplayGuardSpec extends AnyFlatSpec with Matchers with EitherValues with O
         if writes.incrementAndGet() == 2 then Left(ProcessingError("journal", "down")) else super.write(record)
     }
     val first = context(crashing)
-    ReplayGuard.transactional[Int](first, key, store)(store.add(key)).isLeft shouldBe true
+    ReplayGuard.transactional[Int](first, key, store)(_ => store.add(key)).isLeft shouldBe true
     store.applied.keySet shouldBe Set(key.value)
     // the replay finds the begun record, so it trusts the applied key: no second increment
-    ReplayGuard.transactional[Int](context(crashing), key, store)(store.add(key)).value shouldBe 1
+    ReplayGuard.transactional[Int](context(crashing), key, store)(_ => store.add(key)).value shouldBe 1
     store.value shouldBe 1
     store.applied shouldBe empty
     crashing.record(key).value.completed shouldBe true
     journal.records shouldBe empty
+  }
+
+  it should "hand the run's claim token to the target's every operation, and fail when the target refuses it" in {
+    val journal = new Journal
+    val store   = new Counters
+    val c = new RunContext(
+      RunConfig(),
+      RunPosition(ThreadId("t"), RunId("r"), "r/1", TaskId("1.0"), NodeId("n"), 1, Some(FencingToken(42L))),
+      NodeEventSink.none,
+      journal = journal
+    )
+    val key  = c.effectKey("counter.add", "a")
+    val seen = mutable.Buffer.empty[Long]
+    ReplayGuard
+      .transactional[Int](c, key, store) { token =>
+        seen += token.value; store.add(key)
+      }
+      .value shouldBe 1
+    seen shouldBe Seq(42L)
+    store.tokens shouldBe Seq(42L, 42L) // the stale-leftover forget before, and the forget after
+    key.scope shouldBe c.effectKey("other").scope
+    // a target that refuses the token - a successor has touched it - changes nothing, and the task fails
+    val other = c.effectKey("counter.add", "b")
+    ReplayGuard
+      .transactional[Int](c, other, store)(_ => Left(ProcessingError("store", "stale token")))
+      .left
+      .value shouldBe a[ProcessingError]
+    journal.record(other).value.completed shouldBe false
   }
 
   it should "forget a stale applied key with no begun record before the effect, never trusting it" in {
@@ -98,7 +129,7 @@ class ReplayGuardSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val key     = c.effectKey("counter.add", "a")
     // a leftover of a crashed task whose records were released: a re-created thread, or a replanned task id
     store.applied.update(key.value, 41)
-    ReplayGuard.transactional[Int](c, key, store)(store.add(key)).value shouldBe 1
+    ReplayGuard.transactional[Int](c, key, store)(_ => store.add(key)).value shouldBe 1
     store.value shouldBe 1
   }
 
@@ -107,9 +138,9 @@ class ReplayGuardSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val store   = new Counters
     val c       = context(journal)
     val key     = c.effectKey("counter.add", "a")
-    ReplayGuard.transactional[Int](c, key, store)(store.addFailing).left.value shouldBe a[ProcessingError]
+    ReplayGuard.transactional[Int](c, key, store)(_ => store.addFailing).left.value shouldBe a[ProcessingError]
     journal.record(key).value.completed shouldBe false
-    ReplayGuard.transactional[Int](c, key, store)(store.add(key)).value shouldBe 1
+    ReplayGuard.transactional[Int](c, key, store)(_ => store.add(key)).value shouldBe 1
   }
 
   "ReplayGuard.verifiable" should "run the plan only when the effect must run, and replay the outcome" in {
@@ -234,7 +265,7 @@ class ReplayGuardSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val begun = c.effectKey("op", "begun")
     journal.failNext = Some(true)
     ReplayGuard.unverifiable[String](c, begun, idempotent = false)(Right("t")).isLeft shouldBe true
-    refusal(ReplayGuard.transactional[String](c, begun, new Counters)(Right("t"))) should include("Transactional")
+    refusal(ReplayGuard.transactional[String](c, begun, new Counters)(_ => Right("t"))) should include("Transactional")
   }
 
   it should "not start an effect whose task was cancelled after its intent was written" in {

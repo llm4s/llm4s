@@ -352,11 +352,15 @@ call that runs again then gets its original outcome back instead of repeating th
 declares one `ReplaySupport`, and each has its own guard:
 
 - `ReplayGuard.transactional` is for a target that records the key with the outcome in the same
-  transaction as the effect, and implements `AppliedKeys`.
+  transaction as the effect, and implements `AppliedKeys`. The effect and `forget` are given the
+  run's claim token, and the target refuses a token older than the newest it has seen for the
+  key's `scope` (its thread). So a run that lost its claim can neither apply, nor read back, nor
+  forget anything once its successor has touched the target.
 - `ReplayGuard.verifiable` is for a target that can read a digest (`StateCheck`) of what the effect
   touches. If the effect began but its outcome was not recorded, the guard checks the target. It
   returns the presumed outcome if the effect landed, runs the effect again if it did not, and
-  refuses if another thread changed the target in between.
+  refuses if another thread changed the target in between. The effect must be a compare-and-set
+  against `before`, so that a stalled run's write cannot land on its successor's.
 - `ReplayGuard.unverifiable` is for everything else. If the effect began but its outcome was not
   recorded, the guard refuses to run it again ("it may already have run"), unless the tool is
   idempotent.
@@ -370,7 +374,8 @@ val append = AgentTool(appendSpec) { (args, context) =>
     val before = read(args.path)
     val after  = before + args.text
     Right(ReplayGuard.Plan(StateCheck.of(before), StateCheck.of(after), after.length) {
-      write(args.path, after); Right(after.length)
+      // under a lock every writer takes: write only if the file is still what the plan read
+      writeIfUnchanged(args.path, StateCheck.of(before), after).map(_ => after.length)
     })
   } match
     case Right(length)                           => ToolOutcome.Success(ujson.Num(length))
@@ -380,7 +385,7 @@ val append = AgentTool(appendSpec) { (args, context) =>
 ```
 
 What each guard does when the run crashed at each point, and why, is in design record
-[§4.24](../../design/typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md). The
+[§4.24](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md). The
 rules a caller relies on:
 
 - **Build each key with `effectKey`.** In a tool, `context.effectKey(operation, discriminator*)`

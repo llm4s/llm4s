@@ -32,6 +32,7 @@ Effects outside thread state replay through `ReplayGuard`: an intent and an outc
   Persist records with `EffectRecord.toJson` and read them with `EffectRecord.fromJson`. `CheckpointerContract` gains the cases that check all of this.
 - **`GraphError` gains `EffectReplayRefused(operation, reason)`.** A `match` on `GraphError` that must be exhaustive gains a case.
 - **The SQLite schema moves to version 3** (`llm4s_checkpoint_effects`). A version-2 file is migrated when it is opened. A build from before this change refuses a version-3 file, as it refuses any newer schema.
+- **A `Transactional` target fences itself by the claim token.** `AppliedKeys.forget(key, token)` and the effect given to `ReplayGuard.transactional` (`token => ...`) refuse a token older than the newest seen for `key.scope`. A `Verifiable` target's effect is a compare-and-set against the plan's `before`.
 - **New, opt-in API**: `RunContext.taskKey`, `RunContext.effectKey` and `ToolContext.effectKey`; `ReplayGuard` and its `Plan`; `ReplaySupport`, `StateCheck`, `AppliedKeys` and `EffectRecord`; and, in `llm4s-agent-testkit`, `ReplayContract`, which every external target of the harness passes. See [Tool side effects](../guide/agents/#tool-side-effects).
 
 Design: `docs/design/typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md` (§4.24).

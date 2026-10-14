@@ -31,10 +31,12 @@ private[graph] object KeyDigest:
  * call is a new effect, because the thread is part of the key.
  *
  * Built only by `RunContext.effectKey` and `ToolContext.effectKey`. `value` is the identity;
- * `operation` stays readable so that refusals can name it.
+ * `operation` stays readable so that refusals can name it. `scope` names the thread that performs the
+ * effect, without revealing it (the SHA-256 of its id): a `Transactional` target fences its keys per
+ * scope, because a thread's claim tokens only grow ([[AppliedKeys]]).
  */
 @Experimental
-final case class EffectKey private (value: String, operation: String):
+final case class EffectKey private (value: String, operation: String, scope: String):
   override def toString: String = s"EffectKey($operation, $value)"
 
 object EffectKey:
@@ -47,10 +49,14 @@ object EffectKey:
     discriminator: Seq[String]
   ): EffectKey =
     val parts = Seq("llm4s-effect-v1", threadId.value, base.value, operation, discriminator.size.toString)
-    new EffectKey(KeyDigest.of(parts ++ discriminator), operation)
+    new EffectKey(KeyDigest.of(parts ++ discriminator), operation, scopeOf(threadId))
+
+  /** The scope of every effect key of thread `threadId`. */
+  private[graph] def scopeOf(threadId: ThreadId): String = KeyDigest.of(Seq("llm4s-effect-scope-v1", threadId.value))
 
   /** A key read back from a stored record. */
-  private[graph] def stored(value: String, operation: String): EffectKey = new EffectKey(value, operation)
+  private[graph] def stored(value: String, operation: String, scope: String): EffectKey =
+    new EffectKey(value, operation, scope)
 
 /** How a target lets the harness replay an effect on it; every external target declares one (design §4.24). */
 @Experimental
@@ -87,16 +93,31 @@ object StateCheck:
     upickle.default.ReadWriter.join(upickle.default.StringReader, upickle.default.StringWriter)
 
 /**
- * A `Transactional` target's applied-keys table: the target records `(key, outcome)` in the same
- * transaction as the effect, and, given a key it has applied, returns the recorded outcome and writes
- * nothing. [[ReplayGuard.transactional]] trusts an applied key only while the thread's store holds
- * the effect's begun record, and forgets it once the outcome is recorded there.
+ * A `Transactional` target's applied-keys table, fenced by the claim token of the run acting on it
+ * (design §4.24). The target keeps, for each key `scope` (one per thread), the newest
+ * [[FencingToken]] any operation on that scope has carried, and every operation on the scope - the
+ * effect given to [[ReplayGuard.transactional]] and [[forget]] - does this in one transaction:
+ *
+ *  - a token older than the scope's newest is refused with a `Left`, changing nothing: a run that lost
+ *    its claim can neither apply, nor read back, nor forget anything after its successor touched the
+ *    target, whatever it saw in the thread's store before it was taken over;
+ *  - otherwise the scope's newest token becomes this one, and the operation goes ahead. The effect
+ *    records `(key, outcome)` with the effect, or, for a key already applied, returns the recorded
+ *    outcome and writes nothing.
+ *
+ * The newest token per scope is kept for as long as the target keeps data of that thread: a small
+ * record per thread, as the thread store's tombstones are. [[ReplayGuard.transactional]] trusts an
+ * applied key only while the thread's store holds the effect's begun record, and forgets it once the
+ * outcome is recorded there.
  */
 @Experimental
 trait AppliedKeys:
 
-  /** Removes `key` from the applied-keys table; `Right(())` if it is not there. */
-  def forget(key: EffectKey): Result[Unit]
+  /**
+   * Removes `key` from the applied-keys table, fenced by `token` as described above: `Left` if `token`
+   * is older than the newest token seen for `key.scope`; `Right(())` if the key is not there.
+   */
+  def forget(key: EffectKey, token: FencingToken): Result[Unit]
 
 /**
  * The replay evidence of one effect, as the thread's [[Checkpointer]] keeps it: begun (an intent) or
@@ -131,6 +152,7 @@ object EffectRecord:
       "format"    -> CurrentFormat,
       "key"       -> record.key.value,
       "operation" -> record.key.operation,
+      "scope"     -> record.key.scope,
       "taskId"    -> record.taskId.value,
       "intent"    -> EffectBody.intentJson(record.body.intent)
     )
@@ -151,7 +173,7 @@ object EffectRecord:
         )
       else
         Try {
-          val key = EffectKey.stored(json("key").str, json("operation").str)
+          val key = EffectKey.stored(json("key").str, json("operation").str, json("scope").str)
           EffectBody.intentFrom(json("intent")).map { intent =>
             val body = json.obj.get("outcome") match
               case None => EffectBody.Begun(intent)
@@ -243,6 +265,13 @@ object ReplayGuard:
   /**
    * A `Verifiable` effect about to run: the target's digest `before` and `after` it, the outcome it
    * reports when it lands (`presumed`, returned by a replay that finds it landed), and the effect.
+   *
+   * The effect must be a compare-and-set against `before`: atomically at the target - under a lock
+   * every writer of the target takes, an OS file lock across processes - it checks that the digest is
+   * still `before`, and only then writes; otherwise it writes nothing and returns
+   * [[GraphError.EffectReplayRefused]]. That is what fences a run that lost its claim with its effect
+   * already under way: whichever of it and its successor writes second finds the digest moved and
+   * changes nothing. A target that cannot compare and set atomically is not `Verifiable`.
    */
   final class Plan[A] private (
     val before: StateCheck,
@@ -256,31 +285,34 @@ object ReplayGuard:
       new Plan(before, after, presumed, () => effect)
 
   /**
-   * Performs `effect` on a target that records `(key, outcome)` in its own transaction ([[AppliedKeys]]).
-   * A completed effect replays its stored outcome; a begun one runs `effect` again, which the target
-   * answers with its recorded outcome if the first attempt applied. The target's applied key lives only
-   * until the outcome is recorded in the thread's store: a key with no begun record is stale and is
-   * forgotten before the effect begins.
+   * Performs `effect` on a target that records `(key, outcome)` in its own transaction, fenced by the
+   * run's claim token ([[AppliedKeys]]): `effect` is given that token, and must refuse it, changing
+   * nothing, if it is older than the newest the target has seen for `key.scope`. A completed effect
+   * replays its stored outcome; a begun one runs `effect` again, which the target answers with its
+   * recorded outcome if the first attempt applied. The target's applied key lives only until the
+   * outcome is recorded in the thread's store: a key with no begun record is stale and is forgotten,
+   * fenced like everything else, before the effect begins. Outside a runtime the token is `0`.
    */
   def transactional[A: ReadWriter](
     context: RunContext,
     key: EffectKey,
     applied: AppliedKeys,
     maxOutcomeBytes: Int = DefaultMaxOutcomeBytes
-  )(effect: => Result[A]): Result[A] =
+  )(effect: FencingToken => Result[A]): Result[A] =
     val journal = context.journal
+    val token   = context.position.fencingToken.getOrElse(FencingToken(0L))
     def apply(owner: TaskId): Result[A] =
       for
         _       <- notCancelled(context, key)
-        outcome <- effect
+        outcome <- effect(token)
         _       <- complete(journal, key, owner, EffectIntent.Transactional, outcome, maxOutcomeBytes)
-        _       <- applied.forget(key)
+        _       <- applied.forget(key, token)
       yield outcome
     journal.lookup(key).flatMap {
       case None =>
         val owner = context.effectOwner
         for
-          _       <- applied.forget(key)
+          _       <- applied.forget(key, token)
           _       <- journal.write(new EffectRecord(key, owner, EffectBody.Begun(EffectIntent.Transactional)))
           outcome <- apply(owner)
         yield outcome
@@ -288,7 +320,7 @@ object ReplayGuard:
         record.body match
           case EffectBody.Begun(EffectIntent.Transactional) => apply(record.taskId)
           case EffectBody.Begun(other) => Left(mismatch(key, other.support, ReplaySupport.Transactional))
-          case done => applied.forget(key).flatMap(_ => stored[A](key, done, ReplaySupport.Transactional))
+          case done => applied.forget(key, token).flatMap(_ => stored[A](key, done, ReplaySupport.Transactional))
     }
 
   /**
