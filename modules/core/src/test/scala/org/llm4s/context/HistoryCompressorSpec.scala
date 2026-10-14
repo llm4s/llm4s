@@ -246,4 +246,27 @@ class HistoryCompressorSpec extends AnyFlatSpec with Matchers {
       summaryIdx should be < recentIdx
     }
   }
+
+  // a digest is text built from the messages' text view: a block with media is kept as it is (#1913)
+  "compressToDigest" should "keep an older block with media verbatim, and digest only the text blocks" in {
+    val chart = ContentPart
+      .image(
+        org.llm4s.media.MediaSource.Url(java.net.URI.create("https://e.com/chart.png")),
+        org.llm4s.media.MediaType.Png
+      )
+      .toOption
+      .get
+    val messages = Seq(
+      UserMessage(Vector(ContentPart.Text("What does this show?"), chart)),
+      AssistantMessage("Revenue rising."),
+      UserMessage("Question 2"),
+      AssistantMessage("Answer 2"),
+      UserMessage("Question 3"),
+      AssistantMessage("Answer 3")
+    )
+    val processed = HistoryCompressor.compressToDigest(messages, counter, capTokens = 500, keepLastK = 1).toOption.get
+    processed.collect { case u: UserMessage => u }.find(_.parts.contains(chart)) shouldBe defined
+    processed.exists(m => m.isInstanceOf[SystemMessage] && m.content.startsWith("[HISTORY_SUMMARY]")) shouldBe true
+    processed.exists(_.content == "Answer 3") shouldBe true
+  }
 }

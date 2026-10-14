@@ -93,7 +93,7 @@ object HistoryCompressor {
     logger.debug(s"Starting history compression: cap=$capTokens, keepLastK=$keepLastK")
 
     // Skip compression if messages already contain [HISTORY_SUMMARY] for idempotence
-    val existingSummaries = messages.filter(_.content.startsWith("[HISTORY_SUMMARY]"))
+    val existingSummaries = messages.collect { case s: SystemMessage if s.content.startsWith("[HISTORY_SUMMARY]") => s }
     if (existingSummaries.nonEmpty) {
       logger.debug(s"Found ${existingSummaries.length} existing history summaries, skipping compression")
       Right(messages)
@@ -116,13 +116,16 @@ object HistoryCompressor {
       if (keepLastK <= 0) (blocks, Seq.empty)
       else blocks.splitAt(math.max(0, blocks.length - keepLastK))
 
-    val olderDigests = older.map(createBlockDigest)
+    // a block with an image or document is kept as it is, never digested: a digest is text, built from the
+    // messages' text view, and would lose the media without a trace (#1913)
+    val (olderWithMedia, olderText) = older.partition(block => Message.hasMedia(block.messages))
+    val olderDigests                = olderText.map(createBlockDigest)
 
     val digestMessages: Seq[Message] =
       olderDigests.map(d => SystemMessage(s"[HISTORY_SUMMARY]\n${d.content}"))
 
     val recentMessages: Seq[Message] =
-      recent.flatMap(_.messages)
+      (olderWithMedia ++ recent).flatMap(_.messages)
 
     // If multiple digest messages exceed cap, consolidate them into one within cap.
     val digestTotalTokens = digestMessages.map(tokenCounter.countMessage).sum

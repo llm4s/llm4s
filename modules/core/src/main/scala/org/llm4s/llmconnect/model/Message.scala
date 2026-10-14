@@ -96,6 +96,17 @@ object Message {
       case _               => false
     }
 
+  /**
+   * `message`'s text with each media part named by its kind in place (`see [image (url, image/png)]`): for code
+   * that keeps a message as text - a memory, an export - which must not let its media vanish without a trace.
+   * Never the bytes. A system or assistant message is its `content`.
+   */
+  private[llm4s] def textWithMedia(message: Message): String = message match {
+    case um: UserMessage => describe(um.parts)
+    case tm: ToolMessage => describe(tm.parts)
+    case other           => other.content
+  }
+
   /** A message's content with each media part named by its kind, for `toString`. */
   private[model] def describe(parts: Vector[ContentPart]): String =
     parts
