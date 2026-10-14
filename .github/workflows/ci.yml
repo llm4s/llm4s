@@ -781,8 +781,8 @@ jobs:
   # and the coverage run leave them out: algorithmic growth is the same on every platform, so running them on
   # Windows and under coverage instrumentation only multiplied their cost (they were most of each test job's
   # time, #1932). Here they run once, uninstrumented, on Linux, in parallel with the other test jobs, and nightly
-  # in performance-nightly.yml. Not in `All Tests Pass`'s needs: whether it is a required check is a
-  # branch-protection decision.
+  # in performance-nightly.yml. Gating, through `All Tests Pass`: it is the only check of linear-time growth;
+  # `sbt test` keeps only megabyte hang guards.
   performance-tests:
     name: Performance tests
     needs: [quick-checks]
@@ -1051,7 +1051,7 @@ jobs:
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest]
+    needs: [test, performance-tests, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1061,6 +1061,10 @@ jobs:
         run: |
           if [[ "${{ needs.test.result }}" != "success" ]]; then
             echo "Some tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.performance-tests.result }}" != "success" ]]; then
+            echo "Performance tests failed"
             exit 1
           fi
           if [[ "${{ needs.coverage.result }}" != "success" ]]; then
