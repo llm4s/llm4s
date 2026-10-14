@@ -190,7 +190,8 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
           toolWrites.addAndGet(commit.pendingWrites.count(_.nodeId.endsWith("/call-tool"))): Unit
           records
         }
-    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]] = underlying.latest(threadId)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey) = underlying.effect(threadId, key)
+    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]     = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =

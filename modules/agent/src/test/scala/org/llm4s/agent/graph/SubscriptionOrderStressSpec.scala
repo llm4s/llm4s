@@ -32,6 +32,7 @@ class SubscriptionOrderStressSpec extends AnyFlatSpec with Matchers with EitherV
     ) =
       underlying.renew(threadId, token, ttl)
     def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = underlying.effect(threadId, key)
     def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = {
       val page = underlying.eventsAfter(threadId, afterSeq, limit)

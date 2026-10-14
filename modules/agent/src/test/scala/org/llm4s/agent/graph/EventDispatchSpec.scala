@@ -68,6 +68,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     ) =
       underlying.renew(threadId, token, ttl)
     def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = underlying.effect(threadId, key)
     def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = {
       if reads.incrementAndGet() == 2 then switching.countDown()
@@ -442,6 +443,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
       ) =
         store.renew(threadId, token, ttl)
       def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = store.release(threadId, token)
+      def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = store.effect(threadId, key)
       def latest(threadId: ThreadId)                                             = store.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = Left(error)
       def compactEvents(threadId: ThreadId, beforeSeq: Long)              = store.compactEvents(threadId, beforeSeq)

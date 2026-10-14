@@ -140,7 +140,15 @@ final case class GraphSnapshot(
   dynamicJoins: Vector[GraphSnapshot.Activation],
   parked: Vector[GraphSnapshot.ParkedContinuation],
   paused: Boolean
-) derives ReadWriter
+) derives ReadWriter:
+
+  /**
+   * The tasks that can still run from this snapshot, by id: the frontier's, and the tasks the
+   * frontier's and the parked continuations stand in for. Their effect records are kept; every other
+   * task of the thread has finished, or will be planned again ([[Commit.releasesEffect]]).
+   */
+  def liveTasks: Set[String] =
+    frontier.iterator.flatMap(task => Iterator(task.taskId) ++ task.originTask).toSet ++ parked.map(_.originTask)
 
 object GraphSnapshot:
   /**

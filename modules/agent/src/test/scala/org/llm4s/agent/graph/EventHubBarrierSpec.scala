@@ -94,6 +94,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     ) =
       underlying.renew(threadId, token, ttl)
     def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = underlying.effect(threadId, key)
     def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]           = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       val read = reads.incrementAndGet()
@@ -287,8 +288,9 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     def claim(threadId: ThreadId, request: ClaimRequest)                        = underlying.claim(threadId, request)
     def renew(threadId: ThreadId, token: FencingToken, ttl: scala.concurrent.duration.FiniteDuration) =
       underlying.renew(threadId, token, ttl)
-    def release(threadId: ThreadId, token: FencingToken)             = underlying.release(threadId, token)
-    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]] = underlying.latest(threadId)
+    def release(threadId: ThreadId, token: FencingToken)                 = underlying.release(threadId, token)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey) = underlying.effect(threadId, key)
+    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]     = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       if !Thread.currentThread().getName.startsWith("llm4s-") then
         handOverReads.add(afterSeq)
