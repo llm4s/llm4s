@@ -443,14 +443,17 @@ and a prompt section that shows the list to the model on every model step.
 ```scala
 import org.llm4s.agent.harness.{HarnessEvents, TodoMiddleware}
 
-val agent = Agent.builder("researcher", client)
-  .withMiddleware(new TodoMiddleware(maxTodos = 20, maxTodoChars = 200))
-  .build()
-
-agent.stream(threadId, "Write a report on ...") {
-  case HarnessEvents.TodosProgress(p) => p.todos.foreach(t => println(s"[${t.status.wire}] ${t.content}"))
-  case _                               => ()
-}
+for {
+  agent <- Agent.builder("researcher", client)
+             .withMiddleware(new TodoMiddleware(maxTodos = 20, maxTodoChars = 200))
+             .build()                                  // Result[Agent]
+  run   <- agent.stream(threadId, "Write a report on ...") {
+             case HarnessEvents.TodosProgress(p) =>
+               p.todos.foreach(t => println(s"[${t.status.wire}] ${t.content}"))
+             case _ => ()
+           }
+  result <- run.await()
+} yield result
 ```
 
 - **The model sends the whole list** - each item's `content`, `status` (`pending`, `in_progress`,

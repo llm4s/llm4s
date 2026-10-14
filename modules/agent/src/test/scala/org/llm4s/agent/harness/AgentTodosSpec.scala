@@ -91,4 +91,26 @@ class AgentTodosSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     val planned = agent(Agent.builder("assistant", ScriptedLLMClient.of()).withMiddleware(new TodoMiddleware()))
     plain.loop.graph.fingerprint should not be planned.loop.graph.fingerprint
   }
+
+  "The guide's Todos example" should "compile and run as written" in {
+    val client   = ScriptedLLMClient.of(writing("Outline" -> "pending"), CompletionFixture.simple("report"))
+    val threadId = ThreadId("guide")
+    val printed  = new CopyOnWriteArrayList[String]()
+    def println(s: String): Unit = printed.add(s): Unit
+    // as in docs/guide/agents/index.md, "Todos"
+    val outcome = for {
+      agent <- Agent
+        .builder("researcher", client)
+        .withMiddleware(new TodoMiddleware(maxTodos = 20, maxTodoChars = 200))
+        .build()
+      run <- agent.stream(threadId, "Write a report on ...") {
+        case HarnessEvents.TodosProgress(p) =>
+          p.todos.foreach(t => println(s"[${t.status.wire}] ${t.content}"))
+        case _ => ()
+      }
+      result <- run.await()
+    } yield result
+    outcome.value.answer shouldBe Some("report")
+    printed.asScala.toVector shouldBe Vector("[pending] Outline")
+  }
 }
