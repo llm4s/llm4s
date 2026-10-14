@@ -1101,6 +1101,9 @@ final private[graph] class EventHub(
             case Some(owner)                                     => owned(owner == tenant)
             case None if confirmed                               => Right(())
             case None if event.isInstanceOf[StreamEvent.LiveGap] => Right(())
+            // the thread's owner now, not necessarily the event's: a delete and recreate by the subscriber's
+            // own tenant inside this one read would confirm an event of the previous tenant. Accepted as a
+            // residual (design record 4.21): closing it needs an incarnation on every event
             case None =>
               CancelledError.catchInterrupt(Try(checkpointer.latest(threadId)).toResult.flatten) match
                 case _ if cancelled          => Left(End.Cancelled)

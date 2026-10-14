@@ -2695,7 +2695,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when the store refused a claim, or a run's claim commit conflicted, the runtime re-read the thread to check its
   tenant before naming its checkpoint, but if that re-read failed it returned `ThreadBusy` naming the store's own,
   unchecked checkpoint id - which can be another tenant's, and embeds that tenant's run id. `start`, `recover`,
-  `resume`, `deleteThread`, `fork` and `updateState` now return `ThreadBusy(threadId, None, None)` then.
+  `resume`, `deleteThread`, `fork` and `updateState` now return `ThreadBusy(threadId, None, None)` then. A conflicting
+  claim commit whose re-read succeeds now names the re-read's tenant-checked checkpoint instead of the conflict's, and
+  one whose re-read finds no checkpoint (the thread was deleted meanwhile) names none: before, both named the
+  conflict's.
 - **A run whose claim renewals fail or hang no longer runs on after another runtime takes its thread over** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   a run learned its claim was gone only from a renewal the store refused, or a refused commit, so a run partitioned
   from its store, or whose renewal hung in it, executed every remaining superstep - under `OnExit` the whole graph -
