@@ -303,7 +303,7 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
             yield casPlan("write", path, target)(
               before,
               fileCheck(bytes),
-              FileWritten(!exists(target), bytes.length.toLong)
+              FileWritten(before == StateCheck.absent, bytes.length.toLong) // from the one read, as the effect reports
             )(
               atomicWrite(target, bytes).map(_ => FileWritten(before == StateCheck.absent, bytes.length.toLong))
             )
