@@ -15,7 +15,9 @@ import sbt.Keys._
  *  - the keys defined at `ThisBuild` and `Global`, which every project delegates to;
  *  - per project, the keys whose `aggregate` is `false` there;
  *  - the commands sbt and the loaded plugins define, and each command alias with its body;
- *  - each project's `scalaVersion` and `crossScalaVersions`.
+ *  - each project's `scalaVersion` and `crossScalaVersions`;
+ *  - each project's coverage floor (`coverageFloor(n)` in build.sbt), or null when it has none, for
+ *    scripts/check-coverage-legs.sh to check that every floor is enforced by a leg of CI's coverage job.
  */
 object BuildModel {
 
@@ -97,7 +99,11 @@ object BuildModel {
         "keys"               -> arr(rows(scopes)),
         "noAggregate"        -> strs(noAggregate),
         "scalaVersion"       -> str(extracted.getOpt(ref / scalaVersion).getOrElse("")),
-        "crossScalaVersions" -> strs(extracted.getOpt(ref / crossScalaVersions).getOrElse(Nil))
+        "crossScalaVersions" -> strs(extracted.getOpt(ref / crossScalaVersions).getOrElse(Nil)),
+        "coverageFloor" -> (extracted.getOpt(ref / Coverage.coveragePolicy) match {
+          case Some(Coverage.Policy.Floor(pct)) => pct.toString
+          case _                                => "null"
+        })
       )
     }
 

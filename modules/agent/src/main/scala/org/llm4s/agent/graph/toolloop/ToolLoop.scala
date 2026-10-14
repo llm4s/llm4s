@@ -15,7 +15,7 @@ import org.llm4s.agent.graph.middleware.{
   PromptSection,
   ToolCallRequest
 }
-import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome, ToolQuestion, ToolSet }
+import org.llm4s.agent.graph.tool.{ AgentTool, ToolArgumentValidator, ToolContext, ToolOutcome, ToolQuestion, ToolSet }
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -239,14 +239,24 @@ object ModelStep:
    * [[org.llm4s.agent.graph.tool.ToolSet.toolFunctions]]. With `streaming`, it calls
    * `streamComplete`, sending each chunk's text as a `TextDelta` and its thinking as a
    * `ThinkingDelta`, and returns the accumulated completion; otherwise `complete`.
+   *
+   * `output`, an agent's response format (design 4.26), replaces `options`' `responseFormat`: it is sent on
+   * a request that offers no tools, and no format is sent on one that does. A format on a tool-calling request
+   * conflicts with tool use for several providers - Gemini refuses a JSON response type with function
+   * declarations, and Anthropic's fallback tells the model to answer only in JSON - so the loop never sends
+   * one there; the prompt states the schema and the model step validates the answer either way.
    */
   def fromClient(
     client: LLMClient,
     options: CompletionOptions = CompletionOptions(),
-    streaming: Boolean = false
+    streaming: Boolean = false,
+    output: Option[ResponseFormat] = None
   ): ModelStep =
     (messages, tools, call) =>
-      val withTools = options.withTools(tools.toolFunctions)
+      val offered = options.withTools(tools.toolFunctions)
+      val withTools =
+        if output.isEmpty then offered
+        else offered.withResponseFormat(output.filter(_ => tools.toolFunctions.isEmpty))
       if !streaming then client.complete(Conversation(messages), withTools)
       else
         client.streamComplete(
@@ -517,7 +527,20 @@ object ToolLoop:
       _       <- ownedKeysUntouched(agent.id, toolSet, stack)
       _       <- handoffNamesFree(agent.id, toolSet, agent.handoffs)
       offered <- ToolSet.of(toolSet.validator, (toolSet.tools ++ HandoffTools.tools(agent.handoffs))*)
+      _       <- outputUsable(agent, toolSet.validator)
     yield Prepared(agent, toolSet, offered, stack)
+
+  /**
+   * The agent's response format, if any, has an object schema the validator checks fully, and a prompt section
+   * within the agent's prompt section budget on its own.
+   */
+  private def outputUsable(agent: LoopAgent, validator: ToolArgumentValidator): Result[Unit] =
+    agent.output.map(_.problems(validator, agent.maxPromptSectionTokens)).filter(_.nonEmpty) match
+      case None => Right(())
+      case Some(problems) =>
+        Left(
+          ValidationError("output", s"agent '${agent.id.value}': response format refused: ${problems.mkString("; ")}")
+        )
 
   /** A handoff's stand-in tool may not share a name with one of the agent's tools, or a middleware's. */
   private def handoffNamesFree(agent: AgentId, tools: ToolSet, handoffs: Vector[LoopHandoff]): Result[Unit] =
@@ -917,9 +940,11 @@ object ToolLoop:
     def implementAsked[A](owner: AgentNodes, hook: MiddlewareHook, asked: AskedRef[A]): Unit =
       val writes = hook match
         case MiddlewareHook.BeforeAgent   => inputWrites ++ family.writes
-        case MiddlewareHook.WrapModelCall => modelWrites ++ owner.stack.writes
-        case MiddlewareHook.WrapToolCall  => owner.callWrites
-        case MiddlewareHook.AfterAgent    => finishWrites ++ family.writes
+        case MiddlewareHook.WrapModelCall =>
+          // the model step again: with a response format, it may retract the turn, as the finish does
+          modelWrites ++ owner.stack.writes ++ (if owner.agent.output.isDefined then family.writes else Set.empty)
+        case MiddlewareHook.WrapToolCall => owner.callWrites
+        case MiddlewareHook.AfterAgent   => finishWrites ++ family.writes
       b.implement(asked.ref.node, writes = writes) { (resumed, state, context) =>
         val request = resumed.question
         val answers = request.answered :+
@@ -1094,6 +1119,33 @@ object ToolLoop:
             .goto(nodes.model)
 
     /**
+     * What a Block that ends the turn commits: every key the turn wrote back to its value before the turn
+     * (design §4.22), the turn's messages removed, the agent and transfer the turn started with restored, and the
+     * task's usage kept. An output Block and a response format's second invalid answer (design 4.26) both commit
+     * it. A prior value that does not decode is `Left`, which fails the run rather than leave the blocked turn's
+     * value in place.
+     */
+    def retraction(
+      history: Vector[StoredMessage],
+      turn: TurnState,
+      state: ThreadState,
+      context: RunContext
+    ): Result[StateUpdate] =
+      val removeTurn = history.reverseIterator
+        .collectFirst { case StoredMessage(id, _: UserMessage) => id }
+        .fold(StateUpdate.empty)(id => StateUpdate.update(messages, MessageUpdate.RemoveTurn(id)))
+      val rolledBack = turn.startAgent.fold(removeTurn)(agentId =>
+        removeTurn
+          .combine(StateUpdate.update(LoopKeys.activeAgent, agentId))
+          .combine(StateUpdate.update(LoopKeys.transfer, turn.startTransfer))
+      )
+      restored(turn.priorValues, harness.byId, state).map(
+        _.combine(rolledBack)
+          .combine(StateUpdate.update(LoopKeys.turn, turn.copy(priorValues = Map.empty)))
+          .combine(usageOf(context))
+      )
+
+    /**
      * One model step. Every middleware's prompt sections join the agent's system prompt, from the snapshot; the
      * request runs through every `wrapModelCall`, and every provider call `next` makes is counted in the task's
      * usage and announced with `ModelCallCompleted`, whichever response the wrappers return.
@@ -1118,41 +1170,82 @@ object ToolLoop:
             transfer <- state.get(LoopKeys.transfer)
             view     <- sent(agent.id, history, transfer, root, preserves)
             sections <- stack.promptSections(hooks)
-            system   <- systemPrompt(agent.systemPrompt, sections, agent.maxPromptSectionTokens)
+            // the response format's section is the loop's own, counted against the same budget as every other
+            system <- systemPrompt(
+              agent.systemPrompt,
+              sections ++ agent.output.map(OutputFormat.Owner -> _.section),
+              agent.maxPromptSectionTokens
+            )
           yield
             val request  = ModelRequest(system.map(SystemMessage(_)).toVector ++ view, nodes.offered)
             val attempts = AtomicInteger(0)
             // every wrapper's update is checked as it returns, so one in a discarded response fails the run too
             val check = MiddlewareStack.WriteCheck()
-            val result = stack.wrapModelCall(request, hooks, check) { req =>
-              callModel(agent.model, agent.id, context, attempts)(req).map { (completion, attempt) =>
-                hooks.recordCall(completion, attempt)
-                ModelResponse(completion)
+            // one request through every wrapper; each provider call is counted in the task's usage as it returns
+            def call(req: ModelRequest): Result[ModelResponse] =
+              val result = stack.wrapModelCall(req, hooks, check) { r =>
+                callModel(agent.model, agent.id, context, attempts)(r).map { (completion, attempt) =>
+                  hooks.recordCall(completion, attempt)
+                  ModelResponse(completion)
+                }
+              }
+              // an undeclared write fails the step whatever the wrappers returned
+              check.failure.fold(result)(Left(_))
+            // an answer (no tool calls) checked against the response format; None when there is nothing to check
+            def checked(response: ModelResponse): Option[Either[Vector[String], ujson.Value]] =
+              agent.output
+                .filter(_ => response.completion.message.toolCalls.isEmpty)
+                .map(_.check(response.completion.message.content, tools.validator))
+            // a blank answer without tool calls is refused before it is stored, so the history stays valid
+            // and recover asks the model again; so are calls whose ids could not each be given one result.
+            // A validated answer is stored as its JSON alone.
+            def accepted(response: ModelResponse, answer: Option[ujson.Value]): NodeResult =
+              val completion = answer.fold(response.completion) { json =>
+                val content = ujson.write(json)
+                response.completion.withMessage(response.completion.message.withContent(content)).withContent(content)
+              }
+              NodeResult.fromResult(
+                for
+                  update <- Right(response.update)
+                  _      <- completion.message.validate
+                  _      <- ToolResultRule.callIdsUsable(completion.message)
+                  // the wrappers' keys as they leave them, for an output Block to tell the turn's writes from another's
+                  after <- state.applyUpdate(update)
+                yield stored(turn, completion, update, state, after, context)
+              )
+            def answered(result: Result[ModelResponse])(invalid: (ModelResponse, Vector[String]) => NodeResult) =
+              result match
+                // nothing of the step is stored while the question waits - it runs again once answered - but
+                // the model calls a wrapper made before asking were made, and are counted
+                case Left(asked: MiddlewareAsked) =>
+                  askedSuspend(nodes, asked, MiddlewareHook.WrapModelCall, answers, None, usageOf(context))
+                case Left(error) => NodeResult.Fail(error)
+                case Right(response) =>
+                  checked(response) match
+                    case None                 => accepted(response, None)
+                    case Some(Right(json))    => accepted(response, Some(json))
+                    case Some(Left(problems)) => invalid(response, problems)
+            answered(call(request)) { (first, problems) =>
+              // one corrective retry in this task (design 4.26): the request again, with the invalid answer and its
+              // problems, neither of them stored; every wrapper sees it as a request of its own, and the rejected
+              // response's update is discarded with it
+              val corrective = request.withMessages(
+                request.messages :+ AssistantMessage(OutputFormat.echoed(first.completion.message.content)) :+
+                  UserMessage(OutputFormat.correction(problems))
+              )
+              // a second invalid answer ends the turn through the Block path, so the task's usage and events commit
+              // with a Failed checkpoint and the turn is retracted, as an output Block retracts it
+              answered(call(corrective)) { (_, invalid) =>
+                retraction(history, turn, state, context)
+                  .fold(NodeResult.Fail(_), NodeResult.Block(_, GraphError.OutputInvalid(invalid)))
               }
             }
-            // an undeclared write fails the step whatever the wrappers returned
-            check.failure.fold(result)(Left(_)) match
-              // nothing of the step is stored while the question waits - it runs again once answered - but
-              // the model calls a wrapper made before asking were made, and are counted
-              case Left(asked: MiddlewareAsked) =>
-                askedSuspend(nodes, asked, MiddlewareHook.WrapModelCall, answers, None, usageOf(context))
-              case Left(error) => NodeResult.Fail(error)
-              // a blank answer without tool calls is refused before it is stored, so the history stays valid
-              // and recover asks the model again; so are calls whose ids could not each be given one result
-              case Right(response) =>
-                NodeResult.fromResult(
-                  for
-                    update <- Right(response.update)
-                    _      <- response.completion.message.validate
-                    _      <- ToolResultRule.callIdsUsable(response.completion.message)
-                    // the wrappers' keys as they leave them, for an output Block to tell the turn's writes from another's
-                    after <- state.applyUpdate(update)
-                  yield stored(turn, response.completion, update, state, after, context)
-                )
       }
       outcome.fold(NodeResult.Fail(_), identity)
 
-    b.implement(nodes.model, writes = modelWrites ++ stack.writes)((_, state, context) =>
+    // a response format's second invalid answer retracts the turn from here, restoring any key the turn wrote
+    val formatWrites = if agent.output.isDefined then harness.writes else Set.empty
+    b.implement(nodes.model, writes = modelWrites ++ stack.writes ++ formatWrites)((_, state, context) =>
       modelStep(state, context, Vector.empty)
     )
 
@@ -1174,25 +1267,9 @@ object ToolLoop:
           .toRight(ValidationError("tool loop", "finish found no final assistant message"))
       yield
         val (answerId, assistant) = last
-        val removeTurn = history.reverseIterator
-          .collectFirst { case StoredMessage(id, _: UserMessage) => id }
-          .fold(StateUpdate.empty)(id => StateUpdate.update(messages, MessageUpdate.RemoveTurn(id)))
-        val rolledBack = turn.startAgent.fold(removeTurn)(agentId =>
-          removeTurn
-            .combine(StateUpdate.update(LoopKeys.activeAgent, agentId))
-            .combine(StateUpdate.update(LoopKeys.transfer, turn.startTransfer))
-        )
-        // a prior value that does not decode fails the run rather than leave the blocked turn's value in place
         def blocked(error: LLMError) =
-          restored(turn.priorValues, harness.byId, state).fold(
-            NodeResult.Fail(_),
-            restore =>
-              val rollback = restore
-                .combine(rolledBack)
-                .combine(StateUpdate.update(LoopKeys.turn, turn.copy(priorValues = Map.empty)))
-                .combine(usageOf(context))
-              boundary(error, rollback, context, GuardrailPhase.Output)
-          )
+          retraction(history, turn, state, context)
+            .fold(NodeResult.Fail(_), boundary(error, _, context, GuardrailPhase.Output))
         val ended = turn.copy(outcome = Some(TurnOutcome.Completed), priorValues = Map.empty)
         def completed(update: StateUpdate) =
           Command(update.combine(usageOf(context)), Nil).update(LoopKeys.turn, ended)

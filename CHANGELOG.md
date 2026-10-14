@@ -28,6 +28,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The SQLite store keeps the records in a new table (schema version 3, migrated on open).
   - Breaking: `Checkpointer.effect`, `Commit.effects` and `GraphError.EffectReplayRefused` are new. See the
     migration guide and design record §4.24.
+- **An agent's answer can have a response format** ([#1912](https://github.com/llm4s/llm4s/issues/1912), design
+  4.26): `AgentBuilder.withOutput(schema: SchemaDefinition[O])` (with a uPickle `ReadWriter[O]`) sends the
+  strict JSON schema as the `responseFormat` of each model call that offers no tools (a call that offers tools
+  carries no format, since several providers cannot combine the two) and states it in the system prompt.
+  `ModelStep.fromClient` gains `output`.
+  A final answer must be JSON that matches the schema and reads as `O`, and is stored as that JSON alone. An invalid
+  answer is retried once in the same model step, with its problems, and neither is stored; a second ends the turn as
+  a Block with `Left(GraphError.OutputInvalid(errors))`: the turn removed from the thread, both calls in `usage` and
+  their `ModelCallCompleted` events committed, `recover` refused. `AgentResult.decodeOutput[O]` reads the answer.
+  A derived schema is `withOutput(SchemaOf[O].definition)`; `llm4s-schema-derivation` gains no dependency (only a
+  test one on `llm4s-agent`). New `OutputFormat` and `LoopAgent.withOutput` in `org.llm4s.agent.graph.toolloop`.
+  The schema is a `response-format` prompt section (C1), counted against `maxPromptSectionTokens`; the Block restores
+  every key the turn wrote, as an output Block does. `build` refuses a schema whose root is not an object, one the
+  tool argument validator cannot check, and a format whose section alone is over the prompt section budget. The graph version of an agent without a format is unchanged. Source: `GraphError` gains the
+  case `OutputInvalid`, so an exhaustive match on it needs one more case, and `LoopAgent` gains the field `output`.
 - **Kernel hooks for the harness: state-writing hooks, prompt sections and accounted model calls**
   ([#1902](https://github.com/llm4s/llm4s/issues/1902), Stage 3 slice C1, design §4.22): a middleware's `beforeAgent`,
   `wrapModelCall` and `afterAgent` read the committed thread state through a `ModelContext` (`run`, `state`) and
