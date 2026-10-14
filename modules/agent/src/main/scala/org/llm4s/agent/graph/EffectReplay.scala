@@ -310,15 +310,15 @@ object ReplayGuard:
     def apply(owner: TaskId): Result[A] =
       for
         _       <- notCancelled(context, key)
-        outcome <- effect(token)
+        outcome <- caught(effect(token))
         _       <- complete(journal, key, owner, EffectIntent.Transactional, outcome, maxOutcomeBytes)
-        _       <- applied.forget(key, token)
+        _       <- caught(applied.forget(key, token))
       yield outcome
     journal.lookup(key).flatMap {
       case None =>
         val owner = context.effectOwner
         for
-          _       <- applied.forget(key, token)
+          _       <- caught(applied.forget(key, token))
           _       <- journal.write(new EffectRecord(key, owner, EffectBody.Begun(EffectIntent.Transactional)))
           outcome <- apply(owner)
         yield outcome
@@ -326,7 +326,8 @@ object ReplayGuard:
         record.body match
           case EffectBody.Begun(EffectIntent.Transactional) => apply(record.taskId)
           case EffectBody.Begun(other) => Left(mismatch(key, other.support, ReplaySupport.Transactional))
-          case done => applied.forget(key, token).flatMap(_ => stored[A](key, done, ReplaySupport.Transactional))
+          case done =>
+            caught(applied.forget(key, token)).flatMap(_ => stored[A](key, done, ReplaySupport.Transactional))
     }
 
   /**
@@ -347,32 +348,33 @@ object ReplayGuard:
     // `baseline`: on a replay, the `before` the effect began against. A plan that read anything else saw a
     // change made after the probe, which the effect must not overwrite
     def fresh(owner: TaskId, baseline: Option[StateCheck]): Result[A] =
-      plan.flatMap { planned =>
-        val presumed = ujson.copy(upickle.default.writeJs(planned.presumed))
-        val intent   = EffectIntent.Verifiable(planned.before, planned.after, presumed)
-        for
-          _ <- baseline.filter(_ != planned.before).fold[Result[Unit]](Right(())) { expected =>
-            Left(
-              GraphError.EffectReplayRefused(
-                key.operation,
-                s"its target changed after the effect began: it is now ${planned.before.value}, not " +
-                  s"${expected.value} (not applied)"
+      caught(plan)
+        .flatMap(planned => caught(Right(ujson.copy(upickle.default.writeJs(planned.presumed)))).map(planned -> _))
+        .flatMap { (planned, presumed) =>
+          val intent = EffectIntent.Verifiable(planned.before, planned.after, presumed)
+          for
+            _ <- baseline.filter(_ != planned.before).fold[Result[Unit]](Right(())) { expected =>
+              Left(
+                GraphError.EffectReplayRefused(
+                  key.operation,
+                  s"its target changed after the effect began: it is now ${planned.before.value}, not " +
+                    s"${expected.value} (not applied)"
+                )
               )
-            )
-          }
-          _       <- withinCap(key, "its presumed outcome", presumed, maxOutcomeBytes)
-          _       <- journal.write(new EffectRecord(key, owner, EffectBody.Begun(intent)))
-          _       <- notCancelled(context, key)
-          outcome <- planned.effect()
-          _       <- complete(journal, key, owner, intent, outcome, maxOutcomeBytes)
-        yield outcome
-      }
+            }
+            _       <- withinCap(key, "its presumed outcome", presumed, maxOutcomeBytes)
+            _       <- journal.write(new EffectRecord(key, owner, EffectBody.Begun(intent)))
+            _       <- notCancelled(context, key)
+            outcome <- caught(planned.effect())
+            _       <- complete(journal, key, owner, intent, outcome, maxOutcomeBytes)
+          yield outcome
+        }
     journal.lookup(key).flatMap {
       case None => fresh(context.effectOwner, None)
       case Some(record) =>
         record.body match
           case EffectBody.Begun(intent @ EffectIntent.Verifiable(before, after, presumed)) =>
-            probe.flatMap { current =>
+            caught(probe).flatMap { current =>
               // `before` first: when the two digests are equal the probe cannot tell whether the effect
               // ran, and running it again - a compare-and-set that changes no digest - is what is safe
               if current == before then fresh(record.taskId, Some(before))
@@ -411,7 +413,7 @@ object ReplayGuard:
       for
         _       <- journal.write(new EffectRecord(key, owner, EffectBody.Begun(EffectIntent.Unverifiable)))
         _       <- notCancelled(context, key)
-        outcome <- effect
+        outcome <- caught(effect)
         _       <- complete(journal, key, owner, EffectIntent.Unverifiable, outcome, maxOutcomeBytes)
       yield outcome
     journal.lookup(key).flatMap {
@@ -433,11 +435,20 @@ object ReplayGuard:
     outcome: A,
     maxOutcomeBytes: Int
   ): Result[Unit] =
-    val json   = ujson.copy(upickle.default.writeJs(outcome))
-    val length = encodedLength(json)
-    val body =
-      if length > maxOutcomeBytes then EffectBody.Omitted(intent, length) else EffectBody.Completed(intent, json)
-    journal.write(new EffectRecord(key, owner, body))
+    // an outcome that does not encode is a failure after the effect: the record stays begun, the task fails
+    caught(Right(ujson.copy(upickle.default.writeJs(outcome)))).flatMap { json =>
+      val length = encodedLength(json)
+      val body =
+        if length > maxOutcomeBytes then EffectBody.Omitted(intent, length) else EffectBody.Completed(intent, json)
+      journal.write(new EffectRecord(key, owner, body))
+    }
+
+  /**
+   * `body` - the caller's effect, plan, probe or codec, or a target's `forget` - with anything it throws as a
+   * `Left`: never a refusal, so the task fails, commits nothing, and keeps its evidence for `recover`. A
+   * throw must not escape the guard, where a tool loop would turn it into an error result the task commits.
+   */
+  private def caught[A](body: => Result[A]): Result[A] = Try(body).toResult.flatten
 
   private def stored[A: ReadWriter](key: EffectKey, body: EffectBody, expected: ReplaySupport): Result[A] =
     if body.intent.support != expected then Left(mismatch(key, body.intent.support, expected))
