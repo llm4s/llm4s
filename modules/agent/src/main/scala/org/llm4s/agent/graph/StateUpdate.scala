@@ -23,6 +23,16 @@ final class StateUpdate private[graph] (private[graph] val operations: Vector[St
   def remove(key: StateKey[?, ?]): StateUpdate =
     new StateUpdate(operations :+ StateOperation.Remove(key))
 
+  /**
+   * Appends a restore of `key` to `value`, a value it held before, or the removal of its entry for `None`. It
+   * bypasses the key's update function, which has no update for "go back": only a [[NodeResult.Block]] update
+   * uses it, to restore a blocked turn, and a Block update is never a pending write.
+   */
+  private[graph] def restore[A](key: StateKey[A, ?], value: Option[A]): StateUpdate =
+    new StateUpdate(
+      operations :+ value.fold[StateOperation](StateOperation.Remove(key))(StateOperation.Restore(key, _))
+    )
+
   /** Sequential composition: this update's operations, then `next`'s. */
   def combine(next: StateUpdate): StateUpdate =
     new StateUpdate(operations ++ next.operations)
@@ -38,6 +48,8 @@ object StateUpdate:
 
   def remove(key: StateKey[?, ?]): StateUpdate = empty.remove(key)
 
+  private[graph] def restore[A](key: StateKey[A, ?], value: Option[A]): StateUpdate = empty.restore(key, value)
+
 sealed private[graph] trait StateOperation:
   def key: StateKey[?, ?]
 
@@ -47,3 +59,6 @@ private[graph] object StateOperation:
     def applyTo(current: Any): Result[A] = key.applyUpdate(current.asInstanceOf[A], value)
 
   final case class Remove(key: StateKey[?, ?]) extends StateOperation
+
+  /** Sets `key`'s stored value to `value`, without its update function; see [[StateUpdate.restore]]. */
+  final case class Restore[A](key: StateKey[A, ?], value: A) extends StateOperation

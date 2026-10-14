@@ -104,6 +104,13 @@ addCommandAlias(
   "testFast",
   """;set core / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-l", "org.llm4s.tags.SlowTest"); test"""
 )
+// ---- Performance tier ----
+// Tests tagged `org.llm4s.testutil.PerformanceTest` check that an operation's cost grows linearly with its input
+// (`LinearTime.assertLinear`). `sbt test` excludes the tag (see `commonSettings`); this runs only the tagged tests, in
+// every module. CI runs it in the ubuntu-only `Performance tests` job and nightly (performance-nightly.yml).
+lazy val PerformanceTestTag = "org.llm4s.tags.PerformanceTest"
+addCommandAlias("testPerformance", s"testOnly -- -n $PerformanceTestTag")
+
 // ---- Tiered test aliases ----
 // Every suite in `modules/it` declares its tier by class annotation (see project/ItTiers.scala);
 // `it/itTierCheck` fails the build if one declares none. Each alias selects a tier by tag, so a
@@ -163,6 +170,11 @@ lazy val commonSettings = Seq(
   // `-oD`: print each test's duration, so a slow test (or a platform that is slow at one thing,
   // such as Windows refusing a loopback connection) shows up in the log, locally and in CI.
   Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oD"),
+  // The performance tier (`sbt testPerformance`): tests tagged `PerformanceTest` measure how an operation's cost
+  // grows with its input, which is the same on every platform, so `test` - CI's ubuntu and Windows jobs and the
+  // coverage run - leaves them out (#1932). Scoped to `test`, as `it`'s tier filter is, so that `testOnly` of a named
+  // suite still runs all of it, and so that `testPerformance` can select the tag with `testOnly -- -n`.
+  Test / test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-l", PerformanceTestTag),
   // Published modules log through `slf4j-api` only. Choosing a logging backend is the
   // application's decision: `logback-classic` and the `log4j-to-slf4j` bridge used to be compile
   // dependencies here, so every llm4s artifact put them on its users' classpath - a second
@@ -594,9 +606,9 @@ lazy val core = (project in file("modules/core"))
     Test / javaOptions ++= Seq(
       "-Xmx2g",
       "-Xms512m",
-      "-XX:+UseG1GC",
-      "-XX:+TieredCompilation",
-      "-XX:TieredStopAtLevel=1"
+      // No `-XX:TieredStopAtLevel=1`: C1-only start-up tuning from when this module's tests took a minute (#825).
+      // It made the long CPU-bound runs here - the Redaction suites' megabyte inputs - about 40% slower (#1932).
+      "-XX:+UseG1GC"
     ),
     // Pass API key entries from .env into forked test JVM (for smoke/integration tests).
     // Only forwards *_API_KEY variables to avoid polluting test configuration
@@ -680,9 +692,9 @@ lazy val rag = (project in file("modules/rag"))
     Test / javaOptions ++= Seq(
       "-Xmx2g",
       "-Xms512m",
-      "-XX:+UseG1GC",
-      "-XX:+TieredCompilation",
-      "-XX:TieredStopAtLevel=1"
+      // No `-XX:TieredStopAtLevel=1` (copied from core's in the carve): C1 only made these tests slower, a run of
+      // 9.2 s against 6.4 s with the default tiered JIT.
+      "-XX:+UseG1GC"
     ),
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -1146,8 +1158,10 @@ lazy val providerTestkit = (project in file("modules/provider-testkit"))
 // `llm4s-schema-derivation` (#1472): a JSON schema derived from a case class with Scala 3 `Mirror`, so
 // `completeStructured` needs no hand-written `ObjectSchema` that repeats the type. It layers on core's
 // public API (it builds an `ObjectSchema` and calls `completeStructured`) and adds no dependency.
+// `llm4s-agent` is test-only (#1912): `DerivedAgentOutputSpec` and the guide check that a derived schema is an
+// agent's response format (`withOutput(SchemaOf[A].definition)`). The module itself never depends on the agent.
 lazy val schemaDerivation = (project in file("modules/schema-derivation"))
-  .dependsOn(core % "compile->compile;test->test")
+  .dependsOn(core % "compile->compile;test->test", agent % Test)
   .settings(
     name := "llm4s-schema-derivation",
     commonSettings,

@@ -16,6 +16,7 @@ import org.scalatest.matchers.should.Matchers
 import upickle.default.{ macroRW, ReadWriter }
 
 import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch }
+import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
 /** The tool and guardrail events of an agent run, and what the durable ones may carry. */
@@ -68,8 +69,8 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
       e match
         case StreamEvent.Durable(record) =>
           record.event match
-            case RunEvent.RunCompleted | RunEvent.RunFailed(_) | RunEvent.RunSuspended(_) | RunEvent.RunCancelled |
-                RunEvent.RunTimedOut =>
+            case RunEvent.RunCompleted | RunEvent.RunFailed(_, _) | RunEvent.RunSuspended(_) |
+                RunEvent.RunCancelled(_) | RunEvent.RunTimedOut(_) =>
               ended.countDown()
             case _ => ()
         case _ => ()
@@ -271,7 +272,8 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
   }
 
   /** Every durable event of `threadId`'s log, replayed from the start. */
-  private def replayed(runtime: GraphRuntime, threadId: ThreadId): Vector[EventRecord] =
+  private def replayed(runtime: GraphRuntime, store: Checkpointer, threadId: ThreadId): Vector[EventRecord] =
+    val log     = store.eventsAfter(threadId, 0L, 10_000).fold(e => fail(e.message), identity)
     val records = new CopyOnWriteArrayList[EventRecord]()
     val sub = runtime
       .subscribe(threadId, afterSeq = 0L) {
@@ -279,24 +281,29 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
         case _                      => ()
       }
       .fold(e => fail(e.message), identity)
-    Thread.sleep(300) // replay of an in-memory log is immediate; this only lets the dispatcher drain
+    // the runs have ended, so the log is complete: wait until the subscription has delivered all of it
+    val deadline = System.nanoTime() + 10.seconds.toNanos
+    while records.size < log.size && System.nanoTime() < deadline do Thread.sleep(5)
     sub.cancel()
-    records.asScala.toVector
+    records.asScala.toVector shouldBe log
+    log
 
   "Durable agent events" should "be stored once per committed task, and none for a failed task" in {
-    val runtime = GraphRuntime.inMemory()
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
     val client  = Scripted(Left(NetworkError("down", None, "test")), Right(answer("done")))
     val agent   = Agent.builder("assistant", client).withRuntime(runtime).build().fold(e => fail(e.message), identity)
     agent.run(ThreadId("once"), "go").isLeft shouldBe true
     agent.recover(ThreadId("once")).map(_.answer) shouldBe Right(Some("done"))
-    val completed = replayed(runtime, ThreadId("once")).collect {
+    val completed = replayed(runtime, store, ThreadId("once")).collect {
       case r @ EventRecord(_, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ModelCallCompleted.name, _, _)) => r
     }
     completed.size shouldBe 1
   }
 
   it should "store a tool's ToolExecuted once when recover re-runs only the failed work" in {
-    val runtime = GraphRuntime.inMemory()
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
     // the tool call succeeds; the next model call fails, and recover re-runs only that call
     val client = Scripted(Right(toolCallCompletion), Left(NetworkError("down", None, "test")), Right(answer("done")))
     val agent = Agent
@@ -307,7 +314,7 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
       .fold(e => fail(e.message), identity)
     agent.run(ThreadId("tool-once"), "go").isLeft shouldBe true
     agent.recover(ThreadId("tool-once")).map(_.answer) shouldBe Right(Some("done"))
-    val executed = replayed(runtime, ThreadId("tool-once")).collect {
+    val executed = replayed(runtime, store, ThreadId("tool-once")).collect {
       case r @ EventRecord(_, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ToolExecuted.name, _, _)) => r
     }
     executed.size shouldBe 1
@@ -315,7 +322,8 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
 
   "Agent payloads" should "carry no content" in {
     val marker  = "SECRET-42"
-    val runtime = GraphRuntime.inMemory()
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
     val call    = ToolCall("call-1", "echo", ujson.Obj("message" -> marker))
     val client = Scripted(
       Right(Completion("c1", 0L, "", "test-model", AssistantMessage(None, Seq(call)), List(call), usage)),
@@ -328,7 +336,7 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
       .build()
       .fold(e => fail(e.message), identity)
     agent.run(ThreadId("content"), s"tell me $marker").map(_.answer) shouldBe Right(Some(s"the answer is $marker"))
-    val agentPayloads = replayed(runtime, ThreadId("content")).collect {
+    val agentPayloads = replayed(runtime, store, ThreadId("content")).collect {
       case EventRecord(_, _, _, _, _, _, _, RunEvent.Custom(name, _, payload)) if AgentEvents.durable(name) => payload
     }
     agentPayloads should not be empty
@@ -337,7 +345,8 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
 
   it should "carry no guardrail reason or blocked text" in {
     val marker  = "SECRET-42"
-    val runtime = GraphRuntime.inMemory()
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
     val agent = Agent
       .builder("assistant", Scripted(Right(answer(s"leaking $marker"))))
       .withMiddleware(new GuardrailMiddleware(input = Nil, output = Seq(new LengthCheck(1, 3))))
@@ -347,7 +356,7 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
     agent.run(ThreadId("blocked"), s"tell me $marker").map(_.status) should matchPattern {
       case Right(AgentStatus.Blocked(_, _)) =>
     }
-    val agentPayloads = replayed(runtime, ThreadId("blocked")).collect {
+    val agentPayloads = replayed(runtime, store, ThreadId("blocked")).collect {
       case EventRecord(_, _, _, _, _, _, _, RunEvent.Custom(name, _, payload)) if AgentEvents.durable(name) =>
         name -> payload
     }

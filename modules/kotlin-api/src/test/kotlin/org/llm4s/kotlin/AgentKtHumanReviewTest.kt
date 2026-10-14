@@ -3,9 +3,10 @@ package org.llm4s.kotlin
 import kotlinx.coroutines.runBlocking
 import org.llm4s.agent.Agent
 import org.llm4s.agent.AgentNode
-import org.llm4s.agent.graph.RunContext
 import org.llm4s.agent.graph.StateUpdate
 import org.llm4s.agent.graph.middleware.AgentMiddleware
+import org.llm4s.agent.graph.middleware.BoundaryResult
+import org.llm4s.agent.graph.middleware.ModelContext
 import org.llm4s.agent.graph.middleware.ToolCallRequest
 import org.llm4s.agent.graph.tool.AgentTool
 import org.llm4s.agent.graph.tool.AgentToolSpec
@@ -82,8 +83,9 @@ class AgentKtHumanReviewTest {
         override fun id(): String = "region"
 
         @Suppress("UNCHECKED_CAST")
-        override fun beforeAgent(input: String, context: RunContext): Either<LLMError, String> =
-            if (answered(context).isDefined) Right(input) else ask(parse("""{"what":"region"}""")) as Either<LLMError, String>
+        override fun beforeAgent(input: String, context: ModelContext): Either<LLMError, BoundaryResult> =
+            if (answered(context).isDefined) Right(BoundaryResult.apply(input, BoundaryResult.`apply$default$2`()))
+            else ask(parse("""{"what":"region"}""")) as Either<LLMError, BoundaryResult>
     }
 
     private fun call(id: String, text: String): ToolCall = ToolCall.apply(id, "deploy", parse("""{"text":"$text"}"""))

@@ -136,9 +136,9 @@ final case class Info(value: String) derives ReadWriter
 
 final class Region extends AgentMiddleware.Asking[Need, Info]:
   val id = MiddlewareId("region")
-  override def beforeAgent(input: String, context: RunContext): Result[String] =
-    if input.contains("region") then Right(input)
-    else answered(context).fold(ask(Need("region")))(r => Right(s"$input (region ${r.answer.value})"))
+  override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
+    if input.contains("region") then Right(BoundaryResult(input))
+    else answered(context).fold(ask(Need("region")))(r => Right(BoundaryResult(s"$input (region ${r.answer.value})")))
 ```
 
 The turn suspends with a `MiddlewareQuestionRequest` - the agent and middleware that asked, the hook,

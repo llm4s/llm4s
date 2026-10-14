@@ -136,6 +136,24 @@ val weatherTool: Result[ToolFunction[WeatherQuery, String]] =
 
 The tool is sent in strict mode, so every parameter is required and `unit` is a property that may be `null`. The module's tests check that the parameters the tool sends are the derived schema, and that the handler reads a call.
 
+## An agent's answer
+
+An agent's response format is a schema too: pass `SchemaOf[A].definition` to `AgentBuilder.withOutput`, and read the answer with `decodeOutput[A]` (see [the agent guide](agents/#a-typed-answer)). `withOutput` is in `llm4s-agent`, which this module does not depend on.
+
+```scala
+import org.llm4s.agent.Agent
+import org.llm4s.schema.*
+
+def extractWithAgent(client: LLMClient, email: String): Result[Invoice] =
+  for {
+    agent   <- Agent.builder("extractor", client).withOutput(SchemaOf[Invoice].definition).build()
+    result  <- agent.run(s"Extract the invoice from this email: $email")
+    invoice <- result.decodeOutput[Invoice]
+  } yield invoice
+```
+
+As with `completeStructuredOf`, `A` must be a case class: `build` refuses any other type with a `Left`.
+
 ## Descriptions
 
 The model sees a description for every property and for the object. `@description("...")` sets it: on a case class parameter it describes the field, on a case class, enum or sealed trait it describes the type. The text must be a string literal, because the annotation is read at compile time. Without it a field is described by its type's `@description` if it has one, and otherwise by its name, and a type by its name.

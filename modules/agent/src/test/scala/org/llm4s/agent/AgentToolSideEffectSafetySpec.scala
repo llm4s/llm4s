@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.agent.graph.middleware.{ ModelContext, ModelResponse }
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.graph._
@@ -59,10 +60,10 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
   /** A middleware recording where each model call ran. */
   private def modelPositions(seen: ConcurrentLinkedQueue[RunPosition]): AgentMiddleware = new AgentMiddleware {
     val id: MiddlewareId = MiddlewareId("model-positions")
-    override def wrapModelCall(request: ModelRequest, context: RunContext)(
-      next: ModelRequest => Result[Completion]
-    ): Result[Completion] = {
-      seen.add(context.position)
+    override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+      next: ModelRequest => Result[ModelResponse]
+    ): Result[ModelResponse] = {
+      seen.add(context.run.position)
       next(request)
     }
   }
@@ -155,9 +156,9 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
   "A model wrapper that drops a tool result" should "never reach the model" in {
     val dropping = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("drop-results")
-      override def wrapModelCall(request: ModelRequest, context: RunContext)(
-        next: ModelRequest => Result[Completion]
-      ): Result[Completion] =
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] =
         next(request.withMessages(request.messages.filterNot(_.isInstanceOf[ToolMessage])))
     }
     val lookup = SpecTools.tool("lookup")((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("ok"))))

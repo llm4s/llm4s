@@ -242,7 +242,8 @@ delivered what it had queued, and never delivers the new thread's events as if t
   or, with `WatchPolicy.disabled`, only when its own runtime next commits on the thread;
 - in another runtime, a subscription that has delivered no event yet - still at `afterSeq = 0`, as one to a thread
   that never numbered an event always is - cannot be told from a new subscription, so it follows the new thread
-  from its first event instead of ending.
+  from its first event instead of ending - if the new thread is its tenant's; otherwise it ends with
+  `TenantMismatch` before that event ([Tenants](streaming#tenants)).
 
 Subscribe again from `afterSeq = 0` to follow the new thread from its first event.
 

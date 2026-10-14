@@ -181,6 +181,7 @@ The project provides a handful of sbt commands that contributors use frequently.
 | Full CI‑like pipeline      | `sbt buildAll`              | Compiles and tests every aggregated module for the current build |
 | Format code                | `sbt scalafmtAll`           | Apply project‑wide formatting (required before PRs)            |
 | Run an integration tier    | `sbt testIntegration`       | Suites in `modules/it` that need a real service — see section 9 |
+| Run the performance tier   | `sbt testPerformance`       | Tests tagged `PerformanceTest` (scaling checks) — see below    |
 
 ### Using the table
 
@@ -195,6 +196,37 @@ The following commands are still handy in day‑to‑day development:
 sbt "testOnly *MySpec"   # run one suite
 sbt ~test                # continuous feedback as you code
 ```
+
+### Performance tests (`sbt testPerformance`)
+
+Some tests check how an operation's cost grows with its input rather than what it returns: that
+`Redaction.redact`, a guardrail's PII pattern or the error mapper's status patterns take linear
+time on adversarial input, never quadratic (a ReDoS). They use
+`org.llm4s.testutil.LinearTime.assertLinear`, which compares the thread CPU time of an input with
+that of one four times its size; its Scaladoc explains the noise model.
+
+Such a test is tagged `PerformanceTest` (`org.llm4s.testutil.PerformanceTest`):
+
+```scala
+import org.llm4s.testutil.{ LinearTime, PerformanceTest }
+
+it should "read values in time linear in the input" taggedAs PerformanceTest in {
+  LinearTime.assertLinear("unit", build(2500), build(10000))(Redaction.redact(_))
+}
+```
+
+`sbt test` and the coverage run exclude the tag: an algorithm's growth is the same on every
+platform, so running these tests on Windows and under coverage instrumentation multiplied their
+cost - most of each CI test job's time - without adding a signal. `sbt testPerformance` runs only
+the tagged tests, in every module; CI runs it in the ubuntu-only `Performance tests` job on every
+pull request, in parallel with the other test jobs, and nightly (`performance-nightly.yml`).
+`sbt "core/testOnly *RedactionShapesSpec"` runs a whole suite, tagged tests included: the
+exclusion applies to `test`, not to a suite named explicitly.
+
+Each spec whose scaling tests are tagged keeps one ordinary test that pushes a single ~1 MB
+worst-case input through the same operation under a generous wall-clock hang guard
+(`LinearTime.timed(label, hangGuard = ...)`), so `sbt test` still fails on a catastrophic
+regression without a bound tight enough to flake on a slow runner.
 
 > **Scala version note:** LLM4S currently builds on Scala 3.7.1. Historical design notes may mention older cross-building plans, but contributors should follow the current `build.sbt` and CI matrix.
 
@@ -295,6 +327,12 @@ sbt testMcpReference
   * Randomness (unless seeded)
 
 If your test fails in CI but not locally, it is usually a **non-determinism issue**.
+
+The jobs of `.github/workflows/ci.yml` start together; none waits for another. `Quick Checks` (formatting,
+scalafix, compile and the build's policy checks) runs beside `Test` (ubuntu and Windows), `Performance tests`,
+the four `Code Coverage (<leg>)` jobs and the rest, and `All Tests Pass`, the check a merge needs, waits for all
+of them. Coverage floors are enforced per module in the coverage legs; see
+[Test Coverage](test-coverage#what-ci-runs).
 
 ---
 

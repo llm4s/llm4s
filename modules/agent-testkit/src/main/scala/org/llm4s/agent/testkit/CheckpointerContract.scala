@@ -64,7 +64,9 @@ import scala.jdk.CollectionConverters.*
  *    ([[sibling]]): a subscription in one runtime receives the durable events of runs another
  *    runtime commits - in order, without gap or duplicate, when it joined before or mid-run - while
  *    runs alternate between the runtimes; resumes from a sequence number after its runtime restarts;
- *    never receives another runtime's live progress; and stops watching the store when cancelled.
+ *    never receives another runtime's live progress; stops watching the store when cancelled; and
+ *    ends with [[DisconnectReason.TenantMismatch]], delivering nothing of it, when another runtime
+ *    creates the thread for another tenant.
  *
  * Claim expiry is judged by the store's clock. By default the store under test must use the `clock`
  * it is given for that (and may use it for nothing else), and the suite moves a [[ManualClock]]; it
@@ -1460,6 +1462,24 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     again.deliveredExactly(log(s))
     log(s).head.seq shouldBe old.last.seq + 2
     next.cancel()
+  }
+
+  it should "end with TenantMismatch, delivering nothing, when another runtime creates the thread for another tenant" in {
+    val s    = Store()
+    val st   = Steps()
+    val a    = runtime(s.store)
+    val b    = runtime(s.other())
+    val seen = Seen()
+    // tenant "mine" watches a thread that does not exist yet, from the runtime over the other store
+    val sub = b.subscribe(s.thread, config = config("watcher").withTenantId(TenantId("mine")))(seen).value
+    eventually(b.storeWatches(s.thread) == 1)
+
+    completed(a.start(s.thread, st.graph, "theirs", config("a1").withTenantId(TenantId("theirs"))).value)
+
+    eventually(seen.all.lastOption.exists(_.isInstanceOf[StreamEvent.Disconnected]))
+    seen.all shouldBe Vector(StreamEvent.Disconnected(0L, DisconnectReason.TenantMismatch))
+    eventually(b.storeWatches(s.thread) == 0)
+    sub.cancel()
   }
 
   it should "refuse updateState and fork into a thread whose run is live in another runtime, then fence them by their own claim" in {

@@ -38,6 +38,63 @@ Not in a release yet. Stage 3 slice F8b ([#1913](https://github.com/llm4s/llm4s/
 - **A custom `LLMClient`** that matched `UserMessage(content)` must decide what to do with media parts: send them, or return `Left(UnsupportedContentPartError(provider, part.kind, role))` before sending. `org.llm4s.llmconnect.provider.PartEncoding` is `private[llm4s]`; a provider outside llm4s uses `ContentPart.kind` and the error directly, and runs `ProviderModuleChecks.assertContentParts` in its module spec.
 - **Stored data needs nothing.** The JSON of a one-text message is unchanged, and the old shape reads, so memory stores, saved conversations and thinking bindings are unaffected. An agent thread's `messages` and `tool-results` keys move to schema version 2 and migrate on restore; a thread written by this version cannot be restored by an earlier one.
 - **Inline media is bounded** at 5 MiB per part by `ContentPart.image` / `ContentPart.document`, which return a `Result`. Every agent checkpoint copies the thread's messages, so larger media goes at a `MediaSource.Url` or in a `MediaSource.ProviderFile`. See [Multimodal content](../guide/multimodal.html).
+## Stage 3 migration: the Deep Agents harness
+
+Not in a release yet. Stage 3 ([#1901](https://github.com/llm4s/llm4s/issues/1901)) builds the harness as middleware
+and tools on `AgentBuilder`. Each slice adds its part here as it lands:
+
+- [#1902](https://github.com/llm4s/llm4s/issues/1902), kernel hooks for the harness - state-writing hooks, prompt
+  sections, accounted model calls, and a Block that restores the whole turn: [below](#kernel-hooks-for-the-harness-1902).
+
+Design: `docs/design/typed-agent-runtime/4.22-stage-3-slice-c1-kernel-hooks.md` (§4.22) onwards.
+
+### Kernel hooks for the harness (#1902)
+
+Code that only builds agents with the built-in middleware needs no change. A middleware of your own that overrides
+`beforeAgent`, `afterAgent` or `wrapModelCall` does. Source breaks, with no shims:
+
+- **The boundary hooks take a `ModelContext` and return a `BoundaryResult`.** `context.run` is the `RunContext` they
+  took before; `context.state` the committed state the task read. Wrap the text, and add an update to keys the
+  middleware declares in `writes` if it has one:
+
+  ```scala
+  // before
+  override def beforeAgent(input: String, context: RunContext): Result[String] = Right(input.trim)
+  // after
+  override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
+    Right(BoundaryResult(input.trim))
+  ```
+
+  `AgentMiddleware.Asking.answered` takes the `ModelContext` too.
+- **`wrapModelCall` takes a `ModelContext` and its `next` returns a `ModelResponse`.** A wrapper that passed `next`
+  through needs only the new signature. One that read the completion reads `response.completion`; one that changed it
+  uses `response.withCompletion(c)`, which keeps the inner wrappers' updates; one that answered without calling
+  `next` returns `ModelResponse(completion)`. A wrapper adds writes with `response.addUpdate(update)`.
+- **`writes` covers every hook.** An update from any hook may touch only that middleware's own `writes`; any other
+  key fails the run with a `ValidationError`.
+- **An output Block restores every key the turn wrote.** Before, only the turn's messages, the active agent and the
+  transfer were rolled back, and a key a tool or middleware wrote during a blocked turn kept its new value. Now
+  every such key returns to its value before the turn; `usage` is kept. A file, sandbox or memory store outside the
+  thread state is not restored.
+- **Usage counts provider calls.** A retrying wrapper's discarded calls are now in `AgentResult.usage`, and a
+  completion a wrapper returned without calling the model (a cache, a reviewed answer) no longer counts as a request.
+  `ModelCallCompleted` is one event per provider call, `attempts` that call's attempt number (0 for a hook's own call
+  through `ModelContext.accounted`). A hook that calls a model itself - or hands a client to a library that does -
+  wraps the client with `context.accounted(client)`, so its calls are counted.
+- **`RunEvent.RunFailed` gains `usage`; `RunCancelled` and `RunTimedOut` become case classes with `usage`**: the
+  calls of the attempts that committed nothing - a task that failed, or one the cancel or deadline cut short. Match
+  them as `RunFailed(message, _)`, `RunCancelled(_)` and `RunTimedOut(_)`; build them as `RunCancelled()`. Events
+  stored before decode with `None`.
+- **Guardrails take the hook's context.** `Guardrail` gains `validate(value, context: ModelContext)`, defaulting to
+  `validate(value)`; `GuardrailMiddleware` calls it. A guardrail of your own that calls a model overrides it to call
+  through `context.accounted(client)`; one that combines guardrails passes `context` on. A subclass of
+  `LLMGuardrail` that called `evaluateWithLLM(content)` passes the client too: `evaluateWithLLM(content, llmClient)`.
+- **An output Block keeps edits made by others.** A key `updateState` changed while the turn waited for review keeps
+  the edit; only keys still holding the turn's writes are restored.
+- **New hook `promptSections`** adds system-prompt content per request, never stored; together the sections are
+  capped by `AgentBuilder.withMaxPromptSectionTokens` (default 8192, four characters a token, measured on the
+  rendered prompt, separators included) and to 64 per request, over which the run fails. `LoopAgent` gains `maxPromptSectionTokens` and `TurnState` gains `priorValues`; a stored `TurnState` without
+  it decodes.
 
 ## Stage 2 migration: durable execution
 
@@ -83,6 +140,9 @@ A run now holds a lease on its thread - a `RunClaim` with an expiry and a `Fenci
   A store implementation checks the token as its `commit` does, in the same lock or transaction as the delete. `GraphRuntime.deleteThread` passes its own claim's token, and reports a delete whose claim another runtime took over as `ThreadBusy` (or `TenantMismatch`, for another tenant's run), with nothing deleted.
 - **A new thread under a deleted thread's id numbers its events on past the deleted thread's**, not from 1 again: one past the deleted thread's next number, which is never used. A store keeps a tombstone of that number (no data) for each deleted thread that numbered an event, refuses a read of the log after one of the deleted thread's numbers with the new **`GraphError.ThreadDeleted(threadId, afterSeq, firstSeq)`** (`Checkpointer.deleted(afterSeq, firstSeq)` is the rule), and reads from `afterSeq = 0` from the current thread's first event. Code that assumed a thread's first event is `1` should read from `0`.
 - **`DisconnectReason` gains `ThreadDeleted`.** A subscription to a deleted thread - in the deleting runtime, or in another runtime sharing the store, at its next read of the store - ends with `Disconnected(lastSeq, ThreadDeleted)` and never delivers a new thread of the same id as a continuation of the old one; subscribe again from `0` to follow that one. (A subscription in another runtime that has delivered no event yet cannot be told from a new one, and follows the new thread.) A `match` on `DisconnectReason` needs the new case. Before, a subscription in another runtime went on delivering the new thread's events as if they continued the old log, so the old advice to cancel subscriptions before deleting a thread is no longer needed.
+- **`GraphRuntime.subscribe` takes the caller's `RunConfig`, and refuses another tenant's thread.** `subscribe(threadId, afterSeq, capacity)(listener)` is `subscribe(threadId, afterSeq, capacity, config)(listener)`, and `TracingSubscriber.attach(runtime, threadId, tracing, afterSeq)` gains `config` too; both default to `RunConfig()`. A thread whose latest checkpoint is another tenant's - or, with no checkpoint yet, whose run admitting or executing in this runtime is - is refused with `GraphError.TenantMismatch` before the subscription joins, as `history` and `checkpoint` refuse it; a failed read of the thread is returned. Before, any caller could replay and follow any tenant's thread. Pass the `config` your runs use: a multi-tenant caller that subscribed with no `config` is now refused. `RunHandle.subscribe` and `AgentRun.subscribe` use their run's tenant and are unchanged.
+- **`DisconnectReason` gains `TenantMismatch`.** A subscription screens each event against its tenant, so that a thread created under its id by another tenant after it subscribed - or deleted and created again by another tenant through another runtime - is never delivered: it ends with `Disconnected(lastSeq, TenantMismatch)` before that thread's first event. A `match` on `DisconnectReason` needs the new case.
+- **A `ThreadBusy` whose re-read fails names nothing.** When a claim is refused, or a run's claim commit conflicts, the runtime re-reads the thread to check its tenant before naming its checkpoint. If that re-read failed, the error named the store's own, unchecked checkpoint id - another tenant's, possibly, with that tenant's run id in it. It is now `ThreadBusy(threadId, None, None)`.
 - **`CheckpointerContract` no longer requires a store to delete regardless of claims.** It checks a delete with the current token, a stale token and another holder's live token, a runtime delete whose claim was taken over, the numbering of a recreated thread, `ThreadDeleted` from `eventsAfter` and `awaitEventsAfter`, and a subscription in another runtime ending with `ThreadDeleted`.
 - **The SQLite schema is version 2** (`first_seq` on `llm4s_checkpoint_threads`). Opening a version-1 file upgrades it in one transaction; a build that knows only version 1 refuses a version-2 file. Stop every process on the older build first: one that already has the file open is not refused, and its deletes are unfenced and drop tombstones.
 - **There is no unfenced `deleteThread`.** To delete a thread outside a runtime, claim it and delete with the claim's token. A deleted id that numbered events keeps a small tombstone (its next event number) for good.
@@ -228,6 +288,14 @@ A subscription now delivers the durable events of commits made through any runti
 - **A subscription can now end with `Disconnected(lastSeq, ReplayFailed(error))` after its replay**, when a read of the store fails, for instance because the store was closed under it. Before, only a failed replay ended this way. Resubscribe with `afterSeq = lastSeq`.
 - **Other runtimes' durable events arrive; their live events do not.** A listener that assumed every durable event came from its own runtime's runs should check `record.runId`.
 - **`CheckpointerContract` gains change-notification cases and a `sibling(store, clock)` hook.** A durable store's spec overrides `sibling` to open another store over the same storage, so that the cases run between connections.
+
+## Stage 3 migration: the harness
+
+### Typed custom streams (#1914)
+
+`EventHandlers` and the effect modules' `events(run, ...)` are additions. One behaviour changes:
+
+- **An fs2, ZIO, Pekko or Java agent stream whose consumer stops draining now fails** once more than `Agent.StreamCapacity` (1024) durable events wait for it, with an error naming the last `seq` it took, as the runtime already disconnects a listener that far behind (`Disconnected(lastSeq, Lagging)`). Before, the stream's buffer kept every durable event without limit. A `stream*` that fails this way cancels its turn, as any failure of those streams does; resume from the thread's log with `GraphRuntime.subscribe(threadId, afterSeq = lastSeq)`. A consumer that keeps up, even slowly, is unaffected: a run's own events stay far below the bound.
 
 ## Stage 1 migration: agent runtime
 

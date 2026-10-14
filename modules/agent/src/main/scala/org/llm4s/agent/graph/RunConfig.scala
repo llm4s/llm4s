@@ -1,7 +1,10 @@
 package org.llm4s.agent.graph
 
 import org.llm4s.error.ValidationError
+import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary }
 import org.llm4s.types.Result
+
+import java.util.concurrent.atomic.AtomicReference
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -141,11 +144,13 @@ final class RunContext private[graph] (
    * Answers to middleware questions, by asking middleware id, as (question, answer) JSON: set when a
    * hook runs again after its questions were answered; see `AgentMiddleware.Asking`.
    */
-  private[agent] val answers: Map[String, (ujson.Value, ujson.Value)] = Map.empty
+  private[agent] val answers: Map[String, (ujson.Value, ujson.Value)] = Map.empty,
+  /** The model usage this task's hooks and model calls recorded; see `ModelContext`. */
+  private[agent] val usage: TaskUsage = new TaskUsage
 ):
-  /** This context with `next` as the answers its hooks see. */
+  /** This context with `next` as the answers its hooks see, recording usage in the same task's accumulator. */
   private[agent] def withAnswers(next: Map[String, (ujson.Value, ujson.Value)]): RunContext =
-    new RunContext(config, position, sink, next)
+    new RunContext(config, position, sink, next, usage)
 
   /** Records a durable custom event; `payload` is snapshotted at the call, so the node may reuse it. */
   def emit(name: String, version: Int, payload: ujson.Value): Unit = sink.custom(name, version, payload)
@@ -158,3 +163,17 @@ final class RunContext private[graph] (
 
   /** Forgets the durable events a failed attempt emitted, before the node is run again. */
   private[graph] def discardAttempt(): Unit = sink.discardCustom()
+
+/**
+ * The model usage one task recorded, from every thread the task runs hooks on. A task that commits adds it to its
+ * own update; the runtime puts a failed task's on the run's `RunFailed` (design §4.22).
+ */
+final private[agent] class TaskUsage:
+  private val recorded = new AtomicReference(UsageSummary())
+
+  def add(model: String, usage: TokenUsage, cost: Option[Double]): Unit =
+    recorded.updateAndGet(_.add(model, usage, cost)): Unit
+
+  def summary: UsageSummary = recorded.get
+
+  def isEmpty: Boolean = recorded.get.requestCount == 0

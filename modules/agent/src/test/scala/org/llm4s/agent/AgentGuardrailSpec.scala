@@ -1,7 +1,8 @@
 package org.llm4s.agent
 
+import org.llm4s.agent.graph.middleware.{ BoundaryResult, ModelContext, ModelResponse }
 import org.llm4s.agent.AgentFixture._
-import org.llm4s.agent.graph.{ Checkpoint, GraphError, GraphRuntime, RunContext }
+import org.llm4s.agent.graph.{ Checkpoint, GraphError, GraphRuntime }
 import org.llm4s.agent.graph.middleware.{
   AgentMiddleware,
   GuardrailBlocked,
@@ -207,9 +208,9 @@ class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
   final private class FlakyAfterAgent(failures: Int) extends AgentMiddleware {
     val calls            = new AtomicInteger(0)
     val id: MiddlewareId = MiddlewareId("flaky")
-    override def afterAgent(answer: String, context: RunContext): Result[String] =
+    override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
       if (calls.incrementAndGet() <= failures) Left(ValidationError("audit", "audit store unavailable"))
-      else Right(answer)
+      else Right(BoundaryResult(answer))
   }
 
   "A non-guardrail boundary failure" should "end the run as Left with its error, the turn removed and the thread usable" in {
@@ -233,9 +234,9 @@ class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
   final private class BlockingModelWrapper extends AgentMiddleware {
     val calls            = new AtomicInteger(0)
     val id: MiddlewareId = MiddlewareId("model-guard")
-    override def wrapModelCall(request: ModelRequest, context: RunContext)(
-      next: ModelRequest => Result[Completion]
-    ): Result[Completion] =
+    override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+      next: ModelRequest => Result[ModelResponse]
+    ): Result[ModelResponse] =
       if (calls.incrementAndGet() == 1) Left(GuardrailBlocked("ModelGuard", "not now")) else next(request)
   }
 
@@ -271,11 +272,11 @@ class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
   final private class Recording(tag: String, log: java.util.concurrent.CopyOnWriteArrayList[String])
       extends AgentMiddleware {
     val id: MiddlewareId = MiddlewareId(s"rec-$tag")
-    override def beforeAgent(text: String, context: RunContext): Result[String] = {
-      log.add(s"$tag:before:$text"); Right(s"$text+$tag")
+    override def beforeAgent(text: String, context: ModelContext): Result[BoundaryResult] = {
+      log.add(s"$tag:before:$text"); Right(BoundaryResult(s"$text+$tag"))
     }
-    override def afterAgent(answer: String, context: RunContext): Result[String] = {
-      log.add(s"$tag:after:$answer"); Right(s"$answer+$tag")
+    override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] = {
+      log.add(s"$tag:after:$answer"); Right(BoundaryResult(s"$answer+$tag"))
     }
   }
 
@@ -421,8 +422,8 @@ class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
   /** Turns the query `blank me` blank; passes any other. */
   final private class Blanking extends AgentMiddleware {
     val id: MiddlewareId = MiddlewareId("blanking")
-    override def beforeAgent(text: String, context: RunContext): Result[String] =
-      Right(if (text == "blank me") "  " else text)
+    override def beforeAgent(text: String, context: ModelContext): Result[BoundaryResult] =
+      Right(BoundaryResult(if (text == "blank me") "  " else text))
   }
 
   "A query a beforeAgent hook turns blank" should "be Left, store nothing, and leave the thread usable" in {

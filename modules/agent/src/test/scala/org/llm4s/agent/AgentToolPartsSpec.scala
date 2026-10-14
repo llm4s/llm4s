@@ -37,6 +37,26 @@ class AgentToolPartsSpec extends AnyFlatSpec with Matchers {
     resultOf(ToolContent.Parts(parts)).parts shouldBe parts
   }
 
+  // an answer is an AssistantMessage, which is text: media goes into a turn, never out of one, so a response
+  // format is checked against the answer's text whatever media the turn carried (design 4.27)
+  "An agent with a response format" should "check the text answer of a turn that carried media, and keep the media through the retry" in {
+    import AgentOutputSpec.{ invoiceSchema, Invoice }
+    val chartTool =
+      SpecTools.tool("render")((_, _) => ToolOutcome.Success(ToolContent.Parts(Vector(ContentPart.Text("Q3"), chart))))
+    val client = new ScriptedLLMClient(
+      Right(calling(call("c1", "render"))),
+      Right(CompletionFixture.simple("""{"customer":"Acme"}""")),
+      Right(CompletionFixture.simple("""{"customer":"Acme","total":3.5}"""))
+    )
+    val agent  = built(Agent.builder("extractor", client).withOutput(invoiceSchema).withTools(SpecTools.set(chartTool)))
+    val result = agent.run(ThreadId("parts-format"), "bill from the chart").value
+
+    result.decodeOutput[Invoice] shouldBe Right(Invoice("Acme", 3.5))
+    // the corrective request is the same conversation, the tool's image unchanged, plus the correction
+    client.sent(2).collect { case t: ToolMessage => t.parts } shouldBe Vector(Vector(ContentPart.Text("Q3"), chart))
+    client.sent(2).last.content should include("did not match the required JSON Schema")
+  }
+
   "A tool's Json" should "be one text part, rendered as before" in {
     resultOf(ToolContent.Json(ujson.Str("plain"))).parts shouldBe Vector(ContentPart.Text("plain"))
     resultOf(ToolContent.Json(ujson.Obj("n" -> 1))).parts shouldBe Vector(ContentPart.Text("""{"n":1}"""))

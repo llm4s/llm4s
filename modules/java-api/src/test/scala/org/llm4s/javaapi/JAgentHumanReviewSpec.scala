@@ -1,8 +1,8 @@
 package org.llm4s.javaapi
 
 import org.llm4s.agent.{ AgentNode, AgentStatus }
-import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, IdempotencyKey, InterruptId, NodeId, RunContext }
-import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ToolCallRequest }
+import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, IdempotencyKey, InterruptId, NodeId }
+import org.llm4s.agent.graph.middleware.{ AgentMiddleware, BoundaryResult, MiddlewareId, ModelContext, ToolCallRequest }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome, ToolSet }
 import org.llm4s.agent.graph.toolloop.{
   ApprovalRequest,
@@ -164,8 +164,8 @@ object JAgentHumanReviewSpec {
   /** Asks for the region when the query names none. */
   final class Region extends AgentMiddleware.Asking[Need, Info] {
     val id: MiddlewareId = MiddlewareId("region")
-    override def beforeAgent(input: String, context: RunContext): Result[String] =
-      answered(context).fold(ask(Need("region")))(r => Right(s"$input in ${r.answer.value}"))
+    override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
+      answered(context).fold(ask(Need("region")))(r => Right(BoundaryResult(s"$input in ${r.answer.value}")))
   }
 
   /** Asks which environment each tool call is for. */
