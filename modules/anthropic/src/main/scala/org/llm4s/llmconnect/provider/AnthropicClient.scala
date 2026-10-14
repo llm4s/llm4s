@@ -930,7 +930,6 @@ object AnthropicClient {
   private[provider] def checkParts(provider: String, messages: Seq[org.llm4s.llmconnect.model.Message]): Result[Unit] =
     PartEncoding
       .check(provider, messages, userPart, toolPart)
-      .flatMap(_ => PartEncoding.checkInlineLimits(provider, messages, inlineLimit))
       .flatMap(_ =>
         PartEncoding
           .checkPartCounts(provider, Seq(UserMessage(messages.flatMap(partsIn).toVector)), imageKind, MaxImages)
@@ -947,19 +946,8 @@ object AnthropicClient {
     case _               => Vector.empty
   }
 
-  /**
-   * Anthropic takes an image of at most 5 MiB base64-encoded (3,932,160 bytes), less than
-   * `ContentPart.MaxInlineBytes`; a larger one fails here rather than at the API.
-   */
-  private[provider] val MaxInlineImageBytes: Long = 5L * 1024 * 1024 / 4 * 3
-
   /** The Messages API's limit on a whole request: 32 MB. */
   private[provider] val MaxRequestBytes: Long = 32000000L
-
-  private def inlineLimit(part: ContentPart): Option[Long] = part match {
-    case _: ContentPart.Image => Some(MaxInlineImageBytes)
-    case _                    => None
-  }
 
   /**
    * An SDK failure as an [[org.llm4s.error.LLMError]]. The SDK's exception messages carry the service's
