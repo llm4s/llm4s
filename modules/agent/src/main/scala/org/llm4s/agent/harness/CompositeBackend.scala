@@ -67,9 +67,14 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
     val mounted = routes.flatMap { (m, _) =>
       m.relativeTo(path).filter(_.nonEmpty).map(rel => (path / rel.takeWhile(_ != '/')).toOption.get)
     }.distinct
-    val base: Result[Listing[FileInfo]] = routed.backend.ls(routed.path, limit, ctx) match
-      case Left(_: BackendRefused) if mounted.nonEmpty => Right(Listing(Vector.empty, truncated = false))
-      case other                                       => renamed(routed, path)(other)
+    // the fallback covers only the routed backend's refusal of the path itself (absent, or a file it
+    // holds where a mount makes a directory), never an invalid argument, which is checked first
+    val base: Result[Listing[FileInfo]] = Text.checkLimit("ls", path.value, limit).flatMap { _ =>
+      routed.backend.ls(routed.path, limit, ctx) match
+        case Left(r: BackendRefused) if mounted.nonEmpty && r.target == routed.path.value =>
+          Right(Listing(Vector.empty, truncated = false))
+        case other => renamed(routed, path)(other)
+    }
     base.map { listing =>
       val own = listing.items.flatMap(i =>
         visible(routed.mount, i.path).map(cp => FileInfo(cp, i.isDirectory, i.size, i.modified))

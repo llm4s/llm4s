@@ -106,6 +106,16 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     onlyDeep.grep("stale", VPath.root, None, 10, sctx).value.items shouldBe empty
   }
 
+  it should "refuse an invalid limit even where a mount makes the directory" in {
+    composite.ls(VPath.root, 0, ctx).left.value.message should include("limit")
+    CompositeBackend(main, p("/x/y") -> scratch).value.ls(p("/x"), 0, ctx).left.value.message should include("limit")
+    CompositeBackend(main, p("/x/y") -> scratch).value
+      .ls(p("/x"), 5, ctx)
+      .value
+      .items
+      .map(_.path.value) shouldBe Vector("/x/y")
+  }
+
   it should "refuse the root as a mount and a repeated mount" in {
     CompositeBackend(main, VPath.root -> scratch).left.value shouldBe a[ValidationError]
     CompositeBackend(main, p("/x") -> scratch, p("/x") -> deep).left.value shouldBe a[ValidationError]
