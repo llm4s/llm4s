@@ -1,6 +1,7 @@
 package org.llm4s.testkit
 
-import org.llm4s.error.CancelledError
+import com.sun.net.httpserver.HttpExchange
+import org.llm4s.error.{ CancelledError, UnsupportedContentPartError }
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.{
   ContextWindowResolver,
@@ -8,7 +9,7 @@ import org.llm4s.llmconnect.config.{
   EmbeddingProviderConfig,
   ProviderConfig
 }
-import org.llm4s.llmconnect.model.{ Conversation, EmbeddingRequest, StreamedChunk, UserMessage }
+import org.llm4s.llmconnect.model.{ Conversation, EmbeddingRequest, MessageRole, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.spi.{
   EmbeddingProviderDescriptor,
@@ -25,6 +26,7 @@ import org.scalactic.source.Position
 import org.scalatest.exceptions.{ StackDepthException, TestFailedException }
 import org.scalatest.{ Assertion, Assertions }
 
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import scala.collection.mutable.ListBuffer
 
@@ -368,6 +370,86 @@ trait ProviderModuleChecks extends Assertions:
           s"'${c.name}': the conversation has ${c.toolCalls} tool calls and ${c.toolResults} results, " +
             s"but the request carries $calls calls and $results native results"
         )
+    }
+    succeed
+
+  // ---- content parts ----
+
+  /**
+   * `client` sends the content parts its provider takes and refuses every other before sending
+   * anything - the [[ContentPartContract]]. Each [[ContentPartCase]] is sent with `complete` to a
+   * [[LocalProviderTestServer]] that answers with `respond`:
+   *
+   *  - a case in `supported` must succeed, and the request must carry the part (its URL, file id
+   *    or base64 bytes - [[ContentPartCase.markers]]);
+   *  - any other case must return `Left(UnsupportedContentPartError)` naming the part's kind and
+   *    role, and the server must receive no request.
+   *
+   * Every client must also send a user message and a tool result of two text parts, both texts,
+   * and refuse a file uploaded to another provider.
+   *
+   * @param providerId the client's provider id: the owner of the provider-file cases' files
+   * @param respond    answers a request with a successful completion in the provider's format
+   * @param path       the path the server answers on; `/` answers every path
+   * @param supported  the cases the client sends
+   * @param client     builds the client for the server's base URL (`http://localhost:<port>`)
+   */
+  def assertContentParts(providerId: String, respond: HttpExchange => Unit, path: String = "/")(
+    supported: ContentPartCase*
+  )(client: String => LLMClient)(using pos: Position): Assertion =
+    def send(name: String, conversation: Conversation): (Result[?], Option[String]) =
+      val seen   = new java.util.concurrent.atomic.AtomicReference[Option[String]](None)
+      var result = Option.empty[Result[?]]
+      LocalProviderTestServer.withServer(path) { exchange =>
+        seen.set(Some(new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)))
+        respond(exchange)
+      } { baseUrl =>
+        val built = client(baseUrl)
+        val sent  = scala.util.Try(built.complete(conversation))
+        scala.util.Try(built.close()): Unit
+        result = Some(sent.fold(thrown => failAt(s"'$name': complete threw $thrown"), identity))
+      }
+      (result.getOrElse(failAt(s"'$name': the call did not run")), seen.get)
+
+    def sends(name: String, conversation: Conversation, markers: Seq[String]): Unit =
+      send(name, conversation) match
+        case (Left(error), _) => failAt(s"'$name': complete returned Left(${error.message})")
+        case (_, None)        => failAt(s"'$name': the server received no request")
+        case (_, Some(body)) if !markers.exists(body.contains) =>
+          failAt(s"'$name': the request does not carry the part; expected one of ${markers.mkString(", ")}")
+        case _ => ()
+
+    def refuses(name: String, conversation: Conversation, part: String, role: MessageRole): Unit =
+      send(name, conversation) match
+        case (_, Some(_)) => failAt(s"'$name': a request was sent for a part the client should refuse")
+        case (Left(UnsupportedContentPartError(_, _, `part`, r)), _) if r == role.name => ()
+        case (other, _) =>
+          failAt(
+            s"'$name': expected Left(UnsupportedContentPartError) for '$part' in a ${role.name} message, got ${describe(other)}"
+          )
+
+    Seq(MessageRole.User, MessageRole.Tool).foreach { role =>
+      sends(
+        s"two text parts in a ${role.name} message",
+        ContentPartContract.multiText(role),
+        Seq(ContentPartContract.SecondText)
+      )
+      sends(
+        s"two text parts in a ${role.name} message",
+        ContentPartContract.multiText(role),
+        Seq(ContentPartContract.FirstText)
+      )
+    }
+    val foreign = ContentPartContract.foreignFile
+    refuses(
+      "another provider's file",
+      foreign,
+      foreign.messages.collect { case u: UserMessage => u.parts.last.kind }.head,
+      MessageRole.User
+    )
+    ContentPartCase.values.foreach { c =>
+      if supported.contains(c) then sends(c.toString, c.conversation(providerId), c.markers)
+      else refuses(c.toString, c.conversation(providerId), c.part(providerId).kind, c.role)
     }
     succeed
 
