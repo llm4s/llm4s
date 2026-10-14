@@ -20,6 +20,12 @@ import scala.concurrent.duration.*
  * runtime's commits only by subscribing again, which replays the log; a runtime that knows it is the
  * only one using its store can disable it to save the watching thread and its reads.
  *
+ * '''Ordering.''' Each subscription reads on its own cursor, so a commit made elsewhere falls at a
+ * point among the runtime's live events that depends on when that subscription's watch read it: two
+ * subscriptions can place it differently, though each delivers the durable events in `seq` order.
+ * Subscriptions of one runtime share a common live/durable interleaving only while nothing outside
+ * the runtime commits to the thread (#1920); order by `seq` alone where that matters.
+ *
  * `pollInterval` must be at least one millisecond - a shorter one would have every subscription
  * read a polled store in a busy loop: `apply` and the `with*` setters throw
  * `IllegalArgumentException` otherwise, and [[WatchPolicy.of]] returns a `ValidationError`.

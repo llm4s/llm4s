@@ -291,7 +291,9 @@ There is no unfenced delete: to delete a thread outside a runtime, claim it and 
 ## Subscriptions across runtimes
 
 A subscription sees every commit on its thread, made through any runtime or process that shares the store, not
-only through its own: in order, without gap or duplicate, as for its own runtime's commits. Each live subscription
+only through its own: durable events in `seq` order, without gap or duplicate, as for its own runtime's commits.
+(Where another runtime's commit falls among this runtime's live events is not fixed; see
+[Ordering across runtimes](streaming#ordering-across-runtimes).) Each live subscription
 watches the store with `Checkpointer.awaitEventsAfter`. A store that is told of commits returns at once. A store that
 is not, such as SQLite, is polled every `WatchPolicy.pollInterval` (250 ms by default):
 

@@ -176,7 +176,8 @@ tenant.
 Several `GraphRuntime`s, in one process or several, can share one checkpoint store
 ([Durable Checkpointers](durable-checkpointers)). A `GraphRuntime.subscribe` on any of them delivers
 the durable events of every commit on the thread, whichever runtime made it, with the same
-guarantees: in order, without gap or duplicate, and only after the commit.
+durable guarantees: in `seq` order, without gap or duplicate, and only after the commit. How those
+events interleave with live ones is the exception: see [Ordering across runtimes](#ordering-across-runtimes).
 
 - The subscription's own runtime hands it that runtime's commits as they land. Other runtimes' commits
   it reads from the store, on a second virtual thread (`llm4s-watch-<threadId>`) that runs while the
@@ -220,6 +221,23 @@ subscriptions then see other runtimes' commits only by subscribing again, which 
 `Agent.stream*` and `AgentRun.subscribe`, and the fs2, ZIO, Java and Kotlin streams built on them, follow
 a run that their own runtime started, so they work as before. To follow a thread whose runs execute in
 another process, subscribe with `GraphRuntime.subscribe` on a runtime over the same store.
+
+
+### Ordering across runtimes
+
+Within one runtime, every subscription to a thread sees the same interleaving of durable and live
+events. Commits made by another runtime or process sharing the store are the exception. Each
+subscription receives them through its own store watch, or through a hand-over's gap read, so where
+one falls among this runtime's live events depends on when that subscription read it, and two
+subscriptions can place it differently. Durable `seq` order is preserved for every subscription. The
+common interleaving therefore holds exactly when nothing outside this runtime commits to the thread.
+
+If you need one order across runtimes, order by durable `seq` only. There is no durable-only
+subscription option; filter in the listener: ignore `StreamEvent.Live` and `StreamEvent.LiveGap`, and
+take the position of every `StreamEvent.Durable(record)` from `record.seq` (or collect events and sort
+by `seq`). Live events have no `seq` and are not stored, so they cannot be placed in a cross-runtime
+order. The structural fix, one ordered per-thread log shared by all subscriptions, is recorded as future
+work in the design record ([#1920](https://github.com/llm4s/llm4s/issues/1920)).
 
 ## fs2, ZIO and Pekko Streams
 

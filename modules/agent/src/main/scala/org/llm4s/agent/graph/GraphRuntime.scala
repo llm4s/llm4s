@@ -168,10 +168,20 @@ object GraphRuntime:
  * the run ([[RunHandle.observation]]).
  *
  * A subscription also sees the durable events of commits made through another runtime or process
- * sharing the checkpointer, in the same order and with the same guarantees: each live subscription
- * watches the store ([[WatchPolicy]], [[Checkpointer.awaitEventsAfter]]), so they arrive as soon as
- * the store reports them - at once from a store that is told of commits, within `pollInterval` from
- * one that is polled. Live progress events are never stored, so another runtime's do not arrive.
+ * sharing the checkpointer, with the same durable guarantees (ascending `seq`, no gap or duplicate):
+ * each live subscription watches the store ([[WatchPolicy]], [[Checkpointer.awaitEventsAfter]]), so
+ * they arrive as soon as the store reports them - at once from a store that is told of commits,
+ * within `pollInterval` from one that is polled. Live progress events are never stored, so another
+ * runtime's do not arrive.
+ *
+ * '''Ordering across runtimes.''' Within one runtime, every subscription to a thread sees the same
+ * interleaving of durable and live events. A commit made elsewhere reaches each subscription through
+ * that subscription's own store watch, or through a hand-over's gap read, so its position among this
+ * runtime's live events can differ from one subscription to another; each still sees the durable
+ * events in `seq` order. The common interleaving therefore holds exactly when nothing outside this
+ * runtime commits to the thread. A consumer that needs one order across runtimes orders by durable
+ * `seq` alone: it ignores [[StreamEvent.Live]] and [[StreamEvent.LiveGap]], and reads the position of
+ * everything else from `EventRecord.seq`.
  */
 final class GraphRuntime(
   checkpointer: Checkpointer,
@@ -279,8 +289,12 @@ final class GraphRuntime(
    * see there for how cancel waits on a running listener. Commits made through this runtime are
    * handed over as they land; those of another runtime or process sharing the checkpointer are read
    * from the store by the subscription's watch ([[WatchPolicy]]: a second virtual thread, which
-   * `cancel` stops too), in the same order and with the same guarantees, and are queued only as they
-   * fit, so they never make it lag. Live progress of another runtime's runs is not delivered: it is
+   * `cancel` stops too), in `seq` order and with the same durable guarantees, and are queued only as
+   * they fit, so they never make it lag. Where such a commit falls among this runtime's live events
+   * is not fixed: it depends on when this subscription's watch (or a hand-over's gap read) read it, so
+   * two subscriptions can place it differently - the common live/durable interleaving of subscriptions
+   * in one runtime holds only while nothing outside the runtime commits to the thread. Order by
+   * `seq` alone, ignoring [[StreamEvent.Live]], where one order across runtimes matters (#1920). Live progress of another runtime's runs is not delivered: it is
    * never stored. With [[WatchPolicy.disabled]], another runtime's commits are seen only by
    * subscribing again, which replays the log - all of it once no commit a run of this runtime gave up
    * on is still in the store on the thread; until then the replay stops at the first event above what
