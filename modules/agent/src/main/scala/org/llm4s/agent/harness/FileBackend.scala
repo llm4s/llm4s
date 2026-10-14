@@ -1,6 +1,6 @@
 package org.llm4s.agent.harness
 
-import org.llm4s.agent.graph.{ RunContext, StateKey, StateUpdate, ThreadState }
+import org.llm4s.agent.graph.{ effectKey, EffectKey, GraphError, RunContext, StateKey, StateUpdate, ThreadState }
 import org.llm4s.agent.graph.tool.{ Glob, LockKey, ToolContext, ToolOutcome }
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, NonRecoverableError }
@@ -17,7 +17,14 @@ import scala.util.Try
  * from a [[RunContext]] and [[ThreadState]] by a hook.
  */
 @Experimental
-final class FileContext private (val run: RunContext, val state: ThreadState, val tool: Option[ToolContext])
+final class FileContext private (val run: RunContext, val state: ThreadState, val tool: Option[ToolContext]):
+
+  /**
+   * The key of one external effect of this call: the tool call's `effectKey`, or the hook's task's
+   * (C4). A backend keys every external mutation with it, and never builds a key another way.
+   */
+  def effectKey(operation: String, discriminator: String*): EffectKey =
+    tool.fold(run.effectKey(operation, discriminator*))(_.effectKey(operation, discriminator*))
 
 object FileContext:
 
@@ -188,8 +195,9 @@ object BackendRefused:
    * nothing, and `recover` replays it from its replay records.
    */
   def toolOutcome(error: LLMError): ToolOutcome = error match
-    case refused: BackendRefused => ToolOutcome.Error(refused.message)
-    case other                   => ToolOutcome.Fatal(other)
+    case refused: BackendRefused                  => ToolOutcome.Error(refused.message)
+    case refused: GraphError.EffectReplayRefused => ToolOutcome.Error(refused.message)
+    case other                                   => ToolOutcome.Fatal(other)
 
 /** Shared text rules: UTF-8 only, and how content splits into lines. */
 private[harness] object Text:
