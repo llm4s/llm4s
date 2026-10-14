@@ -806,8 +806,10 @@ object BedrockClient {
   private[provider] def documentsWithText(messages: Seq[BedrockMessage]): Result[Unit] =
     messages.zipWithIndex
       .find { (message, _) =>
-        val types = message.content().asScala.map(_.`type`()).toSet
-        types.contains(ContentBlock.Type.DOCUMENT) && !types.contains(ContentBlock.Type.TEXT)
+        val blocks = message.content().asScala
+        // a blank text block is no prompt for the document
+        blocks.exists(_.`type`() == ContentBlock.Type.DOCUMENT) &&
+        !blocks.exists(b => b.`type`() == ContentBlock.Type.TEXT && Option(b.text()).exists(_.trim.nonEmpty))
       }
       .fold[Result[Unit]](Right(())) { (_, index) =>
         Left(

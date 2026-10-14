@@ -152,6 +152,10 @@ class BedrockContentPartsSpec extends AnyFlatSpec with Matchers with EitherValue
     sent shouldBe None
     result.left.value.message should include("needs a text part beside a document")
     send(Conversation(Seq(UserMessage(Vector(ContentPart.Text("Summarise."), doc(bytes))))))._2.isRight shouldBe true
+    // blank text is no prompt
+    val (blankSent, blank) = send(Conversation(Seq(UserMessage(Vector(ContentPart.Text("  "), doc(bytes))))))
+    blankSent shouldBe None
+    blank.left.value.message should include("needs a text part beside a document")
   }
 
   "complete" should "refuse, before sending, each part Converse cannot take" in {
