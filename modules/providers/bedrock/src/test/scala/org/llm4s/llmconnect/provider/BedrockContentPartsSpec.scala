@@ -121,7 +121,18 @@ class BedrockContentPartsSpec extends AnyFlatSpec with Matchers with EitherValue
       result.left.value.message should include(s"at most $limit in a message")
     }
     val fits = Vector(ContentPart.Text("x")) ++ Vector.fill(20)(image(bytes)) ++ Vector.fill(5)(doc(bytes))
-    BedrockClient.checkParts("bedrock", Seq(UserMessage(fits))) shouldBe Right(())
+    send(Conversation(Seq(UserMessage(fits))))._2.isRight shouldBe true
+  }
+
+  it should "count media in the message as sent, after adjacent user messages are merged" in {
+    val fifteen        = UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(15)(image(bytes)))
+    val (sent, result) = send(Conversation(Seq(fifteen, fifteen)))
+    sent shouldBe None
+    result.left.value.message should include("message 0 has 30")
+    // a tool result's media counts as its message's
+    val calls   = AssistantMessage(None, (1 to 3).map(i => ToolCall(s"c$i", "f", ujson.Obj())))
+    val results = (1 to 3).map(i => ToolMessage(Vector.fill(8)(image(bytes)), s"c$i"))
+    send(Conversation(Seq(UserMessage("go"), calls) ++ results))._2.left.value.message should include("has 24")
   }
 
   it should "refuse, before sending, inline media over Converse's own limits" in {
