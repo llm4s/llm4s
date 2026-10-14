@@ -268,6 +268,9 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     val inside = HostFileBackend.open(dir, lockDirectory = dir.resolve(".locks")).value
     written(inside.write(p("/b.txt"), "y", call()))
     inside.read(p("/.locks/stripe-0.lock"), 0, 1, call()).left.value.message should include("lock directory")
+    inside.read(p("/.LOCKS/stripe-0.lock"), 0, 1, call()).left.value.message should include("lock directory")
+    inside.write(p("/.Locks/x"), "x", call()).left.value.message should include("lock directory")
+    (inside.read(p("/.locksmith"), 0, 1, call()).left.value.message should not).include("lock directory")
     inside.ls(VPath.root, 10, call()).value.items.map(_.path.value) should not contain "/.locks"
   }
 

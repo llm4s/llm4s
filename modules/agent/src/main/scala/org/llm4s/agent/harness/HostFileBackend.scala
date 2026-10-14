@@ -237,7 +237,15 @@ final class HostFileBackend private (
    */
   private def lockFile(stripe: Int): Path = lockDirectory.resolve(s"stripe-$stripe.lock")
 
-  private def inLockDirectory(p: Path): Boolean = p.normalize().startsWith(lockDirectory)
+  private val lockIdentity = HostFileBackend.identity(lockDirectory.toString)
+
+  /**
+   * Whether `p` is the lock directory or beneath it, compared by folded identity, so a case or
+   * normalisation alias of the directory (`/.LOCKS` for `.locks` on macOS) is caught too.
+   */
+  private def inLockDirectory(p: Path): Boolean =
+    val id = HostFileBackend.identity(p.normalize().toString)
+    id == lockIdentity || id.startsWith(lockIdentity + p.getFileSystem.getSeparator)
 
   /** The OS lock file a mutation of `path` takes; for tests that hold it from another process. */
   private[harness] def lockFileOf(path: VPath): Result[Path] = resolve("lock", path).map(t => lockFile(stripeOf(t)))
