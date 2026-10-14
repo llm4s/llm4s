@@ -247,7 +247,8 @@ final class GraphRuntime(
    * whoever asks, the same run id included, so a one-shot run whose release failed could not
    * otherwise be forgotten until its claim lapsed. A claim granted on the thread since drops it.
    * Entries are not expired: each is a thread id and a token, one per thread whose release failed
-   * and that this runtime has neither deleted nor claimed since.
+   * and that this runtime has neither deleted nor claimed since. A thread's entry only ever moves to a
+   * newer token ([[recordUnreleased]]), and a release that lands removes it only if it is its own.
    */
   // a Scala map, whose `remove` returns an `Option`: a Java map's `null` for a missing key, typed as the
   // opaque `FencingToken` (a `Long`), may be unboxed to token 0 before `Option(...)` sees it
@@ -941,8 +942,9 @@ final class GraphRuntime(
   private def claimThread(threadId: ThreadId, config: RunConfig): Result[RunClaim] =
     Try(checkpointer.claim(threadId, ClaimRequest(config.runId, claims.ttl))).toResult.flatten match
       case Right(claim) =>
-        // any claim this runtime failed to give back has lapsed and been replaced
-        unreleased.remove(threadId.value): Unit
+        // any claim this runtime failed to give back has lapsed and been replaced: every one older than
+        // this grant, which is all of them, as the store issues each token above every earlier one
+        unreleased.updateWith(threadId.value)(_.filter(_.value > claim.token.value)): Unit
         Right(claim)
       case Left(GraphError.ThreadBusy(_, latest, holder)) =>
         Try(busyAt(threadId, config, holder, nameWithoutCheckpoint = false)).toResult.flatten.left.map {
@@ -1105,17 +1107,29 @@ final class GraphRuntime(
       forgetIfIdle(threadId)
     }
 
+  /**
+   * Records that the claim whose token is `token` was not given back ([[unreleased]]), unless a newer
+   * one on the thread already is: a detached release ([[releaseDetached]]) may fail after a later run's
+   * release on the same thread has failed too, and the newer token is the one that may still be live.
+   * Atomic: `updateWith` on a concurrent `TrieMap` retries until its compare-and-set lands.
+   */
+  private def recordUnreleased(threadId: ThreadId, token: FencingToken): Unit =
+    unreleased.updateWith(threadId.value)(recorded =>
+      Some(recorded.filter(_.value > token.value).getOrElse(token))
+    ): Unit
+
   private def releasing(threadId: ThreadId, token: FencingToken): Unit =
     DefaultRunHandle.guarded(checkpointer.release(threadId, token)) match
+      // only this release's own entry: a newer token recorded since is another claim, still to give back
       case Right(Right(_)) => unreleased.remove(threadId.value, token): Unit
       case Right(Left(error)) =>
-        unreleased.put(threadId.value, token): Unit
+        recordUnreleased(threadId, token)
         GraphRuntime.logger.warn(
           s"Releasing the claim on thread '${threadId.value}' failed; it lapses after ${claims.ttl}: ${error.message}"
         )
       case Left(thrown) =>
         if thrown.isInstanceOf[InterruptedException] then Thread.currentThread().interrupt()
-        unreleased.put(threadId.value, token): Unit
+        recordUnreleased(threadId, token)
         GraphRuntime.logger.warn(
           s"Releasing the claim on thread '${threadId.value}' failed; it lapses after ${claims.ttl}",
           thrown

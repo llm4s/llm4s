@@ -47,8 +47,10 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
 
   /** A store that delegates to `underlying`, with hooks a test sets. */
   private class Hooked(val underlying: Checkpointer) extends Checkpointer {
-    @volatile var onRenew: () => Option[Result[RunClaim]]                  = () => None
-    @volatile var onRelease: () => Option[Result[Unit]]                    = () => None
+    @volatile var onRenew: () => Option[Result[RunClaim]] = () => None
+    @volatile var onRelease: () => Option[Result[Unit]]   = () => None
+    // consulted before `onRelease`, with the token being released
+    @volatile var onReleaseOf: FencingToken => Option[Result[Unit]]        = _ => None
     @volatile var onLatest: () => Option[Result[Option[StoredCheckpoint]]] = () => None
     @volatile var onCommit: Commit => Option[Result[Vector[EventRecord]]]  = _ => None
     @volatile var onDelete: () => Unit                                     = () => ()
@@ -73,7 +75,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     }
     def release(threadId: ThreadId, token: FencingToken) = {
       releases.incrementAndGet()
-      val outcome = onRelease().getOrElse(underlying.release(threadId, token))
+      val outcome = onReleaseOf(token).orElse(onRelease()).getOrElse(underlying.release(threadId, token))
       released.incrementAndGet()
       outcome
     }
@@ -1901,6 +1903,61 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     store.latest(thread).value shouldBe None
     // the delete removed the claim with the thread: nothing is given back
     store.releases.get shouldBe releases
+  }
+
+  it should "give back the newest claim whose release failed, whatever an older run's late detached release did" in {
+    val down: Option[Result[Unit]] = Some(Left(ProcessingError("store", "down")))
+    for (label, late) <- Seq("failing" -> down, "landing" -> Some(Right(()))) do
+      withClue(s"an older release $label late: ") {
+        val time  = ManualTime()
+        val store = Hooked(InMemoryCheckpointer(time))
+        val rt    = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+        val older = TwoStep()
+        val first = rt.start(thread, older.graph, "x", run("first")).value
+        older.awaitEntered()
+        val oldToken = tokenOf(store)
+        // the older run's release - detached, as its claim is lost - is held until `lateGate` opens
+        val releasing = new CountDownLatch(1)
+        val lateGate  = new CountDownLatch(1)
+        val releasers = new ConcurrentLinkedQueue[Thread]()
+        val failNewer = new AtomicBoolean(true)
+        val asked     = new ConcurrentLinkedQueue[FencingToken]()
+        store.onReleaseOf = token => {
+          asked.add(token)
+          if token == oldToken then {
+            releasers.add(Thread.currentThread())
+            releasing.countDown()
+            stuckUntil(lateGate)
+            late
+          } else if failNewer.get then down
+          else None
+        }
+        store.onRenew = unreachable
+        time.advance(1.second)
+        await(first).failed._2 shouldBe GraphError.ClaimLost("t", oldToken, None)
+        releasing.await(5, TimeUnit.SECONDS) shouldBe true
+
+        // a later run takes the lapsed thread over in the same runtime, and its own release fails
+        store.onRenew = () => None
+        val newer = TwoStep()
+        newer.gate.countDown()
+        await(rt.recover(thread, newer.graph, run("second")).value).completed
+        val newToken = tokenOf(store)
+        newToken.value should be > oldToken.value
+        asked.asScala.toSeq should contain(newToken)
+
+        // only then does the older release return
+        lateGate.countDown()
+        releasers.asScala.foreach(_.join(5000))
+        releasers.asScala.exists(_.isAlive) shouldBe false
+
+        // the delete gives back the newer claim, still live, and so is not refused by it
+        failNewer.set(false)
+        asked.clear()
+        rt.deleteThread(thread, run("deleter")) shouldBe Right(())
+        asked.asScala.toSeq shouldBe Seq(newToken)
+        store.latest(thread).value shouldBe None
+      }
   }
 
   // ---- 5c: a store read never holds a lock another thread's run needs ----
