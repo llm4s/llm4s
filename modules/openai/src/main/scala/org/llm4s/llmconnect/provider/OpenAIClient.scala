@@ -197,7 +197,6 @@ class OpenAIClient private[provider] (
         streaming = false
       )
       body = serializeParams(params)
-      _        <- PartEncoding.withinRequestLimit(providerName, body, OpenAIClient.MaxRequestBytes)
       response <- call("completion")(transport.createChatCompletion(params))
       completion = convertFromOpenAIFormat(response)
       _ = recordExchange(
@@ -241,10 +240,8 @@ class OpenAIClient private[provider] (
       .tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
       .flatMap { (transformed, params) =>
         val requestBody = serializeParams(params)
-        PartEncoding.withinRequestLimit(providerName, requestBody, OpenAIClient.MaxRequestBytes).flatMap { _ =>
-          if (transformed.requiresFakeStreaming) executeFakeStreaming(startedAt, requestBody, params, onChunk)
-          else executeNativeStreaming(startedAt, requestBody, params, onChunk)
-        }
+        if (transformed.requiresFakeStreaming) executeFakeStreaming(startedAt, requestBody, params, onChunk)
+        else executeNativeStreaming(startedAt, requestBody, params, onChunk)
       }
   }
 
@@ -598,6 +595,9 @@ class OpenAIClient private[provider] (
   private def convertToOpenAIMessages(conversation: Conversation): Result[Seq[ChatCompletionMessageParam]] =
     PartEncoding
       .check(providerName, conversation.messages, userPart, PartEncoding.textOnly)
+      .flatMap(_ =>
+        PartEncoding.checkInlineMediaTotal(providerName, conversation.messages, OpenAIClient.MaxInlineMediaBytes)
+      )
       // the SDK builders throw on malformed content (a null text): inside the Result, as buildParams is
       .flatMap(_ => Try(conversation.messages.map(toOpenAIMessage)).toEither.left.map(_.toLLMError))
 
@@ -782,8 +782,8 @@ class OpenAIClient private[provider] (
 object OpenAIClient {
   import org.llm4s.types.TryOps
 
-  /** Chat Completions' limit on a request's total payload: 50 MB. */
-  private[provider] val MaxRequestBytes: Long = 50000000L
+  /** Chat Completions' limit on the files and images of one request, decoded: 50 MB. */
+  private[provider] val MaxInlineMediaBytes: Long = 50000000L
 
   private[provider] def forTest(
     model: String,

@@ -117,12 +117,20 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
     sent(Conversation(Seq(UserMessage(Vector(imageOf(MediaType.Gif)))))).isRight shouldBe true
   }
 
-  it should "refuse, before sending, a request over Chat Completions' 50 MB as rendered" in {
-    val big =
-      ContentPart.image(MediaSource.Inline(IArray.fill[Byte](ContentPart.MaxInlineBytes)(1)), MediaType.Png).value
-    val message = UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(8)(big))
-    sent(Conversation(Seq(message))).left.value.message should include(
-      s"a request of at most ${OpenAIClient.MaxRequestBytes} bytes"
+  it should "count Chat Completions' 50 MB on the decoded files and images, not on the base64 body" in {
+    val pdf =
+      ContentPart.document(MediaSource.Inline(IArray.fill[Byte](ContentPart.MaxInlineBytes)(1)), MediaType.Pdf).value
+    // eight 5 MiB PDFs are about 42 MB decoded and 56 MB encoded: within the limit
+    PartEncoding.checkInlineMediaTotal(
+      "openai",
+      Seq(UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(8)(pdf))),
+      OpenAIClient.MaxInlineMediaBytes
+    ) shouldBe
+      Right(())
+    // ten are 52 MB decoded: refused before sending
+    val ten = UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(10)(pdf))
+    sent(Conversation(Seq(ten))).left.value.message should include(
+      s"at most ${OpenAIClient.MaxInlineMediaBytes} bytes of files and images"
     )
   }
 }

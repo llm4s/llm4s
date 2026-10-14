@@ -132,6 +132,22 @@ private[llm4s] object PartEncoding {
     else Left(ValidationError("parts", s"$provider takes a request of at most $maxBytes bytes; this one is $size"))
   }
 
+  /**
+   * `Right` when the inline media of `messages` totals at most `maxBytes`, decoded: a provider's limit on the files
+   * and images of one request, which counts their bytes, not their base64 or the request's text.
+   */
+  def checkInlineMediaTotal(provider: String, messages: Seq[Message], maxBytes: Long): Result[Unit] = {
+    val total = messages.map(m => ContentPart.inlineBytes(partsOf(m))).sum
+    if (total <= maxBytes) Right(())
+    else
+      Left(
+        ValidationError(
+          "parts",
+          s"$provider takes at most $maxBytes bytes of files and images in a request; this one has $total"
+        )
+      )
+  }
+
   /** Covers text parts only, as their text: for a role whose wire format takes nothing else. */
   val textOnly: PartialFunction[ContentPart, String] = { case ContentPart.Text(text) => text }
 

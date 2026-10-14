@@ -56,6 +56,12 @@ class PartEncodingSpec extends AnyFlatSpec with Matchers with EitherValues {
       include("at most 1 images in a message; message 0 has 2")
   }
 
+  "checkInlineMediaTotal" should "count the decoded bytes of every inline part" in {
+    val messages = Seq(UserMessage(Vector(ContentPart.Text("x" * 100), image, image)))
+    PartEncoding.checkInlineMediaTotal("p", messages, 6L) shouldBe Right(())
+    PartEncoding.checkInlineMediaTotal("p", messages, 5L).left.value.message should include("this one has 6")
+  }
+
   "isWebUrl" should "accept http and https only" in {
     PartEncoding.isWebUrl(URI.create("https://e.com/a")) shouldBe true
     PartEncoding.isWebUrl(URI.create("HTTP://e.com/a")) shouldBe true
