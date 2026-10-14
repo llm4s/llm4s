@@ -99,7 +99,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
     def extractWithAgent(client: LLMClient, email: String): Result[Invoice] =
       for {
-        agent   <- Agent.builder("extractor", client).withOutputOf[Invoice].build()
+        agent   <- Agent.builder("extractor", client).withOutput(SchemaOf[Invoice].definition).build()
         result  <- agent.run(s"Extract the invoice from this email: $email")
         invoice <- result.decodeOutput[Invoice]
       } yield invoice

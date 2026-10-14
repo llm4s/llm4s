@@ -107,8 +107,9 @@ final class AgentBuilder private (
   def withHandoffs(handoffs: Handoff*): AgentBuilder = copy(handoffs = this.handoffs ++ handoffs)
 
   /**
-   * The response format of this agent's answers (design 4.26): `O`'s strict JSON schema, replacing any set
-   * before. Every model call of the agent carries it as `responseFormat` - replacing one given with
+   * The response format of this agent's answers (design 4.26): `schema`, rendered strict, replacing any set
+   * before - a hand-written `ObjectSchema[O]`, or one derived with `llm4s-schema-derivation`:
+   * `withOutput(SchemaOf[Invoice].definition)`. Every model call of the agent carries it as `responseFormat` - replacing one given with
    * [[withCompletionOptions]] - and the system prompt states it, since a client that cannot enforce it drops
    * it. A final answer must be JSON that matches the schema and reads as `O`, and is stored as that JSON
    * alone. An invalid answer is retried once in the same model step, with its problems; a second invalid
@@ -117,11 +118,8 @@ final class AgentBuilder private (
    * target answers in its own. [[build]] refuses a schema whose root is not an object, one with a keyword
    * the tool argument validator cannot check, and one over 32,768 characters.
    */
-  def withOutput[O](using definition: SchemaDefinition[O], codec: ReadWriter[O]): AgentBuilder =
-    withOutputFormat(OutputFormat.of[O])
-
-  /** [[withOutput]] with a format already made: for `withOutputOf` in `llm4s-schema-derivation`. */
-  private[llm4s] def withOutputFormat(format: OutputFormat): AgentBuilder = copy(output = Some(format))
+  def withOutput[O: ReadWriter](schema: SchemaDefinition[O]): AgentBuilder =
+    copy(output = Some(OutputFormat.of(schema)))
 
   /** Model calls per turn, at least 1; at the limit the turn ends `StepLimitReached`. */
   def withMaxSteps(n: Int): AgentBuilder = copy(maxSteps = n)

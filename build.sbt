@@ -1143,10 +1143,10 @@ lazy val providerTestkit = (project in file("modules/provider-testkit"))
 // `llm4s-schema-derivation` (#1472): a JSON schema derived from a case class with Scala 3 `Mirror`, so
 // `completeStructured` needs no hand-written `ObjectSchema` that repeats the type. It layers on core's
 // public API (it builds an `ObjectSchema` and calls `completeStructured`) and adds no dependency.
-// `llm4s-agent` is `Provided` (#1912): `withOutputOf` extends `AgentBuilder`, so a caller of it already has the
-// agent runtime, and a caller of `completeStructuredOf` alone is not given it.
+// `llm4s-agent` is test-only (#1912): `DerivedAgentOutputSpec` and the guide check that a derived schema is an
+// agent's response format (`withOutput(SchemaOf[A].definition)`). The module itself never depends on the agent.
 lazy val schemaDerivation = (project in file("modules/schema-derivation"))
-  .dependsOn(core % "compile->compile;test->test", agent % Provided)
+  .dependsOn(core % "compile->compile;test->test", agent % Test)
   .settings(
     name := "llm4s-schema-derivation",
     commonSettings,

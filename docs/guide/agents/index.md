@@ -144,17 +144,17 @@ history, never a system prompt) and `usage`.
 
 ### A Typed Answer
 
-`withOutput[O]` gives the agent a response format: `O`'s JSON schema, from a `SchemaDefinition[O]` and
-a uPickle `ReadWriter[O]` in scope (with `llm4s-schema-derivation`, `withOutputOf[O]` derives it from a
-case class). Every model call carries the schema as its `responseFormat`, and the system prompt states it,
+`withOutput(schema)` gives the agent a response format: a `SchemaDefinition[O]`, with a uPickle
+`ReadWriter[O]` in scope. Write the schema by hand, or derive it with `llm4s-schema-derivation`:
+`withOutput(SchemaOf[Invoice].definition)`. Every model call carries the schema as its `responseFormat`, and the system prompt states it,
 for a client that cannot enforce it. `decodeOutput[O]` reads the answer:
 
 ```scala
 case class Invoice(customer: String, total: Double) derives ReadWriter
-given SchemaDefinition[Invoice] = invoiceSchema // an ObjectSchema[Invoice]
+val invoiceSchema: ObjectSchema[Invoice] = ??? // or SchemaOf[Invoice].definition
 
 for {
-  agent   <- Agent.builder("extractor", client).withOutput[Invoice].build()
+  agent   <- Agent.builder("extractor", client).withOutput(invoiceSchema).build()
   result  <- agent.run("Bill Acme 12.50")
   invoice <- result.decodeOutput[Invoice]
 } yield invoice

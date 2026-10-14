@@ -138,7 +138,7 @@ The tool is sent in strict mode, so every parameter is required and `unit` is a 
 
 ## An agent's answer
 
-`withOutputOf[A]` gives an agent the derived schema as its response format, and `decodeOutput[A]` reads its answer (see [the agent guide](agents/index.md#a-typed-answer)). It extends `AgentBuilder`, so add `llm4s-agent` to your build too: this module depends on it only as `Provided`.
+An agent's response format is a schema too: pass `SchemaOf[A].definition` to `AgentBuilder.withOutput`, and read the answer with `decodeOutput[A]` (see [the agent guide](agents/#a-typed-answer)). `withOutput` is in `llm4s-agent`, which this module does not depend on.
 
 ```scala
 import org.llm4s.agent.Agent
@@ -146,13 +146,13 @@ import org.llm4s.schema.*
 
 def extractWithAgent(client: LLMClient, email: String): Result[Invoice] =
   for {
-    agent   <- Agent.builder("extractor", client).withOutputOf[Invoice].build()
+    agent   <- Agent.builder("extractor", client).withOutput(SchemaOf[Invoice].definition).build()
     result  <- agent.run(s"Extract the invoice from this email: $email")
     invoice <- result.decodeOutput[Invoice]
   } yield invoice
 ```
 
-As with `completeStructuredOf`, `A` must be a case class; `build` refuses any other type, and a schema that cannot be built, with a `Left`.
+As with `completeStructuredOf`, `A` must be a case class: `build` refuses any other type with a `Left`.
 
 ## Descriptions
 

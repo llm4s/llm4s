@@ -20,13 +20,7 @@ import scala.util.Try
  * [[OutputFormat.of]]; `AgentBuilder.withOutput` does.
  */
 @Experimental
-final class OutputFormat private (built: Either[String, ujson.Value], reads: ujson.Value => Option[String]):
-
-  /**
-   * The JSON schema, as `SchemaDefinition.toJsonSchema(strict = true)` renders it; JSON `null` for a schema
-   * that could not be built, which `build` refuses.
-   */
-  def schema: ujson.Value = built.getOrElse(ujson.Null)
+final class OutputFormat private (val schema: ujson.Value, reads: ujson.Value => Option[String]):
 
   /** The `responseFormat` every model call of the agent is made with. */
   def responseFormat: ResponseFormat.JsonSchema = ResponseFormat.JsonSchema(schema)
@@ -37,9 +31,6 @@ final class OutputFormat private (built: Either[String, ujson.Value], reads: ujs
 
   /** The schema's problems for `validator`, as a build refuses them: empty when the format is usable. */
   private[toolloop] def problems(validator: ToolArgumentValidator): Vector[String] =
-    built.fold(error => Vector(s"its schema cannot be built: $error"), _ => schemaProblems(validator))
-
-  private def schemaProblems(validator: ToolArgumentValidator): Vector[String] =
     val rendered = ujson.write(schema)
     val notObject = schema.objOpt.flatMap(_.get("type")) match
       case Some(ujson.Str("object")) => Vector.empty
@@ -86,16 +77,13 @@ object OutputFormat:
   private val Instruction =
     "When you give your final answer, reply with only a JSON value matching this JSON Schema, with no other text:"
 
-  /** The format of `O`: `definition`'s strict JSON schema, and `O`'s reader. */
-  def of[O](using definition: SchemaDefinition[O], codec: ReadWriter[O]): OutputFormat = deferred(definition)
-
   /**
-   * [[of]] for a schema that may fail to build - `SchemaOf.definition` throws for a recursion it finds at run
-   * time - so that the agent's `build` refuses it rather than the builder call throwing.
+   * The format of `O`: `definition`'s strict JSON schema, and `O`'s reader. A schema derived with
+   * `llm4s-schema-derivation` is `SchemaOf[O].definition`.
    */
-  private[llm4s] def deferred[O](definition: => SchemaDefinition[O])(using codec: ReadWriter[O]): OutputFormat =
+  def of[O: ReadWriter](definition: SchemaDefinition[O]): OutputFormat =
     new OutputFormat(
-      Try(definition.toJsonSchema(strict = true)).toEither.left.map(e => Option(e.getMessage).getOrElse(e.toString)),
+      definition.toJsonSchema(strict = true),
       json =>
         Try(upickle.default.read[O](json)).failed.toOption.map(e =>
           s"$$: does not read as the output type: ${Option(e.getMessage).getOrElse(e.toString)}"

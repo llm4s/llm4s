@@ -33,7 +33,7 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
   private def answers(texts: String*): ScriptedLLMClient = ScriptedLLMClient.of(texts.map(CompletionFixture.simple)*)
 
   private def withFormat(client: ScriptedLLMClient): AgentBuilder =
-    Agent.builder("extractor", client).withOutput[Invoice]
+    Agent.builder("extractor", client).withOutput(invoiceSchema)
 
   private val valid   = """{"customer":"Acme","total":12.5}"""
   private val invalid = """{"customer":"Acme","total":"lots"}"""
@@ -65,7 +65,7 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
       Agent
         .builder("extractor", client)
         .withCompletionOptions(CompletionOptions().withResponseFormat(ResponseFormat.Json))
-        .withOutput[Invoice]
+        .withOutput(invoiceSchema)
     ).run("bill Acme").value
 
     client.calls.head._2.responseFormat shouldBe Some(ResponseFormat.JsonSchema(invoiceSchema.toJsonSchema(true)))
@@ -140,7 +140,7 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
 
   it should "include an answer that matches the schema but does not read as the output type" in {
     val client  = answers("""{"customer":"Acme"}""", valid)
-    val partial = Agent.builder("extractor", client).withOutput[Invoice](using partialSchema)
+    val partial = Agent.builder("extractor", client).withOutput(partialSchema)
     built(partial).run("bill Acme").value.decodeOutput[Invoice] shouldBe Right(Invoice("Acme", 12.5))
     client.callCount shouldBe 2
   }
@@ -268,8 +268,7 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
   }
 
   "build" should "refuse a schema that is not a JSON object" in {
-    given SchemaDefinition[String] = StringSchema("a name")
-    val refused                    = Agent.builder("extractor", answers()).withOutput[String].build()
+    val refused = Agent.builder("extractor", answers()).withOutput(StringSchema("a name")).build()
     refused.left.map(_.message).swap.getOrElse("") should include("object")
   }
 
@@ -283,7 +282,7 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
         ToolArgumentValidator.default.validate(schema, arguments)
     }
     val tools   = ToolSet.of(noMinimum).fold(e => fail(e.message), identity)
-    val refused = Agent.builder("extractor", answers()).withTools(tools).withOutput[Invoice].build()
+    val refused = Agent.builder("extractor", answers()).withTools(tools).withOutput(invoiceSchema).build()
     refused.left.map(_.message).swap.getOrElse("") should include("minimum")
   }
 
@@ -292,7 +291,7 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
       "x" * 40000,
       Seq(PropertyDefinition("customer", StringSchema("who")))
     )
-    Agent.builder("extractor", answers()).withOutput[Invoice](using huge).build().isLeft shouldBe true
+    Agent.builder("extractor", answers()).withOutput(huge).build().isLeft shouldBe true
   }
 
   "The graph version" should "change with the response format, and not without one" in {
@@ -300,8 +299,8 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
     def version(b: AgentBuilder) = built(b).loop.graph.version
     val plain                    = Agent.builder("extractor", client)
 
-    version(plain.withOutput[Invoice]) should not be version(plain)
-    version(plain.withOutput[Invoice](using partialSchema)) should not be version(plain.withOutput[Invoice])
+    version(plain.withOutput(invoiceSchema)) should not be version(plain)
+    version(plain.withOutput(partialSchema)) should not be version(plain.withOutput(invoiceSchema))
     version(plain) shouldBe version(Agent.builder("extractor", client))
   }
 
@@ -332,8 +331,6 @@ object AgentOutputSpec {
       PropertyDefinition("total", NumberSchema("the amount", minimum = Some(0)))
     )
   )
-
-  given SchemaDefinition[Invoice] = invoiceSchema
 
   /** An Invoice schema that lists only the customer and allows other keys, so the type's reader must check the total. */
   val partialSchema: SchemaDefinition[Invoice] = ObjectSchema[Invoice](

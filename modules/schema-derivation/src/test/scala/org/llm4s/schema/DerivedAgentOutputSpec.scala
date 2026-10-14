@@ -11,8 +11,12 @@ import org.scalatest.matchers.should.Matchers
 import java.util.concurrent.CopyOnWriteArrayList
 import scala.jdk.CollectionConverters.*
 
-/** `withOutputOf`: an agent's response format derived from a case class (#1912, design 4.26). */
-class AgentOutputOfSpec extends AnyFlatSpec with Matchers {
+/**
+ * A derived schema as an agent's response format (#1912, design 4.26): `withOutput(SchemaOf[A].definition)`.
+ * `llm4s-agent` is a test-only dependency of this module, so this composition is checked without the module
+ * depending on the agent runtime.
+ */
+class DerivedAgentOutputSpec extends AnyFlatSpec with Matchers {
 
   final private class Scripted(replies: String*) extends LLMClient {
     val asked = new CopyOnWriteArrayList[CompletionOptions]()
@@ -36,9 +40,10 @@ class AgentOutputOfSpec extends AnyFlatSpec with Matchers {
   private val invoiceJson =
     """{"vendor":"Acme Supplies Ltd","amount":1250.0,"currency":"GBP","description":"office furniture"}"""
 
-  "withOutputOf" should "send the derived schema as the response format and decode the answer" in {
+  "A derived schema" should "be sent as the agent's response format, and its answer decode" in {
     val client = new Scripted(invoiceJson)
-    val result = Agent.builder("extractor", client).withOutputOf[Invoice].build().flatMap(_.run("Extract it"))
+    val result =
+      Agent.builder("extractor", client).withOutput(SchemaOf[Invoice].definition).build().flatMap(_.run("Extract it"))
 
     result.flatMap(_.decodeOutput[Invoice]) shouldBe Right(
       Invoice("Acme Supplies Ltd", 1250.0, "GBP", "office furniture")
@@ -48,17 +53,8 @@ class AgentOutputOfSpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  it should "refuse a type that is not a JSON object at build" in {
-    val refused = Agent.builder("extractor", new Scripted()).withOutputOf[Color].build()
+  it should "be refused at build when it is not a JSON object" in {
+    val refused = Agent.builder("extractor", new Scripted()).withOutput(SchemaOf[Color].definition).build()
     refused.left.map(_.message).swap.getOrElse("") should include("object")
-  }
-
-  it should "refuse a schema that cannot be built at build, without throwing" in {
-    import RecursionFixtures.BothGivens.Gs.given
-    // never used: build refuses the schema first
-    given upickle.default.ReadWriter[RecursionFixtures.BothGivens.P] =
-      upickle.default.readwriter[ujson.Value].bimap(_ => ujson.Null, _ => sys.error("not read"))
-    val refused = Agent.builder("extractor", new Scripted()).withOutputOf[RecursionFixtures.BothGivens.P].build()
-    refused.left.map(_.message).swap.getOrElse("") should include("recursive type")
   }
 }
