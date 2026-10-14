@@ -560,6 +560,9 @@ final class HostFileBackend private (
 
 object HostFileBackend:
 
+  /** The largest `maxFileBytes`: a file is read into one array, which holds at most this many bytes. */
+  val MaxFileBytes: Long = Int.MaxValue.toLong - 8
+
   /** 4 MiB: the default bound on one file. */
   val DefaultMaxFileBytes: Long = 4L * 1024 * 1024
 
@@ -653,7 +656,9 @@ object HostFileBackend:
     var more   = true
     while more && total <= max do
       buffer.clear()
-      buffer.limit(math.min(buffer.capacity.toLong, max - total + 1).toInt)
+      // the bytes still allowed, plus one to see an overflow, without computing past Long.MaxValue
+      val remaining = max - total
+      buffer.limit(if remaining >= buffer.capacity then buffer.capacity else (remaining + 1).toInt)
       val n = channel.read(buffer)
       if n < 0 then more = false
       else
@@ -743,6 +748,13 @@ object HostFileBackend:
     allowUnprobed: Boolean = false
   ): Result[HostFileBackend] =
     if maxFileBytes <= 0 then Left(ValidationError("maxFileBytes", s"must be positive, was $maxFileBytes"))
+    else if maxFileBytes > MaxFileBytes then
+      Left(
+        ValidationError(
+          "maxFileBytes",
+          s"must be at most $MaxFileBytes (a file is read into one array), was $maxFileBytes"
+        )
+      )
     else if maxScanEntries <= 0 then Left(ValidationError("maxScanEntries", s"must be positive, was $maxScanEntries"))
     else
       for

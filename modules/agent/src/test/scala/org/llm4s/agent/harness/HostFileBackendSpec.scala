@@ -237,6 +237,10 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     taken = 0
     val small = java.nio.channels.Channels.newChannel(new java.io.ByteArrayInputStream("1234".getBytes(UTF_8)))
     HostFileBackend.readAtMost(small, 4).map(new String(_, UTF_8)) shouldBe Some("1234")
+    // a cap that the read window cannot overflow: the largest allowed, over a small channel
+    val tiny = java.nio.channels.Channels.newChannel(new java.io.ByteArrayInputStream("ab".getBytes(UTF_8)))
+    HostFileBackend.readAtMost(tiny, Long.MaxValue).map(new String(_, UTF_8)) shouldBe Some("ab")
+    HostFileBackend.open(dir, locks, maxFileBytes = Long.MaxValue).left.value.message should include("at most")
   }
 
   it should "bound what it reads, not a size checked before reading" in {
