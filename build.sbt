@@ -309,6 +309,7 @@ lazy val llm4s = (project in file("."))
     testkit,
     agentTestkit,
     agentCheckpointSqlite,
+    agentMemory,
     llm4sEffect,
     llm4sZio,
     llm4sPekko,
@@ -732,9 +733,9 @@ lazy val memory = (project in file("modules/memory"))
     name := "llm4s-memory",
     commonSettings,
     // Measured 81.10% statement coverage (`sbt coverage memory/test memory/coverageReport`)
-    // on the code as carved out of core. Floor is the measured value rounded down to the
-    // nearest 5. Never lower it.
-    coverageFloor(80),
+    // on the code as carved out of core; 91.76% with `TransactionalMemoryStore` (#1911), when the
+    // floor was raised. Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(90),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -753,11 +754,12 @@ lazy val memoryPostgres = (project in file("modules/memory-postgres"))
     name := "llm4s-memory-postgres",
     commonSettings,
     // Measured 60.33% statement coverage (`sbt coverage memoryPostgres/test
-    // memoryPostgres/coverageReport`) on the code as carved out of core. Floor is the measured
+    // memoryPostgres/coverageReport`) on the code as carved out of core; 71.01% with the
+    // `TransactionalMemoryStore` unit suite (#1911), when the floor was raised. Floor is the measured
     // value rounded down to the nearest 5. Never lower it. The in-module suite is mock-backed;
     // the real signal is `modules/it`'s `PostgresMemoryStoreSpec`, which runs on every PR
     // against a pgvector service container (#1149) and is not counted here.
-    coverageFloor(60),
+    coverageFloor(70),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -1640,6 +1642,29 @@ lazy val agentCheckpointSqlite = (project in file("modules/agent-checkpoint-sqli
     )
   )
 
+// `llm4s-agent-memory` (#1911, design 4.31) is semantic memory for agents: `SemanticMemoryMiddleware` recalls a
+// tenant's memories before a turn and records the turn after it, each write one replayable effect (C4) on a
+// `TransactionalMemoryStore`. Its own module because `llm4s-memory` depends on core only and `llm4s-agent` must not
+// depend on `llm4s-memory`. Test scope: the agent's test fixtures (`ScriptedLLMClient`), the SQLite checkpointer
+// (a thread restored after the middleware is added, C5) and the testkit's `ReplayContract`. SQLite needs no
+// service, so every suite runs here under `sbt test`.
+lazy val agentMemory = (project in file("modules/agent-memory"))
+  .dependsOn(agent % "compile->compile;test->test", memory, agentTestkit % Test, agentCheckpointSqlite % "test->test")
+  .settings(
+    name := "llm4s-agent-memory",
+    commonSettings,
+    // Measured 99.51% statement coverage (`sbt coverage agentMemory/test agentMemory/coverageReport`) on its first
+    // version. Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test
+    )
+  )
+
 // `llm4s-agent-tools` carries the ready-made tools: `org.llm4s.toolapi.builtin` (core utilities,
 // filesystem, HTTP, shell, and the Brave, DuckDuckGo and Exa search clients) and the demo
 // `toolapi.tools.WeatherTool`. They are integrations with third-party APIs, so they leave the
@@ -1704,7 +1729,7 @@ lazy val it = (project in file("modules/it"))
     core,
     rag,
     knowledgegraph,
-    memory,
+    memory % "compile->compile;test->test",
     memoryPostgres,
     mcp,
     image,
@@ -1811,6 +1836,7 @@ lazy val docs = (project in file("modules/docs"))
     agent,
     agentTestkit,
     agentCheckpointSqlite,
+    agentMemory,
     agentTools,
     knowledgegraphNeo4j,
     llm4sEffect,
@@ -1860,6 +1886,7 @@ lazy val docs = (project in file("modules/docs"))
         (agent / Compile / sources).value ++
         (agentTestkit / Compile / sources).value ++
         (agentCheckpointSqlite / Compile / sources).value ++
+        (agentMemory / Compile / sources).value ++
         (agentTools / Compile / sources).value ++
         (knowledgegraphNeo4j / Compile / sources).value ++
         (llm4sEffect / Compile / sources).value ++

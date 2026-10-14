@@ -89,7 +89,7 @@ class MemoryStoreHardeningSpec extends AnyFlatSpec with Matchers with BeforeAndA
 
   // ===== Schema version =====
 
-  "SQLiteMemoryStore" should "open a file written before schema_version existed, keep its rows, and record version 1" in {
+  "SQLiteMemoryStore" should "open a file written before schema_version existed, keep its rows, and record the current version" in {
     Using.resource(DriverManager.getConnection(s"jdbc:sqlite:$dbPath")) { c =>
       Using.resource(c.createStatement()) { st =>
         st.execute(
@@ -111,7 +111,7 @@ class MemoryStoreHardeningSpec extends AnyFlatSpec with Matchers with BeforeAndA
       Using.resource(c.createStatement()) { st =>
         Using.resource(st.executeQuery("SELECT COUNT(*), MAX(version) FROM schema_version")) { rs =>
           rs.next() shouldBe true
-          (rs.getInt(1), rs.getInt(2)) shouldBe ((1, 1))
+          (rs.getInt(1), rs.getInt(2)) shouldBe ((1, SQLiteMemoryStore.SchemaVersion))
         }
       }
     }
