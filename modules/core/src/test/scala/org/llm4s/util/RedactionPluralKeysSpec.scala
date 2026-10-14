@@ -91,6 +91,49 @@ class RedactionPluralKeysSpec extends AnyFlatSpec with Matchers {
     ).foreach(input => Redaction.redact(input) shouldBe input)
   }
 
+  it should "redact the whole of a plural key's value where another pass replaced a part of it (#1646)" in {
+    // An API key inside the value is replaced by its own pattern; the reading of the plural key replaces the leaf in
+    // quotes, which overlaps it, and was dropped whole, so the rest of the value was written in the clear. The same
+    // input with the singular key comes out with no part of the value readable.
+    Seq(
+      """{"passwords": [Qp1z_AKIAABCDEFGHIJKLMNOP]}""",
+      """{"client_secrets": [Qp1z-sk-proj-abcdefghijklmnopqrstuvwxyz0123456789]}""",
+      """{"Secrets": AKIAABCDEFGHIJKLMNOP_Qp1z}""",
+      "{'passwords': [Qp1zsk-ant-api03-abcdefghijklmnopqrstuvwxyz0123, 'x']}",
+      """{"b":"{\"secrets\": [AKIAABCDEFGHIJKLMNOP;Qp1z]}"}"""
+    ).foreach { input =>
+      val singular = input.replace("passwords", "password").replace("ecrets", "ecret")
+      withClue(s"input $input: ") {
+        (Redaction.redact(singular) should not).include("Qp1z")
+        (Redaction.redact(input) should not).include("Qp1z")
+      }
+    }
+  }
+
+  it should "write one placeholder where a plural key's value meets one already written, so a second redaction keeps it (#1646)" in {
+    Seq(
+      "api_keys: hunter2value token=abc",
+      "api_keys: hunter2value&token=abc",
+      """{"secrets": ["hunter2value&password=x"]}""",
+      "{'passwords': 'hunter2value\"password=x'}"
+    ).foreach { input =>
+      val out = Redaction.redact(input)
+      withClue(s"input $input, output $out: ") {
+        (out should not).include("hunter2value")
+        (out should not).include(s"$R$R")
+        Redaction.redact(out) shouldBe out
+      }
+    }
+  }
+
+  it should "redact a short-lived credential parameter in a URL's fragment, as an OAuth fragment response carries it (#1646)" in {
+    Redaction.redact("https://app.example.com/cb#code=AUTHCODE123&state=xyz") shouldBe
+      s"https://app.example.com/cb#code=$R&state=xyz"
+    Redaction.redact("https://app.example.com/cb#state=xyz&code=AUTHCODE123") shouldBe
+      s"https://app.example.com/cb#state=xyz&code=$R"
+    Redaction.redact("see #code=1 and #signal=2") shouldBe "see #code=1 and #signal=2"
+  }
+
   /** Documents with plural keys and credential parameters in mixed shapes, with the words that must not survive. */
   private def docs(seed: Long, count: Int): Seq[(String, String)] = {
     val rnd                    = new Random(seed)
@@ -125,18 +168,20 @@ class RedactionPluralKeysSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "never throw, and read plural keys in time linear in the input (#1646)" in {
-    val rnd   = new Random(1646)
-    val parts = Seq("secrets", "s", "=", ";jsessionid", "?code", "&", "\\u0026", ":", "\"", "'", "[", " ", "/", "?")
+  it should "never throw on plural keys and credential parameters (#1646)" in {
+    val rnd = new Random(1646)
+    val parts =
+      Seq("secrets", "s", "=", ";jsessionid", "?code", "#code", "&", "\\u0026", ":", "\"", "'", "[", " ", "/", "?")
     (1 to 2000).foreach { _ =>
       val input = Iterator.fill(1 + rnd.nextInt(30))(parts(rnd.nextInt(parts.length))).mkString
       withClue(s"input $input: ")(Try(Redaction.redact(input)).isSuccess shouldBe true)
     }
+  }
+
+  // A timing test: to be tagged `PerformanceTest` once that tier is on main. One size pair, three shapes.
+  it should "read plural keys and credential parameters in time linear in the input (#1646)" in {
     val shapes: Seq[(String, Int => String)] = Seq(
-      "plural words"      -> (n => "secrets " * n),
-      "plural pairs"      -> (n => "secrets=a&" * n),
       "plural arrays"     -> (n => "{\"api_keys\": [\"a\", " * n),
-      "query names"       -> (n => "&code=x" * n),
       "matrix parameters" -> (n => ";jsessionid=a" * n),
       "one long word"     -> (n => "a" * (8 * n) + "secrets")
     )

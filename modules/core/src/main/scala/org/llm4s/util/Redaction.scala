@@ -604,9 +604,15 @@ private[llm4s] object Redaction {
       val read  = redaction(singular, placeholder, singleQuotedFromInput = true, addedReadings = true)._2
       val alone = disjointFrom(kept, read)
       if (alone.nonEmpty) kept = (kept ++ alone).sortBy(_.start)
-      val whole = alone.toSet
-      val pure  = read.filter(e => e.replacement == placeholder && !whole(e)).map(e => (e.start, e.end))
-      val added = uncoveredEdits(input, kept, pure, placeholder)
+      val whole           = alone.toSet
+      val (pure, wrapped) = read.filter(e => e.masked && !whole(e)).partition(_.replacement == placeholder)
+      // A leaf it writes in quotes (`"[REDACTED]"`) may overlap a part another pass replaced, an API key inside the
+      // value: its parts no edit covers are added too, less every `"` and escape (`quoteSafeParts`), so that a JSON
+      // string around them is left as it was.
+      val parts =
+        quoteSafeParts(input, wrapped.map(e => (e.start, e.end, NoContentQuotes)), placeholder)
+      val spans = (pure.map(e => (e.start, e.end)) ++ parts).sortBy(_._1)
+      val added = joinedToPlaceholders(kept, uncoveredEdits(input, kept, spans, placeholder))
       if (added.nonEmpty) kept = (kept ++ added).sortBy(_.start)
     }
     kept
@@ -748,8 +754,8 @@ private[llm4s] object Redaction {
    * parameter written, in place and with as many characters, as a key the readings take (#1646), or `input` itself
    * where there is none. A plural loses its last `s` and doubles its first character, so it keeps its start - what
    * comes before it is what came before - and ends in a sensitive suffix: `secrets` is `ssecret`, `api_keys` is
-   * `aapi_key`. A parameter's key is written as `x`s and `key`, which `SensitiveQueryParams` holds, and the `;` before
-   * `jsessionid` as `&`, as is the `?`, `;`, `/` or `#` that ends its value. The edits a reading of that text makes are edits of the input: no character moves. One scan
+   * `aapi_key`. A parameter's key is written as `x`s and `key`, which `SensitiveQueryParams` holds, the `#` before a
+   * fragment's key and the `;` before `jsessionid` as `&`, as is the `?`, `;`, `/` or `#` that ends its value. The edits a reading of that text makes are edits of the input: no character moves. One scan
    * over the runs of letters, digits, `_` and `-`.
    */
   private def withSingularKeys(input: String): String = {
@@ -761,11 +767,16 @@ private[llm4s] object Redaction {
       text.copyToArray(out, at)
     }
     // After `?` or `&`, or the JSON escape of either (backslashes, `u00`, `3f` or `26`): a parameter's key starts.
+    // After `#` too, which `fragment` takes: an OAuth fragment response (`#code=...&state=...`).
     def afterQuerySeparator(at: Int): Boolean =
-      at > 0 && (input.charAt(at - 1) == '?' || input.charAt(at - 1) == '&' || (at >= 6 && {
+      at > 0 && (input.charAt(at - 1) == '?' || input.charAt(at - 1) == '&' || fragment(at) || (at >= 6 && {
         val sep = escapedSeparator(input, at)
         input.charAt(at - 6) == '\\' && input.startsWith("u00", at - 5) && (sep == '?' || sep == '&')
       }))
+    // Right after the `#` of a URL's fragment: a `#` behind a character a URL holds, not a word of prose (`#code=1`).
+    def fragment(at: Int): Boolean =
+      at > 1 && input.charAt(at - 1) == '#' && !isRegexSpace(input.charAt(at - 2)) &&
+        "\"'`<>()[]{},;".indexOf(input.charAt(at - 2).toInt) < 0
     // Before `=` or its JSON escape: a parameter's value starts.
     def beforeEquals(at: Int): Boolean =
       at < length && (input.charAt(at) == '=' || {
@@ -792,6 +803,7 @@ private[llm4s] object Redaction {
           val matrix    = !separator && i > 0 && input.charAt(i - 1) == ';' && word.equalsIgnoreCase("jsessionid")
           if (separator || matrix) {
             write(i, "x" * (word.length - 3) + "key")
+            if (fragment(i)) write(i - 1, "&") // the readings take a query parameter after `&`, not after `#`
             if (matrix) {
               // A matrix parameter's value ends at the `?`, `;`, `/` or `#` after it, where a query value goes on.
               write(i - 1, "&")
