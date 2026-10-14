@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fenced by a token per scope, with `AppliedWriteKey`, `AppliedWrite` and `MemoryBounds`. `InMemoryStore`,
   `SQLiteMemoryStore` and `PostgresMemoryStore` implement it. `MemoryStore.replace(add, remove)` is new, one
   transaction in the SQL stores.
+- **A checkpoint restores after its graph gains a key** ([#1934](https://github.com/llm4s/llm4s/issues/1934), Stage 3
+  slice C5, design §4.29): every `GraphSnapshot` now records its graph's `GraphShape` (entry, nodes, edges, joins,
+  resume nodes, keys; `CompiledGraph.shape`), and `CompiledGraph.restore` judges a shape change by what the restored
+  run can observe instead of refusing any change of the structural fingerprint. A key added reads its initial value; a
+  key removed is refused only while the thread holds a value for it; a node is never removed. A snapshot in flight
+  (pending tasks, parked continuations, open joins) also needs the same version, unchanged out-edges for every stored
+  node and unchanged joins over stored nodes, so a node added is one the restored run cannot reach. A snapshot written
+  before this change (`shape` absent) restores into its own version when the graph only gained keys.
 - **Replay of external effects: `ReplayGuard`, `EffectKey` and `ReplayContract`** ([#1921](https://github.com/llm4s/llm4s/issues/1921)).
   This is Phase 3 slice C4. A tool or hook performs an effect outside thread state through `ReplayGuard`, which has
   one guard per `ReplaySupport`: `transactional` (the target records an applied key atomically, `AppliedKeys`),
@@ -1394,6 +1402,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **A completed thread restores into a new graph version** ([#1934](https://github.com/llm4s/llm4s/issues/1934)):
+  `GraphRuntime.start` on a `Completed` or `Failed` thread keeps only its state, so it no longer refuses the thread
+  when the graph's `version` or edges changed, or when it gained nodes or keys. For an agent, a thread at rest now
+  continues after its family gains a prompt, tool, middleware or handoff; a suspended or `Running` thread still needs
+  the same family. `RestoreRejected` problems now name the change (a removed node or key, a stored node's changed
+  out-edges, a changed join) instead of "snapshot's graph structure differs from this graph's". Adopting
+  `withLocks` (#1903) no longer refuses an agent's existing threads: `tool-queue` is an added key; dropping every
+  lock refuses only a thread whose `tool-queue` still holds queued calls.
 - **Breaking - claim errors carry typed fields, and `ThreadBusy` is recoverable and says whether its holder is live** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   `GraphError.StaleClaim(threadId, token, current)` takes `token: FencingToken` and `current: Option[FencingToken]`
   (was `Long`/`Option[Long]`), and `GraphError.ThreadBusy(threadId, latestCheckpoint, holder)` takes

@@ -17,6 +17,8 @@ and tools on `AgentBuilder`. Each slice adds its part here as it lands:
 
 - [#1902](https://github.com/llm4s/llm4s/issues/1902), kernel hooks for the harness - state-writing hooks, prompt
   sections, accounted model calls, and a Block that restores the whole turn: [below](#kernel-hooks-for-the-harness-1902).
+- [#1934](https://github.com/llm4s/llm4s/issues/1934), restoring a checkpoint after the graph gains a key - which
+  shape changes keep a thread restorable: [below](#restoring-after-the-graph-changes-1934).
 - [#1903](https://github.com/llm4s/llm4s/issues/1903), tool permissions, timeouts and batch locks:
   [below](#tool-permissions-timeouts-and-batch-locks-1903).
 - [#1907](https://github.com/llm4s/llm4s/issues/1907), todos: [below](#todos-1907).
@@ -76,6 +78,26 @@ Code that only builds agents with the built-in middleware needs no change. A mid
   rendered prompt, separators included) and to 64 per request, over which the run fails. `LoopAgent` gains `maxPromptSectionTokens` and `TurnState` gains `priorValues`; a stored `TurnState` without
   it decodes.
 
+### Restoring after the graph changes (#1934)
+
+Each checkpoint now records its graph's shape (`GraphSnapshot.shape`, `CompiledGraph.shape`), and a restore accepts the
+changes the restored run cannot observe (design §4.29). No code change is needed; what is refused changes:
+
+- **Now restored:** a thread at rest (`Completed`, or `Failed` after a Block) into a graph of another `version`, with
+  other edges or joins, or more nodes or keys - for an agent, a family with another prompt, or with a tool, middleware
+  or handoff added. Any thread into a graph that only gained keys (each reads its initial value) or gained nodes no
+  stored node has a static edge or join to.
+- **Still refused:** a node removed; a key removed while the thread holds a value for it (finish with the old graph,
+  `Remove` the entry, or `forget` the thread); and, for a thread in flight (suspended, or `Running` after a crash),
+  another version, a stored node's changed out-edges, or a changed join over stored nodes. Resume or recover such a
+  thread with the graph it was written by before changing it.
+- **Snapshots written before this change** carry no shape. They restore into their own version when the graph only
+  gained keys, and are refused for anything else until they run once more.
+- `RestoreRejected` problems name the change; "snapshot's graph structure differs from this graph's" is gone.
+- **Effect records (#1921) stay valid.** A thread restored in flight keeps its task ids, so a task `recover` runs again
+  replays its recorded effects; a refused restore commits nothing and leaves them in place.
+- A harness key that should stay removable `Remove`s its entry when it is empty again: removal is judged by the stored
+  entry, which cannot be decoded once its key is gone.
 ### Tool permissions, timeouts and batch locks (#1903)
 
 Design §4.23. Additive, bar one reserved key: an agent without `PermissionMiddleware`, `withTimeout` or `withLocks` behaves as before.
@@ -83,14 +105,14 @@ Design §4.23. Additive, bar one reserved key: an agent without `PermissionMiddl
 - **`tool-queue` is a key the loop owns.** A tool or middleware that declares a `StateKey` with id `tool-queue` is refused at build, as `tool-results` is. Rename it.
 - **`ToolCallRequest` carries `resources`.** `ToolCallRequest(spec, call)` still compiles and gives the tool's `defaultResource`, `(Invoke, <name>)`; the loop builds every request with the call's own resources. A wrapper that builds one for a tool with `withResources` passes them: `ToolCallRequest(spec, call, resources)`.
 - **`PermissionMiddleware` denies what no rule allows**, a tool without `withResources` included: add `PermissionRule.allow(Operation.Invoke, "<name>")` (or `"*"`) for each tool the agent may call. See [Tool Permissions, Timeouts and Locks](/guide/agents/#tool-permissions-timeouts-and-locks).
-- **Adopting locks reshapes the agent's graph.** The loop registers `tool-queue` only for an agent with a tool that declares `withLocks`, so the first tool to adopt locks changes the agent's structural fingerprint and refuses the threads checkpointed before with `RestoreRejected`: finish or `forget` them first. Once an agent has the key, changing lock functions is safe for threads in flight: a batch keeps the lock schedule it was made with. Agents without locks, timeouts and resources included, restore their existing threads unchanged.
+- **Adopting locks adds the `tool-queue` key.** The loop registers `tool-queue` only for an agent with a tool that declares `withLocks`. Since #1934 an added key keeps old checkpoints restorable, so threads checkpointed before the first tool adopted locks continue, at rest or suspended. Dropping every lock while a suspended thread still has calls queued in `tool-queue` is refused with `RestoreRejected` rather than stranding them: resume such a thread with its locks first. Once an agent has the key, changing lock functions is safe for threads in flight: a batch keeps the lock schedule it was made with. Agents without locks, timeouts and resources included, restore their existing threads unchanged.
 - **Locked calls cost supersteps.** Each further round of a batch whose calls hold conflicting locks costs two supersteps; raise `RunBudgets.maxSupersteps` if a long batch of conflicting calls reaches it.
 
 ### Todos (#1907)
 
 Design §4.30. Additive: `TodoMiddleware` (`org.llm4s.agent.harness`) gives an agent a `write_todos` tool and a plan prompt section.
 
-- **Adding `TodoMiddleware` to an existing agent reshapes its graph.** It registers the `todos` key, and its tool's lock registers `tool-queue`, so the agent's structural fingerprint changes and threads checkpointed before are refused with `RestoreRejected`: finish or `forget` them first. Agents without it are unchanged.
+- **Adding `TodoMiddleware` to an existing agent** registers the `todos` key, and its tool's lock registers `tool-queue`. Since #1934 a thread at rest continues, its plan starting empty. A thread in flight (suspended, or `Running` after a crash) is refused with `RestoreRejected`: resume or recover it with the old agent first. So is a thread last checkpointed before #1934, until it has run once under the agent it was written by. Removing `TodoMiddleware` refuses a thread whose plan holds items. Agents without it are unchanged.
 - **`todos` is a key id the middleware owns.** A `StateKey` of your own with id `todos` in a family that also uses `TodoMiddleware` is refused at build, as two keys with one id are. Rename it.
 - **With `PermissionMiddleware`, allow the tool**: `PermissionRule.allow(Operation.Invoke, "write_todos")`.
 

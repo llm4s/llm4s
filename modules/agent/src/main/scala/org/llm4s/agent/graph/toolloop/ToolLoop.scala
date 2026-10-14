@@ -677,10 +677,11 @@ object ToolLoop:
 
     /**
      * [[ToolLoop.queue]], when a tool of any agent of the family declares locks; otherwise the key is not
-     * part of the graph, so a family without locks keeps the structural fingerprint it had before locks
-     * existed, and restores the checkpoints written then. It is decided for the family, not per agent, so
-     * every agent reads a stored schedule whenever the graph has the key: an agent rebuilt without its
-     * locks still drains a batch scheduled with them.
+     * part of the graph. Adopting locks adds the key, which a thread checkpointed before reads as an empty
+     * schedule; dropping every lock removes it, which refuses a thread whose stored schedule still holds
+     * queued calls rather than stranding them (design §4.29). It is decided for the family, not per agent,
+     * so every agent reads a stored schedule whenever the graph has the key: an agent rebuilt without its
+     * locks still drains a batch scheduled with them while another agent keeps the key.
      */
     def queueKey: Option[StateKey[LockSchedule, LockSchedule]] = Option.when(familyLocks)(queue)
 

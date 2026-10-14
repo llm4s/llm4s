@@ -419,7 +419,7 @@ final class GraphRuntime(
                 case CheckpointStatus.Running   => Left(GraphError.IncompleteRun(threadId.value, stored.checkpoint.id))
                 case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
                 case CheckpointStatus.Completed | CheckpointStatus.Failed =>
-                  graph.restore(stored.checkpoint.snapshot).flatMap { done =>
+                  graph.restoreAtRest(stored.checkpoint.snapshot).flatMap { done =>
                     newRun(graph, threadId, config, durability, done.superstep, signal)
                       .admit(
                         graph.startAt(done.superstep, done.state, input),
@@ -446,7 +446,7 @@ final class GraphRuntime(
           stored.checkpoint.status match
             case CheckpointStatus.Running =>
               for
-                execution <- graph.restore(stored.checkpoint.snapshot)
+                execution <- graph.restoreStored(stored.checkpoint)
                 reused    <- reusableWrites(graph, execution, stored)
                 run <- newRun(graph, threadId, config, durability, execution.superstep, signal).admit(
                   execution,
@@ -497,7 +497,7 @@ final class GraphRuntime(
           if stored.checkpoint.status != CheckpointStatus.Suspended then Left(GraphError.NotSuspended(threadId.value))
           else
             for
-              suspended <- graph.restore(stored.checkpoint.snapshot)
+              suspended <- graph.restoreStored(stored.checkpoint)
               resumed   <- graph.resume(suspended, answers)
               run <- newRun(graph, threadId, config, durability, resumed.superstep, signal).admit(
                 resumed,
@@ -780,7 +780,7 @@ final class GraphRuntime(
               (),
               GraphError.CheckpointConflict(threadId.value, Some(expected), Some(stored.checkpoint.id))
             )
-            execution <- graph.restore(stored.checkpoint.snapshot)
+            execution <- graph.restoreStored(stored.checkpoint)
             // the carried writes must still rebind: they are reused by the next `recover`
             _    <- reusableWrites(graph, execution, stored)
             edit <- graph.edit(execution, update, asNode)
