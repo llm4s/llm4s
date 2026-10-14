@@ -10,6 +10,54 @@ nav_order: 2
 Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
 by what you use. The notes below are the per-change detail it links to.
 
+## Smaller breaks since 0.4.1
+
+Changes too small for a section of their own. Each is listed under Breaking changes in the CHANGELOG.
+
+### `AssistantMessage` and `Completion.thinking` (#1381)
+
+`AssistantMessage` is a growth-prone type ([#1381](https://github.com/llm4s/llm4s/issues/1381)): build it with
+`AssistantMessage(...)` and change it with `withContent`, `withToolCalls` and `withThinking`; `.copy` is private. A
+positional pattern takes four fields: `case AssistantMessage(content, toolCalls, thinking, thinkingBinding)`.
+`Completion` loses its `thinking` parameter and `withThinking`: `Completion.thinking` is `message.thinkingText`, so set
+it with `completion.withMessage(completion.message.withThinking(...))`.
+
+### `JSONValidator` checks property types (#922)
+
+A schema's `properties.<field>.type` is now enforced on the top-level fields the output contains
+([#922](https://github.com/llm4s/llm4s/issues/922)). Output that passed because the type was ignored may now be
+rejected; correct the schema or the output. Nested `properties`, `items` and `enum` are still not checked.
+
+### `Result.traverse` and `recoverWithBackoff` (#960)
+
+`Result.traverse` stops calling its function at the first `Left`, so side effects no longer run for the elements after
+a failure ([#960](https://github.com/llm4s/llm4s/issues/960)). `ErrorRecovery.recoverWithBackoff` returns an error it
+does not retry unchanged instead of wrapping it in an `ExecutionError`, and retries a `ServiceError` only for a 5xx,
+429 or 408 status.
+
+### Vertex AI Application Default Credentials (#1939)
+
+`VertexAIAuthProvider`'s `wellKnownCredentialPath` is an `Option[String]`, and `None` (the default) looks up no gcloud
+credentials file ([#1939](https://github.com/llm4s/llm4s/issues/1939)). A client built from a named section finds the
+file as Google's libraries do. A hand-built `VertexAIClient` keeps the fallback by setting the path:
+
+```scala
+VertexAIAdcConfigLoader.load().map(config.withWellKnownCredentialPath)
+```
+
+`GOOGLE_APPLICATION_CREDENTIALS` still wins.
+
+### `AudioFormat.Mp3` (#1307)
+
+`AudioFormat` has a new case, `Mp3` ([#1307](https://github.com/llm4s/llm4s/issues/1307)), so an exhaustive `match`
+needs one more branch. PCM stays the default; the WAV writers and `AudioPreprocessing.standardizeForSTT` refuse MP3
+with a `ValidationError`.
+
+### `RegexValidator`'s constructor
+
+The primary constructor of `RegexValidator` takes a compiled `Pattern` and a description. The `Regex`-based
+constructors remain, so source compiles unchanged, but code compiled against 0.4.1 must be recompiled.
+
 ## Stage 3 migration: the Deep Agents harness
 
 Not in a release yet. Stage 3 ([#1901](https://github.com/llm4s/llm4s/issues/1901)) builds the harness as middleware
