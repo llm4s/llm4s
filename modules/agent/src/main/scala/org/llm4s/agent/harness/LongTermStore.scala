@@ -152,13 +152,26 @@ object LongTermStore:
   /** The most characters a namespace's tenant and path segments may have together. */
   val MaxNamespaceChars: Int = 1024
 
+  /** The most path segments a namespace may have. */
+  val MaxNamespaceSegments: Int = 64
+
   /**
    * `ns` and `key` (a key, a prefix or a query) within their bounds, checked first: before either is
    * copied, encoded, rendered, digested into an effect key or quoted (only a bounded prefix is).
    */
   def checked(operation: String, ns: Namespace, key: String): Result[Unit] =
-    val nsChars = ns.tenant.fold(0L)(_.value.length.toLong) + ns.path.iterator.map(_.length.toLong).sum
-    if nsChars > MaxNamespaceChars then
+    // the count first, so the sum below and any rendering are bounded too (an empty segment has no
+    // characters, but a million of them render a million-element array)
+    lazy val nsChars = ns.tenant.fold(0L)(_.value.length.toLong) + ns.path.iterator.map(_.length.toLong).sum
+    if ns.path.size > MaxNamespaceSegments then
+      Left(
+        BackendRefused(
+          operation,
+          "namespace",
+          s"the namespace has ${ns.path.size} segments, more than $MaxNamespaceSegments"
+        )
+      )
+    else if nsChars > MaxNamespaceChars then
       Left(
         BackendRefused(operation, "namespace", s"the namespace is $nsChars characters, longer than $MaxNamespaceChars")
       )

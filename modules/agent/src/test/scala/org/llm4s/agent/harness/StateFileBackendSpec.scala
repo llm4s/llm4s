@@ -83,6 +83,20 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
       ujson.write(value).getBytes(java.nio.charset.StandardCharsets.UTF_8).length.toLong
     org.llm4s.agent.harness.Text
       .jsonValueBytes(ujson.Arr.from(Seq.fill(1000)(ujson.Str("x" * 100))), 10) should be > 10L
+    // a wide value: its least size is over the bound before any child is visited
+    val wide = ujson.Arr.from(Iterator.fill(2000000)(ujson.Null))
+    org.llm4s.agent.harness.Text.jsonValueBytes(wide, 1000) should be > 1000L
+    org.llm4s.agent.harness.Text
+      .jsonValueBytes(ujson.Obj.from(Seq.tabulate(1000)(i => s"k$i" -> ujson.Null)), 10) should be > 10L
+  }
+
+  "Text.depthWithin" should "walk a wide value one level at a time and stop at the first level too deep" in {
+    val wide = ujson.Arr.from(Iterator.fill(2000000)(ujson.Arr(ujson.Null)))
+    org.llm4s.agent.harness.Text.depthWithin(wide, 2) shouldBe true
+    org.llm4s.agent.harness.Text.depthWithin(wide, 1) shouldBe false
+    val deep = (1 to 100).foldLeft[ujson.Value](ujson.Null)((v, _) => ujson.Obj("a" -> v))
+    org.llm4s.agent.harness.Text.depthWithin(deep, 100) shouldBe true
+    org.llm4s.agent.harness.Text.depthWithin(deep, 99) shouldBe false
   }
 
   it should "take Int.MaxValue as a limit, for listings and reads alike, without overflow" in {

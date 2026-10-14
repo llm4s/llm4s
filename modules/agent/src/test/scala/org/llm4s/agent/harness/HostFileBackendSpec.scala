@@ -554,6 +554,29 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     child.waitFor(10, TimeUnit.SECONDS) shouldBe true
   }
 
+  it should "keep its root through close until an operation already running has finished" in {
+    written(backend.write(p("/a.txt"), "x", call()))
+    Files.createDirectories(dir.resolve("sub"))
+    val child = holding(backend.lockFileOf(p("/a.txt")).value)
+    val edit  = worker().submit(() => backend.edit(p("/a.txt"), "x", "y", replaceAll = false, call()))
+    Thread.sleep(300)
+    val closing = worker().submit(new java.util.concurrent.Callable[Unit] { def call(): Unit = backend.close() })
+    Thread.sleep(300)
+    closing.isDone shouldBe false
+    // an operation that starts now is refused, and the root is still held against an overlapping one
+    backend.read(p("/a.txt"), 0, 1, call()).left.value match
+      case refused: BackendRefused => refused.kind shouldBe BackendRefused.Kind.Closed
+      case other                   => fail(s"expected a refusal, got $other")
+    HostFileBackend.open(dir.resolve("sub"), locks).left.value.message should include("overlaps")
+    child.getOutputStream.close()
+    edit.get(10, TimeUnit.SECONDS).isRight shouldBe true
+    closing.get(10, TimeUnit.SECONDS)
+    onDisk("a.txt") shouldBe "y"
+    HostFileBackend.open(dir.resolve("sub"), locks).value.close()
+    child.waitFor(10, TimeUnit.SECONDS) shouldBe true
+    backend = HostFileBackend.open(dir, locks).value
+  }
+
   it should "end as cancelled, not as a lock failure, when interrupted while another process holds the lock" in {
     // POSIX only: on Windows a thread blocked in LockFileEx is not woken by an interrupt
     assume(posix)

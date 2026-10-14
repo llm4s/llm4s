@@ -342,24 +342,35 @@ private[harness] object Text:
    * `max`: a value is sized before it is copied or stored. Over `max`, the result is some count over it.
    */
   def jsonValueBytes(value: ujson.Value, max: Long): Long =
-    val stack = scala.collection.mutable.Stack[ujson.Value](value)
+    // one iterator per open container, so a wide value stacks nothing per child; a container's least
+    // size (its brackets, commas and one byte per value, plus a key's quotes and colon) is added before
+    // it is entered, so a value far over `max` stops at once
+    val stack = scala.collection.mutable.Stack[Iterator[ujson.Value]](Iterator.single(value))
     var total = 0L
+    def least(n: Int, perChild: Long): Long = 2L + math.max(n - 1, 0).toLong + n.toLong * perChild
     while stack.nonEmpty && total <= max do
-      stack.pop() match
-        case ujson.Str(s) => total += 2 + jsonBytes(s)
-        case ujson.Arr(items) =>
-          total += 2 + math.max(items.size - 1, 0)
-          items.foreach(stack.push)
-        case ujson.Obj(fields) =>
-          total += 2 + math.max(fields.size - 1, 0)
-          fields.foreach { (k, v) =>
-            total += 3 + jsonBytes(k)
-            stack.push(v)
-          }
-        case n: ujson.Num => total += ujson.write(n).length // at most a few dozen characters
-        case ujson.True   => total += 4
-        case ujson.False  => total += 5
-        case ujson.Null   => total += 4
+      val top = stack.top
+      if !top.hasNext then stack.pop()
+      else
+        top.next() match
+          case ujson.Str(s) => total += 2 + jsonBytes(s)
+          case ujson.Arr(items) =>
+            if total + least(items.size, 1) > max then total += least(items.size, 1)
+            else
+              total += 2 + math.max(items.size - 1, 0)
+              stack.push(items.iterator)
+          case ujson.Obj(fields) =>
+            if total + least(fields.size, 4) > max then total += least(fields.size, 4)
+            else
+              total += 2 + math.max(fields.size - 1, 0)
+              stack.push(fields.iterator.map { (k, v) =>
+                total += 3 + jsonBytes(k)
+                v
+              })
+          case n: ujson.Num => total += ujson.write(n).length // at most a few dozen characters
+          case ujson.True   => total += 4
+          case ujson.False  => total += 5
+          case ujson.Null   => total += 4
     total
 
   /**
@@ -392,16 +403,19 @@ private[harness] object Text:
 
   /** Whether `value` nests arrays and objects at most `max` deep, found without recursion. */
   def depthWithin(value: ujson.Value, max: Int): Boolean =
-    val stack = scala.collection.mutable.Stack[(ujson.Value, Int)](value -> 1)
+    // one iterator per open container: the stack is the nesting, at most `max` deep, whatever the width
+    val stack = scala.collection.mutable.Stack[Iterator[ujson.Value]](Iterator.single(value))
     var ok    = true
     while ok && stack.nonEmpty do
-      val (v, depth) = stack.pop()
-      v match
-        case ujson.Arr(items) =>
-          if depth > max then ok = false else items.foreach(i => stack.push(i -> (depth + 1)))
-        case ujson.Obj(fields) =>
-          if depth > max then ok = false else fields.valuesIterator.foreach(f => stack.push(f -> (depth + 1)))
-        case _ => ()
+      val top = stack.top
+      if !top.hasNext then stack.pop()
+      else
+        top.next() match
+          case ujson.Arr(items) =>
+            if stack.size > max then ok = false else stack.push(items.iterator)
+          case ujson.Obj(fields) =>
+            if stack.size > max then ok = false else stack.push(fields.valuesIterator)
+          case _ => ()
     ok
 
   /** Non-overlapping occurrences of `old` in `content`. */

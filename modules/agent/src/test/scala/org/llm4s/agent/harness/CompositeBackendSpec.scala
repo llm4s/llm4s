@@ -73,7 +73,8 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "refuse an over-long glob or grep pattern before using it, quoting only a prefix" in {
-    val long = "a" * 100000
+    // 20M characters: a glob compiled at construction would build an automaton of that many states
+    val long = "a" * 20000000
     val g    = composite.glob(Glob(long), VPath.root, 10, ctx).left.value
     g.message should include("longer than 1000")
     g.message.length should be < 400

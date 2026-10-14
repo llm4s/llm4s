@@ -23,7 +23,9 @@ import scala.collection.immutable.Queue
  */
 @Experimental
 final class Glob private (val pattern: String):
-  private val nfa: Glob.Nfa = Glob.Nfa.of(pattern)
+  // built on first use, never at construction: a caller can bound an untrusted pattern's length
+  // (FileBackend's glob and grep do) before any work proportional to it is done
+  private lazy val nfa: Glob.Nfa = Glob.Nfa.of(pattern)
 
   /** Whether `target` matches this pattern as a whole. */
   def matches(target: String): Boolean =

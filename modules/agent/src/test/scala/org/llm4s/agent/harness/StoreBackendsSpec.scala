@@ -73,6 +73,10 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     val wide = Namespace(None, Vector.fill(2000)("n"))
     short(store.put(wide, "k", ujson.Str("v"), call())) should include("namespace")
     short(store.get(wide, "k")) should include("namespace")
+    // empty segments have no characters, but a million of them would render a million-element array
+    val many = Namespace(None, Vector.fill(1000000)(""))
+    short(store.put(many, "k", ujson.Str("v"), call())) should include("segments")
+    short(store.delete(many, "k", call())) should include("segments")
   }
 
   it should "keep namespaces apart, the tenant included" in {

@@ -79,18 +79,47 @@ final class HostFileBackend private (
 ) extends FileBackend
     with AutoCloseable:
 
-  private val closed = new java.util.concurrent.atomic.AtomicBoolean(false)
+  // `closed` and `inFlight` are guarded by `lifecycle`; `drained` is signalled when `inFlight` falls to 0
+  private val lifecycle = new ReentrantLock()
+  private val drained   = lifecycle.newCondition()
+  private var closed    = false
+  private var inFlight  = 0
+
+  private def underLifecycle[A](body: => A): A =
+    lifecycle.lock()
+    Using.resource(HostFileBackend.Unlock(lifecycle))(_ => body)
 
   /**
-   * Releases the root, so a backend over an overlapping one may open; idempotent. Every later operation
-   * is refused (`BackendRefused.Kind.Closed`): a closed backend no longer holds its root, so letting it
-   * go on would let two backends name one file by two paths.
+   * Releases the root, so a backend over an overlapping one may open; idempotent. Every operation that
+   * starts after it is refused (`BackendRefused.Kind.Closed`), and it first waits for every operation
+   * already admitted to finish: a closed backend no longer holds its root, so an operation of it still
+   * running would let two backends name one file by two paths. The wait is uninterruptible, since the
+   * root must not be released under a running operation (each of which stops on its own interrupt).
+   * Never call it from inside one of this backend's operations.
    */
-  def close(): Unit = if closed.compareAndSet(false, true) then HostFileBackend.OpenRoots.release(root)
+  def close(): Unit =
+    val first = underLifecycle {
+      val was = closed
+      closed = true
+      while inFlight > 0 do drained.awaitUninterruptibly()
+      !was
+    }
+    if first then HostFileBackend.OpenRoots.release(root)
+
+  /** An admitted operation's hold on the root, released when it finishes, however it finishes. */
+  final private class Lease extends AutoCloseable:
+    def close(): Unit = underLifecycle {
+      inFlight -= 1
+      if inFlight == 0 then drained.signalAll()
+    }
 
   private def whileOpen[A](operation: String, path: VPath)(body: => Result[A]): Result[A] =
-    if closed.get then Left(BackendRefused(operation, path.value, "the backend is closed", BackendRefused.Kind.Closed))
-    else body
+    val admitted = underLifecycle {
+      if !closed then inFlight += 1
+      !closed
+    }
+    if !admitted then Left(BackendRefused(operation, path.value, "the backend is closed", BackendRefused.Kind.Closed))
+    else Using.resource(new Lease)(_ => body)
 
   /** C4's class for this target. */
   val replaySupport: ReplaySupport = ReplaySupport.Verifiable
