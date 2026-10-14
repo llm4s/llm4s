@@ -11,7 +11,7 @@ import org.scalatest.matchers.should.Matchers
  * status, never on a bare substring (#1668).
  */
 class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
-  import DefaultErrorMapperSpec.{ Adversarial, ScalingSize }
+  import DefaultErrorMapperSpec.{ Adversarial, Megabyte, ScalingSize }
 
   private def unknownWithCause(t: Throwable): Unit =
     DefaultErrorMapper(t) match {
@@ -219,16 +219,19 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
   }
 
   // The two scaling tests above are PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test`: each
-  // adversarial message at its full length, mapped and scanned whole by each pattern, under a generous hang guard.
-  it should "map, and scan with each pattern, every adversarial message at full length inside the hang guard" in {
+  // adversarial message at a megabyte, mapped and scanned whole by each pattern, under a generous hang guard.
+  it should "map, and scan with each pattern, every megabyte adversarial message inside the hang guard" in {
     def scan(pattern: java.util.regex.Pattern)(message: String): Unit = {
       val matcher = pattern.matcher(message)
       while (matcher.find()) ()
     }
-    adversarial(Adversarial).foreach { case (name, message) =>
-      LinearTime.timed(name)(DefaultErrorMapper(new RuntimeException(message)) shouldBe an[UnknownError])
+    adversarial(Megabyte).foreach { case (name, message) =>
+      message.length should be >= 990000
+      LinearTime.timed(name, LinearTime.MegabyteHangGuard)(
+        DefaultErrorMapper(new RuntimeException(message)) shouldBe an[UnknownError]
+      )
       DefaultErrorMapper.StatusPatterns.foreach { pattern =>
-        LinearTime.timed(s"$name, ${pattern.pattern}")(scan(pattern)(message))
+        LinearTime.timed(s"$name, ${pattern.pattern}", LinearTime.MegabyteHangGuard)(scan(pattern)(message))
       }
     }
   }
@@ -285,6 +288,9 @@ object DefaultErrorMapperSpec {
 
   /** The length of each adversarial input: ten times the 20,000 characters that took seconds before. */
   val Adversarial = 200000
+
+  /** The length of each adversarial input of the hang guard, which stays in `sbt test`: a megabyte. */
+  val Megabyte = 1000000
 
   /**
    * The smaller of the two lengths the patterns' scaling is measured at; the larger is four times it,

@@ -100,10 +100,10 @@ class RedactionScrubSpec extends AnyFlatSpec with Matchers {
 
   // An ordinary test with a generous hang guard; how the cost scales is measured by the PerformanceTest below, run by
   // `sbt testPerformance` (it was a 3 s bound on this one run, which a slow runner can exceed).
-  "Redaction.scrubRemote" should "scrub a body echoing 8,000 access tokens well inside the hang guard" in {
-    val echoed = tokens(8000)
+  "Redaction.scrubRemote" should "scrub a megabyte body echoing 17,000 access tokens well inside the hang guard" in {
+    val echoed = tokens(17000)
     val body   = echoing(echoed)
-    body.length should be > 350000
+    body.length should be > 1000000
     val started  = System.nanoTime()
     val scrubbed = Redaction.scrubRemote(body, Seq("configured-secret"))
     val elapsed  = (System.nanoTime() - started).nanos
