@@ -109,7 +109,7 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
     c.commit(None, Vector.empty, Vector(event("e6"))).value.map(_.seq) shouldBe Vector(6L)
   }
 
-  it should "delete a thread's checkpoint, pending writes, events and claim, leaving other threads alone" in {
+  it should "delete a thread's checkpoint, pending writes, events and claim under its claim, leaving other threads alone" in {
     val c     = Claimed()
     val store = c.store
     val other = ThreadId("other")
@@ -118,7 +118,7 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
     val otherToken = store.claim(other, ClaimRequest(RunId("o"), ttl)).value.token
     store.commit(other, Commit(otherToken, Some(checkpoint("o1", None)), Vector.empty, Vector(event("x"))))
 
-    store.deleteThread(thread).value shouldBe (())
+    store.deleteThread(thread, c.token).value shouldBe (())
 
     store.latest(thread).value shouldBe None
     store.eventsAfter(thread, 0L, 10).value shouldBe empty
@@ -128,12 +128,15 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
     store.commit(thread, Commit(c.token)).left.value shouldBe a[GraphError.StaleClaim]
     val again = store.claim(thread, ClaimRequest(RunId("again"), ttl)).value
     again.token.value should be > otherToken.value
-    // the id is a new thread again: a first checkpoint is accepted, its events numbered from 1
+    // the id is a new thread again: a first checkpoint is accepted, its events numbered past the old
+    // thread's two, its next number skipped
     store
       .commit(thread, Commit(again.token, Some(checkpoint("c1", None)), Vector.empty, Vector(event("again"))))
       .value
-      .map(_.seq) shouldBe Vector(1L)
-    store.deleteThread(ThreadId("unknown")).value shouldBe (())
+      .map(_.seq) shouldBe Vector(4L)
+    // a delete is fenced like a commit: an unknown thread has no claim to delete under
+    store.deleteThread(ThreadId("unknown"), again.token).left.value shouldBe
+      GraphError.StaleClaim("unknown", again.token.value, None)
   }
 
   it should "grant one live claim per thread, by its own clock, and let an expired one be taken over" in {

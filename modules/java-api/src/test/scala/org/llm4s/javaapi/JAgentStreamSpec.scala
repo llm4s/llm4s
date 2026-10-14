@@ -104,7 +104,7 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
       agent.stream(threadId, "hi", recorder).get().await().get().answer() shouldBe Optional.of("hello")
       recorder.events.flatMap(AgentEvents.TextDelta.unapply).map(_.text)
     }
-    val jClient = new JLlmClient(client)
+    val jClient = Llm4s.wrapClient(client)
     deltas(Llm4s.createAgent(jClient, ToolRegistry.empty, true), "j21") shouldBe Vector("he")
     deltas(Llm4s.createAgent(jClient, ToolRegistry.empty, false), "j22") shouldBe empty
   }
@@ -139,7 +139,7 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
   }
 
   it should "fail every stream of an agent that did not build" in {
-    val broken = new JAgent(Left(ValidationError("agent", "broken")))
+    val broken = new JAgent(FacadeToken.INSTANCE, Left(ValidationError("agent", "broken")))
     broken.stream("j", "q", Recorder()).getError().getMessage should include("broken")
   }
 

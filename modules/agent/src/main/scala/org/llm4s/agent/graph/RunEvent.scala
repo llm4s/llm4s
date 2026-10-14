@@ -13,7 +13,20 @@ import java.time.Instant
  */
 enum RunEvent derives ReadWriter:
   case RunStarted(tenantId: Option[String], principal: Option[String])
-  case RunRecovered(fromCheckpoint: String, tenantId: Option[String], principal: Option[String])
+
+  /**
+   * A run continued the incomplete execution at `fromCheckpoint`. `takenOverFrom` is the run id of
+   * another run whose claim on the thread had expired, unreleased, and which this run's claim replaced:
+   * a takeover, so that run may still have been executing. It can equal this run's own id, when a
+   * caller reuses a `RunId` ([[RunConfig.withRunId]]): still a takeover of a separate, earlier run.
+   * `None` when the thread was free; a log written before the field existed reads as `None`.
+   */
+  case RunRecovered(
+    fromCheckpoint: String,
+    tenantId: Option[String],
+    principal: Option[String],
+    takenOverFrom: Option[String] = None
+  )
   case TaskCompleted
   case TaskFailed(message: String)
 
@@ -175,6 +188,24 @@ enum DisconnectReason:
    * compacted away first ([[GraphError.ReplayUnavailable]]).
    */
   case ReplayFailed(error: LLMError)
+
+  /**
+   * The thread was deleted ([[GraphRuntime.deleteThread]], through this runtime or another sharing the
+   * store). A subscription follows one thread, not its id: a new thread created under the same id is
+   * not delivered to it - subscribe again, from `0`, to follow that one. A subscription in another
+   * runtime that had delivered no event yet cannot be told from a new one, so it follows the new
+   * thread instead of ending, unless it is another tenant's ([[TenantMismatch]]); see
+   * [[GraphRuntime.deleteThread]] for when each subscription learns of the delete.
+   */
+  case ThreadDeleted
+
+  /**
+   * The thread belongs to another tenant than the subscriber's ([[GraphRuntime.subscribe]]'s `config`):
+   * it did not exist when the subscription was made, or was deleted and created again through another
+   * runtime, and a run of another tenant then made it. Nothing of that thread is delivered: the event
+   * that showed it is not, and `lastSeq` is the last event the subscriber was entitled to.
+   */
+  case TenantMismatch
 
 /**
  * A registration with [[GraphRuntime.subscribe]] or [[RunHandle.subscribe]]. It is scoped to a

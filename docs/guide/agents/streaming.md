@@ -153,6 +153,24 @@ Durable events outlive the run. `GraphRuntime.subscribe(threadId, afterSeq = 0)`
 events from the start, which gives the structure of every run without any content. See
 `EventCollectionExample`.
 
+### Tenants
+
+A subscription reads the thread, so it is checked like `history`: pass the caller's `RunConfig`, and a
+thread of another tenant is refused with `GraphError.TenantMismatch` before anything is delivered.
+`TracingSubscriber.attach` takes the same `config`. The default, `RunConfig()`, is the caller with no
+tenant, which is right only for threads whose runs set none.
+
+```scala
+runtime.subscribe(threadId, config = RunConfig().withTenantId(TenantId("acme")))(listener)
+```
+
+A thread can change hands under its id after you subscribe: one that does not exist yet is created by
+whichever tenant runs on it first, and one deleted through another runtime can be created again before
+your subscription learns of the delete. So a subscription screens each event against your tenant, and
+ends with `Disconnected(lastSeq, TenantMismatch)` - before the first event of another tenant's thread,
+delivering none of it. `RunHandle.subscribe` and `AgentRun.subscribe` belong to a run, and use its
+tenant.
+
 ## Subscriptions across runtimes
 
 Several `GraphRuntime`s, in one process or several, can share one checkpoint store
@@ -174,6 +192,15 @@ guarantees: in order, without gap or duplicate, and only after the commit.
 - If a read of the store fails, the subscription delivers what it has queued and then ends with
   `Disconnected(lastSeq, ReplayFailed(error))`. Closing the store under it ends it this way too.
   Resubscribe with `afterSeq = lastSeq`, for example after a restart.
+- If the thread is deleted (`GraphRuntime.deleteThread`, `Agent.forget`), through this runtime or another,
+  the subscription delivers what it has queued and then ends with `Disconnected(lastSeq, ThreadDeleted)`:
+  at once in the deleting runtime, and in another runtime at its next read of the store (its next poll, or,
+  with the watch disabled, its runtime's next commit on the thread). It never delivers a new thread created
+  under the same id as a continuation of the deleted one; subscribe again from `afterSeq = 0` to follow
+  that one. A subscription in another runtime that has delivered no event yet cannot be told from a new
+  one, and follows the new thread instead of ending - if it is your tenant's; one of another tenant ends
+  the subscription with `TenantMismatch` (see [Tenants](#tenants)). A subscription that falls behind while its thread is
+  deleted ends with `ThreadDeleted`, not `Lagging`: resubscribing from `lastSeq` would find the log gone.
 
 ```scala
 import org.llm4s.agent.graph.*
@@ -318,4 +345,4 @@ listener { case Checked(v) => ... } // None for another name, version or an unde
 
 See also the [observability guide](../observability/), the
 [migration note](../../reference/migration.html), and
-[Typed Agent Runtime §4.14](/design/typed-agent-runtime-design).
+[Typed Agent Runtime §4.14](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.14-stage-1-slice-3-events-and-tracing.md).

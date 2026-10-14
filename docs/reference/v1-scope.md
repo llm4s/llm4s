@@ -102,7 +102,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `spring` — Spring Boot auto-configuration (`Llm4sAutoConfiguration`, `Llm4sProperties`, `LLM4STemplate`, `LlmHealthIndicator`) — **new** | `llm4s-spring-boot-starter` (`modules/spring-boot-starter`) | Beta |
 | `effect.cats` — `LLMClientIO`, `AgentIO` (cats-effect 3, fs2) — **new** | `llm4s-effect` (`modules/llm4s-effect`) | Beta |
 | `zio` — `LLMClientZ`, `AgentZ` (ZIO 2, ZIO Streams) — **new** | `llm4s-zio` (`modules/llm4s-zio`) | Beta |
-| `kotlin` — coroutine API (`LLMClientKt`, `AgentKt`, `AgentStreamItem`); a separate Gradle build, not part of sbt or the MiMa baseline, not yet published — **new** | `modules/kotlin-api` | Experimental |
+| `kotlin` — coroutine API (`LLMClientKt`, `AgentKt`, `AgentStreamItem`); a separate Gradle build, not part of sbt or the MiMa baseline, published with each release at the release's version (no `_3` suffix; managed by `llm4s-bom`) — **new** <!-- tier-drift: ignore (a Gradle-built artifact, not an sbt project; see PublishedArtifacts.Gradle) --> | `llm4s-kotlin-api` (`modules/kotlin-api`) | Experimental |
 | `pekko` — `LLMClientPekko`, `AgentPekko` (Apache Pekko Streams) — **new** | `llm4s-pekko` (`modules/llm4s-pekko`) | Beta |
 
 Notes:
@@ -138,7 +138,7 @@ See [#1126](https://github.com/llm4s/llm4s/issues/1126) for the reasoning behind
 | `llm4s-provider-testkit` | 21 | 21 | its interruption checks and `LocalProviderTestServer` run on virtual threads ([#1582](https://github.com/llm4s/llm4s/issues/1582)) |
 | `llm4s-media`, `llm4s-workspace-shared` | 21 (supported) | 21 | neither depends on `llm4s-core`: they use no JDK 21 API, and their newest dependency class files are version 55 (uJson), so they may well load on an older JDK, but only JDK 21 is tested and supported |
 
-No build setting pins a bytecode level (no `-release`, `-java-output-version` or `javacOptions` target), so the bytecode level alone does not tell you which JDK you need: the requirement comes from the APIs and the dependencies above. The Scala compiler emits class-file version 52 for the llm4s Scala sources. The few Java sources (the `@Stable` and `@Experimental` annotations in `llm4s-core`, the enums of `llm4s-java-api`) are compiled by `javac` at the level of the JDK that builds them, which is version 65 for artifacts built on CI's JDK 21. The Gradle-built `llm4s-kotlin-api` targets JVM 17 bytecode (version 61) and still needs JDK 21 to run.
+No build setting pins a bytecode level (no `-release`, `-java-output-version` or `javacOptions` target), so the bytecode level alone does not tell you which JDK you need: the requirement comes from the APIs and the dependencies above. The Scala compiler emits class-file version 52 for the llm4s Scala sources. The few Java sources (the `@Stable` and `@Experimental` annotations in `llm4s-core`, the enums and value types of `llm4s-java-api`) are compiled by `javac` at the level of the JDK that builds them, which is version 65 for artifacts built on CI's JDK 21. The Gradle-built `llm4s-kotlin-api` targets JVM 17 bytecode (version 61) and still needs JDK 21 to run.
 
 ## Programme status
 

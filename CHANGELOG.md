@@ -8,6 +8,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`llm4s-kotlin-api` is published to Maven Central with each release** ([#1494](https://github.com/llm4s/llm4s/issues/1494)):
+  `org.llm4s:llm4s-kotlin-api` (no `_3` suffix: a Kotlin artifact), at the release's version, depending on
+  `llm4s-java-api_3` at that same version, and managed by `llm4s-bom`, so a Gradle build that imports the BOM declares
+  `implementation("org.llm4s:llm4s-kotlin-api")`. The Gradle build in `modules/kotlin-api` gained `maven-publish`,
+  `signing` and Dokka: sources and javadoc (Dokka HTML) jars, and a POM with the same url, licence, organization, scm,
+  developers and version scheme as the sbt artifacts. Its version is the `llm4sVersion` Gradle property (default
+  `0.1.0-SNAPSHOT`), and its facade dependency moved from `implementation` to `api`, because `AgentKt`'s signatures
+  expose the facade's types and `Flow`. A new `publish-kotlin` job in `release.yml`, after `publish` and before
+  `github-release`, checks that sbt released the tag's version, builds and signs the publication, checks it
+  (`scripts/check-kotlin-publication.sh`) and uploads it to the Central Portal (`scripts/publish-kotlin-api.sh`, which
+  is safe to re-run: it uploads nothing when Central or the Portal already has the version, and fails closed when the
+  Portal cannot say). The `Kotlin API` CI job dry-runs it unsigned on every pull request and builds a throwaway project against it.
+  `sbt listPublishedArtifacts` prints it as a `gradle` line and `scripts/verify-release.sh` checks it (POM, jar, and the
+  facade version), with tests (`scripts/test-verify-release.sh`, `scripts/test-publish-kotlin-api.sh`). See
+  [Release Process](docs/reference/release.md#the-kotlin-artifact-llm4s-kotlin-api).
+- **Java client builders: a client in code, with no `application.conf` and no Scala type** ([#1489](https://github.com/llm4s/llm4s/issues/1489)):
+  `Llm4s.openAi()`, `anthropic()`, `gemini()`, `ollama()`, `openAiCompatible()` and `azureOpenAi()` return immutable
+  builders (`OpenAiClientBuilder` and so on) taking `apiKey`, `model`, `baseUrl`, `contextWindow`, `reserveCompletion`,
+  `requestTimeout`/`streamTimeout` (`java.time.Duration`) and each provider's own fields (`organization`, `apiVersion`,
+  `header`), whose `build()` returns `LlmResult<JLlmClient>`. A required field left out, `null` or blank, or a value out
+  of range, is a failed result of kind `VALIDATION` naming the field; `build()` sends no request and never throws, and
+  `toString` prints the key as `***` and URLs without userinfo, query or fragment. Defaults are those `application.conf`
+  gives - the provider's base URL and the model catalogue's context window, for an OpenAI-compatible server the window
+  for the provider its base URL's host names - because each builder makes its config as the provider's descriptor makes
+  it from a section, and a test compares the two. `metrics(MetricsCollector)` attaches a collector, as
+  `Llm4s.createClient(config, metrics)` does. Other providers still take a config object through
+  `Llm4s.createClient(ProviderConfig)`. The Kotlin API cannot wrap a builder's client yet
+  ([#1850](https://github.com/llm4s/llm4s/issues/1850)). See [Configure in code](docs/guide/java.md#configure-in-code).
+- **`MemoryManagerConfig.contextTokenBudget` and `autoExtractEntities` take effect** ([#1579](https://github.com/llm4s/llm4s/issues/1579)):
+  `getRelevantContext` without a `maxTokens` now uses the manager's `contextTokenBudget` (2000 by default, as
+  before; an explicit `maxTokens` still wins), through a new `MemoryManager.contextTokenBudget` member that
+  `SimpleMemoryManager` and `LLMMemoryManager` take from their config and other implementations inherit as
+  `MemoryManager.DefaultContextTokenBudget`. With `autoExtractEntities = true`, `recordMessage` and
+  `recordConversation` also run `extractEntities` over each recorded user and assistant message, with its
+  conversation id - one extra LLM call per message on `LLMMemoryManager`, nothing on `SimpleMemoryManager`;
+  a failed extraction is logged and the message stays recorded. `MemoryManagerConfig.fullFeatured` turns it on.
 - **`Llm4s.createClient(ProviderConfig, MetricsCollector)` is public** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
   the `llm4s-java-api` overload that attaches a `MetricsCollector` (a `MicrometerMetrics` over the application's
   `MeterRegistry`, say) was `private[llm4s]` for the Spring Boot starter, yet public in the bytecode, so Java callers
@@ -136,7 +172,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   holding run; once a claim has expired - its process died - another runtime's `recover` takes the thread over,
   reusing the pending writes of the tasks that finished. Every commit carries the claim's token, and the store refuses
   a stale one atomically (`GraphError.StaleClaim`), so a run that lost its claim records nothing after its successor
-  started and ends with `CheckpointWriteFailed`. `RunPosition.fencingToken` gives a node the token. The new
+  started; it stops at once and ends with `GraphError.ClaimLost` (see Changed). `RunPosition.fencingToken` gives a node the token. The new
   **`llm4s-agent-testkit`** publishes `CheckpointerContract`, the contract every store must pass as a ScalaTest
   suite (atomic commits, conflicts, event numbering, compaction and `ReplayUnavailable`, `deleteThread`, claims and
   fencing, and two or more `GraphRuntime`s contending over one store), with the `ManualClock` it drives expiry with;
@@ -296,8 +332,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#1457](https://github.com/llm4s/llm4s/issues/1457)): a new Beta module (`modules/llm4s-pekko`, package
   `org.llm4s.pekko`) that depends on `llm4s-core`, `llm4s-agent` and `pekko-stream` 1.7 (Apache-2.0; Akka is not
   used). `LLMClientPekko(client).streamComplete(conversation)` is a `Source[StreamedChunk, NotUsed]` and `complete` a
-  `Future`; `AgentPekko(agent).stream`, `streamResume` and `streamRecover` are `Source[AgentStreamItem, NotUsed]` (each
-  event of the turn, then `Done(result)`) and `run`, `continueConversation`, `recover` and `resume` are `Future`s, as
+  `Future`; `AgentPekko(agent).stream`, `streamResume` and `streamRecover` are `Source[AgentStreamItem, Future[Done]]`
+  (each event of the turn, then `Done(result)`; the `Future[Done]` completes once the turn has ended and its thread is
+  free) and `run`, `continueConversation`, `recover` and `resume` are `Future`s, as
   `AgentIO` and `AgentZ` offer for fs2 and ZIO. The provider call blocks, so each stream runs it on a daemon thread of its
   own and hands items over through a bounded buffer: a consumer that lags blocks the provider's thread (nothing is
   dropped), and cancelling the stream interrupts it. An agent turn is cancelled when its stream is, a slow consumer gets
@@ -1258,6 +1295,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Breaking - `GraphRuntime.subscribe` is tenant-checked** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  it took no `RunConfig`, so any caller could replay and follow any tenant's thread - its `RunStarted` with tenant and
+  principal, `Custom` payloads and `TaskFailed` messages - although `history`, `checkpoint`, `prune` and `fork` refuse
+  another tenant. `subscribe(threadId, afterSeq, capacity, config)(listener)` and
+  `TracingSubscriber.attach(runtime, threadId, tracing, afterSeq, config)` now take the caller's `RunConfig` (default
+  `RunConfig()`, no tenant) and return `GraphError.TenantMismatch` for a thread whose latest checkpoint is another
+  tenant's - or, for a thread with no checkpoint yet, whose run admitting or executing in the runtime is - before
+  joining. Because a thread can change hands under
+  its id after that - created by another tenant after the subscription was made, or deleted and created again through
+  another runtime - each subscription also screens every event: by the tenant the events that begin a run, a fork or a
+  state update name, and otherwise, until the first event delivered confirms the thread as the caller's, by its latest
+  checkpoint, read again then. An event
+  of another tenant's thread ends it, before that event, with the new `DisconnectReason.TenantMismatch`.
+  `RunHandle.subscribe`, `AgentRun.subscribe`, a run's `Observer` and agent tracing are scoped to their run's tenant
+  and keep their signatures. See the [migration guide](docs/reference/migration.md#durable-checkpointer-contract-1700).
+- **Breaking - a run that loses its claim stops at once and ends `GraphError.ClaimLost`** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  it used to end `CheckpointWriteFailed(_, StaleClaim, _)`, which a caller could not tell from a store outage without
+  matching on its cause. `GraphError.ClaimLost(threadId, token, current)` is new: the run's own `FencingToken`, and the
+  thread's current one when the store named it. The run finds its claim lost when its lease passes with no renewal
+  landing - judged by the runtime's own monotonic clock - or when a renewal or commit is refused as stale. Its tasks
+  are interrupted as a cancel interrupts them, it commits nothing more (not even `RunFailed`), and it drops its
+  `Async` queue and `OnExit` buffer. `recover` may be attempted once the thread is free: it is refused with
+  `ThreadBusy` while a successor holds the thread, a successor that finished leaves the thread's state showing it, and
+  a lease that lapsed with no successor leaves the run for `recover` to continue. A `start`, `recover` or `resume`
+  whose claim's commit is refused as stale returns `ClaimLost` too, and a `fork` or `updateState` whose commit is
+  refused as stale returns `ThreadBusy`, so no runtime call returns `CheckpointWriteFailed(StaleClaim)`. `StaleClaim`
+  stays the store's refusal. `RunEvent.RunRecovered` gains
+  `takenOverFrom: Option[String]`, and `RunClaim` `takenOverFrom: Option[RunId]`: a `recover` whose claim replaced
+  another run's expired, unreleased one records that run, so the log shows the takeover - even when a reused `RunId`
+  makes it this run's own id; a store reports it from
+  `claim`, and `CheckpointerContract` checks it. Both default to `None`, so older logs still read. See
+  [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#fencing-a-run-that-lost-its-claim-stops-and-records-nothing)
+  and the [migration note](docs/reference/migration.md#durable-checkpointer-contract-1700).
+- **`Checkpointer.deleteThread` is fenced by a claim token, and a deleted thread's id numbers on** ([#1700](https://github.com/llm4s/llm4s/issues/1700) follow-up, BREAKING,
+  `llm4s-agent`, `llm4s-agent-testkit`, `llm4s-agent-checkpoint-sqlite`): `deleteThread(threadId)` is
+  `deleteThread(threadId, token: FencingToken)`, and a store deletes only while `token` is the thread's current claim,
+  checked atomically with the delete, returning `GraphError.StaleClaim` and deleting nothing otherwise - a thread with
+  no claim, an unknown one included, too. A store keeps a tombstone (no data) of a deleted thread that numbered any
+  event, and the next thread of its id numbers its events from one past the deleted thread's next number instead of
+  from 1. A read of the log after a number of the deleted thread is refused with the new
+  `GraphError.ThreadDeleted(threadId, afterSeq, firstSeq)` (`Checkpointer.deleted` is the rule), and a read from 0
+  starts at the current thread's first event. `DisconnectReason` gains `ThreadDeleted`, which ends every subscription
+  to a deleted thread. `CheckpointerContract` drops its "deletes regardless of claims" case for cases on the fenced
+  delete, the numbering and `ThreadDeleted`. A deleted id keeps that tombstone for good: nothing reclaims it yet. There
+  is no unfenced delete. The SQLite schema is version 2 (`first_seq`), upgraded on open; stop processes on an older
+  build first. No shims;
+  see the [Stage 2 migration note](docs/reference/migration.md#durable-checkpointer-contract-1700).
+- **Workload-identity configuration is `@Stable`; `stabilityTierCheck` flags Stable signatures that name Experimental types** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
+  `AuthConfig`, `IdentitySource`, `TokenExchangeConfig`, `AccessToken`, `AccessTokenProvider`,
+  `OpenAIWorkloadIdentity` and `AnthropicWorkloadIdentity` were `@Experimental` while the Stable
+  `NamedProviderConfig.auth`/`withAuth`/`apply`, `ProviderDescriptor.requireAuthExtra`,
+  `OpenAICompatibleConfig.tokenExchange`, `OpenAICompatibleClient.Credential` and the `workloadIdentity` fields of
+  `OpenAIConfig` and `AnthropicConfig` carried them, so the 1.x promise on those signatures could not hold. They are
+  now `@Stable`; `TokenExchange`, `CachingAccessTokenProvider` and `IdentityTokenSource` stay `@Experimental`.
+  `stabilityTierCheck` now also fails for a public member of a `@Stable` type whose signature names an
+  `@Experimental` type, and checks itself against fixtures first. **Migration:** `AccessToken` is growth-safe: its
+  constructor and `copy` are private - build one with `AccessToken(value, expiresAt)` and change it with
+  `withValue` / `withExpiresAt`.
+- **A test framework's assertion under a bare `assertion` key stays readable** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
+  `Redaction` treated every key ending in `assertion` as a credential, which blanked test-framework lines such as
+  `Assertion: expected status 200` and `{"assertion": "response.status == 200"}`. The bare key is still a credential
+  in every shape - JSON field, IdP error echo, Python dict, escaped JSON, header line, `key=value` pair, quoted pair,
+  form body and query - but a value under it that reads as prose is left readable: it holds a space (U+0020), no
+  `<`, and no run of 20 or more characters of `[A-Za-z0-9+/_=-]`. A test assertion (`expected status 200 but got
+  404`, `len(items) > 0`) is words and operators between spaces; an RFC 7521 / 7523 `assertion` grant fails the rule
+  however it is wrapped - a JWT, a base64 or base64url SAML assertion (also wrapped with spaces), a hex or opaque
+  token is one long run, a raw XML SAML assertion holds `<`, a PEM block holds base64 lines - and so does a credential
+  with a word beside it (`ghp_... x`, an AWS key id and its secret). The check reads only the value, so redaction
+  stays linear in the input. One rule, read by every pass and by `remoteBody`'s collector. A compound key
+  (`client_assertion`, `saml_assertion`, `jwtAssertion`) and a container under the bare key are redacted whatever
+  they hold, and the patterns that read no key (JWTs, bearer tokens, API keys, sensitive pairs) still apply inside a
+  readable assertion. An `Assertion` request header is still withheld on a cross-origin redirect by the HTTP tool.
+- **Breaking (Java API): the facade's Java-visible surface is the intended one** ([#1666](https://github.com/llm4s/llm4s/issues/1666)):
+  Scala 3 emitted the `private` constructors and `private[javaapi]` factories of `llm4s-java-api` as `public`, so Java
+  could build values the library never would (`new JToolCall(null, null, null)`, a `COMPLETED` `JAgentStatus` with no
+  answer) and adding a field would have broken a caller compiled against a constructor. The value types - `JAgentResult`,
+  `JAgentStatus`, `JMessage`, `JToolCall`, `JUsageSummary`, `JModelUsage`, `PendingInterrupt`, `JCompletion`,
+  `JTokenUsage` and `JEmbeddings` - are now Java classes with package-private constructors and no static factory (bar
+  `JEmbeddings.cosineSimilarity`), with the same accessors, `equals`, `hashCode` and `toString`. The facade's Scala
+  classes (`JLlmClient`, `JAgent`, `JEmbeddingClient`, `AgentStream`, `LlmResult`, `Answer`, `ConversationBuilder`,
+  `JCompletionOptions` and its `Builder`) take a package-private token first in their constructors, which throw
+  `UnsupportedOperationException` when called from outside the package, and the internal `of`/`from` factories
+  and `AgentStream.start` are gone from the facade types (`Llm4s.createClient(config, metrics)` stays public, as
+  [#1817](https://github.com/llm4s/llm4s/issues/1817) made it). `JavaInteropSpec` now
+  fails on any public constructor or public static method that is not in its list of intended ones, its companion's
+  included, and compiles a Java class in another package that tries to build each value type. New:
+  `Llm4s.wrapClient(LLMClient)` and `Llm4s.wrapEmbeddingClient(EmbeddingClient, EmbeddingModelConfig)`, the
+  counterparts of `wrapAgent`. Migration: `new JLlmClient(client)` from Java or Kotlin becomes
+  `Llm4s.wrapClient(client)`, and `new JEmbeddingClient(client, model)` becomes `Llm4s.wrapEmbeddingClient(client,
+  model)`; nothing else had a supported way in.
 - **Subscriptions watch the checkpoint store** ([#1705](https://github.com/llm4s/llm4s/issues/1705), BREAKING,
   `llm4s-agent`): `Checkpointer` gains `awaitEventsAfter`, with a polling default, so existing stores compile
   unchanged. A delegating store should forward it. `GraphRuntime`'s constructor gains an optional `WatchPolicy`, and
@@ -2401,6 +2528,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `org.llm4s.toolapi.ToolHints` in `llm4s-core` (`@Experimental`), because `llm4s-mcp` cannot depend on the agent runtime.
 
 ### Removed
+- **`MemoryManagerConfig.autoRecordMessages` and `consolidationEnabled`** ([#1579](https://github.com/llm4s/llm4s/issues/1579)):
+  no manager ever read them. A manager records only the messages passed to `recordMessage`/`recordConversation`,
+  so there was nothing for `autoRecordMessages` (default `true`) to switch, and automatic consolidation has no
+  trigger to hang on - `consolidateMemories` runs when you call it, reading `consolidationConfig`. The 5-parameter
+  `MemoryManagerConfig` constructor, `apply` and `copy` overloads went with them. **Migration:** drop both
+  arguments; record each turn with `recordMessage`/`recordConversation` and call `consolidateMemories` yourself
+  (for example from a scheduled job). Positional calls shift: the constructor and `apply` are now
+  `(autoExtractEntities, defaultImportance, contextTokenBudget, consolidationConfig)`.
 - **`WorkspaceConfigSupport.loadSandboxConfig`** ([#1730](https://github.com/llm4s/llm4s/issues/1730)): it read a
   sandbox profile from the client's `llm4s.workspace.sandbox.profile`, which nothing passed to the runner and nothing
   called, so it suggested a client setting that enforced nothing. What the runner enforces is decided only by its own
@@ -2556,6 +2691,173 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **A refused claim no longer names another tenant's checkpoint when the thread cannot be re-read** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  when the store refused a claim, or a run's claim commit conflicted, the runtime re-read the thread to check its
+  tenant before naming its checkpoint, but if that re-read failed it returned `ThreadBusy` naming the store's own,
+  unchecked checkpoint id - which can be another tenant's, and embeds that tenant's run id. `start`, `recover`,
+  `resume`, `deleteThread`, `fork` and `updateState` now return `ThreadBusy(threadId, None, None)` then. A conflicting
+  claim commit whose re-read succeeds now names the re-read's tenant-checked checkpoint instead of the conflict's, and
+  one whose re-read finds no checkpoint (the thread was deleted meanwhile) names none: before, both named the
+  conflict's.
+- **A run whose claim renewals fail or hang no longer runs on after another runtime takes its thread over** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  a run learned its claim was gone only from a renewal the store refused, or a refused commit, so a run partitioned
+  from its store, or whose renewal hung in it, executed every remaining superstep - under `OnExit` the whole graph -
+  and their side effects after its successor started. It now judges its own lease, from the monotonic time just
+  before the request that granted or last renewed the claim was sent, on a heartbeat that never waits on the store:
+  renewals run on their own thread, one at a time, and a failing one is retried while the lease lasts. A loss it
+  detects now interrupts the task in flight instead of waiting for the next superstep.
+- **A cancelled or expired run releases its claim with its interrupt flag clear** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  the release ran with the flag set, so a store whose I/O honours interrupts refused it and the thread stayed busy
+  for the claim's whole `ttl`, to every runtime. Admission and `fork`/`updateState` give a claim back the same way.
+  The store-failure stop and a crashed run now record a stop cause before closing, so a late cancel or deadline no
+  longer interrupts their close or their release.
+- **No claim renewal lands after a run's release** ([#1700](https://github.com/llm4s/llm4s/issues/1700)): the
+  heartbeat is stopped and joined, for at most `ttl`, before the release, so a renewal still in the store cannot
+  extend a finished run's claim after a release that failed.
+- **A run that lost its claim ends even when its store hangs** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  under `Durability.Async`, dropping the queue waited for a commit hung in the store forever, and a release queued
+  behind a hung renewal in a store that serialises its calls (SQLite) never returned, so the run never set its
+  result or freed its thread in the runtime. An `Async` commit in flight is now waited for at most `ttl`, then left
+  to finish fenced on the writer, and such a run releases its claim on a detached thread, waited for at most `ttl`
+  (not at all when a renewal is still hung); a release landing late is by token, so it never frees a claim another
+  run has taken since. Until every write the run gave up on returns - a `Sync` run's concurrent tasks can leave
+  several - the event hub keeps its hand-over mark for the thread, so a subscription made meanwhile - a run-scoped replay of the lost run included - joins with it and never
+  waits on that write; once the write returns the hub keeps no state for the thread, even when it returns while the
+  run is freeing the thread (the check and both steps of the run's local release share one lock). Its events are
+  an orphan of a run that has ended: they reach the thread's subscribers in sequence, but never the run's own
+  listeners, its observer or its tracing, live or replayed, so a `ClaimLost` run's run-scoped stream ends at its end
+  and `AgentRun.await` never waits for a write it abandoned. So is a commit whose hand-over is still reading a
+  subscriber's missing events from the store when the run stops waiting. A commit is now handed to every subscription
+  of its thread in one step, once every subscriber's missing events are read, or to none: before, it reached the
+  subscriptions one at a time, and was counted as the run's while some still waited for it, so one run-scoped
+  listener or tracing sink could deliver it live while another, and a replay through the same handle, skipped it.
+  A subscription made while no run holds the thread no longer replays a commit whose hand-over has not finished - the
+  next run's first commit, say - ahead of progress its other subscriptions received before that commit: it decides
+  which stored events have been handed over holding the thread's commit lock, on its own dispatcher thread, and a
+  cancel ends that wait. An `Observer` takes its place in the log from its own run's claim: a lost run's late write
+  handed over during the next run's admission is no longer delivered to that run's observer ahead of its claim.
+- **A run that loses its claim while finishing, or while stuck in the store, still ends**
+  ([#1700](https://github.com/llm4s/llm4s/issues/1700)): a loss found once the run had begun committing its outcome
+  was discarded, because the first stop cause wins, so a `Sync`, `Async` or `OnExit` closing commit hung in the store
+  held `await()` and the thread's slot in the runtime indefinitely; so did any `Sync` commit stuck in a store call
+  that ignores interrupts. A loss now fences the run at any stage - a commit not yet begun is skipped - and, if the
+  run has not ended within `2 × ttl`, ends it without its thread: `ClaimLost`, the thread freed in the runtime, the
+  claim released on a detached thread. The run thread, when it returns, sets no second result and frees nothing; and
+  the watchdog fences and cuts the run only once it has taken it, so a run thread that settles first ends with its
+  own outcome, which its listeners see in full. It also shuts an `Async` run's writer down, without waiting, so a run
+  thread that never returns no longer leaves the writer's platform thread parked for good: the writer ends once a
+  write still in the store returns, and that write still lands, or not, as an orphan.
+  `fork`, `updateState` and a `deleteThread` that did not delete likewise release on a detached thread when their
+  heartbeat's renewal cannot be joined, so a renewal hung in a store that serialises its calls (SQLite) no longer
+  keeps them from returning.
+- **A lost claim bounds the end exactly, admission included** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  a commit could pass the fence's check and begin after the loss was found, so the store could accept work of a run
+  already declared lost; a commit now begins, or is skipped, in one atomic step with the fence. The claim commit of
+  `start`, `recover` and `resume` ran on the caller's thread with no bound, so a store hung on it kept the call blocked
+  and the thread held even after the claim was found lost; that commit is now given up `2 × ttl` after the loss, the
+  call returns `ClaimLost`, the thread is freed and the claim released, and the run never starts. Settling a lost run
+  no longer joins a renewal still in the store before releasing, which had pushed the end to about `3 × ttl`. From
+  the moment a loss is found - its lease passing, or a renewal or commit refused - `await()` and the call that
+  admits a run now return, with the thread free in the runtime, within `2 × ttl`, plus only local work that never
+  calls the store. `fork`, `updateState` and `deleteThread` are bounded the same way: their work under the claim ran
+  on the caller's thread, so a renewal hung in a store that serialises its calls (SQLite) held the call and the
+  thread past the loss. Once the claim is found lost they return `ThreadBusy`, naming no checkpoint, within
+  `2 × ttl` of the loss, with the thread freed and the claim released; their write - commit or store delete - goes
+  through the same atomic fence, so one not begun at the loss never reaches the store. Every stale refusal now counts
+  as the loss it is: an `OnExit` run's exit commit, or a change's commit or store delete, refused as stale after
+  another runtime took the thread over was reported, but not recorded as a loss, so the run or change went on to
+  release its claim synchronously, as if it still held it, and a store hung on that release held `await()` or the
+  call, and the thread, indefinitely. They are now bounded by `2 × ttl` from the refusal, and the claim released on a
+  detached thread, as a refused `Sync` or `Async` commit or renewal already was.
+- **A commit or subscription read hung in the store holds up only its own thread** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  every commit in a `GraphRuntime` was written under one runtime-wide lock, so one thread's hung commit stalled every
+  other thread's runs, their admission included. Commits are now ordered per thread. A subscription's read of the
+  store - switching to live, or filling a gap before a commit handed over - no longer holds the event hub's lock,
+  which every thread's hand-overs and every run's local release take: a read stalled in the store froze the whole
+  runtime, and kept a lost run from ending within its bound.
+- **A claim is renewed from its grant** ([#1700](https://github.com/llm4s/llm4s/issues/1700)): the first renewal came
+  `renewEvery` after the run was launched, so slow admission work could let the lease lapse before it; `fork`,
+  `updateState` and `deleteThread` now renew the claim they hold too, so a store delete slower than `ttl` still lands.
+- **`GraphRuntime.deleteThread` no longer deletes a thread another runtime took over** ([#1700](https://github.com/llm4s/llm4s/issues/1700) follow-up):
+  a runtime that stalled past its claim's `ttl` between claiming the thread and deleting it - a GC pause, a slow
+  store - while another runtime claimed the thread and ran on it deleted that run's checkpoints, events and claim, and
+  could delete another tenant's thread. The delete is now fenced by the deleter's claim token, and such a delete
+  returns `ThreadBusy` (or `TenantMismatch`) with nothing deleted.
+- **A subscription no longer crosses a deleted thread into a new thread of the same id** ([#1700](https://github.com/llm4s/llm4s/issues/1700) follow-up, [#1705](https://github.com/llm4s/llm4s/issues/1705)):
+  a subscription in another runtime that had followed a deleted thread silently skipped the first events of a new
+  thread created under the same id, then delivered the rest as if they continued the old log - another tenant's
+  events included. It now ends with `Disconnected(lastSeq, ThreadDeleted)` at its next read of the store, as does a
+  subscription in the deleting runtime, which used to stay open. A subscription in another runtime that had
+  delivered no event yet cannot be told from a new one, and follows the new thread from its first event.
+- **A one-shot `Agent.run` whose turn failed forgets its thread even when releasing the turn's claim failed**
+  ([#1700](https://github.com/llm4s/llm4s/issues/1700) follow-up): the store refused the forget as it refuses any live
+  claim, the turn's own run id included, so the thread - which nobody can name - was kept. `GraphRuntime.deleteThread`
+  now tries once more to release a claim of its own runtime that it failed to give back before it claims the thread.
+- **Security - `Redaction`: the password of a URL's userinfo is redacted** ([#1816](https://github.com/llm4s/llm4s/issues/1816)):
+  `https://alice:s3cret@gw.example.com/v1` - a provider `baseUrl`, a proxy or a database URL in a connection error,
+  an HTTP client error or the provider exchange log - came out unchanged. The password of `scheme://user:password@host`
+  is now replaced (`https://alice:[REDACTED]@gw.example.com/v1`), in plain text, inside a JSON string with the slashes
+  escaped or not, at any depth, and as a query value (`?next=https://u:p@h/`). The user, the host, the port and the
+  path are kept; the userinfo ends at the authority's last `@`, so an unencoded `@` in a password is read whole, and a
+  percent-encoded one is read as it is. A URL with no userinfo, a user with no password, an empty password and an `@`
+  in the path, query or fragment are left as they were. Every URL of a list is read: an authority also ends at the
+  scheme of the next URL (`redis://u:[REDACTED]@h1,redis://u:[REDACTED]@h2`, also joined by `;`, `)` or `'`), and a `,`
+  or `;` starts another item when it follows a password and an `@` follows it (`https://u:[REDACTED]@h1,a@b.com` keeps
+  the address) or when it follows a host and its port (`https://example.com:8080,bob@corp.com` is left as it is). A
+  second redaction of the output changes nothing. What is left: a password holding an unencoded `@` and then `,` or
+  `;` before another `@`, or one holding `://`, is replaced only in part. Like the readings of #1695, #1706 and #1707,
+  it only adds to what was replaced before.
+- **`llm4s-pekko`: a cancelled agent stream releases its thread before reporting it, and says when it has**
+  ([#1822](https://github.com/llm4s/llm4s/issues/1822), item 1 of [#1815](https://github.com/llm4s/llm4s/issues/1815)):
+  cancelling an `AgentPekko` stream cancelled the turn on a background cleanup thread, so a `recover` on the same thread
+  straight after could be refused with `GraphError.ThreadBusy` - the run's subscription ends just before it gives its
+  thread claim back - which made `AgentPekkoSpec` flaky. The turn is now cancelled and awaited on the stream's own
+  producer thread, and `stream`, `streamResume` and `streamRecover` materialize a `Future[Done]` (they were
+  `Source[AgentStreamItem, NotUsed]`) that completes once the turn has ended and its thread is free, however the stream
+  ended; it never fails, and it is already complete when the stream completes normally. A failed stream now fails only
+  after its turn has ended. **Migration:** wait for the `Future[Done]` (`toMat(sink)(Keep.both)`) before starting
+  another turn on a thread whose stream you cancelled; a type annotation of `Source[AgentStreamItem, NotUsed]` becomes
+  `Source[AgentStreamItem, Future[Done]]`, or add `.mapMaterializedValue(_ => NotUsed)`. See
+  [Apache Pekko Integration](docs/guide/pekko.md#waiting-for-a-cancelled-turn).
+- **A throwing access-token fetch no longer escapes the client** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
+  an `OpenAICompatibleClient.Credential.Dynamic` provider whose `token()` throws now fails the request with an
+  `AuthenticationError` naming the exception's class (not its message), and one whose `invalidate` throws no longer
+  stops the 401 retry; a `CachingAccessTokenProvider` fetch that throws is a failed `token()`, shared for the
+  failure window like any rejection.
+- **Anthropic workload identity checks the identity token file when the client is built** ([#1818](https://github.com/llm4s/llm4s/issues/1818)):
+  the Anthropic SDK reads `identityTokenFile` itself, without llm4s's regular-file and 64 KiB checks. `AnthropicClient`
+  now refuses a path that is a directory, a FIFO, a device or larger than 64 KiB, as a `ConfigurationError` naming
+  `workloadIdentity.identityTokenFile`; a path that does not exist yet is still accepted. Documented in the
+  configuration guide.
+- **Security - workspace runner: more programs that run another cannot be added as extra commands, `tar`, `zip`,
+  `rsync`, `scp` and `sftp` refuse their program-running options, and a command's child gets the system directories
+  when no `PATH` entry survives** ([#1805](https://github.com/llm4s/llm4s/issues/1805)):
+  `WORKSPACE_EXTRA_COMMANDS` still accepted names that run code - shells (`ash`, `mksh`, `yash`, `rbash`, `elvish`,
+  `nu`, `xonsh`), interpreter aliases (`pypy`, `jython`, `pyw`, `javaw`, `jjs`, `luajit`, `Rscript`, `R`, `julia`,
+  `guile`, `racket`, `swipl`, `sbcl`, `clisp`, `erl`, `escript`, `iex`, `elixir`, `ghci`, `runghc`, `ocaml`, `scala`,
+  `kotlin`, `groovy`, `osascript`, `dc`), launchers and loaders (`setpriv`, `capsh`, `prlimit`, `numactl`,
+  `fakeroot`, `proot`, `bwrap`, `firejail`, `gosu`, `su-exec`, `tini`, `unbuffer`, `tmux`, `screen`, `valgrind`,
+  `lldb`, `perf`, `ld.so` / `ld-linux*.so*`), `sed` (GNU `e`), editors that run a command (`vi`, `vim`, `nvim`, `ex`,
+  `emacs`), schedulers (`at`, `crontab`) and Windows programs that run another (`forfiles`, `conhost`, `explorer`,
+  `regsvr32`, `msbuild`, `wmic`, `schtasks`, `runas`, `msiexec`, `pcalua`, `bitsadmin`, `hh`, ...).
+  `WorkspaceSandboxConfig.NeverAllowedCommands` now names them, and the `python`, `pypy`, `jython` and `lua` families
+  and the dynamic loader are matched by prefix (`python3.7m`, `python3-dbg`, `ld-linux-x86-64.so.2`). For the archive
+  and copy tools operators commonly add, the runner refuses the options that run a program, as for `sort` and `cp`:
+  `tar --to-command`, `-I` / `--use-compress-program`, `--checkpoint-action`, `-F` / `--info-script` (also in the
+  traditional dashless form, `tar cIf`); `zip -TT` / `--unzip-command`; `rsync -e` / `--rsh` / `--rsync-path`; `scp` /
+  `sftp` `-S`, `-o`, `-F` and sftp's `-D`. The docs name GTFOBins-style option abuse as the reason the list cannot be
+  complete. When no `PATH` entry survives sanitising, a command's process used to get no `PATH`, for which bash and
+  sh search a built-in default ending in `.` - the workspace; it now gets `/usr/bin:/bin` on POSIX and the system and
+  Windows directories on Windows (no `PATH` only when even those lie in the workspace). A child `PATH` entry that
+  does not exist yet is judged through its nearest existing ancestor's links, so one under a link into the
+  workspace is dropped. A Windows-host test now checks that a command's own `CreateProcess` does not search its
+  current directory with `NoDefaultCurrentDirectoryInExePath=1`. The dead `;`-re-quoting branch of
+  `ProgramResolver.childPath` is gone, `taskset` and `chrt` are grouped alike in the code and the docs, and
+  `docs/workspace-agent-protocol.md` lists the command policy's other codes (`EXECUTABLE_PATH_NOT_ALLOWED`,
+  `ARGUMENT_NOT_ALLOWED`, `ENVIRONMENT_NOT_ALLOWED`, ...). **Migration:** a runner started with one of the newly
+  refused names in `WORKSPACE_EXTRA_COMMANDS` (`scala`, `scala3`, `sed`, `pypy3`, ...) now stops at start-up naming
+  it; drop the name, or use a build tool, which is still accepted (`sbt`, `scala-cli`, `mvn`, `gradle`). An added
+  `tar`, `zip`, `rsync`, `scp` or `sftp` refuses the options above with `ARGUMENT_NOT_ALLOWED`.
 - **`llm4s-observability-micrometer` no longer double-counts `llm4s.errors` behind a `ReliableClient`** ([#1817](https://github.com/llm4s/llm4s/issues/1817)):
   `MicrometerMetrics.recordError` fed the same `llm4s.errors` counter that `observeRequest` feeds, so a provider client
   and the `ReliableClient` around it, sharing one collector, counted each failed attempt and then the final failure

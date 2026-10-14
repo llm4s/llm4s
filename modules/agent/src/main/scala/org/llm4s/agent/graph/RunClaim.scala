@@ -12,18 +12,42 @@ import scala.concurrent.duration.*
  * While it is live - `expiresAt` has not passed - no other claim on the thread is granted, so a run
  * in another runtime or process is refused with [[GraphError.ThreadBusy]]. Once it has expired,
  * another run may take the thread over, and the store then refuses this claim's token
- * ([[GraphError.StaleClaim]]). Until then the holder may still commit and renew, even past
- * `expiresAt`: expiry only lets another run claim the thread.
+ * ([[GraphError.StaleClaim]]). `takenOverFrom` is the holder of the expired claim, never released,
+ * that this one replaced: `None` when the thread was free.
+ *
+ * To the store, the holder may still commit and renew past `expiresAt` until another claim replaces
+ * it: expiry only lets another run claim the thread. A [[GraphRuntime]] does not rely on that: a run
+ * judges its own lease, by its monotonic clock from just before it sent the request that granted or
+ * last renewed the claim, and stops with [[GraphError.ClaimLost]] once that lease has passed. That is no
+ * later than the store's expiry provided the store judges it by one clock that does not run faster than
+ * the runtime's monotonic clock and is not stepped forward; a constant offset does not matter. A store
+ * clock that runs ahead - stepped forward, or each process of a shared store on its own skewed clock -
+ * can expire the claim early, and another run can take the thread over while this one still runs: it
+ * then stops at its next refused renewal or commit, and fencing keeps every write safe.
  */
-final case class RunClaim private (threadId: ThreadId, holder: RunId, token: FencingToken, expiresAt: Instant):
-  def withThreadId(t: ThreadId): RunClaim  = copy(threadId = t)
-  def withHolder(h: RunId): RunClaim       = copy(holder = h)
-  def withToken(t: FencingToken): RunClaim = copy(token = t)
-  def withExpiresAt(at: Instant): RunClaim = copy(expiresAt = at)
+final case class RunClaim private (
+  threadId: ThreadId,
+  holder: RunId,
+  token: FencingToken,
+  expiresAt: Instant,
+  takenOverFrom: Option[RunId]
+):
+  def withThreadId(t: ThreadId): RunClaim              = copy(threadId = t)
+  def withHolder(h: RunId): RunClaim                   = copy(holder = h)
+  def withToken(t: FencingToken): RunClaim             = copy(token = t)
+  def withExpiresAt(at: Instant): RunClaim             = copy(expiresAt = at)
+  def withTakenOverFrom(from: RunId): RunClaim         = copy(takenOverFrom = Some(from))
+  def withTakenOverFrom(from: Option[RunId]): RunClaim = copy(takenOverFrom = from)
 
 object RunClaim:
-  def apply(threadId: ThreadId, holder: RunId, token: FencingToken, expiresAt: Instant): RunClaim =
-    new RunClaim(threadId, holder, token, expiresAt)
+  def apply(
+    threadId: ThreadId,
+    holder: RunId,
+    token: FencingToken,
+    expiresAt: Instant,
+    takenOverFrom: Option[RunId] = None
+  ): RunClaim =
+    new RunClaim(threadId, holder, token, expiresAt, takenOverFrom)
 
 /**
  * What a run asks of [[Checkpointer.claim]]: who holds the claim, and for how long it lasts from the
@@ -52,11 +76,21 @@ object ClaimRequest:
 
 /**
  * How a [[GraphRuntime]] holds its runs' claims: each claim lasts `ttl` from when the store grants or
- * renews it, and a running run renews it every `renewEvery`, on a virtual thread named
- * `llm4s-claim-<threadId>`, until the run ends and releases it. A process that dies stops renewing,
- * so after at most `ttl` its threads can be recovered elsewhere; a live run that cannot reach its
- * store for longer than `ttl` can lose its claim the same way, after which its commits are refused
- * ([[GraphError.StaleClaim]]) and it fails with [[GraphError.CheckpointWriteFailed]].
+ * renews it, and is renewed every `renewEvery` from its grant - also while the run is still being
+ * admitted, and while `fork` or `updateState` holds a thread - until it is released. A process that
+ * dies stops renewing, so after at most `ttl` its threads can be recovered elsewhere.
+ *
+ * A run judges its own lease: it ends `ttl` after the moment, by the runtime's monotonic clock, just
+ * before the request that granted or last renewed the claim was sent. A run whose renewals fail or
+ * hang until that lease passes - its store is unreachable, or partitioned from it - stops at once, as
+ * one whose renewal or commit the store refuses as stale does: its tasks are interrupted, it commits
+ * nothing more, and it fails with [[GraphError.ClaimLost]]. A renewal that fails is tried again at the
+ * next beat while the lease lasts. Tasks already running when the loss is found may still complete a
+ * side effect before they see their interrupt.
+ *
+ * A renewal must land within `ttl - renewEvery` of being due, or the run judges its lease passed and
+ * stops: keep `renewEvery` at most a third of `ttl`, as the default does, so a renewal can fail or be slow
+ * once and still be retried in time.
  *
  * Both must be positive and `renewEvery` shorter than `ttl`: `apply` and the `with*` setters throw
  * `IllegalArgumentException` otherwise, and [[ClaimPolicy.of]] returns a `ValidationError`.

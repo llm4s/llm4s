@@ -101,7 +101,11 @@ final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec:
  * A tool with an external side effect passes `idempotencyKey` to the system it calls (an
  * `Idempotency-Key` header, a client token, a unique column), because the runtime may run the
  * same call more than once: a retrying wrapper, `recover` after a failure, cancellation or crash,
- * and an approval each run it again with the same key.
+ * and an approval each run it again with the same key. A call can even run twice at once: a worker
+ * paused past its claim's lease may still be running it when another runtime takes the thread over
+ * and runs it too, with the same key. A system that can fence writers can refuse the stale worker:
+ * `run.position.fencingToken` is the run's claim token, which grows with every claim on the thread,
+ * so the system keeps the highest token it has seen and refuses a lower one.
  */
 final case class ToolContext private (
   run: RunContext,

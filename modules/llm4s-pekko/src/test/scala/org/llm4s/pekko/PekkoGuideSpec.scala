@@ -51,6 +51,14 @@ class PekkoGuideSpec extends AnyFlatSpec with Matchers {
         case _                                                   => ()
       }
 
+  def firstEventThenRecover(agent: AgentPekko, threadId: ThreadId)(using system: ActorSystem, ec: ExecutionContext) =
+    val (released, firstEvent) = agent.stream(threadId, "Write a long story.").take(1).toMat(Sink.head)(Keep.both).run()
+    for
+      _      <- firstEvent
+      _      <- released // the cancelled turn has ended and its thread is free
+      result <- agent.recover(threadId)
+    yield result
+
   def ask(agent: AgentPekko, question: String)(using ec: ExecutionContext): Future[AgentResult] =
     agent.run(question)
 
@@ -90,6 +98,10 @@ class PekkoGuideSpec extends AnyFlatSpec with Matchers {
     ".stream(ThreadId(\"chat-1\"), \"What is the capital of France?\")",
     "case AgentStreamItem.Event(AgentEvents.TextDelta(delta)) => print(delta.text)",
     "case AgentStreamItem.Done(result)                        => println(s\"\\nDone: ${result.answer}\")",
+    "def firstEventThenRecover(agent: AgentPekko, threadId: ThreadId)(using system: ActorSystem, ec: ExecutionContext) =",
+    "val (released, firstEvent) = agent.stream(threadId, \"Write a long story.\").take(1).toMat(Sink.head)(Keep.both).run()",
+    "_      <- released // the cancelled turn has ended and its thread is free",
+    "result <- agent.recover(threadId)",
     "import org.llm4s.agent.AgentResult",
     "def ask(agent: AgentPekko, question: String)(using ec: ExecutionContext): Future[AgentResult] =",
     "import org.apache.pekko.stream.scaladsl.Sink",

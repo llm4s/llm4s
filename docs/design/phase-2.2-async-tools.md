@@ -1,6 +1,6 @@
 # Phase 2.2: Async Tool Execution
 
-> **Superseded:** `runWithStrategy` and the agent's tool execution strategies described here were removed in [#1328](https://github.com/llm4s/llm4s/issues/1328); parallel tool calls are bounded by `RunBudgets.maxConcurrency` (see [typed-agent-runtime-design.md §4.13](typed-agent-runtime-design.md)). The agent event streaming it mentions returns with [#1329](https://github.com/llm4s/llm4s/issues/1329). Kept as history.
+> **Superseded:** `runWithStrategy` and the agent's tool execution strategies described here were removed in [#1328](https://github.com/llm4s/llm4s/issues/1328); parallel tool calls are bounded by `RunBudgets.maxConcurrency` (see [Typed Agent Runtime §4.13](typed-agent-runtime/4.13-stage-1-slice-2-the-agent-loop-on-the-graph-runtime.md)). The agent event streaming it mentions returns with [#1329](https://github.com/llm4s/llm4s/issues/1329). Kept as history.
 
 > **Status:** Complete
 > **Last Updated:** 2025-11-26

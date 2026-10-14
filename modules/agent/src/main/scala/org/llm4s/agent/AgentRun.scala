@@ -37,7 +37,11 @@ final class AgentRun private[agent] (
   /** Non-blocking: `Running` until the turn ends, then how it ended. */
   def status: RunStatus = handle.status
 
-  /** Cancels the turn; see [[org.llm4s.agent.graph.RunHandle.cancel]]. The thread is left for `recover`. */
+  /**
+   * Cancels the turn; see [[org.llm4s.agent.graph.RunHandle.cancel]]. The thread is left for `recover`, as
+   * it is after a turn that lost its claim (`GraphError.ClaimLost`) once the thread is free: `recover` is
+   * refused with `ThreadBusy` while another runtime holds it.
+   */
   def cancel(): Unit = handle.cancel()
 
   /**
@@ -76,7 +80,11 @@ final class AgentRun private[agent] (
    * as it has delivered the turn's last event - also when it subscribed after the turn ended - and
    * cancelling the returned subscription ends it at once.
    * [[await]] returns only once `listener` has returned from the turn's last event (or the
-   * subscription was cancelled), waiting at most 5 seconds.
+   * subscription was cancelled), waiting at most 5 seconds. A turn that lost its claim
+   * (`GraphError.ClaimLost`) ends its subscription at its end, which never waits on a hung store: a
+   * `Durability.Async` write it abandoned may land afterwards, and is then not one of the turn's events
+   * - it is never delivered here, even by a replay - but is visible only in the thread's log
+   * ([[org.llm4s.agent.graph.GraphRuntime.subscribe]]).
    */
   def subscribe(capacity: Int = Agent.StreamCapacity)(listener: StreamEvent => Unit): Result[Subscription] =
     val scope = RunScope(runId, listener)
@@ -102,7 +110,8 @@ final class AgentRun private[agent] (
    * from the turn's last event (its terminal event, a `Disconnected`, or, for a turn that ended
    * without a terminal event, its last delivered one), waiting at most 5 seconds in all;
    * past that it logs a WARN and returns. A call made from a listener does not wait for that
-   * listener.
+   * listener. For a turn that lost its claim, the turn's last event is the last one it delivered
+   * before it ended; a write it abandoned that lands later is not the turn's (see [[subscribe]]).
    */
   def await(): Result[AgentResult] =
     val ended = handle.await()

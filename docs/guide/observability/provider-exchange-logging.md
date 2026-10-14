@@ -231,7 +231,9 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   `?x_api_key_id=` is redacted too, and a third, matched whole, of parameters that carry a short-lived
   credential: `sig`, `signature`, `X-Amz-Signature`, `X-Goog-Signature`, `code` (an OAuth authorization code),
   `session`, `sessionid` and `jsessionid` (also as the matrix parameter `;jsessionid=`); a field `"code": 400`
-  is left, since only a query parameter's key is read so. A query value written right before JSON
+  is left, since only a query parameter's key is read so. The password of a URL's userinfo is redacted wherever the URL is
+  (`https://alice:[REDACTED]@gw.example.com/v1`, also with JSON's `\/`), every URL of a list joined by `,` or
+  `;` included; the user and the host are kept. A query value written right before JSON
   (`?token=...,{"api_key": "..."}`, also with the quotes escaped) does not hide the field after it.
 - **Where a cookie header's value ends.** Outside any string (a raw request dump, a log line), at the end
   of its line, quotes, apostrophes and backslashes included: `Cookie: sid="abc"; x=y` becomes

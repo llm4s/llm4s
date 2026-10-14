@@ -4,7 +4,7 @@ import org.llm4s.error.CancelledError
 import org.llm4s.types.Result
 
 import java.util.concurrent.{ CompletableFuture, TimeUnit, TimeoutException }
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
 import java.util.concurrent.locks.{ LockSupport, ReentrantLock }
 import scala.annotation.tailrec
 import scala.concurrent.duration.FiniteDuration
@@ -30,16 +30,19 @@ trait RunHandle[O]:
   /**
    * Blocks until the run ends and returns its result; the result is retained, so every call
    * returns the same value. If the awaiting thread is interrupted, returns `Left(CancelledError)`
-   * with the interrupt flag still set, and the run continues: only [[cancel]] stops a run.
+   * with the interrupt flag still set, and the run continues: only [[cancel]] stops a run. A run that
+   * ends `Failed` with [[GraphError.ClaimLost]] may be recovered once its thread is free; see there.
    */
   def await(): Result[RunResult[O]]
 
   /**
    * Cancels the run by interrupting its thread; see [[GraphError.Cancelled]]. Returns at once and
-   * is idempotent. A no-op once the run has ended, and once it has begun committing its outcome
-   * (completed, suspended or failed): that commit is not interrupted, and the run ends with it. A
-   * cancel that interrupts a superstep's commit still ends the run `Cancelled`, even if the store
-   * reports that commit as failed.
+   * is idempotent. A no-op once the run has ended, and once it has begun closing: committing its
+   * outcome (completed, suspended or failed), stopping on a store failure or a crash, or stopping
+   * because it lost its claim ([[GraphError.ClaimLost]]). What it is closing is not interrupted -
+   * neither its commits nor the release of its claim - and the run ends with it. A cancel that
+   * interrupts a superstep's commit still ends the run `Cancelled`, even if the store reports that
+   * commit as failed.
    */
   def cancel(): Unit
 
@@ -59,15 +62,19 @@ trait RunHandle[O]:
   def observation: Option[Subscription]
 
 /**
- * Why a run stops, recorded once: the first cause recorded wins. `Cancelled` and `Expired` are
- * recorded by [[DefaultRunHandle.stop]], which interrupts the run only if its cause was the first.
- * `Finishing` is recorded by the run itself just before it commits its outcome - its completed
- * or suspended checkpoint, or a failed run's `RunFailed` - so a later cancel or expiry records
- * nothing and sends no interrupt into that commit; a run that finds `Cancelled` or `Expired`
- * already recorded is stopped instead.
+ * Why a run stops, recorded once: the first cause recorded wins. `Cancelled`, `Expired` and
+ * `ClaimLost` are recorded by [[DefaultRunHandle.stop]], which interrupts the run only if its cause
+ * was the first; `ClaimLost` comes from the run's claim heartbeat, when the run's lease passed with no
+ * renewal landing or a renewal was refused, and the run also records it itself when the store refuses
+ * one of its commits as stale. `Finishing` is recorded by the run itself just before it closes on its
+ * own account - committing its outcome (its completed or suspended checkpoint, or a failed run's
+ * `RunFailed`), or stopping on a store failure or a crash - so a later cancel, expiry or lost claim
+ * records nothing and sends no interrupt into its commits or its release; a run that finds another
+ * cause already recorded is stopped by that cause instead. A lost claim is acted on even when it is not
+ * the first cause: the run's committer is fenced, and its end bounded ([[DefaultRunHandle.endWithin]]).
  */
 private[graph] enum StopCause:
-  case Cancelled, Expired, Finishing
+  case Cancelled, Expired, ClaimLost, Finishing
 
 /**
  * How a run and its [[DefaultRunHandle]] agree that it stops. `cause` records why (see
@@ -166,7 +173,8 @@ final private[graph] class DefaultRunHandle[O](
     // that has not yet run sets its flag, which the loop checks before every superstep
     if signal.cause.compareAndSet(None, Some(stopCause)) then
       beforeInterrupt()
-      signal.interruptUnlessAcknowledged(() => if !result.isDone then runThread.interrupt())
+      // a stop before the run thread exists records only its cause, which the loop checks before every superstep
+      signal.interruptUnlessAcknowledged(() => if !result.isDone && runThread != null then runThread.interrupt())
 
   /** A test hook run by [[stop]] between recording its cause and interrupting; a no-op by default. */
   @volatile private[graph] var beforeInterrupt: () => Unit = () => ()
@@ -181,17 +189,14 @@ final private[graph] class DefaultRunHandle[O](
    * Starts the run thread, running `body`. A throwable escaping it becomes `crashed(throwable)`;
    * `release` runs before the result is set, on every exit. With a `deadline` (a `System.nanoTime`
    * value), it then starts a virtual thread named `llm4s-deadline-<threadId>` that stops the run
-   * with [[StopCause.Expired]] when the deadline passes; see [[expireAt]]. With a `renewal` - an
-   * interval and a renew function that returns whether to go on - it starts a virtual thread named
-   * `llm4s-claim-<threadId>` that calls it every interval until the run ends or it returns `false`;
-   * see [[renewEvery]].
+   * with [[StopCause.Expired]] when the deadline passes; see [[expireAt]]. The run's claim is renewed
+   * by the runtime's heartbeat, which `release` stops before it gives the claim back.
    */
   private[graph] def launch(
     body: () => RunResult[O],
     crashed: Throwable => RunResult[O],
     release: () => Unit,
-    deadline: Option[Long] = None,
-    renewal: Option[(FiniteDuration, () => Boolean)] = None
+    deadline: Option[Long] = None
   ): Unit =
     val thread = Thread.ofVirtual().name(s"llm4s-run-${threadId.value}").unstarted(() => run(body, crashed, release))
     runThread = thread
@@ -200,21 +205,6 @@ final private[graph] class DefaultRunHandle[O](
     deadline.foreach { at =>
       Thread.ofVirtual().name(s"llm4s-deadline-${threadId.value}").start(() => expireAt(at)): Unit
     }
-    renewal.foreach { (interval, renew) =>
-      Thread.ofVirtual().name(s"llm4s-claim-${threadId.value}").start(() => renewEvery(interval, renew)): Unit
-    }
-
-  /**
-   * The claim thread's body: waits for the run's result for `interval` at a time, and calls `renew`
-   * each time the wait times out, until the result is set or `renew` returns `false`. Like the
-   * deadline thread it holds nothing the run needs and ends as soon as the result is set. A `renew`
-   * that throws ends it (the runtime's never does).
-   */
-  @tailrec private def renewEvery(interval: FiniteDuration, renew: () => Boolean): Unit =
-    DefaultRunHandle.guarded(result.get(interval.toNanos, TimeUnit.NANOSECONDS)) match
-      case Left(_: TimeoutException) =>
-        if DefaultRunHandle.guarded(renew()).getOrElse(false) then renewEvery(interval, renew)
-      case _ => ()
 
   /**
    * The deadline thread's body: waits for the run's result until `deadline`, and stops the run if
@@ -237,16 +227,76 @@ final private[graph] class DefaultRunHandle[O](
    * `crashed` for an abnormal exit, which closes the run's committer and so hands over its last
    * events - then gives the run's subscriptions their end-of-run barriers, and only then releases the
    * thread, so the barriers follow every event of the run and precede any of a later run.
+   * `release` gives the claim back with the interrupt flag clear, so that a cancelled or expired run's
+   * flag cannot make a store refuse it, and sets the flag again afterwards.
    */
   private def run(body: () => RunResult[O], crashed: Throwable => RunResult[O], release: () => Unit): Unit =
     var outcome: Option[RunResult[O]] = None
     Using.resource(new AutoCloseable {
       def close(): Unit =
-        val settled = outcome.getOrElse(crashed(new IllegalStateException("run thread ended abnormally")))
-        DefaultRunHandle.guarded(handedOver.complete(())): Unit
-        DefaultRunHandle.guarded(release()): Unit
-        result.complete(settled): Unit
+        settle(() => outcome.getOrElse(crashed(new IllegalStateException("run thread ended abnormally"))), release)
+        runThreadExited.countDown()
     })(_ => outcome = Some(DefaultRunHandle.guarded(body()).fold(crashed, identity)))
+
+  /** Taken by whichever settles the run: the run thread as it exits, or [[endWithin]]. */
+  private val settling = new AtomicBoolean(false)
+
+  /**
+   * Settles the run from the run thread as it exits, unless [[endWithin]] has taken it: `outcome` is
+   * computed, then the run is taken and [[finish]]ed. The outcome is computed before the run is taken -
+   * closing a crashed run's committer can wait on the store - so that the watchdog can still settle a
+   * run whose thread is stuck computing it. Whoever takes the run second sets nothing, so a run has one
+   * result, and its thread is freed once - never after a later run has taken it.
+   */
+  private def settle(outcome: () => RunResult[O], release: () => Unit): Unit =
+    val settled = outcome()
+    if settling.compareAndSet(false, true) then finish(settled, release)
+
+  /**
+   * Ends a run that has been taken: the subscriptions are given their end-of-run barriers, `release`
+   * runs, and the result is set. Nothing here waits on the store but what `release` bounds.
+   */
+  private def finish(settled: RunResult[O], release: () => Unit): Unit =
+    DefaultRunHandle.guarded(handedOver.complete(())): Unit
+    DefaultRunHandle.guarded(release()): Unit
+    result.complete(settled): Unit
+
+  private val bounding = new AtomicBoolean(false)
+
+  /**
+   * Bounds the run's end once its claim is found lost, whatever the run is doing: a virtual thread,
+   * `llm4s-lost-<threadId>`, waits for the result until `deadline` (a `System.nanoTime` value) and, if
+   * the run thread has not taken the run to settle it by then, takes it, and only then computes
+   * `outcome`, which must neither throw nor wait on the store, and [[finish]]es the run with it. The run
+   * thread may be stuck in a store call that ignores interrupts, as a commit can be, even one of its
+   * outcome, which no stop interrupts; when it does return, it changes nothing. Taking the run first
+   * means `outcome` - which fences the run and cuts its own subscriptions at what the hub has handed
+   * over ([[AbandonedWrites]]) - applies only to a run the watchdog settles: a run thread that wins
+   * instead ends the run with its own outcome, and the watchdog neither fences nor cuts it. Only the first call
+   * starts the thread.
+   */
+  private[graph] def endWithin(deadline: Long, outcome: () => RunResult[O], release: () => Unit): Unit =
+    if bounding.compareAndSet(false, true) then
+      Thread
+        .ofVirtual()
+        .name(s"llm4s-lost-${threadId.value}")
+        .start { () =>
+          val wait = math.max(0L, deadline - System.nanoTime())
+          DefaultRunHandle.guarded(result.get(wait, TimeUnit.NANOSECONDS)) match
+            // `outcome` fences and cuts the run: only once the watchdog has taken it
+            case Left(_: TimeoutException) if settling.compareAndSet(false, true) =>
+              val settled = outcome()
+              settlingWithoutRunThread()
+              finish(settled, release)
+            // settled first; nothing else interrupts this thread
+            case _ => ()
+        }: Unit
+
+  /** A test hook run by [[endWithin]]'s thread once it has computed its outcome; a no-op by default. */
+  @volatile private[graph] var settlingWithoutRunThread: () => Unit = () => ()
+
+  /** Opened as the run thread exits; for tests. */
+  private[graph] val runThreadExited = new java.util.concurrent.CountDownLatch(1)
 
 private[agent] object DefaultRunHandle:
 

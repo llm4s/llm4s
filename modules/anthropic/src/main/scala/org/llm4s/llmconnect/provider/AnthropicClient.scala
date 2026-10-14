@@ -28,7 +28,7 @@ import com.anthropic.models.messages.{
 import scala.collection.mutable
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
+import org.llm4s.llmconnect.config.{ AnthropicConfig, AnthropicWorkloadIdentity, ProviderConfig }
 import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.*
@@ -115,6 +115,7 @@ class AnthropicClient(
   // A config built with `apply` or a `with*` setter skipped `fromValues`: `apply` refuses it as a
   // ConfigurationError, and the constructor here, so a plain-http baseUrl never receives the identity token.
   AnthropicConfig.validate(config).left.foreach(error => throw new IllegalArgumentException(error.message))
+  AnthropicClient.checkTokenFile(config).left.foreach(error => throw new IllegalArgumentException(error.message))
 
   // Initialize Anthropic client
   private val client = {
@@ -937,7 +938,10 @@ object AnthropicClient {
     config: AnthropicConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
   )(using ModelRegistryService): Result[AnthropicClient] =
-    AnthropicConfig.validate(config).flatMap(valid => Try(new AnthropicClient(valid, metrics)).toResult)
+    AnthropicConfig
+      .validate(config)
+      .flatMap(checkTokenFile)
+      .flatMap(valid => Try(new AnthropicClient(valid, metrics)).toResult)
 
   def apply(
     config: AnthropicConfig,
@@ -946,5 +950,15 @@ object AnthropicClient {
   )(using ModelRegistryService): Result[AnthropicClient] =
     AnthropicConfig
       .validate(config)
+      .flatMap(checkTokenFile)
       .flatMap(valid => Try(new AnthropicClient(valid, metrics, exchangeLogging)).toResult)
+
+  /**
+   * The identity token file checks of [[AnthropicWorkloadIdentity.checkTokenFile]], for a config with workload
+   * identity; a config without one passes.
+   */
+  private[llm4s] def checkTokenFile(config: AnthropicConfig): Result[AnthropicConfig] =
+    config.workloadIdentity.fold[Result[AnthropicConfig]](Right(config))(wi =>
+      AnthropicWorkloadIdentity.checkTokenFile(wi).map(_ => config)
+    )
 }

@@ -35,6 +35,14 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
   private def exec(path: Path, sql: String*): Unit =
     Using.resource(jdbc(path))(c => Using.resource(c.createStatement())(s => sql.foreach(s.executeUpdate(_): Unit)))
 
+  /** Turns a closed file back into one a version-1 build wrote: no `first_seq` column, at version 1. */
+  private def asVersionOne(path: Path): Unit =
+    exec(
+      path,
+      "ALTER TABLE llm4s_checkpoint_threads DROP COLUMN first_seq",
+      "UPDATE llm4s_checkpoint_schema SET version = 1"
+    )
+
   private def checkpoint(thread: ThreadId, id: String, parent: Option[String], token: FencingToken): Checkpoint =
     Checkpoint(
       Checkpoint.CurrentFormat,
@@ -263,19 +271,52 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     reopened.close()
   }
 
+  "A version-1 file" should "open at version 2, its threads numbering on, and a deleted thread's id numbering past it" in {
+    val db      = SqliteFiles.fresh()
+    val thread  = ThreadId("v1-thread")
+    val first   = SqliteCheckpointer.open(db).value
+    val written = first.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    first.commit(thread, Commit(written, events = Vector(event("a"), event("b")))).value
+    first.release(thread, written).value
+    first.close()
+    asVersionOne(db)
+
+    val reopened = SqliteCheckpointer.open(db).value
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe 2
+    scalar(db, "SELECT first_seq FROM llm4s_checkpoint_threads WHERE thread_id = 'v1-thread'")(_.getLong(1)) shouldBe 1L
+    reopened.eventsAfter(thread, 0L, 10).value.map(_.seq) shouldBe Vector(1L, 2L)
+    val token = reopened.claim(thread, ClaimRequest(RunId("next"), ttl)).value.token
+    reopened.commit(thread, Commit(token, events = Vector(event("c")))).value.map(_.seq) shouldBe Vector(3L)
+    reopened.deleteThread(thread, token).value
+    // the tombstone keeps the numbering, and nothing else
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_events WHERE thread_id = 'v1-thread'")(_.getInt(1)) shouldBe 0
+    scalar(
+      db,
+      "SELECT checkpoint_json IS NULL AND claim_token IS NULL FROM llm4s_checkpoint_threads WHERE thread_id = 'v1-thread'"
+    )(
+      _.getBoolean(1)
+    ) shouldBe true
+    reopened.eventsAfter(thread, 3L, 10).left.value shouldBe GraphError.ThreadDeleted(thread.value, 3L, 5L)
+    val again = reopened.claim(thread, ClaimRequest(RunId("again"), ttl)).value.token
+    reopened.commit(thread, Commit(again, events = Vector(event("d")))).value.map(_.seq) shouldBe Vector(5L)
+    reopened.close()
+  }
+
   "The schema migrations" should "run each step in turn up to the target, and report a missing step" in {
     val db = SqliteFiles.fresh()
     val addStep =
       (c: Connection) => Using.resource(c.createStatement())(_.executeUpdate("CREATE TABLE later (x)"): Unit)
+    val next = SqliteSchema.Current + 1
     Using.resource(jdbc(db)) { c =>
-      SqliteSchema.migrate(c, target = 2, steps = SqliteSchema.steps + (1 -> addStep)) shouldBe Right(0)
-      SqliteSchema.version(c) shouldBe 2
-      SqliteSchema.migrate(c, target = 2, steps = Map.empty) shouldBe Right(2)
-      SqliteSchema.migrate(c, target = 3, steps = Map.empty).left.value should include(
-        "from checkpoint schema version 2"
+      SqliteSchema.migrate(c, target = next, steps = SqliteSchema.steps + (SqliteSchema.Current -> addStep)) shouldBe
+        Right(0)
+      SqliteSchema.version(c) shouldBe next
+      SqliteSchema.migrate(c, target = next, steps = Map.empty) shouldBe Right(next)
+      SqliteSchema.migrate(c, target = next + 1, steps = Map.empty).left.value should include(
+        s"from checkpoint schema version $next"
       )
-      SqliteSchema.migrate(c, target = 1).left.value should include("newer")
-      SqliteSchema.version(c) shouldBe 2
+      SqliteSchema.migrate(c, target = SqliteSchema.Current).left.value should include("newer")
+      SqliteSchema.version(c) shouldBe next
     }
   }
 
@@ -379,7 +420,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       store.latest(thread),
       store.eventsAfter(thread, 0L, 10),
       store.compactEvents(thread, 1L),
-      store.deleteThread(thread)
+      store.deleteThread(thread, token)
     )
     calls.foreach { result =>
       result.left.value shouldBe a[ProcessingError]
@@ -446,8 +487,8 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       }
       gate.countDown()
       running.await().value match {
-        case RunResult.Failed(_, GraphError.CheckpointWriteFailed(_, _: GraphError.StaleClaim, _)) => succeed
-        case other => fail(s"the stale run was not fenced off: $other")
+        case RunResult.Failed(_, _: GraphError.ClaimLost) => succeed
+        case other                                        => fail(s"the stale run was not fenced off: $other")
       }
       one.latest(thread).value.value.checkpoint.runId shouldBe "second"
       workers.callsOf("a") shouldBe 1
@@ -505,7 +546,8 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val reopened = SqliteCheckpointer.open(db).value
     reopened.history(thread, None, 10).value.map(_.id) shouldBe ids.reverse
     reopened.checkpoint(thread, "c1").value.map(_.id) shouldBe Some("c1")
-    reopened.deleteThread(thread).value
+    val deleting = reopened.claim(thread, ClaimRequest(RunId("deleter"), ttl)).value.token
+    reopened.deleteThread(thread, deleting).value
     scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_history WHERE thread_id = 'kept'")(_.getInt(1)) shouldBe 0
     reopened.history(thread, None, 10).value shouldBe empty
     // a new thread of the same id starts a history of its own, and reuses the old ids freely
@@ -521,6 +563,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     chain(first, kept, 3)
     first.close()
     // a version-1 file as a build before the history table wrote it
+    asVersionOne(db)
     exec(db, "DROP TABLE llm4s_checkpoint_history")
     scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe 1
 

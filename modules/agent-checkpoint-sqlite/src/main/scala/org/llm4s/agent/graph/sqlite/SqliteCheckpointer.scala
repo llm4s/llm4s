@@ -32,6 +32,10 @@ import scala.util.{ Try, Using }
  *    `retractTurn` or [[deleteThread]] removes it; each of those is one write transaction too.
  *  - '''Fencing tokens''' come from one counter for the whole file, stored in it, so they keep increasing across
  *    restarts and [[deleteThread]], and are never issued twice.
+ *  - '''Fenced deletes, numbered incarnations.''' [[deleteThread]] checks the deleter's token in its own write
+ *    transaction, as a commit does. It keeps the thread's next event number in the file, so a new thread of the same
+ *    id numbers its events past the deleted one's, in this process and every other, and a read from inside the
+ *    deleted log is refused with `GraphError.ThreadDeleted`.
  *  - '''Data only.''' Checkpoints, pending writes and events are stored as JSON - the checkpoint through
  *    `Checkpoint.toJson`, which records its format version - and decoded on read, so nothing executable is stored.
  *  - '''Change notification by polling.''' SQLite cannot tell a connection that another has committed, so this
@@ -69,7 +73,8 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
         val claim = Claim(request.holder.value, nextToken(c), now.plusNanos(request.ttl.toNanos))
         ensureRow(c, threadId)
         setClaim(c, threadId, Some(claim))
-        Right(granted(threadId, claim))
+        // a claim still held here has expired: this one takes it over
+        Right(granted(threadId, claim, current.flatMap(_.claim)))
   }
 
   def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration): Result[RunClaim] = writing("renew") { c =>
@@ -286,8 +291,13 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
 
   def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
     reading("eventsAfter") { c =>
-      val earliest = readRow(c, threadId).fold(1L)(_.earliestSeq)
-      if afterSeq + 1 < earliest then Left(GraphError.ReplayUnavailable(threadId.value, earliest))
+      val row      = readRow(c, threadId)
+      val first    = row.fold(1L)(_.firstSeq)
+      val earliest = row.fold(1L)(_.earliestSeq)
+      // a reader from the start reads the thread now under the id, from its first event
+      if Checkpointer.deleted(afterSeq, first) then Left(GraphError.ThreadDeleted(threadId.value, afterSeq, first))
+      else if math.max(afterSeq, first - 1) + 1 < earliest then
+        Left(GraphError.ReplayUnavailable(threadId.value, earliest))
       else if limit <= 0 then Right(Vector.empty)
       else
         Right(
@@ -310,12 +320,35 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
     Right(())
   }
 
-  def deleteThread(threadId: ThreadId): Result[Unit] = writing("deleteThread") { c =>
-    update(c, "DELETE FROM llm4s_checkpoint_events WHERE thread_id = ?", threadId.value)
-    update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
-    update(c, "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ?", threadId.value)
-    update(c, "DELETE FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)
-    Right(())
+  /**
+   * Deletes the thread in one write transaction, which first checks that `token` is the thread's current claim -
+   * so the check and the delete see one state of the file, whatever other stores on it are doing. The thread's row
+   * stays, emptied, as a tombstone (see [[SqliteSchema]]) once it has numbered an event, so that a new thread of the
+   * id numbers on past it.
+   */
+  def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] = writing("deleteThread") { c =>
+    val current = readRow(c, threadId)
+    if !current.flatMap(_.claim).exists(_.token == token.value) then Left(stale(threadId, current, token))
+    else
+      update(c, "DELETE FROM llm4s_checkpoint_events WHERE thread_id = ?", threadId.value)
+      update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
+      update(c, "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ?", threadId.value)
+      update(
+        c,
+        // every SET expression reads the row as it was: the next thread starts one past the deleted one's next
+        // number, which is never used (see `Checkpointer.deleted`); a thread that numbered no event leaves nothing,
+        // and a tombstone that numbered no event since its delete keeps its numbering
+        """UPDATE llm4s_checkpoint_threads
+          |SET checkpoint_id = NULL, checkpoint_json = NULL,
+          |    next_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+          |    first_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+          |    earliest_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+          |    claim_holder = NULL, claim_token = NULL, claim_expires_second = NULL, claim_expires_nano = NULL
+          |WHERE thread_id = ?""".stripMargin,
+        threadId.value
+      )
+      dropIfEmpty(c, threadId)
+      Right(())
   }
 
   /**
@@ -489,7 +522,13 @@ object SqliteCheckpointer:
 
   final private case class Claim(holder: String, token: Long, expiresAt: Instant)
 
-  final private case class Row(checkpointId: Option[String], nextSeq: Long, earliestSeq: Long, claim: Option[Claim])
+  final private case class Row(
+    checkpointId: Option[String],
+    nextSeq: Long,
+    earliestSeq: Long,
+    firstSeq: Long,
+    claim: Option[Claim]
+  )
 
   final private case class ErrorContext(path: Path)
 
@@ -509,8 +548,14 @@ object SqliteCheckpointer:
       undecodable(operation, what, Option(e.getMessage).getOrElse(e.getClass.getName), Some(e))
     )
 
-  private def granted(threadId: ThreadId, claim: Claim): RunClaim =
-    RunClaim(threadId, RunId(claim.holder), FencingToken(claim.token), claim.expiresAt)
+  private def granted(threadId: ThreadId, claim: Claim, replaced: Option[Claim] = None): RunClaim =
+    RunClaim(
+      threadId,
+      RunId(claim.holder),
+      FencingToken(claim.token),
+      claim.expiresAt,
+      replaced.map(c => RunId(c.holder))
+    )
 
   private def stale(threadId: ThreadId, current: Option[Row], token: FencingToken): GraphError =
     GraphError.StaleClaim(threadId.value, token.value, current.flatMap(_.claim).map(_.token))
@@ -518,15 +563,15 @@ object SqliteCheckpointer:
   private def readRow(c: Connection, threadId: ThreadId): Option[Row] =
     query(
       c,
-      """SELECT checkpoint_id, next_seq, earliest_seq, claim_holder, claim_token, claim_expires_second, claim_expires_nano
-        |FROM llm4s_checkpoint_threads WHERE thread_id = ?""".stripMargin,
+      """SELECT checkpoint_id, next_seq, earliest_seq, first_seq, claim_holder, claim_token, claim_expires_second,
+        |claim_expires_nano FROM llm4s_checkpoint_threads WHERE thread_id = ?""".stripMargin,
       threadId.value
     ) { rows =>
-      val token = rows.getLong(5)
+      val token = rows.getLong(6)
       val claim = Option.when(!rows.wasNull()) {
-        Claim(rows.getString(4), token, Instant.ofEpochSecond(rows.getLong(6), rows.getLong(7)))
+        Claim(rows.getString(5), token, Instant.ofEpochSecond(rows.getLong(7), rows.getLong(8)))
       }
-      Row(Option(rows.getString(1)), rows.getLong(2), rows.getLong(3), claim)
+      Row(Option(rows.getString(1)), rows.getLong(2), rows.getLong(3), rows.getLong(4), claim)
     }.headOption
 
   private def ensureRow(c: Connection, threadId: ThreadId): Unit =

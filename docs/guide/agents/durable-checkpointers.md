@@ -62,7 +62,9 @@ val b = GraphRuntime(store)
 ```
 
 `ClaimPolicy` sets how long a claim lasts (`ttl`, 30 seconds by default) and how often a running run renews it
-(`renewEvery`, 10 seconds by default; it must be shorter than `ttl`). The store judges expiry by its own clock.
+(`renewEvery`, 10 seconds by default, counted from the moment the claim is granted; it must be shorter than `ttl`).
+The store judges expiry by its own clock, and the run judges its own lease too (see
+[Fencing](#fencing-a-run-that-lost-its-claim-stops-and-records-nothing) below).
 When the store has a single clock - a database server's, or one process's - the runtimes need not agree on the
 time. An embedded store that each process opens itself, such as SQLite on a shared file, judges expiry by the
 clock of whichever process grants or renews the claim, so clock skew between hosts shortens or lengthens the
@@ -97,29 +99,164 @@ So `recover` tells a live run from a dead one by its claim. It does not wait: un
 expires - at most `ttl` after its process stopped renewing - `recover` is refused with `ThreadBusy`, and you
 retry. `resume` and `start` are refused the same way while another runtime holds the thread.
 
+A `recover` whose claim replaced another run's expired, unreleased claim records that run's id on its
+`RunEvent.RunRecovered` event, as `takenOverFrom`, so the thread's log shows the takeover. That run may have been
+paused rather than dead, and still executing. It is recorded even when it is the recovering run's own id - a
+`RunId` reused with `RunConfig.withRunId` - since the expired claim was still another, earlier run's;
+`takenOverFrom` is `None` when the thread was free.
+
 `recover` reads the dead run's pending writes again once its own claim is granted, so a task that finished in
 the last moments before the takeover is reused, not run again.
 
-## Fencing: a run that lost its claim records nothing
+## Fencing: a run that lost its claim stops and records nothing
 
 A process that was only paused - a long GC, a frozen VM - may wake up after another runtime took its thread over.
 Every commit a run makes carries its claim's token, and the store refuses any commit whose token is not the
 thread's current claim, with `GraphError.StaleClaim`. Such a run therefore cannot record anything after its
-successor started: it ends with `GraphError.CheckpointWriteFailed(StaleClaim)`, and the thread's state and event
-log are its successor's.
+successor started, and the thread's state and event log are its successor's.
 
-A run whose renewal is the first to learn that its claim is gone stops at the start of its next superstep with
-the same error, so a run with `Durability.Async` or `Durability.OnExit`, whose commits are deferred, does not go
-on executing supersteps whose results would be refused.
+A run does not wait for a refused commit to learn that its claim is gone. It judges its own lease: the lease ends
+`ttl` after the moment, by the runtime's monotonic clock (`System.nanoTime`), just before it sent the request that
+granted or last renewed the claim. The store started its own `ttl` no earlier than that, so the run's lease ends no
+later than the store's - provided the store judges expiry by one clock that does not run faster than the runtime's
+monotonic clock and is not stepped forward. A constant offset between the two clocks does not matter. A store clock
+that runs fast or is stepped forward (an NTP step on `Clock.systemUTC()`), or a store whose processes each judge
+expiry by their own skewed clock (SQLite shared between processes), can expire the claim while the run still judges
+it live, so another runtime can take the thread over early. The run then learns of it from its next refused renewal
+or commit - within `renewEvery` - and stops; fencing keeps every write safe, but tasks it was already running can
+repeat side effects (see [Limits](#limits)). A heartbeat that never waits on the store checks the lease,
+so a run whose renewals keep failing, or hang - its store unreachable, or partitioned from it - still notices. A
+renewal that fails, or a store clock that throws, is retried at the next beat while the lease lasts.
+
+The run finds its claim lost when its lease passes with no renewal landing, when a renewal is refused with
+`StaleClaim`, or when a commit is. It then stops at once, in every durability mode:
+
+- its running tasks are interrupted, as `cancel` interrupts them;
+- it commits nothing more - not even `RunFailed` - and drops what it had not yet written: the queue of
+  `Durability.Async` and the buffer of `Durability.OnExit`. From the moment the loss is found, a commit the run
+  has not yet begun is skipped, even one of its outcome while it is finishing. A commit begins, or is skipped, in
+  one atomic step with that check, so the only commits of the run that can reach the store after the loss are ones
+  that had already begun when it was found. An `Async` commit already in the store is waited for
+  at most `ttl`; one still there then is left to finish on its own. It is fenced by the run's token, so it lands
+  only if nobody has claimed the thread since. If it lands, it lands after the run has ended: its events are an
+  orphan of the run, not part of it. They are in the thread's log, and reach the thread's subscribers in sequence
+  and before any later run's events, but never the run's own listeners or its tracing (see [Limits](#limits)).
+  The same holds for a commit that has landed but that this runtime has not yet handed to its subscribers, because
+  it is still reading, from the store, events committed elsewhere that one of them has not seen yet: a commit
+  reaches every subscription of the thread at once, or none, so all of them, and a replay, agree on it;
+- it releases its claim, which is a no-op if another run holds the thread. It does not wait for a renewal that
+  may still be in the store, and the release runs on a thread of its own, waited for only until `2 × ttl` after
+  the loss, so the run's result and the thread's release in this runtime never wait on a store that hangs; a
+  release that never lands lets the claim lapse after `ttl`;
+- it ends with `GraphError.ClaimLost(threadId, token, current)`, where `current` is the thread's current claim
+  when the store named one;
+- its end is bounded whatever it was doing: `await()` returns, and the thread is free in this runtime, within
+  `2 × ttl` of the loss being found, plus only local work that never calls the store. The loss is found when the
+  lease passes - at most `ttl` after the last renewal that landed was sent - or when a renewal or commit is refused,
+  so the bound is at most `3 × ttl` after the last renewal that landed. If the run has not begun to end by
+  `2 × ttl` after the loss - its thread stuck in a store call that ignores interrupts, such as a `Sync` commit,
+  `OnExit`'s exit commit, or the commit of its outcome, which no stop interrupts - it is ended without its thread:
+  it fails with `ClaimLost`, its thread is freed in this runtime and its claim released as above. When the stuck
+  call does return, it changes nothing: the run has its one result, and its thread is not freed again. A write it
+  makes that lands then is an orphan, as above. The same bound holds while the run is admitted: if the commit
+  that claims the thread for `start`, `recover` or `resume` hangs in the store and the claim is found lost
+  meanwhile, the call returns `ClaimLost` within `2 × ttl` of the loss, with the thread freed and the claim
+  released as above. The run never starts, and that commit, if it lands later, is fenced by the token and is an
+  orphan. A claim's commit that the store refuses as stale - the claim lapsed, or another runtime took it over,
+  before it landed - is a loss found then: the call returns `ClaimLost`, never `CheckpointWriteFailed`, with the
+  claim released and the thread freed. If the heartbeat declared the loss meanwhile, the call still returns one
+  `ClaimLost`, naming the current claim the first of the two to find the loss named.
+  `fork`, `updateState` and `deleteThread` are bounded the same way while they hold their claim: if it is found
+  lost while the change waits on the store - its next call queued behind a hung renewal in a store that serialises
+  its calls, say - the call returns `ThreadBusy` naming no checkpoint within `2 × ttl` of the loss, with the thread
+  freed in this runtime and the claim released as above. A change is not a run, so it never returns `ClaimLost`:
+  retry it once the thread is free. A change's write - its commit, or the store delete - that has not begun when
+  the loss is found never reaches the store, and the change returns `ThreadBusy` as for a commit the store refuses
+  as stale. A write the store refuses as stale is itself a loss found then, as a run's is: the change returns
+  `ThreadBusy` within `2 × ttl` of it, and gives its claim back as above, without waiting on the store. One already
+  in the store may still land, fenced by the token. A `deleteThread` that lands after its
+  call was given up on ends this runtime's subscriptions to the thread at once only if the call has not yet freed
+  the thread; otherwise they learn of the delete from the store, as another runtime's do (see
+  [Deleting a thread](#deleting-a-thread)).
+
+`ClaimLost` is not a store outage (`CheckpointWriteFailed`). After it, `recover` may be attempted once the thread
+is free:
+
+- while a successor holds the thread, `recover` is refused with `ThreadBusy`: retry later;
+- if a successor took over and finished the work, the thread's state shows it, and `recover` reports
+  `NothingToRecover` (or the thread is suspended or completed, as the successor left it);
+- if the lease merely lapsed - renewals failed until it passed, and nobody took the thread over - the run released
+  its claim and its last durable checkpoint is still `Running`, so `recover` continues it as after a crash.
 
 ### Limits
 
-- Its tasks that were already running still finish, so their external side effects can happen in both runs, and
-  the successor runs them again. That is the at-least-once boundary every run has; make such tools idempotent. A
-  node that writes to a system able to fence can pass the token on: it is `context.position.fencingToken`.
+- A stale worker can still act until it notices, and while its tasks see their interrupt. The loss is noticed as
+  the run's own lease passes, or as soon as a renewal or commit is refused - within `renewEvery` of a takeover that a
+  store clock running ahead allowed early. A task already
+  running then may finish an external side effect before it checks its interrupt, and a tool that ignores
+  interrupts runs to its end. Such a side effect can happen in both the stale run and its successor, concurrently.
+  That is the at-least-once boundary every run has: make such tools idempotent. A tool or node that writes to a
+  system able to fence can pass the claim's token on: it is `context.position.fencingToken` in a node and
+  `context.run.position.fencingToken` in a tool, and it grows with every claim, so the system can refuse a token
+  lower than the highest it has seen.
 - Until it ends, such a run's live progress events (`StreamEvent.Live`, which are never stored) still reach the
-  subscribers of its own runtime. Its durable events are refused with its commits.
-- A process that dies holds its threads for up to `ttl`; so does a store that fails to release a claim.
+  subscribers of its own runtime. Its durable events are refused or dropped with its commits.
+- A `ClaimLost` run's own event stream - `AgentRun.subscribe`, `Agent.stream`, its observer and its tracing - ends
+  at the run's end, which never waits on a hung store. An `Async` write the run abandoned may still land after
+  that; it is then visible only through the thread's log - a thread subscription (`GraphRuntime.subscribe`) or a
+  replay - never as one of the run's events, even to a run-scoped subscription made later that replays the run.
+- A run that has begun committing its outcome finishes that commit: a loss found during it does not interrupt it.
+  The commit is still fenced, so it lands only if nobody has taken the thread over. The run's end does not wait for
+  it past `2 × ttl` of the loss: if the commit returns first the run ends with its outcome (or `ClaimLost`, if the
+  store refused it), and otherwise with `ClaimLost`.
+- Commits on one thread are written one at a time, in this runtime, so that subscribers see them in order. A commit
+  hung in the store holds up later commits on its thread - including a new run's claim commit there, until the
+  store returns - but never another thread's. A subscription's read of the store that hangs holds up only that
+  subscription, and, for a read of events another runtime committed before this runtime's commit, that thread's
+  commits: never another thread's runs, their admission or release, nor a lost run's bounded end.
+- A process that dies holds its threads for up to `ttl`; so does a store that fails to release a claim - except to
+  its own runtime's `deleteThread`, which tries the release once more first, so `Agent.run(query)` can still forget
+  the thread of a failed turn. A run that ends with its claim still held waits up to `ttl` for a renewal still in
+  the store, so that none lands after its release; if the renewal is still there then, the run releases on a thread
+  of its own without waiting, and its result is set at once. A run whose claim was lost does not wait for its
+  renewal at all. `fork`, `updateState` and a `deleteThread` that did not delete release the claim they hold the
+  same way, so a renewal hung in a store that serialises its calls cannot keep them from returning.
+
+## Deleting a thread
+
+`GraphRuntime.deleteThread(threadId, config)` (`Agent.forget`) claims the thread, checks its tenant under that
+claim, and then has the store delete it with the claim's token, renewing the claim while the store works, as a run
+does. The store's delete is fenced like a commit: it
+deletes only while the token is the thread's current claim, atomically. So a runtime that stalls past its claim's
+`ttl` between the claim and the delete - a long GC pause, a slow store - while another runtime takes the thread over
+deletes nothing of that run: the call returns `ThreadBusy` (or `TenantMismatch`, if the run is another tenant's).
+
+A deleted thread's id names a new thread, but the new thread does not reuse the old event numbers: it numbers its
+events on past the deleted thread's, one number skipped. A subscription follows a thread, not its id, so a
+subscription to the deleted thread ends with `Disconnected(lastSeq, DisconnectReason.ThreadDeleted)` once it has
+delivered what it had queued, and never delivers the new thread's events as if they continued the old log:
+
+- in the deleting runtime, every subscription made before `deleteThread` returns - before the delete, or while it
+  is in flight - ends at once;
+- in another runtime sharing the store, a subscription ends when it next reads the store: when its watch next polls,
+  or, with `WatchPolicy.disabled`, only when its own runtime next commits on the thread;
+- in another runtime, a subscription that has delivered no event yet - still at `afterSeq = 0`, as one to a thread
+  that never numbered an event always is - cannot be told from a new subscription, so it follows the new thread
+  from its first event instead of ending - if the new thread is its tenant's; otherwise it ends with
+  `TenantMismatch` before that event ([Tenants](streaming#tenants)).
+
+Subscribe again from `afterSeq = 0` to follow the new thread from its first event.
+
+There is no unfenced delete: to delete a thread outside a runtime, claim it and delete with the claim's token.
+
+### Limits
+
+- A deleted thread that numbered any event leaves a small record in the store for good: its next event number, and
+  nothing of its data. It is what lets a reader of the deleted log - in any process, however late - be told that the
+  thread was deleted, and a new thread of the id be numbered past it. Nothing removes it, `prune` included, so a store
+  grows by one such record per deleted thread; `Agent.run(query)` forgets the thread of every failed or cancelled
+  one-shot turn, so a long-lived store gains one per such turn. Deleting the same id again, with no event since,
+  adds nothing.
 
 ## Subscriptions across runtimes
 
@@ -132,7 +269,8 @@ is not, such as SQLite, is polled every `WatchPolicy.pollInterval` (250 ms by de
 val runtime = GraphRuntime(store, watch = WatchPolicy(pollInterval = 100.millis))
 ```
 
-Only durable events cross runtimes; live progress is never stored. See
+Only durable events cross runtimes; live progress is never stored. A thread deleted through any runtime ends its
+subscriptions with `ThreadDeleted`, with the exceptions [Deleting a thread](#deleting-a-thread) lists. See
 [Subscriptions across runtimes](streaming#subscriptions-across-runtimes) for the delivery and back-pressure rules.
 
 ## The SQLite store
@@ -235,12 +373,19 @@ from which the next process resubscribes.
 A claim's expiry is judged by the clock of the store that grants or renews it - `Clock.systemUTC()` unless you pass
 one. Stores on one host share that host's clock. Processes on different hosts cannot share one SQLite file safely
 anyway (see WAL above), but if host clocks still differ - containers with skewed clocks, a clock step - a claim
-lasts longer or shorter than `ttl` as other processes see it. Fencing keeps every write safe regardless; skew only
-changes when a dead run's thread can be taken over.
+lasts longer or shorter than `ttl` as other processes see it. Fencing keeps every write safe regardless. A store
+clock running ahead lets another process take over a live run early; that run then finds its commits or renewals
+refused and stops, but tasks it was already running can repeat side effects (see
+[Limits](#limits)). A store clock running behind holds a dead run's thread longer. A run's own lease, judged by its
+monotonic clock, does not protect against a store clock that runs ahead: the run learns of the takeover only from its
+next refused renewal or commit.
 
 ### Schema versions
 
-The file records its schema version. Opening a file at an older version upgrades it in one transaction, and
+The file records its schema version, 2 since the fenced delete (which added `first_seq`, where a deleted thread's id
+continues its event numbering). Stop every process running an older build before opening its file with this one: an
+older process that already has the file open is not refused, and until it stops its deletes are not fenced and drop
+the record a deleted thread's id numbers on from. Opening a file at an older version upgrades it in one transaction, and
 opening a file written by a newer build is refused with a `ProcessingError`, so an older process never misreads
 it. Checkpoints inside keep their own format version, as with every store, and are migrated when read.
 
@@ -298,7 +443,13 @@ yield handle
 ```
 
 With `asNode`, the update must stay within that node's declared write set, as if the node had returned it. The
-thread is held, with a claim in the store, while it is updated, so a live run refuses it with `ThreadBusy`. Pending
+thread is held, with a claim in the store, while it is updated, so a live run refuses it with `ThreadBusy`. If
+that claim lapses, or another runtime takes it over, before the update's commit lands, the store refuses the commit
+and `updateState` returns `ThreadBusy` too, with nothing applied: retry it. So does a claim found lost before the
+commit begins: the commit is never sent. And if the claim is found lost while the update waits on a store that
+hangs, `updateState` returns `ThreadBusy` within `2 × ttl` of the loss rather than waiting (see
+[Fencing](#fencing-a-run-that-lost-its-claim-stops-and-records-nothing)). `fork` does the same for its target.
+Neither is a run, so neither returns `ClaimLost`. Pending
 writes of tasks that already completed are carried over, so `recover` still does not run them again. They apply
 after your update when the thread is recovered, so a carried write to a key you edited can overwrite your edit on
 `recover`. To be sure an edit stands, update a `Running` thread only in keys its completed tasks did not write.
@@ -370,12 +521,20 @@ the contract. In short:
 - grant at most one live claim per thread, by the store's clock, and replace an expired one;
 - give every claim a token greater than every token issued for that thread before, also after `deleteThread`;
 - apply a `Commit` entirely or not at all, and only with the current claim's token (`StaleClaim`, checked first);
+- delete a thread only with the current claim's token, checked in the same lock or transaction as the delete
+  (`StaleClaim` otherwise, deleting nothing); a thread with no claim is refused too;
+- keep, after `deleteThread`, where the thread's event numbering ended - a tombstone with no data, for a thread that
+  numbered any event - and number the next thread of the id from one past the deleted thread's next number;
+  refuse `eventsAfter`/`awaitEventsAfter` after a number of the deleted thread with `ThreadDeleted`
+  (`Checkpointer.deleted(afterSeq, firstSeq)` is the rule), and read from `0`, or from just before the current
+  thread's first event, from that first event. A store that wakes `awaitEventsAfter` on commits wakes it on a
+  delete too;
 - accept a new checkpoint only over the latest (`CheckpointConflict`) and with an id not already in the history,
   and pending writes only for it;
 - keep every superseded checkpoint in the history until `prune`, a commit's `retractTurn` or `deleteThread`
   removes it, and keep pending writes for the latest only;
 - on `retractTurn`, remove every checkpoint after the newest `Completed` or `Failed` one before adding the new one;
-- number events contiguously inside the commit, and never reuse a number;
+- number events contiguously inside the commit, and never reuse a number, also across `deleteThread`;
 - release only with the current token, and treat any other as a no-op;
 - return from `awaitEventsAfter` what `eventsAfter` would: at once if there is something, and otherwise within about
   its `timeout`. A store that can be told of commits, such as a database with a notification channel, overrides it
@@ -410,14 +569,15 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
     MyCheckpointer.open(freshDatabase(), clock)
 ```
 
-It runs every case against your store: commits, conflicts, event numbering, compaction, `deleteThread`, round
+It runs every case against your store: commits, conflicts, event numbering, compaction, `deleteThread` (fenced by
+the current token, and a recreated thread numbered on past the deleted one, whose log a reader cannot continue), round
 trips, the checkpoint history (paging, reads by id, unique ids, retraction and pruning by age, count and event
 count), claims and fencing (also from many threads at once), and two or more `GraphRuntime`s contending over one
 store - a live run refused elsewhere, renewal, takeover after expiry without re-running completed tasks, a stale
 run's commits refused, only one of several runtimes admitted to recover a thread, `updateState` and `fork` fenced
 against a live run, and a blocked turn leaving nothing in the history. It also checks change notification:
 `awaitEventsAfter` itself, and subscriptions in one runtime that receive another runtime's commits in order, mid-run,
-across a restart, and only until they are cancelled. `InMemoryCheckpointer` passes it.
+across a restart, and only until they are cancelled or the thread is deleted. `InMemoryCheckpointer` passes it.
 
 Three hooks fit it to a durable store:
 
@@ -448,7 +608,9 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
 ## See also
 
 - [Streaming events](streaming): subscribing to a thread's events, which a store numbers and replays.
-- `docs/design/typed-agent-runtime-design.md` §4.16, the design of claims and fencing, §4.19, history, fork,
-  `updateState` and retention, and §4.21, subscriptions across runtimes.
+- `docs/design/typed-agent-runtime/`: §4.16 (`4.16-stage-2-slice-1-the-durable-checkpointer-contract.md`), the
+  design of claims and fencing; §4.19 (`4.19-stage-2-slice-3-checkpoint-history-fork-and-retention.md`), history,
+  fork, `updateState` and retention; and §4.21 (`4.21-stage-2-slice-6-live-subscriptions-across-runtimes.md`),
+  subscriptions across runtimes.
 - [Migration guide](../../reference/migration#stage-2-migration-durable-execution): what changed for code that
   implemented `Checkpointer` or built a `Commit`.

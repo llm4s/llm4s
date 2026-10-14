@@ -84,17 +84,19 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
         release.await(5, TimeUnit.SECONDS): Unit
       Right(page(n).filter(_.seq > afterSeq).take(limit))
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId): Result[Unit]                   = underlying.deleteThread(threadId)
-    def history(threadId: ThreadId, before: Option[String], limit: Int)  = underlying.history(threadId, before, limit)
-    def checkpoint(threadId: ThreadId, checkpointId: String)             = underlying.checkpoint(threadId, checkpointId)
-    def prune(threadId: ThreadId, policy: RetentionPolicy)               = underlying.prune(threadId, policy)
+    def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] = underlying.deleteThread(threadId, token)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
 
   "A replaying subscription" should "be in the live set when subscribe returns, and place held live events by commit" in {
     @volatile var log = Vector(record(1), record(2))
     val store         = ScriptedLog(_ => log)
     val hub           = EventHub(store)
     val listener      = Recording()
-    val sub = hub.subscribe(thread, afterSeq = 0L, capacity = 16, listener).fold(e => fail(e.message), identity)
+    val sub = hub
+      .subscribe(thread, afterSeq = 0L, capacity = 16, listener, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
     hub.liveCount(thread) shouldBe 1
     store.reading.await(5, TimeUnit.SECONDS) shouldBe true
     // sent before any commit reached the hub: after everything already in the log
@@ -119,7 +121,9 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
     val store         = ScriptedLog(_ => log)
     val hub           = EventHub(store)
     val listener      = Recording()
-    val sub = hub.subscribe(thread, afterSeq = 0L, capacity = 4, listener).fold(e => fail(e.message), identity)
+    val sub = hub
+      .subscribe(thread, afterSeq = 0L, capacity = 4, listener, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
     store.reading.await(5, TimeUnit.SECONDS) shouldBe true
     (1 to 5).foreach(i => hub.live(thread, live(i))) // 3 held, one slot kept for a gap marker; 2 dropped
     log = log :+ record(3)
@@ -147,7 +151,9 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
     val hub           = EventHub(store)
     hub.durable(thread, Vector(record(1))) // the run's claim, handed over before the subscription
     val listener = Recording()
-    val sub      = hub.subscribe(thread, afterSeq = 0L, capacity = 16, listener).fold(e => fail(e.message), identity)
+    val sub = hub
+      .subscribe(thread, afterSeq = 0L, capacity = 16, listener, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
     store.reading.await(5, TimeUnit.SECONDS) shouldBe true
     hub.live(thread, live(1)) // the node's progress: nothing handed to this subscription yet
     log = log :+ record(2)    // then the node's commit is written ...
@@ -167,7 +173,9 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
     hub.durable(thread, Vector(record(1)))
     val seen  = new CopyOnWriteArrayList[String]()
     val scope = org.llm4s.agent.RunScope(run, e => seen.add(label(e)): Unit)
-    val sub   = hub.subscribe(thread, afterSeq = 0L, capacity = 16, scope).fold(e => fail(e.message), identity)
+    val sub = hub
+      .subscribe(thread, afterSeq = 0L, capacity = 16, scope, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
     scope.attach(sub)
     store.reading.await(5, TimeUnit.SECONDS) shouldBe true
     hub.live(thread, live(1))
@@ -187,7 +195,9 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
     val hub           = EventHub(store)
     hub.durable(thread, Vector(record(1)))
     val listener = Recording()
-    val sub      = hub.subscribe(thread, afterSeq = 0L, capacity = 16, listener).fold(e => fail(e.message), identity)
+    val sub = hub
+      .subscribe(thread, afterSeq = 0L, capacity = 16, listener, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
     log = log :+ record(2) // written, not yet handed over
     store.reading.await(5, TimeUnit.SECONDS) shouldBe true
     store.release.countDown()
@@ -215,7 +225,9 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
     val store         = ScriptedLog(n => if n == 1 then Vector.empty else log)
     val hub           = EventHub(store)
     val listener      = Recording()
-    hub.subscribe(thread, afterSeq = 0L, capacity = 3, listener).fold(e => fail(e.message), identity)
+    hub
+      .subscribe(thread, afterSeq = 0L, capacity = 3, listener, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
     store.reading.await(5, TimeUnit.SECONDS) shouldBe true
     hub.live(thread, live(1))
     log = (1L to 5L).map(record).toVector
@@ -231,7 +243,9 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
     val store    = ScriptedLog(_ => Vector(record(1)))
     val hub      = EventHub(store)
     val listener = Recording()
-    val sub      = hub.subscribe(thread, afterSeq = 0L, capacity = 16, listener).fold(e => fail(e.message), identity)
+    val sub = hub
+      .subscribe(thread, afterSeq = 0L, capacity = 16, listener, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
     store.reading.await(5, TimeUnit.SECONDS) shouldBe true
     hub.live(thread, live(1))
     sub.cancel() // interrupts the blocked read

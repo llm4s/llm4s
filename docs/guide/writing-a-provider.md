@@ -190,6 +190,13 @@ the keys it reads from a section's `auth` block in `ProviderConfigSpec.authExtra
 `FakeTokenExchangeServer` and `TestJwt` in the testkit test it without a network. An SDK that does
 its own federation takes the identity token's file path instead (see `AnthropicProvider`).
 
+The configuration side is `@Stable` ([#1818](https://github.com/llm4s/llm4s/issues/1818)): `AuthConfig`,
+`IdentitySource`, `TokenExchangeConfig`, `AccessToken` and the `AccessTokenProvider` trait, which a Stable
+`NamedProviderConfig`, `ProviderDescriptor.requireAuthExtra` and `OpenAICompatibleClient.Credential` carry. The
+machinery behind them - `TokenExchange`, `CachingAccessTokenProvider` and `IdentityTokenSource` - is still
+`@Experimental`, so keep it out of your own Stable signatures. An `AccessTokenProvider` should return a failure as a
+`Left`; `OpenAICompatibleClient` and `CachingAccessTokenProvider` turn one that throws into an `AuthenticationError`.
+
 ### `ProviderConfigSpec` and `ProviderConfigKey`
 
 The spec says what a section needs. The fields a provider author uses:

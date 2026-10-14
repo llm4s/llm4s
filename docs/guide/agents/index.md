@@ -301,7 +301,10 @@ until cancelled, or fails with `Fatal` - leaves the thread two choices, `recover
 
 **Tools run at least once, so pass the idempotency key on.** A call can run again: a retrying
 `wrapToolCall` middleware, `recover` after a cancellation, failure or crash, and an approval each
-run it once more, and a call cut short may already have done its work. `ToolContext.idempotencyKey`
+run it once more, and a call cut short may already have done its work. With a store shared between
+processes, a call can even run in two runs at the same time: a worker paused past its claim's lease
+can still be running a tool when another runtime takes the thread over and runs the same call (see
+[Fencing](durable-checkpointers#fencing-a-run-that-lost-its-claim-stops-and-records-nothing)). `ToolContext.idempotencyKey`
 is the same in every run of one call, so a tool with an external side effect passes it to the
 system it calls, which then does the work once:
 
@@ -337,6 +340,10 @@ model request made again because the first response was never stored. The bounda
   effect and that store runs the call again on `recover`, with the same key. A graph run under
   `Async` or `OnExit` durability can lose more after its last durable commit: finished calls run
   again with their keys, and a lost model response is asked for again, so its calls get new keys.
+- A stale worker and its successor send the same key for a call both run, so a key-honouring system
+  does the work once. A system that can fence writers can also refuse the stale one outright:
+  `context.run.position.fencingToken` is the run's claim token, which grows with every claim on the
+  thread, so the system keeps the highest token it has seen and refuses a lower one.
 
 ---
 
@@ -555,7 +562,7 @@ For in-depth technical details:
 - [Phase 1.2: Guardrails](/design/phase-1.2-guardrails-framework) - Validation framework
 - [Phase 1.3: Handoffs](/design/phase-1.3-handoff-mechanism) - Agent delegation
 - [Phase 1.4: Memory](/design/phase-1.4-memory-system) - Memory architecture
-- [Typed Agent Runtime §4.13](/design/typed-agent-runtime-design) - How `Agent` runs on the graph runtime
+- [Typed Agent Runtime §4.13](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.13-stage-1-slice-2-the-agent-loop-on-the-graph-runtime.md) - How `Agent` runs on the graph runtime
 - [Phase 2.1: Streaming](/design/phase-2.1-streaming-events) - Event system
 
 ---
