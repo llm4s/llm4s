@@ -7,6 +7,7 @@ import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
 import scala.annotation.unused
+import scala.concurrent.duration.{ Duration, FiniteDuration }
 
 /**
  * What a tool tells the model and the loop: its name, description and argument schema, how its
@@ -22,6 +23,9 @@ import scala.annotation.unused
  * @param validateDecoded a check on the decoded arguments; `Left` becomes an error the model sees
  * @param question the question this tool may ask; set by [[AgentTool.Asking]]
  * @param hints what the tool is likely to do, for a middleware to read; see [[ToolHints]]
+ * @param timeout how long one run of the tool may take; see [[withTimeout]]
+ * @param resourcesOf what a call touches, from its decoded arguments; see [[withResources]]
+ * @param locksOf the locks a call holds, from its decoded arguments; see [[withLocks]]
  */
 final case class AgentToolSpec[A] private (
   name: String,
@@ -29,7 +33,10 @@ final case class AgentToolSpec[A] private (
   schema: SchemaDefinition[A],
   validateDecoded: A => Result[Unit],
   question: Option[ToolQuestion[?, ?]],
-  hints: ToolHints
+  hints: ToolHints,
+  timeout: Option[FiniteDuration],
+  resourcesOf: A => Vector[ToolResource],
+  locksOf: A => Set[LockKey]
 )(using val codec: ReadWriter[A]):
 
   /** Adds a check on the decoded arguments, replacing any earlier one. */
@@ -37,6 +44,40 @@ final case class AgentToolSpec[A] private (
 
   /** Declares what the tool is likely to do, replacing any earlier hints. */
   def withHints(hints: ToolHints): AgentToolSpec[A] = copy(hints = hints)(using codec)
+
+  /**
+   * Bounds each run of the tool - its `execute`, or its `resume` after a question - to `timeout`. A run
+   * past it is interrupted, and the call's outcome is `ToolOutcome.Error("Tool '<name>' timed out after
+   * <n> ms")`, an error the model sees; a wrapper that retries gets a fresh bound. The tool runs on a
+   * thread of its own, which is joined before the call goes on, so a tool that ignores its interrupt
+   * holds its batch past the timeout: block interruptibly. A cancelled run is still a cancellation,
+   * which records nothing. `timeout` must be positive.
+   */
+  def withTimeout(timeout: FiniteDuration): AgentToolSpec[A] =
+    require(timeout > Duration.Zero, s"tool '$name': timeout must be positive, was $timeout")
+    copy(timeout = Some(timeout))(using codec)
+
+  /**
+   * Declares what a call touches, from its decoded arguments, replacing the default
+   * `Vector(ToolResource(Operation.Invoke, name))`; an empty vector is checked as that default. A
+   * `PermissionMiddleware` reads them from `ToolCallRequest.resources`. A function that throws refuses
+   * the call as invalid arguments.
+   */
+  def withResources(resources: A => Vector[ToolResource]): AgentToolSpec[A] =
+    copy(resourcesOf = resources)(using codec)
+
+  /**
+   * Declares the locks a call holds, from its decoded arguments; by default it holds none. When one
+   * model message has several calls, a call whose locks conflict with an earlier call's (one
+   * [[LockKey]] a prefix of the other) waits for it: it runs in a later superstep, in call order, and
+   * sees the state the earlier call committed. Calls without conflicting locks run concurrently, as
+   * before. Each further round of calls costs two supersteps of `RunBudgets.maxSupersteps`. A function
+   * that throws gives the call the root lock, which conflicts with every lock.
+   */
+  def withLocks(locks: A => Set[LockKey]): AgentToolSpec[A] = copy(locksOf = locks)(using codec)
+
+  /** The resource a call of this tool touches when it declares none: invoking the tool. */
+  def defaultResource: ToolResource = ToolResource(Operation.Invoke, name)
 
   /** Declares the question this tool asks and the answer it takes; only [[AgentTool.Asking]] calls it. */
   private[tool] def withQuestion[Q: ReadWriter, Ans: ReadWriter]: AgentToolSpec[A] =
@@ -88,7 +129,17 @@ object AgentToolSpec:
     description: String,
     schema: SchemaDefinition[A]
   ): AgentToolSpec[A] =
-    new AgentToolSpec(name, description, schema, _ => Right(()), None, ToolHints.default)
+    new AgentToolSpec(
+      name,
+      description,
+      schema,
+      _ => Right(()),
+      None,
+      ToolHints.default,
+      None,
+      _ => Vector.empty,
+      _ => Set.empty
+    )
 
 /** The codecs of a tool's question and of the answer it takes. */
 final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec: ReadWriter[Ans])

@@ -12,7 +12,16 @@ import org.llm4s.agent.graph.middleware.{
   ModelRequest,
   ToolCallRequest
 }
-import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome, ToolQuestion, ToolSet }
+import org.llm4s.agent.graph.tool.{
+  AgentTool,
+  AgentToolSpec,
+  LockKey,
+  ToolContext,
+  ToolOutcome,
+  ToolQuestion,
+  ToolResource,
+  ToolSet
+}
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -309,8 +318,12 @@ object ModelStep:
  *    to a key neither the tool nor any middleware declares, and a question it does not declare fail the run with
  *    `GraphError.ToolFailed`; a throwing wrapper fails it with `GraphError.MiddlewareFailed`. Either
  *    leaves the checkpoint `Running`, so `recover` re-runs only that call.
- *  - `collect` runs only when the barrier releases, checks every call of the batch has exactly one
- *    result, and appends the `ToolMessage`s in call order. The model never sees a partial batch.
+ *  - A call whose locks (`AgentToolSpec.withLocks`) conflict with an earlier call's waits in [[ToolLoop.queue]]:
+ *    the model step fans out only the calls no earlier call conflicts with, and `collect`, when the barrier
+ *    releases, fans out the next round from the queue, so conflicting calls run in successive supersteps in call
+ *    order, each seeing what the earlier committed (two supersteps per further round).
+ *  - `collect` runs only when the barrier releases; once the queue is empty, it checks every call of the batch
+ *    has exactly one result, and appends the `ToolMessage`s in call order. The model never sees a partial batch.
  *    A call cut short by cancellation, a `Fatal` or a crash records no result, so the batch stays
  *    open and the thread waits for `recover`, which re-runs only that call (design 4.4, 5.3).
  *  - Every call carries an [[org.llm4s.agent.graph.IdempotencyKey]], derived by the model step
@@ -447,6 +460,14 @@ object ToolLoop:
     }
 
   /**
+   * The calls of the current batch still to run, in call order, each with the idempotency key the model
+   * step gave it: calls that wait for an earlier call holding a conflicting lock
+   * (`AgentToolSpec.withLocks`). Empty between batches; each update replaces it.
+   */
+  val queue: StateKey[Vector[ToolTask], Vector[ToolTask]] =
+    StateKey.replace[Vector[ToolTask]]("tool-queue", Vector.empty)
+
+  /**
    * The loop for a family of `agents`, a new thread starting with `root`. Refuses an empty family,
    * a root outside it, a duplicate id, and any agent whose tools - its own and its middleware's -
    * do not form a valid set or declare a key the loop owns.
@@ -518,6 +539,7 @@ object ToolLoop:
     val owned =
       Set(
         results.id,
+        queue.id,
         Messages.key.id,
         LoopKeys.usage.id,
         LoopKeys.activeAgent.id,
@@ -526,7 +548,7 @@ object ToolLoop:
       )
     def touches(keys: Set[StateKey[?, ?]]) = keys.exists(k => owned.contains(k.id))
     val clause =
-      "declares a key the loop owns ('tool-results', 'messages', 'usage', 'active-agent', 'turn' or 'transfer')"
+      "declares a key the loop owns ('tool-results', 'tool-queue', 'messages', 'usage', 'active-agent', 'turn' or 'transfer')"
     val byTools =
       tools.tools.filter(t => touches(t.writes)).map(t => s"agent '${agent.value}': tool '${t.spec.name}' $clause")
     val byMiddleware =
@@ -571,7 +593,7 @@ object ToolLoop:
 
   /** What a node writes when it runs a middleware hook again: the model's and the finish's write sets. */
   private val modelWrites: Set[StateKey[?, ?]] =
-    Set(Messages.key, LoopKeys.usage, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer)
+    Set(Messages.key, LoopKeys.usage, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer, queue)
   private val finishWrites: Set[StateKey[?, ?]] =
     Set(Messages.key, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer)
   private val inputWrites: Set[StateKey[?, ?]] = Set(Messages.key, LoopKeys.activeAgent, LoopKeys.turn)
@@ -893,7 +915,11 @@ object ToolLoop:
       calls.filter(c => handoffs.contains(c.name)) match
         case none if none.isEmpty =>
           if calls.isEmpty then appended.goto(nodes.finish)
-          else appended.fanOut(nodes.batch, nodes.callTool, calls.map(issued(stored.id, _, context)))
+          else
+            // a call whose locks conflict with an earlier call's waits in the queue, for collect to run
+            val (now, later) = pipeline.scheduled(calls.map(issued(stored.id, _, context)))
+            val queued       = if later.isEmpty then appended else appended.update(queue, later)
+            queued.fanOut(nodes.batch, nodes.callTool, now)
         case Vector(transfer) if calls.size == 1 =>
           val target = handoffs(transfer.name)
           AgentEvents.HandedOff.emit(context, events.HandedOff(agent.id.value, target.agent.id.value))
@@ -1001,8 +1027,14 @@ object ToolLoop:
 
     b.implement(nodes.finish, writes = finishWrites)((_, state, context) => finishStep(state, context, Vector.empty))
 
-    b.implement(nodes.collect, writes = Set(messages, results)) { (_, state, context) =>
-      NodeResult.fromResult(for
+    // the batch's next round of locked calls, while any wait in the queue; then every result, in call order
+    def nextRound(waiting: Vector[ToolTask]): Command =
+      val (now, later) = pipeline.scheduled(waiting)
+      Command.empty.update(queue, later).fanOut(nodes.batch, nodes.callTool, now)
+
+    // every result, appended in call order, once no call waits in the queue
+    def collected(state: ThreadState, context: RunContext): Result[Command] =
+      for
         history  <- state.get(messages)
         recorded <- state.get(results)
         source <- history.reverseIterator
@@ -1033,6 +1065,12 @@ object ToolLoop:
           .foldLeft(Command.empty)((command, m) => command.update(messages, MessageUpdate.Append(m)))
           .remove(results)
           .goto(nodes.model)
+
+    b.implement(nodes.collect, writes = Set(messages, results, queue)) { (_, state, context) =>
+      NodeResult.fromResult(
+        state
+          .get(queue)
+          .flatMap(waiting => if waiting.nonEmpty then Right(nextRound(waiting)) else collected(state, context))
       )
     }
 
@@ -1221,12 +1259,13 @@ object ToolLoop:
     private def timed(
       tool: AgentTool[?],
       call: ToolCall,
+      resources: Vector[ToolResource],
       toolContext: ToolContext,
       context: RunContext
     )(innermost: () => ToolOutcome): (MiddlewareStack.ToolChainResult, FiniteDuration) =
       AgentEvents.ToolCallStarted.progress(context, events.ToolCallStarted(call.id, tool.spec.name, call.arguments))
       val started = System.nanoTime()
-      val chain   = stack.wrapToolCall(ToolCallRequest(tool.spec, call), toolContext)(innermost)
+      val chain   = stack.wrapToolCall(ToolCallRequest(tool.spec, call, resources), toolContext)(innermost)
       (chain, (System.nanoTime() - started).nanos)
 
     private def suspend(
@@ -1245,8 +1284,8 @@ object ToolLoop:
     /** A new call: steps 2-4, then the middleware chain around the tool. */
     def admit[A](tool: AgentTool[A], task: ToolTask, state: ThreadState, context: RunContext): NodeResult =
       checked(tool, task, task.call, context) match
-        case Left(refused) => refused
-        case Right(args)   => execute(tool, task, task.call, args, state, context)
+        case Left(refused)            => refused
+        case Right((args, resources)) => execute(tool, task, task.call, args, resources, state, context)
 
     /**
      * An approved call, as approved or with edited arguments: checked again, then run through the
@@ -1288,7 +1327,8 @@ object ToolLoop:
         case Some(tool) =>
           checked(tool, task, call, context) match
             case Left(refused) => refused
-            case Right(args)   => execute(tool, task, call, args, state, context, approved, answers)
+            case Right((args, resources)) =>
+              execute(tool, task, call, args, resources, state, context, approved, answers)
 
     /** An answered question: decodes the stored call, question and answer, and resumes the tool. */
     def answered[A](
@@ -1311,54 +1351,97 @@ object ToolLoop:
           decoded match
             case Left(message) => error(task, message, context)
             case Right((args, question, reply)) =>
-              val toolContext = ToolContext(
-                answering(agent, context, request.answered),
-                ToolCallId(request.call.id),
-                request.idempotencyKey,
-                state,
-                request.approved
-              )
-              val (chain, took) = timed(tool, request.call, toolContext, context)(
-                innermost(name)(AgentTool.resumeWith(tool, args, question, reply, toolContext))
-              )
-              outcome(
-                tool,
-                task,
-                request.call,
-                request.approved,
-                chain,
-                context,
-                took,
-                request.answered,
-                resumed = true
-              )
+              resourcesOf(tool, task, args, context) match
+                case Left(refused) => refused
+                case Right(resources) =>
+                  val toolContext = ToolContext(
+                    answering(agent, context, request.answered),
+                    ToolCallId(request.call.id),
+                    request.idempotencyKey,
+                    state,
+                    request.approved
+                  )
+                  val (chain, took) = timed(tool, request.call, resources, toolContext, context)(
+                    innermost(tool.spec)(AgentTool.resumeWith(tool, args, question, reply, toolContext))
+                  )
+                  outcome(
+                    tool,
+                    task,
+                    request.call,
+                    request.approved,
+                    chain,
+                    context,
+                    took,
+                    request.answered,
+                    resumed = true
+                  )
         case _ => error(task, s"Tool '$name' does not take answers", context)
 
     /**
-     * Steps 2-4: validate the raw arguments, decode them, run the tool's own check. `Left` is the
-     * task's result instead: an error result, or a cancellation.
+     * Steps 2-4: validate the raw arguments, decode them, run the tool's own check; then the resources
+     * the call touches, for the wrappers. `Left` is the task's result instead: an error result, or a
+     * cancellation.
      */
     private def checked[A](
       tool: AgentTool[A],
       task: ToolTask,
       call: ToolCall,
       context: RunContext
-    ): Either[NodeResult, A] =
-      val name                                 = tool.spec.name
-      def refused(message: String): NodeResult = error(task, s"Invalid arguments for '$name': $message", context)
-      // the validator and the check are caller code: a throw refuses the call rather than failing the
-      // run, unless it is a cancellation, which cancels the task as a throwing tool's does
-      def guarded[T](run: => T): Either[NodeResult, T] =
-        Try(run).toEither.left.map { thrown =>
-          CancelledError.fromThrowable(thrown, s"tool $name").fold(refused(describe(thrown)))(cancelled)
-        }
+    ): Either[NodeResult, (A, Vector[ToolResource])] =
+      def refused(message: String): NodeResult = invalid(tool, task, message, context)
       for
-        violations <- guarded(tools.validator.validate(tool.spec.argumentSchema, argumentsOf(tool, call)))
-        _          <- Either.cond(violations.isEmpty, (), refused(violations.mkString("; ")))
-        args       <- decode(tool, call).left.map(refused)
-        check      <- guarded(tool.spec.validateDecoded(args))
-        _          <- check.left.map(e => refused(e.message))
-      yield args
+        violations <- callerCode(tool, task, context)(
+          tools.validator.validate(tool.spec.argumentSchema, argumentsOf(tool, call))
+        )
+        _         <- Either.cond(violations.isEmpty, (), refused(violations.mkString("; ")))
+        args      <- decode(tool, call).left.map(refused)
+        check     <- callerCode(tool, task, context)(tool.spec.validateDecoded(args))
+        _         <- check.left.map(e => refused(e.message))
+        resources <- resourcesOf(tool, task, args, context)
+      yield (args, resources)
+
+    /** The resources a call with decoded `args` touches, from its tool's `withResources`. */
+    private def resourcesOf[A](
+      tool: AgentTool[A],
+      task: ToolTask,
+      args: A,
+      context: RunContext
+    ): Either[NodeResult, Vector[ToolResource]] =
+      callerCode(tool, task, context)(tool.spec.resourcesOf(args))
+
+    private def invalid(tool: AgentTool[?], task: ToolTask, message: String, context: RunContext): NodeResult =
+      error(task, s"Invalid arguments for '${tool.spec.name}': $message", context)
+
+    /**
+     * The validator, the tool's check and its resource function are caller code: a throw refuses the
+     * call rather than failing the run, unless it is a cancellation, which cancels the task as a
+     * throwing tool's does.
+     */
+    private def callerCode[T](tool: AgentTool[?], task: ToolTask, context: RunContext)(
+      run: => T
+    ): Either[NodeResult, T] =
+      Try(run).toEither.left.map { thrown =>
+        CancelledError
+          .fromThrowable(thrown, s"tool ${tool.spec.name}")
+          .fold(invalid(tool, task, describe(thrown), context))(cancelled)
+      }
+
+    /**
+     * Splits `tasks`, calls of one batch not yet run, in call order, into those that run now and those
+     * that wait: a call waits while an earlier call of `tasks` holds a lock conflicting with one of its
+     * own. The first always runs, so every round makes progress and a batch of `n` calls takes at most
+     * `n` rounds. A call whose arguments do not decode holds no lock (it is refused, touching nothing);
+     * one whose lock function throws holds the root lock, which conflicts with every lock.
+     */
+    def scheduled(tasks: Vector[ToolTask]): (Vector[ToolTask], Vector[ToolTask]) =
+      val locks = tasks.map(t => tools.get(t.call.name).fold(Set.empty[LockKey])(locksOf(_, t.call)))
+      def conflict(a: Set[LockKey], b: Set[LockKey]) = a.exists(x => b.exists(_.conflictsWith(x)))
+      tasks.indices.toVector.partitionMap { i =>
+        if (0 until i).exists(j => conflict(locks(i), locks(j))) then Right(tasks(i)) else Left(tasks(i))
+      }
+
+    private def locksOf[A](tool: AgentTool[A], call: ToolCall): Set[LockKey] =
+      decode(tool, call).fold(_ => Set.empty, args => Try(tool.spec.locksOf(args)).getOrElse(Set(LockKey(""))))
 
     private def decode[A](tool: AgentTool[A], call: ToolCall): Either[String, A] =
       read(argumentsOf(tool, call))(using tool.spec.codec)
@@ -1394,6 +1477,7 @@ object ToolLoop:
       task: ToolTask,
       call: ToolCall,
       args: A,
+      resources: Vector[ToolResource],
       state: ThreadState,
       context: RunContext,
       approved: Boolean = false,
@@ -1402,7 +1486,7 @@ object ToolLoop:
       val toolContext =
         ToolContext(answering(agent, context, answers), ToolCallId(call.id), task.idempotencyKey, state, approved)
       val (chain, took) =
-        timed(tool, call, toolContext, context)(innermost(tool.spec.name)(tool.execute(args, toolContext)))
+        timed(tool, call, resources, toolContext, context)(innermost(tool.spec)(tool.execute(args, toolContext)))
       outcome(tool, task, call, approved, chain, context, took, answers)
 
     /**
@@ -1410,20 +1494,36 @@ object ToolLoop:
      * [[guarded]]. It refuses to start the tool while the thread is interrupted, returning
      * `Fatal(CancelledError)` - so a tool that reported its cancellation as an `Error` is not run
      * again by a wrapper that retries. Once it has produced `Fatal(CancelledError)`, every later
-     * call - a wrapper retrying - returns that same outcome without running the tool again.
+     * call - a wrapper retrying - returns that same outcome without running the tool again. A tool
+     * with a timeout runs [[bounded]].
      */
-    private def innermost(name: String)(run: => ToolOutcome): () => ToolOutcome =
+    private def innermost(spec: AgentToolSpec[?])(run: => ToolOutcome): () => ToolOutcome =
+      val name          = spec.name
       val cancelledWith = new AtomicReference[Option[ToolOutcome]](None)
       () =>
         cancelledWith.get.getOrElse {
           val result =
             if Thread.currentThread().isInterrupted then ToolOutcome.Fatal(CancelledError(s"tool $name"))
-            else guarded(name)(run)
+            else spec.timeout.fold(guarded(name)(run))(bounded(name, _)(run))
           result match
             case ToolOutcome.Fatal(_: CancelledError) => cancelledWith.set(Some(result))
             case _                                    => ()
           result
         }
+
+    /**
+     * One run of a tool with a timeout: [[guarded]], on a forked thread raced against `limit` in an Ox
+     * scope. Past the limit Ox interrupts the fork and joins it - a tool that ignores its interrupt
+     * holds the call until it returns - and discards whatever it returns, so a late `Success` updates
+     * nothing; the call's outcome is an error the model sees. A cancellation of the task while it
+     * waits interrupts and joins the fork too, and is `Fatal(CancelledError)` with the flag restored,
+     * as for an untimed tool.
+     */
+    private def bounded(name: String, limit: FiniteDuration)(run: => ToolOutcome): ToolOutcome =
+      guarded(name)(
+        ox.timeoutOption(limit)(guarded(name)(run))
+          .getOrElse(ToolOutcome.Error(s"Tool '$name' timed out after ${limit.toMillis} ms"))
+      )
 
     /**
      * Guards the tool so that wrappers see a throwing tool as an outcome. A thrown NonFatal exception

@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Tool permissions, timeouts and batch locks for agent tools** ([#1903](https://github.com/llm4s/llm4s/issues/1903)):
+  `AgentToolSpec.withResources(A => Vector[ToolResource])` declares what a call touches (`Operation` is `Read`,
+  `Write`, `Delete`, `Execute`, `Network` or `Invoke`; the default is `(Invoke, <name>)`), and
+  `PermissionMiddleware(rules)` checks it with ordered `PermissionRule(operation, Glob, Allow | Deny | Ask)`s after
+  the arguments decode: the first match wins, an unmatched resource is denied, `Ask` asks for approval, and an edited
+  approval is checked again. `withTimeout(FiniteDuration)` bounds each run of a tool: past it the tool is interrupted
+  and the model sees `Tool '<name>' timed out after <n> ms`. `withLocks(A => Set[LockKey])` orders the calls of one
+  model message whose locks conflict (one key a prefix of the other): they run in successive supersteps, in call
+  order, each seeing the state the earlier committed. `ToolCallRequest` gains `resources`; `tool-queue` is a new key
+  the loop owns. Design §4.23; guide: Tool Permissions, Timeouts and Locks.
 - **`llm4s-kotlin-api` is published to Maven Central with each release** ([#1494](https://github.com/llm4s/llm4s/issues/1494)):
   `org.llm4s:llm4s-kotlin-api` (no `_3` suffix: a Kotlin artifact), at the release's version, depending on
   `llm4s-java-api_3` at that same version, and managed by `llm4s-bom`, so a Gradle build that imports the BOM declares
@@ -1295,6 +1305,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Breaking - `tool-queue` is a state key the agent loop owns** ([#1903](https://github.com/llm4s/llm4s/issues/1903)):
+  it holds a batch's calls waiting on a conflicting lock, and a tool or middleware declaring a key with that id is
+  refused at build, as `tool-results` is. See the migration guide, "Tool permissions, timeouts and batch locks".
 - **Breaking - `GraphRuntime.subscribe` is tenant-checked** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   it took no `RunConfig`, so any caller could replay and follow any tenant's thread - its `RunStarted` with tenant and
   principal, `Custom` payloads and `TaskFailed` messages - although `history`, `checkpoint`, `prune` and `fork` refuse
