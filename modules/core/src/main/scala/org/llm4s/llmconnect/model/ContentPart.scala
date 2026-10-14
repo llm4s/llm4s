@@ -77,7 +77,7 @@ object ContentPart {
 
   /** The text parts of `parts`, joined by newlines: a message's text view. Empty when there are none. */
   def text(parts: Seq[ContentPart]): String =
-    parts.collect { case Text(t) => t }.mkString("\n")
+    parts.collect { case Text(t) => Option(t).getOrElse("") }.mkString("\n")
 
   /** The number of inline bytes `parts` carry, in total. */
   def inlineBytes(parts: Seq[ContentPart]): Long =
