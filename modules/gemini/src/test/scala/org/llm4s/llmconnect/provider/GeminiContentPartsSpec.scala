@@ -97,6 +97,13 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
       Right(())
   }
 
+  it should "refuse a request whose inline media together is over Gemini's 20 MB request limit" in {
+    val four = ContentPart.image(MediaSource.Inline(IArray.fill[Byte](4 * 1024 * 1024)(1)), MediaType.Png).value
+    GeminiParts.check("gemini", Seq(UserMessage(Vector.fill(3)(four))), gemini) shouldBe Right(())
+    GeminiParts.check("gemini", Seq(UserMessage(Vector.fill(4)(four))), gemini).left.value.message should
+      include(s"at most ${GeminiParts.MaxInlineRequestBytes} bytes of inline media")
+  }
+
   "GeminiClient" should "send a user message's parts in order, and a tool result's text" in {
     val sent = new AtomicReference[String]()
     val http = stub[Llm4sHttpClient]

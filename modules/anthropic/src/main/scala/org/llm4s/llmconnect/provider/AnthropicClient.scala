@@ -593,10 +593,17 @@ curl https://api.anthropic.com/v1/messages \
       case (tm: ToolMessage, _) =>
         // no tool_use it can answer here (pruned, or not straight before it), so it goes as text,
         // followed by its media as blocks of the same user turn
-        pendingTexts += ContentBlockParam.ofText(
-          TextBlockParam.builder().text(s"[Tool result for ${tm.toolCallId}]: ${tm.content}").build()
-        )
-        pendingTexts ++= tm.parts.filter(ContentPart.isMedia).map(AnthropicClient.userPart)
+        // followed by its parts in their own order, so each caption stays beside its media
+        if (!tm.parts.exists(ContentPart.isMedia))
+          pendingTexts += ContentBlockParam.ofText(
+            TextBlockParam.builder().text(s"[Tool result for ${tm.toolCallId}]: ${tm.content}").build()
+          )
+        else {
+          pendingTexts += ContentBlockParam.ofText(
+            TextBlockParam.builder().text(s"[Tool result for ${tm.toolCallId}]:").build()
+          )
+          pendingTexts ++= tm.parts.map(AnthropicClient.userPart)
+        }
     }
     flushResults()
 
@@ -915,7 +922,20 @@ object AnthropicClient {
 
   /** `Right` when every part of `messages` is one Anthropic takes, else the error naming the first that is not. */
   private[provider] def checkParts(provider: String, messages: Seq[org.llm4s.llmconnect.model.Message]): Result[Unit] =
-    PartEncoding.check(provider, messages, userPart, toolPart)
+    PartEncoding
+      .check(provider, messages, userPart, toolPart)
+      .flatMap(_ => PartEncoding.checkInlineLimits(provider, messages, inlineLimit))
+
+  /**
+   * Anthropic takes an image of at most 5 MiB base64-encoded (3,932,160 bytes), less than
+   * `ContentPart.MaxInlineBytes`; a larger one fails here rather than at the API.
+   */
+  private[provider] val MaxInlineImageBytes: Long = 5L * 1024 * 1024 / 4 * 3
+
+  private def inlineLimit(part: ContentPart): Option[Long] = part match {
+    case _: ContentPart.Image => Some(MaxInlineImageBytes)
+    case _                    => None
+  }
 
   /**
    * An SDK failure as an [[org.llm4s.error.LLMError]]. The SDK's exception messages carry the service's

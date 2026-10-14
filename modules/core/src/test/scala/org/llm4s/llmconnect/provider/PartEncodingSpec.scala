@@ -39,6 +39,17 @@ class PartEncodingSpec extends AnyFlatSpec with Matchers with EitherValues {
       .value shouldBe UnsupportedContentPartError("p", image.kind, "tool")
   }
 
+  "checkInlineLimits and checkInlineTotal" should "apply a provider's own per-part and per-request limits" in {
+    val messages = Seq(UserMessage(Vector(ContentPart.Text("x"), image, image)))
+    PartEncoding.checkInlineLimits("p", messages, _ => Some(3L)) shouldBe Right(())
+    PartEncoding.checkInlineLimits("p", messages, _ => Some(2L)).left.value.message should include("at most 2 bytes")
+    PartEncoding.checkInlineLimits("p", messages, _ => None) shouldBe Right(())
+    PartEncoding.checkInlineTotal("p", messages, 8L) shouldBe Right(())
+    PartEncoding.checkInlineTotal("p", messages, 7L).left.value.message should include("has 8")
+    PartEncoding.base64Length(3) shouldBe 4
+    PartEncoding.base64Length(4) shouldBe 8
+  }
+
   "isWebUrl" should "accept http and https only" in {
     PartEncoding.isWebUrl(URI.create("https://e.com/a")) shouldBe true
     PartEncoding.isWebUrl(URI.create("HTTP://e.com/a")) shouldBe true

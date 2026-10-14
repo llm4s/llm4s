@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.UnsupportedContentPartError
+import org.llm4s.error.{ UnsupportedContentPartError, ValidationError }
 import org.llm4s.llmconnect.model.{ ContentPart, Message, MessageRole, ToolMessage, UserMessage }
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.types.Result
@@ -62,6 +62,48 @@ private[llm4s] object PartEncoding {
    */
   def isWebUrl(uri: java.net.URI): Boolean =
     Option(uri.getScheme).exists(s => s.equalsIgnoreCase("http") || s.equalsIgnoreCase("https"))
+
+  /**
+   * `Right` when every inline part of `messages` is within the provider's own limit for it: `limit` gives the
+   * most inline bytes `provider` takes for a part, or `None` for no limit of its own. A provider's limit can be
+   * lower than `ContentPart.MaxInlineBytes`, so a part llm4s accepts would otherwise fail only at the provider.
+   */
+  def checkInlineLimits(provider: String, messages: Seq[Message], limit: ContentPart => Option[Long]): Result[Unit] =
+    messages.iterator
+      .flatMap(partsOf)
+      .map(part => (part, ContentPart.inlineBytes(Vector(part)), limit(part)))
+      .collectFirst {
+        case (part, size, Some(max)) if size > max =>
+          Left(
+            ValidationError(
+              "parts",
+              s"$provider takes at most $max bytes for an inline ${part.kind}; this one has $size"
+            )
+          )
+      }
+      .getOrElse(Right(()))
+
+  /** `Right` when the inline parts of `messages`, base64-encoded, total at most `maxEncodedBytes`: a limit on a whole request. */
+  def checkInlineTotal(provider: String, messages: Seq[Message], maxEncodedBytes: Long): Result[Unit] = {
+    val encoded = messages.flatMap(partsOf).map(p => base64Length(ContentPart.inlineBytes(Vector(p)))).sum
+    if (encoded <= maxEncodedBytes) Right(())
+    else
+      Left(
+        ValidationError(
+          "parts",
+          s"$provider takes at most $maxEncodedBytes bytes of inline media in one request; this one has $encoded, base64-encoded"
+        )
+      )
+  }
+
+  /** The length of `bytes` bytes once base64-encoded. */
+  def base64Length(bytes: Long): Long = (bytes + 2) / 3 * 4
+
+  private def partsOf(message: Message): Vector[ContentPart] = message match {
+    case um: UserMessage => um.parts
+    case tm: ToolMessage => tm.parts
+    case _               => Vector.empty
+  }
 
   /** Covers text parts only, as their text: for a role whose wire format takes nothing else. */
   val textOnly: PartialFunction[ContentPart, String] = { case ContentPart.Text(text) => text }

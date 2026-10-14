@@ -86,40 +86,36 @@ object ToolOutputCompressor {
     }
   }
 
-  // each text part is compressed on its own, in place: a part's text stays beside the media it describes
+  /**
+   * The thresholds apply to the result's text in total, so text split across parts cannot slip under
+   * them; what a branch does, it does to each text part in place, so each text stays beside the media
+   * it describes. Over `threshold`, every text part is externalized; over `MaxInlineToolOutput`, every
+   * text part is compressed by its own content type.
+   */
   private def compressToolMessage(
     message: ToolMessage,
     artifactStore: ArtifactStore,
     threshold: ExternalizationThreshold
-  ): Result[Message] =
-    message.parts
-      .foldLeft[Result[Vector[ContentPart]]](Right(Vector.empty)) { (acc, part) =>
-        acc.flatMap { done =>
-          part match {
-            case ContentPart.Text(text) =>
-              compressText(text, message.toolCallId, artifactStore, threshold).map(t => done :+ ContentPart.Text(t))
-            case media => Right(done :+ media)
+  ): Result[Message] = {
+    val total = message.parts.collect { case ContentPart.Text(t) => ContentSize.fromString(t).bytes }.sum
+    val rewrite: Option[String => Result[String]] = total match {
+      case size if size > threshold =>
+        Some(text => externalizeToolOutput(text, artifactStore, detectContentType(text)))
+      case size if size > MaxInlineToolOutput =>
+        Some(text => compressInlineContent(text, message.toolCallId, detectContentType(text)))
+      case _ => None
+    }
+    rewrite.fold[Result[Message]](Right(message)) { f =>
+      message.parts
+        .foldLeft[Result[Vector[ContentPart]]](Right(Vector.empty)) { (acc, part) =>
+          acc.flatMap { done =>
+            part match {
+              case ContentPart.Text(text) => f(text).map(t => done :+ ContentPart.Text(t))
+              case media                  => Right(done :+ media)
+            }
           }
         }
-      }
-      .map(parts => if (parts == message.parts) message else message.withParts(parts))
-
-  private def compressText(
-    content: String,
-    toolCallId: String,
-    artifactStore: ArtifactStore,
-    threshold: ExternalizationThreshold
-  ): Result[String] = {
-    val contentSize = ContentSize.fromString(content)
-    val contentType = detectContentType(content)
-
-    contentSize.bytes match {
-      case size if size > threshold =>
-        externalizeToolOutput(content, artifactStore, contentType)
-      case size if size > MaxInlineToolOutput =>
-        compressInlineContent(content, toolCallId, contentType)
-      case _ =>
-        Right(content)
+        .map(message.withParts)
     }
   }
 

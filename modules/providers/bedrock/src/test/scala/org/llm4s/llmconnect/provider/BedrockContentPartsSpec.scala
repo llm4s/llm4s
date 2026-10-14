@@ -98,8 +98,30 @@ class BedrockContentPartsSpec extends AnyFlatSpec with Matchers with EitherValue
   it should "go as text and then its media when there is no call to answer" in {
     val conv = Conversation(Seq(UserMessage("go"), ToolMessage(Vector(ContentPart.Text("orphan"), image(bytes)), "c9")))
     val blocks = send(conv)._1.get("messages").arr.head("content").arr
-    blocks.map(_.obj.keys.head).toSeq shouldBe Seq("text", "text", "image")
-    blocks(1)("text").str shouldBe "[Tool result for c9]: orphan"
+    blocks.map(_.obj.keys.head).toSeq shouldBe Seq("text", "text", "text", "image")
+    blocks(1)("text").str shouldBe "[Tool result for c9]:"
+    blocks(2)("text").str shouldBe "orphan"
+  }
+
+  it should "keep an unanswered result's parts in their order, each caption beside its image" in {
+    val parts =
+      Vector(ContentPart.Text("before"), image(bytes), ContentPart.Text("after"), image(bytes, MediaType.Gif))
+    val conv   = Conversation(Seq(UserMessage("go"), ToolMessage(parts, "c9")))
+    val blocks = send(conv)._1.get("messages").arr.head("content").arr
+    blocks.map(_.obj.keys.head).toSeq shouldBe Seq("text", "text", "text", "image", "text", "image")
+    blocks.drop(2).flatMap(_.obj.get("text").map(_.str)).toSeq shouldBe Seq("before", "after")
+  }
+
+  it should "refuse, before sending, inline media over Converse's own limits" in {
+    val bigImage = image(MediaSource.Inline(IArray.fill[Byte](BedrockClient.MaxInlineImageBytes.toInt + 1)(1)))
+    val bigDoc   = doc(MediaSource.Inline(IArray.fill[Byte](BedrockClient.MaxInlineDocumentBytes.toInt + 1)(1)))
+    Seq(bigImage, bigDoc).foreach { part =>
+      val (sent, result) = send(Conversation(Seq(UserMessage(Vector(ContentPart.Text("x"), part)))))
+      sent shouldBe None
+      result.left.value.message should include("bytes for an inline")
+    }
+    val fits = doc(MediaSource.Inline(IArray.fill[Byte](BedrockClient.MaxInlineDocumentBytes.toInt)(1)))
+    BedrockClient.checkParts("bedrock", Seq(UserMessage(Vector(ContentPart.Text("x"), fits)))) shouldBe Right(())
   }
 
   it should "refuse, before sending, a message whose only parts are documents: Converse needs text beside one" in {

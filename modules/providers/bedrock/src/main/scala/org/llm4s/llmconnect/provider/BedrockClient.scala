@@ -532,9 +532,14 @@ class BedrockClient(
 
       case (msg: ToolMessage, index) if !pairing.resultPaired(index) =>
         // no call to answer here, so it goes as text, followed by its media
-        val text  = ContentBlock.fromText(s"[Tool result for ${msg.toolCallId}]: ${msg.content}")
-        val media = msg.parts.filter(ContentPart.isMedia).map(BedrockClient.userPart(nextName()))
-        Some(BedrockMessage.builder().role(ConversationRole.USER).content((text +: media).asJava).build())
+        // its parts follow in their own order, so each caption stays beside its media
+        val blocks =
+          if (!msg.parts.exists(ContentPart.isMedia))
+            Seq(ContentBlock.fromText(s"[Tool result for ${msg.toolCallId}]: ${msg.content}"))
+          else
+            ContentBlock.fromText(s"[Tool result for ${msg.toolCallId}]:") +:
+              msg.parts.map(BedrockClient.userPart(nextName()))
+        Some(BedrockMessage.builder().role(ConversationRole.USER).content(blocks.asJava).build())
 
       case (msg: ToolMessage, _) =>
         val resultBlock = ToolResultBlock
@@ -811,7 +816,19 @@ object BedrockClient {
       }
 
   private[provider] def checkParts(provider: String, messages: Seq[Message]): Result[Unit] =
-    PartEncoding.check(provider, messages, userPart("document"), toolPart("document"))
+    PartEncoding
+      .check(provider, messages, userPart("document"), toolPart("document"))
+      .flatMap(_ => PartEncoding.checkInlineLimits(provider, messages, inlineLimit))
+
+  /** Converse's own limits on inline media, lower than `ContentPart.MaxInlineBytes`: 3.75 MB an image, 4.5 MB a document. */
+  private[provider] val MaxInlineImageBytes: Long    = 3750000L
+  private[provider] val MaxInlineDocumentBytes: Long = 4500000L
+
+  private def inlineLimit(part: ContentPart): Option[Long] = part match {
+    case _: ContentPart.Image    => Some(MaxInlineImageBytes)
+    case _: ContentPart.Document => Some(MaxInlineDocumentBytes)
+    case _                       => None
+  }
   import org.llm4s.types.TryOps
 
   /** What the SDK's stream callbacks hand to the thread that is waiting on the stream. */

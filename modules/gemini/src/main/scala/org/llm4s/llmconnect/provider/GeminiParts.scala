@@ -29,7 +29,15 @@ private[provider] object GeminiParts {
 
   /** `Right` when a client with `fileUri` can send every part of `messages`. */
   def check(provider: String, messages: Seq[Message], fileUri: FileUri): Result[Unit] =
-    PartEncoding.check(provider, messages, user(fileUri), PartEncoding.textOnly)
+    PartEncoding
+      .check(provider, messages, user(fileUri), PartEncoding.textOnly)
+      .flatMap(_ => PartEncoding.checkInlineTotal(provider, messages, MaxInlineRequestBytes))
+
+  /**
+   * Gemini and Vertex AI take a request of at most 20 MB, inline data included: each part is within
+   * `ContentPart.MaxInlineBytes`, but several may not be together, so the request's inline media is bounded too.
+   */
+  val MaxInlineRequestBytes: Long = 20000000L
 
   /**
    * The Gemini API's references: a web URL (`http`/`https`), or a file uploaded to `provider` through the

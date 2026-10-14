@@ -44,8 +44,16 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
         .asInstanceOf[ToolMessage]
     compressed.parts.map(_.getClass) shouldBe message.parts.map(_.getClass)
     compressed.parts(1) shouldBe chart
-    compressed.parts(2) shouldBe ContentPart.Text("second caption")
+    compressed.parts(2) should not be ContentPart.Text("second caption") // the result's text is over the bound in total
     compressed.parts.head.asInstanceOf[ContentPart.Text].text.length should be < 24000
+  }
+
+  it should "apply its thresholds to the result's text in total, not to each part" in {
+    val parts   = Vector.fill(5)(ContentPart.Text("y" * 2048))
+    val result  = ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(parts, "c")), ArtifactStore.inMemory())
+    val message = result.toOption.get.head.asInstanceOf[ToolMessage]
+    message.parts.size shouldBe 5
+    message.content.length should be < 5 * 2048
   }
 
   // ============ Content Type Detection ============

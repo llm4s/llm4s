@@ -92,8 +92,27 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
   it should "go as text and then its media when there is no call to answer" in {
     val blocks =
       body(ToolMessage(Vector(ContentPart.Text("orphan"), image(url)), "c9"))("messages").arr.head("content").arr
-    blocks.head("text").str shouldBe "[Tool result for c9]: orphan"
-    blocks(1)("type").str shouldBe "image"
+    blocks.head("text").str shouldBe "[Tool result for c9]:"
+    blocks(1)("text").str shouldBe "orphan"
+    blocks(2)("type").str shouldBe "image"
+  }
+
+  it should "keep an unanswered result's parts in their order, each caption beside its image" in {
+    val parts =
+      Vector(ContentPart.Text("before"), image(url), ContentPart.Text("after"), image(MediaSource.Inline(bytes)))
+    val blocks = body(ToolMessage(parts, "c9"))("messages").arr.head("content").arr
+    blocks.map(_("type").str).toSeq shouldBe Seq("text", "text", "image", "text", "image")
+    blocks.map(b => b.obj.get("text").map(_.str)).flatten.toSeq shouldBe Seq("[Tool result for c9]:", "before", "after")
+    body(ToolMessage("plain", "c9"))("messages").arr.head("content").arr.head("text").str shouldBe
+      "[Tool result for c9]: plain"
+  }
+
+  it should "refuse, before sending, an inline image over Anthropic's own 5 MiB base64 limit" in {
+    val big   = image(MediaSource.Inline(IArray.fill[Byte](AnthropicClient.MaxInlineImageBytes.toInt + 1)(1)))
+    val error = client.complete(Conversation(Seq(UserMessage(Vector(ContentPart.Text("x"), big)))), CompletionOptions())
+    error.left.value.message should include(s"at most ${AnthropicClient.MaxInlineImageBytes} bytes")
+    val fits = image(MediaSource.Inline(IArray.fill[Byte](AnthropicClient.MaxInlineImageBytes.toInt)(1)))
+    AnthropicClient.checkParts("anthropic", Seq(UserMessage(Vector(fits)))) shouldBe Right(())
   }
 
   "complete" should "refuse, before sending, each part Anthropic cannot take" in {
