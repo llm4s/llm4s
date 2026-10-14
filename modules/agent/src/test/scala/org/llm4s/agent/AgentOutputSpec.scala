@@ -52,7 +52,7 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
       .eventsAfter(threadId, 0L, 1000)
       .fold(e => fail(e.message), identity)
       .collect {
-        case EventRecord(_, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ModelCallCompleted.name, _, payload)) =>
+        case EventRecord(_, _, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ModelCallCompleted.name, _, payload)) =>
           AgentEvents.ModelCallCompleted.decode(payload).getOrElse(fail(s"undecodable payload $payload"))
       }
 
@@ -229,7 +229,7 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
     val failed = store
       .eventsAfter(thread, 0L, 1000)
       .fold(e => fail(e.message), identity)
-      .collect { case EventRecord(_, _, _, _, _, _, _, f: RunEvent.RunFailed) => f }
+      .collect { case EventRecord(_, _, _, _, _, _, _, _, f: RunEvent.RunFailed) => f }
     failed.flatMap(_.usage).map(_.requestCount) shouldBe Vector(1L)
     val recovered = agent.recover(thread).value
     recovered.decodeOutput[Invoice] shouldBe Right(Invoice("Acme", 12.5))

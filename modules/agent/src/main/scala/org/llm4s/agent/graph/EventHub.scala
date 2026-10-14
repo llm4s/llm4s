@@ -288,21 +288,20 @@ final private[graph] class EventHub(
       .map(_ => dispatcher)
 
   /**
-   * A dispatcher for run `runId`'s observer that joins the thread's live set now, with no replay, and is
-   * not yet running: it queues everything sent on the thread from this moment, and everything committed
-   * from its run's claim on. The caller holds the thread exclusively in this runtime, so the next commit
-   * it makes is that claim - but a commit of a run that gave up on it ([[AbandonedWrites]]) may still be
-   * handed over first, if the store applied it before the claim was granted. Such a commit is not the
-   * run's, nor the observer's place in the log: until the first commit holding an event of `runId` is
-   * handed to it, the dispatcher skips every commit, so it delivers what a subscription from just before
-   * the claim ([[RunHandle.subscribe]]) does. The check is by run id, so it assumes ids are unique, as
-   * the agent's `RunScope` does: a run that reuses the `RunId` of a lost run on the same thread may
-   * still take that run's orphan, handed over before its claim, as its place in the log.
-   * [[Observation.start]] starts it; [[Observation.abandon]] removes it, delivering nothing.
+   * A dispatcher for a run's observer that joins the thread's live set now, with no replay, and is not
+   * yet running: it delivers everything committed from its run's claim on, and every live event sent
+   * from then on. The caller holds the thread exclusively in this runtime, so the next commit it makes
+   * is that claim - but a commit of a run that gave up on it ([[AbandonedWrites]]) may still be handed
+   * over first, if the store applied it before the claim was granted. Such a commit is not the run's,
+   * nor the observer's place in the log, even when its run had the same `RunId` - an id may be reused,
+   * a token never is. So until a commit fenced by the run's own claim ([[Observation.claimed]], matched by
+   * [[EventRecord.token]]) is handed to it, the dispatcher skips every commit, and every live event,
+   * which no node of the run can have sent yet: it delivers what a subscription from just before the
+   * claim ([[RunHandle.subscribe]]) does. [[Observation.start]] starts it; [[Observation.abandon]]
+   * removes it, delivering nothing.
    */
   def observe(
     threadId: ThreadId,
-    runId: RunId,
     capacity: Int,
     listener: StreamEvent => Unit,
     abandoned: EventRecord => Boolean,
@@ -316,14 +315,22 @@ final private[graph] class EventHub(
         listener,
         abandoned,
         scope,
-        preJoined = true,
-        observing = Some(runId)
+        preJoined = true
       )
     withLock(hubLock)(join(threadId, dispatcher))
     new Observation(dispatcher)
 
   /** A dispatcher joined by [[observe]], to be started or abandoned exactly once. */
   final class Observation private[EventHub] (dispatcher: Dispatcher):
+    /**
+     * The run's claim was granted with `token`: the observer takes its place in the log at the first
+     * commit fenced by it. Called before that claim's commit begins - so before it can be handed over -
+     * and holding no lock of the hub's.
+     */
+    def claimed(token: FencingToken): Observation =
+      dispatcher.claimed(token)
+      this
+
     /** Starts delivery; `lastSeq` is what a `Disconnected` names if nothing durable is delivered. */
     def start(lastSeq: Long): Dispatched =
       dispatcher.startObserved(lastSeq)
@@ -520,8 +527,8 @@ final private[graph] class EventHub(
    * before it. After that it drains its queue, and watches the store for commits made elsewhere
    * (`watchLoop`). The listener is never called while a lock is held. A `preJoined` dispatcher
    * ([[observe]]) never replays, and only drains and watches; it takes its place in the log from the
-   * first commit of its run, `observing`, handed to it - the run's claim - skipping any commit handed
-   * over before it, and its watch waits until then.
+   * first commit fenced by its run's claim (`observing`, the token) handed to it - the claim's own -
+   * skipping every commit and live event handed over before it, and its watch waits until then.
    */
   final private class Dispatcher(
     threadId: ThreadId,
@@ -530,8 +537,7 @@ final private[graph] class EventHub(
     listener: StreamEvent => Unit,
     abandoned: EventRecord => Boolean,
     scope: TenantScope,
-    preJoined: Boolean = false,
-    observing: Option[RunId] = None
+    preJoined: Boolean = false
   ) extends Dispatched:
     private val lock                = new ReentrantLock()
     private val notEmpty: Condition = lock.newCondition()
@@ -564,9 +570,18 @@ final private[graph] class EventHub(
 
     /**
      * Whether `lastQueuedSeq` is a place in the thread's log: from the start for a subscription, which
-     * replays from `afterSeq`; for a `preJoined` one, from the first commit of its run handed to it.
+     * replays from `afterSeq`; for a `preJoined` one, from the first commit fenced by `observing`.
      */
     private var anchored = !preJoined
+
+    /**
+     * For a `preJoined` dispatcher, the token of its run's claim once granted ([[Observation.claimed]]);
+     * guarded by `lock`. Until a commit carrying it is handed over, none is the run's.
+     */
+    private var observing = Option.empty[FencingToken]
+
+    /** Its run's claim was granted with `token`; see [[Observation.claimed]]. */
+    def claimed(token: FencingToken): Unit = withLock(lock) { observing = Some(token) }
 
     /** The store watch, once started; and whether the dispatcher has ended, which stops it. */
     @volatile private var watcher  = Option.empty[Thread]
@@ -711,13 +726,13 @@ final private[graph] class EventHub(
      * subscriber ([[EventHub.durable]]). Missing events - committed elsewhere and not yet read by the
      * watch - are queued ahead of them from the read in `reads` that answers this subscriber; if they
      * cannot all fit, the subscriber lags, and if the read failed, it ends. A replaying subscriber only
-     * notes them. An observer not yet anchored skips a commit holding no event of its run ([[observe]]).
+     * notes them. An observer not yet anchored skips a commit not fenced by its run's claim ([[observe]]).
      */
     def offerDurable(records: Vector[EventRecord], reads: Vector[GapRead]): Unit =
       withLock(lock) {
         if cancelled then ()
         else if !joined then records.foreach(record => noteDurable(record.seq))
-        else if !anchored && observing.exists(run => !records.exists(_.runId == run.value)) then ()
+        else if !anchored && !observing.exists(token => records.exists(_.token == token)) then ()
         else
           if !anchored then
             lastQueuedSeq = records.iterator.map(_.seq).min - 1
@@ -804,7 +819,8 @@ final private[graph] class EventHub(
     private def follows(seq: Long): Boolean = seq == lastQueuedSeq + 1 || (lastQueuedSeq == 0 && seq > 0)
 
     def offerLive(event: StreamEvent.Live): Unit = withLock(lock) {
-      if cancelled then ()
+      // an observer not yet anchored: no node of its run has run, so the event is another run's
+      if cancelled || !anchored then ()
       else if !joined then hold(event)
       else if !halted then
         // the gap marker needs one slot and the event one

@@ -296,7 +296,7 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
     agent.run(ThreadId("once"), "go").isLeft shouldBe true
     agent.recover(ThreadId("once")).map(_.answer) shouldBe Right(Some("done"))
     val completed = replayed(runtime, store, ThreadId("once")).collect {
-      case r @ EventRecord(_, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ModelCallCompleted.name, _, _)) => r
+      case r @ EventRecord(_, _, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ModelCallCompleted.name, _, _)) => r
     }
     completed.size shouldBe 1
   }
@@ -315,7 +315,7 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
     agent.run(ThreadId("tool-once"), "go").isLeft shouldBe true
     agent.recover(ThreadId("tool-once")).map(_.answer) shouldBe Right(Some("done"))
     val executed = replayed(runtime, store, ThreadId("tool-once")).collect {
-      case r @ EventRecord(_, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ToolExecuted.name, _, _)) => r
+      case r @ EventRecord(_, _, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ToolExecuted.name, _, _)) => r
     }
     executed.size shouldBe 1
   }
@@ -337,7 +337,8 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
       .fold(e => fail(e.message), identity)
     agent.run(ThreadId("content"), s"tell me $marker").map(_.answer) shouldBe Right(Some(s"the answer is $marker"))
     val agentPayloads = replayed(runtime, store, ThreadId("content")).collect {
-      case EventRecord(_, _, _, _, _, _, _, RunEvent.Custom(name, _, payload)) if AgentEvents.durable(name) => payload
+      case EventRecord(_, _, _, _, _, _, _, _, RunEvent.Custom(name, _, payload)) if AgentEvents.durable(name) =>
+        payload
     }
     agentPayloads should not be empty
     agentPayloads.foreach(p => (p.render() should not).include(marker))
@@ -357,7 +358,7 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
       case Right(AgentStatus.Blocked(_, _)) =>
     }
     val agentPayloads = replayed(runtime, store, ThreadId("blocked")).collect {
-      case EventRecord(_, _, _, _, _, _, _, RunEvent.Custom(name, _, payload)) if AgentEvents.durable(name) =>
+      case EventRecord(_, _, _, _, _, _, _, _, RunEvent.Custom(name, _, payload)) if AgentEvents.durable(name) =>
         name -> payload
     }
     agentPayloads.map(_._1) should contain(AgentEvents.GuardrailBlocked.name)

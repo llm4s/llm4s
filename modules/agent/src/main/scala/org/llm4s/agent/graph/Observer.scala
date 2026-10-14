@@ -7,7 +7,9 @@ package org.llm4s.agent.graph
  * receives only the live events sent after it returns. `capacity` is the subscription's queue
  * size, at least 2, as for [[GraphRuntime.subscribe]]. Its durable events start at the run's claim,
  * as a [[RunHandle.subscribe]]'s do: a commit of an earlier run on the thread handed over during
- * admission - a lost run's late write - is not delivered. The subscription is thread-scoped like any
+ * admission - a lost run's late write, even one of a run with the same `RunId` - is not delivered, nor
+ * is a live event sent before the claim. The run's own claim is recognised by its fencing token
+ * ([[EventRecord.token]]), which, unlike a run id, is never reused. The subscription is thread-scoped like any
  * other: it keeps delivering later runs until cancelled, through [[RunHandle.observation]]. A
  * refused admission abandons it, and its listener is never called.
  */

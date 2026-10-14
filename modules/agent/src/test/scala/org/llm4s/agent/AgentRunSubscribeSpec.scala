@@ -257,8 +257,10 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     val cancels                 = new java.util.concurrent.atomic.AtomicInteger(0)
     override def cancel(): Unit = cancels.incrementAndGet(): Unit
 
-  private def record(run: String, seq: Long, event: RunEvent): StreamEvent =
-    StreamEvent.Durable(EventRecord("t", seq, run, None, None, None, java.time.Instant.EPOCH, event))
+  private def record(run: String, seq: Long, event: RunEvent, token: Long = 1L): StreamEvent =
+    StreamEvent.Durable(
+      EventRecord("t", seq, run, FencingToken(token), None, None, None, java.time.Instant.EPOCH, event)
+    )
 
   "RunScope" should "cancel its subscription on the run's terminal event, once, and then pass on nothing" in {
     val c     = Received()
@@ -282,6 +284,22 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
       case StreamEvent.Live(_, _, _, _, n, _, _) => n
       case other                                 => other.toString
     } shouldBe Vector("2", "this.run", "LiveGap(2)", "3")
+  }
+
+  it should "pass on only the incarnation of its run id whose claim it was given first, not a reused id's other run (#1918)" in {
+    val c     = Received()
+    val scope = RunScope(RunId("r1"), c.listener)
+    scope.attach(CountingSubscription())
+    // a subscription made for the run starts at its claim: the run's first event fixes its token
+    scope(record("r1", 2, RunEvent.RunRecovered("c1", None, None, Some("r1")), token = 3L))
+    // a write of the lost run it took over, under the same id: never this run's
+    scope(record("r1", 3, RunEvent.TaskCompleted, token = 2L))
+    scope(record("r1", 4, RunEvent.TaskCompleted, token = 3L))
+    // a later run under the same id - replayed to a scope whose run ended without a terminal event
+    scope(record("r1", 5, RunEvent.RunStarted(None, None), token = 4L))
+    scope(record("r1", 6, RunEvent.RunCompleted, token = 4L))
+    scope.isEnded shouldBe false
+    c.all.collect { case StreamEvent.Durable(r) => r.seq } shouldBe Vector(2L, 4L)
   }
 
   it should "cancel a subscription attached after the run's terminal event" in {

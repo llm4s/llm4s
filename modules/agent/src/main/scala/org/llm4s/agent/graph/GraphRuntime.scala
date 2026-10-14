@@ -406,10 +406,10 @@ final class GraphRuntime(
     durability: Durability,
     newOnly: Option[() => LLMError],
     observer: Option[Observer]
-  ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { signal =>
+  ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { admitting =>
     graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None =>
-        newRun(graph, threadId, config, durability, 0, signal).admit(graph.start(input), None, _ => started(config))
+        newRun(graph, threadId, config, durability, 0, admitting).admit(graph.start(input), None, _ => started(config))
       case Some(stored) =>
         checkTenant(threadId, stored, config).flatMap { _ =>
           newOnly match
@@ -420,7 +420,7 @@ final class GraphRuntime(
                 case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
                 case CheckpointStatus.Completed | CheckpointStatus.Failed =>
                   graph.restoreAtRest(stored.checkpoint.snapshot).flatMap { done =>
-                    newRun(graph, threadId, config, durability, done.superstep, signal)
+                    newRun(graph, threadId, config, durability, done.superstep, admitting)
                       .admit(
                         graph.startAt(done.superstep, done.state, input),
                         Some(stored.checkpoint.id),
@@ -438,7 +438,7 @@ final class GraphRuntime(
     config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync,
     observer: Option[Observer] = None
-  ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { signal =>
+  ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { admitting =>
     graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None => Left(GraphError.NothingToRecover(threadId.value))
       case Some(stored) =>
@@ -448,7 +448,7 @@ final class GraphRuntime(
               for
                 execution <- graph.restoreStored(stored.checkpoint)
                 reused    <- reusableWrites(graph, execution, stored)
-                run <- newRun(graph, threadId, config, durability, execution.superstep, signal).admit(
+                run <- newRun(graph, threadId, config, durability, execution.superstep, admitting).admit(
                   execution,
                   Some(stored.checkpoint.id),
                   // a claim that replaced an expired one is a takeover: its run may still be executing, even
@@ -489,7 +489,7 @@ final class GraphRuntime(
     config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync,
     observer: Option[Observer] = None
-  ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { signal =>
+  ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { admitting =>
     graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None => Left(GraphError.NotSuspended(threadId.value))
       case Some(stored) =>
@@ -499,7 +499,7 @@ final class GraphRuntime(
             for
               suspended <- graph.restoreStored(stored.checkpoint)
               resumed   <- graph.resume(suspended, answers)
-              run <- newRun(graph, threadId, config, durability, resumed.superstep, signal).admit(
+              run <- newRun(graph, threadId, config, durability, resumed.superstep, admitting).admit(
                 resumed,
                 Some(stored.checkpoint.id),
                 _ =>
@@ -1243,7 +1243,7 @@ final class GraphRuntime(
    * nothing.
    */
   private def exclusively[I, O](threadId: ThreadId, config: RunConfig, observer: Option[Observer])(
-    admit: StopSignal => Result[Run[I, O]]
+    admit: Admitting => Result[Run[I, O]]
   ): Result[RunHandle[O]] = admission(threadId) {
     observer.filter(_.capacity < 2) match
       case Some(o) =>
@@ -1277,10 +1277,9 @@ final class GraphRuntime(
                 admitted.foreach(_.releaseClaim())
                 release(threadId)
             }) { _ =>
-              observation = observer.map(o =>
-                hub.observe(threadId, config.runId, o.capacity, o.listener, abandoned.apply, runScope)
-              )
-              admit(signal).map { run =>
+              observation = observer.map(o => hub.observe(threadId, o.capacity, o.listener, abandoned.apply, runScope))
+              // the observer takes its place in the log at the first commit fenced by the run's claim
+              admit(Admitting(signal, token => observation.foreach(_.claimed(token)))).map { run =>
                 admitted = Some(run)
                 val subscription = observation.map(_.start(run.claimSeq - 1))
                 val handle = DefaultRunHandle[O](
@@ -1420,9 +1419,16 @@ final class GraphRuntime(
     config: RunConfig,
     durability: Durability,
     firstSuperstep: Int,
-    signal: StopSignal
+    admitting: Admitting
   ): Run[I, O] =
-    new Run(graph, threadId, config, committer(threadId, durability), firstSuperstep, signal)
+    new Run(graph, threadId, config, committer(threadId, durability), firstSuperstep, admitting)
+
+  /**
+   * What admission gives the run it admits: the run's stop signal, and `claimed`, told the token the
+   * run's claim is granted with before the claim's commit begins - so the run's observer
+   * ([[EventHub.observe]]) knows which commit is its place in the log.
+   */
+  final private class Admitting(val signal: StopSignal, val claimed: FencingToken => Unit)
 
   private def reusableWrites(
     graph: CompiledGraph[?, ?],
@@ -1923,8 +1929,9 @@ final class GraphRuntime(
     config: RunConfig,
     committer: Committer,
     firstSuperstep: Int,
-    signal: StopSignal
+    admitting: Admitting
   ):
+    private val signal      = admitting.signal
     val runId               = config.runId
     private val cause       = signal.cause
     private var checkpoints = 0L
@@ -1974,6 +1981,7 @@ final class GraphRuntime(
       val sentAt = ticker()
       claimThread(threadId, config).flatMap { granted =>
         claim = Some(granted)
+        admitting.claimed(granted.token)
         parentOrdinal = GraphRuntime.ordinal(parent)
         var admitted = false
         Using.resource(new AutoCloseable { def close(): Unit = if !admitted then releaseClaim() }) { _ =>

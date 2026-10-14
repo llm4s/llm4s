@@ -26,6 +26,7 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
       thread.value,
       seq,
       run.value,
+      FencingToken(1L),
       None,
       None,
       None,
@@ -34,7 +35,17 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
     )
 
   private def terminal(seq: Long): EventRecord =
-    EventRecord(thread.value, seq, run.value, None, None, None, java.time.Instant.EPOCH, RunEvent.RunCompleted)
+    EventRecord(
+      thread.value,
+      seq,
+      run.value,
+      FencingToken(1L),
+      None,
+      None,
+      None,
+      java.time.Instant.EPOCH,
+      RunEvent.RunCompleted
+    )
 
   private def label(event: StreamEvent): String = event match
     case StreamEvent.Durable(r)                => r.seq.toString

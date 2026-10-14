@@ -66,7 +66,7 @@ final private[agent] class AgentTracing(
           m.usage.foreach(u => trace(TraceEvent.TokenUsageRecorded(u.toTokenUsage, m.model, "agent_completion")))
         case AgentEvents.GuardrailBlocked(g) => blockedBy.set(Some(g.guardrail))
         // the calls of attempts that committed nothing are on the run's terminal event, not on ModelCallCompleted (§4.22)
-        case StreamEvent.Durable(EventRecord(_, _, _, _, _, _, _, terminal)) =>
+        case StreamEvent.Durable(EventRecord(_, _, _, _, _, _, _, _, terminal)) =>
           AgentTracing.lostUsage(terminal).foreach(lost => usage.updateAndGet(_.merge(lost)): Unit)
         case _ => ()
       if RunScope.terminal(record.event) then

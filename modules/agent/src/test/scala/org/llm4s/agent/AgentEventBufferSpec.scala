@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicReference
 class AgentEventBufferSpec extends AnyFlatSpec with Matchers:
 
   private def durable(seq: Long, event: RunEvent): StreamEvent =
-    StreamEvent.Durable(EventRecord("t", seq, "r", None, None, None, Instant.EPOCH, event))
+    StreamEvent.Durable(EventRecord("t", seq, "r", FencingToken(1L), None, None, None, Instant.EPOCH, event))
 
   private def live(n: Int): StreamEvent =
     StreamEvent.Live("t", "r", "task", "node", "agent.text_delta", 1, ujson.Num(n))

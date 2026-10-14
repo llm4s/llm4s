@@ -159,6 +159,14 @@ Effects outside thread state replay through `ReplayGuard`: an intent and an outc
 
 Design: `docs/design/typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md` (§4.24).
 
+### Event records carry their claim's token (#1918)
+
+A run is told from an earlier run with the same `RunId` by its claim's fencing token. Code that only runs agents or graphs is unaffected.
+
+- **`EventRecord` gains `token: FencingToken`, after `runId`.** A `Checkpointer` builds each record with `EventRecord.committed(threadId, seq, commit.token, draft)` (the token is a new parameter) and returns and replays it as stored. `CheckpointerContract` checks that every record carries the token of the commit that stored it.
+- **Persisted logs stay readable.** A store that keeps the record's JSON, as both shipped stores do, needs no schema change: a record written before this change has no `token` key and reads as `FencingToken(0)`, which no store issues. An older build reading a newer record ignores the key.
+- **Positional constructions and patterns gain a field.** `EventRecord(threadId, seq, runId, checkpointId, ...)` becomes `EventRecord(threadId, seq, runId, token, checkpointId, ...)`, and `case EventRecord(_, _, _, _, _, _, _, event)` gains a `_`.
+
 ## Stage 2 migration: durable execution
 
 Not in a release yet. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/1699)) makes agent and graph threads durable and adds human review. One note covers the whole stage; each slice adds its part here as it lands:
