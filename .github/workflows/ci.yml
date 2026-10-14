@@ -75,7 +75,12 @@ jobs:
           LLM_REGION: eastus
         run: sbt "configPolicy/runMain org.llm4s.configpolicy.EnvCheckPolicies --env=dev --preset=dev-sandbox"
 
-  # Quick checks that should fail fast
+  # Checks that need no tests run: formatting, scalafix, compile, the build's policy checks and the scripts' own
+  # tests. No job waits for it: the test, coverage and other jobs start alongside it, so a PR's wall clock is the
+  # longest job, not Quick Checks plus the longest job. It used to gate them all, which put its ~10 minutes in
+  # front of every one. A compile error still fails fast without it, in every job that compiles; what the gate
+  # saved was runner minutes on a PR that fails only formatting or a policy check, and concurrency already cancels
+  # a superseded run. It still gates the merge, through `All Tests Pass`.
   quick-checks:
     name: Quick Checks
     runs-on: ubuntu-latest
@@ -256,7 +261,6 @@ jobs:
 
   scaladoc:
     name: ScalaDoc
-    needs: quick-checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -850,7 +854,6 @@ jobs:
   # Main test matrix
   test:
     name: Test
-    needs: [quick-checks]
     permissions:
       contents: read
     strategy:
@@ -897,7 +900,6 @@ jobs:
   # `sbt test` keeps only megabyte hang guards.
   performance-tests:
     name: Performance tests
-    needs: [quick-checks]
     runs-on: ubuntu-latest
     # Healthy runs take about 15 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
     timeout-minutes: 45
@@ -935,7 +937,6 @@ jobs:
   # the same silent non-execution that #1143 was about.
   integration-tests:
     name: Integration Tests
-    needs: quick-checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1029,7 +1030,6 @@ jobs:
   # artifact; use `+mimaReportBinaryIssues` if a second Scala version returns (#1126).
   mima-check:
     name: Binary Compatibility (MiMa)
-    needs: quick-checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1055,7 +1055,6 @@ jobs:
   # llm4s-java-api from local Maven, so they share one publish of the library.
   kotlin-api:
     name: Kotlin API
-    needs: quick-checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1140,7 +1139,6 @@ jobs:
   # specs against the latest 3.x, so the documented range (docs/guide/spring-boot.md) is tested at both ends (#1467).
   spring-boot-latest:
     name: Spring Boot 3.x (latest)
-    needs: quick-checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1163,7 +1161,7 @@ jobs:
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, performance-tests, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest]
+    needs: [quick-checks, test, performance-tests, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1171,6 +1169,10 @@ jobs:
     steps:
       - name: Check all tests passed
         run: |
+          if [[ "${{ needs.quick-checks.result }}" != "success" ]]; then
+            echo "Quick checks failed"
+            exit 1
+          fi
           if [[ "${{ needs.test.result }}" != "success" ]]; then
             echo "Some tests failed"
             exit 1
@@ -1218,7 +1220,6 @@ jobs:
   # belongs to has to supply the rest.
   ollama-integration:
     name: Ollama Integration
-    needs: quick-checks
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
@@ -1288,7 +1289,6 @@ jobs:
   # itself — `it / Test / envVars` passes `workspaceRunner / Docker / version` to the suite.
   workspace-integration:
     name: Workspace Integration
-    needs: quick-checks
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
@@ -1336,7 +1336,6 @@ jobs:
   # Not in `all-tests-pass` for the same reason.
   mcp-reference-integration:
     name: MCP Reference Server Integration
-    needs: quick-checks
     runs-on: ubuntu-latest
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     permissions:
