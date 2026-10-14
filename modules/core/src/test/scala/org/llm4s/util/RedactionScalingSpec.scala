@@ -53,7 +53,12 @@ class RedactionScalingSpec extends AnyFlatSpec with Matchers {
     "vendor key prefixes"      -> (n => "eyJ" * n + ".eyJx.y AIza" * n),
     "strings at depth three" -> (n =>
       "{\"a\":\"{\\\"b\\\":\\\"{\\\\\\\"c\\\\\\\": \\\\\\\"" + "x " * n + "\\\\\\\"}\\\"}\"}"
-    )
+    ),
+    // each round of decoding uncovers one more escape: past the depth limit, failed closed
+    "escapes past the limit"   -> (n => ("\\u005c" + "u005c" * 40 + "u0022password: x ") * n),
+    "header elements"          -> (n => "{\n  token: " + "a, b " * n + "}"),
+    "keys apart from their :"  -> (n => "{" + "a \n : 1, " * n + "}"),
+    "names apart from their (" -> (n => "{'token': [" + "S (" * n + "]}")
   )
 
   "Redaction.redact" should "run in time linear in its input on every shape that was quadratic before (#1932)" taggedAs PerformanceTest in {

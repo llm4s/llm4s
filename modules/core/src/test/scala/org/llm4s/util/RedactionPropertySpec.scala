@@ -26,7 +26,8 @@ class RedactionPropertySpec extends AnyFlatSpec with Matchers with ScalaCheckPro
     PropertyCheckConfiguration(minSuccessful = 2000)
 
   // Shrinking a document cuts it anywhere, into text no generator writes: a failure is reported as generated.
-  implicit val noShrink: Shrink[String] = Shrink.shrinkAny
+  implicit val noShrink: Shrink[String]           = Shrink.shrinkAny
+  implicit val noShrinkLayers: Shrink[(Doc, Int)] = Shrink.shrinkAny
 
   /** A rendered document and the secrets planted in it. */
   final case class Doc(text: String, secrets: Seq[String])
@@ -108,6 +109,17 @@ class RedactionPropertySpec extends AnyFlatSpec with Matchers with ScalaCheckPro
       1 -> Gen.const(" \n\n    ")
     )
 
+  /** Blanks outside a bracket, where a line break would end the line's key: none, spaces or a tab. */
+  private val genBlanks: Gen[String] = Gen.oneOf("", " ", "\t", "  ", " \t ")
+
+  /**
+   * The blanks before and after a `key=` outside a bracket. A blank after a glued `=` (`token= see the docs`) reads
+   * as prose there unless the value looks like a credential, so the markers, too short to, are planted only with a
+   * blank before the `=` too.
+   */
+  private val genPairBlanks: Gen[(String, String)] =
+    Gen.oneOf(("", ""), (" ", ""), (" ", " "), ("\t", "\t"), ("  ", " "))
+
   /** One field under a sensitive key, in one of the shapes a credential reaches a log in. */
   private def genField(id: Int): Gen[(String, String)] =
     for {
@@ -117,6 +129,8 @@ class RedactionPropertySpec extends AnyFlatSpec with Matchers with ScalaCheckPro
       // the whitespace at the structural positions of a container or call: after an opening bracket, around a key's
       // `:` or `=`, between elements and before a closing bracket
       (a, b, c, d, e, f, g, h, i) <- Gen.zip(genWs, genWs, genWs, genWs, genWs, genWs, genWs, genWs, genWs)
+      bb                          <- genBlanks
+      (pb, pa)                    <- genPairBlanks
       ident = key.replace('-', '_')
       shape <- Gen.oneOf[String](
         s"""{$a"$key"$b:$c${json(quoted)}$d,$e"n":${f}1$g}""",
@@ -138,7 +152,22 @@ class RedactionPropertySpec extends AnyFlatSpec with Matchers with ScalaCheckPro
         s"https://user:${URLEncoder.encode(plain, StandardCharsets.UTF_8)}@db.example.com:5432/x",
         // a header is a line of its own: its value runs to the end of the line, over whatever a separator put after it
         s"\nAuthorization: Bearer $plain\n",
-        s"\nCookie: sid=$plain; theme=dark\nAccept: */*"
+        s"\nCookie: sid=$plain; theme=dark\nAccept: */*",
+        // whitespace, line breaks among it, between a key and its `:` or `=` and after it, inside a bracket: a bare
+        // key's `:` (a JavaScript object, YAML flow), a quoted key's `=`, a leaf's `=` in a container under a sensitive
+        // key, and a call's name before its `(`
+        s"{$a$ident$b:$c${pyRepr(quoted)}$d,${e}n$f:${g}1$h}",
+        s"{$a$ident$b:$c$plain$d}",
+        s"(${a}retries=3,$b$ident$c=$d$plain$e)",
+        s"""{$a"$key"$b=$c${json(quoted)}$d}""",
+        s"""{"$key":$a[${b}note$c=$d$plain$e]}""",
+        s"Settings($a$ident$b=${c}SecretStr$d(${pyRepr(quoted)}))",
+        // outside a bracket, blanks: before a header's `:`, around a pair's `=`, a quoted key's `=` and before a
+        // call's `(`; a line break ends the line's key there
+        s"\n$key$bb: $plain\nnext: 1",
+        s"$key$pb=$pa$plain next=1",
+        s"$ident$pb=${pa}SecretStr$bb(${pyRepr(quoted)})",
+        s"""\n"$key"$bb=$pa${json(quoted)}\n"""
       )
     } yield {
       val secret = if (shape.contains(s"${90000000 + id}")) s"${90000000 + id}" else markerOf(id)
@@ -272,6 +301,50 @@ class RedactionPropertySpec extends AnyFlatSpec with Matchers with ScalaCheckPro
     forAll(genDoc) { doc =>
       val out = Redaction.redact(doc.text)
       doc.secrets.foreach(s => withClue(s"input: ${doc.text}\noutput: $out\n")((out should not).include(s)))
+    }
+  }
+
+  /** `doc` put `layers` times inside a JSON string, as a log that is logged again is. */
+  private def encoded(doc: String, layers: Int): String =
+    (1 to layers).foldLeft(doc)((inner, k) => ujson.Obj(s"m$k" -> inner, "n" -> k).render())
+
+  /**
+   * A string at any depth of encoding: nested JSON is decoded up to `RedactionScanner.MaxDepth` encodings, and a string
+   * that still holds an escape past that is replaced whole, so nothing past the limit is read undecoded. The deep cases
+   * are few: each encoding doubles the backslashes before a quote.
+   */
+  it should "leave no planted secret readable at any depth of string encoding, past the decoding limit too" in {
+    val genDeep: Gen[(Doc, Int)] =
+      for {
+        field  <- genField(0)
+        layers <- Gen.frequency(6 -> Gen.choose(0, 8), 4 -> Gen.choose(9, 16), 2 -> Gen.choose(17, 20))
+      } yield (Doc(encoded(field._1, layers), Seq(field._2)), layers)
+    forAll(genDeep, minSuccessful(120)) { case (doc, layers) =>
+      val out = Redaction.redact(doc.text)
+      doc.secrets.foreach(s =>
+        withClue(s"layers: $layers\ninput: ${doc.text.take(4000)}\noutput: ${out.take(4000)}\n")(
+          (out should not).include(s)
+        )
+      )
+    }
+  }
+
+  it should "leave no secret readable at the decoding limit's edges: 8, 9, 16, 17 and 20 encodings" in {
+    Seq(1, 2, 8, 9, 15, 16, 17, 18, 20).foreach { layers =>
+      Seq(
+        """{"password":"hunter2Zq","user":"bob"}""",
+        "{'password': 'hunter2Zq'}",
+        "login password=hunter2Zq ok",
+        "{password : 'hunter2Zq'}"
+      ).foreach { doc =>
+        val in  = encoded(doc, layers)
+        val out = Redaction.redact(in)
+        withClue(s"layers $layers, $doc: ") {
+          (out should not).include("hunter2Zq")
+          Try(ujson.read(out)).isSuccess shouldBe Try(ujson.read(in)).isSuccess
+          Redaction.redact(out) shouldBe out
+        }
+      }
     }
   }
 

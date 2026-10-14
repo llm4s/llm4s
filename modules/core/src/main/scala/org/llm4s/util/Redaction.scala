@@ -21,8 +21,10 @@ import scala.annotation.unused
  *  - an `Authorization`, `Proxy-Authorization`, `Cookie` or `Set-Cookie` header's value, anywhere in a line;
  *  - Bearer and Basic tokens, the password of a URL's userinfo, and the vendor key shapes of
  *    [[SecretPatterns.SecretType.default]];
- *  - all of this inside strings, at any depth of nesting (JSON in a JSON string, a Python repr in a JSON string), and
- *    in text written with JSON escapes (`\"`, `&`) whose outer quotes are not there.
+ *  - all of this inside strings nested in strings (JSON in a JSON string, a Python repr in a JSON string), and in
+ *    text written with JSON escapes (`\"`, `&`) whose outer quotes are not there, up to 16 JSON string encodings
+ *    deep. Past that, the decoding stops, to keep the cost linear, and it fails closed: a string that still holds an
+ *    escape there is replaced whole, as its keys cannot be read.
  *
  * @example
  * {{{

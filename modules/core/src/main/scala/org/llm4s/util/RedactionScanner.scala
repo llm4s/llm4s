@@ -18,11 +18,17 @@ import java.util.Locale
  * `\n`, `\r`, `\t`, `\uXXXX`; an invalid escape is kept as written), so JSON inside a string - and JSON inside that -
  * is lexed with bare quotes at its own level. An escape in plain text is a fragment of escaped text whose outer quotes
  * are not there (a log written into a JSON string, Gson's `&`): it is decoded in place and the level lexed again,
- * until no escape is left in plain text. Each level is a decode deeper; past [[RedactionScanner.MaxDepth]] nothing is
- * decoded any more.
+ * until no escape is left in plain text. A string's content is a level deeper than the level that holds it, and a
+ * decode one more, so a document JSON-string-encoded `k` times is `2k` levels down. At [[RedactionScanner.MaxDepth]]
+ * nothing is decoded any more, and a level there that still holds an escape is ''unresolved'': its structure - a key
+ * whose quotes are still escaped (`\"password\":\"x\"`), a `=` still written `\u003d` - cannot be read, so the whole
+ * level is replaced, which is the rest of the string literal it is the content of (or the whole input, at the top).
+ * It fails closed: nothing past the limit is shown undecoded.
  *
  * '''Work bound.''' Each level is built and scanned once; the contents of the strings at one depth are disjoint and
- * no longer than the level that holds them, so the work is at most the input's length times the depth. Every rule
+ * no longer than the level that holds them, so the work is at most the input's length times
+ * [[RedactionScanner.MaxDepth]]. The depth is capped because decodes need not shrink the text much: each round of a
+ * chain such as `\u005cu005cu0022` uncovers one more escape for five fewer characters. Every rule
  * reads forward from the scanner's position, with a lookahead of bounded length - a key, a separator, a container's
  * first element, a header name - or consumes what it reads. No regular expression is used.
  *
@@ -30,8 +36,12 @@ import java.util.Locale
  */
 private[util] object RedactionScanner {
 
-  /** The most decodes - a string's content, or a round of escapes in plain text - between a level and the input. */
-  val MaxDepth: Int = 16
+  /**
+   * The most levels - a string's content, a decode of a string's escapes, or a round of escapes in plain text - between
+   * a level and the input: 16 JSON string encodings, each a content and a decode. A level at the limit that still holds
+   * an escape is replaced whole (`Text.unresolved`).
+   */
+  val MaxDepth: Int = 32
 
   /**
    * `input` with every credential the policy finds replaced by `placeholder`. With `truncated`, the input is a prefix
@@ -66,11 +76,14 @@ private[util] object RedactionScanner {
     private[RedactionScanner] var strEnd: Array[Int]          = null
     private[RedactionScanner] var strClosed: java.util.BitSet = null
     private[RedactionScanner] var plainEscapes: Boolean       = false
-    def ch(i: Int): Char                                      = chars(off + i)
-    def rawStart(i: Int): Int                                 = if (starts == null) base + i else starts(mapOff + i)
-    def rawEnd(i: Int): Int                                   = if (ends == null) base + i + 1 else ends(mapOff + i)
-    def stringEnd(i: Int): Int                                = if (strEnd == null) -1 else strEnd(i)
-    def closed(i: Int): Boolean                               = strClosed.get(i)
+
+    /** Whether this level is at [[MaxDepth]] and still holds an escape, so that it cannot be read: it is replaced whole. */
+    private[RedactionScanner] var unresolved: Boolean = false
+    def ch(i: Int): Char                              = chars(off + i)
+    def rawStart(i: Int): Int                         = if (starts == null) base + i else starts(mapOff + i)
+    def rawEnd(i: Int): Int                           = if (ends == null) base + i + 1 else ends(mapOff + i)
+    def stringEnd(i: Int): Int                        = if (strEnd == null) -1 else strEnd(i)
+    def closed(i: Int): Boolean                       = strClosed.get(i)
     private[RedactionScanner] def view(from: Int, to: Int): Text =
       new Text(chars, off + from, to - from, starts, ends, mapOff + from, base + from, depth + 1)
 
@@ -93,7 +106,14 @@ private[util] object RedactionScanner {
       var backslash = false
       var i         = 0
       while (!backslash && i < v.n) { backslash = v.ch(i) == '\\'; i += 1 }
-      settle(if (backslash && v.depth < MaxDepth) decode(v, plain = false) else v)
+      if (!backslash) settle(v)
+      else if (v.depth < MaxDepth) settle(decode(v, plain = false))
+      else {
+        // too deep to decode: unresolved where an escape is left in it, inside a string of its own or not
+        var k = 0
+        while (!v.unresolved && k < v.n) { if (v.ch(k) == '\\' && escapeLength(v, k) > 0) v.unresolved = true; k += 1 }
+        if (v.unresolved) v else settle(v)
+      }
     }
 
     /** `t` lexed, and, while it holds an escape in plain text, decoded there and lexed again. */
@@ -104,6 +124,8 @@ private[util] object RedactionScanner {
         t = decode(t, plain = true)
         lex(t)
       }
+      // at the limit with an escape left in plain text: what it stands for cannot be read
+      if (t.plainEscapes) t.unresolved = true
       t
     }
 
@@ -307,7 +329,8 @@ private[util] object RedactionScanner {
    * The policy over one level (`t`): the scanner that walks its plain text and takes each string as one token. In
    * order of precedence at each position:
    *
-   *  1. A string followed by `:` is a key. A sensitive one has its value replaced (`readValue`): a string's content,
+   *  1. A string followed by `:` is a key, and one followed by `=` a pair's (`"password" = "x"`). A sensitive one has
+   *     its value replaced (`readValue`): a string's content,
    *     a container's or a call's leaves (`walk`), or a number or bare word, which is written as the placeholder in
    *     the key's own quote. Any other string is a level of its own, scanned in turn (`scanString`). A key whose
    *     quotes a stray quote paired otherwise (`""apikey":"x"`) is read as a key all the same (`misalignedField`).
@@ -317,9 +340,11 @@ private[util] object RedactionScanner {
    *     or an `&` that another pair follows.
    *  1. A word followed by `:` is a header: `Authorization`, `Proxy-Authorization`, `Cookie` and `Set-Cookie`
    *     anywhere in a line, and any other sensitive name at the start of a line (after indentation and a YAML `- `).
-   *     Its value runs to the end of the line, or over the indented lines after it where it is empty on its own. A
-   *     sensitive name inside a line is a field where a separator or a bracket comes before it, or where its value
-   *     looks like a credential (`credentialLike`), up to whitespace, `,` or `;`.
+   *     Its value runs to the end of the line, or over the indented lines after it where it is empty on its own;
+   *     inside a bracket, also to a closing bracket it did not open, or a `,` before another key. A sensitive name
+   *     inside a line is a field where a separator or a bracket comes before it, or where its value looks like a
+   *     credential (`credentialLike`), up to whitespace, `,` or `;`; so is one inside a bracket whose `:` or value is
+   *     on another line.
    *  1. After `?`, `&`, a URL's `#`, `;jsessionid` or an HTML escape of `&` or `?`, a query parameter: its key runs
    *     to `=`, and a sensitive one (by substring, as a credential name, or a short-lived credential's name) has its
    *     value replaced, up to `&` that another parameter follows, whitespace, `#` or a `,` before JSON.
@@ -356,7 +381,11 @@ private[util] object RedactionScanner {
     var openWalk: Walk        = null
     private var pending: Walk = null
 
-    def run(): Unit = {
+    def run(): Unit =
+      if (t.unresolved) mask(0, n) // fails closed: see `Text.unresolved`
+      else scan()
+
+    private def scan(): Unit = {
       var i         = if (carried != null) walk(carried, 0) else 0
       var lineStart = carried == null
       while (i < n)
@@ -419,8 +448,18 @@ private[util] object RedactionScanner {
      *  - `skipSpace` (any whitespace, `\n`, `\r\n` and tabs among it) wherever the shape is a container's or a
      *    call's: after a quoted key's `:` and before it, after `[`, `{` and `(` (`plausible`, `callArgs`), between
      *    elements and before a closing bracket (`walk`, which also skips a `pytest` line's prefix), after a key inside
-     *    a container (`walk`), and around a bare key's `=` or `:` inside a bracket this level opened (`afterKey`):
-     *    pretty-printed JSON, a Python repr and keyword arguments one per line put any of these on a line of its own.
+     *    a container (`walk`, `inlinePair`), and around a bare key's `=` or `:`, a quoted key's `=` and between a
+     *    call's name and its `(`, inside a bracket this level opened (`afterKey`): pretty-printed JSON, a Python repr
+     *    and keyword arguments one per line put any of these on a line of its own. Outside a bracket those take
+     *    blanks (`afterKey` again).
+     *
+     * No rule asks for a key and its delimiter to touch: each finds the delimiter past the whitespace its site allows.
+     * The adjacency checks left are those where touching is the stricter reading, and failing it masks more, not
+     * less: `Bearer` and a header name glued to its `:` (not a token), a call's name glued to its `(` (kept, where a
+     * name apart from its `(` is replaced too), `key=` after an `&` (else the value runs on), a quote glued to a key
+     * whose quotes the lexer paired otherwise, and the comparison `a == b`. One reads less on purpose: outside a
+     * bracket, a blank after a glued `=` before a lone word that does not look like a credential is prose (`token=
+     * see the docs`).
      */
     private def skipBlanks(from: Int): Int = {
       var k = from
@@ -497,6 +536,15 @@ private[util] object RedactionScanner {
           val key = keyName(s)
           if (Redaction.isCredentialName(key)) return readValue(skipSpace(k + 1), field = true, raw(s), key)
           return scanString(s, null)
+        }
+        // a quoted key's `=` (`"password" = "x"`, TOML's quoted keys): read as a pair's, with the whitespace of one
+        val e = afterKey(end)
+        if (e < n && t.ch(e) == '=' && !(e + 1 < n && t.ch(e + 1) == '=')) {
+          val key = keyName(s)
+          if (Redaction.isCredentialName(key)) {
+            pending = null
+            return readValue(afterKey(e + 1), field = false, null, key)
+          }
         }
       }
       val carry = pending
@@ -699,8 +747,11 @@ private[util] object RedactionScanner {
         if (c == '[' || c == '{' || c == '(') container(v, quote, field, key)
         else {
           val call = callAt(v)
-          if (call >= 0) walk(new Walk(new java.lang.StringBuilder, quote), call)
-          else if (field) bareValue(v, quote)
+          if (call >= 0) {
+            // a name apart from its `(` may be no call's but a value before a bracket of prose: replaced too
+            if (isSpace(t.ch(call - 1))) mask(v, callNameEnd(v))
+            walk(new Walk(new java.lang.StringBuilder, quote), call)
+          } else if (field) bareValue(v, quote)
           else pairValue(v, key)
         }
       }
@@ -847,14 +898,23 @@ private[util] object RedactionScanner {
         j < n && t.ch(j) == '='
       }
 
-    /** Where a call's `(` is, after a dotted name that starts at `v` (`SecretStr(`, `pydantic.SecretStr(`), or -1. */
+    /**
+     * Where a call's `(` is, after a dotted name that starts at `v` (`SecretStr(`, `pydantic.SecretStr(`), or -1. The
+     * `(` may follow the name after whitespace as a bare key's `=` may (`afterKey`): `SecretStr ('x')`.
+     */
     private def callAt(v: Int): Int =
       if (!(Character.isLetter(t.ch(v)) || t.ch(v) == '_')) -1
       else {
-        var k = v + 1
-        while (k < n && (isWordStart(t.ch(k)) || t.ch(k) == '.')) k += 1
+        val k = afterKey(callNameEnd(v))
         if (k < n && t.ch(k) == '(' && callArgs(k)) k else -1
       }
+
+    /** The end of the dotted name that starts at `v`. */
+    private def callNameEnd(v: Int): Int = {
+      var k = v + 1
+      while (k < n && (isWordStart(t.ch(k)) || t.ch(k) == '.')) k += 1
+      k
+    }
 
     /** Whether what follows the `(` at `k` can start a call's arguments: a value, a name, or `)`. */
     private def callArgs(k: Int): Boolean = {
@@ -892,7 +952,7 @@ private[util] object RedactionScanner {
       } else if ("]})[{(".indexOf(t.ch(k).toInt) >= 0) true
       else {
         val from = if (t.ch(k) == '\\') k + 1 else k
-        val w    = leafEnd(from, inCall = t.ch(open) == '(')
+        val w    = leafEnd(from, inCall = true) // `=` ends an element in any container, as in `walk`
         if (w == from) true
         else {
           val a = skipSpace(w)
@@ -935,11 +995,18 @@ private[util] object RedactionScanner {
       k
     }
 
-    /** The `=` of a `key=` with a sensitive key that starts at `i`, or -1. */
+    /**
+     * The `=` of a `key=` with a sensitive key that starts at `i` inside a container, or -1: any whitespace may come
+     * between the key and its `=`, as everywhere in a container (not `key == x`).
+     */
     private def inlinePair(i: Int): Int = {
       var j = i
       while (j < n && isKeyChar(t.ch(j))) j += 1
-      if (j > i && j < n && t.ch(j) == '=' && Redaction.isCredentialName(text(i, j))) j else -1
+      val k = skipSpace(j)
+      if (
+        j > i && k < n && t.ch(k) == '=' && !(k + 1 < n && t.ch(k + 1) == '=') && Redaction.isCredentialName(text(i, j))
+      ) k
+      else -1
     }
 
     /** Whether an odd run of backslashes ends right before `i`, so that the character at `i` is escaped. */
@@ -997,24 +1064,37 @@ private[util] object RedactionScanner {
             if (stack.length == 0) done = true
             lastValue = true
             lastStr = false
-          } else if (c == ',' || c == ':' || (inCall && c == '=')) { i += 1; lastValue = false; lastStr = false }
+          } else if (c == ',' || c == ':' || c == '=') { i += 1; lastValue = false; lastStr = false }
           else if (c == '\n' || c == '\r') i = skipLinePrefix(i + 1)
           else if (Character.isWhitespace(c) || c == '\\') i += 1
           else if (lastValue) done = true
           else {
             val pair = if (inCall) -1 else inlinePair(i)
             if (pair >= 0) {
-              val e = pairValueEnd(pair + 1)
-              mask(pair + 1, e)
+              val v = skipSpace(pair + 1)
+              val e = pairValueEnd(v)
+              mask(v, e)
               i = e
-              done = true
-              stack.setLength(0)
+              // a value that ran over a closing bracket (`[password=:a]x`) ends the container; else the walk goes on
+              var k = v
+              while (k < e && "]})".indexOf(t.ch(k).toInt) < 0) k = if (t.stringEnd(k) > k) t.stringEnd(k) else k + 1
+              if (k < e || e == v) { done = true; stack.setLength(0) }
+              else lastValue = true
             } else {
-              val e    = leafEnd(i, inCall)
+              // a leaf ends at `=` in any container, as `=` separates there (`[note= x]`, `[a=b]`)
+              val e    = leafEnd(i, inCall = true)
               val k    = skipSpace(e) // inside a container, a key's `:` or `=` may follow on the next line
               val next = if (k < n) t.ch(k) else 0.toChar
               if (next == ':' || (inCall && next == '=') || (k == e && next == '(')) lastValue = false
-              else if (e < n && t.stringEnd(e) >= 0 && e - i <= 2 && Text.opens(t, e)) () // a string's prefix: `b'...'`
+              else if (next == '(') {
+                // a name apart from its `(` (`SecretStr ('x')`, `hunter2 (old)`): replaced, and the bracket walked
+                if (!KeptLiterals.contains(text(i, e))) {
+                  val from = if (escapedBefore(i)) i + 1 else i
+                  if (e > from) { if (w.quote == null) mask(from, e) else maskWith(from, e, w.quote + ph + w.quote) }
+                }
+                lastValue = false
+              } else if (e < n && t.stringEnd(e) >= 0 && e - i <= 2 && Text.opens(t, e))
+                () // a string's prefix: `b'...'`
               else {
                 if (!KeptLiterals.contains(text(i, e))) {
                   val from = if (escapedBefore(i)) i + 1 else i
@@ -1059,11 +1139,16 @@ private[util] object RedactionScanner {
       }
       val k = afterKey(j)
       if (k < n) {
-        val c = t.ch(k)
+        val c                   = t.ch(k)
+        def spansLines: Boolean = depth > 0 && (hasBreak(j, k) || hasBreak(k + 1, afterKey(k + 1)))
         // `key=value`, `key = value`, `key==value`; not the comparison `a == b`
         if (c == '=' && !(k > j && k + 1 < n && t.ch(k + 1) == '=')) return onPair(i, j, k)
-        if (c == ':' && k == j && !(k + 2 < n && t.ch(k + 1) == '/' && t.ch(k + 2) == '/')) {
-          if (anywhereHeader(i, j) || (atLineStart && credentialWord(i, j))) return onHeader(i, j)
+        // `key:`, `key :` and, inside a bracket, `key\n:` (`afterKey`); not a URL's `scheme://`
+        if (c == ':' && !(k + 2 < n && t.ch(k + 1) == '/' && t.ch(k + 2) == '/')) {
+          // a key whose `:` or value is on another line, inside a bracket, is code (`{\n  password\n  :\n  'x'}`): a field
+          if (spansLines && (anywhereHeader(i, j) || credentialWord(i, j)))
+            return inlineField(afterKey(k + 1), text(i, j))
+          if (anywhereHeader(i, j) || (atLineStart && credentialWord(i, j))) return onHeader(i, j, k)
           // `{password: x}`, `a=1, token: x`: a sensitive key inside a line, after a separator or an opening bracket,
           // whose value is read as a pair's, to whitespace or one of `,;<>` (not "Reset your password: the link")
           if (credentialWord(i, j)) {
@@ -1090,14 +1175,33 @@ private[util] object RedactionScanner {
       }
     }
 
-    /** The value of a sensitive `key:` inside a line, from `v`: a string or container as any value, else one token. */
+    /**
+     * The value of a sensitive `key:` inside a line, from `v`: a string or container as any value, `Bearer` or `Basic`
+     * and its token as such, else one token.
+     */
     private def inlineField(v: Int, key: String): Int =
       if (v < n && (t.stringEnd(v) >= 0 || "[{(".indexOf(t.ch(v).toInt) >= 0)) readValue(v, field = false, null, key)
+      else if (authSchemeAt(v)) v // read by `onWord` next
       else {
         val e = inlineValueEnd(v)
         if (e > v && !placeholderOnly(v, e) && !isProse(key, v, e)) mask(v, e)
         e
       }
+
+    /** Whether `Bearer` or `Basic` starts at `v`, a word of its own. */
+    private def authSchemeAt(v: Int): Boolean = {
+      var e = v
+      while (e < n && isKeyChar(t.ch(e))) e += 1
+      val w = text(v, e)
+      (w.equalsIgnoreCase("bearer") || w.equalsIgnoreCase("basic")) && (e == n || isSpace(t.ch(e)))
+    }
+
+    /** Whether a line break is in `from until to`. */
+    private def hasBreak(from: Int, to: Int): Boolean = {
+      var k = from
+      while (k < to && !isBreak(k)) k += 1
+      k < to
+    }
 
     /** Where an unquoted value inside a line ends: at whitespace, `,` or `;`. */
     private def inlineValueEnd(v: Int): Int = {
@@ -1140,10 +1244,13 @@ private[util] object RedactionScanner {
     private def onPair(i: Int, j: Int, eq: Int): Int = {
       val spaced = eq > j
       val v      = afterKey(eq + 1)
-      // `key= value`, a blank after a glued `=`, is prose outside a bracket (`token= see the docs`); a keyword argument
-      // inside one (`f(token= 'x')`) is not
-      if (!spaced && depth == 0 && v > eq + 1) return v
+      // `key= value`, a blank after a glued `=`, is prose outside a bracket (`token= see the docs`) where the value is a
+      // word that does not look like a credential (`credentialLike`) - not a string, a container or a call; a keyword
+      // argument inside one (`f(token= 'x')`) is not
+      def proseAfter: Boolean =
+        v < n && t.stringEnd(v) < 0 && "[{(".indexOf(t.ch(v).toInt) < 0 && callAt(v) < 0 && !credentialLike(v)
       if (!credentialWord(i, j)) v
+      else if (!spaced && depth == 0 && v > eq + 1 && proseAfter) v
       else readValue(v, field = false, null, text(i, j))
     }
 
@@ -1160,8 +1267,8 @@ private[util] object RedactionScanner {
      * this level - or there is nothing after the `:` but that end - it is reported as open, for the level around to
      * carry on past a string that closed where none can.
      */
-    private def onHeader(i: Int, j: Int): Int = {
-      var v = skipBlanks(j + 1)
+    private def onHeader(i: Int, j: Int, colon: Int): Int = {
+      var v = skipBlanks(colon + 1)
       val folded = v < n && isBreak(v) && {
         val k = afterBreak(v)
         k < n && (t.ch(k) == ' ' || t.ch(k) == '\t') && { v = skipBlanks(k); true }
@@ -1178,22 +1285,56 @@ private[util] object RedactionScanner {
           } else if (t.stringEnd(e) > e + 1 && t.stringEnd(e) <= n && !isBreak(t.stringEnd(e) - 1)) e = t.stringEnd(e)
           else {
             val c = t.ch(e)
-            if (c == '[' || c == '{' || c == '(') brackets.append(c)
-            else if ((c == ']' || c == '}' || c == ')') && brackets.length > 0) brackets.setLength(brackets.length - 1)
-            e += 1
+            if (c == '[' || c == '{' || c == '(') { brackets.append(c); e += 1 }
+            else if (c == ']' || c == '}' || c == ')') {
+              if (brackets.length > 0) { brackets.setLength(brackets.length - 1); e += 1 }
+              // Inside a bracket, the value is an element of a container: a closing bracket it did not open, not glued
+              // to more of it (`ab}cd`), closes the container the key is in (`{\n  token: x } {'k':\n  'v'}`) ...
+              else if (depth > 0 && !glued(e + 1)) d = true
+              else e += 1
+            } else if (c == ',' && depth > 0 && brackets.length == 0 && keyAt(e + 1))
+              d = true // ... as a `,` and a key do
+            else e += 1
           }
-        if (e == v) { if (e == n) open(v, OpenHeader, 0); e }
-        else if (placeholderOnly(v, e)) e
-        else if (isProse(text(i, j), v, e)) v
+        // Opening brackets and blanks the value ends with, before the line break that ends it, hold nothing: they are
+        // left to the scanner, as the lines after them are inside those brackets (`Bearer x\n, {\npassword\n: y}`).
+        var m = e
+        if (e < n && brackets.length > 0) {
+          while (m > v && "{[( \t".indexOf(t.ch(m - 1).toInt) >= 0 && t.stringEnd(m - 1) < 0) m -= 1
+          while (m < e && (t.ch(m) == ' ' || t.ch(m) == '\t')) m += 1 // from the first bracket: blanks stay masked
+        }
+        if (m == v) { if (e == n) open(v, OpenHeader, 0); m }
+        else if (placeholderOnly(v, m)) m
+        else if (isProse(text(i, j), v, m)) v
         else {
-          mask(v, e)
+          mask(v, m)
           if (e == n) {
             open(v, OpenHeader, 0)
             // a container the value opened and did not close may go on in the next string (a notebook's lines)
             if (brackets.length > 0) openWalk = new Walk(brackets, null)
           }
-          e
+          m
         }
+      }
+    }
+
+    /**
+     * Whether a key starts at `k`, past whitespace: a string and `:`, or a word and `:` or `=` (not `==` or `://`).
+     * The lookahead ends at the key's delimiter.
+     */
+    private def keyAt(k: Int): Boolean = {
+      val j = skipSpace(k)
+      if (j >= n) false
+      else if (t.stringEnd(j) >= 0) t.closed(j) && colonAfter(t.stringEnd(j))
+      else {
+        var w = j
+        while (w < n && isKeyChar(t.ch(w))) w += 1
+        val d = afterKey(w)
+        w > j && d < n && (t.ch(d) match {
+          case ':' => !(d + 2 < n && t.ch(d + 1) == '/' && t.ch(d + 2) == '/')
+          case '=' => !(d + 1 < n && t.ch(d + 1) == '=')
+          case _   => false
+        })
       }
     }
 

@@ -1443,8 +1443,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#1932](https://github.com/llm4s/llm4s/issues/1932)). `org.llm4s.util.Redaction` (`redact`, `safeBody`,
   `redactForLogging`, `remoteBody`, `scrubRemote`, `isSensitiveKey`, `isCredentialName`, ...) keeps its surface; its
   some 50 regex passes and their merged readings of the input are replaced by `RedactionScanner`. A lexer finds string
-  literals, and a string's content is read as a text of its own, so JSON inside a string, at any depth, is lexed with
-  bare quotes; escapes in plain text (`token=\"...\"`, Gson's `&`) are decoded a level at a time. One policy
+  literals, and a string's content is read as a text of its own, so JSON inside a string, up to 16 string encodings
+  deep, is lexed with bare quotes (past that a string that still holds an escape is masked whole: it fails closed,
+  and the cost stays linear); escapes in plain text (`token=\"...\"`, Gson's `&`) are decoded a level at a time. One policy
   masks the value of every sensitive key, whatever the shape: a string's content, a number or bare word in the key's
   quote, or every leaf of an array, object, tuple or call; and Bearer and Basic tokens, URL userinfo passwords and the
   vendor key shapes, matched without regexes. A value still open where its text ends is masked to that end. Closes
@@ -1463,6 +1464,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     starts on the next line (`{'token': SecretStr(\n'x'\n)}`), keyword arguments one per line
     (`Settings(\n  token=\n    'x')`, also `f(token= 'x')`) and pretty-printed JSON or a repr with a value on a line
     of its own are masked. A `key: value` or `key=value` line outside any bracket still ends at its line break.
+  - Whitespace may come between any key and its delimiter: `{password : 'x'}`, `{password\n: 'x'}`,
+    `password : x` at the start of a line, `[note = x]` under a sensitive key, and a quoted key's `=`
+    (`"password" = "x"`). A call's name apart from its `(` is masked with its arguments (`SecretStr ('x')`), and
+    `password= x` is masked where `x` looks like a credential (`token= see the docs` is still prose).
   - A container that a text only mentions is left, outside a string too: `see 'token': [ for details` is kept,
     where every word after it was replaced (#1657). Inside a string a container is read as any is, so a bare word
     that is its leaf is replaced there too (`{"content": "{\"token\": [abc]}"}` masks `abc`).

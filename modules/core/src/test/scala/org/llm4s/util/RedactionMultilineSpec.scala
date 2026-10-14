@@ -70,11 +70,33 @@ class RedactionMultilineSpec extends AnyFlatSpec with Matchers {
     assertMasked("{a: 1, token:\n  \"Kq81xQ\"}", "Kq81xQ")
   }
 
+  it should "replace a sensitive key's value with whitespace before its `:` or `=` (PR #1959 review)" in {
+    // a bare key inside a bracket: any whitespace before the `:`
+    Redaction.redact("{password : 'hunter2'}") shouldBe s"{password : '$R'}"
+    assertMasked("{password : 'Kq81xQ'}", "Kq81xQ")
+    assertMasked("{password\n: 'Kq81xQ'}", "Kq81xQ")
+    assertMasked("{a: 1,\n  token\n    :\n  Kq81xQ}", "Kq81xQ")
+    // a quoted key's `=`, and a leaf's `=` in a container under a sensitive key
+    assertMasked("{\"password\" = \"Kq81xQ\"}", "Kq81xQ")
+    assertMasked("\"password\" = \"Kq81xQ\"", "Kq81xQ")
+    assertMasked("{\"token\": [note = Kq81xQ]}", "Kq81xQ")
+    assertMasked("{\"token\": [password =\n  Kq81xQ]}", "Kq81xQ")
+    // a call's name before its `(`, and a header's name before its `:`
+    assertMasked("Settings(token=SecretStr ('Kq81xQ'))", "Kq81xQ")
+    assertMasked("token = SecretStr ('Kq81xQ')", "Kq81xQ")
+    assertMasked("password : Kq81xQ\nnext: 1", "Kq81xQ")
+    assertMasked("x\nAuthorization : Bearer Kq81xQ", "Kq81xQ")
+    // a blank after a glued `=` before a value that looks like a credential
+    assertMasked("password= Kq81xQ", "Kq81xQ")
+  }
+
   it should "still end a prose key: value line and a key=value line at the line break" in {
     Redaction.redact("Reset your password:\nthe link expires") shouldBe "Reset your password:\nthe link expires"
     Redaction.redact("token=\nnext=1") shouldBe "token=\nnext=1"
     Redaction.redact("token=\r\nnext=1") shouldBe "token=\r\nnext=1"
     Redaction.redact("password:\r\nhello: world") shouldBe "password:\r\nhello: world"
     Redaction.redact("token= see the docs") shouldBe "token= see the docs"
+    // outside a bracket, a line break between a bare key and its `:` or `=` ends the key's line
+    Redaction.redact("password\n: the link expires") shouldBe "password\n: the link expires"
   }
 }
