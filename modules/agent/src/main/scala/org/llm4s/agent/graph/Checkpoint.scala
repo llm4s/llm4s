@@ -256,7 +256,7 @@ final case class Commit private (
    * the superstep a Block closed can never run, and its records go too.
    */
   private lazy val live: Set[(String, String)] = checkpoint.fold(Set.empty[(String, String)]) { c =>
-    if c.status == CheckpointStatus.Completed || c.status == CheckpointStatus.Failed then Set.empty
+    if settled(c) then Set.empty
     else c.snapshot.liveTasks
   }
 
@@ -265,7 +265,7 @@ final case class Commit private (
    * whether that task is provably settled, so no run can look the record up again (design §4.24). Only a commit
    * with a checkpoint releases anything. It releases a record whose task - id and lineage - is not live in the
    * new checkpoint ([[GraphSnapshot.liveTasks]]; a settled checkpoint runs nothing) and was scheduled no later
-   * than its superstep. That checkpoint is durable once committed, so the superstep that scheduled the task
+   * than its superstep; a settled (`Completed` or `Failed`) checkpoint releases every record. That checkpoint is durable once committed, so the superstep that scheduled the task
    * never runs again: the task finished, or the durable plan scheduled other work under its id, and nothing
    * can plan it again. A task scheduled later is kept, whoever recorded it:
    *  - this run's, running ahead of a commit that lands late (`Async`);
@@ -276,8 +276,13 @@ final case class Commit private (
    */
   def releasesEffect(taskId: TaskId, lineage: String): Boolean =
     checkpoint.exists { c =>
-      !live.contains(taskId.value -> lineage) && Commit.scheduledAt(taskId) <= c.snapshot.superstep
+      // a settled checkpoint can never be recovered or resumed, so it releases every record, whatever superstep a
+      // stale claimant reached ahead of it
+      settled(c) || (!live.contains(taskId.value -> lineage) && Commit.scheduledAt(taskId) <= c.snapshot.superstep)
     }
+
+  private def settled(c: Checkpoint): Boolean =
+    c.status == CheckpointStatus.Completed || c.status == CheckpointStatus.Failed
 
 object Commit:
   def apply(

@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     results, so it replays the first plan's evidence instead of repeating its effect. Planned from other results,
     it is a new task.
   - A commit releases an effect record only when its task is provably settled (`Commit.releasesEffect(taskId,
-    lineage)`): not live, and scheduled no later than the new durable checkpoint. A takeover's admission no longer
+    lineage)`): not live, and scheduled no later than the new durable checkpoint. A settled (`Completed` or
+    `Failed`) checkpoint releases every record, ahead-of-checkpoint ones included. A takeover's admission no longer
     releases the evidence of a stale claimant's in-flight effect.
   - SQLite schema 4 adds `task_lineage`.
   - A pending write records its result's digest (`PendingWrite.resultDigest`), from which its successors' lineage

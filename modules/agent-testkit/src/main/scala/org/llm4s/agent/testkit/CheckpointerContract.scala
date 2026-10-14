@@ -1366,6 +1366,28 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     same(effects(s, recovered, same5, other5), Vector(None, Some(same5), None))
   }
 
+  it should "release at a takeover's settled checkpoint the records a stale claimant made at later supersteps" in {
+    // the first run went past its last durable checkpoint to superstep 7 (Async or OnExit) and was taken over;
+    // the second run took a shorter path and settled at superstep 5. A settled thread is never recovered or
+    // resumed, so no task can look up those records again, whatever superstep scheduled them
+    for status <- Seq(CheckpointStatus.Completed, CheckpointStatus.Failed) do
+      val s     = Store()
+      val first = s.claim("first").value.token
+      s.commit(first, Some(liveCheckpoint(s, "c1", None, 4, Seq("4.0" -> "a")))).value
+      val ahead = Seq(
+        effectRecord("five", "5.0", "b"),
+        effectRecord("six", "6.0", "c", Some(ujson.Str("out"))),
+        effectRecord("seven", "7.0", "d")
+      )
+      s.store.commit(s.thread, Commit(first, effects = ahead.toVector)).value
+      s.advance(ttl * 2)
+      val second = s.claim("second").value.token
+      s.commit(second, Some(liveCheckpoint(s, "c2", Some("c1"), 4, Seq("4.0" -> "a")))).value
+      same(effects(s, ahead*), ahead.toVector.map(Some(_)))
+      s.commit(second, Some(liveCheckpoint(s, "c3", Some("c2"), 5).withStatus(status))).value
+      withClue(s"at a $status checkpoint: ")(same(effects(s, ahead*), Vector(None, None, None)))
+  }
+
   it should "release at a run's single exit commit what its tasks recorded, keeping a parked one's (OnExit)" in {
     val s     = Store()
     val token = s.claim("run").value.token

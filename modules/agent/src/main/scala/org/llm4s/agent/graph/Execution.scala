@@ -288,3 +288,10 @@ object GraphSnapshot:
 
 /** A result decoded from a pending write, with the digest its successors' lineage is computed from. */
 final private[graph] case class ReusedWrite(result: TaskResult, digest: String)
+
+/**
+ * A task's result in a superstep, with its digest (design §4.24): taken once, where the result was produced or
+ * read - from its pending write as encoded, or as recorded - and never by scheduling, which sees only the digest
+ * for lineage.
+ */
+final private[graph] case class Settled(task: Task, result: TaskResult, digest: String)

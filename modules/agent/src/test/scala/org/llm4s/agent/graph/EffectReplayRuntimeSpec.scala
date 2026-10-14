@@ -90,6 +90,51 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
     keys.asScala.toVector.flatMap(record(store, thread, _)) shouldBe empty
   }
 
+  it should "replay the first plan's evidence when the result's codec encodes differently each time" in {
+    // the lineage comes from the write as recorded: a second encoding, here with another nonce, is never taken
+    val nonce = new AtomicInteger()
+    given upickle.default.ReadWriter[String] = upickle.default
+      .readwriter[ujson.Value]
+      .bimap[String](v => ujson.Obj("v" -> v, "nonce" -> nonce.incrementAndGet()), _("v").str)
+    val items    = StateKey.appending[String]("items")
+    val store    = InMemoryCheckpointer()
+    val effect   = new Effect
+    val keys     = new java.util.concurrent.ConcurrentLinkedQueue[EffectKey]()
+    val lineages = new java.util.concurrent.ConcurrentLinkedQueue[String]()
+    val failing  = new AtomicBoolean(true)
+    val bRan     = new CountDownLatch(1)
+    val lossy = new ForwardingCheckpointer(store) {
+      override def commit(threadId: ThreadId, commit: Commit) =
+        if failing.get && commit.checkpoint.exists(_.snapshot.superstep == 1) then
+          Left(ValidationError("store", "lost the checkpoint that scheduled b"))
+        else store.commit(threadId, commit)
+    }
+    val b = GraphBuilder("nonced", "v1")
+    val last = b.node[Unit]("b", writes = Set(log)) { (_, _, context) =>
+      lineages.add(context.effectLineage)
+      NodeResult.fromResult(effect.perform(context, during = () => bRan.countDown()).map { n =>
+        keys.add(effect.key.get)
+        Command.empty.update(log, s"b:$n")
+      })
+    }
+    val a = b.node[Unit]("a", writes = Set(items))((_, _, _) => continue(Command.empty.update(items, "x")))
+    b.edge(a, last)
+    val graph = b.compile(a)(_.get(log)).value
+    val first = GraphRuntime(lossy)
+    first.committing = (_, commit) =>
+      if Thread.currentThread().getName.startsWith("llm4s-graph-writer-") &&
+        commit.checkpoint.exists(_.snapshot.superstep == 1)
+      then bRan.await(5, TimeUnit.SECONDS): Unit
+    first.start(thread, graph, (), durability = Durability.Async).awaited.value.failed
+    effect.applied.get shouldBe 1
+    failing.set(false)
+    GraphRuntime(store).recover(thread, graph, durability = Durability.Async).awaited.value.completed._2 shouldBe
+      Vector("b:1")
+    effect.applied.get shouldBe 1
+    lineages.asScala.toVector.distinct should have size 1
+    keys.asScala.toVector.distinct should have size 1
+  }
+
   it should "replay the first plan's evidence when the reused result was written by an older codec" in {
     // the recovery's graph reads a's update at a newer codec version: decoding migrates it, so its successor's
     // lineage must come from the write as recorded, not from the migrated result encoded again

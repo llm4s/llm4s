@@ -465,7 +465,7 @@ final class CompiledGraph[I, O] private[graph] (
     config: RunConfig
   ): Result[(Execution, Option[LLMError])] =
     val outcomes = executorFor(config.budgets).runAll(execution.frontier.map { task => () =>
-      if holdsBefore(task, config) then Right(task -> TaskResult.Held)
+      if holdsBefore(task, config) then Right(Settled(task, TaskResult.Held, CompiledGraph.HeldDigest))
       else
         val position = RunPosition(threadId, config.runId, "", task.id, task.node, execution.superstep)
         val context = new RunContext(
@@ -476,22 +476,22 @@ final class CompiledGraph[I, O] private[graph] (
           owner = Some(task.arrivalId -> task.arrivalLineage),
           resumeDigest = task.resumeDigest
         )
-        executeTask(task, execution, context).map(task -> _)
+        executeTask(task, execution, context).map(settle(task, _))
     })
     // A cancelled task wins over an earlier task's failure: the run was cancelled, not failed.
     outcomes
       .collectFirst { case Left(c: CancelledError) => c }
       .fold(
         sequence(outcomes)
-          .flatMap(done => commitSuperstep(execution, done, config, Map.empty).map(next => next -> blockedBy(done)))
+          .flatMap(done => commitSuperstep(execution, done, config).map(next => next -> blockedBy(done)))
       )(Left(_))
 
   /**
    * The error of the first blocked task in `completed`, in frontier order: the run ends once the superstep is
    * committed, and the caller receives this error.
    */
-  private[graph] def blockedBy(completed: Vector[(Task, TaskResult)]): Option[LLMError] =
-    completed.collectFirst { case (_, TaskResult.Blocked(_, error)) => error }
+  private[graph] def blockedBy(completed: Vector[Settled]): Option[LLMError] =
+    completed.collectFirst { case Settled(_, TaskResult.Blocked(_, error), _) => error }
 
   /**
    * Runs one task against the committed snapshot and checks what it returned. A task whose node
@@ -586,13 +586,14 @@ final class CompiledGraph[I, O] private[graph] (
    */
   private[graph] def commitSuperstep(
     execution: Execution,
-    completed: Vector[(Task, TaskResult)],
-    config: RunConfig,
-    recorded: Map[TaskId, String]
+    completed: Vector[Settled],
+    config: RunConfig
   ): Result[Execution] =
     completed
-      .foldLeft[Result[ThreadState]](Right(execution.state))((state, tr) => state.flatMap(_.applyUpdate(tr._2.update)))
-      .map(schedule(execution, completed, recorded, _, config))
+      .foldLeft[Result[ThreadState]](Right(execution.state))((state, s) =>
+        state.flatMap(_.applyUpdate(s.result.update))
+      )
+      .map(schedule(execution, completed, _, config))
 
   /**
    * `execution` with `update` applied to its committed state, one superstep on, everything scheduled
@@ -761,19 +762,16 @@ final class CompiledGraph[I, O] private[graph] (
 
   private def schedule(
     execution: Execution,
-    results: Vector[(Task, TaskResult)],
-    recorded: Map[TaskId, String],
+    settled: Vector[Settled],
     state: ThreadState,
     config: RunConfig
   ): Execution =
     val next = execution.superstep + 1
     // what scheduled the next tasks, as data: each task of this superstep, in frontier order, with its lineage
-    // and its result. A replan from the same results schedules the same tasks; one from other results, others.
-    // A result reused from a pending write brings the digest recorded when it was produced (`recorded`): one
-    // recomputed from the decoded result would differ whenever decoding migrated it
-    val content = KeyDigest.of(results.flatMap { (task, result) =>
-      Seq(task.id.value, task.lineage, recorded.getOrElse(task.id, resultDigest(task, result)))
-    })
+    // and its result's digest. A replan from the same results schedules the same tasks; one from other results,
+    // others. The digest was taken where the result was produced or read, never here (design §4.24)
+    val content               = KeyDigest.of(settled.flatMap(s => Seq(s.task.id.value, s.task.lineage, s.digest)))
+    val results               = settled.map(s => s.task -> s.result)
     def lineageOf(id: TaskId) = Task.scheduledLineage(content, id)
     // a task an interruptAfter breakpoint holds has committed its update, but makes no route, edge or arrival yet
     val heldAfter = results.collect { case (task, TaskResult.Done(_)) if holdsAfter(task, config) => task.id }.toSet
@@ -863,18 +861,21 @@ final class CompiledGraph[I, O] private[graph] (
     nextExecution
 
   /**
-   * The digest of a result the task has just produced, for its successors' lineage: that of its pending write
-   * ([[CompiledGraph.writeDigest]]). Never of a result decoded from a write, which keeps the digest it was
-   * recorded with.
+   * A result a task has just produced outside a runtime, with its digest: that of its pending write as encoded
+   * here, once ([[CompiledGraph.writeDigest]]). A runtime takes the digest of the write it records instead.
    */
-  private def resultDigest(task: Task, result: TaskResult): String = result match
-    case TaskResult.Held          => "held"
-    case TaskResult.Blocked(_, e) => s"blocked:${e.message}"
+  private def settle(task: Task, result: TaskResult): Settled = result match
+    case TaskResult.Held          => Settled(task, result, CompiledGraph.HeldDigest)
+    case TaskResult.Blocked(_, e) => Settled(task, result, CompiledGraph.blockedDigest(e))
     case _                        =>
       // a result that does not encode cannot be compared: it is never the same work as another (no false replay)
-      encodeWrite("", task, result).toOption
-        .flatMap(_.resultDigest)
-        .getOrElse(s"unencodable:${java.util.UUID.randomUUID()}")
+      Settled(
+        task,
+        result,
+        encodeWrite("", task, result).toOption
+          .flatMap(_.resultDigest)
+          .getOrElse(s"unencodable:${java.util.UUID.randomUUID()}")
+      )
 
   private def suspended(execution: Execution): RunResult[O] =
     RunResult.Suspended(execution.state, pendingInterrupts(execution), execution)
@@ -1104,6 +1105,12 @@ private[graph] enum TaskResult:
     case Held                 => StateUpdate.empty
 
 private[graph] object CompiledGraph:
+
+  /** The digest of a task a breakpoint holds before it runs: it did nothing. */
+  val HeldDigest: String = "held"
+
+  /** The digest of a blocked task, which has no pending write: its error. */
+  def blockedDigest(error: LLMError): String = s"blocked:${error.message}"
 
   /** The digest of stored JSON `json`, under `tag`; JSON that does not hash is never the same as other JSON. */
   private def digestOf(tag: String, json: ujson.Value): String =
