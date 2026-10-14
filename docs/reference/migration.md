@@ -22,6 +22,8 @@ and tools on `AgentBuilder`. Each slice adds its part here as it lands:
 - [#1903](https://github.com/llm4s/llm4s/issues/1903), tool permissions, timeouts and batch locks:
   [below](#tool-permissions-timeouts-and-batch-locks-1903).
 - [#1907](https://github.com/llm4s/llm4s/issues/1907), todos: [below](#todos-1907).
+- [#1911](https://github.com/llm4s/llm4s/issues/1911), semantic memory - the new `llm4s-agent-memory` module and
+  `TransactionalMemoryStore`: [below](#semantic-memory-1911).
 - [#1914](https://github.com/llm4s/llm4s/issues/1914), typed custom streams: [below](#typed-custom-streams-1914).
 - [#1921](https://github.com/llm4s/llm4s/issues/1921), replay of external effects - `ReplayGuard`, `Checkpointer.effect`
   and `Commit.effects`: [below](#replay-of-external-effects-1921).
@@ -113,6 +115,17 @@ Design §4.30. Additive: `TodoMiddleware` (`org.llm4s.agent.harness`) gives an a
 - **Adding `TodoMiddleware` to an existing agent** registers the `todos` key, and its tool's lock registers `tool-queue`. Since #1934 a thread at rest continues, its plan starting empty. A thread in flight (suspended, or `Running` after a crash) is refused with `RestoreRejected`: resume or recover it with the old agent first. So is a thread last checkpointed before #1934, until it has run once under the agent it was written by. Removing `TodoMiddleware` refuses a thread whose plan holds items. Agents without it are unchanged.
 - **`todos` is a key id the middleware owns.** A `StateKey` of your own with id `todos` in a family that also uses `TodoMiddleware` is refused at build, as two keys with one id are. Rename it.
 - **With `PermissionMiddleware`, allow the tool**: `PermissionRule.allow(Operation.Invoke, "write_todos")`.
+
+### Semantic memory (#1911)
+
+Design §4.31. `SemanticMemoryMiddleware` is in a new module, `llm4s-agent-memory` (package `org.llm4s.agent.harness.memory`); add the dependency to use it. In `llm4s-memory`:
+
+- **`InMemoryStore`, `SQLiteMemoryStore` and `PostgresMemoryStore` are `TransactionalMemoryStore`s.** Nothing changes for code that only stores and recalls. `InMemoryStore` carries its applied writes and fencing tokens in its value, and `clear()` keeps them.
+- **`MemoryStore.replace(add, remove)` is new**, with a default that stores, then deletes; the SQL stores override it as one transaction. A store of your own that writes in place should override it too.
+- **`LLMMemoryManager.consolidateMemories` replaces each group with one `store.replace(Seq(summary), groupIds)`** instead of a store followed by one delete per memory. A store of your own that overrides `store` and `delete` but not `replace` gets the same writes as before, in the same order.
+- **`PostgresMemoryStore.Config.tableName` is at most 55 characters** (was 63), so the names derived from it (`<table>_applied`, `<table>_fences`, the `idx_<table>_...` indexes) stay distinct within PostgreSQL's 63-byte identifier limit. A longer name is refused when the config is built: give the table a shorter name.
+- **SQLite memory files move to schema version 2.** Opening a file creates its two new tables, `memory_applied_writes` and `memory_fences`, and records version 2 beside version 1 in `schema_version`. A Postgres store creates `<table>_applied` and `<table>_fences` beside its table.
+- **Adding `SemanticMemoryMiddleware` to an existing agent** registers the `semantic-memory-recalled` key and changes the agent's version (§4.29). A thread at rest restores, with nothing recalled until its next turn, and restores again if the middleware is removed (the key is cleared at the end of each turn). A thread in flight - suspended, or `Running` after a crash - is refused with `RestoreRejected`: resume or recover it with the old agent first. Agents without it are unchanged.
 
 ### Typed custom streams (#1914)
 
