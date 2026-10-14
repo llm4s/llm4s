@@ -28,9 +28,10 @@ object TracingSubscriber:
     runtime: GraphRuntime,
     threadId: ThreadId,
     tracing: Tracing,
-    afterSeq: Long = 0L
+    afterSeq: Long = 0L,
+    config: RunConfig = RunConfig()
   ): Result[Subscription] =
-    runtime.subscribe(threadId, afterSeq)(listener(threadId, tracing))
+    runtime.subscribe(threadId, afterSeq, config = config)(listener(threadId, tracing))
 
   /** The listener [[attach]] subscribes: traces each durable event, and logs a disconnection. */
   private[agent] def listener(threadId: ThreadId, tracing: Tracing): StreamEvent => Unit = {

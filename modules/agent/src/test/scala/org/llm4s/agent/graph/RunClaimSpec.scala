@@ -170,8 +170,11 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val racing = new Hooked(underlying) {
       override def latest(threadId: ThreadId) = Right(None)
     }
+    // the re-read (which this store also answers with no checkpoint) cannot check the tenant of the
+    // checkpoint the conflict named, so that checkpoint is not named: it may be another tenant's
+    stale should not be empty
     GraphRuntime(racing).start(thread, held.graph, "y", run("second")).left.value shouldBe
-      GraphError.ThreadBusy("t", stale.map(_.checkpoint.id))
+      GraphError.ThreadBusy("t", None, GraphError.BusyHolder.Unnamed)
     racing.releases.get shouldBe 1
     underlying.claim(thread, ClaimRequest(RunId("third"), 1.second)).value.holder shouldBe RunId("third")
   }

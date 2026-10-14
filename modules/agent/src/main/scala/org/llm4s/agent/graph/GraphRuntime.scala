@@ -154,7 +154,8 @@ object GraphRuntime:
  * exactly one. `DeadlineExceeded` is recoverable: `recover` with a new budget continues the run.
  *
  * `subscribe` replays a thread's committed events after a sequence number and then delivers new
- * ones as their commits succeed, in ascending order with no gaps or duplicates, followed by live
+ * ones as their commits succeed - only to a caller of the thread's tenant, as every other read of a
+ * thread is (see [[subscribe]]) - in ascending order with no gaps or duplicates, followed by live
  * progress as it happens. Each subscription has its own dispatcher thread and a queue of
  * `capacity` events, so a slow listener never holds up a run: one that falls behind by more than
  * `capacity` durable events is disconnected ([[DisconnectReason.Lagging]]), and live events that
@@ -294,22 +295,76 @@ final class GraphRuntime(
    * so live events never crowd out durable ones, and must be at least two: a live event is queued
    * only while two live slots are free, one being reserved for the [[StreamEvent.LiveGap]] marker
    * that precedes it, so with one slot no live event could ever be accepted.
+   *
+   * A subscription reads the thread, so it is tenant-checked as [[history]] is: a thread whose latest
+   * checkpoint is another tenant's than `config.tenantId` - or, for a thread with no checkpoint yet,
+   * whose run admitting or executing in this runtime is - is refused with [[GraphError.TenantMismatch]]
+   * before the subscription joins. A read of the thread that fails is returned as it is; one that throws
+   * is [[GraphError.RunCrashed]], as for `history`. A thread can still change hands under its id once
+   * subscribed: one with no checkpoint yet is created by whichever tenant runs first, and one deleted
+   * through another runtime can be created again before the subscription learns of the delete. So
+   * every event is screened before it is delivered - by the tenant the event names, for the events a
+   * run, a fork or a state update begins with, and otherwise, until the first event delivered has
+   * confirmed the thread as the caller's, by its latest checkpoint's, read again then - and an event of another tenant's thread ends the
+   * subscription before it with `Disconnected(lastSeq, DisconnectReason.TenantMismatch)`. A thread
+   * with no checkpoint any more ends it with `ThreadDeleted`, and a failed read with `ReplayFailed`.
    */
-  def subscribe(threadId: ThreadId, afterSeq: Long = 0L, capacity: Int = 1024)(
+  def subscribe(threadId: ThreadId, afterSeq: Long = 0L, capacity: Int = 1024, config: RunConfig = RunConfig())(
     listener: StreamEvent => Unit
-  ): Result[Subscription] = dispatched(threadId, afterSeq, capacity, listener)
+  ): Result[Subscription] = admission(threadId) {
+    val requested = config.tenantId.map(_.value)
+    validCapacity(capacity).flatMap { _ =>
+      checkpointer
+        .latest(threadId)
+        .flatMap {
+          // the checkpoint decides: a run reserved in this runtime may be another tenant's call that its
+          // own admission is about to refuse, and must not make the owner's subscription fail
+          case Some(stored) => checkTenant(threadId, stored, config)
+          // with none yet, a run admitting or executing here is the only owner there is: it has passed
+          // every check a new thread has, and will create the thread for its tenant
+          case None =>
+            val holderTenant = withLock(activeLock)(active.get(threadId.value).map(_._1))
+            Either.cond(
+              holderTenant.forall(_ == requested),
+              (),
+              GraphError.TenantMismatch(threadId.value, requested)
+            )
+        }
+        .flatMap(_ =>
+          // unconfirmed even when the checkpoint matched: the thread can change hands before the first
+          // event is read, so the first event delivered is screened against the store again
+          dispatched(
+            threadId,
+            afterSeq,
+            capacity,
+            listener,
+            AbandonedWrites.none,
+            TenantScope.Of(requested, confirmed = false)
+          )
+        )
+    }
+  }
 
-  /** [[subscribe]], as the hub's subscription, which a run's handle can give its end-of-run barrier. */
+  /**
+   * [[subscribe]], as the hub's subscription, which a run's handle can give its end-of-run barrier;
+   * `scope` is whose thread it may deliver.
+   */
   private def dispatched(
     threadId: ThreadId,
     afterSeq: Long,
     capacity: Int,
     listener: StreamEvent => Unit,
-    abandoned: EventRecord => Boolean = AbandonedWrites.none
+    abandoned: EventRecord => Boolean,
+    scope: TenantScope
   ): Result[Dispatched] =
-    if capacity < 2 then
-      Left(ValidationError("capacity", s"must be at least 2 (one slot is reserved for a LiveGap), was $capacity"))
-    else hub.subscribe(threadId, afterSeq, capacity, listener, abandoned)
+    validCapacity(capacity).flatMap(_ => hub.subscribe(threadId, afterSeq, capacity, listener, abandoned, scope))
+
+  private def validCapacity(capacity: Int): Result[Unit] =
+    Either.cond(
+      capacity >= 2,
+      (),
+      ValidationError("capacity", s"must be at least 2 (one slot is reserved for a LiveGap), was $capacity")
+    )
 
   /** How many subscriptions to `threadId` are in the event hub's live set; for tests. */
   private[llm4s] def liveSubscriptions(threadId: ThreadId): Int = hub.liveCount(threadId)
@@ -494,7 +549,9 @@ final class GraphRuntime(
    * the store: when its watch next polls ([[WatchPolicy]]), or, with the watch disabled, only when
    * its own runtime next commits on the thread. A subscription in another runtime that has delivered
    * no event yet - it is still at `0` - cannot be told from a new one, and follows the new thread
-   * instead. None of them delivers a new thread created under the same id as a continuation of the
+   * instead - if it is its tenant's: one of another tenant ends with
+   * `Disconnected(lastSeq, DisconnectReason.TenantMismatch)` before its first event ([[subscribe]]).
+   * None of them delivers a new thread created under the same id as a continuation of the
    * deleted one: its events are numbered on past the deleted thread's
    * ([[Checkpointer.deleteThread]]); subscribe again from `0` to follow it.
    */
@@ -967,8 +1024,9 @@ final class GraphRuntime(
    * Asks the store for a claim on `threadId` for `config.runId`. A live claim held by another run is
    * [[GraphError.ThreadBusy]] naming it - after the thread is re-read and its tenant checked, so a
    * caller from another tenant gets `TenantMismatch` instead and learns nothing; for a thread with
-   * no checkpoint, whose tenant cannot be checked, the holder is not named. Any other failure of the
-   * store, returned or thrown (non-fatally), is [[GraphError.CheckpointWriteFailed]].
+   * no checkpoint, whose tenant cannot be checked, the holder is not named. A re-read that fails or
+   * throws is `ThreadBusy` naming neither checkpoint nor holder: nothing unchecked is ever named. Any
+   * other failure of the store, returned or thrown (non-fatally), is [[GraphError.CheckpointWriteFailed]].
    */
   private def claimThread(threadId: ThreadId, config: RunConfig): Result[RunClaim] =
     Try(checkpointer.claim(threadId, ClaimRequest(config.runId, claims.ttl))).toResult.flatten match
@@ -980,10 +1038,12 @@ final class GraphRuntime(
         // this grant, which is all of them, as the store issues each token above every earlier one
         unreleased.updateWith(threadId.value)(_.filter(_.value > claim.token.value)): Unit
         Right(claim)
-      case Left(GraphError.ThreadBusy(_, latest, holder)) =>
+      // the refusal's own checkpoint is unchecked - it may be another tenant's, and embeds its run's id -
+      // so a re-read that fails or throws falls back to a ThreadBusy naming nothing
+      case Left(GraphError.ThreadBusy(_, _, holder)) =>
         Try(busyAt(threadId, config, holder, nameWithoutCheckpoint = false)).toResult.flatten.left.map {
           case refusal @ (_: GraphError.TenantMismatch | _: GraphError.ThreadBusy) => refusal
-          case _ => GraphError.ThreadBusy(threadId.value, latest)
+          case _ => GraphError.ThreadBusy(threadId.value, None, GraphError.BusyHolder.Unnamed)
         }
       case Left(other) => Left(GraphError.CheckpointWriteFailed(threadId.value, other))
 
@@ -1200,8 +1260,11 @@ final class GraphRuntime(
             val signal = StopSignal()
             // what the run's own subscriptions must not be given: a write it abandoned that lands late
             val abandoned = AbandonedWrites(config.runId)
-            var launched  = false
-            var admitted  = Option.empty[Run[I, O]]
+            // the run's own subscriptions: its thread is its tenant's once the claim commits, and
+            // every event naming another tenant is still refused
+            val runScope = TenantScope.Of(config.tenantId.map(_.value), confirmed = true)
+            var launched = false
+            var admitted = Option.empty[Run[I, O]]
             // joined before the claim commits, so it receives the claim and everything after it
             var observation = Option.empty[EventHub#Observation]
             // on every exit but a launch, including an InterruptedException, which `Try` would not
@@ -1213,8 +1276,9 @@ final class GraphRuntime(
                 admitted.foreach(_.releaseClaim())
                 release(threadId)
             }) { _ =>
-              observation =
-                observer.map(o => hub.observe(threadId, config.runId, o.capacity, o.listener, abandoned.apply))
+              observation = observer.map(o =>
+                hub.observe(threadId, config.runId, o.capacity, o.listener, abandoned.apply, runScope)
+              )
               admit(signal).map { run =>
                 admitted = Some(run)
                 val subscription = observation.map(_.start(run.claimSeq - 1))
@@ -1223,7 +1287,8 @@ final class GraphRuntime(
                   run.runId,
                   run.claimSeq,
                   signal,
-                  (afterSeq, capacity, listener) => dispatched(threadId, afterSeq, capacity, listener, abandoned.apply),
+                  (afterSeq, capacity, listener) =>
+                    dispatched(threadId, afterSeq, capacity, listener, abandoned.apply, runScope),
                   subscription
                 )
                 // the store claim first - its heartbeat stopped and joined before it - then this
@@ -1964,15 +2029,17 @@ final class GraphRuntime(
           case Left(stale: GraphError.StaleClaim) =>
             claimLost(stale.current)
             Left(GraphError.ClaimLost(threadId.value, token, lostTo.get))
-          // another run advanced the thread first: the thread is re-read so that another tenant's
-          // checkpoint is not named, but the conflict's own `latest` is the authoritative one. A
-          // re-read that fails or throws falls back to that ThreadBusy rather than a store error.
-          case Left(GraphError.CheckpointConflict(_, _, latest)) =>
+          // another run advanced the thread first: the thread is re-read, and its tenant checked, and
+          // the ThreadBusy names the re-read's checkpoint. The conflict's own `latest` is unchecked - it
+          // may be another tenant's, and embeds its run's id - so it is never named: a re-read that
+          // finds no checkpoint names none, and one that fails or throws falls back to a ThreadBusy
+          // naming nothing, rather than to a store error.
+          case Left(_: GraphError.CheckpointConflict) =>
             Try(
               busyAt(threadId, config, GraphError.BusyHolder.Unnamed, nameWithoutCheckpoint = false)
             ).toResult.flatten.left.map {
-              case mismatch: GraphError.TenantMismatch => mismatch
-              case _                                   => GraphError.ThreadBusy(threadId.value, latest)
+              case refusal @ (_: GraphError.TenantMismatch | _: GraphError.ThreadBusy) => refusal
+              case _ => GraphError.ThreadBusy(threadId.value, None, GraphError.BusyHolder.Unnamed)
             }
           case Left(other)    => Left(GraphError.CheckpointWriteFailed(threadId.value, other))
           case Right(records) => Right(records)
