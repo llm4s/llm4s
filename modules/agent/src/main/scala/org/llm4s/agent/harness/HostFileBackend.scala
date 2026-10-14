@@ -55,8 +55,12 @@ import scala.util.{ Failure, Success, Try, Using }
  *  - '''Snapshot.''' Reads see the file as it is now, not as the batch's thread state.
  */
 @Experimental
-final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val maxScanEntries: Int)
-    extends FileBackend:
+final class HostFileBackend private (
+  val root: Path,
+  val maxFileBytes: Long,
+  val maxScanEntries: Int,
+  val lockDirectory: Path
+) extends FileBackend:
 
   /** C4's class for this target. */
   val replaySupport: ReplaySupport = ReplaySupport.Verifiable
@@ -89,26 +93,24 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
   /**
    * `path` under the root, refusing a symbolic link at any component that exists, a regular file with
    * other hard links (which may be outside the root, and which locks by path would not order), and the
-   * backend's own lock directory.
+   * lock directory, should it lie inside the root.
    */
   private def resolve(operation: String, path: VPath): Result[Path] =
-    if path.segments.headOption.map(HostFileBackend.identity).contains(HostFileBackend.Reserved) then
-      refused(operation, path, s"is beneath /${HostFileBackend.Reserved}, which the backend reserves for its locks")
-    else
-      path.segments
-        .foldLeft[Result[Path]](Right(root)) { (acc, segment) =>
-          acc.flatMap { parent =>
-            val next = parent.resolve(segment)
-            if Files.isSymbolicLink(next) then
-              refused(operation, path, "is or is beneath a symbolic link, which is refused")
-            else Right(next)
-          }
+    path.segments
+      .foldLeft[Result[Path]](Right(root)) { (acc, segment) =>
+        acc.flatMap { parent =>
+          val next = parent.resolve(segment)
+          if Files.isSymbolicLink(next) then
+            refused(operation, path, "is or is beneath a symbolic link, which is refused")
+          else Right(next)
         }
-        .flatMap(p =>
-          if !p.normalize().startsWith(root) then refused(operation, path, "resolves outside the root")
-          else if isFile(p) && linkCount(p) > 1 then refused(operation, path, "has other hard links, which are refused")
-          else Right(p)
-        )
+      }
+      .flatMap(p =>
+        if !p.normalize().startsWith(root) then refused(operation, path, "resolves outside the root")
+        else if inLockDirectory(p) then refused(operation, path, "is the backend's lock directory")
+        else if isFile(p) && linkCount(p) > 1 then refused(operation, path, "has other hard links, which are refused")
+        else Right(p)
+      )
 
   /** Every existing ancestor of `target` below the root is a directory. */
   private def underDirectories(operation: String, path: VPath, target: Path): Result[Unit] =
@@ -177,10 +179,30 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
   private val directoryCheck: StateCheck                = StateCheck.of("d")
 
   /** The digest of what is at `p` now: a file's tagged bytes, a directory, or nothing. */
+  /**
+   * The digest of what is at `p` now: a file's tagged bytes, a directory, or nothing. A file over
+   * `maxFileBytes` is digested streaming, as `F` and its SHA-256, so it can still be replaced or deleted
+   * though it cannot be read; the leading byte (`f` or `F`) keeps the two forms apart.
+   */
   private def digest(operation: String, path: VPath, p: Path): Result[StateCheck] =
     if !exists(p) then Right(StateCheck.absent)
     else if isDir(p) then Right(directoryCheck)
-    else fileBytes(operation, path, p).map(fileCheck)
+    else if !isFile(p) then refused(operation, path, "is not a regular file")
+    else
+      bounded(p) match
+        case Some(bytes) => Right(fileCheck(bytes))
+        case None        => Right(StateCheck.of("F" + streamingSha256(p)))
+
+  private def streamingSha256(p: Path): String =
+    val digest = java.security.MessageDigest.getInstance("SHA-256")
+    Using.resource(FileChannel.open(p, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) { channel =>
+      val buffer = ByteBuffer.allocate(64 * 1024)
+      while channel.read(buffer) >= 0 do
+        buffer.flip()
+        digest.update(buffer)
+        buffer.clear()
+    }
+    digest.digest().map(b => f"${b & 0xff}%02x").mkString
 
   /** Writes `bytes` to `target` atomically: a flushed temporary file beside it, moved over it. */
   private def atomicWrite(target: Path, bytes: Array[Byte]): Result[Unit] =
@@ -199,7 +221,7 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
 
   /**
    * `body` holding the target's stripe: first the JVM's lock of that stripe, then the OS's advisory lock
-   * on the root's lock file of that stripe (`.llm4s/locks/<stripe>`), so every process mutating this
+   * on that stripe's file in the lock directory, so every process mutating the same or an overlapping
    * root through a backend is ordered too. One lock file per stripe, used by one thread of this JVM at a
    * time, because closing a channel can release every lock the JVM holds on its file, and an interrupt
    * while waiting closes the waiting channel.
@@ -208,8 +230,14 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
   private def stripeOf(target: Path): Int =
     Math.floorMod(HostFileBackend.identity(target.toString).hashCode, HostFileBackend.Stripes)
 
-  private def lockFile(stripe: Int): Path =
-    root.resolve(HostFileBackend.Reserved).resolve("locks").resolve(stripe.toString)
+  /**
+   * The OS lock file of a stripe: in the lock directory, shared by every backend that uses it whatever
+   * its root, so backends in other processes over the same or overlapping roots - `/w` and `/w/sub` -
+   * lock one file for one target.
+   */
+  private def lockFile(stripe: Int): Path = lockDirectory.resolve(s"stripe-$stripe.lock")
+
+  private def inLockDirectory(p: Path): Boolean = p.normalize().startsWith(lockDirectory)
 
   /** The OS lock file a mutation of `path` takes; for tests that hold it from another process. */
   private[harness] def lockFileOf(path: VPath): Result[Path] = resolve("lock", path).map(t => lockFile(stripeOf(t)))
@@ -374,9 +402,7 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
         val p    = entries.next()
         val name = p.getFileName.toString
         val hidden =
-          HostFileBackend.isTemporary(name) || (dir == root && HostFileBackend.identity(
-            name
-          ) == HostFileBackend.Reserved) || aliased(p)
+          HostFileBackend.isTemporary(name) || inLockDirectory(p) || aliased(p)
         if !hidden then
           eligible += 1
           least.add(name -> p)
@@ -482,13 +508,17 @@ object HostFileBackend:
 
   private val stripes: Vector[ReentrantLock] = Vector.fill(Stripes)(new ReentrantLock())
 
-  /** The root's directory the backend keeps its lock files in; no path may reach it. */
-  private val Reserved = ".llm4s"
+  /**
+   * Where backends keep their OS lock files by default: `llm4s-host-locks` in `java.io.tmpdir`, one
+   * place for every root, so processes of one user on one host share it. Processes that do not share a
+   * temporary directory (other users, containers) must be given one `lockDirectory` they all share.
+   */
+  def DefaultLockDirectory: Path = Path.of(System.getProperty("java.io.tmpdir"), "llm4s-host-locks")
 
   /**
    * A path as the most permissive file system would compare it: Unicode NFC, then case-folded in the
    * root locale. Two names a case-insensitive or normalising file system (Windows, macOS) takes for one
-   * file fold alike, so locks, stripes and the reserved directory treat them as one.
+   * file fold alike, so locks and stripes treat them as one.
    */
   private[harness] def identity(path: String): String =
     java.text.Normalizer
@@ -507,14 +537,17 @@ object HostFileBackend:
   def open(
     root: Path,
     maxFileBytes: Long = DefaultMaxFileBytes,
-    maxScanEntries: Int = DefaultMaxScanEntries
+    maxScanEntries: Int = DefaultMaxScanEntries,
+    lockDirectory: Path = DefaultLockDirectory
   ): Result[HostFileBackend] =
     if maxFileBytes <= 0 then Left(ValidationError("maxFileBytes", s"must be positive, was $maxFileBytes"))
     else if maxScanEntries <= 0 then Left(ValidationError("maxScanEntries", s"must be positive, was $maxScanEntries"))
     else
-      Try(root.toRealPath()).toResult.left
-        .map(e => ValidationError("root", s"$root: ${e.message}"): LLMError)
-        .flatMap(real =>
-          if Files.isDirectory(real) then Right(new HostFileBackend(real, maxFileBytes, maxScanEntries))
-          else Left(ValidationError("root", s"$root is not a directory"))
-        )
+      for
+        real <- Try(root.toRealPath()).toResult.left.map(e => ValidationError("root", s"$root: ${e.message}"): LLMError)
+        _    <- Either.cond(Files.isDirectory(real), (), ValidationError("root", s"$root is not a directory"))
+        locks <- Try {
+          Files.createDirectories(lockDirectory)
+          lockDirectory.toRealPath()
+        }.toResult.left.map(e => ValidationError("lockDirectory", s"$lockDirectory: ${e.message}"): LLMError)
+      yield new HostFileBackend(real, maxFileBytes, maxScanEntries, locks)

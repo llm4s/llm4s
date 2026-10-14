@@ -68,7 +68,7 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
 
   it should "leave no temporary file behind, and never list one" in {
     written(backend.write(p("/a.txt"), "x", call()))
-    Files.list(dir).iterator().asScala.map(_.getFileName.toString).toVector.sorted shouldBe Vector(".llm4s", "a.txt")
+    Files.list(dir).iterator().asScala.map(_.getFileName.toString).toVector.sorted shouldBe Vector("a.txt")
     Files.writeString(dir.resolve(s".a.txt.llm4s-${UUID.randomUUID()}.tmp"), "torn")
     backend.ls(VPath.root, 10, call()).value.items.map(_.path) shouldBe Vector(p("/a.txt"))
     backend.glob(Glob("**"), VPath.root, 10, call()).value.items shouldBe Vector(p("/a.txt"))
@@ -172,12 +172,10 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     unbounded.read(p("/b"), 1, Int.MaxValue, call()).value shouldBe FileLines(Vector("two"), 1, 2)
   }
 
-  it should "treat names a case-insensitive file system takes for one file as one: locks, stripes, reserved" in {
+  it should "treat names a case-insensitive file system takes for one file as one: locks and stripes" in {
     backend.locks(p("/A.txt")) shouldBe backend.locks(p("/a.txt"))
     backend.locks(p("/caf\u00e9")) shouldBe backend.locks(p("/cafe\u0301")) // NFC and NFD
     backend.lockFileOf(p("/A.txt")).value shouldBe backend.lockFileOf(p("/a.txt")).value
-    backend.read(p("/.LLM4S/locks/0"), 0, 1, call()).left.value.message should include("reserves")
-    backend.write(p("/.Llm4s/x"), "x", call()).left.value.message should include("reserves")
   }
 
   it should "walk in sorted order, so a cut-off result is deterministic" in {
@@ -241,13 +239,34 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     Files.delete(outside)
   }
 
-  it should "reserve /.llm4s for its locks: no path reaches it, and no listing shows it" in {
-    written(backend.write(p("/a.txt"), "x", call()))
-    Files.isDirectory(dir.resolve(".llm4s/locks")) shouldBe true
-    backend.read(p("/.llm4s/locks/0"), 0, 1, call()).left.value.message should include("reserves")
-    backend.write(p("/.llm4s/x"), "x", call()).left.value.message should include("reserves")
-    backend.ls(VPath.root, 10, call()).value.items.map(_.path) shouldBe Vector(p("/a.txt"))
-    backend.glob(Glob("**"), VPath.root, 10, call()).value.items shouldBe Vector(p("/a.txt"))
+  it should "share one lock file per target with every backend on an overlapping root, and keep it out of reach" in {
+    Files.createDirectories(dir.resolve("sub"))
+    val locks  = Files.createTempDirectory("llm4s-locks")
+    val outer  = HostFileBackend.open(dir, lockDirectory = locks).value
+    val nested = HostFileBackend.open(dir.resolve("sub"), lockDirectory = locks).value
+    outer.lockFileOf(p("/sub/a.txt")).value shouldBe nested.lockFileOf(p("/a.txt")).value
+    outer.lockFileOf(p("/sub/a.txt")).value.getParent shouldBe locks.toRealPath()
+    written(outer.write(p("/a.txt"), "x", call()))
+    Files.list(dir).iterator().asScala.map(_.getFileName.toString).toVector.sorted shouldBe Vector("a.txt", "sub")
+    // a lock directory inside the root is neither reachable nor listed
+    val inside = HostFileBackend.open(dir, lockDirectory = dir.resolve(".locks")).value
+    written(inside.write(p("/b.txt"), "y", call()))
+    inside.read(p("/.locks/stripe-0.lock"), 0, 1, call()).left.value.message should include("lock directory")
+    inside.ls(VPath.root, 10, call()).value.items.map(_.path.value) should not contain "/.locks"
+  }
+
+  it should "replace or delete a file over maxFileBytes, though it cannot read or edit one" in {
+    val small = HostFileBackend.open(dir, maxFileBytes = 4).value
+    Files.writeString(dir.resolve("big"), "123456789")
+    Files.writeString(dir.resolve("big2"), "123456789")
+    small.read(p("/big"), 0, 1, call()).left.value.message should include("larger than the limit")
+    small.edit(p("/big"), "1", "2", replaceAll = false, call()).left.value.message should include(
+      "larger than the limit"
+    )
+    written(small.write(p("/big"), "ok", call())) shouldBe FileWritten(created = false, 2)
+    onDisk("big") shouldBe "ok"
+    written(small.delete(p("/big2"), call())) shouldBe FileDeleted(wasDirectory = false)
+    Files.exists(dir.resolve("big2")) shouldBe false
   }
 
   "A mutation" should "wait while another process holds the OS lock of its file's stripe" in {

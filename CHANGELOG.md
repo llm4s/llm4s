@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     lock, so the bound is exact across a parallel batch.
   - `HostFileBackend`: opt-in host directory, `Verifiable`; every symbolic link and multiply-linked file refused,
     writes atomic (temporary file and atomic move), per-file locks, and each effect a compare-and-set against its
-    plan under JVM and OS advisory locks (lock files under the reserved `/.llm4s`), across threads and processes.
+    plan under JVM and OS advisory locks (lock files in a shared `lockDirectory`, by default in `java.io.tmpdir`),
+    across threads, processes and overlapping roots.
   - `CompositeBackend` routes by longest mount; `FileBackend.resolved` picks a backend per run (per tenant).
   - `LongTermStore` (`Transactional`, one read-modify-write primitive `modify` over a `StoreView`, bounds per item and
     namespace, values copied in and out) with
