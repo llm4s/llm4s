@@ -135,10 +135,12 @@ final class HostFileBackend private (
   /** An I/O step that has changed nothing: a file-system refusal is the model's; anything else fails. */
   private def io[A](operation: String, path: VPath)(body: => Result[A]): Result[A] =
     Try(body) match
-      case Success(result)                      => result
-      case Failure(_: NoSuchFileException)      => refused(operation, path, "not found")
-      case Failure(_: AccessDeniedException)    => refused(operation, path, "permission denied")
-      case Failure(e: FileSystemException)      => refused(operation, path, Option(e.getReason).getOrElse(e.toString))
+      case Success(result)                   => result
+      case Failure(_: NoSuchFileException)   => refused(operation, path, "not found")
+      case Failure(_: AccessDeniedException) => refused(operation, path, "permission denied")
+      case Failure(e: FileSystemException)   => refused(operation, path, Option(e.getReason).getOrElse(e.toString))
+      case Failure(_: HostFileBackend.BinaryContent) =>
+        refused(operation, path, "is binary (it contains NUL); only UTF-8 text is supported")
       case Failure(_: CharacterCodingException) => refused(operation, path, "is not UTF-8 text")
       case failure                              => failure.toResult.flatten
 
@@ -175,13 +177,15 @@ final class HostFileBackend private (
       Option.when(total <= maxFileBytes)(out.toByteArray)
     }
 
+  /** `bytes` as text under the backend's one text rule (`Text.binaryReason`), as a write applies it. */
   private def text(bytes: Array[Byte]): String =
-    StandardCharsets.UTF_8
+    val decoded = StandardCharsets.UTF_8
       .newDecoder()
       .onMalformedInput(CodingErrorAction.REPORT)
       .onUnmappableCharacter(CodingErrorAction.REPORT)
       .decode(ByteBuffer.wrap(bytes))
       .toString
+    if decoded.indexOf('\u0000') >= 0 then throw new HostFileBackend.BinaryContent else decoded
 
   private def fileCheck(bytes: Array[Byte]): StateCheck = StateCheck.of('f'.toByte +: bytes)
   private val directoryCheck: StateCheck                = StateCheck.of("d")
@@ -557,6 +561,9 @@ object HostFileBackend:
   private val Temporary = """\..+\.llm4s-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp""".r
 
   private def isTemporary(name: String): Boolean = Temporary.matches(name)
+
+  /** Decoded content that the text rule calls binary (NUL); a read refuses it and a search skips it. */
+  final private class BinaryContent extends CharacterCodingException
 
   /** A lock file's folded name. */
   private val LockFileName = """stripe-[0-9]+\.lock""".r

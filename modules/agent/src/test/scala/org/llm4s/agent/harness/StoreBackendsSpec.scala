@@ -156,6 +156,21 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     store.get(Namespace(Some(TenantId("a")), Vector("memories")), "/notes.md").value.isDefined shouldBe true
   }
 
+  it should "refuse a store item with NUL in it as binary, and skip it in grep" in {
+    val store = InMemoryLongTermStore()
+    val files = StoreFileBackend(store)
+    val key = org.llm4s.agent.graph.HarnessTestSupport
+      .runOn("another writer")
+      .effectKey("seed", "/nul.md")
+    store
+      .modify[Unit](Namespace(None, Vector("memories")), "/nul.md", key, FencingToken(0))(_ =>
+        Right(StoreChange.Put(ujson.Obj("content" -> "a\u0000b find"), ()))
+      )
+      .value
+    files.read(p("/nul.md"), 0, 10, call()).left.value.message should include("binary")
+    files.grep("find", VPath.root, None, 10, call()).value.items shouldBe empty
+  }
+
   it should "edit inside the transaction, list implicit directories, glob and grep" in {
     val files = StoreFileBackend(InMemoryLongTermStore(clock = clock))
     done(files.write(p("/user/prefs.md"), "likes scala\nlikes tea", call()))
@@ -273,6 +288,19 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     val worst = SandboxBackend(new CountingRunner("\u0001" * (1 << 20)), maxOutputBytes = SandboxBackend.MaxOutputBytes)
     val recorded = upickle.default.write(worst.execute("x" * 1000, VPath.root, 1.second, call()).value)
     recorded.length should be < org.llm4s.agent.graph.ReplayGuard.DefaultMaxOutcomeBytes
+  }
+
+  it should "fail before recording an intent when its runner cannot be resolved, so a retry runs" in {
+    val runner    = new CountingRunner()
+    var available = false
+    val sandbox = SandboxBackend.resolved(_ => Set(LockKey("sandbox")))(_ =>
+      if available then Right(runner) else Left(org.llm4s.error.ProcessingError("sandbox", "unavailable"))
+    )
+    val same = call().tool.get
+    sandbox.execute("ls", VPath.root, 1.second, FileContext(same)).left.value.message should include("unavailable")
+    available = true
+    sandbox.execute("ls", VPath.root, 1.second, FileContext(same)).value.stdout shouldBe "ok"
+    runner.runs.get shouldBe 1
   }
 
   it should "resolve its runner per call" in {

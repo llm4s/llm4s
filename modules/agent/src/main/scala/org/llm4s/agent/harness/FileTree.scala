@@ -58,6 +58,10 @@ private[harness] object FileTree:
       _     <- Text.checkLimit("read", path.value, limit)
       _     <- Either.cond(offset >= 0, (), BackendRefused("read", path.value, s"offset must be >= 0, was $offset"))
       entry <- fileOf("read", all, path)
+      // one text rule for every source: a store item written past the backend can hold NUL
+      _ <- Text
+        .binaryReason(entry.content)
+        .fold[Result[Unit]](Right(()))(r => Left(BackendRefused("read", path.value, r)))
     yield
       val lines = Text.lines(entry.content)
       FileLines(Text.page(lines, offset, limit), offset, lines.size)
@@ -77,7 +81,9 @@ private[harness] object FileTree:
   ): Result[Listing[GrepMatch]] =
     Text.checkLimit("grep", under.value, limit).flatMap { _ =>
       Text.interruptibly("grep") {
-        val matches = within(all, under, accept).iterator.flatMap(p => Text.matches(p, all(p).content, regex))
+        val matches = within(all, under, accept).iterator
+          .filter(p => Text.binaryReason(all(p).content).isEmpty)
+          .flatMap(p => Text.matches(p, all(p).content, regex))
         Right(Listing.of(matches, limit))
       }
     }

@@ -22,7 +22,7 @@ import scala.jdk.CollectionConverters.*
  *
  * {{{
  * class HostFileBackendReplaySpec extends AnyFlatSpec with ReplayContract:
- *   protected def newSubject(): ReplayContract.Subject = HostFileSubject(Files.createTempDirectory("replay"))
+ *   protected def newSubject(): ReplayContract.Subject = HostFileSubject(freshRoot())
  * }}}
  *
  * Each case runs a one-task graph on a real [[GraphRuntime]] whose task performs the subject's two

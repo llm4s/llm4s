@@ -120,6 +120,13 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     backend.delete(p("/nope"), call()).left.value.message should include("not found")
   }
 
+  it should "refuse a host file with NUL in it as binary, as a write would, and skip it in grep" in {
+    Files.write(dir.resolve("nul.txt"), "a\u0000b\nfind me".getBytes(UTF_8))
+    backend.read(p("/nul.txt"), 0, 10, call()).left.value.message should include("binary")
+    backend.edit(p("/nul.txt"), "a", "c", replaceAll = false, call()).left.value.message should include("binary")
+    backend.grep("find", VPath.root, None, 10, call()).value.items shouldBe empty
+  }
+
   it should "refuse binary content and a file that is not UTF-8, and skip it in grep" in {
     backend.write(p("/bin"), "a\u0000b", call()).left.value.message should include("binary")
     Files.write(dir.resolve("latin1.txt"), Array[Byte](0x63, 0xe9.toByte, 0x0a))

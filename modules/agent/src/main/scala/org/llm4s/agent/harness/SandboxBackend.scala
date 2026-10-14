@@ -65,11 +65,18 @@ final class SandboxBackend private (
 
   def locks(workdir: VPath): Set[LockKey] = lockOf(workdir)
 
+  /**
+   * Resolution is a preflight: a runner that cannot be resolved has run nothing, so the call fails before
+   * the guard records an intent, and a retry runs it afresh rather than being refused as ambiguous. A
+   * completed command whose runner cannot be resolved now fails the same way, until it can be.
+   */
   def execute(command: String, workdir: VPath, timeout: FiniteDuration, ctx: FileContext): Result[ExecResult] =
-    val key = ctx.effectKey("sandbox.execute", command, workdir.value)
-    ReplayGuard.unverifiable[ExecResult](ctx.run, key, idempotent = false)(
-      resolve(ctx).flatMap(_.run(command, workdir, timeout, ctx)).map(bounded)
-    )
+    resolve(ctx).flatMap { runner =>
+      val key = ctx.effectKey("sandbox.execute", command, workdir.value)
+      ReplayGuard.unverifiable[ExecResult](ctx.run, key, idempotent = false)(
+        runner.run(command, workdir, timeout, ctx).map(bounded)
+      )
+    }
 
   private def bounded(result: ExecResult): ExecResult =
     val (out, cutOut) = Text.cutEncoded(result.stdout, maxOutputBytes.toLong)
