@@ -2903,8 +2903,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sig` (Azure SAS), `signature`, `X-Amz-Signature` (AWS SigV4), `X-Goog-Signature`, `code` (an OAuth authorization
   code), `session`, `sessionid` and `jsessionid` - also the matrix parameter `;jsessionid=`, whose value ends at the
   `?`, `;`, `/` or `#` after it, so the path after it is not read as a query - are now redacted, matched by their whole name and only as a query parameter's key
-  (also in a URL's fragment, as an OAuth fragment response sends `#code=...`), so `"code": 400`, `?zipcode=` and
-  `?error_code=` are kept. Like the readings before it, this only adds to what was
+  (also in a URL's fragment, as an OAuth fragment response sends `#code=...`, and after an HTML-escaped `&` or `?`,
+  as an `href` writes an Azure SAS URL: `&amp;sig=...`), so `"code": 400`, `?zipcode=` and `?error_code=` are kept.
+  `remoteBody` also scrubs the echo of a plural key's value elsewhere in the body, each element of an array included
+  (`{"secrets": "...", "error_description": "echoed ..."}`). Like the readings before it, this only adds to what was
   replaced: a reading of the input with those keys written as keys the other readings take. The HTTP tool withholds
   a header so named (`X-Api-Keys`, `Client-Secrets`, `Db-Passwords`) on a cross-origin redirect even when
   `redirectSafeHeaders` lists it, as it does the singular (`Redaction.isCredentialName`).

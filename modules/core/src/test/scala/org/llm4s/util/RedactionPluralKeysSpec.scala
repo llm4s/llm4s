@@ -158,6 +158,34 @@ class RedactionPluralKeysSpec extends AnyFlatSpec with Matchers {
     parses(Redaction.redact(json)) shouldBe true
   }
 
+  it should "scrub a plural key's value where a remote body echoes it under another key (#1646)" in {
+    Redaction.remoteBody("""{"secrets":"abcdefgh","error_description":"echoed abcdefgh"}""") shouldBe
+      s"""{"secrets":"$R","error_description":"echoed $R"}"""
+    Redaction.remoteBody(
+      """{"api_keys":["key1secretA","key2secretB"],"detail":"bad key2secretB, key1secretA"}"""
+    ) shouldBe
+      s"""{"api_keys":["$R","$R"],"detail":"bad $R, $R"}"""
+    Redaction.scrubRemote("""{"client_secrets":{"a":"abcdefgh"},"msg":"abcdefgh"}""") shouldBe
+      s"""{"client_secrets":{"a":"$R"},"msg":"$R"}"""
+  }
+
+  it should "redact a short-lived credential parameter after an HTML-escaped '&' or '?' (#1646)" in {
+    Redaction.redact("https://x.test/?sv=1&amp;sig=SECRETSIG") shouldBe s"https://x.test/?sv=1&amp;sig=$R"
+    Redaction.redact(
+      """<a href="https://acct.blob.core.windows.net/c/b?sv=2022-11-02&amp;se=2026-01-01&amp;sr=b&amp;sp=r&amp;sig=AbC%2Fd123SECRET%3D">x</a>"""
+    ) shouldBe
+      s"""<a href="https://acct.blob.core.windows.net/c/b?sv=2022-11-02&amp;se=2026-01-01&amp;sr=b&amp;sp=r&amp;sig=$R">x</a>"""
+    Redaction.redact("https://x.test/cb?state=s&#38;code=AUTHCODE&#38;x=1") shouldBe
+      s"https://x.test/cb?state=s&#38;code=$R&#38;x=1"
+    Redaction.redact("https://x.test/cb?state=s&#x26;code=AUTHCODE") shouldBe s"https://x.test/cb?state=s&#x26;code=$R"
+    Redaction.redact("https://x.test/cb&#63;code=AUTHCODE&amp;x=1") shouldBe s"https://x.test/cb&#63;code=$R&amp;x=1"
+    Redaction.redact("https://x.test/cb&#x3F;session=SESS1") shouldBe s"https://x.test/cb&#x3F;session=$R"
+    Redaction.redact("""{"html":"<a href=\"https://x.test/?a=1&amp;X-Amz-Signature=abc123\">"}""") shouldBe
+      s"""{"html":"<a href=\\"https://x.test/?a=1&amp;X-Amz-Signature=$R\\">"}"""
+    // prose with an entity is no query
+    Redaction.redact("Tom &amp; Jerry: code=200") shouldBe "Tom &amp; Jerry: code=200"
+  }
+
   it should "end a matrix session id at the JSON escape of a delimiter, and keep the JSON valid (#1646)" in {
     val cases = Seq(
       """{"url":"/a;jsessionid=ABC\/code=200"}"""       -> s"""{"url":"/a;jsessionid=$R\\/code=200"}""",

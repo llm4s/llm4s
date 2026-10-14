@@ -756,8 +756,11 @@ private[llm4s] object Redaction {
    * Storage signed URL), `code` (an OAuth 2.0 authorization code), `session`, `sessionid` and `jsessionid` (a session
    * id, also as the matrix parameter `;jsessionid=`). Matched whole, not as `SensitiveQueryParams` are, by substring:
    * `sig` is in `signal` and `design`, `code` in `zipcode` and `error_code`. Only as the key of a query parameter, after
-   * `?`, `&` or their JSON escapes: a field `"code": 400` is an error code.
+   * `?`, `&`, their JSON escapes or their HTML ones (`&amp;`): a field `"code": 400` is an error code.
    */
+  /** The HTML escapes of `&` and `?` that `withSingularKeys` takes before a parameter's key, in lower case. */
+  private val HtmlQuerySeparators: Seq[String] = Seq("&amp;", "&#38;", "&#x26;", "&#63;", "&#x3f;")
+
   private val SensitiveQueryNames: Set[String] =
     Set("sig", "signature", "x-amz-signature", "x-goog-signature", "code", "session", "sessionid", "jsessionid")
 
@@ -781,12 +784,19 @@ private[llm4s] object Redaction {
       text.copyToArray(out, at)
     }
     // After `?` or `&`, or the JSON escape of either (backslashes, `u00`, `3f` or `26`): a parameter's key starts.
-    // After `#` too, which `fragment` takes: an OAuth fragment response (`#code=...&state=...`).
+    // After `#` too, which `fragment` takes: an OAuth fragment response (`#code=...&state=...`). And after the HTML
+    // escape of `&` or `?` (`&amp;`, `&#38;`, `&#x26;`, `&#63;`, `&#x3f;`), as a URL in an `href` writes them: the
+    // query pass reads `&amp;sig=` as a parameter whose key holds `amp;`, so the rewritten key (`amp;key`) is its.
     def afterQuerySeparator(at: Int): Boolean =
-      at > 0 && (input.charAt(at - 1) == '?' || input.charAt(at - 1) == '&' || fragment(at) || (at >= 6 && {
-        val sep = escapedSeparator(input, at)
-        input.charAt(at - 6) == '\\' && input.startsWith("u00", at - 5) && (sep == '?' || sep == '&')
-      }))
+      at > 0 && (input.charAt(at - 1) == '?' || input.charAt(at - 1) == '&' || fragment(at) ||
+        afterHtmlSeparator(at) || (at >= 6 && {
+          val sep = escapedSeparator(input, at)
+          input.charAt(at - 6) == '\\' && input.startsWith("u00", at - 5) && (sep == '?' || sep == '&')
+        }))
+    def afterHtmlSeparator(at: Int): Boolean =
+      input.charAt(at - 1) == ';' && HtmlQuerySeparators.exists { e =>
+        at >= e.length && input.regionMatches(true, at - e.length, e, 0, e.length)
+      }
     // Right after the `#` of a URL's fragment: a `#` behind a character a URL holds, not a word of prose (`#code=1`).
     def fragment(at: Int): Boolean =
       at > 1 && input.charAt(at - 1) == '#' && !isRegexSpace(input.charAt(at - 2)) &&
@@ -2080,7 +2090,10 @@ private[llm4s] object Redaction {
       .fold(Seq.empty[String])(sensitiveStrings)
       .filter(_.trim.length >= MinRepeatedSecretLength)
 
-  /** Every string leaf under a sensitive key of `root`, found with an explicit stack rather than recursion. */
+  /**
+   * Every string leaf under a credential key of `root` (`isCredentialName`, so a plural's too: each element of
+   * `{"api_keys": [...]}`), found with an explicit stack rather than recursion.
+   */
   private def sensitiveStrings(root: ujson.Value): Seq[String] = {
     val found = Seq.newBuilder[String]
     // Each entry is a value and whether it sits under a sensitive key.
@@ -2094,7 +2107,7 @@ private[llm4s] object Redaction {
               case ujson.Str(s) => isProseAssertion(key, s, 0, s.length)
               case _            => false
             }
-            stack.push(v -> (under || (isSensitiveKey(key) && !prose)))
+            stack.push(v -> (under || (isCredentialName(key) && !prose)))
           }
         case (ujson.Arr(arr), under) => arr.foreach(v => stack.push(v -> under))
         case _                       => ()
