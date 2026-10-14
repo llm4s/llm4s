@@ -104,6 +104,13 @@ addCommandAlias(
   "testFast",
   """;set core / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-l", "org.llm4s.tags.SlowTest"); test"""
 )
+// ---- Performance tier ----
+// Tests tagged `org.llm4s.testutil.PerformanceTest` check that an operation's cost grows linearly with its input
+// (`LinearTime.assertLinear`). `sbt test` excludes the tag (see `commonSettings`); this runs only the tagged tests, in
+// every module. CI runs it in the ubuntu-only `Performance tests` job and nightly (performance-nightly.yml).
+lazy val PerformanceTestTag = "org.llm4s.tags.PerformanceTest"
+addCommandAlias("testPerformance", s"testOnly -- -n $PerformanceTestTag")
+
 // ---- Tiered test aliases ----
 // Every suite in `modules/it` declares its tier by class annotation (see project/ItTiers.scala);
 // `it/itTierCheck` fails the build if one declares none. Each alias selects a tier by tag, so a
@@ -163,6 +170,11 @@ lazy val commonSettings = Seq(
   // `-oD`: print each test's duration, so a slow test (or a platform that is slow at one thing,
   // such as Windows refusing a loopback connection) shows up in the log, locally and in CI.
   Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oD"),
+  // The performance tier (`sbt testPerformance`): tests tagged `PerformanceTest` measure how an operation's cost
+  // grows with its input, which is the same on every platform, so `test` - CI's ubuntu and Windows jobs and the
+  // coverage run - leaves them out (#1932). Scoped to `test`, as `it`'s tier filter is, so that `testOnly` of a named
+  // suite still runs all of it, and so that `testPerformance` can select the tag with `testOnly -- -n`.
+  Test / test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-l", PerformanceTestTag),
   // Published modules log through `slf4j-api` only. Choosing a logging backend is the
   // application's decision: `logback-classic` and the `log4j-to-slf4j` bridge used to be compile
   // dependencies here, so every llm4s artifact put them on its users' classpath - a second
