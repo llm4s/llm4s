@@ -134,6 +134,20 @@ object IdempotencyKey:
   private[graph] def ofTask(threadId: ThreadId, taskId: TaskId): IdempotencyKey =
     KeyDigest.of(Seq("llm4s-task-v1", threadId.value, taskId.value))
 
+  /**
+   * The key of an answered resume of the call `call` (design §4.24): the SHA-256, under a
+   * `llm4s-tool-resume-v1` tag, of the call's key, the phase that asked (`None` for `execute`), and the
+   * question and answer as stored JSON. A chain of resumes is a chain of phases, so a resume that asks
+   * the same question again and is given the same answer is still a phase of its own.
+   */
+  private[graph] def ofResume(
+    call: IdempotencyKey,
+    asking: Option[IdempotencyKey],
+    question: ujson.Value,
+    answer: ujson.Value
+  ): IdempotencyKey =
+    KeyDigest.of(Seq("llm4s-tool-resume-v1", call, asking.getOrElse(""), ujson.write(question), ujson.write(answer)))
+
   extension (key: IdempotencyKey) def value: String = key
 
   /**

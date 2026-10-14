@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Targets fence a run that lost its claim themselves. A transactional target refuses a claim token older than the
     newest it has seen for the key's `scope` (`AppliedKeys.forget(key, token)`, effect `token => ...`). A verifiable
     target's effect is a compare-and-set against the plan's `before`.
+  - Effect identity names the phase of a call: `execute` and its re-runs (approval, `recover`) share one, and
+    each answered `resume` of an asking tool has its own (`ToolQuestionRequest.phase`). A hook keys by its
+    logical task, the one a continuation stands in for.
   - The commit that ends a task's window releases its records (`Commit.releasesEffect`), and `deleteThread`
     removes them. Nothing removes them by age.
   - `llm4s-agent-testkit` adds `ReplayContract`, which crashes a run at each point around an effect and recovers it.

@@ -112,7 +112,12 @@ final case class ToolContext private (
   toolCallId: ToolCallId,
   idempotencyKey: IdempotencyKey,
   state: ThreadState,
-  approved: Boolean
+  approved: Boolean,
+  /**
+   * The phase of the call this context runs: `None` for `execute` (also when an approval or a
+   * wrapper runs it again), or the key of one answered resume (design §4.24). Set by the loop only.
+   */
+  private[graph] val phase: Option[IdempotencyKey]
 ):
   def withRun(r: RunContext): ToolContext                  = copy(run = r)
   def withToolCallId(id: ToolCallId): ToolContext          = copy(toolCallId = id)
@@ -121,13 +126,16 @@ final case class ToolContext private (
   def withApproved(a: Boolean): ToolContext                = copy(approved = a)
 
   /**
-   * The key of one external effect of this call - `operation`, such as `file.edit`, on what
-   * `discriminator` names (a path) - for [[org.llm4s.agent.graph.ReplayGuard]] (design §4.24). Its base
-   * is [[idempotencyKey]], so it is the same in every run of the call, a re-run after approval or an
-   * answer included.
+   * The key of one external effect of this phase of the call - `operation`, such as `file.edit`, on
+   * what `discriminator` names (a path) - for [[org.llm4s.agent.graph.ReplayGuard]] (design §4.24). In
+   * `execute` its base is [[idempotencyKey]], so it is the same in every run of `execute`: a retrying
+   * wrapper, `recover`, and a re-run after approval. An answered `resume` is another phase of the call,
+   * keyed by the call, the phase that asked, the question and the answer: the same in every run of that
+   * resume (`recover` of a failed one included), different from `execute` and from every other resume
+   * of the call, a resume that asks again included.
    */
   def effectKey(operation: String, discriminator: String*): EffectKey =
-    run.effectKeyUnder(idempotencyKey, operation, discriminator)
+    run.effectKeyUnder(phase.getOrElse(idempotencyKey), operation, discriminator)
 
 object ToolContext:
   def apply(
@@ -137,7 +145,18 @@ object ToolContext:
     state: ThreadState,
     approved: Boolean = false
   ): ToolContext =
-    new ToolContext(run, toolCallId, idempotencyKey, state, approved)
+    new ToolContext(run, toolCallId, idempotencyKey, state, approved, None)
+
+  /** The context of an answered resume of the call, whose effect keys are its phase's (see `effectKey`). */
+  private[graph] def resuming(
+    run: RunContext,
+    toolCallId: ToolCallId,
+    idempotencyKey: IdempotencyKey,
+    state: ThreadState,
+    approved: Boolean,
+    phase: IdempotencyKey
+  ): ToolContext =
+    new ToolContext(run, toolCallId, idempotencyKey, state, approved, Some(phase))
 
 /** What a tool call produced, as data. */
 enum ToolOutcome:

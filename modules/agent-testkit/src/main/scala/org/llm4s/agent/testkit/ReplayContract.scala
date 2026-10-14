@@ -98,6 +98,30 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
     }
     b.compile(effects)(_.get(outcomes)).value
 
+  /**
+   * A task that performs slot 0 and suspends; its continuation, which stands in for it, performs slot 0
+   * again and then slot 1, and records both outcomes.
+   */
+  private def suspending(subject: Subject): (CompiledGraph[Unit, Map[String, ujson.Value]], ResumeRef[String, String]) =
+    val b    = GraphBuilder("replay-contract-suspending", "v1")
+    val done = b.declareResume[String, String]("continue")
+    def recorded(context: RunContext, slot: Int): Result[ujson.Value] =
+      subject.perform(context, slot) match
+        case Right(value)                            => Right(ujson.Obj("value" -> value))
+        case Left(_: GraphError.EffectReplayRefused) => Right(Refused)
+        case Left(failure)                           => Left(failure)
+    b.implement(done.node, writes = Set(outcomes)) { (_, _, context) =>
+      val both = for
+        zero <- recorded(context, 0)
+        one  <- recorded(context, 1)
+      yield Map("0" -> zero, "1" -> one)
+      both.fold(NodeResult.Fail(_), m => NodeResult.Continue(Command.empty.update(outcomes, m)))
+    }
+    val first = b.node[Unit]("first", writes = Set(outcomes)) { (_, _, context) =>
+      recorded(context, 0).fold(NodeResult.Fail(_), _ => NodeResult.Suspend(StateUpdate.empty, "go on?", done))
+    }
+    (b.compile(first)(_.get(outcomes)).value, done)
+
   /** A store whose writes die at `point`, and which records every effect key written through it. */
   final private class Crashing(
     val underlying: Checkpointer,
@@ -405,6 +429,28 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
     begunOutcome(ran)
     once(ran, 1)
     same(ran, 1)
+    released(ran)
+  }
+
+  it should "replay, in a continuation of the task, the effect the task performed before it suspended" in {
+    // a hook that asks runs again with its answer as a continuation standing in for its task: same keys
+    val subject      = newSubject()
+    val clock        = ManualClock(start)
+    val keys         = ConcurrentHashMap.newKeySet[EffectKey]()
+    val store        = Crashing(newCheckpointer(clock), None, keys)
+    val thread       = ThreadId(s"replay-contract-${java.util.UUID.randomUUID()}")
+    val (g, proceed) = suspending(subject)
+    val runtime      = GraphRuntime(store, clock, claims)
+    val parked = awaitRun(runtime.start(thread, g, (), config("suspending")).value) match
+      case s: RunResult.Suspended => s
+      case other                  => fail(s"the run did not suspend: $other")
+    val answer = Map(parked.interrupts.head.id -> proceed.answer("yes"))
+    val ran    = Ran(completed(runtime.resume(thread, g, answer, config("continued"))), subject, store, thread)
+    once(ran, 0)
+    same(ran, 0)
+    once(ran, 1)
+    same(ran, 1)
+    keys.size shouldBe Slots.size
     released(ran)
   }
 

@@ -96,20 +96,24 @@ final case class ToolQuestionRequest private (
   question: ujson.Value,
   idempotencyKey: IdempotencyKey,
   approved: Boolean = false,
-  answered: Vector[GivenAnswer] = Vector.empty
+  answered: Vector[GivenAnswer] = Vector.empty,
+  /** The phase of the call that asked: `None` for `execute`, else the asking resume's key (design §4.24). */
+  phase: Option[IdempotencyKey] = None
 ) derives ReadWriter:
   def withAssistantMessageId(id: String): ToolQuestionRequest =
-    ToolQuestionRequest(id, call, question, idempotencyKey, approved, answered)
+    ToolQuestionRequest(id, call, question, idempotencyKey, approved, answered, phase)
   def withCall(c: ToolCall): ToolQuestionRequest =
-    ToolQuestionRequest(assistantMessageId, c, question, idempotencyKey, approved, answered)
+    ToolQuestionRequest(assistantMessageId, c, question, idempotencyKey, approved, answered, phase)
   def withQuestion(q: ujson.Value): ToolQuestionRequest =
-    ToolQuestionRequest(assistantMessageId, call, q, idempotencyKey, approved, answered)
+    ToolQuestionRequest(assistantMessageId, call, q, idempotencyKey, approved, answered, phase)
   def withIdempotencyKey(k: IdempotencyKey): ToolQuestionRequest =
-    ToolQuestionRequest(assistantMessageId, call, question, k, approved, answered)
+    ToolQuestionRequest(assistantMessageId, call, question, k, approved, answered, phase)
   def withApproved(a: Boolean): ToolQuestionRequest =
-    ToolQuestionRequest(assistantMessageId, call, question, idempotencyKey, a, answered)
+    ToolQuestionRequest(assistantMessageId, call, question, idempotencyKey, a, answered, phase)
   def withAnswered(a: Vector[GivenAnswer]): ToolQuestionRequest =
-    ToolQuestionRequest(assistantMessageId, call, question, idempotencyKey, approved, a)
+    ToolQuestionRequest(assistantMessageId, call, question, idempotencyKey, approved, a, phase)
+  def withPhase(p: Option[IdempotencyKey]): ToolQuestionRequest =
+    ToolQuestionRequest(assistantMessageId, call, question, idempotencyKey, approved, answered, p)
 
 object ToolQuestionRequest:
   def apply(
@@ -118,9 +122,10 @@ object ToolQuestionRequest:
     question: ujson.Value,
     idempotencyKey: IdempotencyKey,
     approved: Boolean = false,
-    answered: Vector[GivenAnswer] = Vector.empty
+    answered: Vector[GivenAnswer] = Vector.empty,
+    phase: Option[IdempotencyKey] = None
   ): ToolQuestionRequest =
-    new ToolQuestionRequest(assistantMessageId, call, question, idempotencyKey, approved, answered)
+    new ToolQuestionRequest(assistantMessageId, call, question, idempotencyKey, approved, answered, phase)
 
 /** The hook a middleware asked its question from. */
 enum MiddlewareHook derives ReadWriter:
@@ -1523,14 +1528,17 @@ object ToolLoop:
             reply <- read(answer)(using declared.answerCodec).left.map(m => s"Invalid answer for '$name': $m")
           yield (args, question, reply)
           decoded match
-            case Left(message) => error(task, message, context)
+            case Left(message)                  => error(task, message, context)
             case Right((args, question, reply)) =>
-              val toolContext = ToolContext(
+              // an answered resume is a phase of the call of its own: its effects never replay `execute`'s
+              val phase = IdempotencyKey.ofResume(request.idempotencyKey, request.phase, request.question, answer)
+              val toolContext = ToolContext.resuming(
                 answering(agent, context, request.answered),
                 ToolCallId(request.call.id),
                 request.idempotencyKey,
                 state,
-                request.approved
+                request.approved,
+                phase
               )
               val (chain, took) = timed(tool, request.call, toolContext, context)(
                 innermost(name)(AgentTool.resumeWith(tool, args, question, reply, toolContext))
@@ -1544,7 +1552,8 @@ object ToolLoop:
                 context,
                 took,
                 request.answered,
-                resumed = true
+                resumed = true,
+                phase = Some(phase)
               )
         case _ => error(task, s"Tool '$name' does not take answers", context)
 
@@ -1671,7 +1680,8 @@ object ToolLoop:
       context: RunContext,
       took: FiniteDuration,
       answers: Vector[GivenAnswer],
-      resumed: Boolean = false
+      resumed: Boolean = false,
+      phase: Option[IdempotencyKey] = None
     ): NodeResult =
       val name = tool.spec.name
       def failRun(error: LLMError): NodeResult =
@@ -1722,7 +1732,15 @@ object ToolLoop:
                   executed(task.call, context, ToolExecutionOutcome.Asked, took)
                   NodeResult.Suspend(
                     StateUpdate.empty,
-                    ToolQuestionRequest(task.assistantMessageId, call, json, task.idempotencyKey, approved, answers),
+                    ToolQuestionRequest(
+                      task.assistantMessageId,
+                      call,
+                      json,
+                      task.idempotencyKey,
+                      approved,
+                      answers,
+                      phase
+                    ),
                     ref
                   )
                 case Left(e) =>
