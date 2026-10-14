@@ -153,4 +153,71 @@ class ToolPermissionsSpec extends AnyFlatSpec with Matchers {
     agent.resume(parked.threadId, Map(parked.approve(ids.head))).value.answer shouldBe Some("shipped")
     ran.asScala.toVector shouldBe Vector("/prod/app")
   }
+
+  /**
+   * A tool asking for its destination: its resources are the envelope every answer must fall in,
+   * a write anywhere under `/out`, and it refuses an answer outside it. A recording middleware keeps the resources each
+   * run of the chain checked.
+   */
+  private def saving(rules: Seq[PermissionRule]) = {
+    val wrote = new CopyOnWriteArrayList[String]()
+    val seen  = new CopyOnWriteArrayList[Vector[ToolResource]]()
+    val saver = new AgentTool.Asking[SpecTools.Text, Where, Dest](
+      SpecTools.spec("save").withResources(_ => Vector(ToolResource(Operation.Write, "/out/**")))
+    ) {
+      def execute(args: SpecTools.Text, context: org.llm4s.agent.graph.tool.ToolContext): ToolOutcome =
+        ask(Where(s"where should ${args.text} go?"))
+      def resume(args: SpecTools.Text, q: Where, answer: Dest, context: org.llm4s.agent.graph.tool.ToolContext) =
+        if (!org.llm4s.agent.graph.tool.Glob("/out/**").matches(answer.path))
+          ToolOutcome.Error(s"${answer.path} is outside /out")
+        else { wrote.add(answer.path); ToolOutcome.Success(ujson.Str(s"saved to ${answer.path}")) }
+    }
+    val recording = new org.llm4s.agent.graph.middleware.AgentMiddleware {
+      val id = org.llm4s.agent.graph.middleware.MiddlewareId("recording")
+      override def wrapToolCall(
+        request: org.llm4s.agent.graph.middleware.ToolCallRequest,
+        context: org.llm4s.agent.graph.tool.ToolContext
+      )(next: () => ToolOutcome): ToolOutcome = { seen.add(request.resources); next() }
+    }
+    val client = ScriptedLLMClient.of(calling(call("c1", "save", "report")), CompletionFixture.simple("done"))
+    val agent = built(
+      Agent
+        .builder("assistant", client)
+        .withTools(SpecTools.set(saver))
+        .withMiddleware(new PermissionMiddleware(rules), recording)
+    )
+    (agent, wrote, seen)
+  }
+
+  private def questionOf(result: AgentResult) = result.status match {
+    case AgentStatus.Suspended(_, questions, _, _) => questions.head._1
+    case other                                     => fail(s"expected Suspended, got $other")
+  }
+
+  "An asking tool" should "be checked on its declared envelope before it asks, and again when it resumes" in {
+    val (denied, deniedWrote, _) = saving(Seq(PermissionRule.deny(Operation.Write, "/out/**")))
+    val refused                  = denied.run("save it").value
+    refused.status shouldBe a[AgentStatus.Completed] // denied before asking: no question
+    toolResults(refused) shouldBe Vector("""{"error":"Denied: write /out/**"}""")
+    deniedWrote.size shouldBe 0
+
+    val (agent, wrote, seen) = saving(Seq(PermissionRule.allow(Operation.Write, "/out/**")))
+    val parked               = agent.run("save it").value
+    val done = agent.resume(parked.threadId, Map(parked.reply(questionOf(parked), Dest("/out/r.txt")))).value
+    wrote.asScala.toVector shouldBe Vector("/out/r.txt")
+    toolResults(done) shouldBe Vector("saved to /out/r.txt")
+    // the resumed run was checked on the same envelope, which every answer the tool accepts falls in
+    seen.asScala.toVector shouldBe Vector.fill(2)(Vector(ToolResource(Operation.Write, "/out/**")))
+  }
+
+  it should "refuse an answer outside its envelope itself: the runtime cannot see what the tool touches" in {
+    val (agent, wrote, _) = saving(Seq(PermissionRule.allow(Operation.Write, "/out/**")))
+    val parked            = agent.run("save it").value
+    val done              = agent.resume(parked.threadId, Map(parked.reply(questionOf(parked), Dest("/etc/x")))).value
+    wrote.size shouldBe 0
+    toolResults(done) shouldBe Vector("""{"error":"/etc/x is outside /out"}""")
+  }
 }
+
+final case class Where(prompt: String) derives upickle.default.ReadWriter
+final case class Dest(path: String) derives upickle.default.ReadWriter

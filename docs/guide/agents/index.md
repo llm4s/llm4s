@@ -377,7 +377,9 @@ val agent = Agent.builder("coder", client)
 `Glob` matches the target decides, and a resource no rule matches is denied. A call runs only if
 every resource is allowed: a denial is the error result `Denied: <operation> <target>`, an `Ask`
 suspends the call for approval. A tool that declares no resources touches `(Invoke, <tool name>)`,
-so it needs an `Invoke` rule. Approval is one flag per call: once a reviewer approves the call,
+so it needs an `Invoke` rule. Resources are the call's whole envelope: a tool that asks a question and lets
+the answer choose its target declares a resource covering every target it may pick (`/out/**`) and
+refuses an answer outside it, because the check runs on the declaration, not on what the tool does. Approval is one flag per call: once a reviewer approves the call,
 every `Ask` passes. An edited call is checked again on its new arguments, so a deny rule still
 refuses it. Rules see the arguments after the schema check and decoding. In a `Glob`, `*` and `?`
 stay within one `/`-separated segment and `**` crosses them. An `Execute` rule limits which
