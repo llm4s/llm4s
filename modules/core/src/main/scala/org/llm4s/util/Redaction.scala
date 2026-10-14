@@ -767,8 +767,9 @@ private[llm4s] object Redaction {
    * where there is none. A plural loses its last `s` and doubles its first character, so it keeps its start - what
    * comes before it is what came before - and ends in a sensitive suffix: `secrets` is `ssecret`, `api_keys` is
    * `aapi_key`. A parameter's key is written as `x`s and `key`, which `SensitiveQueryParams` holds, the `#` before a
-   * fragment's key and the `;` before `jsessionid` as `&`, as is the `?` or `#` that ends its value; the `/` or `;` that
-   * ends it is written as a space, so the path after it is not read as a query. The edits a reading of that text makes are edits of the input: no character moves. One scan
+   * fragment's key and the `;` before `jsessionid` as `&`, as is the `#` that ends its value, or the `?` that ends a
+   * matrix value; the `/` or `;` that ends a matrix value is written as spaces, so the path after it is not read as a
+   * query. A JSON escape of those (`\/`, `\u003f`) is written whole, with as many characters. The edits a reading of that text makes are edits of the input: no character moves. One scan
    * over the runs of letters, digits, `_` and `-`.
    */
   private def withSingularKeys(input: String): String = {
@@ -817,19 +818,26 @@ private[llm4s] object Redaction {
           if (separator || matrix) {
             write(i, "x" * (word.length - 3) + "key")
             if (fragment(i)) write(i - 1, "&") // the readings take a query parameter after `&`, not after `#`
-            if (matrix) {
-              // A matrix parameter's value ends at the `?`, `;`, `/` or `#` after it, where a query value goes on. A
-              // query or fragment there goes on with parameters, so its `?` or `#` is written as `&`; a path segment or
-              // another matrix parameter does not, so its `/` or `;` is written as a space, which ends a query value and
-              // starts no parameter (`;jsessionid=a/code=200` keeps `200`).
-              write(i - 1, "&")
-              var k = j + 1
-              while (k < length && "?;/#&\"'<>\\".indexOf(input.charAt(k).toInt) < 0 && !isRegexSpace(input.charAt(k)))
-                k += 1
-              if (k < length && "?#".indexOf(input.charAt(k).toInt) >= 0) write(k, "&")
-              else if (k < length && "/;".indexOf(input.charAt(k).toInt) >= 0) write(k, " ")
-              j = math.max(j, k)
+            if (matrix) write(i - 1, "&")
+            // A query value goes on over `#`, and a matrix parameter's over `?`, `;`, `/` and `#` too, where the value
+            // ends. A query or fragment there goes on with parameters, so its `?` or `#` is written as `&`; a path
+            // segment or another matrix parameter does not, so its `/` or `;` is written as spaces, which end a query
+            // value and start no parameter (`;jsessionid=a/code=200` keeps `200`). Each also as a JSON escape
+            // (`\/`, `\u002f`), written whole: an escaped `?` or `#` as the escape of `&`.
+            val ends  = if (matrix) "?;/#" else "#"
+            var k     = if (input.charAt(j) == '=') j + 1 else separatorEscapeEnd(input, j)
+            val stops = ends + "&\"'<>\\"
+            while (k < length && stops.indexOf(input.charAt(k).toInt) < 0 && !isRegexSpace(input.charAt(k)))
+              k += 1
+            if (k < length) {
+              val (delimiter, end) = delimiterAt(input, k)
+              if (ends.indexOf(delimiter.toInt) >= 0) {
+                if (delimiter == '/' || delimiter == ';') write(k, " " * (end - k))
+                else if (end - k == 1) write(k, "&")
+                else write(end - 2, "26")
+              }
             }
+            if (matrix) j = math.max(j, k)
           }
         }
         i = j
@@ -2564,6 +2572,30 @@ private[llm4s] object Redaction {
         input.charAt(u + 2) == '0' && escapedSeparator(input, u + 5) != NotASeparator
     if (escapes) u + 5 else -1
   }
+
+  /**
+   * The URL delimiter at `at` (`?`, `;`, `/`, `#` or `&`), bare or as a JSON escape (a run of backslashes, then `/`,
+   * or `u00` and the delimiter's hex digits in either case), and the index after it; `NotASeparator` where there is
+   * none.
+   */
+  private def delimiterAt(input: String, at: Int): (Char, Int) =
+    if (input.charAt(at) != '\\') {
+      val c = input.charAt(at)
+      (if ("?;/#&".indexOf(c.toInt) >= 0) c else NotASeparator, at + 1)
+    } else {
+      val u = afterBackslashes(input, at)
+      if (u < input.length && input.charAt(u) == '/') ('/', u + 1)
+      else if (u + 5 <= input.length && input.startsWith("u00", u))
+        input.substring(u + 3, u + 5).toLowerCase(Locale.ROOT) match {
+          case "3f" => ('?', u + 5)
+          case "3b" => (';', u + 5)
+          case "2f" => ('/', u + 5)
+          case "23" => ('#', u + 5)
+          case "26" => ('&', u + 5)
+          case _    => (NotASeparator, at)
+        }
+      else (NotASeparator, at)
+    }
 
   /** The separator that the escape ending at `end` writes, read from its last two hex digits, or `NotASeparator`. */
   private def escapedSeparator(input: String, end: Int): Char =

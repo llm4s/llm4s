@@ -15,6 +15,9 @@ class RedactionPluralKeysSpec extends AnyFlatSpec with Matchers {
 
   private val R = Redaction.RedactionPlaceholder
 
+  /** The start of a JSON `\u00` escape, which a Scala literal would read as the character it escapes. */
+  private val U = "\\u00"
+
   private def parses(json: String): Boolean = Try(ujson.read(json)).isSuccess
 
   "Redaction.redact" should "redact a plural credential key's array, the issue's repros (#1646)" in {
@@ -141,6 +144,37 @@ class RedactionPluralKeysSpec extends AnyFlatSpec with Matchers {
     Redaction.redact("https://app.example.com/cb#state=xyz&code=AUTHCODE123") shouldBe
       s"https://app.example.com/cb#state=xyz&code=$R"
     Redaction.redact("see #code=1 and #signal=2") shouldBe "see #code=1 and #signal=2"
+  }
+
+  it should "keep the fragment after a short-lived credential parameter's value (#1646)" in {
+    Redaction.redact("https://app.example/cb?code=AUTH#section") shouldBe s"https://app.example/cb?code=$R#section"
+    Redaction.redact("https://app.example/cb?sig=SIG1&x=1#section") shouldBe
+      s"https://app.example/cb?sig=$R&x=1#section"
+    Redaction.redact("https://app.example/cb?code=AUTH#code=FRAG") shouldBe s"https://app.example/cb?code=$R#code=$R"
+    Redaction.redact("https://app.example/cb?code=AUTH#access_token=TOK") shouldBe
+      s"https://app.example/cb?code=$R#access_token=$R"
+    val json = s"""{"url":"https://app.example/cb?code=AUTH${U}23section"}"""
+    Redaction.redact(json) shouldBe s"""{"url":"https://app.example/cb?code=$R${U}23section"}"""
+    parses(Redaction.redact(json)) shouldBe true
+  }
+
+  it should "end a matrix session id at the JSON escape of a delimiter, and keep the JSON valid (#1646)" in {
+    val cases = Seq(
+      """{"url":"/a;jsessionid=ABC\/code=200"}"""       -> s"""{"url":"/a;jsessionid=$R\\/code=200"}""",
+      s"""{"url":"/a;jsessionid=ABC${U}2fcode=200"}"""  -> s"""{"url":"/a;jsessionid=$R${U}2fcode=200"}""",
+      s"""{"url":"/a;jsessionid=ABC${U}3flang=en"}"""   -> s"""{"url":"/a;jsessionid=$R${U}3flang=en"}""",
+      s"""{"url":"/a;jsessionid=ABC${U}3Fcode=X"}"""    -> s"""{"url":"/a;jsessionid=$R${U}3Fcode=$R"}""",
+      s"""{"url":"/a;jsessionid=ABC${U}3bcode=200"}"""  -> s"""{"url":"/a;jsessionid=$R${U}3bcode=200"}""",
+      s"""{"url":"/a;jsessionid=ABC${U}23section"}"""   -> s"""{"url":"/a;jsessionid=$R${U}23section"}""",
+      s"""{"url":"/a;jsessionid=ABC${U}26lang=en"}"""   -> s"""{"url":"/a;jsessionid=$R${U}26lang=en"}""",
+      """{"s":"{\"url\":\"/a;jsessionid=ABC\\/b\"}"}""" -> s"""{"s":"{\\"url\\":\\"/a;jsessionid=$R\\\\/b\\"}"}"""
+    )
+    cases.foreach { case (in, expected) =>
+      withClue(in) {
+        Redaction.redact(in) shouldBe expected
+        parses(Redaction.redact(in)) shouldBe true
+      }
+    }
   }
 
   /** Documents with plural keys and credential parameters in mixed shapes, with the words that must not survive. */
