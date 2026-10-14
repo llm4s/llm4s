@@ -32,6 +32,10 @@ import scala.util.{ Failure, Success, Try, Using }
  * after, so a replayed edit whose first attempt landed returns its first result rather than "`old`
  * was not found", and one whose file another writer changed in between is refused.
  *
+ * '''One path, one file.''' Its locks, stripes and replay assume that one path names one file, so [[HostFileBackend.open]]
+ * checks it and refuses a root where it does not hold (an SMB share, a volume with 8.3 names on).
+ * Supported: local POSIX file systems, case-insensitive ones included, and NTFS with 8.3 names off.
+ *
  * '''Not a security boundary.''' It is a convenience for a trusted directory. Never give it a root that
  * an untrusted process can write, a sandboxed command included: such a process can swap a directory for
  * a link between the backend's check and its open, and so reach files outside the root. To run untrusted
@@ -106,7 +110,9 @@ final class HostFileBackend private (
    * Its file-system reads are inside [[io]], so a file that vanishes meanwhile is a refusal, not a throw.
    */
   private def resolve(operation: String, path: VPath): Result[Path] =
-    if path.segments.exists(HostFileBackend.isTemporary) then
+    if path.segments.exists(HostFileBackend.trailing) then
+      refused(operation, path, "has a segment ending in a dot or a space, which Windows reads as another name")
+    else if path.segments.exists(HostFileBackend.isTemporary) then
       refused(operation, path, "has a segment named as the backend's temporary files, which is refused")
     else
       io(operation, path) {
@@ -121,7 +127,6 @@ final class HostFileBackend private (
           }
           .flatMap(p =>
             if !p.normalize().startsWith(root) then refused(operation, path, "resolves outside the root")
-            else if isLockFile(p) then refused(operation, path, "is one of the backend's lock files")
             else if isFile(p) && linkCount(p) > 1 then
               refused(operation, path, "has other hard links, which are refused")
             else Right(p)
@@ -276,20 +281,7 @@ final class HostFileBackend private (
    * its root, so backends in other processes over the same or overlapping roots - `/w` and `/w/sub` -
    * lock one file for one target.
    */
-  private def lockFile(stripe: Int): Path = lockDirectory.resolve(s"stripe-$stripe.lock") // see LockFileName
-
-  private val lockIdentity = HostFileBackend.identity(lockDirectory.toString)
-
-  /**
-   * Whether `p` is one of the backend's lock files: a `stripe-<n>.lock` directly in the lock directory,
-   * compared by folded identity, so a case or normalisation alias (`/.LOCKS/STRIPE-0.LOCK`) is caught
-   * too. Only the files are reserved: the lock directory may be the root, inside it or above it, and
-   * everything else in the root stays reachable.
-   */
-  private def isLockFile(p: Path): Boolean =
-    val n = p.normalize()
-    Option(n.getParent).exists(parent => HostFileBackend.identity(parent.toString) == lockIdentity) &&
-    HostFileBackend.LockFileName.matches(HostFileBackend.identity(n.getFileName.toString))
+  private def lockFile(stripe: Int): Path = lockDirectory.resolve(s"stripe-$stripe.lock")
 
   /** The OS lock file a mutation of `path` takes; for tests that hold it from another process. */
   private[harness] def lockFileOf(path: VPath): Result[Path] = resolve("lock", path).map(t => lockFile(stripeOf(t)))
@@ -475,7 +467,7 @@ final class HostFileBackend private (
         val name = p.getFileName.toString
         // a name the backend cannot list (not a valid segment) is dropped before it counts, too
         val hidden =
-          VPath(s"/$name").isLeft || HostFileBackend.isTemporary(name) || isLockFile(p) || aliased(p)
+          VPath(s"/$name").isLeft || HostFileBackend.trailing(name) || HostFileBackend.isTemporary(name) || aliased(p)
         if !hidden then
           eligible += 1
           least.add((key(name, p), name, p))
@@ -617,20 +609,57 @@ object HostFileBackend:
     case _: java.util.concurrent.CancellationException      => true
     case _                                                  => false
 
-  /** A lock file's folded name. */
-  private val LockFileName = """stripe-[0-9]+\.lock""".r
+  /** A name Windows reads as another (a trailing dot or space is dropped); the backend never uses one. */
+  private[harness] def trailing(name: String): Boolean = name.endsWith(".") || name.endsWith(" ")
+
+  /**
+   * The aliasing a root's file system does that the backend's lexical identity cannot see, found by
+   * trying it: a probe file is created in `root` and its 8.3 short name looked up; the probe is then
+   * removed. `Right` lists what was found (empty: none); `Left` means the root could not be probed (for
+   * example, it is read-only). Case and Unicode-normalisation aliases are not listed: the backend folds
+   * them. Trailing-dot and trailing-space aliases are not either: the backend refuses such names.
+   */
+  def probeAliases(root: Path): Result[Vector[String]] =
+    val id   = UUID.randomUUID().toString.replace("-", "")
+    val name = s"llm4sprobe$id.probe"
+    val file = root.resolve(name)
+    Try(Files.createFile(file)).toResult.left
+      .map(e => ValidationError("root", s"$root cannot be probed for file-name aliasing: ${e.message}"): LLMError)
+      .map { _ =>
+        val shortName = name.take(6).toUpperCase(java.util.Locale.ROOT) + "~1." + "PRO"
+        val short     = Try(root.resolve(shortName)).toOption
+        val found = Vector(
+          short.exists(alias => Try(Files.exists(alias) && Files.isSameFile(file, alias)).getOrElse(false)) ->
+            "8.3 short names (a file is also reachable by a generated short name)"
+        ).collect { case (true, behaviour) => behaviour }
+        Try(Files.deleteIfExists(file))
+        found
+      }
 
   /**
    * A backend over the existing directory `root`, resolved to its real path, keeping its OS lock files
    * in `lockDirectory` (created if absent). Give every backend that may touch the same files - in this
    * process or another, over the same or an overlapping root - one lock directory: the application
    * chooses it, as a setting, since only it knows which processes share files.
+   *
+   * The backend's ordering and replay assume that one path names one file. `open` checks it, and
+   * refuses a root where it does not hold:
+   *  - `lockDirectory` must be outside the root, both resolved to their real paths, so no path of the
+   *    backend can reach a lock file;
+   *  - `probe` (by default [[probeAliases]]) must find no aliasing the backend cannot fold. Supported:
+   *    local POSIX file systems, case-insensitive ones included (macOS), and NTFS with 8.3 names off. An
+   *    SMB/CIFS share or a volume with 8.3 names on is refused: use the workspace sandbox's file backend
+   *    (F2) or a `StoreFileBackend` there;
+   *  - a root that cannot be probed (read-only) is refused, unless `allowUnprobed`: the caller then
+   *    vouches that its file system is a supported one.
    */
   def open(
     root: Path,
     lockDirectory: Path,
     maxFileBytes: Long = DefaultMaxFileBytes,
-    maxScanEntries: Int = DefaultMaxScanEntries
+    maxScanEntries: Int = DefaultMaxScanEntries,
+    probe: Path => Result[Vector[String]] = probeAliases,
+    allowUnprobed: Boolean = false
   ): Result[HostFileBackend] =
     if maxFileBytes <= 0 then Left(ValidationError("maxFileBytes", s"must be positive, was $maxFileBytes"))
     else if maxScanEntries <= 0 then Left(ValidationError("maxScanEntries", s"must be positive, was $maxScanEntries"))
@@ -642,4 +671,21 @@ object HostFileBackend:
           Files.createDirectories(lockDirectory)
           lockDirectory.toRealPath()
         }.toResult.left.map(e => ValidationError("lockDirectory", s"$lockDirectory: ${e.message}"): LLMError)
+        _ <- Either.cond(
+          !locks.startsWith(real),
+          (),
+          ValidationError("lockDirectory", s"$locks is inside the root $real; give the backend one outside it")
+        )
+        _ <- probe(real) match
+          case Right(found) if found.isEmpty => Right(())
+          case Right(found) =>
+            Left(
+              ValidationError(
+                "root",
+                s"$real's file system resolves aliases the backend cannot see: ${found.mkString("; ")}. " +
+                  "Use the workspace sandbox's file backend or a StoreFileBackend for it"
+              )
+            )
+          case Left(_) if allowUnprobed => Right(())
+          case Left(error)              => Left(error)
       yield new HostFileBackend(real, maxFileBytes, maxScanEntries, locks)

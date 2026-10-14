@@ -21,7 +21,12 @@ object HarnessBackends:
   def host(): (HostFileBackend, Path) =
     val dir = Files.createTempDirectory("llm4s-contract")
     dir.toFile.deleteOnExit()
-    (HostFileBackend.open(dir, locks).fold(e => throw new IllegalStateException(e.message), identity), dir)
+    // a volume whose aliasing the backend cannot see (8.3 names on) is refused: nothing of it to test there
+    HostFileBackend.open(dir, locks) match
+      case Right(backend) => (backend, dir)
+      case Left(e) if e.message.contains("aliases") =>
+        org.scalatest.Assertions.cancel(s"unsupported file system: ${e.message}")
+      case Left(e) => throw new IllegalStateException(e.message)
 
   def onHost(dir: Path, path: VPath): Path = dir.resolve(path.value.drop(1))
 

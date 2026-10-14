@@ -433,6 +433,12 @@ The harness keeps an agent's files in a `FileBackend` (`org.llm4s.agent.harness`
 once (`CompositeBackend`), or a host directory (`HostFileBackend`). Each backend declares the locks its
 mutations hold, replays its external effects through `ReplayGuard`, and enforces its own size limits.
 
+**`HostFileBackend` needs a file system where one path names one file.** `HostFileBackend.open` checks this:
+it refuses a lock directory inside the root, and refuses a root whose file system resolves aliases it cannot see.
+It probes for 8.3 short names, which SMB/CIFS shares and some NTFS volumes have. Supported: local POSIX file
+systems (case-insensitive ones too) and NTFS with 8.3 names off. Elsewhere, use the workspace sandbox's file backend
+or a `StoreFileBackend`.
+
 **`HostFileBackend` is not a security boundary.** It is a convenience for a directory you trust. It
 refuses symbolic links and files with other hard links, and each write is a compare-and-set under
 file locks. Even so, a process that can write the root can swap a directory for a link between the

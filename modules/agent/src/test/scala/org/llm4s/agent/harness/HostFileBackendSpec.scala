@@ -23,7 +23,12 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
 
   override def beforeEach(): Unit = {
     dir = Files.createTempDirectory("llm4s-host-backend")
-    backend = HostFileBackend.open(dir, locks).value
+    // the backend refuses a file system with aliases it cannot see (a runner's volume with 8.3 names on):
+    // there is nothing of it to test on such a volume, so the case is cancelled, not failed
+    backend = HostFileBackend.open(dir, locks) match
+      case Right(b)                                 => b
+      case Left(e) if e.message.contains("aliases") => cancel(s"unsupported file system: ${e.message}")
+      case Left(e)                                  => fail(e.message)
   }
 
   /** Children and threads a case started, stopped after it whether it passed or not, so none outlives the JVM's tests. */
@@ -374,20 +379,35 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     outer.lockFileOf(p("/sub/a.txt")).value.getParent shouldBe shared.toRealPath()
     written(outer.write(p("/a.txt"), "x", call()))
     Files.list(dir).iterator().asScala.map(_.getFileName.toString).toVector.sorted shouldBe Vector("a.txt", "sub")
-    // a lock directory inside the root: its lock files are neither reachable nor listed, the rest is
-    val inside = HostFileBackend.open(dir, dir.resolve(".locks")).value
-    written(inside.write(p("/b.txt"), "y", call()))
-    val stripe = inside.lockFileOf(p("/b.txt")).value.getFileName.toString
-    inside.read(p(s"/.locks/$stripe"), 0, 1, call()).left.value.message should include("lock files")
-    inside.read(p(s"/.LOCKS/${stripe.toUpperCase}"), 0, 1, call()).left.value.message should include("lock files")
-    inside.write(p("/.locks/stripe-7.lock"), "x", call()).left.value.message should include("lock files")
-    written(inside.write(p("/.locks/notes.txt"), "mine", call())).created shouldBe true
-    inside.ls(p("/.locks"), 100, call()).value.items.map(_.path.value) shouldBe Vector("/.locks/notes.txt")
-    // a lock directory above the root reserves nothing in it
+    // a lock directory inside the root is refused: no path of the backend may reach a lock file
+    HostFileBackend.open(dir, dir.resolve(".locks")).left.value.message should include("inside the root")
+    HostFileBackend.open(dir, dir).left.value.message should include("inside the root")
+    // one above the root is outside it
     Files.createDirectories(dir.resolve("ws"))
     val below = HostFileBackend.open(dir.resolve("ws"), dir).value
     written(below.write(p("/stripe-0.lock"), "not a lock file of mine", call())).created shouldBe true
-    below.read(p("/stripe-0.lock"), 0, 1, call()).value.lines shouldBe Vector("not a lock file of mine")
+  }
+
+  "HostFileBackend.open" should "refuse a file system whose probe finds aliasing it cannot see" in {
+    val aliasing = HostFileBackend.open(dir, locks, probe = _ => Right(Vector("8.3 short names")))
+    aliasing.left.value.message should (include("8.3 short names").and(include("StoreFileBackend")))
+  }
+
+  it should "refuse a root it cannot probe, unless the caller vouches for its file system" in {
+    val unprobed = (_: Path) => Left(ValidationError("root", "cannot be probed"))
+    HostFileBackend.open(dir, locks, probe = unprobed).left.value.message should include("cannot be probed")
+    HostFileBackend.open(dir, locks, probe = unprobed, allowUnprobed = true).isRight shouldBe true
+  }
+
+  it should "probe a local file system and find nothing, leaving no probe file" in {
+    assume(posix)
+    HostFileBackend.probeAliases(dir).value shouldBe empty
+    Files.list(dir).iterator().asScala.toVector shouldBe empty
+  }
+
+  "HostFileBackend" should "refuse a name ending in a dot or a space, which Windows reads as another" in {
+    backend.write(p("/a."), "x", call()).left.value.message should include("ending in a dot or a space")
+    backend.write(p("/d /a.txt"), "x", call()).left.value.message should include("ending in a dot or a space")
   }
 
   it should "replace or delete a file over maxFileBytes, though it cannot read or edit one" in {
