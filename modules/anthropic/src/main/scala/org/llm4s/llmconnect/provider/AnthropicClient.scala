@@ -11,7 +11,12 @@ import com.anthropic.config.{
 }
 import com.anthropic.core.{ JsonObject, ObjectMappers, RequestOptions }
 import com.anthropic.models.messages.{
+  Base64ImageSource,
+  Base64PdfSource,
   ContentBlockParam,
+  DocumentBlockParam,
+  ImageBlockParam,
+  PlainTextSource,
   Message,
   MessageCreateParams,
   MessageParam,
@@ -22,8 +27,11 @@ import com.anthropic.models.messages.{
   ThinkingConfigEnabled,
   Tool,
   ToolResultBlockParam,
-  ToolUseBlockParam
+  ToolUseBlockParam,
+  UrlImageSource,
+  UrlPdfSource
 }
+import org.llm4s.media.{ ImageMediaType, MediaSource, MediaType }
 
 import scala.collection.mutable
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
@@ -66,7 +74,14 @@ import scala.util.{ Try, Using }
  *    one user turn. A tool call with no `ToolMessage` in the conversation
  *    is left out (Anthropic rejects an unanswered `tool_use`), and a
  *    `ToolMessage` whose call is not in the conversation - after pruning,
- *    say - is sent as user text prefixed `"[Tool result for <toolCallId>]: "`.
+ *    say - is sent as user text prefixed `"[Tool result for <toolCallId>]: "`,
+ *    followed by its media blocks.
+ *
+ *  - **Content parts**: user messages and tool results send text; PNG, JPEG,
+ *    GIF and WebP images by URL or inline; PDFs by URL or inline; and inline
+ *    plain text as a `text` document. Any other part - a provider file, another
+ *    image or document type, plain text by URL - fails the request with
+ *    `UnsupportedContentPartError` before anything is sent.
  *
  *  - **Thinking replayed**: an `AssistantMessage`'s signed thinking blocks
  *    and redacted thinking go back first in its turn, unchanged and in
@@ -169,6 +184,8 @@ class AnthropicClient(
         RequestTransformer.default(registryService),
         dropUnsupported = true
       )
+      // a part Anthropic cannot take fails the request here, before anything is sent
+      .flatMap(t => AnthropicClient.checkParts(providerName, t.messages).map(_ => t))
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
 
@@ -259,6 +276,8 @@ curl https://api.anthropic.com/v1/messages \
         RequestTransformer.default(registryService),
         dropUnsupported = true
       )
+      // a part Anthropic cannot take fails the request here, before anything is sent
+      .flatMap(t => AnthropicClient.checkParts(providerName, t.messages).map(_ => t))
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
 
@@ -528,9 +547,19 @@ curl https://api.anthropic.com/v1/messages \
         paramsBuilder.system(appendJsonInstruction(content, options))
         hasSystemMessage = true
 
-      case (UserMessage(content), _) =>
+      case (um: UserMessage, _) =>
         flushResults()
-        paramsBuilder.addUserMessage(content)
+        um.parts match {
+          case Vector(ContentPart.Text(text)) => paramsBuilder.addUserMessage(text)
+          case parts =>
+            paramsBuilder.addMessage(
+              MessageParam
+                .builder()
+                .role(MessageParam.Role.USER)
+                .contentOfBlockParams(parts.map(AnthropicClient.userPart).asJava)
+                .build()
+            )
+        }
 
       case (original: AssistantMessage, index) =>
         flushResults()
@@ -553,16 +582,21 @@ curl https://api.anthropic.com/v1/messages \
           )
         }
 
-      case (ToolMessage(content, toolCallId), index) if pairing.resultPaired(index) =>
-        pendingResults += ContentBlockParam.ofToolResult(
-          ToolResultBlockParam.builder().toolUseId(toolCallId).content(content).build()
-        )
+      case (tm: ToolMessage, index) if pairing.resultPaired(index) =>
+        val result = ToolResultBlockParam.builder().toolUseId(tm.toolCallId)
+        tm.parts match {
+          case Vector(ContentPart.Text(text)) => result.content(text)
+          case parts                          => result.contentOfBlocks(parts.map(AnthropicClient.toolPart).asJava)
+        }
+        pendingResults += ContentBlockParam.ofToolResult(result.build())
 
-      case (ToolMessage(content, toolCallId), _) =>
-        // no tool_use it can answer here (pruned, or not straight before it), so it goes as text
+      case (tm: ToolMessage, _) =>
+        // no tool_use it can answer here (pruned, or not straight before it), so it goes as text,
+        // followed by its media as blocks of the same user turn
         pendingTexts += ContentBlockParam.ofText(
-          TextBlockParam.builder().text(s"[Tool result for $toolCallId]: $content").build()
+          TextBlockParam.builder().text(s"[Tool result for ${tm.toolCallId}]: ${tm.content}").build()
         )
+        pendingTexts ++= tm.parts.filter(ContentPart.isMedia).map(AnthropicClient.userPart)
     }
     flushResults()
 
@@ -826,6 +860,62 @@ curl https://api.anthropic.com/v1/messages \
 }
 
 object AnthropicClient {
+
+  // ---- content parts ----
+
+  private def imageMediaType(mt: ImageMediaType): Option[Base64ImageSource.MediaType] = mt match {
+    case MediaType.Png  => Some(Base64ImageSource.MediaType.IMAGE_PNG)
+    case MediaType.Jpeg => Some(Base64ImageSource.MediaType.IMAGE_JPEG)
+    case MediaType.Gif  => Some(Base64ImageSource.MediaType.IMAGE_GIF)
+    case MediaType.WebP => Some(Base64ImageSource.MediaType.IMAGE_WEBP)
+    case _              => None
+  }
+
+  /**
+   * The media blocks Anthropic takes, in a user turn and in a tool result alike: a PNG, JPEG, GIF or WebP
+   * image by URL or inline; a PDF by URL or inline; plain text inline, as its UTF-8 text. A provider file
+   * needs the beta Files API, so it is not covered.
+   */
+  private val media: PartialFunction[ContentPart, Either[ImageBlockParam, DocumentBlockParam]] = {
+    case ContentPart.Image(MediaSource.Url(uri), mt) if imageMediaType(mt).isDefined =>
+      Left(ImageBlockParam.builder().source(UrlImageSource.builder().url(uri.toString).build()).build())
+    case ContentPart.Image(inline: MediaSource.Inline, mt) if imageMediaType(mt).isDefined =>
+      Left(
+        ImageBlockParam
+          .builder()
+          .source(
+            Base64ImageSource.builder().data(PartEncoding.base64(inline)).mediaType(imageMediaType(mt).get).build()
+          )
+          .build()
+      )
+    case ContentPart.Document(MediaSource.Url(uri), MediaType.Pdf) =>
+      Right(DocumentBlockParam.builder().source(UrlPdfSource.builder().url(uri.toString).build()).build())
+    case ContentPart.Document(inline: MediaSource.Inline, MediaType.Pdf) =>
+      Right(
+        DocumentBlockParam.builder().source(Base64PdfSource.builder().data(PartEncoding.base64(inline)).build()).build()
+      )
+    case ContentPart.Document(inline: MediaSource.Inline, MediaType.PlainText) =>
+      val text = new String(PartEncoding.bytes(inline), java.nio.charset.StandardCharsets.UTF_8)
+      Right(DocumentBlockParam.builder().source(PlainTextSource.builder().data(text).build()).build())
+  }
+
+  /** A part of a user turn as a content block. */
+  private[provider] val userPart: PartialFunction[ContentPart, ContentBlockParam] = {
+    case ContentPart.Text(text)          => ContentBlockParam.ofText(TextBlockParam.builder().text(text).build())
+    case part if media.isDefinedAt(part) => media(part).fold(ContentBlockParam.ofImage, ContentBlockParam.ofDocument)
+  }
+
+  /** A part of a tool result as a `tool_result` content block. */
+  private[provider] val toolPart: PartialFunction[ContentPart, ToolResultBlockParam.Content.Block] = {
+    case ContentPart.Text(text) =>
+      ToolResultBlockParam.Content.Block.ofText(TextBlockParam.builder().text(text).build())
+    case part if media.isDefinedAt(part) =>
+      media(part).fold(ToolResultBlockParam.Content.Block.ofImage, ToolResultBlockParam.Content.Block.ofDocument)
+  }
+
+  /** `Right` when every part of `messages` is one Anthropic takes, else the error naming the first that is not. */
+  private[provider] def checkParts(provider: String, messages: Seq[org.llm4s.llmconnect.model.Message]): Result[Unit] =
+    PartEncoding.check(provider, messages, userPart, toolPart)
 
   /**
    * An SDK failure as an [[org.llm4s.error.LLMError]]. The SDK's exception messages carry the service's
