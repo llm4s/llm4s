@@ -33,7 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   approval is checked again. `withTimeout(FiniteDuration)` bounds each run of a tool: past it the tool is interrupted
   and the model sees `Tool '<name>' timed out after <n> ms`. `withLocks(A => Set[LockKey])` orders the calls of one
   model message whose locks conflict (one key a prefix of the other): they run in successive supersteps, in call
-  order, each seeing the state the earlier committed. `ToolCallRequest` gains `resources`; `tool-queue` is a new key
+  order, each seeing the state the earlier committed; an approval edit that takes a lock the proposed call did not
+  hold is refused. `ToolCallRequest` gains `resources`; `tool-queue` is a new key
   the loop owns. Design §4.23; guide: Tool Permissions, Timeouts and Locks.
 - **Replay of external effects: `ReplayGuard`, `EffectKey` and `ReplayContract`** ([#1921](https://github.com/llm4s/llm4s/issues/1921)).
   This is Phase 3 slice C4. A tool or hook performs an effect outside thread state through `ReplayGuard`, which has

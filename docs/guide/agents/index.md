@@ -425,7 +425,9 @@ val agent = Agent.builder("coder", client)
 `Glob` matches the target decides, and a resource no rule matches is denied. A call runs only if
 every resource is allowed: a denial is the error result `Denied: <operation> <target>`, an `Ask`
 suspends the call for approval. A tool that declares no resources touches `(Invoke, <tool name>)`,
-so it needs an `Invoke` rule. Approval is one flag per call: once a reviewer approves the call,
+so it needs an `Invoke` rule. Resources are the call's whole envelope: a tool that asks a question and lets
+the answer choose its target declares a resource covering every target it may pick (`/out/**`) and
+refuses an answer outside it, because the check runs on the declaration, not on what the tool does. Approval is one flag per call: once a reviewer approves the call,
 every `Ask` passes. An edited call is checked again on its new arguments, so a deny rule still
 refuses it. Rules see the arguments after the schema check and decoding. In a `Glob`, `*` and `?`
 stay within one `/`-separated segment and `**` crosses them. An `Execute` rule limits which
@@ -449,7 +451,9 @@ exact, and two calls writing one key no longer lose one of the writes. Calls wit
 locks still run in parallel. Each further round costs two supersteps of `RunBudgets.maxSupersteps`.
 A call that waits for approval holds back the calls queued behind it, so a reviewer can see a
 batch's approvals in more than one round. Locks order calls within one batch only, not across
-threads.
+threads. An approval edit may narrow a call's locks (`/prod` to `/prod/app`) but not take a lock
+its proposed arguments did not cover: such an edit is refused, the call does not run, and the model
+sees why.
 
 ---
 

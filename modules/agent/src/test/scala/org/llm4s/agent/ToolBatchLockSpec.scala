@@ -263,6 +263,117 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
     toolResults(done) shouldBe Vector("1", "2", "3")
   }
 
+  /**
+   * A `write` tool locked and permissioned on its path (`text`), incrementing the counter; `failing` paths
+   * fail with `Fatal` while `broken` is set. A recording middleware inside the permissions keeps the
+   * resources each run of the chain reported.
+   */
+  final private class EditFixture(rules: Seq[PermissionRule], failing: Set[String] = Set.empty) {
+    val ran       = new CopyOnWriteArrayList[String]()
+    val resources = new CopyOnWriteArrayList[Vector[ToolResource]]()
+    val broken    = new AtomicBoolean(true)
+    private val spec = SpecTools
+      .spec("write")
+      .withLocks(t => Set(LockKey(t.text)))
+      .withResources(t => Vector(ToolResource(Operation.Write, t.text)))
+    private val tool = AgentTool(spec, writes = Set(counter)) { (t, context) =>
+      if (failing.contains(t.text) && broken.get) ToolOutcome.Fatal(ValidationError("write", "down"))
+      else {
+        ran.add(t.text)
+        val next = context.state.get(counter).fold(e => fail(e.message), identity) + 1
+        ToolOutcome.Success(ujson.Str(next.toString), StateUpdate.update(counter, next))
+      }
+    }
+    private val recording = new org.llm4s.agent.graph.middleware.AgentMiddleware {
+      val id = org.llm4s.agent.graph.middleware.MiddlewareId("recording")
+      override def wrapToolCall(
+        request: org.llm4s.agent.graph.middleware.ToolCallRequest,
+        context: org.llm4s.agent.graph.tool.ToolContext
+      )(next: () => ToolOutcome): ToolOutcome = {
+        resources.add(request.resources)
+        next()
+      }
+    }
+    def agent(client: ScriptedLLMClient): Agent =
+      built(
+        Agent
+          .builder("assistant", client)
+          .withTools(SpecTools.set(tool))
+          .withMiddleware(new PermissionMiddleware(rules), recording)
+      )
+  }
+
+  private def approvalOf(result: AgentResult) = result.status match {
+    case AgentStatus.Suspended(pending, _, _, _) => pending.map(_._1).head
+    case other                                   => fail(s"expected Suspended, got $other")
+  }
+
+  private def editRules = Seq(
+    PermissionRule.ask(Operation.Write, "/prod"),
+    PermissionRule.ask(Operation.Write, "/prod/app"),
+    PermissionRule.allow(Operation.Write, "/prod/**"),
+    PermissionRule.allow(Operation.Write, "/tmp/**")
+  )
+
+  "An edit at approval" should "be refused when it takes a lock the proposed call's locks do not cover" in {
+    // c1 waits for approval; c2, not conflicting with c1's proposed lock, runs and commits beside it
+    val fixture = new EditFixture(editRules)
+    val client =
+      ScriptedLLMClient.of(
+        calling(call("c1", "write", "/prod"), call("c2", "write", "/tmp")),
+        CompletionFixture.simple("ok")
+      )
+    val agent  = fixture.agent(client)
+    val parked = agent.run("go").value
+    fixture.ran.asScala.toVector shouldBe Vector("/tmp")
+
+    // an edit onto c2's lock would run c1 after c2 although it comes first: refused, nothing runs
+    val done = agent.resume(parked.threadId, Map(parked.edit(approvalOf(parked), ujson.Obj("text" -> "/tmp")))).value
+    fixture.ran.asScala.toVector shouldBe Vector("/tmp")
+    toolResults(done) shouldBe Vector(ujson.Obj("error" -> ToolLoop.EditTakesLocks).render(), "1")
+    // the stored call keeps its proposed arguments
+    done.messages.collectFirst {
+      case a: AssistantMessage if a.toolCalls.nonEmpty => a.toolCalls.head.arguments
+    } shouldBe
+      Some(ujson.Obj("text" -> "/prod"))
+  }
+
+  it should "run an edit whose locks the proposed ones cover, reporting and checking the edited resources" in {
+    val fixture = new EditFixture(editRules)
+    val client  = ScriptedLLMClient.of(calling(call("c1", "write", "/prod")), CompletionFixture.simple("ok"))
+    val agent   = fixture.agent(client)
+    val parked  = agent.run("go").value
+
+    agent.resume(parked.threadId, Map(parked.edit(approvalOf(parked), ujson.Obj("text" -> "/prod/app")))).value
+    fixture.ran.asScala.toVector shouldBe Vector("/prod/app")
+    // the permission check ran on the edited resource (an Ask, passed as approved), and wrappers saw it
+    fixture.resources.asScala.toVector.last shouldBe Vector(ToolResource(Operation.Write, "/prod/app"))
+  }
+
+  it should "keep the queue's calls behind the edited call, with their own arguments, through a failure and recover" in {
+    // c2's lock is beneath c1's, so c2 waits in the queue while c1 waits for approval
+    val fixture = new EditFixture(editRules, failing = Set("/prod/lib"))
+    val client = ScriptedLLMClient.of(
+      calling(call("c1", "write", "/prod"), call("c2", "write", "/prod/lib")),
+      CompletionFixture.simple("ok")
+    )
+    val agent  = fixture.agent(client)
+    val thread = ThreadId("edit-recover")
+    val parked = agent.run(thread, "go").value
+    fixture.ran.size shouldBe 0
+
+    // the edited c1 runs; c2 fails in the next round, and the thread waits for recover
+    cause(agent.resume(thread, Map(parked.edit(approvalOf(parked), ujson.Obj("text" -> "/prod/app")))).error) shouldBe
+      a[GraphError.ToolFailed]
+    fixture.ran.asScala.toVector shouldBe Vector("/prod/app")
+
+    // recover schedules c2 again from the stored queue, after c1's committed write
+    fixture.broken.set(false)
+    val done = agent.recover(thread).value
+    fixture.ran.asScala.toVector shouldBe Vector("/prod/app", "/prod/lib")
+    toolResults(done) shouldBe Vector("1", "2")
+  }
+
   "The tool queue" should "be a key the loop owns" in {
     val sneaky =
       AgentTool(SpecTools.spec("sneaky"), writes = Set(ToolLoop.queue))((_, _) => ToolOutcome.Success(ujson.Str("x")))

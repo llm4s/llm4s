@@ -109,4 +109,50 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
     helperClient.callCount shouldBe 1
     rootClient.callCount shouldBe 1
   }
+
+  private def fingerprint(tool: org.llm4s.agent.graph.tool.AgentTool[?]): String =
+    built(Agent.builder("root", client).withTools(SpecTools.set(tool))).loop.graph.fingerprint
+
+  private def echoWith(spec: org.llm4s.agent.graph.tool.AgentToolSpec[SpecTools.Text]) =
+    org.llm4s.agent.graph.tool.AgentTool(spec)((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
+
+  "The structural fingerprint" should "not change with timeouts or resources, nor without locks: no tool-queue key" in {
+    import scala.concurrent.duration._
+    import org.llm4s.agent.graph.tool.{ Operation, ToolResource }
+    val plain = fingerprint(echoWith(SpecTools.spec("echo")))
+    fingerprint(
+      echoWith(
+        SpecTools.spec("echo").withTimeout(1.second).withResources(t => Vector(ToolResource(Operation.Read, t.text)))
+      )
+    ) shouldBe plain
+    // a tool with locks adds the loop's tool-queue key, a change of structure
+    fingerprint(echoWith(SpecTools.spec("echo").withLocks(_ => Set.empty))) should not be plain
+  }
+
+  "A thread checkpointed without locks" should "resume in a rebuild with timeouts, and be refused by one with locks" in {
+    import scala.concurrent.duration._
+    val runtime = GraphRuntime.inMemory()
+    val thread  = ThreadId("unlocked")
+    def agent(spec: org.llm4s.agent.graph.tool.AgentToolSpec[SpecTools.Text], replies: Completion*) =
+      built(
+        Agent
+          .builder("root", ScriptedLLMClient.of(replies*))
+          .withTools(SpecTools.set(echoWith(spec)))
+          .withMiddleware(new ApprovalMiddleware(_ => Some("review")))
+          .withRuntime(runtime)
+      )
+    val parked =
+      agent(SpecTools.spec("echo"), SpecTools.calling(SpecTools.call("c1", "echo"))).run(thread, "go").value
+    val approve = parked.status match {
+      case AgentStatus.Suspended(approvals, _, _, _) => parked.approve(approvals.head._1)
+      case other                                     => fail(s"expected Suspended, got $other")
+    }
+
+    agent(SpecTools.spec("echo").withLocks(_ => Set.empty)).resume(thread, Map(approve)).error shouldBe
+      a[GraphError.RestoreRejected]
+    agent(SpecTools.spec("echo").withTimeout(5.seconds), CompletionFixture.simple("done"))
+      .resume(thread, Map(approve))
+      .value
+      .answer shouldBe Some("done")
+  }
 }

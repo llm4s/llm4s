@@ -431,6 +431,13 @@ final class ToolLoop private (
 
 object ToolLoop:
 
+  /**
+   * The error result of an approval whose edited arguments take a lock the proposed arguments' locks do
+   * not cover (`AgentToolSpec.withLocks`): the call was scheduled with those locks, so it does not run.
+   */
+  val EditTakesLocks: String =
+    "Edit refused: the edited arguments take locks the call was not scheduled with; the call did not run"
+
   /** The tool a durable `ToolExecuted` names for a call to a tool the agent does not have. */
   val UnknownTool: String = "<unknown>"
 
@@ -577,6 +584,17 @@ object ToolLoop:
     def stack: MiddlewareStack       = prepared.stack
     def asking: Vector[AgentTool[?]] = tools.tools.filter(_.spec.question.isDefined)
 
+    /**
+     * [[ToolLoop.queue]], when one of the agent's tools declares locks; otherwise the key is not part of the
+     * graph, so an agent without locks keeps the structural fingerprint it had before locks existed, and
+     * restores the checkpoints written then.
+     */
+    def queueKey: Option[StateKey[Vector[ToolTask], Vector[ToolTask]]] =
+      Option.when(tools.tools.exists(_.spec.locksOf.isDefined))(queue)
+
+    /** What the model node, and a model wrapper's question node, may write. */
+    def modelWrites: Set[StateKey[?, ?]] = ToolLoop.modelWrites ++ queueKey
+
     /** What the call-tool, approval and ask nodes may write: any tool's keys; each call is checked against its own tool's. */
     def callWrites: Set[StateKey[?, ?]] =
       tools.tools.flatMap(_.writes).toSet ++ stack.writes ++ Set(results, Messages.key)
@@ -593,7 +611,7 @@ object ToolLoop:
 
   /** What a node writes when it runs a middleware hook again: the model's and the finish's write sets. */
   private val modelWrites: Set[StateKey[?, ?]] =
-    Set(Messages.key, LoopKeys.usage, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer, queue)
+    Set(Messages.key, LoopKeys.usage, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer)
   private val finishWrites: Set[StateKey[?, ?]] =
     Set(Messages.key, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer)
   private val inputWrites: Set[StateKey[?, ?]] = Set(Messages.key, LoopKeys.activeAgent, LoopKeys.turn)
@@ -753,7 +771,7 @@ object ToolLoop:
     def implementAsked[A](owner: AgentNodes, hook: MiddlewareHook, asked: AskedRef[A]): Unit =
       val writes = hook match
         case MiddlewareHook.BeforeAgent   => inputWrites
-        case MiddlewareHook.WrapModelCall => modelWrites
+        case MiddlewareHook.WrapModelCall => owner.modelWrites
         case MiddlewareHook.WrapToolCall  => owner.callWrites
         case MiddlewareHook.AfterAgent    => finishWrites
       b.implement(asked.ref.node, writes = writes) { (resumed, state, context) =>
@@ -856,6 +874,11 @@ object ToolLoop:
       resumed.answer match
         case ApprovalDecision.Approve        => pipeline.approved(task, request.call, state, context, request.answered)
         case ApprovalDecision.Reject(reason) => pipeline.rejected(task, reason, context)
+        // the call was scheduled with its proposed locks: an edit that would take a lock they do not cover
+        // could run it out of order with a call of its batch that has committed or runs beside it, so it is
+        // refused, the call unrun and its stored arguments unchanged
+        case ApprovalDecision.Edit(arguments) if !pipeline.locksCovered(request.call, arguments) =>
+          pipeline.error(task, ToolLoop.EditTakesLocks, context)
         case ApprovalDecision.Edit(arguments) =>
           val edit = StateUpdate.update(
             messages,
@@ -981,7 +1004,7 @@ object ToolLoop:
       }
       outcome.fold(NodeResult.Fail(_), identity)
 
-    b.implement(nodes.model, writes = modelWrites)((_, state, context) => modelStep(state, context, Vector.empty))
+    b.implement(nodes.model, writes = nodes.modelWrites)((_, state, context) => modelStep(state, context, Vector.empty))
 
     // this agent's afterAgent stack, then - for a handoff target - the root's, which guards the whole family
     val boundaryOwners = if agent.id == root then Vector(nodes) else Vector(nodes, family(root))
@@ -1066,11 +1089,13 @@ object ToolLoop:
           .remove(results)
           .goto(nodes.model)
 
-    b.implement(nodes.collect, writes = Set(messages, results, queue)) { (_, state, context) =>
+    b.implement(nodes.collect, writes = Set(messages, results) ++ nodes.queueKey) { (_, state, context) =>
       NodeResult.fromResult(
-        state
-          .get(queue)
-          .flatMap(waiting => if waiting.nonEmpty then Right(nextRound(waiting)) else collected(state, context))
+        nodes.queueKey.fold(collected(state, context)) { key =>
+          state
+            .get(key)
+            .flatMap(waiting => if waiting.nonEmpty then Right(nextRound(waiting)) else collected(state, context))
+        }
       )
     }
 
@@ -1440,8 +1465,23 @@ object ToolLoop:
         if (0 until i).exists(j => conflict(locks(i), locks(j))) then Right(tasks(i)) else Left(tasks(i))
       }
 
+    /**
+     * Whether `call` with its arguments replaced by `edited` takes only locks its proposed arguments'
+     * locks cover: each edited lock has a proposed one as a prefix, so every call that conflicts with
+     * the edited call conflicted with the proposed one, and the batch's order still holds.
+     */
+    def locksCovered(call: ToolCall, edited: ujson.Value): Boolean =
+      tools.get(call.name).forall { tool =>
+        val proposed = locksOf(tool, call)
+        locksOf(tool, call.copy(arguments = edited)).forall(k =>
+          proposed.exists(p => k.segments.startsWith(p.segments))
+        )
+      }
+
     private def locksOf[A](tool: AgentTool[A], call: ToolCall): Set[LockKey] =
-      decode(tool, call).fold(_ => Set.empty, args => Try(tool.spec.locksOf(args)).getOrElse(Set(LockKey(""))))
+      tool.spec.locksOf.fold(Set.empty[LockKey]) { locks =>
+        decode(tool, call).fold(_ => Set.empty, args => Try(locks(args)).getOrElse(Set(LockKey(""))))
+      }
 
     private def decode[A](tool: AgentTool[A], call: ToolCall): Either[String, A] =
       read(argumentsOf(tool, call))(using tool.spec.codec)
