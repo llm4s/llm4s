@@ -1645,6 +1645,68 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
         }
     }
 
+  "A change given up on as Lapsed, whose write was already in the store" should
+    "still let that write land before its release, so Lapsed does not mean unchanged" in {
+      val time  = ManualTime()
+      val store = Hooked(InMemoryCheckpointer(time))
+      val two   = TwoStep()
+      two.gate.countDown()
+      await(runtime(store, time, slow).start(thread, two.graph, "x", run("first")).value).completed
+      val latest   = store.latest(thread).value.value
+      val entering = new CountDownLatch(1)
+      val hang     = new CountDownLatch(1)
+      val landed   = new CountDownLatch(1)
+      // the change's commit enters the store and stays there, interrupted or not, until `hang` opens
+      store.onCommit = commit =>
+        if commit.events.exists(_.runId == "change") && entering.getCount > 0 then {
+          entering.countDown()
+          stuckUntil(hang)
+          val landing = store.underlying.commit(thread, commit)
+          landed.countDown()
+          Some(landing)
+        } else None
+      // the detached release reaches the store only once the write has landed
+      val releasing = new CountDownLatch(1)
+      store.onRelease = () => {
+        releasing.countDown()
+        landed.await(5, TimeUnit.SECONDS): Unit
+        None
+      }
+      val rt             = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      val releasedBefore = store.released.get
+      val outcome        = new java.util.concurrent.LinkedBlockingQueue[Result[Checkpoint]]()
+      Thread
+        .ofVirtual()
+        .start(() =>
+          outcome.offer(
+            rt.updateState(
+              thread,
+              two.graph,
+              latest.checkpoint.id,
+              StateUpdate.update(two.log, "fixed"),
+              config = run("change")
+            )
+          ): Unit
+        )
+      entering.await(5, TimeUnit.SECONDS) shouldBe true
+
+      // the lease passes with the write in the store: the change is given up on, Lapsed
+      store.onRenew = unreachable
+      time.advance(1.second)
+      Option(outcome.poll(5, TimeUnit.SECONDS)).value.left.value shouldBe
+        GraphError.ThreadBusy("t", None, GraphError.BusyHolder.Lapsed)
+      rt.heldLocally(thread) shouldBe false
+
+      // nobody took the thread over, so the write lands: the thread is not unchanged
+      releasing.await(5, TimeUnit.SECONDS) shouldBe true
+      hang.countDown()
+      landed.await(5, TimeUnit.SECONDS) shouldBe true
+      eventually(store.released.get == releasedBefore + 1)
+      val after = store.latest(thread).value.value.checkpoint
+      after.runId shouldBe "change"
+      after.parent shouldBe Some(latest.checkpoint.id)
+    }
+
   "A change whose claim is found lost before its commit begins" should
     "never reach the store with it, and be ThreadBusy, for fork, updateState and deleteThread" in {
       for how <- changes do

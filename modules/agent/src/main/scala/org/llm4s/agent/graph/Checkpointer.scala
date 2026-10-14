@@ -50,6 +50,9 @@ import scala.util.Try
  *    still available when asked to replay from before it ([[GraphError.ReplayUnavailable]]);
  *  - store checkpoints and pending writes as data ([[Checkpoint.toJson]], `PendingWrite`'s
  *    `ReadWriter`), so nothing executable survives a round trip;
+ *  - keep what it stores apart from the values its callers hold: `ujson` values are mutable, so changing
+ *    a checkpoint, pending write or event payload after committing it, or one a read or a commit
+ *    returned, must change nothing stored or later read back;
  *  - return from [[awaitEventsAfter]] with what [[eventsAfter]] would, at once if the log already
  *    holds an event after `afterSeq`, and otherwise within about `timeout` - with the events of a
  *    commit made meanwhile through any store over the same storage, or empty;
@@ -67,8 +70,10 @@ trait Checkpointer:
   /**
    * Claims `threadId` for `request.holder` until `request.ttl` from now, by the store's clock, if no
    * other claim on it is live, and returns the claim with a new [[FencingToken]]. A live claim -
-   * whoever holds it, the same holder included - is `Left(GraphError.ThreadBusy)` naming its holder,
-   * with nothing changed. A thread need not have a checkpoint to be claimed. A claim that replaces an
+   * whoever holds it, the same holder included - is `Left(GraphError.ThreadBusy(threadId, latest,
+   * GraphError.BusyHolder.Run(holder)))`, naming its holder and the thread's latest checkpoint id, with
+   * nothing changed; a store never returns the runtime-level [[GraphError.BusyHolder.Unnamed]] or
+   * [[GraphError.BusyHolder.Lapsed]]. A thread need not have a checkpoint to be claimed. A claim that replaces an
    * expired one nobody released names that claim's holder as [[RunClaim.takenOverFrom]].
    */
   def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim]

@@ -1308,8 +1308,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `holder: GraphError.BusyHolder` (was `Option[String]`, default `None`): `BusyHolder.Run(runId: RunId)` names the
   holding run when the caller may see it, `BusyHolder.Unnamed` (the default) is another run that cannot be named, and
   the new `BusyHolder.Lapsed` is a `fork`, `updateState` or `deleteThread` whose own claim lapsed - its lease passed,
-  or the store named no current claim - before its write landed, with no other run known to hold the thread. Those
-  used to say "held by another run" when nobody held it. `ThreadBusy` is now a `RecoverableError`, so
+  or the store named no current claim - before its write was known to land, with no other run known to hold the
+  thread; a write it had already sent may still land. Those used to say "held by another run" when nobody held it. `ThreadBusy` is now a `RecoverableError`, so
   `LLMError.isRecoverable`, `RetryPolicy` and `ErrorRecovery` retry it, as its message always said to. `threadId`
   stays a `String`, as in every `GraphError`. See the [migration guide](docs/reference/migration.md#durable-checkpointer-contract-1700).
 - **`GraphRuntime.inMemory(clock)` gives its `InMemoryCheckpointer` the same clock, and takes a `ClaimPolicy`** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):

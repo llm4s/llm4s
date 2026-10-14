@@ -89,7 +89,7 @@ b.recover(threadId, graph) match
   case other => ()
 ```
 
-Nothing is accepted or discarded, so `ThreadBusy` is a `RecoverableError`: the caller retries, and generic retry
+A refusal up front accepts and discards nothing, so `ThreadBusy` is a `RecoverableError`: the caller retries, and generic retry
 code (`RetryPolicy`, `ErrorRecovery`) does too. `holder` is a `GraphError.BusyHolder`:
 
 - `Run(runId)`, the holding run, when the caller may see it: the thread's latest checkpoint is the caller's
@@ -99,8 +99,10 @@ code (`RetryPolicy`, `ErrorRecovery`) does too. `holder` is a `GraphError.BusyHo
   and the holder is in another runtime, so its tenant cannot be checked, or a change's write was refused as stale
   naming only the claim that replaced it;
 - `Lapsed`, when it is the call's own claim that was lost - a `fork`, `updateState` or `deleteThread` whose lease
-  passed, or whose store named no current claim, before its write landed - and no other run is known to hold the
-  thread. A retry is likely admitted at once.
+  passed, or whose store named no current claim, before its write was known to land - and no other run is known
+  to hold the thread. A write not yet sent was never applied, but one already in the store when the loss was found
+  may still land, fenced by the token: read the thread before retrying. A retry can still be refused, by the
+  call's own claim until its release lands or by a run that took the thread over meanwhile.
 
 ## Recovering a run whose process died
 

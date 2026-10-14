@@ -536,7 +536,7 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val lapsed = GraphError.ThreadBusy("t", Some("c"), GraphError.BusyHolder.Lapsed).message
     (lapsed should not).include("held by")
     lapsed shouldBe
-      "Thread 't' was left unchanged: this call's claim on it lapsed before its write landed, and no other run is known to hold it (now at c); retry"
+      "Thread 't': this call's claim on it lapsed before its write was known to land, and no other run is known to hold it; a write already sent may still land (now at c); retry"
   }
 
   "ThreadBusy" should "be recoverable, so generic retry code retries it" in {
@@ -560,6 +560,20 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     clock.advance(1.day + 1.second)
     rt.prune(thread, RetentionPolicy.keepAll.withMaxAge(1.day)).value shouldBe (())
     rt.history(thread).value.map(_.id) shouldBe kept.take(1)
+  }
+
+  it should "let its store expire claims by the clock it was given" in {
+    val clock = MovingClock()
+    val rt    = GraphRuntime.inMemory(clock, ClaimPolicy(1.minute, 10.seconds))
+    val held  = Held()
+    val first = rt.start(thread, held.graph, "a", run("a")).value
+    held.awaitEntered()
+    rt.store.claim(thread, ClaimRequest(RunId("thief"), 1.minute)).left.value shouldBe a[GraphError.ThreadBusy]
+    // past the claim's ttl by the given clock, though not by the system's: the store lets it be taken over
+    clock.advance(2.minutes)
+    rt.store.claim(thread, ClaimRequest(RunId("thief"), 1.minute)).value.takenOverFrom shouldBe Some(RunId("a"))
+    held.gate.countDown()
+    awaitResult(first).value.failed._2 shouldBe a[GraphError.ClaimLost]
   }
 
   it should "take a claim policy" in {

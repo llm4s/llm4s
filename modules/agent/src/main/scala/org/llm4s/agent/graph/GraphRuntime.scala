@@ -1281,6 +1281,9 @@ final class GraphRuntime(
   /** A test hook run by [[release]] between forgetting the hand-over mark and freeing the local slot. */
   @volatile private[graph] var releasingLocally: ThreadId => Unit = _ => ()
 
+  /** The runtime's store; for tests. */
+  private[graph] def store: Checkpointer = checkpointer
+
   /** Whether a thread is waiting for `activeLock`; for tests. */
   private[graph] def activeLockContended: Boolean = activeLock.hasQueuedThreads
 
@@ -2119,7 +2122,7 @@ final class GraphRuntime(
       signal.acknowledge()
       if cause.get.contains(StopCause.ClaimLost) then
         GraphRuntime.logger.warn(
-          s"Run '${runId.value}' on thread '${threadId.value}' crashed after losing its claim",
+          s"Run ${named(runId)} on thread '${threadId.value}' crashed after losing its claim",
           thrown
         )
         lostClaim(position._1, None)

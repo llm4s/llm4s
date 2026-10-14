@@ -221,9 +221,11 @@ object GraphError:
     case Unnamed
 
     /**
-     * No other run is known to hold the thread: the call's own claim lapsed - its lease passed with no
-     * renewal landing, or the store found no current claim - before its write landed. Nothing was
-     * applied, and a retry will likely be admitted at once.
+     * No other run is known to hold the thread: the call's own claim was lost - its lease passed with no
+     * renewal landing, or the store found no current claim - before its write was known to land. A write
+     * not yet sent was never applied; one already in the store when the loss was found may still land,
+     * fenced by the claim's token, so read the thread before retrying. A retry may still be refused: by
+     * this call's own claim until its release lands, or by another run that took the thread over meanwhile.
      */
     case Lapsed
 
@@ -232,8 +234,9 @@ object GraphError:
    * another runtime or process holds a live claim on it ([[RunClaim]]), or it claimed the thread
    * between this call reading it and claiming it; or the call's own claim lapsed before its write
    * landed. `start`, `recover`, `resume`, `deleteThread`, `updateState` and `fork` (on its target
-   * thread) are refused this way. Nothing was accepted, applied or discarded, so it is recoverable:
-   * retry once that run has suspended or completed, or once its claim has expired.
+   * thread) are refused this way, so it is recoverable: retry once that run has suspended or completed,
+   * or once its claim has expired. A refusal up front accepted, applied and discarded nothing. A
+   * [[BusyHolder.Lapsed]] refusal is the exception: a write the call had already sent may still land.
    *
    * `holder` says who holds the thread as far as the caller may know ([[BusyHolder]]): a run's id when
    * it is known and the caller may see it - the thread's latest checkpoint is the caller's tenant's, or,
@@ -254,7 +257,7 @@ object GraphError:
         case BusyHolder.Run(runId) => s"Thread '$threadId' is held by run '${runId.value}' (now at $at); retry"
         case BusyHolder.Unnamed    => s"Thread '$threadId' is held by another run (now at $at); retry"
         case BusyHolder.Lapsed =>
-          s"Thread '$threadId' was left unchanged: this call's claim on it lapsed before its write landed, and no other run is known to hold it (now at $at); retry"
+          s"Thread '$threadId': this call's claim on it lapsed before its write was known to land, and no other run is known to hold it; a write already sent may still land (now at $at); retry"
 
   /**
    * A commit, renewal or release presented a fencing token that is not the thread's current claim:
