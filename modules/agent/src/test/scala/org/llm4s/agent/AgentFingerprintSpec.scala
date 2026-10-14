@@ -203,9 +203,13 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
     )
     // scheduled with every call on lock "a": c2 and c3 wait in turn behind c1, which waits for approval
     val parked = stepAgent(runtime, t => Set(LockKey(t.text)), calling).run(thread, "go").value
-    // rebuilt with lock functions that would let c2 and c3 run side by side
+    // rebuilt with finer locks, within the scheduled ones, that would let c2 and c3 run side by side
     val done =
-      stepAgent(runtime, _ => Set(LockKey(java.util.UUID.randomUUID().toString)), CompletionFixture.simple("done"))
+      stepAgent(
+        runtime,
+        t => Set(LockKey(t.text, java.util.UUID.randomUUID().toString)),
+        CompletionFixture.simple("done")
+      )
         .resume(thread, approveAll(parked))
         .value
     done.answer shouldBe Some("done")
@@ -213,19 +217,23 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
     stepResults(done) shouldBe Vector("1", "2", "3")
   }
 
-  it should "not reorder calls a changed lock function would now make conflict" in {
+  it should "refuse a call whose changed lock function now takes a lock outside its schedule" in {
     import org.llm4s.agent.graph.tool.LockKey
     val runtime = GraphRuntime.inMemory()
     val thread  = ThreadId("policy-merge")
     val calling = SpecTools.calling(SpecTools.call("c1", "step", "a"), SpecTools.call("c2", "step", "b"))
     // scheduled apart: c2 commits beside c1, which waits for approval
     val parked = stepAgent(runtime, t => Set(LockKey(t.text)), calling).run(thread, "go").value
-    // rebuilt so both would share one lock: c1 is not refused or reordered, it runs as scheduled
+    // rebuilt so both would share one lock: c1 would now conflict with c2, which already ran beside it, so it
+    // does not run
     val done = stepAgent(runtime, _ => Set(LockKey("shared")), CompletionFixture.simple("done"))
       .resume(thread, approveAll(parked))
       .value
     done.answer shouldBe Some("done")
-    stepResults(done) shouldBe Vector("2", "1") // c2 ran first, as its schedule allowed; c1 saw its write
+    stepResults(done) shouldBe Vector(
+      ujson.Obj("error" -> org.llm4s.agent.graph.toolloop.ToolLoop.LocksChanged).render(),
+      "1"
+    )
   }
 
   it should "drain its recorded schedule after its agent drops its locks while another agent of the family keeps them" in {

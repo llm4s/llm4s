@@ -409,6 +409,28 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
     lockedOn.asScala.toSet shouldBe Set("a")
   }
 
+  "A call refused when its batch was scheduled" should "not run even when its arguments are admitted later" in {
+    // a stateful check: it refuses "p" the first time only, so scheduling refuses it and the run would admit it
+    val seenP = new AtomicBoolean(false)
+    val ran   = new CopyOnWriteArrayList[String]()
+    val spec = SpecTools
+      .spec("step")
+      .withValidation(t =>
+        if (t.text == "p" && !seenP.getAndSet(true)) Left(ValidationError("step", "not yet")) else Right(())
+      )
+      .withLocks(_ => Set(LockKey("shared")))
+    val tool = AgentTool(spec) { (t, _) =>
+      ran.add(t.text); ToolOutcome.Success(ujson.Str(t.text))
+    }
+    val client =
+      ScriptedLLMClient.of(calling(call("c1", "step", "p"), call("c2", "step", "q")), CompletionFixture.simple("ok"))
+    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(tool)))
+    val result = agent.run("go").value
+    // scheduled without a lock beside q, p must not run beside it
+    toolResults(result) shouldBe Vector(ujson.Obj("error" -> ToolLoop.RefusedWhenScheduled).render(), "q")
+    ran.asScala.toVector shouldBe Vector("q")
+  }
+
   "An output Block" should "retract a turn whose locked calls queued, leaving no schedule and asking approval anew" in {
     val blockOnce = new AtomicBoolean(true)
     val blocking = new org.llm4s.agent.graph.middleware.AgentMiddleware {

@@ -98,22 +98,29 @@ final case class ToolTask(assistantMessageId: String, call: ToolCall, idempotenc
  * calls still to run, in call order. The batch keeps the order its schedule gives, whatever the lock
  * functions say by the time a later round, a resume or a recover runs.
  */
-final case class LockSchedule(locks: Map[String, Vector[String]], waiting: Vector[ToolTask]) derives ReadWriter:
+final case class LockSchedule(
+  locks: Map[String, Vector[String]],
+  waiting: Vector[ToolTask],
+  refused: Set[String] = Set.empty
+) derives ReadWriter:
 
   /** The locks call `callId` was scheduled with; none if it is not in the schedule. */
   def locksOf(callId: String): Set[LockKey] = locks.getOrElse(callId, Vector.empty).map(LockKey(_)).toSet
 
   def withWaiting(w: Vector[ToolTask]): LockSchedule = copy(waiting = w)
 
-  /** Whether any call of the batch was scheduled with a lock. */
-  def holdsLocks: Boolean = locks.values.exists(_.nonEmpty)
+  /** Whether the schedule says anything a run must keep to: a call holds a lock, or was refused. */
+  def needsRecording: Boolean = locks.values.exists(_.nonEmpty) || refused.nonEmpty
 
 object LockSchedule:
   val empty: LockSchedule = LockSchedule(Map.empty, Vector.empty)
 
-  /** The schedule of calls with these locks, none waiting yet. */
-  def of(locks: Map[String, Set[LockKey]]): LockSchedule =
-    LockSchedule(locks.view.mapValues(_.map(_.render).toVector.sorted).toMap, Vector.empty)
+  /**
+   * The schedule of calls with these locks, none waiting yet; `refused` are the calls of a locking tool
+   * whose arguments were refused, so scheduled without locks.
+   */
+  def of(locks: Map[String, Set[LockKey]], refused: Set[String]): LockSchedule =
+    LockSchedule(locks.view.mapValues(_.map(_.render).toVector.sorted).toMap, Vector.empty, refused)
 
 /**
  * The question a tool's `Ask` interrupt carries: the call that asked, from one assistant message,
@@ -479,6 +486,21 @@ object ToolLoop:
    */
   val EditTakesLocks: String =
     "Edit refused: the edited arguments take locks the call was not scheduled with; the call did not run"
+
+  /**
+   * The error result of a call of a locking tool whose arguments are admitted now but were refused when its
+   * batch was scheduled, so it was scheduled without locks: it does not run.
+   */
+  val RefusedWhenScheduled: String =
+    "Refused: the call's arguments were refused when its batch was scheduled; the call did not run"
+
+  /**
+   * The error result of a call whose locks now are not covered by those its batch was scheduled with (a lock,
+   * validation or resource function that answers differently than when the batch was scheduled): it does
+   * not run.
+   */
+  val LocksChanged: String =
+    "Refused: the call's locks are not those its batch was scheduled with; the call did not run"
 
   /** The tool a durable `ToolExecuted` names for a call to a tool the agent does not have. */
   val UnknownTool: String = "<unknown>"
@@ -1089,11 +1111,16 @@ object ToolLoop:
     preserves: Map[(AgentId, AgentId), Boolean],
     harness: Family
   ): AgentSteps =
-    val messages   = Messages.key
-    val agent      = nodes.agent
-    val tools      = nodes.tools
-    val stack      = nodes.stack
-    val pipeline   = Pipeline(agent.id, tools, stack, nodes.approval, nodes.askRefs, nodes.askedRefs)
+    val messages = Messages.key
+    val agent    = nodes.agent
+    val tools    = nodes.tools
+    val stack    = nodes.stack
+    // the batch's lock schedule, as the model step recorded it: none for an agent without locks
+    def scheduledWith(state: ThreadState): LockSchedule =
+      nodes.queueKey.flatMap(key => state.get(key).toOption).getOrElse(LockSchedule.empty)
+
+    val pipeline =
+      Pipeline(agent.id, tools, stack, nodes.approval, nodes.askRefs, nodes.askedRefs, scheduledWith)
     val callWrites = nodes.callWrites
 
     b.implement(nodes.callTool, writes = callWrites) { (task, state, context) =>
@@ -1101,10 +1128,6 @@ object ToolLoop:
         case None       => pipeline.error(task, s"Unknown tool '${task.call.name}'", context)
         case Some(tool) => pipeline.admit(tool, task, state, context)
     }
-
-    // the batch's lock schedule, as the model step recorded it: none for an agent without locks
-    def scheduledWith(state: ThreadState): LockSchedule =
-      nodes.queueKey.flatMap(key => state.get(key).toOption).getOrElse(LockSchedule.empty)
 
     b.implement(nodes.approval.node, writes = callWrites) { (resumed, state, context) =>
       val request = resumed.question
@@ -1182,7 +1205,7 @@ object ToolLoop:
             val batch        = appended(batchWrites(calls))
             // a batch with no lock records nothing: collect then finds no schedule, and nothing waits
             nodes.queueKey
-              .filter(_ => schedule.holdsLocks)
+              .filter(_ => schedule.needsRecording)
               .fold(batch)(key => batch.update(key, schedule.withWaiting(later)))
               .fanOut(nodes.batch, nodes.callTool, now)
         case Vector(transfer) if calls.size == 1 =>
@@ -1546,7 +1569,8 @@ object ToolLoop:
     stack: MiddlewareStack,
     approval: ResumeRef[ApprovalRequest, ApprovalDecision],
     askRefs: Map[String, ResumeRef[ToolQuestionRequest, ujson.Value]],
-    askedRefs: Map[(MiddlewareId, MiddlewareHook), AskedRef[?]]
+    askedRefs: Map[(MiddlewareId, MiddlewareHook), AskedRef[?]],
+    scheduleOf: ThreadState => LockSchedule
   ):
 
     /** An error result, refused before the middleware chain ran, so of zero duration. */
@@ -1718,27 +1742,29 @@ object ToolLoop:
               resourcesOf(tool, task, args, context) match
                 case Left(refused) => refused
                 case Right(resources) =>
-                  val toolContext = ToolContext(
-                    answering(agent, context, request.answered),
-                    ToolCallId(request.call.id),
-                    request.idempotencyKey,
-                    state,
-                    request.approved
-                  )
-                  val (chain, took) = timed(tool, request.call, resources, toolContext, context)(
-                    innermost(tool.spec)(AgentTool.resumeWith(tool, args, question, reply, toolContext))
-                  )
-                  outcome(
-                    tool,
-                    task,
-                    request.call,
-                    request.approved,
-                    chain,
-                    context,
-                    took,
-                    request.answered,
-                    resumed = true
-                  )
+                  outsideSchedule(tool, task, request.call, args, state, context).getOrElse {
+                    val toolContext = ToolContext(
+                      answering(agent, context, request.answered),
+                      ToolCallId(request.call.id),
+                      request.idempotencyKey,
+                      state,
+                      request.approved
+                    )
+                    val (chain, took) = timed(tool, request.call, resources, toolContext, context)(
+                      innermost(tool.spec)(AgentTool.resumeWith(tool, args, question, reply, toolContext))
+                    )
+                    outcome(
+                      tool,
+                      task,
+                      request.call,
+                      request.approved,
+                      chain,
+                      context,
+                      took,
+                      request.answered,
+                      resumed = true
+                    )
+                  }
         case _ => error(task, s"Tool '$name' does not take answers", context)
 
     /**
@@ -1821,8 +1847,12 @@ object ToolLoop:
 
     /** The locks of each of a batch's calls, computed once, when the model step schedules it. */
     def schedule(tasks: Vector[ToolTask]): LockSchedule =
+      val admitted = tasks.map(t => t -> tools.get(t.call.name).flatMap(scheduledLocks(_, t.call)))
       LockSchedule.of(
-        tasks.map(t => t.call.id -> tools.get(t.call.name).fold(Set.empty[LockKey])(locksOf(_, t.call))).toMap
+        admitted.map((t, locks) => t.call.id -> locks.getOrElse(Set.empty)).toMap,
+        admitted.collect {
+          case (t, None) if tools.get(t.call.name).exists(_.spec.locksOf.isDefined) => t.call.id
+        }.toSet
       )
 
     /**
@@ -1846,13 +1876,43 @@ object ToolLoop:
      * a cancellation keeps the interrupt flag set, so the run is still cancelled.
      */
     private def locksOf[A](tool: AgentTool[A], call: ToolCall): Set[LockKey] =
-      tool.spec.locksOf.fold(Set.empty[LockKey]) { locks =>
+      scheduledLocks(tool, call).getOrElse(Set.empty)
+
+    /** [[locksOf]], or `None` when the tool declares locks and [[admission]] refuses the call. */
+    private def scheduledLocks[A](tool: AgentTool[A], call: ToolCall): Option[Set[LockKey]] =
+      tool.spec.locksOf.fold(Some(Set.empty[LockKey])) { locks =>
         admission(tool, call) match
           case Left(Refusal.Cancelled(_)) =>
             Thread.currentThread().interrupt()
-            Set.empty
-          case Left(_)          => Set.empty
-          case Right((args, _)) => Try(locks(args)).getOrElse(Set(LockKey("")))
+            None
+          case Left(_)          => None
+          case Right((args, _)) => Some(Try(locks(args)).getOrElse(Set(LockKey(""))))
+      }
+
+    /**
+     * The batch's schedule holds whatever the call does now: a call of a locking tool runs only if it was
+     * admitted when its batch was scheduled, and its locks now are covered by those it was scheduled with
+     * (each has a scheduled one as a prefix). Otherwise - a validator, resource or lock function that
+     * answers differently now, after a recover or a redeploy, or an edit - it does not run: running it
+     * could put it beside a call it conflicts with, on one snapshot. `None` lets it run.
+     */
+    private def outsideSchedule[A](
+      tool: AgentTool[A],
+      task: ToolTask,
+      call: ToolCall,
+      args: A,
+      state: ThreadState,
+      context: RunContext
+    ): Option[NodeResult] =
+      tool.spec.locksOf.flatMap { locks =>
+        val schedule = scheduleOf(state)
+        if schedule.refused(call.id) then Some(error(task, ToolLoop.RefusedWhenScheduled, context))
+        else
+          val scheduled = schedule.locksOf(call.id)
+          val now       = Try(locks(args)).getOrElse(Set(LockKey("")))
+          Option.unless(now.forall(k => scheduled.exists(p => k.segments.startsWith(p.segments))))(
+            error(task, ToolLoop.LocksChanged, context)
+          )
       }
 
     private def decode[A](tool: AgentTool[A], call: ToolCall): Either[String, A] =
@@ -1895,11 +1955,13 @@ object ToolLoop:
       approved: Boolean = false,
       answers: Vector[GivenAnswer] = Vector.empty
     ): NodeResult =
-      val toolContext =
-        ToolContext(answering(agent, context, answers), ToolCallId(call.id), task.idempotencyKey, state, approved)
-      val (chain, took) =
-        timed(tool, call, resources, toolContext, context)(innermost(tool.spec)(tool.execute(args, toolContext)))
-      outcome(tool, task, call, approved, chain, context, took, answers)
+      outsideSchedule(tool, task, call, args, state, context).getOrElse {
+        val toolContext =
+          ToolContext(answering(agent, context, answers), ToolCallId(call.id), task.idempotencyKey, state, approved)
+        val (chain, took) =
+          timed(tool, call, resources, toolContext, context)(innermost(tool.spec)(tool.execute(args, toolContext)))
+        outcome(tool, task, call, approved, chain, context, took, answers)
+      }
 
     /**
      * The chain's innermost function, for one chain invocation: the tool's `execute` or `resume`,
