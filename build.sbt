@@ -603,9 +603,9 @@ lazy val core = (project in file("modules/core"))
     Test / javaOptions ++= Seq(
       "-Xmx2g",
       "-Xms512m",
-      "-XX:+UseG1GC",
-      "-XX:+TieredCompilation",
-      "-XX:TieredStopAtLevel=1"
+      // No `-XX:TieredStopAtLevel=1`: C1-only start-up tuning from when this module's tests took a minute (#825).
+      // It made the long CPU-bound runs here - the Redaction suites' megabyte inputs - about 40% slower (#1932).
+      "-XX:+UseG1GC"
     ),
     // Pass API key entries from .env into forked test JVM (for smoke/integration tests).
     // Only forwards *_API_KEY variables to avoid polluting test configuration
@@ -689,9 +689,9 @@ lazy val rag = (project in file("modules/rag"))
     Test / javaOptions ++= Seq(
       "-Xmx2g",
       "-Xms512m",
-      "-XX:+UseG1GC",
-      "-XX:+TieredCompilation",
-      "-XX:TieredStopAtLevel=1"
+      // No `-XX:TieredStopAtLevel=1` (copied from core's in the carve): C1 only made these tests slower, a run of
+      // 9.2 s against 6.4 s with the default tiered JIT.
+      "-XX:+UseG1GC"
     ),
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
