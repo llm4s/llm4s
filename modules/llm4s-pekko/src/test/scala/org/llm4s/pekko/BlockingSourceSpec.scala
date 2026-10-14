@@ -265,6 +265,22 @@ class BlockingSourceSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
     Await.result(done, Patience) shouldBe Done
   }
 
+  it should "complete its Future[Done] before the stream can see the producer's end, however it ends" in {
+    // Holds the producer just before the end becomes visible to the stream, and checks `done` there. A drain woken
+    // by an earlier emit or a pull may end the stream as soon as the outcome is set, so `done` must be complete first.
+    def completeAtEnd(end: Either[LLMError, Unit]): Boolean = {
+      val seen = new AtomicReference[java.lang.Boolean](null)
+      val s =
+        BlockingSource("blocking-source-test", 4, done => seen.set(done.isCompleted))(() => new Emits(Seq(1, 2), end))
+      val (done, items) = s.toMat(Sink.seq)(Keep.both).run()
+      Await.ready(items, Patience)
+      Await.result(done, Patience) shouldBe Done
+      seen.get.booleanValue
+    }
+    completeAtEnd(Right(())) shouldBe true
+    completeAtEnd(Left(ValidationError("x", "bad"))) shouldBe true
+  }
+
   it should "complete its Future[Done], not fail it, when the stream fails" in {
     val (done, items) = source(4, new Emits(Seq(1), Left(ValidationError("x", "bad")))).toMat(Sink.seq)(Keep.both).run()
     Await.result(items.failed, Patience) shouldBe a[LLMException]

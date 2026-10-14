@@ -22,6 +22,8 @@ modules/core/src/main/scala/org/llm4s/http/Llm4sHttpClient.scala                
 modules/core/src/main/scala/org/llm4s/llmconnect/ProviderExchangeSink.scala                        core:org.llm4s.llmconnect.ProviderExchangeSinkSpec
 modules/core/src/main/scala/org/llm4s/llmconnect/auth/IdentityTokenSource.scala                    core:org.llm4s.llmconnect.auth.IdentityTokenSourceSpec
 modules/core/src/main/scala/org/llm4s/model/ModelRegistryService.scala                             core:org.llm4s.model.ModelRegistryServiceSpec
+modules/gemini/src/main/scala/org/llm4s/llmconnect/provider/GcloudAdcLocation.scala                  gemini:org.llm4s.llmconnect.provider.GcloudAdcLocationSpec
+modules/gemini/src/main/scala/org/llm4s/config/VertexAIAdcConfigLoader.scala                         gemini:org.llm4s.llmconnect.provider.GcloudAdcLocationSpec
 modules/gemini/src/main/scala/org/llm4s/llmconnect/provider/VertexAIAuthProvider.scala             gemini:org.llm4s.llmconnect.provider.VertexAIAuthProviderSpec
 modules/knowledgegraph/src/main/scala/org/llm4s/knowledgegraph/storage/JsonGraphStore.scala        knowledgegraph:org.llm4s.knowledgegraph.storage.JsonGraphStoreSpec
 modules/mcp/src/main/scala/org/llm4s/mcp/MCPTransport.scala                                        mcp:org.llm4s.mcp.StdioTransportConcurrencySpec
