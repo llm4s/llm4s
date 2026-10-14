@@ -305,15 +305,20 @@ final class HostFileBackend private (
    * are in one real directory, so they share a stripe, and the compare-and-set under it lets only one of
    * them apply. Mutations within one directory are therefore serialised across threads and processes.
    */
-  private def stripeOf(target: Path): Int =
-    val ancestor = Iterator
-      .iterate(Option(target.getParent))(_.flatMap(p => Option(p.getParent)))
-      .takeWhile(_.isDefined)
-      .flatten
-      .find(p => Files.exists(p))
-      .getOrElse(root)
-    val real = Try(ancestor.toRealPath()).getOrElse(ancestor)
-    Math.floorMod(HostFileBackend.identity(real.toString).hashCode, HostFileBackend.Stripes)
+  private def stripeOf(target: Path): Result[Int] =
+    // the nearest ancestor that resolves; one removed since it was seen is passed over (a shape race),
+    // and any other failure to resolve it is an error, never a guessed stripe
+    @annotation.tailrec
+    def real(candidate: Option[Path]): Result[Path] = candidate match
+      case None => Right(root)
+      case Some(p) =>
+        Try(p.toRealPath()) match
+          case Success(r)                      => Right(r)
+          case Failure(_: NoSuchFileException) => real(Option(p.getParent))
+          case Failure(e) => Left(ProcessingError("host-lock", s"cannot resolve $p to take its stripe: $e"))
+    real(Option(target.getParent)).map(r =>
+      Math.floorMod(HostFileBackend.identity(r.toString).hashCode, HostFileBackend.Stripes)
+    )
 
   /**
    * The OS lock file of a stripe: in the lock directory, shared by every backend that uses it whatever
@@ -323,11 +328,14 @@ final class HostFileBackend private (
   private def lockFile(stripe: Int): Path = lockDirectory.resolve(s"stripe-$stripe.lock")
 
   /** The OS lock file a mutation of `path` takes; for tests that hold it from another process. */
-  private[harness] def lockFileOf(path: VPath): Result[Path] = resolve("lock", path).map(t => lockFile(stripeOf(t)))
+  private[harness] def lockFileOf(path: VPath): Result[Path] =
+    resolve("lock", path).flatMap(stripeOf).map(lockFile)
 
   private def exclusively[A](target: Path)(body: => Result[A]): Result[A] =
-    val stripe = stripeOf(target)
-    val lock   = HostFileBackend.stripes(stripe)
+    stripeOf(target).flatMap(stripe => exclusivelyOn(stripe)(body))
+
+  private def exclusivelyOn[A](stripe: Int)(body: => Result[A]): Result[A] =
+    val lock = HostFileBackend.stripes(stripe)
     def cancelled: Result[A] =
       Thread.currentThread().interrupt()
       Left(CancelledError("host file mutation"))
@@ -486,12 +494,18 @@ final class HostFileBackend private (
    * `read`, or nothing for a file `search` skips (not UTF-8, unreadable); a cancellation is never
    * skipped: it propagates, so the search ends as cancelled rather than as an incomplete success.
    */
-  private def unreadableSkipped[A](read: => Option[A]): Option[A] =
+  private def unreadableSkipped[A](path: VPath)(read: => Option[A]): Option[A] =
     Try(read) match
       case Success(result) => result
       case Failure(e) if HostFileBackend.isInterrupt(e) =>
         throw new java.util.concurrent.CancellationException(e.toString)
-      case Failure(_) => None
+      // what search means to skip: content that is not text, and a file gone since the walk listed it
+      case Failure(_: CharacterCodingException | _: NoSuchFileException) => None
+      // anything else is a refusal of the search, never a silent gap in its result
+      case Failure(_: AccessDeniedException) => throw new SearchAborted(path.value, "permission denied")
+      case Failure(e: FileSystemException) =>
+        throw new SearchAborted(path.value, Option(e.getReason).getOrElse(e.toString))
+      case Failure(e) => throw e
 
   /** The listable children of `dir`, in name order: no links, no temporary files, at most `max`. */
   /**
@@ -620,7 +634,7 @@ final class HostFileBackend private (
   ): Result[Listing[GrepMatch]] =
     walked("grep", under, limit)(_.filter((v, _) => accept(v)).flatMap { (v, p) =>
       // a file over the bound, or not UTF-8 text, is skipped; the bound is on what is read
-      unreadableSkipped(bounded(p).map(text)).iterator.flatMap(content => Text.matches(v, content, regex))
+      unreadableSkipped(v)(bounded(p).map(text)).iterator.flatMap(content => Text.matches(v, content, regex))
     })
 
 object HostFileBackend:
@@ -721,9 +735,11 @@ object HostFileBackend:
           def view[V <: java.nio.file.attribute.FileAttributeView](c: Class[V]): Option[V] =
             Option(Files.getFileAttributeView(target, c, LinkOption.NOFOLLOW_LINKS))
           // setuid, setgid and sticky: no portable API sets them, so a replacement would drop them
-          val special = Try(Files.getAttribute(target, "unix:mode", LinkOption.NOFOLLOW_LINKS)).toOption.collect {
-            case mode: Integer => (mode.intValue & 0xe00) != 0
-          }
+          // unknown only where the `unix` view is not supported; a failure to read it is a refusal (below)
+          val special = Try(Files.getAttribute(target, "unix:mode", LinkOption.NOFOLLOW_LINKS)) match
+            case Success(mode: Integer) => Some((mode.intValue & 0xe00) != 0)
+            case Success(_) | Failure(_: UnsupportedOperationException | _: IllegalArgumentException) => None
+            case Failure(e)                                                                           => throw e
           val posix = view(classOf[PosixFileAttributeView]).map { v =>
             val a = v.readAttributes()
             (a.permissions(), a.owner(), a.group())
@@ -838,13 +854,18 @@ object HostFileBackend:
     Try(Files.createFile(file)).toResult.left
       .map(e => ValidationError("root", s"$root cannot be probed for file-name aliasing: ${e.message}"): LLMError)
       .flatMap { _ =>
-        val shortNames = (1 to 4).flatMap(n => Try(root.resolve(s"$prefix~$n.PRO")).toOption)
-        val looked = shortNames.map(alias =>
-          Try(exists(alias)).getOrElse(false) -> Try(exists(alias) && isSame(file, alias)).getOrElse(false)
-        )
+        // a lookup that fails cannot say there is no alias, so it refuses the probe rather than pass it
+        val lookups = Try((1 to 4).map { n =>
+          val alias   = root.resolve(s"$prefix~$n.PRO")
+          val present = exists(alias)
+          present -> (present && isSame(file, alias))
+        })
         val removed = Try(Files.deleteIfExists(file))
+        val looked  = lookups.getOrElse(IndexedSeq.empty)
         if removed.isFailure then
           Left(ValidationError("root", s"$root cannot be probed: the probe file $file could not be removed"))
+        else if lookups.isFailure then
+          Left(ValidationError("root", s"$root cannot be probed for 8.3 short names: ${lookups.failed.get}"))
         else if looked.exists((present, same) => present && !same) then
           Left(
             ValidationError(

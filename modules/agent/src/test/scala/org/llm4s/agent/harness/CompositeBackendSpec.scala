@@ -39,6 +39,50 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     composite.read(p("/scratch/deep/c.txt"), 0, 10, ctx).value.lines shouldBe Vector("deep c")
   }
 
+  /** A backend whose `ls` refuses with `kind`; nothing else is asked of it. */
+  final private class Refusing(kind: BackendRefused.Kind) extends FileBackend {
+    private def no                                    = Left(BackendRefused("ls", "/", s"refused ($kind)", kind))
+    def writes                                        = Set.empty
+    def locks(path: VPath): Set[LockKey]              = Set.empty
+    def ls(path: VPath, limit: Int, ctx: FileContext) = no
+    def read(path: VPath, offset: Int, limit: Int, ctx: FileContext)                               = no
+    def write(path: VPath, content: String, ctx: FileContext)                                      = no
+    def edit(path: VPath, old: String, replacement: String, replaceAll: Boolean, ctx: FileContext) = no
+    def delete(path: VPath, ctx: FileContext)                                                      = no
+    def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext)                 = no
+    def search(
+      under: VPath,
+      regex: java.util.regex.Pattern,
+      accept: VPath => Boolean,
+      limit: Int,
+      ctx: FileContext
+    ) = no
+  }
+
+  it should "stand a mount in only for a path-shape refusal, propagating every other refusal unchanged" in {
+    for (kind <- Seq(BackendRefused.Kind.NotFound, BackendRefused.Kind.NotADirectory)) {
+      val c = CompositeBackend(new Refusing(kind), p("/m") -> main).value
+      c.ls(VPath.root, 10, ctx).value.items.map(_.path) shouldBe Vector(p("/m"))
+    }
+    for (kind <- Seq(BackendRefused.Kind.Closed, BackendRefused.Kind.Refused)) {
+      val c       = CompositeBackend(new Refusing(kind), p("/m") -> main).value
+      val refusal = c.ls(VPath.root, 10, ctx).left.value
+      refusal shouldBe a[BackendRefused]
+      refusal.asInstanceOf[BackendRefused].kind shouldBe kind
+    }
+  }
+
+  it should "refuse an over-long glob or grep pattern before using it, quoting only a prefix" in {
+    val long = "a" * 100000
+    val g    = composite.glob(Glob(long), VPath.root, 10, ctx).left.value
+    g.message should include("longer than 1000")
+    g.message.length should be < 400
+    val r = composite.grep(long, VPath.root, None, 10, ctx).left.value
+    r.message should include("longer than 1000")
+    r.message.length should be < 400
+    composite.grep("x", VPath.root, Some(Glob(long)), 10, ctx).left.value.message should include("longer than 1000")
+  }
+
   it should "name the composite path in a routed backend's refusal" in {
     composite.read(p("/scratch/nope"), 0, 10, ctx).left.value.message should include("/scratch/nope")
   }

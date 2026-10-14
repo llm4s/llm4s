@@ -56,6 +56,25 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     store.appliedKeys shouldBe 0
   }
 
+  it should "refuse an over-long key, prefix, query or namespace first, quoting only a prefix" in {
+    val store = InMemoryLongTermStore()
+    val huge  = "k" * 10000000
+    def short(r: Result[?]) = {
+      val e = r.left.value
+      e shouldBe a[BackendRefused]
+      e.message.length should be < 400
+      e.message
+    }
+    short(store.put(ns, huge, ujson.Str("v"), call())) should include("longer than 1024 bytes")
+    short(store.delete(ns, huge, call())) should include("longer than 1024 bytes")
+    short(store.get(ns, huge)) should include("longer than 1024 bytes")
+    short(store.list(ns, huge, 10)) should include("longer than 1024 bytes")
+    short(store.search(ns, huge, 10)) should include("longer than 1024 bytes")
+    val wide = Namespace(None, Vector.fill(2000)("n"))
+    short(store.put(wide, "k", ujson.Str("v"), call())) should include("namespace")
+    short(store.get(wide, "k")) should include("namespace")
+  }
+
   it should "keep namespaces apart, the tenant included" in {
     val store = InMemoryLongTermStore()
     val nsA   = Namespace(Some(TenantId("a")), Vector("notes"))
@@ -332,6 +351,16 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
       runs.incrementAndGet()
       Right(ExecResult(0, output, s"$command in ${workdir.value}"))
     }
+  }
+
+  "SandboxBackend" should "refuse an over-long command before its effect key or runner sees it" in {
+    val runner  = new CountingRunner()
+    val sandbox = SandboxBackend(runner)
+    val refusal = sandbox.execute("x" * 10000000, p("/src"), 1.second, call()).left.value
+    refusal shouldBe a[BackendRefused]
+    refusal.message should include("longer than 65536 bytes")
+    refusal.message.length should be < 400
+    runner.runs.get shouldBe 0
   }
 
   "SandboxBackend" should "run through the guard, replaying a completed command's result without running it" in {

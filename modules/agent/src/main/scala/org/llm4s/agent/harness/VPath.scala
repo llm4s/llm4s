@@ -30,11 +30,18 @@ object VPath:
 
   /** `s` as a path, or a `ValidationError` saying why it is not one. */
   def apply(s: String): Result[VPath] =
-    val trimmed                 = if s.length > 1 && s.endsWith("/") then s.dropRight(1) else s
-    def invalid(reason: String) = Left(ValidationError("path", s"'$s' $reason"))
-    if !trimmed.startsWith("/") then invalid("is not absolute")
-    else if trimmed.getBytes(UTF_8).length > MaxBytes then invalid(s"is longer than $MaxBytes bytes")
-    else if trimmed == "/" then Right(root)
+    def invalid(reason: String) = Left(ValidationError("path", s"'${Text.quoted(s)}' $reason"))
+    // the length first, before anything is copied or encoded: a character is at least one UTF-8 byte,
+    // and one trailing `/` is dropped
+    if s.length.toLong > MaxBytes.toLong + 1 then invalid(s"is longer than $MaxBytes bytes")
+    else
+      val trimmed = if s.length > 1 && s.endsWith("/") then s.dropRight(1) else s
+      if Text.utf8Bytes(trimmed) > MaxBytes then invalid(s"is longer than $MaxBytes bytes")
+      else if !trimmed.startsWith("/") then invalid("is not absolute")
+      else validated(trimmed, invalid)
+
+  private def validated(trimmed: String, invalid: String => Result[VPath]): Result[VPath] =
+    if trimmed == "/" then Right(root)
     else
       trimmed.drop(1).split("/", -1).iterator.map(segmentError).collectFirst { case Some(r) => r } match
         case Some(reason) => invalid(reason)
@@ -46,8 +53,7 @@ object VPath:
     else if segment.exists(c => c == '\\' || Character.isISOControl(c)) then
       Some("has a backslash or control character")
     else if !UTF_8.newEncoder().canEncode(segment) then Some("is not valid Unicode (an unpaired surrogate)")
-    else if segment.getBytes(UTF_8).length > MaxSegmentBytes then
-      Some(s"has a segment longer than $MaxSegmentBytes bytes")
+    else if Text.utf8Bytes(segment) > MaxSegmentBytes then Some(s"has a segment longer than $MaxSegmentBytes bytes")
     else None
 
   extension (path: VPath)
@@ -60,7 +66,10 @@ object VPath:
 
     /** The child `name` of this path; `name` must be one valid segment. */
     def /(name: String): Result[VPath] =
-      if name.contains('/') then Left(ValidationError("path", s"'$name' is not one segment"))
+      // bounded before the concatenation copies it
+      if name.length > MaxSegmentBytes then
+        Left(ValidationError("path", s"'${Text.quoted(name)}' is longer than $MaxSegmentBytes bytes"))
+      else if name.contains('/') then Left(ValidationError("path", s"'${Text.quoted(name)}' is not one segment"))
       else VPath(if path == root then s"/$name" else s"$path/$name")
 
     /** The parent; `None` for the root. */

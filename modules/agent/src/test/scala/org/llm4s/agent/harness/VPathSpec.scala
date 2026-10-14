@@ -90,4 +90,24 @@ class VPathSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "order by value" in {
     Vector(p("/b"), p("/a/c"), p("/a")).sorted shouldBe Vector(p("/a"), p("/a/c"), p("/b"))
   }
+
+  "VPath" should "refuse an over-long input by its length first, quoting only a bounded prefix of it" in {
+    val huge    = "/" + "a" * 10000000
+    val refusal = VPath(huge).left.value
+    refusal.message should include("longer than 1024 bytes")
+    refusal.message.length should be < 300
+    // a multi-byte path within 1025 characters but over 1024 bytes is refused by its counted size
+    VPath("/" + "\u20ac" * 400).left.value.message should include("longer than 1024 bytes")
+    val name = (VPath.root / ("b" * 10000000)).left.value
+    name.message should include("longer than 255 bytes")
+    name.message.length should be < 300
+    (VPath.root / ("x/" * 100)).left.value.message.length should be < 300
+  }
+
+  "Text.quoted" should "keep a short input whole and cut a long one on a code point boundary, with its length" in {
+    org.llm4s.agent.harness.Text.quoted("short") shouldBe "short"
+    val cut = org.llm4s.agent.harness.Text.quoted("a" * 63 + "\uD83D\uDE00" + "b" * 100)
+    cut shouldBe ("a" * 63 + "... (165 characters)")
+  }
+
 }

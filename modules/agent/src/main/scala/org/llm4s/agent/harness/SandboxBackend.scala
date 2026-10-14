@@ -82,7 +82,19 @@ final class SandboxBackend private (
    * completed command whose runner cannot be resolved now fails the same way, until it can be.
    */
   def execute(command: String, workdir: VPath, timeout: FiniteDuration, ctx: FileContext): Result[ExecResult] =
-    resolve(ctx).flatMap { runner =>
+    // bounded before the effect key digests it or a runner sees it
+    (if command.length.toLong > SandboxBackend.MaxCommandBytes || Text.utf8Bytes(
+         command
+       ) > SandboxBackend.MaxCommandBytes
+     then
+       Left(
+         BackendRefused(
+           "execute",
+           Text.quoted(command),
+           s"the command is longer than ${SandboxBackend.MaxCommandBytes} bytes"
+         )
+       )
+     else Right(())).flatMap(_ => resolve(ctx)).flatMap { runner =>
       val key = ctx.effectKey("sandbox.execute", command, workdir.value)
       ReplayGuard.unverifiable[ExecResult](ctx.run, key, idempotent = false)(
         runner.run(command, workdir, timeout, maxOutputBytes, ctx).map(bounded)
@@ -101,6 +113,9 @@ object SandboxBackend:
 
   /** The most `maxOutputBytes` may be, so an `ExecResult` always fits a replay record. */
   val MaxOutputBytes: Int = 256 * 1024
+
+  /** The longest command `execute` takes, in UTF-8 bytes. */
+  val MaxCommandBytes: Int = 64 * 1024
 
   /** A backend over one runner: one tenant's sandbox. */
   def apply(runner: SandboxRunner, maxOutputBytes: Int = DefaultMaxOutputBytes): SandboxBackend =

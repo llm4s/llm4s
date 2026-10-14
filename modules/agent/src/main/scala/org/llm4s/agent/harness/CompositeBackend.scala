@@ -71,8 +71,10 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
     // holds where a mount makes a directory), never an invalid argument, which is checked first
     val base: Result[Listing[FileInfo]] = Text.checkLimit("ls", path.value, limit).flatMap { _ =>
       routed.backend.ls(routed.path, limit, ctx) match
+        // only the two path-shape kinds it means: a closed backend, a permission, a quota or a replay
+        // refusal is the routed backend's answer, and propagates unchanged
         case Left(r: BackendRefused)
-            if mounted.nonEmpty && r.target == routed.path.value && r.kind != BackendRefused.Kind.Refused =>
+            if mounted.nonEmpty && r.target == routed.path.value && CompositeBackend.ShapeKinds(r.kind) =>
           Right(Listing(Vector.empty, truncated = false))
         case other => renamed(routed, path)(other)
     }
@@ -146,6 +148,10 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
     }
 
 object CompositeBackend:
+
+  /** The refusals the mount fallback of `ls` stands in for: the path is absent, or a file. */
+  private val ShapeKinds: Set[BackendRefused.Kind] =
+    Set(BackendRefused.Kind.NotFound, BackendRefused.Kind.NotADirectory)
 
   /** `default`, with each route's backend mounted at its path; the root and a repeated mount are refused. */
   def apply(default: FileBackend, routes: (VPath, FileBackend)*): Result[CompositeBackend] =

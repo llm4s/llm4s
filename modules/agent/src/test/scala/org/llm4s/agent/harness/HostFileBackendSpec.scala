@@ -464,6 +464,18 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     backend = HostFileBackend.open(dir, locks).value
   }
 
+  "HostFileBackend.probeAliasesWith" should "refuse the probe when a lookup fails, rather than count it as no alias" in {
+    val probe =
+      HostFileBackend.probeAliasesWith(
+        dir,
+        "ABC123",
+        _ => throw new java.io.IOException("lookup failed"),
+        (_, _) => false
+      )
+    probe.left.value.message should include("cannot be probed")
+    Files.list(dir).iterator().asScala.map(_.getFileName.toString).filter(_.endsWith(".probe")).toList shouldBe empty
+  }
+
   "HostFileBackend.probeAliasesWith" should "refuse to guess when another entry already has the probe's short-name prefix" in {
     val taken = dir.resolve("ABC123~1.PRO")
     val probe = HostFileBackend.probeAliasesWith(dir, "ABC123", p => p == taken, (_, _) => false)
@@ -625,6 +637,28 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     refusal shouldBe a[BackendRefused]
     refusal.message should include("larger than the limit")
     onDisk("big.txt") shouldBe "a" * 100000
+  }
+
+  it should "refuse a search over a file it cannot read, rather than skip it, while still skipping binary" in {
+    assume(posix)
+    Files.writeString(dir.resolve("open.txt"), "needle\n")
+    Files.write(dir.resolve("bin.dat"), Array[Byte](0, 1, 2))
+    backend.grep("needle", VPath.root, None, 10, call()).value.items.map(_.path) shouldBe Vector(p("/open.txt"))
+    Files.writeString(dir.resolve("locked.txt"), "needle\n")
+    Files.setPosixFilePermissions(
+      dir.resolve("locked.txt"),
+      java.nio.file.attribute.PosixFilePermissions.fromString("---------")
+    )
+    cleanups += (() =>
+      Files.setPosixFilePermissions(
+        dir.resolve("locked.txt"),
+        java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")
+      ): Unit
+    )
+    assume(!Files.isReadable(dir.resolve("locked.txt"))) // a superuser reads it anyway
+    val refusal = backend.grep("needle", VPath.root, None, 10, call()).left.value
+    refusal shouldBe a[BackendRefused]
+    refusal.message should include("permission denied")
   }
 
 }

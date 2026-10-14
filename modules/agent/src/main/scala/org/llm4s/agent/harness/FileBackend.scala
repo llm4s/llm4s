@@ -139,7 +139,9 @@ trait FileBackend:
 
   /** The files within `under` whose path relative to `under` matches `pattern`. */
   final def glob(pattern: Glob, under: VPath, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
-    find(under, p => p.relativeTo(under).exists(pattern.matches), limit, ctx)
+    Text
+      .checkPattern("glob", pattern.pattern)
+      .flatMap(_ => find(under, p => p.relativeTo(under).exists(pattern.matches), limit, ctx))
 
   /**
    * The lines matching `regex` in the files within `under`. `include` filters the files: a pattern with
@@ -154,10 +156,16 @@ trait FileBackend:
   ): Result[Listing[GrepMatch]] =
     // the model's pattern: compiled and later matched through core's RegexSafetyManager, which refuses
     // known catastrophic shapes, bounds each match's steps and contains a recursing matcher's stack overflow
-    org.llm4s.security.RegexSafetyManager
-      .safeCompile(regex)
-      .left
-      .map(reason => BackendRefused("grep", regex, reason))
+    // both patterns bounded before either is compiled or used, and only a bounded prefix quoted
+    Text
+      .checkPattern("grep", regex)
+      .flatMap(_ => include.fold[Result[Unit]](Right(()))(g => Text.checkPattern("grep", g.pattern)))
+      .flatMap(_ =>
+        org.llm4s.security.RegexSafetyManager
+          .safeCompile(regex)
+          .left
+          .map(reason => BackendRefused("grep", Text.quoted(regex), reason))
+      )
       .flatMap { compiled =>
         val accept: VPath => Boolean = include match
           case None                                      => _ => true
@@ -297,6 +305,33 @@ private[harness] object Text:
       else total += 3
       i += 1
     total
+
+  /** The most characters of an input an error message quotes. */
+  val QuotedChars: Int = 64
+
+  /**
+   * `s` as an error message quotes it: whole if short, else its first [[QuotedChars]] characters (on a
+   * code point boundary) and its length, so a message never copies an unbounded input.
+   */
+  def quoted(s: String): String =
+    if s.length <= QuotedChars then s
+    else
+      val end = if Character.isHighSurrogate(s.charAt(QuotedChars - 1)) then QuotedChars - 1 else QuotedChars
+      s"${s.substring(0, end)}... (${s.length} characters)"
+
+  /** The longest pattern `glob` and `grep` take, as core's `RegexSafetyManager` bounds a regex. */
+  val MaxPatternChars: Int = 1000
+
+  def checkPattern(operation: String, pattern: String): Result[Unit] =
+    if pattern.length <= MaxPatternChars then Right(())
+    else
+      Left(
+        BackendRefused(
+          operation,
+          quoted(pattern),
+          s"the pattern is ${pattern.length} characters, longer than $MaxPatternChars"
+        )
+      )
 
   /** The longest string or array a backend builds: the JVM's practical array limit. */
   val MaxLength: Int = Int.MaxValue - 8
@@ -439,7 +474,7 @@ private[harness] object Text:
       org.llm4s.security.RegexSafetyManager.safeFind(regex, line) match
         case Right(true)  => Iterator(GrepMatch(path, i + 1, line))
         case Right(false) => Iterator.empty
-        case Left(reason) => throw new RegexAborted(s"${path.value}:${i + 1}: $reason")
+        case Left(reason) => throw new SearchAborted("pattern", s"${path.value}:${i + 1}: $reason")
     }
 
   /**
@@ -452,8 +487,8 @@ private[harness] object Text:
       case scala.util.Failure(_: java.util.concurrent.CancellationException) =>
         Thread.currentThread().interrupt()
         Left(org.llm4s.error.CancelledError(operation))
-      case scala.util.Failure(e: RegexAborted) => Left(BackendRefused(operation, "pattern", e.getMessage))
-      case failure                             => failure.toResult.flatten
+      case scala.util.Failure(e: SearchAborted) => Left(BackendRefused(operation, e.target, e.getMessage))
+      case failure                              => failure.toResult.flatten
 
   /** Lines `offset` to `offset + limit` of `lines`, the sum taken without overflow. */
   def page(lines: Vector[String], offset: Int, limit: Int): Vector[String] =
@@ -463,4 +498,4 @@ private[harness] object Text:
     if limit >= 1 then Right(()) else Left(BackendRefused(operation, target, s"limit must be at least 1, was $limit"))
 
 /** A match `RegexSafetyManager` aborted; [[Text.interruptibly]] makes it a refusal. */
-final private[harness] class RegexAborted(message: String) extends RuntimeException(message)
+final private[harness] class SearchAborted(val target: String, message: String) extends RuntimeException(message)
