@@ -1427,6 +1427,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Breaking - a run claim records its tenant, so a takeover and `ThreadBusy` never name another tenant's run** ([#1926](https://github.com/llm4s/llm4s/issues/1926)):
+  `ClaimRequest(holder, ttl)` is `ClaimRequest(holder, tenantId: Option[TenantId], ttl)` (`ClaimRequest.of` too), and
+  `RunClaim` gains `tenantId: Option[TenantId]` after `holder`; both have `withTenantId`. A `Checkpointer` records the
+  tenant with each claim and names a claim's holder only to a claim of the same tenant: a refusal is
+  `ThreadBusy(..., BusyHolder.Run(holder))` only then, `BusyHolder.Unnamed` otherwise, and `RunClaim.takenOverFrom` -
+  and so `RunEvent.RunRecovered.takenOverFrom` in the owner's durable log - is `None` for a takeover of another
+  tenant's claim. Before, another tenant's run could be named in both: by `ThreadBusy` in the moment after it
+  claimed the owner's thread and before its claim commit conflicted, and as `takenOverFrom` once such a claim lapsed
+  unreleased. The runtime now names a holder of the caller's own tenant on a thread with no checkpoint yet, which it
+  used to leave `Unnamed`. `GraphError.ClaimLost.current` is unchanged: a fencing token, it names no run or tenant.
+  `InMemoryCheckpointer`, `SqliteCheckpointer` and `CheckpointerContract` (new cases for the rule, through the store
+  and through runtimes) are updated. The SQLite schema moves to version 5 (`claim_tenant`, `claim_tenant_token`); a
+  claim a version-4 file holds when it is migrated is of no tenant, so its holder is named to nobody until it is
+  released or lapses. A build from before this change refuses a version-5 file.
 - **A completed thread restores into a new graph version** ([#1934](https://github.com/llm4s/llm4s/issues/1934)):
   `GraphRuntime.start` on a `Completed` or `Failed` thread keeps only its state, so it no longer refuses the thread
   when the graph's `version` or edges changed, or when it gained nodes or keys. For an agent, a thread at rest now

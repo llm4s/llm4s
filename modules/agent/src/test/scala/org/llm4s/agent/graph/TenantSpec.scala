@@ -259,7 +259,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     val f          = Fixture()
     val underlying = InMemoryCheckpointer()
     // tenant a's thread, whose run in another runtime holds a live claim
-    val aClaim = underlying.claim(thread, ClaimRequest(RunId("a-run-secret"), 1.hour)).value
+    val aClaim = underlying.claim(thread, ClaimRequest(RunId("a-run-secret"), None, 1.hour)).value
     val aCheckpoint = Checkpoint(
       Checkpoint.CurrentFormat,
       "a-run-secret/1",

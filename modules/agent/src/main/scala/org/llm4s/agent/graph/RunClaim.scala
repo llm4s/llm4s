@@ -12,8 +12,12 @@ import scala.concurrent.duration.*
  * While it is live - `expiresAt` has not passed - no other claim on the thread is granted, so a run
  * in another runtime or process is refused with [[GraphError.ThreadBusy]]. Once it has expired,
  * another run may take the thread over, and the store then refuses this claim's token
- * ([[GraphError.StaleClaim]]). `takenOverFrom` is the holder of the expired claim, never released,
- * that this one replaced: `None` when the thread was free.
+ * ([[GraphError.StaleClaim]]). `tenantId` is the tenant the claim was requested for
+ * ([[ClaimRequest.tenantId]]). `takenOverFrom` is the holder of the expired claim, never released,
+ * that this one replaced, named only when that claim was of the same tenant as this one: `None` when
+ * the thread was free, and when the replaced claim was another tenant's or recorded no tenant (a
+ * claim a store persisted before claims carried one), so that a takeover never reveals another
+ * tenant's [[RunId]].
  *
  * To the store, the holder may still commit and renew past `expiresAt` until another claim replaces
  * it: expiry only lets another run claim the thread. A [[GraphRuntime]] does not rely on that: a run
@@ -28,12 +32,15 @@ import scala.concurrent.duration.*
 final case class RunClaim private (
   threadId: ThreadId,
   holder: RunId,
+  tenantId: Option[TenantId],
   token: FencingToken,
   expiresAt: Instant,
   takenOverFrom: Option[RunId]
 ):
   def withThreadId(t: ThreadId): RunClaim              = copy(threadId = t)
   def withHolder(h: RunId): RunClaim                   = copy(holder = h)
+  def withTenantId(t: TenantId): RunClaim              = copy(tenantId = Some(t))
+  def withTenantId(t: Option[TenantId]): RunClaim      = copy(tenantId = t)
   def withToken(t: FencingToken): RunClaim             = copy(token = t)
   def withExpiresAt(at: Instant): RunClaim             = copy(expiresAt = at)
   def withTakenOverFrom(from: RunId): RunClaim         = copy(takenOverFrom = Some(from))
@@ -43,35 +50,41 @@ object RunClaim:
   def apply(
     threadId: ThreadId,
     holder: RunId,
+    tenantId: Option[TenantId],
     token: FencingToken,
     expiresAt: Instant,
     takenOverFrom: Option[RunId] = None
   ): RunClaim =
-    new RunClaim(threadId, holder, token, expiresAt, takenOverFrom)
+    new RunClaim(threadId, holder, tenantId, token, expiresAt, takenOverFrom)
 
 /**
- * What a run asks of [[Checkpointer.claim]]: who holds the claim, and for how long it lasts from the
- * moment the store grants it, by the store's clock. `apply` and the `with*` setters throw
+ * What a run asks of [[Checkpointer.claim]]: who holds the claim, the tenant it holds it for (the run's
+ * [[RunConfig.tenantId]]; `None` and `Some` differ, as for a thread), and for how long it lasts from the
+ * moment the store grants it, by the store's clock. The store records the tenant with the claim, and
+ * names the claim's holder to a later request - in a refusal, or as [[RunClaim.takenOverFrom]] - only
+ * when that request is of the same tenant. `apply` and the `with*` setters throw
  * `IllegalArgumentException` for a non-positive `ttl`; [[ClaimRequest.of]] returns it as a
  * `ValidationError`.
  */
-final case class ClaimRequest private (holder: RunId, ttl: FiniteDuration):
-  def withHolder(h: RunId): ClaimRequest       = ClaimRequest(h, ttl)
-  def withTtl(t: FiniteDuration): ClaimRequest = ClaimRequest(holder, t)
+final case class ClaimRequest private (holder: RunId, tenantId: Option[TenantId], ttl: FiniteDuration):
+  def withHolder(h: RunId): ClaimRequest              = ClaimRequest(h, tenantId, ttl)
+  def withTenantId(t: TenantId): ClaimRequest         = ClaimRequest(holder, Some(t), ttl)
+  def withTenantId(t: Option[TenantId]): ClaimRequest = ClaimRequest(holder, t, ttl)
+  def withTtl(t: FiniteDuration): ClaimRequest        = ClaimRequest(holder, tenantId, t)
 
 object ClaimRequest:
   private def problems(ttl: FiniteDuration): List[String] =
     Option.when(ttl.length <= 0)(s"ttl must be positive, was $ttl").toList
 
   /** Throws `IllegalArgumentException` for a non-positive `ttl`; use [[of]] for untrusted input. */
-  def apply(holder: RunId, ttl: FiniteDuration): ClaimRequest =
+  def apply(holder: RunId, tenantId: Option[TenantId], ttl: FiniteDuration): ClaimRequest =
     val found = problems(ttl)
     require(found.isEmpty, found.mkString("; "))
-    new ClaimRequest(holder, ttl)
+    new ClaimRequest(holder, tenantId, ttl)
 
-  def of(holder: RunId, ttl: FiniteDuration): Result[ClaimRequest] =
+  def of(holder: RunId, tenantId: Option[TenantId], ttl: FiniteDuration): Result[ClaimRequest] =
     problems(ttl) match
-      case Nil   => Right(new ClaimRequest(holder, ttl))
+      case Nil   => Right(new ClaimRequest(holder, tenantId, ttl))
       case found => Left(ValidationError("claim", found))
 
 /**
