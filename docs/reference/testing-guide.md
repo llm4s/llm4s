@@ -182,6 +182,7 @@ The project provides a handful of sbt commands that contributors use frequently.
 | Format code                | `sbt scalafmtAll`           | Apply project‑wide formatting (required before PRs)            |
 | Run an integration tier    | `sbt testIntegration`       | Suites in `modules/it` that need a real service — see section 9 |
 | Run the performance tier   | `sbt testPerformance`       | Tests tagged `PerformanceTest` (scaling checks) — see below    |
+| Run what Windows CI runs   | `sbt testPlatform`          | Only the platform-sensitive tests — see below                  |
 
 ### Using the table
 
@@ -227,6 +228,31 @@ Each spec whose scaling tests are tagged keeps one ordinary test that pushes a s
 worst-case input through the same operation under a generous wall-clock hang guard
 (`LinearTime.timed(label, hangGuard = ...)`), so `sbt test` still fails on a catastrophic
 regression without a bound tight enough to flake on a slow runner.
+
+### Platform tests (`sbt testPlatform`)
+
+CI's ubuntu `Test` job runs every test. Its Windows leg runs `sbt testPlatform`: only the tests of
+behaviour that differs between platforms, because pure JVM logic runs on the same JVM on both and a
+second run of it on Windows cost some 15 minutes a pull request without adding a signal. What
+differs: file paths, separators, permissions and links; deleting or moving a file that is still open
+(Windows refuses); spawning a process and how its arguments are parsed; SQLite files and their locks;
+line endings written to a file; temporary files; the user's home and the environment.
+
+`project/PlatformTests.scala` lists those tests in two ways:
+
+* `wholeModules` - modules whose job is platform-facing (the workspace runner and client, the
+  filesystem and shell tools, the SQLite stores, speech's external processes, rag's and image's file
+  handling). Every suite in them runs, so a new suite there needs no decision.
+* `suites` - the platform-facing suites of modules that are otherwise pure logic, by name or glob
+  (`"agent" -> Seq("org.llm4s.assistant.*")`). `sbt testPlatform` fails when a name matches no suite,
+  so a renamed suite cannot drop out silently.
+
+**The rule:** a test of platform-sensitive behaviour must run on Windows - put it in a whole module,
+or add its suite to `suites`. `scripts/check-platform-tests.sh`, in Quick Checks, enforces it for
+code: a main source that calls a platform-sensitive API (`ProcessBuilder`, `File.separator`,
+`Files.delete`, `createTempFile`, `jdbc:sqlite`, `System.lineSeparator`, `os.name`, ...; the script's
+`PATTERN`) outside the whole modules must be listed in `scripts/platform-sensitive-sources.txt` with
+the suite that tests it, and a test that checks which OS it runs on must itself run on Windows.
 
 > **Scala version note:** LLM4S currently builds on Scala 3.7.1. Historical design notes may mention older cross-building plans, but contributors should follow the current `build.sbt` and CI matrix.
 
