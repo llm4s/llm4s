@@ -93,7 +93,7 @@ final class HostFileBackend private (
   /**
    * `path` under the root, refusing a symbolic link at any component that exists, a regular file with
    * other hard links (which may be outside the root, and which locks by path would not order), and the
-   * lock directory, should it lie inside the root.
+   * backend's lock files, should the lock directory lie inside the root.
    */
   private def resolve(operation: String, path: VPath): Result[Path] =
     path.segments
@@ -107,7 +107,7 @@ final class HostFileBackend private (
       }
       .flatMap(p =>
         if !p.normalize().startsWith(root) then refused(operation, path, "resolves outside the root")
-        else if inLockDirectory(p) then refused(operation, path, "is the backend's lock directory")
+        else if isLockFile(p) then refused(operation, path, "is one of the backend's lock files")
         else if isFile(p) && linkCount(p) > 1 then refused(operation, path, "has other hard links, which are refused")
         else Right(p)
       )
@@ -235,17 +235,20 @@ final class HostFileBackend private (
    * its root, so backends in other processes over the same or overlapping roots - `/w` and `/w/sub` -
    * lock one file for one target.
    */
-  private def lockFile(stripe: Int): Path = lockDirectory.resolve(s"stripe-$stripe.lock")
+  private def lockFile(stripe: Int): Path = lockDirectory.resolve(s"stripe-$stripe.lock") // see LockFileName
 
   private val lockIdentity = HostFileBackend.identity(lockDirectory.toString)
 
   /**
-   * Whether `p` is the lock directory or beneath it, compared by folded identity, so a case or
-   * normalisation alias of the directory (`/.LOCKS` for `.locks` on macOS) is caught too.
+   * Whether `p` is one of the backend's lock files: a `stripe-<n>.lock` directly in the lock directory,
+   * compared by folded identity, so a case or normalisation alias (`/.LOCKS/STRIPE-0.LOCK`) is caught
+   * too. Only the files are reserved: the lock directory may be the root, inside it or above it, and
+   * everything else in the root stays reachable.
    */
-  private def inLockDirectory(p: Path): Boolean =
-    val id = HostFileBackend.identity(p.normalize().toString)
-    id == lockIdentity || id.startsWith(lockIdentity + p.getFileSystem.getSeparator)
+  private def isLockFile(p: Path): Boolean =
+    val n = p.normalize()
+    Option(n.getParent).exists(parent => HostFileBackend.identity(parent.toString) == lockIdentity) &&
+    HostFileBackend.LockFileName.matches(HostFileBackend.identity(n.getFileName.toString))
 
   /** The OS lock file a mutation of `path` takes; for tests that hold it from another process. */
   private[harness] def lockFileOf(path: VPath): Result[Path] = resolve("lock", path).map(t => lockFile(stripeOf(t)))
@@ -406,7 +409,7 @@ final class HostFileBackend private (
   /**
    * The first `max` listable children of `dir` in name order, and whether there were more. A directory
    * stream has no order, so the whole directory is read, keeping only the `max + 1` least names, and
-   * entries that are not listed (links, temporary files, the lock directory) are dropped before they
+   * entries that are not listed (links, temporary files, lock files) are dropped before they
    * count. Memory is bounded by `max`; the time a huge directory takes, by the tool's timeout, as the
    * read stops when its thread is interrupted.
    */
@@ -423,7 +426,7 @@ final class HostFileBackend private (
         val p    = entries.next()
         val name = p.getFileName.toString
         val hidden =
-          HostFileBackend.isTemporary(name) || inLockDirectory(p) || aliased(p)
+          HostFileBackend.isTemporary(name) || isLockFile(p) || aliased(p)
         if !hidden then
           eligible += 1
           least.add(name -> p)
@@ -546,6 +549,9 @@ object HostFileBackend:
   private val Temporary = """\..+\.llm4s-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp""".r
 
   private def isTemporary(name: String): Boolean = Temporary.matches(name)
+
+  /** A lock file's folded name. */
+  private val LockFileName = """stripe-[0-9]+\.lock""".r
 
   /**
    * A backend over the existing directory `root`, resolved to its real path, keeping its OS lock files

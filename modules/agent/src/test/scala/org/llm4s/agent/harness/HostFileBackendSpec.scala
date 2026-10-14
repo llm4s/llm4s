@@ -273,14 +273,20 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     outer.lockFileOf(p("/sub/a.txt")).value.getParent shouldBe shared.toRealPath()
     written(outer.write(p("/a.txt"), "x", call()))
     Files.list(dir).iterator().asScala.map(_.getFileName.toString).toVector.sorted shouldBe Vector("a.txt", "sub")
-    // a lock directory inside the root is neither reachable nor listed
+    // a lock directory inside the root: its lock files are neither reachable nor listed, the rest is
     val inside = HostFileBackend.open(dir, dir.resolve(".locks")).value
     written(inside.write(p("/b.txt"), "y", call()))
-    inside.read(p("/.locks/stripe-0.lock"), 0, 1, call()).left.value.message should include("lock directory")
-    inside.read(p("/.LOCKS/stripe-0.lock"), 0, 1, call()).left.value.message should include("lock directory")
-    inside.write(p("/.Locks/x"), "x", call()).left.value.message should include("lock directory")
-    (inside.read(p("/.locksmith"), 0, 1, call()).left.value.message should not).include("lock directory")
-    inside.ls(VPath.root, 10, call()).value.items.map(_.path.value) should not contain "/.locks"
+    val stripe = inside.lockFileOf(p("/b.txt")).value.getFileName.toString
+    inside.read(p(s"/.locks/$stripe"), 0, 1, call()).left.value.message should include("lock files")
+    inside.read(p(s"/.LOCKS/${stripe.toUpperCase}"), 0, 1, call()).left.value.message should include("lock files")
+    inside.write(p("/.locks/stripe-7.lock"), "x", call()).left.value.message should include("lock files")
+    written(inside.write(p("/.locks/notes.txt"), "mine", call())).created shouldBe true
+    inside.ls(p("/.locks"), 100, call()).value.items.map(_.path.value) shouldBe Vector("/.locks/notes.txt")
+    // a lock directory above the root reserves nothing in it
+    Files.createDirectories(dir.resolve("ws"))
+    val below = HostFileBackend.open(dir.resolve("ws"), dir).value
+    written(below.write(p("/stripe-0.lock"), "not a lock file of mine", call())).created shouldBe true
+    below.read(p("/stripe-0.lock"), 0, 1, call()).value.lines shouldBe Vector("not a lock file of mine")
   }
 
   it should "replace or delete a file over maxFileBytes, though it cannot read or edit one" in {
