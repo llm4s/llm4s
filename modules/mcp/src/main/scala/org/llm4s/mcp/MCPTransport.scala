@@ -672,6 +672,18 @@ class SSETransportImpl(
   def generateId(): String = requestId.incrementAndGet().toString
 }
 
+private[mcp] object StdioTransportImpl {
+
+  /** The last `max` characters of `text`, cut at a line start when there is one, so a line is never kept in part. */
+  def lastLines(text: String, max: Int): String =
+    if (text.length <= max) text
+    else {
+      val tail = text.takeRight(max)
+      val nl   = tail.indexOf('\n')
+      if (nl >= 0 && nl < tail.length - 1) tail.drop(nl + 1) else tail
+    }
+}
+
 // Stdio transport implementation using subprocess communication with proper MCP protocol compliance.
 // Uses CompletableFuture and a background reader thread to handle concurrent requests safely.
 // This fixes the race condition where multiple threads could get mismatched responses.
@@ -702,6 +714,18 @@ class StdioTransportImpl(
   // Background reader thread for routing responses
   @volatile private var readerThread: Option[Thread] = None
   @volatile private var shutdownRequested            = false
+
+  // The server's stderr is drained on its own thread for as long as the process lives: nothing else reads it while a
+  // request is in flight, and a server that logs more than the pipe buffer holds would block in its write and never
+  // answer (#1952). What it writes is kept here, newest last, cut to the last StderrBufferChars characters, until
+  // readAvailableStderr takes it for a diagnostic.
+  private val StderrBufferChars = 8192
+  // Lines logged at info per process; the rest go to debug, so a chatty server cannot flood the log
+  private val StderrInfoLines                        = 100
+  private val stderrLock                             = new Object
+  private val stderrBuffer                           = new StringBuilder
+  @volatile private var stderrSeen                   = false
+  @volatile private var stderrThread: Option[Thread] = None
 
   // Timeout for server responses (30 seconds)
   private val RESPONSE_TIMEOUT_MS = 30000L
@@ -748,6 +772,9 @@ class StdioTransportImpl(
       )
 
       process = Some(newProcess)
+      stderrLock.synchronized(stderrBuffer.clear())
+      stderrSeen = false
+      stderrReader.foreach(startStderrDrain)
       newProcess
     } match {
       case Failure(e) =>
@@ -776,6 +803,66 @@ class StdioTransportImpl(
         }
     }
   }
+
+  // Starts the daemon thread that reads `reader` (the server's stderr) until it ends: when the process exits, or when
+  // cleanupProcess closes the stream.
+  private def startStderrDrain(reader: java.io.Reader): Unit = {
+    val thread = new Thread(
+      new Runnable {
+        override def run(): Unit = {
+          val chunk  = new Array[Char](4096)
+          val carry  = new StringBuilder
+          var logged = 0
+          def logLine(line: String): Unit = {
+            val text = line.stripSuffix("\r")
+            if (logged < StderrInfoLines) {
+              logger.info(s"StdioTransport($name) stderr: ${PayloadLog.preview(text)}")
+              logged += 1
+              if (logged == StderrInfoLines)
+                logger.info(s"StdioTransport($name) stderr: further lines are logged at debug level")
+            } else logger.debug(s"StdioTransport($name) stderr: ${PayloadLog.preview(text)}")
+          }
+          Iterator
+            .continually(Try(reader.read(chunk)).getOrElse(-1))
+            .takeWhile(_ >= 0)
+            .foreach { n =>
+              val text = new String(chunk, 0, n)
+              stderrLock.synchronized {
+                stderrBuffer.append(text)
+                val kept = StdioTransportImpl.lastLines(stderrBuffer.toString, StderrBufferChars)
+                if (kept.length != stderrBuffer.length) {
+                  stderrBuffer.clear()
+                  stderrBuffer.append(kept)
+                }
+              }
+              stderrSeen = true
+              carry.append(text)
+              val lines = carry.toString.split("\n", -1)
+              carry.clear()
+              carry.append(lines.last)
+              lines.init.foreach(logLine)
+              if (carry.length >= PayloadLog.MaxChars) {
+                logLine(carry.toString)
+                carry.clear()
+              }
+            }
+          if (carry.nonEmpty) logLine(carry.toString)
+          logger.debug(s"StdioTransport($name) stderr drain thread exiting")
+        }
+      },
+      s"StdioTransport-$name-stderr"
+    )
+    thread.setDaemon(true)
+    thread.start()
+    stderrThread = Some(thread)
+  }
+
+  // Waits up to `millis` for `thread` to end, keeping an interrupt of this thread set
+  private def joinQuietly(thread: Thread, millis: Long): Unit =
+    Try(thread.join(millis)).failed.foreach {
+      case _: InterruptedException => Thread.currentThread().interrupt()
+      case _                       => ()
+    }
 
   // Starts the background reader thread that routes responses to pending futures
   private def startReaderThread(): Unit = {
@@ -880,7 +967,7 @@ class StdioTransportImpl(
       }
 
       // Check if there's any output indicating the server is ready
-      if (stdoutReader.exists(_.ready()) || stderrReader.exists(_.ready())) {
+      if (stdoutReader.exists(_.ready()) || stderrSeen) {
         logger.debug(s"StdioTransport($name) server appears ready (has output)")
         return Right(())
       }
@@ -897,25 +984,18 @@ class StdioTransportImpl(
     }
   }
 
-  // Read any available stderr output for diagnostics, bounded: the result goes into error logs and returned errors
-  private def readAvailableStderr(): String =
-    stderrReader match {
-      case Some(reader) =>
-        val output = new StringBuilder
-        scala.util
-          .Try {
-            while (reader.ready()) {
-              val line = reader.readLine()
-              if (line != null) {
-                output.append(line).append("\n")
-                logger.info(s"StdioTransport($name) stderr: ${PayloadLog.preview(line)}")
-              }
-            }
-          }
-          .fold(e => logger.debug(s"Error reading stderr: ${e.getMessage}"), _ => ())
-        PayloadLog.preview(output.toString)
-      case None => ""
+  // Takes what the drain thread has collected of the server's stderr, for diagnostics, bounded: the result goes into
+  // error logs and returned errors. Once the process has exited it first gives the drain thread a moment to read what
+  // is left in the pipe, so a server's last words are not missed.
+  private def readAvailableStderr(): String = {
+    if (!process.exists(_.isAlive)) stderrThread.foreach(joinQuietly(_, 1000))
+    val output = stderrLock.synchronized {
+      val text = stderrBuffer.toString
+      stderrBuffer.clear()
+      text
     }
+    PayloadLog.preview(StdioTransportImpl.lastLines(output, PayloadLog.MaxChars))
+  }
 
   // Sends JSON-RPC request via subprocess stdin/stdout with proper MCP protocol.
   // Thread-safe: uses write lock for sending and CompletableFuture for receiving.
@@ -1058,13 +1138,6 @@ class StdioTransportImpl(
     }
     stdoutReader = None
 
-    stderrReader.foreach { reader =>
-      Try(reader.close()).recover { case e =>
-        logger.debug(s"Error closing stderr reader: ${e.getMessage}")
-      }
-    }
-    stderrReader = None
-
     process.foreach { p =>
       Try {
         // First try graceful termination
@@ -1082,7 +1155,26 @@ class StdioTransportImpl(
         logger.warn(s"StdioTransport($name) error during process cleanup: ${e.getMessage}")
       }
     }
+    val stderrStream = process.map(_.getErrorStream)
     process = None
+
+    // The process is gone, so its stderr has ended and the drain thread ends with it. Closing the pipe is the
+    // backstop for a grandchild that kept it open; the reader itself is closed only after the thread, since closing
+    // a reader that another thread is blocked in waits for that thread.
+    stderrThread.foreach { thread =>
+      joinQuietly(thread, 1000)
+      if (thread.isAlive) {
+        stderrStream.foreach(stream => Try(stream.close()))
+        joinQuietly(thread, 1000)
+      }
+    }
+    stderrThread = None
+    stderrReader.foreach { reader =>
+      Try(reader.close()).recover { case e =>
+        logger.debug(s"Error closing stderr reader: ${e.getMessage}")
+      }
+    }
+    stderrReader = None
     // Process and streams cleaned up
   }
 
