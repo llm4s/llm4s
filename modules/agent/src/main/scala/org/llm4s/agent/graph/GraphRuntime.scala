@@ -1666,7 +1666,9 @@ final class GraphRuntime(
    * passed only against the lease published at that moment, reading the clock before it takes the lock.
    * So a renewal published before the beat's decision always counts, and one published after it - or
    * after a loss found otherwise, or `stop` - is ignored. The beat never reads the lease's end
-   * outside the lock to decide, and nothing slow (the store, the clock, `lost`) runs under it.
+   * outside the lock to decide, and nothing slow (the store, the clock, `lost`) runs under it. A
+   * renewal is started only by such a decision, on a reading taken after the beat's wait, and is sent
+   * at that reading: a beat that wakes late, past the lease's end, declares the loss and sends none.
    *
    * [[stop]] stops the beat and waits for it and for a renewal in flight - no longer than `claims.ttl`
    * in all, so a store that hangs cannot hang the end of a run - so that no renewal lands after the
@@ -1717,10 +1719,34 @@ final class GraphRuntime(
     /** How long the lease has left at `now`, or `None` once the heartbeat is over. */
     private def remainingAt(now: Long): Option[Long] = withLock(lock)(Option.when(!over)(leaseEnd - now))
 
+    private def passed(): Unit = lose(None, s"its lease of ${claims.ttl} passed with no renewal landing")
+
+    /**
+     * At `now`, under `lock` with any renewal's publication: ends the heartbeat if the lease has passed
+     * (`true`), and otherwise starts a renewal sent at `now`, unless one is in flight or the heartbeat is
+     * over - so that no renewal starts once the lease has passed, or once `stop` or `halt` ended it.
+     */
+    private def renewOrEnd(now: Long): Boolean =
+      withLock(lock) {
+        if over then false
+        else if now - leaseEnd >= 0 then
+          over = true
+          true
+        else
+          if renewal.get.forall(!_.isAlive) then renewal.set(Some(renewing(now)))
+          false
+      }
+
+    /**
+     * Each beat reads the clock twice, outside `lock`, and decides on each reading against the lease
+     * published when it decides: once to judge the lease and size its wait, and again once the wait is
+     * over, before it starts a renewal - so that a beat delayed after either reading, or in the wait
+     * itself, past the lease's end, sends no renewal that could revive a lapsed claim the store has not
+     * yet handed over, and declares the loss instead.
+     */
     @tailrec private def beating(): Unit =
-      // the clock is read first: the decision below is against the lease published when it is made
       val now = ticker()
-      if end(ends => now - ends >= 0) then lose(None, s"its lease of ${claims.ttl} passed with no renewal landing")
+      if end(ends => now - ends >= 0) then passed()
       else
         remainingAt(now) match
           case None => ()
@@ -1729,15 +1755,13 @@ final class GraphRuntime(
               stopped.await(math.max(1L, math.min(claims.renewEvery.toNanos, remaining)), TimeUnit.NANOSECONDS)
             ) match
               case Right(false) =>
-                // under `lock`, so that no renewal starts once `stop` or `halt` has ended the heartbeat
-                withLock(lock)(if !over && renewal.get.forall(!_.isAlive) then renewal.set(Some(renewing())))
-                beating()
+                if renewOrEnd(ticker()) then passed() else beating()
               // stopped; nothing else wakes or interrupts it
               case _ => ()
 
-    private def renewing(): Thread =
+    /** A renewal whose request is sent at `sentAt`, the [[ticker]] reading the beat started it on. */
+    private def renewing(sentAt: Long): Thread =
       Thread.ofVirtual().name(s"llm4s-claim-renew-${threadId.value}").start { () =>
-        val sentAt = ticker()
         DefaultRunHandle.guarded(checkpointer.renew(threadId, token, claims.ttl)) match
           case Right(Right(_)) =>
             // the lease runs from when the request was sent, never from when its answer arrived

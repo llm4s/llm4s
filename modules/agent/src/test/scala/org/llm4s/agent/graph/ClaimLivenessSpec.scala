@@ -418,6 +418,65 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     await(handle).completed._2 shouldBe Vector("x", "second")
   }
 
+  it should "lose its claim, and send no renewal, when the lease passes between the beat reading the clock and launching a renewal" in {
+    val time  = ManualTime()
+    val store = Hooked(InMemoryCheckpointer(time))
+    val two   = TwoStep()
+    val rt    = runtime(store, time)
+    // the beat's ticker reads: the first odd one from `holdFrom` on returns the time it read on entry,
+    // after being held until the test releases it - the beat descheduled just after reading the clock
+    val beatCalls   = new AtomicInteger()
+    val holdFrom    = new AtomicInteger(Int.MaxValue)
+    val held        = new AtomicBoolean(false)
+    val beatHeld    = new CountDownLatch(1)
+    val beatRelease = new CountDownLatch(1)
+    rt.ticker = () => {
+      val read = time.nanos()
+      if Thread.currentThread().getName == s"llm4s-claim-${thread.value}" then {
+        // a beat reads the clock twice: to judge the lease and size its wait (odd), then after the wait
+        val n = beatCalls.incrementAndGet()
+        if n >= holdFrom.get && n % 2 == 1 && held.compareAndSet(false, true) then {
+          beatHeld.countDown()
+          beatRelease.await(10, TimeUnit.SECONDS): Unit
+        }
+      }
+      read
+    }
+    // the next renewal is held in the store, so that it is the one renewal in flight, and then fails
+    val inStore  = new CountDownLatch(1)
+    val failNow  = new CountDownLatch(1)
+    val entering = new AtomicBoolean(true)
+    store.onRenew = () => {
+      if entering.compareAndSet(true, false) then {
+        inStore.countDown()
+        failNow.await(10, TimeUnit.SECONDS): Unit
+      }
+      unreachable()
+    }
+    val handle = rt.start(thread, two.graph, "x", run("first")).value
+    two.awaitEntered()
+    inStore.await(5, TimeUnit.SECONDS) shouldBe true
+    // every renewal so far was sent at 0s, so the lease ends at 30s
+    holdFrom.set(beatCalls.get + 1)
+    beatHeld.await(5, TimeUnit.SECONDS) shouldBe true
+
+    // the beat has read 0s and is descheduled; the lease passes, and the renewal in flight settles
+    time.advance(31.seconds)
+    val settled = new CountDownLatch(1)
+    rt.renewalSettled = _ => settled.countDown()
+    failNow.countDown()
+    settled.await(5, TimeUnit.SECONDS) shouldBe true
+    // from here on the store would renew the lapsed claim - no takeover has happened
+    val sent = store.renewals.get
+    store.onRenew = () => None
+    val token = tokenOf(store)
+    beatRelease.countDown()
+
+    two.interrupted.await(5, TimeUnit.SECONDS) shouldBe true
+    await(handle).failed._2 shouldBe GraphError.ClaimLost("t", token, None)
+    store.renewals.get shouldBe sent
+  }
+
   it should "keep renewing through a store clock that throws" in {
     val time   = ManualTime()
     val store  = Hooked(InMemoryCheckpointer(time))
