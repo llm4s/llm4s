@@ -186,7 +186,7 @@ object LLMClient {
    * returned trimmed; if nothing is found the trimmed text is returned unchanged so the caller
    * reports the parse error.
    */
-  private[llmconnect] def extractJson(raw: String): String = {
+  private[llm4s] def extractJson(raw: String): String = {
     val trimmed = raw.trim
     val unfenced = trimmed match {
       case FencePattern(inner) => inner.trim

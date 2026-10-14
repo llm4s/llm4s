@@ -65,6 +65,17 @@ object GraphError:
   final case class MiddlewareFailed(middleware: String, cause: Throwable) extends GraphError with NonRecoverableError:
     override val message: String = s"Middleware '$middleware' failed: ${describe(cause)}"
 
+  /**
+   * An agent's answer did not match its response format (`AgentBuilder.withOutput`, design 4.26) after one
+   * corrective retry: the turn ended as a Block, removed from the thread, with both model calls in its usage.
+   * `errors` are the second answer's problems, each prefixed with a JSON path - at most 20, each at most 300
+   * characters. They quote the answer, so `message`, which durable events record, gives only their count.
+   */
+  final case class OutputInvalid(errors: Vector[String]) extends GraphError with NonRecoverableError:
+    private val problems = if errors.size == 1 then "1 problem" else s"${errors.size} problems"
+    override val message: String =
+      s"The agent's answer did not match its response format after a corrective retry ($problems)"
+
   private def describe(thrown: Throwable): String = Option(thrown.getMessage).getOrElse(thrown.toString)
 
   /** The graph went quiescent while a join still waited for arrivals that nothing can produce. */

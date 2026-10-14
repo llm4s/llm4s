@@ -3,13 +3,14 @@ package org.llm4s.agent
 import org.llm4s.agent.graph.{ BreakpointPhase, GraphRuntime, NodeId }
 import org.llm4s.agent.graph.middleware.AgentMiddleware
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolArgumentValidator, ToolSet }
-import org.llm4s.agent.graph.toolloop.{ LoopAgent, LoopHandoff, ModelStep, ToolLoop }
+import org.llm4s.agent.graph.toolloop.{ LoopAgent, LoopHandoff, ModelStep, OutputFormat, ToolLoop }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.CompletionOptions
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.toolapi.{ SchemaDefinition, ToolRegistry }
 import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
+import upickle.default.ReadWriter
 
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -39,7 +40,8 @@ final class AgentBuilder private (
   streaming: Boolean,
   private val interruptBefore: Vector[AgentNode],
   private val interruptAfter: Vector[AgentNode],
-  maxPromptSectionTokens: Int
+  maxPromptSectionTokens: Int,
+  output: Option[OutputFormat]
 ):
 
   private def copy(
@@ -55,7 +57,8 @@ final class AgentBuilder private (
     streaming: Boolean = streaming,
     interruptBefore: Vector[AgentNode] = interruptBefore,
     interruptAfter: Vector[AgentNode] = interruptAfter,
-    maxPromptSectionTokens: Int = maxPromptSectionTokens
+    maxPromptSectionTokens: Int = maxPromptSectionTokens,
+    output: Option[OutputFormat] = output
   ): AgentBuilder =
     new AgentBuilder(
       id,
@@ -72,7 +75,8 @@ final class AgentBuilder private (
       streaming,
       interruptBefore,
       interruptAfter,
-      maxPromptSectionTokens
+      maxPromptSectionTokens,
+      output
     )
 
   /** The agent's tools, replacing any set before, checked with the set's validator. */
@@ -104,6 +108,23 @@ final class AgentBuilder private (
 
   /** Appends `handoffs` to the agent's handoffs, in order. */
   def withHandoffs(handoffs: Handoff*): AgentBuilder = copy(handoffs = this.handoffs ++ handoffs)
+
+  /**
+   * The response format of this agent's answers (design 4.26): `schema`, rendered strict, replacing any set
+   * before - a hand-written `ObjectSchema[O]`, or one derived with `llm4s-schema-derivation`:
+   * `withOutput(SchemaOf[Invoice].definition)`. The system prompt states it on every model call, and a call
+   * that offers no tools carries it as `responseFormat`, replacing one given with [[withCompletionOptions]]; a
+   * call that offers tools carries none, since providers that cannot combine the two would refuse or suppress
+   * the tool calls (see `ModelStep.fromClient`). A final answer must be JSON that matches the schema and reads as `O`, and is stored as that JSON
+   * alone. An invalid answer is retried once in the same model step, with its problems; a second invalid
+   * answer ends the turn with `Left(GraphError.OutputInvalid)`, the turn removed and both calls counted.
+   * Read the answer with [[AgentResult.decodeOutput]]. The format belongs to this agent only: a handoff
+   * target answers in its own. [[build]] refuses a schema whose root is not an object, one with a keyword
+   * the tool argument validator cannot check, and a format whose prompt section alone is over
+   * [[withMaxPromptSectionTokens]], which the section counts against with the middleware's.
+   */
+  def withOutput[O: ReadWriter](schema: SchemaDefinition[O]): AgentBuilder =
+    copy(output = Some(OutputFormat.of(schema)))
 
   /** Model calls per turn, at least 1; at the limit the turn ends `StepLimitReached`. */
   def withMaxSteps(n: Int): AgentBuilder = copy(maxSteps = n)
@@ -200,8 +221,9 @@ final class AgentBuilder private (
       loopHandoffs <- handoffs.foldLeft[Result[Vector[LoopHandoff]]](Right(Vector.empty)) { (acc, h) =>
         acc.flatMap(done => loopHandoff(h).map(done :+ _))
       }
-    yield LoopAgent(agentId, ModelStep.fromClient(client, options, streaming), toolSet)
+    yield LoopAgent(agentId, ModelStep.fromClient(client, options, streaming, output.map(_.responseFormat)), toolSet)
       .withSystemPrompt(systemPrompt)
+      .withOutput(output)
       .withMaxSteps(maxSteps)
       .withMaxPromptSectionTokens(maxPromptSectionTokens)
       .withMiddleware(middleware)
@@ -223,7 +245,7 @@ final class AgentBuilder private (
 
   /** The settings the graph version covers, as canonical JSON: two builders of one id must agree on them. */
   private def canonical: ujson.Obj =
-    ujson.Obj(
+    val settings = ujson.Obj(
       "id"           -> id,
       "systemPrompt" -> systemPrompt.fold[ujson.Value](ujson.Null)(ujson.Str(_)),
       "maxSteps"     -> maxSteps,
@@ -247,6 +269,9 @@ final class AgentBuilder private (
         handoffs.sortBy(_.id).map(h => ujson.Obj("target" -> h.id, "preserveContext" -> h.preserveContext))
       )
     )
+    // only when set, so the version of an agent without a response format is what it was before formats existed
+    output.foreach(format => settings("output") = format.schema)
+    settings
 
 object AgentBuilder:
 
@@ -266,7 +291,8 @@ object AgentBuilder:
       streaming = false,
       interruptBefore = Vector.empty,
       interruptAfter = Vector.empty,
-      maxPromptSectionTokens = LoopAgent.DefaultMaxPromptSectionTokens
+      maxPromptSectionTokens = LoopAgent.DefaultMaxPromptSectionTokens,
+      output = None
     )
 
   /**
@@ -311,7 +337,7 @@ object AgentBuilder:
 
   /**
    * The graph version of a family: the hex SHA-256 of its agents' settings, sorted by id - each
-   * agent's id, system prompt and max steps, its tools' names and definitions sorted by name, its
+   * agent's id, system prompt and max steps, its response format's schema when it has one, its tools' names and definitions sorted by name, its
    * middleware ids in registration order with each middleware's contributed tools' names and
    * definitions, and its handoff targets with `preserveContext`. Completion
    * options, streaming, breakpoints and the model client are not part of it: they are rebound when a thread is

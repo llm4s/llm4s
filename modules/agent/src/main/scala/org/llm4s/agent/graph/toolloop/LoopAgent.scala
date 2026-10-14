@@ -17,6 +17,7 @@ import upickle.default.ReadWriter
  *   further call, so an agent handed a turn that has already used its limit makes no call
  * @param maxPromptSectionTokens the most every middleware's prompt sections may add to one request together,
  *   estimated at four characters a token: a request over it fails the run (design §4.22)
+ * @param output the response format this agent's answers must match (design 4.26), or none
  */
 final case class LoopAgent private (
   id: AgentId,
@@ -26,13 +27,16 @@ final case class LoopAgent private (
   systemPrompt: Option[String],
   maxSteps: Int,
   handoffs: Vector[LoopHandoff],
-  maxPromptSectionTokens: Int
+  maxPromptSectionTokens: Int,
+  output: Option[OutputFormat]
 ):
   def withSystemPrompt(prompt: Option[String]): LoopAgent         = copy(systemPrompt = prompt)
   def withMaxSteps(steps: Int): LoopAgent                         = copy(maxSteps = steps)
   def withMiddleware(middleware: Seq[AgentMiddleware]): LoopAgent = copy(middleware = middleware)
   def withHandoffs(handoffs: Vector[LoopHandoff]): LoopAgent      = copy(handoffs = handoffs)
   def withMaxPromptSectionTokens(n: Int): LoopAgent               = copy(maxPromptSectionTokens = n)
+  def withOutput(format: OutputFormat): LoopAgent                 = withOutput(Some(format))
+  def withOutput(format: Option[OutputFormat]): LoopAgent         = copy(output = format)
 
 object LoopAgent:
 
@@ -43,11 +47,11 @@ object LoopAgent:
   val MaxPromptSections: Int = 64
 
   /**
-   * An agent with no system prompt, no middleware, no handoffs, a limit of 50 steps a turn and the default prompt
-   * section budget.
+   * An agent with no system prompt, no middleware, no handoffs, no response format, a limit of 50 steps a turn and
+   * the default prompt section budget.
    */
   def apply(id: AgentId, model: ModelStep, tools: ToolSet = ToolSet.empty): LoopAgent =
-    new LoopAgent(id, model, tools, Nil, None, 50, Vector.empty, DefaultMaxPromptSectionTokens)
+    new LoopAgent(id, model, tools, Nil, None, 50, Vector.empty, DefaultMaxPromptSectionTokens, None)
 
 /** A transfer the agent may make to `target`; with `preserveContext = false` the target sees only the transfer onwards. */
 final case class LoopHandoff(target: AgentId, reason: Option[String], preserveContext: Boolean)
