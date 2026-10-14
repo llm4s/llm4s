@@ -105,12 +105,21 @@ object MemoryTestSupport:
   final class Overlong(
     underlying: MemoryManager,
     recalled: String => Result[String],
-    recording: Option[Result[MemoryManager]] = None
+    recording: Option[Result[MemoryManager]] = None,
+    consolidating: Option[MemoryStore => Result[MemoryManager]] = None
   ) extends MemoryManager:
-    export underlying.{ contextTokenBudget as _, getRelevantContext as _, recordConversation as _, * }
+    export underlying.{
+      consolidateMemories as _,
+      contextTokenBudget as _,
+      getRelevantContext as _,
+      recordConversation as _,
+      *
+    }
     def getRelevantContext(query: String, maxTokens: Int, filter: MemoryFilter): Result[String] = recalled(query)
     def recordConversation(messages: Seq[Message], conversationId: String): Result[MemoryManager] =
       recording.getOrElse(underlying.recordConversation(messages, conversationId))
+    def consolidateMemories(olderThan: java.time.Instant, minCount: Int): Result[MemoryManager] =
+      consolidating.fold(underlying.consolidateMemories(olderThan, minCount))(_(underlying.store))
 
   /** Every memory of `store`, by content. */
   def contents(store: MemoryStore): Vector[String] =

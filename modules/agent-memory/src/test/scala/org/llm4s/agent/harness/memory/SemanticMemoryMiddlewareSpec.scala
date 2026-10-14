@@ -484,6 +484,36 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     contents(held(m, None)) shouldBe Vector("Consolidated summary.")
   }
 
+  "A consolidation that fails after a group applied" should "still announce the group it replaced" in {
+    val a = Memory.userFact("a")
+    val b = Memory.userFact("b")
+    // replaces one group through the view, then fails, as a strict manager does on a later group
+    val failingLater = (store: MemoryStore, _: LLMClient) =>
+      new Overlong(
+        SimpleMemoryManager.withStore(store),
+        _ => Right(""),
+        consolidating = Some(view =>
+          view
+            .replace(Seq(Memory.userFact("a and b")), Seq(a.id, b.id))
+            .flatMap(_ => Left(org.llm4s.error.ProcessingError("summary", "the second group failed")))
+        )
+      )
+    val m = new SemanticMemoryMiddleware(
+      _ => Right(InMemoryStore.withMemories(Seq(a, b)).value),
+      failingLater,
+      answering(),
+      record = None,
+      consolidate = consolidate
+    )
+    val seen = new CopyOnWriteArrayList[StreamEvent]()
+    agentWith(answering("ok"), m).stream(ThreadId("partial"), "hi")(e => seen.add(e): Unit).value.await().value
+    contents(held(m, None)) shouldBe Vector("a and b")
+    val events = seen.asScala.toVector
+    events.collect { case MemoryEvents.Consolidated(c) => c } shouldBe Vector(MemoryConsolidated(1, 2, 0))
+    events.collect { case MemoryEvents.Skipped(s) => s } shouldBe
+      Vector(MemorySkipped("memory.consolidate", "ProcessingError"))
+  }
+
   "A manager that returns a store other than its view" should "have its recording skipped, the answer kept" in {
     val elsewhere = (_: MemoryStore, _: LLMClient) => SimpleMemoryManager.withStore(InMemoryStore.empty)
     val m         = new SemanticMemoryMiddleware(_ => Right(InMemoryStore.empty), elsewhere, answering())

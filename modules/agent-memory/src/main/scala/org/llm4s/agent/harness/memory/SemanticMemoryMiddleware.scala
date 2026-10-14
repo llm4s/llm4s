@@ -171,14 +171,15 @@ final class SemanticMemoryMiddleware(
         .map(outcomes.add(_): Unit)
     }
     val cutoff = clock.instant().minusNanos(settings.olderThan.toNanos)
-    guarded(manager(view, context.accounted(client)).consolidateMemories(cutoff, settings.minCount)).map { _ =>
-      val done = outcomes.asScala.toVector
-      if done.nonEmpty then
-        MemoryEvents.Consolidated.emit(
-          context.run,
-          MemoryConsolidated(done.size, done.map(_.removed.size).sum, done.map(_.evicted).sum)
-        )
-    }
+    val result = guarded(manager(view, context.accounted(client)).consolidateMemories(cutoff, settings.minCount))
+    // the groups that applied are durable whatever the manager did after them: announce them even when it failed
+    val done = outcomes.asScala.toVector
+    if done.nonEmpty then
+      MemoryEvents.Consolidated.emit(
+        context.run,
+        MemoryConsolidated(done.size, done.map(_.removed.size).sum, done.map(_.evicted).sum)
+      )
+    result.map(_ => ())
 
   /** A failure after the answer: a cancellation is the hook's `Left`; anything else is announced and skipped. */
   private def skip(context: ModelContext, operation: String, result: Result[Unit]): Result[Unit] =
