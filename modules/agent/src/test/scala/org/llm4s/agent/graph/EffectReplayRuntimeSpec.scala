@@ -295,6 +295,30 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
     record(store, thread, effect.key.get) shouldBe None
   }
 
+  it should "release the records of a sibling that parked in the superstep it closed" in {
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+    val effect  = new Effect
+    val b       = GraphBuilder("blocking-sibling", "v1")
+    val done    = b.declareResume[String, String]("done")
+    b.implement(done.node, writes = Set(log))((_, _, _) => continue(Command.empty.update(log, "resumed")))
+    val asker = b.node[Unit]("asker", writes = Set(log)) { (_, _, context) =>
+      effect.perform(context).fold(NodeResult.Fail(_), _ => NodeResult.Suspend(StateUpdate.empty, "ok?", done))
+    }
+    val guard = b.node[Unit]("guard", writes = Set(log)) { (_, _, _) =>
+      NodeResult.Block(StateUpdate.empty, ValidationError("guard", "no"))
+    }
+    val start = b.node[Unit]("start", writes = Set(log))((_, _, _) => continue(Command.empty))
+    b.edge(start, asker)
+    b.edge(start, guard)
+    runtime.start(thread, b.compile(start)(_.get(log)).value, ()).awaited.value.failed
+    val closing = store.latest(thread).value.value.checkpoint
+    closing.status shouldBe CheckpointStatus.Failed
+    closing.snapshot.parked should not be empty
+    effect.applied.get shouldBe 1
+    record(store, thread, effect.key.get) shouldBe None
+  }
+
   "A run that lost its claim" should "write no record, and so never start its effect" in {
     val clock   = new MutableClock(Instant.parse("2026-10-14T09:00:00Z"))
     val store   = InMemoryCheckpointer(clock)

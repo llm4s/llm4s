@@ -113,6 +113,52 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
     continuation.effectOwner shouldBe TaskId("2.0")
   }
 
+  "An answered resume's key" should "name its phase: the asking phase, the question and the answer, by thread" in {
+    val call    = IdempotencyKey("call-key")
+    val state   = ThreadState.empty(Map.empty)
+    val q       = ujson.Obj("prompt" -> "sure?")
+    val first   = IdempotencyKey.ofResume(call, None, q, ujson.True)
+    val second  = IdempotencyKey.ofResume(call, Some(first), q, ujson.True)
+    val execute = ToolContext(context(), ToolCallId("c"), call, state)
+    def resuming(phase: IdempotencyKey, thread: String = "t") =
+      ToolContext.resuming(context(thread = thread), ToolCallId("c"), call, state, approved = false, phase)
+    val keys = Seq(execute, resuming(first), resuming(second)).map(_.effectKey("op", "x"))
+    keys.distinct should have size 3
+    // stable: the same resume, recovered, derives the same key
+    resuming(IdempotencyKey.ofResume(call, None, ujson.Obj("prompt" -> "sure?"), ujson.True))
+      .effectKey("op", "x") shouldBe keys(1)
+    IdempotencyKey.ofResume(call, None, q, ujson.False) should not be first
+    // a fork resuming the same question is a new effect
+    resuming(first, thread = "fork").effectKey("op", "x") should not be keys(1)
+    // an approval re-run of execute keeps execute's key
+    execute.withApproved(true).effectKey("op", "x") shouldBe keys(0)
+    resuming(first).withApproved(true).effectKey("op", "x") shouldBe keys(1)
+  }
+
+  "A hook that asks" should "keep its task key when it runs again with its answers" in {
+    val c = context(task = "2.0")
+    c.withAnswers(Map("m" -> (ujson.Str("q"), ujson.Str("a")))).taskKey shouldBe c.taskKey
+    c.withAnswers(Map("m" -> (ujson.Str("q"), ujson.Str("a")))).effectKey("op") shouldBe c.effectKey("op")
+  }
+
+  "Commit.releasesEffect at a settled checkpoint" should "release every record, a parked sibling's of a Block included" in {
+    val token = FencingToken(5L)
+    val failed = Checkpoint(
+      Checkpoint.CurrentFormat,
+      "c",
+      None,
+      "t",
+      "r",
+      CheckpointStatus.Failed,
+      java.time.Instant.EPOCH,
+      snapshot(4, Vector(pending("4.0")), Vector("3.1"))
+    )
+    Commit(token, Some(failed)).releasesEffect(TaskId("3.1"), token) shouldBe true
+    Commit(token, Some(failed)).releasesEffect(TaskId("4.0"), token) shouldBe true
+    Commit(token, Some(failed.withStatus(CheckpointStatus.Suspended)))
+      .releasesEffect(TaskId("3.1"), token) shouldBe false
+  }
+
   "EffectRecord's JSON" should "share no mutable value with the record, in either direction" in {
     val key    = context().effectKey("op", "x")
     val out    = ujson.Obj("n" -> 1)

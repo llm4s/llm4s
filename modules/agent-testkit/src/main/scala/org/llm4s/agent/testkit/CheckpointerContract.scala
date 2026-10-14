@@ -1349,6 +1349,18 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     same(s.other().effect(s.thread, keyOf(record)).value, Some(record))
   }
 
+  it should "release every record at a settled checkpoint, the record of a task it lists as parked included" in {
+    // a Block closes the run Failed while a sibling of its superstep parked: nothing can run that sibling again
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0", "0.1")))).value
+    val parked = effectRecord("parked", "0.1")
+    s.store.commit(s.thread, Commit(token, effects = Vector(parked))).value
+    val closing = liveCheckpoint(s, "c2", Some("c1"), 1, parked = Seq("0.1")).withStatus(CheckpointStatus.Failed)
+    s.store.commit(s.thread, Commit(token, Some(closing), retractTurn = true)).value
+    same(effects(s, parked), Vector(None))
+  }
+
   it should "keep an effect record of a thread that has nothing else, until a later claim's commit releases it" in {
     // an effect-only commit on a fresh claim, then the claim released: the thread holds only the record
     val s      = Store()

@@ -17,6 +17,9 @@ and tools on `AgentBuilder`. Each slice adds its part here as it lands:
 
 - [#1902](https://github.com/llm4s/llm4s/issues/1902), kernel hooks for the harness - state-writing hooks, prompt
   sections, accounted model calls, and a Block that restores the whole turn: [below](#kernel-hooks-for-the-harness-1902).
+- [#1914](https://github.com/llm4s/llm4s/issues/1914), typed custom streams: [below](#typed-custom-streams-1914).
+- [#1921](https://github.com/llm4s/llm4s/issues/1921), replay of external effects - `ReplayGuard`, `Checkpointer.effect`
+  and `Commit.effects`: [below](#replay-of-external-effects-1921).
 
 Design: `docs/design/typed-agent-runtime/4.22-stage-3-slice-c1-kernel-hooks.md` (§4.22) onwards.
 
@@ -97,6 +100,7 @@ Effects outside thread state replay through `ReplayGuard`: an intent and an outc
 - **`GraphError` gains `EffectReplayRefused(operation, reason)`.** A `match` on `GraphError` that must be exhaustive gains a case.
 - **The SQLite schema moves to version 3** (`llm4s_checkpoint_effects`). A version-2 file is migrated when it is opened. A build from before this change refuses a version-3 file, as it refuses any newer schema.
 - **A `Transactional` target fences itself by the claim token.** `AppliedKeys.forget(key, token)` and the effect given to `ReplayGuard.transactional` (`token => ...`) refuse a token older than the newest seen for `key.scope`. A `Verifiable` target's effect is a compare-and-set against the plan's `before`.
+- **`ToolQuestionRequest` gains `phase: Option[IdempotencyKey]`** (defaulted; a stored request without it decodes as `None`). An asking tool's `resume` gets effect keys of its own, distinct from `execute`'s.
 - **New, opt-in API**: `RunContext.taskKey`, `RunContext.effectKey` and `ToolContext.effectKey`; `ReplayGuard` and its `Plan`; `ReplaySupport`, `StateCheck`, `AppliedKeys` and `EffectRecord`; and, in `llm4s-agent-testkit`, `ReplayContract`, which every external target of the harness passes. See [Tool side effects](../guide/agents/#tool-side-effects).
 
 Design: `docs/design/typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md` (§4.24).
@@ -302,14 +306,6 @@ A subscription now delivers the durable events of commits made through any runti
 - **A subscription can now end with `Disconnected(lastSeq, ReplayFailed(error))` after its replay**, when a read of the store fails, for instance because the store was closed under it. Before, only a failed replay ended this way. Resubscribe with `afterSeq = lastSeq`.
 - **Other runtimes' durable events arrive; their live events do not.** A listener that assumed every durable event came from its own runtime's runs should check `record.runId`.
 - **`CheckpointerContract` gains change-notification cases and a `sibling(store, clock)` hook.** A durable store's spec overrides `sibling` to open another store over the same storage, so that the cases run between connections.
-
-## Stage 3 migration: the harness
-
-### Typed custom streams (#1914)
-
-`EventHandlers` and the effect modules' `events(run, ...)` are additions. One behaviour changes:
-
-- **An fs2, ZIO, Pekko or Java agent stream whose consumer stops draining now fails** once more than `Agent.StreamCapacity` (1024) durable events wait for it, with an error naming the last `seq` it took, as the runtime already disconnects a listener that far behind (`Disconnected(lastSeq, Lagging)`). Before, the stream's buffer kept every durable event without limit. A `stream*` that fails this way cancels its turn, as any failure of those streams does; resume from the thread's log with `GraphRuntime.subscribe(threadId, afterSeq = lastSeq)`. A consumer that keeps up, even slowly, is unaffected: a run's own events stay far below the bound.
 
 ## Stage 1 migration: agent runtime
 

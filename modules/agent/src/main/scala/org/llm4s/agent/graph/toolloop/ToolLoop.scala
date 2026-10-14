@@ -1742,7 +1742,7 @@ object ToolLoop:
             reply <- read(answer)(using declared.answerCodec).left.map(m => s"Invalid answer for '$name': $m")
           yield (args, question, reply)
           decoded match
-            case Left(message)                  => error(task, message, context)
+            case Left(message) => error(task, message, context)
             case Right((args, question, reply)) =>
               resourcesOf(tool, task, args, context) match
                 case Left(refused) => refused

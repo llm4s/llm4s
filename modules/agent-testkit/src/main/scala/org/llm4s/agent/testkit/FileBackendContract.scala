@@ -131,6 +131,12 @@ trait FileBackendContract extends AnyFlatSpecLike with Matchers with EitherValue
     def conflict(a: String, b: String) =
       backend.locks(path(a)).exists(x => backend.locks(path(b)).exists(_.conflictsWith(x)))
     conflict("/a.txt", "/a.txt") shouldBe true
+    // C2 schedules a batch once and checks each call's locks again when it runs, from the stored rendering:
+    // a backend's locks must be a function of the path alone, and survive rendering
+    Seq("/a.txt", "/d/a.txt", "/A b/é.txt").foreach { p =>
+      backend.locks(path(p)) shouldBe backend.locks(path(p))
+      backend.locks(path(p)).map(k => LockKey(k.render)) shouldBe backend.locks(path(p))
+    }
     conflict("/d", "/d/a.txt") shouldBe true
     backend.locks(path("/a.txt")) should not be empty
   }

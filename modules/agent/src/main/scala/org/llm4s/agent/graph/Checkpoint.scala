@@ -232,7 +232,15 @@ final case class Commit private (
   def withRetractTurn(r: Boolean): Commit                = copy(retractTurn = r)
   def withEffects(e: Vector[EffectRecord]): Commit       = copy(effects = e)
 
-  private lazy val live: Set[String] = checkpoint.fold(Set.empty[String])(_.snapshot.liveTasks)
+  /**
+   * The tasks the new checkpoint can still run. A settled checkpoint (`Completed`, or `Failed`, which a Block
+   * writes) runs none, whatever its snapshot lists: `recover` and `resume` refuse it, so a sibling parked in
+   * the superstep a Block closed can never run, and its records go too.
+   */
+  private lazy val live: Set[String] = checkpoint.fold(Set.empty[String]) { c =>
+    if c.status == CheckpointStatus.Completed || c.status == CheckpointStatus.Failed then Set.empty
+    else c.snapshot.liveTasks
+  }
 
   /**
    * Whether this commit releases an effect record of task `taskId` that a commit fenced by `writer`

@@ -86,6 +86,7 @@ class ClaimLabelSpec extends AnyFlatSpec with Matchers with EitherValues with Be
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
+    def effect(threadId: ThreadId, key: EffectKey)                      = underlying.effect(threadId, key)
   }
 
   private def run(id: String) = RunConfig().withRunId(RunId(id))

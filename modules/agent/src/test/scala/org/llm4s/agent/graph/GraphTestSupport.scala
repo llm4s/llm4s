@@ -117,11 +117,11 @@ private[graph] class ForwardingCheckpointer(to: Checkpointer) extends Checkpoint
   def release(threadId: ThreadId, token: FencingToken)                    = to.release(threadId, token)
   def commit(threadId: ThreadId, commit: Commit)                          = to.commit(threadId, commit)
   def latest(threadId: ThreadId)                                          = to.latest(threadId)
+  def effect(threadId: ThreadId, key: EffectKey)                          = to.effect(threadId, key)
   def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int)         = to.eventsAfter(threadId, afterSeq, limit)
   def compactEvents(threadId: ThreadId, beforeSeq: Long)                  = to.compactEvents(threadId, beforeSeq)
   def deleteThread(threadId: ThreadId, token: FencingToken)               = to.deleteThread(threadId, token)
   def history(threadId: ThreadId, before: Option[String], limit: Int)     = to.history(threadId, before, limit)
   def checkpoint(threadId: ThreadId, checkpointId: String)                = to.checkpoint(threadId, checkpointId)
   def prune(threadId: ThreadId, policy: RetentionPolicy)                  = to.prune(threadId, policy)
-  def effect(threadId: ThreadId, key: EffectKey)                          = to.effect(threadId, key)
 }

@@ -43,7 +43,7 @@ class ReplayGuardSpec extends AnyFlatSpec with Matchers with EitherValues with O
     )
 
   /** A counter store whose increments record their key, atomically. */
-  final private class Counters extends AppliedKeys {
+  private class Counters extends AppliedKeys {
     var value     = 0
     val applied   = mutable.Map.empty[String, Int]
     val forgotten = mutable.Buffer.empty[String]
@@ -303,6 +303,39 @@ class ReplayGuardSpec extends AnyFlatSpec with Matchers with EitherValues with O
     journal.failNext = Some(true)
     ReplayGuard.unverifiable[String](c, begun, idempotent = false)(Right("t")).isLeft shouldBe true
     refusal(ReplayGuard.transactional[String](c, begun, new Counters)(_ => Right("t"))) should include("Transactional")
+  }
+
+  it should "turn a throw from an effect, a plan, a probe, a target or an outcome codec into a failure, keeping the record begun" in {
+    val journal = new Journal
+    val c       = context(journal)
+    final case class Unencodable(n: Int)
+    given upickle.default.ReadWriter[Unencodable] =
+      upickle.default
+        .readwriter[Int]
+        .bimap[Unencodable](_ => throw new IllegalStateException("no codec"), Unencodable(_))
+    val ran = new AtomicInteger()
+    // the effect ran; its outcome does not encode: a failure, not an error result, and the record stays begun
+    val encoded = c.effectKey("op", "encode")
+    val failed =
+      ReplayGuard.unverifiable[Unencodable](c, encoded, idempotent = false)(Right(Unencodable(ran.incrementAndGet())))
+    failed.isLeft shouldBe true
+    failed.left.value should not be a[GraphError.EffectReplayRefused]
+    journal.record(encoded).value.completed shouldBe false
+    ran.get shouldBe 1
+    def boom: Nothing = throw new IllegalStateException("boom")
+    ReplayGuard.unverifiable[Int](c, c.effectKey("op", "effect"), idempotent = false)(boom).isLeft shouldBe true
+    journal.record(c.effectKey("op", "effect")).value.completed shouldBe false
+    ReplayGuard.verifiable[Int](c, c.effectKey("op", "plan"))(Right(StateCheck.absent))(boom).isLeft shouldBe true
+    val throwing = new Counters { override def forget(key: EffectKey, token: FencingToken) = boom }
+    ReplayGuard.transactional[Int](c, c.effectKey("op", "forget"), throwing)(_ => Right(1)).isLeft shouldBe true
+    val begun = c.effectKey("op", "probe")
+    journal.failNext = Some(true)
+    ReplayGuard
+      .verifiable[Int](c, begun)(Right(StateCheck.absent)) {
+        Right(ReplayGuard.Plan(StateCheck.absent, StateCheck.of("x"), 1)(Right(1)))
+      }
+      .isLeft shouldBe true
+    ReplayGuard.verifiable[Int](c, begun)(boom)(Left(ProcessingError("x", "y"))).isLeft shouldBe true
   }
 
   it should "not start an effect whose task was cancelled after its intent was written" in {
