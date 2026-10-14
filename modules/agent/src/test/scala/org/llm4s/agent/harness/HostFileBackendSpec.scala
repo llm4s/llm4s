@@ -577,6 +577,31 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     backend = HostFileBackend.open(dir, locks).value
   }
 
+  it should "keep its root through close until a search already walking has finished" in {
+    written(backend.write(p("/a.txt"), "x\n", call()))
+    Files.createDirectories(dir.resolve("sub"))
+    val entered = new CountDownLatch(1)
+    val release = new CountDownLatch(1)
+    val search = worker().submit(() =>
+      backend.search(
+        VPath.root,
+        java.util.regex.Pattern.compile("x"),
+        _ => { entered.countDown(); release.await(10, TimeUnit.SECONDS); true },
+        10,
+        call()
+      )
+    )
+    entered.await(10, TimeUnit.SECONDS) shouldBe true
+    val closing = worker().submit(new java.util.concurrent.Callable[Unit] { def call(): Unit = backend.close() })
+    Thread.sleep(300)
+    closing.isDone shouldBe false
+    HostFileBackend.open(dir.resolve("sub"), locks).left.value.message should include("overlaps")
+    release.countDown()
+    search.get(10, TimeUnit.SECONDS).value.items.map(_.path) shouldBe Vector(p("/a.txt"))
+    closing.get(10, TimeUnit.SECONDS)
+    backend = HostFileBackend.open(dir, locks).value
+  }
+
   it should "end as cancelled, not as a lock failure, when interrupted while another process holds the lock" in {
     // POSIX only: on Windows a thread blocked in LockFileEx is not woken by an interrupt
     assume(posix)
@@ -682,6 +707,25 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     val refusal = backend.grep("needle", VPath.root, None, 10, call()).left.value
     refusal shouldBe a[BackendRefused]
     refusal.message should include("permission denied")
+  }
+
+  "A file system mounted inside the root" should "never be entered: refused by path, and left out of listings and walks" in {
+    Files.createDirectories(dir.resolve("mnt"))
+    Files.writeString(dir.resolve("mnt/f.txt"), "needle\n")
+    Files.writeString(dir.resolve("top.txt"), "needle\n")
+    backend.close()
+    val real = dir.toRealPath()
+    // the injected identity puts `mnt` and everything under it on another file system
+    backend = HostFileBackend
+      .open(dir, locks, fileSystemId = q => if q.startsWith(real.resolve("mnt")) then "other" else "root")
+      .value
+    backend.read(p("/mnt/f.txt"), 0, 1, call()).left.value.message should include("mounted inside the root")
+    backend.write(p("/mnt/g.txt"), "x", call()).left.value.message should include("mounted inside the root")
+    backend.ls(p("/mnt"), 10, call()).left.value.message should include("mounted inside the root")
+    backend.ls(VPath.root, 10, call()).value.items.map(_.path) shouldBe Vector(p("/top.txt"))
+    backend.grep("needle", VPath.root, None, 10, call()).value.items.map(_.path) shouldBe Vector(p("/top.txt"))
+    backend.glob(Glob("**"), VPath.root, 10, call()).value.items shouldBe Vector(p("/top.txt"))
+    Files.exists(dir.resolve("mnt/g.txt")) shouldBe false
   }
 
 }

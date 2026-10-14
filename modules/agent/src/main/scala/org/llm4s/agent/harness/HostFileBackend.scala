@@ -75,7 +75,8 @@ final class HostFileBackend private (
   val root: Path,
   val maxFileBytes: Long,
   val maxScanEntries: Int,
-  val lockDirectory: Path
+  val lockDirectory: Path,
+  fileSystemId: Path => String
 ) extends FileBackend
     with AutoCloseable:
 
@@ -154,8 +155,20 @@ final class HostFileBackend private (
   private def linkCount(p: Path): Int =
     if countsLinks then Files.getAttribute(p, "unix:nlink", LinkOption.NOFOLLOW_LINKS).asInstanceOf[Int] else 1
 
-  /** A file another name also reaches: a symbolic link, or a regular file with more than one hard link. */
-  private def aliased(p: Path): Boolean = Files.isSymbolicLink(p) || (isFile(p) && linkCount(p) > 1)
+  // `open` probes only the root's file system for aliases, so another one mounted inside the root (an
+  // SMB share with 8.3 names, say) is never entered: its identity rules are unchecked
+  private lazy val rootFileSystem: String = fileSystemId(root)
+
+  /** Whether `p` exists on a file system other than the root's: a mount inside the root. */
+  private def mountedInside(p: Path): Boolean =
+    Files.exists(p, LinkOption.NOFOLLOW_LINKS) && fileSystemId(p) != rootFileSystem
+
+  /**
+   * A file another name also reaches, or one on another file system: a symbolic link, a regular file
+   * with more than one hard link, or a mount inside the root.
+   */
+  private def aliased(p: Path): Boolean =
+    Files.isSymbolicLink(p) || (isFile(p) && linkCount(p) > 1) || mountedInside(p)
 
   /**
    * `path` under the root, refusing a symbolic link at any component that exists, a regular file with
@@ -177,6 +190,12 @@ final class HostFileBackend private (
               val next = parent.resolve(segment)
               if Files.isSymbolicLink(next) then
                 refused(operation, path, "is or is beneath a symbolic link, which is refused")
+              else if mountedInside(next) then
+                refused(
+                  operation,
+                  path,
+                  "is or is beneath another file system mounted inside the root, whose file names are unchecked"
+                )
               else Right(next)
             }
           }
@@ -639,17 +658,21 @@ final class HostFileBackend private (
   private def walked[A](operation: String, under: VPath, limit: Int)(
     select: Iterator[(VPath, Path)] => Iterator[A]
   ): Result[Listing[A]] =
-    whileOpen(operation, under)(Text.checkLimit(operation, under.value, limit))
-      .flatMap(_ => resolve(operation, under))
-      .flatMap { start =>
-        io(operation, under) {
-          Text.interruptibly(operation) {
-            val walk    = new Walk(start, under)
-            val listing = Listing.of(select(walk.files), limit)
-            Right(listing.copy(truncated = listing.truncated || walk.capped))
+    // the lease covers the whole walk, so close() waits for it to end
+    whileOpen(operation, under)(
+      Text
+        .checkLimit(operation, under.value, limit)
+        .flatMap(_ => resolve(operation, under))
+        .flatMap { start =>
+          io(operation, under) {
+            Text.interruptibly(operation) {
+              val walk    = new Walk(start, under)
+              val listing = Listing.of(select(walk.files), limit)
+              Right(listing.copy(truncated = listing.truncated || walk.capped))
+            }
           }
         }
-      }
+    )
 
   def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
     whileOpen("glob", under)(walked("glob", under, limit)(_.collect { case (v, _) if accept(v) => v }))
@@ -908,6 +931,17 @@ object HostFileBackend:
       }
 
   /**
+   * Which file system `p` is on, without following a final link: its `unix:dev` where the JDK reports
+   * it, else its `FileStore`. The backend never enters a path whose file system differs from the root's.
+   */
+  def fileSystemIdOf(p: Path): String =
+    if p.getFileSystem.supportedFileAttributeViews.contains("unix") then
+      s"dev:${Files.getAttribute(p, "unix:dev", LinkOption.NOFOLLOW_LINKS)}"
+    else
+      val store = Files.getFileStore(p)
+      s"store:${store.name}:$store"
+
+  /**
    * A backend over the existing directory `root`, resolved to its real path, keeping its OS lock files
    * in `lockDirectory` (created if absent). Give every backend that may touch the same files - in this
    * process or another, over the same or an overlapping root - one lock directory: the application
@@ -930,7 +964,10 @@ object HostFileBackend:
    *  - no two backends may expose one directory, or overlapping ones, under different paths - bind
    *    mounts, symlinked mount points, nested roots - in any process. Within this JVM `open` refuses a
    *    root that contains or is contained by an open one (the same real root is shared) until that one
-   *    is closed; across processes it is the caller's to keep.
+   *    is closed; across processes it is the caller's to keep;
+   *  - another file system mounted inside the root (`fileSystemId`, by default [[fileSystemIdOf]], differs
+   *    from the root's) is never entered: `open` probes only the root's, so a path at or beneath such a
+   *    mount is refused and listings and searches leave it out.
    */
   def open(
     root: Path,
@@ -939,7 +976,8 @@ object HostFileBackend:
     maxScanEntries: Int = DefaultMaxScanEntries,
     probe: Path => Result[Vector[String]] = probeAliases,
     countsLinks: Path => Boolean = reportsLinkCounts,
-    allowUncheckedIdentity: Boolean = false
+    allowUncheckedIdentity: Boolean = false,
+    fileSystemId: Path => String = fileSystemIdOf
   ): Result[HostFileBackend] =
     if maxFileBytes <= 0 then Left(ValidationError("maxFileBytes", s"must be positive, was $maxFileBytes"))
     else if maxFileBytes > MaxFileBytes then
@@ -986,4 +1024,4 @@ object HostFileBackend:
           )
         )
         _ <- OpenRoots.acquire(real)
-      yield new HostFileBackend(real, maxFileBytes, maxScanEntries, locks)
+      yield new HostFileBackend(real, maxFileBytes, maxScanEntries, locks, fileSystemId)
