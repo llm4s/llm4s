@@ -2,7 +2,7 @@ package org.llm4s.agent.harness
 
 import org.llm4s.agent.graph.{ AppliedKeys, EffectKey, FencingToken, ReplayGuard, ReplaySupport, TenantId }
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.ProcessingError
+import org.llm4s.error.{ ProcessingError, ValidationError }
 import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
@@ -218,11 +218,22 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
                 (Some(current.updated(key, StoreItem(ujson.copy(value), clock.instant()))), o)
               case StoreChange.Remove(o) => (Some(current - key), o)
               case StoreChange.Keep(o)   => (None, o)
-            within(key, next).map { _ =>
-              next.foreach(n => namespaces = if n.isEmpty then namespaces - ns else namespaces.updated(ns, n))
-              applied = applied.updated(effect.value, upickle.default.writeJs(outcome))
-              outcome
-            }
+            val recorded = upickle.default.writeJs(outcome)
+            // the applied key outlives a crash before the guard forgets it, so its outcome is bounded too
+            val size = Text.utf8Bytes(ujson.write(recorded))
+            if size > ReplayGuard.DefaultMaxOutcomeBytes then
+              Left(
+                ValidationError(
+                  "outcome",
+                  s"the outcome is $size bytes, over the replay cap of ${ReplayGuard.DefaultMaxOutcomeBytes}"
+                )
+              )
+            else
+              within(key, next).map { _ =>
+                next.foreach(n => namespaces = if n.isEmpty then namespaces - ns else namespaces.updated(ns, n))
+                applied = applied.updated(effect.value, recorded)
+                outcome
+              }
           }
   })
 

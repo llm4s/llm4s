@@ -206,17 +206,33 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
 
   "A replayed edit whose first attempt landed" should "return its first result, not \"`old` was not found\"" in {
     written(backend.write(p("/a.txt"), "x y", call()))
-    val same = call()
-    written(backend.edit(p("/a.txt"), "x", "z", replaceAll = false, same)) shouldBe FileEdited(1)
-    written(backend.edit(p("/a.txt"), "x", "z", replaceAll = false, same)) shouldBe FileEdited(1)
+    val same = call().tool.get // the call, run again with a context of its own each time
+    written(backend.edit(p("/a.txt"), "x", "z", replaceAll = false, FileContext(same))) shouldBe FileEdited(1)
+    written(backend.edit(p("/a.txt"), "x", "z", replaceAll = false, FileContext(same))) shouldBe FileEdited(1)
     onDisk("a.txt") shouldBe "z y"
   }
 
+  "Two mutations of one path in one call" should "each be an effect of its own, and each replay as itself" in {
+    val run  = testRunContext()
+    val key  = IdempotencyKey(UUID.randomUUID().toString)
+    def ctx  = FileContext(ToolContext(run, ToolCallId("c"), key, stateOf()))
+    val once = ctx
+    written(backend.write(p("/x"), "first", once)) shouldBe FileWritten(created = true, 5)
+    written(backend.write(p("/x"), "second", once)) shouldBe FileWritten(created = false, 6)
+    onDisk("x") shouldBe "second"
+    // the call run again, with a context of its own: both effects replay, in order, and nothing is rewritten
+    Files.writeString(dir.resolve("x"), "second")
+    val again = ctx
+    written(backend.write(p("/x"), "first", again)) shouldBe FileWritten(created = true, 5)
+    written(backend.write(p("/x"), "second", again)) shouldBe FileWritten(created = false, 6)
+    onDisk("x") shouldBe "second"
+  }
+
   "A replayed write" should "not write again over a later writer's content" in {
-    val same = call()
-    written(backend.write(p("/a.txt"), "first", same))
+    val same = call().tool.get
+    written(backend.write(p("/a.txt"), "first", FileContext(same)))
     Files.writeString(dir.resolve("a.txt"), "someone else")
-    written(backend.write(p("/a.txt"), "first", same)) shouldBe FileWritten(created = true, 5)
+    written(backend.write(p("/a.txt"), "first", FileContext(same))) shouldBe FileWritten(created = true, 5)
     onDisk("a.txt") shouldBe "someone else"
   }
 

@@ -125,6 +125,17 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     store.put(ns, "bad\ud800", ujson.Str("x"), call()).left.value.message should include("not valid Unicode")
   }
 
+  it should "refuse an outcome over the replay cap, writing and recording nothing" in {
+    val store = InMemoryLongTermStore()
+    val key   = call().effectKey("test.put", "k")
+    store
+      .modify[String](ns, "k", key, FencingToken(0))(_ => Right(StoreChange.Keep("x" * (2 << 20))))
+      .left
+      .value
+      .message should include("replay cap")
+    store.appliedKeys shouldBe 0
+  }
+
   it should "record nothing for a refused change" in {
     val store = InMemoryLongTermStore()
     val key   = call().effectKey("test.put", "k")
@@ -169,9 +180,9 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "return a replayed edit's first result, not \"`old` was not found\"" in {
     val files = StoreFileBackend(InMemoryLongTermStore())
     done(files.write(p("/a.md"), "x y", call()))
-    val same = call()
-    done(files.edit(p("/a.md"), "x", "z", replaceAll = false, same)) shouldBe FileEdited(1)
-    done(files.edit(p("/a.md"), "x", "z", replaceAll = false, same)) shouldBe FileEdited(1)
+    val same = call().tool.get
+    done(files.edit(p("/a.md"), "x", "z", replaceAll = false, FileContext(same))) shouldBe FileEdited(1)
+    done(files.edit(p("/a.md"), "x", "z", replaceAll = false, FileContext(same))) shouldBe FileEdited(1)
     files.read(p("/a.md"), 0, 1, call()).value.lines shouldBe Vector("z y")
   }
 
@@ -236,9 +247,9 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     val sandbox = SandboxBackend(runner)
     sandbox.replaySupport shouldBe ReplaySupport.Unverifiable
     sandbox.locks(p("/src")) shouldBe Set(LockKey("workspace/w"))
-    val same = call()
-    sandbox.execute("ls", p("/src"), 1.second, same).value shouldBe ExecResult(0, "ok", "ls in /src")
-    sandbox.execute("ls", p("/src"), 1.second, same).value shouldBe ExecResult(0, "ok", "ls in /src")
+    val same = call().tool.get
+    sandbox.execute("ls", p("/src"), 1.second, FileContext(same)).value shouldBe ExecResult(0, "ok", "ls in /src")
+    sandbox.execute("ls", p("/src"), 1.second, FileContext(same)).value shouldBe ExecResult(0, "ok", "ls in /src")
     runner.runs.get shouldBe 1
     sandbox.execute("ls", p("/src"), 1.second, call()).value
     runner.runs.get shouldBe 2

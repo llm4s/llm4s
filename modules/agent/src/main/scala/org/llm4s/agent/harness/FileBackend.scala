@@ -20,12 +20,23 @@ import scala.util.Try
 @Experimental
 final class FileContext private (val run: RunContext, val state: ThreadState, val tool: Option[ToolContext]):
 
+  // how many keys of each (operation, discriminator) this context has handed out
+  private val issued = new java.util.concurrent.ConcurrentHashMap[Vector[String], Int]()
+
   /**
    * The key of one external effect of this call: the tool call's `effectKey`, or the hook's task's
    * (C4). A backend keys every external mutation with it, and never builds a key another way.
+   *
+   * Each effect gets a key of its own, even two of one operation on one path in one call: the `n`th
+   * request for the same operation and discriminator (from 0) adds `#n` to the discriminator, from the
+   * second on. A run of the call performs its effects in the same order each time, so each keeps its
+   * key across replay. Build one `FileContext` per call, and pass it to every backend operation the call
+   * makes: a second context would count from 0 again.
    */
   def effectKey(operation: String, discriminator: String*): EffectKey =
-    tool.fold(run.effectKey(operation, discriminator*))(_.effectKey(operation, discriminator*))
+    val n     = issued.merge(operation +: discriminator.toVector, 1, Integer.sum) - 1
+    val parts = if n == 0 then discriminator else discriminator :+ s"#$n"
+    tool.fold(run.effectKey(operation, parts*))(_.effectKey(operation, parts*))
 
 object FileContext:
 
