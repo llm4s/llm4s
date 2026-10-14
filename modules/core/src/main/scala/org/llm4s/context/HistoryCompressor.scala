@@ -116,18 +116,21 @@ object HistoryCompressor {
       if (keepLastK <= 0) (blocks, Seq.empty)
       else blocks.splitAt(math.max(0, blocks.length - keepLastK))
 
-    // a block with an image or document is kept as it is, never digested: a digest is text, built from the
-    // messages' text view, and would lose the media without a trace (#1913)
-    // together with every block that shares a tool call with one kept, so no call loses its result or result its call
-    val keptIds                     = mediaGroups(older)
-    val (olderWithMedia, olderText) = older.partition(block => keptIds(block.id))
-    val olderDigests                = olderText.map(createBlockDigest)
+    // A block with an image or document is never digested: a digest is text, built from the messages' text
+    // view, and would lose the media without a trace (#1913). Nor is a block that shares a tool call with a block
+    // kept - one with media, or a recent one - so no call loses its result or result its call. The older blocks
+    // from the earliest of those on are kept as they are, so the history keeps its order; only the prefix before
+    // it is digested.
+    val kept                  = keptBlocks(older, recent)
+    val firstKept             = older.indexWhere(b => kept(b.id))
+    val (digested, keptOlder) = if (firstKept < 0) (older, Seq.empty) else older.splitAt(firstKept)
+    val olderDigests          = digested.map(createBlockDigest)
 
     val digestMessages: Seq[Message] =
       olderDigests.map(d => SystemMessage(s"[HISTORY_SUMMARY]\n${d.content}"))
 
     val recentMessages: Seq[Message] =
-      (olderWithMedia ++ recent).flatMap(_.messages)
+      (keptOlder ++ recent).flatMap(_.messages)
 
     // If multiple digest messages exceed cap, consolidate them into one within cap.
     val digestTotalTokens = digestMessages.map(tokenCounter.countMessage).sum
@@ -141,8 +144,11 @@ object HistoryCompressor {
     Right(finalDigestMsgs ++ recentMessages)
   }
 
-  /** The ids of the blocks of `blocks` with media, and of every block linked to one by a shared tool call id. */
-  private def mediaGroups(blocks: Seq[SemanticBlock]): Set[SemanticBlockId] = {
+  /**
+   * The ids of the `older` blocks that must not be digested: those with media, and every one linked by a shared
+   * tool call id, transitively, to one of them or to a `recent` block.
+   */
+  private def keptBlocks(older: Seq[SemanticBlock], recent: Seq[SemanticBlock]): Set[SemanticBlockId] = {
     def callIds(block: SemanticBlock): Set[String] =
       block.messages.flatMap {
         case a: AssistantMessage => a.toolCalls.map(_.id)
@@ -152,10 +158,10 @@ object HistoryCompressor {
     @scala.annotation.tailrec
     def grow(kept: Seq[SemanticBlock]): Seq[SemanticBlock] = {
       val ids  = kept.flatMap(callIds).toSet
-      val more = blocks.filter(b => !kept.contains(b) && callIds(b).exists(ids))
+      val more = older.filter(b => !kept.contains(b) && callIds(b).exists(ids))
       if (more.isEmpty) kept else grow(kept ++ more)
     }
-    grow(blocks.filter(b => Message.hasMedia(b.messages))).map(_.id).toSet
+    grow(older.filter(b => Message.hasMedia(b.messages)) ++ recent).map(_.id).toSet -- recent.map(_.id)
   }
 
   private def createBlockDigest(block: SemanticBlock): HistoryDigest = {

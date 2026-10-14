@@ -257,6 +257,8 @@ class HistoryCompressorSpec extends AnyFlatSpec with Matchers {
       .toOption
       .get
     val messages = Seq(
+      UserMessage("Question 0"),
+      AssistantMessage("Answer 0"),
       UserMessage(Vector(ContentPart.Text("What does this show?"), chart)),
       AssistantMessage("Revenue rising."),
       UserMessage("Question 2"),
@@ -297,5 +299,52 @@ class HistoryCompressorSpec extends AnyFlatSpec with Matchers {
     val calls   = processed.collect { case a: AssistantMessage => a.toolCalls.map(_.id) }.flatten.toSet
     val results = processed.collect { case t: ToolMessage => t.toolCallId }.toSet
     calls shouldBe results
+  }
+
+  it should "keep an older call whose media result is among the recent blocks" in {
+    val chart = ContentPart
+      .image(
+        org.llm4s.media.MediaSource.Url(java.net.URI.create("https://e.com/chart.png")),
+        org.llm4s.media.MediaType.Png
+      )
+      .toOption
+      .get
+    val call = AssistantMessage(contentOpt = None, toolCalls = Seq(ToolCall("c9", "render", ujson.Obj())))
+    val messages = Seq(
+      UserMessage("Question 1"),
+      AssistantMessage("Answer 1"),
+      UserMessage("Draw it"),
+      call,
+      ToolMessage(Vector(chart), "c9")
+    )
+    // the last block - the tool result alone - is recent; the call's block is older
+    val processed = HistoryCompressor.compressToDigest(messages, counter, capTokens = 500, keepLastK = 1).toOption.get
+    processed should contain(call)
+    processed.indexOf(call) should be < processed.indexOf(ToolMessage(Vector(chart), "c9"))
+  }
+
+  it should "keep the history's order: the older blocks from the first kept one on stay as they are" in {
+    val chart = ContentPart
+      .image(
+        org.llm4s.media.MediaSource.Url(java.net.URI.create("https://e.com/chart.png")),
+        org.llm4s.media.MediaType.Png
+      )
+      .toOption
+      .get
+    val media = UserMessage(Vector(ContentPart.Text("Look at this"), chart))
+    val messages = Seq(
+      UserMessage("Question 0"),
+      AssistantMessage("Answer 0"),
+      media,
+      AssistantMessage("A chart."),
+      UserMessage("Question 2"),
+      AssistantMessage("Answer 2"),
+      UserMessage("Question 3"),
+      AssistantMessage("Answer 3")
+    )
+    val processed = HistoryCompressor.compressToDigest(messages, counter, capTokens = 500, keepLastK = 1).toOption.get
+    // the block before the media is digested; the media and everything after it keep their order
+    processed.exists(_.content == "Question 0") shouldBe false
+    processed.dropWhile(_.isInstanceOf[SystemMessage]) shouldBe messages.drop(2)
   }
 }
