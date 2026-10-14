@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.testutil.LinearTime
+import org.llm4s.testutil.{ LinearTime, PerformanceTest }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -178,8 +178,8 @@ class RedactionPluralKeysSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  // A timing test: to be tagged `PerformanceTest` once that tier is on main. One size pair, three shapes.
-  it should "read plural keys and credential parameters in time linear in the input (#1646)" in {
+  // A timing test, run by `sbt testPerformance`. One size pair, three shapes.
+  it should "read plural keys and credential parameters in time linear in the input (#1646)" taggedAs PerformanceTest in {
     val shapes: Seq[(String, Int => String)] = Seq(
       "plural arrays"     -> (n => "{\"api_keys\": [\"a\", " * n),
       "matrix parameters" -> (n => ";jsessionid=a" * n),
@@ -187,6 +187,20 @@ class RedactionPluralKeysSpec extends AnyFlatSpec with Matchers {
     )
     shapes.foreach { case (name, build) =>
       LinearTime.assertLinear(name, build(1000), build(4000))(Redaction.redact(_))
+    }
+  }
+
+  // The scaling test above is PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test` and fails on
+  // a catastrophic regression of its worst shapes in one run, under a generous hang guard.
+  it should "redact a megabyte of plural keys and credential parameters well inside the hang guard (#1646)" in {
+    val inputs = Seq(
+      "{\"api_keys\": [\"a\", " * 60000,
+      ";jsessionid=a" * 90000,
+      "a" * 1000000 + "secrets"
+    )
+    inputs.foreach { input =>
+      input.length should be > 1000000
+      LinearTime.timed("a megabyte of plural keys", LinearTime.MegabyteHangGuard)(Redaction.redact(input))
     }
   }
 }
