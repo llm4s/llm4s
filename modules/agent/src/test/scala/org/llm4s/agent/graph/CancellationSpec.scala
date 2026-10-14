@@ -207,7 +207,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
         val latest = store.latest(thread).value.get
         latest.checkpoint.status shouldBe CheckpointStatus.Running
         val last = store.eventsAfter(thread, 0L, 100).value.last
-        last.event shouldBe RunEvent.RunCancelled
+        last.event shouldBe RunEvent.RunCancelled(None)
         last.checkpointId shouldBe Some(latest.checkpoint.id)
         error shouldBe GraphError.Cancelled(Some(thread.value), Some(latest.checkpoint.id))
 
@@ -440,7 +440,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
         store.release.countDown()
         awaitResult(handle).value.completed._2 shouldBe Vector("A")
         store.latest(thread).value.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Completed)
-        eventsOf(store).map(_.event) should not contain RunEvent.RunCancelled
+        eventsOf(store).map(_.event) should not contain RunEvent.RunCancelled(None)
       }
   }
 
@@ -458,7 +458,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
         claim.status shouldBe CheckpointStatus.Running
         error shouldBe GraphError.Cancelled(Some(thread.value), Some(claim.id))
         val last = eventsOf(store).last
-        last.event shouldBe RunEvent.RunCancelled
+        last.event shouldBe RunEvent.RunCancelled(None)
         last.checkpointId shouldBe Some(claim.id)
         runtime.recover(thread, Fixture(Set.empty).graph).awaited.value.completed._2 shouldBe Vector("A")
       }
@@ -476,8 +476,8 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
         val claim   = store.latest(thread).value.get.checkpoint
         error shouldBe GraphError.DeadlineExceeded(thread.value, Some(claim.id))
         org.llm4s.error.LLMError.isRecoverable(error) shouldBe true
-        eventsOf(store).last.event shouldBe RunEvent.RunTimedOut
-        eventsOf(store).map(_.event) should not contain RunEvent.RunCancelled
+        eventsOf(store).last.event shouldBe RunEvent.RunTimedOut(None)
+        eventsOf(store).map(_.event) should not contain RunEvent.RunCancelled(None)
         runtime.recover(thread, Fixture(Set.empty).graph).awaited.value.completed._2 shouldBe Vector("A")
       }
   }
@@ -504,7 +504,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
         }
         val events = eventsOf(store).map(_.event)
         events.collect { case f: RunEvent.RunFailed => f } should not be empty
-        events should not contain RunEvent.RunCancelled
+        events should not contain RunEvent.RunCancelled(None)
       }
   }
 

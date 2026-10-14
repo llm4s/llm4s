@@ -83,7 +83,7 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
 
   it should "report the first failing guardrail's name and every reason from beforeAgent" in {
     val mw  = new GuardrailMiddleware(Seq(LengthCheck(1, 5)), Nil)
-    val ctx = testRunContext()
+    val ctx = testModelContext()
     mw.beforeAgent("too long input", ctx).left.value match {
       case GuardrailBlocked(name, reason) =>
         name shouldBe "LengthCheck"

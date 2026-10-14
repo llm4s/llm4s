@@ -1,7 +1,7 @@
 package org.llm4s.core.safety
 
 import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, UnknownError }
-import org.llm4s.testutil.{ EchoedCredentials, LinearTime, SmallStack }
+import org.llm4s.testutil.{ EchoedCredentials, LinearTime, PerformanceTest, SmallStack }
 import org.llm4s.util.Redaction
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -11,7 +11,7 @@ import org.scalatest.matchers.should.Matchers
  * status, never on a bare substring (#1668).
  */
 class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
-  import DefaultErrorMapperSpec.{ Adversarial, ScalingSize }
+  import DefaultErrorMapperSpec.{ Adversarial, Megabyte, ScalingSize }
 
   private def unknownWithCause(t: Throwable): Unit =
     DefaultErrorMapper(t) match {
@@ -196,7 +196,7 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
   )
 
   // Timing asserts how the cost scales, not an absolute time a slow runner can exceed (#1709): see LinearTime.
-  it should "map a message shaped to make the patterns backtrack in linear time" in {
+  it should "map a message shaped to make the patterns backtrack in linear time" taggedAs PerformanceTest in {
     // The mapper runs the patterns over a message's head and tail only, which bounds even a quadratic
     // pattern here, but it redacts the whole message, so its cost grows linearly with the message. The
     // patterns' own linearity is checked over the whole input by the next test.
@@ -204,13 +204,9 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
     adversarial(Adversarial / 8).zip(adversarial(Adversarial / 2)).foreach { case ((name, small), (_, large)) =>
       LinearTime.assertLinear(name, new RuntimeException(small), new RuntimeException(large))(mapped)
     }
-    // and at the full adversarial length, a generous hang guard
-    adversarial(Adversarial).foreach { case (name, message) =>
-      LinearTime.timed(name)(mapped(new RuntimeException(message)))
-    }
   }
 
-  it should "scan an entire adversarial message with each pattern in linear time, cap aside" in {
+  it should "scan an entire adversarial message with each pattern in linear time, cap aside" taggedAs PerformanceTest in {
     // The mapper scans only a message's head and tail; this checks the patterns themselves, over the whole input.
     def scan(pattern: java.util.regex.Pattern)(message: String): Unit = {
       val matcher = pattern.matcher(message)
@@ -220,11 +216,24 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
       ((name, small), (_, large)) <- adversarial(ScalingSize).zip(adversarial(4 * ScalingSize))
       pattern                     <- DefaultErrorMapper.StatusPatterns
     } LinearTime.assertLinear(s"$name, ${pattern.pattern}", small, large)(scan(pattern))
-    // and at the full adversarial length, a generous hang guard
-    for {
-      (name, message) <- adversarial(Adversarial)
-      pattern         <- DefaultErrorMapper.StatusPatterns
-    } LinearTime.timed(s"$name, ${pattern.pattern}")(scan(pattern)(message))
+  }
+
+  // The two scaling tests above are PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test`: each
+  // adversarial message at a megabyte, mapped and scanned whole by each pattern, under a generous hang guard.
+  it should "map, and scan with each pattern, every megabyte adversarial message inside the hang guard" in {
+    def scan(pattern: java.util.regex.Pattern)(message: String): Unit = {
+      val matcher = pattern.matcher(message)
+      while (matcher.find()) ()
+    }
+    adversarial(Megabyte).foreach { case (name, message) =>
+      message.length should be >= 990000
+      LinearTime.timed(name, LinearTime.MegabyteHangGuard)(
+        DefaultErrorMapper(new RuntimeException(message)) shouldBe an[UnknownError]
+      )
+      DefaultErrorMapper.StatusPatterns.foreach { pattern =>
+        LinearTime.timed(s"$name, ${pattern.pattern}", LinearTime.MegabyteHangGuard)(scan(pattern)(message))
+      }
+    }
   }
 
   it should "not overflow a small stack on a long run of exception-name prefixes" in {
@@ -279,6 +288,9 @@ object DefaultErrorMapperSpec {
 
   /** The length of each adversarial input: ten times the 20,000 characters that took seconds before. */
   val Adversarial = 200000
+
+  /** The length of each adversarial input of the hang guard, which stays in `sbt test`: a megabyte. */
+  val Megabyte = 1000000
 
   /**
    * The smaller of the two lengths the patterns' scaling is measured at; the larger is four times it,

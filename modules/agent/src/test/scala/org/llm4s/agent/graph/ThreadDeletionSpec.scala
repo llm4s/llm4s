@@ -171,13 +171,16 @@ class ThreadDeletionSpec extends AnyFlatSpec with Matchers with EitherValues wit
   }
 
   "A subscription in the deleting runtime" should "end with ThreadDeleted when the thread is deleted, without a watch" in {
-    val runtime = GraphRuntime(InMemoryCheckpointer(), Clock.systemUTC(), ClaimPolicy.default, WatchPolicy.disabled)
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store, Clock.systemUTC(), ClaimPolicy.default, WatchPolicy.disabled)
     val thread  = newThread()
     await(runtime.start(thread, emitter, "first", RunConfig()).value)
-    val seen = Seen()
+    val lastSeq = store.eventsAfter(thread, 0L, 1000).value.last.seq
+    val seen    = Seen()
     runtime.subscribe(thread)(seen).value
-    eventually(seen.said shouldBe Vector("first"))
-    val lastSeq = seen.durable.last.seq
+    // the whole log replayed - not only the custom event, which the run's closing events follow
+    eventually(seen.durable.lastOption.map(_.seq) shouldBe Some(lastSeq))
+    seen.said shouldBe Vector("first")
 
     runtime.deleteThread(thread).value shouldBe (())
 

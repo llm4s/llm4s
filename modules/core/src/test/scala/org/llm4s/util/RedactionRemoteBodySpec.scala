@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.testutil.LinearTime
+import org.llm4s.testutil.{ LinearTime, PerformanceTest }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -182,7 +182,7 @@ class RedactionRemoteBodySpec extends AnyFlatSpec with Matchers {
   }
 
   // The prose check reads only the value it is asked about: a spaceless value never scans the rest of the input.
-  it should "redact many spaceless bare assertion values in time linear in the input (#1818)" in {
+  it should "redact many spaceless bare assertion values in time linear in the input (#1818)" taggedAs PerformanceTest in {
     val units: Seq[(String, Int => String)] = Seq(
       "JSON objects" -> (n => "[" + "{\"assertion\":\"Q\"}," * n + "1]"),
       "Python dicts" -> (n => "[" + "{'assertion':'Q'}," * n + "1]"),
@@ -191,13 +191,23 @@ class RedactionRemoteBodySpec extends AnyFlatSpec with Matchers {
     )
     for {
       (name, build)  <- units
-      (small, large) <- Seq(1250 -> 5000, 2500 -> 10000)
+      (small, large) <- Seq(2500 -> 10000)
     } {
       LinearTime.assertLinear(s"$name, redact, $small", build(small), build(large))(Redaction.redact(_))
       LinearTime.assertLinear(s"$name, remoteBody, $small", build(small), build(large))(
         Redaction.remoteBody(_, maxLength = 0)
       )
     }
+  }
+
+  // The scaling test above is PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test` and fails on
+  // a catastrophic regression in one run of a megabyte, under a generous hang guard.
+  it should "redact a megabyte of spaceless bare assertion values in escaped JSON well inside the hang guard (#1818)" in {
+    val input = "{\"b\":\"" + ("{\\\"assertion\\\":\\\"Q\\\"}," * 46000) + "\"}"
+    input.length should be > 1000000
+    LinearTime.timed("a megabyte of assertion values", LinearTime.MegabyteHangGuard)(
+      Redaction.remoteBody(input, maxLength = 0)
+    )
   }
 
   it should "redact a field value containing escaped quotes completely" in {

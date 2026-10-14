@@ -398,6 +398,52 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
     lockedOn.asScala.toSet shouldBe Set("a")
   }
 
+  "An output Block" should "retract a turn whose locked calls queued, leaving no schedule and asking approval anew" in {
+    val blockOnce = new AtomicBoolean(true)
+    val blocking = new org.llm4s.agent.graph.middleware.AgentMiddleware {
+      val id = org.llm4s.agent.graph.middleware.MiddlewareId("block-once")
+      override def afterAgent(answer: String, context: org.llm4s.agent.graph.middleware.ModelContext) =
+        if (blockOnce.getAndSet(false)) Left(org.llm4s.agent.graph.middleware.GuardrailBlocked("block-once", "no"))
+        else Right(org.llm4s.agent.graph.middleware.BoundaryResult(answer))
+    }
+    val spec = SpecTools
+      .spec("write")
+      .withLocks(t => Set(LockKey(t.text)))
+      .withResources(t => Vector(ToolResource(Operation.Write, t.text)))
+    val tool = AgentTool(spec, writes = Set(counter)) { (_, context) =>
+      val next = context.state.get(counter).fold(e => fail(e.message), identity) + 1
+      ToolOutcome.Success(ujson.Str(next.toString), StateUpdate.update(counter, next))
+    }
+    val batch = calling(call("c1", "write", "/prod"), call("c2", "write", "/prod/x"))
+    val client =
+      ScriptedLLMClient.of(batch, CompletionFixture.simple("first"), batch, CompletionFixture.simple("second"))
+    val rules = Seq(PermissionRule.ask(Operation.Write, "/prod"), PermissionRule.allow(Operation.Write, "/prod/**"))
+    val agent = built(
+      Agent
+        .builder("assistant", client)
+        .withTools(SpecTools.set(tool))
+        .withMiddleware(new PermissionMiddleware(rules), blocking)
+    )
+    def approvals(result: AgentResult) = result.status match {
+      case AgentStatus.Suspended(pending, _, _, _) => pending.map(p => result.approve(p._1)).toMap
+      case other                                   => fail(s"expected Suspended, got $other")
+    }
+    val thread = ThreadId("blocked-batch")
+
+    // c2 waits behind c1, which asks; once approved both run, and the answer is blocked
+    val parked  = agent.run(thread, "one").value
+    val blocked = agent.resume(thread, approvals(parked)).value
+    blocked.status shouldBe a[AgentStatus.Blocked]
+
+    // the retracted turn left nothing: the counter is back to its prior value, no schedule waits, and the
+    // same call asks for approval again rather than inheriting the blocked turn's
+    val again = agent.run(thread, "two").value
+    approvals(again) should have size 1
+    val done = agent.resume(thread, approvals(again)).value
+    done.answer shouldBe Some("second")
+    done.messages.collect { case t: ToolMessage => t.content }.toVector shouldBe Vector("1", "2")
+  }
+
   "The tool queue" should "be a key the loop owns" in {
     val sneaky =
       AgentTool(SpecTools.spec("sneaky"), writes = Set(ToolLoop.queue))((_, _) => ToolOutcome.Success(ujson.Str("x")))

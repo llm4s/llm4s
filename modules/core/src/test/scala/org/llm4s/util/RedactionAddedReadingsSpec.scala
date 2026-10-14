@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.testutil.LinearTime
+import org.llm4s.testutil.{ LinearTime, PerformanceTest }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -158,7 +158,7 @@ class RedactionAddedReadingsSpec extends AnyFlatSpec with Matchers {
     closed should be > 1000
   }
 
-  it should "read the added readings in time linear in the input (#1695)" in {
+  it should "read the added readings in time linear in the input (#1695)" taggedAs PerformanceTest in {
     val shapes: Seq[(String, Int => String)] = Seq(
       "values with a literal &"          -> (n => "password=p&ssW0rd " * n),
       "one tail of many &"               -> (n => "password=a" + "&b" * n),
@@ -177,5 +177,13 @@ class RedactionAddedReadingsSpec extends AnyFlatSpec with Matchers {
     shapes.foreach { case (name, build) =>
       LinearTime.assertLinear(name, build(2500), build(10000))(Redaction.redact(_))
     }
+  }
+
+  // The scaling test above is PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test` and fails on
+  // a catastrophic regression in one run of a megabyte, under a generous hang guard.
+  it should "read a megabyte of Gson log lines well inside the hang guard (#1695)" in {
+    val input = "{\"log\":\"" + ("user\\u003dbob\\ntoken\\u003dabc " * 34000) + "\"}"
+    input.length should be > 1000000
+    LinearTime.timed("a megabyte of Gson log lines", LinearTime.MegabyteHangGuard)(Redaction.redact(input))
   }
 }

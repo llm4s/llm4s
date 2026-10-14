@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.middleware
 
-import org.llm4s.agent.graph.{ Resumed, RunContext, StateKey, ToolCallId, ToolName }
+import org.llm4s.agent.graph.{ Resumed, RunContext, StateKey, StateUpdate, ToolCallId, ToolName }
 import org.llm4s.agent.graph.tool.{
   AgentTool,
   AgentToolSpec,
@@ -10,6 +10,7 @@ import org.llm4s.agent.graph.tool.{
   ToolResource,
   ToolSet
 }
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, NonRecoverableError }
 import org.llm4s.llmconnect.model.{ Completion, Message, ToolCall }
 import org.llm4s.types.{ Result, TryOps }
@@ -45,6 +46,73 @@ final case class ModelRequest private (messages: Vector[Message], tools: ToolSet
 object ModelRequest:
   def apply(messages: Vector[Message], tools: ToolSet = ToolSet.empty): ModelRequest =
     new ModelRequest(messages, tools)
+
+/**
+ * What a model wrapper returns: the model's `completion`, and an `update` to keys the wrapper declares in its
+ * `writes`, committed with the model step's task. A wrapper adds its writes with [[addUpdate]], which keeps those of
+ * the wrappers inside it - the combined update applies innermost first - and changes the completion with
+ * [[withCompletion]], which keeps the update. A wrapper that answers without calling `next` builds its own with
+ * `ModelResponse(completion)`. Only the response a wrapper returns counts: the updates of a response it discarded,
+ * calling `next` again, are never committed.
+ */
+@Experimental
+final class ModelResponse private (
+  val completion: Completion,
+  private[graph] val parts: Vector[(Option[MiddlewareId], StateUpdate)]
+):
+
+  /** The writes of every wrapper that contributed to this response, innermost first. */
+  def update: StateUpdate = parts.foldLeft(StateUpdate.empty)((acc, part) => acc.combine(part._2))
+
+  /** This response with `c` as its completion, keeping its update. */
+  def withCompletion(c: Completion): ModelResponse = new ModelResponse(c, parts)
+
+  /** This response with `u` applied after its update; `u` belongs to the wrapper that returns the response. */
+  def addUpdate(u: StateUpdate): ModelResponse =
+    if u.isEmpty then this else new ModelResponse(completion, parts :+ (None -> u))
+
+  /** The parts no wrapper has claimed yet, attributed to `owner`: the stack does this as each wrapper returns. */
+  private[graph] def claimedBy(owner: MiddlewareId): ModelResponse =
+    new ModelResponse(completion, parts.map((o, u) => o.orElse(Some(owner)) -> u))
+
+  override def toString: String = s"ModelResponse($completion, $update)"
+
+@Experimental
+object ModelResponse:
+  /** `completion` with no update. */
+  def apply(completion: Completion): ModelResponse = new ModelResponse(completion, Vector.empty)
+
+/**
+ * What `beforeAgent` and `afterAgent` return: the `text` - the run's input, or its final answer - possibly changed,
+ * and an `update` to keys the middleware declares in its `writes`. `beforeAgent`'s commits with the turn's input,
+ * so the turn's first model call sees it; `afterAgent`'s with the turn's final answer.
+ */
+@Experimental
+final case class BoundaryResult private (text: String, update: StateUpdate):
+  def withText(t: String): BoundaryResult = BoundaryResult(t, update)
+
+  /** This result with `u` applied after its update. */
+  def addUpdate(u: StateUpdate): BoundaryResult = BoundaryResult(text, update.combine(u))
+
+@Experimental
+object BoundaryResult:
+  def apply(text: String, update: StateUpdate = StateUpdate.empty): BoundaryResult = new BoundaryResult(text, update)
+
+/**
+ * Content a middleware adds to the system prompt of a model request, built for the request and never stored.
+ * `id` is unique within one request; `cacheable` content is placed before the rest, so a provider's prompt cache
+ * sees a stable prefix.
+ */
+@Experimental
+final case class PromptSection private (id: String, text: String, cacheable: Boolean):
+  def withId(i: String): PromptSection         = PromptSection(i, text, cacheable)
+  def withText(t: String): PromptSection       = PromptSection(id, t, cacheable)
+  def withCacheable(c: Boolean): PromptSection = PromptSection(id, text, c)
+
+@Experimental
+object PromptSection:
+  def apply(id: String, text: String, cacheable: Boolean = false): PromptSection =
+    new PromptSection(id, text, cacheable)
 
 /**
  * One tool call as a tool wrapper sees it, after its arguments were validated and decoded. It is
@@ -109,7 +177,10 @@ trait AgentMiddleware:
   /** Middleware this one must run inside of (be wrapped by); each must be registered in the same stack. */
   def runsAfter: Set[MiddlewareId] = Set.empty
 
-  /** The state keys this middleware's `wrapToolCall` may add to a `Success` update. */
+  /**
+   * The state keys this middleware's hooks may write: an update from `beforeAgent`, `wrapModelCall` or
+   * `afterAgent`, or one `wrapToolCall` adds to a `Success`. A hook's write to any other key fails the run.
+   */
   def writes: Set[StateKey[?, ?]] = Set.empty
 
   /** Tools this middleware contributes; they join the loop's tool set and are validated like any other. */
@@ -118,23 +189,35 @@ trait AgentMiddleware:
   /** The codecs of the question this middleware asks and the answer it takes; only [[AgentMiddleware.Asking]] declares one. */
   private[graph] def declaredQuestion: Option[ToolQuestion[?, ?]] = None
 
-  /** Sees the run's input before anything else runs: returns it, possibly changed, or `Left` to fail the run. */
-  def beforeAgent(input: String, @unused context: RunContext): Result[String] = Right(input)
+  /**
+   * Sees the run's input before anything else runs: returns it, possibly changed, with an update to this
+   * middleware's `writes` that the turn's first model call sees, or `Left` to block the run.
+   */
+  def beforeAgent(input: String, @unused context: ModelContext): Result[BoundaryResult] = Right(BoundaryResult(input))
 
-  /** Sees the run's final answer: returns it, possibly changed, or `Left` to fail the run. */
-  def afterAgent(answer: String, @unused context: RunContext): Result[String] = Right(answer)
+  /** Sees the run's final answer: returns it, possibly changed, with an update to this middleware's `writes`, or `Left` to block the run. */
+  def afterAgent(answer: String, @unused context: ModelContext): Result[BoundaryResult] = Right(BoundaryResult(answer))
+
+  /**
+   * Content for the system prompt of each model request: collected before every model step from the committed
+   * state, in stack order, and never stored. Each middleware bounds its own; the agent bounds them all together
+   * (`maxPromptSectionTokens`). `Left` fails the run.
+   */
+  def promptSections(@unused context: ModelContext): Result[Vector[PromptSection]] = Right(Vector.empty)
 
   /**
    * Wraps one model call. A wrapper may rewrite the request (inject a note, filter tools), call
-   * `next` more than once (retry, fallback), transform its result, or return `Left`, which fails
-   * the run. Only an [[AgentMiddleware.Asking]] wrapper suspends, by asking its question.
+   * `next` more than once (retry, fallback), transform its response, add an update to its `writes`
+   * ([[ModelResponse.addUpdate]]), or return `Left`, which fails the run. Only an
+   * [[AgentMiddleware.Asking]] wrapper suspends, by asking its question. Every call `next` makes is
+   * counted in the thread's usage, whichever response the wrapper returns.
    *
    * Filtering `ModelRequest.tools` shapes what the model is offered and is not a permission
    * control: a tool the model calls anyway still runs through `wrapToolCall`, where denial belongs.
    */
-  def wrapModelCall(request: ModelRequest, @unused context: RunContext)(
-    next: ModelRequest => Result[Completion]
-  ): Result[Completion] = next(request)
+  def wrapModelCall(request: ModelRequest, @unused context: ModelContext)(
+    next: ModelRequest => Result[ModelResponse]
+  ): Result[ModelResponse] = next(request)
 
   /**
    * Wraps one tool call, after its arguments were validated. A wrapper denies with
@@ -197,6 +280,9 @@ object AgentMiddleware:
 
     /** [[answered]] for a tool call's context. */
     final protected def answered(context: ToolContext): Option[Resumed[Q, Ans]] = answered(context.run)
+
+    /** [[answered]] for a boundary or model hook's context. */
+    final protected def answered(context: ModelContext): Option[Resumed[Q, Ans]] = answered(context.run)
 
 /**
  * A middleware's question on its way out of a hook, from [[AgentMiddleware.Asking.ask]]: the agent loop
