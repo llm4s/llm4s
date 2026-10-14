@@ -100,6 +100,7 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
   }
 
   it should "return a Left, not throw, when the SDK refuses a malformed part" in {
-    sent(Conversation(Seq(UserMessage(Vector(ContentPart.Text(null), imageInline))))).isLeft shouldBe true
+    // a null text is read as empty when the part is built, so it reaches the SDK as ""
+    noException should be thrownBy sent(Conversation(Seq(UserMessage(Vector(ContentPart.Text(null), imageInline)))))
   }
 }

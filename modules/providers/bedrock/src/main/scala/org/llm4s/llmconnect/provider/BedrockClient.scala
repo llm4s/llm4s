@@ -819,6 +819,16 @@ object BedrockClient {
     PartEncoding
       .check(provider, messages, userPart("document"), toolPart("document"))
       .flatMap(_ => PartEncoding.checkInlineLimits(provider, messages, inlineLimit))
+      .flatMap(_ => PartEncoding.checkPartCounts(provider, messages, mediaKind, MaxPartsPerMessage))
+
+  /** Converse's limits on media in one message: 20 images, five documents. */
+  private[provider] val MaxPartsPerMessage: Map[String, Int] = Map("image" -> 20, "document" -> 5)
+
+  private def mediaKind(part: ContentPart): Option[String] = part match {
+    case _: ContentPart.Image    => Some("image")
+    case _: ContentPart.Document => Some("document")
+    case _                       => None
+  }
 
   /** Converse's own limits on inline media, lower than `ContentPart.MaxInlineBytes`: 3.75 MB an image, 4.5 MB a document. */
   private[provider] val MaxInlineImageBytes: Long    = 3750000L

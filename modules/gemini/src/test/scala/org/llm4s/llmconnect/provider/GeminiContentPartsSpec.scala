@@ -101,7 +101,10 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
     val four = ContentPart.image(MediaSource.Inline(IArray.fill[Byte](4 * 1024 * 1024)(1)), MediaType.Png).value
     GeminiParts.check("gemini", Seq(UserMessage(Vector.fill(3)(four))), gemini) shouldBe Right(())
     GeminiParts.check("gemini", Seq(UserMessage(Vector.fill(4)(four))), gemini).left.value.message should
-      include(s"at most ${GeminiParts.MaxInlineRequestBytes} bytes of inline media")
+      include(s"a request of at most ${GeminiParts.MaxRequestBytes} bytes")
+    // text counts toward the request too: three 4 MiB images and enough prompt to pass 20 MB
+    val prompt = ContentPart.Text("p" * 3500000)
+    GeminiParts.check("gemini", Seq(UserMessage(Vector(prompt) ++ Vector.fill(3)(four))), gemini).isLeft shouldBe true
   }
 
   "GeminiClient" should "send a user message's parts in order, and a tool result's text" in {

@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.{ UnsupportedContentPartError, ValidationError }
-import org.llm4s.llmconnect.model.{ ContentPart, Message, MessageRole, ToolMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, ContentPart, Message, MessageRole, ToolMessage, UserMessage }
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.types.Result
 
@@ -83,18 +83,53 @@ private[llm4s] object PartEncoding {
       }
       .getOrElse(Right(()))
 
-  /** `Right` when the inline parts of `messages`, base64-encoded, total at most `maxEncodedBytes`: a limit on a whole request. */
-  def checkInlineTotal(provider: String, messages: Seq[Message], maxEncodedBytes: Long): Result[Unit] = {
-    val encoded = messages.flatMap(partsOf).map(p => base64Length(ContentPart.inlineBytes(Vector(p)))).sum
-    if (encoded <= maxEncodedBytes) Right(())
+  /**
+   * `Right` when `messages` come to at most `maxBytes` as a request: every inline part base64-encoded, plus the
+   * UTF-8 bytes of every message's text and tool calls - a provider's limit on a whole request counts its text
+   * as well as its media. An estimate of the payload, not of its JSON framing, which is small beside either.
+   */
+  def checkRequestSize(provider: String, messages: Seq[Message], maxBytes: Long): Result[Unit] = {
+    val media = messages.flatMap(partsOf).map(p => base64Length(ContentPart.inlineBytes(Vector(p)))).sum
+    val text = messages.map {
+      case am: AssistantMessage =>
+        utf8(am.content) + am.toolCalls.map(c => utf8(c.name) + utf8(c.arguments.render())).sum
+      case other => utf8(other.content)
+    }.sum
+    val total = media + text
+    if (total <= maxBytes) Right(())
     else
       Left(
         ValidationError(
           "parts",
-          s"$provider takes at most $maxEncodedBytes bytes of inline media in one request; this one has $encoded, base64-encoded"
+          s"$provider takes a request of at most $maxBytes bytes; this one has $total ($media of them inline media, base64-encoded)"
         )
       )
   }
+
+  /**
+   * `Right` when no message of `messages` carries more than `limit` gives for a kind of part: `limit` counts a
+   * message's parts by a key (`"image"`, `"document"`) and gives the most a provider takes per message.
+   */
+  def checkPartCounts(
+    provider: String,
+    messages: Seq[Message],
+    key: ContentPart => Option[String],
+    limits: Map[String, Int]
+  ): Result[Unit] =
+    messages.zipWithIndex.iterator
+      .flatMap { (message, index) =>
+        partsOf(message).flatMap(key).groupBy(identity).collect {
+          case (k, found) if limits.get(k).exists(found.size > _) =>
+            ValidationError(
+              "parts",
+              s"$provider takes at most ${limits(k)} ${k}s in a message; message $index has ${found.size}"
+            )
+        }
+      }
+      .nextOption()
+      .toLeft(())
+
+  private def utf8(text: String): Long = text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length.toLong
 
   /** The length of `bytes` bytes once base64-encoded. */
   def base64Length(bytes: Long): Long = (bytes + 2) / 3 * 4

@@ -53,6 +53,15 @@ class MessagePartsSpec extends AnyFlatSpec with Matchers with EitherValues {
     ToolMessage(Vector(image), " ").validate.isLeft shouldBe true
   }
 
+  "A null text" should "be read as empty when the part is built, so validation and the codec stay total" in {
+    ContentPart.Text(null) shouldBe ContentPart.Text("")
+    UserMessage(Vector(ContentPart.Text(null), image)).validate.isRight shouldBe true
+    ToolMessage(Vector(ContentPart.Text(null)), "c").validate.isLeft shouldBe true
+    Conversation.create(UserMessage(Vector(ContentPart.Text(null), image))).isRight shouldBe true
+    read[Message](write[Message](UserMessage(Vector(ContentPart.Text(null), image)))) shouldBe
+      UserMessage(Vector(ContentPart.Text(""), image))
+  }
+
   "Message.hasMedia" should "say whether any message carries an image or a document" in {
     Message.hasMedia(Seq(SystemMessage("s"), UserMessage("text"), ToolMessage("r", "c"))) shouldBe false
     Message.hasMedia(Seq(UserMessage("text"), ToolMessage(Vector(image), "c"))) shouldBe true

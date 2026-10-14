@@ -41,9 +41,19 @@ sealed trait ContentPart extends Product with Serializable {
 
 object ContentPart {
 
-  /** Text. A message whose every part is blank text is refused by `Message.validate`. */
-  final case class Text(text: String) extends ContentPart {
+  /**
+   * Text. A message whose every part is blank text is refused by `Message.validate`. A `null` text is
+   * read as empty when the part is built, so no code that reads a part - validation, a codec, a
+   * provider's encoder - has to guard against it.
+   */
+  final case class Text private (text: String) extends ContentPart {
     def kind: String = "text"
+  }
+
+  object Text {
+
+    /** A text part; `null` is read as empty. */
+    def apply(text: String): Text = new Text(if (text == null) "" else text)
   }
 
   /** An image; build one with [[ContentPart.image]]. */
@@ -77,7 +87,7 @@ object ContentPart {
 
   /** The text parts of `parts`, joined by newlines: a message's text view. Empty when there are none. */
   def text(parts: Seq[ContentPart]): String =
-    parts.collect { case Text(t) => Option(t).getOrElse("") }.mkString("\n")
+    parts.collect { case Text(t) => t }.mkString("\n")
 
   /** The number of inline bytes `parts` carry, in total. */
   def inlineBytes(parts: Seq[ContentPart]): Long =

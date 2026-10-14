@@ -925,6 +925,21 @@ object AnthropicClient {
     PartEncoding
       .check(provider, messages, userPart, toolPart)
       .flatMap(_ => PartEncoding.checkInlineLimits(provider, messages, inlineLimit))
+      .flatMap(_ =>
+        PartEncoding
+          .checkPartCounts(provider, Seq(UserMessage(messages.flatMap(partsIn).toVector)), imageKind, MaxImages)
+      )
+
+  /** Anthropic takes at most 100 images in one request: counted over the whole conversation. */
+  private[provider] val MaxImages: Map[String, Int] = Map("image" -> 100)
+
+  private def imageKind(part: ContentPart): Option[String] = Option.when(part.isInstanceOf[ContentPart.Image])("image")
+
+  private def partsIn(message: org.llm4s.llmconnect.model.Message): Vector[ContentPart] = message match {
+    case um: UserMessage => um.parts
+    case tm: ToolMessage => tm.parts
+    case _               => Vector.empty
+  }
 
   /**
    * Anthropic takes an image of at most 5 MiB base64-encoded (3,932,160 bytes), less than

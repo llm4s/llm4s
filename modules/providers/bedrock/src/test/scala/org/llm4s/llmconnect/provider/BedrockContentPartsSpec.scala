@@ -112,6 +112,18 @@ class BedrockContentPartsSpec extends AnyFlatSpec with Matchers with EitherValue
     blocks.drop(2).flatMap(_.obj.get("text").map(_.str)).toSeq shouldBe Seq("before", "after")
   }
 
+  it should "refuse, before sending, a message with more images or documents than Converse takes" in {
+    val tooManyImages = Vector(ContentPart.Text("x")) ++ Vector.fill(21)(image(bytes))
+    val tooManyDocs   = Vector(ContentPart.Text("x")) ++ Vector.fill(6)(doc(bytes))
+    Seq(tooManyImages -> "20 images", tooManyDocs -> "5 documents").foreach { case (parts, limit) =>
+      val (sent, result) = send(Conversation(Seq(UserMessage(parts))))
+      sent shouldBe None
+      result.left.value.message should include(s"at most $limit in a message")
+    }
+    val fits = Vector(ContentPart.Text("x")) ++ Vector.fill(20)(image(bytes)) ++ Vector.fill(5)(doc(bytes))
+    BedrockClient.checkParts("bedrock", Seq(UserMessage(fits))) shouldBe Right(())
+  }
+
   it should "refuse, before sending, inline media over Converse's own limits" in {
     val bigImage = image(MediaSource.Inline(IArray.fill[Byte](BedrockClient.MaxInlineImageBytes.toInt + 1)(1)))
     val bigDoc   = doc(MediaSource.Inline(IArray.fill[Byte](BedrockClient.MaxInlineDocumentBytes.toInt + 1)(1)))
