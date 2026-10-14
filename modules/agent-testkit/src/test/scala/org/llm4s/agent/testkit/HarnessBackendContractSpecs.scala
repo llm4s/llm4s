@@ -164,7 +164,13 @@ class SandboxBackendReplaySpec extends AnyFlatSpec with ReplayContract:
     private val ran = Vector.fill(2)(new AtomicInteger())
     private val runner = new SandboxRunner:
       def locks(workdir: VPath): Set[LockKey] = Set(LockKey("sandbox"))
-      def run(command: String, workdir: VPath, timeout: FiniteDuration, ctx: FileContext): Result[ExecResult] =
+      def run(
+        command: String,
+        workdir: VPath,
+        timeout: FiniteDuration,
+        maxOutputBytes: Int,
+        ctx: FileContext
+      ): Result[ExecResult] =
         val slot = command.last.asDigit
         Right(ExecResult(0, s"run ${ran(slot).incrementAndGet()}", ""))
     private val sandbox        = SandboxBackend(runner)

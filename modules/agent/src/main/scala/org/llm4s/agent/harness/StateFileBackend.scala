@@ -122,7 +122,7 @@ final class StateFileBackend private (
     for
       all    <- current(ctx)
       entry  <- FileTree.fileOf("edit", all, path)
-      edited <- Text.edited(path, entry.content, old, replacement, replaceAll)
+      edited <- Text.edited(path, entry.content, old, replacement, replaceAll, maxBytes)
       _      <- admit("edit", all, path, edited._1)
     yield
       val next = FileEntry(edited._1, clock.instant())

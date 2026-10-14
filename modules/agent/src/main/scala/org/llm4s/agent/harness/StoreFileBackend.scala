@@ -151,7 +151,7 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
   ): Result[(FileEdited, StateUpdate)] =
     guarded[FileEdited]("edit", target, ctx) { view =>
       currentText("edit", view, target)
-        .flatMap(Text.edited(target, _, old, replacement, replaceAll))
+        .flatMap(Text.edited(target, _, old, replacement, replaceAll, store.limits.maxItemBytes.toLong))
         .map((next, n) => StoreChange.Put(file(next), FileEdited(n)))
     }
 

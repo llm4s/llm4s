@@ -149,13 +149,35 @@ object LongTermStore:
    * continuing on this thread is safe; every other fatal error still propagates.
    */
   // scalafix:off DisableSyntax.NoKeywordCatch
-  private[harness] def encoded[A: ReadWriter](outcome: A): Either[String, ujson.Value] =
-    try Right(upickle.default.writeJs(outcome))
+  private[harness] def encoded[A: ReadWriter](outcome: A, maxBytes: Long): Either[Unencoded, ujson.Value] =
+    try
+      // rendered first into a counter that stops past `maxBytes`, so an outcome over the cap is refused
+      // before its tree is built (rule 12); only one within it is then encoded as a tree
+      upickle.default.writeToOutputStream(outcome, new Capped(maxBytes))
+      Right(upickle.default.writeJs(outcome))
     catch {
-      case _: StackOverflowError          => Left(s"the outcome is nested deeper than $MaxDepth levels")
-      case scala.util.control.NonFatal(e) => Left(s"the outcome does not encode: $e")
+      case _: Capped.Over        => Left(Unencoded.Over)
+      case _: StackOverflowError => Left(Unencoded.Failed(s"the outcome is nested deeper than $MaxDepth levels"))
+      case scala.util.control.NonFatal(e) => Left(Unencoded.Failed(s"the outcome does not encode: $e"))
     }
   // scalafix:on DisableSyntax.NoKeywordCatch
+
+  /** Why an outcome was not encoded: over the cap, or a codec that failed. */
+  private[harness] enum Unencoded:
+    case Over
+    case Failed(reason: String)
+
+  /** An output stream that keeps nothing and stops the writer once more than `max` bytes are written. */
+  final private class Capped(max: Long) extends java.io.OutputStream:
+    private var count = 0L
+    private def add(n: Int): Unit =
+      count += n
+      if count > max then throw new Capped.Over
+    override def write(b: Int): Unit                             = add(1)
+    override def write(b: Array[Byte], off: Int, len: Int): Unit = add(len)
+
+  private object Capped:
+    final class Over extends RuntimeException("over the cap", null, false, false)
 
 /**
  * The in-memory [[LongTermStore]], for tests and single-process applications: one lock for the store.
@@ -214,8 +236,9 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
       Listing.of(hits, limit)
     }
 
+  // counted, not rendered: a value is sized before it is copied or stored (rule 12)
   private def itemBytes(key: String, value: ujson.Value): Long =
-    Text.utf8Bytes(key) + Text.utf8Bytes(ujson.write(value))
+    Text.utf8Bytes(key) + Text.jsonValueBytes(value, limits.maxItemBytes.toLong)
 
   def modify[A: ReadWriter](ns: Namespace, key: String, effect: EffectKey, token: FencingToken)(
     change: StoreView => Result[StoreChange[A]]
@@ -244,6 +267,9 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
             // first, without recursion: a deep one would overflow the stack past any `Try`
             case StoreChange.Put(value, _) if !Text.depthWithin(value, LongTermStore.MaxDepth) =>
               Left(BackendRefused("put", key, s"the value is nested deeper than ${LongTermStore.MaxDepth} levels"))
+            // sized before the copy below, so an over-limit value is refused without allocating its size again
+            case StoreChange.Put(value, _) if itemBytes(key, value) > limits.maxItemBytes =>
+              Left(BackendRefused("put", key, s"the item is over the limit of ${limits.maxItemBytes} bytes"))
             case decided =>
               val (next, outcome) = decided match
                 case StoreChange.Put(value, o) =>
@@ -253,28 +279,26 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
               // the applied key outlives a crash before the guard forgets it, so its outcome is bounded too:
               // encoded (contained, as `A`'s codec recurses), checked in depth without recursion, then copied
               // (it may be the caller's own tree) and sized
-              LongTermStore.encoded(outcome).left.map(reason => BackendRefused("put", key, reason)).flatMap {
-                case encoded if !Text.depthWithin(encoded, LongTermStore.MaxDepth) =>
+              LongTermStore.encoded(outcome, ReplayGuard.DefaultMaxOutcomeBytes.toLong) match
+                case Left(LongTermStore.Unencoded.Over) =>
+                  Left(
+                    ValidationError(
+                      "outcome",
+                      s"the outcome is over the replay cap of ${ReplayGuard.DefaultMaxOutcomeBytes} bytes"
+                    )
+                  )
+                case Left(LongTermStore.Unencoded.Failed(reason)) => Left(BackendRefused("put", key, reason))
+                case Right(encoded) if !Text.depthWithin(encoded, LongTermStore.MaxDepth) =>
                   Left(
                     BackendRefused("put", key, s"the outcome is nested deeper than ${LongTermStore.MaxDepth} levels")
                   )
-                case encoded =>
+                case Right(encoded) =>
                   val recorded = ujson.copy(encoded)
-                  val size     = Text.utf8Bytes(ujson.write(recorded))
-                  if size > ReplayGuard.DefaultMaxOutcomeBytes then
-                    Left(
-                      ValidationError(
-                        "outcome",
-                        s"the outcome is $size bytes, over the replay cap of ${ReplayGuard.DefaultMaxOutcomeBytes}"
-                      )
-                    )
-                  else
-                    within(key, next).map { _ =>
-                      next.foreach(n => namespaces = if n.isEmpty then namespaces - ns else namespaces.updated(ns, n))
-                      applied = applied.updated(effect.value, recorded)
-                      outcome
-                    }
-              }
+                  within(key, next).map { _ =>
+                    next.foreach(n => namespaces = if n.isEmpty then namespaces - ns else namespaces.updated(ns, n))
+                    applied = applied.updated(effect.value, recorded)
+                    outcome
+                  }
           }
   })
 

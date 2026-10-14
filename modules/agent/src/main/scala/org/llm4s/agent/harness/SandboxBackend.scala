@@ -40,8 +40,19 @@ trait SandboxRunner:
   /** The locks a command run in `workdir` holds (F2: `workspace/<id>`). */
   def locks(workdir: VPath): Set[LockKey]
 
-  /** Runs `command` in `workdir`, for at most `timeout`. */
-  def run(command: String, workdir: VPath, timeout: FiniteDuration, ctx: FileContext): Result[ExecResult]
+  /**
+   * Runs `command` in `workdir`, for at most `timeout`, capturing at most `maxOutputBytes` of each of
+   * stdout and stderr (bytes of the stream as a JSON string, as [[ExecResult]] is recorded) and
+   * discarding the rest, with `truncated` set: the bound holds while the output is read, not after it is
+   * all in memory (rule 12). The backend cuts anything over it again.
+   */
+  def run(
+    command: String,
+    workdir: VPath,
+    timeout: FiniteDuration,
+    maxOutputBytes: Int,
+    ctx: FileContext
+  ): Result[ExecResult]
 
 /**
  * Where commands run. Its target is `Unverifiable` (C4): every `execute` runs through
@@ -74,7 +85,7 @@ final class SandboxBackend private (
     resolve(ctx).flatMap { runner =>
       val key = ctx.effectKey("sandbox.execute", command, workdir.value)
       ReplayGuard.unverifiable[ExecResult](ctx.run, key, idempotent = false)(
-        runner.run(command, workdir, timeout, ctx).map(bounded)
+        runner.run(command, workdir, timeout, maxOutputBytes, ctx).map(bounded)
       )
     }
 

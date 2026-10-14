@@ -19,6 +19,18 @@ import java.nio.file.{
   StandardCopyOption,
   StandardOpenOption
 }
+import java.nio.file.attribute.{
+  AclEntry,
+  AclFileAttributeView,
+  DosFileAttributeView,
+  FileAttribute,
+  GroupPrincipal,
+  PosixFileAttributeView,
+  PosixFileAttributes,
+  PosixFilePermission,
+  PosixFilePermissions,
+  UserPrincipal
+}
 import java.util.UUID
 import java.util.concurrent.locks.ReentrantLock
 import java.util.regex.Pattern
@@ -238,19 +250,43 @@ final class HostFileBackend private (
     }
     digest.digest().map(b => f"${b & 0xff}%02x").mkString
 
-  /** Writes `bytes` to `target` atomically: a flushed temporary file beside it, moved over it. */
-  private def atomicWrite(target: Path, bytes: Array[Byte]): Result[Unit] =
-    Try {
-      Files.createDirectories(target.getParent)
-      // a short name of its own, so a target near the file system's name limit still has room for it
-      val temp = target.resolveSibling(s".llm4s-${UUID.randomUUID()}.tmp")
-      val written = Using(FileChannel.open(temp, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) { channel =>
-        val buffer = ByteBuffer.wrap(bytes)
-        while buffer.hasRemaining do channel.write(buffer)
-        channel.force(true)
-      }.flatMap(_ => Try(Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)))
-      written.recoverWith { case e => Try(Files.deleteIfExists(temp)).flatMap(_ => Failure(e)) }.get
-    }.toResult.map(_ => ())
+  /**
+   * Writes `bytes` to `target` atomically: a flushed temporary file beside it, moved over it. A file it
+   * replaces keeps its permissions: before any byte is written, the temporary file is given the
+   * target's POSIX permissions, owner and group (checked to hold), or its ACL and owner, and its DOS
+   * hidden and system flags. Where they cannot be kept - setuid, setgid or sticky bits, an owner or group
+   * the process cannot set, no permission model the JDK can copy - the write is refused, never widened.
+   * A new file gets what any file created in its directory gets.
+   */
+  private def atomicWrite(operation: String, path: VPath, target: Path, bytes: Array[Byte]): Result[Unit] =
+    HostFileBackend.Kept.of(target) match
+      case Left(reason) => refused(operation, path, reason)
+      case Right(kept) =>
+        Try(Files.createDirectories(target.getParent)).toResult.flatMap { _ =>
+          // a short name of its own, so a target near the file system's name limit still has room for it
+          val temp    = target.resolveSibling(s".llm4s-${UUID.randomUUID()}.tmp")
+          val options = java.util.Set.of[StandardOpenOption](StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
+          val attempt: Try[Option[String]] =
+            Using(FileChannel.open(temp, options, kept.toSeq.flatMap(_.createAttributes)*)) { channel =>
+              kept.fold[Either[String, Unit]](Right(()))(_.applyTo(temp)).left.toOption.orElse {
+                val buffer = ByteBuffer.wrap(bytes)
+                while buffer.hasRemaining do channel.write(buffer)
+                channel.force(true)
+                None
+              }
+            }.flatMap {
+              case None =>
+                Try(Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING))
+                  .map(_ => None)
+              case refusal => Success(refusal)
+            }
+          if attempt != Success(None) then
+            val _ = Try(Files.deleteIfExists(temp))
+          attempt match
+            case Success(None)         => Right(())
+            case Success(Some(reason)) => refused(operation, path, reason)
+            case Failure(e)            => Failure[Unit](e).toResult
+        }
 
   // ---- serialisation of plan and effect across threads of this JVM
 
@@ -375,15 +411,16 @@ final class HostFileBackend private (
 
   private def writeOpen(path: VPath, content: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
     guarded[FileWritten]("write", path, ctx) { target =>
-      val bytes = content.getBytes(StandardCharsets.UTF_8)
       if path == VPath.root then refused("write", path, "is the root directory")
       else
         Text.binaryReason(content) match
           case Some(reason) => refused("write", path, reason)
-          case None if bytes.length > maxFileBytes =>
+          // sized before it is encoded, so an over-limit write allocates nothing (rule 12)
+          case None if Text.utf8Bytes(content) > maxFileBytes =>
             refused("write", path, s"content is larger than the limit of $maxFileBytes bytes")
           case None if isDir(target) => refused("write", path, "is a directory")
           case None =>
+            val bytes = content.getBytes(StandardCharsets.UTF_8)
             for
               _      <- underDirectories("write", path, target)
               before <- digest("write", path, target)
@@ -392,7 +429,9 @@ final class HostFileBackend private (
               fileCheck(bytes),
               FileWritten(before == StateCheck.absent, bytes.length.toLong) // from the one read, as the effect reports
             )(
-              atomicWrite(target, bytes).map(_ => FileWritten(before == StateCheck.absent, bytes.length.toLong))
+              atomicWrite("write", path, target, bytes).map(_ =>
+                FileWritten(before == StateCheck.absent, bytes.length.toLong)
+              )
             )
     }
 
@@ -406,14 +445,14 @@ final class HostFileBackend private (
     guarded[FileEdited]("edit", path, ctx) { target =>
       for
         bytes  <- fileBytes("edit", path, target)
-        edited <- Text.edited(path, text(bytes), old, replacement, replaceAll)
-        next = edited._1.getBytes(StandardCharsets.UTF_8)
+        edited <- Text.edited(path, text(bytes), old, replacement, replaceAll, maxFileBytes)
         _ <-
-          if next.length > maxFileBytes then
+          if Text.utf8Bytes(edited._1) > maxFileBytes then
             refused("edit", path, s"the result is larger than the limit of $maxFileBytes bytes")
           else Right(())
+        next = edited._1.getBytes(StandardCharsets.UTF_8)
       yield casPlan("edit", path, target)(fileCheck(bytes), fileCheck(next), FileEdited(edited._2))(
-        atomicWrite(target, next).map(_ => FileEdited(edited._2))
+        atomicWrite("edit", path, target, next).map(_ => FileEdited(edited._2))
       )
     }
 
@@ -629,6 +668,77 @@ object HostFileBackend:
 
   /** Decoded content that the text rule calls binary (NUL); a read refuses it and a search skips it. */
   final private class BinaryContent extends CharacterCodingException
+
+  /**
+   * The attributes a replacement of a file must keep: its POSIX permissions, owner and group, or its
+   * ACL and owner, and its DOS hidden and system flags.
+   */
+  final private[harness] class Kept private (
+    posix: Option[(java.util.Set[PosixFilePermission], UserPrincipal, GroupPrincipal)],
+    acl: Option[(UserPrincipal, java.util.List[AclEntry])],
+    dos: Option[(Boolean, Boolean)]
+  ):
+
+    /** Created with the target's permissions, so the temporary file is never wider than it, even briefly. */
+    def createAttributes: Seq[FileAttribute[?]] =
+      posix.map((perms, _, _) => PosixFilePermissions.asFileAttribute(perms)).toSeq
+
+    /** Gives `temp` these attributes (the umask may have narrowed them), or why it cannot have them. */
+    def applyTo(temp: Path): Either[String, Unit] =
+      Try {
+        posix.foreach { (perms, owner, group) =>
+          val view = Files.getFileAttributeView(temp, classOf[PosixFileAttributeView], LinkOption.NOFOLLOW_LINKS)
+          view.setPermissions(perms)
+          if view.readAttributes().owner() != owner then view.setOwner(owner)
+          if view.readAttributes().group() != group then view.setGroup(group)
+        }
+        acl.foreach { (owner, entries) =>
+          val view = Files.getFileAttributeView(temp, classOf[AclFileAttributeView], LinkOption.NOFOLLOW_LINKS)
+          view.setAcl(entries)
+          if view.getOwner() != owner then view.setOwner(owner)
+        }
+        dos.foreach { (hidden, system) =>
+          val view = Files.getFileAttributeView(temp, classOf[DosFileAttributeView], LinkOption.NOFOLLOW_LINKS)
+          view.setHidden(hidden)
+          view.setSystem(system)
+        }
+        posix.forall { (perms, owner, group) =>
+          val now = Files.readAttributes(temp, classOf[PosixFileAttributes], LinkOption.NOFOLLOW_LINKS)
+          now.permissions() == perms && now.owner() == owner && now.group() == group
+        }
+      } match
+        case Success(true)  => Right(())
+        case Success(false) => Left("the file system did not keep its permissions on the replacement")
+        case Failure(e)     => Left(s"its permissions cannot be kept on the replacement: $e")
+
+  object Kept:
+
+    /** `target`'s attributes, `None` if there is no file to replace, or why a replacement cannot keep them. */
+    def of(target: Path): Either[String, Option[Kept]] =
+      if !Files.exists(target, LinkOption.NOFOLLOW_LINKS) then Right(None)
+      else
+        Try {
+          def view[V <: java.nio.file.attribute.FileAttributeView](c: Class[V]): Option[V] =
+            Option(Files.getFileAttributeView(target, c, LinkOption.NOFOLLOW_LINKS))
+          // setuid, setgid and sticky: no portable API sets them, so a replacement would drop them
+          val special = Try(Files.getAttribute(target, "unix:mode", LinkOption.NOFOLLOW_LINKS)).toOption.collect {
+            case mode: Integer => (mode.intValue & 0xe00) != 0
+          }
+          val posix = view(classOf[PosixFileAttributeView]).map { v =>
+            val a = v.readAttributes()
+            (a.permissions(), a.owner(), a.group())
+          }
+          val acl =
+            if posix.isDefined then None else view(classOf[AclFileAttributeView]).map(v => (v.getOwner(), v.getAcl()))
+          val dos = if posix.isDefined then None else view(classOf[DosFileAttributeView]).map(_.readAttributes())
+          if special.contains(true) then Left("has a setuid, setgid or sticky bit, which a replacement cannot keep")
+          else if dos.exists(_.isReadOnly) then Left("is read-only")
+          else if posix.isEmpty && acl.isEmpty then
+            Left("is on a file system whose permissions the backend cannot copy onto a replacement")
+          else Right(Some(new Kept(posix, acl, dos.map(a => (a.isHidden, a.isSystem)))))
+        } match
+          case Success(kept) => kept
+          case Failure(e)    => Left(s"its permissions cannot be read: $e")
 
   /**
    * Whether `e` is how the JDK reports an interrupt of a blocking call: one class for a closed channel,

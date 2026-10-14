@@ -580,4 +580,51 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     onDisk("log.txt").split("\n").toSet shouldBe (applied + "end")
   }
 
+  private def mode(rel: String): String =
+    java.nio.file.attribute.PosixFilePermissions.toString(
+      Files.getPosixFilePermissions(dir.resolve(rel), java.nio.file.LinkOption.NOFOLLOW_LINKS)
+    )
+
+  it should "keep a replaced file's permissions on a write and an edit: 0600 stays private, 0755 executable" in {
+    assume(posix)
+    for (perms <- Seq("rw-------", "rwxr-xr-x")) {
+      val rel = s"keep-$perms.txt"
+      Files.writeString(dir.resolve(rel), "one\n")
+      Files.setPosixFilePermissions(dir.resolve(rel), java.nio.file.attribute.PosixFilePermissions.fromString(perms))
+      written(backend.write(p(s"/$rel"), "two\n", call()))
+      mode(rel) shouldBe perms
+      written(backend.edit(p(s"/$rel"), "two", "three", replaceAll = false, call()))
+      mode(rel) shouldBe perms
+      onDisk(rel) shouldBe "three\n"
+    }
+  }
+
+  it should "give a new file what any file created in its directory gets" in {
+    assume(posix)
+    Files.createFile(dir.resolve("plain.txt"))
+    written(backend.write(p("/new.txt"), "x", call()))
+    mode("new.txt") shouldBe mode("plain.txt")
+  }
+
+  it should "refuse to replace a file whose setuid bit a replacement would drop, changing nothing" in {
+    assume(posix)
+    Files.writeString(dir.resolve("tool"), "#!/bin/sh\n")
+    new ProcessBuilder("chmod", "4755", dir.resolve("tool").toString).start().waitFor() shouldBe 0
+    val refusal = backend.write(p("/tool"), "replaced", call()).left.value
+    refusal shouldBe a[BackendRefused]
+    refusal.message should include("setuid")
+    onDisk("tool") shouldBe "#!/bin/sh\n"
+    Files.list(dir).iterator().asScala.map(_.getFileName.toString).filter(_.endsWith(".tmp")).toList shouldBe empty
+  }
+
+  it should "refuse an edit whose result would pass the limit before building it" in {
+    Files.writeString(dir.resolve("big.txt"), "a" * 100000)
+    // 100 000 occurrences each grown by 99 999 characters: about 10^10, which no JVM here could allocate
+    val refusal =
+      backend.edit(p("/big.txt"), "a", "b" * 100000, replaceAll = true, call()).left.value
+    refusal shouldBe a[BackendRefused]
+    refusal.message should include("larger than the limit")
+    onDisk("big.txt") shouldBe "a" * 100000
+  }
+
 }

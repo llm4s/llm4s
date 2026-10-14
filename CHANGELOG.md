@@ -20,24 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to keep the gcloud fallback.
 
 ### Added
-- **Harness backend SPIs: files, sandbox, long-term store** ([#1904](https://github.com/llm4s/llm4s/issues/1904)):
-  Phase 3 slice C3, in `org.llm4s.agent.harness` (`llm4s-agent`). `VPath` is a validated absolute path. A
-  `FileBackend` (`ls`, `read`, `write`, `edit`, `delete`, `glob`, `grep`) owns its mutations' locks (`locks(path)`,
-  for `AgentToolSpec.withLocks`), their replay (C4's guard, keyed by `FileContext.effectKey`), its bounds and its
-  tenant scoping; `BackendRefused.toolOutcome` turns a refusal into a tool error and anything else into `Fatal`.
-  - `StateFileBackend`: files in a thread-state key, bounded by `maxBytes` and `maxFiles` under one backend-wide
-    lock, so the bound is exact across a parallel batch.
-  - `HostFileBackend`: opt-in host directory, `Verifiable`; every symbolic link and multiply-linked file refused,
-    writes atomic (temporary file and atomic move), per-file locks, and each effect a compare-and-set against its
-    plan under JVM and OS advisory locks (lock files in the `lockDirectory` the application gives `open`),
-    across threads, processes and overlapping roots.
-  - `CompositeBackend` routes by longest mount; `FileBackend.resolved` picks a backend per run (per tenant).
-  - `LongTermStore` (`Transactional`, one read-modify-write primitive `modify` over a `StoreView`, bounds per item and
-    namespace, values copied in and out) with
-    `InMemoryLongTermStore`; `StoreFileBackend` exposes a namespace of the run's tenant as files.
-  - `SandboxBackend` wraps a `SandboxRunner` in the `Unverifiable` guard and cuts each stream at `maxOutputBytes`.
-  - `llm4s-agent-testkit` adds `FileBackendContract` and `FileBackendContract.EditSubject` for `ReplayContract`, and
-    now depends on `llm4s-testkit`. Design record §4.25.
+- Harness backend SPIs in `org.llm4s.agent.harness`: `FileBackend` (state, host, composite and store backends), `SandboxBackend` and `LongTermStore`, with `FileBackendContract` in `llm4s-agent-testkit`
+  ([#1904](https://github.com/llm4s/llm4s/issues/1904); [design record 4.25](docs/design/typed-agent-runtime/4.25-stage-3-slice-c3-backend-spis.md)).
 - **Phase 3 C4 follow-ups: retention against takeover admission, and one-to-one key encoding** ([#1921](https://github.com/llm4s/llm4s/issues/1921)).
   - A task's identity for its effects is now its id and its lineage: a digest of what scheduled it, namely the
     previous superstep's tasks and their results (`PendingTask.lineage`, checkpoint format 7). Work that a takeover

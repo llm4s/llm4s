@@ -183,6 +183,16 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     store.get(Namespace(Some(TenantId("a")), Vector("memories")), "/notes.md").value.isDefined shouldBe true
   }
 
+  it should "refuse an edit whose result would pass the item limit before building it" in {
+    val store = InMemoryLongTermStore()
+    val files = StoreFileBackend(store)
+    done(files.write(p("/big.md"), "a" * 10000, call()))
+    // 10 000 occurrences each grown by 999 999 characters: about 10^10, which no JVM here could allocate
+    val refusal = files.edit(p("/big.md"), "a", "b" * 1000000, replaceAll = true, call()).left.value
+    refusal shouldBe a[BackendRefused]
+    refusal.message should include("larger than the limit")
+  }
+
   it should "refuse a store item with NUL in it as binary, and skip it in grep" in {
     val store = InMemoryLongTermStore()
     val files = StoreFileBackend(store)
@@ -312,7 +322,13 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
   final private class CountingRunner(output: String = "ok") extends SandboxRunner {
     val runs                                = new AtomicInteger()
     def locks(workdir: VPath): Set[LockKey] = Set(LockKey("workspace", "w"))
-    def run(command: String, workdir: VPath, timeout: FiniteDuration, ctx: FileContext): Result[ExecResult] = {
+    def run(
+      command: String,
+      workdir: VPath,
+      timeout: FiniteDuration,
+      maxOutputBytes: Int,
+      ctx: FileContext
+    ): Result[ExecResult] = {
       runs.incrementAndGet()
       Right(ExecResult(0, output, s"$command in ${workdir.value}"))
     }

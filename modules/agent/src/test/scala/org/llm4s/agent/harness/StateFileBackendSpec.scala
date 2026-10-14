@@ -44,6 +44,47 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
     f.state.get(backend.files).value(p("/a.txt")).modified shouldBe clock.instant()
   }
 
+  it should "refuse an edit whose result would pass the limit before building it" in {
+    val (backend, f) = fixture()
+    f.write("/big.txt", "a" * 100000)
+    // 100 000 occurrences each grown by 99 999 characters: about 10^10, which no JVM here could allocate
+    val refusal = backend.edit(p("/big.txt"), "a", "b" * 100000, replaceAll = true, f.ctx).left.value
+    refusal shouldBe a[BackendRefused]
+    refusal.message should include("larger than the limit")
+  }
+
+  "Text.edited" should "size the result exactly, growing or shrinking, against the bound" in {
+    val path = p("/t")
+    org.llm4s.agent.harness.Text.edited(path, "abcb", "b", "xyz", replaceAll = true, 8).value shouldBe ("axyzcxyz", 2)
+    org.llm4s.agent.harness.Text
+      .edited(path, "abcb", "b", "xyz", replaceAll = true, 7)
+      .left
+      .value
+      .message should include("at least 8")
+    org.llm4s.agent.harness.Text.edited(path, "abcd", "b", "xyz", replaceAll = false, 6).value shouldBe ("axyzcd", 1)
+    org.llm4s.agent.harness.Text.edited(path, "abcb", "bc", "", replaceAll = false, 2).value shouldBe ("ab", 1)
+    org.llm4s.agent.harness.Text
+      .edited(path, "a" * 3, "a", "b" * 1000, replaceAll = true, Long.MaxValue)
+      .value
+      ._1
+      .length shouldBe 3000
+  }
+
+  "Text.utf8Bytes and Text.jsonValueBytes" should "count what getBytes and ujson.write produce, without producing it" in {
+    for (s <- Seq("", "ascii", "\u00e9", "\u20ac", "\uD83D\uDE00", "lone \uD800 surrogate"))
+      org.llm4s.agent.harness.Text
+        .utf8Bytes(s) shouldBe s.getBytes(java.nio.charset.StandardCharsets.UTF_8).length.toLong
+    val value = ujson.Obj(
+      "content" -> "a \"quoted\" \\ line\n\tand \u0001 \u20ac",
+      "n"       -> ujson.Arr(1, 2.5, -3, ujson.Null, ujson.True, ujson.False, ujson.Obj()),
+      "empty"   -> ujson.Arr()
+    )
+    org.llm4s.agent.harness.Text.jsonValueBytes(value, Long.MaxValue) shouldBe
+      ujson.write(value).getBytes(java.nio.charset.StandardCharsets.UTF_8).length.toLong
+    org.llm4s.agent.harness.Text
+      .jsonValueBytes(ujson.Arr.from(Seq.fill(1000)(ujson.Str("x" * 100))), 10) should be > 10L
+  }
+
   it should "take Int.MaxValue as a limit, for listings and reads alike, without overflow" in {
     val (backend, f) = fixture()
     f.write("/a.txt", "one\ntwo\nthree")

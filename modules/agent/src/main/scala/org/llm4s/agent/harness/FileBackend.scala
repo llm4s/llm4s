@@ -279,7 +279,53 @@ private[harness] object Text:
       val parts = content.split("\n", -1).toVector
       (if content.endsWith("\n") then parts.dropRight(1) else parts).map(_.stripSuffix("\r"))
 
-  def utf8Bytes(s: String): Long = s.getBytes(java.nio.charset.StandardCharsets.UTF_8).length.toLong
+  /**
+   * The length of `s` in UTF-8, as `getBytes` encodes it (a lone surrogate as one `?`), counted without
+   * encoding: a size is checked before anything that big is allocated (rule 12).
+   */
+  def utf8Bytes(s: String): Long =
+    var total = 0L
+    var i     = 0
+    while i < s.length do
+      val c = s.charAt(i)
+      if c < 0x80 then total += 1
+      else if c < 0x800 then total += 2
+      else if Character.isHighSurrogate(c) && i + 1 < s.length && Character.isLowSurrogate(s.charAt(i + 1)) then
+        total += 4
+        i += 1
+      else if Character.isSurrogate(c) then total += 1
+      else total += 3
+      i += 1
+    total
+
+  /** The longest string or array a backend builds: the JVM's practical array limit. */
+  val MaxLength: Int = Int.MaxValue - 8
+
+  /**
+   * The bytes `value` takes as `ujson.write` renders it (compact; strings as [[jsonBytes]], so a lone
+   * surrogate is counted high), counted without rendering and without recursion, and stopping once past
+   * `max`: a value is sized before it is copied or stored. Over `max`, the result is some count over it.
+   */
+  def jsonValueBytes(value: ujson.Value, max: Long): Long =
+    val stack = scala.collection.mutable.Stack[ujson.Value](value)
+    var total = 0L
+    while stack.nonEmpty && total <= max do
+      stack.pop() match
+        case ujson.Str(s) => total += 2 + jsonBytes(s)
+        case ujson.Arr(items) =>
+          total += 2 + math.max(items.size - 1, 0)
+          items.foreach(stack.push)
+        case ujson.Obj(fields) =>
+          total += 2 + math.max(fields.size - 1, 0)
+          fields.foreach { (k, v) =>
+            total += 3 + jsonBytes(k)
+            stack.push(v)
+          }
+        case n: ujson.Num => total += ujson.write(n).length // at most a few dozen characters
+        case ujson.True   => total += 4
+        case ujson.False  => total += 5
+        case ujson.Null   => total += 4
+    total
 
   /**
    * The bytes the code point `cp` takes inside a JSON string as ujson writes it: a quote, backslash or
@@ -331,13 +377,20 @@ private[harness] object Text:
       if i < 0 then n else loop(i + old.length, n + 1)
     loop(0, 0)
 
-  /** The edited content, or a refusal. */
+  /**
+   * The edited content, or a refusal. `maxBytes` is the backend's bound on the result in bytes of its
+   * encoding (UTF-8 or a JSON string), and every character takes at least one byte in either, so the
+   * result's length in characters - `occurrences × (replacement − old) + content`, in `Long` - is
+   * checked against it before the result is built, in a builder of exactly that size (rule 12). The
+   * backend still checks the encoded size of what this returns.
+   */
   def edited(
     path: VPath,
     content: String,
     old: String,
     replacement: String,
-    replaceAll: Boolean
+    replaceAll: Boolean,
+    maxBytes: Long
   ): Result[(String, Int)] =
     if old.isEmpty then Left(BackendRefused("edit", path.value, "`old` is empty"))
     else
@@ -346,12 +399,33 @@ private[harness] object Text:
         case n if n > 1 && !replaceAll =>
           Left(BackendRefused("edit", path.value, s"`old` occurs $n times; make it unique or set replaceAll"))
         case n =>
-          val next = if replaceAll then content.replace(old, replacement) else replaceFirst(content, old, replacement)
-          binaryReason(next).map(r => BackendRefused("edit", path.value, r)).toLeft((next, n))
+          val replaced  = if replaceAll then n else 1
+          val projected = content.length.toLong + replaced.toLong * (replacement.length.toLong - old.length.toLong)
+          val bound     = math.min(maxBytes, MaxLength.toLong)
+          if projected > bound then
+            Left(
+              BackendRefused(
+                "edit",
+                path.value,
+                s"the result would be at least $projected bytes, larger than the limit of $maxBytes bytes"
+              )
+            )
+          else
+            val next = replacing(content, old, replacement, replaced, projected.toInt)
+            binaryReason(next).map(r => BackendRefused("edit", path.value, r)).toLeft((next, n))
 
-  private def replaceFirst(content: String, old: String, replacement: String): String =
-    val i = content.indexOf(old)
-    content.substring(0, i) + replacement + content.substring(i + old.length)
+  /** `content` with its first `count` occurrences of `old` replaced, built in a builder of `size`. */
+  private def replacing(content: String, old: String, replacement: String, count: Int, size: Int): String =
+    val out = new java.lang.StringBuilder(size)
+    @annotation.tailrec
+    def loop(from: Int, left: Int): Unit =
+      val i = if left > 0 then content.indexOf(old, from) else -1
+      if i < 0 then out.append(content, from, content.length)
+      else
+        out.append(content, from, i).append(replacement)
+        loop(i + old.length, left - 1)
+    loop(0, count)
+    out.toString
 
   /** Matches of `regex` in `content`'s lines, checking the thread's interrupt flag as it matches. */
   /**
