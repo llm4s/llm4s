@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.testutil.LinearTime
+import org.llm4s.testutil.{ LinearTime, PerformanceTest }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -214,7 +214,7 @@ class RedactionEscapedQuotedValueSpec extends AnyFlatSpec with Matchers {
     closed should be > 300
   }
 
-  it should "read values in escaped quotes in time linear in the input (#1707)" in {
+  it should "read values in escaped quotes in time linear in the input (#1707)" taggedAs PerformanceTest in {
     val shapes: Seq[(String, Int => String)] = Seq(
       "values in escaped quotes"    -> (n => "x=1&password=\\\\'p&ss=QZXJ\\\\' " * n),
       "escaped quotes never closed" -> (n => "&password=\\\\'p&ss=QZXJ " * n),
@@ -227,5 +227,13 @@ class RedactionEscapedQuotedValueSpec extends AnyFlatSpec with Matchers {
     shapes.foreach { case (name, build) =>
       LinearTime.assertLinear(name, build(2500), build(10000))(Redaction.redact(_))
     }
+  }
+
+  // The scaling test above is PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test` and fails on
+  // a catastrophic regression in one run of a megabyte, under a generous hang guard.
+  it should "read a megabyte of values in escaped quotes in a JSON string well inside the hang guard (#1707)" in {
+    val input = "{\"q\":\"" + ("x=1&password=\\\\'p&ss=Q\\\\' " * 40000) + "\"}"
+    input.length should be > 1000000
+    LinearTime.timed("a megabyte of values in escaped quotes", LinearTime.MegabyteHangGuard)(Redaction.redact(input))
   }
 }

@@ -1,6 +1,7 @@
 package org.llm4s.agent.graph.toolloop
 
 import org.llm4s.annotation.Experimental
+import org.llm4s.agent.graph.middleware.{ MiddlewareId, PromptSection }
 import org.llm4s.agent.graph.tool.ToolArgumentValidator
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
@@ -25,19 +26,25 @@ final class OutputFormat private (val schema: ujson.Value, reads: ujson.Value =>
   /** The `responseFormat` a model call of the agent that offers no tools is made with. */
   def responseFormat: ResponseFormat.JsonSchema = ResponseFormat.JsonSchema(schema)
 
-  /** The system prompt section that states the schema, after the agent's own prompt. */
-  private[agent] def promptSection: String =
-    s"${OutputFormat.Instruction}\n${ujson.write(schema)}"
+  /**
+   * The prompt section that states the schema, joining the middleware's sections on every model call of the
+   * agent: cacheable, since it is fixed when the agent is built.
+   */
+  private[agent] def section: PromptSection =
+    PromptSection(OutputFormat.SectionId, s"${OutputFormat.Instruction}\n${ujson.write(schema)}", cacheable = true)
 
-  /** The schema's problems for `validator`, as a build refuses them: empty when the format is usable. */
-  private[toolloop] def problems(validator: ToolArgumentValidator): Vector[String] =
-    val rendered = ujson.write(schema)
+  /**
+   * The schema's problems, as a build refuses them: empty when the format is usable. `budget` is the agent's
+   * prompt section budget in estimated tokens (four characters a token), which the section alone must fit.
+   */
+  private[toolloop] def problems(validator: ToolArgumentValidator, budget: Int): Vector[String] =
     val notObject = schema.objOpt.flatMap(_.get("type")) match
       case Some(ujson.Str("object")) => Vector.empty
       case _                         => Vector("its schema's root type must be \"object\"")
+    val tokens = (section.text.length.toLong + 3) / 4
     val tooLong =
-      if rendered.length <= OutputFormat.MaxSchemaChars then Vector.empty
-      else Vector(s"its schema is ${rendered.length} characters, over ${OutputFormat.MaxSchemaChars}")
+      if tokens <= budget then Vector.empty
+      else Vector(s"its prompt section is $tokens estimated tokens, over the agent's maxPromptSectionTokens of $budget")
     val unsupported = validator.unsupported(schema).map(path => s"its schema keyword $path cannot be checked")
     notObject ++ tooLong ++ unsupported
 
@@ -68,11 +75,12 @@ object OutputFormat:
   /** Longest a reported problem is; a longer one is cut. */
   val MaxErrorChars: Int = 300
 
-  /** Longest a schema may render to: it is sent in the system prompt of every model call. */
-  val MaxSchemaChars: Int = 32768
-
   /** Longest the invalid answer is when it is sent back to the model in the corrective request. */
   val MaxEchoedAnswerChars: Int = 16000
+
+  /** The id of the format's prompt section, and the owner its size is reported under. */
+  private[toolloop] val SectionId: String   = "response-format"
+  private[toolloop] val Owner: MiddlewareId = MiddlewareId("response-format")
 
   private val Instruction =
     "When you give your final answer, reply with only a JSON value matching this JSON Schema, with no other text:"

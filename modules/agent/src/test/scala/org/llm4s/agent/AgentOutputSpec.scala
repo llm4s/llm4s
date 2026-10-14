@@ -9,12 +9,20 @@ import org.llm4s.agent.graph.{
   GraphError,
   GraphRuntime,
   InMemoryCheckpointer,
-  RunContext,
   RunEvent,
   ThreadId
 }
-import org.llm4s.agent.graph.middleware.{ AgentMiddleware, GuardrailMiddleware, MiddlewareId, ModelRequest }
+import org.llm4s.agent.graph.middleware.{
+  AgentMiddleware,
+  GuardrailMiddleware,
+  MiddlewareId,
+  ModelContext,
+  ModelRequest,
+  ModelResponse,
+  PromptSection
+}
 import org.llm4s.agent.graph.tool.{ ToolArgumentValidator, ToolOutcome, ToolSet }
+import org.llm4s.agent.graph.toolloop.OutputFormat
 import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
@@ -82,9 +90,9 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
     val echo = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
     val toolless = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("toolless")
-      override def wrapModelCall(request: ModelRequest, context: RunContext)(
-        next: ModelRequest => Result[Completion]
-      ): Result[Completion] = next(request.withTools(ToolSet.empty))
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] = next(request.withTools(ToolSet.empty))
     }
     val client = answers(valid)
     built(withFormat(client).withTools(SpecTools.set(echo)).withMiddleware(toolless)).run("bill Acme").value
@@ -175,7 +183,7 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
     result.usage.requestCount shouldBe 2
     (result.usage.inputTokens, result.usage.outputTokens) shouldBe (16L, 20L)
     modelCallsCompleted(store, thread).map(c => c.attempts -> c.usage.map(_.totalTokens)) shouldBe
-      Vector(1 -> Some(12), 1 -> Some(24))
+      Vector(1 -> Some(12), 2 -> Some(24))
   }
 
   it should "count a blank answer as invalid, and retry it" in {
@@ -212,39 +220,47 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
       Right(CompletionFixture.simple(invalid)),
       Right(CompletionFixture.simple(valid))
     )
-    val agent  = built(withFormat(client))
+    val store  = new InMemoryCheckpointer()
+    val agent  = built(withFormat(client).withRuntime(new GraphRuntime(store)))
     val thread = ThreadId("corrective-failed")
 
     cause(agent.run(thread, "bill Acme").error) shouldBe ValidationError("provider", "unavailable")
+    // the failed task commits nothing, but the first call is counted on the durable RunFailed (rule 11)
+    val failed = store
+      .eventsAfter(thread, 0L, 1000)
+      .fold(e => fail(e.message), identity)
+      .collect { case EventRecord(_, _, _, _, _, _, _, f: RunEvent.RunFailed) => f }
+    failed.flatMap(_.usage).map(_.requestCount) shouldBe Vector(1L)
     val recovered = agent.recover(thread).value
     recovered.decodeOutput[Invoice] shouldBe Right(Invoice("Acme", 12.5))
     client.callCount shouldBe 4
   }
 
-  // a ModelCallCompleted's attempts count only the calls made for its own request, on every path (Codex, #1924)
+  // every provider call of the step - a wrapper's retries and the corrective request's included - is recorded once,
+  // numbered within the step, on every path the step ends by (Codex, #1924; C1's accounting, design §4.22)
 
   /** Calls the model `retries + 1` times on the first request (keeping the last), once on later ones. */
   final private class Retrying(retries: Int) extends AgentMiddleware {
     val requests         = new AtomicInteger(0)
     val id: MiddlewareId = MiddlewareId("retrying")
-    override def wrapModelCall(request: ModelRequest, context: RunContext)(
-      next: ModelRequest => Result[Completion]
-    ): Result[Completion] =
+    override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+      next: ModelRequest => Result[ModelResponse]
+    ): Result[ModelResponse] =
       if (requests.incrementAndGet() == 1) (1 to retries).foldLeft(next(request))((_, _) => next(request))
       else next(request)
   }
 
-  "Each request's attempts" should "count only its own calls when the corrective answer is stored" in {
+  "Each provider call" should "be recorded once, numbered within the step, when the corrective answer is stored" in {
     val store  = new InMemoryCheckpointer()
     val thread = ThreadId("attempts-stored")
     val agent = built(
       withFormat(answers(invalid, invalid, valid)).withMiddleware(new Retrying(1)).withRuntime(new GraphRuntime(store))
     )
     agent.run(thread, "bill Acme").value.decodeOutput[Invoice] shouldBe Right(Invoice("Acme", 12.5))
-    modelCallsCompleted(store, thread).map(_.attempts) shouldBe Vector(2, 1)
+    modelCallsCompleted(store, thread).map(_.attempts) shouldBe Vector(1, 2, 3)
   }
 
-  it should "count only its own calls when the second answer is invalid too" in {
+  it should "be recorded once, numbered within the step, when the second answer is invalid too" in {
     val store  = new InMemoryCheckpointer()
     val thread = ThreadId("attempts-blocked")
     val agent = built(
@@ -253,27 +269,28 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
         .withRuntime(new GraphRuntime(store))
     )
     agent.run(thread, "bill Acme").error shouldBe a[GraphError.OutputInvalid]
-    modelCallsCompleted(store, thread).map(_.attempts) shouldBe Vector(2, 1)
+    modelCallsCompleted(store, thread).map(_.attempts) shouldBe Vector(1, 2, 3)
   }
 
-  it should "count only its own calls when a wrapper asks during the corrective request" in {
+  it should "be recorded once, numbered within the step, when a wrapper asks during the corrective request" in {
     val store  = new InMemoryCheckpointer()
     val thread = ThreadId("attempts-asked")
     // asks after the corrective request's call, so the step suspends with both calls' usage
     val reviewer = new AgentMiddleware.Asking[String, Boolean] {
       val requests         = new AtomicInteger(0)
       val id: MiddlewareId = MiddlewareId("reviewer")
-      override def wrapModelCall(request: ModelRequest, context: RunContext)(
-        next: ModelRequest => Result[Completion]
-      ): Result[Completion] =
-        if (requests.incrementAndGet() == 2) next(request).flatMap(c => ask(c.message.content)) else next(request)
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] =
+        if (requests.incrementAndGet() == 2) next(request).flatMap(r => ask(r.completion.message.content))
+        else next(request)
     }
     val agent = built(withFormat(answers(invalid, valid)).withMiddleware(reviewer).withRuntime(new GraphRuntime(store)))
     val parked = agent.run(thread, "bill Acme").value
 
     parked.status shouldBe a[AgentStatus.Suspended]
     parked.usage.requestCount shouldBe 2
-    modelCallsCompleted(store, thread).map(_.attempts) shouldBe Vector(1, 1)
+    modelCallsCompleted(store, thread).map(_.attempts) shouldBe Vector(1, 2)
   }
 
   "A second invalid answer" should "end the turn Left(OutputInvalid) with the problems, retracting the turn" in {
@@ -336,6 +353,77 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
     next.messages shouldBe Vector(UserMessage("bill Beta"), AssistantMessage(valid))
   }
 
+  it should "restore every key the turn wrote, as an output Block does (design §4.22)" in {
+    val files = org.llm4s.agent.graph.StateKey.replace[Map[String, String]]("files", Map.empty)
+    val write = org.llm4s.agent.graph.tool.AgentTool(SpecTools.spec("write"), writes = Set(files)) { (a, context) =>
+      val current = context.state.get(files).getOrElse(Map.empty)
+      ToolOutcome.Success(
+        ujson.Str("ok"),
+        org.llm4s.agent.graph.StateUpdate.update(files, current + (a.text -> a.text))
+      )
+    }
+    val store = new InMemoryCheckpointer()
+    val client = new ScriptedLLMClient(
+      Right(calling(call("c1", "write", "one"))),
+      Right(CompletionFixture.simple(valid)),
+      Right(calling(call("c2", "write", "two"))),
+      Right(CompletionFixture.simple(invalid)),
+      Right(CompletionFixture.simple(invalid))
+    )
+    val agent  = built(withFormat(client).withTools(SpecTools.set(write)).withRuntime(new GraphRuntime(store)))
+    val thread = ThreadId("restored")
+
+    agent.run(thread, "first").value
+    agent.run(thread, "second").error shouldBe a[GraphError.OutputInvalid]
+
+    val latest = store.latest(thread).fold(e => fail(e.message), identity).getOrElse(fail("no checkpoint"))
+    val state  = agent.loop.graph.restore(latest.checkpoint.snapshot).fold(e => fail(e.message), _.state)
+    state.get(files) shouldBe Right(Map("one" -> "one"))
+    state.get(org.llm4s.agent.graph.toolloop.LoopKeys.turn).map(_.priorValues) shouldBe Right(Map.empty)
+  }
+
+  it should "restore them too when the step ran again after a wrapper's question" in {
+    val files = org.llm4s.agent.graph.StateKey.replace[Map[String, String]]("files", Map.empty)
+    val write = org.llm4s.agent.graph.tool.AgentTool(SpecTools.spec("write"), writes = Set(files)) { (a, context) =>
+      val current = context.state.get(files).getOrElse(Map.empty)
+      ToolOutcome.Success(
+        ujson.Str("ok"),
+        org.llm4s.agent.graph.StateUpdate.update(files, current + (a.text -> a.text))
+      )
+    }
+    // asks about the first corrective request; once answered, it lets every request through
+    val reviewer = new AgentMiddleware.Asking[String, Boolean] {
+      val id: MiddlewareId = MiddlewareId("reviewer")
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] =
+        val corrective =
+          request.messages.lastOption.exists(_.content.contains("did not match the required JSON Schema"))
+        if (corrective && answered(context).isEmpty) next(request).flatMap(r => ask(r.completion.message.content))
+        else next(request)
+    }
+    val store = new InMemoryCheckpointer()
+    val scripted = new ScriptedLLMClient(
+      (Right(calling(call("c1", "write", "one"))) +: Vector.fill(4)(Right(CompletionFixture.simple(invalid))))*
+    )
+    val agent = built(
+      withFormat(scripted).withTools(SpecTools.set(write)).withMiddleware(reviewer).withRuntime(new GraphRuntime(store))
+    )
+    val thread = ThreadId("restored-after-question")
+
+    val parked = agent.run(thread, "first").value
+    val asked = parked.status match {
+      case AgentStatus.Suspended(_, _, asked, _) => asked
+      case other                                 => fail(s"expected Suspended, got $other")
+    }
+    agent.resume(thread, Map(parked.reply(asked.head._1, true))).error shouldBe a[GraphError.OutputInvalid]
+
+    val latest = store.latest(thread).fold(e => fail(e.message), identity).getOrElse(fail("no checkpoint"))
+    val state  = agent.loop.graph.restore(latest.checkpoint.snapshot).fold(e => fail(e.message), _.state)
+    state.get(files) shouldBe Right(Map.empty)
+    state.get(org.llm4s.agent.graph.toolloop.Messages.key).map(_.size) shouldBe Right(0)
+  }
+
   "An output guardrail" should "see the validated JSON, and its Block keep both calls' usage" in {
     val seen = new java.util.concurrent.CopyOnWriteArrayList[String]()
     val refuse: OutputGuardrail = new OutputGuardrail {
@@ -357,9 +445,9 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
     val requests = new AtomicInteger(0)
     val counting = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("counting")
-      override def wrapModelCall(request: ModelRequest, context: RunContext)(
-        next: ModelRequest => Result[Completion]
-      ): Result[Completion] =
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] =
         requests.incrementAndGet()
         next(request)
     }
@@ -386,12 +474,38 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
     refused.left.map(_.message).swap.getOrElse("") should include("minimum")
   }
 
-  it should "refuse a schema longer than the prompt section allows" in {
+  it should "refuse a format whose prompt section alone is over the agent's prompt section budget" in {
     val huge = ObjectSchema[Invoice](
       "x" * 40000,
       Seq(PropertyDefinition("customer", StringSchema("who")))
     )
     Agent.builder("extractor", answers()).withOutput(huge).build().isLeft shouldBe true
+    val small = Agent.builder("extractor", answers()).withOutput(invoiceSchema).withMaxPromptSectionTokens(10).build()
+    small.left.map(_.message).swap.getOrElse("") should include("maxPromptSectionTokens of 10")
+  }
+
+  "The format's prompt section" should "count with the middleware's against the agent's budget at run time" in {
+    val loud = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("loud")
+      override def promptSections(context: ModelContext): Result[Vector[PromptSection]] =
+        Right(Vector(PromptSection("loud", "y" * 4000)))
+    }
+    val budget = (OutputFormat.of(invoiceSchema).section.text.length + 3) / 4 + 10
+    val agent  = built(withFormat(answers(valid)).withMiddleware(loud).withMaxPromptSectionTokens(budget))
+    agent.run("bill Acme").error.message should include("response-format/response-format")
+  }
+
+  it should "come before the middleware's sections that are not cacheable" in {
+    val note = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("note")
+      override def promptSections(context: ModelContext): Result[Vector[PromptSection]] =
+        Right(Vector(PromptSection("note", "A volatile note.")))
+    }
+    val client = answers(valid)
+    built(withFormat(client).withSystemPrompt("You extract invoices.").withMiddleware(note)).run("bill Acme").value
+    val system = client.sent.head.head.content
+    system.indexOf("You extract invoices.") should be < system.indexOf("JSON Schema")
+    system.indexOf("JSON Schema") should be < system.indexOf("A volatile note.")
   }
 
   "The graph version" should "change with the response format, and not without one" in {

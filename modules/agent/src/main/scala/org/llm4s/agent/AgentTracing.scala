@@ -65,7 +65,10 @@ final private[agent] class AgentTracing(
           ): Unit
           m.usage.foreach(u => trace(TraceEvent.TokenUsageRecorded(u.toTokenUsage, m.model, "agent_completion")))
         case AgentEvents.GuardrailBlocked(g) => blockedBy.set(Some(g.guardrail))
-        case _                               => ()
+        // the calls of attempts that committed nothing are on the run's terminal event, not on ModelCallCompleted (§4.22)
+        case StreamEvent.Durable(EventRecord(_, _, _, _, _, _, _, terminal)) =>
+          AgentTracing.lostUsage(terminal).foreach(lost => usage.updateAndGet(_.merge(lost)): Unit)
+        case _ => ()
       if RunScope.terminal(record.event) then
         terminalSeen.set(true)
         ended(record.event)
@@ -174,9 +177,16 @@ private[agent] object AgentTracing:
     case Right(AgentStatus.Blocked(guardrail, _)) => s"blocked:$guardrail"
     case Left(_) =>
       terminal match
-        case RunEvent.RunCancelled => "cancelled"
-        case RunEvent.RunTimedOut  => "timed_out"
-        case _                     => "failed"
+        case RunEvent.RunCancelled(_) => "cancelled"
+        case RunEvent.RunTimedOut(_)  => "timed_out"
+        case _                        => "failed"
+
+  /** The usage a terminal event carries for the attempts that committed nothing; `None` for any other event. */
+  def lostUsage(event: RunEvent): Option[UsageSummary] = event match
+    case RunEvent.RunFailed(_, usage) => usage
+    case RunEvent.RunCancelled(usage) => usage
+    case RunEvent.RunTimedOut(usage)  => usage
+    case _                            => None
 
   /** How long `detach` waits, after the run ends, for its last event to be traced. */
   val Drain: FiniteDuration = 5.seconds

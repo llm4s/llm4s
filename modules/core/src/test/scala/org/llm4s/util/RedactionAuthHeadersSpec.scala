@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.testutil.LinearTime
+import org.llm4s.testutil.{ LinearTime, PerformanceTest }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -406,7 +406,7 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
   // Cost
   // ---------------------------------------------------------------------------------------------
 
-  it should "redact many such headers in time linear in the input" in {
+  it should "redact many such headers in time linear in the input" taggedAs PerformanceTest in {
     val units = Seq(
       "Cookie: a=b; c=d\n",
       "x Cookie:\n",
@@ -419,7 +419,7 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
     units.foreach(unit => LinearTime.assertLinear(s"unit $unit", unit * 5000, unit * 20000)(Redaction.redact(_)))
   }
 
-  it should "read one long cookie value in time linear in its length" in {
+  it should "read one long cookie value in time linear in its length" taggedAs PerformanceTest in {
     // One value each, which nothing ends early: no line break, quotes that end no string, runs of backslashes.
     val open = """{"log":"Cookie: """
     val shapes: Seq[(String, Int => String)] = Seq(
@@ -438,5 +438,13 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
     shapes.foreach { case (name, build) =>
       LinearTime.assertLinear(name, build(5000), build(20000))(Redaction.redact(_))
     }
+  }
+
+  // The scaling tests above are PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test` and fails
+  // on a catastrophic regression in one run of a megabyte, under a generous hang guard.
+  it should "read a megabyte-long cookie value of escaped quotes well inside the hang guard" in {
+    val input = """{"log":"Cookie: """ + ("""\" , [x""" * 150000)
+    input.length should be > 1000000
+    LinearTime.timed("a megabyte-long cookie value", LinearTime.MegabyteHangGuard)(Redaction.redact(input))
   }
 }

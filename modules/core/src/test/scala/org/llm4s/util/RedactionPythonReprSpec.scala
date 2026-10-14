@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.testutil.LinearTime
+import org.llm4s.testutil.{ LinearTime, PerformanceTest }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -271,7 +271,7 @@ class RedactionPythonReprSpec extends AnyFlatSpec with Matchers {
     closed should be > 500
   }
 
-  it should "read Python values in time linear in the input (#1706)" in {
+  it should "read Python values in time linear in the input (#1706)" taggedAs PerformanceTest in {
     val bs = "\\"
     val shapes: Seq[(String, Int => String)] = Seq(
       "values never closed"   -> (n => "{'password': 'a, " * n),
@@ -393,7 +393,7 @@ class RedactionPythonReprSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "read calls in time linear in the input (#1813)" in {
+  it should "read calls in time linear in the input (#1813)" taggedAs PerformanceTest in {
     val shapes: Seq[(String, Int => String)] = Seq(
       "keyword calls"      -> (n => "token=S(" * n),
       "keyword arguments"  -> (n => "token=S(value=" * n),
@@ -405,5 +405,13 @@ class RedactionPythonReprSpec extends AnyFlatSpec with Matchers {
     shapes.foreach { case (name, build) =>
       LinearTime.assertLinear(name, build(1000), build(4000))(Redaction.redact(_))
     }
+  }
+
+  // The scaling tests above are PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test` and fails
+  // on a catastrophic regression in one run of a megabyte, under a generous hang guard.
+  it should "read a megabyte of Python values after commas well inside the hang guard (#1706)" in {
+    val input = "{" + ("'password': \"x'y\", " * 54000) + "'n': 1}"
+    input.length should be > 1000000
+    LinearTime.timed("a megabyte of Python values", LinearTime.MegabyteHangGuard)(Redaction.redact(input))
   }
 }

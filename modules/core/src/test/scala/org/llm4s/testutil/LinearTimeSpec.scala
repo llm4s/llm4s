@@ -169,7 +169,9 @@ class LinearTimeSpec extends AnyFlatSpec with Matchers {
     step should be <= WindowsTick * 4L
   }
 
-  it should "pass a linear workload of microseconds a run on a clock with 15.6 ms ticks" in {
+  // The tests that time real work on the real clock, and judge a ratio of what they measured, are PerformanceTest,
+  // run by `sbt testPerformance` with the scaling tests that use this helper; the rest run on simulated clocks.
+  it should "pass a linear workload of microseconds a run on a clock with 15.6 ms ticks" taggedAs PerformanceTest in {
     // Each run costs far less than a tick: timed once, the small input reads 0 and the large one 0 or a tick.
     val clock   = quantised(WindowsTick)
     val scaling = LinearTime.assertLinearOn(clock, "linear", 20000L, 80000L)(work)
@@ -179,7 +181,7 @@ class LinearTimeSpec extends AnyFlatSpec with Matchers {
     scaling.ratio should be < 8.0
   }
 
-  it should "fail a quadratic workload of microseconds a run on a clock with 15.6 ms ticks" in {
+  it should "fail a quadratic workload of microseconds a run on a clock with 15.6 ms ticks" taggedAs PerformanceTest in {
     val clock = quantised(WindowsTick)
     val failure = intercept[TestFailedException] {
       LinearTime.assertLinearOn(clock, "quadratic", 200L, 800L, runs = 2)(n => work(n * n))
@@ -214,7 +216,7 @@ class LinearTimeSpec extends AnyFlatSpec with Matchers {
     failure.getMessage should include("re-measurements")
   }
 
-  it should "charge the small and the large input the same overhead a run, so a sub-microsecond op reads its own ratio" in {
+  it should "charge the small and the large input the same overhead a run, so a sub-microsecond op reads its own ratio" taggedAs PerformanceTest in {
     // The op's cost does not depend on its input: any ratio well above 1 is the harness's own overhead,
     // charged to one input and not the other - a clock read per run costs more than this op does (#1736).
     val scaling = LinearTime.assertLinear("constant", 1L, 4L)(_ => work(200))
@@ -234,7 +236,14 @@ class LinearTimeSpec extends AnyFlatSpec with Matchers {
     scaling.remeasures shouldBe 0
   }
 
-  it should "fall back to wall time where the JVM reports no CPU time for the thread, as on a virtual thread" in {
+  it should "read wall time where the JVM reports no CPU time for the thread, as on a virtual thread" in {
+    val clock = new AtomicReference[String]()
+    Thread.ofVirtual().start(() => clock.set(LinearTime.currentClock().name)).join()
+    // JDK 21 reports no CPU time (-1) for a virtual thread
+    clock.get() shouldBe "wall"
+  }
+
+  it should "fall back to wall time where the JVM reports no CPU time for the thread, as on a virtual thread" taggedAs PerformanceTest in {
     val result = new AtomicReference[Either[Throwable, (String, LinearTime.Scaling)]]()
     Thread
       .ofVirtual()

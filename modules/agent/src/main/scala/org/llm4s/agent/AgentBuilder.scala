@@ -40,6 +40,7 @@ final class AgentBuilder private (
   streaming: Boolean,
   private val interruptBefore: Vector[AgentNode],
   private val interruptAfter: Vector[AgentNode],
+  maxPromptSectionTokens: Int,
   output: Option[OutputFormat]
 ):
 
@@ -56,6 +57,7 @@ final class AgentBuilder private (
     streaming: Boolean = streaming,
     interruptBefore: Vector[AgentNode] = interruptBefore,
     interruptAfter: Vector[AgentNode] = interruptAfter,
+    maxPromptSectionTokens: Int = maxPromptSectionTokens,
     output: Option[OutputFormat] = output
   ): AgentBuilder =
     new AgentBuilder(
@@ -73,6 +75,7 @@ final class AgentBuilder private (
       streaming,
       interruptBefore,
       interruptAfter,
+      maxPromptSectionTokens,
       output
     )
 
@@ -117,13 +120,20 @@ final class AgentBuilder private (
    * answer ends the turn with `Left(GraphError.OutputInvalid)`, the turn removed and both calls counted.
    * Read the answer with [[AgentResult.decodeOutput]]. The format belongs to this agent only: a handoff
    * target answers in its own. [[build]] refuses a schema whose root is not an object, one with a keyword
-   * the tool argument validator cannot check, and one over 32,768 characters.
+   * the tool argument validator cannot check, and a format whose prompt section alone is over
+   * [[withMaxPromptSectionTokens]], which the section counts against with the middleware's.
    */
   def withOutput[O: ReadWriter](schema: SchemaDefinition[O]): AgentBuilder =
     copy(output = Some(OutputFormat.of(schema)))
 
   /** Model calls per turn, at least 1; at the limit the turn ends `StepLimitReached`. */
   def withMaxSteps(n: Int): AgentBuilder = copy(maxSteps = n)
+
+  /**
+   * The most every middleware's prompt sections may add to one model request together, at least 1 and 8192 by
+   * default, estimated at four characters a token. A request over it fails the run, naming each section's size.
+   */
+  def withMaxPromptSectionTokens(n: Int): AgentBuilder = copy(maxPromptSectionTokens = n)
 
   /**
    * The runtime the agent's threads live on; by default a new [[GraphRuntime.inMemory]] per
@@ -215,6 +225,7 @@ final class AgentBuilder private (
       .withSystemPrompt(systemPrompt)
       .withOutput(output)
       .withMaxSteps(maxSteps)
+      .withMaxPromptSectionTokens(maxPromptSectionTokens)
       .withMiddleware(middleware)
       .withHandoffs(loopHandoffs)
 
@@ -280,6 +291,7 @@ object AgentBuilder:
       streaming = false,
       interruptBefore = Vector.empty,
       interruptAfter = Vector.empty,
+      maxPromptSectionTokens = LoopAgent.DefaultMaxPromptSectionTokens,
       output = None
     )
 

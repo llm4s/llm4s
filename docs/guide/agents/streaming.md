@@ -62,7 +62,7 @@ never duplicated by a retry or a `recover`. They carry no message content.
 
 | Event | Fields | Sent |
 |---|---|---|
-| `ModelCallCompleted` | `agent`, `model`, `attempts`, `toolCalls`, `usage`, `estimatedCost` | after a model call returns successfully |
+| `ModelCallCompleted` | `agent`, `model`, `attempts`, `toolCalls`, `usage`, `estimatedCost` | after each provider call returns a completion - every attempt a retrying wrapper makes, numbered in `attempts`, and (`attempts` 0) each call a hook makes through `ModelContext.accounted` |
 | `ToolExecuted` | `agent`, `toolCallId`, `tool`, `duration`, `outcome` (`Succeeded`, `Errored`, `Denied`, `Rejected`, `NeedsApproval`, `Asked`) | when a tool call's outcome is recorded |
 | `HandedOff` | `from`, `to` | when the model routes a handoff |
 | `GuardrailBlocked` | `guardrail`, `phase` (`Input`, `Output`) | when a guardrail blocks a turn |
@@ -153,6 +153,24 @@ Durable events outlive the run. `GraphRuntime.subscribe(threadId, afterSeq = 0)`
 events from the start, which gives the structure of every run without any content. See
 `EventCollectionExample`.
 
+### Tenants
+
+A subscription reads the thread, so it is checked like `history`: pass the caller's `RunConfig`, and a
+thread of another tenant is refused with `GraphError.TenantMismatch` before anything is delivered.
+`TracingSubscriber.attach` takes the same `config`. The default, `RunConfig()`, is the caller with no
+tenant, which is right only for threads whose runs set none.
+
+```scala
+runtime.subscribe(threadId, config = RunConfig().withTenantId(TenantId("acme")))(listener)
+```
+
+A thread can change hands under its id after you subscribe: one that does not exist yet is created by
+whichever tenant runs on it first, and one deleted through another runtime can be created again before
+your subscription learns of the delete. So a subscription screens each event against your tenant, and
+ends with `Disconnected(lastSeq, TenantMismatch)` - before the first event of another tenant's thread,
+delivering none of it. `RunHandle.subscribe` and `AgentRun.subscribe` belong to a run, and use its
+tenant.
+
 ## Subscriptions across runtimes
 
 Several `GraphRuntime`s, in one process or several, can share one checkpoint store
@@ -180,7 +198,8 @@ guarantees: in order, without gap or duplicate, and only after the commit.
   with the watch disabled, its runtime's next commit on the thread). It never delivers a new thread created
   under the same id as a continuation of the deleted one; subscribe again from `afterSeq = 0` to follow
   that one. A subscription in another runtime that has delivered no event yet cannot be told from a new
-  one, and follows the new thread instead of ending. A subscription that falls behind while its thread is
+  one, and follows the new thread instead of ending - if it is your tenant's; one of another tenant ends
+  the subscription with `TenantMismatch` (see [Tenants](#tenants)). A subscription that falls behind while its thread is
   deleted ends with `ThreadDeleted`, not `Lagging`: resubscribing from `lastSeq` would find the log gone.
 
 ```scala
@@ -228,10 +247,41 @@ event has been delivered, and the stream then fails with the run's error. `strea
 Interrupting the stream or stopping early (`take(n)`, `head`) cancels the turn.
 
 A slow consumer does not: the stream's buffer never holds up the run's subscription. Durable events
-are always kept; live events beyond the buffer's 256 are dropped, and the consumer receives one
+are kept; live events beyond the buffer's 256 are dropped, and the consumer receives one
 `StreamEvent.LiveGap(n)` with their count where they were dropped, then the rest of the run and
-`Done`. Only a `Disconnected` from the runtime fails the stream. Samples: `AgentStreamIOExample`,
+`Done`. A `Disconnected` from the runtime fails the stream, and so does a consumer that has stopped
+draining altogether: once more than `Agent.StreamCapacity` (1024) durable events wait for it, as the
+runtime would disconnect a listener that far behind. Samples: `AgentStreamIOExample`,
 `AgentStreamZIOExample`.
+
+### Typed streams of one run
+
+`events(run, eventType)` on `AgentIO`, `AgentZ` and `AgentPekko` is a stream of one event type's
+decoded payloads, for a run you already hold (from `agent.start`); `events(run, handlers)` turns
+several types into one ADT of yours:
+
+```scala
+enum Progress:
+  case Text(delta: String)
+  case Checked(path: String)
+  case Gap(lost: Int)
+
+val handlers = EventHandlers
+  .on(AgentEvents.TextDelta)(d => Progress.Text(d.text))
+  .on(Checked)(c => Progress.Checked(c.path))
+  .otherwise { case StreamEvent.LiveGap(n) => Progress.Gap(n); case _ => Progress.Gap(0) }
+
+agentIO.events(run, Checked)          // Stream[IO, Checked]
+agentIO.events(run, handlers)         // Stream[IO, Progress]
+agentZ.events(run, handlers)          // ZStream[Any, LLMError, Progress]
+agentPekko.events(run, handlers)      // Source[Progress, Future[Done]]
+```
+
+Merge typed streams with the library's own combinators. Such a stream observes the run, through
+`AgentRun.subscribe`: it replays the run's durable events from its start, then follows it live, and
+misses live events sent before it started. It ends with the run; it does not raise the run's own
+error (await the run for that), and stopping it early cancels its subscription, never the run.
+Handlers run on the stream, so a slow or throwing handler slows or fails the stream only.
 
 ## Java and Kotlin
 
@@ -309,7 +359,35 @@ Checked.progress(context, value)   // live: sent now, never stored
 listener { case Checked(v) => ... } // None for another name, version or an undecodable payload
 ```
 
-`RunContext.progress(name, version, payload)` is the untyped form.
+`RunContext.progress(name, version, payload)` is the untyped form. A tool emits through its
+context's run: `Checked.progress(context.run, value)`.
+
+### Typed handlers
+
+`EventHandlers` packages typed handlers with their event types, so a selection of mixed types is a
+value, and each handler gets its own payload type:
+
+```scala
+val handlers = EventHandlers
+  .on(AgentEvents.TextDelta)(d => print(d.text))
+  .on(Checked)(c => println(s"checked ${c.path}"))
+  .otherwise {
+    case StreamEvent.LiveGap(n) => println(s"[$n live events lost]")
+    case _                      => ()
+  }
+
+agent.stream(threadId, query)(handlers)   // also run.subscribe()(handlers), runtime.subscribe(...)(handlers)
+```
+
+An event is looked up once by name and version and its payload decoded once. Events no handler
+takes - kernel events, `LiveGap`, `Disconnected`, other names or versions, a payload that does not
+decode - go to `otherwise`, or are skipped without it. A second `on` for the same name and version
+replaces the first. `handlers.dispatch(event)` returns a handler's result, for use in your own code.
+
+Live events are at least once across recovery: a tool that `recover` runs again sends its progress
+again, to the recovered run's stream. Durable events are not repeated in the log - a failed attempt's
+are discarded with its task - but a handler with an effect of its own should key it by something
+stable carried in the payload, such as the tool call's `IdempotencyKey`, never by run id.
 
 ## Limits
 
