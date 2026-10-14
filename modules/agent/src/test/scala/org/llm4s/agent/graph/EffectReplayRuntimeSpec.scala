@@ -220,10 +220,15 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
   }
 
   /** A node that performs the effect and then fails while `failing`: the thread stays recoverable. */
-  final private class Failing(effect: Effect) {
+  final private class Failing(effect: Effect, gained: Boolean = false, spare: Boolean = true) {
     val failing = new AtomicBoolean(true)
     val graph: CompiledGraph[Unit, Vector[String]] = {
       val b = GraphBuilder("failing", "v1")
+      // the shape changes of design §4.29: a key and a node added, or a node removed
+      if gained then
+        b.stateKey(StateKey.replace[Int]("gained", 0))
+        b.node[Unit]("unreached")((_, _, _) => continue(Command.empty))
+      if spare then b.node[Unit]("spare")((_, _, _) => continue(Command.empty))
       val n = b.node[Unit]("work", writes = Set(log)) { (_, _, context) =>
         effect.perform(context) match {
           case Left(error)               => NodeResult.Fail(error)
@@ -250,6 +255,34 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
     runtime.recover(thread, work.graph).awaited.value.completed._2 shouldBe Vector("edited", "work:1")
     effect.applied.get shouldBe 1
     record(store, thread, effect.key.get) shouldBe None
+  }
+
+  it should "stay valid when the thread is recovered into a graph that gained a key and a node (§4.29)" in {
+    val store  = InMemoryCheckpointer()
+    val effect = new Effect
+    GraphRuntime(store).start(thread, new Failing(effect).graph, ()).awaited.value.failed
+    record(store, thread, effect.key.get).value.completed shouldBe true
+    val evolved = new Failing(effect, gained = true)
+    evolved.failing.set(false)
+    // the restored task keeps its id, so its key, and replays the recorded outcome instead of applying it again
+    GraphRuntime(store).recover(thread, evolved.graph).awaited.value.completed._2 shouldBe Vector("work:1")
+    effect.applied.get shouldBe 1
+    record(store, thread, effect.key.get) shouldBe None
+  }
+
+  it should "be kept, untouched, when a restore is refused, and replay once the thread is recovered in its own graph" in {
+    val store  = InMemoryCheckpointer()
+    val effect = new Effect
+    val work   = new Failing(effect)
+    GraphRuntime(store).start(thread, work.graph, ()).awaited.value.failed
+    val before = record(store, thread, effect.key.get).value
+    // a node removed refuses the restore before any commit, so nothing is claimed and no record is released
+    GraphRuntime(store).recover(thread, new Failing(effect, spare = false).graph).awaited.left.value shouldBe
+      a[GraphError.RestoreRejected]
+    record(store, thread, effect.key.get).value shouldBe before
+    work.failing.set(false)
+    GraphRuntime(store).recover(thread, work.graph).awaited.value.completed._2 shouldBe Vector("work:1")
+    effect.applied.get shouldBe 1
   }
 
   it should "not be shared with a fork, whose re-run of the task is an effect of its own" in {

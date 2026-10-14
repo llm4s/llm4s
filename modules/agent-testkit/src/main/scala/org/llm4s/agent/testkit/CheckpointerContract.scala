@@ -1590,6 +1590,60 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     completed(admitted.collectFirst { case Right(handle) => handle }.value) shouldBe Vector("x")
   }
 
+  /**
+   * Graph `contract-evolving`: `plan` logs its input and suspends at `approve` for `ask`; `approve` logs the answer.
+   * `gained` adds key `tally`, which `plan` and `approve` read, and a node nothing reaches; `dropped` removes `log`.
+   */
+  private def evolving(gained: Boolean = false, dropped: Boolean = false) =
+    val log     = StateKey.appending[String]("log")
+    val tally   = StateKey.replace[Int]("tally", 41)
+    val b       = GraphBuilder("contract-evolving", "v1")
+    val logs    = if dropped then Set.empty[StateKey[?, ?]] else Set[StateKey[?, ?]](log)
+    val approve = b.declareResume[String, String]("approve")
+    def logged(state: ThreadState, line: String): StateUpdate =
+      if dropped then StateUpdate.empty
+      else StateUpdate.update(log, if gained then s"$line/${state.get(tally).getOrElse(-1)}" else line)
+    if gained then
+      b.stateKey(tally)
+      b.node[Unit]("unreached")((_, _, _) => NodeResult.Continue(Command.empty))
+    b.implement(approve.node, writes = logs)((resumed, state, _) =>
+      NodeResult.Continue(Command(logged(state, s"approved:${resumed.answer}"), Nil))
+    )
+    val plan = b.node[String]("plan", writes = logs) { (input, state, _) =>
+      if input == "ask" then NodeResult.Suspend(logged(state, input), input, approve)
+      else NodeResult.Continue(Command(logged(state, input), Nil))
+    }
+    b.compile(plan)(state => if dropped then Right(Vector.empty[String]) else state.get(log)).value -> approve
+
+  it should "restore its threads, across a reopen, into a graph that gained a key and a node it cannot reach" in {
+    val s            = Store()
+    val (before, _)  = evolving()
+    val (after, ask) = evolving(gained = true)
+    val waiting      = newThread()
+    completed(GraphRuntime(s.store).start(s.thread, before, "hello", config("first")).value) shouldBe Vector("hello")
+    outcome(GraphRuntime(s.store).start(waiting, before, "ask", config("ask")).value).value shouldBe
+      a[RunResult.Suspended]
+    s.store.latest(s.thread).value.value.checkpoint.snapshot.shape shouldBe Some(before.shape)
+
+    val reopened = GraphRuntime(s.reopened())
+    completed(reopened.start(s.thread, after, "again", config("second")).value) shouldBe Vector("hello", "again/41")
+    completed(
+      reopened.resume(waiting, after, Map(InterruptId("0.0") -> ask.answer("yes")), config("resumed")).value
+    ) shouldBe
+      Vector("ask", "approved:yes/41")
+    s.store.latest(s.thread).value.value.checkpoint.snapshot.shape shouldBe Some(after.shape)
+  }
+
+  it should "refuse a thread to a graph that removed a key the thread holds a value for, leaving it unchanged" in {
+    val s           = Store()
+    val (before, _) = evolving()
+    completed(GraphRuntime(s.store).start(s.thread, before, "hello", config("first")).value)
+    val latest = s.latestId()
+    GraphRuntime(s.reopened()).start(s.thread, evolving(dropped = true)._1, "again", config("second")).refused shouldBe
+      a[GraphError.RestoreRejected]
+    s.latestId() shouldBe latest
+  }
+
   it should "delete nothing through a runtime whose claim another runtime took over before the delete" in {
     val s     = Store()
     val w     = Workers()

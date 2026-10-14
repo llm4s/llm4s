@@ -15,7 +15,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.time.{ Clock, Instant, ZoneOffset }
 
-class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
+class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues with org.scalatest.OptionValues {
 
   private val clock = Clock.fixed(Instant.parse("2026-10-14T00:00:00Z"), ZoneOffset.UTC)
 
@@ -216,12 +216,16 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
           val Array(path, old, next) = args.text.split('|')
           outcome(backend.edit(p(path), old, next, replaceAll = false, FileContext(context)))
       }
+    val delete =
+      AgentTool(SpecTools.spec("delete_file").withLocks(t => lockOf(t.text)), backend.writes) { (args, context) =>
+        outcome(backend.delete(p(args.text), FileContext(context)))
+      }
     val read = AgentTool(SpecTools.spec("read_file")) { (args, context) =>
       backend
         .read(p(args.text), 0, 100, FileContext(context))
         .fold(BackendRefused.toolOutcome, lines => ToolOutcome.Success(ujson.Str(lines.lines.mkString("\n"))))
     }
-    SpecTools.set(write, edit, read)
+    SpecTools.set(write, edit, delete, read)
   }
 
   private def toolResults(result: AgentResult): Vector[String] =
@@ -253,5 +257,51 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     val results = toolResults(agent.run("go").value)
     results.take(2).foreach(_ should include("FileWritten(true,10)"))
     results(2) should include("over this thread's limit of 30")
+  }
+
+  // Graph evolution (C5, §4.29): adding file tools adds `files` and `tool-queue`.
+
+  private def withStore(store: org.llm4s.agent.graph.InMemoryCheckpointer)(builder: org.llm4s.agent.AgentBuilder) =
+    built(builder.withRuntime(org.llm4s.agent.graph.GraphRuntime(store)))
+
+  "An agent's thread at rest" should "continue once state file tools are added, its files starting empty" in {
+    val store  = new org.llm4s.agent.graph.InMemoryCheckpointer
+    val thread = org.llm4s.agent.graph.ThreadId("upgraded")
+    withStore(store)(Agent.builder("assistant", ScriptedLLMClient.of(CompletionFixture.simple("hi"))))
+      .run(thread, "q")
+      .value
+    store.latest(thread).value.value.checkpoint.snapshot.state.keySet should not contain "files"
+
+    val backend = StateFileBackend(clock = clock)
+    val client =
+      ScriptedLLMClient.of(calling(call("w", "write_file", "/a.txt|after")), CompletionFixture.simple("done"))
+    val agent = withStore(store)(Agent.builder("assistant", client).withTools(tools(backend)))
+    agent.run(thread, "write").value.answer shouldBe Some("done")
+    val state = agent.loop.graph.restore(store.latest(thread).value.value.checkpoint.snapshot).value.state
+    state.get(backend.files).value.keySet shouldBe Set(p("/a.txt"))
+  }
+
+  it should "be refused by an agent that dropped the tools while its files hold content, and not once they are deleted" in {
+    val store   = new org.llm4s.agent.graph.InMemoryCheckpointer
+    val backend = StateFileBackend(clock = clock)
+    def withFiles(replies: org.llm4s.llmconnect.model.Completion*) =
+      withStore(store)(Agent.builder("assistant", ScriptedLLMClient.of(replies*)).withTools(tools(backend)))
+    def without = withStore(store)(Agent.builder("assistant", ScriptedLLMClient.of(CompletionFixture.simple("plain"))))
+
+    val holding = org.llm4s.agent.graph.ThreadId("holding")
+    withFiles(calling(call("w", "write_file", "/a.txt|x")), CompletionFixture.simple("done")).run(holding, "w").value
+    val refused = without.run(holding, "again").left.value
+    refused shouldBe a[org.llm4s.agent.graph.GraphError.RestoreRejected]
+    refused.message should include("'files'")
+
+    // the last delete removes the key's entry, so the thread no longer depends on the backend
+    val emptied = org.llm4s.agent.graph.ThreadId("emptied")
+    withFiles(
+      calling(call("w", "write_file", "/a.txt|x")),
+      calling(call("d", "delete_file", "/a.txt")),
+      CompletionFixture.simple("done")
+    ).run(emptied, "w").value
+    store.latest(emptied).value.value.checkpoint.snapshot.state.keySet should not contain "files"
+    without.run(emptied, "again").value.answer shouldBe Some("plain")
   }
 }

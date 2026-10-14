@@ -42,7 +42,8 @@ import scala.util.Try
 final class CompiledGraph[I, O] private[graph] (
   val id: String,
   val version: String,
-  val fingerprint: String,
+  val shape: GraphShape,
+  legacy: LegacyFingerprint,
   owner: GraphOwner,
   entry: NodeRef[I],
   nodes: Map[NodeId, NodeDef[?]],
@@ -56,6 +57,12 @@ final class CompiledGraph[I, O] private[graph] (
   sleeper: FiniteDuration => Unit = CompiledGraph.sleepThread,
   ticker: () => Long = () => System.nanoTime()
 ):
+
+  /**
+   * The structural fingerprint a snapshot records: the hex SHA-256 of the graph's id, version, entry, nodes, edges,
+   * joins, resume nodes and keys. A snapshot written before snapshots recorded a [[shape]] is matched by it.
+   */
+  val fingerprint: String = legacy.value
 
   /** One result cache per node that declared a [[CachePolicy]]; process-local and never checkpointed. */
   private val caches: Map[NodeId, NodeCache] =
@@ -191,28 +198,87 @@ final class CompiledGraph[I, O] private[graph] (
               held
             )
           },
-          paused = execution.paused
+          paused = execution.paused,
+          shape = Some(shape)
         )
       ).toResult
 
   /**
-   * Rebuilds an execution from a snapshot, checking it against this graph first: the graph id,
-   * version and structural fingerprint; that every state value, pending input and parked question
-   * decodes with this graph's codec for it; that every join exists with the right kind and is
-   * partially arrived; that every parked continuation names a resume node; and that every arrival
-   * a dynamic join still expects will be made by a pending task or a parked continuation in its
-   * fan-out. Every problem is reported at once.
+   * Rebuilds an execution from a snapshot, checking it against this graph first: the graph id; that the snapshot's
+   * graph has changed only in ways the restored run cannot observe (below); that every state value, pending input
+   * and parked question decodes with this graph's codec for it; that every join exists with the right kind and is
+   * partially arrived; that every parked continuation names a resume node; and that every arrival a dynamic join
+   * still expects will be made by a pending task or a parked continuation in its fan-out. Every problem is reported
+   * at once.
+   *
+   * A snapshot is in flight when it holds a pending task, a parked continuation or a partially arrived join, and at
+   * rest otherwise. Against the [[GraphShape]] it records (design §4.29):
+   *  - a key added reads its initial value; a key removed is refused if the snapshot holds a value for it;
+   *  - no node is removed;
+   *  - in flight, the version is unchanged, every stored node keeps its out-edges, every static join over a stored
+   *    node is unchanged (none added, none removed), and every stored dynamic join keeps its target. So a node
+   *    added is reachable only from other added nodes, and the restored run cannot reach it.
+   *  - at rest, the version, edges, joins and entry node may change: the next run starts at the entry node.
+   *
+   * A snapshot written before snapshots recorded a shape restores only into its own version, and only if this
+   * graph's fingerprint matches its own once keys the snapshot holds no value for are left out: the graph only
+   * gained keys.
    */
-  def restore(snapshot: GraphSnapshot): Result[Execution] =
-    val header = Vector(
-      Option.when(snapshot.graphId != id)(s"snapshot is of graph '${snapshot.graphId}'"),
-      Option.when(snapshot.graphVersion != version)(
-        s"snapshot is of version '${snapshot.graphVersion}', this graph is version '$version'"
-      ),
-      Option.when(snapshot.fingerprint != fingerprint)("snapshot's graph structure differs from this graph's"),
-      Option.when(snapshot.superstep < 0)(s"superstep ${snapshot.superstep} is negative")
-    ).flatten
-    val (stateProblems, values)      = snapshot.state.toVector.sortBy(_._1).partitionMap(restoreValue)
+  def restore(snapshot: GraphSnapshot): Result[Execution] = restoring(snapshot, GraphEvolution.Judged.ByContent)
+
+  /**
+   * Restores `snapshot` as at rest, whatever it holds, for a run that keeps only its state and superstep and starts
+   * again at the entry node: [[GraphRuntime.start]] on a completed or blocked thread. Only the header and the state
+   * are checked, and the execution has nothing scheduled.
+   */
+  private[graph] def restoreAtRest(snapshot: GraphSnapshot): Result[Execution] =
+    restoring(snapshot, GraphEvolution.Judged.AtRest)
+
+  /**
+   * Restores a stored checkpoint to continue it: `recover`, `resume` and `updateState`. A `Running` or `Suspended`
+   * checkpoint is judged in flight whatever its snapshot holds - a `Running` one whose frontier is already empty is a
+   * run whose closing commit never landed, and `recover` finishes it under its own version. A settled one is judged by
+   * its content, as [[restore]] does.
+   */
+  private[graph] def restoreStored(checkpoint: Checkpoint): Result[Execution] =
+    checkpoint.status match
+      case CheckpointStatus.Running | CheckpointStatus.Suspended =>
+        restoring(checkpoint.snapshot, GraphEvolution.Judged.InFlight)
+      case CheckpointStatus.Completed | CheckpointStatus.Failed =>
+        restoring(checkpoint.snapshot, GraphEvolution.Judged.ByContent)
+
+  private def restoring(snapshot: GraphSnapshot, judged: GraphEvolution.Judged): Result[Execution] =
+    val atRest = judged == GraphEvolution.Judged.AtRest
+    val evolution = snapshot.shape match
+      case Some(stored) => GraphEvolution.problems(stored, shape, snapshot, version, judged)
+      case None         => GraphEvolution.legacyProblems(snapshot, version, legacy)
+    val header = Option.when(snapshot.graphId != id)(s"snapshot is of graph '${snapshot.graphId}'").toVector ++
+      evolution ++ Option.when(snapshot.superstep < 0)(s"superstep ${snapshot.superstep} is negative")
+    val storedKeys              = snapshot.shape.fold(Set.empty[String])(_.keys.toSet)
+    val (stateProblems, values) = snapshot.state.toVector.sortBy(_._1).partitionMap(restoreValue(_, storedKeys))
+    if atRest then
+      val problems = header ++ stateProblems
+      if problems.nonEmpty then Left(GraphError.RestoreRejected(id, problems.toList))
+      else
+        Right(
+          new Execution(
+            owner,
+            snapshot.superstep,
+            new ThreadState(keys, values.toMap),
+            Vector.empty,
+            Map.empty,
+            Vector.empty,
+            Vector.empty,
+            paused = false
+          )
+        )
+    else restoreRun(snapshot, header ++ stateProblems, values)
+
+  private def restoreRun(
+    snapshot: GraphSnapshot,
+    found: Vector[String],
+    values: Vector[(StateKeyId, Any)]
+  ): Result[Execution] =
     val (taskProblems, tasks)        = snapshot.frontier.partitionMap(restoreTask)
     val (parkedProblems, parked)     = snapshot.parked.partitionMap(restoreParked)
     val (staticProblems, arrivals)   = snapshot.staticJoins.partitionMap(restoreStaticArrivals)
@@ -238,7 +304,7 @@ final class CompiledGraph[I, O] private[graph] (
           if !savedSlots.contains((slot.join.value, slot.fanOutTask.value, origin.task.value)) =>
         s"interrupt ${p.interrupt.value} belongs to no open activation of dynamic join '${slot.join.value}'"
     }
-    val problems = header ++ stateProblems ++ taskProblems ++ parkedProblems ++ staticProblems ++
+    val problems = found ++ taskProblems ++ parkedProblems ++ staticProblems ++
       dynamicProblems ++ duplicateTasks.toVector.sorted ++ duplicateInterrupts.toVector.sorted ++
       duplicateActivations.toVector.sorted ++ orphanTasks ++ orphanParked
     if problems.nonEmpty then Left(GraphError.RestoreRejected(id, problems.toList))
@@ -260,7 +326,8 @@ final class CompiledGraph[I, O] private[graph] (
     new CompiledGraph(
       id,
       version,
-      fingerprint,
+      shape,
+      legacy,
       owner,
       entry,
       nodes,
@@ -280,7 +347,8 @@ final class CompiledGraph[I, O] private[graph] (
     new CompiledGraph(
       id,
       version,
-      fingerprint,
+      shape,
+      legacy,
       owner,
       entry,
       nodes,
@@ -300,7 +368,8 @@ final class CompiledGraph[I, O] private[graph] (
     new CompiledGraph(
       id,
       version,
-      fingerprint,
+      shape,
+      legacy,
       owner,
       entry,
       nodes,
@@ -764,9 +833,14 @@ final class CompiledGraph[I, O] private[graph] (
         Try(output(execution.state)).toResult.flatten
           .fold(RunResult.Failed(execution.state, _), RunResult.Completed(execution.state, _, execution.superstep))
 
-  private def restoreValue(entry: (String, VersionedJson)): Either[String, (StateKeyId, Any)] =
+  private def restoreValue(
+    entry: (String, VersionedJson),
+    storedKeys: Set[String]
+  ): Either[String, (StateKeyId, Any)] =
     val (keyId, json) = entry
     keys.get(StateKeyId(keyId)) match
+      case None if storedKeys.contains(keyId) =>
+        Left(s"state key '$keyId' was removed from this graph, and the snapshot holds a value for it")
       case None => Left(s"state key '$keyId' is not registered with this graph")
       case Some(key) =>
         key

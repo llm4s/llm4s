@@ -41,9 +41,10 @@ enum FileUpdate derives ReadWriter:
  * Each checkpoint copies the whole map (rule 6), so pair the backend with a `RetentionPolicy`.
  *
  * The lock is what keeps two edits of one file in a batch from losing one, and the bounds exact: the
- * calls of a batch otherwise share one snapshot. Declaring it registers the loop's `tool-queue`, so adding
- * tools over this backend to an existing agent changes its graph, and a thread checkpointed before is
- * refused at restore (`RestoreRejected`).
+ * calls of a batch otherwise share one snapshot. Adding tools over this backend to an existing agent adds
+ * the `files` key and the loop's `tool-queue`: a thread at rest continues with no files, and one in flight
+ * is refused until it is finished (§4.29). The last file's delete removes the key's entry, so taking the
+ * tools out again refuses only a thread that still holds files.
  */
 @Experimental
 final class StateFileBackend private (
@@ -123,7 +124,12 @@ final class StateFileBackend private (
     for
       all <- current(ctx)
       _   <- FileTree.deletable(all, path)
-    yield (FileDeleted(wasDirectory = false), StateUpdate.update(files, FileUpdate.Delete(path)))
+    // the last file's delete removes the key's entry, so the backend can later be taken out of an agent
+    // whose threads no longer hold files (§4.29); ordered by the lock, so `all` is exact
+    yield (
+      FileDeleted(wasDirectory = false),
+      if all.size == 1 then StateUpdate.remove(files) else StateUpdate.update(files, FileUpdate.Delete(path))
+    )
 
   def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
     current(ctx).flatMap(FileTree.find(_, under, accept, limit))

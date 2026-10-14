@@ -329,18 +329,24 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     recorder.caughtUp(store).durable.head.seq shouldBe 5L
   }
 
-  it should "reject a completed thread's checkpoint written by a different graph" in {
+  it should "apply a new input to a completed thread's state under a new version, but resume only its own" in {
     val runtime = GraphRuntime(InMemoryCheckpointer())
     runtime
       .start(thread, Fixture("v1").graph, Vector("a"), RunConfig().withRunId(RunId("run-1")))
       .awaited
       .value
       .completed
+    // at rest, the next run starts at the entry node with the new behaviour (design §4.29)
     runtime
       .start(thread, Fixture("v2").graph, Vector("b"), RunConfig().withRunId(RunId("run-2")))
       .awaited
-      .left
-      .value shouldBe a[GraphError.RestoreRejected]
+      .value
+      .completed
+    val other = ThreadId("crashed")
+    val f     = Fixture("v2")
+    f.failOnce.add("y")
+    runtime.start(other, f.graph, Vector("x", "y")).awaited.value.failed
+    runtime.recover(other, Fixture("v3").graph).awaited.left.value shouldBe a[GraphError.RestoreRejected]
   }
 
   it should "fail the run when a synchronous commit fails" in {
