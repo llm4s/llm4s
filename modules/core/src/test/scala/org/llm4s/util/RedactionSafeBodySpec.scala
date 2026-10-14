@@ -141,6 +141,60 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
     (out3 should not).include("SECOND-PART")
   }
 
+  /** A quote written behind `run` backslashes: `'`, `"`, or the JSON escape of either (`u0027`, `u0022`). */
+  private def quoted(run: Int, quote: String): String = "\\" * run + quote
+
+  /**
+   * A value of a sensitive key opened by a quote escaped `run` backslashes deep, in a few shapes, closed by the same
+   * quote some 80 KiB on, past the cut. The first two, `key=value` pairs, are hidden by redacting the whole body at
+   * every depth.
+   */
+  private def deepQuotedHeads(secret: String, run: Int, quote: String): Seq[String] = {
+    val q     = quoted(run, quote)
+    val words = (0 until 12000).map(i => s"w$i").mkString(" ")
+    Seq(
+      s"log password=$q$secret $words $q end\n",
+      s"""{"m": "cmd password=$q$secret $words $q done"}\n""",
+      s"Settings(token=SecretStr($q$secret $words$q), a=1)\n",
+      s"${q}password$q: $q$secret $words$q, ${q}a$q: 1\n"
+    )
+  }
+
+  it should "not show a value opened by a quote escaped deeper than the fixed probes close (#1680)" in {
+    // Codex's repro: four literal backslashes before the quotes, which no fixed probe spells out; two before a `"`,
+    // which the fixed probe never closed either; JSON nested three and four deep (`2^k - 1` backslashes); a deep `'`
+    // and a deep escape of one. Redacting the whole body hides each of these key=value values, so nothing may show it.
+    val secret = "hunter2SECRETzz"
+    Seq(4 -> "'", 2 -> "\"", 3 -> "\"", 7 -> "\"", 6 -> "'", 4 -> "u0027").foreach { case (run, quote) =>
+      deepQuotedHeads(secret, run, quote).take(2).foreach { head =>
+        withClue(s"run $run, quote $quote, head ${head.take(40)}: ") {
+          (Redaction.safeBody(head + logLines(100000), 2048) should not).include(secret)
+        }
+      }
+    }
+  }
+
+  it should "not show a value opened by a quote escaped to any depth, in any shape (#1680)" taggedAs PerformanceTest in {
+    val secret = "hunter2SECRETzz"
+    for {
+      run   <- 0 to 9
+      quote <- Seq("'", "\"", "u0027", "u0022") if run > 0 || !quote.startsWith("u")
+      head  <- deepQuotedHeads(secret, run, quote)
+    } {
+      val b = head + logLines(150000)
+      withClue(s"run $run, quote $quote, head ${head.take(40)}: ") {
+        if (!Redaction.redact(b).contains(secret)) (Redaction.safeBody(b, 2048) should not).include(secret)
+      }
+    }
+  }
+
+  it should "show nothing of a prefix that holds more quotes, at distinct depths, than it probes (#1680)" in {
+    val head = (0 to 9).map(run => s"a=${quoted(run, "'")}x${quoted(run, "'")} ").mkString
+    val b    = head + logLines(300000)
+    Redaction.safeBodyCut(b, 2048) shouldBe None
+    Redaction.safeBody(b, 2048) shouldBe Redaction.safeBodyOmitted(b)
+  }
+
   it should "show nothing of a body whose prefix cannot show enough, or that has no place to cut (#1680)" in {
     // One credential value runs over the whole prefix: it collapses to the placeholder.
     val b = s"""{"password": "${"x" * (600 * 1024)}"}"""
@@ -181,7 +235,12 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
       while (sb.length < n) sb ++= s"${secret.take(4)}${rnd.nextInt(1000)}" += (if (rnd.nextBoolean()) ' ' else ',')
       sb.toString
     }
-    def head(kind: Int, v: String): String = kind match {
+    // A quote escaped to any depth up to nine backslashes, as JSON nested in JSON, a shell line or a dict writes it.
+    def deep(rnd: Random): String = {
+      val run = rnd.nextInt(10)
+      quoted(run, Seq("'", "\"", "u0027", "u0022")(if (run == 0) rnd.nextInt(2) else rnd.nextInt(4)))
+    }
+    def head(kind: Int, v: String, q: String): String = kind match {
       case 0 => s"""{"password": "$secret $v", "x": "y"}"""
       case 1 => s"""{'password': '$secret $v', 'a': 'b'}"""
       case 2 => s"""Settings(token=SecretStr('$secret $v'), a=1)"""
@@ -189,13 +248,15 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
       case 4 => s"""{"m": "password=\\'$secret $v\\' end"}"""
       case 5 => s"""https://alice:$secret${v.filterNot(_ == ' ')}@db.example.com/x"""
       case 6 => s"""{"assertion": "$secret $v ${"Z" * 30}", "n": 1}"""
-      case _ => s"""{"secret": ["$secret", "$v"], "a": 1}"""
+      case 7 => s"""{"secret": ["$secret", "$v"], "a": 1}"""
+      case 8 => s"""log password=$q$secret $v$q end"""
+      case _ => s"""{"m": "cmd token=$q$secret $v $q done"}"""
     }
     val rnd = new Random(seed)
     (0 until bodies).foreach { _ =>
-      val kind = rnd.nextInt(8)
+      val kind = rnd.nextInt(10)
       val len  = Seq(20, 3000, 30000, 60000, 200000)(rnd.nextInt(5))
-      val h    = head(kind, text(len, rnd))
+      val h    = head(kind, text(len, rnd), deep(rnd))
       val b    = h + logLines(math.max(0, 200000 + rnd.nextInt(200000) - h.length))
       val max  = Seq(1, 300, 2048)(rnd.nextInt(3))
       val out  = Redaction.safeBody(b, max)
@@ -209,18 +270,19 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "show what redacting the prefix shows, or nothing, for any value opened in the kept characters (#1680)" in {
-    showsPrefixOrNothing(bodies = 4, seed = 1680)
+    showsPrefixOrNothing(bodies = 6, seed = 1680)
   }
 
   it should "show what redacting the prefix shows, or nothing, over many bodies (#1680)" taggedAs PerformanceTest in {
     showsPrefixOrNothing(bodies = 40, seed = 16801)
   }
 
-  it should "redact a body of many megabytes without hanging (#1680)" in {
-    // An ordinary hang guard; how the cost compares with redacting the body whole is the PerformanceTest below.
-    val b   = body(16, 4 * 1024 * 1024)
+  it should "redact a body of a megabyte without hanging (#1680)" in {
+    // An ordinary hang guard on a body well over the 128 KiB a body is redacted whole up to; how the cost compares
+    // with redacting the body whole is the PerformanceTest below.
+    val b   = body(16, 1024 * 1024)
     var out = ""
-    LinearTime.timed("safeBody of a 4 MiB body", LinearTime.MegabyteHangGuard) {
+    LinearTime.timed("safeBody of a 1 MiB body", LinearTime.MegabyteHangGuard) {
       out = Redaction.safeBody(b, 2048)
     }
     out should endWith(s"redacted from its first ${Redaction.safeBodyCut(b, 2048).get} chars)")

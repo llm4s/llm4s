@@ -112,15 +112,18 @@ private[llm4s] object Redaction {
    *  - its first `maxLength` characters stay the same when the prefix is redacted with each of a few tails appended
    *    (`SafeBodyProbes`) that close, or decide, a value still open at the cut: the `@` of a URL's userinfo, a run of
    *    credential characters in an `assertion`, the closing quote, escaped quote, bracket or comma of a string, call
-   *    or container.
+   *    or container; and one more tail per distinct quote the prefix holds - `'`, `"`, `u0027` or `u0022` behind its
+   *    own run of backslashes, at any depth - that closes a value that quote opened (`safeBodyQuoteForms`); and
+   *  - it holds at most eight such distinct quotes, so the probes stay few.
    *
    * Otherwise no text of the body is shown, only `[response body not shown: ...] (original length: N)`: it fails closed. A `maxLength` too
    * large for a 64 KiB prefix to serve, or a negative one, has the body redacted whole, as before.
    *
-   * '''Residual risk.''' What is shown is the redaction of the prefix, not of the body. A reading that leaves a value
-   * unless something past the cut closes or qualifies it, and that none of the probes decides, could show the head of
-   * that value. That needs one value of 30 KiB or more, opened in the characters shown and still open at the cut. The
-   * single-pass redesign (#1932) should close this by policy - a value still open at the end of the input is masked,
+   * '''Residual risk.''' What is shown is the redaction of the prefix, not of the body. A value a quote opens is probed
+   * with that quote's own closer, at whatever escape depth, so one left open at the cut by a closing quote past it is
+   * decided. But a reading that leaves a value unless something else past the cut qualifies it - neither its closing
+   * quote nor anything the fixed tails hold - could show the head of that value. That needs one value of 30 KiB or
+   * more, opened in the characters shown and still open at the cut. The single-pass redesign (#1932) should close this by policy - a value still open at the end of the input is masked,
    * never left - which makes redacting a prefix exact.
    *
    * @param body The text to redact and truncate
@@ -147,16 +150,51 @@ private[llm4s] object Redaction {
   /** How much redacted text the prefix must hold past the characters [[safeBody]] shows. */
   private val SafeBodyMargin: Int = 16 * 1024
 
+  /** The tail of [[SafeBodyProbes]] that closes a string, a call or a container, and puts a key after a value. */
+  private val SafeBodyClosingTail: String = """\\' \' ' " ) ] } , "k": 1 """
+
   /**
    * Tails appended to the prefix, each of which closes or decides a value still open at the cut: the `@` that makes a
    * URL's authority hold userinfo, and a run of credential characters that makes an `assertion` value a credential
    * (#1816, #1838); the escaped quotes of #1707, the quotes, brackets and commas that close a string, a call or a
-   * container, and a key after a value. If any of them changes what is shown, nothing is shown.
+   * container, and a key after a value (`SafeBodyClosingTail`). If any of them changes what is shown, nothing is
+   * shown. More tails close each quote the prefix holds, at its own depth (`safeBodyQuoteForms`).
    */
-  private val SafeBodyProbes: Vector[String] = Vector(
-    "@" + "Z" * 24 + " ",
-    """\\' \' ' " ) ] } , "k": 1 """
-  )
+  private val SafeBodyProbes: Vector[String] = Vector("@" + "Z" * 24 + " ", SafeBodyClosingTail)
+
+  /**
+   * How many distinct quotes - a `'`, a `"` or the JSON escape of either (`u0027`, `u0022`), behind a run of
+   * backslashes of a given length - a prefix may hold for [[safeBody]] to probe each; a prefix with more shows nothing.
+   */
+  private val SafeBodyMaxQuoteForms: Int = 8
+
+  /**
+   * Every distinct quote the prefix holds, written with the run of backslashes before it (`'`, `\"`, `\\\\'`,
+   * `\\u0022`), or `None` where there are more than `SafeBodyMaxQuoteForms`. Every reading closes a value that a
+   * quote opens with that quote written the same way, behind as many backslashes, however deep it is escaped: four
+   * backslashes, or the `2^k - 1` of JSON inside `k` strings. [[safeBody]] probes the prefix with each of these, then
+   * `SafeBodyClosingTail`, appended in turn, so a value opened at any depth is closed by one probe; the fixed probes
+   * close only the depths they spell out (#1680). One forward scan.
+   */
+  private def safeBodyQuoteForms(prefix: String): Option[Vector[String]] = {
+    val forms = scala.collection.mutable.LinkedHashSet.empty[String]
+    var i     = 0
+    while (i < prefix.length && forms.size <= SafeBodyMaxQuoteForms) {
+      val c = prefix.charAt(i)
+      if (c == '\\') {
+        val after = afterBackslashes(prefix, i)
+        val end   = quoteEscapeEnd(prefix, i)
+        if (end >= 0) forms += prefix.substring(i, end)
+        else if (after < prefix.length && (prefix.charAt(after) == '\'' || prefix.charAt(after) == '"'))
+          forms += prefix.substring(i, after + 1)
+        i = math.max(after, i + 1)
+      } else {
+        if (c == '\'' || c == '"') forms += c.toString
+        i += 1
+      }
+    }
+    if (forms.size > SafeBodyMaxQuoteForms) None else Some(forms.toVector)
+  }
 
   /** Where [[safeBody]] cuts `body` and shows a prefix, or `None` where it redacts it whole or shows nothing (#1680). */
   private[util] def safeBodyCut(body: String, maxLength: Int): Option[Int] =
@@ -184,10 +222,12 @@ private[llm4s] object Redaction {
         while (cut > floor && !(separatesPrefix(body.charAt(cut)) && body.charAt(cut - 1).isLetterOrDigit)) cut -= 1
         if (cut <= floor) None
         else {
-          val prefix   = body.substring(0, cut)
-          val redacted = redact(prefix)
+          val prefix                             = body.substring(0, cut)
+          val redacted                           = redact(prefix)
+          def unchangedBy(tail: String): Boolean = redact(prefix + tail).regionMatches(0, redacted, 0, maxLength)
           val settled = redacted.length.toLong >= maxLength.toLong + SafeBodyMargin &&
-            SafeBodyProbes.forall(tail => redact(prefix + tail).regionMatches(0, redacted, 0, maxLength))
+            SafeBodyProbes.forall(unchangedBy) &&
+            safeBodyQuoteForms(prefix).exists(_.forall(quote => unchangedBy(quote + " " + SafeBodyClosingTail)))
           if (settled) Some((cut, redacted)) else None
         }
       }

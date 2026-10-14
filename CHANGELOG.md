@@ -2713,9 +2713,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   most 64 KiB, cut after a letter or a digit and before a separator so that no key or token is cut in two, and nothing
   past the cut is ever shown. The prefix is shown only where its redaction runs 16 KiB past the characters shown and
   those characters do not change when the prefix is redacted with tails that close a value still open at the cut (a
-  URL's `@`, a credential run, quotes, brackets); otherwise only
-  `[response body not shown: ...] (original length: N)` is written.
-  The cost is now bounded at about three 64 KiB redactions whatever the body's size. Residual risk, documented on
+  URL's `@`, a credential run, quotes, brackets, and each distinct quote the prefix holds behind its own run of
+  backslashes, so a value opened by a quote escaped to any depth is closed); otherwise only
+  `[response body not shown: ...] (original length: N)` is written, as it is for a prefix holding more than eight
+  distinct quotes. The cost is now bounded at about eleven 64 KiB redactions, five or six for a typical body, whatever the
+  body's size. Residual risk, documented on
   `safeBody`: a value of 30 KiB or more opened in the shown characters, still open at the cut, and decided by none of
   the tails, is redacted as the prefix reads it; the single-pass redesign (#1932) is to close this. The cut rule, the
   margin and the audit of which readings depend on text past a cut come from @kannupriyakalra's analysis in #1841.
