@@ -728,4 +728,29 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     Files.exists(dir.resolve("mnt/g.txt")) shouldBe false
   }
 
+  it should "be found by the mount table too, as a bind mount of the root's own file system has its device" in {
+    val root = Path.of("/w/root")
+    val lines = Iterator(
+      "22 1 8:1 / / rw - ext4 /dev/sda1 rw",
+      "40 22 8:1 /w/root /w/root rw - ext4 /dev/sda1 rw",
+      "41 40 8:1 /data /w/root/sub\\040dir rw - ext4 /dev/sda1 rw",
+      "42 22 8:1 /data /w/rootless rw - ext4 /dev/sda1 rw"
+    )
+    HostFileBackend.mountPointsIn(lines, root) shouldBe Vector(Path.of("/w/root/sub dir"))
+  }
+
+  it should "refuse a root with a mount beneath it at open, and a mutation once one appears after open" in {
+    backend.close()
+    val sub = dir.toRealPath().resolve("sub")
+    HostFileBackend.open(dir, locks, mountsBeneath = _ => Right(Vector(sub))).left.value.message should include(
+      "mounted beneath it"
+    )
+    @volatile var mounted = Vector.empty[Path]
+    backend = HostFileBackend.open(dir, locks, mountsBeneath = _ => Right(mounted)).value
+    written(backend.write(p("/a.txt"), "x", call()))
+    mounted = Vector(sub)
+    backend.write(p("/a.txt"), "y", call()).left.value.message should include("mounted beneath it")
+    onDisk("a.txt") shouldBe "x"
+  }
+
 }

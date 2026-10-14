@@ -76,7 +76,8 @@ final class HostFileBackend private (
   val maxFileBytes: Long,
   val maxScanEntries: Int,
   val lockDirectory: Path,
-  fileSystemId: Path => String
+  fileSystemId: Path => String,
+  mountsBeneath: Path => Result[Vector[Path]]
 ) extends FileBackend
     with AutoCloseable:
 
@@ -158,6 +159,13 @@ final class HostFileBackend private (
   // `open` probes only the root's file system for aliases, so another one mounted inside the root (an
   // SMB share with 8.3 names, say) is never entered: its identity rules are unchecked
   private lazy val rootFileSystem: String = fileSystemId(root)
+
+  /** No file system is mounted beneath the root, a bind mount of its own file system included. */
+  private def unmounted(operation: String, path: VPath): Result[Unit] =
+    mountsBeneath(root).flatMap { found =>
+      if found.isEmpty then Right(())
+      else refused(operation, path, HostFileBackend.mountedReason(root, found))
+    }
 
   /** Whether `p` exists on a file system other than the root's: a mount inside the root. */
   private def mountedInside(p: Path): Boolean =
@@ -301,7 +309,7 @@ final class HostFileBackend private (
   /**
    * Writes `bytes` to `target` atomically: a flushed temporary file beside it, moved over it. A file it
    * replaces keeps its permissions: before any byte is written, the temporary file is given the
-   * target's POSIX permissions, owner and group (checked to hold), or its ACL and owner, and its DOS
+   * target's POSIX permissions, owner and group (checked to hold), its ACL and owner where the file system has an ACL view, and its DOS
    * hidden and system flags. Where they cannot be kept - setuid, setgid or sticky bits, an owner or group
    * the process cannot set, no permission model the JDK can copy - the write is refused, never widened.
    * A new file gets what any file created in its directory gets.
@@ -446,7 +454,9 @@ final class HostFileBackend private (
       // created the directory or found it, takes the stripe of the one real directory
       io(operation, path)(Try(Files.createDirectories(target.getParent)).toResult.map(_ => ())).flatMap(_ =>
         exclusively(target) {
-          resolve(operation, path)
+          // checked again at each mutation: a mount made inside the root after `open` stops it here
+          unmounted(operation, path)
+            .flatMap(_ => resolve(operation, path))
             .flatMap(again => io(operation, path)(digest(operation, path, again)))
             .flatMap { now =>
               if now == before then effect
@@ -796,8 +806,8 @@ object HostFileBackend:
             val a = v.readAttributes()
             (a.permissions(), a.owner(), a.group())
           }
-          val acl =
-            if posix.isDefined then None else view(classOf[AclFileAttributeView]).map(v => (v.getOwner(), v.getAcl()))
+          // both where both exist: a POSIX mode does not carry an ACL's named entries
+          val acl = view(classOf[AclFileAttributeView]).map(v => (v.getOwner(), v.getAcl()))
           val dos = if posix.isDefined then None else view(classOf[DosFileAttributeView]).map(_.readAttributes())
           if special.contains(true) then Left("has a setuid, setgid or sticky bit, which a replacement cannot keep")
           else if dos.exists(_.isReadOnly) then Left("is read-only")
@@ -930,6 +940,40 @@ object HostFileBackend:
         else Right(Vector.empty)
       }
 
+  private[harness] def mountedReason(root: Path, found: Vector[Path]): String =
+    s"the root $root has file systems mounted beneath it (${found.take(3).mkString(", ")}${
+        if found.size > 3 then ", ..." else ""
+      }); " +
+      "a mount, a bind mount of the root's own file system included, makes one file reachable by two paths"
+
+  /**
+   * The mount points strictly beneath `root`, from Linux's `/proc/self/mountinfo` (its fifth field, octal
+   * escapes decoded): a bind mount of the root's own file system has the root's device, so only the
+   * mount table shows it. Empty where there is no such table (macOS has no same-device bind mounts; its
+   * other mounts differ in device, which [[fileSystemIdOf]] catches).
+   */
+  def mountPointsBeneath(root: Path): Result[Vector[Path]] =
+    val table = Path.of("/proc/self/mountinfo")
+    if !Files.isReadable(table) then Right(Vector.empty)
+    else Try(Using.resource(Files.lines(table))(lines => mountPointsIn(lines.iterator.asScala, root))).toResult
+
+  /** The mount points in `mountinfo` lines strictly beneath `root`. */
+  private[harness] def mountPointsIn(lines: Iterator[String], root: Path): Vector[Path] =
+    val escaped = """\\([0-7]{3})""".r
+    lines
+      .flatMap(_.split(' ').lift(4))
+      .map(field =>
+        Path.of(
+          escaped.replaceAllIn(
+            field,
+            m => scala.util.matching.Regex.quoteReplacement(Integer.parseInt(m.group(1), 8).toChar.toString)
+          )
+        )
+      )
+      .filter(m => m.startsWith(root) && m != root)
+      .toVector
+      .distinct
+
   /**
    * Which file system `p` is on, without following a final link: its `unix:dev` where the JDK reports
    * it, else its `FileStore`. The backend never enters a path whose file system differs from the root's.
@@ -977,7 +1021,8 @@ object HostFileBackend:
     probe: Path => Result[Vector[String]] = probeAliases,
     countsLinks: Path => Boolean = reportsLinkCounts,
     allowUncheckedIdentity: Boolean = false,
-    fileSystemId: Path => String = fileSystemIdOf
+    fileSystemId: Path => String = fileSystemIdOf,
+    mountsBeneath: Path => Result[Vector[Path]] = mountPointsBeneath
   ): Result[HostFileBackend] =
     if maxFileBytes <= 0 then Left(ValidationError("maxFileBytes", s"must be positive, was $maxFileBytes"))
     else if maxFileBytes > MaxFileBytes then
@@ -1023,5 +1068,8 @@ object HostFileBackend:
               "or use the workspace sandbox's file backend or a StoreFileBackend"
           )
         )
+        _ <- mountsBeneath(real).flatMap(found =>
+          Either.cond(found.isEmpty, (), ValidationError("root", mountedReason(real, found)))
+        )
         _ <- OpenRoots.acquire(real)
-      yield new HostFileBackend(real, maxFileBytes, maxScanEntries, locks, fileSystemId)
+      yield new HostFileBackend(real, maxFileBytes, maxScanEntries, locks, fileSystemId, mountsBeneath)
