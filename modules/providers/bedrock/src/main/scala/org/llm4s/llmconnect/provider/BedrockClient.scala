@@ -499,7 +499,7 @@ class BedrockClient(
     def nextName(): String = { documents += 1; s"document-$documents" }
     messages.zipWithIndex.flatMap {
       case (um: UserMessage, _) =>
-        val blocks = um.parts.map(BedrockClient.userPart(nextName()))
+        val blocks = PartEncoding.withoutBlankText(um.parts).map(BedrockClient.userPart(nextName()))
         Some(BedrockMessage.builder().role(ConversationRole.USER).content(blocks.asJava).build())
 
       case (original: AssistantMessage, index) =>
@@ -541,14 +541,14 @@ class BedrockClient(
             Seq(ContentBlock.fromText(s"[Tool result for ${msg.toolCallId}]: ${msg.content}"))
           else
             ContentBlock.fromText(s"[Tool result for ${msg.toolCallId}]:") +:
-              msg.parts.map(BedrockClient.userPart(nextName()))
+              PartEncoding.withoutBlankText(msg.parts).map(BedrockClient.userPart(nextName()))
         Some(BedrockMessage.builder().role(ConversationRole.USER).content(blocks.asJava).build())
 
       case (msg: ToolMessage, _) =>
         val resultBlock = ToolResultBlock
           .builder()
           .toolUseId(msg.toolCallId)
-          .content(msg.parts.map(BedrockClient.toolPart(nextName())).asJava)
+          .content(PartEncoding.withoutBlankText(msg.parts).map(BedrockClient.toolPart(nextName())).asJava)
           .build()
         Some(
           BedrockMessage.builder().role(ConversationRole.USER).content(ContentBlock.fromToolResult(resultBlock)).build()
@@ -752,7 +752,7 @@ object BedrockClient {
   }
 
   private def isS3(source: MediaSource): Boolean = source match {
-    case MediaSource.Url(uri) => Option(uri.getScheme).exists(_.equalsIgnoreCase("s3"))
+    case MediaSource.Url(uri) => PartEncoding.hasScheme(uri, "s3")
     case _                    => false
   }
 

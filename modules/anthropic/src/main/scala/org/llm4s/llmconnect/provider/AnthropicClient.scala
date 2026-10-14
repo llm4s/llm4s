@@ -562,7 +562,7 @@ curl https://api.anthropic.com/v1/messages \
               MessageParam
                 .builder()
                 .role(MessageParam.Role.USER)
-                .contentOfBlockParams(parts.map(AnthropicClient.userPart).asJava)
+                .contentOfBlockParams(PartEncoding.withoutBlankText(parts).map(AnthropicClient.userPart).asJava)
                 .build()
             )
         }
@@ -592,7 +592,8 @@ curl https://api.anthropic.com/v1/messages \
         val result = ToolResultBlockParam.builder().toolUseId(tm.toolCallId)
         tm.parts match {
           case Vector(ContentPart.Text(text)) => result.content(text)
-          case parts                          => result.contentOfBlocks(parts.map(AnthropicClient.toolPart).asJava)
+          case parts =>
+            result.contentOfBlocks(PartEncoding.withoutBlankText(parts).map(AnthropicClient.toolPart).asJava)
         }
         pendingResults += ContentBlockParam.ofToolResult(result.build())
 
@@ -608,7 +609,7 @@ curl https://api.anthropic.com/v1/messages \
           pendingTexts += ContentBlockParam.ofText(
             TextBlockParam.builder().text(s"[Tool result for ${tm.toolCallId}]:").build()
           )
-          pendingTexts ++= tm.parts.map(AnthropicClient.userPart)
+          pendingTexts ++= PartEncoding.withoutBlankText(tm.parts).map(AnthropicClient.userPart)
         }
     }
     flushResults()

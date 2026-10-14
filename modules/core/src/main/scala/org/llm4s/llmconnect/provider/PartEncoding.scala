@@ -60,8 +60,25 @@ private[llm4s] object PartEncoding {
    * Whether `uri` is a web URL (`http` or `https`): the only URLs a provider that fetches media itself can
    * read. A `gs://` or `s3://` URL sent to one would pass the check and fail only after the request is sent.
    */
-  def isWebUrl(uri: java.net.URI): Boolean =
-    Option(uri.getScheme).exists(s => s.equalsIgnoreCase("http") || s.equalsIgnoreCase("https"))
+  def isWebUrl(uri: java.net.URI): Boolean = hasScheme(uri, "http", "https")
+
+  /**
+   * Whether `uri` has one of `schemes` and a non-empty authority (a host, a bucket): `http:cat.png` or `https:/cat.png`
+   * is absolute but names nothing to fetch.
+   */
+  def hasScheme(uri: java.net.URI, schemes: String*): Boolean =
+    Option(uri.getScheme).exists(s => schemes.exists(_.equalsIgnoreCase(s))) &&
+      Option(uri.getRawAuthority).exists(_.nonEmpty)
+
+  /**
+   * `parts` without blank text parts: for a block-based API (Anthropic, Converse, Gemini) that refuses an empty
+   * text block. A blank text part carries nothing, and a message of only blank text is refused by `validate`.
+   */
+  def withoutBlankText(parts: Vector[ContentPart]): Vector[ContentPart] =
+    parts.filter {
+      case ContentPart.Text(text) => text.trim.nonEmpty
+      case _                      => true
+    }
 
   /**
    * `Right` when every inline part of `messages` is within the provider's own limit for it: `limit` gives the

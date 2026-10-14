@@ -136,6 +136,16 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
     contents(2)("parts")(0)("functionResponse")("response") shouldBe ujson.Obj("result" -> "a\nb")
   }
 
+  it should "send no empty text part for a blank text part" in {
+    val sent = new AtomicReference[String]()
+    val http = stub[Llm4sHttpClient]
+    (http.post _).when(*, *, *, *).onCall { (_, _, body, _) =>
+      sent.set(body); Right(HttpResponse(200, successBody, Map.empty))
+    }
+    client(http).complete(Conversation(Seq(UserMessage(Vector(ContentPart.Text(" "), inline)))), CompletionOptions())
+    ujson.read(sent.get)("contents")(0)("parts").arr.size shouldBe 1
+  }
+
   it should "send a one-text user message exactly as before" in {
     val sent = new AtomicReference[String]()
     val http = stub[Llm4sHttpClient]

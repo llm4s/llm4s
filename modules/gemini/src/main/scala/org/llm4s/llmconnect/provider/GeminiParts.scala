@@ -62,8 +62,8 @@ private[provider] object GeminiParts {
 
   /** Vertex AI's references: a Cloud Storage object (`gs://`). It has no file store of its own. */
   val vertexFileUri: FileUri = {
-    case MediaSource.Url(uri) if Option(uri.getScheme).exists(_.equalsIgnoreCase("gs")) => Some(uri.toString)
-    case _                                                                              => None
+    case MediaSource.Url(uri) if PartEncoding.hasScheme(uri, "gs") => Some(uri.toString)
+    case _                                                         => None
   }
 
   private def sends(fileUri: FileUri, source: MediaSource): Boolean = source match {

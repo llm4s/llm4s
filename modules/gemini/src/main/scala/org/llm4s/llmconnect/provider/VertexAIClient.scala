@@ -281,7 +281,10 @@ class VertexAIClient(
 
       case um: UserMessage =>
         // checked before the body is built: GeminiParts covers every part
-        contents += ujson.Obj("role" -> "user", "parts" -> ujson.Arr.from(um.parts.map(GeminiParts.user(fileUri))))
+        contents += ujson.Obj(
+          "role"  -> "user",
+          "parts" -> ujson.Arr.from(PartEncoding.withoutBlankText(um.parts).map(GeminiParts.user(fileUri)))
+        )
 
       case am: AssistantMessage =>
         // Tool call IDs map to function names so the following ToolMessages can be keyed by name

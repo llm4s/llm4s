@@ -151,6 +151,8 @@ object ContentPart {
         Left(ValidationError("source", "inline media needs its bytes"))
       case MediaSource.ProviderFile(provider, id) if provider == null || id == null =>
         Left(ValidationError("source", "a provider file needs a provider and an id"))
+      case inline: MediaSource.Inline if inline.length == 0 =>
+        Left(ValidationError("source", "inline media has no bytes"))
       case inline: MediaSource.Inline if inline.length > maxInlineBytes =>
         Left(
           ValidationError(

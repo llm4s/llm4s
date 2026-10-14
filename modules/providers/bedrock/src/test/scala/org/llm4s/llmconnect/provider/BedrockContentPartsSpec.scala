@@ -147,6 +147,12 @@ class BedrockContentPartsSpec extends AnyFlatSpec with Matchers with EitherValue
     BedrockClient.checkParts("bedrock", Seq(UserMessage(Vector(ContentPart.Text("x"), fits)))) shouldBe Right(())
   }
 
+  it should "send no empty text block for a blank text part" in {
+    val blocks = userBlocks(ContentPart.Text(""), image(bytes), ContentPart.Text("caption"), ContentPart.Text("  "))
+    blocks.map(_.obj.keys.head).toSeq shouldBe Seq("image", "text")
+    blocks(1)("text").str shouldBe "caption"
+  }
+
   it should "refuse, before sending, a message whose only parts are documents: Converse needs text beside one" in {
     val (sent, result) = send(Conversation(Seq(UserMessage(Vector(doc(bytes))))))
     sent shouldBe None

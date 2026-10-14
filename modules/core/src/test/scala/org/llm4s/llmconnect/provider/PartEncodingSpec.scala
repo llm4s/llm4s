@@ -62,9 +62,21 @@ class PartEncodingSpec extends AnyFlatSpec with Matchers with EitherValues {
     PartEncoding.checkInlineMediaTotal("p", messages, 5L).left.value.message should include("this one has 6")
   }
 
+  "withoutBlankText" should "drop blank text parts and keep everything else in order" in {
+    PartEncoding.withoutBlankText(
+      Vector(ContentPart.Text(""), image, ContentPart.Text(" "), ContentPart.Text("a"))
+    ) shouldBe
+      Vector(image, ContentPart.Text("a"))
+  }
+
   "isWebUrl" should "accept http and https only" in {
     PartEncoding.isWebUrl(URI.create("https://e.com/a")) shouldBe true
     PartEncoding.isWebUrl(URI.create("HTTP://e.com/a")) shouldBe true
+    Seq("http:cat.png", "https:/cat.png", "https:///cat.png").foreach(u =>
+      PartEncoding.isWebUrl(URI.create(u)) shouldBe false
+    )
+    PartEncoding.hasScheme(URI.create("s3://bucket/key"), "s3") shouldBe true
+    PartEncoding.hasScheme(URI.create("s3:/key"), "s3") shouldBe false
     Seq("gs://b/a", "s3://b/a", "ftp://e.com/a", "relative").foreach(u =>
       PartEncoding.isWebUrl(URI.create(u)) shouldBe false
     )

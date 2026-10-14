@@ -50,6 +50,11 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
     body(UserMessage("hi"))("messages").arr.head("content") shouldBe ujson.Str("hi")
   }
 
+  it should "send no empty text block for a blank text part" in {
+    val content = userContent(UserMessage(Vector(ContentPart.Text(""), image(url), ContentPart.Text("caption"))))
+    content.map(_("type").str) shouldBe Seq("image", "text")
+  }
+
   it should "send images by URL and inline, with their media type" in {
     val blocks = userContent(
       UserMessage(Vector(ContentPart.Text("look"), image(url), image(MediaSource.Inline(bytes), MediaType.WebP)))

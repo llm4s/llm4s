@@ -31,6 +31,13 @@ class ContentPartSpec extends AnyFlatSpec with Matchers with EitherValues {
     error.message should include("Url or a ProviderFile")
   }
 
+  it should "refuse inline media of no bytes" in {
+    ContentPart.image(MediaSource.Inline(IArray.empty[Byte]), MediaType.Png).left.value.message should include(
+      "no bytes"
+    )
+    ContentPart.document(MediaSource.Inline(IArray.empty[Byte]), MediaType.Pdf).isLeft shouldBe true
+  }
+
   it should "refuse a relative URL and a data: URL, which is inline bytes by another name" in {
     ContentPart.image(MediaSource.Url(URI.create("cat.png")), MediaType.Png).left.value.message should
       include("absolute")
