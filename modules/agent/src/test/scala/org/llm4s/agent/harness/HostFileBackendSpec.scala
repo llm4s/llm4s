@@ -26,8 +26,37 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     backend = HostFileBackend.open(dir, locks).value
   }
 
+  /** Children and threads a case started, stopped after it whether it passed or not, so none outlives the JVM's tests. */
+  private val cleanups = scala.collection.mutable.ListBuffer.empty[() => Unit]
+
   override def afterEach(): Unit =
+    cleanups.foreach(c => scala.util.Try(c()))
+    cleanups.clear()
     Files.walk(dir).iterator().asScala.toVector.reverse.foreach(p => Files.deleteIfExists(p))
+
+  /** A child JVM holding the OS lock of `file` until its input closes; destroyed after the case. */
+  private def holding(file: Path): Process =
+    val javaBin = Path.of(System.getProperty("java.home"), "bin", "java").toString
+    val child = new ProcessBuilder(
+      javaBin,
+      "-cp",
+      System.getProperty("java.class.path"),
+      "org.llm4s.agent.harness.HoldLock",
+      file.toString
+    )
+      .redirectErrorStream(true)
+      .start()
+    cleanups += (() => child.destroyForcibly(): Unit)
+    new java.io.BufferedReader(new java.io.InputStreamReader(child.getInputStream)).readLine() shouldBe "locked"
+    child
+
+  /** A single daemon thread, shut down after the case. */
+  private def worker(): java.util.concurrent.ExecutorService =
+    val pool = Executors.newSingleThreadExecutor { r =>
+      val t = new Thread(r); t.setDaemon(true); t
+    }
+    cleanups += (() => pool.shutdownNow(): Unit)
+    pool
 
   private def p(s: String): VPath = VPath(s).value
 
@@ -377,21 +406,8 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
 
   "A mutation" should "wait while another process holds the OS lock of its file's stripe" in {
     written(backend.write(p("/a.txt"), "x", call()))
-    val lockFile = backend.lockFileOf(p("/a.txt")).value
-    val javaBin  = Path.of(System.getProperty("java.home"), "bin", "java").toString
-    val child = new ProcessBuilder(
-      javaBin,
-      "-cp",
-      System.getProperty("java.class.path"),
-      "org.llm4s.agent.harness.HoldLock",
-      lockFile.toString
-    )
-      .redirectErrorStream(true)
-      .start()
-    val out = new java.io.BufferedReader(new java.io.InputStreamReader(child.getInputStream))
-    out.readLine() shouldBe "locked"
-    val pool = Executors.newSingleThreadExecutor()
-    val edit = pool.submit(() => backend.edit(p("/a.txt"), "x", "y", replaceAll = false, call()))
+    val child = holding(backend.lockFileOf(p("/a.txt")).value)
+    val edit  = worker().submit(() => backend.edit(p("/a.txt"), "x", "y", replaceAll = false, call()))
     Thread.sleep(500)
     edit.isDone shouldBe false
     onDisk("a.txt") shouldBe "x"
@@ -399,25 +415,15 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     edit.get(10, TimeUnit.SECONDS).isRight shouldBe true
     onDisk("a.txt") shouldBe "y"
     child.waitFor(10, TimeUnit.SECONDS) shouldBe true
-    pool.shutdown()
   }
 
   it should "end as cancelled, not as a lock failure, when interrupted while another process holds the lock" in {
+    // POSIX only: on Windows a thread blocked in LockFileEx is not woken by an interrupt
+    assume(posix)
     written(backend.write(p("/a.txt"), "x", call()))
-    val lockFile = backend.lockFileOf(p("/a.txt")).value
-    val javaBin  = Path.of(System.getProperty("java.home"), "bin", "java").toString
-    val child = new ProcessBuilder(
-      javaBin,
-      "-cp",
-      System.getProperty("java.class.path"),
-      "org.llm4s.agent.harness.HoldLock",
-      lockFile.toString
-    )
-      .redirectErrorStream(true)
-      .start()
-    new java.io.BufferedReader(new java.io.InputStreamReader(child.getInputStream)).readLine() shouldBe "locked"
-    val pool = Executors.newSingleThreadExecutor()
-    val edit = pool.submit(() => backend.edit(p("/a.txt"), "x", "y", replaceAll = false, call()))
+    val child = holding(backend.lockFileOf(p("/a.txt")).value)
+    val pool  = worker()
+    val edit  = pool.submit(() => backend.edit(p("/a.txt"), "x", "y", replaceAll = false, call()))
     Thread.sleep(300)
     pool.shutdownNow() // interrupts the waiting edit
     edit.get(10, TimeUnit.SECONDS).left.value shouldBe a[org.llm4s.error.CancelledError]
