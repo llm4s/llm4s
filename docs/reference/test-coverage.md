@@ -44,14 +44,27 @@ Run it to see the current floors. The numbers are deliberately not copied here, 
 
 ### What CI runs
 
-The `Code Coverage` job in `.github/workflows/ci.yml` runs `<module>/test <module>/coverageReport` for the modules
-listed in that job. `<module>/coverageReport` is the step that enforces that module's floor. `knowledgegraphNeo4j`
-and `benchmarks` declare floors but are not included in the job, so CI does not currently enforce their floors.
-The benchmark workflow runs tests without coverage. The aggregate report is
-informational only, because a build-wide average is not a meaningful gate.
+Coverage runs in four parallel legs, the `Code Coverage (<leg>)` jobs (`coverage-leg` in
+`.github/workflows/ci.yml`). Each leg lists the modules it owns in the job's matrix and runs
+`<module>/test <module>/coverageReport` for each, in order; `<module>/coverageReport` is the step that enforces that
+module's floor. A report counts every measurement taken so far in the leg, so a module's floor is judged on its own
+tests plus those of modules that ran ahead of it in the same leg; the legs keep the order the single coverage job
+used, and keep the modules whose tests exercise another's code (`rag` before `knowledgegraph`, `media` and
+`observability`; `image` before `observabilityPrometheus`; the providers before `providerTestkit`) in one leg. Each leg uploads its modules' Codecov flags, and only
+those, so every flag is uploaded once. The `Code Coverage` job passes only when every leg does, and is what
+`All Tests Pass` waits for. It also writes the aggregate report from the legs' coverage data, which is informational
+only, because a build-wide average is not a meaningful gate.
 
-A new module has to be added to that job in the same change that adds it, or the code it holds drops out of
-measurement.
+`knowledgegraphNeo4j` and `benchmarks` declare floors but are in no leg, so CI does not currently enforce their
+floors. The benchmark workflow runs tests without coverage.
+
+A new module with a floor has to join a leg, normally the one holding its dependencies, after them, with an upload step for
+its flag, in the same change that adds it. `scripts/check-coverage-legs.sh`, run in Quick Checks against the build sbt
+loaded, fails until it does: it checks that every module with a floor is in exactly one leg (or in the script's
+short, reasoned exemption list) and has exactly one upload step, under the `codecov.yml` flag for its directory.
+
+To run one leg locally as CI does, list its modules' commands after `coverage`, for example
+`sbt coverage core/test core/coverageReport memory/test memory/coverageReport`.
 
 ### Codecov
 

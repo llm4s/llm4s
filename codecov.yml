@@ -26,7 +26,8 @@ coverage:
 #
 # Only main source code is tracked (not tests or resources).
 # `carryforward: true` keeps the last known coverage for a flag when a CI run does not
-# upload that module (CI runs coverage for the modules listed in ci.yml's coverage job).
+# upload that module (CI runs coverage for the modules listed in the legs of ci.yml's coverage-leg job; each
+# leg uploads the flags of its own modules, and scripts/check-coverage-legs.sh checks each flag's `paths` here).
 flags:
   core:
     paths:
