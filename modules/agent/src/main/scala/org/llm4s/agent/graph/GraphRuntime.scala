@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
 import java.util.concurrent.{ CountDownLatch, ExecutorService, Executors, RejectedExecutionException, TimeUnit }
 import scala.annotation.tailrec
 import scala.collection.mutable
+import scala.concurrent.duration.FiniteDuration
 import scala.util.{ Try, Using }
 import scala.util.control.Exception.catching
 
@@ -27,13 +28,15 @@ enum Durability:
   /**
    * Commits are queued and written in order on a background writer while the run continues.
    * After a crash, the work since the last durable checkpoint is redone by `recover`. The run
-   * waits for the queue before returning, and fails if any queued commit failed.
+   * waits for the queue before returning, and fails if any queued commit failed - or with
+   * [[GraphError.CommitTimedOut]] if one stays in the store for twice the claim's `ttl` with none returning.
    */
   case Async
 
   /**
    * After the claim, nothing is written until the run ends; then the last checkpoint, its pending
-   * writes and every buffered event are committed at once. A crash loses the run's progress.
+   * writes and every buffered event are committed at once. A crash loses the run's progress. An exit
+   * commit that stays in the store for twice the claim's `ttl` ends the run [[GraphError.CommitTimedOut]].
    */
   case OnExit
 
@@ -148,6 +151,15 @@ object GraphRuntime:
  * or suspended checkpoint, or the `RunFailed` of a failed run - a cancel is ignored - it sends no interrupt, so that commit is not disturbed - and the
  * run ends with its outcome. Interrupting a thread blocked in [[RunHandle.await]] does not cancel
  * the run.
+ *
+ * A run's closing wait is bounded while it holds its claim too (#1919). An `Async` run waiting for its queued
+ * commits, or an `OnExit` run making its exit commit, whose commit stays in the store for twice `claims.ttl` with
+ * none returning, ends [[GraphError.CommitTimedOut]] without waiting for it, through the same settling as a lost
+ * run: its result is set, its thread freed in this runtime, and its claim released on a detached thread. The commit
+ * is an orphan, fenced by the claim as a lost run's late write is: it lands only if the store applies it before the
+ * release, and the run's own listeners never receive it. A drain that keeps making progress is never cut short,
+ * however long it takes in all. Every other store call is waited for as long as it takes: every
+ * [[Checkpointer]] must return from each call within a bound it documents.
  *
  * A run whose `RunBudgets.timeout` is set has a deadline, fixed when its claim commits. When it
  * passes, the run stops the same way, but ends with [[GraphError.DeadlineExceeded]] and commits
@@ -304,8 +316,8 @@ final class GraphRuntime(
    * [[StreamEvent.LiveGap]], and end at [[StreamEvent.Disconnected]] (#1920). Live progress of another runtime's runs is not delivered: it is
    * never stored. With [[WatchPolicy.disabled]], another runtime's commits are seen only by
    * subscribing again, which replays the log - all of it once no commit a run of this runtime gave up
-   * on is still in the store on the thread; until then the replay stops at the first event above what
-   * this runtime has handed over. A failed read of the store ends the subscription,
+   * on is still in the store on the thread; until then - for as long as the store's bound on a call
+   * lets that write take ([[Checkpointer]]) - the replay stops at the first event above what this runtime has handed over. A failed read of the store ends the subscription,
    * after what is queued, with [[DisconnectReason.ReplayFailed]]. Returns without
    * replaying: replay runs on the subscription's dispatcher thread, the only thread `listener` is
    * called on, and a failed replay ends it with [[DisconnectReason.ReplayFailed]]. The subscription
@@ -1154,6 +1166,20 @@ final class GraphRuntime(
   private def lossBound: Long = claims.ttl.toNanos * 2
 
   /**
+   * How long a run's closing wait - an `Async` run's drain, or an `OnExit` run's exit commit - may go with a commit in
+   * the store and none returning, while the run holds its claim, before the run is ended without it
+   * ([[GraphError.CommitTimedOut]], #1919): twice `claims.ttl`, the bound a lost run's end already has. A store must
+   * return from every call within a bound of its own ([[Checkpointer]]), and one that keeps claims alive does so well
+   * inside `ttl`: a renewal must land within `ttl - renewEvery` of being due, and a store that serialises its calls
+   * queues renewals behind its commits. So a healthy store never reaches this; it is a backstop for one that breaks
+   * the contract, and needs no setting of its own.
+   */
+  private def closeTimeout: FiniteDuration = claims.ttl * 2
+
+  /** [[closeTimeout]] in nanoseconds. */
+  private def closeBound: Long = closeTimeout.toNanos
+
+  /**
    * Stops `heartbeat` and gives back the claim whose token is `token`.
    *
    * A claim found lost - `lostAt` is when, as a `System.nanoTime` value, read before and again after the
@@ -1164,19 +1190,27 @@ final class GraphRuntime(
    * joined - at most `claims.ttl` - so that no renewal lands after the release: synchronously, as
    * [[releaseClaim]], when they were, so a caller that sees the end of the change or run can claim the
    * thread at once; otherwise on a detached thread, not waited for, so the end does not serialise the
-   * release behind the renewal it could not join. Never throws, and keeps the caller's interrupt flag.
+   * release behind the renewal it could not join. With `detach` - a run whose closing wait was given up on while
+   * it held its claim ([[Run.closedWithoutRunThread]]) - the heartbeat is halted, not joined, and the claim given
+   * back on a detached thread that is not waited for, as for a loss past its bound: the store is stuck on a commit,
+   * and may serialise the release behind it. Never throws, and keeps the caller's interrupt flag.
    */
   private def stopAndRelease(
     threadId: ThreadId,
     token: FencingToken,
     heartbeat: Option[Heartbeat],
-    lostAt: => Option[Long]
+    lostAt: => Option[Long],
+    detach: Boolean = false
   ): Unit =
     def untilBound(at: Long): Long = math.max(0L, at + lossBound - System.nanoTime())
     lostAt match
       case Some(at) =>
         heartbeat.foreach(_.halt())
         releaseDetached(threadId, token, untilBound(at))
+      // a run whose closing commit is stuck in the store: neither its renewal nor its release is waited for
+      case None if detach =>
+        heartbeat.foreach(_.halt())
+        releaseDetached(threadId, token, 0L)
       case None =>
         val joined = heartbeat.forall(_.stop())
         lostAt match
@@ -1329,6 +1363,16 @@ final class GraphRuntime(
                 run.stopper = () =>
                   handle.stop(StopCause.ClaimLost)
                   handle.endWithin(run.lossDeadline, () => run.endedWithoutRunThread(), () => releaseBoth())
+                // while the claim holds, a closing wait stuck on the store is bounded too (#1919), through the
+                // same settling as the loss watchdog: whichever comes first ends the run
+                run.closing = () =>
+                  handle.closeWithin(
+                    run.closed,
+                    () => run.stalledSince,
+                    closeBound,
+                    () => run.closedWithoutRunThread(),
+                    () => releaseBoth()
+                  )
                 run.abandonedWrites = Some(abandoned)
                 handle.launch(() => run.execute(), run.crashed, () => releaseBoth(), run.deadline)
                 launched = true
@@ -1530,6 +1574,24 @@ final class GraphRuntime(
     private var orphanCounted = 0
 
     /**
+     * When a commit last began or returned, as a `System.nanoTime` value; under `gate`. With one in flight, how long
+     * the committer has made no progress: what bounds a run's closing wait ([[stalledSince]]).
+     */
+    private var progressAt = System.nanoTime()
+
+    /**
+     * When the committer last made progress - a commit began or returned - if a commit is in flight now; `None`
+     * with none in flight. Never waits on the store.
+     */
+    def stalledSince: Option[Long] = withLock(gate)(Option.when(inFlight > 0)(progressAt))
+
+    /**
+     * Whether [[close]] waits on the store - for an `Async` queue, or `OnExit`'s exit commit - and so is bounded
+     * while the run holds its claim ([[Run.closeCommitter]]). A `Sync` run's commits are made as it goes.
+     */
+    def drains: Boolean = true
+
+    /**
      * From now on, every commit not yet begun is skipped, and recorded as failing with `reason`; one
      * already begun is not touched, and may land. For a run whose claim is found lost at any stage, even
      * while it commits its outcome: nothing it has not begun to write may land. A commit begins - or is
@@ -1552,7 +1614,9 @@ final class GraphRuntime(
      */
     def begun[A](commit: Commit)(skipped: LLMError => A)(write: => A): A =
       val fence = withLock(gate) {
-        if fencedBy.isEmpty then inFlight += 1
+        if fencedBy.isEmpty then
+          inFlight += 1
+          progressAt = System.nanoTime()
         fencedBy
       }
       fence match
@@ -1562,6 +1626,7 @@ final class GraphRuntime(
             def close(): Unit =
               val orphaned = withLock(gate) {
                 inFlight -= 1
+                progressAt = System.nanoTime()
                 val counted = orphanCounted > 0
                 if counted then orphanCounted -= 1
                 counted
@@ -1642,6 +1707,7 @@ final class GraphRuntime(
         }
     def failure: Option[LLMError]                 = failed.get
     def close(): Unit                             = ()
+    override def drains: Boolean                  = false
     override def forgetInterruptedFailure(): Unit = failed.set(None)
     def abandon(reason: LLMError): Boolean =
       failed.set(Some(reason))
@@ -2175,12 +2241,13 @@ final class GraphRuntime(
      * the caller's interrupt flag.
      *
      * A run whose claim was found lost - whatever it was doing then, finishing included - releases on a
-     * detached thread, as [[stopAndRelease]] says.
+     * detached thread, as [[stopAndRelease]] says; so does a run whose closing wait was given up on
+     * ([[closedWithoutRunThread]]), whose store is stuck on a commit and may serialise the release behind it.
      */
     def releaseClaim(): Unit =
       claim match
         case Some(c) if claimReleased.compareAndSet(false, true) =>
-          stopAndRelease(threadId, c.token, heartbeat, lostAt.get)
+          stopAndRelease(threadId, c.token, heartbeat, lostAt.get, detach = closeGivenUp.get)
         // no claim, or released already: a lost claim's heartbeat is not joined, as stopAndRelease says
         case _ => heartbeat.foreach(beat => if lostAt.get.isDefined then beat.halt() else beat.stop(): Unit)
 
@@ -2189,6 +2256,67 @@ final class GraphRuntime(
      * abandoned that lands after the run stopped waiting is never given to them.
      */
     @volatile var abandonedWrites: Option[AbandonedWrites] = None
+
+    /**
+     * Completed once the run's closing wait ([[closeCommitter]]) has returned, however it ended: what the bound on
+     * that wait ([[DefaultRunHandle.closeWithin]]) waits for.
+     */
+    val closed = new java.util.concurrent.CompletableFuture[Unit]()
+
+    /**
+     * Arms the bound on the run's closing wait; set by the runtime when the run is launched, to the handle's
+     * [[DefaultRunHandle.closeWithin]]. Idempotent.
+     */
+    @volatile var closing: () => Unit = () => ()
+
+    /** Set once the closing wait was given up on ([[closedWithoutRunThread]]): the claim is then released detached. */
+    private val closeGivenUp = new AtomicBoolean(false)
+
+    /** When the committer last made progress, while a commit is in flight ([[Committer.stalledSince]]). */
+    def stalledSince: Option[Long] = committer.stalledSince
+
+    /**
+     * Closes the committer - for `Async`, waiting for its queue; for `OnExit`, making the exit commit - bounded
+     * while the run holds its claim (#1919): if a commit stays in the store for [[closeBound]] with none returning,
+     * the run is ended without waiting for it ([[closedWithoutRunThread]]). A lost claim bounds it already, as
+     * [[DefaultRunHandle.endWithin]] does every end of a lost run.
+     */
+    private def closeCommitter(): Unit =
+      if committer.drains then closing()
+      Using.resource(new AutoCloseable { def close(): Unit = closed.complete(()): Unit })(_ => committer.close())
+
+    /**
+     * The run's result when its closing wait is given up on ([[DefaultRunHandle.closeWithin]]): a commit had been
+     * in the store for [[closeBound]] while the run held its claim. Settled as a run that lost its claim is
+     * ([[endedWithoutRunThread]]), but failing [[GraphError.CommitTimedOut]]: the committer is fenced and every
+     * commit in flight counted as an orphan, an `Async` writer shut down without waiting
+     * ([[Committer.settledWithoutRunThread]]), and the run's own subscriptions cut at what the hub has handed over,
+     * so a commit that lands later never reaches them as the run's. The claim is then released on a detached
+     * thread ([[releaseClaim]]): the store may serialise the release behind the commit it is stuck on, and once the
+     * release lands it refuses that commit. A run whose claim was found lost meanwhile ends as
+     * [[endedWithoutRunThread]] says instead. Never throws, and never waits on the store.
+     */
+    def closedWithoutRunThread(): RunResult[O] =
+      if claimWasLost then endedWithoutRunThread()
+      else
+        closeGivenUp.set(true)
+        // the orphan is refused as stale once the release lands: that is no loss to act on, the run is settled
+        committer.onStale = _ => ()
+        val timedOut = GraphError.CommitTimedOut(threadId.value, closeTimeout)
+        GraphRuntime.logger.warn(
+          s"Run ${named(runId)} on thread '${threadId.value}' ended without its closing commit, which had not returned after $closeTimeout; it may still land"
+        )
+        DefaultRunHandle
+          .guarded {
+            committer.settledWithoutRunThread(timedOut)
+            abandonedWrites.foreach(cut => hub.atMark(threadId)(cut.abandonAfter))
+          }
+          .left
+          .foreach(thrown =>
+            GraphRuntime.logger
+              .warn(s"Ending run '${runId.value}' on thread '${threadId.value}' without it failed", thrown)
+          )
+        RunResult.Failed(position._1.state, timedOut)
 
     /**
      * The run's result when it is settled without its run thread ([[DefaultRunHandle.endWithin]]): the
@@ -2240,7 +2368,7 @@ final class GraphRuntime(
         )
         lostClaim(position._1, None)
       else
-        DefaultRunHandle.guarded(committer.close()).left.foreach(thrown.addSuppressed)
+        DefaultRunHandle.guarded(closeCommitter()).left.foreach(thrown.addSuppressed)
         RunResult.Failed(position._1.state, GraphError.RunCrashed(threadId.value, thrown))
 
     /**
@@ -2366,7 +2494,7 @@ final class GraphRuntime(
             case Right(_) if !cause.compareAndSet(None, Some(StopCause.Finishing)) => cancelled()
             case Right(saved) =>
               submit(saved, event)
-              committer.close()
+              closeCommitter()
               committer.failure.fold(result)(e => RunResult.Failed(execution.state, writeFailed(e, None)))
 
     /**
@@ -2383,7 +2511,7 @@ final class GraphRuntime(
         case Right(saved)                                                      =>
           // the blocked turn leaves the history with it: nothing of it stays readable or forkable
           submit(saved, failed(error.message), retractTurn = true)
-          committer.close()
+          closeCommitter()
           committer.failure.fold[RunResult[O]](RunResult.Failed(execution.state, error))(e =>
             RunResult.Failed(execution.state, writeFailed(e, Some(error)))
           )
@@ -2590,7 +2718,7 @@ final class GraphRuntime(
      * ([[GraphError.CheckpointWriteFailed]], keeping `error` as the run's own failure).
      */
     private def stop(execution: Execution, error: LLMError): RunResult[O] =
-      committer.close()
+      closeCommitter()
       val reported = (error, committer.failure) match
         case (already: GraphError.CheckpointWriteFailed, _) => already
         case (_, Some(storeError))                          => writeFailed(storeError, Some(error))

@@ -154,6 +154,22 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
    */
   protected def exactExpiry: Boolean = true
 
+  /**
+   * A store for the case that checks the contract's bound on every call (#1919), whose claims expire by `clock`:
+   * the store, the bound its own documentation gives every call - [[CheckpointerContract.BoundedStore]] - and a way
+   * to make its storage busy from outside, as another connection or process holding a write would. The case waits
+   * out that bound more than once, so give it a store configured with a short one. `None`, the default, skips the
+   * case: right for a store whose storage nothing outside the instance can hold, such as `InMemoryCheckpointer`,
+   * whose calls never wait on anything but each other's brief turn at its lock.
+   */
+  protected def boundedStore(@unused clock: Clock): Option[CheckpointerContract.BoundedStore] = None
+
+  /**
+   * How far past its bound a call may return in [[boundedStore]]'s case before the case fails: scheduling, and a
+   * driver that polls its lock - SQLite's busy handler sleeps up to 100 ms between tries - add a little to any bound.
+   */
+  protected def boundGrace: FiniteDuration = 500.millis
+
   private val start     = Instant.parse("2026-10-09T12:00:00Z")
   private val ttl       = 30.seconds
   private val threadIds = new AtomicInteger()
@@ -1134,6 +1150,58 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       Option(outcome.poll(contractWait.toMillis, TimeUnit.MILLISECONDS)).getOrElse(fail("the wait did not end"))
     result.refused shouldBe a[CancelledError]
     flagged shouldBe true
+  }
+
+  // ---- every call returns within the store's bound (#1919) ----
+
+  it should "return from every call within the bound it documents, also while another connection holds its storage" in {
+    val bounded = boundedStore(ManualClock(start))
+    assume(bounded.isDefined, "the store gives no bound, nor a way to make its storage busy (boundedStore)")
+    val b      = bounded.get
+    val store  = b.store
+    val thread = newThread()
+    val held   = store.claim(thread, ClaimRequest(RunId("holder"), None, ttl)).value
+    def event(name: String): EventDraft =
+      EventDraft("run", None, None, None, start, RunEvent.Custom(name, 1, ujson.Obj("name" -> name)))
+    // writes and reads at once, so that each also waits behind the store's own earlier calls, not only the storage
+    val calls: Vector[(String, () => Result[Any])] = Vector(
+      "commit"        -> (() => store.commit(thread, Commit(held.token, events = Vector(event("a"))))),
+      "commit"        -> (() => store.commit(thread, Commit(held.token, events = Vector(event("b"))))),
+      "renew"         -> (() => store.renew(thread, held.token, ttl)),
+      "claim"         -> (() => store.claim(newThread(), ClaimRequest(RunId("other"), None, ttl))),
+      "claim"         -> (() => store.claim(newThread(), ClaimRequest(RunId("another"), None, ttl))),
+      "compactEvents" -> (() => store.compactEvents(thread, 1L)),
+      "prune"         -> (() => store.prune(thread, RetentionPolicy(maxCheckpoints = Some(1)))),
+      "latest"        -> (() => store.latest(thread)),
+      "eventsAfter"   -> (() => store.eventsAfter(thread, 0L, 10)),
+      "history"       -> (() => store.history(thread, None, 10))
+    )
+    val took  = new LinkedBlockingQueue[(String, FiniteDuration)]()
+    val busy  = b.busy()
+    val ready = new CyclicBarrier(calls.size)
+    val callers = calls.map { (name, call) =>
+      Thread.ofVirtual().start { () =>
+        ready.await(contractWait.toMillis, TimeUnit.MILLISECONDS): Unit
+        val began = System.nanoTime()
+        call(): Unit
+        took.put(name -> (System.nanoTime() - began).nanos)
+      }
+    }
+    callers.foreach(_.join(contractWait.toMillis))
+    busy.close()
+    val all = Iterator.continually(took.poll()).takeWhile(_ != null).toVector
+    all should have size calls.size.toLong
+    all.foreach { (name, waited) =>
+      withClue(
+        s"$name took ${waited.toMillis} ms; its bound is ${b.bound.toMillis} ms, with ${boundGrace.toMillis} ms of grace: "
+      ) {
+        waited should be <= (b.bound + boundGrace)
+      }
+    }
+    // a call that gave up changed nothing it should not have, and the store is usable again at once
+    store.commit(thread, Commit(held.token, events = Vector(event("after")))).value.map(_.event) shouldBe
+      Vector(RunEvent.Custom("after", 1, ujson.Obj("name" -> "after")))
+    closeExtra(store)
   }
 
   // ---- the checkpoint history ----
@@ -2161,3 +2229,13 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     history.map(_.runId).count(_ == "two") shouldBe 1
     history.tail.flatMap(c => graph.restore(c.snapshot).value.state.get(log).value) should not contain "draft:bad"
   }
+
+object CheckpointerContract:
+
+  /**
+   * A store with the bound its documentation gives every call, as the `Checkpointer` contract requires (#1919), for
+   * [[CheckpointerContract.boundedStore]]: `bound` is how long any call may take, waits for its storage included,
+   * before it returns - with a failure, if it must. `busy` makes the storage busy for writers, as another connection
+   * or process holding a write would, until the handle it returns is closed.
+   */
+  final case class BoundedStore(store: Checkpointer, bound: FiniteDuration, busy: () => AutoCloseable)

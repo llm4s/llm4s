@@ -2940,6 +2940,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file if they take longer. It then waits up to `busyTimeout` again for SQLite's lock, which another process may
   hold. A write interrupted while it waits for its turn returns `CancelledError` with the interrupt flag set. Writes
   from different processes are still ordered by SQLite's polling.
+- **A store that hangs can no longer hold a run that keeps its claim: every store call must return within a bound,
+  and a stuck closing commit ends the run `CommitTimedOut`** ([#1919](https://github.com/llm4s/llm4s/issues/1919)).
+  #1897 bounded the end of a run that lost its claim; a run that kept it could still wait forever on its store.
+  - **The `Checkpointer` contract requires every call to return within a bound the store documents**, set by its
+    configuration, failing a call that reaches it with nothing changed; `awaitEventsAfter` returns within its
+    `timeout` plus the bound, and a store names any call it cannot bound. `CheckpointerContract` checks it through a
+    new hook, `boundedStore`, returning `CheckpointerContract.BoundedStore(store, bound, busy)`; the default `None`
+    skips the case.
+  - **`SqliteCheckpointer` meets it: every call returns within `2 × busyTimeout`, plus its own SQL.** A call used to
+    wait for the store's earlier calls with no limit, so one call stuck waiting out a busy file held every later call
+    in turn, each for up to `busyTimeout` more. It now waits for them, and a write for the file's turn (#1951), at
+    most `busyTimeout` from its start, and then for SQLite's lock at most `busyTimeout` again, failing with a
+    `ProcessingError` past either. A disk that stalls inside a write is the one wait it cannot bound.
+  - **New `GraphError.CommitTimedOut(threadId, after)`.** An `Async` run waiting for its queued commits, or an
+    `OnExit` run making its exit commit, whose commit stays in the store for twice `ClaimPolicy.ttl` with none
+    returning, while the run holds its claim, now ends with it instead of waiting: `await()` returns, the thread is
+    free in the runtime, and the claim is released on a detached thread with a clean interrupt flag. The commit is an
+    orphan, as a lost run's late write is: fenced by the claim, so refused once the release lands, but it can land
+    first, and never reaches the run's own listeners or tracing. A drain that keeps making progress is never cut
+    short. Read the thread before recovering it: it holds either the run's last durable checkpoint or its outcome.
+  - What a call stuck in the store still holds - its thread, the later commits on the same graph thread, and
+    subscriptions that join behind a run's claim commit - is now documented as the store's responsibility, in the
+    `Checkpointer` Scaladoc and the [durable checkpointers guide](docs/guide/agents/durable-checkpointers.md#when-the-store-hangs).
 - **A multi-megabyte provider error body no longer takes seconds to redact for a log line or an error**
   ([#1680](https://github.com/llm4s/llm4s/issues/1680)): the internal `safeBody` helper behind every provider error
   body redacted the whole body before truncating it to 2048 characters, about a second per megabyte. A body up to
