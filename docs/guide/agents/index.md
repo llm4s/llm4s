@@ -142,6 +142,31 @@ result.map { r =>
 `AgentResult` also carries `threadId`, `runId`, `activeAgent`, `messages` (the thread's full
 history, never a system prompt) and `usage`.
 
+### A Typed Answer
+
+`withOutput[O]` gives the agent a response format: `O`'s JSON schema, from a `SchemaDefinition[O]` and
+a uPickle `ReadWriter[O]` in scope (with `llm4s-schema-derivation`, `withOutputOf[O]` derives it from a
+case class). Every model call carries the schema as its `responseFormat`, and the system prompt states it,
+for a client that cannot enforce it. `decodeOutput[O]` reads the answer:
+
+```scala
+case class Invoice(customer: String, total: Double) derives ReadWriter
+given SchemaDefinition[Invoice] = invoiceSchema // an ObjectSchema[Invoice]
+
+for {
+  agent   <- Agent.builder("extractor", client).withOutput[Invoice].build()
+  result  <- agent.run("Bill Acme 12.50")
+  invoice <- result.decodeOutput[Invoice]
+} yield invoice
+```
+
+A final answer must be JSON that matches the schema and reads as `O`; it is stored as that JSON alone.
+An invalid answer is sent back to the model once, with its problems, in the same step; neither is stored.
+A second invalid answer ends the turn with `Left(GraphError.OutputInvalid(errors))`: the turn is removed
+from the thread, as an output guardrail's block removes it, both calls stay in `usage`, `recover` has
+nothing to continue, and the next turn runs from before it. The format is the agent's own: a handoff
+target answers in its own format, or freely.
+
 ---
 
 ## Safety Defaults

@@ -14,6 +14,7 @@ import upickle.default.ReadWriter
  * @param maxSteps the limit this agent's model node applies to the turn's step count, which every
  *   agent of the turn shares: at it the turn ends with [[TurnOutcome.StepLimitReached]] instead of a
  *   further call, so an agent handed a turn that has already used its limit makes no call
+ * @param output the response format this agent's answers must match (design 4.26), or none
  */
 final case class LoopAgent private (
   id: AgentId,
@@ -22,18 +23,21 @@ final case class LoopAgent private (
   middleware: Seq[AgentMiddleware],
   systemPrompt: Option[String],
   maxSteps: Int,
-  handoffs: Vector[LoopHandoff]
+  handoffs: Vector[LoopHandoff],
+  output: Option[OutputFormat]
 ):
   def withSystemPrompt(prompt: Option[String]): LoopAgent         = copy(systemPrompt = prompt)
   def withMaxSteps(steps: Int): LoopAgent                         = copy(maxSteps = steps)
   def withMiddleware(middleware: Seq[AgentMiddleware]): LoopAgent = copy(middleware = middleware)
   def withHandoffs(handoffs: Vector[LoopHandoff]): LoopAgent      = copy(handoffs = handoffs)
+  def withOutput(format: OutputFormat): LoopAgent                 = withOutput(Some(format))
+  def withOutput(format: Option[OutputFormat]): LoopAgent         = copy(output = format)
 
 object LoopAgent:
 
-  /** An agent with no system prompt, no middleware, no handoffs and a limit of 50 steps a turn. */
+  /** An agent with no system prompt, no middleware, no handoffs, no response format and a limit of 50 steps a turn. */
   def apply(id: AgentId, model: ModelStep, tools: ToolSet = ToolSet.empty): LoopAgent =
-    new LoopAgent(id, model, tools, Nil, None, 50, Vector.empty)
+    new LoopAgent(id, model, tools, Nil, None, 50, Vector.empty, None)
 
 /** A transfer the agent may make to `target`; with `preserveContext = false` the target sees only the transfer onwards. */
 final case class LoopHandoff(target: AgentId, reason: Option[String], preserveContext: Boolean)

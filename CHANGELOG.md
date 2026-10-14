@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **An agent's answer can have a response format** ([#1912](https://github.com/llm4s/llm4s/issues/1912), design
+  4.26): `AgentBuilder.withOutput[O]` (using a `SchemaDefinition[O]` and a uPickle `ReadWriter[O]`) sends `O`'s
+  strict JSON schema as the `responseFormat` of every model call of the agent and states it in the system prompt.
+  A final answer must be JSON that matches the schema and reads as `O`, and is stored as that JSON alone. An invalid
+  answer is retried once in the same model step, with its problems, and neither is stored; a second ends the turn as
+  a Block with `Left(GraphError.OutputInvalid(errors))`: the turn removed from the thread, both calls in `usage` and
+  their `ModelCallCompleted` events committed, `recover` refused. `AgentResult.decodeOutput[O]` reads the answer.
+  `withOutputOf[O: SchemaOf]` in `llm4s-schema-derivation` derives the schema; that module now takes `llm4s-agent`
+  as a `Provided` dependency. New `OutputFormat` and `LoopAgent.withOutput` in `org.llm4s.agent.graph.toolloop`.
+  `build` refuses a schema whose root is not an object, one the tool argument validator cannot check, and one over
+  32,768 characters. The graph version of an agent without a format is unchanged. Source: `GraphError` gains the
+  case `OutputInvalid`, so an exhaustive match on it needs one more case, and `LoopAgent` gains the field `output`.
 - **`llm4s-kotlin-api` is published to Maven Central with each release** ([#1494](https://github.com/llm4s/llm4s/issues/1494)):
   `org.llm4s:llm4s-kotlin-api` (no `_3` suffix: a Kotlin artifact), at the release's version, depending on
   `llm4s-java-api_3` at that same version, and managed by `llm4s-bom`, so a Gradle build that imports the BOM declares

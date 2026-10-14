@@ -6,9 +6,12 @@ import org.llm4s.agent.graph.toolloop.{
   ApprovalRequest,
   BreakpointRequest,
   MiddlewareQuestionRequest,
+  OutputFormat,
   ToolQuestionRequest
 }
+import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{ Message, UsageSummary }
+import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
 /** How an agent's turn ended, or why it is waiting. */
@@ -67,6 +70,16 @@ final case class AgentResult private (
   def answer: Option[String] = status match
     case AgentStatus.Completed(text) => Some(text)
     case _                           => None
+
+  /**
+   * The answer read as `O`: the agent's response format ([[AgentBuilder.withOutput]]) makes it JSON of `O`'s
+   * schema, and any JSON answer - fenced or in prose - reads too. `Left(ValidationError)` when the turn did not
+   * complete, or the answer is not JSON, is JSON `null`, or does not read as `O`.
+   */
+  def decodeOutput[O: ReadWriter]: Result[O] =
+    answer
+      .toRight(ValidationError("output", s"the turn has no answer: it ended ${status.productPrefix}"))
+      .flatMap(OutputFormat.decode[O])
 
   /** Approves the pending tool call `id`, for [[Agent.resume]]. */
   def approve(id: InterruptId): (InterruptId, ujson.Value) = decide(id, ApprovalDecision.Approve)

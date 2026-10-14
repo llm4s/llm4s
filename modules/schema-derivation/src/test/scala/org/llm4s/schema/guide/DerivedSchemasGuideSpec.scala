@@ -89,6 +89,22 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
         .buildSafe()
   }
 
+  // ---- An agent's answer
+
+  object Agents {
+    import Quickstart.Invoice
+
+    import org.llm4s.agent.Agent
+    import org.llm4s.schema.*
+
+    def extractWithAgent(client: LLMClient, email: String): Result[Invoice] =
+      for {
+        agent   <- Agent.builder("extractor", client).withOutputOf[Invoice].build()
+        result  <- agent.run(s"Extract the invoice from this email: $email")
+        invoice <- result.decodeOutput[Invoice]
+      } yield invoice
+  }
+
   // ---- Types the module does not know
 
   object Meetings {
@@ -150,7 +166,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   "The guide's Scala blocks" should "all appear in this spec word for word" in {
     val scalaBlocks = blocks("scala")
-    scalaBlocks should have size 7
+    scalaBlocks should have size 8
     scalaBlocks.foreach(block =>
       withClue(s"This block of the guide is not in the code the spec compiles:\n$block\n") {
         squash(thisSource) should include(squash(block))
@@ -193,6 +209,12 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     tool.execute(ujson.Obj("city" -> "Paris", "unit" -> ujson.Null)) shouldBe Right(ujson.Str("Sunny in Paris"))
     tool.execute(ujson.Obj("city" -> "Oslo", "unit" -> "Fahrenheit")) shouldBe Right(ujson.Str("Sunny in Oslo"))
     tool.execute(ujson.Obj("unit" -> "Kelvin")).isLeft shouldBe true
+  }
+
+  "The agent of the guide" should "answer with the derived type" in {
+    import Quickstart.*
+    val reply = """{"vendor":"Acme","amount":1250.0,"currency":"GBP"}"""
+    Agents.extractWithAgent(new Scripted(reply), "Acme bills GBP 1250") shouldBe Right(Invoice("Acme", 1250.0, "GBP"))
   }
 
   "A type the module does not know" should "be described by the given the guide defines, and round-trip" in {
