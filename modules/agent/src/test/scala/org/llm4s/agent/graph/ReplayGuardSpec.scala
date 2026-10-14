@@ -210,6 +210,27 @@ class ReplayGuardSpec extends AnyFlatSpec with Matchers with EitherValues with O
     cell shouldBe "changed by another thread"
   }
 
+  it should "refuse a replay whose new plan read a change made after the probe matched the recorded before" in {
+    var cell    = "a"
+    val journal = new Journal
+    val c       = context(journal)
+    def append(probed: () => Unit) =
+      ReplayGuard.verifiable[String](c, c.effectKey("text.append", "cell")) {
+        val digest = StateCheck.of(cell); probed(); Right(digest)
+      } {
+        val before = cell
+        Right(ReplayGuard.Plan(StateCheck.of(before), StateCheck.of(before + "!"), before + "!") {
+          if cell != before then Left(GraphError.EffectReplayRefused("text.append", "cas"))
+          else { cell = before + "!"; Right(cell) }
+        })
+      }
+    journal.failNext = Some(true) // the intent lands against "a"; the effect never runs
+    append(() => ()).isLeft shouldBe true
+    // another writer changes the cell between the probe (which saw "a") and the new plan
+    refusal(append(() => cell = "c")) should include(StateCheck.of("a").value)
+    cell shouldBe "c"
+  }
+
   it should "run again, rather than presume, a plan whose digests before and after are equal" in {
     val journal = new Journal
     val writes  = new AtomicInteger()
