@@ -149,6 +149,7 @@ sbt testIntegration    # modules/it @Docker tier (Postgres/pgvector, Qdrant, Neo
 sbt testWorkspace      # modules/it @Workspace tier (needs a built workspace-runner image)
 sbt testOllama         # modules/it @Ollama tier
 sbt testSmoke          # modules/it @Cloud tier (live API keys)
+sbt testPerformance    # tests tagged PerformanceTest (LinearTime scaling checks); sbt test and coverage leave them out
 sbt it/itTierCheck     # every suite in modules/it must declare exactly one tier
 sbt stabilityTierCheck # every top-level public type of a frozen module is @Stable or @Experimental
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
@@ -449,6 +450,14 @@ class MySpec extends AnyFlatSpec with Matchers {
 ```
 
 **Best practices:** Deterministic, fast (use mocks), isolated, target 80%+ coverage.
+
+A test that measures how cost grows with input size (`LinearTime.assertLinear`, or any timing
+ratio) is tagged `taggedAs(PerformanceTest)` (`org.llm4s.testutil`). `sbt test` and the coverage
+run exclude the tag - growth is platform-independent, so Windows and coverage instrumentation only
+multiplied its cost - and `sbt testPerformance` runs it (CI's ubuntu `Performance tests` job and a
+nightly run). Leave one untagged guard per spec: a single ~1 MB worst-case input under
+`LinearTime.timed(label, hangGuard)`, generous enough never to flake, so `sbt test` still fails
+on a catastrophic (quadratic) regression.
 
 ## Adding New Code
 
