@@ -108,8 +108,9 @@ private[llm4s] object MistralDialect extends OpenAICompatibleDialect:
 
   /** The standard parts, and a PDF by URL as Mistral's `document_url` chunk. */
   override def encodeUserPart: PartialFunction[ContentPart, ujson.Value] =
-    OpenAICompatibleDialect.standardUserParts.orElse { case ContentPart.Document(MediaSource.Url(uri), MediaType.Pdf) =>
-      ujson.Obj("type" -> "document_url", "document_url" -> uri.toString)
+    OpenAICompatibleDialect.standardUserParts.orElse {
+      case ContentPart.Document(MediaSource.Url(uri), MediaType.Pdf) if PartEncoding.isWebUrl(uri) =>
+        ujson.Obj("type" -> "document_url", "document_url" -> uri.toString)
     }
 
   /**

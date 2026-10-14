@@ -199,7 +199,7 @@ object OpenAICompatibleDialect:
 
   /** Text, and an image by URL or inline (`image_url`, inline as a `data:` URL): what chat completions takes. */
   val standardUserParts: PartialFunction[ContentPart, ujson.Value] = textPart.orElse {
-    case ContentPart.Image(MediaSource.Url(uri), _) => imageUrl(uri.toString)
+    case ContentPart.Image(MediaSource.Url(uri), _) if PartEncoding.isWebUrl(uri) => imageUrl(uri.toString)
     case ContentPart.Image(inline: MediaSource.Inline, mediaType) =>
       imageUrl(PartEncoding.dataUrl(inline, mediaType))
   }

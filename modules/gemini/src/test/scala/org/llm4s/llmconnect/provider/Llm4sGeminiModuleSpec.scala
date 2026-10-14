@@ -134,6 +134,10 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
     ContentPartCase.UserTextDocumentInline
   )
 
+  // Vertex AI takes Cloud Storage references only: the contract's https URLs and provider files are refused
+  private val vertexParts =
+    Seq(ContentPartCase.UserImageInline, ContentPartCase.UserPdfInline, ContentPartCase.UserTextDocumentInline)
+
   private def vertexConfig: VertexAIConfig =
     VertexAIProvider.buildConfig("test-instance", section(VertexAIProvider).withApiKey(None)) match
       case Right(c: VertexAIConfig) => c
@@ -226,7 +230,7 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
   "a client built by the vertexai descriptor" should {
 
     "send text, images and documents in a user message, and refuse media in a tool result" in {
-      assertContentParts("vertexai", sendJsonResponse(_, 200, geminiReply))(geminiParts*)(vertexClientAt)
+      assertContentParts("vertexai", sendJsonResponse(_, 200, geminiReply))(vertexParts*)(vertexClientAt)
     }
 
     "actually stream, not silently fall back to complete()" in {

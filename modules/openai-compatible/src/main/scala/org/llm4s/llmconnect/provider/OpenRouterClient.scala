@@ -166,7 +166,7 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
    */
   override def encodeUserPart: PartialFunction[ContentPart, ujson.Value] =
     OpenAICompatibleDialect.standardUserParts.orElse {
-      case ContentPart.Document(MediaSource.Url(uri), MediaType.Pdf) => pdf(uri.toString)
+      case ContentPart.Document(MediaSource.Url(uri), MediaType.Pdf) if PartEncoding.isWebUrl(uri) => pdf(uri.toString)
       case ContentPart.Document(inline: MediaSource.Inline, MediaType.Pdf) =>
         pdf(PartEncoding.dataUrl(inline, MediaType.Pdf))
     }

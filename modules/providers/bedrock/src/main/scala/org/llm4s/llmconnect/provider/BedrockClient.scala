@@ -422,7 +422,8 @@ class BedrockClient(
             "Bedrock needs at least one user or assistant message; a system-only conversation has none"
           )
         )
-      else Right((systemTexts, messages))
+      else
+        BedrockClient.documentsWithText(messages).map(_ => (systemTexts, messages))
     }
   }
 
@@ -790,6 +791,25 @@ object BedrockClient {
   }
 
   /** `Right` when every part of `messages` is one Converse takes, else the error naming the first that is not. */
+  /**
+   * Converse refuses a message that carries a document block but no text block, so such a message - a user
+   * message whose only parts are documents - fails here, before anything is sent, rather than at Bedrock.
+   */
+  private[provider] def documentsWithText(messages: Seq[BedrockMessage]): Result[Unit] =
+    messages.zipWithIndex
+      .find { (message, _) =>
+        val types = message.content().asScala.map(_.`type`()).toSet
+        types.contains(ContentBlock.Type.DOCUMENT) && !types.contains(ContentBlock.Type.TEXT)
+      }
+      .fold[Result[Unit]](Right(())) { (_, index) =>
+        Left(
+          ValidationError(
+            "messages",
+            s"Bedrock message $index carries a document but no text; Converse needs a text part beside a document"
+          )
+        )
+      }
+
   private[provider] def checkParts(provider: String, messages: Seq[Message]): Result[Unit] =
     PartEncoding.check(provider, messages, userPart("document"), toolPart("document"))
   import org.llm4s.types.TryOps

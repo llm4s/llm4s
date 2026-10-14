@@ -69,7 +69,12 @@ class BedrockContentPartsSpec extends AnyFlatSpec with Matchers with EitherValue
   }
 
   it should "send an s3:// URL as an S3 location" in {
-    val blocks = userBlocks(image(s3, MediaType.WebP), doc(MediaSource.Url(URI.create("s3://bucket/report.pdf"))))
+    val blocks =
+      userBlocks(
+        image(s3, MediaType.WebP),
+        doc(MediaSource.Url(URI.create("s3://bucket/report.pdf"))),
+        ContentPart.Text("?")
+      )
     blocks.head("image") shouldBe
       ujson.Obj(
         "format" -> "webp",
@@ -95,6 +100,13 @@ class BedrockContentPartsSpec extends AnyFlatSpec with Matchers with EitherValue
     val blocks = send(conv)._1.get("messages").arr.head("content").arr
     blocks.map(_.obj.keys.head).toSeq shouldBe Seq("text", "text", "image")
     blocks(1)("text").str shouldBe "[Tool result for c9]: orphan"
+  }
+
+  it should "refuse, before sending, a message whose only parts are documents: Converse needs text beside one" in {
+    val (sent, result) = send(Conversation(Seq(UserMessage(Vector(doc(bytes))))))
+    sent shouldBe None
+    result.left.value.message should include("needs a text part beside a document")
+    send(Conversation(Seq(UserMessage(Vector(ContentPart.Text("Summarise."), doc(bytes))))))._2.isRight shouldBe true
   }
 
   "complete" should "refuse, before sending, each part Converse cannot take" in {

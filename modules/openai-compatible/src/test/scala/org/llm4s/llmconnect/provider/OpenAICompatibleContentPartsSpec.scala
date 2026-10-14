@@ -99,6 +99,15 @@ class OpenAICompatibleContentPartsSpec extends AnyFlatSpec with Matchers with Ei
     MistralDialect.encodeUserPart.isDefinedAt(pdfInline) shouldBe false
   }
 
+  "Every dialect" should "refuse a URL its endpoint cannot fetch (gs://, s3://)" in {
+    val gsImage = ContentPart.image(MediaSource.Url(URI.create("gs://b/a.png")), MediaType.Png).value
+    val s3Pdf   = ContentPart.document(MediaSource.Url(URI.create("s3://b/r.pdf")), MediaType.Pdf).value
+    Seq(OpenAICompatibleDialect.standard(), OpenRouterDialect, MistralDialect, ZaiDialect, CohereDialect).foreach { d =>
+      d.encodeUserPart.isDefinedAt(gsImage) shouldBe false
+      d.encodeUserPart.isDefinedAt(s3Pdf) shouldBe false
+    }
+  }
+
   "DeepSeek" should "take text only" in {
     DeepSeekDialect.encodeUserPart(ContentPart.Text("t")) shouldBe ujson.Obj("type" -> "text", "text" -> "t")
     DeepSeekDialect.encodeUserPart.isDefinedAt(imageUrl) shouldBe false

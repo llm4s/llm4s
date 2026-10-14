@@ -103,6 +103,8 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
         Vector(image(MediaSource.ProviderFile("anthropic", "file_1")))
       )                                                  -> "image (provider file anthropic, image/png)",
       UserMessage(Vector(doc(url, MediaType.PlainText))) -> "document (url, text/plain)",
+      UserMessage(Vector(image(MediaSource.Url(URI.create("gs://b/a.png")))))     -> "image (url, image/png)",
+      UserMessage(Vector(doc(MediaSource.Url(URI.create("s3://b/r.pdf")))))       -> "document (url, application/pdf)",
       UserMessage(Vector(doc(MediaSource.Inline(bytes), MediaType.Csv)))          -> "document (inline, text/csv)",
       ToolMessage(Vector(image(MediaSource.Inline(bytes), MediaType.Tiff)), "c1") -> "image (inline, image/tiff)"
     )

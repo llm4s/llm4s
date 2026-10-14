@@ -30,7 +30,8 @@ private[llm4s] object PartEncoding {
   /**
    * `Right` when `user` covers every part of every user message in `messages`, and `tool` every
    * part of every tool message; else the error for the first part one does not. For a client that
-   * builds its request in steps that cannot fail, so it checks the conversation first.
+   * builds its request in steps that cannot fail, so it checks the conversation first. It asks only
+   * `isDefinedAt`: nothing is encoded, so inline media is not base64-encoded twice per request.
    */
   def check(
     provider: String,
@@ -40,12 +41,27 @@ private[llm4s] object PartEncoding {
   ): Result[Unit] =
     messages.iterator
       .map {
-        case um: UserMessage => encodeAll(provider, um.role, um.parts)(user).map(_ => ())
-        case tm: ToolMessage => encodeAll(provider, tm.role, tm.parts)(tool).map(_ => ())
+        case um: UserMessage => covered(provider, um.role, um.parts, user)
+        case tm: ToolMessage => covered(provider, tm.role, tm.parts, tool)
         case _               => Right(())
       }
       .collectFirst { case Left(error) => Left(error) }
       .getOrElse(Right(()))
+
+  private def covered(
+    provider: String,
+    role: MessageRole,
+    parts: Seq[ContentPart],
+    encode: PartialFunction[ContentPart, Any]
+  ): Result[Unit] =
+    parts.find(!encode.isDefinedAt(_)).fold[Result[Unit]](Right(()))(part => Left(unsupported(provider, part, role)))
+
+  /**
+   * Whether `uri` is a web URL (`http` or `https`): the only URLs a provider that fetches media itself can
+   * read. A `gs://` or `s3://` URL sent to one would pass the check and fail only after the request is sent.
+   */
+  def isWebUrl(uri: java.net.URI): Boolean =
+    Option(uri.getScheme).exists(s => s.equalsIgnoreCase("http") || s.equalsIgnoreCase("https"))
 
   /** Covers text parts only, as their text: for a role whose wire format takes nothing else. */
   val textOnly: PartialFunction[ContentPart, String] = { case ContentPart.Text(text) => text }

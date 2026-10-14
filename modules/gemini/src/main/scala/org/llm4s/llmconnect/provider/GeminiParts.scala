@@ -9,36 +9,58 @@ import org.llm4s.types.Result
  * [[GeminiClient]] and [[VertexAIClient]], which speak the same request format.
  *
  * A user message's text parts are `text` parts; an image or document is `inlineData` (`mimeType`, base64
- * `data`) when inline, and `fileData` (`mimeType`, `fileUri`) at a URL or in a file uploaded to the client's
- * own provider, whose id is the `fileUri`. A tool result is a `functionResponse`, whose `response.result` is
- * its text: media in one is refused. Any other part fails the request with an
- * [[org.llm4s.error.UnsupportedContentPartError]] before anything is sent.
+ * `data`) when inline, and `fileData` (`mimeType`, `fileUri`) for a reference the client resolves to a URI.
+ * Each client passes its own `fileUri`, because the two take different references: the Gemini API a web
+ * URL or a file uploaded through its Files API, Vertex AI a Cloud Storage object. A tool result is a
+ * `functionResponse`, whose `response.result` is its text: media in one is refused. Any other part fails
+ * the request with an [[org.llm4s.error.UnsupportedContentPartError]] before anything is sent.
  */
 private[provider] object GeminiParts {
 
-  /** The `parts` entry for each user-message part `provider`'s client sends. */
-  def user(provider: String): PartialFunction[ContentPart, ujson.Value] = {
-    case ContentPart.Text(text)                                      => ujson.Obj("text" -> text)
-    case ContentPart.Image(source, mt) if sends(provider, source)    => encode(source, mt)
-    case ContentPart.Document(source, mt) if sends(provider, source) => encode(source, mt)
+  /** Resolves a reference to the URI sent as `fileData.fileUri`; `None` refuses it. */
+  type FileUri = MediaSource => Option[String]
+
+  /** The `parts` entry for each user-message part a client with `fileUri` sends. */
+  def user(fileUri: FileUri): PartialFunction[ContentPart, ujson.Value] = {
+    case ContentPart.Text(text)                                     => ujson.Obj("text" -> text)
+    case ContentPart.Image(source, mt) if sends(fileUri, source)    => encode(fileUri, source, mt)
+    case ContentPart.Document(source, mt) if sends(fileUri, source) => encode(fileUri, source, mt)
   }
 
-  /** `Right` when `provider`'s client can send every part of `messages`. */
-  def check(provider: String, messages: Seq[Message]): Result[Unit] =
-    PartEncoding.check(provider, messages, user(provider), PartEncoding.textOnly)
+  /** `Right` when a client with `fileUri` can send every part of `messages`. */
+  def check(provider: String, messages: Seq[Message], fileUri: FileUri): Result[Unit] =
+    PartEncoding.check(provider, messages, user(fileUri), PartEncoding.textOnly)
 
-  private def sends(provider: String, source: MediaSource): Boolean = source match {
-    case MediaSource.ProviderFile(owner, _) => owner == provider
-    case _                                  => true
+  /**
+   * The Gemini API's references: a web URL (`http`/`https`), or a file uploaded to `provider` through the
+   * Files API - by its `uri`, or by its name (`files/abc`, or `abc`), resolved against `baseUrl` as the
+   * Files API forms the `uri` (`<baseUrl>/files/abc`).
+   */
+  def geminiFileUri(provider: String, baseUrl: String): FileUri = {
+    case MediaSource.Url(uri) if PartEncoding.isWebUrl(uri) => Some(uri.toString)
+    case MediaSource.ProviderFile(owner, id) if owner == provider =>
+      if (id.startsWith("https://")) Some(id)
+      else Some(s"${baseUrl.stripSuffix("/")}/${if (id.startsWith("files/")) id else s"files/$id"}")
+    case _ => None
   }
 
-  private def encode(source: MediaSource, mediaType: MediaType): ujson.Value = source match {
+  /** Vertex AI's references: a Cloud Storage object (`gs://`). It has no file store of its own. */
+  val vertexFileUri: FileUri = {
+    case MediaSource.Url(uri) if Option(uri.getScheme).exists(_.equalsIgnoreCase("gs")) => Some(uri.toString)
+    case _                                                                              => None
+  }
+
+  private def sends(fileUri: FileUri, source: MediaSource): Boolean = source match {
+    case _: MediaSource.Inline => true
+    case reference             => fileUri(reference).isDefined
+  }
+
+  private def encode(fileUri: FileUri, source: MediaSource, mediaType: MediaType): ujson.Value = source match {
     case inline: MediaSource.Inline =>
       ujson.Obj("inlineData" -> ujson.Obj("mimeType" -> mediaType.mimeType, "data" -> PartEncoding.base64(inline)))
-    case MediaSource.Url(uri)            => fileData(uri.toString, mediaType)
-    case MediaSource.ProviderFile(_, id) => fileData(id, mediaType)
+    case reference =>
+      ujson.Obj(
+        "fileData" -> ujson.Obj("mimeType" -> mediaType.mimeType, "fileUri" -> fileUri(reference).getOrElse(""))
+      )
   }
-
-  private def fileData(uri: String, mediaType: MediaType): ujson.Value =
-    ujson.Obj("fileData" -> ujson.Obj("mimeType" -> mediaType.mimeType, "fileUri" -> uri))
 }

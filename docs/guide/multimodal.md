@@ -76,13 +76,15 @@ the role. No part is dropped and none is turned into text. A `ProviderFile` goes
 | Mistral, in addition | PDF `Url` | |
 | DeepSeek | text | text |
 | Anthropic | text; image (PNG, JPEG, GIF, WebP) `Url`, `Inline`; PDF `Url`, `Inline`; plain text `Inline` | the same |
-| Gemini API, Vertex AI | text; image and document `Inline`, `Url`, own `ProviderFile` | text |
+| Gemini API | text; image and document `Inline`, a web `Url`, own `ProviderFile` (its `uri`, or its name `files/abc`) | text |
+| Vertex AI | text; image and document `Inline`, a `gs://` `Url` | text |
 | Ollama | text; image `Inline` | text |
-| Bedrock | text; image (PNG, JPEG, GIF, WebP) and document (all five) `Inline` or an `s3://` `Url` | the same |
+| Bedrock | text; image (PNG, JPEG, GIF, WebP) and document (all five) `Inline` or an `s3://` `Url`; a document needs a text part beside it | the same |
 | watsonx.ai | text; image `Inline` | text |
 
-"Own `ProviderFile`" means a file whose `provider` is the client's own id (`openai`, `azure`, `requesty`, `gemini`,
-`vertexai`). Several text parts with no media are sent as one string, joined by newlines, by the OpenAI-compatible
+A `Url` sent to OpenAI, an OpenAI-compatible provider, Anthropic or the Gemini API must be `http` or `https`.
+"Own `ProviderFile`" means a file whose `provider` is the client's own id (`openai`, `azure`, `requesty`, `gemini`;
+Vertex AI takes none). Several text parts with no media are sent as one string, joined by newlines, by the OpenAI-compatible
 providers and Ollama.
 
 A media type the wire format can name but a model rejects is the provider's error, as it is for text.

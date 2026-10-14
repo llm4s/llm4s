@@ -877,7 +877,7 @@ object AnthropicClient {
    * needs the beta Files API, so it is not covered.
    */
   private val media: PartialFunction[ContentPart, Either[ImageBlockParam, DocumentBlockParam]] = {
-    case ContentPart.Image(MediaSource.Url(uri), mt) if imageMediaType(mt).isDefined =>
+    case ContentPart.Image(MediaSource.Url(uri), mt) if imageMediaType(mt).isDefined && PartEncoding.isWebUrl(uri) =>
       Left(ImageBlockParam.builder().source(UrlImageSource.builder().url(uri.toString).build()).build())
     case ContentPart.Image(inline: MediaSource.Inline, mt) if imageMediaType(mt).isDefined =>
       Left(
@@ -888,7 +888,7 @@ object AnthropicClient {
           )
           .build()
       )
-    case ContentPart.Document(MediaSource.Url(uri), MediaType.Pdf) =>
+    case ContentPart.Document(MediaSource.Url(uri), MediaType.Pdf) if PartEncoding.isWebUrl(uri) =>
       Right(DocumentBlockParam.builder().source(UrlPdfSource.builder().url(uri.toString).build()).build())
     case ContentPart.Document(inline: MediaSource.Inline, MediaType.Pdf) =>
       Right(

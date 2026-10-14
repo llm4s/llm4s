@@ -90,4 +90,16 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
     sent(toolResult(ToolMessage(Vector(imageInline), "c1"))).left.value shouldBe
       UnsupportedContentPartError("openai", imageInline.kind, "tool")
   }
+
+  it should "refuse an image URL it cannot fetch, a gs:// or s3:// one, before sending" in {
+    Seq("gs://bucket/a.png", "s3://bucket/a.png").foreach { u =>
+      val part = ContentPart.image(MediaSource.Url(URI.create(u)), MediaType.Png).value
+      sent(Conversation(Seq(UserMessage(Vector(part))))).left.value shouldBe
+        UnsupportedContentPartError("openai", part.kind, "user")
+    }
+  }
+
+  it should "return a Left, not throw, when the SDK refuses a malformed part" in {
+    sent(Conversation(Seq(UserMessage(Vector(ContentPart.Text(null), imageInline))))).isLeft shouldBe true
+  }
 }

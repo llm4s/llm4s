@@ -88,6 +88,9 @@ class GeminiClient(
   // thought signatures are replayed only to the provider and model id they were produced by (see ReplayOrigin)
   private val replayOrigin = ReplayOrigin(providerName, config.model)
 
+  // the references Gemini takes: web URLs and this provider's uploaded files
+  private val fileUri = GeminiParts.geminiFileUri(providerName, config.baseUrl)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
@@ -102,7 +105,7 @@ class GeminiClient(
         dropUnsupported = true
       )
       // a part Gemini cannot take fails the request here, before anything is sent
-      .flatMap(transformed => GeminiParts.check(providerName, transformed.messages).map(_ => transformed))
+      .flatMap(transformed => GeminiParts.check(providerName, transformed.messages, fileUri).map(_ => transformed))
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
@@ -148,7 +151,7 @@ class GeminiClient(
         dropUnsupported = true
       )
       // a part Gemini cannot take fails the request here, before anything is sent
-      .flatMap(transformed => GeminiParts.check(providerName, transformed.messages).map(_ => transformed))
+      .flatMap(transformed => GeminiParts.check(providerName, transformed.messages, fileUri).map(_ => transformed))
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
@@ -277,7 +280,7 @@ class GeminiClient(
 
       case um: UserMessage =>
         // checked before the body is built: GeminiParts covers every part
-        contents += ujson.Obj("role" -> "user", "parts" -> ujson.Arr.from(um.parts.map(GeminiParts.user(providerName))))
+        contents += ujson.Obj("role" -> "user", "parts" -> ujson.Arr.from(um.parts.map(GeminiParts.user(fileUri))))
 
       case am: AssistantMessage =>
         // Tool call IDs map to function names so the following ToolMessages can be keyed by name

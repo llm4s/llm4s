@@ -558,7 +558,7 @@ class OpenAIClient private[provider] (
   private val userPart: PartialFunction[ContentPart, ChatCompletionContentPart] = {
     case ContentPart.Text(text) =>
       ChatCompletionContentPart.ofText(ChatCompletionContentPartText.builder().text(text).build())
-    case ContentPart.Image(MediaSource.Url(uri), _)               => imageUrl(uri.toString)
+    case ContentPart.Image(MediaSource.Url(uri), _) if PartEncoding.isWebUrl(uri) => imageUrl(uri.toString)
     case ContentPart.Image(inline: MediaSource.Inline, mediaType) => imageUrl(PartEncoding.dataUrl(inline, mediaType))
     case ContentPart.Document(inline: MediaSource.Inline, MediaType.Pdf) =>
       pdfFile(_.filename("document.pdf").fileData(PartEncoding.dataUrl(inline, MediaType.Pdf)))
@@ -592,7 +592,8 @@ class OpenAIClient private[provider] (
   private def convertToOpenAIMessages(conversation: Conversation): Result[Seq[ChatCompletionMessageParam]] =
     PartEncoding
       .check(providerName, conversation.messages, userPart, PartEncoding.textOnly)
-      .map(_ => conversation.messages.map(toOpenAIMessage))
+      // the SDK builders throw on malformed content (a null text): inside the Result, as buildParams is
+      .flatMap(_ => Try(conversation.messages.map(toOpenAIMessage)).toEither.left.map(_.toLLMError))
 
   // one text part goes as a plain string, as every message did before content parts
   private def singleText(parts: Vector[ContentPart]): Boolean = parts match {
