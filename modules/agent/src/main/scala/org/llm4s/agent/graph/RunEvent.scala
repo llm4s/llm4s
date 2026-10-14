@@ -194,10 +194,18 @@ enum DisconnectReason:
    * store). A subscription follows one thread, not its id: a new thread created under the same id is
    * not delivered to it - subscribe again, from `0`, to follow that one. A subscription in another
    * runtime that had delivered no event yet cannot be told from a new one, so it follows the new
-   * thread instead of ending; see [[GraphRuntime.deleteThread]] for when each subscription learns of
-   * the delete.
+   * thread instead of ending, unless it is another tenant's ([[TenantMismatch]]); see
+   * [[GraphRuntime.deleteThread]] for when each subscription learns of the delete.
    */
   case ThreadDeleted
+
+  /**
+   * The thread belongs to another tenant than the subscriber's ([[GraphRuntime.subscribe]]'s `config`):
+   * it did not exist when the subscription was made, or was deleted and created again through another
+   * runtime, and a run of another tenant then made it. Nothing of that thread is delivered: the event
+   * that showed it is not, and `lastSeq` is the last event the subscriber was entitled to.
+   */
+  case TenantMismatch
 
 /**
  * A registration with [[GraphRuntime.subscribe]] or [[RunHandle.subscribe]]. It is scoped to a

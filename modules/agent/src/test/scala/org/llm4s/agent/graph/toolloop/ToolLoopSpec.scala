@@ -422,7 +422,8 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
       .suspended
     val afterWinner = store.latest(thread).value.map(_.checkpoint.id)
 
-    // the loser read the thread before the winner claimed it
+    // the loser read the thread before the winner claimed it; its re-read after the conflict sees the winner
+    val staleRead = new java.util.concurrent.atomic.AtomicBoolean(true)
     val racing = new Checkpointer {
       def commit(threadId: ThreadId, commit: Commit)                             = store.commit(threadId, commit)
       def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = store.claim(threadId, request)
@@ -434,7 +435,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
         store.renew(threadId, token, ttl)
       def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = store.release(threadId, token)
       def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = store.effect(threadId, key)
-      def latest(threadId: ThreadId)                                             = Right(stale)
+      def latest(threadId: ThreadId) = if staleRead.getAndSet(false) then Right(stale) else store.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int)     = store.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long)              = store.compactEvents(threadId, beforeSeq)
       def deleteThread(threadId: ThreadId, token: FencingToken)           = store.deleteThread(threadId, token)
