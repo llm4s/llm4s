@@ -158,7 +158,8 @@ object Listing:
 
   /** The first `limit` of `items`, `truncated` when there are more. */
   def of[A](items: Iterator[A], limit: Int): Listing[A] =
-    val taken = items.take(limit + 1).toVector
+    // one more than the limit tells whether there are more; at Int.MaxValue there cannot be
+    val taken = items.take(if limit < Int.MaxValue then limit + 1 else limit).toVector
     Listing(taken.take(limit), taken.length > limit)
 
 /** One entry of a directory. `size` is in UTF-8 bytes, 0 for a directory. */
@@ -301,6 +302,10 @@ private[harness] object Text:
         Thread.currentThread().interrupt()
         Left(org.llm4s.error.CancelledError(operation))
       case failure => failure.toResult.flatten
+
+  /** Lines `offset` to `offset + limit` of `lines`, the sum taken without overflow. */
+  def page(lines: Vector[String], offset: Int, limit: Int): Vector[String] =
+    lines.slice(offset, math.min(offset.toLong + limit, lines.size.toLong).toInt)
 
   def checkLimit(operation: String, target: String, limit: Int): Result[Unit] =
     if limit >= 1 then Right(()) else Left(BackendRefused(operation, target, s"limit must be at least 1, was $limit"))

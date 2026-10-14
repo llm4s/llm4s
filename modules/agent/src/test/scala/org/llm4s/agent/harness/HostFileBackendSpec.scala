@@ -161,6 +161,17 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     small.grep("1", VPath.root, None, 10, call()).value.items.map(_.path) shouldBe Vector(p("/exact"))
   }
 
+  it should "take Int.MaxValue as a limit and as its scan bound, without overflow" in {
+    val unbounded = HostFileBackend.open(dir, maxScanEntries = Int.MaxValue).value
+    Seq("a/x", "b").foreach(rel => written(unbounded.write(p(s"/$rel"), "one\ntwo", call())))
+    unbounded.glob(Glob("**"), VPath.root, Int.MaxValue, call()).value shouldBe Listing(
+      Vector(p("/a/x"), p("/b")),
+      false
+    )
+    unbounded.ls(VPath.root, Int.MaxValue, call()).value.items.map(_.path) shouldBe Vector(p("/a"), p("/b"))
+    unbounded.read(p("/b"), 1, Int.MaxValue, call()).value shouldBe FileLines(Vector("two"), 1, 2)
+  }
+
   it should "walk in sorted order, so a cut-off result is deterministic" in {
     Seq("c", "a/z", "a/b", "b").foreach(rel => written(backend.write(p(s"/$rel"), rel, call())))
     backend.glob(Glob("**"), VPath.root, 10, call()).value.items.map(_.value) shouldBe Vector(

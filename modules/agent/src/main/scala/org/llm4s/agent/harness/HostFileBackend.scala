@@ -355,7 +355,10 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
    * read stops when its thread is interrupted.
    */
   private def children(dir: Path, max: Int): (Vector[(String, Path)], Boolean) =
-    val least = new java.util.PriorityQueue[(String, Path)](max + 1, Ordering.by[(String, Path), String](_._1).reverse)
+    val least = new java.util.PriorityQueue[(String, Path)](
+      math.min(max, 1024) + 1,
+      Ordering.by[(String, Path), String](_._1).reverse
+    )
     var eligible = 0
     Using.resource(Files.newDirectoryStream(dir)) { stream =>
       val entries = stream.iterator()
@@ -401,11 +404,11 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
       _      <- Either.cond(offset >= 0, (), BackendRefused("read", path.value, s"offset must be >= 0, was $offset"))
       target <- resolve("read", path)
       lines  <- io("read", path)(fileBytes("read", path, target).map(b => Text.lines(text(b))))
-    yield FileLines(lines.slice(offset, offset + limit), offset, lines.size)
+    yield FileLines(Text.page(lines, offset, limit), offset, lines.size)
 
   /** The files within `under`, depth first in name order, stopping after `maxScanEntries` entries. */
   final private class Walk(start: Path, from: VPath):
-    private var visited = 0
+    private var visited = 0L
     private var cut     = false
     private def full    = visited > maxScanEntries
 
@@ -416,7 +419,7 @@ final class HostFileBackend private (val root: Path, val maxFileBytes: Long, val
     private def within(dir: Path, at: VPath): Iterator[(VPath, Path)] =
       if full then Iterator.empty
       else
-        val (entries, more) = children(dir, maxScanEntries - visited + 1)
+        val (entries, more) = children(dir, math.min(maxScanEntries.toLong - visited + 1, Int.MaxValue.toLong).toInt)
         if more then cut = true
         entries.iterator.flatMap { (name, p) =>
           visited += 1

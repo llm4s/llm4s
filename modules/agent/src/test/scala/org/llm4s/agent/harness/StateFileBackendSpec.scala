@@ -44,6 +44,21 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     f.state.get(backend.files).value(p("/a.txt")).modified shouldBe clock.instant()
   }
 
+  it should "take Int.MaxValue as a limit, for listings and reads alike, without overflow" in {
+    val (backend, f) = fixture()
+    f.write("/a.txt", "one\ntwo\nthree")
+    f.write("/b.txt", "x")
+    backend.ls(VPath.root, Int.MaxValue, f.ctx).value shouldBe Listing(
+      backend.ls(VPath.root, 10, f.ctx).value.items,
+      false
+    )
+    backend.ls(VPath.root, Int.MaxValue, f.ctx).value.items should have size 2
+    backend.glob(Glob("*"), VPath.root, Int.MaxValue, f.ctx).value.items should have size 2
+    backend.grep("o", VPath.root, None, Int.MaxValue, f.ctx).value.items should have size 2
+    backend.read(p("/a.txt"), 1, Int.MaxValue, f.ctx).value shouldBe FileLines(Vector("two", "three"), 1, 3)
+    Listing.of(Iterator(1, 2), Int.MaxValue) shouldBe Listing(Vector(1, 2), truncated = false)
+  }
+
   it should "refuse reading a missing file, a directory, or with a bad offset or limit" in {
     val (backend, f) = fixture()
     f.write("/d/a.txt", "x")

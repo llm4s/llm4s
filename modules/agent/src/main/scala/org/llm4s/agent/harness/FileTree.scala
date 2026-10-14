@@ -60,7 +60,7 @@ private[harness] object FileTree:
       entry <- fileOf("read", all, path)
     yield
       val lines = Text.lines(entry.content)
-      FileLines(lines.slice(offset, offset + limit), offset, lines.size)
+      FileLines(Text.page(lines, offset, limit), offset, lines.size)
 
   private def within(all: Map[VPath, FileEntry], under: VPath, accept: VPath => Boolean): Vector[VPath] =
     all.keysIterator.filter(p => p.isWithin(under) && accept(p)).toVector.sorted
