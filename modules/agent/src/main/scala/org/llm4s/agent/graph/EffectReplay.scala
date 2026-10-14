@@ -70,8 +70,8 @@ object EffectKey:
     operation: String,
     discriminator: Seq[String]
   ): EffectKey =
-    // v2: the base names the effect's task by its lineage (design §4.24)
-    val parts = Seq("llm4s-effect-v2", threadId.value, base.value, operation, discriminator.size.toString)
+    // the base names the effect's task (its lineage included) or the call (whose key carries it)
+    val parts = Seq("llm4s-effect-v1", threadId.value, base.value, operation, discriminator.size.toString)
     new EffectKey(KeyDigest.of(parts ++ discriminator), operation, scopeOf(threadId))
 
   /** The scope of every effect key of thread `threadId`. */

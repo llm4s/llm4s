@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     lineage)`): not live, and scheduled no later than the new durable checkpoint. A takeover's admission no longer
     releases the evidence of a stale claimant's in-flight effect.
   - SQLite schema 4 adds `task_lineage`.
+  - The loop records a tool call's `IdempotencyKey` from the issuing model task's key, lineage included, and the
+    call's id, name and arguments (`IdempotencyKey.ofCall`), so a model request asked again from the same results
+    that answers alike issues the same keys. Tasks and calls of a format-6 checkpoint keep their earlier keys.
   - Key and `StateCheck` hashing encode unpaired surrogates one-to-one. Well-formed text hashes as before.
 - **A checkpoint restores after its graph gains a key** ([#1934](https://github.com/llm4s/llm4s/issues/1934), Stage 3
   slice C5, design §4.29): every `GraphSnapshot` now records its graph's `GraphShape` (entry, nodes, edges, joins,

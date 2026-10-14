@@ -121,18 +121,33 @@ object IdempotencyKey:
    * task keeps its id; the id itself names the superstep that scheduled the task.
    */
   private[graph] def ofTask(threadId: ThreadId, taskId: TaskId, lineage: String): IdempotencyKey =
-    KeyDigest.of(Seq("llm4s-task-v2", threadId.value, taskId.value, lineage))
+    // a task of a format-6 checkpoint keeps the key it had then, so the records it wrote still answer for it
+    if lineage == Task.Legacy then KeyDigest.of(Seq("llm4s-task-v1", threadId.value, taskId.value))
+    else KeyDigest.of(Seq("llm4s-task-v2", threadId.value, taskId.value, lineage))
 
   /**
-   * The base of the effect keys of tool call `toolCallId` run as task `task` ([[RunContext.taskKey]], the task
-   * the call's first run was): in `execute`, or in the answered resume `phase`.
+   * The key of tool call `call` issued by the model task whose key is `modelTask` ([[RunContext.taskKey]]):
+   * the SHA-256 of the thread, that task, and the call's id, name and arguments. The model task's key carries
+   * its lineage, so a model request made again from the same results - `recover` after the response was lost,
+   * or work after the last durable checkpoint planned again after a takeover - that answers with the same call
+   * issues it under the same key, and its effects replay rather than repeat; a request whose answer differs
+   * issues other calls, with other keys, whatever ids the provider reuses (design §4.24).
    */
-  private[graph] def ofToolEffect(
-    task: IdempotencyKey,
-    toolCallId: ToolCallId,
-    phase: Option[IdempotencyKey]
+  private[agent] def ofCall(
+    threadId: ThreadId,
+    modelTask: IdempotencyKey,
+    call: org.llm4s.llmconnect.model.ToolCall
   ): IdempotencyKey =
-    KeyDigest.of(Seq("llm4s-tool-effect-v1", task, toolCallId.value, phase.getOrElse("")))
+    KeyDigest.of(
+      Seq(
+        "llm4s-tool-call-v3",
+        threadId.value,
+        modelTask,
+        call.id,
+        call.name,
+        ujson.write(call.arguments, escapeUnicode = true)
+      )
+    )
 
   /**
    * The key of an answered resume of the call `call` (design §4.24): the SHA-256, under a
@@ -144,11 +159,16 @@ object IdempotencyKey:
     call: IdempotencyKey,
     asking: Option[IdempotencyKey],
     question: ujson.Value,
-    answer: ujson.Value
+    answer: ujson.Value,
+    legacy: Boolean = false
   ): IdempotencyKey =
-    // escaped to ASCII: JSON text is one-to-one with its value only when no character is re-encoded on the way
-    def text(value: ujson.Value) = ujson.write(value, escapeUnicode = true)
-    KeyDigest.of(Seq("llm4s-tool-resume-v2", call, asking.getOrElse(""), text(question), text(answer)))
+    // escaped to ASCII: JSON text is one-to-one with its value only when no character is re-encoded on the way;
+    // a call of a format-6 checkpoint keeps the phase key it had then
+    if legacy then
+      KeyDigest.of(Seq("llm4s-tool-resume-v1", call, asking.getOrElse(""), ujson.write(question), ujson.write(answer)))
+    else
+      def text(value: ujson.Value) = ujson.write(value, escapeUnicode = true)
+      KeyDigest.of(Seq("llm4s-tool-resume-v2", call, asking.getOrElse(""), text(question), text(answer)))
 
   extension (key: IdempotencyKey) def value: String = key
 

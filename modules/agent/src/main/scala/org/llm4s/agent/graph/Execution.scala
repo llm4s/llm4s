@@ -113,8 +113,15 @@ final private[graph] case class Task(
  * `hold` says what continues it, `resumeNode` is the held task's own node and `question` is unused.
  */
 private[graph] object Task:
-  /** The lineage of a task created before its run was admitted; admission stamps it ([[rootLineage]]). */
-  val Unstamped: String = ""
+  /**
+   * The lineage of a task created before its run was admitted; admission stamps it ([[rootLineage]]). Not the
+   * empty lineage, which is a task of a format-6 checkpoint: that keeps its empty lineage, and with it the keys
+   * it had before lineages (see `RunContext.taskKey`).
+   */
+  val Unstamped: String = "unstamped"
+
+  /** The lineage of a task restored from a checkpoint written before lineages (format 6). */
+  val Legacy: String = ""
 
   /** The lineage of task `id` created for the run of claim `token` before it was admitted. */
   def rootLineage(token: Long, id: TaskId): String =

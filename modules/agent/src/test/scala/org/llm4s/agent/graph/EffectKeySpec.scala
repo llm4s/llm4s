@@ -74,9 +74,9 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
     val forked = ToolContext(context(thread = "fork"), ToolCallId("call_0"), call, ThreadState.empty(Map.empty))
     forked.effectKey("file.write", "/a") should not be here.effectKey("file.write", "/a")
     here.effectKey("file.write", "/a") should not be context().effectKey("file.write", "/a")
-    ToolContext(context(), ToolCallId("call_1"), call, ThreadState.empty(Map.empty))
-      .effectKey("file.write", "/a") should
-      not be here.effectKey("file.write", "/a")
+    // the call's key names the call: another call's key is another effect, whatever its provider id
+    ToolContext(context(), ToolCallId("call_0"), IdempotencyKey("other"), ThreadState.empty(Map.empty))
+      .effectKey("file.write", "/a") should not be here.effectKey("file.write", "/a")
   }
 
   "EffectRecord" should "round-trip through its JSON, and refuse a newer format or an unknown support class" in {
@@ -222,7 +222,14 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
     at("a").taskKey shouldBe at("a").taskKey
     val call  = IdempotencyKey("call")
     val state = ThreadState.empty(Map.empty)
-    ToolContext(at("a"), ToolCallId("c"), call, state).effectKey("op") should not be
+    // a call's key carries the issuing model task's lineage
+    val issued = org.llm4s.llmconnect.model.ToolCall("c", "tool", ujson.Obj("x" -> 1))
+    IdempotencyKey.ofCall(ThreadId("t"), at("a").taskKey, issued) should not be
+      IdempotencyKey.ofCall(ThreadId("t"), at("b").taskKey, issued)
+    IdempotencyKey.ofCall(ThreadId("t"), at("a").taskKey, issued) should not be
+      IdempotencyKey.ofCall(ThreadId("t"), at("a").taskKey, issued.copy(arguments = ujson.Obj("x" -> 2)))
+    // a tool's effects follow the call's key, which already carries the lineage
+    ToolContext(at("a"), ToolCallId("c"), call, state).effectKey("op") shouldBe
       ToolContext(at("b"), ToolCallId("c"), call, state).effectKey("op")
   }
 

@@ -67,8 +67,18 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  "The key a tool sees" should "be derived from where the model call ran and the call id" in {
-    val seen = new ConcurrentLinkedQueue[IdempotencyKey]()
+  "The key a tool sees" should "be derived from the model task that issued the call and the call itself" in {
+    val seen  = new ConcurrentLinkedQueue[IdempotencyKey]()
+    val tasks = new ConcurrentLinkedQueue[IdempotencyKey]()
+    val modelTasks = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("model-tasks")
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] = {
+        tasks.add(context.run.taskKey)
+        next(request)
+      }
+    }
     val record = SpecTools.tool("record") { (_, context) =>
       seen.add(context.idempotencyKey)
       ToolOutcome.Success(ujson.Str("ok"))
@@ -76,14 +86,16 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
     val models = new ConcurrentLinkedQueue[RunPosition]()
     val client = ScriptedLLMClient.of(calling(call("c1", "record")), CompletionFixture.simple("done"))
     val agent = built(
-      Agent.builder("assistant", client).withTools(SpecTools.set(record)).withMiddleware(modelPositions(models))
+      Agent
+        .builder("assistant", client)
+        .withTools(SpecTools.set(record))
+        .withMiddleware(modelPositions(models))
+        .withMiddleware(modelTasks)
     )
     agent.run(thread, "go").value.answer shouldBe Some("done")
 
-    val issuing = models.asScala.head
-    seen.asScala.toVector shouldBe Vector(
-      IdempotencyKey.derive(thread, issuing.checkpointId, issuing.superstep, issuing.taskId, ToolCallId("c1"))
-    )
+    // the model task's key carries its lineage: the same work issues the same call under the same key (§4.24)
+    seen.asScala.toVector shouldBe Vector(IdempotencyKey.ofCall(thread, tasks.asScala.head, call("c1", "record")))
   }
 
   /** A `record` tool that keeps every key it sees, and a model that calls it as `call_0` in two turns. */

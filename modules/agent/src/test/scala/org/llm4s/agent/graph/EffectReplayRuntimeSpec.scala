@@ -123,6 +123,47 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
     keys.asScala.toVector.flatMap(record(store, thread, _)) shouldBe empty
   }
 
+  "A task of a format-6 checkpoint" should "keep the keys it had before lineages, so its records still answer" in {
+    // written by a build before lineages: the checkpoint's task has none, and its record is keyed the old way
+    val store  = InMemoryCheckpointer()
+    val effect = new Effect
+    val b      = GraphBuilder("legacy", "v1")
+    val n = b.node[Unit]("work", writes = Set(log)) { (_, _, context) =>
+      NodeResult.fromResult(effect.perform(context).map(n => Command.empty.update(log, s"work:$n")))
+    }
+    val graph  = b.compile(n)(_.get(log)).value
+    val legacy = graph.snapshot(graph.start(())).value
+    val format6 = Checkpoint(
+      6,
+      "old/1",
+      None,
+      thread.value,
+      "old",
+      CheckpointStatus.Running,
+      Instant.EPOCH,
+      legacy.copy(frontier = legacy.frontier.map(_.copy(lineage = "")))
+    )
+    val token = store.claim(thread, ClaimRequest(RunId("old"), 1.minute)).value.token
+    store.commit(thread, Commit(token, Some(format6))).value
+    val old = new RunContext(
+      RunConfig(),
+      RunPosition(thread, RunId("old"), "old/1", TaskId("0.0"), NodeId("work"), 0),
+      NodeEventSink.none,
+      owner = Some(TaskId("0.0") -> "")
+    )
+    old.taskKey.value shouldBe KeyDigest.of(Seq("llm4s-task-v1", thread.value, "0.0"))
+    val key = old.effectKey("count.add", "counter")
+    val written =
+      new EffectRecord(key, TaskId("0.0"), "", EffectBody.Completed(EffectIntent.Unverifiable, ujson.Num(1)))
+    store.commit(thread, Commit(token, effects = Vector(written))).value
+    store.release(thread, token).value
+
+    GraphRuntime(store).recover(thread, graph).awaited.value.completed._2 shouldBe Vector("work:1")
+    effect.applied.get shouldBe 0
+    effect.key.get shouldBe key
+    record(store, thread, key) shouldBe None
+  }
+
   "A run under Async" should "keep the record of a task running ahead of a commit that lands late" in {
     val store   = InMemoryCheckpointer()
     val runtime = GraphRuntime(store)
