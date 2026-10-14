@@ -59,19 +59,24 @@ class PayloadLogSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "bound and redact the server's stderr in the error it returns and logs" in {
-    // Reads the request, then writes ~10 KB to stderr and exits: the pending request fails, and the transport
+    // Reads the request, then writes ~3 KB to stderr (over MaxChars, under a pipe buffer) and exits: the pending request fails, and the transport
     // reports the server's stderr in its ERROR log and in the returned error. The server assembles the secret at
     // run time, because the transport logs its command line.
     val failingServer = StdioTestServers.command("--stderr-flood")
     val transport     = new StdioTransportImpl(failingServer, startupTimeout = 500.millis, name = "stderr-log")
 
+    val started = System.nanoTime()
     val (result, logged) = capturingDebug(classOf[StdioTransportImpl]) {
       try transport.sendRequest(JsonRpcRequest("2.0", "1", "tools/list", None))
       finally transport.close()
     }
+    val elapsed = (System.nanoTime() - started).nanos
 
     val error = result.left.map(_.message)
     error.isLeft shouldBe true
+    // The process-exit path, not the 30 s response timeout: a blocked server would end on the timeout.
+    elapsed should be < 15.seconds
+    error.left.foreach(message => (message should not).include("Timeout waiting"))
     error.left.foreach { message =>
       message should include("Server stderr:")
       message.length should be < PayloadLog.MaxChars + 300

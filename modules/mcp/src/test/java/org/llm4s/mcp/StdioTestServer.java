@@ -32,7 +32,7 @@ import java.util.regex.Pattern;
  *   <li>{@code --hello} - write a line to stdout before reading anything.</li>
  *   <li>{@code --hang} - after the above, sleep for 30 seconds instead of answering.</li>
  *   <li>{@code --exit-after-read} - read one line, then exit 0.</li>
- *   <li>{@code --stderr-flood} - read one line, write about 10 KB of JSON with a secret to stderr, exit 1.</li>
+ *   <li>{@code --stderr-flood} - read one line, write about 3 KB of JSON with a secret to stderr, exit 1.</li>
  *   <li>{@code --exit=N} - exit N at once.</li>
  * </ul>
  * Lines are read with {@code readLine}, so CRLF and LF both work; replies end in {@code \n}.
@@ -81,9 +81,12 @@ public final class StdioTestServer {
       if (line == null) return;
       if (gotFile != null) writeFile(gotFile, "got");
       if (flood) {
+        // Over PayloadLog.MaxChars (2048) so the cut is exercised, yet under a Windows anonymous pipe's 4096-byte
+        // buffer: the transport does not read stderr while a request is in flight, and a bigger write would block
+        // here before the exit, so the spec would end on the response timeout instead of the process exit.
         // Assembled at run time: the transport logs its command line, and the secret must not be in it.
         String k = "hunter2-SENT";
-        System.err.print("{\"api_key\":\"" + k + "INEL\",\"x\":\"" + "x".repeat(10000) + "\"}\n");
+        System.err.print("{\"api_key\":\"" + k + "INEL\",\"x\":\"" + "x".repeat(3000) + "\"}\n");
         System.err.flush();
         System.exit(1);
       }

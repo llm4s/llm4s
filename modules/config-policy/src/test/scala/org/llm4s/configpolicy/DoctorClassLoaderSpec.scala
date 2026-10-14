@@ -35,8 +35,13 @@ class DoctorClassLoaderSpec extends AnyWordSpec with Matchers {
     Files.write(file, content.getBytes(StandardCharsets.UTF_8))
   }
 
-  private def readAll(url: java.net.URL): String =
-    Using.resource(url.openStream())(s => new String(s.readAllBytes(), StandardCharsets.UTF_8))
+  // Without the JVM-wide jar cache: a `jar:` URL opened with caching keeps its JarFile open after the class loader
+  // closes, and Windows refuses to delete a jar that is open.
+  private def readAll(url: java.net.URL): String = {
+    val connection = url.openConnection()
+    connection.setUseCaches(false)
+    Using.resource(connection.getInputStream)(s => new String(s.readAllBytes(), StandardCharsets.UTF_8))
+  }
 
   "DoctorCli.classLoaderFor" should {
 
