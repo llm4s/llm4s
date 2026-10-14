@@ -349,6 +349,9 @@ lazy val llm4s = (project in file("."))
     // `sbt "dumpBuildModel <file>"`: the build's projects, keys, commands and aliases as JSON, read by
     // scripts/check-doc-support.sh. See project/BuildModel.scala.
     commands += BuildModel.dumpCommand,
+    // `sbt testPlatform`: only the tests that exercise platform-specific behaviour, for CI's Windows job.
+    // See project/PlatformTests.scala.
+    PlatformTests.settings(PerformanceTestTag),
     publish / skip                      := true,
     mimaFailOnNoPrevious                := false,
     publishedArtifactsCheck / aggregate := false,

@@ -16,7 +16,8 @@ import scala.util.matching.Regex
  * Pattern-based redaction automatically detects and masks:
  *  - API keys (OpenAI, Anthropic, Google, Voyage, Langfuse)
  *  - Bearer tokens and credential headers: Authorization, Proxy-Authorization, Cookie and Set-Cookie
- *  - URL query parameters with sensitive keys, and the password of a URL's userinfo (`https://user:password@host`)
+ *  - URL query parameters with sensitive keys, and those that carry a short-lived credential (`sig`, `code`, `;jsessionid=`)
+ *  - The password of a URL's userinfo (`https://user:password@host`)
  *  - Sensitive fields, whatever the shape: JSON (also inside a string, single-quoted, with a number value, or with
  *    an array or object value, whose every leaf - string, number or bare word - is replaced), `key=value` pairs and
  *    `x-api-key: value` header lines (api_key, password, token, client_secret, etc.)
@@ -286,7 +287,9 @@ private[llm4s] object Redaction {
    * (suffix `apikey`), `X-Auth-Token` (`authtoken`) and `X-Amz-Security-Token` (`securitytoken`). `cookie` is a whole
    * word, never a suffix or a substring: `cookie_policy`, `cookie_consent` and `max_cookie_age` name settings, not
    * cookies. With `SensitiveKeySuffixes`, this is core's one list of sensitive key names for fields, header lines and
-   * `key=value` pairs; URL query parameters are also matched, by substring, against `SensitiveQueryParams`. A list of
+   * `key=value` pairs; URL query parameters are also matched, by substring, against `SensitiveQueryParams`. The
+   * plurals (`SensitivePluralSuffixes`) and the whole query names (`SensitiveQueryNames`) of #1646 are read by a
+   * reading of their own, which only adds to what these lists redact. A list of
    * headers to withhold (the HTTP tool's redirect stripping) should read the same names.
    */
   private val SensitiveKeyWords: Set[String] =
@@ -317,13 +320,22 @@ private[llm4s] object Redaction {
 
   /**
    * Whether `key` (a field, header or parameter name) names a credential, by `SensitiveKeyWords` and
-   * `SensitiveKeySuffixes`. `llm4s-agent-tools`' HTTP tool reads it to withhold such headers on a cross-origin
-   * redirect even when they are allowlisted, so the two lists stay one.
+   * `SensitiveKeySuffixes`: the names the redaction passes read as keys. A plural (`api_keys`) is not one of them;
+   * `isCredentialName` takes those too.
    */
   private[llm4s] def isSensitiveKey(key: String): Boolean = {
     val normalised = key.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit)
     SensitiveKeyWords.contains(normalised) || SensitiveKeySuffixes.exists(normalised.endsWith)
   }
+
+  /**
+   * Whether `key` (a field, header or parameter name) names a credential or credentials: `isSensitiveKey`, or a
+   * plural of `SensitivePluralSuffixes` (`X-Api-Keys`, `Client-Secrets`, `db_passwords`), which redaction reads by a
+   * reading of its own (#1646). `llm4s-agent-tools`' HTTP tool reads it to withhold such headers on a cross-origin
+   * redirect even when they are allowlisted, so what a log redacts and what a redirect withholds stay one list.
+   */
+  private[llm4s] def isCredentialName(key: String): Boolean =
+    isSensitiveKey(key) || isPluralCredentialName(key.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit))
 
   /**
    * Whether the value `input(start until end)` of a sensitive `key` is prose that is left readable: the key is the
@@ -543,7 +555,9 @@ private[llm4s] object Redaction {
    * (`pythonValues`): a `pytest` diff, a notebook's line array, a dict cut off after a comma, `str(dict)` inside a
    * `repr`, `\'` inside a JSON string, a keyword argument holding a list or a call (`token=SecretStr('...')`, #1813).
    * A sixth (#1816) adds the password of a URL's userinfo, `https://alice:[REDACTED]@host`, also with the slashes
-   * escaped as JSON writes them.
+   * escaped as JSON writes them. Last (#1646), every reading again, of the input with each plural credential key
+   * (`secrets`, `api_keys`, `passwords`) and each key of a query parameter that carries a short-lived credential
+   * (`sig`, `X-Amz-Signature`, `code`, `;jsessionid=`) written as a key they take (`withSingularKeys`).
    *
    * Redacting the output a second time usually changes nothing, but that is not guaranteed: where quotes are
    * unbalanced or stray, the text a first pass replaced can change how a second pass pairs the quotes, and the
@@ -670,7 +684,11 @@ private[llm4s] object Redaction {
    * that meets a placeholder already written is written as nothing, so that the two read as one (#1813). The same
    * reading then runs again for a key whose value is a call (`token=SecretStr('...')`, #1813).
    *
-   * Last, the same way, the password of a URL's userinfo (`urlUserinfoPasswords`, #1816).
+   * Then, the same way, the password of a URL's userinfo (`urlUserinfoPasswords`, #1816).
+   *
+   * Last, every reading again, of the input with its plural credential keys and its credential query parameters
+   * written as keys they take (`withSingularKeys`, #1646), added the same way: whole where it touches no edit, and in
+   * the parts no edit covers where a placeholder alone replaces the text.
    *
    * Each reading is a fixed number of passes over the input, so the cost stays linear.
    */
@@ -711,6 +729,26 @@ private[llm4s] object Redaction {
     }
     if (input.indexOf('@') >= 0) {
       val added = joinedToPlaceholders(kept, uncoveredEdits(input, kept, urlUserinfoPasswords(input), placeholder))
+      if (added.nonEmpty) kept = (kept ++ added).sortBy(_.start)
+    }
+    val singular = withSingularKeys(input)
+    if (singular ne input) {
+      // Every reading again, of the input with each plural credential key and each further query parameter written
+      // as a key the readings take (#1646): what it replaces is added where nothing is, whole, or where something is,
+      // in the parts nothing covers. Its text is never written: an edit writes the placeholder and the quotes around
+      // it, never the input.
+      val read  = redaction(singular, placeholder, singleQuotedFromInput = true, addedReadings = true)._2
+      val alone = disjointFrom(kept, read)
+      if (alone.nonEmpty) kept = (kept ++ alone).sortBy(_.start)
+      val whole           = alone.toSet
+      val (pure, wrapped) = read.filter(e => e.masked && !whole(e)).partition(_.replacement == placeholder)
+      // A leaf it writes in quotes (`"[REDACTED]"`) may overlap a part another pass replaced, an API key inside the
+      // value: its parts no edit covers are added too, less every `"` and escape (`quoteSafeParts`), so that a JSON
+      // string around them is left as it was.
+      val parts =
+        quoteSafeParts(input, wrapped.map(e => (e.start, e.end, NoContentQuotes)), placeholder)
+      val spans = (pure.map(e => (e.start, e.end)) ++ parts).sortBy(_._1)
+      val added = joinedToPlaceholders(kept, uncoveredEdits(input, kept, spans, placeholder))
       if (added.nonEmpty) kept = (kept ++ added).sortBy(_.start)
     }
     kept
@@ -827,6 +865,122 @@ private[llm4s] object Redaction {
       val startsMasked = kept.iterator.filter(k => k.masked && k.before.isEmpty).map(_.start).toSet
       extra.map(e => if (endsMasked(e.start) || startsMasked(e.end)) Edit(e.start, e.end, "", -1, -1) else e)
     }
+
+  /**
+   * The plural of a credential name, as the last word of a key (#1646): `secrets`, `passwords` and `apikeys`, after
+   * lower-casing and dropping `_` and `-`, so `api_keys`, `apiKeys`, `x-api-keys`, `client_secrets` and
+   * `db_passwords` too. They name nothing but credentials. `tokens` is not one: `max_tokens`, `prompt_tokens` and
+   * `usage.tokens` are counts in every provider exchange.
+   */
+  private val SensitivePluralSuffixes: Seq[String] = Seq("secrets", "passwords", "apikeys")
+
+  /** Whether `normalised` (lower-cased, letters and digits only) ends in a `SensitivePluralSuffixes`. */
+  private def isPluralCredentialName(normalised: String): Boolean = SensitivePluralSuffixes.exists(normalised.endsWith)
+
+  /**
+   * Query parameters that carry a short-lived credential, by their whole name in any case (#1646): `sig` (an Azure
+   * SAS signature), `signature`, `x-amz-signature` (an AWS SigV4 presigned URL), `x-goog-signature` (a Google Cloud
+   * Storage signed URL), `code` (an OAuth 2.0 authorization code), `session`, `sessionid` and `jsessionid` (a session
+   * id, also as the matrix parameter `;jsessionid=`). Matched whole, not as `SensitiveQueryParams` are, by substring:
+   * `sig` is in `signal` and `design`, `code` in `zipcode` and `error_code`. Only as the key of a query parameter, after
+   * `?`, `&`, their JSON escapes or their HTML ones (`&amp;`): a field `"code": 400` is an error code.
+   */
+  /** The HTML escapes of `&` and `?` that `withSingularKeys` takes before a parameter's key, in lower case. */
+  private val HtmlQuerySeparators: Seq[String] = Seq("&amp;", "&#38;", "&#x26;", "&#63;", "&#x3f;")
+
+  private val SensitiveQueryNames: Set[String] =
+    Set("sig", "signature", "x-amz-signature", "x-goog-signature", "code", "session", "sessionid", "jsessionid")
+
+  /**
+   * `input` with every plural credential key (`SensitivePluralSuffixes`) and every key of a `SensitiveQueryNames`
+   * parameter written, in place and with as many characters, as a key the readings take (#1646), or `input` itself
+   * where there is none. A plural loses its last `s` and doubles its first character, so it keeps its start - what
+   * comes before it is what came before - and ends in a sensitive suffix: `secrets` is `ssecret`, `api_keys` is
+   * `aapi_key`. A parameter's key is written as `x`s and `key`, which `SensitiveQueryParams` holds, the `#` before a
+   * fragment's key and the `;` before `jsessionid` as `&`, as is the `#` that ends its value, or the `?` that ends a
+   * matrix value; the `/` or `;` that ends a matrix value is written as spaces, so the path after it is not read as a
+   * query. A JSON escape of those (`\/`, `\u003f`) is written whole, with as many characters. The edits a reading of that text makes are edits of the input: no character moves. One scan
+   * over the runs of letters, digits, `_` and `-`.
+   */
+  private def withSingularKeys(input: String): String = {
+    val length                    = input.length
+    var out: Array[Char]          = null
+    def keyChar(c: Char): Boolean = c.isLetterOrDigit || c == '_' || c == '-'
+    def write(at: Int, text: String): Unit = {
+      if (out == null) out = input.toCharArray
+      text.copyToArray(out, at)
+    }
+    // After `?` or `&`, or the JSON escape of either (backslashes, `u00`, `3f` or `26`): a parameter's key starts.
+    // After `#` too, which `fragment` takes: an OAuth fragment response (`#code=...&state=...`). And after the HTML
+    // escape of `&` or `?` (`&amp;`, `&#38;`, `&#x26;`, `&#63;`, `&#x3f;`), as a URL in an `href` writes them: the
+    // query pass reads `&amp;sig=` as a parameter whose key holds `amp;`, so the rewritten key (`amp;key`) is its.
+    def afterQuerySeparator(at: Int): Boolean =
+      at > 0 && (input.charAt(at - 1) == '?' || input.charAt(at - 1) == '&' || fragment(at) ||
+        afterHtmlSeparator(at) || (at >= 6 && {
+          val sep = escapedSeparator(input, at)
+          input.charAt(at - 6) == '\\' && input.startsWith("u00", at - 5) && (sep == '?' || sep == '&')
+        }))
+    def afterHtmlSeparator(at: Int): Boolean =
+      input.charAt(at - 1) == ';' && HtmlQuerySeparators.exists { e =>
+        at >= e.length && input.regionMatches(true, at - e.length, e, 0, e.length)
+      }
+    // Right after the `#` of a URL's fragment: a `#` behind a character a URL holds, not a word of prose (`#code=1`).
+    def fragment(at: Int): Boolean =
+      at > 1 && input.charAt(at - 1) == '#' && !isRegexSpace(input.charAt(at - 2)) &&
+        "\"'`<>()[]{},;".indexOf(input.charAt(at - 2).toInt) < 0
+    // Before `=` or its JSON escape: a parameter's value starts.
+    def beforeEquals(at: Int): Boolean =
+      at < length && (input.charAt(at) == '=' || {
+        val end = if (input.charAt(at) == '\\') separatorEscapeEnd(input, at) else -1
+        end >= 0 && escapedSeparator(input, end) == '='
+      })
+    var i = 0
+    while (i < length)
+      if (!keyChar(input.charAt(i))) i += 1
+      else if (
+        input.charAt(i) == 'u' && i > 0 && input.charAt(i - 1) == '\\' && i + 5 <= length &&
+        (1 to 4).forall(k => Character.digit(input.charAt(i + k), 16) >= 0)
+      ) i += 5 // the hex digits of a JSON escape (`\u0026code`): the key starts after them
+      else {
+        var j = i
+        while (j < length && keyChar(input.charAt(j))) j += 1
+        val word       = input.substring(i, j)
+        val normalised = word.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit)
+        val last       = word.charAt(word.length - 1)
+        if ((last == 's' || last == 'S') && isPluralCredentialName(normalised))
+          write(i, word.charAt(0).toString + word.dropRight(1))
+        else if (SensitiveQueryNames(word.toLowerCase(Locale.ROOT)) && beforeEquals(j)) {
+          val separator = afterQuerySeparator(i)
+          val matrix    = !separator && i > 0 && input.charAt(i - 1) == ';' && word.equalsIgnoreCase("jsessionid")
+          if (separator || matrix) {
+            write(i, "x" * (word.length - 3) + "key")
+            if (fragment(i)) write(i - 1, "&") // the readings take a query parameter after `&`, not after `#`
+            if (matrix) write(i - 1, "&")
+            // A query value goes on over `#`, and a matrix parameter's over `?`, `;`, `/` and `#` too, where the value
+            // ends. A query or fragment there goes on with parameters, so its `?` or `#` is written as `&`; a path
+            // segment or another matrix parameter does not, so its `/` or `;` is written as spaces, which end a query
+            // value and start no parameter (`;jsessionid=a/code=200` keeps `200`). Each also as a JSON escape
+            // (`\/`, `\u002f`), written whole: an escaped `?` or `#` as the escape of `&`.
+            val ends  = if (matrix) "?;/#" else "#"
+            var k     = if (input.charAt(j) == '=') j + 1 else separatorEscapeEnd(input, j)
+            val stops = ends + "&\"'<>\\"
+            while (k < length && stops.indexOf(input.charAt(k).toInt) < 0 && !isRegexSpace(input.charAt(k)))
+              k += 1
+            if (k < length) {
+              val (delimiter, end) = delimiterAt(input, k)
+              if (ends.indexOf(delimiter.toInt) >= 0) {
+                if (delimiter == '/' || delimiter == ';') write(k, " " * (end - k))
+                else if (end - k == 1) write(k, "&")
+                else write(end - 2, "26")
+              }
+            }
+            if (matrix) j = math.max(j, k)
+          }
+        }
+        i = j
+      }
+    if (out == null) input else new String(out)
+  }
 
   /**
    * `'key':`, the key of a Python dict, with its `:` and the spaces after it, its quotes behind the same run of
@@ -2063,7 +2217,10 @@ private[llm4s] object Redaction {
       .fold(Seq.empty[String])(sensitiveStrings)
       .filter(_.trim.length >= MinRepeatedSecretLength)
 
-  /** Every string leaf under a sensitive key of `root`, found with an explicit stack rather than recursion. */
+  /**
+   * Every string leaf under a credential key of `root` (`isCredentialName`, so a plural's too: each element of
+   * `{"api_keys": [...]}`), found with an explicit stack rather than recursion.
+   */
   private def sensitiveStrings(root: ujson.Value): Seq[String] = {
     val found = Seq.newBuilder[String]
     // Each entry is a value and whether it sits under a sensitive key.
@@ -2077,7 +2234,7 @@ private[llm4s] object Redaction {
               case ujson.Str(s) => isProseAssertion(key, s, 0, s.length)
               case _            => false
             }
-            stack.push(v -> (under || (isSensitiveKey(key) && !prose)))
+            stack.push(v -> (under || (isCredentialName(key) && !prose)))
           }
         case (ujson.Arr(arr), under) => arr.foreach(v => stack.push(v -> under))
         case _                       => ()
@@ -2555,6 +2712,30 @@ private[llm4s] object Redaction {
         input.charAt(u + 2) == '0' && escapedSeparator(input, u + 5) != NotASeparator
     if (escapes) u + 5 else -1
   }
+
+  /**
+   * The URL delimiter at `at` (`?`, `;`, `/`, `#` or `&`), bare or as a JSON escape (a run of backslashes, then `/`,
+   * or `u00` and the delimiter's hex digits in either case), and the index after it; `NotASeparator` where there is
+   * none.
+   */
+  private def delimiterAt(input: String, at: Int): (Char, Int) =
+    if (input.charAt(at) != '\\') {
+      val c = input.charAt(at)
+      (if ("?;/#&".indexOf(c.toInt) >= 0) c else NotASeparator, at + 1)
+    } else {
+      val u = afterBackslashes(input, at)
+      if (u < input.length && input.charAt(u) == '/') ('/', u + 1)
+      else if (u + 5 <= input.length && input.startsWith("u00", u))
+        input.substring(u + 3, u + 5).toLowerCase(Locale.ROOT) match {
+          case "3f" => ('?', u + 5)
+          case "3b" => (';', u + 5)
+          case "2f" => ('/', u + 5)
+          case "23" => ('#', u + 5)
+          case "26" => ('&', u + 5)
+          case _    => (NotASeparator, at)
+        }
+      else (NotASeparator, at)
+    }
 
   /** The separator that the escape ending at `end` writes, read from its last two hex digits, or `NotASeparator`. */
   private def escapedSeparator(input: String, end: Int): Char =

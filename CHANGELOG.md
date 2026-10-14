@@ -46,6 +46,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The SQLite store keeps the records in a new table (schema version 3, migrated on open).
   - Breaking: `Checkpointer.effect`, `Commit.effects` and `GraphError.EffectReplayRefused` are new. See the
     migration guide and design record §4.24.
+- **Todos: a `write_todos` tool, the thread's plan and a plan prompt section** ([#1907](https://github.com/llm4s/llm4s/issues/1907),
+  design §4.30): `new TodoMiddleware(maxTodos = 50, maxTodoChars = 200)` (`org.llm4s.agent.harness`, `llm4s-agent`)
+  gives an agent a `write_todos` tool that replaces the plan (`TodoMiddleware.key`, a `TodoList` of
+  `Todo(id, content, status)`, `TodoStatus` = `Pending | InProgress | Done`), shows it to the model in a prompt
+  section on every model step, and announces each change with a durable `HarnessEvents.TodosUpdated` (ids and
+  statuses only) and a live `HarnessEvents.TodosProgress` (the whole list). The tool assigns ids and never reuses
+  one within a thread, refuses a list over its limits as an error the model sees, and locks `todos`, so two calls in
+  one message apply in order. An output Block restores the plan. Adding it to an existing agent changes the agent's
+  graph structure: see the migration guide.
 - **`ClaimPolicy.label`: a runtime's name in the logs of its claims** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   `ClaimPolicy.default.withLabel("worker-7")` (or `ClaimPolicy(ttl, renewEvery, label)`) makes the runtime log each
   granted claim with its run id and label at INFO (`Run 'r1' (runtime 'worker-7') claimed thread 't' with token 1`;
@@ -3050,6 +3059,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redaction leaves as it is. A `"` that delimits a JSON string around the value, at any depth, is still kept, so the
   JSON parses. Like the readings before it, this only adds to what was replaced: `data={'password': pw}` still
   replaces `pw`, since a bare word there may be the credential.
+- **Security - `Redaction`: plural credential keys, and query parameters that carry a short-lived credential** ([#1646](https://github.com/llm4s/llm4s/issues/1646)):
+  `{"secrets": ["..."]}`, `{"api_keys": [...]}`, `{"passwords": "..."}` and `secrets=...` came out unchanged, since a
+  key was sensitive only when its normalised name was a credential word or ended in one, and no plural was. A key
+  whose name ends in `secrets`, `passwords` or `apikeys` (`api_keys`, `apiKeys`, `x-api-keys`, `client_secrets`,
+  `db_passwords`) is now read as the singular is, in every shape: a JSON or single-quoted field with a string, number,
+  array or object value, JSON inside a string, `key=value`, a header line and a Python literal. `tokens` is not one:
+  `max_tokens`, `prompt_tokens` and `usage.tokens` are counts, and `"tokens": {...}` is kept. The query parameters
+  `sig` (Azure SAS), `signature`, `X-Amz-Signature` (AWS SigV4), `X-Goog-Signature`, `code` (an OAuth authorization
+  code), `session`, `sessionid` and `jsessionid` - also the matrix parameter `;jsessionid=`, whose value ends at the
+  `?`, `;`, `/` or `#` after it, so the path after it is not read as a query - are now redacted, matched by their whole name and only as a query parameter's key
+  (also in a URL's fragment, as an OAuth fragment response sends `#code=...`, and after an HTML-escaped `&` or `?`,
+  as an `href` writes an Azure SAS URL: `&amp;sig=...`), so `"code": 400`, `?zipcode=` and `?error_code=` are kept.
+  `remoteBody` also scrubs the echo of a plural key's value elsewhere in the body, each element of an array included
+  (`{"secrets": "...", "error_description": "echoed ..."}`). Like the readings before it, this only adds to what was
+  replaced: a reading of the input with those keys written as keys the other readings take. The HTTP tool withholds
+  a header so named (`X-Api-Keys`, `Client-Secrets`, `Db-Passwords`) on a cross-origin redirect even when
+  `redirectSafeHeaders` lists it, as it does the singular (`Redaction.isCredentialName`).
 - **The Spring Boot starter's health indicator redacts nested credentials and header values** ([#1820](https://github.com/llm4s/llm4s/issues/1820)):
   the credentials it removes from a failed probe's `error` message were read only from top-level text fields of the
   resolved provider config, so a credential set outside Spring properties (in `application.conf`, a `reference.conf`

@@ -120,6 +120,13 @@ Design §4.25. New, opt-in API in `org.llm4s.agent.harness`; nothing existing ch
 - **`llm4s-agent-testkit` depends on `llm4s-testkit`**, whose `ScriptedLLMClient` drives `FileBackendContract`'s agent runs. A build that excludes `llm4s-testkit` from its test classpath adds it back.
 - **File tools over a `StateFileBackend` reshape the agent's graph.** Every mutation holds the lock `state-files/<keyId>` (needed: it keeps two edits of one file in a batch from losing one, and the quota exact), so the loop registers `tool-queue`, as for any tool with locks: threads checkpointed before are refused with `RestoreRejected`; finish or `forget` them first.
 - A `HostFileBackend` keeps its cross-process lock files in the `lockDirectory` given to `open`; give every backend that may touch the same files, in any process, the same one. It refuses symbolic links and files with other hard links.
+### Todos (#1907)
+
+Design §4.30. Additive: `TodoMiddleware` (`org.llm4s.agent.harness`) gives an agent a `write_todos` tool and a plan prompt section.
+
+- **Adding `TodoMiddleware` to an existing agent reshapes its graph.** It registers the `todos` key, and its tool's lock registers `tool-queue`, so the agent's structural fingerprint changes and threads checkpointed before are refused with `RestoreRejected`: finish or `forget` them first. Agents without it are unchanged.
+- **`todos` is a key id the middleware owns.** A `StateKey` of your own with id `todos` in a family that also uses `TodoMiddleware` is refused at build, as two keys with one id are. Rename it.
+- **With `PermissionMiddleware`, allow the tool**: `PermissionRule.allow(Operation.Invoke, "write_todos")`.
 
 ## Stage 2 migration: durable execution
 

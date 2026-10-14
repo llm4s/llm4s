@@ -150,6 +150,7 @@ sbt testWorkspace      # modules/it @Workspace tier (needs a built workspace-run
 sbt testOllama         # modules/it @Ollama tier
 sbt testSmoke          # modules/it @Cloud tier (live API keys)
 sbt testPerformance    # tests tagged PerformanceTest (LinearTime scaling checks); sbt test and coverage leave them out
+sbt testPlatform       # only the platform-sensitive tests (project/PlatformTests.scala): what CI's Windows job runs
 sbt it/itTierCheck     # every suite in modules/it must declare exactly one tier
 sbt stabilityTierCheck # every top-level public type of a frozen module is @Stable or @Experimental
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
@@ -458,6 +459,16 @@ multiplied its cost - and `sbt testPerformance` runs it (CI's ubuntu `Performanc
 nightly run). Leave one untagged guard per spec: a single ~1 MB worst-case input under
 `LinearTime.timed(label, hangGuard)`, generous enough never to flake, so `sbt test` still fails
 on a catastrophic (quadratic) regression.
+
+CI's Windows job runs only `sbt testPlatform`: the tests of platform-sensitive behaviour (paths and
+separators, permissions, deleting or moving open files, processes and their arguments, SQLite files
+and locks, line endings written to files, temp files, the user's home), listed in
+`project/PlatformTests.scala` as `wholeModules` (every suite runs) and `suites` (named suites of
+otherwise pure modules). Pure JVM logic runs only on ubuntu. **A test of platform-sensitive behaviour
+must run on Windows**: put it in a whole module or add its suite to `PlatformTests.suites`. A main
+source calling a platform-sensitive API outside the whole modules must be listed, with the suite that
+tests it, in `scripts/platform-sensitive-sources.txt`; `scripts/check-platform-tests.sh` (Quick
+Checks) fails otherwise, and when a test that checks `os.name` does not run on Windows.
 
 ## Adding New Code
 
