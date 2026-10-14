@@ -25,7 +25,7 @@ import scala.concurrent.duration.{ Duration, FiniteDuration }
  * @param hints what the tool is likely to do, for a middleware to read; see [[ToolHints]]
  * @param timeout how long one run of the tool may take; see [[withTimeout]]
  * @param resourcesOf what a call touches, from its decoded arguments; see [[withResources]]
- * @param locksOf the locks a call holds, from its decoded arguments; see [[withLocks]]
+ * @param locksOf the locks a call holds, from its decoded arguments, when the tool declares any; see [[withLocks]]
  */
 final case class AgentToolSpec[A] private (
   name: String,
@@ -36,7 +36,7 @@ final case class AgentToolSpec[A] private (
   hints: ToolHints,
   timeout: Option[FiniteDuration],
   resourcesOf: A => Vector[ToolResource],
-  locksOf: A => Set[LockKey]
+  locksOf: Option[A => Set[LockKey]]
 )(using val codec: ReadWriter[A]):
 
   /** Adds a check on the decoded arguments, replacing any earlier one. */
@@ -84,7 +84,7 @@ final case class AgentToolSpec[A] private (
    * chooses its target locks a key above every target it may pick, and an approval edit may narrow the
    * locks but not take one they do not cover (it is refused).
    */
-  def withLocks(locks: A => Set[LockKey]): AgentToolSpec[A] = copy(locksOf = locks)(using codec)
+  def withLocks(locks: A => Set[LockKey]): AgentToolSpec[A] = copy(locksOf = Some(locks))(using codec)
 
   /** The resource a call of this tool touches when it declares none: invoking the tool. */
   def defaultResource: ToolResource = ToolResource(Operation.Invoke, name)
@@ -148,7 +148,7 @@ object AgentToolSpec:
       ToolHints.default,
       None,
       _ => Vector.empty,
-      _ => Set.empty
+      None
     )
 
 /** The codecs of a tool's question and of the answer it takes. */
