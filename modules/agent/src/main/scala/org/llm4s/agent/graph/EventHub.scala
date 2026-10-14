@@ -103,6 +103,31 @@ private[graph] object AbandonedWrites:
   /** For a subscription not made for a run: nothing is abandoned. */
   val none: EventRecord => Boolean = _ => false
 
+/**
+ * Whose thread a subscription may deliver. A thread belongs to the tenant on its latest checkpoint, and
+ * [[GraphRuntime.subscribe]] refuses another tenant's thread up front, but a thread can change hands
+ * under its id after that: one that did not exist yet is created by another tenant's run, or one is
+ * deleted and created again by another tenant through a runtime whose delete the subscription has not
+ * yet learned of. So a scoped subscription screens every event before delivering it:
+ *
+ *  - an event that names its run's tenant - each of the events a run, a fork or a state update begins
+ *    with ([[EventHub.tenantNamed]]) - is delivered only if that tenant is the subscriber's, and confirms
+ *    the thread as the subscriber's;
+ *  - any other event is delivered once the thread is confirmed; until then the thread's latest
+ *    checkpoint is read and its tenant checked first. A [[StreamEvent.LiveGap]] carries nothing of
+ *    the thread, and is delivered as it is.
+ *
+ * An event of another tenant ends the subscription, before that event, with
+ * [[DisconnectReason.TenantMismatch]]: it delivers nothing of a thread it is not entitled to. A failed
+ * read ends it as a failed replay does, and a thread with no checkpoint any more as a deleted one.
+ */
+private[graph] enum TenantScope:
+  /** Delivers every event, unscreened: only the hub's own tests, which have no tenants, subscribe so. */
+  case Unscoped
+
+  /** Delivers only a thread of `tenantId`; `confirmed` if the thread is already known to be one. */
+  case Of(tenantId: Option[String], confirmed: Boolean)
+
 /** A subscription the [[EventHub]] dispatches: one that can be given a run's end-of-run barrier. */
 private[graph] trait Dispatched extends Subscription:
   /**
@@ -245,9 +270,10 @@ final private[graph] class EventHub(
     afterSeq: Long,
     capacity: Int,
     listener: StreamEvent => Unit,
-    abandoned: EventRecord => Boolean = AbandonedWrites.none
+    abandoned: EventRecord => Boolean = AbandonedWrites.none,
+    scope: TenantScope = TenantScope.Unscoped
   ): Result[Dispatched] =
-    val dispatcher = new Dispatcher(threadId, afterSeq, capacity, listener, abandoned)
+    val dispatcher = new Dispatcher(threadId, afterSeq, capacity, listener, abandoned, scope)
     // joined before the dispatcher starts, so no live event sent after this returns is missed, and
     // marked with what the hub has handed over so far, so every live event it holds is placed
     withLock(hubLock) {
@@ -279,10 +305,20 @@ final private[graph] class EventHub(
     runId: RunId,
     capacity: Int,
     listener: StreamEvent => Unit,
-    abandoned: EventRecord => Boolean = AbandonedWrites.none
+    abandoned: EventRecord => Boolean = AbandonedWrites.none,
+    scope: TenantScope = TenantScope.Unscoped
   ): Observation =
     val dispatcher =
-      new Dispatcher(threadId, afterSeq = 0L, capacity, listener, abandoned, preJoined = true, observing = Some(runId))
+      new Dispatcher(
+        threadId,
+        afterSeq = 0L,
+        capacity,
+        listener,
+        abandoned,
+        scope,
+        preJoined = true,
+        observing = Some(runId)
+      )
     withLock(hubLock)(join(threadId, dispatcher))
     new Observation(dispatcher)
 
@@ -487,6 +523,7 @@ final private[graph] class EventHub(
     capacity: Int,
     listener: StreamEvent => Unit,
     abandoned: EventRecord => Boolean,
+    scope: TenantScope,
     preJoined: Boolean = false,
     observing: Option[RunId] = None
   ) extends Dispatched:
@@ -1034,11 +1071,53 @@ final private[graph] class EventHub(
       event match
         case StreamEvent.Durable(record) if listener.isInstanceOf[RunListener] && abandoned(record) => Right(())
         case _ =>
-          outcome(call(() => listener(event))).map { _ =>
-            event match
-              case StreamEvent.Durable(record) => lastDeliveredSeq = record.seq
-              case _                           => ()
-          }
+          screened(event).flatMap(_ =>
+            outcome(call(() => listener(event))).map { _ =>
+              event match
+                case StreamEvent.Durable(record) => lastDeliveredSeq = record.seq
+                case _                           => ()
+            }
+          )
+
+    /** Whether the thread is known to be the subscriber's tenant's ([[TenantScope]]); dispatcher thread only. */
+    private var confirmed = scope match
+      case TenantScope.Unscoped         => true
+      case TenantScope.Of(_, confirmed) => confirmed
+
+    /**
+     * `event` may be delivered: it is of the subscriber's tenant's thread ([[TenantScope]]). Otherwise the
+     * subscription ends, before it, with [[DisconnectReason.TenantMismatch]], or as a failed read of the
+     * thread's latest checkpoint does. Called on the dispatcher thread holding no lock, as the listener
+     * is, so a read that stalls holds up only this subscription; `cancel` interrupts it.
+     */
+    private def screened(event: StreamEvent): Either[End, Unit] =
+      scope match
+        case TenantScope.Unscoped => Right(())
+        case TenantScope.Of(tenant, _) =>
+          val named = event match
+            case StreamEvent.Durable(record) => EventHub.tenantNamed(record.event)
+            case _                           => None
+          named match
+            case Some(owner)                                     => owned(owner == tenant)
+            case None if confirmed                               => Right(())
+            case None if event.isInstanceOf[StreamEvent.LiveGap] => Right(())
+            case None =>
+              CancelledError.catchInterrupt(Try(checkpointer.latest(threadId)).toResult.flatten) match
+                case _ if cancelled          => Left(End.Cancelled)
+                case Right(Right(Some(now))) => owned(now.checkpoint.tenantId == tenant)
+                case Right(Right(None))      => Left(End.Disconnect(DisconnectReason.ThreadDeleted))
+                case Right(Left(error))      => Left(End.Disconnect(EventHub.disconnectFor(error)))
+                case Left(_) =>
+                  Left(
+                    End.Disconnect(DisconnectReason.ReplayFailed(CancelledError(s"read of thread ${threadId.value}")))
+                  )
+
+    /** Confirms the thread as the subscriber's if `matches`, and ends the subscription otherwise. */
+    private def owned(matches: Boolean): Either[End, Unit] =
+      if matches then
+        confirmed = true
+        Right(())
+      else Left(End.Disconnect(DisconnectReason.TenantMismatch))
 
     /** How a listener call ended: on, or stopped - cancelled, or the listener threw. */
     private def outcome(called: Option[Either[InterruptedException, Try[Unit]]]): Either[End, Unit] =
@@ -1155,6 +1234,18 @@ final private[graph] class EventHub(
           Left(End.Disconnect(DisconnectReason.ReplayFailed(CancelledError(s"replay of thread ${threadId.value}"))))
 
 private[graph] object EventHub:
+  /**
+   * The tenant `event` records for its run, if it is one of the events that begin a run, a fork or a
+   * state update - each records the tenant it was made for ([[RunEvent]]); `None` for any other event.
+   */
+  def tenantNamed(event: RunEvent): Option[Option[String]] = event match
+    case RunEvent.RunStarted(tenant, _)         => Some(tenant)
+    case RunEvent.RunRecovered(_, tenant, _, _) => Some(tenant)
+    case RunEvent.RunResumed(_, tenant, _)      => Some(tenant)
+    case RunEvent.StateUpdated(_, _, tenant, _) => Some(tenant)
+    case RunEvent.ThreadForked(_, _, tenant, _) => Some(tenant)
+    case _                                      => None
+
   /** How a failed read of the store ends a subscription: `ThreadDeleted` for a deleted thread's log. */
   def disconnectFor(error: LLMError): DisconnectReason = error match
     case _: GraphError.ThreadDeleted => DisconnectReason.ThreadDeleted

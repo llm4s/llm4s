@@ -8,6 +8,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
+import scala.concurrent.duration.*
 
 class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
 
@@ -221,12 +222,11 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
       a[GraphError.ThreadBusy]
   }
 
-  it should "report a lost claim as ThreadBusy when the thread cannot be re-read" in {
+  it should "report a lost claim as ThreadBusy naming nothing when the thread cannot be re-read" in {
     val f          = Fixture()
     val underlying = InMemoryCheckpointer()
     GraphRuntime(underlying).start(thread, f.graph, "x", tenant("a")).awaited.value.completed
-    val winner = underlying.latest(thread).value.map(_.checkpoint.id)
-    val reads  = new java.util.concurrent.atomic.AtomicInteger()
+    val reads = new java.util.concurrent.atomic.AtomicInteger()
     // the first read misses the winner, so the claim conflicts; the re-read then fails
     val failing = new Checkpointer {
       def commit(threadId: ThreadId, commit: Commit)                             = underlying.commit(threadId, commit)
@@ -248,8 +248,40 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
       def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
       def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
     }
-    GraphRuntime(failing).start(thread, f.graph, "y", tenant("a")).awaited.left.value shouldBe
-      GraphError.ThreadBusy("t", winner)
+    // the conflict's checkpoint is tenant a's, and embeds its run's id: tenant b is told nothing of it
+    GraphRuntime(failing).start(thread, f.graph, "y", tenant("b")).awaited.left.value shouldBe
+      GraphError.ThreadBusy("t", None, None)
+  }
+
+  it should "report a refused claim as ThreadBusy naming nothing when the thread cannot be re-read" in {
+    val f          = Fixture()
+    val underlying = InMemoryCheckpointer()
+    // tenant a's thread, whose run in another runtime holds a live claim
+    val aClaim = underlying.claim(thread, ClaimRequest(RunId("a-run-secret"), 1.hour)).value
+    val aCheckpoint = Checkpoint(
+      Checkpoint.CurrentFormat,
+      "a-run-secret/1",
+      None,
+      thread.value,
+      "a-run-secret",
+      CheckpointStatus.Running,
+      java.time.Instant.now(),
+      f.graph.snapshot(f.graph.start("x")).value,
+      Some("a"),
+      Some(aClaim.token)
+    )
+    underlying.commit(thread, Commit(aClaim.token, Some(aCheckpoint))).value
+    val reads = new java.util.concurrent.atomic.AtomicInteger()
+    // tenant b's admission read missed tenant a's checkpoint, and the re-read after the refusal fails
+    val failing = new ForwardingCheckpointer(underlying) {
+      override def latest(threadId: ThreadId) =
+        if reads.incrementAndGet() == 1 then Right(None) else Left(ValidationError("store", "down"))
+    }
+    val refusal = GraphRuntime(failing).start(thread, f.graph, "y", tenant("b")).awaited.left.value
+    refusal shouldBe GraphError.ThreadBusy("t", None, None)
+    // and the same for the changes that claim the thread: a delete, a fork's target, an update
+    reads.set(0)
+    GraphRuntime(failing).deleteThread(thread, tenant("b")).left.value shouldBe GraphError.ThreadBusy("t", None, None)
   }
 
   it should "refuse another tenant while a first admission on a new thread is still reading it" in {
