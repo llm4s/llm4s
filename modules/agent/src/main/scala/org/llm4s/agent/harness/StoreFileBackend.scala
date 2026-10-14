@@ -122,7 +122,13 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
   /** The current file's text, or why there is none: missing, a directory, or not a file. */
   private def currentText(operation: String, view: StoreView, target: VPath): Result[String] =
     view.current match
-      case Some(item) => content(item).toRight(BackendRefused(operation, target.value, "is not a file"))
+      // the one text rule on what is stored too: an item written past the backend may hold NUL
+      case Some(item) =>
+        content(item)
+          .toRight(BackendRefused(operation, target.value, "is not a file"))
+          .flatMap(text =>
+            Text.binaryReason(text).fold(Right(text))(r => Left(BackendRefused(operation, target.value, r)))
+          )
       case None =>
         isDirectory(view, target).flatMap(dir =>
           refused(operation, target, if dir then "is a directory; delete the files in it" else "not found")

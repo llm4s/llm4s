@@ -195,6 +195,7 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
       )
       .value
     files.read(p("/nul.md"), 0, 10, call()).left.value.message should include("binary")
+    files.edit(p("/nul.md"), "\u0000", "", replaceAll = false, call()).left.value.message should include("binary")
     files.grep("find", VPath.root, None, 10, call()).value.items shouldBe empty
   }
 
