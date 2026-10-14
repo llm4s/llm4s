@@ -206,6 +206,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
       ) =
         underlying.renew(threadId, token, ttl)
       def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+      def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = underlying.effect(threadId, key)
       def latest(threadId: ThreadId) = if stale.getAndSet(false) then Right(None) else underlying.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
@@ -238,6 +239,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
       ) =
         underlying.renew(threadId, token, ttl)
       def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+      def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = underlying.effect(threadId, key)
       def latest(threadId: ThreadId) =
         if reads.incrementAndGet() == 1 then Right(None) else Left(ValidationError("store", "down"))
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
@@ -250,7 +252,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     }
     // the conflict's checkpoint is tenant a's, and embeds its run's id: tenant b is told nothing of it
     GraphRuntime(failing).start(thread, f.graph, "y", tenant("b")).awaited.left.value shouldBe
-      GraphError.ThreadBusy("t", None, None)
+      GraphError.ThreadBusy("t", None, GraphError.BusyHolder.Unnamed)
   }
 
   it should "report a refused claim as ThreadBusy naming nothing when the thread cannot be re-read" in {
@@ -281,7 +283,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
         else if reads.incrementAndGet() == 1 then Right(first.get)
         else Left(ValidationError("store", "down"))
     }
-    val busy = GraphError.ThreadBusy("t", None, None)
+    val busy = GraphError.ThreadBusy("t", None, GraphError.BusyHolder.Unnamed)
     GraphRuntime(failing).start(thread, f.graph, "y", tenant("b")).awaited.left.value shouldBe busy
 
     // the changes that claim the thread take the same path: a delete,
@@ -323,6 +325,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
       ) =
         underlying.renew(threadId, token, ttl)
       def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+      def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = underlying.effect(threadId, key)
       def latest(threadId: ThreadId) = {
         if armed.compareAndSet(true, false) then {
           reading.countDown()
@@ -347,7 +350,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     runtime.start(thread, f.graph, "y").left.value shouldBe GraphError.TenantMismatch("t", None)
     // the first admission is this runtime's own, so its run is named although the thread has no checkpoint yet
     runtime.start(thread, f.graph, "y", tenant("a")).left.value should matchPattern {
-      case GraphError.ThreadBusy("t", None, Some(_)) =>
+      case GraphError.ThreadBusy("t", None, GraphError.BusyHolder.Run(_)) =>
     }
 
     release.countDown()

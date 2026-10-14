@@ -349,6 +349,9 @@ lazy val llm4s = (project in file("."))
     // `sbt "dumpBuildModel <file>"`: the build's projects, keys, commands and aliases as JSON, read by
     // scripts/check-doc-support.sh. See project/BuildModel.scala.
     commands += BuildModel.dumpCommand,
+    // `sbt testPlatform`: only the tests that exercise platform-specific behaviour, for CI's Windows job.
+    // See project/PlatformTests.scala.
+    PlatformTests.settings(PerformanceTestTag),
     publish / skip                      := true,
     mimaFailOnNoPrevious                := false,
     publishedArtifactsCheck / aggregate := false,
@@ -1620,7 +1623,8 @@ lazy val agentTestkit = (project in file("modules/agent-testkit"))
 // version `llm4s-memory` already uses. It needs no service, so no suite needs a `modules/it` tier: its tests,
 // including the one that kills a forked JVM mid-run and recovers in this one, run with `sbt test`.
 lazy val agentCheckpointSqlite = (project in file("modules/agent-checkpoint-sqlite"))
-  .dependsOn(agent, agentTestkit % Test)
+  // test->test: the ReplayContract reference subjects live in agent-testkit's tests
+  .dependsOn(agent, agentTestkit % "test->compile;test->test")
   .settings(
     name := "llm4s-agent-checkpoint-sqlite",
     commonSettings,

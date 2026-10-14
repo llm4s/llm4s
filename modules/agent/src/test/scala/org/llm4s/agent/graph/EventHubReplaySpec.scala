@@ -8,6 +8,7 @@ import org.scalatest.time.{ Seconds, Span }
 
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
+import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.*
 
 /**
@@ -76,6 +77,7 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
     ) =
       underlying.renew(threadId, token, ttl)
     def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = underlying.effect(threadId, key)
     def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]           = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       val n = reads.incrementAndGet()
@@ -252,6 +254,7 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
     hub.liveCount(thread) shouldBe 0
     hub.live(thread, live(2))
     store.release.countDown()
-    Thread.sleep(100)
+    // its dispatcher has ended, so it can deliver nothing more
+    sub.ended(5.seconds) shouldBe true
     listener.seen.asScala shouldBe empty
   }

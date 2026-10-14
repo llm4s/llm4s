@@ -146,11 +146,42 @@ final class RunContext private[graph] (
    */
   private[agent] val answers: Map[String, (ujson.Value, ujson.Value)] = Map.empty,
   /** The model usage this task's hooks and model calls recorded; see `ModelContext`. */
-  private[agent] val usage: TaskUsage = new TaskUsage
+  private[agent] val usage: TaskUsage = new TaskUsage,
+  /** Where this task's [[ReplayGuard]]s keep effect records: the thread's store in a runtime, memory outside one. */
+  private[graph] val journal: EffectJournal = EffectJournal.local(),
+  /** The task effect records belong to: the task a continuation stands in for, else this one (design §4.24). */
+  owner: Option[TaskId] = None
 ):
   /** This context with `next` as the answers its hooks see, recording usage in the same task's accumulator. */
   private[agent] def withAnswers(next: Map[String, (ujson.Value, ujson.Value)]): RunContext =
-    new RunContext(config, position, sink, next, usage)
+    new RunContext(config, position, sink, next, usage, journal, owner)
+
+  /** The task this task's effect records belong to ([[Commit.releasesEffect]]). */
+  private[graph] def effectOwner: TaskId = owner.getOrElse(position.taskId)
+
+  /**
+   * This task's key: the SHA-256 of the thread and the id of the logical task (design §4.24) - for a
+   * continuation, the task it stands in for, so a hook that runs again after an answer, an approval or a
+   * breakpoint keeps its key. It is the same in every run of the task: a retry, `recover`, `recover`
+   * after `updateState`, and a resumed continuation. The base of a hook's [[effectKey]]s, and the key a
+   * hook gives an external system. It identifies the task among the thread's live tasks, not for all
+   * time: after `deleteThread`, or work after the last durable checkpoint planned again under
+   * `Async`/`OnExit`, a task id can name new work.
+   */
+  lazy val taskKey: IdempotencyKey = IdempotencyKey.ofTask(position.threadId, effectOwner)
+
+  /**
+   * The key of one external effect of this task - `operation`, such as `memory.record`, on what
+   * `discriminator` names - for [[ReplayGuard]]. A tool uses `ToolContext.effectKey`, whose base is its
+   * call's [[IdempotencyKey]]. Give each effect of a task its own operation or discriminator, and pass
+   * a set (memory ids) sorted.
+   */
+  def effectKey(operation: String, discriminator: String*): EffectKey =
+    EffectKey.derive(position.threadId, taskKey, operation, discriminator)
+
+  /** The key of an effect under `base`, by this task's thread. */
+  private[graph] def effectKeyUnder(base: IdempotencyKey, operation: String, discriminator: Seq[String]): EffectKey =
+    EffectKey.derive(position.threadId, base, operation, discriminator)
 
   /** Records a durable custom event; `payload` is snapshotted at the call, so the node may reuse it. */
   def emit(name: String, version: Int, payload: ujson.Value): Unit = sink.custom(name, version, payload)

@@ -48,8 +48,16 @@ import scala.util.Try
  *    deleted gets that refusal within about its `timeout` (from its next call, for the polling default);
  *  - keep events until [[compactEvents]] or [[prune]] removes them, and report the earliest sequence
  *    still available when asked to replay from before it ([[GraphError.ReplayUnavailable]]);
- *  - store checkpoints and pending writes as data ([[Checkpoint.toJson]], `PendingWrite`'s
- *    `ReadWriter`), so nothing executable survives a round trip;
+ *  - keep a thread's effect records ([[EffectRecord]]), upserted by key by a commit's `effects` and
+ *    remembered with the commit's token as their writer, until a commit with a checkpoint releases them
+ *    ([[Commit.releasesEffect]], judged before that commit's own records are applied) or
+ *    [[deleteThread]] removes them - never [[prune]], never by age - and copy none of them anywhere;
+ *    [[effect]] reads one;
+ *  - store checkpoints, pending writes and effect records as data ([[Checkpoint.toJson]], `PendingWrite`'s
+ *    `ReadWriter`, [[EffectRecord.toJson]]), so nothing executable survives a round trip;
+ *  - keep what it stores apart from the values its callers hold: `ujson` values are mutable, so changing
+ *    a checkpoint, pending write or event payload after committing it, or one a read or a commit
+ *    returned, must change nothing stored or later read back;
  *  - return from [[awaitEventsAfter]] with what [[eventsAfter]] would, at once if the log already
  *    holds an event after `afterSeq`, and otherwise within about `timeout` - with the events of a
  *    commit made meanwhile through any store over the same storage, or empty;
@@ -67,8 +75,10 @@ trait Checkpointer:
   /**
    * Claims `threadId` for `request.holder` until `request.ttl` from now, by the store's clock, if no
    * other claim on it is live, and returns the claim with a new [[FencingToken]]. A live claim -
-   * whoever holds it, the same holder included - is `Left(GraphError.ThreadBusy)` naming its holder,
-   * with nothing changed. A thread need not have a checkpoint to be claimed. A claim that replaces an
+   * whoever holds it, the same holder included - is `Left(GraphError.ThreadBusy(threadId, latest,
+   * GraphError.BusyHolder.Run(holder)))`, naming its holder and the thread's latest checkpoint id, with
+   * nothing changed; a store never returns the runtime-level [[GraphError.BusyHolder.Unnamed]] or
+   * [[GraphError.BusyHolder.Lapsed]]. A thread need not have a checkpoint to be claimed. A claim that replaces an
    * expired one nobody released names that claim's holder as [[RunClaim.takenOverFrom]].
    */
   def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim]
@@ -92,6 +102,12 @@ trait Checkpointer:
 
   /** The thread's latest checkpoint and its pending writes; `None` for a new thread. */
   def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]
+
+  /**
+   * The thread's effect record under `key` ([[ReplayGuard]], design §4.24); `None` if it has none, or
+   * the thread is unknown. Needs no claim.
+   */
+  def effect(threadId: ThreadId, key: EffectKey): Result[Option[EffectRecord]]
 
   /**
    * Up to `limit` of the thread's checkpoints, newest first - the latest is the first of the first
@@ -172,7 +188,7 @@ trait Checkpointer:
 
   /**
    * Removes everything stored for the thread - its checkpoint history, its pending writes, its
-   * event log and its claim - so that its id names a new thread again; tokens issued after it are
+   * event log, its effect records and its claim - so that its id names a new thread again; tokens issued after it are
    * still greater than every token issued before. The store keeps only where the thread's event
    * numbering ended - a tombstone, holding nothing of the thread's data, and nothing at all for a
    * thread that numbered no event - so that a new thread of the id numbers its events on past the
@@ -241,10 +257,14 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     earliestSeq: Long,
     claim: Option[Claim],
     /** The first event number of the thread now under the id: past every event of a deleted one. */
-    firstSeq: Long
+    firstSeq: Long,
+    /** Effect records by key, with their task and the token of the commit that wrote them. */
+    effects: Map[String, StoredEffect] = Map.empty
   ):
     def latestId: Option[String] = history.lastOption.map(_.id)
-    def isEmpty: Boolean         = history.isEmpty && claim.isEmpty && nextSeq == 1L
+    def isEmpty: Boolean         = history.isEmpty && claim.isEmpty && nextSeq == 1L && effects.isEmpty
+
+  final private case class StoredEffect(taskId: TaskId, writer: FencingToken, json: ujson.Value)
 
   private val threads   = mutable.Map.empty[String, ThreadRecord]
   private var lastToken = 0L
@@ -269,7 +289,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     )
 
   private def stale(threadId: ThreadId, current: ThreadRecord, token: FencingToken): GraphError =
-    GraphError.StaleClaim(threadId.value, token.value, current.claim.map(_.token))
+    GraphError.StaleClaim(threadId.value, token, current.claim.map(c => FencingToken(c.token)))
 
   private def settled(status: CheckpointStatus): Boolean =
     status == CheckpointStatus.Completed || status == CheckpointStatus.Failed
@@ -278,7 +298,8 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     val current = record(threadId)
     val now     = clock.instant()
     current.claim.filter(c => now.isBefore(c.expiresAt)) match
-      case Some(live) => Left(GraphError.ThreadBusy(threadId.value, current.latestId, Some(live.holder)))
+      case Some(live) =>
+        Left(GraphError.ThreadBusy(threadId.value, current.latestId, GraphError.BusyHolder.Run(RunId(live.holder))))
       case None =>
         lastToken += 1
         val claim = Claim(request.holder.value, lastToken, now.plusNanos(request.ttl.toNanos))
@@ -337,9 +358,13 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
         if commit.retractTurn then current.history.take(current.history.lastIndexWhere(c => settled(c.status)) + 1)
         else current.history
       val added = commit.checkpoint.map(c => Stored(c.id, c.status, c.createdAt, Checkpoint.toJson(c)))
+      // released before this commit's own records are applied
+      val effects = current.effects.filterNot((_, e) => commit.releasesEffect(e.taskId, e.writer)) ++
+        commit.effects.map(r => r.key.value -> StoredEffect(r.taskId, commit.token, EffectRecord.toJson(r)))
       store(
         threadId,
         current.copy(
+          effects = effects,
           history = kept ++ added,
           pendingWrites = if commit.checkpoint.isDefined then writes else current.pendingWrites ++ writes,
           events = current.events ++ stored,
@@ -360,6 +385,12 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
           checkpoint <- Checkpoint.fromJson(latest.json)
           writes     <- Try(current.pendingWrites.map(upickle.default.read[PendingWrite](_))).toResult
         yield Some(StoredCheckpoint(checkpoint, writes))
+  }
+
+  def effect(threadId: ThreadId, key: EffectKey): Result[Option[EffectRecord]] = withLock(lock) {
+    record(threadId).effects.get(key.value) match
+      case None         => Right(None)
+      case Some(stored) => EffectRecord.fromJson(stored.json).map(Some(_))
   }
 
   def history(threadId: ThreadId, before: Option[String], limit: Int): Result[Vector[Checkpoint]] = withLock(lock) {
@@ -458,7 +489,10 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
       // event since its delete is kept as it is, so deleting it again moves nothing on
       if current.nextSeq == 1L then threads.remove(threadId.value): Unit
       else if current.nextSeq == current.firstSeq && current.firstSeq > 1L then
-        store(threadId, current.copy(history = Vector.empty, pendingWrites = Vector.empty, claim = None))
+        store(
+          threadId,
+          current.copy(history = Vector.empty, pendingWrites = Vector.empty, claim = None, effects = Map.empty)
+        )
       else
         val first = current.nextSeq + 1
         store(threadId, ThreadRecord(Vector.empty, Vector.empty, Vector.empty, first, first, None, first))

@@ -25,6 +25,9 @@ import scala.util.Using
  *    The checkpoint's status and creation time sit beside it for retraction and retention.
  *  - `llm4s_checkpoint_pending_writes`: the latest checkpoint's pending writes as JSON, in commit order.
  *  - `llm4s_checkpoint_events`: the durable event log, one JSON `EventRecord` per `(thread, seq)`.
+ *  - `llm4s_checkpoint_effects` (version 3): the thread's effect records (design §4.24), one JSON `EffectRecord`
+ *    per `(thread, effect key)`, with the task it belongs to and the token of the commit that wrote it, which
+ *    decide when a commit releases it (`Commit.releasesEffect`).
  *
  * Opening a store brings the file to [[Current]] in one transaction, applying each step `n -> n + 1` in turn, and
  * refuses a file whose version is newer than this build knows. Version 0 is a file with none of these tables.
@@ -32,13 +35,30 @@ import scala.util.Using
 private[sqlite] object SqliteSchema:
 
   /** The schema version this build writes. */
-  val Current: Int = 2
+  val Current: Int = 3
 
   /** A migration from the version it is keyed by to the next. */
   type Step = Connection => Unit
 
   /** The steps, keyed by the version each upgrades from. */
-  val steps: Map[Int, Step] = Map(0 -> createTables, 1 -> addFirstSeq)
+  val steps: Map[Int, Step] = Map(0 -> createTables, 1 -> addFirstSeq, 2 -> addEffects)
+
+  /**
+   * Version 3: effect records, the replay evidence of `ReplayGuard` (#1921). A version-2 file holds none: no build
+   * that wrote one performed a guarded effect.
+   */
+  private def addEffects(connection: Connection): Unit =
+    statements(
+      connection,
+      """CREATE TABLE llm4s_checkpoint_effects (
+        |  thread_id    TEXT NOT NULL,
+        |  effect_key   TEXT NOT NULL,
+        |  task_id      TEXT NOT NULL,
+        |  writer_token INTEGER NOT NULL,
+        |  record_json  TEXT NOT NULL,
+        |  PRIMARY KEY (thread_id, effect_key)
+        |) WITHOUT ROWID""".stripMargin
+    )
 
   /**
    * Version 2: the first event number of the thread now under each id, so that a thread deleted and created again

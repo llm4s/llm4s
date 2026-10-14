@@ -196,8 +196,8 @@ which belong to the `Agent`. `AgentResult` is a value to read, not something to 
 - A thread stays in the runtime until `agent.forget(threadId)` removes it - one-shot
   `agent.run(query)` threads too, which on the default in-memory runtime means they stay in memory.
   Forget a conversation you will not continue: `agent.run(query).flatMap(r => agent.forget(r.threadId).map(_ => r))`.
-  `forget` refuses a thread whose run is still active (`ThreadBusy`) or that belongs to another
-  tenant (`TenantMismatch`); an unknown thread is `Right(())`.
+  `forget` refuses a thread that a run still holds - in this runtime, or by a live claim in any runtime sharing
+  the store (`ThreadBusy`) - or that belongs to another tenant (`TenantMismatch`); an unknown thread is `Right(())`.
 
 ### Suspended turns from Java and Kotlin
 
@@ -370,6 +370,162 @@ model request made again because the first response was never stored. The bounda
   does the work once. A system that can fence writers can also refuse the stale one outright:
   `context.run.position.fencingToken` is the run's claim token, which grows with every claim on the
   thread, so the system keeps the highest token it has seen and refuses a lower one.
+
+**Guarded effects: replay without repeating.** For a target that does not take an idempotency key,
+such as a file, a sandbox or a store, perform the effect through `ReplayGuard`. The guard records an
+intent before the effect and its outcome after, in the thread's own store, under the run's claim. A
+call that runs again then gets its original outcome back instead of repeating the work. The target
+declares one `ReplaySupport`, and each has its own guard:
+
+- `ReplayGuard.transactional` is for a target that records the key with the outcome in the same
+  transaction as the effect, and implements `AppliedKeys`. The effect and `forget` are given the
+  run's claim token, and the target refuses a token older than the newest it has seen for the
+  key's `scope` (its thread). So a run that lost its claim can neither apply, nor read back, nor
+  forget anything once its successor has touched the target.
+- `ReplayGuard.verifiable` is for a target that can read a digest (`StateCheck`) of what the effect
+  touches. If the effect began but its outcome was not recorded, the guard checks the target. It
+  returns the presumed outcome if the effect landed, runs the effect again if it did not, and
+  refuses if another thread changed the target in between. The effect must be a compare-and-set
+  against `before`, so that a stalled run's write cannot land on its successor's.
+- `ReplayGuard.unverifiable` is for everything else. If the effect began but its outcome was not
+  recorded, the guard refuses to run it again ("it may already have run"), unless the tool is
+  idempotent.
+
+```scala
+import org.llm4s.agent.graph.{GraphError, ReplayGuard, StateCheck}
+
+val append = AgentTool(appendSpec) { (args, context) =>
+  val key = context.effectKey("file.append", args.path)
+  ReplayGuard.verifiable[Int](context.run, key)(Right(StateCheck.of(read(args.path)))) {
+    val before = read(args.path)
+    val after  = before + args.text
+    Right(ReplayGuard.Plan(StateCheck.of(before), StateCheck.of(after), after.length) {
+      // under a lock every writer takes: write only if the file is still what the plan read
+      writeIfUnchanged(args.path, StateCheck.of(before), after).map(_ => after.length)
+    })
+  } match
+    case Right(length)                           => ToolOutcome.Success(ujson.Num(length))
+    case Left(r: GraphError.EffectReplayRefused) => ToolOutcome.Error(r.message)
+    case Left(other)                             => ToolOutcome.Fatal(other) // outcome unknown: recover replays it
+}
+```
+
+What each guard does when the run crashed at each point, and why, is in design record
+[§4.24](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md). The
+rules a caller relies on:
+
+- **Build each key with `effectKey`.** In a tool, `context.effectKey(operation, discriminator*)`
+  derives the key from the call's idempotency key. In a hook or node, `RunContext.effectKey` derives
+  it from the task's `taskKey`. Give each effect of a task its own operation or discriminator.
+- **A fork's re-run of a call is a new effect.** The key includes the thread.
+- **The evidence is kept exactly as long as the task can run again.** That is until the commit that
+  finishes the task, however long the thread waits. `prune` never removes it, and `deleteThread`
+  removes it with the thread.
+- **A Block does not undo an external effect.** A guardrail that blocks a turn restores every state
+  key the turn wrote, its messages included (§4.22), but a file the turn wrote on the host, a
+  command it ran or a record it stored stays as it is. The turn's replay evidence goes with its
+  closing commit, so nothing replays it either.
+
+### Tool Permissions, Timeouts and Locks
+
+An `AgentToolSpec` can declare what a call touches, how long one run may take, and which locks it
+holds, each from the call's decoded arguments:
+
+```scala
+import org.llm4s.agent.graph.middleware.{PermissionMiddleware, PermissionRule}
+import org.llm4s.agent.graph.tool.{LockKey, Operation, ToolResource}
+import scala.concurrent.duration.*
+
+val writeSpec = baseSpec
+  .withResources(args => Vector(ToolResource(Operation.Write, args.path)))
+  .withLocks(args => Set(LockKey("workspace", workspaceId, args.path)))
+  .withTimeout(30.seconds)
+
+val agent = Agent.builder("coder", client)
+  .withTools(tools)
+  .withMiddleware(                       // register it first, so it wraps every other middleware
+    new PermissionMiddleware(Seq(
+      PermissionRule.deny(Operation.Write, "/etc/**"),
+      PermissionRule.ask(Operation.Write, "/deploy/**"),
+      PermissionRule.allow(Operation.Write, "/src/**"),
+      PermissionRule.allow(Operation.Invoke, "*")
+    ))
+  )
+  .build()
+```
+
+**Permissions are deny-if-unmatched.** For each resource the first rule with its operation whose
+`Glob` matches the target decides, and a resource no rule matches is denied. A call runs only if
+every resource is allowed: a denial is the error result `Denied: <operation> <target>`, an `Ask`
+suspends the call for approval. A tool that declares no resources touches `(Invoke, <tool name>)`,
+so it needs an `Invoke` rule. Resources are the call's whole envelope: a tool that asks a question and lets
+the answer choose its target declares a resource covering every target it may pick (`/out/**`) and
+refuses an answer outside it, because the check runs on the declaration, not on what the tool does. Such an envelope
+is checked for every target in it: a deny rule reaching any part of it denies the call, and it is
+allowed only when allow rules cover all of it. Approval is one flag per call: once a reviewer approves the call,
+every `Ask` passes. An edited call is checked again on its new arguments, so a deny rule still
+refuses it. Rules see the arguments after the schema check and decoding. In a `Glob`, `*` and `?`
+stay within one `/`-separated segment and `**` crosses them. An `Execute` rule limits which
+commands the agent may ask to run, not what a command does once it runs: rely on the sandbox for
+that.
+
+**A timeout bounds each run of the tool.** A run past it is interrupted and the model sees the
+error `Tool '<name>' timed out after <n> ms`; the run continues. The tool runs on a thread of its
+own, and the call waits for that thread to finish, so **block interruptibly**: a tool that ignores
+its interrupt holds its whole batch past the timeout. A timed-out call may have done part of its
+work: it keeps its idempotency key if it runs again (a retrying middleware, `recover`), but if the
+model calls the tool again, that is a new call with a new key. Cancelling the run still cancels the
+call, which records nothing.
+
+**Locks order conflicting calls of one batch.** Two `LockKey`s conflict when one is a prefix of
+the other, segment by segment: `workspace/w1` conflicts with `workspace/w1/src/a.scala`, and
+`a/b` does not conflict with `a/bc`. When a model message has several calls, a call whose locks
+conflict with an earlier call's waits for it and runs in a later superstep, in call order, seeing
+what the earlier call committed. So a check against thread state (a quota, a file's content) is
+exact, and two calls writing one key no longer lose one of the writes. Calls without conflicting
+locks still run in parallel. Each further round costs two supersteps of `RunBudgets.maxSupersteps`.
+A call that waits for approval holds back the calls queued behind it, so a reviewer can see a
+batch's approvals in more than one round. Locks order calls within one batch only, not across
+threads. An approval edit may narrow a call's locks (`/prod` to `/prod/app`) but not take a lock
+its proposed arguments did not cover: such an edit is refused, the call does not run, and the model
+sees why.
+
+### Todos
+
+`TodoMiddleware` gives an agent a plan: a `write_todos` tool that replaces the thread's todo list,
+and a prompt section that shows the list to the model on every model step.
+
+```scala
+import org.llm4s.agent.harness.{HarnessEvents, TodoMiddleware}
+
+for {
+  agent <- Agent.builder("researcher", client)
+             .withMiddleware(new TodoMiddleware(maxTodos = 20, maxTodoChars = 200))
+             .build()                                  // Result[Agent]
+  run   <- agent.stream(threadId, "Write a report on ...") {
+             case HarnessEvents.TodosProgress(p) =>
+               p.todos.foreach(t => println(s"[${t.status.wire}] ${t.content}"))
+             case _ => ()
+           }
+  result <- run.await()
+} yield result
+```
+
+- **The model sends the whole list** - each item's `content`, `status` (`pending`, `in_progress`,
+  `done`) and, to keep an item, its `id` - and it replaces the plan. The tool assigns ids: an item
+  without one keeps the id of an item with the same content, or gets a new one, and an id is never
+  reused within a thread. An unknown id, an id given twice, a list over `maxTodos` (default 50) or an
+  item over `maxTodoChars` code points (default 200) is refused as an error the model sees.
+- **The plan is thread state**, in `TodoMiddleware.key` (a `TodoList`): it is checkpointed, read
+  by the next turn, and restored by an output Block with the rest of the turn. Two `write_todos`
+  calls in one message run in turn (the tool locks `todos`), the second seeing the first's list.
+- **Events.** Each change emits a durable `HarnessEvents.TodosUpdated` with ids and statuses only,
+  and a live `HarnessEvents.TodosProgress` with the whole list.
+- **The plan guides the model only.** It changes no route and no permission: a
+  `PermissionMiddleware` needs `PermissionRule.allow(Operation.Invoke, "write_todos")` for the tool.
+- **Adding it to an existing agent reshapes its graph** (it registers the `todos` key, and the
+  tool's lock registers `tool-queue`), so threads checkpointed before are refused with
+  `RestoreRejected`: finish or `forget` them first.
 
 ---
 

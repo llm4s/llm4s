@@ -156,6 +156,16 @@ jobs:
           scripts/test-check-coverage-legs.sh target/build-model.json
           scripts/check-coverage-legs.sh --model target/build-model.json
 
+      # Fails when a main source that calls a platform-sensitive API (processes, path separators, permissions,
+      # temporary files, writing or deleting files, file locks, SQLite, line separators, the OS name) has no test
+      # that runs on Windows: the `test` job's Windows leg runs only `sbt testPlatform` (project/PlatformTests.scala),
+      # so such a file must be in a module that runs whole there or be listed in scripts/platform-sensitive-sources.txt
+      # with the suite that tests it. Also fails when a test that checks which OS it is on does not run on Windows.
+      - name: Check every platform-sensitive source is tested on Windows
+        run: |
+          scripts/test-check-platform-tests.sh target/build-model.json
+          scripts/check-platform-tests.sh --model target/build-model.json
+
       # The wrapper below re-runs a step only when its `[error]` output shows a transient download failure and
       # never otherwise; this runs it against a fake command, with no network, to keep that true.
       - name: Test the transient-network retry wrapper
@@ -876,7 +886,16 @@ jobs:
             modules/**/target/scala-3.7.1/scoverage-report/
           retention-days: 14
 
-  # Main test matrix
+  # Main test matrix. Ubuntu runs every test (`sbt test`). Windows runs `sbt testPlatform`: only the tests of what
+  # differs between platforms - file paths, separators, permissions and links, deleting or moving an open file,
+  # spawning processes and their argument parsing, SQLite files and their locks, line endings written to files,
+  # temporary files, the user's home - as project/PlatformTests.scala lists them. Pure JVM logic runs on the same
+  # JVM on both, so running all of it again on Windows cost some 15 minutes a PR and added no signal.
+  #
+  # The rule for new code: a test of platform-sensitive behaviour must run on Windows, so it goes in a module of
+  # `PlatformTests.wholeModules` or is named in `PlatformTests.suites`. scripts/check-platform-tests.sh (Quick
+  # Checks) enforces it for every main source that calls a platform-sensitive API, against
+  # scripts/platform-sensitive-sources.txt, and `sbt testPlatform` fails when a suite it names no longer exists.
   test:
     name: Test
     permissions:
@@ -888,8 +907,7 @@ jobs:
         java: [21]
 
     runs-on: ${{ matrix.os }}
-    # Healthy runs take up to about 50 minutes on Windows; the default limit is 360, so a hung run would hold
-    # the PR for six hours.
+    # Healthy runs take about 10-15 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
     timeout-minutes: 90
     
     steps:
@@ -903,8 +921,9 @@ jobs:
       
       - uses: sbt/setup-sbt@v1
       
+      # `sbt test` on ubuntu; `sbt testPlatform` on Windows (see above).
       - name: Run tests
-        run: sbt test
+        run: sbt ${{ runner.os == 'Windows' && 'testPlatform' || 'test' }}
       
       - name: Upload test reports
         if: failure()

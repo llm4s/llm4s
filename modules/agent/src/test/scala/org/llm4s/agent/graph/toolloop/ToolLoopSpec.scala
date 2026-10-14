@@ -435,6 +435,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
       ) =
         store.renew(threadId, token, ttl)
       def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = store.release(threadId, token)
+      def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = store.effect(threadId, key)
       def latest(threadId: ThreadId) = if staleRead.getAndSet(false) then Right(stale) else store.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int)     = store.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long)              = store.compactEvents(threadId, beforeSeq)
@@ -1739,7 +1740,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val owning = middleware("owning", declares = Set(Messages.key))
     val owned  = buildSingle(ScriptedModel(summarise), set(tools.echo), Seq(owning))
     owned.left.value.message should include(
-      "middleware 'owning' declares a key the loop owns ('tool-results', 'messages', 'usage', 'active-agent', 'turn' or 'transfer')"
+      "middleware 'owning' declares a key the loop owns ('tool-results', 'tool-queue', 'messages', 'usage', 'active-agent', 'turn' or 'transfer')"
     )
   }
 

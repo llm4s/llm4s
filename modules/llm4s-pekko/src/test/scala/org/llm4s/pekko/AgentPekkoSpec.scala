@@ -78,6 +78,7 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
     def claim(threadId: ThreadId, request: ClaimRequest)                    = underlying.claim(threadId, request)
     def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) = underlying.renew(threadId, token, ttl)
     def release(threadId: ThreadId, token: FencingToken)                    = underlying.release(threadId, token)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)    = underlying.effect(threadId, key)
     def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]        = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       underlying.eventsAfter(threadId, afterSeq, limit)
@@ -102,6 +103,7 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
     def claim(threadId: ThreadId, request: ClaimRequest)                    = underlying.claim(threadId, request)
     def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) = underlying.renew(threadId, token, ttl)
     def release(threadId: ThreadId, token: FencingToken)                    = underlying.release(threadId, token)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)    = underlying.effect(threadId, key)
     def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]        = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       underlying.eventsAfter(threadId, afterSeq, limit)
@@ -131,7 +133,8 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
       Fixtures.awaitUninterruptibly(let): Unit
       underlying.release(threadId, token)
     }
-    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]] = underlying.latest(threadId)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey) = underlying.effect(threadId, key)
+    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]     = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
@@ -254,9 +257,10 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
     probe.request(1)
     val first = probe.within(Patience)(probe.expectNext())
     store.completed.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
-    probe.request(Long.MaxValue)
-    val rest = probe.within(Patience)(probe.receiveWithin(Patience, 100000))
-    val all  = (first +: rest.collect { case i: AgentStreamItem => i }).toVector
+    // `toStrict` drains until the stream completes. `receiveWithin(Patience, n)` returned only after `n` items or the
+    // whole of `Patience`, and the stream ends long before 100000 items, so this test used to take a full minute.
+    val rest = probe.toStrict(Patience)
+    val all  = (first +: rest).toVector
 
     val events = all.collect { case AgentStreamItem.Event(e) => e }
     val gaps   = events.collect { case StreamEvent.LiveGap(n) => n }.sum

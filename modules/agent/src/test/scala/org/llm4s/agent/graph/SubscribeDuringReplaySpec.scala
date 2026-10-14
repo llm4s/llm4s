@@ -42,6 +42,7 @@ class SubscribeDuringReplaySpec extends AnyFlatSpec with Matchers with EitherVal
     ) =
       underlying.renew(threadId, token, ttl)
     def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = underlying.effect(threadId, key)
     def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       if reads.incrementAndGet() == 1 then

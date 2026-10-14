@@ -97,7 +97,9 @@ class SqliteTwoConnectionsContractSpec extends AnyFlatSpec with CheckpointerCont
     }
 
   final private case class Alternating(path: Path, clock: Clock, stores: Vector[SqliteCheckpointer])
-      extends Checkpointer {
+      extends Checkpointer
+      with AutoCloseable {
+    def close(): Unit              = stores.foreach(_.close())
     private val turn               = new AtomicInteger()
     private def next: Checkpointer = stores(Math.floorMod(turn.getAndIncrement(), stores.size))
     def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim] = next.claim(threadId, request)
@@ -105,6 +107,7 @@ class SqliteTwoConnectionsContractSpec extends AnyFlatSpec with CheckpointerCont
       next.renew(threadId, token, ttl)
     def release(threadId: ThreadId, token: FencingToken): Result[Unit]          = next.release(threadId, token)
     def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = next.commit(threadId, commit)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)        = next.effect(threadId, key)
     def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]            = next.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       next.eventsAfter(threadId, afterSeq, limit)

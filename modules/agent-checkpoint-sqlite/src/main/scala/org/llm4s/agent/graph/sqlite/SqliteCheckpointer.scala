@@ -68,7 +68,13 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
     val now     = clock.instant()
     current.flatMap(_.claim).filter(live => now.isBefore(live.expiresAt)) match
       case Some(live) =>
-        Left(GraphError.ThreadBusy(threadId.value, current.flatMap(_.checkpointId), Some(live.holder)))
+        Left(
+          GraphError.ThreadBusy(
+            threadId.value,
+            current.flatMap(_.checkpointId),
+            GraphError.BusyHolder.Run(RunId(live.holder))
+          )
+        )
       case None =>
         val claim = Claim(request.holder.value, nextToken(c), now.plusNanos(request.ttl.toNanos))
         ensureRow(c, threadId)
@@ -163,6 +169,36 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
         update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
       }
       appendWrites(c, threadId, commit.pendingWrites)
+      // released before this commit's own records are applied
+      if commit.checkpoint.isDefined then
+        query(
+          c,
+          "SELECT effect_key, task_id, writer_token FROM llm4s_checkpoint_effects WHERE thread_id = ?",
+          threadId.value
+        )(row => (row.getString(1), TaskId(row.getString(2)), FencingToken(row.getLong(3))))
+          .filter((_, task, writer) => commit.releasesEffect(task, writer))
+          .foreach { (key, _, _) =>
+            update(
+              c,
+              "DELETE FROM llm4s_checkpoint_effects WHERE thread_id = ? AND effect_key = ?",
+              threadId.value,
+              key
+            )
+          }
+      commit.effects.foreach { record =>
+        update(
+          c,
+          """INSERT INTO llm4s_checkpoint_effects (thread_id, effect_key, task_id, writer_token, record_json)
+            |VALUES (?, ?, ?, ?, ?)
+            |ON CONFLICT (thread_id, effect_key) DO UPDATE SET
+            |  task_id = excluded.task_id, writer_token = excluded.writer_token, record_json = excluded.record_json""".stripMargin,
+          threadId.value,
+          record.key.value,
+          record.taskId.value,
+          commit.token.value,
+          ujson.write(EffectRecord.toJson(record))
+        )
+      }
       val stored = commit.events.zipWithIndex.map { (draft, i) =>
         val seq = nextSeq + i
         seq -> upickle.default.write(EventRecord.committed(threadId.value, seq, draft))
@@ -211,6 +247,28 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
           checkpoint <- decodeCheckpoint("latest", json)
           decoded    <- decoding("latest", "pending write")(writes.map(upickle.default.read[PendingWrite](_)))
         yield Some(StoredCheckpoint(checkpoint, decoded))
+    }
+
+  def effect(threadId: ThreadId, key: EffectKey): Result[Option[EffectRecord]] =
+    reading("effect") { c =>
+      Right(
+        query(
+          c,
+          "SELECT record_json FROM llm4s_checkpoint_effects WHERE thread_id = ? AND effect_key = ?",
+          threadId.value,
+          key.value
+        )(_.getString(1)).headOption
+      )
+    }.flatMap {
+      case None => Right(None)
+      case Some(json) =>
+        decoding("effect", "effect record")(ujson.read(json)).flatMap { parsed =>
+          EffectRecord
+            .fromJson(parsed)
+            .left
+            .map(e => undecodable("effect", "effect record", e.message, None))
+            .map(Some(_))
+        }
     }
 
   def history(threadId: ThreadId, before: Option[String], limit: Int): Result[Vector[Checkpoint]] =
@@ -333,6 +391,7 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
       update(c, "DELETE FROM llm4s_checkpoint_events WHERE thread_id = ?", threadId.value)
       update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
       update(c, "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ?", threadId.value)
+      update(c, "DELETE FROM llm4s_checkpoint_effects WHERE thread_id = ?", threadId.value)
       update(
         c,
         // every SET expression reads the row as it was: the next thread starts one past the deleted one's next
@@ -558,7 +617,7 @@ object SqliteCheckpointer:
     )
 
   private def stale(threadId: ThreadId, current: Option[Row], token: FencingToken): GraphError =
-    GraphError.StaleClaim(threadId.value, token.value, current.flatMap(_.claim).map(_.token))
+    GraphError.StaleClaim(threadId.value, token, current.flatMap(_.claim).map(c => FencingToken(c.token)))
 
   private def readRow(c: Connection, threadId: ThreadId): Option[Row] =
     query(
@@ -599,7 +658,8 @@ object SqliteCheckpointer:
     update(
       c,
       """DELETE FROM llm4s_checkpoint_threads
-        |WHERE thread_id = ? AND checkpoint_id IS NULL AND claim_token IS NULL AND next_seq = 1""".stripMargin,
+        |WHERE thread_id = ? AND checkpoint_id IS NULL AND claim_token IS NULL AND next_seq = 1
+        |  AND NOT EXISTS (SELECT 1 FROM llm4s_checkpoint_effects e WHERE e.thread_id = llm4s_checkpoint_threads.thread_id)""".stripMargin,
       threadId.value
     )
 
