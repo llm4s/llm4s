@@ -34,6 +34,10 @@ object GraphShape:
  */
 private[graph] object GraphEvolution:
 
+  /** How a restore judges a snapshot: as at rest, in flight, or by what it holds ([[inFlight]]). */
+  enum Judged:
+    case AtRest, InFlight, ByContent
+
   /** At most this many keys are searched when matching a snapshot written before shapes were recorded. */
   val MaxLegacyAddedKeys: Int = 16
 
@@ -43,8 +47,8 @@ private[graph] object GraphEvolution:
       snapshot.dynamicJoins.nonEmpty
 
   /**
-   * The problems with restoring `snapshot`, which carries `stored`, into a graph of shape `current` at `version`;
-   * `atRest` judges it at rest whatever it holds. Key removals are judged by the stored values themselves
+   * The problems with restoring `snapshot`, which carries `stored`, into a graph of shape `current` at `version`,
+   * judged as `judged` says. Key removals are judged by the stored values themselves
    * ([[CompiledGraph.restore]]), and pending writes when they are rebound.
    */
   def problems(
@@ -52,10 +56,14 @@ private[graph] object GraphEvolution:
     current: GraphShape,
     snapshot: GraphSnapshot,
     version: String,
-    atRest: Boolean
+    judged: Judged
   ): Vector[String] =
     val removed = stored.nodes.filterNot(current.nodes.toSet).map(n => s"node '$n' was removed from this graph")
-    if atRest || !inFlight(snapshot) then removed
+    val running = judged match
+      case Judged.AtRest    => false
+      case Judged.InFlight  => true
+      case Judged.ByContent => inFlight(snapshot)
+    if !running then removed
     else
       val storedNodes = stored.nodes.toSet
       val versioned = Option.when(snapshot.graphVersion != version)(

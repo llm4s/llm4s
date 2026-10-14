@@ -224,18 +224,33 @@ final class CompiledGraph[I, O] private[graph] (
    * graph's fingerprint matches its own once keys the snapshot holds no value for are left out: the graph only
    * gained keys.
    */
-  def restore(snapshot: GraphSnapshot): Result[Execution] = restoring(snapshot, atRest = false)
+  def restore(snapshot: GraphSnapshot): Result[Execution] = restoring(snapshot, GraphEvolution.Judged.ByContent)
 
   /**
    * Restores `snapshot` as at rest, whatever it holds, for a run that keeps only its state and superstep and starts
    * again at the entry node: [[GraphRuntime.start]] on a completed or blocked thread. Only the header and the state
    * are checked, and the execution has nothing scheduled.
    */
-  private[graph] def restoreAtRest(snapshot: GraphSnapshot): Result[Execution] = restoring(snapshot, atRest = true)
+  private[graph] def restoreAtRest(snapshot: GraphSnapshot): Result[Execution] =
+    restoring(snapshot, GraphEvolution.Judged.AtRest)
 
-  private def restoring(snapshot: GraphSnapshot, atRest: Boolean): Result[Execution] =
+  /**
+   * Restores a stored checkpoint to continue it: `recover`, `resume` and `updateState`. A `Running` or `Suspended`
+   * checkpoint is judged in flight whatever its snapshot holds - a `Running` one whose frontier is already empty is a
+   * run whose closing commit never landed, and `recover` finishes it under its own version. A settled one is judged by
+   * its content, as [[restore]] does.
+   */
+  private[graph] def restoreStored(checkpoint: Checkpoint): Result[Execution] =
+    checkpoint.status match
+      case CheckpointStatus.Running | CheckpointStatus.Suspended =>
+        restoring(checkpoint.snapshot, GraphEvolution.Judged.InFlight)
+      case CheckpointStatus.Completed | CheckpointStatus.Failed =>
+        restoring(checkpoint.snapshot, GraphEvolution.Judged.ByContent)
+
+  private def restoring(snapshot: GraphSnapshot, judged: GraphEvolution.Judged): Result[Execution] =
+    val atRest = judged == GraphEvolution.Judged.AtRest
     val evolution = snapshot.shape match
-      case Some(stored) => GraphEvolution.problems(stored, shape, snapshot, version, atRest)
+      case Some(stored) => GraphEvolution.problems(stored, shape, snapshot, version, judged)
       case None         => GraphEvolution.legacyProblems(snapshot, version, legacy)
     val header = Option.when(snapshot.graphId != id)(s"snapshot is of graph '${snapshot.graphId}'").toVector ++
       evolution ++ Option.when(snapshot.superstep < 0)(s"superstep ${snapshot.superstep} is negative")

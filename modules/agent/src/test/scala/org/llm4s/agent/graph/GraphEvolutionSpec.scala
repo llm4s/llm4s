@@ -287,6 +287,28 @@ class GraphEvolutionSpec extends AnyFlatSpec with Matchers with EitherValues wit
     )
   }
 
+  it should "be refused for a Running checkpoint whose frontier is already empty, which recover finishes in its own" in {
+    // a run whose closing commit never landed: its last Running checkpoint is quiescent
+    val store = InMemoryCheckpointer()
+    val unfinished = new ForwardingCheckpointer(store) {
+      override def latest(threadId: ThreadId) =
+        store
+          .latest(threadId)
+          .map(_.map(s => s.copy(checkpoint = s.checkpoint.withStatus(CheckpointStatus.Running))))
+    }
+    GraphRuntime(store).start(thread, graph(), "go").awaited.value.completed
+    latest(unfinished).checkpoint.snapshot.frontier shouldBe empty
+    val runtime = GraphRuntime(unfinished)
+    runtime.recover(thread, graph(Variant(version = "v2"))).awaited.left.value shouldBe a[GraphError.RestoreRejected]
+    val stuck = latest(unfinished).checkpoint.id
+    runtime
+      .updateState(thread, graph(Variant(version = "v2")), stuck, StateUpdate.update(log, "edited"))
+      .left
+      .value shouldBe a[GraphError.RestoreRejected]
+    runtime.recover(thread, graph(Variant(addKey = true))).awaited.value.completed._2 shouldBe
+      Vector("start:go", "a", "b")
+  }
+
   it should "let a thread whose run was blocked start again, its frontier never run" in {
     val (store, rt) = written("block")
     latest(store).checkpoint.status shouldBe CheckpointStatus.Failed
