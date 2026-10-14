@@ -36,14 +36,14 @@ class MemoryInternalsSpec extends AnyFlatSpec with Matchers with EitherValues {
       reading.clear()
     )
     refusals.foreach(_.left.value shouldBe a[ValidationError])
-    contents(cell.current) shouldBe empty
+    cell.read(contents) shouldBe empty
   }
 
   it should "buffer what a recording manager stores, without writing it" in {
     val cell = new TenantMemory(InMemoryStore.empty)
     val view = MemoryView.recording(cell).storeAll(Seq(fact)).value.asInstanceOf[MemoryView]
     view.buffered.map(_.id) shouldBe Vector(fact.id)
-    contents(cell.current) shouldBe empty
+    cell.read(contents) shouldBe empty
   }
 
   "A TenantMemory over a plain store" should "refuse a transactional write, forget nothing, hold no applied key" in {
@@ -64,11 +64,11 @@ class MemoryInternalsSpec extends AnyFlatSpec with Matchers with EitherValues {
       )
       .value
     out.evicted shouldBe 2
-    contents(cell.current) shouldBe Vector("fact 3", "fact 4")
+    cell.read(contents) shouldBe Vector("fact 3", "fact 4")
     val removed =
-      cell.writePlain(Nil, cell.current.recall().value.map(_.id) :+ MemoryId("absent"), MemoryBounds()).value
+      cell.writePlain(Nil, cell.read(_.recall()).value.map(_.id) :+ MemoryId("absent"), MemoryBounds()).value
     removed.removed should have size 2
-    contents(cell.current) shouldBe empty
+    cell.read(contents) shouldBe empty
   }
 
   "The outcome codec" should "refuse an outcome in a newer format" in {

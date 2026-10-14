@@ -90,8 +90,12 @@ final class SemanticMemoryMiddleware(
 
   override def writes: Set[StateKey[?, ?]] = Set(RecalledKey)
 
-  /** `tenant`'s store as the middleware's last write left it, resolving it if no run of the tenant has yet. */
-  def storeFor(tenant: Option[TenantId]): Result[MemoryStore] = cell(tenant).map(_.current)
+  /**
+   * `f` on `tenant`'s store as the middleware's last write left it, resolving it if no run of the tenant has yet. `f`
+   * runs under the tenant's lock, so it never overlaps a turn's read or write of the store: read through this, not
+   * through a reference kept from the resolver, while runs may be active.
+   */
+  def withStore[A](tenant: Option[TenantId])(f: MemoryStore => Result[A]): Result[A] = cell(tenant).flatMap(_.read(f))
 
   override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
     cell(context.run.config.tenantId).flatMap { tenant =>

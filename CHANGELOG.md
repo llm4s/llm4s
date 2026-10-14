@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fenced by a token per scope, with `AppliedWriteKey`, `AppliedWrite` and `MemoryBounds`. `InMemoryStore`,
   `SQLiteMemoryStore` and `PostgresMemoryStore` implement it. `MemoryStore.replace(add, remove)` is new, one
   transaction in the SQL stores.
+  - `PostgresMemoryStore.Config.tableName` is now at most 55 characters (was 63), so the derived names
+    `<table>_applied`, `<table>_fences` and the `idx_<table>_...` indexes stay distinct within PostgreSQL's 63-byte
+    identifier limit, which truncates silently.
 - **A checkpoint restores after its graph gains a key** ([#1934](https://github.com/llm4s/llm4s/issues/1934), Stage 3
   slice C5, design §4.29): every `GraphSnapshot` now records its graph's `GraphShape` (entry, nodes, edges, joins,
   resume nodes, keys; `CompiledGraph.shape`), and `CompiledGraph.restore` judges a shape change by what the restored

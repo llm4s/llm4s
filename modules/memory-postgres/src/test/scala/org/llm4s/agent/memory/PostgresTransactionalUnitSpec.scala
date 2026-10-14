@@ -211,7 +211,14 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
     db.state.fences shouldBe Map("scope" -> 2L)
   }
 
-  it should "fail, writing nothing, when the connection fails" in {
+  "PostgresMemoryStore.Config" should "accept a table name only while every name derived from it fits 63 bytes" in {
+    (PostgresMemoryStore.Config(tableName = "t" * 55).tableName should have).length(55)
+    an[IllegalArgumentException] should be thrownBy PostgresMemoryStore.Config(tableName = "t" * 56)
+    // `<table>_applied`, the longest derived name, fits PostgreSQL's limit untruncated
+    (("t" * 55) + "_applied").length should be <= 63
+  }
+
+  "PostgresMemoryStore.applyAtomically" should "fail, writing nothing, when the connection fails" in {
     val (db, _) = fresh()
     val failing: Connection = db.proxy(classOf[Connection]) {
       case ("prepareStatement" | "createStatement", _) => throw new java.sql.SQLException("connection lost")

@@ -18,8 +18,11 @@ final private[memory] class TenantMemory(val initial: MemoryStore) extends Appli
   private val lock                        = new ReentrantLock()
   @volatile private var held: MemoryStore = initial
 
-  /** The store as the last write left it. */
-  def current: MemoryStore = held
+  /**
+   * `f` on the store as the last write left it, under the lock: a store need not be thread-safe
+   * (`SQLiteMemoryStore` is one connection), so no read runs while another thread of the tenant writes.
+   */
+  def read[A](f: MemoryStore => A): A = locked(f(held))
 
   /** Whether the store records applied writes, so its writes replay as `Transactional`. */
   def transactional: Boolean = held.isInstanceOf[TransactionalMemoryStore]
@@ -65,9 +68,10 @@ final private[memory] class TenantMemory(val initial: MemoryStore) extends Appli
     else Right(())
 
   /** How many applied keys the store holds; `0` for a store that is not transactional. */
-  def appliedCount: Result[Int] = held match
+  def appliedCount: Result[Int] = read {
     case store: TransactionalMemoryStore => store.appliedWriteCount
     case _                               => Right(0)
+  }
 
   private def locked[A](body: => A): A = Using.resource(new TenantMemory.Held(lock))(_ => body)
 

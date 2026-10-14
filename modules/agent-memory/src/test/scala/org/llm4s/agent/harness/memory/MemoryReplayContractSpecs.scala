@@ -26,7 +26,7 @@ final class MemoryReplaySubject(val name: String, store: () => MemoryStore, val 
       .map(out => ujson.Num(out.added.size.toDouble))
 
   def observe(slot: Int): Result[String] =
-    cell.current.recall(MemoryFilter.All, Int.MaxValue).map(_.count(_.content == content(slot)).toString)
+    cell.read(_.recall(MemoryFilter.All, Int.MaxValue)).map(_.count(_.content == content(slot)).toString)
 
   def initial(slot: Int): String = "0"
   def once(slot: Int): String    = "1"
@@ -34,7 +34,7 @@ final class MemoryReplaySubject(val name: String, store: () => MemoryStore, val 
   /** Another thread consolidates the slot's memory away, under its own scope. */
   def interfere(slot: Int): Unit =
     val ids =
-      cell.current.recall(MemoryFilter.All, Int.MaxValue).toOption.get.filter(_.content == content(slot)).map(_.id)
+      cell.read(_.recall(MemoryFilter.All, Int.MaxValue)).toOption.get.filter(_.content == content(slot)).map(_.id)
     if cell.transactional then
       val other = AppliedWriteKey("another-thread", java.util.UUID.randomUUID().toString)
       cell

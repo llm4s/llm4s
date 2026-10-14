@@ -49,7 +49,7 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
 
   /** The store a middleware holds for `tenant`, as its last write left it. */
   private def held(m: SemanticMemoryMiddleware, tenant: Option[TenantId]): MemoryStore =
-    m.storeFor(tenant).value
+    m.withStore(tenant)(Right(_)).value
 
   private def agentWith(client: LLMClient, m: SemanticMemoryMiddleware, runtime: Option[GraphRuntime] = None): Agent =
     val builder = Agent.builder("assistant", client).withMiddleware(m)
@@ -145,6 +145,31 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     val runs        = (1 to 8).map(i => agent.start(ThreadId(s"bound-$i"), s"question $i", tenant(t1)).value)
     runs.foreach(_.await().value)
     held(m, Some(t1)).count().value shouldBe 5L
+  }
+
+  it should "never read the store while another thread of the tenant writes it" in {
+    // a store that is not thread-safe, as SQLiteMemoryStore is not: it fails any call that overlaps another
+    val inside  = new java.util.concurrent.atomic.AtomicInteger()
+    val overlap = new java.util.concurrent.atomic.AtomicBoolean(false)
+    def exclusive[A](body: => A): A =
+      if inside.incrementAndGet() > 1 then overlap.set(true)
+      Thread.sleep(2)
+      val result = body
+      inside.decrementAndGet()
+      result
+    final class Exclusive(base: InMemoryStore) extends PlainStore(base):
+      private def wrap(r: Result[MemoryStore])              = r.map(s => new Exclusive(s.asInstanceOf[InMemoryStore]))
+      override def store(memory: Memory)                    = exclusive(wrap(base.store(memory)))
+      override def delete(id: MemoryId)                     = exclusive(wrap(base.delete(id)))
+      override def recall(filter: MemoryFilter, limit: Int) = exclusive(base.recall(filter, limit))
+      override def search(query: String, topK: Int, filter: MemoryFilter) = exclusive(base.search(query, topK, filter))
+    val m      = new SemanticMemoryMiddleware(_ => Right(new Exclusive(InMemoryStore.empty)), simple, answering())
+    val client = new FunctionClient(_ => "answer")
+    val agent  = agentWith(client, m)
+    val runs   = (1 to 8).map(i => agent.start(ThreadId(s"x-$i"), s"question $i").value)
+    runs.foreach(_.await().value)
+    overlap.get shouldBe false
+    held(m, None).count().value shouldBe 16L
   }
 
   it should "count every call the memory manager makes in the run's usage (rule 11)" in {

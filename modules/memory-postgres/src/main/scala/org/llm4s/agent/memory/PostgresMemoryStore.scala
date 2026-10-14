@@ -630,7 +630,11 @@ object PostgresMemoryStore {
 
   import SqlParam._
 
-  private val ValidIdentifierPattern  = "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$".r
+  /**
+   * At most 55 characters, so every name the store derives from it - `<table>_applied`, `<table>_fences` and the
+   * `idx_<table>_...` indexes - stays distinct within PostgreSQL's 63-byte identifier limit, which truncates silently.
+   */
+  private val ValidIdentifierPattern  = "^[a-zA-Z_][a-zA-Z0-9_]{0,54}$".r
   private val ValidMetadataKeyPattern = "^[a-zA-Z_][a-zA-Z0-9_]*$".r
 
   /** Helper for binary filter composition (And/Or) */
@@ -656,7 +660,7 @@ object PostgresMemoryStore {
   ) {
     require(
       ValidIdentifierPattern.matches(tableName),
-      s"Invalid table name '$tableName': must match pattern [a-zA-Z_][a-zA-Z0-9_]{0,62}"
+      s"Invalid table name '$tableName': must match pattern [a-zA-Z_][a-zA-Z0-9_]{0,54}"
     )
     def jdbcUrl: String = s"jdbc:postgresql://$host:$port/$database"
   }
