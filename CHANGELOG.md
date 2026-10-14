@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timeout. A daemon thread now reads it from process start into a buffer of the last 8 KB, which the error messages
   ("Server stderr: ...") still draw on, bounded and redacted as before. The first 100 stderr lines of a process are
   logged at info as before, the rest at debug. `close()` ends the thread.
+  Stderr is redacted as whole lines, whatever the read boundaries: a line is read up to 16384 characters, redacted,
+  then cut for the log and the buffer, and the rest of a longer (or never-ending) line is dropped and counted in a
+  `[line cut ...]` marker, so a key and its value are never separated and an error never shows a raw fragment.
 - **Vertex AI finds gcloud's Application Default Credentials on Windows and under `CLOUDSDK_CONFIG`** ([#1939](https://github.com/llm4s/llm4s/issues/1939)).
   The well-known `application_default_credentials.json` was looked for only in `~/.config/gcloud`. It is now located
   as Google's client libraries do: `$CLOUDSDK_CONFIG` when set (any OS), else `%APPDATA%\gcloud` on Windows, else

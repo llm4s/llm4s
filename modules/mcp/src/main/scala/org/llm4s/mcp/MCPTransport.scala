@@ -674,6 +674,54 @@ class SSETransportImpl(
 
 private[mcp] object StdioTransportImpl {
 
+  /**
+   * Turns a server's stderr, arriving in chunks cut anywhere, into lines that are safe to log and to put in an error.
+   * A line is redacted as a whole before it is shortened: a secret and the key that names it are never separated by a
+   * chunk boundary or by the cut. A line longer than `lineCap` is redacted from its first `lineCap` characters, emitted
+   * then with a marker, and the rest of it is dropped, counted but never kept or shown, so a line that never ends
+   * costs `lineCap` characters of memory and one log entry. `emit` receives each redacted, bounded line.
+   */
+  final class StderrLines(lineCap: Int, emit: String => Unit) {
+    private val line    = new StringBuilder
+    private var dropped = 0L
+    private var capped  = false
+
+    def feed(text: String): Unit = {
+      var start = 0
+      while (start < text.length) {
+        val nl  = text.indexOf('\n', start)
+        val end = if (nl < 0) text.length else nl
+        append(text.substring(start, end))
+        if (nl >= 0) endLine()
+        start = end + 1
+      }
+    }
+
+    /** Emits the line still open, at the end of the stream. */
+    def finish(): Unit = if (line.nonEmpty || capped) endLine()
+
+    private def append(part: String): Unit =
+      if (capped) dropped += part.length
+      else {
+        val room = lineCap - line.length
+        line.append(part.substring(0, math.min(room, part.length)))
+        if (part.length >= room) {
+          dropped += part.length - room
+          capped = true
+        }
+      }
+
+    private def endLine(): Unit = {
+      val text = line.toString.stripSuffix("\r")
+      val marker =
+        if (capped) s" [line cut at $lineCap chars, ${if (dropped > 0) s"$dropped more " else ""}omitted]" else ""
+      emit(PayloadLog.preview(text) + marker)
+      line.clear()
+      dropped = 0
+      capped = false
+    }
+  }
+
   /** The last `max` characters of `text`, cut at a line start when there is one, so a line is never kept in part. */
   def lastLines(text: String, max: Int): String =
     if (text.length <= max) text
@@ -717,9 +765,11 @@ class StdioTransportImpl(
 
   // The server's stderr is drained on its own thread for as long as the process lives: nothing else reads it while a
   // request is in flight, and a server that logs more than the pipe buffer holds would block in its write and never
-  // answer (#1952). What it writes is kept here, newest last, cut to the last StderrBufferChars characters, until
+  // answer (#1952). What it writes is kept here, redacted, newest last, cut to the last StderrBufferChars characters, until
   // readAvailableStderr takes it for a diagnostic.
   private val StderrBufferChars = 8192
+  // How much of one stderr line is read before it is redacted and cut; the rest of a longer line is dropped
+  private val StderrLineChars = 16384
   // Lines logged at info per process; the rest go to debug, so a chatty server cannot flood the log
   private val StderrInfoLines                        = 100
   private val stderrLock                             = new Object
@@ -811,42 +861,35 @@ class StdioTransportImpl(
       new Runnable {
         override def run(): Unit = {
           val chunk  = new Array[Char](4096)
-          val carry  = new StringBuilder
           var logged = 0
-          def logLine(line: String): Unit = {
-            val text = line.stripSuffix("\r")
-            if (logged < StderrInfoLines) {
-              logger.info(s"StdioTransport($name) stderr: ${PayloadLog.preview(text)}")
-              logged += 1
-              if (logged == StderrInfoLines)
-                logger.info(s"StdioTransport($name) stderr: further lines are logged at debug level")
-            } else logger.debug(s"StdioTransport($name) stderr: ${PayloadLog.preview(text)}")
-          }
-          Iterator
-            .continually(Try(reader.read(chunk)).getOrElse(-1))
-            .takeWhile(_ >= 0)
-            .foreach { n =>
-              val text = new String(chunk, 0, n)
+          // Each line arrives redacted whole and bounded; the buffer for diagnostics keeps these, never raw chunks
+          val lines = new StdioTransportImpl.StderrLines(
+            StderrLineChars,
+            line => {
+              if (logged < StderrInfoLines) {
+                logger.info(s"StdioTransport($name) stderr: $line")
+                logged += 1
+                if (logged == StderrInfoLines)
+                  logger.info(s"StdioTransport($name) stderr: further lines are logged at debug level")
+              } else logger.debug(s"StdioTransport($name) stderr: $line")
               stderrLock.synchronized {
-                stderrBuffer.append(text)
+                stderrBuffer.append(line).append('\n')
                 val kept = StdioTransportImpl.lastLines(stderrBuffer.toString, StderrBufferChars)
                 if (kept.length != stderrBuffer.length) {
                   stderrBuffer.clear()
                   stderrBuffer.append(kept)
                 }
               }
-              stderrSeen = true
-              carry.append(text)
-              val lines = carry.toString.split("\n", -1)
-              carry.clear()
-              carry.append(lines.last)
-              lines.init.foreach(logLine)
-              if (carry.length >= PayloadLog.MaxChars) {
-                logLine(carry.toString)
-                carry.clear()
-              }
             }
-          if (carry.nonEmpty) logLine(carry.toString)
+          )
+          Iterator
+            .continually(Try(reader.read(chunk)).getOrElse(-1))
+            .takeWhile(_ >= 0)
+            .foreach { n =>
+              stderrSeen = true
+              lines.feed(new String(chunk, 0, n))
+            }
+          lines.finish()
           logger.debug(s"StdioTransport($name) stderr drain thread exiting")
         }
       },
