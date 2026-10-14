@@ -267,6 +267,16 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
       backend.lockFileOf(p("/real/sub/new/deeper.txt")).value shouldBe backend.lockFileOf(p("/real/sub/x.txt")).value
   }
 
+  it should "list and walk only regular files and directories, a FIFO not counting" in {
+    assume(posix)
+    val fifo = dir.resolve("a-fifo")
+    assume(new ProcessBuilder("mkfifo", fifo.toString).start().waitFor() == 0)
+    Files.writeString(dir.resolve("b.txt"), "b")
+    val capped = HostFileBackend.open(dir, locks, maxScanEntries = 1).value
+    capped.ls(VPath.root, 10, call()).value.items.map(_.path) shouldBe Vector(p("/b.txt"))
+    capped.glob(Glob("*"), VPath.root, 10, call()).value.items shouldBe Vector(p("/b.txt"))
+  }
+
   it should "drop a name it cannot list before it counts against the limit" in {
     assume(posix)
     Files.writeString(dir.resolve("a\nbad"), "x")

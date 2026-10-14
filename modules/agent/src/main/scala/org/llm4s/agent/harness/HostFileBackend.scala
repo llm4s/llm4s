@@ -466,8 +466,10 @@ final class HostFileBackend private (
         val p    = entries.next()
         val name = p.getFileName.toString
         // a name the backend cannot list (not a valid segment) is dropped before it counts, too
+        // only what the backend can use: a regular file or a directory (no FIFO, socket or device)
         val hidden =
-          VPath(s"/$name").isLeft || HostFileBackend.trailing(name) || HostFileBackend.isTemporary(name) || aliased(p)
+          VPath(s"/$name").isLeft || HostFileBackend.trailing(name) || HostFileBackend.isTemporary(name) ||
+            aliased(p) || !(isFile(p) || isDir(p))
         if !hidden then
           eligible += 1
           least.add((key(name, p), name, p))
