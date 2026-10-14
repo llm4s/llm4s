@@ -56,8 +56,8 @@ message's text view: its text parts joined by newlines, `""` for a message that 
 
 ## Why inline media is bounded
 
-`ContentPart.image` and `ContentPart.document` return `Left(ValidationError)` for inline bytes over 5 MiB (pass
-`maxInlineBytes` for another bound). An agent thread's every checkpoint is a full snapshot of its state, so each
+`ContentPart.image` and `ContentPart.document` return `Left(ValidationError)` for inline bytes over 5 MiB, and a
+part read from JSON is checked the same way. An agent thread's every checkpoint is a full snapshot of its state, so each
 retained checkpoint keeps a copy of every inline part - base64-encoded, a third larger - for as long as the message
 stays in the thread. Put larger media at a URL, or upload it to the provider and send a `ProviderFile`; both are held
 by reference.

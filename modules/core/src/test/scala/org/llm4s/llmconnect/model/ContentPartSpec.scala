@@ -31,12 +31,6 @@ class ContentPartSpec extends AnyFlatSpec with Matchers with EitherValues {
     error.message should include("Url or a ProviderFile")
   }
 
-  it should "take a caller's own bound" in {
-    ContentPart.image(png, MediaType.Png, maxInlineBytes = 3).isLeft shouldBe true
-    ContentPart.image(png, MediaType.Png, maxInlineBytes = 4).isRight shouldBe true
-    ContentPart.image(png, MediaType.Png, maxInlineBytes = 0).left.value.message should include("positive")
-  }
-
   it should "refuse a relative URL and a data: URL, which is inline bytes by another name" in {
     ContentPart.image(MediaSource.Url(URI.create("cat.png")), MediaType.Png).left.value.message should
       include("absolute")
@@ -54,7 +48,10 @@ class ContentPartSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "ContentPart.document" should "apply the same checks" in {
     ContentPart.document(remote, MediaType.Pdf).value.mediaType shouldBe MediaType.Pdf
-    ContentPart.document(png, MediaType.Csv, maxInlineBytes = 2).isLeft shouldBe true
+    ContentPart
+      .document(MediaSource.Inline(IArray.fill[Byte](ContentPart.MaxInlineBytes + 1)(0)), MediaType.Csv)
+      .isLeft shouldBe
+      true
   }
 
   "The media constructors" should "refuse null arguments with a ValidationError, never build a part holding one" in {
@@ -133,6 +130,17 @@ class ContentPartSpec extends AnyFlatSpec with Matchers with EitherValues {
     )
     ujson.read(write[ContentPart](parts(3)))("source") shouldBe
       ujson.Obj("type" -> "providerFile", "provider" -> "openai", "id" -> "file-9")
+  }
+
+  it should "read stored or imported JSON through the same checks a built part passes" in {
+    def imageJson(source: ujson.Value) = ujson.Obj("type" -> "image", "mediaType" -> "image/png", "source" -> source)
+    val oversized = java.util.Base64.getEncoder.encodeToString(Array.fill[Byte](ContentPart.MaxInlineBytes + 1)(0))
+    Seq(
+      imageJson(ujson.Obj("type" -> "inline", "data" -> oversized)),
+      imageJson(ujson.Obj("type" -> "url", "uri" -> "relative.png")),
+      imageJson(ujson.Obj("type" -> "url", "uri" -> "data:image/png;base64,iVBO")),
+      imageJson(ujson.Obj("type" -> "providerFile", "provider" -> " ", "id" -> "f"))
+    ).foreach(json => an[Exception] should be thrownBy read[ContentPart](json))
   }
 
   it should "refuse a media type of the wrong family, and an unknown part" in {

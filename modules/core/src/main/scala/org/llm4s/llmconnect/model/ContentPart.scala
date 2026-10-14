@@ -15,8 +15,8 @@ import java.util.Base64
  * Text is built directly. An image or a document is built with [[ContentPart.image]] or
  * [[ContentPart.document]], which check its source and return a `Result`:
  *
- *  - '''Inline bytes are bounded''' by [[ContentPart.MaxInlineBytes]] (5 MiB) unless the caller
- *    gives its own bound. An agent thread's every checkpoint is a full snapshot of its state, so
+ *  - '''Inline bytes are bounded''' by [[ContentPart.MaxInlineBytes]] (5 MiB), also when a part is
+ *    read from JSON. An agent thread's every checkpoint is a full snapshot of its state, so
  *    each retained checkpoint keeps a copy of every inline part - base64-encoded, a third larger -
  *    for as long as the message stays in the thread. Larger media belongs at a
  *    [[org.llm4s.media.MediaSource.Url]] or in a [[org.llm4s.media.MediaSource.ProviderFile]],
@@ -66,24 +66,19 @@ object ContentPart {
     def kind: String = s"document (${source.kind}, ${mediaType.mimeType})"
   }
 
-  /** The default bound on an inline part's bytes: 5 MiB. */
+  /**
+   * The bound on an inline part's bytes: 5 MiB. One bound for every part, wherever it is built - a smart
+   * constructor or the codec reading stored or imported JSON - so no part over it can exist.
+   */
   val MaxInlineBytes: Int = 5 * 1024 * 1024
 
-  /** An image from `source`, checked as described on [[ContentPart]], with inline bytes bounded by [[MaxInlineBytes]]. */
+  /** An image from `source`, checked as described on [[ContentPart]]. */
   def image(source: MediaSource, mediaType: ImageMediaType): Result[Image] =
-    image(source, mediaType, MaxInlineBytes)
+    notNull(mediaType).flatMap(_ => checked(source, MaxInlineBytes)).map(new Image(_, mediaType))
 
-  /** An image from `source`, checked as described on [[ContentPart]], with inline bytes bounded by `maxInlineBytes`. */
-  def image(source: MediaSource, mediaType: ImageMediaType, maxInlineBytes: Int): Result[Image] =
-    notNull(mediaType).flatMap(_ => checked(source, maxInlineBytes)).map(new Image(_, mediaType))
-
-  /** A document from `source`, checked as described on [[ContentPart]], with inline bytes bounded by [[MaxInlineBytes]]. */
+  /** A document from `source`, checked as described on [[ContentPart]]. */
   def document(source: MediaSource, mediaType: DocumentMediaType): Result[Document] =
-    document(source, mediaType, MaxInlineBytes)
-
-  /** A document from `source`, checked as described on [[ContentPart]], with inline bytes bounded by `maxInlineBytes`. */
-  def document(source: MediaSource, mediaType: DocumentMediaType, maxInlineBytes: Int): Result[Document] =
-    notNull(mediaType).flatMap(_ => checked(source, maxInlineBytes)).map(new Document(_, mediaType))
+    notNull(mediaType).flatMap(_ => checked(source, MaxInlineBytes)).map(new Document(_, mediaType))
 
   /** The text parts of `parts`, joined by newlines: a message's text view. Empty when there are none. */
   def text(parts: Seq[ContentPart]): String =
@@ -156,8 +151,6 @@ object ContentPart {
         Left(ValidationError("source", "inline media needs its bytes"))
       case MediaSource.ProviderFile(provider, id) if provider == null || id == null =>
         Left(ValidationError("source", "a provider file needs a provider and an id"))
-      case _ if maxInlineBytes <= 0 =>
-        Left(ValidationError("maxInlineBytes", s"must be positive, was $maxInlineBytes"))
       case inline: MediaSource.Inline if inline.length > maxInlineBytes =>
         Left(
           ValidationError(
@@ -185,6 +178,9 @@ object ContentPart {
       ujson.Obj("type" -> "providerFile", "provider" -> provider, "id" -> id)
   }
 
+  private def valid(part: Result[ContentPart]): ContentPart =
+    part.fold(e => throw new IllegalArgumentException(s"invalid content part: ${e.message}"), identity)
+
   private def readSource(json: ujson.Value): MediaSource = json("type").str match {
     case "url"          => MediaSource.Url(URI.create(json("uri").str))
     case "inline"       => MediaSource.Inline(IArray.unsafeFromArray(Base64.getDecoder.decode(json("data").str)))
@@ -199,7 +195,6 @@ object ContentPart {
     }
   }
 
-  // stored parts were checked when they were built, and a thread must restore: the reader does not check again
   implicit val rw: RW[ContentPart] = readwriter[ujson.Value].bimap[ContentPart](
     {
       case Text(text) => ujson.Obj("type" -> "text", "text" -> text)
@@ -210,10 +205,12 @@ object ContentPart {
     },
     json =>
       json("type").str match {
-        case "text"  => Text(json("text").str)
-        case "image" => new Image(readSource(json("source")), mediaType(json, "image") { case i: ImageMediaType => i })
+        case "text" => Text(json("text").str)
+        // read through the smart constructors: stored or imported JSON is checked as a built part is
+        case "image" =>
+          valid(image(readSource(json("source")), mediaType(json, "image") { case i: ImageMediaType => i }))
         case "document" =>
-          new Document(readSource(json("source")), mediaType(json, "document") { case d: DocumentMediaType => d })
+          valid(document(readSource(json("source")), mediaType(json, "document") { case d: DocumentMediaType => d }))
         case other => throw new IllegalArgumentException(s"unknown content part '$other'")
       }
   )
