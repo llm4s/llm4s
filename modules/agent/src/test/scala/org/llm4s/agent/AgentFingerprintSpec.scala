@@ -155,4 +155,49 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
       .value
       .answer shouldBe Some("done")
   }
+
+  "The graph version" should "change when any tool adopts locks, even where the queue key is already registered" in {
+    val lockedEcho = echoWith(SpecTools.spec("echo").withLocks(_ => Set.empty))
+    val lockedOther = org.llm4s.agent.graph.tool.AgentTool(SpecTools.spec("other").withLocks(_ => Set.empty))((a, _) =>
+      ToolOutcome.Success(ujson.Str(a.text))
+    )
+    def agentWith(tools: org.llm4s.agent.graph.tool.AgentTool[?]*) =
+      Agent.builder("root", client).withTools(SpecTools.set(tools*))
+    // a second tool of the same agent adopting locks
+    version(agentWith(lockedEcho, lockedOther)) should not be version(agentWith(lockedEcho, other))
+    // an agent adopting locks while another agent of the family already has them
+    def family(root: org.llm4s.agent.graph.tool.AgentTool[?]) =
+      agentWith(root).withHandoffs(
+        Handoff.to("helper", Agent.builder("helper", client).withTools(SpecTools.set(lockedOther)))
+      )
+    version(family(lockedEcho)) should not be version(family(echo))
+    // timeouts and resources are not part of it
+    import scala.concurrent.duration._
+    version(agentWith(echoWith(SpecTools.spec("echo").withTimeout(1.second)))) shouldBe version(agentWith(echo))
+  }
+
+  "A thread parked in a batch" should "be refused once another tool of its agent adopts locks" in {
+    val runtime    = GraphRuntime.inMemory()
+    val thread     = ThreadId("adopting")
+    val lockedEcho = echoWith(SpecTools.spec("echo").withLocks(_ => Set.empty))
+    def agent(otherTool: org.llm4s.agent.graph.tool.AgentTool[?], replies: Completion*) =
+      built(
+        Agent
+          .builder("root", ScriptedLLMClient.of(replies*))
+          .withTools(SpecTools.set(lockedEcho, otherTool))
+          .withMiddleware(new ApprovalMiddleware(_ => Some("review")))
+          .withRuntime(runtime)
+      )
+    val parked = agent(other, SpecTools.calling(SpecTools.call("c1", "other"), SpecTools.call("c2", "echo")))
+      .run(thread, "go")
+      .value
+    val approvals = parked.status match {
+      case AgentStatus.Suspended(pending, _, _, _) => pending.map(p => parked.approve(p._1)).toMap
+      case other                                   => fail(s"expected Suspended, got $other")
+    }
+    val lockedOther = org.llm4s.agent.graph.tool.AgentTool(SpecTools.spec("other").withLocks(_ => Set.empty))((a, _) =>
+      ToolOutcome.Success(ujson.Str(a.text))
+    )
+    agent(lockedOther).resume(thread, approvals).error shouldBe a[GraphError.RestoreRejected]
+  }
 }
