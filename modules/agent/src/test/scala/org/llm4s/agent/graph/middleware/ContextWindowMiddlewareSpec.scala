@@ -142,9 +142,9 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   it should "give a ContextWindowMiddleware request that passes validateConversation" in {
     val mw   = new ContextWindowMiddleware(ContextWindowConfig(maxMessages = Some(4)))
     var sent = Vector.empty[Message]
-    val result = mw.wrapModelCall(ModelRequest(toolHistory.toVector, ToolSet.of().value), testRunContext()) { req =>
+    val result = mw.wrapModelCall(ModelRequest(toolHistory.toVector, ToolSet.of().value), testModelContext()) { req =>
       sent = req.messages
-      Right(completion(AssistantMessage("ok")))
+      Right(ModelResponse(completion(AssistantMessage("ok"))))
     }
     result.isRight shouldBe true
     sent.head shouldBe SystemMessage("sys")

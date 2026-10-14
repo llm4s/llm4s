@@ -1,6 +1,7 @@
 package org.llm4s.agent.graph
 
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
+import org.llm4s.llmconnect.model.UsageSummary
 import org.llm4s.types.{ Result, TryOps }
 import org.slf4j.LoggerFactory
 
@@ -2071,6 +2072,18 @@ final class GraphRuntime(
     /** The thread's current claim, when the store named it as this run's claim was found lost. */
     private val lostTo = AtomicReference[Option[FencingToken]](None)
 
+    // the model usage of the tasks that failed: they commit nothing, so it goes on the run's RunFailed (§4.22)
+    private val failedUsage = AtomicReference(UsageSummary())
+
+    /** The usage of the attempts that committed nothing, for the run's terminal event; `None` when there is none. */
+    private def lostUsage: Option[UsageSummary] = Option.when(failedUsage.get.requestCount > 0)(failedUsage.get)
+
+    /** Keeps the usage `context`'s task recorded, when the task commits nothing: no pending write will carry it. */
+    private def uncommitted(context: RunContext): Unit =
+      if !context.usage.isEmpty then failedUsage.updateAndGet(_.merge(context.usage.summary)): Unit
+
+    private def failed(message: String): RunEvent = RunEvent.RunFailed(message, lostUsage)
+
     /**
      * When the claim was found lost, at any stage of the run, as a `System.nanoTime` value; set once. The
      * run's end is bounded from it: see [[lossDeadline]].
@@ -2334,7 +2347,7 @@ final class GraphRuntime(
         case Right(_) if !cause.compareAndSet(None, Some(StopCause.Finishing)) => cancelled()
         case Right(saved)                                                      =>
           // the blocked turn leaves the history with it: nothing of it stays readable or forkable
-          submit(saved, RunEvent.RunFailed(error.message), retractTurn = true)
+          submit(saved, failed(error.message), retractTurn = true)
           committer.close()
           committer.failure.fold[RunResult[O]](RunResult.Failed(execution.state, error))(e =>
             RunResult.Failed(execution.state, writeFailed(e, Some(error)))
@@ -2349,9 +2362,13 @@ final class GraphRuntime(
       )
       def settled(executed: Result[TaskResult]): Result[TaskResult] =
         executed.flatMap(result => graph.encodeWrite(checkpointId, task, result).map(result -> _)) match
-          // no write and no event: `recover` runs the task again
-          case Left(cancelled: CancelledError)                  => Left(cancelled)
-          case Right(_) if Thread.currentThread().isInterrupted => Left(CancelledError(s"task ${task.id.value}"))
+          // no write and no event: `recover` runs the task again; its calls' usage goes on the run's terminal event
+          case Left(cancelled: CancelledError) =>
+            uncommitted(context)
+            Left(cancelled)
+          case Right(_) if Thread.currentThread().isInterrupted =>
+            uncommitted(context)
+            Left(CancelledError(s"task ${task.id.value}"))
           case Right((result, write)) =>
             val event = result match
               // a held task never reaches here: encodeWrite refuses it
@@ -2363,6 +2380,7 @@ final class GraphRuntime(
             )
             Right(result)
           case Left(error) =>
+            uncommitted(context)
             committer.submit(
               Commit(
                 token,
@@ -2374,6 +2392,7 @@ final class GraphRuntime(
             Left(error)
       graph.executeTask(task, execution, context) match
         case Right(_: TaskResult.Blocked) if Thread.currentThread().isInterrupted =>
+          uncommitted(context)
           Left(CancelledError(s"task ${task.id.value}"))
         // a blocked task has no pending write, since its error is not data: its event records the failure,
         // and the run ends with the superstep
@@ -2451,9 +2470,17 @@ final class GraphRuntime(
         case StopCause.ClaimLost => lostClaim(execution, None)
         // `Finishing` here means an interrupt from inside the run reached the outcome's commit
         case StopCause.Cancelled | StopCause.Finishing =>
-          closeStopped(execution, RunEvent.RunCancelled, GraphError.Cancelled(Some(threadId.value), Some(checkpointId)))
+          closeStopped(
+            execution,
+            RunEvent.RunCancelled(lostUsage),
+            GraphError.Cancelled(Some(threadId.value), Some(checkpointId))
+          )
         case StopCause.Expired =>
-          closeStopped(execution, RunEvent.RunTimedOut, GraphError.DeadlineExceeded(threadId.value, Some(checkpointId)))
+          closeStopped(
+            execution,
+            RunEvent.RunTimedOut(lostUsage),
+            GraphError.DeadlineExceeded(threadId.value, Some(checkpointId))
+          )
       Thread.currentThread().interrupt()
       result
 
@@ -2492,7 +2519,7 @@ final class GraphRuntime(
       if !cause.compareAndSet(None, Some(StopCause.Finishing)) then cancelled()
       else
         committer.submit(
-          Commit(token, None, Vector.empty, Vector(draft(None, None, RunEvent.RunFailed(error.message))))
+          Commit(token, None, Vector.empty, Vector(draft(None, None, failed(error.message))))
         )
         stop(execution, error)
 

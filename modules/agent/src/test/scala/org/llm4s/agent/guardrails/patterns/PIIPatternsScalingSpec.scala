@@ -1,7 +1,7 @@
 package org.llm4s.agent.guardrails.patterns
 
 import org.llm4s.agent.guardrails.patterns.PIIPatterns.PIIType
-import org.llm4s.testutil.LinearTime
+import org.llm4s.testutil.{ LinearTime, PerformanceTest }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -50,7 +50,7 @@ class PIIPatternsScalingSpec extends AnyFlatSpec with Matchers {
     }
 
   (PIIType.all :+ PIIType.BankAccount).foreach { piiType =>
-    s"The ${piiType.name} pattern" should "take linear time on long runs of letters, digits, a. and a@" in {
+    s"The ${piiType.name} pattern" should "take linear time on long runs of letters, digits, a. and a@" taggedAs PerformanceTest in {
       checkScaling(piiType)
     }
   }

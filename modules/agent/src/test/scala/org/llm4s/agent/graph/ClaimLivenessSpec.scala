@@ -99,7 +99,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
   /**
    * A store that serialises `renew` and `release` on one lock, as `SqliteCheckpointer` serialises every
    * call on its connection. After [[hangRenewals]], the next renewal holds the lock until [[unhang]], so a
-   * release waits behind it. `released` records the token of each release that ran.
+   * release waits behind it. `released` records the token of each release the store has made.
    *
    * After [[serialiseAfterClaim]], once the next claim is granted, `latest`, `commit` and `deleteThread`
    * are serialised too, and `latest` first waits for a renewal to hang, so that the claim holder's next
@@ -139,8 +139,10 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       underlying.renew(threadId, token, ttl)
     }
     def release(threadId: ThreadId, token: FencingToken) = serialised {
+      // recorded once the store has released, so a claim made after a test sees it is not refused
+      val outcome = underlying.release(threadId, token)
       released.add(token)
-      underlying.release(threadId, token)
+      outcome
     }
     def commit(threadId: ThreadId, commit: Commit) = {
       beforeCommit()
@@ -1619,6 +1621,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
           store.serialiseAfterClaim()
           store.hangRenewals()
           val rt       = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+          val releases = store.released.size
           val returned = new CountDownLatch(1)
           rt.changeReturned = id => if id == held then returned.countDown()
           val outcome = new java.util.concurrent.LinkedBlockingQueue[Result[Any]]()
@@ -1639,6 +1642,11 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
           store.changes.get shouldBe 0
           store.latest(thread).value.value shouldBe latest
           if how == "fork" then store.latest(held).value shouldBe None
+
+          // the lost claim is given back on a detached thread, queued behind the hung renewal - which renewed
+          // it, nobody having taken it - and the change's return does not wait for it: until it lands the
+          // store still holds the claim, and a new change is refused ThreadBusy
+          eventually(store.released.size == releases + 1)
 
           // and the thread is free for the same change in this runtime
           changing(how, rt, two, latest.checkpoint.id, "again").isRight shouldBe true

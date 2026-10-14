@@ -172,12 +172,13 @@ class SqliteCrossRuntimeSubscriptionSpec extends AnyFlatSpec with Matchers with 
     val b        = runtime(counted, WatchPolicy(pollInterval = interval))
     val sub      = b.subscribe(thread)(Seen()).value
     eventually("the watch to start")(b.storeWatches(thread) == 1)
+    val began = System.nanoTime()
     val start = counted.reads.get
-    Thread.sleep(1000)
-    val polled = counted.reads.get - start
-    // about five reads in a second; generous bounds, for a loaded machine
-    polled should be >= 2
-    polled should be <= 8
+    // it keeps polling: three more reads arrive
+    eventually("three more polls")(counted.reads.get >= start + 3)
+    // and no faster than its interval: the three are two intervals apart, at least. A loaded machine can
+    // only slow the polls, so only the lower bound is asserted
+    (System.nanoTime() - began).nanos should be >= interval * 3 / 2
     sub.cancel()
     eventually("the watch to stop")(b.storeWatches(thread) == 0)
     val reads = counted.reads.get

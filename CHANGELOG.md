@@ -15,6 +15,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operator can trace the run a `ThreadBusy` names to the runtime holding it. The label is never stored and never
   appears in an error another caller gets. A blank label is refused. See the
   [guide](docs/guide/agents/durable-checkpointers.md#runs-claim-their-thread).
+- **Kernel hooks for the harness: state-writing hooks, prompt sections and accounted model calls**
+  ([#1902](https://github.com/llm4s/llm4s/issues/1902), Stage 3 slice C1, design §4.22): a middleware's `beforeAgent`,
+  `wrapModelCall` and `afterAgent` read the committed thread state through a `ModelContext` (`run`, `state`) and
+  write their own declared `writes` - `BoundaryResult(text, update)` and `ModelResponse.addUpdate`, each checked
+  against the writing middleware's own keys. The new `promptSections` hook adds `PromptSection(id, text, cacheable)`s
+  to every request's system prompt, cacheable first, never stored, capped together by
+  `AgentBuilder.withMaxPromptSectionTokens` (default 8192). `ModelContext.accounted(client)` and `recordUsage` count a
+  hook's own model calls in the thread's usage, and a failed task's calls are on the durable
+  `RunEvent.RunFailed.usage`.
+- **Typed custom streams: `EventHandlers`, and `events(run, ...)` on `AgentIO`, `AgentZ` and `AgentPekko`** ([#1914](https://github.com/llm4s/llm4s/issues/1914)):
+  `EventHandlers.on(eventType)(handler)` packages typed handlers with their `EventType`s, so a selection of mixed event
+  types keeps each payload's type; `.otherwise(f)` takes every event no handler took (kernel events, `LiveGap`,
+  `Disconnected`, an undecodable payload). An event is looked up once by name and version and decoded once. It is a
+  listener, so it is passed as one: `agent.stream(threadId, query)(handlers)`, `run.subscribe()(handlers)`,
+  `runtime.subscribe(threadId)(handlers)`. `agentIO.events(run, eventType)` is a `Stream[F, A]` of one type's payloads
+  for a run you hold, `events(run, handlers)` a stream of the handlers' results (one ADT of yours); the same on `AgentZ`
+  (`ZStream`) and `AgentPekko` (`Source[_, Future[Done]]`). It replays the run's durable events, follows it live, ends
+  with it, and cancels only its subscription when stopped early. Design record: §4.28.
 - **`llm4s-kotlin-api` is published to Maven Central with each release** ([#1494](https://github.com/llm4s/llm4s/issues/1494)):
   `org.llm4s:llm4s-kotlin-api` (no `_3` suffix: a Kotlin artifact), at the release's version, depending on
   `llm4s-java-api_3` at that same version, and managed by `llm4s-bom`, so a Gradle build that imports the BOM declares
@@ -1328,6 +1346,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conflict; a refused claim leaves the live claim as it was; and stored checkpoints, pending writes and events are
   kept apart from the `ujson` values callers pass in and are given back. `InMemoryCheckpointerSpec` and
   `SqliteCheckpointerSpec` check that a refused claim spends no token.
+- **An agent stream whose consumer stops draining fails once 1024 durable events wait** ([#1914](https://github.com/llm4s/llm4s/issues/1914)):
+  the buffer under the fs2, ZIO, Pekko and Java agent streams (`AgentEventBuffer`) dropped live events past its size
+  but kept durable events without limit. It now holds at most `Agent.StreamCapacity` of them waiting; one more ends the
+  stream with an error naming the last `seq` taken, as the runtime's own `Disconnected(lastSeq, Lagging)` does. A
+  `stream*` that fails this way cancels its turn, as any failure of those streams does. Migration note: Stage 3, typed
+  custom streams.
 - **Breaking - `GraphRuntime.subscribe` is tenant-checked** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   it took no `RunConfig`, so any caller could replay and follow any tenant's thread - its `RunStarted` with tenant and
   principal, `Custom` payloads and `TaskFailed` messages - although `history`, `checkpoint`, `prune` and `fork` refuse
@@ -1343,6 +1367,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of another tenant's thread ends it, before that event, with the new `DisconnectReason.TenantMismatch`.
   `RunHandle.subscribe`, `AgentRun.subscribe`, a run's `Observer` and agent tracing are scoped to their run's tenant
   and keep their signatures. See the [migration guide](docs/reference/migration.md#durable-checkpointer-contract-1700).
+- **Breaking - middleware hooks take a `ModelContext` and return state updates; an output Block restores the whole
+  turn; usage counts provider calls** ([#1902](https://github.com/llm4s/llm4s/issues/1902)), with no shims:
+  `beforeAgent(input, context: ModelContext): Result[BoundaryResult]` and `afterAgent` likewise (were `RunContext` and
+  `Result[String]`); `wrapModelCall(request, context: ModelContext)(next: ModelRequest => Result[ModelResponse])`
+  (was `RunContext` and `Completion`). An output guardrail Block now restores every key the turn wrote - middleware and
+  tool keys too, not only messages, the active agent and the transfer - keeping only `usage`; effects outside thread
+  state are not restored. The thread's usage counts every provider call a model step makes, a retrying wrapper's
+  discarded ones included, and no longer counts a completion a wrapper returned without calling the model; each
+  provider call is its own `ModelCallCompleted` event, `attempts` its attempt number. `RunEvent.RunFailed` gains
+  `usage` (a pattern `RunFailed(msg)` becomes `RunFailed(msg, _)`); `TurnState` gains `priorValues`; `LoopAgent`
+  gains `maxPromptSectionTokens`. Stored threads and events decode unchanged. `RunEvent.RunCancelled` and
+  `RunTimedOut` become `RunCancelled(usage)` / `RunTimedOut(usage)`, carrying the usage of the attempts the stop cut
+  short (match `RunCancelled(_)`; old events decode). `Guardrail` gains `validate(value, context: ModelContext)`,
+  which `GuardrailMiddleware` calls, and `LLMGuardrail.evaluateWithLLM` takes the client to call, so a judge's calls
+  are counted. An output Block keeps a key someone else (`updateState`) wrote while the turn waited. Prompt sections
+  are bounded on the rendered prompt, separators included, and to `LoopAgent.MaxPromptSections` (64) per request.
 - **Breaking - a run that loses its claim stops at once and ends `GraphError.ClaimLost`** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   it used to end `CheckpointWriteFailed(_, StaleClaim, _)`, which a caller could not tell from a store outage without
   matching on its cause. `GraphError.ClaimLost(threadId, token, current)` is new: the run's own `FencingToken`, and the

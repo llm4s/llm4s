@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.rag
 
+import org.llm4s.agent.graph.middleware.ModelContext
 import org.llm4s.agent.guardrails.{ GuardrailAction, InputGuardrail }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
@@ -88,12 +89,18 @@ class TopicBoundaryGuardrail(
   /**
    * Validate that the query is within allowed topic boundaries.
    */
-  override def validate(value: String): Result[String] =
+  override def validate(value: String): Result[String] = bounded(value, llmClient)
+
+  /** As `validate(value)`, the judge called through `context.accounted(llmClient)`, so its call is counted. */
+  override def validate(value: String, context: ModelContext): Result[String] =
+    bounded(value, context.accounted(llmClient))
+
+  private def bounded(value: String, client: LLMClient): Result[String] =
     if (allowedTopics.isEmpty) {
       // No topic restrictions
       Right(value)
     } else {
-      evaluateTopicBoundary(value).flatMap { result =>
+      evaluateTopicBoundary(value, client).flatMap { result =>
         if (result.isOnTopic) {
           Right(value)
         } else {
@@ -141,7 +148,7 @@ class TopicBoundaryGuardrail(
   /**
    * Evaluate if the query is within topic boundaries.
    */
-  private def evaluateTopicBoundary(query: String): Result[TopicBoundaryResult] = {
+  private def evaluateTopicBoundary(query: String, client: LLMClient): Result[TopicBoundaryResult] = {
     val systemPrompt = buildSystemPrompt()
     val userPrompt   = buildUserPrompt(query)
 
@@ -158,7 +165,7 @@ class TopicBoundaryGuardrail(
     )
 
     for {
-      completion <- llmClient.complete(conversation, options)
+      completion <- client.complete(conversation, options)
       result     <- parseTopicResult(completion.message.content)
     } yield result
   }

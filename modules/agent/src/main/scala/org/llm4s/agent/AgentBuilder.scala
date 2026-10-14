@@ -38,7 +38,8 @@ final class AgentBuilder private (
   tracing: Option[Tracing],
   streaming: Boolean,
   private val interruptBefore: Vector[AgentNode],
-  private val interruptAfter: Vector[AgentNode]
+  private val interruptAfter: Vector[AgentNode],
+  maxPromptSectionTokens: Int
 ):
 
   private def copy(
@@ -53,7 +54,8 @@ final class AgentBuilder private (
     tracing: Option[Tracing] = tracing,
     streaming: Boolean = streaming,
     interruptBefore: Vector[AgentNode] = interruptBefore,
-    interruptAfter: Vector[AgentNode] = interruptAfter
+    interruptAfter: Vector[AgentNode] = interruptAfter,
+    maxPromptSectionTokens: Int = maxPromptSectionTokens
   ): AgentBuilder =
     new AgentBuilder(
       id,
@@ -69,7 +71,8 @@ final class AgentBuilder private (
       tracing,
       streaming,
       interruptBefore,
-      interruptAfter
+      interruptAfter,
+      maxPromptSectionTokens
     )
 
   /** The agent's tools, replacing any set before, checked with the set's validator. */
@@ -104,6 +107,12 @@ final class AgentBuilder private (
 
   /** Model calls per turn, at least 1; at the limit the turn ends `StepLimitReached`. */
   def withMaxSteps(n: Int): AgentBuilder = copy(maxSteps = n)
+
+  /**
+   * The most every middleware's prompt sections may add to one model request together, at least 1 and 8192 by
+   * default, estimated at four characters a token. A request over it fails the run, naming each section's size.
+   */
+  def withMaxPromptSectionTokens(n: Int): AgentBuilder = copy(maxPromptSectionTokens = n)
 
   /**
    * The runtime the agent's threads live on; by default a new [[GraphRuntime.inMemory]] per
@@ -194,6 +203,7 @@ final class AgentBuilder private (
     yield LoopAgent(agentId, ModelStep.fromClient(client, options, streaming), toolSet)
       .withSystemPrompt(systemPrompt)
       .withMaxSteps(maxSteps)
+      .withMaxPromptSectionTokens(maxPromptSectionTokens)
       .withMiddleware(middleware)
       .withHandoffs(loopHandoffs)
 
@@ -255,7 +265,8 @@ object AgentBuilder:
       None,
       streaming = false,
       interruptBefore = Vector.empty,
-      interruptAfter = Vector.empty
+      interruptAfter = Vector.empty,
+      maxPromptSectionTokens = LoopAgent.DefaultMaxPromptSectionTokens
     )
 
   /**
