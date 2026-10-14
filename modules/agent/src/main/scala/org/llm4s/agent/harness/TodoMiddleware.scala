@@ -76,7 +76,7 @@ final class TodoMiddleware(
   /** The checks that need no state, made before the call is scheduled. */
   private def validate(args: WriteTodos): Result[Unit] =
     val size = args.todos.size
-    val ids  = args.todos.flatMap(_.id)
+    val ids  = args.todos.flatMap(_.kept)
     val problems =
       Option.when(size > maxTodos)(s"at most $maxTodos todos, got $size").toList ++
         args.todos.zipWithIndex.flatMap { (item, i) =>
@@ -84,7 +84,10 @@ final class TodoMiddleware(
           if length == 0 then Some(s"todo ${i + 1} has no content")
           else Option.when(length > maxTodoChars)(s"todo ${i + 1} is $length characters, over $maxTodoChars")
         } ++
-        ids.diff(ids.distinct).distinct.map(id => s"id '${clip(id, MaxShownId)}' is given more than once")
+        ids.diff(ids.distinct).distinct.map(id => s"id '${clip(id, MaxIdChars)}' is given more than once") ++
+        ids.distinct
+          .filter(codePoints(_) > MaxIdChars)
+          .map(id => s"id '${clip(id, MaxIdChars)}' is over $MaxIdChars characters")
     if problems.isEmpty then Right(()) else Left(ValidationError("todos", problems))
 
   private def write(args: WriteTodos, context: ToolContext): ToolOutcome =
@@ -103,21 +106,21 @@ final class TodoMiddleware(
   /** `current` replaced by `args`: named ids kept, unnamed items matched by content, the rest given fresh ids. */
   private def resolve(current: TodoList, args: WriteTodos): Either[String, TodoList] =
     val known   = current.todos.map(_.id).toSet
-    val unknown = args.todos.flatMap(_.id).filterNot(known).distinct
+    val unknown = args.todos.flatMap(_.kept).filterNot(known).distinct
     if unknown.nonEmpty then
       Left(
-        s"Unknown todo id(s): ${unknown.map(clip(_, MaxShownId)).mkString(", ")}. Pass the id of a todo in the " +
+        s"Unknown todo id(s): ${unknown.map(clip(_, MaxIdChars)).mkString(", ")}. Pass the id of a todo in the " +
           "current plan, or none for a new todo. The plan is unchanged."
       )
     else
-      val named = args.todos.flatMap(_.id).toSet
+      val named = args.todos.flatMap(_.kept).toSet
       val (todos, _, nextId) =
         args.todos.foldLeft((Vector.empty[Todo], named, current.nextId)) { case ((acc, claimed, next), item) =>
           val content = item.content.trim
-          item.id match
+          item.kept match
             case Some(id) => (acc :+ Todo(id, content, item.status), claimed, next)
             case None =>
-              current.todos.find(t => t.content == content && !claimed(t.id)) match
+              current.todos.find(t => t.content == content && !claimed(t.id) && codePoints(t.id) <= MaxIdChars) match
                 case Some(same) => (acc :+ Todo(same.id, content, item.status), claimed + same.id, next)
                 case None =>
                   val fresh = Iterator.iterate(next)(_ + 1).find(n => !known(n.toString)).getOrElse(next)
@@ -128,7 +131,7 @@ final class TodoMiddleware(
   /** At most `maxTodos` todos of `list`, one per line, each content cleaned and cut to `maxTodoChars`. */
   private def render(list: TodoList): String =
     val shown = list.todos.take(maxTodos).map { t =>
-      s"- [${t.status.wire}] (${clip(clean(t.id), MaxShownId)}) ${clip(clean(t.content), maxTodoChars)}"
+      s"- [${t.status.wire}] (${clip(clean(t.id), MaxIdChars)}) ${clip(clean(t.content), maxTodoChars)}"
     }
     val hidden = list.todos.size - shown.size
     (shown ++ Option.when(hidden > 0)(s"($hidden more not shown)")).mkString("\n")
@@ -154,10 +157,14 @@ object TodoMiddleware:
   /** The lock every `write_todos` call takes: calls of one model message run in turn. */
   private val Lock: LockKey = LockKey("todos")
 
-  /** The most code points of an id shown in a section, result or message. */
-  private val MaxShownId = 20
+  /** The most code points of an id: the tool keeps no longer one, and shows at most this many of a stored one. */
+  private val MaxIdChars = 20
 
-  final private case class TodoItem(content: String, status: TodoStatus, id: Option[String] = None) derives ReadWriter
+  final private case class TodoItem(content: String, status: TodoStatus, id: Option[String] = None) derives ReadWriter:
+
+    /** The id of the todo this item keeps: `null`, absent and blank all mean a new todo. */
+    def kept: Option[String] = id.map(_.trim).filter(_.nonEmpty)
+
   final private case class WriteTodos(todos: Vector[TodoItem]) derives ReadWriter
 
   private def schema(maxTodos: Int, maxTodoChars: Int) =
@@ -171,7 +178,10 @@ object TodoMiddleware:
         "status",
         Schema.string("Where it stands").withEnum(TodoStatus.values.toSeq.map(_.wire))
       )
-      .withOptionalField("id", Schema.string("The id of a todo in the current plan, to keep it"))
+      .withOptionalField(
+        "id",
+        Schema.nullable(Schema.string("The id of a todo in the current plan, to keep it; null or absent for a new one"))
+      )
     Schema
       .`object`[WriteTodos]("The whole plan, replacing the current one")
       .withRequiredField(

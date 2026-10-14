@@ -126,6 +126,47 @@ class TodoMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues wit
     results(4) should include("more than once")
   }
 
+  it should "read a null or blank id as a new todo, as a strict provider sends one for every item" in {
+    val strictNew  = ujson.Obj("content" -> "A", "status" -> "pending", "id" -> ujson.Null)
+    val blank      = ujson.Obj("content" -> "B", "status" -> "pending", "id" -> " ")
+    val model      = ScriptedModel(writes(Seq(strictNew, blank)), answer("done"))
+    val (state, _) = runInMemory(loopOf(model, Seq(new TodoMiddleware())).graph, AgentInput("plan")).answered
+    todosOf(state) shouldBe Vector(("1", "A", TodoStatus.Pending), ("2", "B", TodoStatus.Pending))
+  }
+
+  it should "offer the id as nullable, so a strict schema still lets a new todo have none" in {
+    val spec = new TodoMiddleware().tools.head.spec
+    val idType =
+      spec.toolDefinition("function")("parameters")("properties")("todos")("items")("properties")("id")("type")
+    idType.arr.map(_.str).toSet shouldBe Set("string", "null")
+  }
+
+  it should "refuse an id over 20 characters, and never keep a stored one that long (rule 12)" in {
+    val store  = new InMemoryCheckpointer
+    val thread = ThreadId("long-ids")
+    val rt     = GraphRuntime(store)
+    val loop0  = loopOf(ScriptedModel(answer("ok")), Seq(new TodoMiddleware()))
+    rt.start(thread, loop0.graph, AgentInput("one")).awaited.value.answered
+    val long = "x" * 30
+    rt.updateState(
+      thread,
+      loop0.graph,
+      store.latest(thread).value.value.checkpoint.id,
+      StateUpdate.update(TodoMiddleware.key, TodoList(Vector(Todo(long, "A", TodoStatus.Pending)), 1L))
+    ).isRight shouldBe true
+    val model = ScriptedModel(
+      writes(Seq(item("A", "done", Some(long)))),
+      writes(Seq(item("A", "done"))),
+      answer("ok")
+    )
+    val (state, _) =
+      rt.start(thread, loopOf(model, Seq(new TodoMiddleware())).graph, AgentInput("two")).awaited.value.answered
+    toolResults(state).takeRight(2).head should include("over 20 characters")
+    // the stored id is shown clipped, and not kept by content
+    systemOf(model.request(0)) should include(s"(${"x" * 20}…) A")
+    todosOf(state) shouldBe Vector(("1", "A", TodoStatus.Done))
+  }
+
   "Two write_todos calls in one batch" should "apply in order, the second seeing the first's ids (rule 1)" in {
     val model = ScriptedModel(
       writes(Seq(item("A", "pending")), Seq(item("A", "done", Some("1")), item("B", "pending"))),
