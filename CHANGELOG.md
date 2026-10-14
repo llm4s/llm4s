@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ToolContext.effectKey` / `RunContext.effectKey`, over the call's `IdempotencyKey` or the new `RunContext.taskKey`.
   - The guard keeps an intent and an outcome per key as `EffectRecord`s in the thread's own `Checkpointer`, fenced
     by the run's claim, so a replay returns the original outcome rather than repeating the effect.
+  - Targets fence a run that lost its claim themselves. A transactional target refuses a claim token older than the
+    newest it has seen for the key's `scope` (`AppliedKeys.forget(key, token)`, effect `token => ...`). A verifiable
+    target's effect is a compare-and-set against the plan's `before`.
   - The commit that ends a task's window releases its records (`Commit.releasesEffect`), and `deleteThread`
     removes them. Nothing removes them by age.
   - `llm4s-agent-testkit` adds `ReplayContract`, which crashes a run at each point around an effect and recovers it.

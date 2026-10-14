@@ -1049,6 +1049,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       "format"    -> EffectRecord.CurrentFormat,
       "key"       -> key,
       "operation" -> "contract.op",
+      "scope"     -> "contract-scope",
       "taskId"    -> taskId,
       "intent"    -> ujson.Obj("support" -> "unverifiable")
     )

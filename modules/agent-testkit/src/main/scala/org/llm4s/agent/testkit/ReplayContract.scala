@@ -48,6 +48,17 @@ import scala.jdk.CollectionConverters.*
  * (Verifiable), refused (Unverifiable). It also checks that a run left recoverable for a year, its
  * thread pruned by age meanwhile, still replays from its records.
  *
+ * Two cases put a stale claimant beside its successor on a real takeover. In each, a run pauses inside the
+ * store, its claim expires, and a successor recovers the thread; then the stale run carries on:
+ *  - The stale run paused after reading no record. Its successor applied the effect and crashed before
+ *    recording the outcome.
+ *  - The stale run paused after writing its intent. Its successor replayed the effect and completed.
+ *
+ * Either way the effect must apply once. That holds only if the target fences itself: a
+ * `Transactional` target refuses a token older than the newest it has seen for the key's scope
+ * ([[org.llm4s.agent.graph.AppliedKeys]]), and a `Verifiable` effect is a compare-and-set against its
+ * plan's `before`.
+ *
  * Override [[newCheckpointer]] to run the suite against another store; the default is
  * `InMemoryCheckpointer`. The store must judge claims by the `clock` it is given.
  */
@@ -88,9 +99,12 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
     b.compile(effects)(_.get(outcomes)).value
 
   /** A store whose writes die at `point`, and which records every effect key written through it. */
-  final private class Crashing(val underlying: Checkpointer, point: Option[Crash]) extends Checkpointer:
+  final private class Crashing(
+    val underlying: Checkpointer,
+    point: Option[Crash],
+    val keys: java.util.Set[EffectKey] = ConcurrentHashMap.newKeySet[EffectKey]()
+  ) extends Checkpointer:
     val dead                                            = new AtomicBoolean(false)
-    val keys: java.util.Set[EffectKey]                  = ConcurrentHashMap.newKeySet[EffectKey]()
     private val begins                                  = new AtomicInteger()
     private val completes                               = new AtomicInteger()
     private val commits                                 = new AtomicInteger()
@@ -132,6 +146,76 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
       alive(underlying.eventsAfter(threadId, afterSeq, limit))
     def compactEvents(threadId: ThreadId, beforeSeq: Long)    = alive(underlying.compactEvents(threadId, beforeSeq))
     def deleteThread(threadId: ThreadId, token: FencingToken) = alive(underlying.deleteThread(threadId, token))
+
+  /**
+   * The store as a run that is about to lose its claim sees it: the run pauses at `at` - its first effect
+   * lookup has returned, or its first intent has been written - until [[resume]], while its claim
+   * expires and another run takes the thread over. It then carries on, unaware, as a stalled process does.
+   */
+  final private class Pausing(underlying: Checkpointer, at: Pause, keys: java.util.Set[EffectKey]) extends Checkpointer:
+    val reached         = new java.util.concurrent.CountDownLatch(1)
+    private val resumed = new java.util.concurrent.CountDownLatch(1)
+    private val lookups = new AtomicInteger()
+    private val begins  = new AtomicInteger()
+    def resume(): Unit  = resumed.countDown()
+    private def pause(): Unit =
+      reached.countDown()
+      resumed.await(contractWait.toMillis, java.util.concurrent.TimeUnit.MILLISECONDS): Unit
+
+    def effect(threadId: ThreadId, key: EffectKey) =
+      val read = underlying.effect(threadId, key)
+      if at == Pause.AfterLookup && lookups.incrementAndGet() == 1 then pause()
+      read
+    def commit(threadId: ThreadId, commit: Commit) =
+      commit.effects.foreach(r => keys.add(r.key))
+      val written = underlying.commit(threadId, commit)
+      if at == Pause.AfterIntent && commit.effects.exists(!_.completed) && begins.incrementAndGet() == 1 then pause()
+      written
+    def claim(threadId: ThreadId, request: ClaimRequest)                    = underlying.claim(threadId, request)
+    def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) = underlying.renew(threadId, token, ttl)
+    def release(threadId: ThreadId, token: FencingToken)                    = underlying.release(threadId, token)
+    def latest(threadId: ThreadId)                                          = underlying.latest(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) =
+      underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
+    def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
+      underlying.eventsAfter(threadId, afterSeq, limit)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long)    = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId, token: FencingToken) = underlying.deleteThread(threadId, token)
+
+  /**
+   * A run that loses its claim while it pauses at `at`, and a successor that takes the thread over and
+   * crashes at `crash` (or completes); then the stale run carries on to its end, and, if the successor
+   * crashed, a third run recovers the thread. The outcomes are the run that completed.
+   */
+  private def staleClaimant(at: Pause, crash: Option[Crash]): Ran =
+    val subject = newSubject()
+    val clock   = ManualClock(start)
+    val base    = newCheckpointer(clock)
+    val keys    = ConcurrentHashMap.newKeySet[EffectKey]()
+    val thread  = ThreadId(s"replay-contract-${java.util.UUID.randomUUID()}")
+    val g       = graph(subject)
+    val stale   = Pausing(base, at, keys)
+    val first   = GraphRuntime(stale, clock, claims).start(thread, g, (), config("stale")).value
+    stale.reached.await(contractWait.toMillis, java.util.concurrent.TimeUnit.MILLISECONDS) shouldBe true
+    clock.advance(claims.ttl + 1.minute)
+    val successor = Crashing(base, crash, keys)
+    val second    = GraphRuntime(successor, clock, claims).recover(thread, g, config("successor"))
+    val outcomes = crash match
+      case None => Some(completed(second))
+      case Some(_) =>
+        awaitRun(second.value) shouldBe a[RunResult.Failed]
+        None
+    // the stale run carries on: whatever it does now must neither undo nor repeat its successor's work
+    stale.resume()
+    awaitRun(first) shouldBe a[RunResult.Failed]
+    val last = Crashing(base, None, keys)
+    outcomes match
+      case Some(done) => Ran(done, subject, last, thread)
+      case None =>
+        clock.advance(claims.ttl + 1.minute)
+        Ran(completed(GraphRuntime(last, clock, claims).recover(thread, g, config("recover"))), subject, last, thread)
 
   /** What one case leaves: the outcome per slot, and the target. */
   final private case class Ran(outcomes: Map[String, ujson.Value], subject: Subject, store: Crashing, thread: ThreadId)
@@ -198,6 +282,10 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
   private def refused(ran: Ran, slot: Int): Assertion =
     if ran.outcomes(slot.toString) == Refused then succeed
     else fail(s"slot $slot was not refused: ${ran.outcomes(slot.toString)}")
+
+  /** Slot 0's outcome when its effect began, and may have run, before a crash or takeover. */
+  private def begunOutcome(ran: Ran): Assertion =
+    if support == ReplaySupport.Unverifiable && !idempotent then refused(ran, 0) else same(ran, 0)
 
   private lazy val support    = newSubject().support
   private lazy val idempotent = newSubject().idempotent
@@ -298,6 +386,28 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
     released(ran)
   }
 
+  it should "not let a run that lost its claim after finding no record undo its successor's effect" in {
+    // the stale run read no record of slot 0, then stalled; its successor applied the effect and crashed
+    // before recording the outcome; the stale run then carries on as if nothing had happened
+    val ran = staleClaimant(Pause.AfterLookup, Some(Crash.AfterEffect))
+    once(ran, 0)
+    begunOutcome(ran)
+    once(ran, 1)
+    same(ran, 1)
+    released(ran)
+  }
+
+  it should "not let a run that lost its claim with its effect under way apply it after its successor" in {
+    // the stale run recorded its intent for slot 0 and stalled before the effect; its successor replays
+    // the effect and completes the run; the stale run's effect then goes ahead
+    val ran = staleClaimant(Pause.AfterIntent, None)
+    once(ran, 0)
+    begunOutcome(ran)
+    once(ran, 1)
+    same(ran, 1)
+    released(ran)
+  }
+
   it should "replay from its records a run left recoverable for a year, its thread pruned by age meanwhile" in {
     val ran = crashAndRecover(
       Some(Crash.AfterEffect),
@@ -359,3 +469,7 @@ object ReplayContract:
   /** Where a case crashes the run that performs the effects. */
   private enum Crash:
     case BeforeIntent, AfterIntent, AfterEffect, AfterOutcome, AfterCommit
+
+  /** Where a run about to lose its claim stalls. */
+  private enum Pause:
+    case AfterLookup, AfterIntent

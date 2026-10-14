@@ -46,21 +46,40 @@ class ReplayContractSelfCheckSpec extends AnyFlatSpec with Matchers {
 
   /** A "transactional" counter that records no applied key: the effect is not atomic with its evidence. */
   final private class NotTransactional extends ReplayContract.Subject with AppliedKeys {
-    private val cells                        = mutable.Map.empty[Int, Int].withDefaultValue(0)
-    def name: String                         = "a counter that records no applied key"
-    def support: ReplaySupport               = ReplaySupport.Transactional
-    def forget(key: EffectKey): Result[Unit] = Right(())
+    private val cells                                             = mutable.Map.empty[Int, Int].withDefaultValue(0)
+    def name: String                                              = "a counter that records no applied key"
+    def support: ReplaySupport                                    = ReplaySupport.Transactional
+    def forget(key: EffectKey, token: FencingToken): Result[Unit] = Right(())
     def perform(context: RunContext, slot: Int): Result[ujson.Value] =
       ReplayGuard
-        .transactional[Int](context, context.effectKey("counter.add", s"cell-$slot"), this)(synchronized {
-          cells(slot) += 1
-          Right(cells(slot))
-        })
+        .transactional[Int](context, context.effectKey("counter.add", s"cell-$slot"), this)(_ =>
+          synchronized {
+            cells(slot) += 1
+            Right(cells(slot))
+          }
+        )
         .map(ujson.Num(_))
     def observe(slot: Int): Result[String] = synchronized(Right(cells(slot).toString))
     def initial(slot: Int): String         = "0"
     def once(slot: Int): String            = "1"
     def interfere(slot: Int): Unit         = synchronized(cells(slot) = 100)
+  }
+
+  /** A transactional counter store that ignores the claim token: a stale run's operations still land. */
+  final private class NotFenced extends ReplaySubjects.TransactionalCounters {
+    override def name: String = "a transactional counter store that does not fence"
+    override protected def fenced[A](key: EffectKey, token: FencingToken)(body: => A): Result[A] =
+      synchronized(Right(body))
+  }
+
+  /** A verifiable cell whose effect writes without comparing: a stale run's write lands on its successor's. */
+  final private class NoCompareAndSet extends ReplaySubjects.VerifiableText {
+    override def name: String = "a verifiable cell that writes without comparing"
+    override protected def compareAndSet(slot: Int, before: StateCheck, next: String): Result[Int] =
+      synchronized {
+        cells(slot) = cells(slot) + "!"
+        Right(next.length)
+      }
   }
 
   /** A verifiable cell whose two slots share one key: the second effect replays the first's outcome. */
@@ -127,6 +146,27 @@ class ReplayContractSelfCheckSpec extends AnyFlatSpec with Matchers {
     )
   }
 
+  it should "fail a transactional target that does not fence by the claim token" in {
+    val failed = failures(new AnyFlatSpec with ReplayContract {
+      protected def newSubject(): ReplayContract.Subject = new NotFenced
+    })
+    failed should contain(
+      "should not let a run that lost its claim after finding no record undo its successor's effect"
+    )
+    failed should contain(
+      "should not let a run that lost its claim with its effect under way apply it after its successor"
+    )
+  }
+
+  it should "fail a verifiable target whose effect is not a compare-and-set" in {
+    val failed = failures(new AnyFlatSpec with ReplayContract {
+      protected def newSubject(): ReplayContract.Subject = new NoCompareAndSet
+    })
+    failed should contain(
+      "should not let a run that lost its claim with its effect under way apply it after its successor"
+    )
+  }
+
   it should "fail a target whose effects in one task share a key" in {
     val failed = failures(new AnyFlatSpec with ReplayContract {
       protected def newSubject(): ReplayContract.Subject = new SharedKey
@@ -145,6 +185,9 @@ class ReplayContractSelfCheckSpec extends AnyFlatSpec with Matchers {
   it should "pass the reference targets" in {
     failures(new AnyFlatSpec with ReplayContract {
       protected def newSubject(): ReplayContract.Subject = ReplaySubjects.VerifiableText()
+    }) shouldBe empty
+    failures(new AnyFlatSpec with ReplayContract {
+      protected def newSubject(): ReplayContract.Subject = ReplaySubjects.TransactionalCounters()
     }) shouldBe empty
   }
 }

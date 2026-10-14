@@ -12,39 +12,64 @@ import scala.collection.mutable
  */
 object ReplaySubjects:
 
-  /** A transactional counter store: `add` records `(key, new value)` with the increment, atomically. */
-  final class TransactionalCounters extends ReplayContract.Subject with AppliedKeys:
-    private val cells   = mutable.Map.empty[Int, Int].withDefaultValue(0)
-    private val applied = mutable.Map.empty[String, Int]
+  /**
+   * A transactional counter store, fenced: every operation on a scope refuses a token older than the newest
+   * it has seen for that scope, and `add` records `(key, new value)` with the increment, atomically.
+   */
+  class TransactionalCounters extends ReplayContract.Subject with AppliedKeys:
+    protected val cells   = mutable.Map.empty[Int, Int].withDefaultValue(0)
+    protected val applied = mutable.Map.empty[String, Int]
+    private val newest    = mutable.Map.empty[String, Long]
 
     def name: String              = "a transactional counter store"
     def support: ReplaySupport    = ReplaySupport.Transactional
     override def appliedKeys: Int = synchronized(applied.size)
 
-    def forget(key: EffectKey): Result[Unit] = synchronized(Right(applied.remove(key.value): Unit))
+    /** Refuses `token` if older than the scope's newest; otherwise makes it the newest. Under the lock. */
+    protected def fenced[A](key: EffectKey, token: FencingToken)(body: => A): Result[A] = synchronized {
+      val seen = newest.getOrElse(key.scope, Long.MinValue)
+      if token.value < seen then Left(org.llm4s.error.ProcessingError("counters", s"token ${token.value} < $seen"))
+      else
+        newest.update(key.scope, token.value)
+        Right(body)
+    }
+
+    def forget(key: EffectKey, token: FencingToken): Result[Unit] =
+      fenced(key, token)(applied.remove(key.value): Unit)
 
     /** Adds one to `slot`'s cell, unless `key` was applied: then its recorded value, and no write. */
-    private def add(key: EffectKey, slot: Int): Result[Int] = synchronized {
-      Right(applied.getOrElseUpdate(key.value, { cells(slot) += 1; cells(slot) }))
-    }
+    protected def add(key: EffectKey, slot: Int, token: FencingToken): Result[Int] =
+      fenced(key, token)(applied.getOrElseUpdate(key.value, { cells(slot) += 1; cells(slot) }))
 
     def perform(context: RunContext, slot: Int): Result[ujson.Value] =
       val key = context.effectKey("counter.add", s"cell-$slot")
-      ReplayGuard.transactional[Int](context, key, this)(add(key, slot)).map(ujson.Num(_))
+      ReplayGuard.transactional[Int](context, key, this)(token => add(key, slot, token)).map(ujson.Num(_))
 
     def observe(slot: Int): Result[String] = synchronized(Right(cells(slot).toString))
     def initial(slot: Int): String         = "0"
     def once(slot: Int): String            = "1"
     def interfere(slot: Int): Unit         = synchronized(cells(slot) = 100)
 
-  /** A verifiable text cell per slot: the effect appends `"!"`, reporting the new length. */
-  final class VerifiableText extends ReplayContract.Subject:
-    private val cells = mutable.Map.empty[Int, String].withDefaultValue("text")
+  /**
+   * A verifiable text cell per slot: the effect appends `"!"`, reporting the new length, as a
+   * compare-and-set against the digest the plan read.
+   */
+  class VerifiableText extends ReplayContract.Subject:
+    protected val cells = mutable.Map.empty[Int, String].withDefaultValue("text")
 
     def name: String           = "a verifiable text cell"
     def support: ReplaySupport = ReplaySupport.Verifiable
 
-    private def read(slot: Int): String = synchronized(cells(slot))
+    protected def read(slot: Int): String = synchronized(cells(slot))
+
+    /** Writes `next` only if `slot` still digests to `before`, atomically. */
+    protected def compareAndSet(slot: Int, before: StateCheck, next: String): Result[Int] = synchronized {
+      if StateCheck.of(cells(slot)) != before then
+        Left(GraphError.EffectReplayRefused("text.append", "the cell changed since the plan read it"))
+      else
+        cells(slot) = next
+        Right(next.length)
+    }
 
     def perform(context: RunContext, slot: Int): Result[ujson.Value] =
       val key = context.effectKey("text.append", s"cell-$slot")
@@ -53,8 +78,7 @@ object ReplaySubjects:
           val current = read(slot)
           val next    = current + "!"
           Right(ReplayGuard.Plan(StateCheck.of(current), StateCheck.of(next), next.length) {
-            synchronized(cells(slot) = next)
-            Right(next.length)
+            compareAndSet(slot, StateCheck.of(current), next)
           })
         }
         .map(ujson.Num(_))
