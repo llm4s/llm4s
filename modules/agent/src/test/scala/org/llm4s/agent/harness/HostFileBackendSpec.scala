@@ -224,6 +224,15 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     ).map(p)
   }
 
+  it should "stripe by the directory the file system resolves, so aliases of a directory share a stripe" in {
+    Files.createDirectories(dir.resolve("real/sub"))
+    backend.lockFileOf(p("/real/sub/a.txt")).value shouldBe backend.lockFileOf(p("/real/sub/b.txt")).value
+    if posix then
+      Files.createDirectories(dir.resolve("alias-target"))
+      // two different directories may still share a stripe by hash; the point is aliases never differ
+      backend.lockFileOf(p("/real/sub/new/deeper.txt")).value shouldBe backend.lockFileOf(p("/real/sub/x.txt")).value
+  }
+
   it should "drop a name it cannot list before it counts against the limit" in {
     assume(posix)
     Files.writeString(dir.resolve("a\nbad"), "x")

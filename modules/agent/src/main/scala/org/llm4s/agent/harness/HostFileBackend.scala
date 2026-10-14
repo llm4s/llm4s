@@ -253,10 +253,23 @@ final class HostFileBackend private (
    * time, because closing a channel can release every lock the JVM holds on its file, and an interrupt
    * while waiting closes the waiting channel.
    */
-  // by the folded path, so two names of one file on a case-insensitive file system share a stripe
+  /**
+   * The stripe of a mutation of `target`: by the physical identity of the directory it is in, as the file
+   * system itself resolves it - the real path of its nearest existing ancestor, folded. No lexical rule
+   * can say which names one file system takes for one file (case, Unicode normalisation, Windows 8.3 names
+   * and trailing dots, an SMB share mounted on Linux), but the file system can: two aliases of one target
+   * are in one real directory, so they share a stripe, and the compare-and-set under it lets only one of
+   * them apply. Mutations within one directory are therefore serialised across threads and processes.
+   */
   private def stripeOf(target: Path): Int =
-    if lexicalIdentity then Math.floorMod(HostFileBackend.identity(target.toString).hashCode, HostFileBackend.Stripes)
-    else 0
+    val ancestor = Iterator
+      .iterate(Option(target.getParent))(_.flatMap(p => Option(p.getParent)))
+      .takeWhile(_.isDefined)
+      .flatten
+      .find(p => Files.exists(p))
+      .getOrElse(root)
+    val real = Try(ancestor.toRealPath()).getOrElse(ancestor)
+    Math.floorMod(HostFileBackend.identity(real.toString).hashCode, HostFileBackend.Stripes)
 
   /**
    * The OS lock file of a stripe: in the lock directory, shared by every backend that uses it whatever
@@ -338,20 +351,24 @@ final class HostFileBackend private (
     effect: => Result[A]
   ): ReplayGuard.Plan[A] =
     ReplayGuard.Plan(before, after, presumed)(
-      exclusively(target) {
-        resolve(operation, path)
-          .flatMap(again => io(operation, path)(digest(operation, path, again)))
-          .flatMap { now =>
-            if now == before then effect
-            else
-              Left(
-                GraphError.EffectReplayRefused(
-                  s"file.$operation",
-                  s"${path.value} changed after it was planned: it is now ${now.value}, not ${before.value}"
+      // the target's directory exists before its stripe is chosen, so every writer of the file, whether it
+      // created the directory or found it, takes the stripe of the one real directory
+      io(operation, path)(Try(Files.createDirectories(target.getParent)).toResult.map(_ => ())).flatMap(_ =>
+        exclusively(target) {
+          resolve(operation, path)
+            .flatMap(again => io(operation, path)(digest(operation, path, again)))
+            .flatMap { now =>
+              if now == before then effect
+              else
+                Left(
+                  GraphError.EffectReplayRefused(
+                    s"file.$operation",
+                    s"${path.value} changed after it was planned: it is now ${now.value}, not ${before.value}"
+                  )
                 )
-              )
-          }
-      }
+            }
+        }
+      )
     )
 
   def write(path: VPath, content: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
