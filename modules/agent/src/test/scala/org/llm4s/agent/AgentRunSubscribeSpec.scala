@@ -163,7 +163,9 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
       c.terminalSeen shouldBe false
       (System.nanoTime() - started).nanos
     }
-    took should be < 1.second
+    // a drain that waited for the cancelled listener would wait out `Drain` and warn; a loaded machine may
+    // take a while to run the turn, so the bound is the drain itself, and the missing warning is the proof
+    took should be < AgentRun.Drain
     appender.list.asScala.filter(_.getLevel == Level.WARN) shouldBe empty
   }
 
