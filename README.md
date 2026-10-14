@@ -570,7 +570,9 @@ LLM4S uses GitHub Actions for continuous integration to ensure code quality and 
 
 Our unified CI workflow runs on every push and pull request to main/master branches:
 
-- **Quick Checks**: Fast-failing checks for code formatting and compilation
+- **Quick Checks**: formatting, scalafix, compilation and the build's policy checks, in one sbt server. It runs
+  alongside the test jobs rather than before them, and gates the merge through `All Tests Pass`
+- **Code Coverage**: per-module coverage floors, enforced in four parallel legs (`Code Coverage (<leg>)`)
 - **Cross-Platform Testing**: Tests run on Ubuntu and Windows with Scala 3.7.1
 - **Template Validation**: Verifies the g8 template works correctly
 - **Caching**: Optimized caching strategy with Coursier for faster builds
