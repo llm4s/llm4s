@@ -1171,6 +1171,22 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     same(s.other().effect(s.thread, keyOf(record)).value, Some(record))
   }
 
+  it should "keep an effect record of a thread that has nothing else, until a later claim's commit releases it" in {
+    // an effect-only commit on a fresh claim, then the claim released: the thread holds only the record
+    val s      = Store()
+    val first  = s.claim("first").value.token
+    val record = effectRecord("orphan", "0.0")
+    s.store.commit(s.thread, Commit(first, effects = Vector(record))).value
+    s.store.release(s.thread, first).value
+    same(effects(s, record), Vector(Some(record)))
+    s.reopened()
+    same(effects(s, record), Vector(Some(record)))
+    // the next claim's first checkpoint does not hold its task live, and another claim wrote it: released
+    val next = s.claim("next").value.token
+    s.commit(next, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.1")))).value
+    same(effects(s, record), Vector(None))
+  }
+
   it should "remove a thread's effect records with the thread, so a new thread of its id has none" in {
     val s     = Store()
     val token = s.claim("run").value.token

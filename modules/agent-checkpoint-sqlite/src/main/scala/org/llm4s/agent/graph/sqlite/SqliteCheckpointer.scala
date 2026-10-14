@@ -652,7 +652,8 @@ object SqliteCheckpointer:
     update(
       c,
       """DELETE FROM llm4s_checkpoint_threads
-        |WHERE thread_id = ? AND checkpoint_id IS NULL AND claim_token IS NULL AND next_seq = 1""".stripMargin,
+        |WHERE thread_id = ? AND checkpoint_id IS NULL AND claim_token IS NULL AND next_seq = 1
+        |  AND NOT EXISTS (SELECT 1 FROM llm4s_checkpoint_effects e WHERE e.thread_id = llm4s_checkpoint_threads.thread_id)""".stripMargin,
       threadId.value
     )
 

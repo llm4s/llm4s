@@ -337,6 +337,35 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     reopened.close()
   }
 
+  "A thread holding only effect records" should "keep its row when its claim is released, as the in-memory store does" in {
+    val db     = SqliteFiles.fresh()
+    val thread = ThreadId("effects-only")
+    val store  = SqliteCheckpointer.open(db).value
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val record = EffectRecord
+      .fromJson(
+        ujson.Obj(
+          "format"    -> 1,
+          "key"       -> "k",
+          "operation" -> "op",
+          "scope"     -> "s",
+          "taskId"    -> "0.0",
+          "intent"    -> ujson.Obj("support" -> "unverifiable")
+        )
+      )
+      .value
+    store.commit(thread, Commit(token, effects = Vector(record))).value
+    store.release(thread, token).value
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_threads WHERE thread_id = 'effects-only'")(_.getInt(1)) shouldBe 1
+    store.effect(thread, record.key).value shouldBe Some(record)
+    // deleted with the thread, the row goes too
+    val again = store.claim(thread, ClaimRequest(RunId("again"), ttl)).value.token
+    store.deleteThread(thread, again).value
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_threads WHERE thread_id = 'effects-only'")(_.getInt(1)) shouldBe 0
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_effects WHERE thread_id = 'effects-only'")(_.getInt(1)) shouldBe 0
+    store.close()
+  }
+
   "A stored effect record" should "be a ProcessingError naming the file when it does not decode" in {
     val db     = SqliteFiles.fresh()
     val thread = ThreadId("bad-effect")
