@@ -57,6 +57,19 @@ class ContentPartSpec extends AnyFlatSpec with Matchers with EitherValues {
     ContentPart.document(png, MediaType.Csv, maxInlineBytes = 2).isLeft shouldBe true
   }
 
+  "The media constructors" should "refuse null arguments with a ValidationError, never build a part holding one" in {
+    ContentPart.image(null, MediaType.Png).left.value.message should include("needs a source")
+    ContentPart.image(png, null).left.value.message should include("needs a media type")
+    ContentPart.document(MediaSource.Url(null), MediaType.Pdf).left.value.message should include("needs a URI")
+    ContentPart
+      .image(MediaSource.Inline(null.asInstanceOf[IArray[Byte]]), MediaType.Png)
+      .left
+      .value
+      .message should include("needs its bytes")
+    ContentPart.document(MediaSource.ProviderFile(null, "f"), MediaType.Pdf).isLeft shouldBe true
+    ContentPart.document(MediaSource.ProviderFile("openai", null), MediaType.Pdf).isLeft shouldBe true
+  }
+
   "kind" should "name the part, its source and its media type" in {
     ContentPart.Text("hi").kind shouldBe "text"
     ContentPart.image(remote, MediaType.Png).value.kind shouldBe "image (url, image/png)"
@@ -90,7 +103,11 @@ class ContentPartSpec extends AnyFlatSpec with Matchers with EitherValues {
       ContentPart.document(png, MediaType.Pdf).value
     ) shouldBe ContentPart.EstimatedDocumentTokens
     ContentPart.estimatedTokens(ContentPart.document(remote, MediaType.Markdown).value) shouldBe
-      ContentPart.EstimatedDocumentTokens
+      ContentPart.EstimatedReferencedDocumentTokens
+    ContentPart.estimatedTokens(
+      ContentPart.document(MediaSource.ProviderFile("openai", "f"), MediaType.Pdf).value
+    ) shouldBe
+      ContentPart.EstimatedReferencedDocumentTokens
   }
 
   "inlineBytes" should "total the inline parts" in {

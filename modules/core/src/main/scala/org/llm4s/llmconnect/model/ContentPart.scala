@@ -75,7 +75,7 @@ object ContentPart {
 
   /** An image from `source`, checked as described on [[ContentPart]], with inline bytes bounded by `maxInlineBytes`. */
   def image(source: MediaSource, mediaType: ImageMediaType, maxInlineBytes: Int): Result[Image] =
-    checked(source, maxInlineBytes).map(new Image(_, mediaType))
+    notNull(mediaType).flatMap(_ => checked(source, maxInlineBytes)).map(new Image(_, mediaType))
 
   /** A document from `source`, checked as described on [[ContentPart]], with inline bytes bounded by [[MaxInlineBytes]]. */
   def document(source: MediaSource, mediaType: DocumentMediaType): Result[Document] =
@@ -83,7 +83,7 @@ object ContentPart {
 
   /** A document from `source`, checked as described on [[ContentPart]], with inline bytes bounded by `maxInlineBytes`. */
   def document(source: MediaSource, mediaType: DocumentMediaType, maxInlineBytes: Int): Result[Document] =
-    checked(source, maxInlineBytes).map(new Document(_, mediaType))
+    notNull(mediaType).flatMap(_ => checked(source, maxInlineBytes)).map(new Document(_, mediaType))
 
   /** The text parts of `parts`, joined by newlines: a message's text view. Empty when there are none. */
   def text(parts: Seq[ContentPart]): String =
@@ -116,7 +116,9 @@ object ContentPart {
    *  - an image, [[EstimatedImageTokens]] (a large image on Anthropic; more than OpenAI's high-detail cost);
    *  - an inline text document (plain text, Markdown, HTML, CSV), its bytes over four;
    *  - an inline PDF, its bytes over 32, at least [[EstimatedDocumentTokens]];
-   *  - a document at a URL or in a provider file, whose size is unknown here, [[EstimatedDocumentTokens]].
+   *  - a document at a URL or in a provider file, whose size is unknown here, [[EstimatedReferencedDocumentTokens]]:
+   *    a large document's cost, since nothing here bounds it; a caller that knows a document is small and is short of
+   *    room can send it inline, where its size is counted.
    * Text parts are 0: they are counted by the tokenizer.
    */
   private[llm4s] def estimatedTokens(part: ContentPart): Int = part match {
@@ -124,20 +126,36 @@ object ContentPart {
     case _: Image                                            => EstimatedImageTokens
     case Document(inline: MediaSource.Inline, MediaType.Pdf) => math.max(EstimatedDocumentTokens, inline.length / 32)
     case Document(inline: MediaSource.Inline, _)             => inline.length / 4
-    case _: Document                                         => EstimatedDocumentTokens
+    case _: Document                                         => EstimatedReferencedDocumentTokens
   }
 
   /** What [[estimatedTokens]] gives an image. */
   private[llm4s] val EstimatedImageTokens: Int = 1600
 
-  /** What [[estimatedTokens]] gives a document of unknown size, and the least it gives an inline PDF. */
+  /**
+   * What [[estimatedTokens]] gives a referenced document, whose size is unknown: 50,000 tokens, about a 25-page PDF
+   * on the costlier providers. Unknown size errs high.
+   */
+  private[llm4s] val EstimatedReferencedDocumentTokens: Int = 50000
+
+  /** The least [[estimatedTokens]] gives an inline PDF. */
   private[llm4s] val EstimatedDocumentTokens: Int = 3000
 
   /** Whether `part` is an image or a document. */
   def isMedia(part: ContentPart): Boolean = !part.isInstanceOf[Text]
 
+  private def notNull(mediaType: MediaType): Result[Unit] =
+    if (mediaType == null) Left(ValidationError("mediaType", "a media part needs a media type")) else Right(())
+
+  // a null anywhere in the source is refused here, so no part that reaches validation, a codec or a provider holds one
   private def checked(source: MediaSource, maxInlineBytes: Int): Result[MediaSource] =
     source match {
+      case null                  => Left(ValidationError("source", "a media part needs a source"))
+      case MediaSource.Url(null) => Left(ValidationError("source", "a media URL needs a URI"))
+      case i: MediaSource.Inline if i.bytes.asInstanceOf[AnyRef] == null =>
+        Left(ValidationError("source", "inline media needs its bytes"))
+      case MediaSource.ProviderFile(provider, id) if provider == null || id == null =>
+        Left(ValidationError("source", "a provider file needs a provider and an id"))
       case _ if maxInlineBytes <= 0 =>
         Left(ValidationError("maxInlineBytes", s"must be positive, was $maxInlineBytes"))
       case inline: MediaSource.Inline if inline.length > maxInlineBytes =>
