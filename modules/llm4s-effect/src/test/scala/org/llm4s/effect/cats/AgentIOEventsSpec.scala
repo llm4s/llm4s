@@ -12,7 +12,9 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.util.concurrent.{ CountDownLatch, TimeUnit }
+import java.util.concurrent.{ ConcurrentLinkedQueue, CountDownLatch, TimeUnit }
+import java.util.concurrent.atomic.AtomicBoolean
+import scala.jdk.CollectionConverters.*
 
 class AgentIOEventsSpec extends AnyFlatSpec with Matchers {
 
@@ -84,18 +86,30 @@ class AgentIOEventsSpec extends AnyFlatSpec with Matchers {
     ok(run.await()).answer shouldBe Some("done")
   }
 
-  it should "fail with an LLMException when its subscription disconnects as lagging, leaving the run alone" in {
-    val (io, run) = started(
-      context => {
-        (1 to 1100).foreach(i => Pings.Pinged.emit(context.run, Ping(i)))
-        ToolOutcome.Success(ujson.Str("ok"))
-      },
-      "e5"
+  it should "fail once a stalled consumer falls behind, naming the last seq it received, leaving the run alone" in {
+    val agent    = Pings.flooding()
+    val run      = ok(agent.start(ThreadId("e5"), "go"))
+    val received = new ConcurrentLinkedQueue[Long]()
+    val stalling = new AtomicBoolean(true)
+    // stalled on its first event until the run has ended and handed the stream every event: the
+    // stream's buffer overflows (or the subscription lags), whatever the timing
+    val outcome = AgentIO[IO](agent)
+      .events(run, Pings.seqs)
+      .unNone
+      .evalMap(seq =>
+        IO.blocking {
+          if (stalling.getAndSet(false)) run.await(): Unit
+          received.add(seq): Unit
+        }
+      )
+      .compile
+      .drain
+      .attempt
+      .unsafeRunSync()
+    val message = outcome.left.toOption.collect { case e: LLMException => e.error.message }
+    message.getOrElse(fail(s"expected an LLMException, got $outcome")) should endWith(
+      s"after seq ${received.asScala.last}"
     )
-    // one commit of more durable events than the subscription holds disconnects it (Lagging)
-    val stalled = io.events(run, Pings.Pinged).evalMap(p => IO.blocking(run.await()).as(p)).compile.drain
-    val outcome = stalled.attempt.unsafeRunSync()
-    outcome.left.toOption.collect { case e: LLMException => e }.isDefined shouldBe true
     ok(run.await()).answer shouldBe Some("done")
   }
 

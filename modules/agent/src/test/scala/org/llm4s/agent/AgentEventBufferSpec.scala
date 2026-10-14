@@ -21,6 +21,9 @@ class AgentEventBufferSpec extends AnyFlatSpec with Matchers:
     caller.join(1000)
     withClue(s"the listener blocked on $event: ")(caller.isAlive shouldBe false)
 
+  private def errorOf(buffer: AgentEventBuffer): String =
+    buffer.take().swap.toOption.map(_.message).getOrElse(fail("expected the hand-over to have failed"))
+
   private def takeAll(buffer: AgentEventBuffer): Vector[StreamEvent] =
     Iterator.continually(buffer.take()).takeWhile(_.exists(_.isDefined)).flatMap(_.toOption.flatten).toVector
 
@@ -74,8 +77,37 @@ class AgentEventBufferSpec extends AnyFlatSpec with Matchers:
     offer(buffer, durable(5, RunEvent.TaskCompleted)) // a fourth waiting: never blocks, ends the hand-over
     offer(buffer, durable(6, RunEvent.RunCompleted))  // ignored after the end
     takeAll(buffer) shouldBe (2 to 4).map(i => durable(i.toLong, RunEvent.TaskCompleted)).toVector
-    val error = buffer.take().swap.toOption.map(_.message)
-    error.exists(_.contains("after seq 1")) shouldBe true
+    // the consumer's position when the error is reported - the last queued event it took - not
+    // where it was when the bound was crossed (seq 1): resuming from there would repeat 2 to 4
+    errorOf(buffer) should endWith("after seq 4")
+  }
+
+  it should "name the consumer's position, not the subscription's, for a kernel disconnect" in {
+    val buffer = AgentEventBuffer(4)
+    (1 to 3).foreach(i => offer(buffer, durable(i.toLong, RunEvent.TaskCompleted)))
+    // the kernel's lastSeq counts what its listener returned from, events of other runs included
+    offer(buffer, StreamEvent.Disconnected(9L, DisconnectReason.Lagging))
+    buffer.take() shouldBe Right(Some(durable(1, RunEvent.TaskCompleted)))
+    buffer.take() shouldBe Right(Some(durable(2, RunEvent.TaskCompleted)))
+    buffer.take() shouldBe Right(Some(durable(3, RunEvent.TaskCompleted)))
+    val message = errorOf(buffer)
+    message should include("Lagging")
+    message should endWith("after seq 3")
+  }
+
+  it should "name the last seq taken, not what a close dropped, once closed after a failure" in {
+    val buffer = AgentEventBuffer(4, durableCapacity = 2)
+    (1 to 2).foreach(i => offer(buffer, durable(i.toLong, RunEvent.TaskCompleted)))
+    buffer.take() shouldBe Right(Some(durable(1, RunEvent.TaskCompleted)))
+    (3 to 4).foreach(i => offer(buffer, durable(i.toLong, RunEvent.TaskCompleted))) // 2 and 3 wait; 4 ends it
+    buffer.close() // drops 2 and 3, which the consumer never took
+    errorOf(buffer) should endWith("after seq 1")
+  }
+
+  it should "name seq 0 when the consumer took no durable event" in {
+    val buffer = AgentEventBuffer(4)
+    offer(buffer, StreamEvent.Disconnected(5L, DisconnectReason.Lagging))
+    errorOf(buffer) should endWith("after seq 0")
   }
 
   it should "count only the durable events still waiting against its durable capacity" in {

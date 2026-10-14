@@ -14,7 +14,7 @@ import scala.annotation.tailrec
  *  - durable events are queued, up to `durableCapacity` waiting to be taken - by default
  *    [[Agent.StreamCapacity]], the room the kernel gives a listener's durable queue. One more ends
  *    the hand-over as the kernel's `Disconnected(lastSeq, Lagging)` would: `take` returns what is
- *    queued, then a `Left` naming the last `seq` the consumer took. Only a consumer that has
+ *    queued, then a `Left`. Only a consumer that has
  *    stopped draining reaches it, and the buffer never holds more than that;
  *  - a live event - or a kernel `LiveGap` - that arrives while `capacity` live events are queued is
  *    dropped, and the consumer receives one `StreamEvent.LiveGap(dropped)` at the position of the
@@ -24,7 +24,10 @@ import scala.annotation.tailrec
  * `take` returns the next event; `Right(None)` after the run's terminal event, after [[end]] once
  * everything queued before it has been taken, or after [[close]]; or `Left` when the subscription
  * was disconnected (fell behind, or failed), once everything queued before that has been taken -
- * after a [[close]] too.
+ * after a [[close]] too. A `Left` names the `seq` of the last durable event `take` returned, the
+ * consumer's position when the error is reported (not the subscription's, which may be ahead of it
+ * by what was queued, or by what a `close` dropped): resubscribing with `afterSeq` set to it
+ * repeats nothing the consumer took and skips nothing it did not.
  */
 final private[llm4s] class AgentEventBuffer(capacity: Int, durableCapacity: Int = Agent.StreamCapacity):
   private val lock     = new ReentrantLock()
@@ -39,22 +42,24 @@ final private[llm4s] class AgentEventBuffer(capacity: Int, durableCapacity: Int 
   // no more events will be accepted: a terminal event was taken, a disconnect arrived, or `close`
   private var finished = false
   // the run's scope has ended: nothing more will arrive, but what is queued is still taken
-  private var ended                     = false
-  private var failure: Option[LLMError] = None
+  private var ended = false
+  // why the hand-over failed, given the consumer's position when `take` reports it
+  private var failure: Option[Long => LLMError] = None
 
   /** The run-scoped listener: queues `event`, or counts it as dropped; never blocks. */
   val listener: StreamEvent => Unit = event =>
     withLock(lock) {
       if !finished then
         event match
-          case StreamEvent.Disconnected(lastSeq, reason) =>
-            failure = Some(ValidationError("events", s"the event subscription ended after seq $lastSeq: $reason"))
+          case StreamEvent.Disconnected(_, reason) =>
+            failure =
+              Some(taken => ValidationError("events", s"the event subscription ended ($reason) after seq $taken"))
             finished = true
           case _: StreamEvent.Durable if durableQueued >= durableCapacity =>
-            failure = Some(
+            failure = Some(taken =>
               ValidationError(
                 "events",
-                s"the consumer fell more than $durableCapacity durable events behind, after seq $lastTaken"
+                s"the consumer fell more than $durableCapacity durable events behind, after seq $taken"
               )
             )
             finished = true
@@ -97,7 +102,9 @@ final private[llm4s] class AgentEventBuffer(capacity: Int, durableCapacity: Int 
           val gap = StreamEvent.LiveGap(dropped)
           dropped = 0
           Right(Some(gap))
-        case None if finished || ended => failure.toLeft(None)
+        // the error names the last durable `seq` the consumer took, read now: everything queued
+        // before the failure has been taken, so it is where a resubscription continues from
+        case None if finished || ended => failure.map(_(lastTaken)).toLeft(None)
         case None =>
           notEmpty.await()
           next()

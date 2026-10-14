@@ -13,8 +13,10 @@ import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.util.concurrent.{ CountDownLatch, TimeUnit }
-import scala.concurrent.{ Await, Future }
+import java.util.concurrent.{ ConcurrentLinkedQueue, CountDownLatch, TimeUnit }
+import java.util.concurrent.atomic.AtomicBoolean
+import scala.concurrent.{ blocking, Await, ExecutionContext, Future }
+import scala.jdk.CollectionConverters.*
 import scala.concurrent.duration.*
 import scala.util.Try
 
@@ -103,18 +105,32 @@ class AgentPekkoEventsSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
     ok(run.await()).answer shouldBe Some("done")
   }
 
-  it should "fail with an LLMException when its subscription disconnects as lagging, leaving the run alone" in {
-    val (pekko, run) = started(
-      context => {
-        (1 to 1100).foreach(i => Pings.Pinged.emit(context.run, Ping(i)))
-        ToolOutcome.Success(ujson.Str("ok"))
-      },
-      "pe5"
+  it should "fail once a stalled consumer falls behind, naming the last seq it received, leaving the run alone" in {
+    val agent              = Pings.flooding()
+    val run                = ok(agent.start(ThreadId("pe5"), "go"))
+    val received           = new ConcurrentLinkedQueue[Long]()
+    val stalling           = new AtomicBoolean(true)
+    given ExecutionContext = ExecutionContext.global
+    // stalled on its first event until the run has ended and handed the stream every event: the
+    // stream's buffer overflows (or the subscription lags), whatever the timing
+    val failed = Try(
+      await(
+        AgentPekko(agent)
+          .events(run, Pings.seqs)
+          .collect { case Some(seq) => seq }
+          .mapAsync(1)(seq =>
+            Future(blocking {
+              if (stalling.getAndSet(false)) run.await(): Unit
+              seq
+            })
+          )
+          .runWith(Sink.foreach(seq => received.add(seq): Unit))
+      )
     )
-    val failed = Try(await(pekko.events(run, Pings.Pinged).runWith(Sink.ignore)))
-    failed.failed.toOption
-      .collect { case e: LLMException => e.error.message }
-      .exists(_.contains("Lagging")) shouldBe true
+    val message = failed.failed.toOption.collect { case e: LLMException => e.error.message }
+    message.getOrElse(fail(s"expected an LLMException, got $failed")) should endWith(
+      s"after seq ${received.asScala.last}"
+    )
     ok(run.await()).answer shouldBe Some("done")
   }
 
