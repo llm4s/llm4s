@@ -341,7 +341,9 @@ object AgentBuilder:
    * middleware ids in registration order with each middleware's contributed tools' names and
    * definitions, and its handoff targets with `preserveContext`. Completion
    * options, streaming, breakpoints and the model client are not part of it: they are rebound when a thread is
-   * restored.
+   * restored. A thread in flight (suspended, or `Running` after a crash) restores only into the same version; a thread
+   * at rest into a changed family too, unless a node it was built with or a key it holds a value for is gone (design
+   * §4.29).
    */
   private[agent] def fingerprint(family: Vector[AgentBuilder]): String =
     val canonical = ujson.Arr.from(family.sortBy(_.id).map(_.canonical)).render()

@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A checkpoint restores after its graph gains a key** ([#1934](https://github.com/llm4s/llm4s/issues/1934), Stage 3
+  slice C5, design §4.29): every `GraphSnapshot` now records its graph's `GraphShape` (entry, nodes, edges, joins,
+  resume nodes, keys; `CompiledGraph.shape`), and `CompiledGraph.restore` judges a shape change by what the restored
+  run can observe instead of refusing any change of the structural fingerprint. A key added reads its initial value; a
+  key removed is refused only while the thread holds a value for it; a node is never removed. A snapshot in flight
+  (pending tasks, parked continuations, open joins) also needs the same version, unchanged out-edges for every stored
+  node and unchanged joins over stored nodes, so a node added is one the restored run cannot reach. A snapshot written
+  before this change (`shape` absent) restores into its own version when the graph only gained keys.
 - **An agent's answer can have a response format** ([#1912](https://github.com/llm4s/llm4s/issues/1912), design
   4.26): `AgentBuilder.withOutput(schema: SchemaDefinition[O])` (with a uPickle `ReadWriter[O]`) sends the
   strict JSON schema as the `responseFormat` of each model call that offers no tools (a call that offers tools
@@ -1328,6 +1336,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **A completed thread restores into a new graph version** ([#1934](https://github.com/llm4s/llm4s/issues/1934)):
+  `GraphRuntime.start` on a `Completed` or `Failed` thread keeps only its state, so it no longer refuses the thread
+  when the graph's `version` or edges changed, or when it gained nodes or keys. For an agent, a thread at rest now
+  continues after its family gains a prompt, tool, middleware or handoff; a suspended or `Running` thread still needs
+  the same family. `RestoreRejected` problems now name the change (a removed node or key, a stored node's changed
+  out-edges, a changed join) instead of "snapshot's graph structure differs from this graph's".
 - **An agent stream whose consumer stops draining fails once 1024 durable events wait** ([#1914](https://github.com/llm4s/llm4s/issues/1914)):
   the buffer under the fs2, ZIO, Pekko and Java agent streams (`AgentEventBuffer`) dropped live events past its size
   but kept durable events without limit. It now holds at most `Agent.StreamCapacity` of them waiting; one more ends the

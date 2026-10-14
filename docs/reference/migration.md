@@ -17,6 +17,8 @@ and tools on `AgentBuilder`. Each slice adds its part here as it lands:
 
 - [#1902](https://github.com/llm4s/llm4s/issues/1902), kernel hooks for the harness - state-writing hooks, prompt
   sections, accounted model calls, and a Block that restores the whole turn: [below](#kernel-hooks-for-the-harness-1902).
+- [#1934](https://github.com/llm4s/llm4s/issues/1934), restoring a checkpoint after the graph gains a key - which
+  shape changes keep a thread restorable: [below](#restoring-after-the-graph-changes-1934).
 
 Design: `docs/design/typed-agent-runtime/4.22-stage-3-slice-c1-kernel-hooks.md` (§4.22) onwards.
 
@@ -67,6 +69,25 @@ Code that only builds agents with the built-in middleware needs no change. A mid
   capped by `AgentBuilder.withMaxPromptSectionTokens` (default 8192, four characters a token, measured on the
   rendered prompt, separators included) and to 64 per request, over which the run fails. `LoopAgent` gains `maxPromptSectionTokens` and `TurnState` gains `priorValues`; a stored `TurnState` without
   it decodes.
+
+### Restoring after the graph changes (#1934)
+
+Each checkpoint now records its graph's shape (`GraphSnapshot.shape`, `CompiledGraph.shape`), and a restore accepts the
+changes the restored run cannot observe (design §4.29). No code change is needed; what is refused changes:
+
+- **Now restored:** a thread at rest (`Completed`, or `Failed` after a Block) into a graph of another `version`, with
+  other edges or joins, or more nodes or keys - for an agent, a family with another prompt, or with a tool, middleware
+  or handoff added. Any thread into a graph that only gained keys (each reads its initial value) or gained nodes no
+  stored node has a static edge or join to.
+- **Still refused:** a node removed; a key removed while the thread holds a value for it (finish with the old graph,
+  `Remove` the entry, or `forget` the thread); and, for a thread in flight (suspended, or `Running` after a crash),
+  another version, a stored node's changed out-edges, or a changed join over stored nodes. Resume or recover such a
+  thread with the graph it was written by before changing it.
+- **Snapshots written before this change** carry no shape. They restore into their own version when the graph only
+  gained keys, and are refused for anything else until they run once more.
+- `RestoreRejected` problems name the change; "snapshot's graph structure differs from this graph's" is gone.
+- A harness key that should stay removable `Remove`s its entry when it is empty again: removal is judged by the stored
+  entry, which cannot be decoded once its key is gone.
 
 ## Stage 2 migration: durable execution
 

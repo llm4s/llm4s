@@ -20,13 +20,13 @@ import java.util.concurrent.atomic.AtomicBoolean
  * `withoutNotes` removes the `notes` key every thread has written.
  */
 object EvolvingGraphFixture:
-  val Resource           = "/fixtures/evolving-graph.db"
-  val AtRest: ThreadId   = ThreadId("at-rest")
-  val Waiting: ThreadId  = ThreadId("suspended")
-  val Crashed: ThreadId  = ThreadId("running")
-  val log                = StateKey.appending[String]("log")
-  val notes              = StateKey.appending[String]("notes")
-  val tally              = StateKey.replace[Int]("tally", 0)
+  val Resource          = "/fixtures/evolving-graph.db"
+  val AtRest: ThreadId  = ThreadId("at-rest")
+  val Waiting: ThreadId = ThreadId("suspended")
+  val Crashed: ThreadId = ThreadId("running")
+  val log               = StateKey.appending[String]("log")
+  val notes             = StateKey.appending[String]("notes")
+  val tally             = StateKey.replace[Int]("tally", 0)
 
   final case class Evolving(graph: CompiledGraph[String, Vector[String]], approve: ResumeRef[String, String])
 
@@ -43,8 +43,7 @@ object EvolvingGraphFixture:
     val kept    = if withoutNotes then Set.empty[StateKey[?, ?]] else Set[StateKey[?, ?]](notes)
     b.implement(done, writes = if tallied then Set(log, tally) else Set(log)) { (_, state, _) =>
       val logged = Command.empty.update(log, "done")
-      if tallied then
-        state.get(tally).fold(NodeResult.Fail(_), n => NodeResult.Continue(logged.update(tally, n + 1)))
+      if tallied then state.get(tally).fold(NodeResult.Fail(_), n => NodeResult.Continue(logged.update(tally, n + 1)))
       else NodeResult.Continue(logged)
     }
     b.implement(work, writes = kept + log) { (_, _, _) =>
@@ -78,10 +77,10 @@ object WriteEvolvingGraphFixture:
   def main(args: Array[String]): Unit =
     val target = Path.of(args(0))
     SqliteFiles.delete(target)
-    val store   = SqliteFiles.opened(target, Clock.systemUTC())
-    val runtime = GraphRuntime(store)
-    val broken  = AtomicBoolean(false)
-    val fixture = graph(broken).graph
+    val store                                = SqliteFiles.opened(target, Clock.systemUTC())
+    val runtime                              = GraphRuntime(store)
+    val broken                               = AtomicBoolean(false)
+    val fixture                              = graph(broken).graph
     def ran(thread: ThreadId, input: String) = runtime.start(thread, fixture, input).flatMap(_.await())
     val first                                = ran(AtRest, "hello")
     require(first.exists(_.isInstanceOf[RunResult.Completed[?]]), s"at-rest: $first")

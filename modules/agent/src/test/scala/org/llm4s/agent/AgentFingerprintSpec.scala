@@ -1,8 +1,15 @@
 package org.llm4s.agent
 
 import org.llm4s.agent.AgentFixture._
-import org.llm4s.agent.graph.{ GraphError, GraphRuntime, ThreadId }
-import org.llm4s.agent.graph.middleware.{ ApprovalMiddleware, MiddlewareId }
+import org.llm4s.agent.graph.{ GraphError, GraphRuntime, InMemoryCheckpointer, StateKey, ThreadId }
+import org.llm4s.agent.graph.middleware.{
+  AgentMiddleware,
+  ApprovalMiddleware,
+  BoundaryResult,
+  MiddlewareId,
+  ModelContext
+}
+import org.llm4s.types.Result
 import org.llm4s.agent.graph.tool.ToolOutcome
 import org.llm4s.llmconnect.model._
 import org.scalatest.flatspec.AnyFlatSpec
@@ -108,5 +115,73 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
     refused.error shouldBe a[GraphError.RestoreRejected]
     helperClient.callCount shouldBe 1
     rootClient.callCount shouldBe 1
+  }
+
+  /** Counts the turns of a thread in its own key, and records the count each turn started from. */
+  final private class Counting extends AgentMiddleware {
+    val id: MiddlewareId                     = MiddlewareId("counting")
+    override def writes: Set[StateKey[?, ?]] = Set(Counting.turns)
+    @volatile var seen: Vector[Int]          = Vector.empty
+    override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
+      context.state.get(Counting.turns).map { n =>
+        seen = seen :+ n
+        BoundaryResult(input, org.llm4s.agent.graph.StateUpdate.update(Counting.turns, n + 1))
+      }
+  }
+  private object Counting {
+    val turns: StateKey[Int, Int] = StateKey.replace[Int]("counting-turns", 0)
+  }
+
+  "A thread at rest" should "restore into a family that gained a middleware and its key, the key starting at its initial value" in {
+    val runtime = GraphRuntime(InMemoryCheckpointer())
+    val thread  = ThreadId("upgraded")
+    val client  = ScriptedLLMClient.of(CompletionFixture.simple("one"), CompletionFixture.simple("two"))
+    built(Agent.builder("root", client).withRuntime(runtime)).run(thread, "q1").value.answer shouldBe Some("one")
+
+    val counting = new Counting
+    val upgraded =
+      built(Agent.builder("root", client).withSystemPrompt("new").withMiddleware(counting).withRuntime(runtime))
+    upgraded.run(thread, "q2").value.answer shouldBe Some("two")
+    counting.seen shouldBe Vector(0)
+  }
+
+  it should "be refused by a family that dropped a middleware whose key holds a value" in {
+    val runtime = GraphRuntime(InMemoryCheckpointer())
+    val thread  = ThreadId("downgraded")
+    val client  = ScriptedLLMClient.of(CompletionFixture.simple("one"), CompletionFixture.simple("never"))
+    built(Agent.builder("root", client).withMiddleware(new Counting).withRuntime(runtime))
+      .run(thread, "q1")
+      .value
+    val refused = built(Agent.builder("root", client).withRuntime(runtime)).run(thread, "q2").error
+    refused shouldBe a[GraphError.RestoreRejected]
+    refused.message should include("'counting-turns' was removed from this graph")
+    client.callCount shouldBe 1
+  }
+
+  "A thread in flight" should "be refused by a changed family, and resume in its own" in {
+    val runtime = GraphRuntime(InMemoryCheckpointer())
+    val thread  = ThreadId("parked")
+    val client = ScriptedLLMClient.of(
+      CompletionFixture.withMessage(AssistantMessage(None, Seq(ToolCall("c1", "echo", ujson.Obj("text" -> "hi"))))),
+      CompletionFixture.simple("done")
+    )
+    def family(builder: AgentBuilder) =
+      built(
+        builder
+          .withTools(SpecTools.set(echo))
+          .withMiddleware(new ApprovalMiddleware(request => Some(s"review ${request.call.id}")))
+          .withRuntime(runtime)
+      )
+    val parked = family(Agent.builder("root", client)).run(thread, "q1").value
+    val approval = parked.status match {
+      case AgentStatus.Suspended(approvals, _, _, _) => approvals.head._1
+      case other                                     => fail(s"expected Suspended, got $other")
+    }
+    val answers = Map(parked.approve(approval))
+
+    family(Agent.builder("root", client).withMiddleware(new Counting))
+      .resume(thread, answers)
+      .error shouldBe a[GraphError.RestoreRejected]
+    family(Agent.builder("root", client)).resume(thread, answers).value.answer shouldBe Some("done")
   }
 }

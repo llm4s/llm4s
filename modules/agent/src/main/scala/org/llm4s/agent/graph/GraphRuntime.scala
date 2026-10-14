@@ -403,7 +403,7 @@ final class GraphRuntime(
                 case CheckpointStatus.Running   => Left(GraphError.IncompleteRun(threadId.value, stored.checkpoint.id))
                 case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
                 case CheckpointStatus.Completed | CheckpointStatus.Failed =>
-                  graph.restore(stored.checkpoint.snapshot).flatMap { done =>
+                  graph.restoreAtRest(stored.checkpoint.snapshot).flatMap { done =>
                     newRun(graph, threadId, config, durability, done.superstep, signal)
                       .admit(
                         graph.startAt(done.superstep, done.state, input),

@@ -127,7 +127,9 @@ enum Step[+O]:
  * decoded and checked against the graph that restores them.
  *
  * Each value records its codec's version and is migrated on restore; the snapshot itself is
- * versioned by the [[Checkpoint]] that carries it.
+ * versioned by the [[Checkpoint]] that carries it. `shape` is the writing graph's declared structure, which
+ * [[CompiledGraph.restore]] compares with its own; `None` on a snapshot written before shapes were recorded (#1934),
+ * which is matched by `fingerprint` alone.
  */
 final case class GraphSnapshot(
   graphId: String,
@@ -139,7 +141,8 @@ final case class GraphSnapshot(
   staticJoins: Vector[GraphSnapshot.StaticArrivals],
   dynamicJoins: Vector[GraphSnapshot.Activation],
   parked: Vector[GraphSnapshot.ParkedContinuation],
-  paused: Boolean
+  paused: Boolean,
+  shape: Option[GraphShape] = None
 ) derives ReadWriter
 
 object GraphSnapshot:
