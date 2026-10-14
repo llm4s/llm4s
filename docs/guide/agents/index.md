@@ -398,6 +398,20 @@ rules a caller relies on:
 - **A Block does not undo an external effect.** A guardrail that blocks a turn retracts its
   messages, but a file the turn wrote, or a command it ran, stays as it is.
 
+### Harness File Backends
+
+The harness keeps an agent's files in a `FileBackend` (`org.llm4s.agent.harness`): thread state
+(`StateFileBackend`, the default), a long-term store (`StoreFileBackend`, for `/memories/`), several at
+once (`CompositeBackend`), or a host directory (`HostFileBackend`). Each backend declares the locks its
+mutations hold, replays its external effects through `ReplayGuard`, and enforces its own size limits.
+
+**`HostFileBackend` is not a security boundary.** It is a convenience for a directory you trust. It
+refuses symbolic links and files with other hard links, and each write is a compare-and-set under
+file locks. Even so, a process that can write the root can swap a directory for a link between the
+backend's check and its open, and reach files outside the root. Never give it a root that an untrusted
+process can write, including a command run by a sandbox. To run untrusted commands, use the workspace
+sandbox and its file backend, which are the isolation boundary.
+
 ### Tool Permissions, Timeouts and Locks
 
 An `AgentToolSpec` can declare what a call touches, how long one run may take, and which locks it

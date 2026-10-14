@@ -32,6 +32,11 @@ import scala.util.{ Failure, Success, Try, Using }
  * after, so a replayed edit whose first attempt landed returns its first result rather than "`old`
  * was not found", and one whose file another writer changed in between is refused.
  *
+ * '''Not a security boundary.''' It is a convenience for a trusted directory. Never give it a root that
+ * an untrusted process can write, a sandboxed command included: such a process can swap a directory for
+ * a link between the backend's check and its open, and so reach files outside the root. To run untrusted
+ * commands, use the workspace sandbox and its file backend (F2), which is the isolation boundary.
+ *
  *  - '''Resolution.''' A path's segments resolve under the real root, and every component that exists
  *    is checked: a symbolic link is refused, wherever it points. A link inside the root would make two
  *    paths name one file, and their locks would not order them. `find` and `search` skip links.
