@@ -87,14 +87,21 @@ class AgentEventBufferSpec extends AnyFlatSpec with Matchers:
     buffer.take() shouldBe Right(None)
   }
 
+  /** Waits until `t` is parked - blocked in `take` - so the wake-up, not an early return, is what is tested. */
+  private def awaitBlocked(t: Thread): Unit =
+    val deadline = System.nanoTime() + 10_000_000_000L
+    while t.getState != Thread.State.WAITING && t.getState != Thread.State.TIMED_WAITING && System.nanoTime() < deadline
+    do Thread.sleep(1)
+    t.getState should (be(Thread.State.WAITING).or(be(Thread.State.TIMED_WAITING)))
+
   it should "wake a blocked take when closed" in {
     val buffer = AgentEventBuffer(4)
     val result = new AtomicReference[Any](null)
     val taker  = new Thread(() => result.set(buffer.take()))
     taker.start()
-    Thread.sleep(50)
+    awaitBlocked(taker)
     buffer.close()
-    taker.join(1000)
+    taker.join(10_000)
     result.get shouldBe Right(None)
   }
 
@@ -112,9 +119,9 @@ class AgentEventBufferSpec extends AnyFlatSpec with Matchers:
     val result = new AtomicReference[Any](null)
     val taker  = new Thread(() => result.set(buffer.take()))
     taker.start()
-    Thread.sleep(50)
+    awaitBlocked(taker)
     buffer.end()
-    taker.join(1000)
+    taker.join(10_000)
     result.get shouldBe Right(None)
   }
 

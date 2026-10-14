@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.testutil.LinearTime
+import org.llm4s.testutil.{ LinearTime, PerformanceTest }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -1040,7 +1040,7 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "read single-quoted fields from the input as well in time linear in the input (#1697)" in {
+  it should "read single-quoted fields from the input as well in time linear in the input (#1697)" taggedAs PerformanceTest in {
     val shapes = Seq(
       ("{", "'\"password\": \"a', 'x', \"s\": \"{'\"token\": \"b', 'y'}\", ", "}"),
       ("{", "'note': 'see \"password\": \" here', 'apiKey': [\"7YJ1VSFPX'}\", -9935758], ", "}"),
@@ -1055,7 +1055,7 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "redact a document of many JSON strings that mention 'token': [ in time linear in its length" in {
+  it should "redact a document of many JSON strings that mention 'token': [" in {
     // One forward scan decides which string, if any, encloses each container, so the cost does not grow with the
     // square of the length: a document four times as long takes about four times as long, never sixteen.
     val unit = s"""{"role": "user", "content": "see 'token': [ for details", "api_key": "$secretText"}, """
@@ -1065,10 +1065,23 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
       (out should not).include(secretText)
       ujson.read(out).arr.size shouldBe repeats + 1
     }
+  }
+
+  it should "redact a document of many JSON strings that mention 'token': [ in time linear in its length" taggedAs PerformanceTest in {
+    val unit = s"""{"role": "user", "content": "see 'token': [ for details", "api_key": "$secretText"}, """
+    def document(repeats: Int): String = "[" + (unit * repeats) + "{}]"
     // the cheapest of several runs after a warm-up, in CPU time, not one run each in wall time (#1709)
     LinearTime.assertLinear("500 vs 2000 units", document(500), document(2000))(
       Redaction.redact(_)
     )
+  }
+
+  // The scaling tests above and below are PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test`
+  // and fails on a catastrophic regression of the worst of their shapes in one run, under a generous hang guard.
+  it should "redact a megabyte of single-quoted fields well inside the hang guard (#1697)" in {
+    val input = "{" + ("'apiKey': 'abc', 'token': [1, 'x', {'secret': \"y\"}], " * 20000) + "}"
+    input.length should be > 1000000
+    LinearTime.timed("a megabyte of single-quoted fields", LinearTime.MegabyteHangGuard)(Redaction.redact(input))
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -1229,7 +1242,7 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     onSmallStack("{'password': " + ("1" * MegaChars) + "}") shouldBe s"{'password': '$R'}"
   }
 
-  it should "redact quote-heavy Python repr shapes in time linear in their length (#1675, #1687)" in {
+  it should "redact quote-heavy Python repr shapes in time linear in their length (#1675, #1687)" taggedAs PerformanceTest in {
     // Each shape repeats a unit that asks a value, leaf or key check of its own: a growth with the square of the
     // length would make four times the input take sixteen times as long.
     val shapes = Seq(

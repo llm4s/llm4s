@@ -1,5 +1,6 @@
 package org.llm4s.util
 
+import org.llm4s.testutil.{ LinearTime, PerformanceTest }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -381,7 +382,7 @@ class RedactionQueryParamSpec extends AnyFlatSpec with Matchers {
     Redaction.redact(u("x;password~3d'SECRET QZ' n=1")) shouldBe u(s"x;password~3d'$R' n=1")
   }
 
-  it should "read a quoted credential holding escaped '&' in time linear in its length" in {
+  it should "read a quoted credential holding escaped '&' in time linear in its length" taggedAs PerformanceTest in {
     // Each value is read in one forward scan: no search for a matching quote starts again from each character, which
     // would make four times the input take sixteen times as long.
     val shapes = Seq(
@@ -406,6 +407,14 @@ class RedactionQueryParamSpec extends AnyFlatSpec with Matchers {
         large should be < (small * 12 + 50000000L)
       }
     }
+  }
+
+  // The scaling test above is PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test` and fails on
+  // a catastrophic regression in one run of a megabyte, under a generous hang guard.
+  it should "read a megabyte-long quoted credential holding escaped '&' well inside the hang guard" in {
+    val input = u("x;password=~27") + (u("a b;c,d&e~26f=") * 60000)
+    input.length should be > 1000000
+    LinearTime.timed("a megabyte-long quoted credential", LinearTime.MegabyteHangGuard)(Redaction.redact(input))
   }
 
   it should "read a Bearer token only after the escape of a separator, whose 'u' is lower-case in JSON" in {

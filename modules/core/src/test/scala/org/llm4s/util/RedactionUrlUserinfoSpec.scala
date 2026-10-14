@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.testutil.LinearTime
+import org.llm4s.testutil.{ LinearTime, PerformanceTest }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -152,7 +152,7 @@ class RedactionUrlUserinfoSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "never throw, and read URLs in time linear in the input (#1816)" in {
+  it should "never throw on any URL-like input (#1816)" in {
     val rnd = new Random(1816)
     (1 to 2000).foreach { _ =>
       val input = Iterator
@@ -169,6 +169,10 @@ class RedactionUrlUserinfoSpec extends AnyFlatSpec with Matchers {
         .mkString
       withClue(s"input $input: ")(Try(Redaction.redact(input)).isSuccess shouldBe true)
     }
+  }
+
+  // PerformanceTest, run by `sbt testPerformance`; the megabyte below stays in `sbt test`.
+  it should "read URLs in time linear in the input (#1816)" taggedAs PerformanceTest in {
     val shapes: Seq[(String, Int => String)] = Seq(
       "schemes"          -> (n => "a://" * n),
       "userinfo"         -> (n => "x://u:p@" * n),
@@ -184,5 +188,11 @@ class RedactionUrlUserinfoSpec extends AnyFlatSpec with Matchers {
     shapes.foreach { case (name, build) =>
       LinearTime.assertLinear(name, build(1000), build(4000))(Redaction.redact(_))
     }
+  }
+
+  it should "read a megabyte of userinfo well inside the hang guard (#1816)" in {
+    val input = "x://u:p@" * 130000
+    input.length should be > 1000000
+    LinearTime.timed("a megabyte of userinfo", LinearTime.MegabyteHangGuard)(Redaction.redact(input))
   }
 }

@@ -1,5 +1,6 @@
 package org.llm4s.util
 
+import org.llm4s.testutil.{ LinearTime, PerformanceTest }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -256,7 +257,15 @@ class RedactionSpanMergeSpec extends AnyFlatSpec with Matchers {
       u(raw"""{"msg":"https://h/cb?credential='$R'~26id=1"}""")
   }
 
-  it should "merge the passes in time linear in the input" in {
+  // The scaling tests below are PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test` and fails
+  // on a catastrophic regression in one run of a megabyte, under a generous hang guard.
+  it should "merge the passes over a megabyte well inside the hang guard" in {
+    val input = u("a=1~26token=~27k~26'passwd':'v'~26 ") * 25000
+    input.length should be > 1000000
+    LinearTime.timed("merging the passes over a megabyte", LinearTime.MegabyteHangGuard)(Redaction.redact(input))
+  }
+
+  it should "merge the passes in time linear in the input" taggedAs PerformanceTest in {
     // Each pass reads the input once, and the merge sorts the edits once: four times the input takes about four times
     // as long, not sixteen.
     val units = Seq(
@@ -284,7 +293,7 @@ class RedactionSpanMergeSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "read a long run of backslashes once, not once from each of its backslashes" in {
+  it should "read a long run of backslashes once, not once from each of its backslashes" taggedAs PerformanceTest in {
     // An escaped quote may follow any run of backslashes; a search that started again at each of them would make a
     // run four times as long take sixteen times as long.
     def time(length: Int): Long = {
