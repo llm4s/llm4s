@@ -59,11 +59,33 @@ class AgentEventBufferSpec extends AnyFlatSpec with Matchers:
     )
   }
 
-  it should "always queue durable events, past capacity too" in {
+  it should "queue durable events past the live capacity" in {
     val buffer = AgentEventBuffer(1)
     val events = (1 to 5).map(i => durable(i.toLong, RunEvent.TaskCompleted)) :+ durable(6, RunEvent.RunCompleted)
     events.foreach(offer(buffer, _))
     takeAll(buffer) shouldBe events.toVector
+  }
+
+  it should "end with a Left naming the last seq taken once more durable events wait than its durable capacity" in {
+    val buffer = AgentEventBuffer(1, durableCapacity = 3)
+    offer(buffer, durable(1, RunEvent.RunStarted(None, None)))
+    buffer.take() shouldBe Right(Some(durable(1, RunEvent.RunStarted(None, None))))
+    (2 to 4).foreach(i => offer(buffer, durable(i.toLong, RunEvent.TaskCompleted)))
+    offer(buffer, durable(5, RunEvent.TaskCompleted)) // a fourth waiting: never blocks, ends the hand-over
+    offer(buffer, durable(6, RunEvent.RunCompleted))  // ignored after the end
+    takeAll(buffer) shouldBe (2 to 4).map(i => durable(i.toLong, RunEvent.TaskCompleted)).toVector
+    val error = buffer.take().swap.toOption.map(_.message)
+    error.exists(_.contains("after seq 1")) shouldBe true
+  }
+
+  it should "count only the durable events still waiting against its durable capacity" in {
+    val buffer = AgentEventBuffer(1, durableCapacity = 2)
+    val events = (1 to 5).map(i => durable(i.toLong, RunEvent.TaskCompleted)) :+ durable(6, RunEvent.RunCompleted)
+    val taken = events.toVector.map { event =>
+      offer(buffer, event)
+      buffer.take()
+    }
+    taken shouldBe events.toVector.map(e => Right(Some(e)))
   }
 
   it should "count the space taken live events free, and add a kernel LiveGap that does not fit to its own count" in {

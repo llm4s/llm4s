@@ -5,7 +5,8 @@ import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReferen
 import java.util.concurrent.locks.LockSupport
 
 import org.llm4s.agent.{ Agent, AgentBuilder }
-import org.llm4s.agent.graph.{ GraphError, RunContext, ThreadId }
+import org.llm4s.agent.graph.{ EventType, GraphError, RunContext, ThreadId }
+import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContext, ToolOutcome, ToolSet }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId }
 import org.llm4s.error.{ CancelledError, LLMError, SimpleError, UnknownError }
 import org.llm4s.llmconnect.LLMClient
@@ -15,8 +16,10 @@ import org.llm4s.llmconnect.model.{
   CompletionOptions,
   Conversation,
   StreamedChunk,
+  ToolCall,
   UserMessage
 }
+import org.llm4s.toolapi.Schema
 import org.llm4s.types.Result
 
 /**
@@ -191,4 +194,51 @@ object Fixtures {
   }
 
   val boom: Result[Completion] = Left(SimpleError("boom"))
+
+  /** A tool's own typed events, for the typed-stream specs of the effect modules. */
+  object Pings {
+    final case class Ping(n: Int) derives upickle.default.ReadWriter
+    final case class Arg(text: String) derives upickle.default.ReadWriter
+
+    /** Emitted durably by the tools below. */
+    val Pinged: EventType[Ping] = EventType[Ping]("test.pinged", 1)
+
+    /** Sent live by the tools below. */
+    val Progressed: EventType[Ping] = EventType[Ping]("test.progressed", 1)
+
+    /**
+     * An agent whose first model call calls the tool `pinger`, which runs `body`, and whose second call
+     * answers "done"; every later call fails.
+     */
+    def agent(body: ToolContext => ToolOutcome): Agent = {
+      val calls = new AtomicInteger(0)
+      val call  = ToolCall("call-1", "pinger", ujson.Obj("text" -> "x"))
+      val client = new Scripted(
+        onComplete = () =>
+          calls.getAndIncrement() match {
+            case 0 => Right(Completion("c0", 0L, "", "m", AssistantMessage(None, Seq(call)), toolCalls = List(call)))
+            case 1 => Right(Completion("c1", 0L, "done", "m", AssistantMessage(Some("done"))))
+            case _ => boom
+          }
+      )
+      val spec =
+        AgentToolSpec[Arg](
+          "pinger",
+          "Pings",
+          Schema.`object`[Arg]("pinger").withRequiredField("text", Schema.string("t"))
+        )
+      val tools = ToolSet.of(AgentTool(spec)((_, context) => body(context))) match {
+        case Right(set) => set
+        case Left(e)    => throw new AssertionError(e.message)
+      }
+      agentOf(client)(_.withTools(tools))
+    }
+
+    /** Emits `Pinged(1)` durably and `Progressed(2)` live, then succeeds. */
+    val pinging: ToolContext => ToolOutcome = context => {
+      Pinged.emit(context.run, Ping(1))
+      Progressed.progress(context.run, Ping(2))
+      ToolOutcome.Success(ujson.Str("ok"))
+    }
+  }
 }

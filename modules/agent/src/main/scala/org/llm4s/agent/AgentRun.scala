@@ -87,7 +87,18 @@ final class AgentRun private[agent] (
    * ([[org.llm4s.agent.graph.GraphRuntime.subscribe]]).
    */
   def subscribe(capacity: Int = Agent.StreamCapacity)(listener: StreamEvent => Unit): Result[Subscription] =
-    val scope = RunScope(runId, listener)
+    subscribeEnding(capacity, () => ())(listener)
+
+  /**
+   * [[subscribe]], calling `onEnd` once when the subscription ends - after the turn's terminal event or
+   * a `Disconnected` has been passed to `listener`, at the turn's end-of-run barrier, or when the
+   * returned subscription is cancelled. For the bridges (fs2, ZIO, Pekko) that observe a run they do
+   * not own and must end without a terminal event too.
+   */
+  private[llm4s] def subscribeEnding(capacity: Int, onEnd: () => Unit)(
+    listener: StreamEvent => Unit
+  ): Result[Subscription] =
+    val scope = RunScope(runId, listener, onEnd)
     handle.subscribe(capacity)(scope).map { s =>
       scope.attach(s)
       scopes.add(scope)
