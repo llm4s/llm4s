@@ -56,7 +56,9 @@ final case class LLMMemoryManager(
             accStore.flatMap { s =>
               consolidateGroup(group, s) match {
                 case Right(newStore) => Right(newStore)
-                case Left(error)     =>
+                // a cancellation is not a group's failure: it stops consolidation, whatever the mode
+                case Left(cancelled: org.llm4s.error.CancelledError) => Left(cancelled)
+                case Left(error)                                     =>
                   // Log error with safe summary (no sensitive content)
                   val groupType = group.headOption.map(_.memoryType.name).getOrElse("unknown")
                   val groupSize = group.length

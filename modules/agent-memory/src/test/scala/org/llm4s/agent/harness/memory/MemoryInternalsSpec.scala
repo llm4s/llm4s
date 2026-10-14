@@ -71,6 +71,14 @@ class MemoryInternalsSpec extends AnyFlatSpec with Matchers with EitherValues {
     cell.read(contents) shouldBe empty
   }
 
+  "Cutting a memory" should "drop its embedding, computed for the whole text, and keep a memory that fits as it is" in {
+    val embedded = Memory.userFact("a long fact").withEmbedding(Array(1f, 2f))
+    val cut      = SemanticMemoryMiddleware.cut(embedded, 6)
+    cut.content shouldBe "a long"
+    cut.embedding shouldBe None
+    (SemanticMemoryMiddleware.cut(embedded, 100) should be).theSameInstanceAs(embedded)
+  }
+
   "The outcome codec" should "refuse an outcome in a newer format" in {
     import MemoryEffects.given
     val newer = AppliedWrite.toJson(AppliedWrite(Vector.empty, Vector.empty, 0))

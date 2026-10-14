@@ -575,6 +575,31 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     left should have size 2
   }
 
+  it should "return a cancellation, not skip it, in best-effort mode and while extracting entities" in {
+    val cancelling = new LLMClient {
+      def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+        Left(org.llm4s.error.CancelledError("model"))
+      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+        complete(c, o)
+      def getContextWindow(): Int     = 128000
+      def getReserveCompletion(): Int = 4096
+    }
+    val manager = LLMMemoryManager(MemoryManagerConfig.default, InMemoryStore.empty, cancelling)
+    val populated = manager
+      .recordConversation(Seq(UserMessage("a"), AssistantMessage("b"), UserMessage("c")), "conv")
+      .fold(e => fail(e.message), identity)
+    populated.consolidateMemories(Instant.now().plus(1, ChronoUnit.DAYS), minCount = 3) match {
+      case Left(_: org.llm4s.error.CancelledError) => succeed
+      case other                                   => fail(s"expected a cancellation, got $other")
+    }
+    val extracting =
+      LLMMemoryManager(MemoryManagerConfig.default.copy(autoExtractEntities = true), InMemoryStore.empty, cancelling)
+    extracting.recordMessage(UserMessage("Ada wrote programs"), "conv") match {
+      case Left(_: org.llm4s.error.CancelledError) => succeed
+      case other                                   => fail(s"expected a cancellation, got $other")
+    }
+  }
+
   it should "preserve importance scores during consolidation" in {
     val manager = createManager()
 

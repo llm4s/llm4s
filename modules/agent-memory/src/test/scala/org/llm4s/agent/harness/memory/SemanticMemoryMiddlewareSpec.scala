@@ -514,6 +514,50 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
       Vector(MemorySkipped("memory.consolidate", "ProcessingError"))
   }
 
+  "A consolidation whose sources another writer already replaced" should "announce nothing" in {
+    val stale = (store: MemoryStore, _: LLMClient) =>
+      new Overlong(
+        SimpleMemoryManager.withStore(store),
+        _ => Right(""),
+        consolidating = Some(view =>
+          view.replace(Seq(Memory.userFact("summary")), Seq(MemoryId("gone"))).map(_ => SimpleMemoryManager.empty)
+        )
+      )
+    val m = new SemanticMemoryMiddleware(
+      _ => Right(InMemoryStore.empty),
+      stale,
+      answering(),
+      record = None,
+      consolidate = consolidate
+    )
+    val seen = new CopyOnWriteArrayList[StreamEvent]()
+    agentWith(answering("ok"), m).stream(ThreadId("stale"), "hi")(e => seen.add(e): Unit).value.await().value
+    contents(held(m, None)) shouldBe empty
+    seen.asScala.collect { case MemoryEvents.Consolidated(c) => c } shouldBe empty
+  }
+
+  "A manager that swallows a cancellation" should "still fail the turn" in {
+    // as LLMMemoryManager did in best-effort mode: the task is interrupted, but the manager returns success
+    val swallowing = (store: MemoryStore, _: LLMClient) =>
+      new Overlong(
+        SimpleMemoryManager.withStore(store),
+        _ => Right(""),
+        consolidating = Some { _ =>
+          Thread.currentThread().interrupt()
+          Right(SimpleMemoryManager.empty)
+        }
+      )
+    val m = new SemanticMemoryMiddleware(
+      _ => Right(InMemoryStore.empty),
+      swallowing,
+      answering(),
+      record = None,
+      consolidate = consolidate
+    )
+    agentWith(answering("ok"), m).run("hi").isLeft shouldBe true
+    Thread.interrupted(): Unit // the run's thread is not this one; clear defensively
+  }
+
   "A manager that returns a store other than its view" should "have its recording skipped, the answer kept" in {
     val elsewhere = (_: MemoryStore, _: LLMClient) => SimpleMemoryManager.withStore(InMemoryStore.empty)
     val m         = new SemanticMemoryMiddleware(_ => Right(InMemoryStore.empty), elsewhere, answering())

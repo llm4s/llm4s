@@ -31,6 +31,7 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
     var state: State            = State()
     private var snapshot: State = state
     val statements              = mutable.ArrayBuffer.empty[String]
+    val locks                   = mutable.ArrayBuffer.empty[String]
     def proxy[A](cls: Class[A])(f: (String, Array[AnyRef]) => AnyRef): A =
       Proxy
         .newProxyInstance(
@@ -66,7 +67,7 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
     private def query(sql: String, params: mutable.Map[Int, Any]): ResultSet = {
       statements += sql
       val s = state
-      if (sql.startsWith("SELECT pg_advisory_xact_lock")) rows(Seq(Seq(true)))
+      if (sql.startsWith("SELECT pg_advisory_xact_lock")) { locks += params(1).toString; rows(Seq(Seq(true))) }
       else if (sql == s"SELECT token FROM ${table}_fences WHERE scope = ?")
         rows(s.fences.get(params(1).toString).map(Seq(_)).toSeq)
       else if (sql == s"SELECT outcome FROM ${table}_applied WHERE key = ?")
@@ -209,6 +210,13 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
     store.appliedWriteCount.value shouldBe 0
     store.appliedWrite(k, 2).value._2 shouldBe None
     db.state.fences shouldBe Map("scope" -> 2L)
+  }
+
+  "PostgresMemoryStore's advisory lock" should "be keyed as PostgreSQL folds the table name, so one table has one lock" in {
+    val db    = new FakePostgres("Mem")
+    val store = new PostgresMemoryStore(new FakeDataSource(db), "Mem", None)
+    store.appliedWrite(k, 1).value
+    db.locks.toVector shouldBe Vector("mem")
   }
 
   "PostgresMemoryStore.Config" should "accept a table name only while every name derived from it fits 63 bytes" in {

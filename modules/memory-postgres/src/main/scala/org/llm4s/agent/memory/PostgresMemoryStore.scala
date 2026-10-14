@@ -145,7 +145,8 @@ final class PostgresMemoryStore private[memory] (
       withConnection { conn =>
         inTransaction(conn) {
           Using.resource(conn.prepareStatement("SELECT pg_advisory_xact_lock(hashtext(?))")) { stmt =>
-            stmt.setString(1, tableName)
+            // PostgreSQL folds the unquoted name to lower case: `Memories` and `memories` are one table, one lock
+            stmt.setString(1, tableName.toLowerCase(java.util.Locale.ROOT))
             Using.resource(stmt.executeQuery())(_.next()): Unit
           }
           val newest = Using.resource(conn.prepareStatement(s"SELECT token FROM $fencesTable WHERE scope = ?")) {

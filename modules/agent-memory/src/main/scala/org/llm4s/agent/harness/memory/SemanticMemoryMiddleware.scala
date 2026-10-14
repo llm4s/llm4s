@@ -157,7 +157,10 @@ final class SemanticMemoryMiddleware(
               ).flatMap(recorded => buffered(recorded.store))
                 .map(add => add.map(cut(_, settings.maxRecordChars)) -> Nil)
             }
-            .map(out => MemoryEvents.Recorded.emit(context.run, MemoryRecorded(out.added.size, out.evicted)))
+            .map(out =>
+              if out.added.nonEmpty || out.evicted > 0 then
+                MemoryEvents.Recorded.emit(context.run, MemoryRecorded(out.added.size, out.evicted))
+            )
     }
 
   /** Old memories consolidated by the manager, each group it replaces one `memory.consolidate` effect. */
@@ -168,7 +171,7 @@ final class SemanticMemoryMiddleware(
       val key = context.run.effectKey("memory.consolidate", remove.map(_.value).distinct.sorted*)
       MemoryEffects
         .write(context.run, tenant, key, bounds)(Right(add.map(cut(_, maxChars)) -> remove))
-        .map(outcomes.add(_): Unit)
+        .map(out => if out.added.nonEmpty || out.removed.nonEmpty || out.evicted > 0 then outcomes.add(out): Unit)
     }
     val cutoff = clock.instant().minusNanos(settings.olderThan.toNanos)
     val result = guarded(manager(view, context.accounted(client)).consolidateMemories(cutoff, settings.minCount))
@@ -259,8 +262,14 @@ object SemanticMemoryMiddleware:
     lock.lock()
     def close(): Unit = lock.unlock()
 
-  /** `body`, a throw as `Left`: a manager or resolver that throws is a failed memory operation, not a failed hook. */
-  private def guarded[A](body: => Result[A]): Result[A] = Try(body).toResult.flatten
+  /**
+   * `body`, a throw as `Left`: a manager or resolver that throws is a failed memory operation, not a failed hook. A
+   * call that leaves the task interrupted is a cancellation whatever it returned, so a manager that treats a cancelled
+   * model call as a best-effort failure cannot let the task commit.
+   */
+  private def guarded[A](body: => Result[A]): Result[A] =
+    val result = Try(body).toResult.flatten
+    if Thread.currentThread().isInterrupted then Left(CancelledError("semantic memory")) else result
 
   /** The memories a recording view buffered. */
   private def buffered(store: MemoryStore): Result[Seq[Memory]] = store match
@@ -275,8 +284,13 @@ object SemanticMemoryMiddleware:
 
   private def name(tenant: Option[TenantId]): String = tenant.fold("(none)")(t => s"'${t.value}'")
 
-  /** `memory` with its content cut to `max` code points. */
-  private def cut(memory: Memory, max: Int): Memory = memory.copy(content = clip(memory.content, max))
+  /**
+   * `memory` with its content cut to `max` code points. A memory that is cut loses its embedding, which was computed
+   * for the whole text; a store with an embedding service computes it again for what is kept.
+   */
+  private[memory] def cut(memory: Memory, max: Int): Memory =
+    val kept = clip(memory.content, max)
+    if kept == memory.content then memory else memory.copy(content = kept, embedding = None)
 
   /** `s` cut to `max` code points. */
   private def clip(s: String, max: Int): String =
