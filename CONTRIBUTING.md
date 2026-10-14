@@ -211,6 +211,17 @@ input through the same operation under a generous hang guard (`LinearTime.timed(
 ...)`), so `sbt test` still catches a catastrophic regression. Details in the
 [Testing Guide](docs/reference/testing-guide.md#performance-tests-sbt-testperformance).
 
+### Platform tests
+
+CI's Windows job runs only `sbt testPlatform`, the tests of behaviour that differs between
+platforms (file paths and separators, permissions, deleting open files, processes, SQLite files,
+line endings written to files, temp files), listed in `project/PlatformTests.scala`. If your change
+makes code platform-sensitive, make sure a test of it runs on Windows: put it in a module listed in
+`PlatformTests.wholeModules`, or add its suite to `PlatformTests.suites`, and list a main source
+outside those modules in `scripts/platform-sensitive-sources.txt`; `scripts/check-platform-tests.sh`
+fails in Quick Checks otherwise. Details in the
+[Testing Guide](docs/reference/testing-guide.md#platform-tests-sbt-testplatform).
+
 ### Tests that need a real service
 
 Suites needing a database, a container, a local model server or an API key go in

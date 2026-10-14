@@ -421,6 +421,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.26 | [Stage 3 slice F8a: response format for the agent's answer](typed-agent-runtime/4.26-stage-3-slice-f8a-response-format.md) ([#1912](https://github.com/llm4s/llm4s/issues/1912)) |
 | 4.28 | [Stage 3 slice F9: typed custom streams](typed-agent-runtime/4.28-stage-3-slice-f9-typed-custom-streams.md) ([#1914](https://github.com/llm4s/llm4s/issues/1914)) |
 | 4.29 | [Stage 3 slice C5: restore a checkpoint after the graph gains a key](typed-agent-runtime/4.29-stage-3-slice-c5-graph-evolution.md) ([#1934](https://github.com/llm4s/llm4s/issues/1934)) |
+| 4.30 | [Stage 3 slice F3: todos](typed-agent-runtime/4.30-stage-3-slice-f3-todos.md) ([#1907](https://github.com/llm4s/llm4s/issues/1907)) |
 
 ### 4.9 Stage 0 carry-forward
 

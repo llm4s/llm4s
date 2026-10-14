@@ -194,6 +194,22 @@ class HttpRedirectAllowlistSpec extends AnyFlatSpec with Matchers with BeforeAnd
     sameOrigin.get("assertion") shouldBe Some("PHNhbWwyOkFzc2VydGlvbiB4bWxucz0idXJuIj4")
   }
 
+  it should "never forward a plural credential header, even one the allowlist names (#1646)" in {
+    // Redaction reads `secrets`, `passwords` and `apikeys` as credentials in a log line; a header so named is one too.
+    // `tokens` is not one: it is a count (`X-Tokens`, `max_tokens`), and an allowlisted one is still forwarded.
+    val plurals = Map(
+      "X-Api-Keys"     -> "k1,k2",
+      "Client-Secrets" -> "s1",
+      "Db-Passwords"   -> "p1"
+    )
+    val cfg           = config.copy(redirectSafeHeaders = plurals.keys.toSeq :+ "X-Tokens")
+    val (received, _) = echoed(via(originA, s"$originB/echo"), plurals + ("X-Tokens" -> "3"), cfg)
+    received.keySet.intersect(plurals.keySet.map(_.toLowerCase(Locale.ROOT))) shouldBe empty
+    received.get("x-tokens") shouldBe Some("3")
+    val (sameOrigin, _) = echoed(via(originA, s"$originA/echo"), plurals, cfg)
+    sameOrigin.get("x-api-keys") shouldBe Some("k1,k2")
+  }
+
   it should "forward Content-Type with a body a 307 re-sends, and drop it when a 302 drops the body" in {
     val cfg     = config.withAllMethods
     val headers = Map("Content-Type" -> "text/plain", "X-Api-Key" -> "k1")
@@ -301,7 +317,10 @@ class HttpRedirectAllowlistSpec extends AnyFlatSpec with Matchers with BeforeAnd
       "X-CSRF-Token",
       "Ocp-Apim-Subscription-Key",
       "Cookie2",
-      "proxy-authorization"
+      "proxy-authorization",
+      "X_API_KEYS",
+      "x-client-secrets",
+      "Db-Passwords"
     )
     val (sent, _) = HTTPTool.headersForHop(
       Some(names.map(_ -> "v").toMap),

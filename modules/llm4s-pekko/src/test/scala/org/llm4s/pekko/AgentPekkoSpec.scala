@@ -254,9 +254,10 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
     probe.request(1)
     val first = probe.within(Patience)(probe.expectNext())
     store.completed.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
-    probe.request(Long.MaxValue)
-    val rest = probe.within(Patience)(probe.receiveWithin(Patience, 100000))
-    val all  = (first +: rest.collect { case i: AgentStreamItem => i }).toVector
+    // `toStrict` drains until the stream completes. `receiveWithin(Patience, n)` returned only after `n` items or the
+    // whole of `Patience`, and the stream ends long before 100000 items, so this test used to take a full minute.
+    val rest = probe.toStrict(Patience)
+    val all  = (first +: rest).toVector
 
     val events = all.collect { case AgentStreamItem.Event(e) => e }
     val gaps   = events.collect { case StreamEvent.LiveGap(n) => n }.sum
