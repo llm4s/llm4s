@@ -17,6 +17,8 @@ and tools on `AgentBuilder`. Each slice adds its part here as it lands:
 
 - [#1902](https://github.com/llm4s/llm4s/issues/1902), kernel hooks for the harness - state-writing hooks, prompt
   sections, accounted model calls, and a Block that restores the whole turn: [below](#kernel-hooks-for-the-harness-1902).
+- [#1903](https://github.com/llm4s/llm4s/issues/1903), tool permissions, timeouts and batch locks:
+  [below](#tool-permissions-timeouts-and-batch-locks-1903).
 - [#1914](https://github.com/llm4s/llm4s/issues/1914), typed custom streams: [below](#typed-custom-streams-1914).
 - [#1921](https://github.com/llm4s/llm4s/issues/1921), replay of external effects - `ReplayGuard`, `Checkpointer.effect`
   and `Commit.effects`: [below](#replay-of-external-effects-1921).
