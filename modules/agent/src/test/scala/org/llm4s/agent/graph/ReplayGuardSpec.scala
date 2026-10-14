@@ -210,6 +210,22 @@ class ReplayGuardSpec extends AnyFlatSpec with Matchers with EitherValues with O
     cell shouldBe "changed by another thread"
   }
 
+  it should "run again, rather than presume, a plan whose digests before and after are equal" in {
+    val journal = new Journal
+    val writes  = new AtomicInteger()
+    val c       = context(journal)
+    def same = ReplayGuard.verifiable[String](c, c.effectKey("file.write", "/same"))(Right(StateCheck.of("x"))) {
+      Right(ReplayGuard.Plan(StateCheck.of("x"), StateCheck.of("x"), "wrote") {
+        writes.incrementAndGet(); Right("wrote")
+      })
+    }
+    journal.failNext = Some(true) // the intent lands; the effect never runs
+    same.isLeft shouldBe true
+    writes.get shouldBe 0
+    same.value shouldBe "wrote"
+    writes.get shouldBe 1
+  }
+
   it should "refuse a presumed outcome over the cap before the effect runs, recording nothing" in {
     val journal = new Journal
     val ran     = new AtomicInteger()

@@ -328,8 +328,11 @@ object ReplayGuard:
    * it will report and the effect; it runs only when the effect must run, so a check against the
    * current state (an edit's "`old` not found", a quota) belongs inside it. `probe` reads the target's
    * current digest; it runs only on a replay of an effect that began and did not record its outcome:
-   * matching `after`, the effect landed and `presumed` is returned; matching `before`, it did not, and
-   * it is planned and run again; anything else is [[GraphError.EffectReplayRefused]] naming the conflict.
+   * matching `before`, it did not land, and it is planned and run again; matching `after`, it landed and
+   * `presumed` is returned; anything else is [[GraphError.EffectReplayRefused]] naming the conflict.
+   * `before` is checked first, so a plan whose two digests are equal (a write of what is already
+   * there) is run again rather than presumed: the probe cannot tell whether it ran, and running it
+   * again changes no digest.
    */
   def verifiable[A: ReadWriter](context: RunContext, key: EffectKey, maxOutcomeBytes: Int = DefaultMaxOutcomeBytes)(
     probe: => Result[StateCheck]
@@ -353,13 +356,15 @@ object ReplayGuard:
         record.body match
           case EffectBody.Begun(intent @ EffectIntent.Verifiable(before, after, presumed)) =>
             probe.flatMap { current =>
-              if current == after then
+              // `before` first: when the two digests are equal the probe cannot tell whether the effect
+              // ran, and running it again - a compare-and-set that changes no digest - is what is safe
+              if current == before then fresh(record.taskId)
+              else if current == after then
                 decode[A](key, presumed).flatMap { outcome =>
                   journal
                     .write(new EffectRecord(key, record.taskId, EffectBody.Completed(intent, presumed)))
                     .map(_ => outcome)
                 }
-              else if current == before then fresh(record.taskId)
               else
                 Left(
                   GraphError.EffectReplayRefused(
