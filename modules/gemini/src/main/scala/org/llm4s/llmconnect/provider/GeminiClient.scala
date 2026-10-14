@@ -101,6 +101,8 @@ class GeminiClient(
         org.llm4s.model.RequestTransformer.default(registryService),
         dropUnsupported = true
       )
+      // a part Gemini cannot take fails the request here, before anything is sent
+      .flatMap(transformed => GeminiParts.check(providerName, transformed.messages).map(_ => transformed))
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
@@ -145,6 +147,8 @@ class GeminiClient(
         org.llm4s.model.RequestTransformer.default(registryService),
         dropUnsupported = true
       )
+      // a part Gemini cannot take fails the request here, before anything is sent
+      .flatMap(transformed => GeminiParts.check(providerName, transformed.messages).map(_ => transformed))
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
@@ -271,11 +275,9 @@ class GeminiClient(
         // Gemini handles system messages via systemInstruction
         systemInstr = Some(content)
 
-      case UserMessage(content) =>
-        contents += ujson.Obj(
-          "role"  -> "user",
-          "parts" -> ujson.Arr(ujson.Obj("text" -> content))
-        )
+      case um: UserMessage =>
+        // checked before the body is built: GeminiParts covers every part
+        contents += ujson.Obj("role" -> "user", "parts" -> ujson.Arr.from(um.parts.map(GeminiParts.user(providerName))))
 
       case am: AssistantMessage =>
         // Tool call IDs map to function names so the following ToolMessages can be keyed by name
@@ -297,7 +299,8 @@ class GeminiClient(
         if (parts.nonEmpty && (am.toolCalls.nonEmpty || am.contentOpt.isDefined))
           contents += ujson.Obj("role" -> "model", "parts" -> ujson.Arr(parts: _*))
 
-      case ToolMessage(content, toolCallId) =>
+      case tm: ToolMessage =>
+        val toolCallId = tm.toolCallId
         // Gemini uses functionResponse for tool results
         // The name field should be the function name, not the tool call ID
         // Look up the function name from our mapping, fallback to toolCallId if not found
@@ -309,7 +312,7 @@ class GeminiClient(
               "functionResponse" -> {
                 val response = ujson.Obj(
                   "name"     -> functionName,
-                  "response" -> ujson.Obj("result" -> content)
+                  "response" -> ujson.Obj("result" -> tm.content)
                 )
                 // a populated functionCall.id must come back on the matching functionResponse
                 if (callIdsSentWithId.contains(toolCallId)) response("id") = toolCallId

@@ -8,8 +8,14 @@ import org.llm4s.llmconnect.{ LLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, VertexAIConfig }
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.testkit.LocalProviderTestServer.{ holdOpen, sendSseResponse, streamThenHold, withServer }
-import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks }
+import org.llm4s.testkit.LocalProviderTestServer.{
+  holdOpen,
+  sendJsonResponse,
+  sendSseResponse,
+  streamThenHold,
+  withServer
+}
+import org.llm4s.testkit.{ ContentPartCase, CredentialsRoundTrip, ProviderModuleChecks }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.matchers.should.Matchers
@@ -93,6 +99,41 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
     new VertexAIClient(config, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
   }
 
+  /**
+   * A `VertexAIClient` whose model calls go to the stub server at `baseUrl`: Vertex AI's base URL cannot be
+   * configured, so its HTTP client forwards them, and answers the token endpoints itself.
+   */
+  private def vertexClientAt(baseUrl: String): VertexAIClient = {
+    val tokenBody = """{"access_token":"ya29.test-token","expires_in":3600}"""
+    val real      = Llm4sHttpClient.create()
+    val mockHttp  = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).onCall { (url, headers, body, timeout) =>
+      if url.contains("aiplatform") then real.post(s"$baseUrl/vertex", headers, body, timeout)
+      else Right(HttpResponse(200, tokenBody, Map.empty))
+    }
+    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    new VertexAIClient(
+      vertexConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Disabled,
+      mockHttp
+    )
+  }
+
+  private val geminiReply =
+    """{"candidates":[{"content":{"parts":[{"text":"ok"}],"role":"model"},"finishReason":"STOP"}]}"""
+
+  /** What both clients send: everything but media in a tool result and another provider's file. */
+  private val geminiParts = Seq(
+    ContentPartCase.UserImageUrl,
+    ContentPartCase.UserImageInline,
+    ContentPartCase.UserImageFile,
+    ContentPartCase.UserPdfUrl,
+    ContentPartCase.UserPdfInline,
+    ContentPartCase.UserPdfFile,
+    ContentPartCase.UserTextDocumentInline
+  )
+
   private def vertexConfig: VertexAIConfig =
     VertexAIProvider.buildConfig("test-instance", section(VertexAIProvider).withApiKey(None)) match
       case Right(c: VertexAIConfig) => c
@@ -161,6 +202,10 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
 
   "a client built by the gemini descriptor" should {
 
+    "send text, images and documents in a user message, and refuse media in a tool result" in {
+      assertContentParts("gemini", sendJsonResponse(_, 200, geminiReply))(geminiParts*)(geminiClientAt)
+    }
+
     "actually stream, not silently fall back to complete()" in {
       withServer("/")(exchange => sendSseResponse(exchange, geminiSseBody)) { baseUrl =>
         assertStreams(geminiClientAt(baseUrl))
@@ -179,6 +224,10 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
   }
 
   "a client built by the vertexai descriptor" should {
+
+    "send text, images and documents in a user message, and refuse media in a tool result" in {
+      assertContentParts("vertexai", sendJsonResponse(_, 200, geminiReply))(geminiParts*)(vertexClientAt)
+    }
 
     "actually stream, not silently fall back to complete()" in {
       // No apiKey: that field doubles as a credential file path for Vertex, and a
