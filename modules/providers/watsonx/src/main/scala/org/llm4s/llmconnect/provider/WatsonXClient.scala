@@ -542,7 +542,7 @@ object WatsonXClient {
    */
   private[provider] val userPart: PartialFunction[ContentPart, ujson.Value] = {
     case ContentPart.Text(text) => ujson.Obj("type" -> "text", "text" -> text)
-    case ContentPart.Image(inline: MediaSource.Inline, mediaType) =>
+    case ContentPart.Image(inline: MediaSource.Inline, mediaType) if PartEncoding.ChatImageTypes(mediaType) =>
       ujson.Obj("type" -> "image_url", "image_url" -> ujson.Obj("url" -> PartEncoding.dataUrl(inline, mediaType)))
   }
 

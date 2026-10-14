@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.{ UnsupportedContentPartError, ValidationError }
 import org.llm4s.llmconnect.model.{ AssistantMessage, ContentPart, Message, MessageRole, ToolMessage, UserMessage }
-import org.llm4s.media.{ MediaSource, MediaType }
+import org.llm4s.media.{ ImageMediaType, MediaSource, MediaType }
 import org.llm4s.types.Result
 
 import java.util.Base64
@@ -139,6 +139,13 @@ private[llm4s] object PartEncoding {
     case tm: ToolMessage => tm.parts
     case _               => Vector.empty
   }
+
+  /**
+   * The image formats the chat-completions APIs take (OpenAI's documented set, which the OpenAI-compatible
+   * endpoints follow): PNG, JPEG, WebP and GIF. A client refuses any other before sending, rather than send a
+   * `image/bmp` or `image/tiff` data URL the provider rejects.
+   */
+  val ChatImageTypes: Set[ImageMediaType] = Set(MediaType.Png, MediaType.Jpeg, MediaType.WebP, MediaType.Gif)
 
   /** Covers text parts only, as their text: for a role whose wire format takes nothing else. */
   val textOnly: PartialFunction[ContentPart, String] = { case ContentPart.Text(text) => text }

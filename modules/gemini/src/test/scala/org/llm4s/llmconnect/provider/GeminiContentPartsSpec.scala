@@ -148,4 +148,15 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
       UnsupportedContentPartError("gemini", other.kind, "user")
     (http.post _).verify(*, *, *, *).never()
   }
+
+  // the image formats the provider takes; any other is refused before sending (#1913, Codex)
+  private def imageOf(mt: org.llm4s.media.ImageMediaType) =
+    ContentPart.image(MediaSource.Inline(IArray[Byte](1, 2, 3)), mt).fold(e => fail(e.message), identity)
+
+  "An image" should "be sent only as PNG, JPEG or WebP, by Gemini and Vertex AI" in {
+    Seq(GeminiParts.user(gemini), GeminiParts.user(GeminiParts.vertexFileUri)).foreach { encode =>
+      Seq(MediaType.Png, MediaType.Jpeg, MediaType.WebP).foreach(mt => encode.isDefinedAt(imageOf(mt)) shouldBe true)
+      Seq(MediaType.Gif, MediaType.Bmp, MediaType.Tiff).foreach(mt => encode.isDefinedAt(imageOf(mt)) shouldBe false)
+    }
+  }
 }

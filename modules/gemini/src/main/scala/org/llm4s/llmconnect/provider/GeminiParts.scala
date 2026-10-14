@@ -22,10 +22,13 @@ private[provider] object GeminiParts {
 
   /** The `parts` entry for each user-message part a client with `fileUri` sends. */
   def user(fileUri: FileUri): PartialFunction[ContentPart, ujson.Value] = {
-    case ContentPart.Text(text)                                     => ujson.Obj("text" -> text)
-    case ContentPart.Image(source, mt) if sends(fileUri, source)    => encode(fileUri, source, mt)
-    case ContentPart.Document(source, mt) if sends(fileUri, source) => encode(fileUri, source, mt)
+    case ContentPart.Text(text)                                                    => ujson.Obj("text" -> text)
+    case ContentPart.Image(source, mt) if ImageTypes(mt) && sends(fileUri, source) => encode(fileUri, source, mt)
+    case ContentPart.Document(source, mt) if sends(fileUri, source)                => encode(fileUri, source, mt)
   }
+
+  /** The image formats Gemini and Vertex AI take that llm4s names: PNG, JPEG and WebP (HEIC and HEIF have no `MediaType`). */
+  val ImageTypes: Set[org.llm4s.media.ImageMediaType] = Set(MediaType.Png, MediaType.Jpeg, MediaType.WebP)
 
   /** `Right` when a client with `fileUri` can send every part of `messages`. */
   def check(provider: String, messages: Seq[Message], fileUri: FileUri): Result[Unit] =

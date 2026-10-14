@@ -59,3 +59,14 @@ class WatsonXContentPartsSpec extends AnyFunSuite with Matchers with EitherValue
     client.complete(Conversation(Seq(UserMessage(Vector(pdf)))), CompletionOptions()).left.value shouldBe
       a[UnsupportedContentPartError]
   }
+
+  // the image formats the provider takes; any other is refused before sending (#1913, Codex)
+  private def imageOf(mt: org.llm4s.media.ImageMediaType) =
+    ContentPart.image(MediaSource.Inline(IArray[Byte](1, 2, 3)), mt).fold(e => fail(e.message), identity)
+
+  test("an image is sent only in a format the chat-completions APIs take") {
+    Seq(MediaType.Png, MediaType.Jpeg, MediaType.WebP, MediaType.Gif).foreach(mt =>
+      WatsonXClient.userPart.isDefinedAt(imageOf(mt)) shouldBe true
+    )
+    Seq(MediaType.Bmp, MediaType.Tiff).foreach(mt => WatsonXClient.userPart.isDefinedAt(imageOf(mt)) shouldBe false)
+  }

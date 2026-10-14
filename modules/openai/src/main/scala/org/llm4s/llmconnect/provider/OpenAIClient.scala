@@ -558,8 +558,10 @@ class OpenAIClient private[provider] (
   private val userPart: PartialFunction[ContentPart, ChatCompletionContentPart] = {
     case ContentPart.Text(text) =>
       ChatCompletionContentPart.ofText(ChatCompletionContentPartText.builder().text(text).build())
-    case ContentPart.Image(MediaSource.Url(uri), _) if PartEncoding.isWebUrl(uri) => imageUrl(uri.toString)
-    case ContentPart.Image(inline: MediaSource.Inline, mediaType) => imageUrl(PartEncoding.dataUrl(inline, mediaType))
+    case ContentPart.Image(MediaSource.Url(uri), mt) if PartEncoding.isWebUrl(uri) && PartEncoding.ChatImageTypes(mt) =>
+      imageUrl(uri.toString)
+    case ContentPart.Image(inline: MediaSource.Inline, mediaType) if PartEncoding.ChatImageTypes(mediaType) =>
+      imageUrl(PartEncoding.dataUrl(inline, mediaType))
     case ContentPart.Document(inline: MediaSource.Inline, MediaType.Pdf) =>
       pdfFile(_.filename("document.pdf").fileData(PartEncoding.dataUrl(inline, MediaType.Pdf)))
     case ContentPart.Document(MediaSource.ProviderFile(owner, id), MediaType.Pdf) if owner == providerName =>

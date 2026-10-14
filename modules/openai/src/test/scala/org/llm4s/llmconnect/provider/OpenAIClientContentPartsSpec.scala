@@ -103,4 +103,17 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
     // a null text is read as empty when the part is built, so it reaches the SDK as ""
     noException should be thrownBy sent(Conversation(Seq(UserMessage(Vector(ContentPart.Text(null), imageInline)))))
   }
+
+  // the image formats the provider takes; any other is refused before sending (#1913, Codex)
+  private def imageOf(mt: org.llm4s.media.ImageMediaType) =
+    ContentPart.image(MediaSource.Inline(IArray[Byte](1, 2, 3)), mt).fold(e => fail(e.message), identity)
+
+  it should "refuse, without sending, an image in a format OpenAI does not take" in {
+    Seq(MediaType.Bmp, MediaType.Tiff).foreach { mt =>
+      val part = imageOf(mt)
+      sent(Conversation(Seq(UserMessage(Vector(part))))).left.value shouldBe
+        UnsupportedContentPartError("openai", part.kind, "user")
+    }
+    sent(Conversation(Seq(UserMessage(Vector(imageOf(MediaType.Gif)))))).isRight shouldBe true
+  }
 }
