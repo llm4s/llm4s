@@ -193,13 +193,22 @@ private[llm4s] object Redaction {
 
   /**
    * Whether `key` (a field, header or parameter name) names a credential, by `SensitiveKeyWords` and
-   * `SensitiveKeySuffixes`. `llm4s-agent-tools`' HTTP tool reads it to withhold such headers on a cross-origin
-   * redirect even when they are allowlisted, so the two lists stay one.
+   * `SensitiveKeySuffixes`: the names the redaction passes read as keys. A plural (`api_keys`) is not one of them;
+   * `isCredentialName` takes those too.
    */
   private[llm4s] def isSensitiveKey(key: String): Boolean = {
     val normalised = key.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit)
     SensitiveKeyWords.contains(normalised) || SensitiveKeySuffixes.exists(normalised.endsWith)
   }
+
+  /**
+   * Whether `key` (a field, header or parameter name) names a credential or credentials: `isSensitiveKey`, or a
+   * plural of `SensitivePluralSuffixes` (`X-Api-Keys`, `Client-Secrets`, `db_passwords`), which redaction reads by a
+   * reading of its own (#1646). `llm4s-agent-tools`' HTTP tool reads it to withhold such headers on a cross-origin
+   * redirect even when they are allowlisted, so what a log redacts and what a redirect withholds stay one list.
+   */
+  private[llm4s] def isCredentialName(key: String): Boolean =
+    isSensitiveKey(key) || isPluralCredentialName(key.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit))
 
   /**
    * Whether the value `input(start until end)` of a sensitive `key` is prose that is left readable: the key is the
@@ -738,6 +747,9 @@ private[llm4s] object Redaction {
    */
   private val SensitivePluralSuffixes: Seq[String] = Seq("secrets", "passwords", "apikeys")
 
+  /** Whether `normalised` (lower-cased, letters and digits only) ends in a `SensitivePluralSuffixes`. */
+  private def isPluralCredentialName(normalised: String): Boolean = SensitivePluralSuffixes.exists(normalised.endsWith)
+
   /**
    * Query parameters that carry a short-lived credential, by their whole name in any case (#1646): `sig` (an Azure
    * SAS signature), `signature`, `x-amz-signature` (an AWS SigV4 presigned URL), `x-goog-signature` (a Google Cloud
@@ -755,7 +767,8 @@ private[llm4s] object Redaction {
    * where there is none. A plural loses its last `s` and doubles its first character, so it keeps its start - what
    * comes before it is what came before - and ends in a sensitive suffix: `secrets` is `ssecret`, `api_keys` is
    * `aapi_key`. A parameter's key is written as `x`s and `key`, which `SensitiveQueryParams` holds, the `#` before a
-   * fragment's key and the `;` before `jsessionid` as `&`, as is the `?`, `;`, `/` or `#` that ends its value. The edits a reading of that text makes are edits of the input: no character moves. One scan
+   * fragment's key and the `;` before `jsessionid` as `&`, as is the `?` or `#` that ends its value; the `/` or `;` that
+   * ends it is written as a space, so the path after it is not read as a query. The edits a reading of that text makes are edits of the input: no character moves. One scan
    * over the runs of letters, digits, `_` and `-`.
    */
   private def withSingularKeys(input: String): String = {
@@ -796,7 +809,7 @@ private[llm4s] object Redaction {
         val word       = input.substring(i, j)
         val normalised = word.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit)
         val last       = word.charAt(word.length - 1)
-        if ((last == 's' || last == 'S') && SensitivePluralSuffixes.exists(normalised.endsWith))
+        if ((last == 's' || last == 'S') && isPluralCredentialName(normalised))
           write(i, word.charAt(0).toString + word.dropRight(1))
         else if (SensitiveQueryNames(word.toLowerCase(Locale.ROOT)) && beforeEquals(j)) {
           val separator = afterQuerySeparator(i)
@@ -805,12 +818,16 @@ private[llm4s] object Redaction {
             write(i, "x" * (word.length - 3) + "key")
             if (fragment(i)) write(i - 1, "&") // the readings take a query parameter after `&`, not after `#`
             if (matrix) {
-              // A matrix parameter's value ends at the `?`, `;`, `/` or `#` after it, where a query value goes on.
+              // A matrix parameter's value ends at the `?`, `;`, `/` or `#` after it, where a query value goes on. A
+              // query or fragment there goes on with parameters, so its `?` or `#` is written as `&`; a path segment or
+              // another matrix parameter does not, so its `/` or `;` is written as a space, which ends a query value and
+              // starts no parameter (`;jsessionid=a/code=200` keeps `200`).
               write(i - 1, "&")
               var k = j + 1
               while (k < length && "?;/#&\"'<>\\".indexOf(input.charAt(k).toInt) < 0 && !isRegexSpace(input.charAt(k)))
                 k += 1
-              if (k < length && "?;/#".indexOf(input.charAt(k).toInt) >= 0) write(k, "&")
+              if (k < length && "?#".indexOf(input.charAt(k).toInt) >= 0) write(k, "&")
+              else if (k < length && "/;".indexOf(input.charAt(k).toInt) >= 0) write(k, " ")
               j = math.max(j, k)
             }
           }

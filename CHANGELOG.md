@@ -2902,10 +2902,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `max_tokens`, `prompt_tokens` and `usage.tokens` are counts, and `"tokens": {...}` is kept. The query parameters
   `sig` (Azure SAS), `signature`, `X-Amz-Signature` (AWS SigV4), `X-Goog-Signature`, `code` (an OAuth authorization
   code), `session`, `sessionid` and `jsessionid` - also the matrix parameter `;jsessionid=`, whose value ends at the
-  `?`, `;`, `/` or `#` after it - are now redacted, matched by their whole name and only as a query parameter's key
+  `?`, `;`, `/` or `#` after it, so the path after it is not read as a query - are now redacted, matched by their whole name and only as a query parameter's key
   (also in a URL's fragment, as an OAuth fragment response sends `#code=...`), so `"code": 400`, `?zipcode=` and
   `?error_code=` are kept. Like the readings before it, this only adds to what was
-  replaced: a reading of the input with those keys written as keys the other readings take.
+  replaced: a reading of the input with those keys written as keys the other readings take. The HTTP tool withholds
+  a header so named (`X-Api-Keys`, `Client-Secrets`, `Db-Passwords`) on a cross-origin redirect even when
+  `redirectSafeHeaders` lists it, as it does the singular (`Redaction.isCredentialName`).
 - **The Spring Boot starter's health indicator redacts nested credentials and header values** ([#1820](https://github.com/llm4s/llm4s/issues/1820)):
   the credentials it removes from a failed probe's `error` message were read only from top-level text fields of the
   resolved provider config, so a credential set outside Spring properties (in `application.conf`, a `reference.conf`

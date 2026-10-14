@@ -70,6 +70,15 @@ class RedactionPluralKeysSpec extends AnyFlatSpec with Matchers {
     Redaction.redact("https://app.example.com/home;jsessionid=ABCDEF0123?lang=en") shouldBe
       s"https://app.example.com/home;jsessionid=$R?lang=en"
     Redaction.redact("/a;jsessionid=ABCDEF0123/b") shouldBe s"/a;jsessionid=$R/b"
+    // a path segment or matrix parameter after it is no query parameter, whatever its name; a query after it is
+    Redaction.redact("/a;jsessionid=ABC/code=200") shouldBe s"/a;jsessionid=$R/code=200"
+    Redaction.redact("/a;jsessionid=ABC/sig=1/session=2/x;code=3") shouldBe
+      s"/a;jsessionid=$R/sig=1/session=2/x;code=3"
+    Redaction.redact("/a;jsessionid=ABC;code=200;sessionid=7") shouldBe s"/a;jsessionid=$R;code=200;sessionid=7"
+    Redaction.redact("/a;jsessionid=ABC?code=X") shouldBe s"/a;jsessionid=$R?code=$R"
+    Redaction.redact("/a;jsessionid=ABC/b?code=X&session=Y") shouldBe s"/a;jsessionid=$R/b?code=$R&session=$R"
+    Redaction.redact("/a;jsessionid=ABC/b;jsessionid=DEF") shouldBe s"/a;jsessionid=$R/b;jsessionid=$R"
+    Redaction.redact("/a;jsessionid=ABC#code=X") shouldBe s"/a;jsessionid=$R#code=$R"
     // inside JSON, also with `&` and `=` escaped as Gson writes them
     val json = Redaction.redact("""{"url":"https://app.example.com/cb?code=AUTHCODE123&state=xyz"}""")
     json shouldBe s"""{"url":"https://app.example.com/cb?code=$R&state=xyz"}"""
