@@ -219,15 +219,16 @@ object GraphError:
   enum BusyHolder:
     /**
      * Run `runId` holds the thread: it is executing in this runtime, or holds a live claim on it. Named
-     * only when the caller may see it - the thread's latest checkpoint is the caller's tenant's, or, for a
-     * thread with no checkpoint yet, the holder is a run of the same runtime with the caller's tenant.
+     * only when it is of the caller's tenant - a run of this runtime with the caller's tenant, or a claim
+     * the store recorded for the caller's tenant ([[ClaimRequest.tenantId]]) - and the thread's latest
+     * checkpoint, if it has one, is the caller's tenant's too.
      */
     case Run(runId: RunId)
 
     /**
-     * Another run holds the thread, or took it over, but is not named: the thread has no checkpoint yet
-     * in the store and the holder is not a run of this runtime, so its tenant cannot be checked; or the
-     * store refused the call's write as stale naming only the claim that replaced its own.
+     * Another run holds the thread, or took it over, but is not named: its claim is another tenant's, or
+     * recorded no tenant (a claim persisted before claims carried one); or the store refused the call's
+     * write as stale naming only the claim that replaced its own.
      */
     case Unnamed
 
@@ -250,9 +251,9 @@ object GraphError:
    * [[BusyHolder.Lapsed]] refusal is the exception: a write the call had already sent may still land.
    *
    * `holder` says who holds the thread as far as the caller may know ([[BusyHolder]]): a run's id when
-   * it is known and the caller may see it - the thread's latest checkpoint is the caller's tenant's, or,
-   * for a thread with no checkpoint yet in the store, the holder is a run of this runtime with the
-   * caller's tenant; [[BusyHolder.Unnamed]] when another run holds it but cannot be named; and
+   * it is known and of the caller's tenant - a run of this runtime, or a claim recorded for the caller's
+   * tenant - and the thread's latest checkpoint, if any, is the caller's tenant's;
+   * [[BusyHolder.Unnamed]] when another run holds it but cannot be named, such as another tenant's; and
    * [[BusyHolder.Lapsed]] when it is the call's own claim that lapsed, with no other run known to hold
    * the thread. A caller of another tenant is refused with [[TenantMismatch]] instead, and learns nothing.
    */

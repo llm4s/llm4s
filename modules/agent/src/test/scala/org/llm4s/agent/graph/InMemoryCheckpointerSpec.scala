@@ -46,7 +46,7 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
   final private class Claimed {
     val clock = new MutableClock(now)
     val store = InMemoryCheckpointer(clock)
-    val token = store.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    val token = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     def commit(checkpoint: Option[Checkpoint], writes: Vector[PendingWrite], events: Vector[EventDraft]) =
       store.commit(thread, Commit(token, checkpoint, writes, events))
   }
@@ -115,7 +115,7 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
     val other = ThreadId("other")
     c.commit(Some(checkpoint("c1", None)), Vector.empty, Vector(event("a"), event("b")))
     c.commit(None, Vector(write("c1", "0.0")), Vector.empty)
-    val otherToken = store.claim(other, ClaimRequest(RunId("o"), ttl)).value.token
+    val otherToken = store.claim(other, ClaimRequest(RunId("o"), None, ttl)).value.token
     store.commit(other, Commit(otherToken, Some(checkpoint("o1", None)), Vector.empty, Vector(event("x"))))
 
     store.deleteThread(thread, c.token).value shouldBe (())
@@ -126,7 +126,7 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
     store.eventsAfter(other, 0L, 10).value.map(_.seq) shouldBe Vector(1L)
     // the claim went with the thread, so its token is stale; a new claim is granted at once
     store.commit(thread, Commit(c.token)).left.value shouldBe a[GraphError.StaleClaim]
-    val again = store.claim(thread, ClaimRequest(RunId("again"), ttl)).value
+    val again = store.claim(thread, ClaimRequest(RunId("again"), None, ttl)).value
     again.token.value should be > otherToken.value
     // the id is a new thread again: a first checkpoint is accepted, its events numbered past the old
     // thread's two, its next number skipped
@@ -142,10 +142,10 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
   it should "grant one live claim per thread, by its own clock, and let an expired one be taken over" in {
     val c     = Claimed()
     val store = c.store
-    store.claim(thread, ClaimRequest(RunId("thief"), ttl)).left.value shouldBe
+    store.claim(thread, ClaimRequest(RunId("thief"), None, ttl)).left.value shouldBe
       GraphError.ThreadBusy("t", None, GraphError.BusyHolder.Run(RunId("run")))
     c.clock.advance(ttl)
-    val taken = store.claim(thread, ClaimRequest(RunId("thief"), ttl)).value
+    val taken = store.claim(thread, ClaimRequest(RunId("thief"), None, ttl)).value
     taken.holder shouldBe RunId("thief")
     taken.token.value should be > c.token.value
     taken.expiresAt shouldBe now.plusSeconds(60)
@@ -154,7 +154,7 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
       GraphError.StaleClaim("t", c.token, Some(taken.token))
     store.renew(thread, c.token, ttl).left.value shouldBe a[GraphError.StaleClaim]
     store.release(thread, c.token).value shouldBe (())
-    store.claim(thread, ClaimRequest(RunId("third"), ttl)).left.value shouldBe
+    store.claim(thread, ClaimRequest(RunId("third"), None, ttl)).left.value shouldBe
       GraphError.ThreadBusy("t", None, GraphError.BusyHolder.Run(RunId("thief")))
     store.eventsAfter(thread, 0L, 10).value shouldBe empty
   }
@@ -163,10 +163,10 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
     val c     = Claimed()
     val store = c.store
     (1 to 3).foreach(_ =>
-      store.claim(thread, ClaimRequest(RunId("refused"), ttl)).left.value shouldBe a[GraphError.ThreadBusy]
+      store.claim(thread, ClaimRequest(RunId("refused"), None, ttl)).left.value shouldBe a[GraphError.ThreadBusy]
     )
     store.release(thread, c.token).value shouldBe (())
-    store.claim(thread, ClaimRequest(RunId("next"), ttl)).value.token shouldBe FencingToken(c.token.value + 1)
+    store.claim(thread, ClaimRequest(RunId("next"), None, ttl)).value.token shouldBe FencingToken(c.token.value + 1)
   }
 
   it should "renew a claim from the store's clock, even after it expired if nobody took it over" in {
@@ -177,7 +177,7 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
     renewed.token shouldBe c.token
     renewed.expiresAt shouldBe now.plusSeconds(61)
     c.commit(Some(checkpoint("c1", None)), Vector.empty, Vector.empty).value shouldBe empty
-    store.claim(thread, ClaimRequest(RunId("thief"), ttl)).left.value shouldBe
+    store.claim(thread, ClaimRequest(RunId("thief"), None, ttl)).left.value shouldBe
       GraphError.ThreadBusy("t", Some("c1"), GraphError.BusyHolder.Run(RunId("run")))
   }
 
@@ -187,7 +187,7 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
     store.release(thread, c.token).value shouldBe (())
     store.commit(thread, Commit(c.token)).left.value shouldBe GraphError.StaleClaim("t", c.token, None)
     store.renew(thread, c.token, ttl).left.value shouldBe GraphError.StaleClaim("t", c.token, None)
-    val next = store.claim(thread, ClaimRequest(RunId("next"), ttl)).value
+    val next = store.claim(thread, ClaimRequest(RunId("next"), None, ttl)).value
     next.token.value shouldBe c.token.value + 1
     store.release(thread, next.token).value shouldBe (())
     store.latest(thread).value shouldBe None

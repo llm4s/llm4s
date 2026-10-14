@@ -26,7 +26,11 @@ import org.llm4s.util.Redaction
  *  1. `GOOGLE_ACCESS_TOKEN` environment variable — direct token; useful for CI and testing.
  *  2. JSON credential file resolved from [[credentialFilePath]], then
  *     `GOOGLE_APPLICATION_CREDENTIALS`, then
- *     `~/.config/gcloud/application_default_credentials.json`.
+ *     gcloud's well-known `application_default_credentials.json`, found as Google's client
+ *     libraries find it: in `$CLOUDSDK_CONFIG` when that is set (any OS), else
+ *     `%APPDATA%\gcloud` on Windows, else `~/.config/gcloud`. `APPDATA` and `CLOUDSDK_CONFIG`
+ *     are resolved at the config edge ([[org.llm4s.config.VertexAIAdcConfigLoader]]) and arrive as
+ *     [[wellKnownCredentialPath]], not through [[envReader]].
  *     Supports both `authorized_user` (refresh-token flow) and `service_account`
  *     (RS256 JWT assertion flow, no extra dependencies).
  *  3. GCE / GKE metadata server — Workload Identity path for production deployments.
@@ -49,6 +53,7 @@ import org.llm4s.util.Redaction
  * @param httpClient         HTTP client for token-endpoint calls.
  * @param envReader          Environment variable reader; injectable for testing.
  * @param fileReader         File reader; injectable for testing.
+ * @param wellKnownCredentialPath Location of gcloud's well-known credential file, as resolved by the config loader; `None` skips that lookup.
  */
 @Stable
 class VertexAIAuthProvider(
@@ -56,7 +61,8 @@ class VertexAIAuthProvider(
   httpClient: Llm4sHttpClient,
   envReader: String => Option[String] = key => Option(System.getenv(key)),
   fileReader: String => Result[String] = path =>
-    Try(new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8)).toEither.left.map(_.toLLMError)
+    Try(new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8)).toEither.left.map(_.toLLMError),
+  wellKnownCredentialPath: Option[String] = None
 ) {
   import VertexAIAuthProvider._
 
@@ -100,9 +106,7 @@ class VertexAIAuthProvider(
     credentialFilePath
       .orElse(envReader("GOOGLE_APPLICATION_CREDENTIALS"))
       .orElse {
-        val defaultPath =
-          s"${System.getProperty("user.home")}/.config/gcloud/application_default_credentials.json"
-        if (new java.io.File(defaultPath).exists()) Some(defaultPath) else None
+        wellKnownCredentialPath.filter(p => new java.io.File(p).exists())
       }
 
   private def fetchTokenFromCredentialFile(content: String): Result[CachedToken] =

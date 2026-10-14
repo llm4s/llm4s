@@ -68,7 +68,11 @@ class VertexAIClient(
   /** How long a streamed call may take: the section's `timeouts.stream`, else VertexAIClient.DefaultStreamTimeout. */
   protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(VertexAIClient.DefaultStreamTimeout)
 
-  private val authProvider = new VertexAIAuthProvider(config.credentialFilePath, httpClient)
+  private val authProvider = new VertexAIAuthProvider(
+    config.credentialFilePath,
+    httpClient,
+    wellKnownCredentialPath = config.wellKnownCredentialPath
+  )
 
   protected def clientDescription: String = s"Vertex AI client for model ${config.model}"
   protected def providerName: String      = "vertexai"

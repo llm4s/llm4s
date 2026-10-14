@@ -360,8 +360,9 @@ above registers both.
 1. **Pick a GCP project** with the Vertex AI API enabled, and a region that serves your model.
 2. **Authenticate** with Application Default Credentials (`gcloud auth application-default login`),
    or point `apiKey` at a service-account JSON file. Without `apiKey`, credentials come from
-   `GOOGLE_APPLICATION_CREDENTIALS`, then `~/.config/gcloud/application_default_credentials.json`,
-   then the GCE metadata server.
+   `GOOGLE_APPLICATION_CREDENTIALS`, then gcloud's `application_default_credentials.json`, then the
+   GCE metadata server. The file is located as Google's client libraries do: in `$CLOUDSDK_CONFIG`
+   when that is set (any OS), else `%APPDATA%\gcloud` on Windows, else `~/.config/gcloud`.
 
 ### Configuration
 
