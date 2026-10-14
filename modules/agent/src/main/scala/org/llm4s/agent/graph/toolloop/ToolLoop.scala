@@ -12,7 +12,7 @@ import org.llm4s.agent.graph.middleware.{
   ModelRequest,
   ToolCallRequest
 }
-import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome, ToolQuestion, ToolSet }
+import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome, ToolQuestion, ToolSet }
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -210,9 +210,16 @@ object BreakpointRequest:
   def apply(node: NodeId, phase: BreakpointPhase, call: Option[ToolCall] = None): BreakpointRequest =
     new BreakpointRequest(node, phase, call)
 
-/** The result the loop wrote for one call, waiting for the batch barrier. */
-final case class ToolResult(assistantMessageId: String, toolCallId: String, content: String, isError: Boolean)
-    derives ReadWriter
+/**
+ * The result the loop wrote for one call, waiting for the batch barrier: the parts the call's
+ * `ToolMessage` will carry, or, for an error, its message as one text part.
+ */
+final case class ToolResult(
+  assistantMessageId: String,
+  toolCallId: String,
+  parts: Vector[ContentPart],
+  isError: Boolean
+) derives ReadWriter
 
 /** One invocation of an agent's model: the task's [[RunContext]], the agent, and this attempt's number (from 1). */
 final class ModelCall private[toolloop] (val context: RunContext, val agent: AgentId, val attempt: Int):
@@ -438,13 +445,27 @@ object ToolLoop:
   /** Agent `agent`'s finish node: the turn's final answer, before its `afterAgent` hooks run. */
   def finishNode(agent: AgentId): NodeId = NodeId(s"${agent.value}/finish")
 
-  /** The results recorded for the current batch, at most one per call; removed when the batch is collected. */
+  /**
+   * The results recorded for the current batch, at most one per call; removed when the batch is collected.
+   *
+   * Version 2 (#1913): a result carries `parts`; version 1's `content` string migrates to one text part.
+   */
   val results: StateKey[Vector[ToolResult], ToolResult] =
     StateKey[Vector[ToolResult], ToolResult]("tool-results", Vector.empty) { (recorded, result) =>
       if recorded.exists(r => r.assistantMessageId == result.assistantMessageId && r.toolCallId == result.toolCallId)
       then Left(ValidationError("tool-results", s"tool call '${result.toolCallId}' already has a result"))
       else Right(recorded :+ result)
     }
+      .withStateVersion(SchemaVersion(2)(1 -> (json => Try(ujson.Arr.from(json.arr.map(textToParts))).toResult)))
+      .withUpdateVersion(SchemaVersion(2)(1 -> (json => Try(textToParts(json)).toResult)))
+
+  // a version-1 ToolResult's `content` string, as the one text part version 2 holds
+  private def textToParts(result: ujson.Value): ujson.Value =
+    val upgraded = ujson.copy(result)
+    upgraded.obj.remove("content").foreach { text =>
+      upgraded("parts") = upickle.default.writeJs(Vector[ContentPart](ContentPart.Text(text.str)))
+    }
+    upgraded
 
   /**
    * The loop for a family of `agents`, a new thread starting with `root`. Refuses an empty family,
@@ -1026,8 +1047,10 @@ object ToolLoop:
         )
       yield
         val toolMessages = ordered.map { r =>
-          val content = if r.isError then ujson.Obj("error" -> r.content).render() else r.content
-          StoredMessage(s"${context.position.taskId.value}/tool/${r.toolCallId}", ToolMessage(content, r.toolCallId))
+          val parts =
+            if r.isError then Vector(ContentPart.Text(ujson.Obj("error" -> ContentPart.text(r.parts)).render()))
+            else r.parts
+          StoredMessage(s"${context.position.taskId.value}/tool/${r.toolCallId}", ToolMessage(parts, r.toolCallId))
         }
         toolMessages
           .foldLeft(Command.empty)((command, m) => command.update(messages, MessageUpdate.Append(m)))
@@ -1178,7 +1201,11 @@ object ToolLoop:
     ): NodeResult =
       announce(task.call, content, isError, context, outcome, duration)
       NodeResult.Continue(
-        Command.empty.update(results, ToolResult(task.assistantMessageId, task.call.id, content, isError))
+        Command.empty
+          .update(
+            results,
+            ToolResult(task.assistantMessageId, task.call.id, Vector(ContentPart.Text(content)), isError)
+          )
       )
 
     /**
@@ -1468,13 +1495,17 @@ object ToolLoop:
           val undeclared =
             update.operations.map(_.key.id).filterNot(k => allowed.exists(_.id == k)).map(_.value).distinct
           if undeclared.isEmpty then
-            val result = rendered(content)
-            AgentEvents.ToolCallResult.progress(context, events.ToolCallResult(call.id, result, isError = false))
-            executed(task.call, context, ToolExecutionOutcome.Succeeded, took)
-            NodeResult.Continue(
-              Command(update, Nil)
-                .update(results, ToolResult(task.assistantMessageId, call.id, result, isError = false))
-            )
+            resultParts(name, content) match
+              case Left(problem) => record(task, problem, isError = true, context, ToolExecutionOutcome.Errored, took)
+              case Right(parts)  =>
+                // live only, and the text view only: media is not put on the event bus
+                AgentEvents.ToolCallResult
+                  .progress(context, events.ToolCallResult(call.id, ContentPart.text(parts), isError = false))
+                executed(task.call, context, ToolExecutionOutcome.Succeeded, took)
+                NodeResult.Continue(
+                  Command(update, Nil)
+                    .update(results, ToolResult(task.assistantMessageId, call.id, parts, isError = false))
+                )
           else
             failRun(
               ValidationError(
@@ -1578,6 +1609,23 @@ object ToolLoop:
           failRun(
             ValidationError("middleware question", s"middleware '${asker.value}' asked a question it does not declare")
           )
+
+    /**
+     * The parts a `Success` puts in the call's `ToolMessage`, or why it cannot: decided when the tool
+     * runs, so a refusal is the call's error result, never a failed update. `Parts` are kept as they
+     * are unless they have no content, or more inline bytes in total than one part may carry - every
+     * checkpoint copies them.
+     */
+    private def resultParts(name: String, content: ToolContent): Either[String, Vector[ContentPart]] =
+      content match
+        case ToolContent.Json(value)                                => Right(Vector(ContentPart.Text(rendered(value))))
+        case ToolContent.Parts(parts) if !Message.hasContent(parts) => Left(s"Tool '$name' returned no content")
+        case ToolContent.Parts(parts) if ContentPart.inlineBytes(parts) > ContentPart.MaxInlineBytes =>
+          Left(
+            s"Tool '$name' returned ${ContentPart.inlineBytes(parts)} inline bytes, more than the bound of " +
+              s"${ContentPart.MaxInlineBytes}; return larger media as a Url or a ProviderFile"
+          )
+        case ToolContent.Parts(parts) => Right(parts)
 
     /**
      * A string result is the string itself, not a quoted JSON string - except a blank one, which a

@@ -1,7 +1,15 @@
 package org.llm4s.agent.graph.middleware
 
 import org.llm4s.agent.graph.*
-import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolFixtures, AgentToolSpec, ToolContext, ToolOutcome, ToolSet }
+import org.llm4s.agent.graph.tool.{
+  AgentTool,
+  AgentToolFixtures,
+  AgentToolSpec,
+  ToolContent,
+  ToolContext,
+  ToolOutcome,
+  ToolSet
+}
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.agent.graph.toolloop.ToolLoopFixtures
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, ToolCall, UserMessage }
@@ -81,7 +89,9 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
   private val modelRequest = ModelRequest(Vector.empty, ToolSet.of().value)
 
   private def tool(name: String): AgentTool[Search] =
-    AgentTool(AgentToolSpec[Search](name, "Searches", searchSchema))((_, _) => ToolOutcome.Success(ujson.Str("ok")))
+    AgentTool(AgentToolSpec[Search](name, "Searches", searchSchema))((_, _) =>
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
+    )
 
   private def stack(middleware: AgentMiddleware*): MiddlewareStack = MiddlewareStack.of(middleware*).value
 
@@ -179,10 +189,10 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     val log = newLog
     val result = stack(Rec("a", log), Rec("b", log), Rec("c", log)).wrapToolCall(request, toolContext) { () =>
       log.add("tool")
-      ToolOutcome.Success(ujson.Str("done"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))
     }
     log.asScala.toList shouldBe List("a:before", "b:before", "c:before", "tool", "c:after", "b:after", "a:after")
-    result shouldBe MiddlewareStack.ToolChainResult(ToolOutcome.Success(ujson.Str("done")), None)
+    result shouldBe MiddlewareStack.ToolChainResult(ToolOutcome.Success(ToolContent.Json(ujson.Str("done"))), None)
   }
 
   it should "call the innermost function directly with no middleware" in {
@@ -201,7 +211,7 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     val b = new Wrap("b")(_ => ToolOutcome.Error("Denied: x"))
     val result = stack(a, b, Rec("c", log)).wrapToolCall(request, toolContext) { () =>
       log.add("tool")
-      ToolOutcome.Success(ujson.Str("done"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))
     }
     log.asScala.toList shouldBe Nil
     seen.asScala.toList shouldBe List(ToolOutcome.Error("Denied: x").toString)
@@ -216,10 +226,10 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
       next()
     )
     val result = stack(retry).wrapToolCall(request, toolContext) { () =>
-      ToolOutcome.Success(ujson.Num(calls.incrementAndGet().toDouble))
+      ToolOutcome.Success(ToolContent.Json(ujson.Num(calls.incrementAndGet().toDouble)))
     }
     calls.get shouldBe 2
-    result.outcome shouldBe ToolOutcome.Success(ujson.Num(2))
+    result.outcome shouldBe ToolOutcome.Success(ToolContent.Json(ujson.Num(2)))
   }
 
   "ToolChainResult.raisedBy" should "be None for the tool's own NeedsApproval" in {

@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.toolloop
 
-import org.llm4s.agent.graph.StateKey
+import org.llm4s.agent.graph.{ SchemaVersion, StateKey }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{ AssistantMessage, Message }
 import org.llm4s.types.Result
@@ -36,9 +36,17 @@ enum MessageUpdate derives ReadWriter:
 
 object Messages:
 
-  /** The conversation, as a typed state key. Every update is checked against the current history. */
+  /**
+   * The conversation, as a typed state key. Every update is checked against the current history.
+   *
+   * Version 2 (#1913): a user or tool message may carry content parts. Version-1 JSON is valid
+   * version 2 - core's `Message` reader takes the old string shape as one text part - so the step is
+   * the identity; the version is what makes an older runtime refuse a value that may hold parts.
+   */
   val key: StateKey[Vector[StoredMessage], MessageUpdate] =
     StateKey[Vector[StoredMessage], MessageUpdate]("messages", Vector.empty)(apply)
+      .withStateVersion(SchemaVersion(2)(1 -> Right.apply))
+      .withUpdateVersion(SchemaVersion(2)(1 -> Right.apply))
 
   private def apply(history: Vector[StoredMessage], update: MessageUpdate): Result[Vector[StoredMessage]] =
     def indexOf(id: String) =

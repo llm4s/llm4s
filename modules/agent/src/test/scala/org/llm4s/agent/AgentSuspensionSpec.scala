@@ -4,7 +4,7 @@ import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling, Text }
 import org.llm4s.agent.graph.InterruptId
 import org.llm4s.agent.graph.middleware.ApprovalMiddleware
-import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome }
+import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.llmconnect.model._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -23,7 +23,7 @@ class AgentSuspensionSpec extends AnyFlatSpec with Matchers {
 
   private val deploy = SpecTools.tool("deploy") { (a, _) =>
     ran.add(a.text)
-    ToolOutcome.Success(ujson.Str(s"deployed ${a.text}"))
+    ToolOutcome.Success(ToolContent.Json(ujson.Str(s"deployed ${a.text}")))
   }
 
   private def agentOver(client: ScriptedLLMClient, tools: AgentTool[?]*): Agent =
@@ -59,7 +59,7 @@ class AgentSuspensionSpec extends AnyFlatSpec with Matchers {
     val slow = SpecTools.tool("deploy") { (_, _) =>
       entered.countDown()
       Thread.sleep(60_000) // interrupted by cancel
-      ToolOutcome.Success(ujson.Str("never"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("never")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "deploy", "prod")), CompletionFixture.simple("shipped"))
     val agent  = agentOver(client, slow)
@@ -126,7 +126,7 @@ class AgentSuspensionSpec extends AnyFlatSpec with Matchers {
     val asker = new AgentTool.Asking[Text, Confirm, Answer](SpecTools.spec("confirm")) {
       def execute(args: Text, context: ToolContext): ToolOutcome = ask(Confirm(s"really ${args.text}?"))
       def resume(args: Text, question: Confirm, answer: Answer, context: ToolContext): ToolOutcome =
-        ToolOutcome.Success(ujson.Str(s"${question.prompt} ${answer.ok}"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str(s"${question.prompt} ${answer.ok}")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "confirm", "go")), CompletionFixture.simple("confirmed"))
     val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(asker)))

@@ -106,7 +106,7 @@ object Message {
       .mkString(" ")
 
   /** Whether `parts` has content: at least one part that is media or non-blank text. */
-  private[model] def hasContent(parts: Vector[ContentPart]): Boolean =
+  private[llm4s] def hasContent(parts: Vector[ContentPart]): Boolean =
     parts.exists {
       case ContentPart.Text(text) => text.trim.nonEmpty
       case _                      => true

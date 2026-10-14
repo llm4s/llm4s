@@ -20,7 +20,7 @@ import org.llm4s.agent.graph.middleware.{
   ModelRequest,
   ToolCallRequest
 }
-import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome }
+import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.agent.graph.toolloop.{ BreakpointRequest, ToolLoop }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
@@ -39,7 +39,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with Matchers {
 
   private val deploy = SpecTools.tool("deploy") { (a, _) =>
     ran.add(a.text)
-    ToolOutcome.Success(ujson.Str(s"deployed ${a.text}"))
+    ToolOutcome.Success(ToolContent.Json(ujson.Str(s"deployed ${a.text}")))
   }
 
   private def breakpointsOf(result: AgentResult): Vector[(InterruptId, BreakpointRequest)] = result.status match {
@@ -242,7 +242,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with Matchers {
     val confirm = new AgentTool.Asking[Text, Need, Boolean](SpecTools.spec("confirm")) {
       def execute(args: Text, context: ToolContext): ToolOutcome = ask(Need("sure?"))
       def resume(args: Text, question: Need, answer: Boolean, context: ToolContext): ToolOutcome =
-        ToolOutcome.Success(ujson.Str(s"confirmed $answer"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str(s"confirmed $answer")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "confirm")), CompletionFixture.simple("done"))
     val agent =
@@ -349,7 +349,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with Matchers {
     val flaky = SpecTools.tool("deploy") { (_, _) =>
       runs.incrementAndGet()
       if failOnce.getAndSet(false) then ToolOutcome.Fatal(ValidationError("deploy", "store down"))
-      else ToolOutcome.Success(ujson.Str("ok"))
+      else ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "deploy")), CompletionFixture.simple("done"))
     val agent =
@@ -368,7 +368,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with Matchers {
         entered.countDown()
         Thread.sleep(60_000) // interrupted by cancel
       }
-      ToolOutcome.Success(ujson.Str("ok"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "deploy")), CompletionFixture.simple("done"))
     val agent =

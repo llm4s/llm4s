@@ -16,7 +16,7 @@ import org.llm4s.agent.graph.{
   ThreadId
 }
 import org.llm4s.agent.graph.middleware._
-import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome }
+import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.agent.graph.toolloop.{
   AgentInput,
   ApprovalRequest,
@@ -48,7 +48,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
   private val deployed = new CopyOnWriteArrayList[String]()
   private val deploy = SpecTools.tool("deploy") { (a, _) =>
     deployed.add(a.text)
-    ToolOutcome.Success(ujson.Str(s"deployed ${a.text}"))
+    ToolOutcome.Success(ToolContent.Json(ujson.Str(s"deployed ${a.text}")))
   }
 
   /** The durable `ModelCallCompleted` events of `threadId`, in order. */
@@ -252,7 +252,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val confirm = new AgentTool.Asking[Text, Confirm, Boolean](SpecTools.spec("confirm")) {
       def execute(args: Text, context: ToolContext): ToolOutcome = ask(Confirm("sure?"))
       def resume(args: Text, question: Confirm, answer: Boolean, context: ToolContext): ToolOutcome =
-        ToolOutcome.Success(ujson.Str(s"confirmed $answer"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str(s"confirmed $answer")))
     }
     val env    = new Environment(new CopyOnWriteArrayList[String]())
     val client = ScriptedLLMClient.of(calling(call("c1", "confirm")), CompletionFixture.simple("done"))
@@ -274,7 +274,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val confirm = new AgentTool.Asking[Text, Confirm, Boolean](SpecTools.spec("confirm")) {
       def execute(args: Text, context: ToolContext): ToolOutcome = ask(Confirm("sure?"))
       def resume(args: Text, question: Confirm, answer: Boolean, context: ToolContext): ToolOutcome =
-        ToolOutcome.Success(ujson.Str("never"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("never")))
     }
     val calls = new AtomicInteger(0)
     // passes the first invocation through, so the tool asks; asks itself on the second, the tool's resume

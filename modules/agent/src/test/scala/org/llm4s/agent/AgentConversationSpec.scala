@@ -236,7 +236,8 @@ class AgentConversationSpec extends AnyFlatSpec with Matchers {
     val slow = SpecTools.tool("slow") { (_, _) =>
       started.countDown()
       release.await(10, java.util.concurrent.TimeUnit.SECONDS)
-      org.llm4s.agent.graph.tool.ToolOutcome.Success(ujson.Str("slow done"))
+      org.llm4s.agent.graph.tool.ToolOutcome
+        .Success(org.llm4s.agent.graph.tool.ToolContent.Json(ujson.Str("slow done")))
     }
     val client = ScriptedLLMClient.of(
       SpecTools.calling(SpecTools.call("c1", "slow")),

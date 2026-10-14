@@ -4,6 +4,7 @@ import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.graph.{ GraphError, GraphRuntime, ThreadId }
 import org.llm4s.agent.graph.middleware.{ ApprovalMiddleware, MiddlewareId }
 import org.llm4s.agent.graph.tool.ToolOutcome
+import org.llm4s.agent.graph.tool.ToolContent
 import org.llm4s.llmconnect.model._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -13,8 +14,8 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
 
   private val client = ScriptedLLMClient.of()
 
-  private val echo  = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
-  private val other = SpecTools.tool("other")((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
+  private val echo  = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
+  private val other = SpecTools.tool("other")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
 
   private def base: AgentBuilder =
     Agent
@@ -65,7 +66,7 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
           .`object`[SpecTools.Text]("lookup")
           .withRequiredField("text", org.llm4s.toolapi.Schema.string("Text"))
       )
-    )((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
+    )((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
     override def tools: Vector[org.llm4s.agent.graph.tool.AgentTool[?]] = Vector(lookup)
   }
 

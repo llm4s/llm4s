@@ -2,7 +2,7 @@ package org.llm4s.agent.graph.sqlite
 
 import org.llm4s.agent.{ Agent, AgentResult }
 import org.llm4s.agent.graph.{ GraphRuntime, ThreadId }
-import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolOutcome, ToolSet }
+import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContent, ToolOutcome, ToolSet }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -61,16 +61,29 @@ object TextOnlyThreadFixture:
     def getContextWindow(): Int     = 128000
     def getReserveCompletion(): Int = 4096
 
-  /** The fixture's agent over `store`: `flaky` fails while `broken` is set. */
-  def agent(client: LLMClient, store: SqliteCheckpointer, broken: AtomicBoolean): Agent =
+  /**
+   * The fixture's agent over `store`: `flaky` fails while `broken` is set, `lookup` returns `lookup`, and each `good`
+   * call is counted in `goodRuns`. A tool's behaviour is not part of the agent's fingerprint, so the agent restores the
+   * fixture's thread whatever these are.
+   */
+  def agent(
+    client: LLMClient,
+    store: SqliteCheckpointer,
+    broken: AtomicBoolean,
+    lookup: ToolContent = ToolContent.Json(ujson.Str("sunny")),
+    goodRuns: AtomicInteger = AtomicInteger()
+  ): Agent =
     def tool(name: String)(outcome: => ToolOutcome) = AgentTool(spec(name))((_, _) => outcome)
     val tools = ToolSet
       .of(
-        tool("lookup")(ToolOutcome.Success(ujson.Str("sunny"))),
-        tool("good")(ToolOutcome.Success(ujson.Str("good result"))),
+        tool("lookup")(ToolOutcome.Success(lookup)),
+        tool("good") {
+          goodRuns.incrementAndGet()
+          ToolOutcome.Success(ToolContent.Json(ujson.Str("good result")))
+        },
         tool("flaky")(
           if broken.get then ToolOutcome.Fatal(ValidationError("flaky", "backend down"))
-          else ToolOutcome.Success(ujson.Str("flaky result"))
+          else ToolOutcome.Success(ToolContent.Json(ujson.Str("flaky result")))
         )
       )
       .fold(e => throw new IllegalStateException(e.message), identity)
