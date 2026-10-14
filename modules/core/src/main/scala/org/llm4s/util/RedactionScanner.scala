@@ -408,6 +408,20 @@ private[util] object RedactionScanner {
 
     private def raw(i: Int): String = input.substring(t.rawStart(i), t.rawEnd(i))
 
+    /*
+     * Whitespace and structure. Two skips decide where the scanner looks past whitespace, and each site uses the one
+     * its shape needs:
+     *
+     *  - `skipBlanks` (spaces and tabs) where a line break ends the shape: a prose or header `key: value` line (its
+     *    value runs to the end of the line, or folds over indented lines - `onHeader`), a `key=value` line outside any
+     *    bracket (logfmt; `token=\nnext=1` has an empty value), `Bearer` and its token, a leaf and a closing quote
+     *    on the same line (`endsValueAt`, `endsJsonStringAt`), and the next header after an escaped line break.
+     *  - `skipSpace` (any whitespace, `\n`, `\r\n` and tabs among it) wherever the shape is a container's or a
+     *    call's: after a quoted key's `:` and before it, after `[`, `{` and `(` (`plausible`, `callArgs`), between
+     *    elements and before a closing bracket (`walk`, which also skips a `pytest` line's prefix), after a key inside
+     *    a container (`walk`), and around a bare key's `=` or `:` inside a bracket this level opened (`afterKey`):
+     *    pretty-printed JSON, a Python repr and keyword arguments one per line put any of these on a line of its own.
+     */
     private def skipBlanks(from: Int): Int = {
       var k = from
       while (k < n && (t.ch(k) == ' ' || t.ch(k) == '\t')) k += 1
@@ -844,7 +858,8 @@ private[util] object RedactionScanner {
 
     /** Whether what follows the `(` at `k` can start a call's arguments: a value, a name, or `)`. */
     private def callArgs(k: Int): Boolean = {
-      val a = skipBlanks(k + 1)
+      // a call's arguments may start on the next line (`SecretStr(\n'x'\n)`): any whitespace
+      val a = skipSpace(k + 1)
       a >= n || t.stringEnd(a) >= 0 || {
         val c = t.ch(a)
         "[{)-'\"".indexOf(c.toInt) >= 0 || isWordStart(c)
@@ -996,7 +1011,7 @@ private[util] object RedactionScanner {
               stack.setLength(0)
             } else {
               val e    = leafEnd(i, inCall)
-              val k    = skipBlanks(e)
+              val k    = skipSpace(e) // inside a container, a key's `:` or `=` may follow on the next line
               val next = if (k < n) t.ch(k) else 0.toChar
               if (next == ':' || (inCall && next == '=') || (k == e && next == '(')) lastValue = false
               else if (e < n && t.stringEnd(e) >= 0 && e - i <= 2 && Text.opens(t, e)) () // a string's prefix: `b'...'`
@@ -1042,7 +1057,7 @@ private[util] object RedactionScanner {
         val r = onAuthScheme(i, j, bearer = lower == "bearer")
         if (r >= 0) return r
       }
-      val k = skipBlanks(j)
+      val k = afterKey(j)
       if (k < n) {
         val c = t.ch(k)
         // `key=value`, `key = value`, `key==value`; not the comparison `a == b`
@@ -1052,7 +1067,7 @@ private[util] object RedactionScanner {
           // `{password: x}`, `a=1, token: x`: a sensitive key inside a line, after a separator or an opening bracket,
           // whose value is read as a pair's, to whitespace or one of `,;<>` (not "Reset your password: the link")
           if (credentialWord(i, j)) {
-            val v = skipBlanks(k + 1)
+            val v = afterKey(k + 1)
             if (afterSeparator(i) || credentialLike(v)) return inlineField(v, text(i, j))
           }
         }
@@ -1115,11 +1130,19 @@ private[util] object RedactionScanner {
         }
       } else readValue(v, field = true, quote, key)
 
+    /**
+     * Past the whitespace at `from` around a bare key's `=` or `:`: blanks, and line breaks too inside a bracket this
+     * level opened (`Settings(\n  token=\n    'x')`, `{password:\n  'x'}`), where the text is code. Outside one, a
+     * line break ends a `key=` or `key:` line with an empty value, and the next line is a line of its own.
+     */
+    private def afterKey(from: Int): Int = if (depth > 0) skipSpace(from) else skipBlanks(from)
+
     private def onPair(i: Int, j: Int, eq: Int): Int = {
       val spaced = eq > j
-      var v      = eq + 1
-      if (spaced) v = skipBlanks(v)
-      else if (v < n && (t.ch(v) == ' ' || t.ch(v) == '\t')) return v
+      val v      = afterKey(eq + 1)
+      // `key= value`, a blank after a glued `=`, is prose outside a bracket (`token= see the docs`); a keyword argument
+      // inside one (`f(token= 'x')`) is not
+      if (!spaced && depth == 0 && v > eq + 1) return v
       if (!credentialWord(i, j)) v
       else readValue(v, field = false, null, text(i, j))
     }

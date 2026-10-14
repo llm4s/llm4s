@@ -84,11 +84,29 @@ class RedactionPropertySpec extends AnyFlatSpec with Matchers with ScalaCheckPro
       case '\\'        => "\\\\"
       case c if c == q => "\\" + c
       case '\n'        => "\\n"
+      case '\r'        => "\\r"
+      case '\t'        => "\\t"
       case c           => c.toString
     } + q
   }
 
   private def json(s: String): String = ujson.Str(s).render()
+
+  /**
+   * Whitespace at a structural position of a container or a call: none, blanks, a tab, or a line break (`\n` or
+   * `\r\n`) with or without indentation - pretty-printed JSON, a Python repr, keyword arguments one per line.
+   */
+  private val genWs: Gen[String] =
+    Gen.frequency(
+      4 -> Gen.const(""),
+      3 -> Gen.const(" "),
+      1 -> Gen.const("\t"),
+      2 -> Gen.const("\n"),
+      2 -> Gen.const("\n  "),
+      2 -> Gen.const("\r\n"),
+      1 -> Gen.const("\r\n\t"),
+      1 -> Gen.const(" \n\n    ")
+    )
 
   /** One field under a sensitive key, in one of the shapes a credential reaches a log in. */
   private def genField(id: Int): Gen[(String, String)] =
@@ -96,17 +114,21 @@ class RedactionPropertySpec extends AnyFlatSpec with Matchers with ScalaCheckPro
       key    <- Gen.oneOf(sensitiveKeys)
       quoted <- genSecret(id, quoted = true)
       plain  <- genSecret(id, quoted = false)
+      // the whitespace at the structural positions of a container or call: after an opening bracket, around a key's
+      // `:` or `=`, between elements and before a closing bracket
+      (a, b, c, d, e, f, g, h, i) <- Gen.zip(genWs, genWs, genWs, genWs, genWs, genWs, genWs, genWs, genWs)
       ident = key.replace('-', '_')
       shape <- Gen.oneOf[String](
-        s"""{"$key": ${json(quoted)}, "n": 1}""",
-        s"""{"$key": [${json(quoted)}, ${json(plain)}], "user": "bob"}""",
-        s"""{"$key": {"value": ${json(quoted)}, "on": true}}""",
-        s"""{"$key": ${90000000 + id}}""",
-        s"{'$key': ${pyRepr(quoted)}, 'user': 'bob'}",
-        s"{'$key': [${pyRepr(quoted)}, 2], 'n': 1}",
-        s"{'$key': (${pyRepr(quoted)},), 'n': 1}",
-        s"Settings($ident=${pyRepr(quoted)}, retries=3)",
-        s"Settings($ident=SecretStr(${pyRepr(quoted)}), user='bob')",
+        s"""{$a"$key"$b:$c${json(quoted)}$d,$e"n":${f}1$g}""",
+        s"""{$a"$key"$b:$c[$d${json(quoted)}$e,$f${json(plain)}$g]$h,$i"user": "bob"}""",
+        s"""{$a"$key"$b:$c{$d"value"$e:$f${json(quoted)}$g, "on": true$h}$i}""",
+        s"""{$a"$key"$b:$c${90000000 + id}$d}""",
+        s"{$a'$key'$b:$c${pyRepr(quoted)}$d,$e'user'$f:$g'bob'$h}",
+        s"{$a'$key'$b:$c[$d${pyRepr(quoted)}$e,${f}2$g],$h'n': 1$i}",
+        s"{$a'$key'$b:$c($d${pyRepr(quoted)}$e,$f),$g'n': 1$h}",
+        s"Settings($a$ident$b=$c${pyRepr(quoted)}$d,${e}retries=3$f)",
+        s"Settings($a$ident$b=${c}SecretStr($d${pyRepr(quoted)}$e)$f,${g}user='bob'$h)",
+        s"{$a'$key'$b:${c}SecretStr($d${pyRepr(quoted)}$e)$f}",
         s"$key=$plain next=1",
         s"$ident=${json(quoted)} user=bob",
         s"$ident = ${json(quoted)}",
@@ -114,7 +136,8 @@ class RedactionPropertySpec extends AnyFlatSpec with Matchers with ScalaCheckPro
         s"\n$key: $plain\nnext: 1",
         s"\nconfig:\n  $key: $plain\n  port: 5432",
         s"https://user:${URLEncoder.encode(plain, StandardCharsets.UTF_8)}@db.example.com:5432/x",
-        s"\nAuthorization: Bearer $plain",
+        // a header is a line of its own: its value runs to the end of the line, over whatever a separator put after it
+        s"\nAuthorization: Bearer $plain\n",
         s"\nCookie: sid=$plain; theme=dark\nAccept: */*"
       )
     } yield {

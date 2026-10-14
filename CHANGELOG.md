@@ -1459,6 +1459,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`  password: ...`), a block of indented lines under a sensitive key (`credentials:\n  user: ...`), a
     `key: value` inside a line whose value looks like a credential (`... token: Zq81x9`), and a URL password that
     holds an unencoded `#`, `"`, `'`, `\`, `[`, `]`, `{` or `}`.
+  - Inside a container or a call, a line break (`\n`, `\r\n`) is whitespace like a space: a call whose argument
+    starts on the next line (`{'token': SecretStr(\n'x'\n)}`), keyword arguments one per line
+    (`Settings(\n  token=\n    'x')`, also `f(token= 'x')`) and pretty-printed JSON or a repr with a value on a line
+    of its own are masked. A `key: value` or `key=value` line outside any bracket still ends at its line break.
   - A container that a text only mentions is left, outside a string too: `see 'token': [ for details` is kept,
     where every word after it was replaced (#1657). Inside a string a container is read as any is, so a bare word
     that is its leaf is replaced there too (`{"content": "{\"token\": [abc]}"}` masks `abc`).
