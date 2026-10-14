@@ -73,7 +73,9 @@ abstract class LaggingOrDeletedCases
     val old      = commitElsewhere(store, thread, "o1", "o2", "o3")
     val hub      = EventHub(store)
     val listener = Held()
-    val sub      = hub.subscribe(thread, afterSeq = old.last.seq, capacity = 2, listener).value
+    val sub = hub
+      .subscribe(thread, afterSeq = old.last.seq, capacity = 2, listener, AbandonedWrites.none, TenantScope.Unscoped)
+      .value
     // a live event is held while the subscription replays and queued once it is live: send until one arrives
     eventually {
       hub.live(thread, probe(thread))
