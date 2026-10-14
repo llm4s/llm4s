@@ -26,8 +26,8 @@ import scala.util.Using
  *  - `llm4s_checkpoint_pending_writes`: the latest checkpoint's pending writes as JSON, in commit order.
  *  - `llm4s_checkpoint_events`: the durable event log, one JSON `EventRecord` per `(thread, seq)`.
  *  - `llm4s_checkpoint_effects` (version 3): the thread's effect records (design §4.24), one JSON `EffectRecord`
- *    per `(thread, effect key)`, with the task it belongs to and the token of the commit that wrote it, which
- *    decide when a commit releases it (`Commit.releasesEffect`).
+ *    per `(thread, effect key)`, with the task it belongs to - its id and, from version 4, its lineage - which
+ *    decide when a commit releases it (`Commit.releasesEffect`), and the token of the commit that wrote it.
  *
  * Opening a store brings the file to [[Current]] in one transaction, applying each step `n -> n + 1` in turn, and
  * refuses a file whose version is newer than this build knows. Version 0 is a file with none of these tables.
@@ -35,13 +35,21 @@ import scala.util.Using
 private[sqlite] object SqliteSchema:
 
   /** The schema version this build writes. */
-  val Current: Int = 3
+  val Current: Int = 4
 
   /** A migration from the version it is keyed by to the next. */
   type Step = Connection => Unit
 
   /** The steps, keyed by the version each upgrades from. */
-  val steps: Map[Int, Step] = Map(0 -> createTables, 1 -> addFirstSeq, 2 -> addEffects)
+  val steps: Map[Int, Step] = Map(0 -> createTables, 1 -> addFirstSeq, 2 -> addEffects, 3 -> addEffectLineages)
+
+  /**
+   * Version 4: the lineage of the task each effect record belongs to (#1921 follow-up), which decides with its
+   * id when a commit releases the record. A version-3 file's records read with an empty lineage, which no task
+   * of a restored run has, so they never answer for one (format 6 never shipped).
+   */
+  private def addEffectLineages(connection: Connection): Unit =
+    statements(connection, "ALTER TABLE llm4s_checkpoint_effects ADD COLUMN task_lineage TEXT NOT NULL DEFAULT ''")
 
   /**
    * Version 3: effect records, the replay evidence of `ReplayGuard` (#1921). A version-2 file holds none: no build

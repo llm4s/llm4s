@@ -24,33 +24,8 @@ import scala.jdk.CollectionConverters._
 class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
 
   private val thread = ThreadId("t")
-  private val callId = ToolCallId("call_0")
 
-  private val task = TaskId("1.0")
-
-  "IdempotencyKey.derive" should "be 64 lowercase hex characters, the same for the same call" in {
-    val key = IdempotencyKey.derive(thread, "run/1", 1, task, callId)
-    (key.value should fullyMatch).regex("[0-9a-f]{64}")
-    IdempotencyKey.derive(thread, "run/1", 1, task, callId) shouldBe key
-  }
-
-  it should "differ when the thread, the checkpoint, the superstep, the task or the call differs" in {
-    val key = IdempotencyKey.derive(thread, "run/1", 1, task, callId)
-    IdempotencyKey.derive(ThreadId("u"), "run/1", 1, task, callId) should not be key
-    IdempotencyKey.derive(thread, "run/2", 1, task, callId) should not be key
-    IdempotencyKey.derive(thread, "run/1", 2, task, callId) should not be key
-    IdempotencyKey.derive(thread, "run/1", 1, TaskId("1.1"), callId) should not be key
-    IdempotencyKey.derive(thread, "run/1", 1, task, ToolCallId("call_1")) should not be key
-  }
-
-  it should "not confuse inputs whose parts concatenate alike" in {
-    IdempotencyKey.derive(ThreadId("ab"), "c", 1, task, callId) should not be
-      IdempotencyKey.derive(ThreadId("a"), "bc", 1, task, callId)
-    IdempotencyKey.derive(thread, "run/1", 11, TaskId("1.0"), callId) should not be
-      IdempotencyKey.derive(thread, "run/1", 1, TaskId("11.0"), callId)
-  }
-
-  it should "encode as a plain JSON string" in {
+  "IdempotencyKey" should "encode as a plain JSON string" in {
     val key = IdempotencyKey("k-1")
     upickle.default.write(key) shouldBe "\"k-1\""
     upickle.default.read[IdempotencyKey]("\"k-1\"") shouldBe key
@@ -67,8 +42,18 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  "The key a tool sees" should "be derived from where the model call ran and the call id" in {
-    val seen = new ConcurrentLinkedQueue[IdempotencyKey]()
+  "The key a tool sees" should "be derived from the model task that issued the call and the call itself" in {
+    val seen  = new ConcurrentLinkedQueue[IdempotencyKey]()
+    val tasks = new ConcurrentLinkedQueue[IdempotencyKey]()
+    val modelTasks = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("model-tasks")
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] = {
+        tasks.add(context.run.taskKey)
+        next(request)
+      }
+    }
     val record = SpecTools.tool("record") { (_, context) =>
       seen.add(context.idempotencyKey)
       ToolOutcome.Success(ujson.Str("ok"))
@@ -76,14 +61,16 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
     val models = new ConcurrentLinkedQueue[RunPosition]()
     val client = ScriptedLLMClient.of(calling(call("c1", "record")), CompletionFixture.simple("done"))
     val agent = built(
-      Agent.builder("assistant", client).withTools(SpecTools.set(record)).withMiddleware(modelPositions(models))
+      Agent
+        .builder("assistant", client)
+        .withTools(SpecTools.set(record))
+        .withMiddleware(modelPositions(models))
+        .withMiddleware(modelTasks)
     )
     agent.run(thread, "go").value.answer shouldBe Some("done")
 
-    val issuing = models.asScala.head
-    seen.asScala.toVector shouldBe Vector(
-      IdempotencyKey.derive(thread, issuing.checkpointId, issuing.superstep, issuing.taskId, ToolCallId("c1"))
-    )
+    // the model task's key carries its lineage: the same work issues the same call under the same key (§4.24)
+    seen.asScala.toVector shouldBe Vector(IdempotencyKey.ofCall(thread, tasks.asScala.head, call("c1", "record")))
   }
 
   /** A `record` tool that keeps every key it sees, and a model that calls it as `call_0` in two turns. */

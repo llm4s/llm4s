@@ -144,14 +144,16 @@ Effects outside thread state replay through `ReplayGuard`: an intent and an outc
   ```
 
 - **`Commit` gains `effects: Vector[EffectRecord]`**, defaulted in `apply`, so existing calls compile. A store must do three things with it:
-  - Upsert a commit's records by `key`, remembering the commit's token as each record's writer.
-  - On every commit that carries a checkpoint, first remove each record for which `commit.releasesEffect(record.taskId, writer)` holds.
+  - Upsert a commit's records by `key`.
+  - On every commit that carries a checkpoint, first remove each record for which `commit.releasesEffect(record.taskId, record.lineage)` holds.
   - Remove a thread's records in `deleteThread`. Never remove them in `prune`.
 
   Persist records with `EffectRecord.toJson` and read them with `EffectRecord.fromJson`. `CheckpointerContract` gains the cases that check all of this.
 - **`GraphError` gains `EffectReplayRefused(operation, reason)`.** A `match` on `GraphError` that must be exhaustive gains a case.
 - **The SQLite schema moves to version 3** (`llm4s_checkpoint_effects`). A version-2 file is migrated when it is opened. A build from before this change refuses a version-3 file, as it refuses any newer schema.
 - **A `Transactional` target fences itself by the claim token.** `AppliedKeys.forget(key, token)` and the effect given to `ReplayGuard.transactional` (`token => ...`) refuse a token older than the newest seen for `key.scope`. A `Verifiable` target's effect is a compare-and-set against the plan's `before`.
+- **A store keys release by the record's task and lineage.** `Commit.releasesEffect(taskId, lineage)` replaces `releasesEffect(taskId, writer)`; persist `EffectRecord.lineage` with the record (SQLite: schema 4, `task_lineage`), and `PendingWrite.resultDigest` with the write. A store that persists the write's and the snapshot's JSON whole needs no change; the snapshot gains `PendingTask.resumeDigest` and `ParkedContinuation.questionDigest` / `resumeDigest`. `GraphSnapshot.liveTasks` is a set of `(id, lineage)` pairs. The checkpoint format moves to 7 (`PendingTask.lineage`, `originLineage`); format 6 never shipped (v0.4.1 has no graph checkpoints), so a format-6 checkpoint restores with no legacy keys: each task gets a fresh root lineage at admission, and any effect record it wrote is ignored.
+- **A tool call's idempotency key now names the issuing model task and the call itself** (`IdempotencyKey.ofCall`), not the model call's checkpoint: a request asked again that answers with the same call gets the same key. `IdempotencyKey.derive` is removed: the loop no longer uses it, and a test builds a key with `IdempotencyKey("...")`.
 - **`ToolQuestionRequest` gains `phase: Option[IdempotencyKey]`** (defaulted; a stored request without it decodes as `None`). An asking tool's `resume` gets effect keys of its own, distinct from `execute`'s.
 - **New, opt-in API**: `RunContext.taskKey`, `RunContext.effectKey` and `ToolContext.effectKey`; `ReplayGuard` and its `Plan`; `ReplaySupport`, `StateCheck`, `AppliedKeys` and `EffectRecord`; and, in `llm4s-agent-testkit`, `ReplayContract`, which every external target of the harness passes. See [Tool side effects](../guide/agents/#tool-side-effects).
 
@@ -235,7 +237,7 @@ ToolQuestionRequest(messageId, call, question, IdempotencyKey("key-1"))
 
 - **`ToolContext` takes the call's key**, after `toolCallId`: `ToolContext(run, toolCallId, idempotencyKey, state,
   approved)`, with `withIdempotencyKey`. You build one only to unit-test a tool; any key will do there
-  (`IdempotencyKey("test")`, or `IdempotencyKey.derive(threadId, checkpointId, superstep, taskId, toolCallId)`).
+  (`IdempotencyKey("test")`).
 - **`ToolTask`, `ApprovalRequest` and `ToolQuestionRequest` gain `idempotencyKey`** - last in `ApprovalRequest` and
   `ToolTask`, before the defaulted `approved` in `ToolQuestionRequest`. Code that only reads them (`AgentResult`'s
   `Suspended`, `ToolLoop.requests`/`questions`, the Java and Kotlin `PendingInterrupt`) is unchanged.

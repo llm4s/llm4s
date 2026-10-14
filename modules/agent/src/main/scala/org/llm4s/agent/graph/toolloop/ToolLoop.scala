@@ -1547,11 +1547,8 @@ object ToolLoop:
    */
   private def issued(messageId: String, call: ToolCall, context: RunContext): ToolTask =
     val at = context.position
-    ToolTask(
-      messageId,
-      call,
-      IdempotencyKey.derive(at.threadId, at.checkpointId, at.superstep, at.taskId, ToolCallId(call.id))
-    )
+    // the model task's identity, lineage included, so the same work issues the same keys (design §4.24)
+    ToolTask(messageId, call, IdempotencyKey.ofCall(at.threadId, context.taskKey, call))
 
   /**
    * Runs `body`, returning what it throws as `Left`: a NonFatal exception, or a bare
@@ -1751,7 +1748,13 @@ object ToolLoop:
                   outsideSchedule(tool, task, request.call, args, state, context).getOrElse {
                     // an answered resume is a phase of the call of its own: its effects never replay `execute`'s
                     val phase =
-                      IdempotencyKey.ofResume(request.idempotencyKey, request.phase, request.question, answer)
+                      IdempotencyKey.ofResume(
+                        request.idempotencyKey,
+                        request.phase,
+                        // recorded with the continuation when the answer was applied; a resume without one is
+                        // never the same phase as another
+                        context.resumeDigest.getOrElse(s"unrecorded:${java.util.UUID.randomUUID()}")
+                      )
                     val toolContext = ToolContext.resuming(
                       answering(agent, context, request.answered),
                       ToolCallId(request.call.id),

@@ -150,14 +150,19 @@ final class RunContext private[graph] (
   /** Where this task's [[ReplayGuard]]s keep effect records: the thread's store in a runtime, memory outside one. */
   private[graph] val journal: EffectJournal = EffectJournal.local(),
   /** The task effect records belong to: the task a continuation stands in for, else this one (design §4.24). */
-  owner: Option[TaskId] = None
+  owner: Option[(TaskId, String)] = None,
+  /** A resume continuation's identity, kept with its task ([[CompiledGraph.resumeDigest]]). */
+  private[agent] val resumeDigest: Option[String] = None
 ):
   /** This context with `next` as the answers its hooks see, recording usage in the same task's accumulator. */
   private[agent] def withAnswers(next: Map[String, (ujson.Value, ujson.Value)]): RunContext =
-    new RunContext(config, position, sink, next, usage, journal, owner)
+    new RunContext(config, position, sink, next, usage, journal, owner, resumeDigest)
 
   /** The task this task's effect records belong to ([[Commit.releasesEffect]]). */
-  private[graph] def effectOwner: TaskId = owner.getOrElse(position.taskId)
+  private[graph] def effectOwner: TaskId = owner.fold(position.taskId)(_._1)
+
+  /** The lineage of the task this task's effect records belong to (design §4.24). */
+  private[graph] def effectLineage: String = owner.fold("")(_._2)
 
   /**
    * This task's key: the SHA-256 of the thread and the id of the logical task (design §4.24) - for a
@@ -168,7 +173,7 @@ final class RunContext private[graph] (
    * time: after `deleteThread`, or work after the last durable checkpoint planned again under
    * `Async`/`OnExit`, a task id can name new work.
    */
-  lazy val taskKey: IdempotencyKey = IdempotencyKey.ofTask(position.threadId, effectOwner)
+  lazy val taskKey: IdempotencyKey = IdempotencyKey.ofTask(position.threadId, effectOwner, effectLineage)
 
   /**
    * The key of one external effect of this task - `operation`, such as `memory.record`, on what

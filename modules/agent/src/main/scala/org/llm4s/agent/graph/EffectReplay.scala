@@ -9,16 +9,51 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentHashMap
 import scala.util.Try
 
-/** SHA-256 over length-prefixed parts, as 64 lowercase hex characters: no two part lists share a digest input. */
+/**
+ * SHA-256 over length-prefixed parts, as 64 lowercase hex characters: no two part lists share a digest input.
+ * Each part is encoded injectively ([[encoded]]), so no two different strings - unpaired surrogates included -
+ * share one.
+ */
 private[graph] object KeyDigest:
   def of(parts: Seq[String]): String =
     val digest = java.security.MessageDigest.getInstance("SHA-256")
     parts.foreach { part =>
-      val bytes = part.getBytes(StandardCharsets.UTF_8)
+      val bytes = encoded(part)
       digest.update(java.nio.ByteBuffer.allocate(4).putInt(bytes.length).array())
       digest.update(bytes)
     }
     hex(digest.digest())
+
+  /**
+   * `text`'s bytes, one-to-one: well-formed text is its UTF-8, as before; text with an unpaired surrogate,
+   * which `String.getBytes` would replace with `?` - so `"a\uD800"` and `"a?"` would share bytes - is the byte
+   * `0xFF`, which starts no UTF-8 encoding, then its UTF-16 code units, big-endian.
+   */
+  /**
+   * `json` as text that two equal values share and two different values never do: object members sorted by
+   * key, recursively, and every non-ASCII character escaped. A serializer keeps members in insertion order, so
+   * equal objects built in another order would otherwise digest apart.
+   */
+  def canonical(json: ujson.Value): String =
+    def sorted(value: ujson.Value): ujson.Value = value match
+      case null               => ujson.Null // a Java caller's null hashes as JSON null
+      case ujson.Obj(members) => ujson.Obj.from(members.toSeq.sortBy(_._1).map((k, v) => k -> sorted(v)))
+      case ujson.Arr(items)   => ujson.Arr.from(items.map(sorted))
+      case other              => other
+    ujson.write(sorted(json), escapeUnicode = true)
+
+  def encoded(text: String): Array[Byte] =
+    val encoder = StandardCharsets.UTF_8
+      .newEncoder()
+      .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+      .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+    Try(encoder.encode(java.nio.CharBuffer.wrap(text))).toOption match
+      case Some(buffer) =>
+        val bytes = new Array[Byte](buffer.remaining())
+        buffer.get(bytes)
+        bytes
+      // each UTF-16 code unit as is: a charset would replace an unpaired surrogate too
+      case None => Array(0xff.toByte) ++ text.toArray.flatMap(c => Array((c >> 8).toByte, c.toByte))
 
   def hex(bytes: Array[Byte]): String = bytes.map(b => f"${b & 0xff}%02x").mkString
 
@@ -48,6 +83,7 @@ object EffectKey:
     operation: String,
     discriminator: Seq[String]
   ): EffectKey =
+    // the base names the effect's task (its lineage included) or the call (whose key carries it)
     val parts = Seq("llm4s-effect-v1", threadId.value, base.value, operation, discriminator.size.toString)
     new EffectKey(KeyDigest.of(parts ++ discriminator), operation, scopeOf(threadId))
 
@@ -84,8 +120,8 @@ object StateCheck:
   def of(bytes: Array[Byte]): StateCheck =
     "sha256:" + KeyDigest.hex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes))
 
-  /** The SHA-256 of `text` as UTF-8. */
-  def of(text: String): StateCheck = of(text.getBytes(StandardCharsets.UTF_8))
+  /** The SHA-256 of `text`: of its UTF-8 when it is well-formed, else of an encoding no other text shares. */
+  def of(text: String): StateCheck = of(KeyDigest.encoded(text))
 
   extension (check: StateCheck) def value: String = check
 
@@ -121,13 +157,17 @@ trait AppliedKeys:
 
 /**
  * The replay evidence of one effect, as the thread's [[Checkpointer]] keeps it: begun (an intent) or
- * completed (an outcome). `taskId` is the task the evidence belongs to - for a continuation, the task
- * it stands in for - which decides when a commit releases it ([[Commit.releasesEffect]]). A store
- * persists [[EffectRecord.toJson]] and reads it back with [[EffectRecord.fromJson]]; the body is
- * the guard's.
+ * completed (an outcome). `taskId` and `lineage` name the task the evidence belongs to - for a
+ * continuation, the task it stands in for - by its id and a digest of what scheduled it; they decide when a commit releases it ([[Commit.releasesEffect]]). A store persists
+ * [[EffectRecord.toJson]] and reads it back with [[EffectRecord.fromJson]]; the body is the guard's.
  */
 @Experimental
-final class EffectRecord private[graph] (val key: EffectKey, val taskId: TaskId, private[graph] val body: EffectBody):
+final class EffectRecord private[graph] (
+  val key: EffectKey,
+  val taskId: TaskId,
+  val lineage: String,
+  private[graph] val body: EffectBody
+):
 
   /** Whether the effect's outcome is recorded. */
   def completed: Boolean = body match
@@ -154,6 +194,7 @@ object EffectRecord:
       "operation" -> record.key.operation,
       "scope"     -> record.key.scope,
       "taskId"    -> record.taskId.value,
+      "lineage"   -> record.lineage,
       // copied out, and copied in by fromJson: ujson values are mutable, so no caller shares a stored one
       "intent" -> ujson.copy(EffectBody.intentJson(record.body.intent))
     )
@@ -182,7 +223,8 @@ object EffectRecord:
                 outcome.obj.get("value") match
                   case Some(value) => EffectBody.Completed(intent, ujson.copy(value))
                   case None        => EffectBody.Omitted(intent, outcome("omittedBytes").num.toLong)
-            new EffectRecord(key, TaskId(json("taskId").str), body)
+            val lineage = json.obj.get("lineage").fold("")(_.str)
+            new EffectRecord(key, TaskId(json("taskId").str), lineage, body)
           }
         }.toResult.flatten
     }
@@ -225,6 +267,13 @@ private[graph] object EffectBody:
       )
     case other => Left(ValidationError("effectRecord", s"unknown effect support '$other'"))
 
+/** The task an effect record belongs to: its id and its lineage (design §4.24). */
+final private[graph] case class EffectOwner(task: TaskId, lineage: String)
+
+private[graph] object EffectOwner:
+  def of(context: RunContext): EffectOwner  = EffectOwner(context.effectOwner, context.effectLineage)
+  def of(record: EffectRecord): EffectOwner = EffectOwner(record.taskId, record.lineage)
+
 /** Where a task's guards read and write effect records: the thread's store in a runtime, memory outside one. */
 private[graph] trait EffectJournal:
   def lookup(key: EffectKey): Result[Option[EffectRecord]]
@@ -239,7 +288,8 @@ private[graph] object EffectJournal:
     def write(record: EffectRecord): Result[Unit]            = Right(records.put(record.key.value, record): Unit)
 
     /** Drops the records of every task not in `live`: they can no longer run. */
-    def keepOnly(live: Set[String]): Unit = records.values.removeIf(r => !live.contains(r.taskId.value)): Unit
+    def keepOnly(live: Set[(String, String)]): Unit =
+      records.values.removeIf(r => !live.contains(r.taskId.value -> r.lineage)): Unit
 
   def local(): Local = new Local()
 
@@ -307,7 +357,7 @@ object ReplayGuard:
   )(effect: FencingToken => Result[A]): Result[A] =
     val journal = context.journal
     val token   = context.position.fencingToken.getOrElse(FencingToken(0L))
-    def apply(owner: TaskId): Result[A] =
+    def apply(owner: EffectOwner): Result[A] =
       for
         _       <- notCancelled(context, key)
         outcome <- caught(effect(token))
@@ -316,15 +366,16 @@ object ReplayGuard:
       yield outcome
     journal.lookup(key).flatMap {
       case None =>
-        val owner = context.effectOwner
+        val owner = EffectOwner.of(context)
         for
-          _       <- caught(applied.forget(key, token))
-          _       <- journal.write(new EffectRecord(key, owner, EffectBody.Begun(EffectIntent.Transactional)))
+          _ <- caught(applied.forget(key, token))
+          _ <- journal
+            .write(new EffectRecord(key, owner.task, owner.lineage, EffectBody.Begun(EffectIntent.Transactional)))
           outcome <- apply(owner)
         yield outcome
       case Some(record) =>
         record.body match
-          case EffectBody.Begun(EffectIntent.Transactional) => apply(record.taskId)
+          case EffectBody.Begun(EffectIntent.Transactional) => apply(EffectOwner.of(record))
           case EffectBody.Begun(other) => Left(mismatch(key, other.support, ReplaySupport.Transactional))
           case done =>
             caught(applied.forget(key, token)).flatMap(_ => stored[A](key, done, ReplaySupport.Transactional))
@@ -349,7 +400,7 @@ object ReplayGuard:
     // same `before` (else it saw a change made after the probe) and plan the same `after` (else the recorded
     // intent could no longer recognise the original effect, which a run that lost its claim may still land),
     // and the begun record, with its `presumed`, is never rewritten
-    def fresh(owner: TaskId, recorded: Option[EffectIntent.Verifiable]): Result[A] =
+    def fresh(owner: EffectOwner, recorded: Option[EffectIntent.Verifiable]): Result[A] =
       caught(plan)
         .flatMap(planned => caught(Right(ujson.copy(upickle.default.writeJs(planned.presumed)))).map(planned -> _))
         .flatMap { (planned, presumed) =>
@@ -367,25 +418,25 @@ object ReplayGuard:
             _ <- withinCap(key, "its presumed outcome", presumed, maxOutcomeBytes)
             _ <-
               if recorded.isDefined then Right(())
-              else journal.write(new EffectRecord(key, owner, EffectBody.Begun(intent)))
+              else journal.write(new EffectRecord(key, owner.task, owner.lineage, EffectBody.Begun(intent)))
             _       <- notCancelled(context, key)
             outcome <- caught(planned.effect())
             _       <- complete(journal, key, owner, intent, outcome, maxOutcomeBytes)
           yield outcome
         }
     journal.lookup(key).flatMap {
-      case None => fresh(context.effectOwner, None)
+      case None => fresh(EffectOwner.of(context), None)
       case Some(record) =>
         record.body match
           case EffectBody.Begun(intent @ EffectIntent.Verifiable(before, after, presumed)) =>
             caught(probe).flatMap { current =>
               // `before` first: when the two digests are equal the probe cannot tell whether the effect
               // ran, and running it again - a compare-and-set that changes no digest - is what is safe
-              if current == before then fresh(record.taskId, Some(intent))
+              if current == before then fresh(EffectOwner.of(record), Some(intent))
               else if current == after then
                 decode[A](key, presumed).flatMap { outcome =>
                   journal
-                    .write(new EffectRecord(key, record.taskId, EffectBody.Completed(intent, presumed)))
+                    .write(new EffectRecord(key, record.taskId, record.lineage, EffectBody.Completed(intent, presumed)))
                     .map(_ => outcome)
                 }
               else
@@ -413,19 +464,21 @@ object ReplayGuard:
     maxOutcomeBytes: Int = DefaultMaxOutcomeBytes
   )(effect: => Result[A]): Result[A] =
     val journal = context.journal
-    def fresh(owner: TaskId): Result[A] =
+    def fresh(owner: EffectOwner): Result[A] =
       for
-        _       <- journal.write(new EffectRecord(key, owner, EffectBody.Begun(EffectIntent.Unverifiable)))
+        _ <- journal.write(
+          new EffectRecord(key, owner.task, owner.lineage, EffectBody.Begun(EffectIntent.Unverifiable))
+        )
         _       <- notCancelled(context, key)
         outcome <- caught(effect)
         _       <- complete(journal, key, owner, EffectIntent.Unverifiable, outcome, maxOutcomeBytes)
       yield outcome
     journal.lookup(key).flatMap {
-      case None => fresh(context.effectOwner)
+      case None => fresh(EffectOwner.of(context))
       case Some(record) =>
         record.body match
           case EffectBody.Begun(EffectIntent.Unverifiable) =>
-            if idempotent then fresh(record.taskId)
+            if idempotent then fresh(EffectOwner.of(record))
             else Left(GraphError.EffectReplayRefused(key.operation, "it may already have run; it is not run again"))
           case EffectBody.Begun(other) => Left(mismatch(key, other.support, ReplaySupport.Unverifiable))
           case done                    => stored[A](key, done, ReplaySupport.Unverifiable)
@@ -434,7 +487,7 @@ object ReplayGuard:
   private def complete[A: ReadWriter](
     journal: EffectJournal,
     key: EffectKey,
-    owner: TaskId,
+    owner: EffectOwner,
     intent: EffectIntent,
     outcome: A,
     maxOutcomeBytes: Int
@@ -444,7 +497,7 @@ object ReplayGuard:
       val length = encodedLength(json)
       val body =
         if length > maxOutcomeBytes then EffectBody.Omitted(intent, length) else EffectBody.Completed(intent, json)
-      journal.write(new EffectRecord(key, owner, body))
+      journal.write(new EffectRecord(key, owner.task, owner.lineage, body))
     }
 
   /**

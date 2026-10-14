@@ -26,6 +26,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `SandboxBackend` wraps a `SandboxRunner` in the `Unverifiable` guard and cuts each stream at `maxOutputBytes`.
   - `llm4s-agent-testkit` adds `FileBackendContract` and `FileBackendContract.EditSubject` for `ReplayContract`, and
     now depends on `llm4s-testkit`. Design record §4.25.
+- **Phase 3 C4 follow-ups: retention against takeover admission, and one-to-one key encoding** ([#1921](https://github.com/llm4s/llm4s/issues/1921)).
+  - A task's identity for its effects is now its id and its lineage: a digest of what scheduled it, namely the
+    previous superstep's tasks and their results (`PendingTask.lineage`, checkpoint format 7). Work that a takeover
+    plans again after the last durable checkpoint (`Async`, `OnExit`) keeps its identity when planned from the same
+    results, so it replays the first plan's evidence instead of repeating its effect. Planned from other results,
+    it is a new task.
+  - A commit releases an effect record only when its task is provably settled (`Commit.releasesEffect(taskId,
+    lineage)`): not live, and scheduled no later than the new durable checkpoint. A settled (`Completed` or
+    `Failed`) checkpoint releases every record, ahead-of-checkpoint ones included. A takeover's admission no longer
+    releases the evidence of a stale claimant's in-flight effect.
+  - SQLite schema 4 adds `task_lineage`.
+  - A pending write records its result's digest (`PendingWrite.resultDigest`), from which its successors' lineage
+    is computed. A recovery that reuses a write made by an older codec therefore keeps its successors' keys.
+    A resume's identity is likewise taken when its answer is applied and kept with the continuation
+    (`PendingTask.resumeDigest`, `ParkedContinuation.questionDigest`), so no identity digest is recomputed from a
+    decoded value.
+  - The loop records a tool call's `IdempotencyKey` from the issuing model task's key, lineage included, and the
+    call's id, name and arguments (`IdempotencyKey.ofCall`), so a model request asked again from the same results
+    that answers alike issues the same keys.
+    `IdempotencyKey.derive` is removed. Format 6 never shipped: a format-6 task restores with a fresh root lineage,
+    and its effect records are ignored.
+  - Key and `StateCheck` hashing encode unpaired surrogates one-to-one. Well-formed text hashes as before.
 - **Semantic memory for agents: the new `llm4s-agent-memory` module and `SemanticMemoryMiddleware`**
   ([#1911](https://github.com/llm4s/llm4s/issues/1911)). This is Phase 3 slice F7 (design §4.31).
   - Before each turn the middleware recalls what earlier threads of the same tenant recorded
