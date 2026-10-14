@@ -4,6 +4,7 @@ import upickle.default.ReadWriter
 
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import scala.util.Try
 
 /**
  * A compiled graph's declared structure, as data: what a [[GraphSnapshot]] records of the graph that wrote it, so a
@@ -111,16 +112,30 @@ private[graph] object GraphEvolution:
  * then one `key:<id>` line per key, sorted, joined by newlines. `matches` also accepts the fingerprint of the same
  * structure over fewer keys, dropping only keys outside `held`.
  */
-final private[graph] class LegacyFingerprint(structure: Vector[String], keys: Vector[String]):
-  private val sortedKeys = keys.sorted
+final private[graph] class LegacyFingerprint(
+  structure: Vector[String],
+  keys: Vector[String],
+  newDigest: () => MessageDigest = () => MessageDigest.getInstance("SHA-256")
+):
+  private val sortedKeys     = keys.sorted
+  private val structureBytes = structure.mkString("\n").getBytes(StandardCharsets.UTF_8)
 
-  private val prefix: MessageDigest =
-    val digest = MessageDigest.getInstance("SHA-256")
-    digest.update(structure.mkString("\n").getBytes(StandardCharsets.UTF_8))
+  private def overStructure(): MessageDigest =
+    val digest = newDigest()
+    digest.update(structureBytes)
     digest
 
+  private lazy val prefix: MessageDigest = overStructure()
+
+  /**
+   * A digest that has read the structure lines: a clone of `prefix`, so the search hashes only key lines, or a fresh
+   * one where the provider cannot clone (`CloneNotSupportedException`, as some FIPS providers throw).
+   */
+  private def started(): MessageDigest =
+    Try(prefix.clone().asInstanceOf[MessageDigest]).getOrElse(overStructure())
+
   private def over(kept: Vector[String]): String =
-    val digest = prefix.clone().asInstanceOf[MessageDigest]
+    val digest = started()
     kept.foreach(k => digest.update(s"\nkey:$k".getBytes(StandardCharsets.UTF_8)))
     digest.digest().map(b => f"$b%02x").mkString
 

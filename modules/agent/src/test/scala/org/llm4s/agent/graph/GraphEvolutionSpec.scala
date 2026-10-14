@@ -327,4 +327,24 @@ class GraphEvolutionSpec extends AnyFlatSpec with Matchers with EitherValues wit
     GraphRuntime(legacy).start(thread, graph(Variant(addKey = true)), "again").awaited.value.completed
     latest(store).checkpoint.snapshot.shape shouldBe Some(graph(Variant(addKey = true)).shape)
   }
+
+  it should "be matched where the SHA-256 provider cannot clone a digest" in {
+    // a provider whose digests refuse clone(), as some FIPS providers' do
+    final class Uncloneable extends java.security.MessageDigest("SHA-256") {
+      private val inner                             = java.security.MessageDigest.getInstance("SHA-256")
+      protected def engineUpdate(input: Byte): Unit = inner.update(input)
+      protected def engineUpdate(b: Array[Byte], o: Int, l: Int): Unit = inner.update(b, o, l)
+      protected def engineDigest(): Array[Byte]                        = inner.digest()
+      protected def engineReset(): Unit                                = inner.reset()
+      override def clone(): AnyRef = throw new CloneNotSupportedException("no clone")
+    }
+    val structure = Vector("graph:g:v1", "entry:a", "node:a")
+    val keys      = Vector("log", "added")
+    val cloning   = new LegacyFingerprint(structure, keys)
+    val plain     = new LegacyFingerprint(structure, keys, () => new Uncloneable)
+    plain.value shouldBe cloning.value
+    val before = new LegacyFingerprint(structure, Vector("log")).value
+    plain.matches(before, held = Set("log")) shouldBe true
+    plain.matches(before, held = Set("log", "added")) shouldBe false
+  }
 }
