@@ -17,17 +17,26 @@ import scala.jdk.CollectionConverters._
 
 class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues with BeforeAndAfterEach {
 
-  private var dir: Path                = _
-  private val locks: Path              = Files.createTempDirectory("llm4s-host-locks")
-  private var backend: HostFileBackend = _
+  private var dir: Path                   = _
+  private val locks: Path                 = Files.createTempDirectory("llm4s-host-locks")
+  private var backend: HostFileBackend    = _
+  private var unsupported: Option[String] = None
+
+  // the cases of `open` with an injected probe run anywhere; the rest need a supported file system
+  // (beforeEach has run when this does, as BeforeAndAfterEach wraps it)
+  override def withFixture(test: NoArgTest) =
+    unsupported match
+      case Some(why) if !test.name.startsWith("HostFileBackend.open") =>
+        org.scalatest.Canceled(s"unsupported file system: $why")
+      case _ => super.withFixture(test)
 
   override def beforeEach(): Unit = {
     dir = Files.createTempDirectory("llm4s-host-backend")
     // the backend refuses a file system with aliases it cannot see (a runner's volume with 8.3 names on):
-    // there is nothing of it to test on such a volume, so the case is cancelled, not failed
-    backend = HostFileBackend.open(dir, locks) match
-      case Right(b)                                 => b
-      case Left(e) if e.message.contains("aliases") => cancel(s"unsupported file system: ${e.message}")
+    // there is nothing of it to test on such a volume, so its cases are cancelled (withFixture), not failed
+    HostFileBackend.open(dir, locks) match
+      case Right(b)                                 => backend = b; unsupported = None
+      case Left(e) if e.message.contains("aliases") => unsupported = Some(e.message)
       case Left(e)                                  => fail(e.message)
   }
 

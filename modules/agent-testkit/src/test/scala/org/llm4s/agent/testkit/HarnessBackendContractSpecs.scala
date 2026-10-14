@@ -30,6 +30,14 @@ object HarnessBackends:
 
   def onHost(dir: Path, path: VPath): Path = dir.resolve(path.value.drop(1))
 
+  /** Why this machine's temporary volume cannot hold a host backend (8.3 names on), if it cannot. */
+  lazy val hostUnsupported: Option[String] =
+    HostFileBackend
+      .probeAliases(Files.createTempDirectory("llm4s-probe"))
+      .toOption
+      .filter(_.nonEmpty)
+      .map(_.mkString("; "))
+
   val memories: Namespace = Namespace(None, Vector("memories"))
 
   /** `change` applied straight to the store, as another writer would, leaving no applied key. */
@@ -79,6 +87,10 @@ class ResolvedStateBackendContractSpec extends AnyFlatSpec with FileBackendContr
 // Replay: each external backend through its own guarded path.
 
 class HostFileBackendReplaySpec extends AnyFlatSpec with ReplayContract:
+  override def withFixture(test: NoArgTest) =
+    HarnessBackends.hostUnsupported.fold(super.withFixture(test))(why =>
+      org.scalatest.Canceled(s"unsupported file system: $why")
+    )
   protected def newSubject(): ReplayContract.Subject =
     val (backend, dir) = HarnessBackends.host()
     FileBackendContract.EditSubject(
