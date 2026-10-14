@@ -61,7 +61,8 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
       case _                           => ()
     }
     val hub = EventHub(InMemoryCheckpointer())
-    val sub = hub.observe(thread, run, capacity = 2, listener).start(lastSeq = 0L)
+    val sub =
+      hub.observe(thread, run, capacity = 2, listener, AbandonedWrites.none, TenantScope.Unscoped).start(lastSeq = 0L)
     hub.durable(thread, Vector(record(1)))
     entered.await(5, TimeUnit.SECONDS) shouldBe true             // the listener holds the first event
     hub.durable(thread, Vector(record(2), record(3), record(4))) // 4 does not fit: lagging
@@ -115,7 +116,9 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     val log      = BlockingLog(Vector(record(1), record(2)), blockOn = 3)
     val listener = Recording()
     val hub      = EventHub(log)
-    val sub      = hub.subscribe(thread, afterSeq = 0L, capacity = 16, listener).fold(e => fail(e.message), identity)
+    val sub = hub
+      .subscribe(thread, afterSeq = 0L, capacity = 16, listener, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
     log.reading.await(5, TimeUnit.SECONDS) shouldBe true // the catch-up read is blocked; not yet joined
     // the run's last event, committed after the replay, is visible only to the catch-up; then the run ends
     log.records = log.records :+ record(3)
@@ -141,7 +144,8 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     def live(i: Int): StreamEvent.Live =
       StreamEvent.Live(thread.value, run.value, "task", "node", "test.progress", 1, ujson.Num(i))
     val hub = EventHub(InMemoryCheckpointer())
-    val sub = hub.observe(thread, run, capacity, listener).start(lastSeq = 0L)
+    val sub =
+      hub.observe(thread, run, capacity, listener, AbandonedWrites.none, TenantScope.Unscoped).start(lastSeq = 0L)
     hub.durable(thread, Vector(record(1)))
     entered.await(5, TimeUnit.SECONDS) shouldBe true // the listener holds the first event
 
@@ -177,7 +181,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     val fourth   = new CountDownLatch(1)
     val listener = Recording(countAt(4, fourth))
     val hub      = EventHub(log)
-    val sub      = hub.observe(thread, run, capacity = 16, listener, cut.apply).start(lastSeq = 0L)
+    val sub = hub.observe(thread, run, capacity = 16, listener, cut.apply, TenantScope.Unscoped).start(lastSeq = 0L)
     hub.durable(thread, Vector(record(1)))
     log.records = log.records :+ record(3)
     val handing = Thread.ofVirtual().start(() => hub.durable(thread, Vector(record(3))))
@@ -200,7 +204,9 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     val replayedFourth = new CountDownLatch(1)
     val replayed       = Recording(countAt(4, replayedFourth))
     val again =
-      hub.subscribe(thread, afterSeq = 0L, capacity = 16, replayed, cut.apply).fold(e => fail(e.message), identity)
+      hub
+        .subscribe(thread, afterSeq = 0L, capacity = 16, replayed, cut.apply, TenantScope.Unscoped)
+        .fold(e => fail(e.message), identity)
     replayedFourth.await(5, TimeUnit.SECONDS) shouldBe true
     replayed.seen.asScala.toVector shouldBe Vector("1", "2", "4")
     again.cancel()
@@ -229,9 +235,11 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     def live(i: Int): StreamEvent.Live =
       StreamEvent.Live(thread.value, run.value, "task", "node", "test.progress", 1, ujson.Num(i))
     val hub = EventHub(log)
-    val b   = hub.observe(thread, run, capacity = 16, behind, cut.apply).start(lastSeq = 0L)
+    val b   = hub.observe(thread, run, capacity = 16, behind, cut.apply, TenantScope.Unscoped).start(lastSeq = 0L)
     hub.durable(thread, Vector(record(1)))
-    val l = hub.subscribe(thread, afterSeq = 2L, capacity = 16, level, cut.apply).fold(e => fail(e.message), identity)
+    val l = hub
+      .subscribe(thread, afterSeq = 2L, capacity = 16, level, cut.apply, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
     // a live event reaches `level` only once it has switched to live
     hub.live(thread, live(0))
     levelLive.await(5, TimeUnit.SECONDS) shouldBe true
@@ -265,7 +273,9 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     val replayedFourth = new CountDownLatch(1)
     val replayed       = Recording(countAt(4, replayedFourth))
     val again =
-      hub.subscribe(thread, afterSeq = 0L, capacity = 16, replayed, cut.apply).fold(e => fail(e.message), identity)
+      hub
+        .subscribe(thread, afterSeq = 0L, capacity = 16, replayed, cut.apply, TenantScope.Unscoped)
+        .fold(e => fail(e.message), identity)
     replayedFourth.await(5, TimeUnit.SECONDS) shouldBe true
     replayed.seen.asScala.toVector shouldBe Vector("1", "2", "4")
     again.cancel()
@@ -325,7 +335,8 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
       countAt(2, aheadSaw2)(event)
       countAt(4, aheadSaw4)(event)
     }
-    val a = hub.observe(thread, run, capacity = 16, ahead).start(lastSeq = 0L)
+    val a =
+      hub.observe(thread, run, capacity = 16, ahead, AbandonedWrites.none, TenantScope.Unscoped).start(lastSeq = 0L)
     log.records = Vector(record(1))
     hub.durable(thread, Vector(record(1)))
     log.records = log.records :+ record(2, RunId("elsewhere"))
@@ -344,7 +355,9 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
         case _: StreamEvent.Live => lateJoined.countDown()
         case _                   => ()
     }
-    val l = hub.subscribe(thread, afterSeq = 0L, capacity = 16, late).fold(e => fail(e.message), identity)
+    val l = hub
+      .subscribe(thread, afterSeq = 0L, capacity = 16, late, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
     hub.live(thread, StreamEvent.Live(thread.value, run.value, "task", "node", "test.progress", 1, ujson.Num(0)))
     lateJoined.await(5, TimeUnit.SECONDS) shouldBe true
     late.seen.asScala.toVector shouldBe Vector("1", "live")
@@ -393,10 +406,14 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     }
     val lateThree = new CountDownLatch(1)
     val lateSeen  = recording(countAt(3, lateThree))
-    val b         = hub.observe(thread, run, capacity = 16, behindSeen).start(lastSeq = 0L)
+    val b = hub
+      .observe(thread, run, capacity = 16, behindSeen, AbandonedWrites.none, TenantScope.Unscoped)
+      .start(lastSeq = 0L)
     locks.withThreadLock(thread)(hub.durable(thread, Vector(record(1))))
     hub.release(thread)
-    val l = hub.subscribe(thread, afterSeq = 2L, capacity = 16, levelSeen).fold(e => fail(e.message), identity)
+    val l = hub
+      .subscribe(thread, afterSeq = 2L, capacity = 16, levelSeen, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
     // a live event reaches `level` only once it has switched to live
     hub.live(thread, live(0))
     levelJoined.await(5, TimeUnit.SECONDS) shouldBe true
@@ -406,7 +423,9 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     val handing = Thread.ofVirtual().start(() => locks.withThreadLock(thread)(hub.durable(thread, Vector(record(3)))))
     log.reading.await(5, TimeUnit.SECONDS) shouldBe true
     // `late` subscribes meanwhile, and its replay reads 1, 2 and 3 from the store
-    val la = hub.subscribe(thread, afterSeq = 0L, capacity = 16, lateSeen).fold(e => fail(e.message), identity)
+    val la = hub
+      .subscribe(thread, afterSeq = 0L, capacity = 16, lateSeen, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
     lateRead.await(5, TimeUnit.SECONDS) shouldBe true
     // progress sent during the hand-over: `level` has it before any of 3
     hub.live(thread, live(1))
@@ -444,7 +463,9 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     val lateSeen = recording(countAt(2, lateTwo))
     locks.withThreadLock(thread)(hub.durable(thread, Vector(record(1))))
     hub.release(thread)
-    val l = hub.subscribe(thread, afterSeq = 1L, capacity = 16, levelSeen).fold(e => fail(e.message), identity)
+    val l = hub
+      .subscribe(thread, afterSeq = 1L, capacity = 16, levelSeen, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
     hub.live(thread, live(0))
     levelJoined.await(5, TimeUnit.SECONDS) shouldBe true
     // the next run's commit, 2, is written under the thread's commit lock and not yet handed over
@@ -459,7 +480,9 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
       }
     }
     written.await(5, TimeUnit.SECONDS) shouldBe true
-    val la = hub.subscribe(thread, afterSeq = 0L, capacity = 16, lateSeen).fold(e => fail(e.message), identity)
+    val la = hub
+      .subscribe(thread, afterSeq = 0L, capacity = 16, lateSeen, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
     lateRead.await(5, TimeUnit.SECONDS) shouldBe true // `late`'s replay has read 1 and 2
     hub.live(thread, live(1))
     levelLive.await(5, TimeUnit.SECONDS) shouldBe true
@@ -494,7 +517,9 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     val waiting = new CountDownLatch(1)
     hub.settling = _ => waiting.countDown()
     val lateSeen = recording()
-    val la       = hub.subscribe(thread, afterSeq = 0L, capacity = 16, lateSeen).fold(e => fail(e.message), identity)
+    val la = hub
+      .subscribe(thread, afterSeq = 0L, capacity = 16, lateSeen, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
     waiting.await(5, TimeUnit.SECONDS) shouldBe true // `late` read 1 and 2, and waits for the commit lock
     // the hub is free: another subscription's live event and a hand-over on another thread go through
     val other = ThreadId("other")
@@ -514,7 +539,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     val hub         = EventHub(InMemoryCheckpointer())
     val sixth       = new CountDownLatch(1)
     val listener    = recording(countAt(6, sixth))
-    val observation = hub.observe(thread, run, capacity = 16, listener)
+    val observation = hub.observe(thread, run, capacity = 16, listener, AbandonedWrites.none, TenantScope.Unscoped)
     hub.durable(thread, Vector(record(5, RunId("lost"))))
     hub.durable(thread, Vector(record(6)))
     val sub = observation.start(lastSeq = 5L)
@@ -549,7 +574,9 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     hub.settling = _ => waiting.countDown()
     val lateThree = new CountDownLatch(1)
     val lateSeen  = recording(countAt(3, lateThree))
-    val la        = hub.subscribe(thread, afterSeq = 0L, capacity = 16, lateSeen).fold(e => fail(e.message), identity)
+    val la = hub
+      .subscribe(thread, afterSeq = 0L, capacity = 16, lateSeen, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
     waiting.await(5, TimeUnit.SECONDS) shouldBe true // `late` read 1, 2 and 3, and waits for the commit lock
     // 2 is handed over, and noted by `late`, while it waits
     handOver.countDown()
