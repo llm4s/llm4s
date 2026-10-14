@@ -224,6 +224,17 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     ).map(p)
   }
 
+  it should "drop a name it cannot list before it counts against the limit" in {
+    assume(posix)
+    Files.writeString(dir.resolve("a\nbad"), "x")
+    Files.writeString(dir.resolve("z"), "z")
+    backend.ls(VPath.root, 1, call()).value shouldBe Listing(
+      backend.ls(VPath.root, 10, call()).value.items,
+      truncated = false
+    )
+    backend.ls(VPath.root, 1, call()).value.items.map(_.path) shouldBe Vector(p("/z"))
+  }
+
   it should "walk in sorted order, so a cut-off result is deterministic" in {
     Seq("c", "a/z", "a/b", "b").foreach(rel => written(backend.write(p(s"/$rel"), rel, call())))
     backend.glob(Glob("**"), VPath.root, 10, call()).value.items.map(_.value) shouldBe Vector(
@@ -242,10 +253,15 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     Files.createDirectories(dir.resolve("sub"))
     val nested = HostFileBackend.open(dir.resolve("sub"), locks).value
     val real   = HostFileBackend.identity(dir.toRealPath().toString.replace('\\', '/'))
-    backend.locks(p("/sub/a.txt")) shouldBe Set(LockKey("host", real, "sub/a.txt"))
     backend.locks(p("/sub/a.txt")).head.conflictsWith(nested.locks(p("/a.txt")).head) shouldBe true
     backend.locks(p("/sub")).head.conflictsWith(backend.locks(p("/sub/a.txt")).head) shouldBe true
-    backend.locks(p("/a")).head.conflictsWith(backend.locks(p("/ab")).head) shouldBe false
+    if posix then
+      backend.locks(p("/sub/a.txt")) shouldBe Set(LockKey("host", real, "sub/a.txt"))
+      backend.locks(p("/a")).head.conflictsWith(backend.locks(p("/ab")).head) shouldBe false
+    else
+      // Windows aliases (8.3 names, trailing dots) cannot be folded lexically: one lock for the root
+      backend.locks(p("/a")) shouldBe Set(LockKey("host", real))
+      backend.locks(p("/a")) shouldBe backend.locks(p("/ab"))
   }
 
   // Replay, through C4's verifiable guard.

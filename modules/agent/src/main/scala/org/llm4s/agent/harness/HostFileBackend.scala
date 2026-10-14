@@ -74,7 +74,15 @@ final class HostFileBackend private (
    * `/A` and `/a`, which one file on a case-insensitive file system, conflict. On a case-sensitive one
    * they only conflict needlessly.
    */
-  def locks(path: VPath): Set[LockKey] = Set(rootLock / HostFileBackend.identity(path.value))
+  def locks(path: VPath): Set[LockKey] =
+    if lexicalIdentity then Set(rootLock / HostFileBackend.identity(path.value)) else Set(rootLock)
+
+  /**
+   * Whether a folded path names one file: true on a POSIX file system. Windows also resolves 8.3 short
+   * names (`PROGRA~1`) and ignores trailing dots and spaces, aliases no lexical rule can fold, so there
+   * every mutation takes the root's lock and one stripe: serialised, never racing.
+   */
+  private val lexicalIdentity = root.getFileSystem.supportedFileAttributeViews.contains("unix")
 
   // ---- resolution
 
@@ -247,7 +255,8 @@ final class HostFileBackend private (
    */
   // by the folded path, so two names of one file on a case-insensitive file system share a stripe
   private def stripeOf(target: Path): Int =
-    Math.floorMod(HostFileBackend.identity(target.toString).hashCode, HostFileBackend.Stripes)
+    if lexicalIdentity then Math.floorMod(HostFileBackend.identity(target.toString).hashCode, HostFileBackend.Stripes)
+    else 0
 
   /**
    * The OS lock file of a stripe: in the lock directory, shared by every backend that uses it whatever
@@ -447,8 +456,9 @@ final class HostFileBackend private (
         if Thread.currentThread().isInterrupted then throw new java.util.concurrent.CancellationException("interrupted")
         val p    = entries.next()
         val name = p.getFileName.toString
+        // a name the backend cannot list (not a valid segment) is dropped before it counts, too
         val hidden =
-          HostFileBackend.isTemporary(name) || isLockFile(p) || aliased(p)
+          VPath(s"/$name").isLeft || HostFileBackend.isTemporary(name) || isLockFile(p) || aliased(p)
         if !hidden then
           eligible += 1
           least.add((key(name, p), name, p))
