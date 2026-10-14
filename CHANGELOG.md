@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Multimodal content parts: images and documents in user messages and tool results** ([#1913](https://github.com/llm4s/llm4s/issues/1913)):
+  `ContentPart` (`Text`, `Image`, `Document`) in `org.llm4s.llmconnect.model`, built with `ContentPart.image` /
+  `ContentPart.document` from an `org.llm4s.media.MediaSource` (`Url`, `Inline`, `ProviderFile`), with inline bytes
+  bounded at `ContentPart.MaxInlineBytes` (5 MiB) because every agent checkpoint copies a thread's messages.
+  `org.llm4s.media` gains `DocumentMediaType` (`Pdf`, `PlainText`, `Markdown`, `Html`, `Csv`). Every chat provider
+  maps the parts its API takes and fails the request with the new `UnsupportedContentPartError` for any other, before
+  sending it; the matrix is in [Multimodal content](docs/guide/multimodal.md). A tool returns parts with
+  `ToolOutcome.Success(ToolContent.Parts(...))`. `llm4s-provider-testkit` gains `assertContentParts` and
+  `ContentPartCase`, which every chat provider module's spec runs. `llm4s-core` now depends on `llm4s-media`, which
+  has no dependency. Design record: `docs/design/typed-agent-runtime/4.27-stage-3-slice-f8b-multimodal-content-parts.md`.
 - **`llm4s-kotlin-api` is published to Maven Central with each release** ([#1494](https://github.com/llm4s/llm4s/issues/1494)):
   `org.llm4s:llm4s-kotlin-api` (no `_3` suffix: a Kotlin artifact), at the release's version, depending on
   `llm4s-java-api_3` at that same version, and managed by `llm4s-bom`, so a Gradle build that imports the BOM declares
@@ -1295,6 +1305,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Breaking - `UserMessage` and `ToolMessage` carry `parts: Vector[ContentPart]`** ([#1913](https://github.com/llm4s/llm4s/issues/1913)):
+  `UserMessage(text)` and `ToolMessage(text, toolCallId)` still build the one-text-part message, and `content` is the
+  text view (the text parts, joined by newlines). A pattern `case UserMessage(content)` now binds the parts: match
+  `case u: UserMessage` and read `u.content`, or handle `u.parts`. Interpolating the binder still compiles and now
+  prints the parts. The JSON of a one-text message is unchanged and the old shape still reads; an agent thread's
+  `messages` and `tool-results` keys move to schema version 2, migrated on restore. See the migration guide.
+- **Breaking - `ToolOutcome.Success` takes a `ToolContent`** ([#1913](https://github.com/llm4s/llm4s/issues/1913)):
+  `ToolOutcome.Success(ToolContent.Json(value))` for what was `ToolOutcome.Success(value)`, or
+  `ToolContent.Parts(parts)` for images and documents. No shim. `AgentTool.fromToolFunction` returns `Json`.
 - **Breaking - a run that loses its claim stops at once and ends `GraphError.ClaimLost`** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   it used to end `CheckpointWriteFailed(_, StaleClaim, _)`, which a caller could not tell from a store outage without
   matching on its cause. `GraphError.ClaimLost(threadId, token, current)` is new: the run's own `FencingToken`, and the
