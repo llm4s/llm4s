@@ -460,7 +460,7 @@ final class CompiledGraph[I, O] private[graph] (
       .collectFirst { case Left(c: CancelledError) => c }
       .fold(
         sequence(outcomes)
-          .flatMap(done => commitSuperstep(execution, done, config).map(next => next -> blockedBy(done)))
+          .flatMap(done => commitSuperstep(execution, done, config, Map.empty).map(next => next -> blockedBy(done)))
       )(Left(_))
 
   /**
@@ -564,11 +564,12 @@ final class CompiledGraph[I, O] private[graph] (
   private[graph] def commitSuperstep(
     execution: Execution,
     completed: Vector[(Task, TaskResult)],
-    config: RunConfig
+    config: RunConfig,
+    recorded: Map[TaskId, String]
   ): Result[Execution] =
     completed
       .foldLeft[Result[ThreadState]](Right(execution.state))((state, tr) => state.flatMap(_.applyUpdate(tr._2.update)))
-      .map(schedule(execution, completed, _, config))
+      .map(schedule(execution, completed, recorded, _, config))
 
   /**
    * `execution` with `update` applied to its committed state, one superstep on, everything scheduled
@@ -640,7 +641,7 @@ final class CompiledGraph[I, O] private[graph] (
         // a task a breakpoint holds before it runs did nothing: recovery holds it again, or runs it
         case TaskResult.Held =>
           throw new IllegalStateException(s"task ${task.id.value} is held at a breakpoint and has no pending write")
-    }.toResult
+    }.toResult.map(write => write.copy(resultDigest = Some(CompiledGraph.writeDigest(write))))
 
   /** A route as data, its payloads encoded with the target node's input codec. */
   private def encodeRoute(route: Route): EncodedRoute = route match
@@ -738,14 +739,17 @@ final class CompiledGraph[I, O] private[graph] (
   private def schedule(
     execution: Execution,
     results: Vector[(Task, TaskResult)],
+    recorded: Map[TaskId, String],
     state: ThreadState,
     config: RunConfig
   ): Execution =
     val next = execution.superstep + 1
     // what scheduled the next tasks, as data: each task of this superstep, in frontier order, with its lineage
-    // and its result. A replan from the same results schedules the same tasks; one from other results, others
+    // and its result. A replan from the same results schedules the same tasks; one from other results, others.
+    // A result reused from a pending write brings the digest recorded when it was produced (`recorded`): one
+    // recomputed from the decoded result would differ whenever decoding migrated it
     val content = KeyDigest.of(results.flatMap { (task, result) =>
-      Seq(task.id.value, task.lineage, resultDigest(task, result))
+      Seq(task.id.value, task.lineage, recorded.getOrElse(task.id, resultDigest(task, result)))
     })
     def lineageOf(id: TaskId) = Task.scheduledLineage(content, id)
     // a task an interruptAfter breakpoint holds has committed its update, but makes no route, edge or arrival yet
@@ -818,18 +822,19 @@ final class CompiledGraph[I, O] private[graph] (
     execution.journal.keepOnly(nextExecution.liveTasks)
     nextExecution
 
-  /** A task's result as data, for its successors' lineage: its pending write, without the checkpoint id. */
+  /**
+   * The digest of a result the task has just produced, for its successors' lineage: that of its pending write
+   * ([[CompiledGraph.writeDigest]]). Never of a result decoded from a write, which keeps the digest it was
+   * recorded with.
+   */
   private def resultDigest(task: Task, result: TaskResult): String = result match
     case TaskResult.Held          => "held"
     case TaskResult.Blocked(_, e) => s"blocked:${e.message}"
     case _                        =>
       // a result that does not encode cannot be compared: it is never the same work as another (no false replay)
-      encodeWrite("", task, result)
-        .flatMap(write => Try(KeyDigest.canonical(upickle.default.writeJs(write))).toResult)
-        .fold(
-          _ => s"unencodable:${java.util.UUID.randomUUID()}",
-          identity
-        )
+      encodeWrite("", task, result).toOption
+        .flatMap(_.resultDigest)
+        .getOrElse(s"unencodable:${java.util.UUID.randomUUID()}")
 
   private def suspended(execution: Execution): RunResult[O] =
     RunResult.Suspended(execution.state, pendingInterrupts(execution), execution)
@@ -1038,5 +1043,18 @@ private[graph] enum TaskResult:
     case Held                 => StateUpdate.empty
 
 private[graph] object CompiledGraph:
+
+  /**
+   * The digest of pending write `write` as encoded, its checkpoint id and recorded digest aside: of the bytes a
+   * store holds, never of a result decoded from them, which decoding may have migrated (design §4.24). A write
+   * that does not hash is never the same work as another.
+   */
+  def writeDigest(write: PendingWrite): String =
+    Try(KeyDigest.canonical(upickle.default.writeJs(write.copy(checkpointId = "", resultDigest = None))))
+      .fold(
+        _ => s"unencodable:${java.util.UUID.randomUUID()}",
+        canonical => KeyDigest.of(Seq("llm4s-result-v1", canonical))
+      )
+
   /** Sleeps the calling thread; an interrupt throws `InterruptedException`, as `Thread.sleep` does. */
   def sleepThread(delay: FiniteDuration): Unit = TimeUnit.NANOSECONDS.sleep(delay.toNanos)

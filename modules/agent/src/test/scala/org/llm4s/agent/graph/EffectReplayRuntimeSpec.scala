@@ -81,6 +81,65 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValue
     keys.asScala.toVector.flatMap(record(store, thread, _)) shouldBe empty
   }
 
+  it should "replay the first plan's evidence when the reused result was written by an older codec" in {
+    // the recovery's graph reads a's update at a newer codec version: decoding migrates it, so its successor's
+    // lineage must come from the write as recorded, not from the migrated result encoded again
+    final case class Old(label: String) derives upickle.default.ReadWriter
+    final case class Item(name: String) derives upickle.default.ReadWriter
+    val rename: ujson.Value => Result[ujson.Value] = json => Right(ujson.Obj("name" -> json("label")))
+    val oldItems                                   = StateKey.appending[Old]("items")
+    val newItems = StateKey
+      .appending[Item]("items")
+      .withUpdateVersion(SchemaVersion(2)(1 -> rename))
+      .withStateVersion(
+        SchemaVersion(2)(1 -> (json => Right(ujson.Arr.from(json.arr.map(o => ujson.Obj("name" -> o("label")))))))
+      )
+    val store    = InMemoryCheckpointer()
+    val effect   = new Effect
+    val keys     = new java.util.concurrent.ConcurrentLinkedQueue[EffectKey]()
+    val lineages = new java.util.concurrent.ConcurrentLinkedQueue[String]()
+    val failing  = new AtomicBoolean(true)
+    val lossy = new ForwardingCheckpointer(store) {
+      override def commit(threadId: ThreadId, commit: Commit) =
+        if failing.get && commit.checkpoint.exists(_.snapshot.superstep == 1) then
+          Left(ValidationError("store", "lost the checkpoint that scheduled b"))
+        else store.commit(threadId, commit)
+    }
+    def graphWith[A](items: StateKey[Vector[A], A], item: A) =
+      val b = GraphBuilder("migrated", "v1")
+      val last = b.node[Unit]("b", writes = Set(log)) { (_, _, context) =>
+        lineages.add(context.effectLineage)
+        NodeResult.fromResult(effect.perform(context).map { n =>
+          keys.add(effect.key.get)
+          Command.empty.update(log, s"b:$n")
+        })
+      }
+      val a = b.node[Unit]("a", writes = Set(items))((_, _, _) => continue(Command.empty.update(items, item)))
+      b.edge(a, last)
+      b.compile(a)(_.get(log)).value
+
+    GraphRuntime(lossy)
+      .start(thread, graphWith(oldItems, Old("x")), (), durability = Durability.Async)
+      .awaited
+      .value
+      .failed
+    effect.applied.get shouldBe 1
+    store.latest(thread).value.value.pendingWrites.map(_.operations) shouldBe Vector(
+      Vector(EncodedOperation.Update("items", VersionedJson(1, ujson.Obj("label" -> "x"))))
+    )
+    failing.set(false)
+    GraphRuntime(store)
+      .recover(thread, graphWith(newItems, Item("x")), durability = Durability.Async)
+      .awaited
+      .value
+      .completed
+      ._2 shouldBe Vector("b:1")
+    effect.applied.get shouldBe 1
+    lineages.asScala.toVector.distinct should have size 1
+    keys.asScala.toVector.distinct should have size 1
+    keys.asScala.toVector.flatMap(record(store, thread, _)) shouldBe empty
+  }
+
   it should "be another task, with an effect of its own, when planned from other results" in {
     val store   = InMemoryCheckpointer()
     val effect  = new Effect

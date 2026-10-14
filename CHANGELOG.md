@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     lineage)`): not live, and scheduled no later than the new durable checkpoint. A takeover's admission no longer
     releases the evidence of a stale claimant's in-flight effect.
   - SQLite schema 4 adds `task_lineage`.
+  - A pending write records its result's digest (`PendingWrite.resultDigest`), from which its successors' lineage
+    is computed. A recovery that reuses a write made by an older codec therefore keeps its successors' keys.
   - The loop records a tool call's `IdempotencyKey` from the issuing model task's key, lineage included, and the
     call's id, name and arguments (`IdempotencyKey.ofCall`), so a model request asked again from the same results
     that answers alike issues the same keys.

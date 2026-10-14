@@ -270,3 +270,6 @@ object GraphSnapshot:
     /** The lineage of the task the continuation stands in for; empty before lineages (format 6). */
     originLineage: String = ""
   ) derives ReadWriter
+
+/** A result decoded from a pending write, with the digest its successors' lineage is computed from. */
+final private[graph] case class ReusedWrite(result: TaskResult, digest: String)

@@ -183,7 +183,14 @@ final case class PendingWrite(
   operations: Vector[EncodedOperation],
   routes: Vector[EncodedRoute],
   // defaulted so writes recorded against a format-1 checkpoint still read
-  suspension: Option[EncodedSuspension] = None
+  suspension: Option[EncodedSuspension] = None,
+  /**
+   * The digest of the result as the task first produced it (design §4.24), which its successors' lineage is
+   * computed from. Recorded rather than recomputed on recovery: decoding migrates the result to the current
+   * codec versions, and re-encoding the migrated result would give another digest, so another lineage. A write
+   * recorded before the field reads with `None`, and its digest is computed from the write as stored.
+   */
+  resultDigest: Option[String] = None
 ) derives ReadWriter
 
 /** A suspended task's parked continuation: where it resumes and the question, as data. */

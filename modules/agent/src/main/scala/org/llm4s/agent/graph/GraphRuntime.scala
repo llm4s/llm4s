@@ -1428,9 +1428,9 @@ final class GraphRuntime(
     graph: CompiledGraph[?, ?],
     execution: Execution,
     stored: StoredCheckpoint
-  ): Result[Map[TaskId, TaskResult]] =
+  ): Result[Map[TaskId, ReusedWrite]] =
     val frontier = execution.frontier.map(_.id).toSet
-    stored.pendingWrites.foldLeft[Result[Map[TaskId, TaskResult]]](Right(Map.empty)) { (acc, write) =>
+    stored.pendingWrites.foldLeft[Result[Map[TaskId, ReusedWrite]]](Right(Map.empty)) { (acc, write) =>
       acc.flatMap { reused =>
         if !frontier.contains(TaskId(write.taskId)) then
           Left(
@@ -1449,7 +1449,11 @@ final class GraphRuntime(
             )
             result <- graph.decodeWrite(write)
             _      <- graph.checkResult(task, result)
-          yield reused.updated(task.id, result)
+          // the digest the write was recorded with, or one of the write as stored: never of the decoded result
+          yield reused.updated(
+            task.id,
+            ReusedWrite(result, write.resultDigest.getOrElse(CompiledGraph.writeDigest(write)))
+          )
       }
     }
 
@@ -1935,7 +1939,7 @@ final class GraphRuntime(
     @volatile private var position: (Execution, String) = null
 
     /** What the claim leaves for `execute`: pending writes `loop` reuses. */
-    private var claimedReused: Map[TaskId, TaskResult] = Map.empty
+    private var claimedReused: Map[TaskId, ReusedWrite] = Map.empty
 
     /** The sequence number of the claim's event; set by the claim. */
     var claimSeq: Long = 0L
@@ -1965,7 +1969,7 @@ final class GraphRuntime(
       execution: Execution,
       parent: Option[String],
       event: RunClaim => RunEvent,
-      carry: () => Result[(Vector[PendingWrite], Map[TaskId, TaskResult])] = () => Right(Vector.empty -> Map.empty)
+      carry: () => Result[(Vector[PendingWrite], Map[TaskId, ReusedWrite])] = () => Right(Vector.empty -> Map.empty)
     ): Result[Run[I, O]] =
       val sentAt = ticker()
       claimThread(threadId, config).flatMap { granted =>
@@ -2015,7 +2019,7 @@ final class GraphRuntime(
       parent: Option[String],
       event: RunEvent,
       carried: Vector[PendingWrite],
-      reused: Map[TaskId, TaskResult]
+      reused: Map[TaskId, ReusedWrite]
     ): Result[Run[I, O]] =
       for
         claimed <- newCheckpoint(execution, parent, CheckpointStatus.Running)
@@ -2220,7 +2224,7 @@ final class GraphRuntime(
     @tailrec private def loop(
       execution: Execution,
       checkpointId: String,
-      reused: Map[TaskId, TaskResult]
+      reused: Map[TaskId, ReusedWrite]
     ): RunResult[O] =
       committer.failure match
         // the store refused a commit as stale: another run took the thread over
@@ -2246,7 +2250,7 @@ final class GraphRuntime(
               .executorFor(config.budgets)
               .runAll(execution.frontier.map { task => () =>
                 reused.get(task.id) match
-                  case Some(result) => Right(task -> result)
+                  case Some(write) => Right(task -> write.result)
                   // held at a breakpoint before it runs: nothing to record, and recovery decides again
                   case None if graph.holdsBefore(task, config) => Right(task -> TaskResult.Held)
                   case None                                    => runTask(task, execution, checkpointId).map(task -> _)
@@ -2260,7 +2264,9 @@ final class GraphRuntime(
                 )
               // the first blocked task, in frontier order, ends the run once the superstep is committed
               val blockedBy = completed.toOption.flatMap(graph.blockedBy)
-              completed.flatMap(graph.commitSuperstep(execution, _, config)) match
+              completed.flatMap(
+                graph.commitSuperstep(execution, _, config, reused.view.mapValues(_.digest).toMap)
+              ) match
                 case Left(error) => fail(execution, error)
                 case Right(next) =>
                   blockedBy match
