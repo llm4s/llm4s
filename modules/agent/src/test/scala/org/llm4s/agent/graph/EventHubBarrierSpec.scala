@@ -277,12 +277,14 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
    * until `release` opens. Every read off a subscriber's thread is counted, by where it starts.
    */
   final private class WatchedLog(stallAfter: Long) extends Checkpointer:
-    private val underlying                                                      = InMemoryCheckpointer()
-    @volatile var records                                                       = Vector.empty[EventRecord]
-    val watchGo                                                                 = new java.util.concurrent.Semaphore(0)
-    val reading                                                                 = new CountDownLatch(1)
-    val release                                                                 = new CountDownLatch(1)
-    val handOverReads                                                           = new CopyOnWriteArrayList[Long]()
+    private val underlying = InMemoryCheckpointer()
+    @volatile var records  = Vector.empty[EventRecord]
+    val watchGo            = new java.util.concurrent.Semaphore(0)
+    val reading            = new CountDownLatch(1)
+    val release            = new CountDownLatch(1)
+    val handOverReads      = new CopyOnWriteArrayList[Long]()
+    // opened by the first store watch to call `awaitEventsAfter`
+    val watching                                                                = new CountDownLatch(1)
     def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = underlying.commit(threadId, commit)
     def claim(threadId: ThreadId, request: ClaimRequest)                        = underlying.claim(threadId, request)
     def renew(threadId: ThreadId, token: FencingToken, ttl: scala.concurrent.duration.FiniteDuration) =
@@ -302,6 +304,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
       limit: Int,
       timeout: scala.concurrent.duration.FiniteDuration
     ): Result[Vector[EventRecord]] =
+      watching.countDown()
       if watchGo.tryAcquire(5, TimeUnit.SECONDS) then Right(records.filter(_.seq > afterSeq).take(limit))
       else Right(Vector.empty)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = underlying.compactEvents(threadId, beforeSeq)
@@ -310,11 +313,24 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
 
+  "An observer's store watch" should "start watching the store once its run's first commit is handed to it, not a poll interval later" in {
+    val log = WatchedLog(stallAfter = Long.MaxValue)
+    // an hour: a watch that waited one interval for its observer's first commit would not watch in this test
+    val hub      = EventHub(log, watch = WatchPolicy(pollInterval = 1.hour))
+    val listener = Recording()
+    val sub      = hub.observe(thread, run, capacity = 16, listener).start(lastSeq = 0L)
+    eventually(hub.watchCount(thread) == 1)
+    log.records = Vector(record(1))
+    hub.durable(thread, Vector(record(1)))
+    log.watching.await(5, TimeUnit.SECONDS) shouldBe true
+    sub.cancel()
+    sub.ended(5.seconds) shouldBe true
+  }
+
   "A subscriber that switches to live behind a hand-over's read of missing events" should "have what it is missing read too, before the commit reaches anyone" in {
     val log = WatchedLog(stallAfter = 2L)
-    // the watch reads only when `watchGo` lets it, so the poll interval paces nothing but an observer's
-    // wait for its first commit: its watch may check before `durable` below anchors it, and then
-    // waits one interval before it looks again - an hour would leave it blind for the whole test
+    // the watch reads only when `watchGo` lets it, so the poll interval paces nothing here: an observer's
+    // watch that checks before `durable` below anchors it is woken by the anchoring
     val hub = EventHub(log, watch = WatchPolicy(pollInterval = scala.concurrent.duration.DurationInt(10).millis))
     // `ahead` takes 1 from the hand-over and 2, committed elsewhere, from its watch: it is past the hub's mark
     val aheadSaw2 = new CountDownLatch(1)
@@ -557,6 +573,12 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     la.cancel()
     hub.liveCount(thread) shouldBe 0
   }
+
+  /** Waits, at most 5 seconds, for `condition`, an observable of another thread's progress. */
+  private def eventually(condition: => Boolean): Unit =
+    val deadline = System.nanoTime() + 5.seconds.toNanos
+    while !condition && System.nanoTime() < deadline do Thread.onSpinWait()
+    condition shouldBe true
 
   /** Counts `latch` down once the durable event `seq` has been recorded. */
   private def countAt(seq: Long, latch: CountDownLatch): StreamEvent => Unit = {

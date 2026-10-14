@@ -1310,6 +1310,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `createdAt` stamped by the injected one, pruning young checkpoints. `inMemory(clock, claims)` is new;
   `inMemory(clock)` stays for Java and Kotlin. The guide says which timestamps the runtime's clock stamps and which
   the store's clock judges.
+- **An observer's store watch starts as soon as its run's claim is handed to it** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
+  it used to poll for that every `WatchPolicy.pollInterval`, so it could begin watching for other runtimes' commits
+  up to one interval late.
 - **Breaking - a run that loses its claim stops at once and ends `GraphError.ClaimLost`** ([#1700](https://github.com/llm4s/llm4s/issues/1700)):
   it used to end `CheckpointWriteFailed(_, StaleClaim, _)`, which a caller could not tell from a store outage without
   matching on its cause. `GraphError.ClaimLost(threadId, token, current)` is new: the run's own `FencingToken`, and the

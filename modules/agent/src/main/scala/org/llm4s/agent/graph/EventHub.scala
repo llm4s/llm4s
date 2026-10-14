@@ -496,6 +496,9 @@ final private[graph] class EventHub(
     /** Signalled when a listener call ends. */
     private val idle: Condition = lock.newCondition()
 
+    /** Signalled when a `preJoined` dispatcher is anchored, so its store watch starts watching at once. */
+    private val anchoring: Condition = lock.newCondition()
+
     // guarded by `lock`; `lastQueuedSeq` is also advanced by replay, before the dispatcher joins
     private val queue         = new java.util.ArrayDeque[Queued]()
     private var lastQueuedSeq = afterSeq
@@ -676,6 +679,7 @@ final private[graph] class EventHub(
           if !anchored then
             lastQueuedSeq = records.iterator.map(_.seq).min - 1
             anchored = true
+            anchoring.signalAll()
           val gapped = records.iterator.map(_.seq).find(_ > lastQueuedSeq).exists(_ > lastQueuedSeq + 1)
           if halted || !gapped then records.foreach(queueDurable)
           else
@@ -1098,8 +1102,12 @@ final private[graph] class EventHub(
       from match
         case None       => ()
         case Some(None) =>
-          // an Observer's dispatcher, before its run's claim is handed to it
-          TimeUnit.NANOSECONDS.sleep(watch.pollInterval.toNanos)
+          // an Observer's dispatcher, before its run's claim is handed to it: woken as soon as it is, and
+          // otherwise every `pollInterval`, to check again; an interrupt - `cancel`, the end - stops it
+          withLock(lock) {
+            if !anchored && !cancelled && !finished && !halted then
+              anchoring.awaitNanos(watch.pollInterval.toNanos): Unit
+          }
           watchLoop()
         case Some(Some(after)) =>
           Try(checkpointer.awaitEventsAfter(threadId, after, PageSize, watch.pollInterval)).toResult.flatten match
