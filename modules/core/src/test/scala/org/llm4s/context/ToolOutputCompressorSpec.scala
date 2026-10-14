@@ -25,7 +25,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
     compressed.content.length should be < 20000
   }
 
-  it should "compress each text part of an interleaved result in place, beside its own image" in {
+  it should "externalize an interleaved result's text together, keeping its images in their order" in {
     val chart = ContentPart
       .image(
         org.llm4s.media.MediaSource.Url(java.net.URI.create("https://example.com/a.png")),
@@ -42,13 +42,13 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
         .get
         .head
         .asInstanceOf[ToolMessage]
-    compressed.parts.map(_.getClass) shouldBe message.parts.map(_.getClass)
-    compressed.parts(1) shouldBe chart
-    compressed.parts(2) should not be ContentPart.Text("second caption") // the result's text is over the bound in total
-    compressed.parts.head.asInstanceOf[ContentPart.Text].text.length should be < 24000
+    // over the threshold in total: one pointer where the first text was, the images kept in place
+    compressed.parts.size shouldBe 3
+    compressed.parts.tail shouldBe Vector(chart, chart)
+    compressed.content.length should be < 2048
   }
 
-  it should "bring a result split into small parts under the inline bound, keeping their places" in {
+  it should "bring a result split into small parts under the inline bound, keeping its media" in {
     val chart = ContentPart
       .image(
         org.llm4s.media.MediaSource.Url(java.net.URI.create("https://example.com/a.png")),
@@ -59,7 +59,6 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
     val parts   = Vector.fill(5)(ContentPart.Text("z " * 250)) :+ chart
     val result  = ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(parts, "c")), ArtifactStore.inMemory())
     val message = result.toOption.get.head.asInstanceOf[ToolMessage]
-    message.parts.size shouldBe 6
     message.parts.last shouldBe chart
     message.content.getBytes("UTF-8").length should be <= 2048
   }
@@ -68,8 +67,8 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
     val parts   = Vector.fill(5)(ContentPart.Text("y" * 2048))
     val result  = ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(parts, "c")), ArtifactStore.inMemory())
     val message = result.toOption.get.head.asInstanceOf[ToolMessage]
-    message.parts.size shouldBe 5
-    message.content.length should be < 5 * 2048
+    message.parts.size shouldBe 1
+    message.content.length should be < 2048
   }
 
   // ============ Content Type Detection ============
@@ -357,5 +356,28 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
         }
       }
     }
+  }
+
+  it should "bring many short text parts under the inline bound with one artifact, written once" in {
+    val writes = new java.util.concurrent.atomic.AtomicInteger()
+    val inner  = ArtifactStore.inMemory()
+    val store = new ArtifactStore {
+      def store(key: org.llm4s.types.ArtifactKey, content: String) = {
+        writes.incrementAndGet(); inner.store(key, content)
+      }
+      def retrieve(key: org.llm4s.types.ArtifactKey) = inner.retrieve(key)
+      def exists(key: org.llm4s.types.ArtifactKey)   = inner.exists(key)
+    }
+    val chart = ContentPart
+      .image(org.llm4s.media.MediaSource.Url(java.net.URI.create("https://e.com/a.png")), org.llm4s.media.MediaType.Png)
+      .toOption
+      .get
+    val parts   = (1 to 100).toVector.map(i => ContentPart.Text(s"note $i " + ("x" * 90))) :+ chart
+    val message = ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(parts, "c")), store).toOption.get.head
+    val result  = message.asInstanceOf[ToolMessage]
+    result.content.getBytes("UTF-8").length should be <= 2048
+    result.parts.last shouldBe chart
+    result.parts.count(_.isInstanceOf[ContentPart.Text]) shouldBe 1
+    writes.get shouldBe 1
   }
 }
