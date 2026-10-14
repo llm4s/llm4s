@@ -38,7 +38,9 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
     store.list(namespace(ctx), "/", store.limits.maxItems).map { listing =>
       listing.items.flatMap { e =>
         for
-          p <- VPath(e.key).toOption
+          // only a key that is its own canonical path: `/a/` would read as `/a` while every mutation
+          // addresses the item `/a`, so a non-canonical key is no file of the view
+          p <- VPath(e.key).toOption.filter(_.value == e.key)
           c <- content(e.item)
         yield p -> FileEntry(c, e.item.updated)
       }.toMap
@@ -84,7 +86,7 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
     else
       view
         .withPrefix(target.value + "/", store.limits.maxItems)
-        .map(_.exists(e => VPath(e.key).isRight && content(e.item).isDefined))
+        .map(_.exists(e => VPath(e.key).exists(_.value == e.key) && content(e.item).isDefined))
 
   /** Whether some ancestor of `target` is a file, so `target` would be beneath one. */
   private def beneathFile(view: StoreView, target: VPath): Result[Boolean] =

@@ -431,10 +431,14 @@ final class HostFileBackend private (
    * count. Memory is bounded by `max`; the time a huge directory takes, by the tool's timeout, as the
    * read stops when its thread is interrupted.
    */
-  private def children(dir: Path, max: Int): (Vector[(String, Path)], Boolean) =
-    val least = new java.util.PriorityQueue[(String, Path)](
+  private def children(dir: Path, max: Int, walk: Boolean = false): (Vector[(String, Path)], Boolean) =
+    // A walk visits a directory's entries ordered as the paths it will emit: a directory by its name and
+    // `/`, as its descendants' paths start, so `a-foo` comes before `a/x`, as `VPath` orders them. A
+    // listing orders the entries themselves, by name.
+    def key(name: String, p: Path) = if walk && isDir(p) then name + "/" else name
+    val least = new java.util.PriorityQueue[(String, String, Path)](
       math.min(max, 1024) + 1,
-      Ordering.by[(String, Path), String](_._1).reverse
+      Ordering.by[(String, String, Path), String](_._1).reverse
     )
     var eligible = 0
     Using.resource(Files.newDirectoryStream(dir)) { stream =>
@@ -447,10 +451,10 @@ final class HostFileBackend private (
           HostFileBackend.isTemporary(name) || isLockFile(p) || aliased(p)
         if !hidden then
           eligible += 1
-          least.add(name -> p)
+          least.add((key(name, p), name, p))
           if least.size > max then least.poll(): Unit
     }
-    (least.asScala.toVector.sortBy(_._1), eligible > max)
+    (least.asScala.toVector.sortBy(_._1).map((_, name, p) => name -> p), eligible > max)
 
   def ls(path: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
     Text.checkLimit("ls", path.value, limit).flatMap(_ => resolve("ls", path)).flatMap { dir =>
@@ -496,7 +500,8 @@ final class HostFileBackend private (
     private def within(dir: Path, at: VPath): Iterator[(VPath, Path)] =
       if full then Iterator.empty
       else
-        val (entries, more) = children(dir, math.min(maxScanEntries.toLong - visited + 1, Int.MaxValue.toLong).toInt)
+        val (entries, more) =
+          children(dir, math.min(maxScanEntries.toLong - visited + 1, Int.MaxValue.toLong).toInt, walk = true)
         if more then cut = true
         entries.iterator.flatMap { (name, p) =>
           visited += 1

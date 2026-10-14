@@ -217,6 +217,20 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     store.get(ns, "/other").value.map(_.value.num) shouldBe Some(1)
   }
 
+  it should "keep a non-canonical key out of its view, so reads and mutations address one item" in {
+    val store = InMemoryLongTermStore()
+    val files = StoreFileBackend(store)
+    val ns    = Namespace(None, Vector("memories"))
+    val key   = org.llm4s.agent.graph.HarnessTestSupport.runOn("another writer").effectKey("seed", "slash")
+    store
+      .modify[Unit](ns, "/a/", key, FencingToken(0))(_ => Right(StoreChange.Put(ujson.Obj("content" -> "odd"), ())))
+      .value
+    files.read(p("/a"), 0, 1, call()).left.value.message should include("not found")
+    files.ls(VPath.root, 10, call()).value.items shouldBe empty
+    done(files.write(p("/a"), "canonical", call())).created shouldBe true
+    files.read(p("/a"), 0, 1, call()).value.lines shouldBe Vector("canonical")
+  }
+
   it should "edit inside the transaction, list implicit directories, glob and grep" in {
     val files = StoreFileBackend(InMemoryLongTermStore(clock = clock))
     done(files.write(p("/user/prefs.md"), "likes scala\nlikes tea", call()))

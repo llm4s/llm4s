@@ -211,6 +211,19 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     result.left.value shouldBe a[org.llm4s.error.CancelledError]
   }
 
+  it should "walk in the order of the paths it returns, a directory's entries after a sibling that sorts before '/'" in {
+    Seq("a/x", "a-foo", "a.b", "b").foreach(rel => written(backend.write(p(s"/$rel"), "z", call())))
+    backend.glob(Glob("**"), VPath.root, 10, call()).value.items shouldBe
+      Vector("/a-foo", "/a.b", "/a/x", "/b").map(p).sorted
+    backend.glob(Glob("**"), VPath.root, 1, call()).value.items shouldBe Vector(p("/a-foo"))
+    backend.grep("z", VPath.root, None, 10, call()).value.items.map(_.path) shouldBe Vector(
+      "/a-foo",
+      "/a.b",
+      "/a/x",
+      "/b"
+    ).map(p)
+  }
+
   it should "walk in sorted order, so a cut-off result is deterministic" in {
     Seq("c", "a/z", "a/b", "b").foreach(rel => written(backend.write(p(s"/$rel"), rel, call())))
     backend.glob(Glob("**"), VPath.root, 10, call()).value.items.map(_.value) shouldBe Vector(
