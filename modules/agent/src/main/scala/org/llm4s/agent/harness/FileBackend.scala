@@ -1,6 +1,6 @@
 package org.llm4s.agent.harness
 
-import org.llm4s.agent.graph.{ effectKey, EffectKey, GraphError, RunContext, StateKey, StateUpdate, ThreadState }
+import org.llm4s.agent.graph.{ EffectKey, GraphError, RunContext, StateKey, StateUpdate, ThreadState }
 import org.llm4s.agent.graph.tool.{ Glob, LockKey, ToolContext, ToolOutcome }
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, NonRecoverableError }
