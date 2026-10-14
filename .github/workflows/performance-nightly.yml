@@ -1,0 +1,49 @@
+name: Performance tests (nightly)
+
+# The performance tier (`sbt testPerformance`, tests tagged `PerformanceTest`) on main every night, as well as on
+# every pull request and push in ci.yml's `Performance tests` job. These tests measure how an operation's cost
+# grows with its input, so a nightly run on a fresh runner shows a flaky bound or a slow drift - a newer JDK, a
+# different runner CPU - that a single PR's run would not, and catches a regression even on days nothing merges.
+
+on:
+  schedule:
+    - cron: "41 2 * * *"  # 02:41 UTC every day
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  performance-tests:
+    name: Performance tests
+    runs-on: ubuntu-latest
+    # Healthy runs take about 15 minutes; the default limit is 360.
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Run performance tests
+        run: sbt testPerformance
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-performance-nightly
+          path: |
+            **/target/test-reports/
+            **/target/scala-3.7.1/test-reports/
+          retention-days: 14
