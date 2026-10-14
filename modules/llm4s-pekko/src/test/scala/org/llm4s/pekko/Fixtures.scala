@@ -5,9 +5,9 @@ import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReferen
 import java.util.concurrent.locks.LockSupport
 
 import org.llm4s.agent.{ Agent, AgentBuilder }
-import org.llm4s.agent.graph.{ EventHandlers, EventType, GraphError, RunContext, StreamEvent, ThreadId }
+import org.llm4s.agent.graph.{ EventHandlers, EventType, GraphError, StreamEvent, ThreadId }
 import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContext, ToolOutcome, ToolSet }
-import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId }
+import org.llm4s.agent.graph.middleware.{ AgentMiddleware, BoundaryResult, MiddlewareId, ModelContext }
 import org.llm4s.error.{ CancelledError, LLMError, SimpleError, UnknownError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{
@@ -211,9 +211,9 @@ private[pekko] object Fixtures {
     val thread = new AtomicReference[Option[ThreadId]](None)
     val middleware = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("capture")
-      override def beforeAgent(text: String, context: RunContext): Result[String] = {
-        thread.set(Some(context.position.threadId))
-        Right(text)
+      override def beforeAgent(text: String, context: ModelContext): Result[BoundaryResult] = {
+        thread.set(Some(context.run.position.threadId))
+        Right(BoundaryResult(text))
       }
     }
     (middleware, thread)

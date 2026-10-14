@@ -182,7 +182,8 @@ The rest of those families are marked:
 | `llm4s-speech` (`org.llm4s.speech.stt`, `.tts`, `.io`) | `STTError.EngineNotAvailable`, `TTSError.EngineNotAvailable` | `STTError.UnsupportedFormat`, `STTError.InvalidInput`, `WavFileGenerator.WavError`, `AudioIO.AudioIOError` |
 
 So are two whole families: `GraphError` in `llm4s-agent`
-(`org.llm4s.agent.graph`, from the graph runtime; every case is non-recoverable except `DeadlineExceeded`)
+(`org.llm4s.agent.graph`, from the graph runtime; every case is non-recoverable except `DeadlineExceeded` and
+`ThreadBusy`)
 and `ImageGenerationError` in `llm4s-image` (`org.llm4s.imagegeneration`, from the image-generation
 clients; a `ServiceError` there is recoverable only for a transient status). The image module reuses the
 names `AuthenticationError`, `RateLimitError`, `ServiceError`, `ValidationError` and `UnknownError`, so

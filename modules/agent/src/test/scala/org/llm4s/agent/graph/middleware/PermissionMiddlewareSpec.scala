@@ -68,6 +68,47 @@ class PermissionMiddlewareSpec extends AnyFlatSpec with Matchers {
     decide(Seq(PermissionRule.allow(Invoke, "other")), false) shouldBe ToolOutcome.Error("Denied: invoke files")
   }
 
+  "An envelope target" should "be denied when a deny rule reaches any target in it, even after a broader allow" in {
+    val rules = Seq(PermissionRule.deny(Write, "/out/secrets/**"), PermissionRule.allow(Write, "/out/**"))
+    decide(rules, false, ToolResource(Write, "/out/**")) shouldBe ToolOutcome.Error("Denied: write /out/**")
+    decide(rules, true, ToolResource(Write, "/out/**")) shouldBe ToolOutcome.Error("Denied: write /out/**")
+    // a narrower envelope clear of the deny is allowed
+    decide(rules, false, ToolResource(Write, "/out/public/**")) shouldBe ran
+  }
+
+  it should "be allowed only when allow rules cover all of it" in {
+    decide(Seq(PermissionRule.allow(Write, "/out/**")), false, ToolResource(Write, "/out/**")) shouldBe ran
+    // part of the envelope is matched by no rule
+    decide(Seq(PermissionRule.allow(Write, "/out/a/**")), false, ToolResource(Write, "/out/**")) shouldBe
+      ToolOutcome.Error("Denied: write /out/**")
+  }
+
+  it should "be asked about when an ask rule reaches part of it, and run once approved" in {
+    val rules = Seq(PermissionRule.ask(Write, "/out/private/**"), PermissionRule.allow(Write, "/out/**"))
+    decide(rules, false, ToolResource(Write, "/out/**")) shouldBe
+      ToolOutcome.NeedsApproval("Permission required: write /out/**")
+    decide(rules, true, ToolResource(Write, "/out/**")) shouldBe ran
+  }
+
+  it should "be denied conservatively when a deny reaches only targets an earlier partial allow decided" in {
+    val rules = Seq(
+      PermissionRule.allow(Write, "/out/a/**"),
+      PermissionRule.deny(Write, "/out/a/x"),
+      PermissionRule.allow(Write, "/out/**")
+    )
+    // a concrete target is first match wins: /out/a/x is allowed by the first rule
+    decide(rules, false, ToolResource(Write, "/out/a/x")) shouldBe ran
+    // an envelope is not split by rule: the deny reaches it, so it is denied
+    decide(rules, false, ToolResource(Write, "/out/**")) shouldBe ToolOutcome.Error("Denied: write /out/**")
+  }
+
+  "A spec's resourcesOf" should "return the advertised default, invoking the tool, until withResources replaces it" in {
+    spec.resourcesOf(ujson.Obj()) shouldBe Vector(ToolResource(Invoke, "files"))
+    spec.resourcesOf(ujson.Obj()) shouldBe Vector(spec.defaultResource)
+    spec.withResources(_ => Vector(ToolResource(Read, "/a"))).resourcesOf(ujson.Obj()) shouldBe
+      Vector(ToolResource(Read, "/a"))
+  }
+
   "ToolCallRequest(spec, call)" should "carry the tool's default resource" in {
     ToolCallRequest(spec, call).resources shouldBe Vector(ToolResource(Invoke, "files"))
   }

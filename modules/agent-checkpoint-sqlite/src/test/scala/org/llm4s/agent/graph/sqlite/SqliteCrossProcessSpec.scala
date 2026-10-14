@@ -78,7 +78,11 @@ class SqliteCrossProcessSpec extends AnyFlatSpec with Matchers with EitherValues
           store.latest(thread).value.exists(_.pendingWrites.exists(_.nodeId == "worker"))
         }
         runtime.recover(thread, workers.graph).left.value shouldBe
-          GraphError.ThreadBusy(thread.value, store.latest(thread).value.map(_.checkpoint.id), Some("child"))
+          GraphError.ThreadBusy(
+            thread.value,
+            store.latest(thread).value.map(_.checkpoint.id),
+            GraphError.BusyHolder.Run(RunId("child"))
+          )
         runtime.start(thread, workers.graph, Vector("c")).left.value shouldBe a[GraphError.IncompleteRun]
         runtime.deleteThread(thread).left.value shouldBe a[GraphError.ThreadBusy]
         // the live run's events so far have reached this process's subscriber, in order, from the other process
@@ -95,7 +99,7 @@ class SqliteCrossProcessSpec extends AnyFlatSpec with Matchers with EitherValues
       replayed.map(_.seq) shouldBe (1L to replayed.size.toLong).toVector
       replayed.head.event shouldBe a[RunEvent.RunStarted]
       replayed.count(e => e.event == RunEvent.TaskCompleted && e.nodeId.contains("worker")) shouldBe 1
-      replayed.map(_.event).collect { case e @ (RunEvent.RunCompleted | RunEvent.RunFailed(_)) => e } shouldBe empty
+      replayed.map(_.event).collect { case e @ (RunEvent.RunCompleted | RunEvent.RunFailed(_, _)) => e } shouldBe empty
 
       // its claim is still in the file, so the thread stays refused until the claim expires by this store's clock
       runtime.recover(thread, workers.graph).left.value shouldBe a[GraphError.ThreadBusy]

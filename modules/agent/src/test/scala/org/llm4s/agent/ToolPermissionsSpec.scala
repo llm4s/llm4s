@@ -210,6 +210,16 @@ class ToolPermissionsSpec extends AnyFlatSpec with Matchers {
     seen.asScala.toVector shouldBe Vector.fill(2)(Vector(ToolResource(Operation.Write, "/out/**")))
   }
 
+  it should "be denied before it asks when a deny rule reaches any target of its envelope" in {
+    val (agent, wrote, _) = saving(
+      Seq(PermissionRule.deny(Operation.Write, "/out/secrets/**"), PermissionRule.allow(Operation.Write, "/out/**"))
+    )
+    val refused = agent.run("save it").value
+    refused.status shouldBe a[AgentStatus.Completed] // no question asked
+    toolResults(refused) shouldBe Vector("""{"error":"Denied: write /out/**"}""")
+    wrote.size shouldBe 0
+  }
+
   it should "refuse an answer outside its envelope itself: the runtime cannot see what the tool touches" in {
     val (agent, wrote, _) = saving(Seq(PermissionRule.allow(Operation.Write, "/out/**")))
     val parked            = agent.run("save it").value

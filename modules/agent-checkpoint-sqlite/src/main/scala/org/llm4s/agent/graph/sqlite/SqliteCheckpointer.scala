@@ -68,7 +68,13 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
     val now     = clock.instant()
     current.flatMap(_.claim).filter(live => now.isBefore(live.expiresAt)) match
       case Some(live) =>
-        Left(GraphError.ThreadBusy(threadId.value, current.flatMap(_.checkpointId), Some(live.holder)))
+        Left(
+          GraphError.ThreadBusy(
+            threadId.value,
+            current.flatMap(_.checkpointId),
+            GraphError.BusyHolder.Run(RunId(live.holder))
+          )
+        )
       case None =>
         val claim = Claim(request.holder.value, nextToken(c), now.plusNanos(request.ttl.toNanos))
         ensureRow(c, threadId)
@@ -611,7 +617,7 @@ object SqliteCheckpointer:
     )
 
   private def stale(threadId: ThreadId, current: Option[Row], token: FencingToken): GraphError =
-    GraphError.StaleClaim(threadId.value, token.value, current.flatMap(_.claim).map(_.token))
+    GraphError.StaleClaim(threadId.value, token, current.flatMap(_.claim).map(c => FencingToken(c.token)))
 
   private def readRow(c: Connection, threadId: ThreadId): Option[Row] =
     query(

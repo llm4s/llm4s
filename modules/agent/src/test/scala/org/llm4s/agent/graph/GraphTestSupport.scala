@@ -80,6 +80,14 @@ object GraphTestSupport {
       NodeEventSink.none
     )
 
+  /** A `ModelContext` outside any runtime, for calling boundary and model hooks directly, over an empty state. */
+  def testModelContext(run: RunContext = testRunContext()): org.llm4s.agent.graph.middleware.ModelContext =
+    new org.llm4s.agent.graph.middleware.ModelContext(
+      run,
+      ThreadState.empty(Map.empty),
+      org.llm4s.agent.AgentId.unsafe("test")
+    )
+
   def continue(command: Command): NodeResult = NodeResult.Continue(command)
 
   extension [O](admitted: org.llm4s.types.Result[RunHandle[O]])

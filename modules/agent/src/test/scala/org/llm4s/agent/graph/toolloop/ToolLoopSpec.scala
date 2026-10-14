@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.toolloop
 
+import org.llm4s.agent.graph.middleware.{ BoundaryResult, ModelContext, ModelResponse }
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.GraphTestSupport.*
@@ -1255,7 +1256,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
       "retrying",
       // retries a Left, and a throw from next, up to three calls in all
       model = (request, next) => {
-        def attempt(n: Int): Result[Completion] = {
+        def attempt(n: Int): Result[ModelResponse] = {
           val result =
             try next(request)
             catch { case _: Throwable => Left(ValidationError("model", "next threw")) }
@@ -1314,20 +1315,22 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     name: String,
     before: String => Result[String] = Right(_),
     after: String => Result[String] = Right(_),
-    model: (ModelRequest, ModelRequest => Result[Completion]) => Result[Completion] = (r, next) => next(r),
+    model: (ModelRequest, ModelRequest => Result[ModelResponse]) => Result[ModelResponse] = (r, next) => next(r),
     contributes: Vector[AgentTool[?]] = Vector.empty,
     declares: Set[StateKey[?, ?]] = Set.empty,
     wrapTool: (ToolCallRequest, ToolContext, () => ToolOutcome) => ToolOutcome = (_, _, next) => next()
   ): AgentMiddleware =
     new AgentMiddleware {
-      val id: MiddlewareId                                                         = MiddlewareId(name)
-      override def writes: Set[StateKey[?, ?]]                                     = declares
-      override def tools: Vector[AgentTool[?]]                                     = contributes
-      override def beforeAgent(input: String, context: RunContext): Result[String] = before(input)
-      override def afterAgent(answer: String, context: RunContext): Result[String] = after(answer)
-      override def wrapModelCall(request: ModelRequest, context: RunContext)(
-        next: ModelRequest => Result[Completion]
-      ): Result[Completion] = model(request, next)
+      val id: MiddlewareId                     = MiddlewareId(name)
+      override def writes: Set[StateKey[?, ?]] = declares
+      override def tools: Vector[AgentTool[?]] = contributes
+      override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
+        before(input).map(BoundaryResult(_))
+      override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
+        after(answer).map(BoundaryResult(_))
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] = model(request, next)
       override def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome =
         wrapTool(request, context, next)
     }

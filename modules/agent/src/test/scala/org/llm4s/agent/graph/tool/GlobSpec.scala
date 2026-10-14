@@ -48,4 +48,37 @@ class GlobSpec extends AnyFlatSpec with Matchers {
     Glob("/src/**").hashCode shouldBe Glob("/src/**").hashCode
     Glob("/src/**").pattern shouldBe "/src/**"
   }
+
+  "overlaps" should "hold when some target matches both patterns" in {
+    Glob("/out/**").overlaps(Glob("/out/secrets/**")) shouldBe true
+    Glob("/out/secrets/**").overlaps(Glob("/out/**")) shouldBe true
+    Glob("/out/*.txt").overlaps(Glob("/out/a.*")) shouldBe true // /out/a.txt
+    Glob("/out/*").overlaps(Glob("/out/a/b")) shouldBe false
+    Glob("/src/**").overlaps(Glob("/tmp/**")) shouldBe false
+    Glob("a?c").overlaps(Glob("a/c")) shouldBe false
+    Glob("x").overlaps(Glob("x")) shouldBe true
+  }
+
+  "covers" should "hold when every target of the other matches this pattern" in {
+    Glob("/out/**").covers(Glob("/out/secrets/**")) shouldBe true
+    Glob("/out/secrets/**").covers(Glob("/out/**")) shouldBe false
+    Glob("/out/**").covers(Glob("/out")) shouldBe true
+    Glob("/out/*").covers(Glob("/out/**")) shouldBe false
+    Glob("**").covers(Glob("/anything/**")) shouldBe true
+    Glob("/src/**/*.scala").covers(Glob("/src/a/*.scala")) shouldBe true
+    Glob("/src/**/*.scala").covers(Glob("/src/a/*")) shouldBe false
+    Glob("/a/b").covers(Glob("/a/b")) shouldBe true
+    Glob("/a/b").covers(Glob("/a/c")) shouldBe false
+  }
+
+  "A concrete target" should "be overlapped and covered exactly when it matches" in {
+    for {
+      pattern <- Seq("/out/**", "/out/*.txt", "/src/**/a.scala", "x?z")
+      target  <- Seq("/out/a.txt", "/src/a.scala", "xyz")
+    }
+      withClue(s"$pattern vs $target: ") {
+        Glob(pattern).overlaps(Glob(target)) shouldBe Glob(pattern).matches(target)
+        Glob(pattern).covers(Glob(target)) shouldBe Glob(pattern).matches(target)
+      }
+  }
 }

@@ -1,6 +1,9 @@
 package org.llm4s.agent.guardrails
 
+import org.llm4s.agent.graph.middleware.ModelContext
 import org.llm4s.types.Result
+
+import scala.annotation.unused
 
 /**
  * Base trait for all guardrails.
@@ -23,6 +26,14 @@ trait Guardrail[A] {
    * @return Right(value) if valid, Left(error) if invalid
    */
   def validate(value: A): Result[A]
+
+  /**
+   * Validates `value` inside an agent's hook, as `validate(value)` does, with the hook's `context`. A guardrail that
+   * calls a model overrides this to call through `context.accounted`, so the call is counted in the thread's usage
+   * and on the run's terminal event even when the task fails (design §4.22); one that combines guardrails passes
+   * `context` on to each. `GuardrailMiddleware` and `GuardrailReviewMiddleware` call this form.
+   */
+  def validate(value: A, @unused context: ModelContext): Result[A] = validate(value)
 
   /**
    * Name of this guardrail for logging and error messages.

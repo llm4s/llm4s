@@ -10,9 +10,63 @@ nav_order: 2
 Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
 by what you use. The notes below are the per-change detail it links to.
 
-## Stage 3 migration: the harness
+## Stage 3 migration: the Deep Agents harness
 
-Not in a release yet. Stage 3 ([#1901](https://github.com/llm4s/llm4s/issues/1901)) builds the Deep Agents harness on the Stage 2 runtime. Each slice adds its part here as it lands.
+Not in a release yet. Stage 3 ([#1901](https://github.com/llm4s/llm4s/issues/1901)) builds the harness as middleware
+and tools on `AgentBuilder`. Each slice adds its part here as it lands:
+
+- [#1902](https://github.com/llm4s/llm4s/issues/1902), kernel hooks for the harness - state-writing hooks, prompt
+  sections, accounted model calls, and a Block that restores the whole turn: [below](#kernel-hooks-for-the-harness-1902).
+
+Design: `docs/design/typed-agent-runtime/4.22-stage-3-slice-c1-kernel-hooks.md` (§4.22) onwards.
+
+### Kernel hooks for the harness (#1902)
+
+Code that only builds agents with the built-in middleware needs no change. A middleware of your own that overrides
+`beforeAgent`, `afterAgent` or `wrapModelCall` does. Source breaks, with no shims:
+
+- **The boundary hooks take a `ModelContext` and return a `BoundaryResult`.** `context.run` is the `RunContext` they
+  took before; `context.state` the committed state the task read. Wrap the text, and add an update to keys the
+  middleware declares in `writes` if it has one:
+
+  ```scala
+  // before
+  override def beforeAgent(input: String, context: RunContext): Result[String] = Right(input.trim)
+  // after
+  override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
+    Right(BoundaryResult(input.trim))
+  ```
+
+  `AgentMiddleware.Asking.answered` takes the `ModelContext` too.
+- **`wrapModelCall` takes a `ModelContext` and its `next` returns a `ModelResponse`.** A wrapper that passed `next`
+  through needs only the new signature. One that read the completion reads `response.completion`; one that changed it
+  uses `response.withCompletion(c)`, which keeps the inner wrappers' updates; one that answered without calling
+  `next` returns `ModelResponse(completion)`. A wrapper adds writes with `response.addUpdate(update)`.
+- **`writes` covers every hook.** An update from any hook may touch only that middleware's own `writes`; any other
+  key fails the run with a `ValidationError`.
+- **An output Block restores every key the turn wrote.** Before, only the turn's messages, the active agent and the
+  transfer were rolled back, and a key a tool or middleware wrote during a blocked turn kept its new value. Now
+  every such key returns to its value before the turn; `usage` is kept. A file, sandbox or memory store outside the
+  thread state is not restored.
+- **Usage counts provider calls.** A retrying wrapper's discarded calls are now in `AgentResult.usage`, and a
+  completion a wrapper returned without calling the model (a cache, a reviewed answer) no longer counts as a request.
+  `ModelCallCompleted` is one event per provider call, `attempts` that call's attempt number (0 for a hook's own call
+  through `ModelContext.accounted`). A hook that calls a model itself - or hands a client to a library that does -
+  wraps the client with `context.accounted(client)`, so its calls are counted.
+- **`RunEvent.RunFailed` gains `usage`; `RunCancelled` and `RunTimedOut` become case classes with `usage`**: the
+  calls of the attempts that committed nothing - a task that failed, or one the cancel or deadline cut short. Match
+  them as `RunFailed(message, _)`, `RunCancelled(_)` and `RunTimedOut(_)`; build them as `RunCancelled()`. Events
+  stored before decode with `None`.
+- **Guardrails take the hook's context.** `Guardrail` gains `validate(value, context: ModelContext)`, defaulting to
+  `validate(value)`; `GuardrailMiddleware` calls it. A guardrail of your own that calls a model overrides it to call
+  through `context.accounted(client)`; one that combines guardrails passes `context` on. A subclass of
+  `LLMGuardrail` that called `evaluateWithLLM(content)` passes the client too: `evaluateWithLLM(content, llmClient)`.
+- **An output Block keeps edits made by others.** A key `updateState` changed while the turn waited for review keeps
+  the edit; only keys still holding the turn's writes are restored.
+- **New hook `promptSections`** adds system-prompt content per request, never stored; together the sections are
+  capped by `AgentBuilder.withMaxPromptSectionTokens` (default 8192, four characters a token, measured on the
+  rendered prompt, separators included) and to 64 per request, over which the run fails. `LoopAgent` gains `maxPromptSectionTokens` and `TurnState` gains `priorValues`; a stored `TurnState` without
+  it decodes.
 
 ### Tool permissions, timeouts and batch locks (#1903)
 
@@ -21,7 +75,7 @@ Design §4.23. Additive, bar one reserved key: an agent without `PermissionMiddl
 - **`tool-queue` is a key the loop owns.** A tool or middleware that declares a `StateKey` with id `tool-queue` is refused at build, as `tool-results` is. Rename it.
 - **`ToolCallRequest` carries `resources`.** `ToolCallRequest(spec, call)` still compiles and gives the tool's `defaultResource`, `(Invoke, <name>)`; the loop builds every request with the call's own resources. A wrapper that builds one for a tool with `withResources` passes them: `ToolCallRequest(spec, call, resources)`.
 - **`PermissionMiddleware` denies what no rule allows**, a tool without `withResources` included: add `PermissionRule.allow(Operation.Invoke, "<name>")` (or `"*"`) for each tool the agent may call. See [Tool Permissions, Timeouts and Locks](/guide/agents/#tool-permissions-timeouts-and-locks).
-- **Adopting locks reshapes the agent's graph.** The loop registers `tool-queue` only for an agent with a tool that declares `withLocks`, so its structural fingerprint changes and threads it checkpointed before are refused with `RestoreRejected`: finish or `forget` them first. Agents without locks, timeouts and resources included, restore their existing threads unchanged.
+- **Adopting locks reshapes the agent's graph.** The loop registers `tool-queue` only for an agent with a tool that declares `withLocks`, so the first tool to adopt locks changes the agent's structural fingerprint and refuses the threads checkpointed before with `RestoreRejected`: finish or `forget` them first. Once an agent has the key, changing lock functions is safe for threads in flight: a batch keeps the lock schedule it was made with. Agents without locks, timeouts and resources included, restore their existing threads unchanged.
 - **Locked calls cost supersteps.** Each further round of a batch whose calls hold conflicting locks costs two supersteps; raise `RunBudgets.maxSupersteps` if a long batch of conflicting calls reaches it.
 
 ### Replay of external effects (#1921)
@@ -84,11 +138,12 @@ A run now holds a lease on its thread - a `RunClaim` with an expiry and a `Fenci
 - **`Commit(checkpoint, pendingWrites, events)` is `Commit(token, checkpoint, pendingWrites, events)`**, with a private constructor: build it with `Commit(token, ...)` (all but the token default to empty) and change it with `withCheckpoint`, `withPendingWrites`, `withEvents` and `withToken`. A commit to `InMemoryCheckpointer` - or any store - now needs a claim first: `store.claim(threadId, ClaimRequest(runId, ttl))` returns the `RunClaim` whose `token` it carries.
 - **`Checkpoint` and `RunPosition` have private constructors and gain `fencingToken: Option[FencingToken]`.** Build them with `Checkpoint(...)` and `RunPosition(...)` as before (the new field defaults to `None`) and change them with `with*` setters; `checkpoint.copy(parent = p)` is `checkpoint.withParent(p)`. A run's position carries its claim's token; `None` outside a runtime.
 - **`Checkpoint.CurrentFormat` is 5.** Format 4 and earlier checkpoints still read (as written by no claim, `fencingToken = None`); a build before this change refuses format 5.
-- **`GraphError.ThreadBusy(threadId, latestCheckpoint)` gains `holder: Option[String]`**, the holding run's id. A pattern `case GraphError.ThreadBusy(t, c)` becomes `case GraphError.ThreadBusy(t, c, _)`. `ThreadBusy` is now also returned when another runtime or process holds a live claim on the thread.
-- **`GraphError.StaleClaim(threadId, token, current)` is new**: a commit, renewal or release made with a token that is not the thread's current claim. It is the store's refusal. No runtime call returns it, wrapped or not: a run that loses its claim, or a `start`, `recover` or `resume` whose claim's commit is refused as stale, ends with `ClaimLost` (below), and a `fork`, `updateState` or `deleteThread` whose claim lapsed or was taken over mid-operation returns `ThreadBusy` - nothing was applied, so retry.
+- **`GraphError.ThreadBusy(threadId, latestCheckpoint)` gains `holder: GraphError.BusyHolder`** (default `BusyHolder.Unnamed`): `BusyHolder.Run(runId)` names the holding run when the caller may see it; `Unnamed` is another run that cannot be named; `Lapsed` is a `fork`, `updateState` or `deleteThread` whose own claim lapsed before its write was known to land, with no other run known to hold the thread - a write it had already sent may still land, so read the thread before retrying. A pattern `case GraphError.ThreadBusy(t, c)` becomes `case GraphError.ThreadBusy(t, c, _)`, and one on a named holder `case GraphError.ThreadBusy(_, _, GraphError.BusyHolder.Run(runId))`. `ThreadBusy` is now also returned when another runtime or process holds a live claim on the thread, and by `updateState` and a `fork` onto a held target.
+- **`GraphError.ThreadBusy` is a `RecoverableError`** (it was a `NonRecoverableError`): a retry may get past it once the thread is free, so generic retry code - `LLMError.isRecoverable`, `RetryPolicy`, `ErrorRecovery`, and a node given an explicit `RetryPolicy` (the default node policy retries nothing) - now retries it. Code that treated every `GraphError` but `DeadlineExceeded` as final should let `ThreadBusy` through to its retry. A call wrapped in `ErrorRecovery.recoverWithBackoff` that is still `ThreadBusy` after its last attempt now ends with an `ExecutionError` naming the attempts and the last error, not with the `ThreadBusy` itself; match on that, and beware that `ExecutionError` is itself recoverable, so nested retry layers multiply attempts.
+- **`GraphError.StaleClaim(threadId, token: FencingToken, current: Option[FencingToken])` is new**: a commit, renewal or release made with a token that is not the thread's current claim. Build it, or compare with it, with `FencingToken(n)`, not a bare `Long`. It is the store's refusal. No runtime call returns it, wrapped or not: a run that loses its claim, or a `start`, `recover` or `resume` whose claim's commit is refused as stale, ends with `ClaimLost` (below), and a `fork`, `updateState` or `deleteThread` whose claim lapsed or was taken over mid-operation returns `ThreadBusy` - nothing was applied, so retry.
 - **A run that lost its claim ends with `GraphError.ClaimLost(threadId, token, current)`, not `CheckpointWriteFailed(StaleClaim)`.** It is new: the run's lease passed with no renewal landing (the run judges it by its own monotonic clock), or a renewal or commit was refused as stale - the claim's own commit at admission included, so `start`, `recover` and `resume` return it too. The run stops at once, its tasks interrupted, and commits nothing more. A pattern `case GraphError.CheckpointWriteFailed(_, _: GraphError.StaleClaim, _)` becomes `case _: GraphError.ClaimLost`. Unlike `CheckpointWriteFailed`, it is not a store outage. `recover` may be attempted once the thread is free: it is refused with `ThreadBusy` while a successor holds it, a successor that finished leaves the thread's state showing it, and a lease that lapsed with no successor leaves the run for `recover` to continue.
 - **`RunEvent.RunRecovered` gains `takenOverFrom: Option[String]`**, the run id whose expired claim the recovery took over, and **`RunClaim` gains `takenOverFrom: Option[RunId]`**, which a store sets when a claim replaces an expired, unreleased one. Both default to `None`, so a log written before still reads; a pattern `case RunEvent.RunRecovered(c, t, p)` becomes `case RunEvent.RunRecovered(c, t, p, _)`. A store reports the replaced holder from `claim` (`CheckpointerContract` checks it).
-- **`InMemoryCheckpointer` takes an optional `Clock`** (default the system clock), by which its claims expire, and **`GraphRuntime` an optional `ClaimPolicy`** (`ttl` 30 seconds, `renewEvery` 10 seconds). Java and Kotlin keep `new InMemoryCheckpointer()`, `new GraphRuntime(store)` and `new GraphRuntime(store, clock)`.
+- **`InMemoryCheckpointer` takes an optional `Clock`** (default the system clock), by which its claims expire, and **`GraphRuntime` an optional `ClaimPolicy`** (`ttl` 30 seconds, `renewEvery` 10 seconds). Java and Kotlin keep `new InMemoryCheckpointer()`, `new GraphRuntime(store)` and `new GraphRuntime(store, clock)`. **`GraphRuntime.inMemory(clock, claims)`** gives its store the same clock - before, the store used the system clock whatever `clock` was - so a test that moves `clock` now moves claim expiry and `prune`'s ages too.
 - **`GraphRuntime.deleteThread` claims the thread before deleting it**, so it is refused with `ThreadBusy` while a run holds the thread in any runtime, not only in its own.
 - **`Checkpointer.deleteThread(threadId)` is `deleteThread(threadId, token: FencingToken)`**, fenced like a commit: a store deletes only while `token` is the thread's current claim, checked atomically with the delete, and otherwise returns `GraphError.StaleClaim` and deletes nothing. A thread with no claim - an unknown one included - is therefore refused too; claim it first (`GraphRuntime.deleteThread` does). A wrapper that delegates to another store forwards the token:
 
@@ -101,7 +156,7 @@ A run now holds a lease on its thread - a `RunClaim` with an expiry and a `Fenci
 - **`DisconnectReason` gains `ThreadDeleted`.** A subscription to a deleted thread - in the deleting runtime, or in another runtime sharing the store, at its next read of the store - ends with `Disconnected(lastSeq, ThreadDeleted)` and never delivers a new thread of the same id as a continuation of the old one; subscribe again from `0` to follow that one. (A subscription in another runtime that has delivered no event yet cannot be told from a new one, and follows the new thread.) A `match` on `DisconnectReason` needs the new case. Before, a subscription in another runtime went on delivering the new thread's events as if they continued the old log, so the old advice to cancel subscriptions before deleting a thread is no longer needed.
 - **`GraphRuntime.subscribe` takes the caller's `RunConfig`, and refuses another tenant's thread.** `subscribe(threadId, afterSeq, capacity)(listener)` is `subscribe(threadId, afterSeq, capacity, config)(listener)`, and `TracingSubscriber.attach(runtime, threadId, tracing, afterSeq)` gains `config` too; both default to `RunConfig()`. A thread whose latest checkpoint is another tenant's - or, with no checkpoint yet, whose run admitting or executing in this runtime is - is refused with `GraphError.TenantMismatch` before the subscription joins, as `history` and `checkpoint` refuse it; a failed read of the thread is returned. Before, any caller could replay and follow any tenant's thread. Pass the `config` your runs use: a multi-tenant caller that subscribed with no `config` is now refused. `RunHandle.subscribe` and `AgentRun.subscribe` use their run's tenant and are unchanged.
 - **`DisconnectReason` gains `TenantMismatch`.** A subscription screens each event against its tenant, so that a thread created under its id by another tenant after it subscribed - or deleted and created again by another tenant through another runtime - is never delivered: it ends with `Disconnected(lastSeq, TenantMismatch)` before that thread's first event. A `match` on `DisconnectReason` needs the new case.
-- **A `ThreadBusy` whose re-read fails names nothing.** When a claim is refused, or a run's claim commit conflicts, the runtime re-reads the thread to check its tenant before naming its checkpoint. If that re-read failed, the error named the store's own, unchecked checkpoint id - another tenant's, possibly, with that tenant's run id in it. It is now `ThreadBusy(threadId, None, None)`.
+- **A `ThreadBusy` whose re-read fails names nothing.** When a claim is refused, or a run's claim commit conflicts, the runtime re-reads the thread to check its tenant before naming its checkpoint. If that re-read failed, the error named the store's own, unchecked checkpoint id - another tenant's, possibly, with that tenant's run id in it. It is now `ThreadBusy(threadId, None, BusyHolder.Unnamed)`.
 - **`CheckpointerContract` no longer requires a store to delete regardless of claims.** It checks a delete with the current token, a stale token and another holder's live token, a runtime delete whose claim was taken over, the numbering of a recreated thread, `ThreadDeleted` from `eventsAfter` and `awaitEventsAfter`, and a subscription in another runtime ending with `ThreadDeleted`.
 - **The SQLite schema is version 2** (`first_seq` on `llm4s_checkpoint_threads`). Opening a version-1 file upgrades it in one transaction; a build that knows only version 1 refuses a version-2 file. Stop every process on the older build first: one that already has the file open is not refused, and its deletes are unfenced and drop tombstones.
 - **There is no unfenced `deleteThread`.** To delete a thread outside a runtime, claim it and delete with the claim's token. A deleted id that numbered events keeps a small tombstone (its next event number) for good.

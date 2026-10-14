@@ -3,6 +3,8 @@ package org.llm4s.agent.graph.middleware
 import org.llm4s.agent.graph.tool.{ Glob, Operation, ToolContext, ToolOutcome, ToolResource }
 import org.llm4s.annotation.Experimental
 
+import scala.annotation.tailrec
+
 /** What a [[PermissionRule]] decides for a resource it matches. */
 @Experimental
 enum PermissionDecision:
@@ -14,6 +16,14 @@ final case class PermissionRule(operation: Operation, target: Glob, decision: Pe
 
   /** Whether this rule decides `resource`: the same operation, and a target the glob matches. */
   def matches(resource: ToolResource): Boolean = resource.operation == operation && target.matches(resource.target)
+
+  /** Whether this rule decides every target of `resource`'s envelope: the same operation, and a glob covering it. */
+  def covers(resource: ToolResource): Boolean =
+    resource.operation == operation && target.covers(Glob(resource.target))
+
+  /** Whether this rule decides some target of `resource`'s envelope: the same operation, and an overlapping glob. */
+  def overlaps(resource: ToolResource): Boolean =
+    resource.operation == operation && target.overlaps(Glob(resource.target))
 
 object PermissionRule:
   def allow(operation: Operation, pattern: String): PermissionRule =
@@ -44,9 +54,31 @@ final class PermissionMiddleware(rules: Seq[PermissionRule], val id: MiddlewareI
 
   private val ordered = rules.toVector
 
-  /** The decision for `resource`: the first matching rule's, or `Deny` when none matches. */
+  /**
+   * The decision for `resource`: for a concrete target, the first matching rule's, or `Deny` when none
+   * matches. A target is read as a [[Glob]], so one written as a pattern - an envelope such as `/out/&#42;&#42;`,
+   * declared by a tool whose answer picks the path - is decided for every target in it: the rules are read
+   * in order, and the envelope is denied as soon as a `Deny` rule reaches any of its targets, asked about
+   * once an `Ask` rule reaches some, and allowed only when an `Allow` rule covers all that remain; if no
+   * rule covers the rest, some target is unmatched, so it is denied. An `Allow` that covers only part does
+   * not settle it, so a later `Deny` reaching the rest still denies (conservatively, even when the earlier
+   * allow already decided the targets they share). For a concrete target, reaching and covering are both
+   * matching, so this is first match wins.
+   */
   def decide(resource: ToolResource): PermissionDecision =
-    ordered.find(_.matches(resource)).fold(PermissionDecision.Deny)(_.decision)
+    @tailrec def scan(rules: List[PermissionRule], asked: Boolean): PermissionDecision = rules match
+      case Nil => PermissionDecision.Deny
+      case rule :: rest =>
+        if !rule.overlaps(resource) then scan(rest, asked)
+        else
+          rule.decision match
+            case PermissionDecision.Deny => PermissionDecision.Deny
+            case PermissionDecision.Ask =>
+              if rule.covers(resource) then PermissionDecision.Ask else scan(rest, asked = true)
+            case PermissionDecision.Allow =>
+              if rule.covers(resource) then if asked then PermissionDecision.Ask else PermissionDecision.Allow
+              else scan(rest, asked)
+    scan(ordered.toList, asked = false)
 
   override def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome =
     val decided = request.resources.map(r => r -> decide(r))

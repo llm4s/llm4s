@@ -102,7 +102,7 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     await(handle).failed._2 shouldBe GraphError.Cancelled(Some("t"), Some(latest.checkpoint.id))
     handle.status shouldBe RunStatus.Failed
     latest.checkpoint.status shouldBe CheckpointStatus.Running
-    store.eventsAfter(thread, 0L, 100).value.last.event shouldBe RunEvent.RunCancelled
+    store.eventsAfter(thread, 0L, 100).value.last.event shouldBe RunEvent.RunCancelled(None)
 
     await(runtime.recover(thread, instant).value).completed._2 shouldBe "x"
   }
@@ -152,7 +152,7 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
   final private class ClosingStore(closing: CountDownLatch, stopped: CountDownLatch) extends Checkpointer {
     val underlying = InMemoryCheckpointer()
     def commit(threadId: ThreadId, commit: Commit) =
-      if commit.events.exists(_.event == RunEvent.RunCancelled) then {
+      if commit.events.exists(_.event == RunEvent.RunCancelled(None)) then {
         closing.countDown()
         val waited      = CancelledError.catchInterrupt(stopped.await(5, TimeUnit.SECONDS))
         val interrupted = waited.isLeft || Thread.interrupted()
@@ -215,7 +215,7 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
         go.countDown()
         val error = awaitResult(handle).value.failed._2
         error shouldBe GraphError.Cancelled(Some(thread.value), store.latest(thread).value.map(_.checkpoint.id))
-        store.eventsAfter(thread, 0L, 100).value.last.event shouldBe RunEvent.RunCancelled
+        store.eventsAfter(thread, 0L, 100).value.last.event shouldBe RunEvent.RunCancelled(None)
       }
   }
 

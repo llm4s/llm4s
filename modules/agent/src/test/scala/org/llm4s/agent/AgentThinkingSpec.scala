@@ -1,7 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.agent.graph.middleware.{ BoundaryResult, ModelContext }
 import org.llm4s.agent.AgentFixture._
-import org.llm4s.agent.graph.RunContext
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId }
 import org.llm4s.agent.graph.toolloop.{ MessageUpdate, Messages, StoredMessage }
 import org.llm4s.llmconnect.model._
@@ -74,8 +74,9 @@ class AgentThinkingSpec extends AnyFlatSpec with Matchers {
   // goes through AssistantMessage's setters, which unseal the thinking when they change something.
 
   private def rewriting(to: String => String) = new AgentMiddleware {
-    val id: MiddlewareId                                                         = MiddlewareId("rewrite")
-    override def afterAgent(answer: String, context: RunContext): Result[String] = Right(to(answer))
+    val id: MiddlewareId = MiddlewareId("rewrite")
+    override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
+      Right(BoundaryResult(to(answer)))
   }
 
   private def storedAnswer(result: AgentResult) =

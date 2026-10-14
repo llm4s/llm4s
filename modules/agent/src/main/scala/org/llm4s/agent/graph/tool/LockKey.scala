@@ -11,7 +11,7 @@ import org.llm4s.annotation.Experimental
  *
  * Calls of one model message whose locks conflict run one after another, in call order, each in its
  * own superstep, so each sees the state the earlier one committed; see [[AgentToolSpec.withLocks]].
- * A key is never stored.
+ * A batch records its calls' keys rendered (`render`), which `LockKey(rendered)` reads back exactly.
  */
 opaque type LockKey = Vector[String]
 

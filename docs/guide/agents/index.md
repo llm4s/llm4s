@@ -142,6 +142,32 @@ result.map { r =>
 `AgentResult` also carries `threadId`, `runId`, `activeAgent`, `messages` (the thread's full
 history, never a system prompt) and `usage`.
 
+### A Typed Answer
+
+`withOutput(schema)` gives the agent a response format: a `SchemaDefinition[O]`, with a uPickle
+`ReadWriter[O]` in scope. Write the schema by hand, or derive it with `llm4s-schema-derivation`:
+`withOutput(SchemaOf[Invoice].definition)`. The system prompt states the schema on every model call,
+and a call that offers no tools also carries it as its `responseFormat`. A call that offers tools carries
+no format, because several providers cannot combine one with tool calls. `decodeOutput[O]` reads the answer:
+
+```scala
+case class Invoice(customer: String, total: Double) derives ReadWriter
+val invoiceSchema: ObjectSchema[Invoice] = ??? // or SchemaOf[Invoice].definition
+
+for {
+  agent   <- Agent.builder("extractor", client).withOutput(invoiceSchema).build()
+  result  <- agent.run("Bill Acme 12.50")
+  invoice <- result.decodeOutput[Invoice]
+} yield invoice
+```
+
+A final answer must be JSON that matches the schema and reads as `O`; it is stored as that JSON alone.
+An invalid answer is sent back to the model once, with its problems, in the same step; neither is stored.
+A second invalid answer ends the turn with `Left(GraphError.OutputInvalid(errors))`: the turn is removed
+from the thread, as an output guardrail's block removes it, both calls stay in `usage`, `recover` has
+nothing to continue, and the next turn runs from before it. The format is the agent's own: a handoff
+target answers in its own format, or freely.
+
 ---
 
 ## Safety Defaults
@@ -170,8 +196,8 @@ which belong to the `Agent`. `AgentResult` is a value to read, not something to 
 - A thread stays in the runtime until `agent.forget(threadId)` removes it - one-shot
   `agent.run(query)` threads too, which on the default in-memory runtime means they stay in memory.
   Forget a conversation you will not continue: `agent.run(query).flatMap(r => agent.forget(r.threadId).map(_ => r))`.
-  `forget` refuses a thread whose run is still active (`ThreadBusy`) or that belongs to another
-  tenant (`TenantMismatch`); an unknown thread is `Right(())`.
+  `forget` refuses a thread that a run still holds - in this runtime, or by a live claim in any runtime sharing
+  the store (`ThreadBusy`) - or that belongs to another tenant (`TenantMismatch`); an unknown thread is `Right(())`.
 
 ### Suspended turns from Java and Kotlin
 
@@ -446,7 +472,9 @@ every resource is allowed: a denial is the error result `Denied: <operation> <ta
 suspends the call for approval. A tool that declares no resources touches `(Invoke, <tool name>)`,
 so it needs an `Invoke` rule. Resources are the call's whole envelope: a tool that asks a question and lets
 the answer choose its target declares a resource covering every target it may pick (`/out/**`) and
-refuses an answer outside it, because the check runs on the declaration, not on what the tool does. Approval is one flag per call: once a reviewer approves the call,
+refuses an answer outside it, because the check runs on the declaration, not on what the tool does. Such an envelope
+is checked for every target in it: a deny rule reaching any part of it denies the call, and it is
+allowed only when allow rules cover all of it. Approval is one flag per call: once a reviewer approves the call,
 every `Ask` passes. An edited call is checked again on its new arguments, so a deny rule still
 refuses it. Rules see the arguments after the schema check and decoding. In a `Glob`, `*` and `?`
 stay within one `/`-separated segment and `**` crosses them. An `Execute` rule limits which

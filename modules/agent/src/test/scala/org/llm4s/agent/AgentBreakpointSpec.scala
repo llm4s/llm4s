@@ -1,18 +1,10 @@
 package org.llm4s.agent
 
+import org.llm4s.agent.graph.middleware.{ ModelContext, ModelResponse }
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.AgentMiddlewareQuestionSpec.{ Info, Need, Review }
 import org.llm4s.agent.SpecTools.{ call, calling, Text }
-import org.llm4s.agent.graph.{
-  BreakpointPhase,
-  GraphError,
-  GraphRuntime,
-  InterruptId,
-  NodeId,
-  RunConfig,
-  RunContext,
-  ThreadId
-}
+import org.llm4s.agent.graph.{ BreakpointPhase, GraphError, GraphRuntime, InterruptId, NodeId, RunConfig, ThreadId }
 import org.llm4s.agent.graph.middleware.{
   AgentMiddleware,
   ApprovalMiddleware,
@@ -58,9 +50,9 @@ class AgentBreakpointSpec extends AnyFlatSpec with Matchers {
   /** Asks before every model call, and lets it go ahead once answered. */
   final private class SpendGate extends AgentMiddleware.Asking[Need, Boolean] {
     val id: MiddlewareId = MiddlewareId("spend")
-    override def wrapModelCall(request: ModelRequest, context: RunContext)(
-      next: ModelRequest => Result[Completion]
-    ): Result[Completion] = answered(context).fold(ask(Need("spend?")))(_ => next(request))
+    override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+      next: ModelRequest => Result[ModelResponse]
+    ): Result[ModelResponse] = answered(context).fold(ask(Need("spend?")))(_ => next(request))
   }
 
   /** Asks which environment each tool call is for, and runs it once answered. */
