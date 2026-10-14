@@ -64,62 +64,28 @@ final class StateFileBackend private (
 
   private def current(ctx: FileContext): Result[Map[VPath, FileEntry]] = ctx.state.get(files)
 
-  private def isDirectory(all: Map[VPath, FileEntry], path: VPath): Boolean =
-    path == VPath.root || all.keysIterator.exists(p => p != path && p.isWithin(path))
-
   def ls(path: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
-    for
-      _   <- Text.checkLimit("ls", path.value, limit)
-      all <- current(ctx)
-      _ <-
-        if all.contains(path) then Left(BackendRefused("ls", path.value, "is a file, not a directory"))
-        else if !isDirectory(all, path) then Left(BackendRefused("ls", path.value, "not found"))
-        else Right(())
-    yield
-      val children = all.toVector.flatMap { (p, entry) =>
-        p.relativeTo(path).filter(_.nonEmpty).map { rel =>
-          val first = rel.takeWhile(_ != '/')
-          val child = (path / first).toOption.get
-          if rel.contains('/') then FileInfo(child, isDirectory = true, 0L, None)
-          else FileInfo(child, isDirectory = false, Text.utf8Bytes(entry.content), Some(entry.modified))
-        }
-      }.distinct
-      Listing.of(children.sortBy(_.path).iterator, limit)
+    current(ctx).flatMap(FileTree.ls(_, path, limit))
 
   def read(path: VPath, offset: Int, limit: Int, ctx: FileContext): Result[FileLines] =
-    for
-      _     <- Text.checkLimit("read", path.value, limit)
-      _     <- Either.cond(offset >= 0, (), BackendRefused("read", path.value, s"offset must be >= 0, was $offset"))
-      all   <- current(ctx)
-      entry <- fileOf("read", all, path)
-    yield
-      val lines = Text.lines(entry.content)
-      FileLines(lines.slice(offset, offset + limit), offset, lines.size)
-
-  private def fileOf(operation: String, all: Map[VPath, FileEntry], path: VPath): Result[FileEntry] =
-    all.get(path) match
-      case Some(entry)                     => Right(entry)
-      case None if isDirectory(all, path) => Left(BackendRefused(operation, path.value, "is a directory"))
-      case None                            => Left(BackendRefused(operation, path.value, "not found"))
+    current(ctx).flatMap(FileTree.read(_, path, offset, limit))
 
   private def entryBytes(path: VPath, content: String): Long = Text.utf8Bytes(path.value) + Text.utf8Bytes(content)
 
-  /** `path` may hold `content`: not the root, not over a directory or beneath a file, and within bounds. */
+  /** `path` may hold `content`: text, a writable path, and within this thread's bounds. */
   private def admit(operation: String, all: Map[VPath, FileEntry], path: VPath, content: String): Result[Unit] =
     val total = all.iterator.map((p, e) => entryBytes(p, e.content)).sum
     val after = total - all.get(path).fold(0L)(e => entryBytes(path, e.content)) + entryBytes(path, content)
     val count = all.size + (if all.contains(path) then 0 else 1)
     def refuse(reason: String) = Left(BackendRefused(operation, path.value, reason))
-    Text.binaryReason(content) match
-      case Some(reason)                                        => refuse(reason)
-      case None if path == VPath.root                          => refuse("is the root directory")
-      case None if !all.contains(path) && isDirectory(all, path) => refuse("is a directory")
-      case None if Iterator.iterate(path.parent)(_.flatMap(_.parent)).takeWhile(_.isDefined).flatten.exists(all.contains) =>
-        refuse("is beneath a file")
-      case None if after > maxBytes =>
-        refuse(s"the files would total $after bytes, over this thread's limit of $maxBytes")
-      case None if count > maxFiles => refuse(s"there would be $count files, over this thread's limit of $maxFiles")
-      case None                     => Right(())
+    for
+      _ <- Text.binaryReason(content).fold[Result[Unit]](Right(()))(refuse)
+      _ <- FileTree.writable(operation, all, path)
+      _ <-
+        if after > maxBytes then refuse(s"the files would total $after bytes, over this thread's limit of $maxBytes")
+        else if count > maxFiles then refuse(s"there would be $count files, over this thread's limit of $maxFiles")
+        else Right(())
+    yield ()
 
   def write(path: VPath, content: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
     for
@@ -138,27 +104,20 @@ final class StateFileBackend private (
     ctx: FileContext
   ): Result[(FileEdited, StateUpdate)] =
     for
-      all         <- current(ctx)
-      entry       <- fileOf("edit", all, path)
-      edited      <- Text.edited(path, entry.content, old, replacement, replaceAll)
-      _           <- admit("edit", all, path, edited._1)
+      all    <- current(ctx)
+      entry  <- FileTree.fileOf("edit", all, path)
+      edited <- Text.edited(path, entry.content, old, replacement, replaceAll)
+      _      <- admit("edit", all, path, edited._1)
     yield (FileEdited(edited._2), StateUpdate.update(files, FileUpdate.Put(path, FileEntry(edited._1, clock.instant()))))
 
   def delete(path: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
     for
       all <- current(ctx)
-      _ <-
-        if all.contains(path) then Right(())
-        else if isDirectory(all, path) then
-          Left(BackendRefused("delete", path.value, "is a directory; delete the files in it"))
-        else Left(BackendRefused("delete", path.value, "not found"))
+      _   <- FileTree.deletable(all, path)
     yield (FileDeleted(wasDirectory = false), StateUpdate.update(files, FileUpdate.Delete(path)))
 
   def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
-    for
-      _   <- Text.checkLimit("glob", under.value, limit)
-      all <- current(ctx)
-    yield Listing.of(all.keysIterator.filter(p => p.isWithin(under) && accept(p)).toVector.sorted.iterator, limit)
+    current(ctx).flatMap(FileTree.find(_, under, accept, limit))
 
   def search(
     under: VPath,
@@ -167,14 +126,7 @@ final class StateFileBackend private (
     limit: Int,
     ctx: FileContext
   ): Result[Listing[GrepMatch]] =
-    for
-      _   <- Text.checkLimit("grep", under.value, limit)
-      all <- current(ctx)
-      found <- Text.interruptibly("grep") {
-        val paths = all.keysIterator.filter(p => p.isWithin(under) && accept(p)).toVector.sorted
-        Right(Listing.of(paths.iterator.flatMap(p => Text.matches(p, all(p).content, regex)), limit))
-      }
-    yield found
+    current(ctx).flatMap(FileTree.search(_, under, regex, accept, limit))
 
 object StateFileBackend:
 

@@ -34,6 +34,13 @@ object FileContext:
   /** The context of a hook, which is not a tool call. */
   def apply(run: RunContext, state: ThreadState): FileContext = new FileContext(run, state, None)
 
+  /**
+   * A hook's context with no thread state, for code that has only a `RunContext` (`ReplayContract`'s
+   * subjects): an external backend never reads state, and a state backend's read fails as an unknown key.
+   */
+  private[agent] def withoutState(run: RunContext): FileContext =
+    new FileContext(run, ThreadState.empty(Map.empty), None)
+
 /**
  * Where an agent's files live: thread state ([[StateFileBackend]]), a host directory
  * ([[HostFileBackend]]), a [[LongTermStore]] ([[StoreFileBackend]]), several at once
