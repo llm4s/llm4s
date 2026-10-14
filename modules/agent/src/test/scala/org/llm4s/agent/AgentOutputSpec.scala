@@ -176,6 +176,61 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
     client.callCount shouldBe 4
   }
 
+  // a ModelCallCompleted's attempts count only the calls made for its own request, on every path (Codex, #1924)
+
+  /** Calls the model `retries + 1` times on the first request (keeping the last), once on later ones. */
+  final private class Retrying(retries: Int) extends AgentMiddleware {
+    val requests         = new AtomicInteger(0)
+    val id: MiddlewareId = MiddlewareId("retrying")
+    override def wrapModelCall(request: ModelRequest, context: RunContext)(
+      next: ModelRequest => Result[Completion]
+    ): Result[Completion] =
+      if (requests.incrementAndGet() == 1) (1 to retries).foldLeft(next(request))((_, _) => next(request))
+      else next(request)
+  }
+
+  "Each request's attempts" should "count only its own calls when the corrective answer is stored" in {
+    val store  = new InMemoryCheckpointer()
+    val thread = ThreadId("attempts-stored")
+    val agent = built(
+      withFormat(answers(invalid, invalid, valid)).withMiddleware(new Retrying(1)).withRuntime(new GraphRuntime(store))
+    )
+    agent.run(thread, "bill Acme").value.decodeOutput[Invoice] shouldBe Right(Invoice("Acme", 12.5))
+    modelCallsCompleted(store, thread).map(_.attempts) shouldBe Vector(2, 1)
+  }
+
+  it should "count only its own calls when the second answer is invalid too" in {
+    val store  = new InMemoryCheckpointer()
+    val thread = ThreadId("attempts-blocked")
+    val agent = built(
+      withFormat(answers(invalid, invalid, invalid))
+        .withMiddleware(new Retrying(1))
+        .withRuntime(new GraphRuntime(store))
+    )
+    agent.run(thread, "bill Acme").error shouldBe a[GraphError.OutputInvalid]
+    modelCallsCompleted(store, thread).map(_.attempts) shouldBe Vector(2, 1)
+  }
+
+  it should "count only its own calls when a wrapper asks during the corrective request" in {
+    val store  = new InMemoryCheckpointer()
+    val thread = ThreadId("attempts-asked")
+    // asks after the corrective request's call, so the step suspends with both calls' usage
+    val reviewer = new AgentMiddleware.Asking[String, Boolean] {
+      val requests         = new AtomicInteger(0)
+      val id: MiddlewareId = MiddlewareId("reviewer")
+      override def wrapModelCall(request: ModelRequest, context: RunContext)(
+        next: ModelRequest => Result[Completion]
+      ): Result[Completion] =
+        if (requests.incrementAndGet() == 2) next(request).flatMap(c => ask(c.message.content)) else next(request)
+    }
+    val agent = built(withFormat(answers(invalid, valid)).withMiddleware(reviewer).withRuntime(new GraphRuntime(store)))
+    val parked = agent.run(thread, "bill Acme").value
+
+    parked.status shouldBe a[AgentStatus.Suspended]
+    parked.usage.requestCount shouldBe 2
+    modelCallsCompleted(store, thread).map(_.attempts) shouldBe Vector(1, 1)
+  }
+
   "A second invalid answer" should "end the turn Left(OutputInvalid) with the problems, retracting the turn" in {
     val store  = new InMemoryCheckpointer()
     val client = answers(valid, invalid, "not json at all", valid)

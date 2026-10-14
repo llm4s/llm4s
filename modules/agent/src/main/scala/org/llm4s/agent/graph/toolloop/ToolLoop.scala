@@ -951,12 +951,17 @@ object ToolLoop:
           yield
             val request  = ModelRequest(prompt ++ view, nodes.offered)
             val attempts = AtomicInteger(0)
-            // every completion the model returned in this step, with its attempt number
+            // the step's attempts before the current request: a request's attempts - which every durable
+            // ModelCallCompleted reports - count only the calls made for it, so a corrective request starts from 0
+            val before               = AtomicInteger(0)
+            def requestAttempts: Int = attempts.get - before.get
+            // every completion the model returned in this step, with its request's attempts so far
             val returned = AtomicReference(Vector.empty[(Completion, Int)])
             def call(req: ModelRequest): Result[Completion] =
+              before.set(attempts.get)
               stack.wrapModelCall(req, answering(agent.id, context, answers)) { r =>
                 val result = callModel(agent.model, agent.id, context, attempts)(r)
-                result.foreach(c => returned.updateAndGet(_ :+ (c -> attempts.get)))
+                result.foreach(c => returned.updateAndGet(_ :+ (c -> requestAttempts)))
                 result
               }
             // nothing of the step is stored while the question waits - it runs again once answered - but
@@ -992,12 +997,12 @@ object ToolLoop:
               case Left(error)                  => NodeResult.Fail(error)
               case Right(first) =>
                 checked(first) match
-                  case None              => accepted(first, None, attempts.get, None)
-                  case Some(Right(json)) => accepted(first, Some(json), attempts.get, None)
+                  case None              => accepted(first, None, requestAttempts, None)
+                  case Some(Right(json)) => accepted(first, Some(json), requestAttempts, None)
                   // one corrective retry in this task (design 4.26): the request again, with the invalid answer
                   // and its problems, neither of them stored; every wrapper sees it as a request of its own
                   case Some(Left(problems)) =>
-                    val firstAttempts = attempts.get
+                    val firstAttempts = requestAttempts
                     val corrective = request.withMessages(
                       request.messages :+ AssistantMessage(OutputFormat.echoed(first.message.content)) :+
                         UserMessage(OutputFormat.correction(problems))
@@ -1008,7 +1013,7 @@ object ToolLoop:
                       case Right(second)                =>
                         // the rejected call is accounted whatever the second does: its own event and usage
                         val rejected = completed(first, firstAttempts, context)
-                        val n        = attempts.get - firstAttempts
+                        val n        = requestAttempts
                         checked(second) match
                           case None              => accepted(second, None, n, Some(rejected))
                           case Some(Right(json)) => accepted(second, Some(json), n, Some(rejected))
