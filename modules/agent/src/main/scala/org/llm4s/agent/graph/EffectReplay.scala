@@ -345,25 +345,29 @@ object ReplayGuard:
     probe: => Result[StateCheck]
   )(plan: => Result[Plan[A]]): Result[A] =
     val journal = context.journal
-    // `baseline`: on a replay, the `before` the effect began against. A plan that read anything else saw a
-    // change made after the probe, which the effect must not overwrite
-    def fresh(owner: TaskId, baseline: Option[StateCheck]): Result[A] =
+    // `recorded`: on a replay, the intent the effect began with. It stays the evidence: a replan must read the
+    // same `before` (else it saw a change made after the probe) and plan the same `after` (else the recorded
+    // intent could no longer recognise the original effect, which a run that lost its claim may still land),
+    // and the begun record, with its `presumed`, is never rewritten
+    def fresh(owner: TaskId, recorded: Option[EffectIntent.Verifiable]): Result[A] =
       caught(plan)
         .flatMap(planned => caught(Right(ujson.copy(upickle.default.writeJs(planned.presumed)))).map(planned -> _))
         .flatMap { (planned, presumed) =>
-          val intent = EffectIntent.Verifiable(planned.before, planned.after, presumed)
+          val intent = recorded.getOrElse(EffectIntent.Verifiable(planned.before, planned.after, presumed))
+          val differs = recorded.collect {
+            case EffectIntent.Verifiable(before, _, _) if before != planned.before =>
+              s"its target changed after the effect began: it is now ${planned.before.value}, not ${before.value} (not applied)"
+            case EffectIntent.Verifiable(_, after, _) if after != planned.after =>
+              s"the effect would now end at ${planned.after.value}, not the recorded ${after.value}"
+          }
           for
-            _ <- baseline.filter(_ != planned.before).fold[Result[Unit]](Right(())) { expected =>
-              Left(
-                GraphError.EffectReplayRefused(
-                  key.operation,
-                  s"its target changed after the effect began: it is now ${planned.before.value}, not " +
-                    s"${expected.value} (not applied)"
-                )
-              )
-            }
-            _       <- withinCap(key, "its presumed outcome", presumed, maxOutcomeBytes)
-            _       <- journal.write(new EffectRecord(key, owner, EffectBody.Begun(intent)))
+            _ <- differs.fold[Result[Unit]](Right(()))(reason =>
+              Left(GraphError.EffectReplayRefused(key.operation, reason))
+            )
+            _ <- withinCap(key, "its presumed outcome", presumed, maxOutcomeBytes)
+            _ <-
+              if recorded.isDefined then Right(())
+              else journal.write(new EffectRecord(key, owner, EffectBody.Begun(intent)))
             _       <- notCancelled(context, key)
             outcome <- caught(planned.effect())
             _       <- complete(journal, key, owner, intent, outcome, maxOutcomeBytes)
@@ -377,7 +381,7 @@ object ReplayGuard:
             caught(probe).flatMap { current =>
               // `before` first: when the two digests are equal the probe cannot tell whether the effect
               // ran, and running it again - a compare-and-set that changes no digest - is what is safe
-              if current == before then fresh(record.taskId, Some(before))
+              if current == before then fresh(record.taskId, Some(intent))
               else if current == after then
                 decode[A](key, presumed).flatMap { outcome =>
                   journal

@@ -231,6 +231,31 @@ class ReplayGuardSpec extends AnyFlatSpec with Matchers with EitherValues with O
     cell shouldBe "c"
   }
 
+  it should "keep the recorded intent on a replan, refusing one that would end elsewhere" in {
+    var cell    = "a"
+    var suffix  = "!"
+    val journal = new Journal
+    val c       = context(journal)
+    def append() =
+      ReplayGuard.verifiable[String](c, c.effectKey("text.append", "cell"))(Right(StateCheck.of(cell))) {
+        val before = cell
+        Right(ReplayGuard.Plan(StateCheck.of(before), StateCheck.of(before + suffix), s"presumed $suffix") {
+          cell = before + suffix; Right(cell)
+        })
+      }
+    journal.failNext = Some(true) // the intent lands against "a" -> "a!"; the effect never runs
+    append().isLeft shouldBe true
+    val recorded = journal.records.values.head
+    // a redeployed plan now appends "?": it would end elsewhere, so it is refused, the intent kept
+    suffix = "?"
+    refusal(append()) should include(StateCheck.of("a!").value)
+    cell shouldBe "a"
+    journal.records.values.head shouldBe recorded
+    // the same plan again runs, under the recorded intent
+    suffix = "!"
+    append().value shouldBe "a!"
+  }
+
   it should "run again, rather than presume, a plan whose digests before and after are equal" in {
     val journal = new Journal
     val writes  = new AtomicInteger()
