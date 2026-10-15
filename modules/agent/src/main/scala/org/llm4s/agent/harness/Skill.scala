@@ -66,11 +66,18 @@ object Skill:
    * for it (no YAML library), then checked against the standard. A [[SkillFormatError]] names the line.
    */
   def parse(path: VPath, content: String): Result[Skill] =
-    fromLines(path, Text.lines(content), closed = true)
+    // the same bound the middleware reads within: the frontmatter must close in the first MaxFrontmatterChars
+    val cut = content.length > MaxFrontmatterChars
+    fromLines(path, Text.lines(if cut then content.substring(0, MaxFrontmatterChars) else content), closed = !cut)
 
-  /** The skill of a file's first lines, `closed` when they are the whole file or end at the closing `---`. */
+  /**
+   * The skill of a file's first lines, `closed` when they are the whole file or end at the closing `---`. When they
+   * are not, the last line may be cut short, so it is dropped: a cut `----` must not read as the closing fence.
+   */
   private[harness] def fromLines(path: VPath, lines: Vector[String], closed: Boolean): Result[Skill] =
-    Frontmatter.parse(path, lines, closed).flatMap(fields => fromFields(path, fields))
+    Frontmatter
+      .parse(path, if closed then lines else lines.dropRight(1), closed)
+      .flatMap(fields => fromFields(path, fields))
 
   private def fromFields(path: VPath, fields: ListMap[String, Frontmatter.Field]): Result[Skill] =
     def error(line: Int, problem: String) = Left(SkillFormatError(path, line, problem))
