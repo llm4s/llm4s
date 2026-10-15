@@ -414,6 +414,9 @@ class WorkspaceAgentInterfaceImpl(
         .iterator()
         .asScala
         .filter(withinPolicy) // before anything follows a link it lists
+        // the workspace's files and directories (and links to nothing, which a delete removes); a FIFO, socket or
+        // device is no file any operation reads or writes, so a listing never offers it as one
+        .filter(p => Files.isDirectory(p) || Files.isRegularFile(p) || (Files.isSymbolicLink(p) && !Files.exists(p)))
         .filterNot { p =>
           val relativePath = rootPath.relativize(p).toString
           isExcluded(relativePath, patterns)
