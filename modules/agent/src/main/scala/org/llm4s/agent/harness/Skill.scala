@@ -371,8 +371,11 @@ private[harness] object Frontmatter:
 
   /** Only a comment may follow a closing quote or bracket. */
   private def trailing(n: Int, rest: String): Parsed[Unit] =
+    // a comment only after whitespace, by the one rule plain values use: `"a"#b` is not a comment
     val r = rest.trim
-    if r.isEmpty || r.startsWith("#") then Right(()) else Left((n, "unexpected text after a closing quote or bracket"))
+    if r.isEmpty then Right(())
+    else if r.startsWith("#") && CommentStart.findFirstMatchIn(rest).exists(_.start > 0) then Right(())
+    else Left((n, "unexpected text after a closing quote or bracket"))
 
   /**
    * The quoted string at the start of `value`, opened by `quote`, and the text after it. Double quotes take the escapes

@@ -244,6 +244,20 @@ class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
     parse("---", "name: pdf-tools", "description: \"a:\tb\"", "---").value.description shouldBe "a:\tb"
   }
 
+  it should "take a comment after a closing quote or bracket only after whitespace" in {
+    problem("---", "name: pdf-tools", "description: \"PDFs\"#internal", "---").line shouldBe 3
+    problem("---", "name: pdf-tools", "description: d", "allowed-tools: [Read]#internal", "---").line shouldBe 4
+    parse("---", "name: pdf-tools", "description: \"PDFs\" # internal", "---").value.description shouldBe "PDFs"
+    parse(
+      "---",
+      "name: pdf-tools",
+      "description: d",
+      "allowed-tools: [Read]\t# internal",
+      "---"
+    ).value.allowedTools shouldBe
+      Vector("Read")
+  }
+
   it should "refuse a name over 64 characters" in {
     val long = "a" * 65
     val e    = Skill.parse(VPath(s"/s/$long/SKILL.md").value, s"---\nname: $long\ndescription: d\n---").left.value
