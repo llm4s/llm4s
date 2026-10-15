@@ -237,6 +237,13 @@ class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
       "a\tb\nc \u00e9 \uD83D\uDE00"
   }
 
+  it should "refuse a tab inside a plain value, which could separate an indicator, and take it quoted" in {
+    for (v <- Seq("summarize:\tquickly", "-\tx", "?\tx", "a\tb"))
+      withClue(v)(problem("---", "name: pdf-tools", s"description: $v", "---").line shouldBe 3)
+    problem("---", "name: pdf-tools", "description: d", "allowed-tools: [a:\tb]", "---").line shouldBe 4
+    parse("---", "name: pdf-tools", "description: \"a:\tb\"", "---").value.description shouldBe "a:\tb"
+  }
+
   it should "refuse a name over 64 characters" in {
     val long = "a" * 65
     val e    = Skill.parse(VPath(s"/s/$long/SKILL.md").value, s"---\nname: $long\ndescription: d\n---").left.value
