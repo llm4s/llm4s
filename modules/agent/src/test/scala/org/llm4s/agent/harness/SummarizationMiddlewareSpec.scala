@@ -429,6 +429,15 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
       .compress(None, Vector(UserMessage(Vector(image)), AssistantMessage("nice")), 500, context)
       .value
     only should include("Media: [image (url, image/png)]")
+    // within a tight bound the media lines come first, within half of it, and the digest is cut instead
+    val busy = (1 to 20).toVector.flatMap(i =>
+      Vector(UserMessage(Vector(ContentPart.Text(s"step id: K$i must be kept. " * 5), image)), AssistantMessage("ok"))
+    )
+    val tight = SummaryCompressor.digest(counter).compress(Some(only), busy, 30, context).value
+    tight.length should be <= 120
+    tight should startWith("Media: 21 image")
+    val roomy = SummaryCompressor.digest(counter).compress(Some(only), busy.take(2), 100, context).value
+    roomy.linesIterator.takeWhile(_.startsWith("Media: ")).toVector should have size 2
   }
 
   it should "give the compressor the stored summary clamped to the bound, as the request carries it (rule 12)" in {

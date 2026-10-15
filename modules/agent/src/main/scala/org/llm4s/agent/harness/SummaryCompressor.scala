@@ -75,6 +75,11 @@ object SummaryCompressor:
   /** The least `maxInputTokens` of a model compressor: a cut line keeps 16 characters beside its marker. */
   val MinInputTokens: Int = 16
 
+  /**
+   * A digest summary is its media lines (`Media: ...`) first, then the digest. The media lines name every media part
+   * the summary covers, since `HistoryCompressor` keeps only what its patterns extract; they come first and take at
+   * most half the bound, so the cut a bound makes falls on the digest, never on them.
+   */
   final private class Digest(counter: ConversationTokenCounter) extends SummaryCompressor:
     def compress(
       previous: Option[String],
@@ -82,17 +87,18 @@ object SummaryCompressor:
       maxTokens: Int,
       context: ModelContext
     ): Result[String] =
-      digestOf(messages, maxTokens).flatMap { added =>
-        previous.filter(_.nonEmpty) match
-          case None => Right(added)
-          case Some(old) =>
-            val extended = if added.isEmpty then old else s"$old\n$added"
-            if extended.length.toLong <= maxTokens.toLong * 4 then Right(extended)
-            else
-              // the old summary's media lines are kept as they are: its digest would not extract them
-              val oldMedia = old.linesIterator.filter(_.startsWith("Media: ")).toVector
-              digestOf(UserMessage(old) +: messages, maxTokens).map(d => (oldMedia :+ d).mkString("\n"))
-      }
+      val budget                = maxTokens.toLong * 4
+      val (oldMedia, oldDigest) = previous.fold(Vector.empty[String])(_.linesIterator.toVector).partition(isMedia)
+      val media                 = mediaText(oldMedia ++ mediaLine(messages), budget / 2)
+      val room                  = math.max(0L, budget - media.fold(0L)(_.length.toLong + 1))
+      val old                   = oldDigest.mkString("\n").trim
+      digestOf(messages, maxTokens)
+        .flatMap { added =>
+          val extended = Vector(old, added).filter(_.nonEmpty).mkString("\n")
+          if old.isEmpty || extended.length.toLong <= room then Right(extended)
+          else digestOf(UserMessage(old) +: messages, math.max(1L, room / 4).toInt)
+        }
+        .map(body => (media.toVector :+ SummarizationMiddleware.cut(body, room)).filter(_.nonEmpty).mkString("\n"))
 
     /**
      * The digest of `messages`. Media parts are first named by kind in their message's text, so `HistoryCompressor`
@@ -106,20 +112,37 @@ object SummaryCompressor:
           case SystemMessage(c) if c.startsWith(DigestHeader) => c.stripPrefix(DigestHeader).trim
           case kept                                           => rendered(kept)
         })
-        .map(_.filter(_.nonEmpty) ++ mediaLine(messages))
-        .map(_.mkString("\n"))
+        .map(_.filter(_.nonEmpty).mkString("\n"))
 
-    /**
-     * The media of `messages`, named by kind: `HistoryCompressor`'s digest keeps only what its patterns extract, so
-     * a block whose content is an image would otherwise leave no trace.
-     */
-    private def mediaLine(messages: Vector[Message]): Option[String] =
-      val media = messages.flatMap {
-        case u: UserMessage => u.parts.filter(ContentPart.isMedia)
-        case t: ToolMessage => t.parts.filter(ContentPart.isMedia)
-        case _              => Vector.empty
-      }
-      Option.when(media.nonEmpty)(media.map(m => s"[${m.kind}]").mkString("Media: ", ", ", ""))
+  private val MediaPrefix = "Media: "
+
+  private def isMedia(line: String): Boolean = line.startsWith(MediaPrefix)
+
+  /** The media parts of `messages`, named by kind, as one media line. */
+  private def mediaLine(messages: Vector[Message]): Option[String] =
+    val media = messages.flatMap {
+      case u: UserMessage => u.parts.filter(ContentPart.isMedia)
+      case t: ToolMessage => t.parts.filter(ContentPart.isMedia)
+      case _              => Vector.empty
+    }
+    Option.when(media.nonEmpty)(media.map(m => s"[${m.kind}]").mkString(MediaPrefix, ", ", ""))
+
+  private val MediaKind = """\[(image|document)""".r
+
+  /**
+   * `lines` as one media text within `max` characters: as they are when they fit, else one line counting each kind,
+   * which always fits a summary of at least a few tokens.
+   */
+  private def mediaText(lines: Vector[String], max: Long): Option[String] =
+    val joined = lines.mkString("\n")
+    if lines.isEmpty then None
+    else if joined.length.toLong <= max then Some(joined)
+    else
+      val counts = lines.flatMap(l => MediaKind.findAllMatchIn(l).map(_.group(1))).groupBy(identity)
+      val each   = counts.toVector.sortBy(_._1).map((kind, n) => s"${n.size} $kind").mkString(", ")
+      Some(
+        SummarizationMiddleware.cut(s"${MediaPrefix}$each (each named in the conversation before)", math.max(0L, max))
+      )
 
   final private class Model(client: LLMClient, options: CompletionOptions, maxInputTokens: Int)
       extends SummaryCompressor:
