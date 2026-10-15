@@ -406,7 +406,8 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
           .withTools(
             org.llm4s.agent.SpecTools.set(
               org.llm4s.agent.SpecTools.tool("echo")((a, _) =>
-                org.llm4s.agent.graph.tool.ToolOutcome.Success(ujson.Str(a.text))
+                org.llm4s.agent.graph.tool.ToolOutcome
+                  .Success(org.llm4s.agent.graph.tool.ToolContent.Json(ujson.Str(a.text)))
               )
             )
           )
@@ -623,6 +624,28 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     ask("What did I say my favourite colour was?").value shouldBe Some("Teal.")
     systemPrompt(client.sent(1)) should include("My favourite colour is teal")
     java.nio.file.Files.exists(dir.resolve("memory-alice.db")) shouldBe true
+  }
+
+  // memory is text: a turn's media - a tool's image, imported history's documents - is never recorded or recalled,
+  // so no media bytes reach a tenant's store (#1913)
+  "A turn that carried media" should "record its user text and answer only, never the media" in {
+    val (stores, _) = perTenant()
+    val m           = new SemanticMemoryMiddleware(stores, simple, answering(), record = Some(MemoryRecording()))
+    val chart = ContentPart
+      .image(org.llm4s.media.MediaSource.Inline(IArray.fill[Byte](64)(9)), org.llm4s.media.MediaType.Png)
+      .value
+    val tool = org.llm4s.agent.SpecTools.tool("render")((_, _) =>
+      org.llm4s.agent.graph.tool.ToolOutcome.Success(org.llm4s.agent.graph.tool.ToolContent.Parts(Vector(chart)))
+    )
+    val client = new ScriptedLLMClient(
+      Right(org.llm4s.agent.SpecTools.calling(org.llm4s.agent.SpecTools.call("c1", "render"))),
+      Right(CompletionFixture.simple("It rose."))
+    )
+    val history = Seq(UserMessage(Vector(ContentPart.Text("earlier"), chart)), AssistantMessage("ok"))
+    built(Agent.builder("assistant", client).withMiddleware(m).withTools(org.llm4s.agent.SpecTools.set(tool)))
+      .run(ThreadId("media"), "How did sales go?", RunConfig(), history)
+      .value
+    contents(held(m, None)) shouldBe Vector("How did sales go?", "It rose.")
   }
 }
 

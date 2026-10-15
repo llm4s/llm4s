@@ -21,7 +21,7 @@ import org.llm4s.agent.graph.middleware.{
   ModelResponse,
   PromptSection
 }
-import org.llm4s.agent.graph.tool.{ ToolArgumentValidator, ToolOutcome, ToolSet }
+import org.llm4s.agent.graph.tool.{ ToolArgumentValidator, ToolContent, ToolOutcome, ToolSet }
 import org.llm4s.agent.graph.toolloop.OutputFormat
 import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.error.ValidationError
@@ -67,7 +67,7 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
 
   // a format on a request that offers tools conflicts with tool use for several providers (Codex, #1924)
   it should "send no response format on a call that offers the agent's tools, so the model can still call them" in {
-    val echo   = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
+    val echo   = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
     val client = new ScriptedLLMClient(Right(calling(call("c1", "echo"))), Right(CompletionFixture.simple(valid)))
     val result = built(withFormat(client).withTools(SpecTools.set(echo))).run("bill Acme").value
 
@@ -87,7 +87,7 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "send the format when a model wrapper removes the tools from the request" in {
-    val echo = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
+    val echo = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
     val toolless = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("toolless")
       override def wrapModelCall(request: ModelRequest, context: ModelContext)(
@@ -101,7 +101,7 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "send no response format of the completion options on a tool call either" in {
-    val echo   = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
+    val echo   = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
     val client = new ScriptedLLMClient(Right(calling(call("c1", "echo"))), Right(CompletionFixture.simple(valid)))
     built(
       withFormat(client)
@@ -199,7 +199,7 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "route the corrective call's tool calls as usual" in {
-    val echo = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
+    val echo = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
     val client = new ScriptedLLMClient(
       Right(CompletionFixture.simple(invalid)),
       Right(calling(call("c1", "echo"))),
@@ -338,7 +338,7 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "remove a turn's tool calls too" in {
-    val echo = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
+    val echo = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
     val client = new ScriptedLLMClient(
       Right(calling(call("c1", "echo"))),
       Right(CompletionFixture.simple(invalid)),
@@ -358,7 +358,7 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
     val write = org.llm4s.agent.graph.tool.AgentTool(SpecTools.spec("write"), writes = Set(files)) { (a, context) =>
       val current = context.state.get(files).getOrElse(Map.empty)
       ToolOutcome.Success(
-        ujson.Str("ok"),
+        ToolContent.Json(ujson.Str("ok")),
         org.llm4s.agent.graph.StateUpdate.update(files, current + (a.text -> a.text))
       )
     }
@@ -387,7 +387,7 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
     val write = org.llm4s.agent.graph.tool.AgentTool(SpecTools.spec("write"), writes = Set(files)) { (a, context) =>
       val current = context.state.get(files).getOrElse(Map.empty)
       ToolOutcome.Success(
-        ujson.Str("ok"),
+        ToolContent.Json(ujson.Str("ok")),
         org.llm4s.agent.graph.StateUpdate.update(files, current + (a.text -> a.text))
       )
     }

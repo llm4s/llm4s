@@ -76,25 +76,26 @@ private[javaapi] object LlmErrorKinds {
 
   /** The kind of each concrete error class of `org.llm4s.error`. */
   val byClass: Map[Class[? <: LLMError], LlmErrorKind] = Map(
-    classOf[AuthenticationError]   -> LlmErrorKind.AUTHENTICATION,
-    classOf[RateLimitError]        -> LlmErrorKind.RATE_LIMIT,
-    classOf[TimeoutError]          -> LlmErrorKind.TIMEOUT,
-    classOf[NetworkError]          -> LlmErrorKind.NETWORK,
-    classOf[ServiceError]          -> LlmErrorKind.SERVICE,
-    classOf[APIError]              -> LlmErrorKind.SERVICE,
-    classOf[ValidationError]       -> LlmErrorKind.VALIDATION,
-    classOf[InvalidInputError]     -> LlmErrorKind.VALIDATION,
-    classOf[ConfigurationError]    -> LlmErrorKind.CONFIGURATION,
-    classOf[CancelledError]        -> LlmErrorKind.CANCELLED,
-    classOf[ContextError]          -> LlmErrorKind.OTHER,
-    classOf[ExecutionError]        -> LlmErrorKind.OTHER,
-    classOf[NotFoundError]         -> LlmErrorKind.OTHER,
-    classOf[OptimisticLockFailure] -> LlmErrorKind.OTHER,
-    classOf[ProcessingError]       -> LlmErrorKind.OTHER,
-    classOf[SimpleError]           -> LlmErrorKind.OTHER,
-    classOf[SystemError]           -> LlmErrorKind.OTHER,
-    classOf[TokenizerError]        -> LlmErrorKind.OTHER,
-    classOf[UnknownError]          -> LlmErrorKind.OTHER
+    classOf[AuthenticationError]         -> LlmErrorKind.AUTHENTICATION,
+    classOf[RateLimitError]              -> LlmErrorKind.RATE_LIMIT,
+    classOf[TimeoutError]                -> LlmErrorKind.TIMEOUT,
+    classOf[NetworkError]                -> LlmErrorKind.NETWORK,
+    classOf[ServiceError]                -> LlmErrorKind.SERVICE,
+    classOf[APIError]                    -> LlmErrorKind.SERVICE,
+    classOf[ValidationError]             -> LlmErrorKind.VALIDATION,
+    classOf[InvalidInputError]           -> LlmErrorKind.VALIDATION,
+    classOf[UnsupportedContentPartError] -> LlmErrorKind.VALIDATION,
+    classOf[ConfigurationError]          -> LlmErrorKind.CONFIGURATION,
+    classOf[CancelledError]              -> LlmErrorKind.CANCELLED,
+    classOf[ContextError]                -> LlmErrorKind.OTHER,
+    classOf[ExecutionError]              -> LlmErrorKind.OTHER,
+    classOf[NotFoundError]               -> LlmErrorKind.OTHER,
+    classOf[OptimisticLockFailure]       -> LlmErrorKind.OTHER,
+    classOf[ProcessingError]             -> LlmErrorKind.OTHER,
+    classOf[SimpleError]                 -> LlmErrorKind.OTHER,
+    classOf[SystemError]                 -> LlmErrorKind.OTHER,
+    classOf[TokenizerError]              -> LlmErrorKind.OTHER,
+    classOf[UnknownError]                -> LlmErrorKind.OTHER
   )
 
   /**

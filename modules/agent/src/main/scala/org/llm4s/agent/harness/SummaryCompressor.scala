@@ -6,6 +6,7 @@ import org.llm4s.context.{ ConversationTokenCounter, HistoryCompressor }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
+  ContentPart,
   CompletionOptions,
   Conversation,
   Message,
@@ -151,6 +152,15 @@ object SummaryCompressor:
     case a: AssistantMessage =>
       val calls = a.toolCalls.map(c => s"[called ${c.name}(${c.arguments.render()}) as ${c.id}]")
       (Option(a.content).filter(_.nonEmpty).toVector ++ calls).mkString("assistant: ", " ", "")
-    case t: ToolMessage => s"tool result for ${t.toolCallId}: ${t.content}"
-    case u: UserMessage => s"user: ${u.content}"
+    case t: ToolMessage => s"tool result for ${t.toolCallId}: ${withMedia(t.parts)}"
+    case u: UserMessage => s"user: ${withMedia(u.parts)}"
     case other          => s"${other.role.toString.toLowerCase}: ${other.content}"
+
+  /** The text of `parts`, each media part named by its kind in place, never sent as bytes. */
+  private def withMedia(parts: Vector[ContentPart]): String =
+    parts
+      .map {
+        case ContentPart.Text(text) => text
+        case media                  => s"[${media.kind}]"
+      }
+      .mkString(" ")

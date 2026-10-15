@@ -10,6 +10,7 @@ import org.llm4s.agent.graph.toolloop.ToolLoopFixtures.*
 import org.llm4s.context.ConversationTokenCounter
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.*
+import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.toolapi.Schema
 import org.llm4s.types.Result
 import org.scalatest.{ EitherValues, OptionValues }
@@ -80,7 +81,7 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
         "Echo",
         Schema.`object`[Echo]("echo").withRequiredField("text", Schema.string("text"))
       )
-    )((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
+    )((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
 
   "SummarizationMiddleware" should "fold all but keepRecent messages into a summary sent in the same request (rule 3)" in {
     given store: InMemoryCheckpointer = new InMemoryCheckpointer
@@ -310,6 +311,25 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     client.calls.foreach((conversation, _) => conversation.messages.last.content.length should be < (20 * 4 + 60))
     client.calls(1)._1.messages.last.content should include("first")
     client.calls.head._1.messages.last.content should include("[cut:")
+  }
+
+  it should "name media parts in the transcript by kind, never sending their bytes" in {
+    val client = ScriptedLLMClient.of(CompletionFixture.simple("s"))
+    val image =
+      ContentPart.image(MediaSource.Inline(IArray.fill[Byte](64)(7)), MediaType.Png).value
+    val context = new ModelContext(testRunContext(), ThreadState.empty(Map.empty), agentA)
+    SummaryCompressor
+      .model(client)
+      .compress(
+        None,
+        Vector(UserMessage(Vector(ContentPart.Text("look"), image)), AssistantMessage("ok")),
+        100,
+        context
+      )
+      .value shouldBe "s"
+    val sent = client.calls.head._1.messages.last.content
+    sent should include("user: look [image (inline")
+    sent should include("image/png")
   }
 
   "The digest compressor" should "digest with no model call, extend by appending, and stay within the bound" in {

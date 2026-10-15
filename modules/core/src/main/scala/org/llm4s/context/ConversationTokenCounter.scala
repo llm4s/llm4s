@@ -70,9 +70,13 @@ class ConversationTokenCounter private (tokenizer: org.llm4s.context.tokens.Stri
 
   private def countMessageContent(message: Message): Int = message match {
     case msg: AssistantMessage => countAssistantMessage(msg)
-    case msg: ToolMessage      => countToolMessage(msg)
+    case msg: ToolMessage      => countToolMessage(msg) + mediaTokens(msg.parts)
+    case msg: UserMessage      => countTextContent(msg.content) + mediaTokens(msg.parts)
     case msg                   => countTextContent(msg.content)
   }
+
+  // media is not in the text view: estimated, so images and documents count against the window
+  private def mediaTokens(parts: Vector[ContentPart]): Int = parts.map(ContentPart.estimatedTokens).sum
 
   // Thinking counts too: Anthropic, Bedrock, Ollama, DeepSeek, Z.ai, OpenRouter and Mistral send it
   // back, and a short answer can carry thousands of reasoning tokens. Providers that drop it

@@ -2,7 +2,7 @@ package org.llm4s.context
 
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model._
-import org.llm4s.types.Result
+import org.llm4s.types.{ Result, SemanticBlockId }
 import org.slf4j.LoggerFactory
 import scala.util.matching.Regex
 
@@ -93,7 +93,7 @@ object HistoryCompressor {
     logger.debug(s"Starting history compression: cap=$capTokens, keepLastK=$keepLastK")
 
     // Skip compression if messages already contain [HISTORY_SUMMARY] for idempotence
-    val existingSummaries = messages.filter(_.content.startsWith("[HISTORY_SUMMARY]"))
+    val existingSummaries = messages.collect { case s: SystemMessage if s.content.startsWith("[HISTORY_SUMMARY]") => s }
     if (existingSummaries.nonEmpty) {
       logger.debug(s"Found ${existingSummaries.length} existing history summaries, skipping compression")
       Right(messages)
@@ -116,13 +116,21 @@ object HistoryCompressor {
       if (keepLastK <= 0) (blocks, Seq.empty)
       else blocks.splitAt(math.max(0, blocks.length - keepLastK))
 
-    val olderDigests = older.map(createBlockDigest)
+    // A block with an image or document is never digested: a digest is text, built from the messages' text
+    // view, and would lose the media without a trace (#1913). Nor is a block that shares a tool call with a block
+    // kept - one with media, or a recent one - so no call loses its result or result its call. The older blocks
+    // from the earliest of those on are kept as they are, so the history keeps its order; only the prefix before
+    // it is digested.
+    val kept                  = keptBlocks(older, recent)
+    val firstKept             = older.indexWhere(b => kept(b.id))
+    val (digested, keptOlder) = if (firstKept < 0) (older, Seq.empty) else older.splitAt(firstKept)
+    val olderDigests          = digested.map(createBlockDigest)
 
     val digestMessages: Seq[Message] =
       olderDigests.map(d => SystemMessage(s"[HISTORY_SUMMARY]\n${d.content}"))
 
     val recentMessages: Seq[Message] =
-      recent.flatMap(_.messages)
+      (keptOlder ++ recent).flatMap(_.messages)
 
     // If multiple digest messages exceed cap, consolidate them into one within cap.
     val digestTotalTokens = digestMessages.map(tokenCounter.countMessage).sum
@@ -134,6 +142,26 @@ object HistoryCompressor {
       }
 
     Right(finalDigestMsgs ++ recentMessages)
+  }
+
+  /**
+   * The ids of the `older` blocks that must not be digested: those with media, and every one linked by a shared
+   * tool call id, transitively, to one of them or to a `recent` block.
+   */
+  private def keptBlocks(older: Seq[SemanticBlock], recent: Seq[SemanticBlock]): Set[SemanticBlockId] = {
+    def callIds(block: SemanticBlock): Set[String] =
+      block.messages.flatMap {
+        case a: AssistantMessage => a.toolCalls.map(_.id)
+        case t: ToolMessage      => Seq(t.toolCallId)
+        case _                   => Nil
+      }.toSet
+    @scala.annotation.tailrec
+    def grow(kept: Seq[SemanticBlock]): Seq[SemanticBlock] = {
+      val ids  = kept.flatMap(callIds).toSet
+      val more = older.filter(b => !kept.contains(b) && callIds(b).exists(ids))
+      if (more.isEmpty) kept else grow(kept ++ more)
+    }
+    grow(older.filter(b => Message.hasMedia(b.messages)) ++ recent).map(_.id).toSet -- recent.map(_.id)
   }
 
   private def createBlockDigest(block: SemanticBlock): HistoryDigest = {

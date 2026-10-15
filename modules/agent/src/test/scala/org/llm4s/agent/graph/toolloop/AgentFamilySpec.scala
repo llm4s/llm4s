@@ -48,7 +48,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
   private val echo: AgentTool[Echo] =
     AgentTool(
       AgentToolSpec[Echo]("echo", "Echoes", Schema.`object`[Echo]("echo").withRequiredField("text", Schema.string("t")))
-    )((args, _) => ToolOutcome.Success(ujson.Str(args.text)))
+    )((args, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(args.text))))
 
   private val tools = ToolSet.of(echo).value
 
@@ -177,7 +177,8 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
     val gated = AgentTool(
       AgentToolSpec[Echo]("gated", "Gated", Schema.`object`[Echo]("g").withRequiredField("text", Schema.string("t")))
     )((args, context) =>
-      if context.approved then ToolOutcome.Success(ujson.Str(args.text)) else ToolOutcome.NeedsApproval("check")
+      if context.approved then ToolOutcome.Success(ToolContent.Json(ujson.Str(args.text)))
+      else ToolOutcome.NeedsApproval("check")
     )
     val idle  = ScriptedModel()
     val model = ScriptedModel(_ => AssistantMessage(None, Seq(ToolCall("g1", "gated", ujson.Obj("text" -> "ok")))))
@@ -227,7 +228,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
         Schema.`object`[Echo]("t").withRequiredField("text", Schema.string("t"))
       ),
       Set(LoopKeys.turn)
-    )((_, _) => ToolOutcome.Success(ujson.Str("x")))
+    )((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("x"))))
     val activeWriter = AgentTool(
       AgentToolSpec[Echo](
         "active_writer",
@@ -235,7 +236,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
         Schema.`object`[Echo]("w").withRequiredField("text", Schema.string("t"))
       ),
       Set(LoopKeys.activeAgent)
-    )((_, _) => ToolOutcome.Success(ujson.Str("x")))
+    )((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("x"))))
     val refused =
       ToolLoop.build(
         "family",

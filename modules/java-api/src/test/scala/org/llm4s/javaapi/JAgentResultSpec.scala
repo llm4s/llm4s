@@ -131,10 +131,10 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "read a null text as empty, never null, and a null tool-call id as empty" in {
-    FacadeInternals.message(UserMessage(null)).content shouldBe ""
+    FacadeInternals.message(UserMessage(null: String)).content shouldBe ""
     FacadeInternals.message(SystemMessage(null)).content shouldBe ""
     FacadeInternals.message(AssistantMessage(Some(null))).content shouldBe ""
-    val tool = FacadeInternals.message(ToolMessage(null, null))
+    val tool = FacadeInternals.message(ToolMessage(null: String, null))
     tool.content shouldBe ""
     tool.toolCallId shouldBe Optional.empty
     tool.toString shouldBe "TOOL: "

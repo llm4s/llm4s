@@ -10,11 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- The net change since 0.5.0, by area. Add an entry to its area's list; a follow-up to unreleased work edits
      its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
 
+### Breaking changes
+
+- `UserMessage`/`ToolMessage` carry `parts` and have no extractor; `ToolOutcome.Success` takes a `ToolContent`;
+  [migration](docs/reference/migration.md#multimodal-content-parts-1913).
+
 ### Agent harness (Phase 3)
 
 - **Added** context management: `SummarizationMiddleware` (a kept, bounded summary in place of older messages) and
   `ToolOutputOffload` with a read-only `OffloadBackend` for large tool results
   [#1908](https://github.com/llm4s/llm4s/issues/1908); [design §4.34](docs/design/typed-agent-runtime/4.34-stage-3-slice-f4-context-management.md).
+- **Added** multimodal content parts: user messages and tool results carry images and documents, which each provider
+  sends or refuses before sending [#1913](https://github.com/llm4s/llm4s/issues/1913); [design 4.27](docs/design/typed-agent-runtime/4.27-stage-3-slice-f8b-multimodal-content-parts.md).
 - **Added** backend SPIs: `FileBackend` (state, composite, store), `SandboxBackend`, `LongTermStore` and `FileBackendContract`
   [#1904](https://github.com/llm4s/llm4s/issues/1904); [design §4.25](docs/design/typed-agent-runtime/4.25-stage-3-slice-c3-backend-spis.md).
 

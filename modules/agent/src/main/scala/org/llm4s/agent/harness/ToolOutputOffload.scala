@@ -9,10 +9,10 @@ import org.llm4s.agent.graph.middleware.{
   ModelResponse,
   ToolCallRequest
 }
-import org.llm4s.agent.graph.tool.{ LockKey, ToolContext, ToolOutcome }
+import org.llm4s.agent.graph.tool.{ LockKey, ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.agent.graph.toolloop.Messages
 import org.llm4s.annotation.Experimental
-import org.llm4s.llmconnect.model.ToolMessage
+import org.llm4s.llmconnect.model.{ ContentPart, ToolMessage }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
@@ -77,7 +77,7 @@ final class ToolOutputOffload(
             val (stored, isCut) = Text.cutEncoded(large, math.max(0L, math.min(maxResultBytes, room)))
             val result          = OffloadedResult(segment, tool, stored, Text.utf8Bytes(large), isCut)
             ToolOutcome.Success(
-              ujson.Str(preview(result, large)),
+              shown(content, preview(result, large)),
               update.combine(StateUpdate.update(key, OffloadUpdate.Put(result, maxTotalBytes)))
             )
       case other => other
@@ -166,12 +166,22 @@ object ToolOutputOffload:
   private def cutChars(line: String): String = SummarizationMiddleware.cut(line, PreviewLineChars.toLong)
 
   /**
-   * The text the loop sends for a result: a non-blank string as itself, anything else rendered as JSON. `None` when
-   * the result is certainly within `limit` characters, sized without rendering it.
+   * The text the loop sends for a result: for JSON, a non-blank string as itself and anything else rendered as JSON;
+   * for content parts, the text parts joined. `None` when a JSON result is certainly within `limit` characters,
+   * sized without rendering it.
    */
-  private def resultText(content: ujson.Value, limit: Long): Option[String] = content match
-    case ujson.Str(s) => Some(s)
-    case other        => Option.when(Text.jsonValueBytes(other, limit) > limit)(other.render())
+  private def resultText(content: ToolContent, limit: Long): Option[String] = content match
+    case ToolContent.Json(ujson.Str(s)) => Some(s)
+    case ToolContent.Json(other)        => Option.when(Text.jsonValueBytes(other, limit) > limit)(other.render())
+    case ToolContent.Parts(parts)       => Some(ContentPart.text(parts))
+
+  /**
+   * What the model is sent in place of `content`: the preview, and for content parts every non-text part after it,
+   * in order. Only text is offloaded; media is never dropped.
+   */
+  private def shown(content: ToolContent, preview: String): ToolContent = content match
+    case ToolContent.Json(_)      => ToolContent.Json(ujson.Str(preview))
+    case ToolContent.Parts(parts) => ToolContent.Parts(ContentPart.Text(preview) +: parts.filter(ContentPart.isMedia))
 
   /** The text of a stored tool result. */
   private object StoredToolText:

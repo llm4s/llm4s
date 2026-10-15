@@ -10,6 +10,7 @@ import org.llm4s.agent.graph.middleware.ModelContext
 import org.llm4s.agent.graph.middleware.ToolCallRequest
 import org.llm4s.agent.graph.tool.AgentTool
 import org.llm4s.agent.graph.tool.AgentToolSpec
+import org.llm4s.agent.graph.tool.ToolContent
 import org.llm4s.agent.graph.tool.ToolContext
 import org.llm4s.agent.graph.tool.ToolOutcome
 import org.llm4s.agent.graph.tool.ToolSet
@@ -66,7 +67,7 @@ class AgentKtHumanReviewTest {
         AgentTool.`apply$default$2`<ujson.Value>(),
     ) { args: ujson.Value, _: ToolContext ->
         ran.add(args.toString())
-        ToolOutcome.Success.apply(ujson.Str("deployed"), StateUpdate.empty())
+        ToolOutcome.Success.apply(ToolContent.Json.apply(ujson.Str("deployed")), StateUpdate.empty())
     }
 
     /** Asks which environment each call is for, then lets it run. */

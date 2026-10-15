@@ -15,6 +15,9 @@ import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import org.llm4s.media.{ MediaSource, MediaType }
+
+import java.net.URI
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.jdk.CollectionConverters.*
@@ -52,7 +55,7 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
         AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))
       ) { (a, context) =>
         keys.add(context.idempotencyKey.value)
-        ToolOutcome.Success(ujson.Str(lines(a.text.toInt)))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str(lines(a.text.toInt))))
       }
   }
 
@@ -112,7 +115,11 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
   it should "render a JSON result as the loop sends it" in {
     val json = AgentTool(
       AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))
-    )((a, _) => ToolOutcome.Success(ujson.Arr((1 to a.text.toInt).map(i => ujson.Obj("i" -> i, "pad" -> "y" * 30))*)))
+    )((a, _) =>
+      ToolOutcome.Success(
+        ToolContent.Json(ujson.Arr((1 to a.text.toInt).map(i => ujson.Obj("i" -> i, "pad" -> "y" * 30))*))
+      )
+    )
     val model = ScriptedModel(calling("c1" -> 500), answer("done"))
     val (state, _) =
       runInMemory(
@@ -120,6 +127,28 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
         AgentInput("go")
       ).answered
     offloadsOf(state).results.head.content should startWith("""[{"i":1,"pad":"yyy""")
+  }
+
+  it should "offload only the text of content parts, passing every image on in order" in {
+    val chart = ContentPart.image(MediaSource.Url(URI.create("https://example.com/chart.png")), MediaType.Png).value
+    val photo = ContentPart.image(MediaSource.Url(URI.create("https://example.com/photo.png")), MediaType.Png).value
+    val parts = AgentTool(
+      AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))
+    )((_, _) =>
+      ToolOutcome.Success(
+        ToolContent.Parts(Vector(ContentPart.Text(lines(300)), chart, ContentPart.Text(lines(300)), photo))
+      )
+    )
+    val model = ScriptedModel(calling("c1" -> 1), answer("done"))
+    val (state, _) =
+      runInMemory(
+        loopOf(model, Seq(new ToolOutputOffload(thresholdTokens = 1000)), parts).graph,
+        AgentInput("go")
+      ).answered
+    offloadsOf(state).results.head.content shouldBe lines(300) + "\n" + lines(300)
+    val sent = model.request(1).collectFirst { case t: ToolMessage => t }.value
+    sent.parts.filter(ContentPart.isMedia) shouldBe Vector(chart, photo)
+    sent.parts.head.asInstanceOf[ContentPart.Text].text should include("/large_tool_results/")
   }
 
   "The offloads" should "stay within maxTotalBytes under a parallel batch, evicting the oldest (rules 1, 12)" in {

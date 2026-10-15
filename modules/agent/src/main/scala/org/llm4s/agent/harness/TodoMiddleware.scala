@@ -2,7 +2,7 @@ package org.llm4s.agent.harness
 
 import org.llm4s.agent.graph.{ StateKey, StateUpdate }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelContext, PromptSection }
-import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, LockKey, ToolContext, ToolOutcome }
+import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, LockKey, ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ValidationError
 import org.llm4s.toolapi.Schema
@@ -97,11 +97,14 @@ final class TodoMiddleware(
         resolve(current, args) match
           case Left(message) => ToolOutcome.Error(message)
           case Right(next) if next == current =>
-            ToolOutcome.Success(ujson.Str(s"Plan unchanged:\n${render(next)}"))
+            ToolOutcome.Success(ToolContent.Json(ujson.Str(s"Plan unchanged:\n${render(next)}")))
           case Right(next) =>
             HarnessEvents.TodosUpdated.emit(context.run, TodosUpdated(next.todos.map(t => TodoMark(t.id, t.status))))
             HarnessEvents.TodosProgress.progress(context.run, TodosProgress(next.todos))
-            ToolOutcome.Success(ujson.Str(s"Plan updated:\n${render(next)}"), StateUpdate.update(key, next))
+            ToolOutcome.Success(
+              ToolContent.Json(ujson.Str(s"Plan updated:\n${render(next)}")),
+              StateUpdate.update(key, next)
+            )
 
   /** `current` replaced by `args`: named ids kept, unnamed items matched by content, the rest given fresh ids. */
   private def resolve(current: TodoList, args: WriteTodos): Either[String, TodoList] =

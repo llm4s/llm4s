@@ -146,9 +146,9 @@ private[llm4s] object FacadeInternals {
       held.map(_._2).orNull
     )
 
-  /** `message` as Java and Kotlin callers read it. */
+  /** `message` as Java and Kotlin callers read it: a user or tool message's text view (its text parts, joined). */
   def message(message: Message): JMessage = message match {
-    case UserMessage(content)   => plain(JMessageRole.USER, content)
+    case user: UserMessage      => plain(JMessageRole.USER, user.content)
     case SystemMessage(content) => plain(JMessageRole.SYSTEM, content)
     case assistant: AssistantMessage =>
       new JMessage(
@@ -158,12 +158,12 @@ private[llm4s] object FacadeInternals {
         Optional.empty,
         ThinkingBlock.text(assistant.thinking).toJava
       )
-    case ToolMessage(content, toolCallId) =>
+    case tool: ToolMessage =>
       new JMessage(
         JMessageRole.TOOL,
-        text(content),
+        text(tool.content),
         java.util.List.of(),
-        Optional.ofNullable(toolCallId),
+        Optional.ofNullable(tool.toolCallId),
         Optional.empty
       )
   }

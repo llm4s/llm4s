@@ -158,7 +158,7 @@ class ConfigurableMockClient(responses: Map[String, String]) extends LLMClient {
     options: CompletionOptions = CompletionOptions()
   ): Result[Completion] = {
     val userMessage = conversation.messages
-      .collectFirst { case UserMessage(content) => content }
+      .collectFirst { case u: UserMessage => u.content }
       .getOrElse("")
     
     responses.get(userMessage) match {
@@ -538,7 +538,7 @@ class RAGSpec extends AnyFlatSpec with Matchers {
         options: CompletionOptions = CompletionOptions()
       ): Result[Completion] = {
         lastPrompt = conversation.messages
-          .collectFirst { case UserMessage(content) => content }
+          .collectFirst { case u: UserMessage => u.content }
         Right(Completion(
           id = "mock-1",
           created = System.currentTimeMillis(),
