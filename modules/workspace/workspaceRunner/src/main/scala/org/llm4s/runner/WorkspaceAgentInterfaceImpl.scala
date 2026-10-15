@@ -663,7 +663,34 @@ class WorkspaceAgentInterfaceImpl(
         stillPinned()
         // the replacement keeps the file's permissions (an executable script stays executable); a new file keeps the
         // mode it was created with. Not POSIX: the platform's defaults.
-        if (Files.exists(target)) Try(Files.setPosixFilePermissions(temp, Files.getPosixFilePermissions(target)))
+        // the name the metadata is copied onto is still the file staged through the handle (same file key), and each
+        // change is made without following a link (copyOwnership), so a swapped directory cannot redirect them
+        secure.foreach { s =>
+          val staged =
+            Try(
+              s.getFileAttributeView(tempName, classOf[BasicFileAttributeView], LinkOption.NOFOLLOW_LINKS)
+                .readAttributes()
+                .fileKey()
+            ).toOption
+          val named =
+            Try(Files.readAttributes(temp, classOf[BasicFileAttributes], LinkOption.NOFOLLOW_LINKS).fileKey()).toOption
+          if (staged.isEmpty || staged != named)
+            throw new WorkspaceAgentException(
+              s"Path '$path' changed while it was written: its directory was replaced; nothing was written",
+              "HASH_MISMATCH",
+              None
+            )
+        }
+        if (Files.exists(target))
+          Try(
+            Files
+              .getFileAttributeView(
+                temp,
+                classOf[java.nio.file.attribute.PosixFileAttributeView],
+                LinkOption.NOFOLLOW_LINKS
+              )
+              .setPermissions(Files.getPosixFilePermissions(target))
+          )
         // the replacement is a new inode, so it takes the file's metadata as well as its mode: its owner and group
         // (the runner runs as root over a bind mount, and a root-owned replacement would lock its owner out) and its
         // ACL. Each where the platform has it; a runner that may not chown keeps the owner it has.
@@ -1879,22 +1906,29 @@ private[runner] object WorkspaceAgentInterfaceImpl {
    */
   def copyOwnership(from: Path, to: Path, aclTools: Option[(Path, Path)] = None): Unit = {
     import java.nio.file.attribute.{ AclFileAttributeView, PosixFileAttributeView }
-    Try(Files.setOwner(to, Files.getOwner(from))): Unit
+    // every change to `to` is made without following a link: the staged file is a plain file the runner made, so
+    // whatever its name might be made to lead to by a directory swapped meanwhile, no other file is ever changed
+    val noFollow = java.nio.file.LinkOption.NOFOLLOW_LINKS
+    Try(
+      Files
+        .getFileAttributeView(to, classOf[java.nio.file.attribute.FileOwnerAttributeView], noFollow)
+        .setOwner(Files.getOwner(from))
+    ): Unit
     Try {
       val group = Files.readAttributes(from, classOf[java.nio.file.attribute.PosixFileAttributes]).group()
-      Files.getFileAttributeView(to, classOf[PosixFileAttributeView]).setGroup(group)
+      Files.getFileAttributeView(to, classOf[PosixFileAttributeView], noFollow).setGroup(group)
     }: Unit
     // an NFSv4 / Windows ACL, where the platform exposes one as a view
     Try {
       Option(Files.getFileAttributeView(from, classOf[AclFileAttributeView])).foreach { acl =>
-        Files.getFileAttributeView(to, classOf[AclFileAttributeView]).setAcl(acl.getAcl)
+        Files.getFileAttributeView(to, classOf[AclFileAttributeView], noFollow).setAcl(acl.getAcl)
       }
     }: Unit
     // user extended attributes, where the file system has them
     Try {
       import java.nio.file.attribute.UserDefinedFileAttributeView
       Option(Files.getFileAttributeView(from, classOf[UserDefinedFileAttributeView])).foreach { source =>
-        val target = Files.getFileAttributeView(to, classOf[UserDefinedFileAttributeView])
+        val target = Files.getFileAttributeView(to, classOf[UserDefinedFileAttributeView], noFollow)
         source.list().forEach { name =>
           val buffer = java.nio.ByteBuffer.allocate(source.size(name))
           source.read(name, buffer)
@@ -1903,7 +1937,9 @@ private[runner] object WorkspaceAgentInterfaceImpl {
         }
       }
     }: Unit
-    aclTools.foreach { case (getfacl, setfacl) => copyPosixAcl(from, to, getfacl, setfacl) }
+    // setfacl follows a link it is given, so it is never given one
+    if (!Files.isSymbolicLink(to))
+      aclTools.foreach { case (getfacl, setfacl) => copyPosixAcl(from, to, getfacl, setfacl) }
   }
 
   /**

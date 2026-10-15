@@ -173,7 +173,12 @@ final private[runner] class ProcessRegistry(
           !self.contains(pid.longValue) && ProcessHandle.of(pid).map[Boolean](_.isAlive).orElse(false)
         }
         if (othersRunning) Nil
-        else sweepAll()
+        else {
+          // swept until a scan finds nothing: an orphan that forked before it was killed leaves a child, re-parented to
+          // the runner, that the next scan finds. A killed process forks no more, so this ends; bounded all the same
+          val found = Iterator.continually(sweepAll()).take(100).takeWhile(_.nonEmpty).flatten.toList
+          found
+        }
       }
 
   private def sweepAll(): List[ProcessHandle] =
@@ -181,12 +186,20 @@ final private[runner] class ProcessRegistry(
       // every process the runner starts itself is in the ledger from its start (a command, a helper), so a child that
       // is in neither is a re-parented orphan, never a process being started or a helper at work
       val own = ProcessRegistry.commands.asScala ++ ProcessRegistry.helpers.asScala
-      ProcessHandle.current().children().toList.asScala.filterNot(h => own.contains(h.pid())).toList.flatMap { orphan =>
-        val tree = Try(orphan.descendants().toList.asScala.toList).getOrElse(Nil)
-        tree.foreach(d => Try(d.destroyForcibly()): Unit)
-        Try(orphan.destroyForcibly()): Unit
-        orphan :: tree
-      }
+      ProcessHandle
+        .current()
+        .children()
+        .toList
+        .asScala
+        .filter(_.isAlive)
+        .filterNot(h => own.contains(h.pid()))
+        .toList
+        .flatMap { orphan =>
+          val tree = Try(orphan.descendants().toList.asScala.toList).getOrElse(Nil)
+          tree.foreach(d => Try(d.destroyForcibly()): Unit)
+          Try(orphan.destroyForcibly()): Unit
+          orphan :: tree
+        }
     }
 
   /** The owner's process `commandId`, while it runs. */

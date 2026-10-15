@@ -424,7 +424,7 @@ class ContainerisedWorkspace(
 
   /**
    * The response to `command`, waited for up to its deadline. A command is given up on when interrupted (and then
-   * cancelled). A file request is not: it has no cancellation, so an interrupt (a cancelled agent run) waits on for the
+   * cancelled). A file change is not: it has no cancellation, so an interrupt (a cancelled agent run) waits on for the
    * response, which the runner sends by its commit deadline, before this deadline, so the caller never stops waiting
    * while a change it cannot see may still commit. The interrupt is kept for the caller either way.
    */
@@ -433,9 +433,10 @@ class ContainerisedWorkspace(
     future: CompletableFuture[WorkspaceAgentResponse]
   ): Try[WorkspaceAgentResponse] = {
     val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(responseTimeoutSeconds(command))
+    // only a change waits out an interrupt: a read commits nothing, so abandoning its response is safe and prompt
     val cancellable = command match {
-      case _: ExecuteCommandCommand => true
-      case _                        => false
+      case _: WriteFileCommand | _: ModifyFileCommand | _: DeleteFileCommand => false
+      case _                                                                 => true
     }
     @scala.annotation.tailrec
     def await(interrupted: Boolean): (Try[WorkspaceAgentResponse], Boolean) =
