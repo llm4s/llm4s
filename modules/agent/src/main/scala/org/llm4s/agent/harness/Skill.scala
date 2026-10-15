@@ -180,12 +180,12 @@ private[harness] object Frontmatter:
    * is too long.
    */
   def parse(path: VPath, lines: Vector[String], closed: Boolean): Result[ListMap[String, Field]] =
-    val first = lines.headOption.map(_.stripPrefix("\uFEFF").stripTrailing)
+    val first = lines.headOption.map(l => fence(l.stripPrefix("\uFEFF")))
     val body  = lines.iterator.zipWithIndex.drop(1).map((l, i) => (l, i + 1))
     val parsed: Parsed[ListMap[String, Field]] =
       if !first.contains("---") then Left((1, "the file must start with a `---` line opening the frontmatter"))
       else
-        val upTo = body.takeWhile((l, _) => l.stripTrailing != "---").toVector
+        val upTo = body.takeWhile((l, _) => fence(l) != "---").toVector
         if upTo.size == lines.size - 1 then
           Left(
             (
@@ -221,6 +221,15 @@ private[harness] object Frontmatter:
     } match
       case Some(n) => Left((n, "a character YAML does not allow (a control character)"))
       case None    => Right(found)
+
+  /**
+   * `line` with trailing spaces and tabs dropped, the only whitespace YAML allows there: a fence followed by any other
+   * character (a control character `stripTrailing` would also drop) is not a fence.
+   */
+  private[harness] def fence(line: String): String =
+    var end = line.length
+    while end > 0 && (line.charAt(end - 1) == ' ' || line.charAt(end - 1) == '\t') do end -= 1
+    line.substring(0, end)
 
   /** An open block: a key with no inline value, and what has followed it. */
   final private case class Block(
@@ -400,9 +409,13 @@ private[harness] object Frontmatter:
    * `\\`, `\"`, `\/`, `\n`, `\t`, `\r`, `\0` and `\uXXXX`; single quotes double a quote to include one.
    */
   private def quoted(n: Int, value: String, quote: Char): Parsed[(String, String)] =
+    quotedAt(n, value, 0, quote).map((text, end) => (text, value.substring(end)))
+
+  /** The quoted string opening at `start` of `value`, and the index just past its closing quote; nothing is copied. */
+  private def quotedAt(n: Int, value: String, start: Int, quote: Char): Parsed[(String, Int)] =
     val out = new java.lang.StringBuilder()
     @annotation.tailrec
-    def loop(i: Int): Parsed[(String, String)] =
+    def loop(i: Int): Parsed[(String, Int)] =
       if i >= value.length then Left((n, "a quoted string is not closed on its line"))
       else
         val c = value.charAt(i)
@@ -410,12 +423,12 @@ private[harness] object Frontmatter:
           if i + 1 < value.length && value.charAt(i + 1) == '\'' then
             out.append('\'')
             loop(i + 2)
-          else Right((out.toString, value.substring(i + 1)))
+          else Right((out.toString, i + 1))
         else if quote == '"' && c == '"' then
           // an escape can spell what no file backend accepts: a NUL, or half of a surrogate pair
           val text = out.toString
           if Text.binaryReason(text).isDefined then Left((n, "an escape makes a NUL or an unpaired surrogate"))
-          else Right((text, value.substring(i + 1)))
+          else Right((text, i + 1))
         else if quote == '"' && c == '\\' then
           if i + 1 >= value.length then Left((n, "a quoted string is not closed on its line"))
           else
@@ -427,46 +440,63 @@ private[harness] object Frontmatter:
               case 't'  => out.append('\t'); loop(i + 2)
               case 'r'  => out.append('\r'); loop(i + 2)
               case '0'  => out.append('\u0000'); loop(i + 2)
-              case 'u' if i + 6 <= value.length && value.substring(i + 2, i + 6).forall(Character.digit(_, 16) >= 0) =>
+              case 'u'
+                  if i + 6 <= value.length && (i + 2 until i + 6)
+                    .forall(k => Character.digit(value.charAt(k), 16) >= 0) =>
                 out.append(Integer.parseInt(value.substring(i + 2, i + 6), 16).toChar)
                 loop(i + 6)
               case _ => Left((n, "an unsupported escape in a quoted string"))
         else
           out.append(c)
           loop(i + 1)
-    loop(1)
+    loop(start + 1)
 
-  /** `[a, "b", c]`: scalars separated by commas, on one line; nothing nested. */
+  /**
+   * `[a, "b", c]`: scalars separated by commas, on one line; nothing nested. One pass over `value` by index, so a long
+   * list costs time linear in its length (no suffix is copied per item).
+   */
   private def flowList(n: Int, value: String): Parsed[Vector[String]] =
-    @annotation.tailrec
-    def loop(rest: String, acc: Vector[String]): Parsed[Vector[String]] =
-      val r = rest.dropWhile(_ == ' ')
-      if r.isEmpty then Left((n, "a flow list is not closed on its line"))
-      else if r.head == ']' then
-        if acc.isEmpty then trailing(n, r.tail).map(_ => acc) else Left((n, "a flow list has an empty item"))
+    val len                                    = value.length
+    def skip(from: Int): Int                   = { var j = from; while j < len && value.charAt(j) == ' ' do j += 1; j }
+    val items                                  = Vector.newBuilder[String]
+    var count                                  = 0
+    var i                                      = 1 // past the `[`
+    var result: Option[Parsed[Vector[String]]] = None
+    while result.isEmpty do
+      val j = skip(i)
+      if j >= len then result = Some(Left((n, "a flow list is not closed on its line")))
+      else if value.charAt(j) == ']' then
+        result = Some(
+          if count == 0 then trailing(n, value.substring(j + 1)).map(_ => Vector.empty)
+          else Left((n, "a flow list has an empty item"))
+        )
       else
-        val item: Parsed[(String, String)] =
-          r.head match
-            case q @ ('"' | '\'') => quoted(n, r, q)
+        val item: Parsed[(String, Int)] =
+          value.charAt(j) match
+            case q @ ('"' | '\'') => quotedAt(n, value, j, q)
             case '[' | '{'        => Left((n, "nested lists and maps are not supported"))
             case c if Unsupported.contains(c) && c != '>' && c != '|' => Left((n, Unsupported(c)))
             case _ =>
-              val end = r.indexWhere(c => c == ',' || c == ']')
-              if end < 0 then Left((n, "a flow list is not closed on its line"))
+              var end = j
+              while end < len && value.charAt(end) != ',' && value.charAt(end) != ']' do end += 1
+              if end >= len then Left((n, "a flow list is not closed on its line"))
               else
-                val plain = r.substring(0, end).trim
+                val plain = value.substring(j, end).trim
                 if plain.isEmpty then Left((n, "a flow list has an empty item"))
                 // a ` #` starts a comment, which would swallow the rest of the line and the list's `]` with it
                 else if CommentStart.findFirstIn(plain).isDefined then
                   Left((n, "a flow list cannot hold a comment; it must close on its line"))
                 else if plain.exists(c => c == '[' || c == '{' || c == '}') then
                   Left((n, "nested lists and maps are not supported"))
-                else plainProblem(plain, inList = true).fold(Right((plain, r.substring(end))))(p => Left((n, p)))
+                else plainProblem(plain, inList = true).fold(Right((plain, end)))(p => Left((n, p)))
         item match
-          case Left(e) => Left(e)
+          case Left(e) => result = Some(Left(e))
           case Right((v, after)) =>
-            val a = after.dropWhile(_ == ' ')
-            if a.startsWith(",") then loop(a.tail, acc :+ v)
-            else if a.startsWith("]") then trailing(n, a.tail).map(_ => acc :+ v)
-            else Left((n, "expected `,` or `]` in a flow list"))
-    loop(value.tail, Vector.empty)
+            items += v
+            count += 1
+            val a = skip(after)
+            if a < len && value.charAt(a) == ',' then i = a + 1
+            else if a < len && value.charAt(a) == ']' then
+              result = Some(trailing(n, value.substring(a + 1)).map(_ => items.result()))
+            else result = Some(Left((n, "expected `,` or `]` in a flow list")))
+    result.get

@@ -194,7 +194,7 @@ object SkillsMiddleware:
     var fences = 0
     line =>
       seen += 1
-      val fence = (if seen == 1 then line.stripPrefix("\uFEFF") else line).stripTrailing == "---"
+      val fence = Frontmatter.fence(if seen == 1 then line.stripPrefix("\uFEFF") else line) == "---"
       if fence then fences += 1
       (seen == 1 && !fence) || fences >= 2
 
