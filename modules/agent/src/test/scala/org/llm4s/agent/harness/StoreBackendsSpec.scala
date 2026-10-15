@@ -165,7 +165,10 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "refuse a value nested deeper than MaxDepth, without overflowing the stack" in {
     val store = InMemoryLongTermStore()
     val deep  = (1 to 100000).foldLeft[ujson.Value](ujson.Num(1))((v, _) => ujson.Arr(v))
-    store.put(ns, "deep", deep, call()).left.value.message should include("nested deeper")
+    // 100 000 levels are over the size cap too, which is counted first, iteratively: refused, no overflow
+    store.put(ns, "deep", deep, call()).left.value.message should include("over the limit")
+    val deeper = (1 to LongTermStore.MaxDepth + 1).foldLeft[ujson.Value](ujson.Num(1))((v, _) => ujson.Arr(v))
+    store.put(ns, "deeper", deeper, call()).left.value.message should include("nested deeper")
     val ok = (1 to LongTermStore.MaxDepth - 1).foldLeft[ujson.Value](ujson.Num(1))((v, _) => ujson.Arr(v))
     store.put(ns, "ok", ok, call()).value shouldBe true
     store.appliedKeys shouldBe 0
@@ -511,5 +514,28 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     store
       .modify[Unit](ns, "a", outer, FencingToken(0))(_ => Right(StoreChange.Put(ujson.Str("a"), ())))
       .isRight shouldBe true
+  }
+
+  it should "refuse a wide value by its size before walking it for depth" in {
+    val store = InMemoryLongTermStore()
+    val wide  = ujson.Arr.from(Iterator.fill(2000000)(ujson.Null))
+    val key   = org.llm4s.agent.graph.HarnessTestSupport.runOn("wide").effectKey("wide", "w")
+    store
+      .modify[Unit](ns, "w", key, FencingToken(0))(_ => Right(StoreChange.Put(wide, ())))
+      .left
+      .value
+      .message should include("over the limit")
+    // a deep value within the size cap is still refused for its depth
+    val deep = (1 to 100).foldLeft[ujson.Value](ujson.Null)((v, _) => ujson.Arr(v))
+    store
+      .modify[Unit](
+        ns,
+        "d",
+        org.llm4s.agent.graph.HarnessTestSupport.runOn("deep").effectKey("deep", "d"),
+        FencingToken(0)
+      )(_ => Right(StoreChange.Put(deep, ())))
+      .left
+      .value
+      .message should include("nested deeper")
   }
 }

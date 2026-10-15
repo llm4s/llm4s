@@ -332,8 +332,14 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
                   .map((k, i) => StoreEntry(k, detached(i)))
               )
           change(view).flatMap {
-            // a value is walked recursively by every copy, encoding and search, so its depth is checked
-            // first, without recursion: a deep one would overflow the stack past any `Try`
+            // sized first: the count is iterative and stops at the cap (a wide value at its least size, before
+            // its children), so every later walk of the value - depth, copy - is bounded by `maxItemBytes`
+            case StoreChange.Put(value, _) if itemBytes(key, value) > limits.maxItemBytes =>
+              Left(
+                BackendRefused("put", Text.quoted(key), s"the item is over the limit of ${limits.maxItemBytes} bytes")
+              )
+            // a value is walked recursively by every copy, encoding and search, so its depth is checked next,
+            // without recursion: a deep one would overflow the stack past any `Try`
             case StoreChange.Put(value, _) if !Text.depthWithin(value, LongTermStore.MaxDepth) =>
               Left(
                 BackendRefused(
@@ -341,11 +347,6 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
                   Text.quoted(key),
                   s"the value is nested deeper than ${LongTermStore.MaxDepth} levels"
                 )
-              )
-            // sized before the copy below, so an over-limit value is refused without allocating its size again
-            case StoreChange.Put(value, _) if itemBytes(key, value) > limits.maxItemBytes =>
-              Left(
-                BackendRefused("put", Text.quoted(key), s"the item is over the limit of ${limits.maxItemBytes} bytes")
               )
             case decided =>
               val (next, outcome) = decided match
