@@ -65,11 +65,11 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "stand a mount in only for a path-shape refusal, propagating every other refusal unchanged" in {
     for (kind <- Seq(BackendRefused.Kind.NotFound, BackendRefused.Kind.NotADirectory)) {
-      val c = CompositeBackend(new Refusing(kind), p("/m") -> main).value
+      val c = CompositeBackend(new Refusing(kind, typed = true), p("/m") -> main).value
       c.ls(VPath.root, 10, ctx).value.items.map(_.path) shouldBe Vector(p("/m"))
     }
     for (kind <- Seq(BackendRefused.Kind.Refused)) {
-      val c       = CompositeBackend(new Refusing(kind), p("/m") -> main).value
+      val c       = CompositeBackend(new Refusing(kind, typed = true), p("/m") -> main).value
       val refusal = c.ls(VPath.root, 10, ctx).left.value
       refusal shouldBe a[BackendRefused]
       refusal.asInstanceOf[BackendRefused].kind shouldBe kind
@@ -297,5 +297,15 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     // the store's own item bound, refused by the store under its key
     c.write(p("/mem/g"), "z" * 100, in).left.value.asInstanceOf[BackendRefused].target shouldBe "/mem/g"
     c.read(p("/s/f"), 0, 0, in).left.value.asInstanceOf[BackendRefused].target shouldBe "/s/f"
+  }
+
+  it should "walk the mounts beneath a root its routed backend finds absent, and only for that refusal" in {
+    for (kind <- Seq(BackendRefused.Kind.NotFound, BackendRefused.Kind.NotADirectory)) {
+      val c = CompositeBackend(new Refusing(kind, typed = true), p("/y") -> main).value
+      c.glob(Glob("**"), VPath.root, 10, ctx).value.items shouldBe Vector(p("/y/a.txt"))
+      c.grep("main", VPath.root, None, 10, ctx).value.items.map(_.path) shouldBe Vector(p("/y/a.txt"))
+    }
+    val refused = CompositeBackend(new Refusing(BackendRefused.Kind.Refused, typed = true), p("/y") -> main).value
+    refused.glob(Glob("**"), VPath.root, 10, ctx).left.value shouldBe a[BackendRefused]
   }
 }

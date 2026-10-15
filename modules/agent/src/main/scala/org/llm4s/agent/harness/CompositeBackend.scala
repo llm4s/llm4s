@@ -82,7 +82,7 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
         // only the two path-shape kinds it means: a permission, a quota or a replay refusal is the routed
         // backend's answer, and propagates unchanged
         case Left(r: BackendRefused)
-            if mounted.nonEmpty && r.target == routed.path.value && CompositeBackend.ShapeKinds(r.kind) =>
+            if mounted.nonEmpty && r.path.contains(routed.path) && CompositeBackend.ShapeKinds(r.kind) =>
           Right(Listing(Vector.empty, truncated = false))
         case other => renamed(routed)(other)
     }
@@ -124,11 +124,21 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
   private def spanning[A](under: VPath, limit: Int, pathOf: A => VPath, rebased: (A, VPath) => A)(
     query: (Routed, VPath => Option[VPath]) => Result[Listing[A]]
   ): Result[Listing[A]] =
-    spanned(under)
+    val spans = spanned(under)
+    // where a mount lies beneath `under`, the composite makes `under` a directory whatever a backend holds
+    // there: a backend's refusal of its own root of the walk as absent or a file stands for nothing found,
+    // as in `ls`, so the mounts beneath are still searched; every other refusal propagates unchanged
+    def walked(routed: Routed): Result[Listing[A]] =
+      query(routed, p => visible(routed.mount, p)) match
+        case Left(r: BackendRefused)
+            if spans.size > 1 && r.path.contains(routed.path) && CompositeBackend.ShapeKinds(r.kind) =>
+          Right(Listing(Vector.empty, truncated = false))
+        case other => other
+    spans
       .foldLeft[Result[(Vector[A], Boolean)]](Right((Vector.empty, false))) { (acc, routed) =>
         for
           sofar   <- acc
-          listing <- renamed(routed)(query(routed, p => visible(routed.mount, p)))
+          listing <- renamed(routed)(walked(routed))
         yield (
           sofar._1 ++ listing.items.flatMap(a => visible(routed.mount, pathOf(a)).map(cp => rebased(a, cp))),
           sofar._2 || listing.truncated
