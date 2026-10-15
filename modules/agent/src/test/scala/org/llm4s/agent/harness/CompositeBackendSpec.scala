@@ -324,4 +324,21 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     refusal.path shouldBe None
     refusal.target shouldBe "files"
   }
+
+  it should "name no path for a refusal of an entry a deeper mount shadows, and say so" in {
+    val base = StateFileBackend(keyId = "base")
+    val over = StateFileBackend(keyId = "over")
+    val c    = CompositeBackend(base, p("/scratch") -> over).value
+    var st   = stateOf(base.files, over.files)
+    def in   = FileContext(testRunContext(), st)
+    // another writer stored /scratch in the default, as a file with NUL: corrupt, and shadowed by the mount
+    st = committed(
+      st,
+      StateUpdate.update(base.files, FileUpdate.Put(p("/scratch"), FileEntry("a\u0000b", java.time.Instant.EPOCH)))
+    ).value
+    val refusal = c.ls(VPath.root, 10, in).left.value.asInstanceOf[BackendRefused]
+    refusal.kind shouldBe BackendRefused.Kind.Corrupt
+    refusal.path shouldBe None
+    refusal.message should include("shadowed")
+  }
 }

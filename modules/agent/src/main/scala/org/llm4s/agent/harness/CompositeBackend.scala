@@ -59,9 +59,20 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
   private def renamed[A](routed: Routed)(result: Result[A]): Result[A] =
     result.left.map {
       case r: BackendRefused =>
-        r.path
-          .flatMap(_.rebase(VPath.root, routed.mount))
-          .fold[LLMError](r)(composite => r.copy(target = composite.value, path = Some(composite)))
+        r.path.flatMap(_.rebase(VPath.root, routed.mount)) match
+          // the composite path reaches the same backend: the model can act on it, say delete it
+          case Some(composite) if route(composite).mount == routed.mount =>
+            r.copy(target = composite.value, path = Some(composite))
+          // a deeper mount shadows it: no composite path reaches it, so the refusal names no path to act
+          // on, and says where it is
+          case Some(composite) =>
+            r.copy(
+              target = composite.value,
+              path = None,
+              reason = s"${r.reason} (${composite.value} of the backend at ${routed.mount.value} is shadowed by a " +
+                "mount, so no path here reaches it: repair it through that backend)"
+            )
+          case None => r
       case other => other
     }
 
