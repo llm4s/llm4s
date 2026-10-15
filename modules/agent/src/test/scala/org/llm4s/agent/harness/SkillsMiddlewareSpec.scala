@@ -268,6 +268,26 @@ class SkillsMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues w
     model.system(0) should include("- pdf: From state.")
   }
 
+  "Reading the skills" should "add no report to the step's own, whoever reads them first" in {
+    val store   = new InMemoryCheckpointer
+    val thread  = ThreadId("readers")
+    val backend = storeBackend()
+    seed(backend, "/skills/bad/SKILL.md" -> "no frontmatter")
+    val mw = new SkillsMiddleware(Vector(p("/skills")), backend)
+    // a middleware that reads the skills before the stack builds the section, in the same model task
+    val reader = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("reader")
+      override def promptSections(context: ModelContext): Result[Vector[PromptSection]] =
+        mw.skills(context).map(_ => Vector.empty)
+    }
+    GraphRuntime(store)
+      .start(thread, loopOf(new Recording, Seq(reader, mw)).graph, AgentInput("q"))
+      .awaited
+      .value
+      .answered
+    reports(store, thread).size shouldBe 1
+  }
+
   "A first model step that failed" should "commit no report, and its recovery read again and report once (rules 4, 10)" in {
     val broken = new AtomicBoolean(true)
     val failing = new AgentMiddleware {

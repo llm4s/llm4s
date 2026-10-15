@@ -92,7 +92,7 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val cache    = new RunCache[String](4)
     val computed = new AtomicInteger(0)
     def get(run: org.llm4s.agent.graph.RunContext) =
-      cache(run) { computed.incrementAndGet(); Right("v") }(_ => run.emit("reported", 1, ujson.Null))
+      cache(run, reports = true) { computed.incrementAndGet(); Right("v") }(_ => run.emit("reported", 1, ujson.Null))
     val first = recordingRunContext(events, token = Some(1L), task = "1.0")
     get(first).value shouldBe "v"
     get(recordingRunContext(events, token = Some(1L), task = "2.0")).value shouldBe "v"
@@ -110,11 +110,32 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
     computed.get shouldBe 4
   }
 
+  it should "report only on a reporting call: once in the task, whatever reads the value besides" in {
+    val events = new CopyOnWriteArrayList[(String, ujson.Value)]()
+    val cache  = new RunCache[String](4)
+    val run    = recordingRunContext(events, token = Some(1L), task = "1.0")
+    def get(context: org.llm4s.agent.graph.RunContext, reports: Boolean) =
+      cache(context, reports)(Right("v"))(_ => context.emit("reported", 1, ujson.Null))
+    // a reader first (another middleware asking for the skills), then the section's build, in one task
+    get(run, reports = false)
+    events.size shouldBe 0
+    get(run, reports = true)
+    events.size shouldBe 1
+    get(run, reports = false)
+    events.size shouldBe 1
+    // a reader in a later task neither reports nor stops the first reporting task's report
+    val other = new CopyOnWriteArrayList[(String, ujson.Value)]()
+    val fresh = recordingRunContext(other, token = Some(2L), task = "1.0")
+    cache(recordingRunContext(other, token = Some(2L), task = "0.0"), reports = false)(Right("v"))(_ => ())
+    cache(fresh, reports = true)(Right("v"))(_ => fresh.emit("reported", 1, ujson.Null))
+    other.size shouldBe 1
+  }
+
   it should "report again when the computing task runs again after its attempt's events were discarded (rule 10)" in {
     val events = new CopyOnWriteArrayList[(String, ujson.Value)]()
     val cache  = new RunCache[String](4)
     val run    = recordingRunContext(events, token = Some(1L), task = "1.0")
-    def get()  = cache(run)(Right("v"))(_ => run.emit("reported", 1, ujson.Null))
+    def get()  = cache(run, reports = true)(Right("v"))(_ => run.emit("reported", 1, ujson.Null))
     get()
     discardAttempt(run)
     events.size shouldBe 0
@@ -139,7 +160,7 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
       else { successes.incrementAndGet(); Right("v") }
     }
     val threads = (1 to 6).map { i =>
-      new Thread(() => cache(recordingRunContext(events, task = s"t$i"))(compute())(_ => ()): Unit)
+      new Thread(() => cache(recordingRunContext(events, task = s"t$i"), reports = true)(compute())(_ => ()): Unit)
     }
     threads.foreach { t =>
       t.start(); Thread.sleep(2)
@@ -157,17 +178,19 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val started  = new java.util.concurrent.CountDownLatch(1)
     val proceed  = new java.util.concurrent.CountDownLatch(1)
     val first = new Thread(() =>
-      cache(recordingRunContext(events, task = "a")) {
+      cache(recordingRunContext(events, task = "a"), reports = true) {
         started.countDown(); proceed.await(); computed.incrementAndGet(); Right("v")
       }(_ =>
         // while this caller still holds the slot, another run's value evicts this run's from the LRU (maxRuns 1)
-        cache(recordingRunContext(events, run = "other"))(Right("o"))(_ => ()): Unit
+        cache(recordingRunContext(events, run = "other"), reports = true)(Right("o"))(_ => ()): Unit
       ): Unit
     )
     first.start()
     started.await()
     val waiter = new Thread(() =>
-      cache(recordingRunContext(events, task = "b")) { computed.incrementAndGet(); Right("again") }(_ => ()): Unit
+      cache(recordingRunContext(events, task = "b"), reports = true) { computed.incrementAndGet(); Right("again") }(_ =>
+        ()
+      ): Unit
     )
     waiter.start()
     while (waiter.getState != Thread.State.BLOCKED) Thread.sleep(1)
@@ -182,7 +205,9 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val cache  = new RunCache[String](4)
     (1 to 3).foreach { i =>
       an[InterruptedException] should be thrownBy
-        cache(recordingRunContext(events, run = s"i$i"))(throw new InterruptedException("cancelled"))(_ => ())
+        cache(recordingRunContext(events, run = s"i$i"), reports = true)(throw new InterruptedException("cancelled"))(
+          _ => ()
+        )
     }
     cache.inFlightRuns shouldBe 0
     cache.cached shouldBe 0
@@ -192,25 +217,27 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val events = new CopyOnWriteArrayList[(String, ujson.Value)]()
     val cache  = new RunCache[String](2)
     val run    = recordingRunContext(events, token = Some(1L))
-    cache(run)(Right("v"))(_ => ()).value shouldBe "v"
+    cache(run, reports = true)(Right("v"))(_ => ()).value shouldBe "v"
     // failures of other runs, returned or thrown, take no place from the run that has its value
     (1 to 3).foreach { i =>
-      cache(recordingRunContext(events, run = s"f$i"))(Left(ValidationError("store", "down")))(_ =>
+      cache(recordingRunContext(events, run = s"f$i"), reports = true)(Left(ValidationError("store", "down")))(_ =>
         ()
       ).isLeft shouldBe true
     }
-    an[IllegalStateException] should be thrownBy cache(recordingRunContext(events, run = "thrown"))(
+    an[IllegalStateException] should be thrownBy cache(recordingRunContext(events, run = "thrown"), reports = true)(
       throw new IllegalStateException("boom")
     )(_ => ())
     cache.cached shouldBe 1
     // a full cache: a failure evicts no value
-    cache(recordingRunContext(events, run = "second"))(Right("s"))(_ => ()).value shouldBe "s"
-    cache(recordingRunContext(events, run = "f9"))(Left(ValidationError("store", "down")))(_ => ()).isLeft shouldBe true
+    cache(recordingRunContext(events, run = "second"), reports = true)(Right("s"))(_ => ()).value shouldBe "s"
+    cache(recordingRunContext(events, run = "f9"), reports = true)(Left(ValidationError("store", "down")))(_ =>
+      ()
+    ).isLeft shouldBe true
     cache.cached shouldBe 2
     val again = new java.util.concurrent.atomic.AtomicInteger(0)
-    cache(run) { again.incrementAndGet(); Right("w") }(_ => ()).value shouldBe "v"
+    cache(run, reports = true) { again.incrementAndGet(); Right("w") }(_ => ()).value shouldBe "v"
     again.get shouldBe 0
-    (1 to 5).foreach(i => cache(recordingRunContext(events, run = s"r$i"))(Right("v"))(_ => ()))
+    (1 to 5).foreach(i => cache(recordingRunContext(events, run = s"r$i"), reports = true)(Right("v"))(_ => ()))
     cache.cached shouldBe 2
     an[IllegalArgumentException] should be thrownBy new RunCache[String](0)
   }
