@@ -148,46 +148,88 @@ class InstructionMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Eit
     )
   }
 
-  "An edit" should "show from the next run, not in the run that read the files (rule 1)" in {
-    val store   = new InMemoryCheckpointer
-    val thread  = ThreadId("edit")
-    val backend = StateFileBackend()
-    val mw      = new InstructionMemoryMiddleware(Vector(project), backend)
-    val rt      = GraphRuntime(store)
-    val loop0   = loopOf(new Recording, Seq(mw))
-    rt.start(thread, loop0.graph, AgentInput("one")).awaited.value.answered
-    def put(text: String) =
+  /** A thread whose state backend holds the files `files`, after one run of `mw`. */
+  private def seeded(thread: ThreadId, store: Checkpointer, backend: StateFileBackend, mw: AgentMiddleware)(
+    files: (VPath, String)*
+  ): GraphRuntime = {
+    val rt    = GraphRuntime(store)
+    val loop0 = loopOf(new Recording, Seq(mw), ToolSet.of(FileTools(backend)*).value)
+    rt.start(thread, loop0.graph, AgentInput("seed")).awaited.value.answered
+    files.foreach { case (path, text) =>
       rt.updateState(
         thread,
         loop0.graph,
         store.latest(thread).value.value.checkpoint.id,
-        StateUpdate.update(backend.files, FileUpdate.Put(project, FileEntry(text, java.time.Instant.EPOCH)))
+        StateUpdate.update(backend.files, FileUpdate.Put(path, FileEntry(text, java.time.Instant.EPOCH)))
       ).isRight shouldBe true
-    put("Version one.")
-    // a tool in this run edits the file after the first model call read it
-    val editing: AgentTool[ujson.Value] =
-      AgentTool(
-        AgentToolSpec[ujson.Value]("bump", "edits", org.llm4s.toolapi.Schema.`object`[ujson.Value]("none")),
-        writes = backend.writes
-      ) { (_, context) =>
-        backend.edit(project, "one", "two", replaceAll = false, FileContext(context)) match {
-          case Right((_, update)) => ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")), update)
-          case Left(e)            => ToolOutcome.Fatal(e)
-        }
-      }
-    val calls = new CopyOnWriteArrayList[Vector[Message]]()
-    val model = new ModelStep {
-      def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion] = {
-        calls.add(messages)
-        if (calls.size == 1) Right(completion(AssistantMessage(None, Seq(ToolCall("e1", "bump", ujson.Obj())))))
-        else Right(completion(AssistantMessage("done")))
-      }
     }
-    rt.start(thread, loopOf(model, Seq(mw), ToolSet.of(editing).value).graph, AgentInput("two")).awaited.value.answered
-    calls.get(1).collectFirst { case s: SystemMessage => s.content }.value should include("Version one.")
+    rt
+  }
+
+  /** A model that calls `edit_file` on each of `paths`, replacing "one" with "two", then answers. */
+  final private class Editing(paths: VPath*) extends ModelStep {
+    val seen = new CopyOnWriteArrayList[Vector[Message]]()
+    def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion] = {
+      seen.add(messages)
+      if (seen.size == 1)
+        Right(
+          completion(
+            AssistantMessage(
+              None,
+              paths.zipWithIndex.map { case (path, i) =>
+                ToolCall(
+                  s"e$i",
+                  FileTools.EditFile,
+                  ujson.Obj("path" -> path.value, "old_string" -> "one", "new_string" -> "two")
+                )
+              }
+            )
+          )
+        )
+      else Right(completion(AssistantMessage("done")))
+    }
+    def system(i: Int): String = seen.get(i).collectFirst { case s: SystemMessage => s.content }.getOrElse("")
+  }
+
+  "An edit with FileTools' edit_file" should "show from the next run, not in the run that read the files (rule 1)" in {
+    val store   = new InMemoryCheckpointer
+    val thread  = ThreadId("edit")
+    val backend = StateFileBackend()
+    val mw      = new InstructionMemoryMiddleware(Vector(project), backend)
+    val tools   = ToolSet.of(FileTools(backend)*).value
+    val rt      = seeded(thread, store, backend, mw)(project -> "Version one.")
+    val model   = new Editing(project)
+    rt.start(thread, loopOf(model, Seq(mw), tools).graph, AgentInput("two")).awaited.value.answered
+    model.system(1) should include("Version one.")
     val next = new Recording
-    rt.start(thread, loopOf(next, Seq(mw), ToolSet.of(editing).value).graph, AgentInput("three")).awaited.value.answered
+    rt.start(thread, loopOf(next, Seq(mw), tools).graph, AgentInput("three")).awaited.value.answered
     next.system(0) should include("Version two.")
+    mw.tools shouldBe empty
+  }
+
+  it should "change only the files the permission rules let the agent write" in {
+    val store   = new InMemoryCheckpointer
+    val thread  = ThreadId("permitted")
+    val backend = StateFileBackend()
+    val mw      = new InstructionMemoryMiddleware(Vector(user, project), backend)
+    val tools   = ToolSet.of(FileTools(backend)*).value
+    val rules = new PermissionMiddleware(
+      Seq(
+        PermissionRule.deny(Operation.Write, "/user/**"),
+        PermissionRule.allow(Operation.Write, "/project/**"),
+        PermissionRule.allow(Operation.Read, "**"),
+        PermissionRule.allow(Operation.Invoke, "*")
+      )
+    )
+    val rt = seeded(thread, store, backend, mw)(user -> "User one.", project -> "Project one.")
+    rt.start(thread, loopOf(new Editing(user, project), Seq(rules, mw), tools).graph, AgentInput("edit"))
+      .awaited
+      .value
+      .answered
+    val next = new Recording
+    rt.start(thread, loopOf(next, Seq(rules, mw), tools).graph, AgentInput("after")).awaited.value.answered
+    next.system(0) should include("User one.")
+    next.system(0) should include("Project two.")
   }
 
   "A first model step that failed" should "commit no report, and its recovery read again and report once (rules 4, 10)" in {

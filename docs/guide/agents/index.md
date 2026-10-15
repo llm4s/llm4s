@@ -627,7 +627,7 @@ for {
 
 - **Read once per run**, as skills are: an edit during a run shows from the next run, and a recovered
   or resumed run reads again. A missing file is skipped.
-- **Editable when permitted.** The agent edits a file with `edit_file` over the same backend when the
+- **Editable when permitted.** The agent edits a file with `edit_file` (`FileTools(backend)`) over the same backend when the
   backend accepts the write and the permission rules allow `Write` on its path; deny it to keep a
   scope read-only.
 - **Bounded.** Each file at most `maxFileTokens` (default 2000), the section at most
