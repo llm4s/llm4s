@@ -89,6 +89,22 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     ws.writeFile("new", "x", expectedHash = Some(planned)).success shouldBe true
     Files.isSymbolicLink(root.resolve("new")) shouldBe true
     ws.fileSnapshot("new-target").content shouldBe Some("x")
+    // creating directories creates the link target's, where the write lands
+    Files.createSymbolicLink(root.resolve("deeplink"), root.resolve("made/for/file"))
+    ws.writeFile("deeplink", "y", createDirectories = Some(true)).success shouldBe true
+    ws.fileSnapshot("made/for/file").content shouldBe Some("y")
+  }
+
+  it should "delete the entry the path physically names, compared where it is" in {
+    assume(!isWindowsHost)
+    Files.createDirectories(root.resolve("one/x"))
+    Files.createDirectories(root.resolve("two/x"))
+    Files.createSymbolicLink(root.resolve("alias"), root.resolve("one"))
+    val ws = workspace()
+    ws.deleteFile("alias/x", Some(ws.fileSnapshot("alias/x", followLinks = false).hash)).wasDirectory shouldBe true
+    Files.exists(root.resolve("one/x")) shouldBe false
+    Files.exists(root.resolve("two/x")) shouldBe true
+    Files.isSymbolicLink(root.resolve("alias")) shouldBe true
   }
 
   it should "describe a link as itself when asked, so a link to a big file or a FIFO is deleted without touching it" in {

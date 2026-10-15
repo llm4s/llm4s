@@ -648,8 +648,9 @@ class WorkspaceAgentInterfaceImpl(
     def rollBack(): Unit =
       createdDirs.foreach(d => Try(Files.deleteIfExists(d))) // a directory something else filled stays
     if (createDirs) {
-      // the directories are created where the path really leads, checked by the path policy just before
-      val parent = effective(resolvedPath.getParent)
+      // the directories are created where the write really lands, checked by the path policy just before: through a
+      // dangling link (`link -> new/dir/file`), the link target's directories
+      val parent = effective(resolvedPath).getParent
       checkPolicy(path, parent, Access.Write)
       createdDirs = Iterator
         .iterate(parent)(_.getParent)
@@ -689,8 +690,12 @@ class WorkspaceAgentInterfaceImpl(
       val (expected, staged) = writeMode match {
         case "create" => (Some(Kind.Absent), bytes)
         case "append" =>
-          val existing = if (Files.isRegularFile(target)) Files.readAllBytes(target) else Array.emptyByteArray
-          (Some(if (Files.exists(target)) digestOf(existing) else Kind.Absent), existing ++ bytes)
+          // what the file is and what it holds, from one read: a file deleted after it is read is still a mismatch
+          Try(Files.readAllBytes(target)) match {
+            case Success(existing)                             => (Some(digestOf(existing)), existing ++ bytes)
+            case Failure(_: java.nio.file.NoSuchFileException) => (Some(Kind.Absent), bytes)
+            case Failure(e)                                    => throw e
+          }
         case _ =>
           // of `target` itself, the file the move replaces (through a link to nothing, the file it names is nothing)
           (expectedHash.map(e => if (Kind.isDangling(e)) Kind.Absent else e), bytes)
@@ -887,20 +892,22 @@ class WorkspaceAgentInterfaceImpl(
       val resolved = resolveEntry(path, Access.Write)
       if (resolved == rootPath)
         throw new WorkspaceAgentException("The workspace root cannot be deleted", "INVALID_ARGUMENT", None)
-      expectedHash.foreach(checkExpected(path, resolved, _, entryHash))
-      if (!Files.exists(resolved, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+      // acted on where it physically is, the parent resolved through links: the same entry, checked and removed
+      val entry = entryOf(resolved)
+      expectedHash.foreach(checkExpected(path, entry, _, entryHash))
+      if (!Files.exists(entry, java.nio.file.LinkOption.NOFOLLOW_LINKS))
         throw new WorkspaceAgentException(s"File '$path' does not exist", "FILE_NOT_FOUND", None)
-      val wasDirectory = Files.isDirectory(resolved, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+      val wasDirectory = Files.isDirectory(entry, java.nio.file.LinkOption.NOFOLLOW_LINKS)
       // immediately before the removal, as before a write's commit: the path still names the same entry, through the
       // same links and passing the path policy, and the change is within its deadline
-      if (resolveEntry(path, Access.Write) != resolved)
+      if (entryOf(resolveEntry(path, Access.Write)) != entry)
         throw new WorkspaceAgentException(
           s"Path '$path' changed while it was deleted: it now leads elsewhere; nothing was deleted",
           "HASH_MISMATCH",
           None
         )
       ensureInTime(path)
-      Try(Files.delete(resolved)) match {
+      Try(Files.delete(entry)) match {
         case Success(_) => DeleteFileResponse("local", path, wasDirectory)
         case Failure(_: java.nio.file.DirectoryNotEmptyException) =>
           throw new WorkspaceAgentException(
