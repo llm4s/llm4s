@@ -147,6 +147,16 @@ class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
     parse("---", "name: pdf-tools", "description: \"\\uD83D\\uDE00\"", "---").value.description shouldBe "\uD83D\uDE00"
   }
 
+  it should "refuse a plain value YAML would read as a map, and a metadata, licence or allowed-tools without a value" in {
+    problem("---", "name: pdf-tools", "description: summarize: quickly", "---").problem should include("quote it")
+    problem("---", "name: pdf-tools", "description: note:", "---").line shouldBe 3
+    problem("---", "name: pdf-tools", "description: d", "metadata:", "  a: b: c", "---").line shouldBe 5
+    parse("---", "name: pdf-tools", "description: \"summarize: quickly\"", "---").value.description shouldBe
+      "summarize: quickly"
+    for (bad <- Seq("metadata:", "metadata: []", "metadata: \"\"", "license:", "license: ''", "allowed-tools:"))
+      withClue(bad)(problem("---", "name: pdf-tools", "description: d", bad, "---").line shouldBe 4)
+  }
+
   it should "refuse a name over 64 characters" in {
     val long = "a" * 65
     val e    = Skill.parse(VPath(s"/s/$long/SKILL.md").value, s"---\nname: $long\ndescription: d\n---").left.value
