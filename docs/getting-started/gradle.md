@@ -27,7 +27,7 @@ LLM4S is published for **Scala 3 only**, and Gradle does **not** resolve Scala c
 > Releases up to `0.3.4` used unprefixed names (`core_3`); from `0.4.0` every artifact carries an `llm4s-` prefix. See the [migration guide](/reference/migration#artifact-coordinate-rename-v040).
 
 {: .note }
-> The examples use `0.4.1`, where all functionality, including the provider clients, ships in `llm4s-core`. On `main` the provider clients, agent runtime and other features are being split into separate artifacts (`llm4s-openai`, `llm4s-anthropic`, `llm4s-agent`, ...); once those are published you add the modules you use alongside `llm4s-core_3`. The dependency notes below say which version each one applies to.
+> From `0.5.0` the provider clients, agent runtime and other features are separate artifacts (`llm4s-openai_3`, `llm4s-anthropic_3`, `llm4s-agent_3`, ...): add the modules you use alongside `llm4s-core_3`, or align them with the [BOM](installation#align-versions-with-the-bom). Up to `0.4.x` everything shipped in `llm4s-core`. The dependency notes below say which version each one applies to.
 
 ---
 
@@ -38,11 +38,12 @@ repositories {
     mavenCentral()
 }
 
-val llm4sVersion = "0.4.1"
+val llm4sVersion = "{{ site.data.project.latest_release }}"
 
 dependencies {
-    // Scala 3 artifact - note the explicit _3 suffix
+    // Scala 3 artifacts - note the explicit _3 suffix
     implementation("org.llm4s:llm4s-core_3:$llm4sVersion")
+    implementation("org.llm4s:llm4s-openai_3:$llm4sVersion") // the provider module you use
 }
 
 // Pin the Scala 3 library to avoid binary incompatibility from transitive deps.
@@ -65,10 +66,11 @@ repositories {
     mavenCentral()
 }
 
-def llm4sVersion = '0.4.1'
+def llm4sVersion = '{{ site.data.project.latest_release }}'
 
 dependencies {
     implementation "org.llm4s:llm4s-core_3:${llm4sVersion}"
+    implementation "org.llm4s:llm4s-openai_3:${llm4sVersion}" // the provider module you use
 }
 
 configurations.all {
@@ -171,17 +173,16 @@ dependencies {
 ## Ktor setup
 
 ```kotlin
-val llm4sVersion = "0.4.1"
+val llm4sVersion = "{{ site.data.project.latest_release }}"
 val ktorVersion = "2.3.12"
 
 dependencies {
     implementation("io.ktor:ktor-server-core:$ktorVersion")
     implementation("io.ktor:ktor-server-netty:$ktorVersion")
 
-    implementation("org.llm4s:llm4s-core_3:$llm4sVersion") {
-        // Ktor manages its own logging backend (0.4.x only; see above)
-        exclude(group = "ch.qos.logback", module = "logback-classic")
-    }
+    implementation("org.llm4s:llm4s-core_3:$llm4sVersion")
+    implementation("org.llm4s:llm4s-openai_3:$llm4sVersion")
+    // With 0.4.x, exclude logback-classic from llm4s-core here (see above): Ktor manages its own logging backend
 }
 ```
 

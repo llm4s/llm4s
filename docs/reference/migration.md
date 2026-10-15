@@ -1151,9 +1151,9 @@ the module:
 ## Pre-baseline API cleanup, pass 1
 
 Not in a release yet; from the
-[spine re-audit](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5935792540). 0.5.0 sets
-the binary-compatibility baseline for `llm4s-core` and `llm4s-agent`, so public API that nothing
-used, or that was already deprecated, is removed now rather than frozen.
+[spine re-audit](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5935792540). A later
+pre-1.0 release sets the binary-compatibility baseline, so public API that nothing used, or that was
+already deprecated, is removed now rather than frozen.
 
 | Removed | Use instead |
 |---|---|
@@ -1650,7 +1650,7 @@ LangfuseConfigLoader.default().map(RAGASLangfuseObserver.from)
 
 ### Source breaks
 
-These are taken before 0.5.0 sets the MiMa baseline, and none of them changes a package name.
+These are taken before the MiMa baseline is set, and none of them changes a package name.
 
 1. **Langfuse, the collector, its model and store, and `CostTracker` need `llm4s-observability`**
    (table above).

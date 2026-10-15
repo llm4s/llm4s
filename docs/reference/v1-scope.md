@@ -25,7 +25,7 @@ What has actually moved so far, in the build but not yet in a release:
 | [6](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability` (Langfuse, the trace collector, `CostTracker`); `OpenTelemetryConfig` joins the existing `llm4s-observability-otel`; `llm4s-observability-prometheus` (Prometheus). The tracing and metrics contracts stay in `llm4s-core`, which declares no observability dependency | in the build, unpublished |
 | [7](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (the built-in tools and their config), `llm4s-agent` (`agent`, `assistant`) | in the build, unpublished |
 
-The latest release tag is `v0.4.1`, which is still a single `llm4s-core` (0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). The first release to publish separate module artifacts will be **0.5.0**, in slice 8 ([#1281](https://github.com/llm4s/llm4s/issues/1281)); it is also the MiMa baseline. Until it is published nothing is frozen: "Frozen at 1.0" is the tier a module will hold, not a constraint on changing it now.
+**0.5.0** is the first release to publish separate module artifacts (0.4.x was a single `llm4s-core`; 0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). It sets no MiMa baseline: that comes at a pre-1.0 release, version to be decided, once the designs are final ([#1281](https://github.com/llm4s/llm4s/issues/1281)). Until then nothing is frozen: "Frozen at 1.0" is the tier a module will hold, not a constraint on changing it now.
 
 ## Maturity Legend
 
@@ -120,7 +120,7 @@ Notes:
 
 ## What Frozen means
 
-- **Source and binary compatible within 1.x.** Once `0.5.0` publishes the split modules, `mimaPreviousArtifacts` enforces binary compatibility on every Frozen module for all subsequent 1.x releases.
+- **Source and binary compatible within 1.x.** Once the pre-1.0 baseline is set, `mimaPreviousArtifacts` enforces binary compatibility on every Frozen module for all subsequent 1.x releases.
 - **Deprecate before removing.** A Frozen API is only removed after a deprecation cycle, never dropped outright in a minor release. See the [Compatibility and Deprecation Policy](compatibility-policy).
 - **Beta and Experimental can move faster.** They may change in a minor release, but a migration note ships with the change in the same release's CHANGELOG.
 

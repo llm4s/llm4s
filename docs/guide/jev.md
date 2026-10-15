@@ -16,10 +16,6 @@ That is why this module has its own client. Jev is not an `LLMClient`, returns n
 streaming. Sending a prompt through a chat client and parsing generated JSON would lose the typed question and answer
 contract; so would treating Jev as an OpenAI-compatible provider.
 
-{: .note }
-> Not yet published. `llm4s-jev` exists in the build as of [#1265](https://github.com/llm4s/llm4s/issues/1265) but ships in
-> the next release.
-
 ```scala
 // same version as llm4s-core
 libraryDependencies += "org.llm4s" %% "llm4s-jev" % llm4sVersion

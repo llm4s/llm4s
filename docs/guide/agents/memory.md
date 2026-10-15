@@ -40,11 +40,6 @@ Postgres store lives in another module and is not covered there.
 
 ## Dependency
 
-{: .note }
-> Not yet published. `llm4s-memory` exists in the build as of
-> [#1129](https://github.com/llm4s/llm4s/issues/1129) but ships in the next release;
-> in `0.4.1` and earlier this code is inside `llm4s-core`.
-
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-memory" % llm4sVersion
 ```
@@ -375,10 +370,6 @@ custom `EmbeddingService` written before it existed keeps working unchanged.
 ## Memory with Agents
 
 ### Semantic Memory Middleware
-
-{: .note }
-> Not yet published. `llm4s-agent-memory` exists in the build as of
-> [#1911](https://github.com/llm4s/llm4s/issues/1911) but ships in the next release.
 
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-agent-memory" % llm4sVersion // same version as llm4s-agent

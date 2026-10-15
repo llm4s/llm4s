@@ -137,10 +137,9 @@ Add LLM4S to your `build.sbt`:
 libraryDependencies += "org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"
 ```
 
-In `{{ site.data.project.latest_release }}` the provider clients ship inside `llm4s-core`. On `main`
-they have moved to modules of their own (`llm4s-openai`, `llm4s-anthropic`, `llm4s-gemini`,
-`llm4s-ollama`, `llm4s-openai-compatible`), which from the next release you add alongside
-`llm4s-core` - e.g. `"org.llm4s" %% "llm4s-openai" % llm4sVersion`.
+The provider clients are modules of their own (`llm4s-openai`, `llm4s-anthropic`, `llm4s-gemini`,
+`llm4s-ollama`, `llm4s-openai-compatible`), which you add alongside `llm4s-core` - e.g.
+`"org.llm4s" %% "llm4s-openai" % llm4sVersion`.
 
 {: .note }
 > **Latest release:** `{{ site.data.project.latest_release }}`
