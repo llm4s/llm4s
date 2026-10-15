@@ -205,4 +205,21 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
     GeminiParts.GeminiMaxImages shouldBe 3600
     GeminiParts.VertexMaxImages shouldBe 3000
   }
+
+  "Vertex AI" should "take PDF and plain-text documents only, and at most 3,000 of them" in {
+    val vertex = GeminiParts.user(GeminiParts.vertexFileUri, GeminiParts.VertexDocumentTypes)
+    def docOf(mt: org.llm4s.media.DocumentMediaType) =
+      ContentPart.document(MediaSource.Inline(IArray.fill[Byte](1)(65)), mt).value
+    Seq(MediaType.Pdf, MediaType.PlainText).foreach(mt => vertex.isDefinedAt(docOf(mt)) shouldBe true)
+    Seq(MediaType.Markdown, MediaType.Html, MediaType.Csv).foreach(mt => vertex.isDefinedAt(docOf(mt)) shouldBe false)
+    GeminiParts.user(gemini).isDefinedAt(docOf(MediaType.Csv)) shouldBe true
+    val docs = Seq(UserMessage(Vector.fill(3)(docOf(MediaType.Pdf))))
+    GeminiParts
+      .check("vertexai", docs, GeminiParts.vertexFileUri, 10, GeminiParts.VertexDocumentTypes, Some(2))
+      .left
+      .value
+      .message should
+      include("at most 2 documents in a request; this one has 3")
+    GeminiParts.VertexMaxDocuments shouldBe 3000
+  }
 }

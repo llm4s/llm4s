@@ -77,7 +77,7 @@ the role. No part is dropped and none is turned into text. A `ProviderFile` goes
 | DeepSeek | text | text |
 | Anthropic | text; image (PNG, JPEG, GIF, WebP) `Url`, `Inline`; PDF `Url`, `Inline`; plain text `Inline` | the same |
 | Gemini API | text; image and document `Inline`, a web `Url`, own `ProviderFile` (its `uri`, or its name `files/abc`) | text |
-| Vertex AI | text; image and document `Inline`, a `gs://` `Url` | text |
+| Vertex AI | text; image, PDF and plain-text document `Inline` or a `gs://` `Url` | text |
 | Ollama | text; image `Inline` | text |
 | Bedrock | text; image (PNG, JPEG, GIF, WebP) and document (all five) `Inline` or an `s3://` `Url`; a document needs a text part beside it | the same |
 | watsonx.ai | text; one PNG or JPEG image `Inline` in a chat | text |

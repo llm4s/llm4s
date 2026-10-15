@@ -158,6 +158,13 @@ private[llm4s] object PartEncoding {
     else Left(ValidationError("parts", s"$provider takes at most $max images in a request; this one has $images"))
   }
 
+  /** `Right` when `messages` carry at most `max` documents in all: a provider's limit on the documents of one request. */
+  def checkDocumentsPerRequest(provider: String, messages: Seq[Message], max: Int): Result[Unit] = {
+    val documents = messages.map(m => partsOf(m).count(_.isInstanceOf[ContentPart.Document])).sum
+    if (documents <= max) Right(())
+    else Left(ValidationError("parts", s"$provider takes at most $max documents in a request; this one has $documents"))
+  }
+
   /** Covers text parts only, as their text: for a role whose wire format takes nothing else. */
   val textOnly: PartialFunction[ContentPart, String] = { case ContentPart.Text(text) => text }
 

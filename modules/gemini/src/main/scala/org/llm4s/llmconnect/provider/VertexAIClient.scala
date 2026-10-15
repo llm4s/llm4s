@@ -105,7 +105,14 @@ class VertexAIClient(
       // a part Gemini cannot take fails the request here, before anything is sent
       .flatMap(transformed =>
         GeminiParts
-          .check(providerName, transformed.messages, fileUri, GeminiParts.VertexMaxImages)
+          .check(
+            providerName,
+            transformed.messages,
+            fileUri,
+            GeminiParts.VertexMaxImages,
+            GeminiParts.VertexDocumentTypes,
+            Some(GeminiParts.VertexMaxDocuments)
+          )
           .map(_ => transformed)
       )
       .flatMap { transformed =>
@@ -161,7 +168,14 @@ class VertexAIClient(
       // a part Gemini cannot take fails the request here, before anything is sent
       .flatMap(transformed =>
         GeminiParts
-          .check(providerName, transformed.messages, fileUri, GeminiParts.VertexMaxImages)
+          .check(
+            providerName,
+            transformed.messages,
+            fileUri,
+            GeminiParts.VertexMaxImages,
+            GeminiParts.VertexDocumentTypes,
+            Some(GeminiParts.VertexMaxDocuments)
+          )
           .map(_ => transformed)
       )
       .flatMap { transformed =>
@@ -290,8 +304,10 @@ class VertexAIClient(
       case um: UserMessage =>
         // checked before the body is built: GeminiParts covers every part
         contents += ujson.Obj(
-          "role"  -> "user",
-          "parts" -> ujson.Arr.from(PartEncoding.withoutBlankText(um.parts).map(GeminiParts.user(fileUri)))
+          "role" -> "user",
+          "parts" -> ujson.Arr.from(
+            PartEncoding.withoutBlankText(um.parts).map(GeminiParts.user(fileUri, GeminiParts.VertexDocumentTypes))
+          )
         )
 
       case am: AssistantMessage =>

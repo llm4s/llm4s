@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.model.{ ContentPart, Message }
-import org.llm4s.media.{ MediaSource, MediaType }
+import org.llm4s.media.{ DocumentMediaType, MediaSource, MediaType }
 import org.llm4s.types.Result
 
 /**
@@ -20,21 +20,44 @@ private[provider] object GeminiParts {
   /** Resolves a reference to the URI sent as `fileData.fileUri`; `None` refuses it. */
   type FileUri = MediaSource => Option[String]
 
-  /** The `parts` entry for each user-message part a client with `fileUri` sends. */
-  def user(fileUri: FileUri): PartialFunction[ContentPart, ujson.Value] = {
+  /** The `parts` entry for each user-message part a client with `fileUri`, taking `documentTypes`, sends. */
+  def user(
+    fileUri: FileUri,
+    documentTypes: Set[DocumentMediaType] = GeminiDocumentTypes
+  ): PartialFunction[ContentPart, ujson.Value] = {
     case ContentPart.Text(text)                                                    => ujson.Obj("text" -> text)
     case ContentPart.Image(source, mt) if ImageTypes(mt) && sends(fileUri, source) => encode(fileUri, source, mt)
-    case ContentPart.Document(source, mt) if sends(fileUri, source)                => encode(fileUri, source, mt)
+    case ContentPart.Document(source, mt) if documentTypes(mt) && sends(fileUri, source) =>
+      encode(fileUri, source, mt)
   }
+
+  /** The document types the Gemini API takes: PDF and the text types (plain text, Markdown, HTML, CSV). */
+  val GeminiDocumentTypes: Set[DocumentMediaType] = MediaType.documents.toSet
+
+  /** The document types Vertex AI's Gemini models take: PDF and plain text. */
+  val VertexDocumentTypes: Set[DocumentMediaType] = Set(MediaType.Pdf, MediaType.PlainText)
+
+  /** The documents Vertex AI takes in one prompt: 3,000. */
+  val VertexMaxDocuments: Int = 3000
 
   /** The image formats Gemini and Vertex AI take that llm4s names: PNG, JPEG and WebP (HEIC and HEIF have no `MediaType`). */
   val ImageTypes: Set[org.llm4s.media.ImageMediaType] = Set(MediaType.Png, MediaType.Jpeg, MediaType.WebP)
 
   /** `Right` when a client with `fileUri` can send every part of `messages`. */
-  def check(provider: String, messages: Seq[Message], fileUri: FileUri, maxImages: Int): Result[Unit] =
+  def check(
+    provider: String,
+    messages: Seq[Message],
+    fileUri: FileUri,
+    maxImages: Int,
+    documentTypes: Set[DocumentMediaType] = GeminiDocumentTypes,
+    maxDocuments: Option[Int] = None
+  ): Result[Unit] =
     PartEncoding
-      .check(provider, messages, user(fileUri), PartEncoding.textOnly)
+      .check(provider, messages, user(fileUri, documentTypes), PartEncoding.textOnly)
       .flatMap(_ => PartEncoding.checkImagesPerRequest(provider, messages, maxImages))
+      .flatMap(_ =>
+        maxDocuments.fold[Result[Unit]](Right(()))(PartEncoding.checkDocumentsPerRequest(provider, messages, _))
+      )
 
   /** The images the Gemini API takes in one request: 3,600. */
   val GeminiMaxImages: Int = 3600
