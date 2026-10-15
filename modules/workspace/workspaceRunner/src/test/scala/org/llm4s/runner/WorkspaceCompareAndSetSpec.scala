@@ -240,6 +240,9 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     code(late.writeFile("new.txt", "x", mode = Some("create"))) shouldBe "WORKSPACE_BUSY"
     code(late.modifyFile("late.txt", List(InsertOperation(afterLine = 0, newContent = "z")))) shouldBe "WORKSPACE_BUSY"
     Files.exists(root.resolve("new.txt")) shouldBe false
+    // and the directories it created for the write are removed with it
+    code(late.writeFile("deep/er/new.txt", "x", createDirectories = Some(true))) shouldBe "WORKSPACE_BUSY"
+    Files.exists(root.resolve("deep")) shouldBe false
     workspace().fileSnapshot("late.txt").content shouldBe Some("one")
   }
 

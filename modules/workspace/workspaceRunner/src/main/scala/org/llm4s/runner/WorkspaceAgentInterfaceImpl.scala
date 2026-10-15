@@ -641,12 +641,22 @@ class WorkspaceAgentInterfaceImpl(
     if (Files.isDirectory(resolvedPath))
       throw new WorkspaceAgentException(s"Path '$path' is a directory, not a file", "NOT_A_FILE", None)
 
-    // only now, every refusal made, is anything created: a refused write leaves no directory behind
+    // only now, every refusal made, is anything created: a refused write leaves no directory behind. The directories
+    // this request creates are part of its change, so a write that does not commit (refused, failed, or past its
+    // deadline) removes them again: a client that gave up never finds them
+    var createdDirs = List.empty[Path] // deepest first
+    def rollBack(): Unit =
+      createdDirs.foreach(d => Try(Files.deleteIfExists(d))) // a directory something else filled stays
     if (createDirs) {
       // the directories are created where the path really leads, checked by the path policy just before
       val parent = effective(resolvedPath.getParent)
       checkPolicy(path, parent, Access.Write)
+      createdDirs = Iterator
+        .iterate(parent)(_.getParent)
+        .takeWhile(d => d != null && !Files.exists(d, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+        .toList
       Try(Files.createDirectories(parent)).failed.foreach { e =>
+        rollBack()
         throw new WorkspaceAgentException(
           s"Cannot create the parent directories of '$path': ${e.getMessage}",
           "PARENT_NOT_A_DIRECTORY",
@@ -667,7 +677,12 @@ class WorkspaceAgentInterfaceImpl(
       // link is written through, as Files.write writes through it: the file it names changes and the link stays.
       val target = effective(resolvedPath)
       checkPolicy(path, target, Access.Write)
-      if (createDirs) Files.createDirectories(target.getParent)
+      if (!Files.isDirectory(target.getParent))
+        throw new WorkspaceAgentException(
+          s"Path '$path' changed while it was written: its directory is gone; nothing was written",
+          "HASH_MISMATCH",
+          None
+        )
       import FileSnapshotResponse.Kind
       // every mode is staged and committed atomically, in time (commitStaged): what the file must still be when the
       // change commits, and what it then holds
@@ -697,6 +712,9 @@ class WorkspaceAgentInterfaceImpl(
         path = path,
         bytesWritten = bytes.length
       )
+    }.recoverWith { case e =>
+      rollBack()
+      Failure(e)
     }.recover {
       case refused: WorkspaceAgentException => throw refused
       case e: Exception =>
