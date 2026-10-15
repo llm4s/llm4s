@@ -31,11 +31,16 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
   it should "keep at most maxChars, cut on a code point, and say it was cut" in {
     val backend = storeBackend()
     seed(backend, "/a.md" -> "abc\ndef\n\uD83D\uDE00xyz")
-    DocumentText.read(backend, p("/a.md"), 5L, ctxOn(backend)).value.value shouldBe BoundedText("abc\nd", cut = true)
+    DocumentText.read(backend, p("/a.md"), 5L, ctxOn(backend)).value.value shouldBe BoundedText(
+      "abc\nd",
+      cut = true,
+      lastLineCut = true
+    )
     // the 9th character would split the surrogate pair, so the cut stops before it
     DocumentText.read(backend, p("/a.md"), 9L, ctxOn(backend)).value.value shouldBe BoundedText(
       "abc\ndef\n",
-      cut = true
+      cut = true,
+      lastLineCut = true
     )
     DocumentText.read(backend, p("/a.md"), 7L, ctxOn(backend)).value.value shouldBe BoundedText("abc\ndef", cut = true)
     DocumentText.read(backend, p("/a.md"), 13L, ctxOn(backend)).value.value shouldBe
@@ -58,13 +63,17 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
   }
 
   "SectionText" should "add a part whole or not at all, or cut it with a marker counted in the bound" in {
-    val s = new SectionText(20)
+    val s = new SectionText(21)
     s.addWhole("0123456789") shouldBe true
-    s.addWhole("0123456789X") shouldBe false
+    s.addWhole("0123456789XY") shouldBe false
     s.addCut("## h\nbody body", prefix = 5, marker = "[cut]") shouldBe Some(true)
-    s.text shouldBe "0123456789## h\n[cut]"
-    s.text.length should be <= 20
+    s.text shouldBe "0123456789## h\nb[cut]"
+    s.text.length should be <= 21
     s.addCut("## h\n", prefix = 5, marker = "[cut]") shouldBe None
+    // a cut that would keep only the heading and the marker adds nothing
+    val t = new SectionText(10)
+    t.addCut("## h\nbody body", prefix = 5, marker = "[cut]") shouldBe None
+    t.isEmpty shouldBe true
   }
 
   "Report" should "keep at most 32 issues and count the rest" in {

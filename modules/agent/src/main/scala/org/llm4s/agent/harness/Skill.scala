@@ -67,16 +67,27 @@ object Skill:
    */
   def parse(path: VPath, content: String): Result[Skill] =
     // the same bound the middleware reads within: the frontmatter must close in the first MaxFrontmatterChars
-    val cut = content.length > MaxFrontmatterChars
-    fromLines(path, Text.lines(if cut then content.substring(0, MaxFrontmatterChars) else content), closed = !cut)
+    val cut  = content.length > MaxFrontmatterChars
+    val kept = if cut then content.substring(0, MaxFrontmatterChars) else content
+    // the bound falls inside a line unless it falls at a line's end: before a `\n` (or the `\r` of a `\r\n`)
+    val lastLineCut =
+      cut && !kept.endsWith("\n") && content.charAt(MaxFrontmatterChars) != '\n' &&
+        content.charAt(MaxFrontmatterChars) != '\r'
+    fromLines(path, Text.lines(kept), closed = !cut, lastLineCut)
 
   /**
-   * The skill of a file's first lines, `closed` when they are the whole file or end at the closing `---`. When they
-   * are not, the last line may be cut short, so it is dropped: a cut `----` must not read as the closing fence.
+   * The skill of a file's first lines, `closed` when they are the whole file or end at the closing `---`.
+   * `lastLineCut` says the last line was cut short at the bound; it is dropped, so a cut `-----` is never read as the
+   * closing fence, while a whole fence ending exactly at the bound is kept.
    */
-  private[harness] def fromLines(path: VPath, lines: Vector[String], closed: Boolean): Result[Skill] =
+  private[harness] def fromLines(
+    path: VPath,
+    lines: Vector[String],
+    closed: Boolean,
+    lastLineCut: Boolean
+  ): Result[Skill] =
     Frontmatter
-      .parse(path, if closed then lines else lines.dropRight(1), closed)
+      .parse(path, if lastLineCut then lines.dropRight(1) else lines, closed)
       .flatMap(fields => fromFields(path, fields))
 
   private def fromFields(path: VPath, fields: ListMap[String, Frontmatter.Field]): Result[Skill] =

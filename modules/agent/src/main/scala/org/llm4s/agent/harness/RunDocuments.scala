@@ -163,7 +163,7 @@ final private[harness] class RunDocuments[A](id: MiddlewareId, maxRuns: Int)(
     }(done => Report.emit(context.run, done.report))
 
 /** A document's text as read: at most the bound asked for, `cut` when the file held more. */
-final private[harness] case class BoundedText(text: String, cut: Boolean)
+final private[harness] case class BoundedText(text: String, cut: Boolean, lastLineCut: Boolean = false)
 
 private[harness] object DocumentText:
 
@@ -188,10 +188,11 @@ private[harness] object DocumentText:
         case Left(refused: BackendRefused) if refused.kind == BackendRefused.Kind.NotFound => Right(None)
         case Left(error)                                                                   => Left(error)
         case Right(page) =>
-          val out     = new java.lang.StringBuilder()
-          val lines   = page.lines.iterator
-          var started = false                 // whether a line was added: every later line is preceded by `\n`
-          var outcome = Option.empty[Boolean] // Some(cut) once reading is over
+          val out         = new java.lang.StringBuilder()
+          val lines       = page.lines.iterator
+          var started     = false                 // whether a line was added: every later line is preceded by `\n`
+          var outcome     = Option.empty[Boolean] // Some(cut) once reading is over
+          var lastLineCut = false                 // whether the last line kept is cut short
           while outcome.isEmpty && lines.hasNext do
             val line      = lines.next()
             val separator = if started then 1 else 0
@@ -203,13 +204,14 @@ private[harness] object DocumentText:
               if separator == 1 then out.append('\n')
               if line.length.toLong > room then
                 out.append(cut(line, room))
+                lastLineCut = true
                 outcome = Some(true)
               else
                 out.append(line)
                 if stop(line) then outcome = Some(false)
           // lines the call did not return are lines the bound left out
           val wasCut = outcome.getOrElse(page.lines.size < page.totalLines)
-          Right(Some(BoundedText(out.toString, wasCut)))
+          Right(Some(BoundedText(out.toString, wasCut, lastLineCut)))
 
   /** At most `max` characters of `s`, on a code-point boundary. */
   def cut(s: String, max: Long): String =
@@ -253,10 +255,13 @@ final private[harness] class SectionText(maxChars: Long):
     if part.length.toLong <= remaining then
       out.append(part)
       Some(false)
-    else if prefix.toLong + marker.length > remaining then None
     else
-      out.append(DocumentText.cut(part, remaining - marker.length)).append(marker)
-      Some(true)
+      // a cut keeps at least one character of the part's own text: a heading and a marker alone show nothing
+      val kept = DocumentText.cut(part, remaining - marker.length)
+      if kept.length <= prefix then None
+      else
+        out.append(kept).append(marker)
+        Some(true)
 
   def text: String = out.toString
 
