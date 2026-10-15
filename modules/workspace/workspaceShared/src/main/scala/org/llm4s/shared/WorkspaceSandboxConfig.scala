@@ -383,6 +383,13 @@ object WorkspaceSandboxConfig {
   val CommandGateWait: FiniteDuration = 30.seconds
 
   /**
+   * How long after its wait at the gate a file change may still commit. The runner refuses, changing nothing, a change
+   * not committed within `CommandGateWait + CommitAfterGate` of its start, and a client waits longer than that for the
+   * response, so a change is never applied after its client gave up on it.
+   */
+  val CommitAfterGate: FiniteDuration = 30.seconds
+
+  /**
    * The largest `limits.maxFileSize` the runner keeps: a snapshot holds a file whole in memory, in one array. A config
    * over it is refused by [[validate]], and a runner given one unvalidated uses this instead.
    */

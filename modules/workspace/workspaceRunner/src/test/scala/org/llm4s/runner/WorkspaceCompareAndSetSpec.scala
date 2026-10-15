@@ -221,6 +221,23 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
       Files.getPosixFilePermissions(root.resolve("plain.txt"))
   }
 
+  it should "be refused, changing nothing, once its client would have given up on it" in {
+    Files.write(root.resolve("late.txt"), "one".getBytes(StandardCharsets.UTF_8))
+    val zero = scala.concurrent.duration.Duration.Zero
+    // no time at all to commit in: every change is past its deadline when it would commit
+    val late = new WorkspaceAgentInterfaceImpl(
+      root.toString,
+      isWindowsHost,
+      Some(WorkspaceSandboxConfig()),
+      gateWait = zero,
+      commitAfterGate = zero
+    )
+
+    code(late.writeFile("late.txt", "two", expectedHash = Some(hashOf("one")))) shouldBe "WORKSPACE_BUSY"
+    code(late.deleteFile("late.txt", Some(hashOf("one")))) shouldBe "WORKSPACE_BUSY"
+    workspace().fileSnapshot("late.txt").content shouldBe Some("one")
+  }
+
   it should "refuse to compare with a file over the size limit, which is never read" in {
     Files.write(root.resolve("big"), ("x" * 20).getBytes(StandardCharsets.UTF_8))
     val small = workspace(WorkspaceSandboxConfig(limits = WorkspaceSandboxConfig.DefaultLimits.copy(maxFileSize = 10)))

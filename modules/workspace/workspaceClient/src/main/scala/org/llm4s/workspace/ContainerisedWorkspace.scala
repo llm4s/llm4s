@@ -434,7 +434,9 @@ class ContainerisedWorkspace(
           exec.timeout.map(WireDurations.toWholeSeconds).getOrElse(DefaultCommandTimeoutSec.toLong)
         gateSec + commandTimeoutSec + ResponseTimeoutBufferSec
       case _ =>
-        gateSec + (DefaultCommandTimeoutSec + ResponseTimeoutBufferSec).toLong
+        // longer than the runner lets a file change take before it must commit, so the runner refuses an overdue
+        // change before this client gives up on it
+        gateSec + WireDurations.toWholeSeconds(WorkspaceSandboxConfig.CommitAfterGate) + ResponseTimeoutBufferSec
     }
   }
 

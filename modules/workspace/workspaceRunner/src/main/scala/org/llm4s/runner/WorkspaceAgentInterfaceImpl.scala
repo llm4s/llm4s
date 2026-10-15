@@ -31,6 +31,7 @@ import scala.util.chaining._
  * @param gateWait      how long a command or a file operation waits at the command gate before it is refused
  *                      (`WORKSPACE_BUSY`)
  * @param startProcess  starts a process for the [[ProcessRegistry]]; the platform's, bar in tests
+ * @param commitAfterGate how long after its gate wait a file change may still commit; past it, it is refused unchanged
  */
 class WorkspaceAgentInterfaceImpl(
   workspaceRoot: String,
@@ -38,7 +39,8 @@ class WorkspaceAgentInterfaceImpl(
   sandboxConfig: Option[WorkspaceSandboxConfig] = None,
   programSearch: ProgramSearch = ProgramSearch.host(),
   gateWait: FiniteDuration = WorkspaceAgentInterfaceImpl.GateWait,
-  startProcess: java.lang.ProcessBuilder => Process = _.start()
+  startProcess: java.lang.ProcessBuilder => Process = _.start(),
+  commitAfterGate: FiniteDuration = WorkspaceSandboxConfig.CommitAfterGate
 ) extends WorkspaceAgentInterface {
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -238,8 +240,29 @@ class WorkspaceAgentInterfaceImpl(
    * behind another file operation or a command is refused (`WORKSPACE_BUSY`, having done nothing) rather than started
    * after its client, whose deadline allows for one `gateWait`, has given up on it.
    */
+  /** When the current file operation must have committed by: set by [[mutating]] as the request starts. */
+  private val commitBy = new ThreadLocal[java.lang.Long]
+
+  /**
+   * Refuses (`WORKSPACE_BUSY`, nothing changed) a change about to be committed after its client has given up on it:
+   * the client waits `CommandGateWait` plus a margin beyond `CommitAfterGate` for a response, so a request still
+   * uncommitted past `gateWait + CommitAfterGate` (a slow hash, a slow ACL copy) is stopped before its write, move or
+   * delete, never applied unseen. Called immediately before each commit step.
+   */
+  private def ensureInTime(path: String): Unit =
+    Option(commitBy.get).foreach { by =>
+      if (System.nanoTime() > by)
+        throw new WorkspaceAgentException(
+          s"The change to '$path' took longer than its client waits for it; nothing was changed",
+          "WORKSPACE_BUSY",
+          None
+        )
+    }
+
   private def mutating[A](body: => A): A = {
-    val deadline  = System.nanoTime() + gateWait.toNanos
+    val started  = System.nanoTime()
+    val deadline = started + gateWait.toNanos
+    commitBy.set(started + (gateWait + commitAfterGate).toNanos)
     def remaining = math.max(0L, deadline - System.nanoTime())
     def busy(what: String) =
       new WorkspaceAgentException(
@@ -249,7 +272,7 @@ class WorkspaceAgentInterfaceImpl(
       )
     if (!fileLock.tryLock(remaining, TimeUnit.NANOSECONDS)) throw busy("Another file operation")
     try processes.exclusive(remaining)(body)
-    finally fileLock.unlock()
+    finally { fileLock.unlock(); commitBy.remove() }
   }
 
   /** The current [[FileSnapshotResponse.hash]] of `resolved`, its bytes read as a stream. */
@@ -643,6 +666,7 @@ class WorkspaceAgentInterfaceImpl(
           expectedHash
             .map(e => if (FileSnapshotResponse.Kind.isDangling(e)) FileSnapshotResponse.Kind.Absent else e)
             .foreach(checkExpected(path, target, _))
+          ensureInTime(path)
           Files.move(
             temp,
             target,
@@ -653,7 +677,7 @@ class WorkspaceAgentInterfaceImpl(
           Files.deleteIfExists(temp)
           throw e
         }.get
-      } else Files.write(resolvedPath, bytes, options: _*)
+      } else { ensureInTime(path); Files.write(resolvedPath, bytes, options: _*) }
 
       WriteFileResponse(
         commandId = "local",
@@ -727,6 +751,7 @@ class WorkspaceAgentInterfaceImpl(
     if (resultingSize > maxFileSize) throw tooLarge(resultingSize, "would exceed")
 
     // Write back to file using UTF-8 encoding
+    ensureInTime(path)
     Using(
       new PrintWriter(
         new BufferedWriter(
@@ -838,6 +863,7 @@ class WorkspaceAgentInterfaceImpl(
       if (!Files.exists(resolved, java.nio.file.LinkOption.NOFOLLOW_LINKS))
         throw new WorkspaceAgentException(s"File '$path' does not exist", "FILE_NOT_FOUND", None)
       val wasDirectory = Files.isDirectory(resolved, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+      ensureInTime(path)
       Try(Files.delete(resolved)) match {
         case Success(_) => DeleteFileResponse("local", path, wasDirectory)
         case Failure(_: java.nio.file.DirectoryNotEmptyException) =>
