@@ -306,7 +306,7 @@ class WorkspaceAgentInterfaceImpl(
     else {
       // read at most one byte past the limit, whatever the size said: a file growing while it is read is `oversized`
       val digest = java.security.MessageDigest.getInstance("SHA-256")
-      val within = Using.resource(Files.newInputStream(resolved)) { in =>
+      val within = Using.resource(openRead(resolved)) { in =>
         val buffer = new Array[Byte](8192)
         var total  = 0L
         var n      = in.read(buffer)
@@ -586,10 +586,59 @@ class WorkspaceAgentInterfaceImpl(
    * it has grown since its size was checked, so it is never read whole into memory.
    */
   private def readBounded(path: Path): Option[Array[Byte]] =
-    Using.resource(Files.newInputStream(path)) { in =>
+    Using.resource(openRead(path)) { in =>
       val bytes = in.readNBytes(math.min(maxFileSize + 1, Int.MaxValue.toLong - 8).toInt)
       if (bytes.length.toLong > maxFileSize) None else Some(bytes)
     }
+
+  /**
+   * `secure(dir, name)` on `place`'s final name, relative to its directory held open, where the platform has secure
+   * directory streams (Linux) and `place` is a physical path (no link in it): the directory is first checked to be the
+   * one the path names (same file key, the path still resolving to itself), so a parent swapped for a link
+   * afterwards cannot redirect the operation. Elsewhere, `plain`, by path, immediately after the caller's checks.
+   */
+  private def held[A](place: Path)(secure: (java.nio.file.SecureDirectoryStream[Path], Path) => A)(plain: => A): A = {
+    import java.nio.file.{ LinkOption, SecureDirectoryStream }
+    import java.nio.file.attribute.{ BasicFileAttributeView, BasicFileAttributes }
+    val parent = place.getParent
+    if (parent == null || Try(effective(place) != place).getOrElse(true)) plain
+    else {
+      val stream = Files.newDirectoryStream(parent)
+      stream match {
+        case s: SecureDirectoryStream[Path @unchecked] =>
+          Try {
+            val heldKey =
+              Try(s.getFileAttributeView(classOf[BasicFileAttributeView]).readAttributes().fileKey()).toOption
+            val namedKey =
+              Try(
+                Files.readAttributes(parent, classOf[BasicFileAttributes], LinkOption.NOFOLLOW_LINKS).fileKey()
+              ).toOption
+            if (heldKey.isEmpty || heldKey != namedKey || effective(parent) != parent)
+              throw new WorkspaceAgentException(
+                s"Path '${rootPath.relativize(place)}' changed while it was used: its directory was replaced",
+                "HASH_MISMATCH",
+                None
+              )
+            secure(s, place.getFileName)
+          }.transform(
+            a => { stream.close(); scala.util.Success(a) },
+            e => { Try(stream.close()); scala.util.Failure(e) }
+          ).get
+        case _ =>
+          stream.close()
+          plain
+      }
+    }
+  }
+
+  /** `place` opened for reading through [[held]]: relative to its held directory, never following a final link. */
+  private def openRead(place: Path): java.io.InputStream =
+    held(place) { (dir, name) =>
+      val options = new java.util.HashSet[java.nio.file.OpenOption]()
+      options.add(StandardOpenOption.READ)
+      options.add(java.nio.file.LinkOption.NOFOLLOW_LINKS)
+      java.nio.channels.Channels.newInputStream(dir.newByteChannel(name, options))
+    }(Files.newInputStream(place))
 
   /** A file's hash, as [[currentHash]] gives it, from the bytes read. */
   private def digestOf(bytes: Array[Byte]): String =
@@ -1080,7 +1129,7 @@ class WorkspaceAgentInterfaceImpl(
           )
         else {
           // read once, bounded by the limit even if the file grew since its size was read
-          Try(Using.resource(Files.newInputStream(place))(_.readNBytes((maxFileSize + 1).toInt))) match {
+          Try(Using.resource(openRead(place))(_.readNBytes((maxFileSize + 1).toInt))) match {
             // deleted since it was classified: what it has become
             case Failure(_: java.nio.file.NoSuchFileException) => response(Kind.Absent, Kind.Absent, 0L, None, None)
             case Failure(e)                                    => throw e
@@ -1138,7 +1187,15 @@ class WorkspaceAgentInterfaceImpl(
         )
       expectedHash.foreach(checkExpected(path, entry, _, entryHash)) // and still what was compared
       ensureInTime(path)
-      Try(Files.delete(entry)) match {
+      Try(
+        held(entry)((dir, name) => if (wasDirectory) dir.deleteDirectory(name) else dir.deleteFile(name))(
+          Files.delete(entry)
+        )
+      ).recoverWith {
+        // a held directory's removal of a non-empty one, however the platform words it
+        case _ if wasDirectory && Try(Using.resource(Files.list(entry))(_.findAny().isPresent)).getOrElse(false) =>
+          scala.util.Failure(new java.nio.file.DirectoryNotEmptyException(entry.toString))
+      } match {
         case Success(_) => DeleteFileResponse("local", path, wasDirectory)
         case Failure(_: java.nio.file.DirectoryNotEmptyException) =>
           throw new WorkspaceAgentException(

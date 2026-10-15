@@ -141,19 +141,26 @@ final private[runner] class ProcessRegistry(
             }
             // settled only when a sweep, made after everything found so far has exited, finds nothing more: a dying
             // orphan that forked leaves a child the next sweep finds, so the permit is kept until none is left
-            // (bounded in rounds, each only after the last round's processes have all exited: a process that is
-            // dead but unreaped must never hold the gate for ever)
+            // Never released while anything found is alive. Past `SettleRounds` generations the command is reported
+            // once, and each further round waits a second first, so the sweeps never spin
             def settle(pending: List[ProcessHandle], round: Int): Unit =
               if (pending.isEmpty) done()
-              else if (round >= ProcessRegistry.SettleRounds) {
-                logger.error(s"Command $commandId: its processes kept forking while killed; releasing it")
-                done()
-              } else
+              else {
+                if (round == ProcessRegistry.SettleRounds)
+                  logger.error(s"Command $commandId: its processes keep forking while killed; it holds the gate")
+                val next: Runnable =
+                  () => settle(sweepOrphans(Try(entry.process.pid()).toOption).filter(_.isAlive), round + 1)
                 java.util.concurrent.CompletableFuture
                   .allOf(pending.map(_.onExit()): _*)
-                  .whenComplete((_, _) =>
-                    settle(sweepOrphans(Try(entry.process.pid()).toOption).filter(_.isAlive), round + 1)
-                  ): Unit
+                  .whenComplete { (_, _) =>
+                    if (round < ProcessRegistry.SettleRounds) next.run()
+                    else
+                      java.util.concurrent.CompletableFuture.runAsync(
+                        next,
+                        java.util.concurrent.CompletableFuture.delayedExecutor(1, TimeUnit.SECONDS)
+                      ): Unit
+                  }: Unit
+              }
             if (leftovers.nonEmpty)
               logger.warn(
                 s"Command $commandId left ${leftovers.size} process(es) running; it holds the gate until they exit"
@@ -302,6 +309,6 @@ private[runner] object ProcessRegistry {
   /** How long a kill waits for the process to exit before it reports that it did not. */
   val KillWait: FiniteDuration = FiniteDuration(5, TimeUnit.SECONDS)
 
-  /** How many generations of processes forked while being killed a command's exit sweeps before it gives up. */
+  /** How many generations of processes forked while being killed a command's exit sweeps at once, before it slows. */
   val SettleRounds: Int = 20
 }
