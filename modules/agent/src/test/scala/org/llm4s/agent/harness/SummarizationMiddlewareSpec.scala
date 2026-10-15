@@ -19,6 +19,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
+import scala.jdk.CollectionConverters.*
 
 /** Stage 3 slice F4 (#1908, design §4.34): `SummarizationMiddleware` through the tool loop. */
 class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
@@ -175,6 +176,26 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     // a later request keeps its new note while the stored summary replaces the history it covers
     turns(loopOf(model, Seq(annotate, mw)), "u5")
     contents(model.last).drop(1).head shouldBe "note 5"
+  }
+
+  it should "never fold across a gap in the history it was sent, so a summary covers only what it saw" in {
+    given store: InMemoryCheckpointer = new InMemoryCheckpointer
+    given thread: ThreadId            = ThreadId("gap")
+    // an outer wrapper that never sends the first answer, as a pruning wrapper or a handoff's view leaves a gap
+    val gap = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("gap")
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] =
+        next(request.withMessages(request.messages.filterNot(_.content == "a1")))
+    }
+    val model      = new Model()
+    val compressor = new Recording()
+    val mw         = new SummarizationMiddleware(SummaryTrigger.Messages(4), keepRecent = 1, compressor = compressor)
+    val state      = turns(loopOf(model, Seq(gap, mw)), "u1", "u2", "u3", "u4")
+    // only u1 could be folded without skipping a1, which the compressor never saw; after it, the gap blocks folding
+    compressor.calls.asScala.map(_._2.map(_.content)).toVector shouldBe Vector(Vector("u1"))
+    state.get(SummarizationMiddleware.key).value.value.throughMessageId shouldBe state.get(Messages.key).value.head.id
   }
 
   it should "send the request as it is when no cut is left" in {
@@ -396,6 +417,7 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
 
   "The limits" should "refuse values below 1" in {
     an[IllegalArgumentException] should be thrownBy SummaryTrigger.Messages(0)
+    an[IllegalArgumentException] should be thrownBy SummaryCompressor.model(ScriptedLLMClient.of(), maxInputTokens = 15)
     an[IllegalArgumentException] should be thrownBy SummaryTrigger.Tokens(0)
     an[IllegalArgumentException] should be thrownBy new SummarizationMiddleware(
       SummaryTrigger.Messages(1),

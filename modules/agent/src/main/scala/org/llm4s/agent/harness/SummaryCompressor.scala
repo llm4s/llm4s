@@ -61,13 +61,19 @@ object SummaryCompressor:
     options: CompletionOptions = CompletionOptions(),
     maxInputTokens: Int = DefaultMaxInputTokens
   ): SummaryCompressor =
-    require(maxInputTokens >= 1, s"SummaryCompressor.model: maxInputTokens must be at least 1, was $maxInputTokens")
+    require(
+      maxInputTokens >= MinInputTokens,
+      s"SummaryCompressor.model: maxInputTokens must be at least $MinInputTokens, was $maxInputTokens"
+    )
     new Model(client, options, maxInputTokens)
 
   private val DigestHeader = "[HISTORY_SUMMARY]"
 
   /** The most characters the marker on a cut transcript line takes. */
   private val CutMarkerChars = 48
+
+  /** The least `maxInputTokens` of a model compressor: a cut line keeps 16 characters beside its marker. */
+  val MinInputTokens: Int = 16
 
   final private class Digest(counter: ConversationTokenCounter) extends SummaryCompressor:
     def compress(

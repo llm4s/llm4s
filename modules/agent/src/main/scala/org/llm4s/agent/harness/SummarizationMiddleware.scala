@@ -89,10 +89,12 @@ final class SummarizationMiddleware(
       kept = matched.filterNot(_._2.exists(_ <= t))
       if kept.size < matched.size && valid(kept.map(_._1))
     yield s -> kept
-    val summary   = applied.map(_._1)
-    val after     = applied.fold(matched)(_._2)
-    val effective = system ++ summary.fold(Vector.empty[Message])(s => summarised(s.text)) ++ after.map(_._1)
-    lazy val asIs = Plan.AsIs(request.withMessages(effective))
+    val summary = applied.map(_._1)
+    // the stored message the applied summary covers through: a summary covers a prefix of the stored history
+    val coveredThrough = summary.fold(-1)(s => history.indexWhere(_.id == s.throughMessageId))
+    val after          = applied.fold(matched)(_._2)
+    val effective      = system ++ summary.fold(Vector.empty[Message])(s => summarised(s.text)) ++ after.map(_._1)
+    lazy val asIs      = Plan.AsIs(request.withMessages(effective))
     if !fires(effective) then asIs
     else
       // the last `keepRecent` are kept; the cut moves earlier while it would split a tool batch, or leave the last
@@ -103,7 +105,11 @@ final class SummarizationMiddleware(
         .takeWhile(_ > 0)
         .find { c =>
           val (folded, kept) = after.splitAt(c)
+          val stored         = folded.flatMap(_._2)
+          // the folded stored messages must be exactly those after the summary, through the last: a summary never
+          // claims a message its compressor did not see (a handoff's view or a pruning wrapper leaves gaps)
           folded.last._2.isDefined &&
+          stored == (coveredThrough + 1 to folded.last._2.get).toVector &&
           valid(Vector(summaryMessage("")) ++ folded.filter(_._2.isEmpty).map(_._1) ++ kept.map(_._1))
         }
       cut match
