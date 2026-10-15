@@ -153,20 +153,20 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
    */
   def delete(target: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
     guarded[FileDeleted]("delete", target, ctx) { view =>
-      if target == VPath.root then refused("delete", target, "is the root directory")
-      else
-        view.current match
-          case Some(_) => Right(StoreChange.Remove(FileDeleted(wasDirectory = false)))
-          case None =>
-            view
-              .withPrefix(target.value + "/", 1)
-              .flatMap(beneath =>
-                refused(
-                  "delete",
-                  target,
-                  if beneath.nonEmpty then "is a directory; delete the files in it" else "not found"
-                )
+      view.current match
+        // whatever the item is, the root included (a file there is corrupt state, and this repairs it)
+        case Some(_)                      => Right(StoreChange.Remove(FileDeleted(wasDirectory = false)))
+        case None if target == VPath.root => refused("delete", target, "is the root directory")
+        case None =>
+          view
+            .withPrefix(target.value + "/", 1)
+            .flatMap(beneath =>
+              refused(
+                "delete",
+                target,
+                if beneath.nonEmpty then "is a directory; delete the files in it" else "not found"
               )
+            )
     }
 
 object StoreFileBackend:

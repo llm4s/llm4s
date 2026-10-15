@@ -269,6 +269,7 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
         ("files over the bound together", small, Seq("/a" -> "x" * 40, "/b" -> "x" * 40), "/b", "limit"),
         ("binary content", StateFileBackend(clock = clock), Seq("/nul" -> "a\u0000b"), "/nul", "binary"),
         ("an unpaired surrogate", StateFileBackend(clock = clock), Seq("/s" -> "a\uD800b"), "/s", "not valid Unicode"),
+        ("a file at the root", StateFileBackend(clock = clock), Seq("/" -> "x"), "/", "at the root"),
         (
           "a file that is also a directory",
           StateFileBackend(clock = clock),

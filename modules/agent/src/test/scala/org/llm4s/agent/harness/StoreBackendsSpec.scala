@@ -249,6 +249,7 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
       ),
       ("binary content", Seq("/nul" -> text("a\u0000b")), Some("/nul"), "binary"),
       ("an unpaired surrogate", Seq("/s" -> text("a\uD800b")), Some("/s"), "not valid Unicode"),
+      ("a file at the root", Seq("/" -> text("x")), Some("/"), "at the root"),
       ("a file that is also a directory", Seq("/a" -> text("x"), "/a/b" -> text("y")), Some("/a"), "both a file")
     )
     for ((shape, stored, offending, problem) <- cases) withClue(shape) {

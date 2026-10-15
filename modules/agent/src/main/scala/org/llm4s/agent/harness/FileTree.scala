@@ -25,7 +25,8 @@ private[harness] object FileTree:
    *  - each entry's content at most `maxEntryBytes` as a JSON string, and all entries (paths and
    *    contents) at most `maxTotalBytes`, counted only until a bound is passed;
    *  - each entry text under the one text rule (no NUL, no unpaired surrogate);
-   *  - no path both a file and a directory: no entry beneath another.
+   *  - no path both a file and a directory: no entry beneath another, and none at the root, which is
+   *    always a directory.
    *
    * Keys are already `VPath`s: the state key's reader validates them, and the store backend refuses a
    * key that is not one before it builds the map. A delete does not run this, so the entry a refusal
@@ -43,7 +44,9 @@ private[harness] object FileTree:
       while problem.isEmpty && entries.hasNext do
         val (path, entry) = entries.next()
         val ancestor      = Iterator.iterate(path.parent)(_.flatMap(_.parent)).takeWhile(_.isDefined).flatten
-        if Text.jsonBytesOver(entry.content, math.min(bounds.maxEntryBytes, bounds.maxTotalBytes - total)) then
+        if path == VPath.root then
+          problem = Some(corrupt(operation, Some(path), "holds a file at the root, which is always a directory"))
+        else if Text.jsonBytesOver(entry.content, math.min(bounds.maxEntryBytes, bounds.maxTotalBytes - total)) then
           problem = Some(
             corrupt(
               operation,
