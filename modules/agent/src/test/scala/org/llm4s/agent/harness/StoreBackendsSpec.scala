@@ -478,4 +478,14 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     val b     = ctx.effectKey("op", "x")
     Set(first, a, b).size shouldBe 3
   }
+
+  "StoreFileBackend over a store of Int.MaxValue items" should "still see a file's ancestor in its transaction" in {
+    val files = storeFiles(InMemoryLongTermStore(StoreLimits(maxItems = Int.MaxValue)))
+    done(files.write(p("/a"), "x", call()))
+    files.write(p("/a/b"), "y", call()).left.value.message should include("beneath a file")
+  }
+
+  "Text.jsonValueBytes" should "count an object's keys only as far as the cap" in {
+    Text.jsonValueBytes(ujson.Obj("k" * 10000000 -> ujson.Null), 100) should be <= 110L
+  }
 }

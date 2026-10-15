@@ -387,7 +387,7 @@ private[harness] object Text:
             else
               total += 2 + math.max(fields.size - 1, 0)
               stack.push(fields.iterator.map { (k, v) =>
-                total += 3 + jsonBytes(k)
+                total += 3 + jsonBytesUpTo(k, max - total)
                 v
               })
           case n: ujson.Num => total += ujson.write(n).length // at most a few dozen characters

@@ -69,7 +69,7 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
   /** The files as `view` sees them, in the transaction: the one point a mutation but `delete` takes them. */
   private def viewed(operation: String, view: StoreView): Result[Map[VPath, FileEntry]] =
     view
-      .withPrefix("", store.limits.maxItems + 1)
+      .withPrefix("", if store.limits.maxItems < Int.MaxValue then store.limits.maxItems + 1 else Int.MaxValue)
       .flatMap(es => filesOf(operation, es.take(store.limits.maxItems), es.size > store.limits.maxItems))
 
   def ls(dir: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
