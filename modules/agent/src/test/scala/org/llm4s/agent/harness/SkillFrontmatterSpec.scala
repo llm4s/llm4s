@@ -336,6 +336,17 @@ class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
     )
   }
 
+  it should "skip tabs between flow-list tokens, so a quoted item after one is read as quoted" in {
+    parse(
+      "---",
+      "name: pdf-tools",
+      "description: d",
+      "allowed-tools: [\tRead,\t\"Write\" ,\t'Glob'\t]",
+      "---"
+    ).value.allowedTools shouldBe
+      Vector("Read", "Write", "Glob")
+  }
+
   it should "refuse a name over 64 characters" in {
     val long = "a" * 65
     val e    = Skill.parse(VPath(s"/s/$long/SKILL.md").value, s"---\nname: $long\ndescription: d\n---").left.value
