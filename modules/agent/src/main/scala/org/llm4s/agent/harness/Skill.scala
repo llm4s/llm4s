@@ -79,9 +79,10 @@ object Skill:
         case None if required => error(1, s"`$key` is required")
         case None             => Right(None)
         // a field the standard defines is never empty when given: a key with no value, or a blank one, is malformed
-        case Some(Frontmatter.Field(Frontmatter.Value.Empty, line)) => error(line, s"`$key` is empty")
+        case Some(Frontmatter.Field(Frontmatter.Value.Empty, line))  => error(line, s"`$key` is empty")
         case Some(Frontmatter.Field(Frontmatter.Value.Str(s), line)) =>
-          if s.trim.isEmpty then error(line, s"`$key` is empty") else Right(Some(s.trim))
+          // as parsed: a plain value is already trimmed, and a quoted one is checked with the spaces it quotes
+          if s.trim.isEmpty then error(line, s"`$key` is empty") else Right(Some(s))
         case Some(Frontmatter.Field(_, line)) => error(line, s"`$key` must be a string")
     // the standard bounds a field it defines from 1 character to `max`: empty is as non-conforming as too long
     def longer(key: String, value: String, max: Int): Result[Unit] =
@@ -319,18 +320,20 @@ private[harness] object Frontmatter:
    */
   private def plainProblem(plain: String, inList: Boolean): Option[String] =
     val nested = "nested lists and maps are not supported"
-    if plain.contains(": ") || plain.endsWith(":") then
+    // a list item that is only a comment (`- # off`) is empty, not the comment's text
+    if plain.isEmpty then Some("a value is empty")
+    else if plain.contains(": ") || plain.endsWith(":") then
       Some(if inList then nested else "a plain value cannot hold `: `; quote it")
     else if plain == "-" || plain.startsWith("- ") || plain == "?" || plain.startsWith("? ") then Some(nested)
     else if NotAString.matches(plain) then Some("YAML reads this plain value as a null, boolean or number; quote it")
     else
       plain.headOption.flatMap(c =>
-        Unsupported.get(c).orElse(Option.when("[]{},".contains(c))(s"a plain value cannot start with `$c`; quote it"))
+        Unsupported.get(c).orElse(Option.when("[]{},#".contains(c))(s"a plain value cannot start with `$c`; quote it"))
       )
 
   /** `value` up to a ` #` comment, trimmed. */
   private def withoutComment(value: String): String =
-    val i = value.indexOf(" #")
+    val i = if value.startsWith("#") then 0 else value.indexOf(" #")
     (if i < 0 then value else value.substring(0, i)).trim
 
   /** Only a comment may follow a closing quote or bracket. */
