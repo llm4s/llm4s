@@ -22,7 +22,9 @@ import upickle.default.ReadWriter
  * @param readLimit the lines `read_file` returns when the model gives no `limit`, and the most it returns
  * @param maxLineChars the most characters of one line `read_file` and `grep` show; a longer line is cut and marked
  * @param maxResults the most entries `ls`, `glob` and `grep` return; a longer listing says it stopped
- * @param maxResultChars the most characters of any one result, an error's included; at least 256
+ * @param maxResultChars the most characters of any one result a tool returns, an error's included, as the model sees it;
+ *   at least 256. An outcome the loop or a middleware gives instead of running the tool (invalid arguments, a
+ *   denial, a timeout) is theirs, bounded by the arguments the tools bound
  */
 @Experimental
 final case class FileToolLimits private (readLimit: Int, maxLineChars: Int, maxResults: Int, maxResultChars: Int):

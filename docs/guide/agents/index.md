@@ -456,7 +456,7 @@ for {
   replaces `old_string` with `new_string`, and refuses when `old_string` is absent, or occurs more
   than once without `replace_all`.
 - **Bounded results.** Lines are cut at `maxLineChars`; `ls`, `glob` and `grep` stop at `maxResults`
-  and say so; every result, an error's included, is at most `maxResultChars` characters.
+  and say so; every result a tool returns, an error's included, is at most `maxResultChars` characters (an outcome the loop or a middleware gives instead, such as a denial, is theirs).
 - **Order in one message.** Mutations take the backend's locks, so two edits of one file in one
   message apply in order, the second against the first's result. Reads take no lock: a read in the
   same message as a write may not see it (over thread state it sees the file as before the message).
