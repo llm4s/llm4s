@@ -238,6 +238,12 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
       ("a key that is not a path", Seq("notes" -> text("x")), None, "not a file path"),
       ("a key that is not canonical", Seq("/a/" -> text("x")), None, "not a file path"),
       ("an item that is not a file", Seq("/meta" -> ujson.Obj("tags" -> ujson.Arr("t"))), Some("/meta"), "not a file"),
+      (
+        "a file with other fields",
+        Seq("/rich" -> ujson.Obj("content" -> "x", "metadata" -> ujson.Obj("k" -> "v"))),
+        Some("/rich"),
+        "not a file"
+      ),
       ("binary content", Seq("/nul" -> text("a\u0000b")), Some("/nul"), "binary"),
       ("an unpaired surrogate", Seq("/s" -> text("a\uD800b")), Some("/s"), "not valid Unicode"),
       ("a file that is also a directory", Seq("/a" -> text("x"), "/a/b" -> text("y")), Some("/a"), "both a file")

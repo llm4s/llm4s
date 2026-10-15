@@ -31,7 +31,10 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
 
   private def namespace(ctx: FileContext): Namespace = Namespace(ctx.run.config.tenantId, path)
 
-  private def content(item: StoreItem): Option[String] = item.value.objOpt.flatMap(_.get("content")).flatMap(_.strOpt)
+  // exactly the shape this backend writes, `{"content": string}`: an object with more would lose its other
+  // fields to an edit, so it is no file of the backend's, and corrupt stored state
+  private def content(item: StoreItem): Option[String] =
+    item.value.objOpt.filter(_.keySet == Set("content")).flatMap(_.get("content")).flatMap(_.strOpt)
 
   private val bounds =
     FileTree.Bounds(store.limits.maxItems, store.limits.maxItemBytes.toLong, store.limits.maxBytes)
