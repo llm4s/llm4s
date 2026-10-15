@@ -140,6 +140,8 @@ and tools on `AgentBuilder`. Each slice adds its part here as it lands:
 - [#1903](https://github.com/llm4s/llm4s/issues/1903), tool permissions, timeouts and batch locks:
   [below](#tool-permissions-timeouts-and-batch-locks-1903).
 - [#1907](https://github.com/llm4s/llm4s/issues/1907), todos: [below](#todos-1907).
+- [#1908](https://github.com/llm4s/llm4s/issues/1908), context management - summarisation and large tool-output
+  offload: [below](#context-management-1908).
 - [#1911](https://github.com/llm4s/llm4s/issues/1911), semantic memory - the new `llm4s-agent-memory` module and
   `TransactionalMemoryStore`: [below](#semantic-memory-1911).
 - [#1914](https://github.com/llm4s/llm4s/issues/1914), typed custom streams: [below](#typed-custom-streams-1914).
@@ -235,6 +237,14 @@ Design §4.30. Additive: `TodoMiddleware` (`org.llm4s.agent.harness`) gives an a
 - **Adding `TodoMiddleware` to an existing agent** registers the `todos` key, and its tool's lock registers `tool-queue`. Since #1934 a thread at rest continues, its plan starting empty. A thread in flight (suspended, or `Running` after a crash) is refused with `RestoreRejected`: resume or recover it with the old agent first. So is a thread last checkpointed before #1934, until it has run once under the agent it was written by. Removing `TodoMiddleware` refuses a thread whose plan holds items. Agents without it are unchanged.
 - **`todos` is a key id the middleware owns.** A `StateKey` of your own with id `todos` in a family that also uses `TodoMiddleware` is refused at build, as two keys with one id are. Rename it.
 - **With `PermissionMiddleware`, allow the tool**: `PermissionRule.allow(Operation.Invoke, "write_todos")`.
+
+### Context management (#1908)
+
+Design §4.34. Additive: `SummarizationMiddleware` and `ToolOutputOffload` (`org.llm4s.agent.harness`).
+
+- **Adding either to an existing agent** registers its key (`summary`, `offloads`), which changes the agent's version as any middleware key does (§4.29): a thread at rest continues, starting with no summary or offloads; a thread in flight is refused until it is resumed or recovered with the old agent. Agents without them are unchanged.
+- **`summary` and `offloads` are key ids the middleware own.** A `StateKey` of your own with either id in a family that uses the middleware is refused at build. Rename it.
+- **Use `SummarizationMiddleware` or `ContextWindowMiddleware`, not both.** `ContextWindowMiddleware` is unchanged, the pruning-only option.
 
 ### Semantic memory (#1911)
 
