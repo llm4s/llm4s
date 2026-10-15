@@ -132,7 +132,7 @@ constructors remain, so source compiles unchanged, but code compiled against 0.4
 
 ## Stage 3 migration: the Deep Agents harness
 
-In 0.5.0, except the slices for #1904, #1905, #1908, #1909, #1910 and #1915, which are in 0.5.1. Stage 3
+In 0.5.0, except the slices for #1904, #1905, #1908, #1909, #1910, #1913 and #1915, which are in 0.5.1. Stage 3
 ([#1901](https://github.com/llm4s/llm4s/issues/1901)) builds the harness as middleware
 and tools on `AgentBuilder`. Each slice adds its part here as it lands:
 
