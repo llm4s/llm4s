@@ -105,6 +105,9 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
     // another thread with the same run id and token is its own entry
     get(recordingRunContext(events, thread = "other", token = Some(1L), task = "1.0"))
     computed.get shouldBe 3
+    // another runtime (another store) can issue the same thread, run id and token: still its own run
+    get(recordingRunContext(events, token = Some(1L), task = "1.0", runtime = "other-store"))
+    computed.get shouldBe 4
   }
 
   it should "report again when the computing task runs again after its attempt's events were discarded (rule 10)" in {

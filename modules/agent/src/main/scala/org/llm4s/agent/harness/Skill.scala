@@ -81,9 +81,12 @@ object Skill:
         case Some(Frontmatter.Field(Frontmatter.Value.Str(s), line)) =>
           if required && s.trim.isEmpty then error(line, s"`$key` is empty") else Right(Some(s.trim))
         case Some(Frontmatter.Field(_, line)) => error(line, s"`$key` must be a string")
+    // the standard bounds a field it defines from 1 character to `max`: empty is as non-conforming as too long
     def longer(key: String, value: String, max: Int): Result[Unit] =
-      if value.codePointCount(0, value.length) <= max then Right(())
-      else error(fields.get(key).fold(1)(_.line), s"`$key` is longer than $max characters")
+      val line = fields.get(key).fold(1)(_.line)
+      if value.isEmpty then error(line, s"`$key` is empty")
+      else if value.codePointCount(0, value.length) <= max then Right(())
+      else error(line, s"`$key` is longer than $max characters")
     val folder = path.parent.map(_.name).getOrElse("")
     for
       name <- string("name", required = true).map(_.getOrElse(""))

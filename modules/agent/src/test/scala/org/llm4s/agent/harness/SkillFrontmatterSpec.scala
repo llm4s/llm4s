@@ -131,6 +131,10 @@ class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
     parse("---", "name: pdf-tools", s"description: ${"d" * 1024}", "---").value.description.length shouldBe 1024
     problem("---", "name: pdf-tools", s"description: ${"d" * 1025}", "---").problem should include("longer than 1024")
     problem("---", "name: pdf-tools", "description: d", s"compatibility: ${"c" * 501}", "---").line shouldBe 4
+    problem("---", "name: pdf-tools", "description: d", "compatibility:", "---").problem should include(
+      "`compatibility` is empty"
+    )
+    problem("---", "name: pdf-tools", "description: d", "compatibility: \"\"", "---").line shouldBe 4
     problem("---", "name: pdf-tools", "description: d", "compatibility: [a]", "---").problem should include(
       "must be a string"
     )

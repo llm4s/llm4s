@@ -17,9 +17,10 @@ import scala.util.control.Exception.ultimately
  * A value computed once per run incarnation, kept for at most `maxRuns` incarnations (the least recently used
  * evicted first).
  *
- * The key is the thread, the run id and the claim's fencing token: a run id can be reused (`RunConfig.withRunId`, a
- * recovery under the same id), the token is new for every run that claims the thread, so a recovered or resumed run
- * computes its value again. The value is computed under its incarnation's own lock, held until the last caller
+ * The key is the thread, the run id, the claim's fencing token and the runtime's own object for the run
+ * (`RunContext.incarnation`): a run id can be reused (`RunConfig.withRunId`, a recovery under the same id), and two
+ * runtimes over different stores can issue one thread the same token, but no two runs share that object - so a
+ * recovered or resumed run, or one in another runtime, computes its value again. The value is computed under its incarnation's own lock, held until the last caller
  * waiting on it leaves, so the concurrent hooks of one run compute it once - or, after a failure, one at a time, a
  * waiter retrying in turn - and never two at once. Only a computed value takes a place in the LRU: a computation in flight, or one that failed
  * (returned or thrown), evicts nothing and leaves nothing behind.
@@ -32,7 +33,17 @@ import scala.util.control.Exception.ultimately
 final private[harness] class RunCache[A](maxRuns: Int):
   require(maxRuns >= 1, s"maxCachedRuns must be at least 1, was $maxRuns")
 
-  final private case class Incarnation(thread: ThreadId, run: RunId, token: Option[FencingToken])
+  /** A run's identity: its thread, id and claim, and the runtime's own object for it, compared by reference. */
+  final private class Incarnation(
+    val thread: ThreadId,
+    val run: RunId,
+    val token: Option[FencingToken],
+    val of: AnyRef
+  ):
+    override def equals(other: Any): Boolean = other match
+      case that: Incarnation => (that.of eq of) && that.thread == thread && that.run == run && that.token == token
+      case _                 => false
+    override def hashCode: Int = (thread, run, token, System.identityHashCode(of)).hashCode
 
   /** A computed value, and the task that computed it. */
   final private case class Entry(value: A, reporter: TaskId)
@@ -62,7 +73,7 @@ final private[harness] class RunCache[A](maxRuns: Int):
   /** The run's value: computed by `compute` on the run's first call, and reported by `report` as above. */
   def apply(run: RunContext)(compute: => Result[A])(report: A => Unit): Result[A] =
     val position = run.position
-    val key      = Incarnation(position.threadId, position.runId, position.fencingToken)
+    val key      = new Incarnation(position.threadId, position.runId, position.fencingToken, run.incarnation)
     def held     = lock.synchronized(Option(done.get(key)))
     def hit(entry: Entry): Result[A] =
       if entry.reporter == position.taskId then report(entry.value)
