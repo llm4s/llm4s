@@ -266,6 +266,8 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     Files.write(root.resolve("big"), ("x" * 20).getBytes(StandardCharsets.UTF_8))
     val small = workspace(WorkspaceSandboxConfig(limits = WorkspaceSandboxConfig.DefaultLimits.copy(maxFileSize = 10)))
     small.fileSnapshot("big", includeContent = false).hash shouldBe "oversized"
+    // a search skips it, never reading it whole
+    small.searchFiles(List("."), "x", "literal", recursive = Some(true)).matches shouldBe empty
     code(small.writeFile("big", "y", expectedHash = Some("oversized"))) shouldBe "SIZE_LIMIT_EXCEEDED"
     code(small.deleteFile("big", Some("oversized"))) shouldBe "SIZE_LIMIT_EXCEEDED"
     Files.size(root.resolve("big")) shouldBe 20L

@@ -1242,7 +1242,12 @@ class WorkspaceAgentInterfaceImpl(
       val relativePath = rootPath.relativize(file).toString
 
       // opened where it physically is, checked immediately before: an entry retargeted since the walk is skipped
-      Try(Files.readAllLines(checkedForRead(relativePath, file), StandardCharsets.UTF_8).asScala.toList).toOption
+      // and read bounded by the limit, as every read is: a file over it, or grown past it, is skipped unread whole
+      Try(readBounded(checkedForRead(relativePath, file))).toOption.flatten
+        .flatMap(bytes =>
+          Try(StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString).toOption
+        )
+        .map(text => Source.fromString(text).getLines().toList)
         .foreach { lines =>
           for ((line, lineIndex) <- lines.zipWithIndex if !done) {
             val isMatch =
