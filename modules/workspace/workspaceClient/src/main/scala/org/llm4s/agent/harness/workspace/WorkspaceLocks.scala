@@ -50,6 +50,7 @@ private[workspace] object WorkspaceCalls:
     "SIZE_LIMIT_EXCEEDED",
     "DIRECTORY_NOT_EMPTY",
     "PARENT_NOT_A_DIRECTORY",
+    "WORKSPACE_BUSY",
     "INVALID_ARGUMENT",
     "FILE_EXISTS"
   )

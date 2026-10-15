@@ -28,12 +28,14 @@ import scala.util.chaining._
  *                      no standalone `.exe` on Windows.
  * @param sandboxConfig Optional sandbox config; if None, uses [[WorkspaceSandboxConfig.Permissive]]
  * @param programSearch where the programs a command names are looked for (#1790); the host's, bar in tests
+ * @param gateWait      how long a file mutation waits for running commands to end before it is refused (`WORKSPACE_BUSY`)
  */
 class WorkspaceAgentInterfaceImpl(
   workspaceRoot: String,
   isWindows: Boolean,
   sandboxConfig: Option[WorkspaceSandboxConfig] = None,
-  programSearch: ProgramSearch = ProgramSearch.host()
+  programSearch: ProgramSearch = ProgramSearch.host(),
+  gateWait: FiniteDuration = WorkspaceAgentInterfaceImpl.GateWait
 ) extends WorkspaceAgentInterface {
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -167,9 +169,42 @@ class WorkspaceAgentInterfaceImpl(
 
   /**
    * The lock every mutating file operation holds, so a compare-and-set (`expectedHash`) is atomic against every other
-   * file operation of this runner. A command the runner executes does not take it.
+   * file operation of this runner.
    */
   private val mutationLock = new Object
+
+  /**
+   * The gate between file mutations and commands, which write files too: a running command holds one permit, from
+   * before its process starts until it has exited, and a file mutation holds them all, so a compare-and-set never runs
+   * beside a command this runner started, from any client. Commands still run beside one another. Fair, so a mutation
+   * waiting for commands to end is not overtaken by new ones; a mutation that cannot have the gate within
+   * `gateWait` (default [[WorkspaceAgentInterfaceImpl.GateWait]]) is refused (`WORKSPACE_BUSY`), having changed nothing. What a command leaves running after it exits,
+   * and writers outside the runner (the host, over a bind mount), are not fenced.
+   */
+  private val commandGate = new java.util.concurrent.Semaphore(WorkspaceAgentInterfaceImpl.GatePermits, true)
+
+  /** Takes a command's permit; [[releaseCommand]] gives it back once the process has exited. */
+  private[runner] def acquireCommand(): Unit = commandGate.acquire()
+
+  private[runner] def releaseCommand(): Unit = commandGate.release()
+
+  /** `body` with the file mutation lock and the whole command gate. */
+  private def mutating[A](body: => A): A = mutationLock.synchronized {
+    if (
+      !commandGate.tryAcquire(
+        WorkspaceAgentInterfaceImpl.GatePermits,
+        gateWait.toMillis,
+        TimeUnit.MILLISECONDS
+      )
+    )
+      throw new WorkspaceAgentException(
+        s"A command is running in the workspace; the file was not changed (waited $gateWait)",
+        "WORKSPACE_BUSY",
+        None
+      )
+    try body
+    finally commandGate.release(WorkspaceAgentInterfaceImpl.GatePermits)
+  }
 
   /** The current [[FileSnapshotResponse.hash]] of `resolved`, its bytes read as a stream. */
   /**
@@ -412,7 +447,7 @@ class WorkspaceAgentInterfaceImpl(
     mode: Option[String] = None,
     createDirectories: Option[Boolean] = None,
     expectedHash: Option[String] = None
-  ): WriteFileResponse = mutationLock.synchronized {
+  ): WriteFileResponse = mutating {
     val resolvedPath = resolvePath(path)
     refuseGitMetadata(path, resolvedPath)
     refuseReadOnly(path, resolvedPath)
@@ -498,21 +533,30 @@ class WorkspaceAgentInterfaceImpl(
         // what the hash was taken of (the link followed) is what changes. `effective` already passed every path check.
         val target = effective(resolvedPath)
         if (createDirs) Files.createDirectories(target.getParent)
-        val temp = Files.createTempFile(target.getParent, ".llm4s-write-", ".tmp")
+        // created as an ordinary new file is (the process umask applies), not with a temporary file's fixed rw-------
+        val temp = target.resolveSibling(s".llm4s-write-${java.util.UUID.randomUUID()}.tmp")
         Try {
-          Files.write(temp, bytes)
-          // the replacement keeps the file's permissions (an executable script stays executable); a new file gets
-          // the usual rw-r--r-- rather than a temporary file's rw-------. Not POSIX: the platform's defaults.
-          Try {
-            val permissions =
-              if (Files.exists(target)) Files.getPosixFilePermissions(target)
-              else java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--")
-            Files.setPosixFilePermissions(temp, permissions)
-          }
+          Using.resource(Files.newOutputStream(temp, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE))(
+            _.write(bytes)
+          )
+          // the replacement keeps the file's permissions (an executable script stays executable); a new file keeps the
+          // mode it was created with. Not POSIX: the platform's defaults.
+          if (Files.exists(target)) Try(Files.setPosixFilePermissions(temp, Files.getPosixFilePermissions(target)))
           // the replacement is a new inode, so it takes the file's metadata as well as its mode: its owner and group
           // (the runner runs as root over a bind mount, and a root-owned replacement would lock its owner out) and its
           // ACL. Each where the platform has it; a runner that may not chown keeps the owner it has.
           if (Files.exists(target)) WorkspaceAgentInterfaceImpl.copyOwnership(target, temp)
+          // checked again just before the move: the path must still name the same file, through the same links, and
+          // still pass every path check. File operations and this runner's commands cannot change it meanwhile (the
+          // mutation lock and the command gate); this catches a writer outside the runner, up to the move itself.
+          val again = effective(resolvePath(path))
+          refuseReadOnly(path, resolvePath(path))
+          if (again != target)
+            throw new WorkspaceAgentException(
+              s"Path '$path' changed while it was written: it now leads to another file; nothing was written",
+              "HASH_MISMATCH",
+              None
+            )
           Files.move(
             temp,
             target,
@@ -531,12 +575,14 @@ class WorkspaceAgentInterfaceImpl(
         path = path,
         bytesWritten = bytes.length
       )
-    }.recover { case e: Exception =>
-      throw new WorkspaceAgentException(
-        s"Failed to write to file '$path': ${e.getMessage}",
-        "WRITE_ERROR",
-        None
-      )
+    }.recover {
+      case refused: WorkspaceAgentException => throw refused
+      case e: Exception =>
+        throw new WorkspaceAgentException(
+          s"Failed to write to file '$path': ${e.getMessage}",
+          "WRITE_ERROR",
+          None
+        )
     }.get
   }
 
@@ -546,7 +592,7 @@ class WorkspaceAgentInterfaceImpl(
   override def modifyFile(
     path: String,
     operations: List[FileOperation]
-  ): ModifyFileResponse = mutationLock.synchronized {
+  ): ModifyFileResponse = mutating {
     val resolvedPath = resolvePath(path)
     refuseGitMetadata(path, resolvedPath)
     refuseReadOnly(path, resolvedPath)
@@ -681,7 +727,7 @@ class WorkspaceAgentInterfaceImpl(
 
   /** Deletes the file, or the empty directory, `path`; with `expectedHash`, only if its hash is still that. */
   override def deleteFile(path: String, expectedHash: Option[String] = None): DeleteFileResponse =
-    mutationLock.synchronized {
+    mutating {
       val resolved = resolvePath(path)
       if (resolved == rootPath)
         throw new WorkspaceAgentException("The workspace root cannot be deleted", "INVALID_ARGUMENT", None)
@@ -1352,47 +1398,53 @@ class WorkspaceAgentInterfaceImpl(
         } finally reader.close()
       })
 
-    val exitCode = Try {
-      val process = builder.start()
+    // the command holds a permit of the gate from before it starts until it has exited, so no file mutation runs
+    // beside it ([[commandGate]])
+    acquireCommand()
+    val exitCode =
+      try
+        Try {
+          val process = builder.start()
 
-      // Read stdout and stderr in background threads to prevent blocking
-      val stdoutThread = capture(process.getInputStream, stdout, stdoutTruncated)
-      val stderrThread = capture(process.getErrorStream, stderr, stderrTruncated)
+          // Read stdout and stderr in background threads to prevent blocking
+          val stdoutThread = capture(process.getInputStream, stdout, stdoutTruncated)
+          val stderrThread = capture(process.getErrorStream, stderr, stderrTruncated)
 
-      stdoutThread.setDaemon(true)
-      stderrThread.setDaemon(true)
-      stdoutThread.start()
-      stderrThread.start()
+          stdoutThread.setDaemon(true)
+          stderrThread.setDaemon(true)
+          stdoutThread.start()
+          stderrThread.start()
 
-      val completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+          val completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
 
-      if (!completed) {
-        process.destroy()
-        // Wait up to 2 seconds for graceful termination before escalating
-        if (!process.waitFor(2, TimeUnit.SECONDS)) {
-          process.destroyForcibly()
-          process.waitFor(3, TimeUnit.SECONDS)
-        }
-        throw new WorkspaceAgentException(
-          s"Command execution timed out after ${timeoutMs}ms",
-          "TIMEOUT",
-          None
-        )
-      }
+          if (!completed) {
+            process.destroy()
+            // Wait up to 2 seconds for graceful termination before escalating
+            if (!process.waitFor(2, TimeUnit.SECONDS)) {
+              process.destroyForcibly()
+              process.waitFor(3, TimeUnit.SECONDS)
+            }
+            throw new WorkspaceAgentException(
+              s"Command execution timed out after ${timeoutMs}ms",
+              "TIMEOUT",
+              None
+            )
+          }
 
-      // Wait for output threads to finish capturing
-      stdoutThread.join(2000)
-      stderrThread.join(2000)
+          // Wait for output threads to finish capturing
+          stdoutThread.join(2000)
+          stderrThread.join(2000)
 
-      process.exitValue()
-    }.recover {
-      case e: Exception if !e.isInstanceOf[WorkspaceAgentException] =>
-        throw new WorkspaceAgentException(
-          s"Failed to execute command: ${e.getMessage}",
-          "EXECUTION_FAILED",
-          None
-        )
-    }.get
+          process.exitValue()
+        }.recover {
+          case e: Exception if !e.isInstanceOf[WorkspaceAgentException] =>
+            throw new WorkspaceAgentException(
+              s"Failed to execute command: ${e.getMessage}",
+              "EXECUTION_FAILED",
+              None
+            )
+        }.get
+      finally releaseCommand()
 
     val duration          = System.currentTimeMillis() - startTime
     val isStdoutTruncated = stdoutTruncated.get()
@@ -1430,6 +1482,12 @@ class WorkspaceAgentInterfaceImpl(
 final private[runner] case class PreparedCommand(builder: java.lang.ProcessBuilder, timeout: FiniteDuration)
 
 private[runner] object WorkspaceAgentInterfaceImpl {
+
+  /** The command gate's permits: one per running command, all of them for a file mutation. */
+  val GatePermits: Int = 1 << 20
+
+  /** How long a file mutation waits for running commands to end before it is refused as `WORKSPACE_BUSY`. */
+  val GateWait: FiniteDuration = FiniteDuration(30, TimeUnit.SECONDS)
 
   /**
    * Gives `to` the owner, the group and the ACL of `from`, each where the file system has it and the runner may set

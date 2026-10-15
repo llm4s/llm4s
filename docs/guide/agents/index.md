@@ -504,8 +504,8 @@ yield agent
   file changed meanwhile is refused. Commands are `Unverifiable`: a completed command replays its stored
   result, and one that may have run is refused, never run again.
 - **Effects stay.** What a command or a file write did to the workspace is outside thread state: a Block
-  that retracts the turn does not undo it. A command run from outside the agent, by another process,
-  is outside the compare-and-set as well.
+  that retracts the turn does not undo it. The runner never runs a file change beside a command it started,
+  but a process a command leaves running, or a writer outside the container, is outside the compare-and-set.
 - **Tenants.** One workspace is one tenant's. An application serving several builds a pair per tenant
   and picks it with `FileBackend.resolved` and
   `SandboxBackend.resolved(_ => Set(WorkspaceLocks.AllWorkspaces))`.

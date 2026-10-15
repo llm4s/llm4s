@@ -69,8 +69,12 @@ final private[runner] class WebSocketCommandExecutor(
 
       case Right(prepared) =>
         send(CommandStartedMessage(cmd.commandId, cmd.command))
+        // a permit of the workspace's command gate, from before the process starts until it has exited: no file
+        // mutation runs beside it
+        workspace.acquireCommand()
         Try(prepared.builder.start()) match {
           case Failure(ex) =>
+            workspace.releaseCommand()
             fail(
               Option(ex.getMessage).getOrElse("Failed to start process"),
               "EXECUTION_FAILED",
@@ -215,6 +219,7 @@ final private[runner] class WebSocketCommandExecutor(
             -1
         } finally {
           processes.remove(cmd.commandId)
+          workspace.releaseCommand()
           exitDone.trySuccess(())
         }
       exitCodePromise.trySuccess(exitCode)

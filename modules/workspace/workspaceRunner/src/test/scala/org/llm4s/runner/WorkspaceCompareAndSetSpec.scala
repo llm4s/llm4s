@@ -8,7 +8,7 @@ import org.scalatest.matchers.should.Matchers
 import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Path }
 import scala.jdk.CollectionConverters._
-import scala.util.Using
+import scala.util.{ Try, Using }
 
 /**
  * The runner's side of the harness's `Verifiable` workspace backend (design §4.33): snapshots whose hash is
@@ -79,6 +79,43 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     ws.writeFile("link.txt", "two", expectedHash = Some(hashOf("one")))
     Files.isSymbolicLink(root.resolve("link.txt")) shouldBe true
     ws.fileSnapshot("real.txt").content shouldBe Some("two")
+  }
+
+  it should "never run beside a command this runner started, and be refused if the command outlasts its wait" in {
+    assume(!isWindowsHost)
+    Files.write(root.resolve("follow.txt"), "x\n".getBytes(StandardCharsets.UTF_8))
+    val ws = new WorkspaceAgentInterfaceImpl(
+      root.toString,
+      isWindowsHost,
+      Some(WorkspaceSandboxConfig()),
+      gateWait = scala.concurrent.duration.FiniteDuration(200, java.util.concurrent.TimeUnit.MILLISECONDS)
+    )
+    // `tail -f` runs until its 3 s timeout kills it
+    val running = new Thread(() =>
+      Try(
+        ws.executeCommand(
+          "tail -f follow.txt",
+          timeout = Some(
+            scala.concurrent.duration.FiniteDuration(3, java.util.concurrent.TimeUnit.SECONDS)
+          )
+        )
+      ): Unit
+    )
+    running.start()
+    Thread.sleep(500)
+    code(ws.writeFile("cas.txt", "x", expectedHash = Some("absent"))) shouldBe "WORKSPACE_BUSY"
+    Files.exists(root.resolve("cas.txt")) shouldBe false
+    running.join()
+    ws.writeFile("cas.txt", "x", expectedHash = Some("absent")).success shouldBe true
+  }
+
+  it should "give a new file the mode an ordinary write gives it" in {
+    assume(!isWindowsHost)
+    val ws = workspace()
+    ws.writeFile("plain.txt", "x")
+    ws.writeFile("cas-new.txt", "x", expectedHash = Some("absent"))
+    Files.getPosixFilePermissions(root.resolve("cas-new.txt")) shouldBe
+      Files.getPosixFilePermissions(root.resolve("plain.txt"))
   }
 
   it should "refuse to compare with a file over the size limit, which is never read" in {
