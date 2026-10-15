@@ -596,7 +596,14 @@ class OpenAIClient private[provider] (
     PartEncoding
       .check(providerName, conversation.messages, userPart, PartEncoding.textOnly)
       .flatMap(_ =>
-        PartEncoding.checkInlineMediaTotal(providerName, conversation.messages, OpenAIClient.MaxInlineMediaBytes)
+        PartEncoding.checkInlineBytesTotal(providerName, conversation.messages, OpenAIClient.MaxFileBytes, "files")(
+          _.isInstanceOf[ContentPart.Document]
+        )
+      )
+      .flatMap(_ =>
+        PartEncoding.checkInlineBytesTotal(providerName, conversation.messages, OpenAIClient.MaxImageBytes, "images")(
+          _.isInstanceOf[ContentPart.Image]
+        )
       )
       .flatMap(_ => PartEncoding.checkImagesPerRequest(providerName, conversation.messages, OpenAIClient.MaxImages))
       // the SDK builders throw on malformed content (a null text): inside the Result, as buildParams is
@@ -783,11 +790,14 @@ class OpenAIClient private[provider] (
 object OpenAIClient {
   import org.llm4s.types.TryOps
 
-  /** Chat Completions' limit on the files and images of one request, decoded: 50 MB. */
-  private[provider] val MaxInlineMediaBytes: Long = 50000000L
+  /** Chat Completions' limit on the files (PDFs) of one request, decoded: 50 MB. */
+  private[provider] val MaxFileBytes: Long = 50000000L
 
-  /** Chat Completions' limit on the images of one request: 500. */
-  private[provider] val MaxImages: Int = 500
+  /** Chat Completions' limit on the images of one request, decoded: 512 MB. */
+  private[provider] val MaxImageBytes: Long = 512000000L
+
+  /** Chat Completions' limit on the images of one request: 1,500. */
+  private[provider] val MaxImages: Int = 1500
 
   private[provider] def forTest(
     model: String,

@@ -117,27 +117,38 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
     sent(Conversation(Seq(UserMessage(Vector(imageOf(MediaType.Gif)))))).isRight shouldBe true
   }
 
-  it should "count Chat Completions' 50 MB on the decoded files and images, not on the base64 body" in {
+  it should "count Chat Completions' 50 MB on the decoded files only, not on images or the base64 body" in {
     val pdf =
       ContentPart.document(MediaSource.Inline(IArray.fill[Byte](ContentPart.MaxInlineBytes)(1)), MediaType.Pdf).value
     // eight 5 MiB PDFs are about 42 MB decoded and 56 MB encoded: within the limit
-    PartEncoding.checkInlineMediaTotal(
+    PartEncoding.checkInlineBytesTotal(
       "openai",
       Seq(UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(8)(pdf))),
-      OpenAIClient.MaxInlineMediaBytes
-    ) shouldBe
+      OpenAIClient.MaxFileBytes,
+      "files"
+    )(_.isInstanceOf[ContentPart.Document]) shouldBe
       Right(())
+    // eleven 5 MiB images are 58 MB: within the image limit, which is its own
+    val big =
+      ContentPart.image(MediaSource.Inline(IArray.fill[Byte](ContentPart.MaxInlineBytes)(1)), MediaType.Png).value
+    PartEncoding.checkInlineBytesTotal(
+      "openai",
+      Seq(UserMessage(Vector.fill(11)(big))),
+      OpenAIClient.MaxFileBytes,
+      "files"
+    )(_.isInstanceOf[ContentPart.Document]) shouldBe Right(())
+    OpenAIClient.MaxImageBytes shouldBe 512000000L
     // ten are 52 MB decoded: refused before sending
     val ten = UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(10)(pdf))
     sent(Conversation(Seq(ten))).left.value.message should include(
-      s"at most ${OpenAIClient.MaxInlineMediaBytes} bytes of files and images"
+      s"at most ${OpenAIClient.MaxFileBytes} bytes of files"
     )
   }
 
-  it should "refuse, before sending, more than 500 images in a request" in {
+  it should "refuse, before sending, more than 1,500 images in a request" in {
     val url = ContentPart.image(MediaSource.Url(URI.create("https://x.example/a.png")), MediaType.Png).value
     sent(
-      Conversation(Seq(UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(501)(url))))
+      Conversation(Seq(UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(1501)(url))))
     ).left.value.message should
       include(s"at most ${OpenAIClient.MaxImages} images in a request")
   }

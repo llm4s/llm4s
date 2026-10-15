@@ -136,18 +136,18 @@ private[llm4s] object PartEncoding {
   }
 
   /**
-   * `Right` when the inline media of `messages` totals at most `maxBytes`, decoded: a provider's limit on the files
-   * and images of one request, which counts their bytes, not their base64 or the request's text.
+   * `Right` when the inline parts of `messages` that `select` picks total at most `maxBytes`, decoded: a provider's
+   * limit on, say, the files of one request, which counts their bytes, not their base64 or the request's text.
+   * `what` names them in the error ("files", "images").
    */
-  def checkInlineMediaTotal(provider: String, messages: Seq[Message], maxBytes: Long): Result[Unit] = {
-    val total = messages.map(m => ContentPart.inlineBytes(partsOf(m))).sum
+  def checkInlineBytesTotal(provider: String, messages: Seq[Message], maxBytes: Long, what: String)(
+    select: ContentPart => Boolean
+  ): Result[Unit] = {
+    val total = messages.map(m => ContentPart.inlineBytes(partsOf(m).filter(select))).sum
     if (total <= maxBytes) Right(())
     else
       Left(
-        ValidationError(
-          "parts",
-          s"$provider takes at most $maxBytes bytes of files and images in a request; this one has $total"
-        )
+        ValidationError("parts", s"$provider takes at most $maxBytes bytes of $what in a request; this one has $total")
       )
   }
 

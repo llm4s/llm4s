@@ -55,10 +55,15 @@ class PartEncodingSpec extends AnyFlatSpec with Matchers with EitherValues {
       include("at most 1 images in a request; this one has 2")
   }
 
-  "checkInlineMediaTotal" should "count the decoded bytes of every inline part" in {
+  "checkInlineBytesTotal" should "count the decoded bytes of the inline parts it selects" in {
     val messages = Seq(UserMessage(Vector(ContentPart.Text("x" * 100), image, image)))
-    PartEncoding.checkInlineMediaTotal("p", messages, 6L) shouldBe Right(())
-    PartEncoding.checkInlineMediaTotal("p", messages, 5L).left.value.message should include("this one has 6")
+    PartEncoding.checkInlineBytesTotal("p", messages, 6L, "images")(_ => true) shouldBe Right(())
+    PartEncoding.checkInlineBytesTotal("p", messages, 0L, "files")(_.isInstanceOf[ContentPart.Document]) shouldBe Right(
+      ()
+    )
+    PartEncoding.checkInlineBytesTotal("p", messages, 5L, "images")(_ => true).left.value.message should include(
+      "this one has 6"
+    )
   }
 
   "withoutBlankText" should "drop blank text parts and keep everything else in order" in {
