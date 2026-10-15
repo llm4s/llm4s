@@ -494,4 +494,22 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
   "Text.jsonValueBytes" should "count an object's keys only as far as the cap" in {
     Text.jsonValueBytes(ujson.Obj("k" * 10000000 -> ujson.Null), 100) should be <= 110L
   }
+
+  "InMemoryLongTermStore.modify" should "refuse a change that calls back into the store, so no write is lost" in {
+    val store = InMemoryLongTermStore()
+    val outer = org.llm4s.agent.graph.HarnessTestSupport.runOn("outer").effectKey("outer", "a")
+    val inner = org.llm4s.agent.graph.HarnessTestSupport.runOn("inner").effectKey("inner", "b")
+    val nested = store.modify[Unit](ns, "a", outer, FencingToken(0)) { _ =>
+      store
+        .modify[Unit](ns, "b", inner, FencingToken(0))(_ => Right(StoreChange.Put(ujson.Str("b"), ())))
+        .map(_ => StoreChange.Put(ujson.Str("a"), ()))
+    }
+    nested.left.value.message should include("inside another transaction")
+    store.get(ns, "a").value shouldBe None
+    store.get(ns, "b").value shouldBe None
+    // and the store is usable after
+    store
+      .modify[Unit](ns, "a", outer, FencingToken(0))(_ => Right(StoreChange.Put(ujson.Str("a"), ())))
+      .isRight shouldBe true
+  }
 }

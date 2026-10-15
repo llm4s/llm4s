@@ -246,7 +246,27 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
   def appliedKeys: Int = synchronized(applied.size)
 
   def forget(key: EffectKey, token: FencingToken): Result[Unit] =
-    synchronized(fenced(key, token) { applied -= key.value; Right(()) })
+    transaction("forget")(fenced(key, token) { applied -= key.value; Right(()) })
+
+  // whether this store's lock is held by a transaction now: `synchronized` is reentrant, so a `change`
+  // that called back into the store would run a second transaction inside the first, and the first would
+  // then write back a namespace it read before the second; such a call is refused instead
+  private var transacting = false
+
+  /** `body` as the store's one transaction, under its lock; a transaction begun inside another is refused. */
+  private def transaction[A](operation: String)(body: => Result[A]): Result[A] = synchronized {
+    if transacting then
+      Left(
+        ProcessingError(
+          "long-term-store",
+          s"$operation was called from inside another transaction of this store (a modify change); a change " +
+            "must not call back into the store"
+        )
+      )
+    else
+      transacting = true
+      scala.util.Using.resource(new AutoCloseable { def close(): Unit = transacting = false })(_ => body)
+  }
 
   private def items(ns: Namespace): Map[String, StoreItem] = namespaces.getOrElse(ns, Map.empty)
 
@@ -291,7 +311,7 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
 
   private def modifyChecked[A: ReadWriter](ns: Namespace, key: String, effect: EffectKey, token: FencingToken)(
     change: StoreView => Result[StoreChange[A]]
-  ): Result[A] = synchronized(fenced(effect, token) {
+  ): Result[A] = transaction("modify")(fenced(effect, token) {
     if !java.nio.charset.StandardCharsets.UTF_8.newEncoder().canEncode(key) then
       Left(BackendRefused("put", Text.quoted(key), "the key is not valid Unicode (an unpaired surrogate)"))
     else
