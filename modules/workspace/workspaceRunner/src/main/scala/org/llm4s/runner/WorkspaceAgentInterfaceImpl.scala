@@ -602,7 +602,7 @@ class WorkspaceAgentInterfaceImpl(
         "SIZE_LIMIT_EXCEEDED",
         Some(s"Resulting size: $resulting bytes")
       )
-    if (expectedHash.isDefined && Files.isDirectory(resolvedPath))
+    if (writeMode == "overwrite" && Files.isDirectory(resolvedPath))
       throw new WorkspaceAgentException(s"Path '$path' is a directory, not a file", "NOT_A_FILE", None)
 
     // only now, every refusal made, is anything created: a refused write leaves no directory behind
@@ -626,7 +626,9 @@ class WorkspaceAgentInterfaceImpl(
     }
 
     Try {
-      if (expectedHash.isDefined) {
+      // an overwrite, with or without a compare-and-set, replaces the file atomically: checked, and in time, before the
+      // move that commits it, never left half-written by a slow file system or a client that gave up
+      if (expectedHash.isDefined || writeMode == "overwrite") {
         // replaced atomically: a reader, or a crash, sees the old content or the new, never part of either. A link is
         // written through, as Files.write writes through it: the file it names is replaced and the link stays, so
         // what the hash was taken of (the link followed) is what changes. `effective` already passed every path check.
@@ -677,7 +679,13 @@ class WorkspaceAgentInterfaceImpl(
           Files.deleteIfExists(temp)
           throw e
         }.get
-      } else { ensureInTime(path); Files.write(resolvedPath, bytes, options: _*) }
+      } else {
+        // create or append: written where the path really leads, held to the path policy immediately before, in time
+        val target = effective(resolvedPath)
+        checkPolicy(path, target, Access.Write)
+        ensureInTime(path)
+        Files.write(target, bytes, options: _*)
+      }
 
       WriteFileResponse(
         commandId = "local",

@@ -17,9 +17,9 @@ import scala.util.Try
  * `src/a.txt`, `/` its root. One workspace is one tenant's: an application serving several builds one
  * backend per tenant and picks it with `FileBackend.resolved` (rule 8).
  *
- *  - '''Order.''' A mutation of `path` locks `files/workspace/<id>/<path>` ([[WorkspaceLocks]]), which a
- *    command in the workspace (`files/workspace/<id>`) conflicts with, so a batch's edits and commands apply
- *    in call order. Reads take no lock and see the workspace as it is.
+ *  - '''Order.''' A mutation locks the whole workspace, `files/workspace/<id>` ([[WorkspaceLocks]]), as a
+ *    command there does, so a batch's edits and commands apply in call order, even two paths that name one
+ *    file through a link. Reads take no lock and see the workspace as it is.
  *  - '''Replay.''' The target is `Verifiable` (C4). Each mutation runs `ReplayGuard.verifiable` under
  *    `ctx.effectKey("file.write" | "file.edit" | "file.delete", path)`: the plan reads the file once, makes
  *    every refusal, and plans a compare-and-set against the hash it read, which the runner applies atomically
@@ -45,7 +45,8 @@ final class WorkspaceFileBackend private (val id: String, workspace: WorkspaceAg
 
   val writes: Set[StateKey[?, ?]] = Set.empty
 
-  def locks(path: VPath): Set[LockKey] = Set(WorkspaceLocks.fileLock(id, path))
+  // the whole workspace, whatever the path: two paths can name one file through a link
+  def locks(path: VPath): Set[LockKey] = Set(WorkspaceLocks.workspaceLock(id))
 
   /** What is at `path`; with `follow = false` a link is described as itself (a delete removes the link). */
   private def snapshot(

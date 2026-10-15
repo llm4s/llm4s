@@ -141,7 +141,9 @@ class WorkspaceBackendsSpec extends AnyFlatSpec with Matchers with EitherValues 
     val files  = WorkspaceFixtures.files(new FakeWorkspace())
     val runner = WorkspaceSandboxRunner("ws", new FakeWorkspace()).value
     val file   = files.locks(p("/src/a.txt")).head
-    file shouldBe LockKey("files/workspace/ws/src/a.txt")
+    file shouldBe LockKey("files/workspace/ws")
+    // two paths that may name one file through a link share it: their edits are ordered
+    files.locks(p("/alias")).head.conflictsWith(files.locks(p("/real")).head) shouldBe true
     runner.locks(p("/src")).head.conflictsWith(file) shouldBe true
     WorkspaceLocks.workspaceLock("other").conflictsWith(file) shouldBe false
     WorkspaceLocks.AllWorkspaces.conflictsWith(runner.locks(p("/")).head) shouldBe true

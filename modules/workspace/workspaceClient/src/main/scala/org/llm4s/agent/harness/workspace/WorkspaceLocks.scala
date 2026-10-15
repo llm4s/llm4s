@@ -11,10 +11,10 @@ import org.llm4s.types.Result
 import scala.util.{ Failure, Success, Try }
 
 /**
- * The locks of a workspace's backends (design §4.33). A file mutation locks `files/workspace/<id>/<path>`
- * and a command `files/workspace/<id>`, so, by C2's prefix rule, a command conflicts with every edit in its
- * workspace and a batch's commands and edits apply in call order. They are under C3's
- * `FileBackend.LockRoot`, as `FileBackend.resolved` requires of a resolved backend's locks.
+ * The locks of a workspace's backends (design §4.33): a file mutation and a command alike lock the whole workspace,
+ * `files/workspace/<id>`, so a batch's edits and commands apply one after another in call order. A per-path key would
+ * not do: two paths can name one file through a link (`/alias -> /real`), and their edits must still be ordered. The
+ * key is under C3's `FileBackend.LockRoot`, as `FileBackend.resolved` requires of a resolved backend's locks.
  */
 @Experimental
 object WorkspaceLocks:
@@ -24,9 +24,6 @@ object WorkspaceLocks:
 
   /** The lock of everything in the workspace `id`: what a command there holds. */
   def workspaceLock(id: String): LockKey = AllWorkspaces / id
-
-  /** The lock a mutation of `path` in the workspace `id` holds. */
-  def fileLock(id: String, path: VPath): LockKey = workspaceLock(id) / path.value
 
   private val ValidId = "[A-Za-z0-9._-]{1,128}".r
 

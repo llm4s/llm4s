@@ -496,9 +496,9 @@ yield agent
   nothing else. The runner refuses anything its command policy forbids as well
   ([Workspace sandbox](../../reference/workspace-sandbox.html)), and enforces `allowedPaths`,
   `readOnlyPaths` and its size limits itself.
-- **Order.** A file mutation locks `files/workspace/<id>/<path>` and a command `files/workspace/<id>`,
-  so in one batch a command waits for every edit before it in its workspace, and an edit for every
-  command before it.
+- **Order.** A file mutation and a command both lock the whole workspace (`files/workspace/<id>`), so a
+  batch's edits and commands in one workspace apply one after another, in call order. Two paths that name
+  one file through a link are ordered too.
 - **Replay.** File mutations are `Verifiable`: each is a compare-and-set against the file's hash, which
   the runner applies atomically, so a replayed edit that landed returns its first result and one whose
   file changed meanwhile is refused. Commands are `Unverifiable`: a completed command replays its stored
