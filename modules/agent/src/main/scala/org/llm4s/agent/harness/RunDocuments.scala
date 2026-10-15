@@ -17,8 +17,9 @@ import org.llm4s.types.Result
  *
  * The key is the thread, the run id and the claim's fencing token: a run id can be reused (`RunConfig.withRunId`, a
  * recovery under the same id), the token is new for every run that claims the thread, so a recovered or resumed run
- * computes its value again. The value is computed under its incarnation's own lock, so the concurrent hooks of one run
- * compute it once. Only a computed value takes a place in the LRU: a computation in flight, or one that failed
+ * computes its value again. The value is computed under its incarnation's own lock, held until the last caller
+ * waiting on it leaves, so the concurrent hooks of one run compute it once - or, after a failure, one at a time, a
+ * waiter retrying in turn - and never two at once. Only a computed value takes a place in the LRU: a computation in flight, or one that failed
  * (returned or thrown), evicts nothing and leaves nothing behind.
  *
  * `report` runs when the value is computed, in the task that computed it, and again whenever that task runs the hook
@@ -41,9 +42,14 @@ final private[harness] class RunCache[A](maxRuns: Int):
   private val done = new java.util.LinkedHashMap[Incarnation, Entry](16, 0.75f, true):
     override def removeEldestEntry(eldest: java.util.Map.Entry[Incarnation, Entry]): Boolean = this.size() > maxRuns
 
-  // the incarnations being computed, one lock each, so concurrent callers of one run compute once; at most one
-  // entry per caller in flight, and removed when its computation ends
-  private val inFlight = new java.util.HashMap[Incarnation, Object]()
+  /** An incarnation's in-flight lock, and how many callers hold or wait on it. */
+  final private class Slot:
+    var users: Int = 0
+
+  // the incarnations being computed or waited on, one lock each, so the callers of one run compute one at a time: a
+  // caller that waited finds the value, or - after a failure - retries in turn on the same lock. Removed when its
+  // last caller leaves, so at most one entry per caller in flight
+  private val inFlight = new java.util.HashMap[Incarnation, Slot]()
 
   /** The number of incarnations whose value is held. */
   def cached: Int = lock.synchronized(done.size)
@@ -59,24 +65,28 @@ final private[harness] class RunCache[A](maxRuns: Int):
     held match
       case Some(entry) => hit(entry)
       case None =>
-        val slot = lock.synchronized(inFlight.computeIfAbsent(key, _ => new Object))
-        slot.synchronized {
-          // a caller that waited for the slot finds the value its holder computed
+        val slot = lock.synchronized {
+          val s = inFlight.computeIfAbsent(key, _ => new Slot)
+          s.users += 1
+          s
+        }
+        val result = scala.util.Try(slot.synchronized {
           held match
             case Some(entry) => hit(entry)
             case None =>
               val computed = scala.util.Try(compute)
-              lock.synchronized {
-                inFlight.remove(key, slot)
-                computed match
-                  case scala.util.Success(Right(value)) => done.put(key, Entry(value, position.taskId)): Unit
-                  case _                                => () // a failure, returned or thrown, keeps nothing
-              }
-              computed.get.map { value =>
-                report(value)
-                value
-              }
+              computed match
+                case scala.util.Success(Right(value)) =>
+                  lock.synchronized(done.put(key, Entry(value, position.taskId))): Unit
+                  report(value)
+                case _ => () // a failure, returned or thrown, keeps nothing; a waiter retries in turn
+              computed.get
+        })
+        lock.synchronized {
+          slot.users -= 1
+          if slot.users == 0 then inFlight.remove(key, slot): Unit
         }
+        result.get
 
 /** What one run's read produced: its value, the text of its section (if any), and its report. */
 final private[harness] case class RunRead[A](value: A, section: Option[String], report: Option[DocumentsReported])

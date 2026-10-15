@@ -119,6 +119,34 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
     events.size shouldBe 1
   }
 
+  it should "let the callers of one run compute one at a time, a waiter retrying in turn after a failure" in {
+    val events    = new CopyOnWriteArrayList[(String, ujson.Value)]()
+    val cache     = new RunCache[String](4)
+    val active    = new AtomicInteger(0)
+    val most      = new AtomicInteger(0)
+    val attempts  = new AtomicInteger(0)
+    val successes = new AtomicInteger(0)
+    def compute(): org.llm4s.types.Result[String] = {
+      val now = active.incrementAndGet()
+      most.accumulateAndGet(now, math.max)
+      Thread.sleep(20)
+      active.decrementAndGet()
+      // the first attempt fails; the rest succeed
+      if (attempts.getAndIncrement() == 0) Left(ValidationError("store", "down"))
+      else { successes.incrementAndGet(); Right("v") }
+    }
+    val threads = (1 to 6).map { i =>
+      new Thread(() => cache(recordingRunContext(events, task = s"t$i"))(compute())(_ => ()): Unit)
+    }
+    threads.foreach { t =>
+      t.start(); Thread.sleep(2)
+    }
+    threads.foreach(_.join())
+    most.get shouldBe 1
+    successes.get shouldBe 1
+    cache.cached shouldBe 1
+  }
+
   it should "not keep a failure, and hold at most maxRuns incarnations (rule 12)" in {
     val events = new CopyOnWriteArrayList[(String, ujson.Value)]()
     val cache  = new RunCache[String](2)
