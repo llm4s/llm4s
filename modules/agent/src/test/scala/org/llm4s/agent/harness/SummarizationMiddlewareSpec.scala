@@ -244,12 +244,12 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
       SummaryTrigger.Messages(2),
       keepRecent = 1,
       compressor = compressor,
-      maxSummaryTokens = 10
+      maxSummaryTokens = 32
     )
     val loop  = loopOf(model, Seq(mw))
     val state = turns(loop, "u1", "u2")
-    state.get(SummarizationMiddleware.key).value.value.text shouldBe "x" * 40
-    summaryOf(model.last).value shouldBe "x" * 40
+    state.get(SummarizationMiddleware.key).value.value.text shouldBe "x" * 128
+    summaryOf(model.last).value shouldBe "x" * 128
     // a stored summary over the bound, written another way, is cut when it is sent
     val rt      = GraphRuntime(store)
     val through = state.get(Messages.key).value.last.id
@@ -260,8 +260,8 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
       StateUpdate.update(SummarizationMiddleware.key, Some(ConversationSummary("y" * 5000, through)))
     ).isRight shouldBe true
     val again = new Model()
-    turns(loopOf(again, Seq(new SummarizationMiddleware(SummaryTrigger.Messages(1000), 1, compressor, 10))), "u3")
-    summaryOf(again.last).value shouldBe "y" * 40
+    turns(loopOf(again, Seq(new SummarizationMiddleware(SummaryTrigger.Messages(1000), 1, compressor, 32))), "u3")
+    summaryOf(again.last).value shouldBe "y" * 128
   }
 
   it should "not be sent once its message is gone from the history" in {
@@ -392,14 +392,14 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
       SummaryTrigger.Messages(2),
       1,
       SummaryCompressor.digest(counter),
-      maxSummaryTokens = 20
+      maxSummaryTokens = 32
     )
     val bounded =
       turns(loopOf(new Model(), Seq(small)), (1 to 6).map(i => s"step id: K$i must be kept.")*)(using
         store,
         ThreadId("digest-small")
       )
-    bounded.get(SummarizationMiddleware.key).value.value.text.length should be <= 80
+    bounded.get(SummarizationMiddleware.key).value.value.text.length should be <= 128
   }
 
   it should "digest a block with media, naming each part, and never drop a message it was given" in {
@@ -433,23 +433,32 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     val busy = (1 to 20).toVector.flatMap(i =>
       Vector(UserMessage(Vector(ContentPart.Text(s"step id: K$i must be kept. " * 5), image)), AssistantMessage("ok"))
     )
-    val tight = SummaryCompressor.digest(counter).compress(Some(only), busy, 30, context).value
-    tight.length should be <= 120
+    val tight = SummaryCompressor.digest(counter).compress(Some(only), busy, 32, context).value
+    tight.length should be <= 128
     tight should startWith("Media: counted 21 image")
     // counting again keeps the earlier count
-    val again = SummaryCompressor.digest(counter).compress(Some(tight), busy.take(2), 30, context).value
+    val again = SummaryCompressor.digest(counter).compress(Some(tight), busy.take(2), 32, context).value
     again should startWith("Media: counted 21 image\nMedia: [image (url, image/png)]\n")
-    val recounted = SummaryCompressor.digest(counter).compress(Some(again), busy, 30, context).value
+    val recounted = SummaryCompressor.digest(counter).compress(Some(again), busy, 32, context).value
     recounted should startWith("Media: counted 42 image\n")
     val roomy = SummaryCompressor.digest(counter).compress(Some(only), busy.take(2), 100, context).value
     roomy.linesIterator.takeWhile(_.startsWith("Media: ")).toVector should have size 2
+    // prose that merely starts like a media line is summary text, never taken for media or replaced by a count
+    val prose = "Media: the user requires every chart in PNG.\n" + "Earlier facts. " * 20
+    val kept  = SummaryCompressor.digest(counter).compress(Some(prose), busy, 32, context).value
+    kept should startWith("Media: counted 20 image\n")
+    SummaryCompressor.digest(counter).compress(Some(prose), busy.take(2), 500, context).value should include(
+      "Media: the user requires every chart in PNG."
+    )
+    // a bound below the floor is refused, so a counted line always fits whole
+    SummaryCompressor.digest(counter).compress(None, busy, 31, context).left.value shouldBe a[ValidationError]
   }
 
   it should "give the compressor the stored summary clamped to the bound, as the request carries it (rule 12)" in {
     given store: InMemoryCheckpointer = new InMemoryCheckpointer
     given thread: ThreadId            = ThreadId("clamped-previous")
     val compressor                    = new Recording()
-    val mw   = new SummarizationMiddleware(SummaryTrigger.Messages(3), 1, compressor, maxSummaryTokens = 10)
+    val mw   = new SummarizationMiddleware(SummaryTrigger.Messages(3), 1, compressor, maxSummaryTokens = 32)
     val loop = loopOf(new Model(), Seq(mw))
     val one  = turns(loop, "u1")
     GraphRuntime(store)
@@ -464,7 +473,7 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
       )
       .isRight shouldBe true
     turns(loop, "u2", "u3")
-    compressor.call(0)._1 shouldBe Some("y" * 40)
+    compressor.call(0)._1 shouldBe Some("y" * 128)
   }
 
   "An agent without SummarizationMiddleware" should "register no summary key (rule 7)" in {
@@ -493,7 +502,7 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
       SummaryTrigger.Messages(1),
       1,
       new Recording(),
-      maxSummaryTokens = 0
+      maxSummaryTokens = 31
     )
   }
 

@@ -31,7 +31,7 @@ import upickle.default.ReadWriter
  * @param trigger when to summarise
  * @param keepRecent how many of the latest messages are always sent as they are; at least 1
  * @param compressor writes the summary
- * @param maxSummaryTokens the bound on the summary, in estimated tokens at four characters a token; at least 1
+ * @param maxSummaryTokens the bound on the summary, in estimated tokens at four characters a token; at least `SummaryCompressor.MinSummaryTokens` (32)
  * @param tokenCounter the estimate a `SummaryTrigger.Tokens` trigger is measured with
  */
 @Experimental
@@ -46,7 +46,10 @@ final class SummarizationMiddleware(
   import SummarizationMiddleware.*
 
   require(keepRecent >= 1, s"SummarizationMiddleware: keepRecent must be at least 1, was $keepRecent")
-  require(maxSummaryTokens >= 1, s"SummarizationMiddleware: maxSummaryTokens must be at least 1, was $maxSummaryTokens")
+  require(
+    maxSummaryTokens >= SummaryCompressor.MinSummaryTokens,
+    s"SummarizationMiddleware: maxSummaryTokens must be at least ${SummaryCompressor.MinSummaryTokens}, was $maxSummaryTokens"
+  )
 
   override def writes: Set[StateKey[?, ?]] = Set(key)
 

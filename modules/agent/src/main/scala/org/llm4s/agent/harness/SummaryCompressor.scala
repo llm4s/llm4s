@@ -3,6 +3,7 @@ package org.llm4s.agent.harness
 import org.llm4s.agent.graph.middleware.ModelContext
 import org.llm4s.annotation.Experimental
 import org.llm4s.context.{ ConversationTokenCounter, HistoryCompressor }
+import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
@@ -87,18 +88,25 @@ object SummaryCompressor:
       maxTokens: Int,
       context: ModelContext
     ): Result[String] =
-      val budget                = maxTokens.toLong * 4
-      val (oldMedia, oldDigest) = previous.fold(Vector.empty[String])(_.linesIterator.toVector).partition(isMedia)
-      val media                 = mediaText(oldMedia ++ mediaLine(messages), budget / 2)
-      val room                  = math.max(0L, budget - media.fold(0L)(_.length.toLong + 1))
-      val old                   = oldDigest.mkString("\n").trim
-      digestOf(messages, maxTokens)
-        .flatMap { added =>
-          val extended = Vector(old, added).filter(_.nonEmpty).mkString("\n")
-          if old.isEmpty || extended.length.toLong <= room then Right(extended)
-          else digestOf(UserMessage(old) +: messages, math.max(1L, room / 4).toInt)
-        }
-        .map(body => (media.toVector :+ SummarizationMiddleware.cut(body, room)).filter(_.nonEmpty).mkString("\n"))
+      val budget = maxTokens.toLong * 4
+      // only lines in exactly the formats this compressor writes are media lines; any other line is summary prose
+      val (oldMedia, oldDigest) =
+        previous.fold(Vector.empty[String])(_.linesIterator.toVector).partition(l => mediaCounts(l).isDefined)
+      val media = mediaText(oldMedia ++ mediaLine(messages), budget / 2)
+      val room  = math.max(0L, budget - media.fold(0L)(_.length.toLong + 1))
+      val old   = oldDigest.mkString("\n").trim
+      if maxTokens < MinSummaryTokens then
+        Left(
+          ValidationError("maxTokens", s"a digest summary needs at least $MinSummaryTokens tokens, was $maxTokens")
+        )
+      else
+        digestOf(messages, maxTokens)
+          .flatMap { added =>
+            val extended = Vector(old, added).filter(_.nonEmpty).mkString("\n")
+            if old.isEmpty || extended.length.toLong <= room then Right(extended)
+            else digestOf(UserMessage(old) +: messages, math.max(1L, room / 4).toInt)
+          }
+          .map(body => (media.toVector :+ SummarizationMiddleware.cut(body, room)).filter(_.nonEmpty).mkString("\n"))
 
     /**
      * The digest of `messages`. Media parts are first named by kind in their message's text, so `HistoryCompressor`
@@ -114,9 +122,13 @@ object SummaryCompressor:
         })
         .map(_.filter(_.nonEmpty).mkString("\n"))
 
-  private val MediaPrefix = "Media: "
+  /**
+   * The least bound a summary may have: a digest summary's counted media line (at most about 60 characters) always
+   * fits in half of it, whole.
+   */
+  val MinSummaryTokens: Int = 32
 
-  private def isMedia(line: String): Boolean = line.startsWith(MediaPrefix)
+  private val MediaPrefix = "Media: "
 
   /** The media parts of `messages`, named by kind, as one media line. */
   private def mediaLine(messages: Vector[Message]): Option[String] =
@@ -127,35 +139,52 @@ object SummaryCompressor:
     }
     Option.when(media.nonEmpty)(media.map(m => s"[${m.kind}]").mkString(MediaPrefix, ", ", ""))
 
-  private val MediaKind = """\[(image|document)""".r
-
   /**
-   * `lines` as one media text within `max` characters: as they are when they fit, else one line counting each kind,
-   * which always fits a summary of at least a few tokens.
+   * `lines` (media lines) as one media text within `max` characters: as they are when they fit, else one counted line
+   * adding up every kind, which fits whole in half of a [[MinSummaryTokens]] bound.
    */
   private def mediaText(lines: Vector[String], max: Long): Option[String] =
     val joined = lines.mkString("\n")
     if lines.isEmpty then None
     else if joined.length.toLong <= max then Some(joined)
-    else Some(SummarizationMiddleware.cut(counted(mediaCounts(lines)), math.max(0L, max)))
+    else Some(counted(lines.flatMap(mediaCounts).foldLeft(Map.empty[String, Long])(add)))
 
   /** The prefix of a media line that counts parts rather than naming them. */
   private val CountedPrefix = s"${MediaPrefix}counted "
 
-  private val CountedKind = """(\d+) (image|document)""".r
+  private val Kind = "(image|document)"
+
+  /** A named line: `Media: [image (url, image/png)], [document (inline, application/pdf)]`. */
+  private val Named = s"""\\Q$MediaPrefix\\E\\[$Kind \\([^()\\[\\]]*\\)\\](?:, \\[$Kind \\([^()\\[\\]]*\\)\\])*""".r
+
+  /** A counted line: `Media: counted 3 image, 1 document`. */
+  private val Counted = s"""\\Q$CountedPrefix\\E\\d{1,18} $Kind(?:, \\d{1,18} $Kind)*""".r
+
+  private val NamedKind   = s"""\\[$Kind """.r
+  private val CountedKind = s"""(\\d{1,18}) $Kind""".r
 
   /**
-   * How many parts of each kind `lines` record: one per named part (`[image ...]`), plus the counts of a counted line,
-   * so counting again never forgets what an earlier count recorded.
+   * How many parts of each kind `line` records, when it is a media line in exactly a format this compressor writes:
+   * one per named part, or a counted line's counts. `None` for any other line, which is prose and kept as such.
    */
-  private def mediaCounts(lines: Vector[String]): Map[String, Long] =
-    lines
-      .flatMap { line =>
-        if line.startsWith(CountedPrefix) then
-          CountedKind.findAllMatchIn(line).map(m => m.group(2) -> m.group(1).toLongOption.getOrElse(0L)).toVector
-        else MediaKind.findAllMatchIn(line).map(_.group(1) -> 1L).toVector
-      }
-      .groupMapReduce(_._1)(_._2)(_ + _)
+  private def mediaCounts(line: String): Option[Map[String, Long]] =
+    if Counted.matches(line) then
+      Some(
+        CountedKind
+          .findAllMatchIn(line.stripPrefix(CountedPrefix))
+          .map(m => Map(m.group(2) -> m.group(1).toLong))
+          .foldLeft(Map.empty[String, Long])(add)
+      )
+    else if Named.matches(line) then
+      Some(NamedKind.findAllMatchIn(line).map(m => Map(m.group(1) -> 1L)).foldLeft(Map.empty[String, Long])(add))
+    else None
+
+  private def add(a: Map[String, Long], b: Map[String, Long]): Map[String, Long] =
+    // saturating: a count never wraps
+    b.foldLeft(a) { (acc, kv) =>
+      val sofar = acc.getOrElse(kv._1, 0L)
+      acc.updated(kv._1, if Long.MaxValue - sofar < kv._2 then Long.MaxValue else sofar + kv._2)
+    }
 
   private def counted(counts: Map[String, Long]): String =
     counts.toVector.sortBy(_._1).map((kind, n) => s"$n $kind").mkString(CountedPrefix, ", ", "")
