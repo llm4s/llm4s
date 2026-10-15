@@ -153,8 +153,8 @@ final class WorkspaceFileBackend private (val id: String, workspace: WorkspaceAg
               case Left(error)             => failure = Some(error)
               case Right(s) =>
                 s.content match
-                  // gone since the walk, or not text a line search can read
-                  case None => skipped = skipped || s.kind == FileSnapshotResponse.Kind.File
+                  // not searched - not text, too large, or no longer a file since the walk: matches may be missing
+                  case None => skipped = true
                   case Some(text) =>
                     val wanted = math.min(limit.toLong + 1 - count, Int.MaxValue.toLong).toInt
                     Text.interruptibly("grep")(Right(Text.matches(path, text, regex).take(wanted).toVector)) match
