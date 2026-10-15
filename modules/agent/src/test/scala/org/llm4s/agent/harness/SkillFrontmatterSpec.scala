@@ -1,8 +1,11 @@
 package org.llm4s.agent.harness
 
+import org.llm4s.testutil.{ LinearTime, PerformanceTest }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+
+import scala.concurrent.duration.*
 
 /** Stage 3 slice F5 (#1909, design §4.35): the restricted `SKILL.md` frontmatter parser. */
 class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
@@ -273,6 +276,40 @@ class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
     val upTo = body + ("y" * (Skill.MaxFrontmatterChars - body.length - 4)) + "\n---"
     upTo.length shouldBe Skill.MaxFrontmatterChars
     Skill.parse(path, upTo + "\n# body\n" + ("z" * 100)).value.name shouldBe "pdf-tools"
+  }
+
+  it should "take only spaces and tabs after a fence: a fence followed by a control character is none" in {
+    parse("---  ", "name: pdf-tools", "description: d", "---\t", "body").value.name shouldBe "pdf-tools"
+    problem("---", "name: pdf-tools", "description: d", "---\u000b", "---").line shouldBe 4
+    problem("---\u000b", "name: pdf-tools", "description: d", "---").line shouldBe 1
+  }
+
+  /** A flow list of `items` tools, parsed without the file's size bound, to measure the parser alone. */
+  private def flow(items: Int): Vector[String] =
+    Vector(
+      "---",
+      "name: pdf-tools",
+      "description: d",
+      (1 to items).map(i => s"T$i").mkString("allowed-tools: [", ", ", "]"),
+      "---"
+    )
+
+  // An ordinary test with a generous hang guard; how the cost scales is measured by the PerformanceTest below
+  it should "parse a flow list of about a megabyte within the hang guard" in {
+    val lines = flow(130000)
+    lines(3).length should be > 1000000
+    val started = System.nanoTime()
+    Frontmatter.parse(path, lines, closed = true).value("allowed-tools").value match {
+      case Frontmatter.Value.Items(xs) => xs.size shouldBe 130000
+      case other                       => fail(s"not a list: $other")
+    }
+    (System.nanoTime() - started).nanos should be < LinearTime.MegabyteHangGuard
+  }
+
+  it should "parse a flow list in time linear in its length" taggedAs PerformanceTest in {
+    LinearTime.assertLinear("flow list, 5,000 vs 20,000 items", flow(5000), flow(20000))(
+      Frontmatter.parse(path, _, closed = true)
+    )
   }
 
   it should "refuse a name over 64 characters" in {
