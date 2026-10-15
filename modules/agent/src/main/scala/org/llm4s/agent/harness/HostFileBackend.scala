@@ -896,34 +896,90 @@ object HostFileBackend:
     case _                                                  => false
 
   /**
-   * The real roots of this JVM's open backends, with how many backends hold each. A root that contains or
-   * is contained by an open one is refused: two backends would then name one file by two paths, with two
-   * lock keys and possibly two stripes. The same real root is shared (its paths, locks and stripes agree).
-   * Across processes this is a documented precondition only.
+   * Where a root physically is: the device and the path within that device's file system it shows. Two
+   * lexically unrelated paths can show one directory (a same-device bind mount), so roots are compared by
+   * this, not by their paths alone. Where there is no mount table the path is the identity.
    */
-  private object OpenRoots:
-    private val held = scala.collection.mutable.Map.empty[Path, Int]
+  final private[harness] case class Physical(device: String, path: Path):
+    def overlaps(other: Physical): Boolean =
+      device == other.device && (path.startsWith(other.path) || other.path.startsWith(path))
 
-    def acquire(root: Path): Result[Unit] = synchronized {
-      held.keysIterator.find(r => r != root && (r.startsWith(root) || root.startsWith(r))) match
-        case Some(other) =>
-          Left(
-            ValidationError(
-              "root",
-              s"$root overlaps the root $other of another open HostFileBackend; one file must have one path"
-            )
-          )
-        case None =>
-          held.update(root, held.getOrElse(root, 0) + 1)
+  /**
+   * The real roots of this JVM's open backends, with how many backends hold each and where each physically
+   * is. A root that is, contains or is contained by an open one - by its path, by its physical identity
+   * (a bind mount of it elsewhere), or by `Files.isSameFile` - is refused: two backends would then name one
+   * file by two paths, with two lock keys and possibly two stripes. The same real root is shared (its
+   * paths, locks and stripes agree). Across processes this is a documented precondition only.
+   */
+  private[harness] object OpenRoots:
+    private val held = scala.collection.mutable.Map.empty[Path, (Int, Physical)]
+
+    def acquire(root: Path, physical: Physical): Result[Unit] = synchronized {
+      held.get(root) match
+        case Some((n, at)) =>
+          held.update(root, (n + 1, at))
           Right(())
+        case None =>
+          held.iterator.find { (r, held) =>
+            val (_, at) = held
+            r.startsWith(root) || root.startsWith(r) || at.overlaps(physical) ||
+            Try(Files.isSameFile(r, root)).getOrElse(false)
+          } match
+            case Some((other, _)) =>
+              Left(
+                ValidationError(
+                  "root",
+                  s"$root overlaps the root $other of another open HostFileBackend, by its path or by where it " +
+                    "physically is (a bind mount); one file must have one path"
+                )
+              )
+            case None =>
+              held.update(root, (1, physical))
+              Right(())
     }
 
     def release(root: Path): Unit = synchronized {
       held.get(root) match
-        case Some(1) => held.remove(root): Unit
-        case Some(n) => held.update(root, n - 1)
-        case None    => ()
+        case Some((1, _))  => held.remove(root): Unit
+        case Some((n, at)) => held.update(root, (n - 1, at))
+        case None          => ()
     }
+
+  /** A mount table entry: the device, the path within its file system it shows, and where it is mounted. */
+  final private[harness] case class MountEntry(device: String, source: Path, mountPoint: Path)
+
+  private val Escaped = """\\([0-7]{3})""".r
+
+  /** A mount table field with its octal escapes (`\\040` for a space) decoded. */
+  private def unescaped(field: String): String =
+    Escaped.replaceAllIn(
+      field,
+      m => scala.util.matching.Regex.quoteReplacement(Integer.parseInt(m.group(1), 8).toChar.toString)
+    )
+
+  /** The entries of `mountinfo` lines: fields 3 (device), 4 (source within it) and 5 (mount point). */
+  private[harness] def mountEntries(lines: Iterator[String]): Vector[MountEntry] =
+    lines.flatMap { line =>
+      val f = line.split(' ')
+      Option.when(f.length > 4)(MountEntry(f(2), Path.of(unescaped(f(3))), Path.of(unescaped(f(4)))))
+    }.toVector
+
+  /** Where `real` physically is by `entries`: under the last, deepest mount point that contains it. */
+  private[harness] def physicalIn(entries: Vector[MountEntry], real: Path): Option[Physical] =
+    entries
+      .filter(e => real.startsWith(e.mountPoint))
+      .foldLeft(Option.empty[MountEntry])((best, e) =>
+        if best.forall(_.mountPoint.getNameCount <= e.mountPoint.getNameCount) then Some(e) else best
+      )
+      .map(e => Physical(e.device, e.source.resolve(e.mountPoint.relativize(real).toString)))
+
+  /** Where `real` physically is, by this process's mount table where there is one, else by its path. */
+  private def physicalOf(real: Path): Result[Physical] =
+    val table = Path.of("/proc/self/mountinfo")
+    if !Files.isReadable(table) then Right(Physical("path", real))
+    else
+      Try(Using.resource(Files.lines(table))(lines => mountEntries(lines.iterator.asScala))).toResult
+        .map(entries => physicalIn(entries, real).getOrElse(Physical("path", real)))
 
   /**
    * At most `max` bytes of `channel`, or `None` when it holds more. Each read asks for no more than the
@@ -1033,20 +1089,7 @@ object HostFileBackend:
 
   /** The mount points in `mountinfo` lines strictly beneath `root`. */
   private[harness] def mountPointsIn(lines: Iterator[String], root: Path): Vector[Path] =
-    val escaped = """\\([0-7]{3})""".r
-    lines
-      .flatMap(_.split(' ').lift(4))
-      .map(field =>
-        Path.of(
-          escaped.replaceAllIn(
-            field,
-            m => scala.util.matching.Regex.quoteReplacement(Integer.parseInt(m.group(1), 8).toChar.toString)
-          )
-        )
-      )
-      .filter(m => m.startsWith(root) && m != root)
-      .toVector
-      .distinct
+    mountEntries(lines).map(_.mountPoint).filter(m => m.startsWith(root) && m != root).distinct
 
   /**
    * Which file system `p` is on, without following a final link: its `unix:dev` where the JDK reports
@@ -1152,7 +1195,8 @@ object HostFileBackend:
         )
         identity <- Try((fileKeyOf(real), fileSystemId(real))).toResult.left
           .map(e => ValidationError("root", s"$real cannot be identified: ${e.message}"): LLMError)
-        _ <- OpenRoots.acquire(real)
+        physical <- physicalOf(real)
+        _        <- OpenRoots.acquire(real, physical)
       yield new HostFileBackend(
         real,
         maxFileBytes,

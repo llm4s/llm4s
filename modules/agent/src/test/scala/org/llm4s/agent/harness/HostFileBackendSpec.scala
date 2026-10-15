@@ -15,7 +15,12 @@ import java.util.UUID
 import java.util.concurrent.{ CountDownLatch, Executors, TimeUnit }
 import scala.jdk.CollectionConverters._
 
-class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues with BeforeAndAfterEach {
+class HostFileBackendSpec
+    extends AnyFlatSpec
+    with Matchers
+    with EitherValues
+    with org.scalatest.OptionValues
+    with BeforeAndAfterEach {
 
   private var dir: Path                   = _
   private val locks: Path                 = Files.createTempDirectory("llm4s-host-locks")
@@ -878,5 +883,31 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     Files.exists(dir.resolve("d/new.txt")) shouldBe true
     child.waitFor(10, TimeUnit.SECONDS) shouldBe true
   }
+
+  "Open roots" should "be compared by where they physically are, so a bind mount of one elsewhere is refused" in {
+    val table = mountEntriesOf(
+      "22 1 9:1 / / rw - ext4 /dev/sda1 rw",
+      "40 22 9:1 /w/source /x/alias rw - ext4 /dev/sda1 rw",
+      "41 22 9:2 / /data rw - ext4 /dev/sdb1 rw"
+    )
+    val w     = HostFileBackend.physicalIn(table, Path.of("/w")).value
+    val alias = HostFileBackend.physicalIn(table, Path.of("/x/alias/sub")).value
+    alias shouldBe HostFileBackend.Physical("9:1", Path.of("/w/source/sub"))
+    HostFileBackend.physicalIn(table, Path.of("/data/w")).value shouldBe HostFileBackend.Physical("9:2", Path.of("/w"))
+    w.overlaps(alias) shouldBe true
+    w.overlaps(HostFileBackend.physicalIn(table, Path.of("/data/w")).value) shouldBe false
+    // two lexically unrelated roots, one physically inside the other: the second is refused
+    val first  = Path.of("/llm4s-spec-nonexistent/one")
+    val second = Path.of("/llm4s-spec-nonexistent-other/two")
+    HostFileBackend.OpenRoots.acquire(first, w).value
+    cleanups += (() => HostFileBackend.OpenRoots.release(first))
+    HostFileBackend.OpenRoots.acquire(second, alias).left.value.message should include("physically")
+    val third = Path.of("/llm4s-spec-nonexistent-third/three")
+    HostFileBackend.OpenRoots.acquire(third, HostFileBackend.Physical("9:2", Path.of("/w"))).value
+    HostFileBackend.OpenRoots.release(third)
+  }
+
+  private def mountEntriesOf(lines: String*): Vector[HostFileBackend.MountEntry] =
+    HostFileBackend.mountEntries(lines.iterator)
 
 }
