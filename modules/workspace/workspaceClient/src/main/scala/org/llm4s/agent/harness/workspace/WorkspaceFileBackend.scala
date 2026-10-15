@@ -56,10 +56,16 @@ final class WorkspaceFileBackend private (val id: String, workspace: WorkspaceAg
   ): Result[FileSnapshotResponse] =
     call(operation, path)(workspace.fileSnapshot(relative(path), content, follow))
 
-  /** A runner path (`src/a.txt`) as a `VPath`, if it is one. */
+  /**
+   * A runner path (`src/a.txt`, from the Linux runner) as a `VPath`, if it is one. A backslash is a character of a
+   * name there, not a separator, and a `VPath` cannot hold one, so such an entry is skipped, never rewritten into a
+   * different path.
+   */
   private def vpath(runnerPath: String): Option[VPath] =
-    val normalised = runnerPath.replace('\\', '/').stripPrefix("./")
-    if normalised.isEmpty || normalised == "." then Some(VPath.root) else VPath("/" + normalised).toOption
+    val normalised = runnerPath.stripPrefix("./")
+    if normalised.isEmpty || normalised == "." then Some(VPath.root)
+    else if normalised.contains('\\') then None
+    else VPath("/" + normalised).toOption
 
   def ls(path: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
     Text.checkLimitAt("ls", path, limit).flatMap { _ =>

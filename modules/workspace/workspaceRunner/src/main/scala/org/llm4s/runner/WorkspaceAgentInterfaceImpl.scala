@@ -117,6 +117,29 @@ class WorkspaceAgentInterfaceImpl(
   private def effective(path: Path): Path = effective(path, 0)
 
   /**
+   * `relativePath` as an entry of its directory, for what acts on the entry itself and never follows it (a delete, a
+   * snapshot of a link as itself): when it names a symbolic link, only its directory is held to the path checks (as
+   * [[resolvePath]] holds any path), and the link is not followed, so a link whose target is outside the workspace or
+   * the allowed paths can still be removed. Anything else is [[resolvePath]]'s.
+   */
+  private def resolveEntry(relativePath: String): Path = {
+    val lexical = Try(rootPath.resolve(relativePath).normalize()).toOption
+    lexical.filter(p => p.startsWith(rootPath) && p != rootPath && Files.isSymbolicLink(p)) match {
+      case Some(link) =>
+        val parent = resolvePath(rootPath.relativize(link.getParent).toString)
+        // the entry's own name, beneath its checked directory, must itself be allowed
+        if (allowedRoots.nonEmpty && !allowedRoots.exists(link.startsWith))
+          throw new WorkspaceAgentException(
+            s"Path '$relativePath' is outside the sandbox's allowed paths (${config.allowedPaths.mkString(", ")})",
+            "PATH_NOT_ALLOWED",
+            None
+          )
+        parent.resolve(link.getFileName)
+      case None => resolvePath(relativePath)
+    }
+  }
+
+  /**
    * Whether an entry a walk produced passes the same checks as a path asked for ([[resolvePath]]): a link beneath an
    * allowed directory that leads outside it, or outside the workspace, is left out of a listing or a search before
    * anything follows it.
@@ -764,7 +787,8 @@ class WorkspaceAgentInterfaceImpl(
     // under the gate as well as the lock: a command cannot swap a link it resolved through while it is read
     mutating {
       import FileSnapshotResponse.Kind
-      val resolved = resolvePath(path)
+      // a link described as itself is never followed; anything else is resolved and checked as any path
+      val resolved = if (followLinks) resolvePath(path) else resolveEntry(path)
       def response(kind: String, hash: String, size: Long, content: Option[String], error: Option[String]) =
         FileSnapshotResponse("local", path, kind, hash, size, content, error)
       if (!followLinks && Files.isSymbolicLink(resolved))
@@ -823,7 +847,8 @@ class WorkspaceAgentInterfaceImpl(
   /** Deletes the file, or the empty directory, `path`; with `expectedHash`, only if its hash is still that. */
   override def deleteFile(path: String, expectedHash: Option[String] = None): DeleteFileResponse =
     mutating {
-      val resolved = resolvePath(path)
+      // the entry itself: a link is removed, never followed, so only its directory is held to the path checks
+      val resolved = resolveEntry(path)
       if (resolved == rootPath)
         throw new WorkspaceAgentException("The workspace root cannot be deleted", "INVALID_ARGUMENT", None)
       refuseGitMetadata(path, resolved)

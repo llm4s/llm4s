@@ -97,6 +97,23 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     Files.size(root.resolve("big")) shouldBe 20L
   }
 
+  it should "delete a link whose target is outside the workspace or the allowed paths, never following it" in {
+    assume(!isWindowsHost)
+    val outside = Files.createTempDirectory("workspace-outside-target")
+    Files.write(outside.resolve("secret"), "s".getBytes(StandardCharsets.UTF_8))
+    Files.createDirectories(root.resolve("src"))
+    Files.createSymbolicLink(root.resolve("src/out"), outside.resolve("secret"))
+    val confined = workspace(WorkspaceSandboxConfig(allowedPaths = List("src")))
+    code(confined.fileSnapshot("src/out")) shouldBe "PATH_ESCAPE_ATTEMPT"
+    val link = confined.fileSnapshot("src/out", includeContent = false, followLinks = false)
+    link.kind shouldBe "link"
+    confined.deleteFile("src/out", Some(link.hash)).wasDirectory shouldBe false
+    Files.exists(root.resolve("src/out"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+    Files.exists(outside.resolve("secret")) shouldBe true
+    Files.delete(outside.resolve("secret"))
+    Files.delete(outside)
+  }
+
   it should "refuse a FIFO without opening it, as every file operation does" in {
     assume(!isWindowsHost)
     val fifo = root.resolve("pipe")
