@@ -88,7 +88,10 @@ object SummaryCompressor:
           case Some(old) =>
             val extended = if added.isEmpty then old else s"$old\n$added"
             if extended.length.toLong <= maxTokens.toLong * 4 then Right(extended)
-            else digestOf(UserMessage(old) +: messages, maxTokens)
+            else
+              // the old summary's media lines are kept as they are: its digest would not extract them
+              val oldMedia = old.linesIterator.filter(_.startsWith("Media: ")).toVector
+              digestOf(UserMessage(old) +: messages, maxTokens).map(d => (oldMedia :+ d).mkString("\n"))
       }
 
     /**
@@ -103,7 +106,20 @@ object SummaryCompressor:
           case SystemMessage(c) if c.startsWith(DigestHeader) => c.stripPrefix(DigestHeader).trim
           case kept                                           => rendered(kept)
         })
-        .map(_.filter(_.nonEmpty).mkString("\n"))
+        .map(_.filter(_.nonEmpty) ++ mediaLine(messages))
+        .map(_.mkString("\n"))
+
+    /**
+     * The media of `messages`, named by kind: `HistoryCompressor`'s digest keeps only what its patterns extract, so
+     * a block whose content is an image would otherwise leave no trace.
+     */
+    private def mediaLine(messages: Vector[Message]): Option[String] =
+      val media = messages.flatMap {
+        case u: UserMessage => u.parts.filter(ContentPart.isMedia)
+        case t: ToolMessage => t.parts.filter(ContentPart.isMedia)
+        case _              => Vector.empty
+      }
+      Option.when(media.nonEmpty)(media.map(m => s"[${m.kind}]").mkString("Media: ", ", ", ""))
 
   final private class Model(client: LLMClient, options: CompletionOptions, maxInputTokens: Int)
       extends SummaryCompressor:

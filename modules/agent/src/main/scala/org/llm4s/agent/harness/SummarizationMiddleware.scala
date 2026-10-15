@@ -118,7 +118,8 @@ final class SummarizationMiddleware(
           val (folded, kept) = after.splitAt(c)
           Plan.Fold(
             system,
-            summary.map(_.text),
+            // the same bounded text the request carries, whatever is stored (a wider sharer, `updateState`)
+            summary.map(s => clamp(s.text, maxSummaryTokens)),
             folded.collect { case (m, Some(_)) => m },
             folded.collect { case (m, None) => m } ++ kept.map(_._1),
             history(folded.last._2.get).id

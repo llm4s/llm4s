@@ -423,6 +423,34 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
       .value
     text should include("CH42")
     text should include("K9")
+    // a block that is only an image still leaves its trace
+    val only = SummaryCompressor
+      .digest(counter)
+      .compress(None, Vector(UserMessage(Vector(image)), AssistantMessage("nice")), 500, context)
+      .value
+    only should include("Media: [image (url, image/png)]")
+  }
+
+  it should "give the compressor the stored summary clamped to the bound, as the request carries it (rule 12)" in {
+    given store: InMemoryCheckpointer = new InMemoryCheckpointer
+    given thread: ThreadId            = ThreadId("clamped-previous")
+    val compressor                    = new Recording()
+    val mw   = new SummarizationMiddleware(SummaryTrigger.Messages(3), 1, compressor, maxSummaryTokens = 10)
+    val loop = loopOf(new Model(), Seq(mw))
+    val one  = turns(loop, "u1")
+    GraphRuntime(store)
+      .updateState(
+        thread,
+        loop.graph,
+        store.latest(thread).value.value.checkpoint.id,
+        StateUpdate.update(
+          SummarizationMiddleware.key,
+          Some(ConversationSummary("y" * 5000, one.get(Messages.key).value.head.id))
+        )
+      )
+      .isRight shouldBe true
+    turns(loop, "u2", "u3")
+    compressor.call(0)._1 shouldBe Some("y" * 40)
   }
 
   "An agent without SummarizationMiddleware" should "register no summary key (rule 7)" in {
