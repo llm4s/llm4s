@@ -5,6 +5,8 @@ import org.llm4s.agent.graph.middleware.{ MiddlewareId, ModelContext, PromptSect
 import org.llm4s.error.CancelledError
 import org.llm4s.types.Result
 
+import scala.util.control.Exception.ultimately
+
 /*
  * The mechanism shared by the middleware that show documents read through a backend as a prompt section - skills
  * (F5, §4.35) and instruction memory (F6, §4.36): read once per run, bounded per document and in total, cached by
@@ -17,8 +19,9 @@ import org.llm4s.types.Result
  *
  * The key is the thread, the run id and the claim's fencing token: a run id can be reused (`RunConfig.withRunId`, a
  * recovery under the same id), the token is new for every run that claims the thread, so a recovered or resumed run
- * computes its value again. The value is computed under its incarnation's own lock, so the concurrent hooks of one run
- * compute it once. Only a computed value takes a place in the LRU: a computation in flight, or one that failed
+ * computes its value again. The value is computed under its incarnation's own lock, held until the last caller
+ * waiting on it leaves, so the concurrent hooks of one run compute it once - or, after a failure, one at a time, a
+ * waiter retrying in turn - and never two at once. Only a computed value takes a place in the LRU: a computation in flight, or one that failed
  * (returned or thrown), evicts nothing and leaves nothing behind.
  *
  * `report` runs when the value is computed, in the task that computed it, and again whenever that task runs the hook
@@ -41,12 +44,20 @@ final private[harness] class RunCache[A](maxRuns: Int):
   private val done = new java.util.LinkedHashMap[Incarnation, Entry](16, 0.75f, true):
     override def removeEldestEntry(eldest: java.util.Map.Entry[Incarnation, Entry]): Boolean = this.size() > maxRuns
 
-  // the incarnations being computed, one lock each, so concurrent callers of one run compute once; at most one
-  // entry per caller in flight, and removed when its computation ends
-  private val inFlight = new java.util.HashMap[Incarnation, Object]()
+  /** An incarnation's in-flight lock, and how many callers hold or wait on it. */
+  final private class Slot:
+    var users: Int = 0
+
+  // the incarnations being computed or waited on, one lock each, so the callers of one run compute one at a time: a
+  // caller that waited finds the value, or - after a failure - retries in turn on the same lock. Removed when its
+  // last caller leaves, so at most one entry per caller in flight
+  private val inFlight = new java.util.HashMap[Incarnation, Slot]()
 
   /** The number of incarnations whose value is held. */
   def cached: Int = lock.synchronized(done.size)
+
+  /** The number of incarnations being computed or waited on. */
+  def inFlightRuns: Int = lock.synchronized(inFlight.size)
 
   /** The run's value: computed by `compute` on the run's first call, and reported by `report` as above. */
   def apply(run: RunContext)(compute: => Result[A])(report: A => Unit): Result[A] =
@@ -59,23 +70,30 @@ final private[harness] class RunCache[A](maxRuns: Int):
     held match
       case Some(entry) => hit(entry)
       case None =>
-        val slot = lock.synchronized(inFlight.computeIfAbsent(key, _ => new Object))
-        slot.synchronized {
-          // a caller that waited for the slot finds the value its holder computed
-          held match
-            case Some(entry) => hit(entry)
-            case None =>
-              val computed = scala.util.Try(compute)
-              lock.synchronized {
-                inFlight.remove(key, slot)
-                computed match
-                  case scala.util.Success(Right(value)) => done.put(key, Entry(value, position.taskId)): Unit
-                  case _                                => () // a failure, returned or thrown, keeps nothing
-              }
-              computed.get.map { value =>
-                report(value)
-                value
-              }
+        val slot = lock.synchronized {
+          val s = inFlight.computeIfAbsent(key, _ => new Slot)
+          s.users += 1
+          s
+        }
+        // released whatever ends the wait or the computation - a value, a failure, or a throw `Try` would not catch,
+        // such as an interrupt - so no slot outlives its callers
+        def release(): Unit = lock.synchronized {
+          slot.users -= 1
+          if slot.users == 0 then inFlight.remove(key, slot): Unit
+        }
+        ultimately(release()) {
+          slot.synchronized {
+            held match
+              case Some(entry) => hit(entry)
+              case None        =>
+                // a failure, returned or thrown, keeps nothing; a waiter retries in turn
+                val computed = compute
+                computed.foreach { value =>
+                  lock.synchronized(done.put(key, Entry(value, position.taskId))): Unit
+                  report(value)
+                }
+                computed
+          }
         }
 
 /** What one run's read produced: its value, the text of its section (if any), and its report. */
