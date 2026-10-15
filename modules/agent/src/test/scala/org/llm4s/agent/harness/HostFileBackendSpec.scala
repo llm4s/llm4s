@@ -910,4 +910,35 @@ class HostFileBackendSpec
   private def mountEntriesOf(lines: String*): Vector[HostFileBackend.MountEntry] =
     HostFileBackend.mountEntries(lines.iterator)
 
+  "A lock directory" should "be refused inside the root physically, as by its path" in {
+    val root  = Path.of("/w")
+    val at    = HostFileBackend.Physical("9:1", Path.of("/w"))
+    val alias = Path.of("/x/locks") // a bind mount of /w/locks: lexically outside, physically inside
+    HostFileBackend.lockDirectoryInside(
+      alias,
+      root,
+      HostFileBackend.Physical("9:1", Path.of("/w/locks")),
+      at
+    ) shouldBe true
+    HostFileBackend.lockDirectoryInside(
+      Path.of("/w/locks"),
+      root,
+      HostFileBackend.Physical("9:1", Path.of("/w/locks")),
+      at
+    ) shouldBe
+      true
+    HostFileBackend.lockDirectoryInside(
+      alias,
+      root,
+      HostFileBackend.Physical("9:2", Path.of("/w/locks")),
+      at
+    ) shouldBe false
+    HostFileBackend.lockDirectoryInside(
+      alias,
+      root,
+      HostFileBackend.Physical("9:1", Path.of("/x/locks")),
+      at
+    ) shouldBe false
+  }
+
 }

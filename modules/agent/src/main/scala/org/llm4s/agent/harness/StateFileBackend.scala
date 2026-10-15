@@ -120,8 +120,13 @@ final class StateFileBackend private (
     ctx: FileContext
   ): Result[(FileEdited, StateUpdate)] =
     for
-      all    <- current(ctx)
-      entry  <- FileTree.fileOf("edit", all, path)
+      all   <- current(ctx)
+      entry <- FileTree.fileOf("edit", all, path)
+      // the one text rule on what is stored too, as `read` applies it: another writer of the key may have
+      // put NUL or an unpaired surrogate there, and an edit must not work on content a read refuses
+      _ <- Text
+        .binaryReason(entry.content)
+        .fold[Result[Unit]](Right(()))(r => Left(BackendRefused("edit", path.value, r)))
       edited <- Text.edited(path, entry.content, old, replacement, replaceAll, maxBytes)
       _      <- admit("edit", all, path, edited._1)
     yield

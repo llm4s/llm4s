@@ -945,6 +945,10 @@ object HostFileBackend:
         case None          => ()
     }
 
+  /** Whether the lock directory `locks` is inside the root `real`, by path or physically (a bind mount). */
+  private[harness] def lockDirectoryInside(locks: Path, real: Path, locksAt: Physical, rootAt: Physical): Boolean =
+    locks.startsWith(real) || (locksAt.device == rootAt.device && locksAt.path.startsWith(rootAt.path))
+
   /** A mount table entry: the device, the path within its file system it shows, and where it is mounted. */
   final private[harness] case class MountEntry(device: String, source: Path, mountPoint: Path)
 
@@ -1158,10 +1162,17 @@ object HostFileBackend:
           Files.createDirectories(lockDirectory)
           lockDirectory.toRealPath()
         }.toResult.left.map(e => ValidationError("lockDirectory", s"$lockDirectory: ${e.message}"): LLMError)
+        // inside the root by its path, or physically (a bind mount of the root, or of a directory in it):
+        // either way a path of the backend could reach, and delete, a lock file another process holds
+        rootAt  <- physicalOf(real)
+        locksAt <- physicalOf(locks)
         _ <- Either.cond(
-          !locks.startsWith(real),
+          !lockDirectoryInside(locks, real, locksAt, rootAt),
           (),
-          ValidationError("lockDirectory", s"$locks is inside the root $real; give the backend one outside it")
+          ValidationError(
+            "lockDirectory",
+            s"$locks is inside the root $real, by its path or physically; give the backend one outside it"
+          )
         )
         _ <- probe(real) match
           case Right(found) if found.isEmpty => Right(())
@@ -1195,8 +1206,7 @@ object HostFileBackend:
         )
         identity <- Try((fileKeyOf(real), fileSystemId(real))).toResult.left
           .map(e => ValidationError("root", s"$real cannot be identified: ${e.message}"): LLMError)
-        physical <- physicalOf(real)
-        _        <- OpenRoots.acquire(real, physical)
+        _ <- OpenRoots.acquire(real, rootAt)
       yield new HostFileBackend(
         real,
         maxFileBytes,

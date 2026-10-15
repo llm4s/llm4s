@@ -252,6 +252,15 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
     a.writes shouldBe Set(a.files)
   }
 
+  it should "refuse to edit stored content its read refuses, written past it by another writer of the key" in {
+    val (backend, f) = fixture()
+    for (bad <- Seq("a\u0000b", "a\uD800b")) {
+      f.commit(StateUpdate.update(backend.files, FileUpdate.Put(p("/bad"), FileEntry(bad, clock.instant()))))
+      backend.read(p("/bad"), 0, 1, f.ctx).isLeft shouldBe true
+      backend.edit(p("/bad"), bad.substring(1, 2), "", replaceAll = false, f.ctx).left.value shouldBe a[BackendRefused]
+    }
+  }
+
   it should "encode its key's values and updates, and refuse an invalid path on decode" in {
     val entry = FileEntry("x", clock.instant())
     upickle.default.read[FileEntry](upickle.default.write(entry)) shouldBe entry
