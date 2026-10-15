@@ -17,7 +17,10 @@ final private[runner] case class RunningCommand(
   process: Process,
   cancelled: AtomicBoolean,
   startTimeMs: Long,
-  completionSent: AtomicBoolean
+  completionSent: AtomicBoolean,
+  // the descendants a kill found (they may outlive the parent): the entry is tracked, and holds its permit, until
+  // every one of them has exited too
+  tree: java.util.Set[ProcessHandle] = java.util.concurrent.ConcurrentHashMap.newKeySet[ProcessHandle]()
 )
 
 /**
@@ -123,10 +126,24 @@ final private[runner] class ProcessRegistry(
         case Right(entry) =>
           // the only removal: when the process has really exited, it leaves the registry and gives back its permit
           entry.process.onExit().whenComplete { (_, _) =>
-            // what it left running is stopped before its permit is given back: a file change never runs beside it
-            sweepOrphans()
-            running.remove((owner, commandId), entry)
-            gate.release()
+            // what it left running is stopped, and waited for, before its permit is given back: a file change never
+            // runs beside a process of this command. One that survives its kill keeps the entry tracked, holding the
+            // permit, until it has really exited, as a surviving parent does
+            val leftovers = (entry.tree.asScala.toList ++ sweepOrphans()).distinct.filter(_.isAlive)
+            leftovers.foreach(h => Try(h.destroyForcibly()): Unit)
+            def done(): Unit = {
+              running.remove((owner, commandId), entry)
+              gate.release()
+            }
+            if (leftovers.isEmpty) done()
+            else {
+              logger.warn(
+                s"Command $commandId left ${leftovers.size} process(es) running; it holds the gate until they exit"
+              )
+              java.util.concurrent.CompletableFuture
+                .allOf(leftovers.map(_.onExit()): _*)
+                .whenComplete((_, _) => done()): Unit
+            }
           }: Unit
           Right(entry)
       }
@@ -139,16 +156,21 @@ final private[runner] class ProcessRegistry(
    * orphan goes to the host's init and cannot be found; there the container is the boundary. A file operation's own
    * helper (`getfacl`) never runs then: it needs the whole gate, and the exiting command still holds its permit.
    */
-  private def sweepOrphans(): Unit =
-    if (ProcessHandle.current().pid() == 1L) ProcessRegistry.ledger.synchronized {
-      // every process the runner starts itself is in the ledger from its start (a command, a helper), so a child that
-      // is in neither is a re-parented orphan, never a process being started or a helper at work
-      val own = ProcessRegistry.commands.asScala ++ ProcessRegistry.helpers.asScala
-      ProcessHandle.current().children().toList.asScala.filterNot(h => own.contains(h.pid())).foreach { orphan =>
-        Try(orphan.descendants().toList.asScala).getOrElse(Nil).foreach(d => Try(d.destroyForcibly()): Unit)
-        Try(orphan.destroyForcibly()): Unit
+  private def sweepOrphans(): List[ProcessHandle] =
+    if (ProcessHandle.current().pid() != 1L) Nil
+    else
+      ProcessRegistry.ledger.synchronized {
+        // every process the runner starts itself is in the ledger from its start (a command, a helper), so a child that
+        // is in neither is a re-parented orphan, never a process being started or a helper at work
+        val own = ProcessRegistry.commands.asScala ++ ProcessRegistry.helpers.asScala
+        ProcessHandle.current().children().toList.asScala.filterNot(h => own.contains(h.pid())).toList.flatMap {
+          orphan =>
+            val tree = Try(orphan.descendants().toList.asScala.toList).getOrElse(Nil)
+            tree.foreach(d => Try(d.destroyForcibly()): Unit)
+            Try(orphan.destroyForcibly()): Unit
+            orphan :: tree
+        }
       }
-    }
 
   /** The owner's process `commandId`, while it runs. */
   def find(owner: AnyRef, commandId: String): Option[RunningCommand] = Option(running.get((owner, commandId)))
@@ -165,11 +187,19 @@ final private[runner] class ProcessRegistry(
     if (asCancellation) entry.cancelled.set(true)
     // its whole tree, children first, collected before the parent dies and they are re-parented out of reach: a
     // command's build tool or shell never leaves a process changing the workspace after it is killed
-    Try(entry.process.descendants().toList.asScala).getOrElse(Nil).foreach(d => Try(d.destroyForcibly()): Unit)
+    val tree = Try(entry.process.descendants().toList.asScala.toList).getOrElse(Nil)
+    tree.foreach { d =>
+      entry.tree.add(d)
+      Try(d.destroyForcibly()): Unit
+    }
     Try(entry.process.destroyForcibly()).failed.foreach { e =>
       logger.error(s"Error killing command ${entry.commandId}: ${e.getMessage}", e)
     }
-    val gone = Try(entry.process.waitFor(ProcessRegistry.KillWait.toMillis, TimeUnit.MILLISECONDS)).getOrElse(false)
+    // gone only when the parent and every descendant found have exited, within the one wait
+    val deadline = System.nanoTime() + ProcessRegistry.KillWait.toNanos
+    def left     = math.max(0L, deadline - System.nanoTime())
+    val gone = Try(entry.process.waitFor(left, TimeUnit.NANOSECONDS)).getOrElse(false) &&
+      tree.forall(d => Try(d.onExit().get(left, TimeUnit.NANOSECONDS)).isSuccess || !d.isAlive)
     if (!gone) logger.warn(s"Command ${entry.commandId} did not terminate when killed; it stays tracked until it exits")
     gone
   }
