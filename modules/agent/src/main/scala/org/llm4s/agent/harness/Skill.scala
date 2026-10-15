@@ -176,8 +176,33 @@ private[harness] object Frontmatter:
               else s"the frontmatter is not closed within ${Skill.MaxFrontmatterChars} characters"
             )
           )
-        else fields(upTo)
+        else
+          // every character YAML forbids, checked once over the whole frontmatter, raw or spelled by an escape
+          upTo.collectFirst { case (l, n) if !printable(l) => n } match
+            case Some(n) => Left((n, "a character YAML does not allow (a control character)"))
+            case None    => fields(upTo).flatMap(checkedValues)
     parsed.left.map((line, problem) => SkillFormatError(path, line, problem))
+
+  /**
+   * Whether every code point of `s` is one YAML 1.2 allows in a document (c-printable): tab, the printable ASCII range,
+   * NEL, and the rest of Unicode but the C1 controls, surrogates and U+FFFE/U+FFFF. (A line holds no LF or CR.)
+   */
+  private def printable(s: String): Boolean =
+    s.codePoints.allMatch(cp =>
+      cp == 0x9 || (cp >= 0x20 && cp <= 0x7e) || cp == 0x85 || (cp >= 0xa0 && cp <= 0xd7ff) ||
+        (cp >= 0xe000 && cp <= 0xfffd) || (cp >= 0x10000 && cp <= 0x10ffff)
+    )
+
+  /** The parsed values, refused when an escape spelled a character YAML forbids raw (other than a line break or tab). */
+  private def checkedValues(found: ListMap[String, Field]): Parsed[ListMap[String, Field]] =
+    def ok(s: String) = printable(s.replace('\n', ' ').replace('\r', ' '))
+    found.collectFirst {
+      case (_, Field(Value.Str(s), n)) if !ok(s)                   => n
+      case (_, Field(Value.Items(xs), n)) if !xs.forall(ok)        => n
+      case (_, Field(Value.Entries(m), n)) if !m.values.forall(ok) => n
+    } match
+      case Some(n) => Left((n, "a character YAML does not allow (a control character)"))
+      case None    => Right(found)
 
   /** An open block: a key with no inline value, and what has followed it. */
   final private case class Block(

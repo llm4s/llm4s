@@ -229,6 +229,14 @@ class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
     problem("---", "name: pdf-tools", "description: d", "allowed-tools: [Read\t# off]", "---").line shouldBe 4
   }
 
+  it should "refuse a character YAML does not allow, raw or escaped, and take tabs, line breaks and Unicode" in {
+    problem("---", "name: pdf-tools", "description: \"a\u0001b\"", "---").line shouldBe 3
+    problem("---", "name: pdf-tools", "description: a\u007fb", "---").line shouldBe 3
+    problem("---", "name: pdf-tools", "description: d", "metadata:", "  k: \"\\u0002\"", "---").line shouldBe 4
+    parse("---", "name: pdf-tools", "description: \"a\\tb\\nc \u00e9 \uD83D\uDE00\"", "---").value.description shouldBe
+      "a\tb\nc \u00e9 \uD83D\uDE00"
+  }
+
   it should "refuse a name over 64 characters" in {
     val long = "a" * 65
     val e    = Skill.parse(VPath(s"/s/$long/SKILL.md").value, s"---\nname: $long\ndescription: d\n---").left.value
