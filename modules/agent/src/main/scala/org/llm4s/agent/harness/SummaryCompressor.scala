@@ -137,7 +137,18 @@ object SummaryCompressor:
       case t: ToolMessage => t.parts.filter(ContentPart.isMedia)
       case _              => Vector.empty
     }
-    Option.when(media.nonEmpty)(media.map(m => s"[${m.kind}]").mkString(MediaPrefix, ", ", ""))
+    Option.when(media.nonEmpty)(media.map(marker).mkString(MediaPrefix, ", ", ""))
+
+  /**
+   * One media part as a named-line marker, `[image (url, image/png)]`: its kind, with every character the format uses
+   * as structure (brackets, parentheses) or that would break the line replaced by `_` and the description cut to 100
+   * characters, so any part `ContentPart` accepts - a provider file's provider is any non-blank string - parses back.
+   */
+  private def marker(part: ContentPart): String =
+    val word  = if part.isInstanceOf[ContentPart.Image] then "image" else "document"
+    val inner = part.kind.stripPrefix(word).trim.stripPrefix("(").stripSuffix(")")
+    val safe  = inner.map(c => if "()[]".contains(c) || Character.isISOControl(c) then '_' else c).take(100)
+    s"[$word ($safe)]"
 
   /**
    * `lines` (media lines) as one media text within `max` characters: as they are when they fit, else one counted line

@@ -450,6 +450,15 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     SummaryCompressor.digest(counter).compress(Some(prose), busy.take(2), 500, context).value should include(
       "Media: the user requires every chart in PNG."
     )
+    // a provider file whose provider holds the format's own characters still parses back as media
+    val odd = ContentPart.image(MediaSource.ProviderFile("p(1)[x]", "f"), MediaType.Png).value
+    val first = SummaryCompressor
+      .digest(counter)
+      .compress(None, Vector(UserMessage(Vector(odd)), AssistantMessage("ok")), 500, context)
+      .value
+    first should include("Media: [image (provider file p_1__x_, image/png)]")
+    val next = SummaryCompressor.digest(counter).compress(Some(first), busy, 32, context).value
+    next should startWith("Media: counted 21 image\n")
     // a bound below the floor is refused, so a counted line always fits whole
     SummaryCompressor.digest(counter).compress(None, busy, 31, context).left.value shouldBe a[ValidationError]
   }
