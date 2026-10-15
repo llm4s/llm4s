@@ -1345,7 +1345,9 @@ jobs:
   workspace-integration:
     name: Workspace Integration
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # On a push to main, and on demand: `gh workflow run ci.yml --ref <branch>` runs it for a branch that changes the
+    # workspace (it is too slow for every PR, and not a required check).
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
 

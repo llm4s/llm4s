@@ -5,7 +5,9 @@ import org.llm4s.it.Tier
 import org.llm4s.it.tags.Workspace
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
-import org.llm4s.toolapi.{ ToolRegistry, WorkspaceTools }
+import org.llm4s.agent.graph.tool.ToolSet
+import org.llm4s.agent.harness.{ ExecuteTool, FileTools }
+import org.llm4s.agent.harness.workspace.{ WorkspaceFileBackend, WorkspaceSandboxBackend }
 import org.llm4s.types.Result
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
@@ -16,7 +18,7 @@ import java.nio.file.Files
 import scala.util.Try
 
 /**
- * An [[Agent]] driving the real workspace tools ([[WorkspaceTools.createDefaultWorkspaceTools]])
+ * An [[Agent]] driving the harness tools over a workspace (`FileTools` over `WorkspaceFileBackend`, `ExecuteTool` over `WorkspaceSandboxBackend`)
  * against a real workspace-runner container: agent -> tool -> `ContainerisedWorkspace` ->
  * container -> `ToolMessage`.
  *
@@ -99,10 +101,12 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
   private def runScript(script: (String, ujson.Value)*): (AgentStatus, Seq[ToolMessage]) = {
     Tier.require(isDockerAvailable, s"Docker not available or $EnableDockerEnvVar!=true")
     val result = (for {
-      toolSeq <- WorkspaceTools.createDefaultWorkspaceTools(workspace)
+      files   <- WorkspaceFileBackend("it-agent", workspace)
+      sandbox <- WorkspaceSandboxBackend("it-agent", workspace)
+      tools   <- ToolSet.of((FileTools(files) :+ ExecuteTool(sandbox))*)
       agent <- Agent
         .builder("workspace", new ScriptedToolCallLLM(script))
-        .withTools(new ToolRegistry(toolSeq))
+        .withTools(tools)
         .withMaxSteps(10)
         .build()
       done <- agent.run("go")
@@ -110,16 +114,27 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
     (result.status, result.messages.collect { case m: ToolMessage => m })
   }
 
-  private def resultOf(m: ToolMessage): ujson.Value = ujson.read(m.content)
+  /** An `execute` result's parts: `exit code: N`, then `stdout:` and `stderr:` sections. */
+  final private case class Executed(exitCode: Int, stdout: String, stderr: String)
+
+  private def executed(m: ToolMessage): Executed = {
+    val Pattern = """(?s)exit code: (-?\d+)\nstdout:\n(.*)\nstderr:\n(.*?)(\n\(output cut.*)?""".r
+    m.content match {
+      case Pattern(code, out, err, _) =>
+        def text(s: String) = if (s == "(empty)") "" else s
+        Executed(code.toInt, text(out), text(err))
+      case other => fail(s"not an execute result: $other")
+    }
+  }
 
   "An Agent with the workspace tools" should "run a command in the container and receive its stdout and exit code" in {
-    val (status, tms) = runScript("execute_command" -> ujson.Obj("command" -> "echo hello_from_workspace"))
+    val (status, tms) = runScript("execute" -> ujson.Obj("command" -> "echo hello_from_workspace"))
 
     status shouldBe a[AgentStatus.Completed]
     tms should have size 1
-    val r = resultOf(tms.head)
-    r("exit_code").num.toInt shouldBe 0
-    r("stdout").str.trim shouldBe "hello_from_workspace"
+    val r = executed(tms.head)
+    r.exitCode shouldBe 0
+    r.stdout.trim shouldBe "hello_from_workspace"
   }
 
   // Commands are one program and its arguments, run without a shell, and only allowlisted programs run (#1756), so
@@ -128,76 +143,77 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
 
   it should "report the real non-zero exit code of a failing command" in {
     val (_, tms) = runScript(
-      "write_file"      -> ujson.Obj("path" -> "exit_code.txt", "content" -> "alpha\n"),
-      "execute_command" -> ujson.Obj("command" -> "grep zzz exit_code.txt")
+      "write_file" -> ujson.Obj("path" -> "/exit_code.txt", "content" -> "alpha\n"),
+      "execute"    -> ujson.Obj("command" -> "grep zzz exit_code.txt")
     )
 
     tms should have size 2
     // grep exits 1 when nothing matches.
-    resultOf(tms(1))("exit_code").num.toInt shouldBe 1
+    executed(tms(1)).exitCode shouldBe 1
   }
 
   it should "capture stderr separately from stdout" in {
     val (_, tms) = runScript(
-      "write_file"      -> ujson.Obj("path" -> "out_marker.txt", "content" -> "out_marker\n"),
-      "execute_command" -> ujson.Obj("command" -> "cat out_marker.txt err_marker.txt")
+      "write_file" -> ujson.Obj("path" -> "/out_marker.txt", "content" -> "out_marker\n"),
+      "execute"    -> ujson.Obj("command" -> "cat out_marker.txt err_marker.txt")
     )
 
     tms should have size 2
     // cat prints the file that exists to stdout and its complaint about the missing one to stderr.
-    val r = resultOf(tms(1))
-    r("exit_code").num.toInt shouldBe 1
-    r("stdout").str should include("out_marker")
-    (r("stdout").str should not).include("err_marker")
-    r("stderr").str should include("err_marker")
+    val r = executed(tms(1))
+    r.exitCode shouldBe 1
+    r.stdout should include("out_marker")
+    (r.stdout should not).include("err_marker")
+    r.stderr should include("err_marker")
   }
 
   it should "write a file in one turn and read the same content back in the next" in {
     val (status, tms) = runScript(
-      "write_file" -> ujson.Obj("path" -> "agent_roundtrip.txt", "content" -> "round-trip payload"),
-      "read_file"  -> ujson.Obj("path" -> "agent_roundtrip.txt")
+      "write_file" -> ujson.Obj("path" -> "/agent_roundtrip.txt", "content" -> "round-trip payload"),
+      "read_file"  -> ujson.Obj("path" -> "/agent_roundtrip.txt")
     )
 
     status shouldBe a[AgentStatus.Completed]
     tms should have size 2
-    resultOf(tms(1))("content").str shouldBe "round-trip payload"
+    tms(1).content should include("round-trip payload")
     // The write really landed on the mounted host directory, not just in a fake.
     new File(tempDir, "agent_roundtrip.txt").exists() shouldBe true
   }
 
   it should "see files it wrote when the next command runs in the container" in {
     val (_, tms) = runScript(
-      "write_file"      -> ujson.Obj("path" -> "visible.txt", "content" -> "42"),
-      "execute_command" -> ujson.Obj("command" -> "cat visible.txt")
+      "write_file" -> ujson.Obj("path" -> "/visible.txt", "content" -> "42"),
+      "execute"    -> ujson.Obj("command" -> "cat visible.txt")
     )
 
     tms should have size 2
-    resultOf(tms(1))("stdout").str.trim shouldBe "42"
+    executed(tms(1)).stdout.trim shouldBe "42"
   }
 
   it should "surface a tool error for a file that does not exist" in {
-    val (status, tms) = runScript("read_file" -> ujson.Obj("path" -> "no_such_file.txt"))
+    val (status, tms) = runScript("read_file" -> ujson.Obj("path" -> "/no_such_file.txt"))
 
     status shouldBe a[AgentStatus.Completed]
     tms should have size 1
-    // A failed read must not look like a successful one: there is no "content" field.
-    Try(resultOf(tms.head)).toOption.flatMap(_.objOpt).forall(o => !o.value.contains("content")) shouldBe true
+    // A failed read must not look like a successful one: it is an error result, with no numbered lines.
+    tms.head.content should include("not found")
+    (tms.head.content should not).include("     1\t")
   }
 
   it should "return control within the deadline for a command that exceeds its timeout" in {
     val start = System.currentTimeMillis()
     // `tail -f` never ends by itself, so only the 2 s timeout stops it.
     val (_, tms) = runScript(
-      "write_file"      -> ujson.Obj("path" -> "timeout.txt", "content" -> "waiting\n"),
-      "execute_command" -> ujson.Obj("command" -> "tail -f timeout.txt", "timeout" -> 2)
+      "write_file" -> ujson.Obj("path" -> "/timeout.txt", "content" -> "waiting\n"),
+      "execute"    -> ujson.Obj("command" -> "tail -f timeout.txt", "timeout_seconds" -> 2)
     )
     val elapsedMs = System.currentTimeMillis() - start
 
     elapsedMs should be < 30000L
     tms should have size 2
     // The runner reports a command it stopped at its timeout with exit code -1.
-    val r = resultOf(tms(1))
-    r("exit_code").num.toInt shouldBe -1
-    r("stdout").str should include("waiting")
+    val r = executed(tms(1))
+    r.exitCode shouldBe -1
+    r.stdout should include("waiting")
   }
 }

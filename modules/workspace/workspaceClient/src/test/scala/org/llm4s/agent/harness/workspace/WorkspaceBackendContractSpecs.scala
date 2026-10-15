@@ -19,6 +19,9 @@ object WorkspaceFixtures:
 class WorkspaceFileBackendContractSpec extends AnyFlatSpec with FileBackendContract:
   protected def newBackend(): FileBackend = WorkspaceFixtures.files(new FakeWorkspace())
 
+class WorkspaceFileToolsSpec extends AnyFlatSpec with org.llm4s.agent.testkit.FileToolsContract:
+  protected def newBackend(): FileBackend = WorkspaceFixtures.files(new FakeWorkspace())
+
 class ResolvedWorkspaceFileBackendContractSpec extends AnyFlatSpec with FileBackendContract:
   // one workspace per tenant, picked by the run's tenant (rule 8)
   protected def newBackend(): FileBackend =

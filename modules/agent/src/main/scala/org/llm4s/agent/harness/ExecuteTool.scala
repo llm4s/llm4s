@@ -57,9 +57,12 @@ object ExecuteTool:
     defaultTimeout: FiniteDuration = 60.seconds,
     maxTimeout: FiniteDuration = 10.minutes
   ): AgentTool[Args] =
-    require(defaultTimeout > Duration.Zero, "defaultTimeout must be positive")
-    // the model asks in whole seconds, so a maximum under one second could not be kept by any request of its own
-    require(maxTimeout >= 1.second, s"maxTimeout must be at least one second, was $maxTimeout")
+    // the model asks, the schema reports and a workspace runs in whole seconds: a fraction would be shown rounded
+    // down and run rounded up, past the maximum
+    def wholeSeconds(name: String, d: FiniteDuration): Unit =
+      require(d >= 1.second && d.toNanos % 1000000000L == 0L, s"$name must be a whole number of seconds, was $d")
+    wholeSeconds("defaultTimeout", defaultTimeout)
+    wholeSeconds("maxTimeout", maxTimeout)
     require(defaultTimeout <= maxTimeout, s"defaultTimeout ($defaultTimeout) must be at most maxTimeout ($maxTimeout)")
     val maxSeconds = maxTimeout.toSeconds.min(Int.MaxValue.toLong).toInt
     val spec = AgentToolSpec[Args](
@@ -76,7 +79,7 @@ object ExecuteTool:
         .withOptionalField(
           "timeout_seconds",
           Schema
-            .integer(s"How long it may run, in seconds; default ${defaultTimeout.toSeconds.max(1)}")
+            .integer(s"How long it may run, in seconds; default ${defaultTimeout.toSeconds}")
             .withRange(Some(1), Some(maxSeconds))
         )
     )

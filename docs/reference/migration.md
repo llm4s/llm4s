@@ -44,6 +44,29 @@ Not in a release yet. Stage 3 slice F8b ([#1913](https://github.com/llm4s/llm4s/
 
 Not in a release yet. Stage 3 slice F2 ([#1906](https://github.com/llm4s/llm4s/issues/1906)) puts the workspace behind the harness's `FileBackend` and `SandboxBackend` ([design 4.33](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.33-stage-3-slice-f2-workspace-backends.md)). Source and behaviour breaks, with no shims:
 
+- **`org.llm4s.toolapi.WorkspaceTools` and `createDefaultWorkspaceTools` are deleted.** Their `ToolFunction`s called the workspace directly, with no locks, no replay guard and no bounds of their own. Build the harness tools over the workspace instead and give the agent a `ToolSet`; `codegen.CodeWorker` does this itself:
+
+  ```scala
+  // before
+  WorkspaceTools.createDefaultWorkspaceTools(workspace).map(tools => builder.withTools(new ToolRegistry(tools)))
+  // after
+  for
+    files   <- WorkspaceFileBackend("ws1", workspace)
+    sandbox <- WorkspaceSandboxBackend("ws1", workspace)
+    tools   <- ToolSet.of((FileTools(files) :+ ExecuteTool(sandbox))*)
+  yield builder.withTools(tools)
+  ```
+
+  | Old tool | Replacement | Notes |
+  |---|---|---|
+  | `explore_files` | `ls`, `glob` | paths are absolute (`/src`), the workspace root is `/` |
+  | `read_file` | `read_file` | numbered lines, paged by `offset` / `limit` |
+  | `write_file` | `write_file` | creates parent directories; no append mode |
+  | `modify_file` | `edit_file` | replaces exact text (`old_string`, `new_string`), not line ranges |
+  | `search_files` | `grep` | a regex; `include` filters files |
+  | `execute_command` | `execute` | `workdir` (default `/`), `timeout_seconds`; the result is text, `exit code: N` then `stdout:` and `stderr:` |
+
+  An `execute` call is the resource `(Execute, <command>)`, so it needs a `PermissionMiddleware` rule if you use one.
 - **`WorkspaceAgentInterface` has two new methods and two new parameters.** `fileSnapshot(path, includeContent)` and `deleteFile(path, expectedHash)`; `writeFile(..., expectedHash)` and `executeCommand(..., maxOutputChars)`. A class implementing the interface implements them; a caller that passes arguments by position is unaffected. The wire messages' new fields have defaults, so an older client and a newer runner (or the reverse) still talk, without the new calls.
 - **`ContainerisedWorkspace` keeps the runner's error code.** A refused call used to throw `WorkspaceAgentException(..., "EXECUTION_FAILED")` with the code in the message; it now throws the runner's own code (`FILE_NOT_FOUND`, `PATH_NOT_ALLOWED`, ...), as `WorkspaceAgentInterfaceRemote` does. `EXECUTION_FAILED` now means the transport failed.
 - **The runner enforces the sandbox's paths and limits** (#870): a file operation or a command's working directory outside `allowedPaths` is `PATH_NOT_ALLOWED`, a mutation under `readOnlyPaths` is `PATH_READ_ONLY`, and a write, append or line edit that would leave a file over `maxFileSize` is `SIZE_LIMIT_EXCEEDED`. Each path check is made on what the path names through symbolic links as well as on its text, so a file operation through a link that leads outside the workspace is now `PATH_ESCAPE_ATTEMPT`. A config that set these and relied on them being ignored now has its calls refused.

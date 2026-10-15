@@ -25,7 +25,7 @@ object CodeGenExample {
   /** The task given to the agent. Each command it names is one program and its arguments, as the runner requires. */
   val Task: String =
     """Create a simple sbt project containing a hello world example that prints the current date and time.
-      |Write the files with the file tools; create directories with 'mkdir -p'.
+      |Write the files with write_file, which creates their directories.
       |Test the generated code by running 'sbt compile' and then 'sbt run', each as its own command.
       |Commands run without a shell: give one program and its arguments, with no pipes, redirection, ';' or '&&',
       |and no 'cd' (use the working directory instead).

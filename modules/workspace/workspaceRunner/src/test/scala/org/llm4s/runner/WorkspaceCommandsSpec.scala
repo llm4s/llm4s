@@ -23,8 +23,8 @@ import scala.util.Try
  * a suite sends that the runner refuses, or that behaves differently from what the suite asserts, would first fail
  * there. This spec runs each of those exact strings on every PR and asserts what the suite asserts:
  *
- *   - `WorkspaceAgentIntegrationSpec` (modules/it): through `WorkspaceTools`' `execute_command`, which sends the
- *     working directory `/workspace` (the workspace root) and the tool's `timeout` in seconds;
+ *   - `WorkspaceAgentIntegrationSpec` (modules/it): through the harness's `execute` tool (`WorkspaceSandboxRunner`), which sends the
+ *     working directory `.` (the workspace root, the tool's `/`) and the tool's timeout in seconds;
  *   - `ContainerisedWorkspaceTest` (modules/it): `ContainerisedWorkspace.executeCommand` with no working directory;
  *   - `ContainerisedWorkspaceDemo`, `LockedDownSandboxDemo` (workspaceSamples) and `CodeGenExample` (workspaceClient).
  *
@@ -50,8 +50,8 @@ class WorkspaceCommandsSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
   private def write(name: String, content: String): Unit =
     Files.write(root.resolve(name), content.getBytes(StandardCharsets.UTF_8))
 
-  /** `WorkspaceTools.defaultExecuteHandler`'s working directory: `/workspace`, the container's workspace root. */
-  private def toolWorkingDirectory: Option[String] = Some(root.toString)
+  /** The `execute` tool's working directory for `/`: `.`, the workspace root. */
+  private def toolWorkingDirectory: Option[String] = Some(".")
 
   final private class Channel {
     val messages  = new ConcurrentLinkedQueue[WebSocketMessage]()

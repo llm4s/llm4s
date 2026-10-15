@@ -14,13 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `UserMessage`/`ToolMessage` carry `parts` and have no extractor; `ToolOutcome.Success` takes a `ToolContent`;
   [migration](docs/reference/migration.md#multimodal-content-parts-1913).
-- `WorkspaceAgentInterface` gains `fileSnapshot`, `deleteFile` and compare-and-set writes; the runner enforces
+- `WorkspaceTools` is removed (use `FileTools` over `WorkspaceFileBackend` and `ExecuteTool`); `WorkspaceAgentInterface` gains `fileSnapshot`, `deleteFile` and compare-and-set writes; the runner enforces
   `allowedPaths`/`readOnlyPaths`; [migration](docs/reference/migration.md#workspace-backends-1906).
 
 ### Agent harness (Phase 3)
 
 - **Added** workspace backends: `WorkspaceFileBackend` (`Verifiable`, compare-and-set in the runner), `WorkspaceSandboxBackend`
-  and the `execute` tool [#1906](https://github.com/llm4s/llm4s/issues/1906); [design 4.33](docs/design/typed-agent-runtime/4.33-stage-3-slice-f2-workspace-backends.md).
+  and the `execute` tool; `WorkspaceTools` **removed**, `CodeWorker` on the new tools [#1906](https://github.com/llm4s/llm4s/issues/1906); [design 4.33](docs/design/typed-agent-runtime/4.33-stage-3-slice-f2-workspace-backends.md).
 - **Added** `FileTools(backend)`: `ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob` and `grep` over any `FileBackend`, bounded by `FileToolLimits`, and `FileToolsContract`
   [#1905](https://github.com/llm4s/llm4s/issues/1905); [design §4.32](docs/design/typed-agent-runtime/4.32-stage-3-slice-f1-filesystem-tools.md).
 - **Added** multimodal content parts: user messages and tool results carry images and documents, which each provider

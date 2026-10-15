@@ -137,5 +137,7 @@ class ExecuteToolSpec extends AnyFlatSpec with Matchers with EitherValues with O
     an[IllegalArgumentException] should be thrownBy ExecuteTool(backend, defaultTimeout = Duration.Zero)
     an[IllegalArgumentException] should be thrownBy ExecuteTool(backend, 2.minutes, 1.minute)
     an[IllegalArgumentException] should be thrownBy ExecuteTool(backend, 100.millis, 500.millis)
+    an[IllegalArgumentException] should be thrownBy ExecuteTool(backend, 1500.millis, 1500.millis)
+    an[IllegalArgumentException] should be thrownBy ExecuteTool(backend, 1.second, 90500.millis)
   }
 }
