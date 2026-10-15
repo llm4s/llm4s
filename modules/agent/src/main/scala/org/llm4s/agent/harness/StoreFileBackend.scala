@@ -162,6 +162,10 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
 
 object StoreFileBackend:
 
-  /** The files of `store` under `path`, in the namespace of each run's tenant. */
-  def apply(store: LongTermStore, path: Vector[String] = Vector("memories")): StoreFileBackend =
-    new StoreFileBackend(store, path)
+  /**
+   * The files of `store` under `path`, in the namespace of each run's tenant; `path` within the store's
+   * namespace bounds (`LongTermStore.MaxNamespaceSegments` segments, `MaxNamespaceChars` characters),
+   * checked before its lock key is built.
+   */
+  def apply(store: LongTermStore, path: Vector[String] = Vector("memories")): Result[StoreFileBackend] =
+    LongTermStore.checked("files", Namespace(None, path), "").map(_ => new StoreFileBackend(store, path))

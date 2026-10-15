@@ -13,6 +13,9 @@ import scala.concurrent.duration.*
 
 /** The harness's shipped backends pass the file contract and, when external, the replay contract (§4.25). */
 object HarnessBackends:
+
+  def storeFiles(store: LongTermStore, path: Vector[String] = Vector("memories")): StoreFileBackend =
+    StoreFileBackend(store, path).fold(e => throw new IllegalStateException(e.message), identity)
   def p(s: String): VPath = VPath(s).fold(e => throw new IllegalArgumentException(e.message), identity)
 
   /** One lock directory for every host backend of the suite, as an application gives its backends. */
@@ -53,14 +56,18 @@ class StateFileBackendContractSpec extends AnyFlatSpec with FileBackendContract:
 class CompositeBackendContractSpec extends AnyFlatSpec with FileBackendContract:
   // the contract's paths live in the default; a mount beside them must not disturb them
   protected def newBackend(): FileBackend =
-    CompositeBackend(StateFileBackend(), HarnessBackends.p("/memories") -> StoreFileBackend(InMemoryLongTermStore()))
+    CompositeBackend(
+      StateFileBackend(),
+      HarnessBackends.p("/memories") -> HarnessBackends.storeFiles(InMemoryLongTermStore())
+    )
       .fold(e => throw new IllegalStateException(e.message), identity)
 
 class HostFileBackendContractSpec extends AnyFlatSpec with FileBackendContract:
   protected def newBackend(): FileBackend = HarnessBackends.host()._1
 
 class StoreFileBackendContractSpec extends AnyFlatSpec with FileBackendContract:
-  protected def newBackend(): FileBackend      = StoreFileBackend(InMemoryLongTermStore(StoreLimits(maxBytes = 200)))
+  protected def newBackend(): FileBackend =
+    HarnessBackends.storeFiles(InMemoryLongTermStore(StoreLimits(maxBytes = 200)))
   override protected def tenantScoped: Boolean = true
   // each item is its key, plus {"content":"..."}: 94 bytes; two fit, the third is over
   override protected def boundedBatch: Option[Vector[(String, String)]] =
@@ -122,7 +129,7 @@ class StoreFileBackendReplaySpec extends AnyFlatSpec with ReplayContract:
       HarnessBackends.raw(store, ns, path.value)(StoreChange.Put(ujson.Obj("content" -> text), ()))
     FileBackendContract.EditSubject(
       "a store file backend",
-      StoreFileBackend(store),
+      HarnessBackends.storeFiles(store),
       ReplaySupport.Transactional,
       seed,
       path =>

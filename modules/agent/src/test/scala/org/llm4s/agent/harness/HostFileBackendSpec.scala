@@ -811,4 +811,28 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     Files.readAttributes(f, classOf[java.nio.file.attribute.DosFileAttributes]).isHidden shouldBe true
   }
 
+  "A root replaced after open" should "be refused, by a mount over it or a directory moved into its place" in {
+    assume(posix)
+    written(backend.write(p("/a.txt"), "x", call()))
+    // a directory moved into its place: same path, another file key
+    val aside = Files.createTempDirectory("llm4s-host-aside").resolve("old")
+    cleanups += (() =>
+      Files.walk(aside.getParent).iterator().asScala.toVector.reverse.foreach(q => Files.deleteIfExists(q)): Unit
+    )
+    Files.move(dir, aside)
+    Files.createDirectories(dir)
+    backend.write(p("/b.txt"), "y", call()).left.value.message should include("was replaced")
+    backend.read(p("/a.txt"), 0, 1, call()).left.value.message should include("was replaced")
+    Files.exists(dir.resolve("b.txt")) shouldBe false
+    backend.close()
+    Files.delete(dir)
+    Files.move(aside, dir)
+    // a mount over it: the same directory, now reported on another file system
+    @volatile var mounted = false
+    backend = HostFileBackend.open(dir, locks, fileSystemId = _ => if (mounted) "over" else "root").value
+    written(backend.write(p("/a.txt"), "z", call()))
+    mounted = true
+    backend.write(p("/c.txt"), "w", call()).left.value.message should include("was replaced")
+  }
+
 }

@@ -77,7 +77,11 @@ final class HostFileBackend private (
   val maxScanEntries: Int,
   val lockDirectory: Path,
   fileSystemId: Path => String,
-  mountsBeneath: Path => Result[Vector[Path]]
+  mountsBeneath: Path => Result[Vector[Path]],
+  // the opened root itself, taken by `open`: its file key (device and inode, where the file system has
+  // them) and file system, so a mount or a directory put over the root later is seen, not taken as it
+  rootKey: Option[AnyRef],
+  rootFileSystem: String
 ) extends FileBackend
     with AutoCloseable:
 
@@ -168,7 +172,16 @@ final class HostFileBackend private (
 
   // `open` probes only the root's file system for aliases, so another one mounted inside the root (an
   // SMB share with 8.3 names, say) is never entered: its identity rules are unchecked
-  private lazy val rootFileSystem: String = fileSystemId(root)
+
+  /** The root is still the directory `open` checked: same file key, same file system. */
+  private def rootIntact(operation: String, path: VPath): Result[Unit] =
+    Try {
+      HostFileBackend.fileKeyOf(root) == rootKey && fileSystemId(root) == rootFileSystem
+    } match
+      case Success(true) => Right(())
+      case Success(false) =>
+        refused(operation, path, s"the root $root was replaced since it was opened (a mount over it?); reopen it")
+      case Failure(e) => refused(operation, path, s"the root $root cannot be checked: $e")
 
   /** No file system is mounted beneath the root, a bind mount of its own file system included. */
   private def unmounted(operation: String, path: VPath): Result[Unit] =
@@ -196,6 +209,9 @@ final class HostFileBackend private (
    * Its file-system reads are inside [[io]], so a file that vanishes meanwhile is a refusal, not a throw.
    */
   private def resolve(operation: String, path: VPath): Result[Path] =
+    rootIntact(operation, path).flatMap(_ => resolveIn(operation, path))
+
+  private def resolveIn(operation: String, path: VPath): Result[Path] =
     if path.segments.exists(HostFileBackend.trailing) then
       refused(operation, path, "has a segment ending in a dot or a space, which Windows reads as another name")
     else if path.segments.exists(HostFileBackend.isTemporary) then
@@ -742,6 +758,12 @@ object HostFileBackend:
   final private case class Unlock(lock: ReentrantLock) extends AutoCloseable:
     def close(): Unit = lock.unlock()
 
+  /** `p`'s file key (device and inode where the file system has them), without following a final link. */
+  private[harness] def fileKeyOf(p: Path): Option[AnyRef] =
+    Option(
+      Files.readAttributes(p, classOf[java.nio.file.attribute.BasicFileAttributes], LinkOption.NOFOLLOW_LINKS).fileKey
+    )
+
   /** Leaves an admitted operation: the thread is no longer inside one. */
   final private case class Unnest(depth: ThreadLocal[Integer]) extends AutoCloseable:
     def close(): Unit = depth.set(0)
@@ -1113,5 +1135,16 @@ object HostFileBackend:
         _ <- mounts(real).flatMap(found =>
           Either.cond(found.isEmpty, (), ValidationError("root", mountedReason(real, found)))
         )
+        identity <- Try((fileKeyOf(real), fileSystemId(real))).toResult.left
+          .map(e => ValidationError("root", s"$real cannot be identified: ${e.message}"): LLMError)
         _ <- OpenRoots.acquire(real)
-      yield new HostFileBackend(real, maxFileBytes, maxScanEntries, locks, fileSystemId, mounts)
+      yield new HostFileBackend(
+        real,
+        maxFileBytes,
+        maxScanEntries,
+        locks,
+        fileSystemId,
+        mounts,
+        identity._1,
+        identity._2
+      )

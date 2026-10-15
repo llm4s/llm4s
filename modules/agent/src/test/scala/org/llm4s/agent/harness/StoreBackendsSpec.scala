@@ -29,6 +29,9 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private def p(s: String): VPath = VPath(s).value
 
+  private def storeFiles(store: LongTermStore, path: Vector[String] = Vector("memories")): StoreFileBackend =
+    StoreFileBackend(store, path).value
+
   private def call(tenant: Option[String] = None): FileContext = {
     val config = RunConfig().withTenantId(tenant.map(TenantId(_)))
     FileContext(
@@ -198,7 +201,7 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "StoreFileBackend" should "keep files in the run's tenant's namespace" in {
     val store = InMemoryLongTermStore(clock = clock)
-    val files = StoreFileBackend(store)
+    val files = storeFiles(store)
     done(files.write(p("/notes.md"), "a's note", call(Some("a")))) shouldBe FileWritten(created = true, 8)
     files.read(p("/notes.md"), 0, 10, call(Some("a"))).value.lines shouldBe Vector("a's note")
     files.read(p("/notes.md"), 0, 10, call(Some("b"))).left.value.message should include("not found")
@@ -208,7 +211,7 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "refuse an edit whose result would pass the item limit before building it" in {
     val store = InMemoryLongTermStore()
-    val files = StoreFileBackend(store)
+    val files = storeFiles(store)
     done(files.write(p("/big.md"), "a" * 10000, call()))
     // 10 000 occurrences each grown by 999 999 characters: about 10^10, which no JVM here could allocate
     val refusal = files.edit(p("/big.md"), "a", "b" * 1000000, replaceAll = true, call()).left.value
@@ -218,7 +221,7 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "refuse a store item with NUL in it as binary, and skip it in grep" in {
     val store = InMemoryLongTermStore()
-    val files = StoreFileBackend(store)
+    val files = storeFiles(store)
     val key = org.llm4s.agent.graph.HarnessTestSupport
       .runOn("another writer")
       .effectKey("seed", "/nul.md")
@@ -234,7 +237,7 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "shape its tree by files only: an item that is not a file neither makes a directory nor is overwritten" in {
     val store = InMemoryLongTermStore()
-    val files = StoreFileBackend(store)
+    val files = storeFiles(store)
     val ns    = Namespace(None, Vector("memories"))
     val key   = org.llm4s.agent.graph.HarnessTestSupport.runOn("another writer").effectKey("seed", "meta")
     store
@@ -253,7 +256,7 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "keep a non-canonical key out of its view, so reads and mutations address one item" in {
     val store = InMemoryLongTermStore()
-    val files = StoreFileBackend(store)
+    val files = storeFiles(store)
     val ns    = Namespace(None, Vector("memories"))
     val key   = org.llm4s.agent.graph.HarnessTestSupport.runOn("another writer").effectKey("seed", "slash")
     store
@@ -266,7 +269,7 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "edit inside the transaction, list implicit directories, glob and grep" in {
-    val files = StoreFileBackend(InMemoryLongTermStore(clock = clock))
+    val files = storeFiles(InMemoryLongTermStore(clock = clock))
     done(files.write(p("/user/prefs.md"), "likes scala\nlikes tea", call()))
     done(files.edit(p("/user/prefs.md"), "tea", "coffee", replaceAll = false, call())) shouldBe FileEdited(1)
     files.edit(p("/user/prefs.md"), "tea", "x", replaceAll = false, call()).left.value.message should include(
@@ -287,7 +290,7 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "return a replayed edit's first result, not \"`old` was not found\"" in {
-    val files = StoreFileBackend(InMemoryLongTermStore())
+    val files = storeFiles(InMemoryLongTermStore())
     done(files.write(p("/a.md"), "x y", call()))
     val same = call().tool.get
     done(files.edit(p("/a.md"), "x", "z", replaceAll = false, FileContext(same))) shouldBe FileEdited(1)
@@ -297,7 +300,7 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "decide the tree's shape in the transaction: of a file and a path beneath it written at once, one wins" in {
     (1 to 50).foreach { _ =>
-      val files = StoreFileBackend(InMemoryLongTermStore())
+      val files = storeFiles(InMemoryLongTermStore())
       val start = new java.util.concurrent.CyclicBarrier(2)
       val pool  = java.util.concurrent.Executors.newFixedThreadPool(2)
       val writes = Vector("/a", "/a/b").map(path =>
@@ -334,7 +337,7 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "refuse a write over the store's bounds as a tool error, and lock by path" in {
-    val files = StoreFileBackend(InMemoryLongTermStore(StoreLimits(maxItemBytes = 40)), Vector("mem"))
+    val files = storeFiles(InMemoryLongTermStore(StoreLimits(maxItemBytes = 40)), Vector("mem"))
     val error = files.write(p("/big.md"), "x" * 50, call()).left.value
     BackendRefused.toolOutcome(error) shouldBe a[org.llm4s.agent.graph.tool.ToolOutcome.Error]
     files.locks(p("/a/b.md")) shouldBe Set(LockKey("files/store/mem/a/b.md"))
@@ -455,6 +458,11 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     // replayed: the recorded outcome, the one that was sized
     store.modify[Shifty](ns, "k", key, FencingToken(0))(_ => Right(StoreChange.Keep(Shifty("other")))).value shouldBe
       Shifty("small")
+  }
+
+  "StoreFileBackend.apply" should "refuse a path over the namespace bounds before building its lock key" in {
+    StoreFileBackend(InMemoryLongTermStore(), Vector.fill(1000000)("")).left.value.message should include("segments")
+    StoreFileBackend(InMemoryLongTermStore(), Vector("m" * 10000)).left.value.message should include("namespace")
   }
 
 }
