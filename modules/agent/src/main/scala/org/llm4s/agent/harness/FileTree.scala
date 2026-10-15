@@ -66,11 +66,22 @@ private[harness] object FileTree:
         )
     yield Listing.of(children.sortBy(_.path).iterator, limit)
 
-  def read(all: Map[VPath, FileEntry], path: VPath, offset: Int, limit: Int): Result[FileLines] =
+  /**
+   * `entry` within the backend's bound on stored content (`maxBytes`, as a JSON string): what the backend
+   * writes it checks itself, but another writer of its key or store may have stored more, and an
+   * operation that consumes the content checks before it copies or scans it.
+   */
+  def bounded(operation: String, path: VPath, entry: FileEntry, maxBytes: Long): Result[FileEntry] =
+    if Text.jsonBytesOver(entry.content, maxBytes) then
+      Left(BackendRefused.at(operation, path, s"is larger than this backend's limit of $maxBytes bytes"))
+    else Right(entry)
+
+  def read(all: Map[VPath, FileEntry], path: VPath, offset: Int, limit: Int, maxBytes: Long): Result[FileLines] =
     for
       _     <- Text.checkLimitAt("read", path, limit)
       _     <- Either.cond(offset >= 0, (), BackendRefused.at("read", path, s"offset must be >= 0, was $offset"))
-      entry <- fileOf("read", all, path)
+      found <- fileOf("read", all, path)
+      entry <- bounded("read", path, found, maxBytes)
       // one text rule for every source: a store item written past the backend can hold NUL
       _ <- Text
         .binaryReason(entry.content)
@@ -90,12 +101,14 @@ private[harness] object FileTree:
     under: VPath,
     regex: Pattern,
     accept: VPath => Boolean,
-    limit: Int
+    limit: Int,
+    maxBytes: Long
   ): Result[Listing[GrepMatch]] =
     Text.checkLimitAt("grep", under, limit).flatMap { _ =>
       Text.interruptibly("grep") {
         val matches = within(all, under, accept).iterator
-          .filter(p => Text.binaryReason(all(p).content).isEmpty)
+          // skipped, as content that is not text is: one stored past the backend's bound is not scanned
+          .filter(p => !Text.jsonBytesOver(all(p).content, maxBytes) && Text.binaryReason(all(p).content).isEmpty)
           .flatMap(p => Text.matches(p, all(p).content, regex))
         Right(Listing.of(matches, limit))
       }

@@ -268,6 +268,16 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
     backend.ls(VPath.root, 10, f.ctx).left.value.message should include("both a file and a directory")
   }
 
+  it should "refuse to read or edit, and skip in grep, content another writer stored past its bound" in {
+    val (backend, f) = fixture(StateFileBackend(maxBytes = 100, clock = clock))
+    f.commit(StateUpdate.update(backend.files, FileUpdate.Put(p("/big"), FileEntry("needle " * 100, clock.instant()))))
+    backend.read(p("/big"), 0, 1, f.ctx).left.value.message should include("larger than")
+    backend.edit(p("/big"), "needle", "x", replaceAll = false, f.ctx).left.value.message should include("larger than")
+    backend.grep("needle", VPath.root, None, 10, f.ctx).value.items shouldBe empty
+    // and it can still be deleted
+    backend.delete(p("/big"), f.ctx).isRight shouldBe true
+  }
+
   it should "encode its key's values and updates, and refuse an invalid path on decode" in {
     val entry = FileEntry("x", clock.instant())
     upickle.default.read[FileEntry](upickle.default.write(entry)) shouldBe entry

@@ -79,7 +79,7 @@ final class StateFileBackend private (
     current(ctx).flatMap(FileTree.ls(_, path, limit))
 
   def read(path: VPath, offset: Int, limit: Int, ctx: FileContext): Result[FileLines] =
-    current(ctx).flatMap(FileTree.read(_, path, offset, limit))
+    current(ctx).flatMap(FileTree.read(_, path, offset, limit, maxBytes))
 
   // what each checkpoint stores: the path, and the content as a JSON string, escapes included
   private def entryBytes(path: VPath, content: String): Long = Text.jsonBytes(path.value) + Text.jsonBytes(content)
@@ -121,7 +121,8 @@ final class StateFileBackend private (
   ): Result[(FileEdited, StateUpdate)] =
     for
       all   <- current(ctx)
-      entry <- FileTree.fileOf("edit", all, path)
+      found <- FileTree.fileOf("edit", all, path)
+      entry <- FileTree.bounded("edit", path, found, maxBytes)
       // the one text rule on what is stored too, as `read` applies it: another writer of the key may have
       // put NUL or an unpaired surrogate there, and an edit must not work on content a read refuses
       _ <- Text
@@ -161,7 +162,7 @@ final class StateFileBackend private (
     limit: Int,
     ctx: FileContext
   ): Result[Listing[GrepMatch]] =
-    current(ctx).flatMap(FileTree.search(_, under, regex, accept, limit))
+    current(ctx).flatMap(FileTree.search(_, under, regex, accept, limit, maxBytes))
 
 object StateFileBackend:
 

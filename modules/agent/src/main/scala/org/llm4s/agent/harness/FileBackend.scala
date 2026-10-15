@@ -410,6 +410,17 @@ private[harness] object Text:
   /** The bytes `s` takes encoded as a JSON string, quotes excluded: what a checkpoint or record stores. */
   def jsonBytes(s: String): Long = s.codePoints.iterator.asScala.map(cp => jsonWidth(cp.intValue).toLong).sum
 
+  /** Whether `s` takes more than `max` [[jsonBytes]], counted only until it does. */
+  def jsonBytesOver(s: String, max: Long): Boolean =
+    @annotation.tailrec
+    def loop(i: Int, bytes: Long): Boolean =
+      if bytes > max then true
+      else if i >= s.length then false
+      else
+        val cp = s.codePointAt(i)
+        loop(i + Character.charCount(cp), bytes + jsonWidth(cp))
+    loop(0, 0L)
+
   /** `s` cut to at most `max` [[jsonBytes]] on a character boundary, and whether it was cut. */
   def cutEncoded(s: String, max: Long): (String, Boolean) =
     @annotation.tailrec

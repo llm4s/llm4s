@@ -50,7 +50,7 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
     all(ctx).flatMap(FileTree.ls(_, dir, limit))
 
   def read(file: VPath, offset: Int, limit: Int, ctx: FileContext): Result[FileLines] =
-    all(ctx).flatMap(FileTree.read(_, file, offset, limit))
+    all(ctx).flatMap(FileTree.read(_, file, offset, limit, store.limits.maxItemBytes.toLong))
 
   def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
     all(ctx).flatMap(FileTree.find(_, under, accept, limit))
@@ -62,7 +62,7 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
     limit: Int,
     ctx: FileContext
   ): Result[Listing[GrepMatch]] =
-    all(ctx).flatMap(FileTree.search(_, under, regex, accept, limit))
+    all(ctx).flatMap(FileTree.search(_, under, regex, accept, limit, store.limits.maxItemBytes.toLong))
 
   private def guarded[A: ReadWriter](operation: String, file: VPath, ctx: FileContext)(
     change: StoreView => Result[StoreChange[A]]
@@ -140,9 +140,17 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
    * takes [[currentFile]], so such a file can still be cleaned up.
    */
   private def currentText(operation: String, view: StoreView, target: VPath): Result[String] =
-    currentFile(operation, view, target).flatMap(text =>
-      Text.binaryReason(text).fold(Right(text))(r => Left(BackendRefused.at(operation, target, r)))
-    )
+    currentFile(operation, view, target)
+      .flatMap(text =>
+        // the store's own item bound, which a store that is not this one's may not have kept
+        if Text.jsonBytesOver(text, store.limits.maxItemBytes.toLong) then
+          Left(
+            BackendRefused
+              .at(operation, target, s"is larger than the store's item limit of ${store.limits.maxItemBytes} bytes")
+          )
+        else Right(text)
+      )
+      .flatMap(text => Text.binaryReason(text).fold(Right(text))(r => Left(BackendRefused.at(operation, target, r))))
 
   def write(target: VPath, text: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
     Text.binaryReason(text).fold[Result[Unit]](Right(()))(r => refused("write", target, r)).flatMap { _ =>
