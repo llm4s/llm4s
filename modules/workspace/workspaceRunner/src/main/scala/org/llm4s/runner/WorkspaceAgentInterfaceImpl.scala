@@ -675,7 +675,15 @@ class WorkspaceAgentInterfaceImpl(
         .reverse // shallowest first
       Try(missing.foreach { d =>
         // one at a time, each recorded only once this request made it: one another writer made meanwhile is theirs,
-        // and a roll-back never removes it
+        // and a roll-back never removes it. Each is checked where it physically lands immediately before it is made:
+        // an ancestor swapped for a link since cannot lead the next one elsewhere
+        if (effective(d) != d)
+          throw new WorkspaceAgentException(
+            s"Path '$path' changed while its directories were created: it now leads elsewhere; nothing more was made",
+            "HASH_MISMATCH",
+            None
+          )
+        checkPolicy(path, d, Access.Write)
         Try(Files.createDirectory(d)) match {
           case Success(_) => createdDirs = d :: createdDirs
           case Failure(_: java.nio.file.FileAlreadyExistsException) if Files.isDirectory(d) => ()
@@ -688,6 +696,10 @@ class WorkspaceAgentInterfaceImpl(
       }.failed
         .foreach { e =>
           rollBack()
+          e match {
+            case refused: WorkspaceAgentException => throw refused // a path check's own refusal
+            case _                                => ()
+          }
           throw new WorkspaceAgentException(
             s"Cannot create the parent directories of '$path': ${e.getMessage}",
             "PARENT_NOT_A_DIRECTORY",
