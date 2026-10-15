@@ -55,8 +55,9 @@ final class ToolOutputOffload(
   require(thresholdTokens >= 1000, s"ToolOutputOffload: thresholdTokens must be at least 1000, was $thresholdTokens")
   require(maxResultBytes >= 1, s"ToolOutputOffload: maxResultBytes must be at least 1, was $maxResultBytes")
   require(
-    maxResultBytes <= maxTotalBytes,
-    s"ToolOutputOffload: maxResultBytes ($maxResultBytes) must be at most maxTotalBytes ($maxTotalBytes)"
+    maxTotalBytes >= maxResultBytes + MetadataBytes,
+    s"ToolOutputOffload: maxTotalBytes ($maxTotalBytes) must be at least maxResultBytes ($maxResultBytes) plus " +
+      s"$MetadataBytes bytes for each result's key and tool name"
   )
 
   override def writes: Set[StateKey[?, ?]] = Set(key)
@@ -71,10 +72,9 @@ final class ToolOutputOffload(
           case None => ToolOutcome.Success(content, update)
           case Some(large) =>
             val segment = segmentOf(context.idempotencyKey.value)
-            val tool    = request.toolName.value
-            // the stored copy, cut so the entry fits the bound on its own
-            val room            = maxTotalBytes - Text.jsonBytes(segment) - Text.jsonBytes(tool)
-            val (stored, isCut) = Text.cutEncoded(large, math.max(0L, math.min(maxResultBytes, room)))
+            val tool    = Text.cutEncoded(request.toolName.value, MaxNameBytes)._1
+            // the key and the tool name take at most MetadataBytes, so the entry always fits the bound on its own
+            val (stored, isCut) = Text.cutEncoded(large, maxResultBytes)
             val result          = OffloadedResult(segment, tool, stored, Text.utf8Bytes(large), isCut)
             ToolOutcome.Success(
               shown(content, preview(result, large)),
@@ -149,12 +149,18 @@ object ToolOutputOffload:
   /** The path the model is shown for the result stored under `segment`. */
   def pathOf(segment: String): String = s"${Mount.value}/$segment"
 
+  /** The most bytes of the key and of the tool name an entry stores, together at most [[MetadataBytes]]. */
+  private val MaxNameBytes: Long = 64
+
+  /** What an entry's key and tool name take at most, beside its content. */
+  val MetadataBytes: Long = 2 * MaxNameBytes
+
   /**
-   * The path segment of a call's key: the key itself, as the runtime's keys are hex digests; a key a caller built
-   * that is not a valid segment is hashed into one.
+   * The path segment of a call's key: the key itself when it is at most 64 of `[A-Za-z0-9_-]`, as the runtime's hex
+   * digests are; any other key a caller built is hashed into one. So a segment is always at most 64 bytes.
    */
   private[harness] def segmentOf(key: String): String =
-    VPath.root./(key).toOption.filter(_ => !key.contains('/')).fold(sha256(key))(_ => key)
+    if key.matches("[A-Za-z0-9_-]{1,64}") then key else sha256(key)
 
   private def sha256(s: String): String =
     java.security.MessageDigest

@@ -331,6 +331,12 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
     an[IllegalArgumentException] should be thrownBy new ToolOutputOffload(thresholdTokens = 999)
     an[IllegalArgumentException] should be thrownBy new ToolOutputOffload(maxResultBytes = 0)
     an[IllegalArgumentException] should be thrownBy new ToolOutputOffload(maxResultBytes = 10, maxTotalBytes = 5)
+    // a budget that could not hold one result's key and tool name beside its content
+    an[IllegalArgumentException] should be thrownBy new ToolOutputOffload(maxResultBytes = 10, maxTotalBytes = 100)
+    new ToolOutputOffload(
+      maxResultBytes = 10,
+      maxTotalBytes = 10 + ToolOutputOffload.MetadataBytes
+    ).maxTotalBytes shouldBe 138L
   }
 
   it should "hash a caller-built key that is not a path segment" in {

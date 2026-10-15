@@ -3,9 +3,9 @@ package org.llm4s.agent.harness
 import org.llm4s.agent.ContextPruning
 import org.llm4s.agent.graph.{ StateKey, StateUpdate }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelContext, ModelRequest, ModelResponse }
-import org.llm4s.agent.graph.toolloop.{ Messages, StoredMessage }
+import org.llm4s.agent.graph.toolloop.{ Messages, StoredMessage, ToolResultRule }
 import org.llm4s.annotation.Experimental
-import org.llm4s.llmconnect.model.{ Message, MessageRole, ToolMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ Message, MessageRole, UserMessage }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
@@ -76,36 +76,46 @@ final class SummarizationMiddleware(
     history: Vector[StoredMessage],
     stored: Option[ConversationSummary]
   ): Plan =
-    val (system, rest) = request.messages.span(_.role == MessageRole.System)
-    val matched        = align(rest, history)
-    val throughIndex   = stored.map(s => history.indexWhere(_.id == s.throughMessageId)).filter(_ >= 0)
-    // the request positions the stored summary covers: up to the last one matched at or before its message
-    val covered = throughIndex.fold(0) { t =>
-      val last = matched.lastIndexWhere(_.exists(_ <= t))
-      // a summary that covers nothing here, or would leave a tool result without its call, is not sent
-      if last < 0 || rest.lift(last + 1).exists(_.isInstanceOf[ToolMessage]) then 0 else last + 1
-    }
-    val summary   = Option.when(covered > 0)(stored).flatten
-    val after     = rest.drop(covered)
-    val afterIds  = matched.drop(covered)
-    val effective = system ++ summary.map(s => summaryMessage(clamp(s.text, maxSummaryTokens))).toVector ++ after
-    if !fires(effective) then Plan.AsIs(request.withMessages(effective))
+    val (system, rest)           = request.messages.span(_.role == MessageRole.System)
+    val matched                  = rest.zip(align(rest, history))
+    def summarised(text: String) = Vector(summaryMessage(clamp(text, maxSummaryTokens)))
+    // a request whose summary would leave a tool call without its results, or a result without its call, is not sent
+    def valid(messages: Vector[Message]) = ToolResultRule.violations(messages).isEmpty
+    // the stored summary replaces exactly the request messages matched to a stored message it covers; a message an
+    // outer wrapper added matches none, and is kept wherever it stands
+    val applied = for
+      s <- stored
+      t <- Some(history.indexWhere(_.id == s.throughMessageId)).filter(_ >= 0)
+      kept = matched.filterNot(_._2.exists(_ <= t))
+      if kept.size < matched.size && valid(kept.map(_._1))
+    yield s -> kept
+    val summary   = applied.map(_._1)
+    val after     = applied.fold(matched)(_._2)
+    val effective = system ++ summary.fold(Vector.empty[Message])(s => summarised(s.text)) ++ after.map(_._1)
+    lazy val asIs = Plan.AsIs(request.withMessages(effective))
+    if !fires(effective) then asIs
     else
       // the last `keepRecent` are kept; the cut moves earlier while it would split a tool batch, or leave the last
-      // folded message without a stored id for `throughMessageId`
+      // folded message without a stored id for `throughMessageId`. Only stored messages are folded: one an outer
+      // wrapper added is kept, before the kept messages
       val cut = Iterator
         .iterate(after.size - keepRecent)(_ - 1)
         .takeWhile(_ > 0)
-        .find(c => !after(c).isInstanceOf[ToolMessage] && afterIds(c - 1).isDefined)
+        .find { c =>
+          val (folded, kept) = after.splitAt(c)
+          folded.last._2.isDefined &&
+          valid(Vector(summaryMessage("")) ++ folded.filter(_._2.isEmpty).map(_._1) ++ kept.map(_._1))
+        }
       cut match
-        case None => Plan.AsIs(request.withMessages(effective))
+        case None => asIs
         case Some(c) =>
+          val (folded, kept) = after.splitAt(c)
           Plan.Fold(
             system,
             summary.map(_.text),
-            after.take(c),
-            after.drop(c),
-            history(afterIds(c - 1).get).id
+            folded.collect { case (m, Some(_)) => m },
+            folded.collect { case (m, None) => m } ++ kept.map(_._1),
+            history(folded.last._2.get).id
           )
 
   private def fires(messages: Vector[Message]): Boolean = trigger match

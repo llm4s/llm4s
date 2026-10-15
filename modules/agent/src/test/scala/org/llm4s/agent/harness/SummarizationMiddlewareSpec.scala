@@ -152,6 +152,31 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     ToolResultRule.check(second).isRight shouldBe true
   }
 
+  it should "keep a message an outer wrapper adds, never counting it as summarised" in {
+    given store: InMemoryCheckpointer = new InMemoryCheckpointer
+    given thread: ThreadId            = ThreadId("annotated")
+    val turn                          = new java.util.concurrent.atomic.AtomicInteger(0)
+    // an outer wrapper that puts a fresh note before the history on every request
+    val annotate = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("annotate")
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] =
+        next(request.withMessages(UserMessage(s"note ${turn.incrementAndGet()}") +: request.messages))
+    }
+    val model      = new Model()
+    val compressor = new Recording()
+    val mw         = new SummarizationMiddleware(SummaryTrigger.Messages(6), keepRecent = 2, compressor = compressor)
+    turns(loopOf(model, Seq(annotate, mw)), "u1", "u2", "u3", "u4")
+    // the note is never folded, and is sent after the summary
+    compressor.call(0)._2.map(_.content) should not contain "note 3"
+    compressor.call(0)._2.map(_.content).filter(_.startsWith("note")) shouldBe empty
+    contents(model.last).drop(1) should contain("note 4")
+    // a later request keeps its new note while the stored summary replaces the history it covers
+    turns(loopOf(model, Seq(annotate, mw)), "u5")
+    contents(model.last).drop(1).head shouldBe "note 5"
+  }
+
   it should "send the request as it is when no cut is left" in {
     given store: InMemoryCheckpointer = new InMemoryCheckpointer
     given thread: ThreadId            = ThreadId("no-cut")
