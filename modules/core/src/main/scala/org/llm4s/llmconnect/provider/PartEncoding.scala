@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.{ UnsupportedContentPartError, ValidationError }
 import org.llm4s.llmconnect.model.{ ContentPart, Message, MessageRole, ToolMessage, UserMessage }
-import org.llm4s.media.{ ImageMediaType, MediaSource, MediaType }
+import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.types.Result
 
 import java.util.Base64
@@ -88,82 +88,6 @@ private[llm4s] object PartEncoding {
       case ContentPart.Text(text) => text.trim.nonEmpty
       case _                      => true
     }
-
-  /**
-   * `Right` when every inline part of `messages` is within the provider's own limit for it: `limit` gives the
-   * most inline bytes `provider` takes for a part, or `None` for no limit of its own. A provider's limit can be
-   * lower than `ContentPart.MaxInlineBytes`, so a part llm4s accepts would otherwise fail only at the provider.
-   */
-  def checkInlineLimits(provider: String, messages: Seq[Message], limit: ContentPart => Option[Long]): Result[Unit] =
-    messages.iterator
-      .flatMap(partsOf)
-      .map(part => (part, ContentPart.inlineBytes(Vector(part)), limit(part)))
-      .collectFirst {
-        case (part, size, Some(max)) if size > max =>
-          Left(
-            ValidationError(
-              "parts",
-              s"$provider takes at most $max bytes for an inline ${part.kind}; this one has $size"
-            )
-          )
-      }
-      .getOrElse(Right(()))
-
-  /** The length of `bytes` bytes once base64-encoded. */
-  def base64Length(bytes: Long): Long = (bytes + 2) / 3 * 4
-
-  private def partsOf(message: Message): Vector[ContentPart] = message match {
-    case um: UserMessage => um.parts
-    case tm: ToolMessage => tm.parts
-    case _               => Vector.empty
-  }
-
-  /**
-   * The image formats the chat-completions APIs take (OpenAI's documented set, which the OpenAI-compatible
-   * endpoints follow): PNG, JPEG, WebP and GIF. A client refuses any other before sending, rather than send a
-   * `image/bmp` or `image/tiff` data URL the provider rejects.
-   */
-  val ChatImageTypes: Set[ImageMediaType] = Set(MediaType.Png, MediaType.Jpeg, MediaType.WebP, MediaType.Gif)
-
-  /**
-   * `Right` when the rendered request `requestText` is at most `maxBytes` as UTF-8: a provider's limit on a whole
-   * request, measured on the bytes that are sent - text, tools, schema, escaping and media - before they are.
-   */
-  def withinRequestLimit(provider: String, requestText: String, maxBytes: Long): Result[Unit] = {
-    val size = requestText.getBytes(java.nio.charset.StandardCharsets.UTF_8).length.toLong
-    if (size <= maxBytes) Right(())
-    else Left(ValidationError("parts", s"$provider takes a request of at most $maxBytes bytes; this one is $size"))
-  }
-
-  /**
-   * `Right` when the inline parts of `messages` that `select` picks total at most `maxBytes`, decoded: a provider's
-   * limit on, say, the files of one request, which counts their bytes, not their base64 or the request's text.
-   * `what` names them in the error ("files", "images").
-   */
-  def checkInlineBytesTotal(provider: String, messages: Seq[Message], maxBytes: Long, what: String)(
-    select: ContentPart => Boolean
-  ): Result[Unit] = {
-    val total = messages.map(m => ContentPart.inlineBytes(partsOf(m).filter(select))).sum
-    if (total <= maxBytes) Right(())
-    else
-      Left(
-        ValidationError("parts", s"$provider takes at most $maxBytes bytes of $what in a request; this one has $total")
-      )
-  }
-
-  /** `Right` when `messages` carry at most `max` images in all: a provider's limit on the images of one request. */
-  def checkImagesPerRequest(provider: String, messages: Seq[Message], max: Int): Result[Unit] = {
-    val images = messages.map(m => partsOf(m).count(_.isInstanceOf[ContentPart.Image])).sum
-    if (images <= max) Right(())
-    else Left(ValidationError("parts", s"$provider takes at most $max images in a request; this one has $images"))
-  }
-
-  /** `Right` when `messages` carry at most `max` documents in all: a provider's limit on the documents of one request. */
-  def checkDocumentsPerRequest(provider: String, messages: Seq[Message], max: Int): Result[Unit] = {
-    val documents = messages.map(m => partsOf(m).count(_.isInstanceOf[ContentPart.Document])).sum
-    if (documents <= max) Right(())
-    else Left(ValidationError("parts", s"$provider takes at most $max documents in a request; this one has $documents"))
-  }
 
   /** Covers text parts only, as their text: for a role whose wire format takes nothing else. */
   val textOnly: PartialFunction[ContentPart, String] = { case ContentPart.Text(text) => text }

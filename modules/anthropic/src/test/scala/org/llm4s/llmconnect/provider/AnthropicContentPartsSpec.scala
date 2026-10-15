@@ -125,30 +125,6 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
       "[Tool result for c9]: plain"
   }
 
-  it should "take up to 600 images for a model with a context window over 200k" in {
-    val many = UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(150)(image(url)))
-    AnthropicClient.checkParts("anthropic", Seq(many), contextWindow = 1000000) shouldBe Right(())
-    AnthropicClient.checkParts("anthropic", Seq(many), contextWindow = 200000).isLeft shouldBe true
-    AnthropicClient.maxImages(1000000) shouldBe 600
-    AnthropicClient.maxImages(200000) shouldBe 100
-  }
-
-  it should "refuse, before sending, a request with more than 100 images across its messages" in {
-    val fifty = UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(50)(image(url)))
-    AnthropicClient.checkParts("anthropic", Seq(fifty, AssistantMessage("ok"), fifty)) shouldBe Right(())
-    val more = UserMessage(Vector(ContentPart.Text("x"), image(url)))
-    client
-      .complete(
-        Conversation(Seq(fifty, AssistantMessage("ok"), fifty, AssistantMessage("ok"), more)),
-        CompletionOptions()
-      )
-      .left
-      .value
-      .message should include("at most 100 images")
-  }
-
-  // the direct API takes an image of up to 10 MB base64-encoded, more than MaxInlineBytes encodes to: no
-  // per-image limit applies beyond the part's own
   it should "accept any inline image llm4s accepts, up to MaxInlineBytes" in {
     val largest = image(MediaSource.Inline(IArray.fill[Byte](ContentPart.MaxInlineBytes)(1)))
     AnthropicClient.checkParts("anthropic", Seq(UserMessage(Vector(ContentPart.Text("x"), largest)))) shouldBe Right(())
@@ -183,14 +159,4 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
     }
   }
 
-  "complete" should "refuse, before sending, a request over the Messages API's 32 MB as rendered" in {
-    // five images at MaxInlineBytes are each allowed, and together about 35 MB base64-encoded
-    val atLimit = image(MediaSource.Inline(IArray.fill[Byte](ContentPart.MaxInlineBytes)(1)))
-    val message = UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(5)(atLimit))
-    AnthropicClient.checkParts("anthropic", Seq(message)) shouldBe Right(())
-    client.complete(Conversation(Seq(message)), CompletionOptions()).left.value.message should
-      include(s"a request of at most ${AnthropicClient.MaxRequestBytes} bytes")
-    client.streamComplete(Conversation(Seq(message)), CompletionOptions(), _ => ()).left.value.message should
-      include("a request of at most")
-  }
 }

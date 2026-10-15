@@ -398,17 +398,13 @@ class OllamaClient(
 
 object OllamaClient {
 
-  /** The image formats Ollama's server decodes: PNG, JPEG and WebP. */
-  private[provider] val ImageTypes: Set[org.llm4s.media.ImageMediaType] =
-    Set(org.llm4s.media.MediaType.Png, org.llm4s.media.MediaType.Jpeg, org.llm4s.media.MediaType.WebP)
-
   /**
    * The user-message parts Ollama's `/api/chat` takes: text, joined into `content`, and inline images,
    * sent raw base64 in `images`. It fetches no URL and has no files, and takes no documents.
    */
   private[provider] val userPart: PartialFunction[ContentPart, Either[String, String]] = {
     case ContentPart.Text(text) => Left(text)
-    case ContentPart.Image(inline: MediaSource.Inline, mt) if OllamaClient.ImageTypes(mt) =>
+    case ContentPart.Image(inline: MediaSource.Inline, _) =>
       Right(PartEncoding.base64(inline))
   }
 

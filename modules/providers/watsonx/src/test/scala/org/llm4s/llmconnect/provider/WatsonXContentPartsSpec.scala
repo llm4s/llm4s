@@ -59,23 +59,3 @@ class WatsonXContentPartsSpec extends AnyFunSuite with Matchers with EitherValue
     client.complete(Conversation(Seq(UserMessage(Vector(pdf)))), CompletionOptions()).left.value shouldBe
       a[UnsupportedContentPartError]
   }
-
-  // the image formats the provider takes; any other is refused before sending (#1913, Codex)
-  private def imageOf(mt: org.llm4s.media.ImageMediaType) =
-    ContentPart.image(MediaSource.Inline(IArray[Byte](1, 2, 3)), mt).fold(e => fail(e.message), identity)
-
-  test("an image is sent only as PNG or JPEG, the formats watsonx.ai takes") {
-    Seq(MediaType.Png, MediaType.Jpeg).foreach(mt => WatsonXClient.userPart.isDefinedAt(imageOf(mt)) shouldBe true)
-    Seq(MediaType.WebP, MediaType.Gif, MediaType.Bmp, MediaType.Tiff).foreach(mt =>
-      WatsonXClient.userPart.isDefinedAt(imageOf(mt)) shouldBe false
-    )
-  }
-
-  test("a chat with more than one image is refused before anything is sent") {
-    val one = Seq(UserMessage(Vector(ContentPart.Text("x"), imageOf(MediaType.Png))))
-    WatsonXClient.imageCount("watsonx", one) shouldBe Right(())
-    val two = one :+ AssistantMessage("ok") :+ UserMessage(Vector(imageOf(MediaType.Jpeg)))
-    WatsonXClient.imageCount("watsonx", two).left.value.message should include(
-      "at most 1 images in a request; this one has 2"
-    )
-  }

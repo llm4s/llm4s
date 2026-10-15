@@ -423,10 +423,7 @@ class BedrockClient(
           )
         )
       else
-        BedrockClient
-          .documentsWithText(messages)
-          .flatMap(_ => BedrockClient.mediaCountsWithin(messages))
-          .map(_ => (systemTexts, messages))
+        Right((systemTexts, messages))
     }
   }
 
@@ -799,80 +796,10 @@ object BedrockClient {
   }
 
   /** `Right` when every part of `messages` is one Converse takes, else the error naming the first that is not. */
-  /**
-   * Converse refuses a message that carries a document block but no text block, so such a message - a user
-   * message whose only parts are documents - fails here, before anything is sent, rather than at Bedrock.
-   */
-  private[provider] def documentsWithText(messages: Seq[BedrockMessage]): Result[Unit] =
-    messages.zipWithIndex
-      .find { (message, _) =>
-        val blocks = message.content().asScala
-        // a blank text block is no prompt for the document
-        blocks.exists(_.`type`() == ContentBlock.Type.DOCUMENT) &&
-        !blocks.exists(b => b.`type`() == ContentBlock.Type.TEXT && Option(b.text()).exists(_.trim.nonEmpty))
-      }
-      .fold[Result[Unit]](Right(())) { (_, index) =>
-        Left(
-          ValidationError(
-            "messages",
-            s"Bedrock message $index carries a document but no text; Converse needs a text part beside a document"
-          )
-        )
-      }
-
   private[provider] def checkParts(provider: String, messages: Seq[Message]): Result[Unit] =
     PartEncoding
       .check(provider, messages, userPart("document"), toolPart("document"))
-      .flatMap(_ => PartEncoding.checkInlineLimits(provider, messages, inlineLimit))
 
-  /** Converse's limits on media in one message: 20 images, five documents. */
-  private[provider] val MaxImagesPerMessage: Int    = 20
-  private[provider] val MaxDocumentsPerMessage: Int = 5
-
-  /**
-   * Converse's count limits, checked on the messages as sent: adjacent llm4s messages of one role are merged
-   * into one Converse message, so two that each fit can together exceed a limit. Media inside a `toolResult`
-   * counts as the message's.
-   */
-  private[provider] def mediaCountsWithin(messages: Seq[BedrockMessage]): Result[Unit] = {
-    def media(block: ContentBlock): Seq[String] = block.`type`() match {
-      case ContentBlock.Type.IMAGE    => Seq("image")
-      case ContentBlock.Type.DOCUMENT => Seq("document")
-      case ContentBlock.Type.TOOL_RESULT =>
-        block.toolResult().content().asScala.toSeq.flatMap { inner =>
-          if (inner.image() != null) Seq("image") else if (inner.document() != null) Seq("document") else Nil
-        }
-      case _ => Nil
-    }
-    messages.zipWithIndex.iterator
-      .flatMap { (message, index) =>
-        val kinds     = message.content().asScala.toSeq.flatMap(media)
-        val images    = kinds.count(_ == "image")
-        val documents = kinds.count(_ == "document")
-        Option
-          .when(images > MaxImagesPerMessage)(
-            s"at most $MaxImagesPerMessage images in a message; message $index has $images"
-          )
-          .orElse(
-            Option.when(documents > MaxDocumentsPerMessage)(
-              s"at most $MaxDocumentsPerMessage documents in a message; message $index has $documents"
-            )
-          )
-      }
-      .nextOption()
-      .map(problem => ValidationError("parts", s"bedrock takes $problem"))
-      .toLeft(())
-  }
-
-  /** Converse's own limits on inline media, lower than `ContentPart.MaxInlineBytes`: 3.75 MB an image, 4.5 MB a document. */
-  private[provider] val MaxInlineImageBytes: Long    = 3750000L
-  private[provider] val MaxInlineDocumentBytes: Long = 4500000L
-
-  private def inlineLimit(part: ContentPart): Option[Long] = part match {
-    case _: ContentPart.Image    => Some(MaxInlineImageBytes)
-    case _: ContentPart.Document => Some(MaxInlineDocumentBytes)
-    case _                       => None
-  }
   import org.llm4s.types.TryOps
 
   /** What the SDK's stream callbacks hand to the thread that is waiting on the stream. */

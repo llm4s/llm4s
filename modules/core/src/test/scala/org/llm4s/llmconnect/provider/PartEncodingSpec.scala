@@ -39,33 +39,6 @@ class PartEncodingSpec extends AnyFlatSpec with Matchers with EitherValues {
       .value shouldBe UnsupportedContentPartError("p", image.kind, "tool")
   }
 
-  "checkInlineLimits" should "apply a provider's own per-part limits" in {
-    val messages = Seq(UserMessage(Vector(ContentPart.Text("x"), image, image)))
-    PartEncoding.checkInlineLimits("p", messages, _ => Some(3L)) shouldBe Right(())
-    PartEncoding.checkInlineLimits("p", messages, _ => Some(2L)).left.value.message should include("at most 2 bytes")
-    PartEncoding.checkInlineLimits("p", messages, _ => None) shouldBe Right(())
-    PartEncoding.base64Length(3) shouldBe 4
-    PartEncoding.base64Length(4) shouldBe 8
-  }
-
-  "checkImagesPerRequest" should "count the images of every message" in {
-    val messages = Seq(UserMessage(Vector(image)), AssistantMessage("ok"), UserMessage(Vector(image)))
-    PartEncoding.checkImagesPerRequest("p", messages, 2) shouldBe Right(())
-    PartEncoding.checkImagesPerRequest("p", messages, 1).left.value.message should
-      include("at most 1 images in a request; this one has 2")
-  }
-
-  "checkInlineBytesTotal" should "count the decoded bytes of the inline parts it selects" in {
-    val messages = Seq(UserMessage(Vector(ContentPart.Text("x" * 100), image, image)))
-    PartEncoding.checkInlineBytesTotal("p", messages, 6L, "images")(_ => true) shouldBe Right(())
-    PartEncoding.checkInlineBytesTotal("p", messages, 0L, "files")(_.isInstanceOf[ContentPart.Document]) shouldBe Right(
-      ()
-    )
-    PartEncoding.checkInlineBytesTotal("p", messages, 5L, "images")(_ => true).left.value.message should include(
-      "this one has 6"
-    )
-  }
-
   "withoutBlankText" should "drop blank text parts and keep everything else in order" in {
     PartEncoding.withoutBlankText(
       Vector(ContentPart.Text(""), image, ContentPart.Text(" "), ContentPart.Text("a"))

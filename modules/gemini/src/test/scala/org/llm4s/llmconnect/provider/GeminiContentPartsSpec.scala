@@ -87,43 +87,17 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
   "GeminiParts.check" should "refuse media in a tool result and another provider's file, naming the part" in {
     val assistant = AssistantMessage(None, Seq(ToolCall("c1", "fetch", ujson.Obj())))
     GeminiParts
-      .check(
-        "gemini",
-        Seq(UserMessage("go"), assistant, ToolMessage(Vector(inline), "c1")),
-        gemini,
-        GeminiParts.GeminiMaxImages
-      )
+      .check("gemini", Seq(UserMessage("go"), assistant, ToolMessage(Vector(inline), "c1")), gemini)
       .left
       .value shouldBe
       UnsupportedContentPartError("gemini", inline.kind, "tool")
     GeminiParts
-      .check("vertexai", Seq(UserMessage(Vector(url))), GeminiParts.vertexFileUri, GeminiParts.VertexMaxImages)
+      .check("vertexai", Seq(UserMessage(Vector(url))), GeminiParts.vertexFileUri)
       .left
       .value shouldBe
       UnsupportedContentPartError("vertexai", url.kind, "user")
-    GeminiParts.check(
-      "gemini",
-      Seq(UserMessage(Vector(ContentPart.Text("a"), inline, url, file))),
-      gemini,
-      GeminiParts.GeminiMaxImages
-    ) shouldBe
+    GeminiParts.check("gemini", Seq(UserMessage(Vector(ContentPart.Text("a"), inline, url, file))), gemini) shouldBe
       Right(())
-  }
-
-  "GeminiClient" should "refuse, before sending, a request over 20 MB as rendered: media, text, tools and schema" in {
-    val http = stub[Llm4sHttpClient]
-    val four = ContentPart.image(MediaSource.Inline(IArray.fill[Byte](4 * 1024 * 1024)(1)), MediaType.Png).value
-    // three 4 MiB images are about 16.8 MB base64-encoded: a 4 MB response schema takes the request over
-    val schema  = ujson.Obj("type" -> "object", "description" -> ("d" * 4000000))
-    val options = CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(schema))
-    val error   = client(http).complete(Conversation(Seq(UserMessage(Vector.fill(3)(four)))), options).left.value
-    error.message should include(s"a request of at most ${GeminiParts.MaxRequestBytes} bytes")
-    client(http)
-      .complete(Conversation(Seq(UserMessage(Vector.fill(5)(four)))), CompletionOptions())
-      .isLeft shouldBe true
-    (http.post _).verify(*, *, *, *).never()
-    GeminiParts.withinRequestLimit("gemini", "x" * 10) shouldBe Right(())
-    GeminiParts.withinRequestLimit("gemini", "é" * 10000001).left.value.message should include("this one is 20000002")
   }
 
   "GeminiClient" should "send a user message's parts in order, and a tool result's text" in {
@@ -178,58 +152,4 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
     (http.post _).verify(*, *, *, *).never()
   }
 
-  // the image formats the provider takes; any other is refused before sending (#1913, Codex)
-  private def imageOf(mt: org.llm4s.media.ImageMediaType) =
-    ContentPart.image(MediaSource.Inline(IArray[Byte](1, 2, 3)), mt).fold(e => fail(e.message), identity)
-
-  "An image" should "be sent in the formats each API takes: GIF too for the Gemini API" in {
-    val geminiEncode = GeminiParts.user(gemini)
-    Seq(MediaType.Png, MediaType.Jpeg, MediaType.WebP, MediaType.Gif).foreach(mt =>
-      geminiEncode.isDefinedAt(imageOf(mt)) shouldBe true
-    )
-    val vertexEncode =
-      GeminiParts.user(GeminiParts.vertexFileUri, GeminiParts.VertexDocumentTypes, GeminiParts.VertexImageTypes)
-    Seq(MediaType.Png, MediaType.Jpeg, MediaType.WebP).foreach(mt =>
-      vertexEncode.isDefinedAt(imageOf(mt)) shouldBe true
-    )
-    vertexEncode.isDefinedAt(imageOf(MediaType.Gif)) shouldBe false
-    Seq(MediaType.Bmp, MediaType.Tiff).foreach { mt =>
-      geminiEncode.isDefinedAt(imageOf(mt)) shouldBe false
-      vertexEncode.isDefinedAt(imageOf(mt)) shouldBe false
-    }
-  }
-
-  "GeminiParts.check" should "refuse more images in a request than the API takes" in {
-    val small = ContentPart.image(MediaSource.Inline(IArray.fill[Byte](1)(1)), MediaType.Png).value
-    GeminiParts.check("gemini", Seq(UserMessage(Vector.fill(3)(small))), gemini, 3) shouldBe Right(())
-    GeminiParts
-      .check(
-        "gemini",
-        Seq(UserMessage(Vector.fill(2)(small)), AssistantMessage("ok"), UserMessage(Vector.fill(2)(small))),
-        gemini,
-        3
-      )
-      .left
-      .value
-      .message should include("at most 3 images in a request; this one has 4")
-    GeminiParts.GeminiMaxImages shouldBe 3600
-    GeminiParts.VertexMaxImages shouldBe 3000
-  }
-
-  "Vertex AI" should "take PDF and plain-text documents only, and at most 3,000 of them" in {
-    val vertex = GeminiParts.user(GeminiParts.vertexFileUri, GeminiParts.VertexDocumentTypes)
-    def docOf(mt: org.llm4s.media.DocumentMediaType) =
-      ContentPart.document(MediaSource.Inline(IArray.fill[Byte](1)(65)), mt).value
-    Seq(MediaType.Pdf, MediaType.PlainText).foreach(mt => vertex.isDefinedAt(docOf(mt)) shouldBe true)
-    Seq(MediaType.Markdown, MediaType.Html, MediaType.Csv).foreach(mt => vertex.isDefinedAt(docOf(mt)) shouldBe false)
-    GeminiParts.user(gemini).isDefinedAt(docOf(MediaType.Csv)) shouldBe true
-    val docs = Seq(UserMessage(Vector.fill(3)(docOf(MediaType.Pdf))))
-    GeminiParts
-      .check("vertexai", docs, GeminiParts.vertexFileUri, 10, GeminiParts.VertexDocumentTypes, Some(2))
-      .left
-      .value
-      .message should
-      include("at most 2 documents in a request; this one has 3")
-    GeminiParts.VertexMaxDocuments shouldBe 3000
-  }
 }

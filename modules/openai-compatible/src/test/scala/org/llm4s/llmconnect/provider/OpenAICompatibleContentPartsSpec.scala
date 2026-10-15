@@ -118,16 +118,4 @@ class OpenAICompatibleContentPartsSpec extends AnyFlatSpec with Matchers with Ei
     CohereDialect.encodeUserPart.isDefinedAt(pdfUrl) shouldBe false
   }
 
-  // the image formats the provider takes; any other is refused before sending (#1913, Codex)
-  private def imageOf(mt: org.llm4s.media.ImageMediaType) =
-    ContentPart.image(MediaSource.Inline(IArray[Byte](1, 2, 3)), mt).fold(e => fail(e.message), identity)
-
-  "An image" should "be sent only as PNG, JPEG, WebP or GIF, by every dialect" in {
-    Seq(OpenAICompatibleDialect.standard(), OpenRouterDialect, MistralDialect, ZaiDialect, CohereDialect).foreach { d =>
-      Seq(MediaType.Png, MediaType.Jpeg, MediaType.WebP, MediaType.Gif).foreach(mt =>
-        d.encodeUserPart.isDefinedAt(imageOf(mt)) shouldBe true
-      )
-      Seq(MediaType.Bmp, MediaType.Tiff).foreach(mt => d.encodeUserPart.isDefinedAt(imageOf(mt)) shouldBe false)
-    }
-  }
 }

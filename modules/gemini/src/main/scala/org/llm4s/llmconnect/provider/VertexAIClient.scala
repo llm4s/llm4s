@@ -105,50 +105,39 @@ class VertexAIClient(
       // a part Gemini cannot take fails the request here, before anything is sent
       .flatMap(transformed =>
         GeminiParts
-          .check(
-            providerName,
-            transformed.messages,
-            fileUri,
-            GeminiParts.VertexMaxImages,
-            GeminiParts.VertexDocumentTypes,
-            Some(GeminiParts.VertexMaxDocuments),
-            GeminiParts.VertexImageTypes
-          )
+          .check(providerName, transformed.messages, fileUri)
           .map(_ => transformed)
       )
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
-        // the limit is on the request as sent: its text, tools, schema and media, JSON-encoded
-        GeminiParts.withinRequestLimit(providerName, requestText).flatMap { _ =>
-          val url = modelUrl("generateContent")
+        val url                     = modelUrl("generateContent")
 
-          logger.debug(s"[VertexAI] Sending request to $url")
-          logger.debug(s"[VertexAI] Request body: ${org.llm4s.util.Redaction.redactForLogging(requestText)}")
+        logger.debug(s"[VertexAI] Sending request to $url")
+        logger.debug(s"[VertexAI] Request body: ${org.llm4s.util.Redaction.redactForLogging(requestText)}")
 
-          for {
-            token <- authProvider.getAccessToken()
-            headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token")
-            attempt <- httpClient.post(url, headers, requestText, timeout = requestTimeout) match {
-              case Left(error) =>
-                recordExchange(startedAt, requestText, None, Left(error))
-                Left(error)
-              case Right(response) =>
-                val result = Try {
-                  if (response.statusCode >= 200 && response.statusCode < 300)
-                    parseCompletionResponse(response.body).map(c =>
-                      c.withMessage(
-                        ThinkingReplay.bindOrigin(replayOrigin, c.message)
-                      )
+        for {
+          token <- authProvider.getAccessToken()
+          headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token")
+          attempt <- httpClient.post(url, headers, requestText, timeout = requestTimeout) match {
+            case Left(error) =>
+              recordExchange(startedAt, requestText, None, Left(error))
+              Left(error)
+            case Right(response) =>
+              val result = Try {
+                if (response.statusCode >= 200 && response.statusCode < 300)
+                  parseCompletionResponse(response.body).map(c =>
+                    c.withMessage(
+                      ThinkingReplay.bindOrigin(replayOrigin, c.message)
                     )
-                  else handleErrorResponse(response.statusCode, response.body, response.headers)
-                }.toEither.left.map(e => e.toLLMError).flatten
-                recordExchange(startedAt, requestText, Some(response.body), result)
-                result
-            }
-          } yield attempt
-        }
+                  )
+                else handleErrorResponse(response.statusCode, response.body, response.headers)
+              }.toEither.left.map(e => e.toLLMError).flatten
+              recordExchange(startedAt, requestText, Some(response.body), result)
+              result
+          }
+        } yield attempt
       }
   }
 
@@ -169,117 +158,106 @@ class VertexAIClient(
       // a part Gemini cannot take fails the request here, before anything is sent
       .flatMap(transformed =>
         GeminiParts
-          .check(
-            providerName,
-            transformed.messages,
-            fileUri,
-            GeminiParts.VertexMaxImages,
-            GeminiParts.VertexDocumentTypes,
-            Some(GeminiParts.VertexMaxDocuments),
-            GeminiParts.VertexImageTypes
-          )
+          .check(providerName, transformed.messages, fileUri)
           .map(_ => transformed)
       )
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
-        // the limit is on the request as sent: its text, tools, schema and media, JSON-encoded
-        GeminiParts.withinRequestLimit(providerName, requestText).flatMap { _ =>
-          val url = s"${modelUrl("streamGenerateContent")}?alt=sse"
+        val url                     = s"${modelUrl("streamGenerateContent")}?alt=sse"
 
-          logger.debug(s"[VertexAI] Starting stream to $url")
+        logger.debug(s"[VertexAI] Starting stream to $url")
 
-          for {
-            token <- authProvider.getAccessToken()
-            headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token")
-            result <- httpClient.postStream(url, headers, requestText, timeout = streamTimeout) match {
-              case Left(error) =>
-                recordExchange(startedAt, requestText, None, Left(error))
-                Left(error)
-              case Right(response) if response.statusCode < 200 || response.statusCode >= 300 =>
-                val err =
-                  Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
-                val errorResult = handleErrorResponse(response.statusCode, err, response.headers)
-                recordExchange(startedAt, requestText, Some(err), errorResult)
-                errorResult
-              case Right(response) =>
-                val accumulator = StreamingAccumulator.create()
-                val messageId   = UUID.randomUUID().toString
-                val rawStream   = StringBuilder()
-                val signatures =
-                  scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
-                var textLength = 0 // characters of answer text streamed so far: where a text signature sits
-                // a chunk nested too deeply: the stream fails with it, unread
-                var refused = Option.empty[org.llm4s.error.LLMError]
+        for {
+          token <- authProvider.getAccessToken()
+          headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token")
+          result <- httpClient.postStream(url, headers, requestText, timeout = streamTimeout) match {
+            case Left(error) =>
+              recordExchange(startedAt, requestText, None, Left(error))
+              Left(error)
+            case Right(response) if response.statusCode < 200 || response.statusCode >= 300 =>
+              val err =
+                Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
+              val errorResult = handleErrorResponse(response.statusCode, err, response.headers)
+              recordExchange(startedAt, requestText, Some(err), errorResult)
+              errorResult
+            case Right(response) =>
+              val accumulator = StreamingAccumulator.create()
+              val messageId   = UUID.randomUUID().toString
+              val rawStream   = StringBuilder()
+              val signatures =
+                scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
+              var textLength = 0 // characters of answer text streamed so far: where a text signature sits
+              // a chunk nested too deeply: the stream fails with it, unread
+              var refused = Option.empty[org.llm4s.error.LLMError]
 
-                Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) { reader =>
-                  Iterator.continually(reader.readLine()).takeWhile(l => l != null && refused.isEmpty).foreach { line =>
-                    rawStream.append(line).append('\n')
-                    val trimmed = line.trim
-                    if (trimmed.startsWith("data: ")) {
-                      val jsonStr = trimmed.stripPrefix("data: ").trim
-                      if (jsonStr.nonEmpty) {
-                        // a chunk's functionCall.args is the model's JSON, native in the envelope: one nested too
-                        // deeply fails the stream as the same reply fails `complete`, never parsed and sent back
-                        // (#1562); a chunk that is not JSON at all is skipped, as it always was
-                        BoundedJson.read(jsonStr) match {
-                          case Right(json) =>
-                            parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
-                              textLength += parsed.text.length
-                              signatures ++= parsed.signatures
-                              chunks.foreach { chunk =>
-                                accumulator.addChunk(chunk)
-                                onChunk(chunk)
-                              }
+              Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) { reader =>
+                Iterator.continually(reader.readLine()).takeWhile(l => l != null && refused.isEmpty).foreach { line =>
+                  rawStream.append(line).append('\n')
+                  val trimmed = line.trim
+                  if (trimmed.startsWith("data: ")) {
+                    val jsonStr = trimmed.stripPrefix("data: ").trim
+                    if (jsonStr.nonEmpty) {
+                      // a chunk's functionCall.args is the model's JSON, native in the envelope: one nested too
+                      // deeply fails the stream as the same reply fails `complete`, never parsed and sent back
+                      // (#1562); a chunk that is not JSON at all is skipped, as it always was
+                      BoundedJson.read(jsonStr) match {
+                        case Right(json) =>
+                          parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
+                            textLength += parsed.text.length
+                            signatures ++= parsed.signatures
+                            chunks.foreach { chunk =>
+                              accumulator.addChunk(chunk)
+                              onChunk(chunk)
                             }
-                            for {
-                              usage      <- Try(json("usageMetadata")).toOption
-                              prompt     <- Try(usage("promptTokenCount").num.toInt).toOption
-                              completion <- Try(usage("candidatesTokenCount").num.toInt).toOption
-                            } accumulator.updateTokens(prompt, completion)
-                          case Left(tooDeep @ BoundedJson.TooDeep()) =>
-                            logger.warn(
-                              s"[VertexAI] Stream refused: a chunk is nested more than ${BoundedJson.MaxDepth} levels deep"
-                            )
-                            refused = Some(tooDeep)
-                          case Left(_) => () // unreadable chunk: skipped
-                        }
+                          }
+                          for {
+                            usage      <- Try(json("usageMetadata")).toOption
+                            prompt     <- Try(usage("promptTokenCount").num.toInt).toOption
+                            completion <- Try(usage("candidatesTokenCount").num.toInt).toOption
+                          } accumulator.updateTokens(prompt, completion)
+                        case Left(tooDeep @ BoundedJson.TooDeep()) =>
+                          logger.warn(
+                            s"[VertexAI] Stream refused: a chunk is nested more than ${BoundedJson.MaxDepth} levels deep"
+                          )
+                          refused = Some(tooDeep)
+                        case Left(_) => () // unreadable chunk: skipped
                       }
                     }
                   }
-                }.toEither.left
-                  .map(HttpFailures.streamReadError(_, url, streamTimeout))
-                  .flatMap(_ => refused.toLeft(()))
-                  .flatMap(_ =>
-                    accumulator.toCompletion.map { c =>
-                      val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-                      // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
-                      val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
-                      val completion = c
-                        .withModel(config.model)
-                        .withToolCalls(
-                          c.message.toolCalls.toList
-                        ) // the accumulator keeps streamed calls on the message only
-                        .withEstimatedCost(cost)
-                        .withMessage(
-                          ThinkingReplay.bindOrigin(replayOrigin, message)
-                        )
-                      recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
-                      completion
-                    }
+                }
+              }.toEither.left
+                .map(HttpFailures.streamReadError(_, url, streamTimeout))
+                .flatMap(_ => refused.toLeft(()))
+                .flatMap(_ =>
+                  accumulator.toCompletion.map { c =>
+                    val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+                    // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
+                    val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
+                    val completion = c
+                      .withModel(config.model)
+                      .withToolCalls(
+                        c.message.toolCalls.toList
+                      ) // the accumulator keeps streamed calls on the message only
+                      .withEstimatedCost(cost)
+                      .withMessage(
+                        ThinkingReplay.bindOrigin(replayOrigin, message)
+                      )
+                    recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
+                    completion
+                  }
+                )
+                .tapLeft(error =>
+                  recordExchange(
+                    startedAt,
+                    requestText,
+                    Option.when(rawStream.nonEmpty)(rawStream.result()),
+                    Left(error)
                   )
-                  .tapLeft(error =>
-                    recordExchange(
-                      startedAt,
-                      requestText,
-                      Option.when(rawStream.nonEmpty)(rawStream.result()),
-                      Left(error)
-                    )
-                  )
-            }
-          } yield result
-        }
+                )
+          }
+        } yield result
       }
   }
 
@@ -310,7 +288,7 @@ class VertexAIClient(
           "parts" -> ujson.Arr.from(
             PartEncoding
               .withoutBlankText(um.parts)
-              .map(GeminiParts.user(fileUri, GeminiParts.VertexDocumentTypes, GeminiParts.VertexImageTypes))
+              .map(GeminiParts.user(fileUri))
           )
         )
 

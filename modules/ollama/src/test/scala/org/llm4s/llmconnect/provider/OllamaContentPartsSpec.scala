@@ -63,16 +63,4 @@ class OllamaContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
       .value shouldBe a[UnsupportedContentPartError]
   }
 
-  // the image formats the provider takes; any other is refused before sending (#1913, Codex)
-  private def imageOf(mt: org.llm4s.media.ImageMediaType) =
-    ContentPart.image(MediaSource.Inline(IArray[Byte](1, 2, 3)), mt).fold(e => fail(e.message), identity)
-
-  "An image" should "be sent only as PNG, JPEG or WebP, the formats Ollama decodes" in {
-    Seq(MediaType.Png, MediaType.Jpeg, MediaType.WebP).foreach(mt =>
-      OllamaClient.userPart.isDefinedAt(imageOf(mt)) shouldBe true
-    )
-    Seq(MediaType.Gif, MediaType.Bmp, MediaType.Tiff).foreach(mt =>
-      OllamaClient.userPart.isDefinedAt(imageOf(mt)) shouldBe false
-    )
-  }
 }

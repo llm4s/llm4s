@@ -559,9 +559,9 @@ class OpenAIClient private[provider] (
   private val userPart: PartialFunction[ContentPart, ChatCompletionContentPart] = {
     case ContentPart.Text(text) =>
       ChatCompletionContentPart.ofText(ChatCompletionContentPartText.builder().text(text).build())
-    case ContentPart.Image(MediaSource.Url(uri), mt) if PartEncoding.isWebUrl(uri) && PartEncoding.ChatImageTypes(mt) =>
+    case ContentPart.Image(MediaSource.Url(uri), _) if PartEncoding.isWebUrl(uri) =>
       imageUrl(uri.toString)
-    case ContentPart.Image(inline: MediaSource.Inline, mediaType) if PartEncoding.ChatImageTypes(mediaType) =>
+    case ContentPart.Image(inline: MediaSource.Inline, mediaType) =>
       imageUrl(PartEncoding.dataUrl(inline, mediaType))
     case ContentPart.Document(inline: MediaSource.Inline, MediaType.Pdf) =>
       pdfFile(_.filename("document.pdf").fileData(PartEncoding.dataUrl(inline, MediaType.Pdf)))
@@ -595,17 +595,6 @@ class OpenAIClient private[provider] (
   private def convertToOpenAIMessages(conversation: Conversation): Result[Seq[ChatCompletionMessageParam]] =
     PartEncoding
       .check(providerName, conversation.messages, userPart, PartEncoding.textOnly)
-      .flatMap(_ =>
-        PartEncoding.checkInlineBytesTotal(providerName, conversation.messages, OpenAIClient.MaxFileBytes, "files")(
-          _.isInstanceOf[ContentPart.Document]
-        )
-      )
-      .flatMap(_ =>
-        PartEncoding.checkInlineBytesTotal(providerName, conversation.messages, OpenAIClient.MaxImageBytes, "images")(
-          _.isInstanceOf[ContentPart.Image]
-        )
-      )
-      .flatMap(_ => PartEncoding.checkImagesPerRequest(providerName, conversation.messages, OpenAIClient.MaxImages))
       // the SDK builders throw on malformed content (a null text): inside the Result, as buildParams is
       .flatMap(_ => Try(conversation.messages.map(toOpenAIMessage)).toEither.left.map(_.toLLMError))
 
@@ -789,15 +778,6 @@ class OpenAIClient private[provider] (
  */
 object OpenAIClient {
   import org.llm4s.types.TryOps
-
-  /** Chat Completions' limit on the files (PDFs) of one request, decoded: 50 MB. */
-  private[provider] val MaxFileBytes: Long = 50000000L
-
-  /** Chat Completions' limit on the images of one request, decoded: 512 MB. */
-  private[provider] val MaxImageBytes: Long = 512000000L
-
-  /** Chat Completions' limit on the images of one request: 1,500. */
-  private[provider] val MaxImages: Int = 1500
 
   private[provider] def forTest(
     model: String,

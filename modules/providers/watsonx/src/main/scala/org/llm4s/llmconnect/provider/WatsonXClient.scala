@@ -424,7 +424,6 @@ class WatsonXClient(
   private[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): Result[ujson.Obj] =
     PartEncoding
       .check(providerName, conversation.messages, WatsonXClient.userPart, PartEncoding.textOnly)
-      .flatMap(_ => WatsonXClient.imageCount(providerName, conversation.messages))
       .map(_ => requestBody(conversation, options))
 
   private def requestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
@@ -537,23 +536,13 @@ class WatsonXClient(
 
 object WatsonXClient {
 
-  /** The image formats the watsonx.ai chat API takes: PNG and JPEG. */
-  private[provider] val ImageTypes: Set[org.llm4s.media.ImageMediaType] =
-    Set(org.llm4s.media.MediaType.Png, org.llm4s.media.MediaType.Jpeg)
-
-  /** The chat API takes one image in a chat: counted over the whole conversation, which is sent as one request. */
-  private[provider] val MaxImages: Int = 1
-
-  private[provider] def imageCount(provider: String, messages: Seq[Message]): Result[Unit] =
-    PartEncoding.checkImagesPerRequest(provider, messages, MaxImages)
-
   /**
    * The user-message parts the watsonx.ai chat API takes, in its OpenAI-style content array: text, and inline
    * images as a base64 `data:` URL in `image_url`. The service fetches no remote URL and takes no documents.
    */
   private[provider] val userPart: PartialFunction[ContentPart, ujson.Value] = {
     case ContentPart.Text(text) => ujson.Obj("type" -> "text", "text" -> text)
-    case ContentPart.Image(inline: MediaSource.Inline, mediaType) if ImageTypes(mediaType) =>
+    case ContentPart.Image(inline: MediaSource.Inline, mediaType) =>
       ujson.Obj("type" -> "image_url", "image_url" -> ujson.Obj("url" -> PartEncoding.dataUrl(inline, mediaType)))
   }
 

@@ -107,38 +107,35 @@ class GeminiClient(
       // a part Gemini cannot take fails the request here, before anything is sent
       .flatMap(transformed =>
         GeminiParts
-          .check(providerName, transformed.messages, fileUri, GeminiParts.GeminiMaxImages)
+          .check(providerName, transformed.messages, fileUri)
           .map(_ => transformed)
       )
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
-        // the limit is on the request as sent: its text, tools, schema and media, JSON-encoded
-        GeminiParts.withinRequestLimit(providerName, requestText).flatMap { _ =>
-          val url = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
+        val url                     = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
 
-          // Note: URL contains API key as query param - do not log full URL
-          logger.debug(s"[Gemini] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
-          logger.debug(s"[Gemini] Request body: ${Redaction.redactForLogging(requestText)}")
+        // Note: URL contains API key as query param - do not log full URL
+        logger.debug(s"[Gemini] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
+        logger.debug(s"[Gemini] Request body: ${Redaction.redactForLogging(requestText)}")
 
-          val headers = Map("Content-Type" -> "application/json")
+        val headers = Map("Content-Type" -> "application/json")
 
-          httpClient.post(url, headers, requestText, timeout = requestTimeout) match {
-            case Left(error) =>
-              recordingExchange(startedAt, requestText)(Left(error))(None)
-            case Right(response) =>
-              val result = Try {
-                if (response.statusCode >= 200 && response.statusCode < 300)
-                  parseCompletionResponse(response.body).map(c =>
-                    c.withMessage(ThinkingReplay.bindOrigin(replayOrigin, c.message))
-                  )
-                else handleErrorResponse(response.statusCode, response.body, response.headers)
-              }.toEither.left
-                .map(e => e.toLLMError)
-                .flatten
-              recordingExchange(startedAt, requestText)(result)(Some(response.body))
-          }
+        httpClient.post(url, headers, requestText, timeout = requestTimeout) match {
+          case Left(error) =>
+            recordingExchange(startedAt, requestText)(Left(error))(None)
+          case Right(response) =>
+            val result = Try {
+              if (response.statusCode >= 200 && response.statusCode < 300)
+                parseCompletionResponse(response.body).map(c =>
+                  c.withMessage(ThinkingReplay.bindOrigin(replayOrigin, c.message))
+                )
+              else handleErrorResponse(response.statusCode, response.body, response.headers)
+            }.toEither.left
+              .map(e => e.toLLMError)
+              .flatten
+            recordingExchange(startedAt, requestText)(result)(Some(response.body))
         }
       }
   }
@@ -160,98 +157,95 @@ class GeminiClient(
       // a part Gemini cannot take fails the request here, before anything is sent
       .flatMap(transformed =>
         GeminiParts
-          .check(providerName, transformed.messages, fileUri, GeminiParts.GeminiMaxImages)
+          .check(providerName, transformed.messages, fileUri)
           .map(_ => transformed)
       )
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
-        // the limit is on the request as sent: its text, tools, schema and media, JSON-encoded
-        GeminiParts.withinRequestLimit(providerName, requestText).flatMap { _ =>
-          val url = s"${config.baseUrl}/models/${config.model}:streamGenerateContent?key=${config.apiKey}&alt=sse"
+        val url = s"${config.baseUrl}/models/${config.model}:streamGenerateContent?key=${config.apiKey}&alt=sse"
 
-          // Note: URL contains API key as query param - do not log full URL
-          logger.debug(s"[Gemini] Starting stream to ${config.baseUrl}/models/${config.model}:streamGenerateContent")
+        // Note: URL contains API key as query param - do not log full URL
+        logger.debug(s"[Gemini] Starting stream to ${config.baseUrl}/models/${config.model}:streamGenerateContent")
 
-          val headers = Map("Content-Type" -> "application/json")
+        val headers = Map("Content-Type" -> "application/json")
 
-          httpClient.postStream(url, headers, requestText, timeout = streamTimeout) match {
-            case Left(error) =>
-              recordingExchange(startedAt, requestText)(Left(error))(None)
-            case Right(response) if response.statusCode < 200 || response.statusCode >= 300 =>
-              val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
-              recordingExchange(startedAt, requestText)(
-                handleErrorResponse(response.statusCode, err, response.headers)
-              )(Some(err))
-            case Right(response) =>
-              val accumulator = StreamingAccumulator.create()
-              val messageId   = UUID.randomUUID().toString
-              val rawStream   = StringBuilder()
-              val signatures = scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
-              var textLength = 0 // characters of answer text streamed so far: where a text signature sits
-              var refused = Option.empty[LLMError] // a chunk nested too deeply: the stream fails with it, unread
+        httpClient.postStream(url, headers, requestText, timeout = streamTimeout) match {
+          case Left(error) =>
+            recordingExchange(startedAt, requestText)(Left(error))(None)
+          case Right(response) if response.statusCode < 200 || response.statusCode >= 300 =>
+            val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
+            recordingExchange(startedAt, requestText)(
+              handleErrorResponse(response.statusCode, err, response.headers)
+            )(Some(err))
+          case Right(response) =>
+            val accumulator = StreamingAccumulator.create()
+            val messageId   = UUID.randomUUID().toString
+            val rawStream   = StringBuilder()
+            val signatures  = scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
+            var textLength = 0 // characters of answer text streamed so far: where a text signature sits
+            var refused = Option.empty[LLMError] // a chunk nested too deeply: the stream fails with it, unread
 
-              val result =
-                Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) { reader =>
-                  Iterator.continually(reader.readLine()).takeWhile(l => l != null && refused.isEmpty).foreach { line =>
-                    rawStream.append(line).append('\n')
-                    val trimmed = line.trim
-                    // SSE format: lines starting with "data: " contain JSON
-                    if (trimmed.startsWith("data: ")) {
-                      val jsonStr = trimmed.stripPrefix("data: ").trim
-                      if (jsonStr.nonEmpty) {
-                        // a chunk's functionCall.args is the model's JSON, native in the envelope: one nested too
-                        // deeply fails the stream as the same reply fails `complete`, never parsed and sent back
-                        // (#1562); a chunk that is not JSON at all is skipped, as it always was
-                        BoundedJson.read(jsonStr) match {
-                          case Right(json) =>
-                            parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
-                              textLength += parsed.text.length
-                              signatures ++= parsed.signatures
-                              chunks.foreach { chunk =>
-                                accumulator.addChunk(chunk)
-                                onChunk(chunk)
-                              }
+            val result =
+              Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) { reader =>
+                Iterator.continually(reader.readLine()).takeWhile(l => l != null && refused.isEmpty).foreach { line =>
+                  rawStream.append(line).append('\n')
+                  val trimmed = line.trim
+                  // SSE format: lines starting with "data: " contain JSON
+                  if (trimmed.startsWith("data: ")) {
+                    val jsonStr = trimmed.stripPrefix("data: ").trim
+                    if (jsonStr.nonEmpty) {
+                      // a chunk's functionCall.args is the model's JSON, native in the envelope: one nested too
+                      // deeply fails the stream as the same reply fails `complete`, never parsed and sent back
+                      // (#1562); a chunk that is not JSON at all is skipped, as it always was
+                      BoundedJson.read(jsonStr) match {
+                        case Right(json) =>
+                          parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
+                            textLength += parsed.text.length
+                            signatures ++= parsed.signatures
+                            chunks.foreach { chunk =>
+                              accumulator.addChunk(chunk)
+                              onChunk(chunk)
                             }
-                            // Extract token usage from usageMetadata if present
-                            for {
-                              usage      <- Try(json("usageMetadata")).toOption
-                              prompt     <- Try(usage("promptTokenCount").num.toInt).toOption
-                              completion <- Try(usage("candidatesTokenCount").num.toInt).toOption
-                            } accumulator.updateTokens(prompt, completion)
-                          case Left(tooDeep @ BoundedJson.TooDeep()) =>
-                            logger.warn(
-                              s"[Gemini] Stream refused: a chunk is nested more than ${BoundedJson.MaxDepth} levels deep"
-                            )
-                            refused = Some(tooDeep)
-                          case Left(_) => () // unreadable chunk: skipped
-                        }
+                          }
+                          // Extract token usage from usageMetadata if present
+                          for {
+                            usage      <- Try(json("usageMetadata")).toOption
+                            prompt     <- Try(usage("promptTokenCount").num.toInt).toOption
+                            completion <- Try(usage("candidatesTokenCount").num.toInt).toOption
+                          } accumulator.updateTokens(prompt, completion)
+                        case Left(tooDeep @ BoundedJson.TooDeep()) =>
+                          logger.warn(
+                            s"[Gemini] Stream refused: a chunk is nested more than ${BoundedJson.MaxDepth} levels deep"
+                          )
+                          refused = Some(tooDeep)
+                        case Left(_) => () // unreadable chunk: skipped
                       }
                     }
                   }
-                }.toEither.left
-                  .map(HttpFailures.streamReadError(_, url, streamTimeout))
-                  .flatMap(_ => refused.toLeft(()))
-                  .flatMap(_ =>
-                    accumulator.toCompletion.map { c =>
-                      val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-                      // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
-                      val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
-                      c.withModel(config.model)
-                        .withToolCalls(
-                          c.message.toolCalls.toList
-                        ) // the accumulator keeps streamed calls on the message only
-                        .withEstimatedCost(cost)
-                        .withMessage(ThinkingReplay.bindOrigin(replayOrigin, message))
-                    }
-                  )
+                }
+              }.toEither.left
+                .map(HttpFailures.streamReadError(_, url, streamTimeout))
+                .flatMap(_ => refused.toLeft(()))
+                .flatMap(_ =>
+                  accumulator.toCompletion.map { c =>
+                    val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+                    // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
+                    val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
+                    c.withModel(config.model)
+                      .withToolCalls(
+                        c.message.toolCalls.toList
+                      ) // the accumulator keeps streamed calls on the message only
+                      .withEstimatedCost(cost)
+                      .withMessage(ThinkingReplay.bindOrigin(replayOrigin, message))
+                  }
+                )
 
-              recordingExchange(startedAt, requestText)(result)(
-                successResponse = Some(rawStream.result()),
-                failureResponse = Option.when(rawStream.nonEmpty)(rawStream.result())
-              )
-          }
+            recordingExchange(startedAt, requestText)(result)(
+              successResponse = Some(rawStream.result()),
+              failureResponse = Option.when(rawStream.nonEmpty)(rawStream.result())
+            )
         }
       }
   }

@@ -112,56 +112,10 @@ class BedrockContentPartsSpec extends AnyFlatSpec with Matchers with EitherValue
     blocks.drop(2).flatMap(_.obj.get("text").map(_.str)).toSeq shouldBe Seq("before", "after")
   }
 
-  it should "refuse, before sending, a message with more images or documents than Converse takes" in {
-    val tooManyImages = Vector(ContentPart.Text("x")) ++ Vector.fill(21)(image(bytes))
-    val tooManyDocs   = Vector(ContentPart.Text("x")) ++ Vector.fill(6)(doc(bytes))
-    Seq(tooManyImages -> "20 images", tooManyDocs -> "5 documents").foreach { case (parts, limit) =>
-      val (sent, result) = send(Conversation(Seq(UserMessage(parts))))
-      sent shouldBe None
-      result.left.value.message should include(s"at most $limit in a message")
-    }
-    val fits = Vector(ContentPart.Text("x")) ++ Vector.fill(20)(image(bytes)) ++ Vector.fill(5)(doc(bytes))
-    send(Conversation(Seq(UserMessage(fits))))._2.isRight shouldBe true
-  }
-
-  it should "count media in the message as sent, after adjacent user messages are merged" in {
-    val fifteen        = UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(15)(image(bytes)))
-    val (sent, result) = send(Conversation(Seq(fifteen, fifteen)))
-    sent shouldBe None
-    result.left.value.message should include("message 0 has 30")
-    // a tool result's media counts as its message's
-    val calls   = AssistantMessage(None, (1 to 3).map(i => ToolCall(s"c$i", "f", ujson.Obj())))
-    val results = (1 to 3).map(i => ToolMessage(Vector.fill(8)(image(bytes)), s"c$i"))
-    send(Conversation(Seq(UserMessage("go"), calls) ++ results))._2.left.value.message should include("has 24")
-  }
-
-  it should "refuse, before sending, inline media over Converse's own limits" in {
-    val bigImage = image(MediaSource.Inline(IArray.fill[Byte](BedrockClient.MaxInlineImageBytes.toInt + 1)(1)))
-    val bigDoc   = doc(MediaSource.Inline(IArray.fill[Byte](BedrockClient.MaxInlineDocumentBytes.toInt + 1)(1)))
-    Seq(bigImage, bigDoc).foreach { part =>
-      val (sent, result) = send(Conversation(Seq(UserMessage(Vector(ContentPart.Text("x"), part)))))
-      sent shouldBe None
-      result.left.value.message should include("bytes for an inline")
-    }
-    val fits = doc(MediaSource.Inline(IArray.fill[Byte](BedrockClient.MaxInlineDocumentBytes.toInt)(1)))
-    BedrockClient.checkParts("bedrock", Seq(UserMessage(Vector(ContentPart.Text("x"), fits)))) shouldBe Right(())
-  }
-
   it should "send no empty text block for a blank text part" in {
     val blocks = userBlocks(ContentPart.Text(""), image(bytes), ContentPart.Text("caption"), ContentPart.Text("  "))
     blocks.map(_.obj.keys.head).toSeq shouldBe Seq("image", "text")
     blocks(1)("text").str shouldBe "caption"
-  }
-
-  it should "refuse, before sending, a message whose only parts are documents: Converse needs text beside one" in {
-    val (sent, result) = send(Conversation(Seq(UserMessage(Vector(doc(bytes))))))
-    sent shouldBe None
-    result.left.value.message should include("needs a text part beside a document")
-    send(Conversation(Seq(UserMessage(Vector(ContentPart.Text("Summarise."), doc(bytes))))))._2.isRight shouldBe true
-    // blank text is no prompt
-    val (blankSent, blank) = send(Conversation(Seq(UserMessage(Vector(ContentPart.Text("  "), doc(bytes))))))
-    blankSent shouldBe None
-    blank.left.value.message should include("needs a text part beside a document")
   }
 
   "complete" should "refuse, before sending, each part Converse cannot take" in {
