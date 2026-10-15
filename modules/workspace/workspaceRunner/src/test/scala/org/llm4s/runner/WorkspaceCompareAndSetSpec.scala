@@ -136,6 +136,7 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     code(ws.fileSnapshot("pipe")) shouldBe "NOT_A_FILE"
     code(ws.fileSnapshot("pipe", includeContent = false)) shouldBe "NOT_A_FILE"
     code(ws.readFile("pipe")) shouldBe "NOT_A_FILE"
+    code(ws.searchFiles(List("pipe"), "x", "literal")) shouldBe "NOT_A_FILE"
     code(ws.writeFile("pipe", "x")) shouldBe "NOT_A_FILE"
     code(ws.writeFile("pipe", "x", expectedHash = Some("absent"))) shouldBe "NOT_A_FILE"
     code(ws.modifyFile("pipe", List(InsertOperation(afterLine = 0, newContent = "z")))) shouldBe "NOT_A_FILE"

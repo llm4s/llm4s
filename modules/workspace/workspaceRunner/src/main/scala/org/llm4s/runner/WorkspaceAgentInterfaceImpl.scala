@@ -1062,6 +1062,8 @@ class WorkspaceAgentInterfaceImpl(
             .toList
         }
       } else {
+        // a path named outright is held to the same rule as a walked one: a FIFO or socket is refused, never opened
+        refuseSpecial(path, resolvedPath)
         List(resolvedPath)
       }
     }
