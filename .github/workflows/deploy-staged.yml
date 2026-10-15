@@ -130,7 +130,7 @@ jobs:
         env:
           IMAGE: ${{ steps.image.outputs.image }}
         run: |
-          built="$(sbt -error "print deployService/Docker/version" | tail -1)"
+          built="$(sbt -batch -no-colors -error "print deployService/Docker/version" | sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -v '^[[:space:]]*$' | tail -1)"
           docker tag "llm4s/deploy-service:$built" "$IMAGE"
 
       - name: Check the image does not run as root
