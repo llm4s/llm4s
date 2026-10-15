@@ -349,7 +349,15 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
 
     val readOnly = workspace(WorkspaceSandboxConfig(readOnlyPaths = List("docs")))
     code(readOnly.writeFile("src/docs/a.md", "x")) shouldBe "PATH_READ_ONLY"
-    code(readOnly.deleteFile("src/docs")) shouldBe "PATH_READ_ONLY"
+    // the link is an entry outside the read-only path: deleting it is allowed, and leaves the read-only directory
+    readOnly.deleteFile("src/docs").wasDirectory shouldBe false
+    Files.isDirectory(root.resolve("docs")) shouldBe true
+    // an entry reached through an aliased directory is judged where it really is: docs/x, read-only
+    Files.createDirectories(root.resolve("public"))
+    Files.createSymbolicLink(root.resolve("alias"), root.resolve("docs"))
+    Files.createSymbolicLink(root.resolve("docs/x"), root.resolve("public"))
+    code(readOnly.deleteFile("alias/x")) shouldBe "PATH_READ_ONLY"
+    Files.isSymbolicLink(root.resolve("docs/x")) shouldBe true
 
     code(workspace().writeFile("out/a", "x")) shouldBe "PATH_ESCAPE_ATTEMPT"
     code(workspace().fileSnapshot("out")) shouldBe "PATH_ESCAPE_ATTEMPT"

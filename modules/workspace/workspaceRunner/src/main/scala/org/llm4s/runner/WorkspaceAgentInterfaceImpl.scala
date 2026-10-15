@@ -61,16 +61,18 @@ class WorkspaceAgentInterfaceImpl(
   private val allowedCommandsString: String =
     allowedCommandsNormalized.toSeq.sorted.mkString(", ")
 
+  /** What an operation does at a path: reads it, or changes it (writes, edits, deletes). */
+  sealed private[runner] trait Access
+  private[runner] object Access {
+    case object Read  extends Access
+    case object Write extends Access
+  }
+
   /**
-   * Resolves a relative path against the workspace root, ensuring it doesn't escape the workspace.
-   *
-   * @param relativePath The path relative to workspace root
-   * @return The absolute path
-   * @throws IllegalArgumentException if the path attempts to escape the workspace
+   * `relativePath` as text, against the root: refused (`PATH_ESCAPE_ATTEMPT`) when the platform cannot parse it (a NUL;
+   * on Windows `C:\x\f:s`, `x*`) or when `..` takes it above the root. What it names on disk is [[checkPolicy]]'s.
    */
-  private def resolvePath(relativePath: String): Path = {
-    // A string the platform cannot parse as a path (a NUL character; on Windows `C:\x\f:s`, `x*`) is refused with
-    // the same code rather than escaping as InvalidPathException.
+  private def lexical(relativePath: String): Path = {
     val normalized = Try(rootPath.resolve(relativePath).normalize()).getOrElse {
       throw new WorkspaceAgentException(
         s"Path '${relativePath.replace("\u0000", "\\0")}' is not a valid path in the workspace",
@@ -78,35 +80,85 @@ class WorkspaceAgentInterfaceImpl(
         None
       )
     }
-
-    if (!normalized.startsWith(rootPath)) {
+    if (!normalized.startsWith(rootPath))
       throw new WorkspaceAgentException(
         s"Path '$relativePath' attempts to escape the workspace",
         "PATH_ESCAPE_ATTEMPT",
         None
       )
-    }
+    normalized
+  }
 
-    // Every check below is made on what the path names on disk as well as on its text: a symbolic link inside the
-    // workspace (`src/link -> ../private`, or `-> /etc`) would otherwise lead an operation past it.
-    val onDisk = effective(normalized)
-    if (!onDisk.startsWith(effective(rootPath))) {
+  /**
+   * The physical location of the entry `lex` names: its directory resolved through every link, plus its own name. An
+   * operation on the entry itself (a delete, a snapshot of a link as itself) acts there; the root is its own entry.
+   */
+  private def entryOf(lex: Path): Path =
+    if (lex == rootPath || lex.getParent == null) effective(lex) else effective(lex.getParent).resolve(lex.getFileName)
+
+  /**
+   * '''The path policy''' (design §4.33): the one check every file operation, walk entry and command working directory
+   * goes through, made on the physical location it acts on - what the path names with every link resolved, or for an
+   * operation on an entry itself, [[entryOf]]. No call site checks a path any other way.
+   *
+   *  - '''The workspace.''' The location must be inside the workspace root (`PATH_ESCAPE_ATTEMPT`).
+   *  - '''`allowedPaths`''' (#870). With any, the location must be inside one: inside what it names, or inside the
+   *    entry itself when it is a link (`PATH_NOT_ALLOWED`).
+   *  - '''`readOnlyPaths`''' (#870). A change may not be inside one, as either (`PATH_READ_ONLY`).
+   *  - '''`.git`.''' A change may not name `.git` or a path inside one (`PATH_NOT_ALLOWED`, #1721): git reads its
+   *    configuration, hooks and attributes there and runs the programs they name.
+   */
+  private def checkPolicy(relativePath: String, place: Path, access: Access): Unit = {
+    val realRoot = effective(rootPath)
+    if (!place.startsWith(realRoot))
       throw new WorkspaceAgentException(
-        s"Path '$relativePath' leads outside the workspace through a link",
+        s"Path '$relativePath' leads outside the workspace",
         "PATH_ESCAPE_ATTEMPT",
         None
       )
-    }
-
-    // #870: with `allowedPaths`, only those paths and what is beneath them are accessible
-    if (allowedRoots.nonEmpty && !allowedRoots.exists(a => normalized.startsWith(a) && onDisk.startsWith(effective(a))))
+    def within(roots: List[Path]) = roots.exists(r => place.startsWith(effective(r)) || place.startsWith(entryOf(r)))
+    if (allowedRoots.nonEmpty && !within(allowedRoots))
       throw new WorkspaceAgentException(
         s"Path '$relativePath' is outside the sandbox's allowed paths (${config.allowedPaths.mkString(", ")})",
         "PATH_NOT_ALLOWED",
         None
       )
+    if (access == Access.Write) {
+      if (within(readOnlyRoots))
+        throw new WorkspaceAgentException(
+          s"Path '$relativePath' is read-only in this sandbox (${config.readOnlyPaths.mkString(", ")})",
+          "PATH_READ_ONLY",
+          None
+        )
+      if (CommandPolicy.namesGitMetadata(place, realRoot, realRoot))
+        throw new WorkspaceAgentException(
+          s"Path '$relativePath' names '.git' or a path inside one; git reads its configuration, hooks and attributes " +
+            "there and runs the programs they name, so the file operations may not write it",
+          "PATH_NOT_ALLOWED",
+          None
+        )
+    }
+  }
 
-    normalized
+  /**
+   * `relativePath` for an operation that follows it (a read, a write through a link): checked by [[checkPolicy]] on
+   * what it names on disk, and returned as the lexical path the operation uses.
+   */
+  private def resolvePath(relativePath: String, access: Access = Access.Read): Path = {
+    val lex = lexical(relativePath)
+    checkPolicy(relativePath, effective(lex), access)
+    lex
+  }
+
+  /**
+   * `relativePath` for an operation on the entry itself, which never follows it (a delete, a snapshot of a link as
+   * itself): checked by [[checkPolicy]] on [[entryOf]], so a link whose target is outside the workspace can be removed,
+   * and an entry reached through an aliased directory is judged where it really is.
+   */
+  private def resolveEntry(relativePath: String, access: Access): Path = {
+    val lex = lexical(relativePath)
+    checkPolicy(relativePath, entryOf(lex), access)
+    lex
   }
 
   /**
@@ -117,42 +169,6 @@ class WorkspaceAgentInterfaceImpl(
   private def effective(path: Path): Path = effective(path, 0)
 
   /**
-   * `relativePath` as an entry of its directory, for what acts on the entry itself and never follows it (a delete, a
-   * snapshot of a link as itself): when it names a symbolic link, only its directory is held to the path checks (as
-   * [[resolvePath]] holds any path), and the link is not followed, so a link whose target is outside the workspace or
-   * the allowed paths can still be removed. Anything else is [[resolvePath]]'s.
-   */
-  private def resolveEntry(relativePath: String): Path = {
-    val lexical = Try(rootPath.resolve(relativePath).normalize()).toOption
-    lexical.filter(p => p.startsWith(rootPath) && p != rootPath && Files.isSymbolicLink(p)) match {
-      case Some(link) =>
-        // the entry where its directory really is (links above it resolved, the entry itself not followed)
-        val onDisk = effective(link.getParent).resolve(link.getFileName)
-        if (!onDisk.startsWith(effective(rootPath)))
-          throw new WorkspaceAgentException(
-            s"Path '$relativePath' leads outside the workspace through a link",
-            "PATH_ESCAPE_ATTEMPT",
-            None
-          )
-        // allowed when it is, or is beneath, an allowed path - by its text, and where it really is
-        def allowed(a: Path) = link.startsWith(a) && (a == link || onDisk.startsWith(effective(a)))
-        if (allowedRoots.nonEmpty && !allowedRoots.exists(allowed))
-          throw new WorkspaceAgentException(
-            s"Path '$relativePath' is outside the sandbox's allowed paths (${config.allowedPaths.mkString(", ")})",
-            "PATH_NOT_ALLOWED",
-            None
-          )
-        link
-      case None => resolvePath(relativePath)
-    }
-  }
-
-  /**
-   * Whether an entry a walk produced passes the same checks as a path asked for ([[resolvePath]]): a link beneath an
-   * allowed directory that leads outside it, or outside the workspace, is left out of a listing or a search before
-   * anything follows it.
-   */
-  /**
    * The entries within `dir`, to `depth`, as `Files.walk` gives them, but with `dir` itself followed when it is a link:
    * a walk does not follow its starting link, while every other operation (a listing, a read) does. Each entry is
    * named beneath `dir` as written, so its path is the one the caller asked about, and [[withinPolicy]] judges it.
@@ -162,6 +178,7 @@ class WorkspaceAgentInterfaceImpl(
     Files.walk(start, depth).map(p => dir.resolve(start.relativize(p)))
   }
 
+  /** Whether an entry a walk produced passes the path policy, before anything follows it. */
   private def withinPolicy(entry: Path): Boolean = Try(resolvePath(rootPath.relativize(entry).toString)).isSuccess
 
   /**
@@ -197,18 +214,6 @@ class WorkspaceAgentInterfaceImpl(
   // compared by its text and, through `effective`, by what it names on disk when the check runs.
   private val allowedRoots: List[Path]  = config.allowedPaths.map(p => rootPath.resolve(p).normalize())
   private val readOnlyRoots: List[Path] = config.readOnlyPaths.map(p => rootPath.resolve(p).normalize())
-
-  /**
-   * Refuses (`PATH_READ_ONLY`) a mutation of a path the sandbox's `readOnlyPaths` cover (#870), by its text or by
-   * what it names on disk: a link elsewhere into a read-only directory is read-only too.
-   */
-  private def refuseReadOnly(path: String, resolved: Path): Unit =
-    if (readOnlyRoots.exists(ro => resolved.startsWith(ro) || effective(resolved).startsWith(effective(ro))))
-      throw new WorkspaceAgentException(
-        s"Path '$path' is read-only in this sandbox (${config.readOnlyPaths.mkString(", ")})",
-        "PATH_READ_ONLY",
-        None
-      )
 
   /**
    * The lock every mutating file operation holds, so a compare-and-set (`expectedHash`) is atomic against every other
@@ -342,22 +347,6 @@ class WorkspaceAgentInterfaceImpl(
       throw new WorkspaceAgentException(
         s"Path '$path' changed: it is now $current, not $expected",
         "HASH_MISMATCH",
-        None
-      )
-  }
-
-  /**
-   * Refuses (`PATH_NOT_ALLOWED`) a write to `.git` or a path inside one, as written or through a link: git reads its
-   * configuration, hooks and attributes there and runs the programs they name, and a `.git` file points git at another
-   * repository (#1721).
-   */
-  private def refuseGitMetadata(path: String, resolved: Path): Unit = {
-    val realRoot = Try(rootPath.toRealPath()).getOrElse(rootPath)
-    if (CommandPolicy.namesGitMetadata(resolved, rootPath, realRoot))
-      throw new WorkspaceAgentException(
-        s"Path '$path' names '.git' or a path inside one; git reads its configuration, hooks and attributes there " +
-          "and runs the programs they name, so the file operations may not write it",
-        "PATH_NOT_ALLOWED",
         None
       )
   }
@@ -556,9 +545,7 @@ class WorkspaceAgentInterfaceImpl(
     createDirectories: Option[Boolean] = None,
     expectedHash: Option[String] = None
   ): WriteFileResponse = mutating {
-    val resolvedPath = resolvePath(path)
-    refuseGitMetadata(path, resolvedPath)
-    refuseReadOnly(path, resolvedPath)
+    val resolvedPath = resolvePath(path, Access.Write)
     refuseSpecial(path, resolvedPath)
     val writeMode  = mode.getOrElse("overwrite")
     val createDirs = createDirectories.getOrElse(false)
@@ -643,8 +630,6 @@ class WorkspaceAgentInterfaceImpl(
         val target = effective(resolvedPath)
         // the file it names, not only the path as written, is held to every write rule: a link to a missing file under
         // .git or a read-only path is refused before anything is created
-        refuseGitMetadata(path, target)
-        refuseReadOnly(path, target)
         if (createDirs) Files.createDirectories(target.getParent)
         // created as an ordinary new file is (the process umask applies), not with a temporary file's fixed rw-------
         val temp = target.resolveSibling(s".llm4s-write-${java.util.UUID.randomUUID()}.tmp")
@@ -662,9 +647,7 @@ class WorkspaceAgentInterfaceImpl(
           // checked again just before the move: the path must still name the same file, through the same links, and
           // still pass every path check. File operations and this runner's commands cannot change it meanwhile (the
           // mutation lock and the command gate); this catches a writer outside the runner, up to the move itself.
-          val again = effective(resolvePath(path))
-          refuseReadOnly(path, resolvePath(path))
-          refuseGitMetadata(path, effective(resolvePath(path)))
+          val again = effective(resolvePath(path, Access.Write))
           if (again != target)
             throw new WorkspaceAgentException(
               s"Path '$path' changed while it was written: it now leads to another file; nothing was written",
@@ -715,9 +698,7 @@ class WorkspaceAgentInterfaceImpl(
     path: String,
     operations: List[FileOperation]
   ): ModifyFileResponse = mutating {
-    val resolvedPath = resolvePath(path)
-    refuseGitMetadata(path, resolvedPath)
-    refuseReadOnly(path, resolvedPath)
+    val resolvedPath = resolvePath(path, Access.Write)
 
     if (!Files.exists(resolvedPath)) {
       throw new WorkspaceAgentException(
@@ -803,7 +784,7 @@ class WorkspaceAgentInterfaceImpl(
     mutating {
       import FileSnapshotResponse.Kind
       // a link described as itself is never followed; anything else is resolved and checked as any path
-      val resolved = if (followLinks) resolvePath(path) else resolveEntry(path)
+      val resolved = if (followLinks) resolvePath(path) else resolveEntry(path, Access.Read)
       def response(kind: String, hash: String, size: Long, content: Option[String], error: Option[String]) =
         FileSnapshotResponse("local", path, kind, hash, size, content, error)
       if (!followLinks && Files.isSymbolicLink(resolved))
@@ -869,11 +850,9 @@ class WorkspaceAgentInterfaceImpl(
   override def deleteFile(path: String, expectedHash: Option[String] = None): DeleteFileResponse =
     mutating {
       // the entry itself: a link is removed, never followed, so only its directory is held to the path checks
-      val resolved = resolveEntry(path)
+      val resolved = resolveEntry(path, Access.Write)
       if (resolved == rootPath)
         throw new WorkspaceAgentException("The workspace root cannot be deleted", "INVALID_ARGUMENT", None)
-      refuseGitMetadata(path, resolved)
-      refuseReadOnly(path, resolved)
       expectedHash.foreach(checkExpected(path, resolved, _, entryHash))
       if (!Files.exists(resolved, java.nio.file.LinkOption.NOFOLLOW_LINKS))
         throw new WorkspaceAgentException(s"File '$path' does not exist", "FILE_NOT_FOUND", None)
