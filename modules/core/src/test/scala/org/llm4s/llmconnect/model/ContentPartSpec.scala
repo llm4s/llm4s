@@ -150,6 +150,19 @@ class ContentPartSpec extends AnyFlatSpec with Matchers with EitherValues {
     ).foreach(json => an[Exception] should be thrownBy read[ContentPart](json))
   }
 
+  it should "refuse an oversized inline payload on its encoded length, before decoding it" in {
+    val atLimit = java.util.Base64.getEncoder.encodeToString(Array.fill[Byte](ContentPart.MaxInlineBytes)(0))
+    val json = ujson.Obj(
+      "type"      -> "image",
+      "mediaType" -> "image/png",
+      "source"    -> ujson.Obj("type" -> "inline", "data" -> atLimit)
+    )
+    read[ContentPart](json).asInstanceOf[ContentPart.Image].source.asInstanceOf[MediaSource.Inline].length shouldBe
+      ContentPart.MaxInlineBytes
+    json("source")("data") = atLimit + "AAAA"
+    an[Exception] should be thrownBy read[ContentPart](json)
+  }
+
   it should "refuse a media type of the wrong family, and an unknown part" in {
     val wrongFamily = ujson.Obj(
       "type"      -> "image",

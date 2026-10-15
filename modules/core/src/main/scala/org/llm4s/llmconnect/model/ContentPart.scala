@@ -184,9 +184,17 @@ object ContentPart {
   private def valid(part: Result[ContentPart]): ContentPart =
     part.fold(e => throw new IllegalArgumentException(s"invalid content part: ${e.message}"), identity)
 
+  // the base64 length of MaxInlineBytes bytes
+  private val MaxInlineBase64Chars: Int = (MaxInlineBytes + 2) / 3 * 4
+
   private def readSource(json: ujson.Value): MediaSource = json("type").str match {
-    case "url"          => MediaSource.Url(URI.create(json("uri").str))
-    case "inline"       => MediaSource.Inline(IArray.unsafeFromArray(Base64.getDecoder.decode(json("data").str)))
+    case "url"    => MediaSource.Url(URI.create(json("uri").str))
+    case "inline" =>
+      // checked on its encoded length before it is decoded, so oversized JSON never allocates its bytes
+      val data = json("data").str
+      if (data.length > MaxInlineBase64Chars)
+        throw new IllegalArgumentException(s"an inline part of ${data.length} base64 characters is over the bound")
+      MediaSource.Inline(IArray.unsafeFromArray(Base64.getDecoder.decode(data)))
     case "providerFile" => MediaSource.ProviderFile(json("provider").str, json("id").str)
     case other          => throw new IllegalArgumentException(s"unknown media source '$other'")
   }
