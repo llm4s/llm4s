@@ -119,6 +119,24 @@ class ProcessRegistrySpec extends AnyFlatSpec with Matchers {
     assertTrackedUntilExit(workspace, stub, owner, "s1")
   }
 
+  "A killed command" should "take the processes it started with it" in {
+    assume(!isWindowsHost)
+    val workspace = new WorkspaceAgentInterfaceImpl(
+      Files.createTempDirectory("process-tree").toString,
+      isWindowsHost,
+      Some(WorkspaceSandboxConfig.Permissive)
+    )
+    val entry = workspace.processes
+      .spawn(new Object, "tree", new java.lang.ProcessBuilder("sh", "-c", "sleep 60 & echo $!; wait"))
+      .toOption
+      .get
+    val child =
+      new java.io.BufferedReader(new java.io.InputStreamReader(entry.process.getInputStream)).readLine().toLong
+    ProcessHandle.of(child).map[Boolean](_.isAlive).orElse(false) shouldBe true
+    workspace.processes.kill(entry) shouldBe true
+    eventually(!ProcessHandle.of(child).map[Boolean](_.isAlive).orElse(false)) shouldBe true
+  }
+
   "A command waiting to start when its client leaves" should "never start" in {
     val workspace = workspaceWith(new StubbornProcess)
     val owner     = new Object

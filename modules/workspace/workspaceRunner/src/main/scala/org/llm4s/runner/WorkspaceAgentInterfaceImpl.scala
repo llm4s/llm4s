@@ -505,8 +505,16 @@ class WorkspaceAgentInterfaceImpl(
 
     val metadata = createFileMetadata(resolvedPath)
 
-    Using(Source.fromFile(checkedForRead(path, resolvedPath).toFile, StandardCharsets.UTF_8.name())) { source =>
-      val lines      = source.getLines().toList
+    // read bounded by the limit, whatever the file has grown to since its size was checked, then decoded strictly
+    val read = readBounded(checkedForRead(path, resolvedPath)).getOrElse(
+      throw new WorkspaceAgentException(
+        s"File '$path' exceeds maximum size limit (${maxFileSize} bytes)",
+        "SIZE_LIMIT_EXCEEDED",
+        None
+      )
+    )
+    Try(StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(read)).toString).map { text =>
+      val lines      = Source.fromString(text).getLines().toList
       val totalLines = lines.size
 
       val start = startLine.map(l => math.max(1, math.min(l, totalLines)) - 1).getOrElse(0)

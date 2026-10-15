@@ -119,10 +119,28 @@ final private[runner] class ProcessRegistry(
         case Right(entry) =>
           // the only removal: when the process has really exited, it leaves the registry and gives back its permit
           entry.process.onExit().whenComplete { (_, _) =>
+            // what it left running is stopped before its permit is given back: a file change never runs beside it
+            sweepOrphans()
             running.remove((owner, commandId), entry)
             gate.release()
           }: Unit
           Right(entry)
+      }
+    }
+
+  /**
+   * Kills what a command that exited on its own left behind. A descendant whose parent has exited is re-parented to
+   * the init process, which in the runner's container is the runner itself (PID 1): every child of the runner that is
+   * no tracked command is such an orphan, and is killed with its tree. Outside a container (the runner not PID 1) an
+   * orphan goes to the host's init and cannot be found; there the container is the boundary. A file operation's own
+   * helper (`getfacl`) never runs then: it needs the whole gate, and the exiting command still holds its permit.
+   */
+  private def sweepOrphans(): Unit =
+    if (ProcessHandle.current().pid() == 1L) {
+      val tracked = running.values().asScala.flatMap(e => Try(e.process.pid()).toOption).toSet
+      ProcessHandle.current().children().toList.asScala.filterNot(h => tracked(h.pid())).foreach { orphan =>
+        Try(orphan.descendants().toList.asScala).getOrElse(Nil).foreach(d => Try(d.destroyForcibly()): Unit)
+        Try(orphan.destroyForcibly()): Unit
       }
     }
 
@@ -139,6 +157,9 @@ final private[runner] class ProcessRegistry(
   def kill(entry: RunningCommand, asCancellation: Boolean = true): Boolean = {
     // a cancellation (by the client, a disconnect, shutdown) is reported as one; a timeout's kill is not
     if (asCancellation) entry.cancelled.set(true)
+    // its whole tree, children first, collected before the parent dies and they are re-parented out of reach: a
+    // command's build tool or shell never leaves a process changing the workspace after it is killed
+    Try(entry.process.descendants().toList.asScala).getOrElse(Nil).foreach(d => Try(d.destroyForcibly()): Unit)
     Try(entry.process.destroyForcibly()).failed.foreach { e =>
       logger.error(s"Error killing command ${entry.commandId}: ${e.getMessage}", e)
     }
