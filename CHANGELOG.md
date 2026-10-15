@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- The net change since 0.5.0, by area. Add an entry to its area's list; a follow-up to unreleased work edits
      its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
 
+### Agent harness (Phase 3)
+
+- **Added** backend SPIs: `FileBackend` (state, composite, store), `SandboxBackend`, `LongTermStore` and `FileBackendContract`
+  [#1904](https://github.com/llm4s/llm4s/issues/1904); [design §4.25](docs/design/typed-agent-runtime/4.25-stage-3-slice-c3-backend-spis.md).
+
 ## [0.5.0] - 2026-10-15
 
 ### Highlights
@@ -359,8 +364,6 @@ OpenAI-compatible provider); workload identity, configurable timeouts, testkits 
   [#1903](https://github.com/llm4s/llm4s/issues/1903); [design
   §4.23](docs/design/typed-agent-runtime/4.23-stage-3-slice-c2-tool-permissions-timeouts-locks.md),
   [guide](docs/guide/agents/index.md#tool-permissions-timeouts-and-locks).
-- **Added** backend SPIs: `FileBackend` (state, composite, store), `SandboxBackend`, `LongTermStore` and `FileBackendContract`
-  [#1904](https://github.com/llm4s/llm4s/issues/1904); [design §4.25](docs/design/typed-agent-runtime/4.25-stage-3-slice-c3-backend-spis.md).
 - **Added** replay of external effects: `ReplayGuard`, `EffectKey` and `ReplayContract`
   [#1921](https://github.com/llm4s/llm4s/issues/1921); [design
   §4.24](docs/design/typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md).
