@@ -141,6 +141,8 @@ object RunnerMain extends cask.MainRoutes {
    * its early cancellations go with it), and its running processes are killed - this client's only.
    */
   private def disconnect(channel: cask.WsChannelActor, why: String): Unit = {
+    // the connection first: from here on nothing of this client counts as connected
+    connections.remove(channel): Unit
     clientEarlyCancels.remove(channel): Unit
     Option(clientProcesses.remove(channel)).foreach { processes =>
       processes.forEach { (_, running) =>
@@ -156,7 +158,6 @@ object RunnerMain extends cask.MainRoutes {
         }
       }
     }
-    connections.remove(channel): Unit
   }
 
   private def handleWebSocketMessage(channel: cask.WsChannelActor, message: String): Unit = {
@@ -317,20 +318,25 @@ object RunnerMain extends cask.MainRoutes {
    * ExecuteCommandResponse. The command goes through the same checks and argv execution as the direct
    * `executeCommand` (`WorkspaceAgentInterfaceImpl.prepareCommand`), never through a shell (#1756).
    */
-  private def handleExecuteCommand(channel: cask.WsChannelActor, cmd: ExecuteCommandCommand): Unit = {
-    // Ensure client has a process map (per-client isolation)
-    val processes = clientProcesses.computeIfAbsent(channel, _ => new ConcurrentHashMap[String, RunningCommand]())
-    // connected while this connection still owns its map: the close handlers remove it, then cancel what is in it
-    Future(
-      commandExecutor.execute(
-        cmd,
-        processes,
-        message => sendMessage(channel, message),
-        () => clientProcesses.get(channel) eq processes,
-        earlyCancels(channel)
-      )
-    )(ec)
-  }
+  private def handleExecuteCommand(channel: cask.WsChannelActor, cmd: ExecuteCommandCommand): Unit =
+    // a connection that has already gone gets no per-client state, and its command is dropped
+    if (!connections.containsKey(channel))
+      logger.warn(s"Dropped command ${cmd.commandId}: its connection has closed")
+    else {
+      // Ensure client has a process map (per-client isolation)
+      val processes = clientProcesses.computeIfAbsent(channel, _ => new ConcurrentHashMap[String, RunningCommand]())
+      // connected while the connection is open and still owns this map: `disconnect` removes the connection first,
+      // then the map, then cancels what is in it, so a map made after it closed never counts
+      Future(
+        commandExecutor.execute(
+          cmd,
+          processes,
+          message => sendMessage(channel, message),
+          () => connections.containsKey(channel) && (clientProcesses.get(channel) eq processes),
+          earlyCancels(channel)
+        )
+      )(ec)
+    }
 
   private def sendMessage(channel: cask.WsChannelActor, message: WebSocketMessage): Unit = {
     val attempt = Try(write(message)).toEither
