@@ -10,11 +10,12 @@ import com.typesafe.sbt.packager.Keys.{ packageName, maintainer }
  */
 object WorkspaceRunnerDocker {
 
-  // Extra system packages and tooling currently installed in the image
+  // Extra system packages and tooling currently installed in the image. `acl` (getfacl, setfacl) lets the runner keep a
+  // file's POSIX ACL when a compare-and-set write replaces it (#1906).
   // Note: This is the existing behaviour moved out of build.sbt for clarity.
   val devToolingCommands: Seq[CmdLike] = Seq(
     Cmd("USER", "root"),
-    Cmd("RUN", "apt-get update && apt-get install -y curl gnupg apt-transport-https ca-certificates zip unzip"),
+    Cmd("RUN", "apt-get update && apt-get install -y curl gnupg apt-transport-https ca-certificates zip unzip acl"),
     // Use the modern signed-by keyring approach. `apt-key` was deprecated long ago and
     // is no longer present in recent base images (Ubuntu 24.04+/temurin), so piping the
     // key into `apt-key add` fails with "apt-key: not found".
