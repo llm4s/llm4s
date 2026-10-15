@@ -549,6 +549,10 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
       r should include("[output cut at 256 characters]")
     }
     Bounded.error("short", 256) shouldBe "short"
+    // a valid pair renders as its two units: a message that fits exactly is not cut
+    val emoji = "😀" * 122 // 244 units, + {"error":""} = 256
+    Bounded.error(emoji, 256) shouldBe emoji
+    ujson.Obj("error" -> emoji).render().length shouldBe 256
     val cut = Bounded.error("\u0001" * 100 + "😀" * 100, 256)
     ujson.Obj("error" -> cut).render().length should be <= 256
   }

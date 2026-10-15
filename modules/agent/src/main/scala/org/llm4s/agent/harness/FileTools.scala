@@ -503,22 +503,27 @@ private[harness] object Bounded:
     var total = 0
     var i     = 0
     while i < s.length && total <= max do
-      total += escapedWidth(s.charAt(i))
-      i += 1
+      val (w, n) = escapedAt(s, i)
+      total += w
+      i += n
     total
+
+  /**
+   * The rendered width of the character at `at`, and how many UTF-16 units it is: a valid surrogate pair is one
+   * character of two units rendered as itself, a lone surrogate an escape. Both counts use it, so they agree.
+   */
+  private def escapedAt(s: String, at: Int): (Int, Int) =
+    if Character.isHighSurrogate(s.charAt(at)) && at + 1 < s.length && Character.isLowSurrogate(s.charAt(at + 1))
+    then (2, 2)
+    else (escapedWidth(s.charAt(at)), 1)
 
   /** The longest prefix of `s` that takes at most `max` characters escaped, never splitting a surrogate pair. */
   private def escapedPrefix(s: String, max: Int): String =
     var total = 0
     var i     = 0
-    // a surrogate pair is kept whole: both halves fit, or neither
-    def width(at: Int): (Int, Int) =
-      if Character.isHighSurrogate(s.charAt(at)) && at + 1 < s.length && Character.isLowSurrogate(s.charAt(at + 1))
-      then (2, 2)
-      else (escapedWidth(s.charAt(at)), 1)
-    var done = false
+    var done  = false
     while !done && i < s.length do
-      val (w, n) = width(i)
+      val (w, n) = escapedAt(s, i)
       if total + w > max then done = true
       else
         total += w
