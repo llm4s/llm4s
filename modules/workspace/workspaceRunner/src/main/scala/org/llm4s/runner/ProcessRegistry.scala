@@ -129,7 +129,8 @@ final private[runner] class ProcessRegistry(
             // what it left running is stopped, and waited for, before its permit is given back: a file change never
             // runs beside a process of this command. One that survives its kill keeps the entry tracked, holding the
             // permit, until it has really exited, as a surviving parent does
-            val leftovers = (entry.tree.asScala.toList ++ sweepOrphans()).distinct.filter(_.isAlive)
+            val leftovers =
+              (entry.tree.asScala.toList ++ sweepOrphans(Try(entry.process.pid()).toOption)).distinct.filter(_.isAlive)
             leftovers.foreach(h => Try(h.destroyForcibly()): Unit)
             def done(): Unit = {
               running.remove((owner, commandId), entry)
@@ -155,22 +156,35 @@ final private[runner] class ProcessRegistry(
    * no tracked command is such an orphan, and is killed with its tree. Outside a container (the runner not PID 1) an
    * orphan goes to the host's init and cannot be found; there the container is the boundary. A file operation's own
    * helper (`getfacl`) never runs then: it needs the whole gate, and the exiting command still holds its permit.
+   *
+   * An orphan cannot be told apart from the re-parented descendant of a command still running, so the sweep is made
+   * only by the last command to exit (`self` is the exiting one): while another runs, nothing is swept, and no file
+   * operation can run either (that command holds a permit), so an orphan never runs beside a file change; the last
+   * command's exit sweeps every orphan before its permit is given back.
    */
-  private def sweepOrphans(): List[ProcessHandle] =
+  private def sweepOrphans(self: Option[Long]): List[ProcessHandle] =
     if (ProcessHandle.current().pid() != 1L) Nil
     else
       ProcessRegistry.ledger.synchronized {
-        // every process the runner starts itself is in the ledger from its start (a command, a helper), so a child that
-        // is in neither is a re-parented orphan, never a process being started or a helper at work
-        val own = ProcessRegistry.commands.asScala ++ ProcessRegistry.helpers.asScala
-        ProcessHandle.current().children().toList.asScala.filterNot(h => own.contains(h.pid())).toList.flatMap {
-          orphan =>
-            val tree = Try(orphan.descendants().toList.asScala.toList).getOrElse(Nil)
-            tree.foreach(d => Try(d.destroyForcibly()): Unit)
-            Try(orphan.destroyForcibly()): Unit
-            orphan :: tree
+        val othersRunning = ProcessRegistry.commands.asScala.exists { pid =>
+          !self.contains(pid.longValue) && ProcessHandle.of(pid).map[Boolean](_.isAlive).orElse(false)
         }
+        if (othersRunning) Nil
+        else sweepAll()
       }
+
+  private def sweepAll(): List[ProcessHandle] =
+    ProcessRegistry.ledger.synchronized {
+      // every process the runner starts itself is in the ledger from its start (a command, a helper), so a child that
+      // is in neither is a re-parented orphan, never a process being started or a helper at work
+      val own = ProcessRegistry.commands.asScala ++ ProcessRegistry.helpers.asScala
+      ProcessHandle.current().children().toList.asScala.filterNot(h => own.contains(h.pid())).toList.flatMap { orphan =>
+        val tree = Try(orphan.descendants().toList.asScala.toList).getOrElse(Nil)
+        tree.foreach(d => Try(d.destroyForcibly()): Unit)
+        Try(orphan.destroyForcibly()): Unit
+        orphan :: tree
+      }
+    }
 
   /** The owner's process `commandId`, while it runs. */
   def find(owner: AnyRef, commandId: String): Option[RunningCommand] = Option(running.get((owner, commandId)))
@@ -187,11 +201,10 @@ final private[runner] class ProcessRegistry(
     if (asCancellation) entry.cancelled.set(true)
     // its whole tree, children first, collected before the parent dies and they are re-parented out of reach: a
     // command's build tool or shell never leaves a process changing the workspace after it is killed
-    val tree = Try(entry.process.descendants().toList.asScala.toList).getOrElse(Nil)
-    tree.foreach { d =>
-      entry.tree.add(d)
-      Try(d.destroyForcibly()): Unit
-    }
+    Try(entry.process.descendants().toList.asScala).getOrElse(Nil).foreach(entry.tree.add(_): Unit)
+    // every descendant ever found, this kill's and an earlier one's: a repeated kill still waits for a survivor
+    val tree = entry.tree.asScala.toList.filter(_.isAlive)
+    tree.foreach(d => Try(d.destroyForcibly()): Unit)
     Try(entry.process.destroyForcibly()).failed.foreach { e =>
       logger.error(s"Error killing command ${entry.commandId}: ${e.getMessage}", e)
     }
