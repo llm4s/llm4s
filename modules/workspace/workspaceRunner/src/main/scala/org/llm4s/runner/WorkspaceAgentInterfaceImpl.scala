@@ -865,7 +865,8 @@ class WorkspaceAgentInterfaceImpl(
         )
       ).toOption
         .filter(_.isDirectory)
-        .flatMap(a => Option(a.fileKey()))
+        // its file key where the platform has one, else (Windows) its creation time: either tells it from a replacement
+        .map(a => Option(a.fileKey()).getOrElse(a.creationTime()))
     var createdDirs = List.empty[(Path, Option[AnyRef])] // deepest first
     def rollBack(): Unit =
       createdDirs.foreach { case (d, made) =>

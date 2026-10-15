@@ -184,7 +184,11 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     Files.createDirectories(root.resolve("src/.git"))
     Files.write(root.resolve("src/.git/config"), "x".getBytes(StandardCharsets.UTF_8))
     Files.write(root.resolve("src/a.scala"), "x".getBytes(StandardCharsets.UTF_8))
-    val listed = workspace().exploreFiles(".", recursive = Some(true), maxDepth = Some(10)).files.map(_.path)
+    // as the platform writes a path: the runner reports its own separator
+    val listed = workspace()
+      .exploreFiles(".", recursive = Some(true), maxDepth = Some(10))
+      .files
+      .map(_.path.replace(java.io.File.separatorChar, '/'))
     listed should contain("src/a.scala")
     listed.filter(p => p.contains(".git") || p.contains("node_modules")) shouldBe empty
   }
