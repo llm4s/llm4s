@@ -49,6 +49,18 @@ final private[runner] class ProcessRegistry(
   // set by killAll, under the registry's lock: from then on nothing is started, so no process outlives the runner
   @volatile private var closed = false
 
+  // owners whose connection has closed (killOwner), under the registry's lock: nothing more is started for them
+  private val closedOwners = java.util.Collections.newSetFromMap(new java.util.WeakHashMap[AnyRef, java.lang.Boolean]())
+
+  /** Thrown inside the lock when `proceed` says no: the command was cancelled, or its client left, while it waited. */
+  private object NotStarted extends RuntimeException("Cancelled before it started", null, false, false)
+
+  /**
+   * `body` under the registry's lock, the one `spawn` asks `proceed` and starts under: a cancellation recorded here,
+   * for a command not yet registered, is seen by that command's `spawn`, or the command is registered and found.
+   */
+  def atomically[A](body: => A): A = synchronized(body)
+
   private def busy(what: String) =
     new WorkspaceAgentException(
       s"$what is in progress in the workspace; nothing was started (waited $gateWait)",
@@ -69,15 +81,13 @@ final private[runner] class ProcessRegistry(
     proceed: () => Boolean = () => true
   ): Either[WorkspaceAgentException, RunningCommand] =
     if (!gate.tryAcquire(gateWait.toMillis, TimeUnit.MILLISECONDS)) Left(busy("A file change"))
-    // asked again once the gate is had: a command cancelled (or whose client left) while it waited never starts
-    else if (!proceed()) {
-      gate.release()
-      Left(new WorkspaceAgentException("Cancelled before it started", ProcessRegistry.NotStarted, None))
-    } else {
-      // start and register under the registry's lock, so killAll never misses a process between the two
+    else {
+      // asked, started and registered in one step under the registry's lock: killAll and killOwner never miss a
+      // process between the two, and a command cancelled (or whose client left) while it waited never starts
       val started = synchronized {
         // one process per id and owner: a second would hide the first from cancellation
         (if (closed) scala.util.Failure(new IllegalStateException("The runner is shutting down"))
+         else if (closedOwners.contains(owner) || !proceed()) scala.util.Failure(NotStarted)
          else if (running.containsKey((owner, commandId)))
            scala.util.Failure(new IllegalStateException(s"Command $commandId is already running"))
          else Try(start(builder))).map { process =>
@@ -94,6 +104,9 @@ final private[runner] class ProcessRegistry(
         }
       }
       started.toEither match {
+        case Left(NotStarted) =>
+          gate.release()
+          Left(new WorkspaceAgentException("Cancelled before it started", ProcessRegistry.NotStarted, None))
         case Left(e) =>
           gate.release()
           Left(
@@ -136,7 +149,11 @@ final private[runner] class ProcessRegistry(
 
   /** Kills every process of `owner` (its connection closed); each stays tracked until it exits. */
   def killOwner(owner: AnyRef): Unit =
-    running.values().asScala.filter(_.owner eq owner).toList.foreach(kill(_): Unit)
+    synchronized {
+      // closed in the same step: a command of this owner still waiting to start is refused, never started after
+      closedOwners.add(owner)
+      running.values().asScala.filter(_.owner eq owner).toList
+    }.foreach(kill(_): Unit)
 
   /**
    * Kills every process (shutdown); each stays tracked until it exits. The registry is closed in the same step, so a

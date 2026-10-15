@@ -121,8 +121,12 @@ final private[runner] class WebSocketCommandExecutor(
     cancelledEarly: Option[EarlyCancellations] = None,
     onOverflow: () => Unit = () => ()
   ): Unit =
-    registry.find(owner, commandId) match {
-      case Some(running) =>
+    // looked up, or recorded as an early cancellation, under the registry's lock: a command waiting at the gate either
+    // is registered and found here, or sees the cancellation as its spawn decides whether to start
+    registry.atomically(
+      registry.find(owner, commandId).toRight(cancelledEarly.forall(_.add(commandId)))
+    ) match {
+      case Right(running) =>
         // killed through the registry, which keeps it tracked until it has exited
         registry.kill(running): Unit
         logger.info(s"Command $commandId cancelled by client")
@@ -132,11 +136,11 @@ final private[runner] class WebSocketCommandExecutor(
           send(CommandCompletedMessage(commandId, 143, durationMs.millis))
         }
 
-      case None =>
-        // it may still be waiting at the gate: remember it, so it never starts. Always kept: a cancellation is never
+      case Left(kept) =>
+        // it may still be waiting at the gate: remembered, so it never starts. Always kept: a cancellation is never
         // dropped, and each is forgotten only once no command could still be waiting for it (EarlyCancellations)
         // a client past the bound is disconnected, which stops all its commands, rather than any cancellation dropped
-        cancelledEarly.foreach(early => if (!early.add(commandId)) onOverflow())
+        if (!kept) onOverflow()
         logger.warn(s"Cancellation requested for unknown or non-running command id $commandId")
         send(ErrorMessage(s"No running command found for id $commandId", "UNKNOWN_COMMAND_ID", Some(commandId)))
     }

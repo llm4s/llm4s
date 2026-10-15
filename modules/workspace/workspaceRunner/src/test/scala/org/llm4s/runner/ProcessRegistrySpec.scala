@@ -119,6 +119,15 @@ class ProcessRegistrySpec extends AnyFlatSpec with Matchers {
     assertTrackedUntilExit(workspace, stub, owner, "s1")
   }
 
+  "A command waiting to start when its client leaves" should "never start" in {
+    val workspace = workspaceWith(new StubbornProcess)
+    val owner     = new Object
+    workspace.processes.killOwner(owner)
+    workspace.processes.spawn(owner, "late", new java.lang.ProcessBuilder("true")).left.map(_.code) shouldBe
+      Left(ProcessRegistry.NotStarted)
+    workspace.processes.all shouldBe empty
+  }
+
   "A command waiting to start at shutdown" should "never start" in {
     val stub      = new StubbornProcess
     val workspace = workspaceWith(stub)
