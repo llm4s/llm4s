@@ -81,15 +81,38 @@ final class ToolOutputOffload(
               shown(content, preview(result, large)),
               update.combine(StateUpdate.update(key, OffloadUpdate.Put(result, maxTotalBytes)))
             )
+      // an error over the threshold is cut before it is stored: it is the model's to read, not to page through
+      case ToolOutcome.Error(message) if message.length.toLong > thresholdChars =>
+        ToolOutcome.Error(capped(message))
       case other => other
 
+  /**
+   * Sends every tool result of the request within the threshold, whoever produced it: an outcome given instead of
+   * running the tool - the loop's argument, approval and timeout errors, a denial from a middleware outside this one -
+   * never reaches `wrapToolCall`, so its text is cut here, as it is sent. A `Success` over the threshold was already
+   * offloaded. Media parts are kept.
+   */
   override def wrapModelCall(request: ModelRequest, context: ModelContext)(
     next: ModelRequest => Result[ModelResponse]
   ): Result[ModelResponse] =
     val dropped = coveredBySummary(context.state)
-    next(request).map(r =>
+    val sent = request.messages.map {
+      case t: ToolMessage if ContentPart.text(t.parts).length.toLong > thresholdChars =>
+        ToolMessage(
+          ContentPart.Text(capped(ContentPart.text(t.parts))) +: t.parts.filter(ContentPart.isMedia),
+          t.toolCallId
+        )
+      case other => other
+    }
+    next(if sent == request.messages then request else request.withMessages(sent)).map(r =>
       if dropped.isEmpty then r else r.addUpdate(StateUpdate.update(key, OffloadUpdate.Drop(dropped)))
     )
+
+  /** `text` cut to the threshold, its last characters a note saying how much was cut. */
+  private def capped(text: String): String =
+    val note =
+      s"\n[cut: this tool result is ${text.length} characters, over this agent's limit of $thresholdTokens tokens]"
+    SummarizationMiddleware.cut(text, thresholdChars - note.length) + note
 
   /** What the model is shown in place of `full`: where it is stored, and its first lines. */
   private def preview(result: OffloadedResult, full: String): String =

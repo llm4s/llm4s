@@ -435,6 +435,43 @@ its mutations hold, replays its external effects through `ReplayGuard`, and enfo
 limits. A backend over a host directory is not part of this release; it is tracked in
 [#1964](https://github.com/llm4s/llm4s/issues/1964).
 
+### Harness File Tools
+
+`FileTools(backend)` gives the model seven tools over any `FileBackend`: `ls`, `read_file`,
+`write_file`, `edit_file`, `delete`, `glob` and `grep` ([design §4.32](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.32-stage-3-slice-f1-filesystem-tools.md)).
+
+```scala
+import org.llm4s.agent.graph.tool.ToolSet
+import org.llm4s.agent.harness.{FileToolLimits, FileTools, StateFileBackend}
+
+for {
+  tools <- ToolSet.of(FileTools(StateFileBackend(), FileToolLimits(maxResultChars = 20000))*)
+  agent <- Agent.builder("coder", client).withTools(tools).build()
+} yield agent
+```
+
+- **Paths are absolute** (`/src/main.scala`); `.`, `..` and empty segments are refused.
+- **`read_file`** numbers lines from 1 and pages with `offset` (the line to start at) and `limit`
+  (default and at most `readLimit`, 2000), and says how many lines the file has. **`edit_file`**
+  replaces `old_string` with `new_string`, and refuses when `old_string` is absent, or occurs more
+  than once without `replace_all`.
+- **Bounded results.** Lines are cut at `maxLineChars`; `ls`, `glob` and `grep` stop at `maxResults`
+  and say so; every result a tool returns, an error's included, is at most `maxResultChars` characters (an outcome the loop or a middleware gives instead, such as a denial, is theirs).
+- **Order in one message.** Mutations take the backend's locks, so two edits of one file in one
+  message apply in order, the second against the first's result. Reads take no lock: a read in the
+  same message as a write may not see it (over thread state it sees the file as before the message).
+- **Permissions.** Each tool declares its resources: `Read` of the path for `ls` and `read_file`,
+  `Write` for `write_file` and `edit_file`, `Delete` for `delete`. `glob` and `grep` declare the
+  envelope of what they may read (`/src/**`, `/src/*.md`), which a `PermissionMiddleware` decides as
+  a whole, so a deny rule beneath the searched path denies the search. `ls` shows the names, not the
+  contents, of entries beneath a path it may read.
+- **Block and replay.** An output Block restores state files with the rest of the turn; writes to a
+  store are not undone. A store mutation that runs again after a crash replays its recorded outcome.
+- **Not with the host file tools.** `llm4s-agent-tools`' `ReadFileTool` and `WriteFileTool` have the
+  names `read_file` and `write_file`, and a `ToolSet` refuses duplicate names: use one suite or the
+  other.
+- `FileToolsContract` (`llm4s-agent-testkit`) runs the tools over your own `FileBackend`.
+
 ### Tool Permissions, Timeouts and Locks
 
 An `AgentToolSpec` can declare what a call touches, how long one run may take, and which locks it
@@ -724,18 +761,23 @@ in the thread, oldest evicted first beyond `maxTotalBytes` (4 MiB by default). M
 can read it:
 
 ```scala
-import org.llm4s.agent.harness.{CompositeBackend, OffloadBackend, StateFileBackend, ToolOutputOffload}
+import org.llm4s.agent.graph.tool.ToolSet
+import org.llm4s.agent.harness.{CompositeBackend, FileTools, OffloadBackend, StateFileBackend, ToolOutputOffload}
 
-// give `files` to the agent's file tools
-val files: Result[CompositeBackend] =
-  CompositeBackend(StateFileBackend(), ToolOutputOffload.Mount -> OffloadBackend)
-val agent = Agent.builder("assistant", client)
-  .withMiddleware(new ToolOutputOffload(thresholdTokens = 20000))
-  .build()
+for {
+  files <- CompositeBackend(StateFileBackend(), ToolOutputOffload.Mount -> OffloadBackend)
+  tools <- ToolSet.of(FileTools(files)*)
+  agent <- Agent.builder("assistant", client)
+             .withTools(tools)
+             .withMiddleware(new ToolOutputOffload(thresholdTokens = 20000))
+             .build()
+} yield agent
 ```
 
 The mount is read-only. Only text is offloaded: images and documents in a result are passed on unchanged. With
-summarisation, results the summary covers are dropped.
+summarisation, results the summary covers are dropped; register `SummarizationMiddleware` before
+`ToolOutputOffload`. `ToolOutputOffload` also caps every tool result the model is sent at `thresholdTokens`,
+including errors and denials that no tool produced.
 
 ---
 

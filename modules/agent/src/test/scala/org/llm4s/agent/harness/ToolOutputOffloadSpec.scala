@@ -129,6 +129,33 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
     offloadsOf(state).results.head.content should startWith("""[{"i":1,"pad":"yyy""")
   }
 
+  "Every tool result" should "be sent within the threshold, an error or an outer wrapper's denial included (rule 12)" in {
+    val failing = AgentTool(
+      AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))
+    )((_, _) => ToolOutcome.Error("e" * 9000))
+    // a middleware outside the offload that denies with a long reason: its outcome never reaches wrapToolCall
+    val deny = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("deny")
+      override def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome =
+        if request.call.id == "c2" then ToolOutcome.Error("Denied: " + "d" * 9000) else next()
+    }
+    val model = ScriptedModel(calling("c1" -> 1, "c2" -> 1), answer("done"))
+    val (state, _) =
+      runInMemory(
+        loopOf(model, Seq(deny, new ToolOutputOffload(thresholdTokens = 1000)), failing).graph,
+        AgentInput("go")
+      ).answered
+    val stored = toolResults(state)
+    // the tool's own error was cut before it was stored; the outer denial is stored as its producer made it
+    stored.head.length should be < 4100
+    stored.head should include("[cut: this tool result is")
+    stored(1).length should be > 9000
+    // what the model was sent holds neither in full
+    val sent = model.request(1).collect { case t: ToolMessage => t.content }
+    sent.foreach(_.length should be <= 4000)
+    sent(1) should include("[cut:")
+  }
+
   it should "measure rendered JSON in characters, so multibyte text under the threshold stays inline" in {
     val cjk = AgentTool(
       AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))

@@ -18,8 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Agent harness (Phase 3)
 
 - **Added** context management: `SummarizationMiddleware` (a kept, bounded summary in place of older messages) and
-  `ToolOutputOffload` with a read-only `OffloadBackend` for large tool results
+  `ToolOutputOffload` (large results to a read-only `OffloadBackend`, every tool result sent capped)
   [#1908](https://github.com/llm4s/llm4s/issues/1908); [design §4.34](docs/design/typed-agent-runtime/4.34-stage-3-slice-f4-context-management.md).
+- **Added** `FileTools(backend)`: `ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob` and `grep` over any `FileBackend`, bounded by `FileToolLimits`, and `FileToolsContract`
+  [#1905](https://github.com/llm4s/llm4s/issues/1905); [design §4.32](docs/design/typed-agent-runtime/4.32-stage-3-slice-f1-filesystem-tools.md).
 - **Added** multimodal content parts: user messages and tool results carry images and documents, which each provider
   sends or refuses before sending [#1913](https://github.com/llm4s/llm4s/issues/1913); [design 4.27](docs/design/typed-agent-runtime/4.27-stage-3-slice-f8b-multimodal-content-parts.md).
 - **Added** backend SPIs: `FileBackend` (state, composite, store), `SandboxBackend`, `LongTermStore` and `FileBackendContract`
