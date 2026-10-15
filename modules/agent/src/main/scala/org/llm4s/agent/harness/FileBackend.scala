@@ -121,7 +121,11 @@ trait FileBackend:
   /** Deletes the file, or the empty directory, `path`. */
   def delete(path: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)]
 
-  /** The files within `under` that `accept` takes, in path order, at most `limit`. */
+  /**
+   * The files within `under` that `accept` takes, in path order, at most `limit`: `accept` is applied
+   * before the limit, so a file it refuses never takes a place (a composite passes a predicate that refuses
+   * the paths a mount shadows, and relies on this to fill its limit with visible files). `search` likewise.
+   */
   def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]]
 
   /**

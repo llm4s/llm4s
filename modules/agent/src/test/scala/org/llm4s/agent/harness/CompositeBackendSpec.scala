@@ -357,4 +357,20 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     refusal.path shouldBe None
     refusal.message should include("longer than a path may be")
   }
+
+  it should "fill a walk's limit with visible entries, a mount's shadowed ones filtered before the limit" in {
+    val base = StateFileBackend(keyId = "base3")
+    val over = StateFileBackend(keyId = "over3")
+    var st   = stateOf(base.files, over.files)
+    // the default holds /m/a and /m/b, which the mount at /m shadows, and /z, which it does not
+    for (path <- Seq("/m/a", "/m/b", "/z"))
+      st = committed(
+        st,
+        StateUpdate.update(base.files, FileUpdate.Put(p(path), FileEntry("needle", java.time.Instant.EPOCH)))
+      ).value
+    val c  = CompositeBackend(base, p("/m") -> over).value
+    val in = FileContext(testRunContext(), st)
+    c.glob(Glob("**"), VPath.root, 1, in).value.items shouldBe Vector(p("/z"))
+    c.grep("needle", VPath.root, None, 1, in).value.items.map(_.path) shouldBe Vector(p("/z"))
+  }
 }
