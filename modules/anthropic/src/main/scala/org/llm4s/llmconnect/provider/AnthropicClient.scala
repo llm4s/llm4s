@@ -185,7 +185,7 @@ class AnthropicClient(
         dropUnsupported = true
       )
       // a part Anthropic cannot take fails the request here, before anything is sent
-      .flatMap(t => AnthropicClient.checkParts(providerName, t.messages).map(_ => t))
+      .flatMap(t => AnthropicClient.checkParts(providerName, t.messages, providerConfig.contextWindow).map(_ => t))
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
 
@@ -280,7 +280,7 @@ curl https://api.anthropic.com/v1/messages \
         dropUnsupported = true
       )
       // a part Anthropic cannot take fails the request here, before anything is sent
-      .flatMap(t => AnthropicClient.checkParts(providerName, t.messages).map(_ => t))
+      .flatMap(t => AnthropicClient.checkParts(providerName, t.messages, providerConfig.contextWindow).map(_ => t))
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
 
@@ -929,10 +929,14 @@ object AnthropicClient {
   }
 
   /** `Right` when every part of `messages` is one Anthropic takes, else the error naming the first that is not. */
-  private[provider] def checkParts(provider: String, messages: Seq[org.llm4s.llmconnect.model.Message]): Result[Unit] =
+  private[provider] def checkParts(
+    provider: String,
+    messages: Seq[org.llm4s.llmconnect.model.Message],
+    contextWindow: Int = 200000
+  ): Result[Unit] =
     PartEncoding
       .check(provider, messages, userPart, toolPart)
-      .flatMap(_ => PartEncoding.checkImagesPerRequest(provider, messages, MaxImages))
+      .flatMap(_ => PartEncoding.checkImagesPerRequest(provider, messages, maxImages(contextWindow)))
       .flatMap(_ => utf8Documents(messages))
 
   /**
@@ -961,8 +965,11 @@ object AnthropicClient {
       }
       .getOrElse(Right(()))
 
-  /** Anthropic takes at most 100 images in one request: counted over the whole conversation. */
-  private[provider] val MaxImages: Int = 100
+  /**
+   * The images Anthropic takes in one request, counted over the whole conversation: 100 for a model with a 200k
+   * context window, 600 for a larger one (the 1M-context models).
+   */
+  private[provider] def maxImages(contextWindow: Int): Int = if (contextWindow > 200000) 600 else 100
 
   /** The Messages API's limit on a whole request: 32 MB. */
   private[provider] val MaxRequestBytes: Long = 32000000L

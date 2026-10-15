@@ -125,6 +125,14 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
       "[Tool result for c9]: plain"
   }
 
+  it should "take up to 600 images for a model with a context window over 200k" in {
+    val many = UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(150)(image(url)))
+    AnthropicClient.checkParts("anthropic", Seq(many), contextWindow = 1000000) shouldBe Right(())
+    AnthropicClient.checkParts("anthropic", Seq(many), contextWindow = 200000).isLeft shouldBe true
+    AnthropicClient.maxImages(1000000) shouldBe 600
+    AnthropicClient.maxImages(200000) shouldBe 100
+  }
+
   it should "refuse, before sending, a request with more than 100 images across its messages" in {
     val fifty = UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(50)(image(url)))
     AnthropicClient.checkParts("anthropic", Seq(fifty, AssistantMessage("ok"), fifty)) shouldBe Right(())
