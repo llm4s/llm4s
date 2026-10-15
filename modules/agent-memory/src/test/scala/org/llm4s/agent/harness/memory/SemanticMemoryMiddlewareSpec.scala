@@ -193,6 +193,33 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     contents(held(m, None)) shouldBe empty
   }
 
+  "The memory middleware inside guardrail middleware" should "be refused when the agent is built (design 4.37)" in {
+    val (stores, _) = perTenant()
+    val m           = new SemanticMemoryMiddleware(stores, simple, answering())
+    val guard       = new GuardrailMiddleware(Nil, Seq(new LengthCheck(0, 3)))
+    val review      = new org.llm4s.agent.graph.middleware.GuardrailReviewMiddleware(Nil, Nil)
+    val error       = Agent.builder("assistant", answering()).withMiddleware(guard, review, m).build().left.value
+    error.message should include("'semantic-memory' must run outside 'guardrails'")
+    error.message should include("'semantic-memory' must run outside 'guardrail-review'")
+    // arranged outside by runsBefore, whatever the registration order
+    val placed = new SemanticMemoryMiddleware(stores, simple, answering(), runsBefore = Set(guard.id))
+    Agent.builder("assistant", answering()).withMiddleware(guard, placed).build().isRight shouldBe true
+  }
+
+  it should "be refused on a handoff target when the root has the guardrail, whose afterAgent runs last" in {
+    val (stores, _) = perTenant()
+    val target =
+      Agent.builder("target", answering()).withMiddleware(new SemanticMemoryMiddleware(stores, simple, answering()))
+    val error = Agent
+      .builder("root", answering())
+      .withMiddleware(new GuardrailMiddleware(Nil, Seq(new LengthCheck(0, 3))))
+      .withHandoffs(org.llm4s.agent.Handoff.to("target", target, "delegate"))
+      .build()
+      .left
+      .value
+    error.message should include("agent 'target': middleware 'semantic-memory' must run outside 'guardrails'")
+  }
+
   "A crash after the record's effect, then recover," should "leave exactly one copy of the turn" in {
     crashedRecord(Crash.Before) // the outcome's commit never landed: the store's applied key answers the replay
   }

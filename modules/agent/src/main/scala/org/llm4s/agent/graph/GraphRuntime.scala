@@ -2081,9 +2081,11 @@ final class GraphRuntime(
           )
           val outcome = boundedByLoss(() =>
             // the tasks created for the run before its claim get the claim's root lineage (design §4.24)
-            carry().flatMap((carried, reused) =>
+            carry().flatMap { (carried, reused) =>
+              // under the store claim, before the run's first event: nothing of the run exists to be pruned
+              config.retention.foreach(retain)
               committed(execution.stampedBy(granted.token.value), parent, event(granted), carried, reused)
-            )
+            }
           )
           admitted = outcome.isRight
           outcome
@@ -2160,6 +2162,19 @@ final class GraphRuntime(
         claimSeq = seq
         deadline = config.budgets.timeout.map(timeout => System.nanoTime() + timeout.toNanos)
         this
+
+    /**
+     * Prunes the thread to `policy` as the run is admitted - under the store claim, before the run's claim commit, so no
+     * other run writes meanwhile and nothing of this run exists yet to be pruned, by any limit; a failure is logged,
+     * never the run's. `keepAll` removes nothing, so it is skipped.
+     */
+    private def retain(policy: RetentionPolicy): Unit =
+      if policy != RetentionPolicy.keepAll then
+        Try(checkpointer.prune(threadId, policy)).toResult.flatten.left.foreach(error =>
+          GraphRuntime.logger.warn(
+            s"Pruning ${threadId.value} to its retention as run ${runId.value} was admitted failed: ${error.message}"
+          )
+        )
 
     /** The store claim this run holds, from [[admit]] on; `None` before it, or if it was refused. */
     @volatile private var claim: Option[RunClaim] = None

@@ -306,6 +306,21 @@ object AgentTool:
     new FromToolFunction(tool, hints)
 
   /**
+   * `tool` with each run bounded by `timeout` ([[AgentToolSpec.withTimeout]]) when its spec declares no timeout of its
+   * own, and `tool` itself when it does. The bounded tool writes the same keys, and asks and takes the same questions.
+   */
+  private[agent] def withDefaultTimeout[A](tool: AgentTool[A], timeout: FiniteDuration): AgentTool[A] =
+    if tool.spec.timeout.isDefined then tool
+    else
+      val bounded = tool.spec.withTimeout(timeout)
+      new AgentTool[A]:
+        val spec: AgentToolSpec[A]                              = bounded
+        override def writes: Set[StateKey[?, ?]]                = tool.writes
+        def execute(args: A, context: ToolContext): ToolOutcome = tool.execute(args, context)
+        override private[tool] def resumeErased(args: A, question: Any, answer: Any, context: ToolContext) =
+          tool.resumeErased(args, question, answer, context)
+
+  /**
    * Continues `tool`'s call `args` with `question` answered by `answer`, both decoded with the codecs
    * of `tool.spec.question`; the loop's entry point to [[AgentTool.resumeErased]].
    */

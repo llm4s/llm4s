@@ -65,7 +65,8 @@ final case class RunConfig private (
   budgets: RunBudgets,
   metadata: Map[String, String],
   interruptBefore: Set[NodeId],
-  interruptAfter: Set[NodeId]
+  interruptAfter: Set[NodeId],
+  retention: Option[RetentionPolicy]
 ):
   def withRunId(id: RunId): RunConfig                 = copy(runId = id)
   def withTenantId(t: TenantId): RunConfig            = copy(tenantId = Some(t))
@@ -81,6 +82,21 @@ final case class RunConfig private (
   /** Holds every task of these nodes after it ran, replacing the nodes set before. */
   def withInterruptAfter(nodes: Set[NodeId]): RunConfig = copy(interruptAfter = nodes)
 
+  /**
+   * Prunes the thread to `policy` ([[Checkpointer.prune]]) as the run is admitted: once the store has granted its claim
+   * and before the run commits anything, so a run refused at admission - a blank query, a busy thread, a pending
+   * interrupt, another tenant's thread - leaves the thread unchanged, nothing else writes to the thread while it prunes,
+   * and nothing of the run exists yet to be pruned, by any limit, so its own replay is whole. Pruning never removes the
+   * latest checkpoint or its pending writes, so what the run continues from is unchanged; earlier runs' checkpoints and
+   * events beyond the policy are removed, raising the replay floor for their handles. `RetentionPolicy.keepAll`
+   * removes nothing and is skipped. A prune that fails is logged at WARN and the run goes on: retention is
+   * housekeeping.
+   */
+  def withRetention(policy: RetentionPolicy): RunConfig = copy(retention = Some(policy))
+
+  /** [[withRetention]], or no pruning for `None`. */
+  def withRetention(policy: Option[RetentionPolicy]): RunConfig = copy(retention = policy)
+
 object RunConfig:
   def apply(
     runId: RunId = RunId.random(),
@@ -89,8 +105,21 @@ object RunConfig:
     budgets: RunBudgets = RunBudgets.default,
     metadata: Map[String, String] = Map.empty,
     interruptBefore: Set[NodeId] = Set.empty,
-    interruptAfter: Set[NodeId] = Set.empty
-  ): RunConfig = new RunConfig(runId, tenantId, principal, budgets, metadata, interruptBefore, interruptAfter)
+    interruptAfter: Set[NodeId] = Set.empty,
+    retention: Option[RetentionPolicy] = None
+  ): RunConfig =
+    new RunConfig(runId, tenantId, principal, budgets, metadata, interruptBefore, interruptAfter, retention)
+
+  /** A config without retention, as before `retention` existed. */
+  def apply(
+    runId: RunId,
+    tenantId: Option[TenantId],
+    principal: Option[Principal],
+    budgets: RunBudgets,
+    metadata: Map[String, String],
+    interruptBefore: Set[NodeId],
+    interruptAfter: Set[NodeId]
+  ): RunConfig = new RunConfig(runId, tenantId, principal, budgets, metadata, interruptBefore, interruptAfter, None)
 
 /**
  * Where a task runs. `checkpointId` is the checkpoint whose frontier it belongs to; `""` outside a

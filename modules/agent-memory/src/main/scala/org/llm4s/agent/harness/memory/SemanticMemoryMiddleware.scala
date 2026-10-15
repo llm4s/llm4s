@@ -1,7 +1,16 @@
 package org.llm4s.agent.harness.memory
 
 import org.llm4s.agent.graph.{ StateKey, StateUpdate, TenantId }
-import org.llm4s.agent.graph.middleware.{ AgentMiddleware, BoundaryResult, MiddlewareId, ModelContext, PromptSection }
+import org.llm4s.agent.graph.middleware.{
+  AgentMiddleware,
+  BoundaryResult,
+  GuardrailMiddleware,
+  GuardrailReviewMiddleware,
+  MiddlewareId,
+  ModelContext,
+  Placement,
+  PromptSection
+}
 import org.llm4s.agent.graph.toolloop.{ Messages, StoredMessage }
 import org.llm4s.agent.memory.{
   AppliedWrite,
@@ -53,7 +62,9 @@ import scala.util.{ Try, Using }
  *     retracted because memory could not be written. A crash is replayed by `recover` from C4's records.
  *
  * Register it outside guardrail middleware - before it, or with `runsBefore` naming it - so that a blocked answer is
- * never recorded: `afterAgent` runs in reverse stack order, and a guardrail's block stops the others. An effect that
+ * never recorded: `afterAgent` runs in reverse stack order, and a guardrail's block stops the others. `build()` refuses
+ * it inside a `GuardrailMiddleware` or `GuardrailReviewMiddleware` ([[placement]]), and on a handoff target when the
+ * root agent has one, since the root's `afterAgent` runs after every agent's own. An effect that
  * applied stays applied: a Block restores thread state, not the store.
  *
  * The key is registered only by an agent family with a `SemanticMemoryMiddleware`: adding one to an existing agent
@@ -89,6 +100,12 @@ final class SemanticMemoryMiddleware(
   private val resolving = new ReentrantLock()
 
   override def writes: Set[StateKey[?, ?]] = Set(RecalledKey)
+
+  /** Outside guardrail middleware, at the boundary, so a blocked answer is never recorded; see the class's Scaladoc. */
+  override def placement(other: AgentMiddleware): Option[Placement] = other match
+    case _: GuardrailMiddleware | _: GuardrailReviewMiddleware =>
+      Some(Placement.OutsideAtBoundary("inside it, a turn's answer is recorded before the guardrail can block it"))
+    case _ => None
 
   /**
    * `f` on `tenant`'s store as the middleware's last write left it, resolving it if no run of the tenant has yet. `f`

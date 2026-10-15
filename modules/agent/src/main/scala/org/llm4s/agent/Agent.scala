@@ -41,7 +41,8 @@ final class Agent private[agent] (
   runtime: GraphRuntime,
   tracing: Option[Tracing],
   interruptBefore: Set[NodeId] = Set.empty,
-  interruptAfter: Set[NodeId] = Set.empty
+  interruptAfter: Set[NodeId] = Set.empty,
+  retention: Option[RetentionPolicy] = None
 ):
 
   /**
@@ -52,6 +53,9 @@ final class Agent private[agent] (
     config
       .withInterruptBefore(config.interruptBefore ++ interruptBefore)
       .withInterruptAfter(config.interruptAfter ++ interruptAfter)
+      // a harness's retention, applied as each turn is admitted (design 4.37), unless the run sets its own;
+      // keepAll removes nothing, so it is not applied at all
+      .withRetention(config.retention.orElse(retention).filter(_ != RetentionPolicy.keepAll))
 
   /**
    * One turn on a new thread with a random id. The thread stays in the agent's runtime - on the

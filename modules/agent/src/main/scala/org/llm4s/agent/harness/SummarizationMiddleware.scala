@@ -2,7 +2,14 @@ package org.llm4s.agent.harness
 
 import org.llm4s.agent.ContextPruning
 import org.llm4s.agent.graph.{ StateKey, StateUpdate }
-import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelContext, ModelRequest, ModelResponse }
+import org.llm4s.agent.graph.middleware.{
+  AgentMiddleware,
+  MiddlewareId,
+  ModelContext,
+  ModelRequest,
+  ModelResponse,
+  Placement
+}
 import org.llm4s.agent.graph.toolloop.{ Messages, StoredMessage, ToolResultRule }
 import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.model.{ Message, MessageRole, UserMessage }
@@ -28,6 +35,9 @@ import upickle.default.ReadWriter
  * `ModelContext.accounted`, so they are counted in the thread's usage. Use this or `ContextWindowMiddleware`, which
  * prunes with no model call, not both.
  *
+ * It must run outside a [[ToolOutputOffload]] - registered before it - so it matches the request with the stored
+ * history before offload cuts any tool result; `build()` refuses the other order ([[placement]]).
+ *
  * @param trigger when to summarise
  * @param keepRecent how many of the latest messages are always sent as they are; at least 1
  * @param compressor writes the summary
@@ -52,6 +62,16 @@ final class SummarizationMiddleware(
   )
 
   override def writes: Set[StateKey[?, ?]] = Set(key)
+
+  /** Outside every [[ToolOutputOffload]]: see the class's Scaladoc. */
+  override def placement(other: AgentMiddleware): Option[Placement] = other match
+    case _: ToolOutputOffload =>
+      Some(
+        Placement.Outside(
+          "it matches the request with the stored history, which tool-output-offload's cut tool results no longer match"
+        )
+      )
+    case _ => None
 
   override def wrapModelCall(request: ModelRequest, context: ModelContext)(
     next: ModelRequest => Result[ModelResponse]

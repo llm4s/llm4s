@@ -1,9 +1,10 @@
 package org.llm4s.agent
 
-import org.llm4s.agent.graph.{ BreakpointPhase, GraphRuntime, NodeId }
+import org.llm4s.agent.graph.{ BreakpointPhase, GraphRuntime, NodeId, RetentionPolicy }
 import org.llm4s.agent.graph.middleware.AgentMiddleware
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolArgumentValidator, ToolSet }
 import org.llm4s.agent.graph.toolloop.{ LoopAgent, LoopHandoff, ModelStep, OutputFormat, ToolLoop }
+import org.llm4s.agent.harness.HarnessProfile
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.CompletionOptions
@@ -41,7 +42,8 @@ final class AgentBuilder private (
   private val interruptBefore: Vector[AgentNode],
   private val interruptAfter: Vector[AgentNode],
   maxPromptSectionTokens: Int,
-  output: Option[OutputFormat]
+  output: Option[OutputFormat],
+  harness: Option[HarnessProfile]
 ):
 
   private def copy(
@@ -58,7 +60,8 @@ final class AgentBuilder private (
     interruptBefore: Vector[AgentNode] = interruptBefore,
     interruptAfter: Vector[AgentNode] = interruptAfter,
     maxPromptSectionTokens: Int = maxPromptSectionTokens,
-    output: Option[OutputFormat] = output
+    output: Option[OutputFormat] = output,
+    harness: Option[HarnessProfile] = harness
   ): AgentBuilder =
     new AgentBuilder(
       id,
@@ -76,7 +79,8 @@ final class AgentBuilder private (
       interruptBefore,
       interruptAfter,
       maxPromptSectionTokens,
-      output
+      output,
+      harness
     )
 
   /** The agent's tools, replacing any set before, checked with the set's validator. */
@@ -125,6 +129,16 @@ final class AgentBuilder private (
    */
   def withOutput[O: ReadWriter](schema: SchemaDefinition[O]): AgentBuilder =
     copy(output = Some(OutputFormat.of(schema)))
+
+  /**
+   * Installs `profile` (design 4.37), replacing any set before: at [[build]], its tools join this agent's, its
+   * middleware run outside this agent's own - permissions, summarisation, offload, skills, instructions, todos,
+   * outermost first, each when the profile sets it - and its prompt is the system prompt, so [[withSystemPrompt]] is
+   * refused beside it (use `PromptMode.Replace` or `Suffix`). On the root agent, its `retention` prunes each thread as each turn is admitted
+   * (`RunConfig.withRetention`, unless the run sets its own); a handoff target's is ignored, as its runtime is. `build()` refuses what the profile refuses
+   * (see [[org.llm4s.agent.harness.HarnessProfile]]).
+   */
+  def withHarness(profile: HarnessProfile): AgentBuilder = copy(harness = Some(profile))
 
   /** Model calls per turn, at least 1; at the limit the turn ends `StepLimitReached`. */
   def withMaxSteps(n: Int): AgentBuilder = copy(maxSteps = n)
@@ -194,20 +208,47 @@ final class AgentBuilder private (
       agents <- family.foldLeft[Result[Vector[LoopAgent]]](Right(Vector.empty)) { (acc, builder) =>
         acc.flatMap(done => builder.loopAgent.map(done :+ _))
       }
-      root <- AgentId.of(id)
-      loop <- ToolLoop.build(id, AgentBuilder.fingerprint(family), root, agents)
+      root      <- AgentId.of(id)
+      loop      <- ToolLoop.build(id, AgentBuilder.fingerprint(family), root, agents)
+      installed <- effective
     yield new Agent(
       root,
       loop,
       runtime.getOrElse(GraphRuntime.inMemory()),
       tracing,
       family.flatMap(b => b.held(loop, b.interruptBefore, BreakpointPhase.Before)).toSet,
-      family.flatMap(b => b.held(loop, b.interruptAfter, BreakpointPhase.After)).toSet
+      family.flatMap(b => b.held(loop, b.interruptAfter, BreakpointPhase.After)).toSet,
+      installed.retention
     )
 
   /** The nodes of `loop` this agent's breakpoints on `nodes` hold in `phase`; its id is checked by `build` first. */
   private def held(loop: ToolLoop, nodes: Vector[AgentNode], phase: BreakpointPhase): Vector[NodeId] =
     nodes.flatMap(loop.breakpointNodes(AgentId.unsafe(id), _, phase))
+
+  /**
+   * The tools, middleware and prompt this agent runs with, its harness's included, and the retention its harness
+   * sets; assembled once per builder, so its middleware are one set of instances however often it is built.
+   */
+  private lazy val effective: Result[AgentBuilder.Effective] =
+    harness match
+      case None => Right(AgentBuilder.Effective(tools, middleware, systemPrompt, None))
+      case Some(profile) =>
+        if systemPrompt.isDefined then
+          Left(
+            ValidationError(
+              "systemPrompt",
+              s"agent '$id': a harness sets the system prompt; use its PromptMode.Replace or Suffix, not withSystemPrompt"
+            )
+          )
+        else
+          profile.assembled.map(h =>
+            AgentBuilder.Effective(
+              h.tools ++ tools,
+              h.middleware ++ middleware,
+              Some(h.systemPrompt),
+              Some(h.retention)
+            )
+          )
 
   private def loopAgent: Result[LoopAgent] =
     for
@@ -217,16 +258,17 @@ final class AgentBuilder private (
         (),
         ValidationError("maxSteps", s"agent '$id': must be at least 1, was $maxSteps")
       )
-      toolSet <- ToolSet.of(validator, tools*)
+      installed <- effective
+      toolSet   <- ToolSet.of(validator, installed.tools*)
       loopHandoffs <- handoffs.foldLeft[Result[Vector[LoopHandoff]]](Right(Vector.empty)) { (acc, h) =>
         acc.flatMap(done => loopHandoff(h).map(done :+ _))
       }
     yield LoopAgent(agentId, ModelStep.fromClient(client, options, streaming, output.map(_.responseFormat)), toolSet)
-      .withSystemPrompt(systemPrompt)
+      .withSystemPrompt(installed.systemPrompt)
       .withOutput(output)
       .withMaxSteps(maxSteps)
       .withMaxPromptSectionTokens(maxPromptSectionTokens)
-      .withMiddleware(middleware)
+      .withMiddleware(installed.middleware)
       .withHandoffs(loopHandoffs)
 
   private def loopHandoff(handoff: Handoff): Result[LoopHandoff] =
@@ -243,18 +285,25 @@ final class AgentBuilder private (
           )
         case None => Right(LoopHandoff(AgentId.unsafe(handoff.id), handoff.transferReason, handoff.preserveContext))
 
-  /** The settings the graph version covers, as canonical JSON: two builders of one id must agree on them. */
+  /**
+   * The settings the graph version covers, as canonical JSON: two builders of one id must agree on them. A harness's
+   * tools, middleware and prompt are covered as the agent's own; a harness that does not assemble is covered by its
+   * presence only, and refused by `build()`.
+   */
   private def canonical: ujson.Obj =
+    val installed = effective.getOrElse(AgentBuilder.Effective(tools, middleware, systemPrompt, None))
     val settings = ujson.Obj(
       "id"           -> id,
-      "systemPrompt" -> systemPrompt.fold[ujson.Value](ujson.Null)(ujson.Str(_)),
+      "systemPrompt" -> installed.systemPrompt.fold[ujson.Value](ujson.Null)(ujson.Str(_)),
       "maxSteps"     -> maxSteps,
       "tools" -> ujson.Arr.from(
-        tools.sortBy(_.spec.name).map(t => ujson.Obj("name" -> t.spec.name, "definition" -> t.spec.toolDefinition))
+        installed.tools
+          .sortBy(_.spec.name)
+          .map(t => ujson.Obj("name" -> t.spec.name, "definition" -> t.spec.toolDefinition))
       ),
       // each middleware's id and contributed tools, so a changed middleware tool schema changes the version
       "middleware" -> ujson.Arr.from(
-        middleware.map(m =>
+        installed.middleware.map(m =>
           ujson.Obj(
             "id" -> m.id.value,
             "tools" -> ujson.Arr.from(
@@ -271,6 +320,7 @@ final class AgentBuilder private (
     )
     // only when set, so the version of an agent without a response format is what it was before formats existed
     output.foreach(format => settings("output") = format.schema)
+    if harness.isDefined && effective.isLeft then settings("harness") = "invalid"
     settings
 
 object AgentBuilder:
@@ -292,8 +342,17 @@ object AgentBuilder:
       interruptBefore = Vector.empty,
       interruptAfter = Vector.empty,
       maxPromptSectionTokens = LoopAgent.DefaultMaxPromptSectionTokens,
-      output = None
+      output = None,
+      harness = None
     )
+
+  /** What an agent runs with once its harness is installed; `retention` only with a harness. */
+  final private case class Effective(
+    tools: Vector[AgentTool[?]],
+    middleware: Vector[AgentMiddleware],
+    systemPrompt: Option[String],
+    retention: Option[RetentionPolicy]
+  )
 
   /**
    * The root and every builder reachable through handoffs to builders, breadth-first, one per id.
