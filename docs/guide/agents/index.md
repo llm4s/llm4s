@@ -789,6 +789,59 @@ budget. The system prompt is outside the budget.
 | `RecentTurnsOnly(n)` | Keep only the last N conversation turns |
 | `Custom(fn)` | User-defined pruning function |
 
+### Summarisation
+
+`SummarizationMiddleware` (`org.llm4s.agent.harness`) replaces the older part of each request with a summary
+instead of dropping it. When the outgoing request is over its trigger, every message but the last `keepRecent`
+is folded into the summary, which goes into that request and is kept in the thread for the next ones; when it
+fires again, the summary is extended, not recomputed. The stored history is never edited.
+
+```scala
+import org.llm4s.agent.harness.{SummarizationMiddleware, SummaryCompressor, SummaryTrigger}
+
+val agent = Agent.builder("assistant", client)
+  .withMiddleware(
+    new SummarizationMiddleware(
+      trigger = SummaryTrigger.Tokens(60000),
+      keepRecent = 10,
+      compressor = SummaryCompressor.model(summariserClient),
+      maxSummaryTokens = 2000
+    )
+  )
+  .build()
+```
+
+`SummaryCompressor.model(client)` asks a model for the summary; its calls are counted in the thread's usage.
+`SummaryCompressor.digest(counter)` uses core's `HistoryCompressor`, with no model call. The summary never exceeds
+`maxSummaryTokens`, a tool call is never separated from its results, and an output Block discards a blocked turn's
+summary. Use summarisation or `ContextWindowMiddleware`, not both.
+
+### Large tool results
+
+`ToolOutputOffload` keeps a tool result over `thresholdTokens` out of the conversation: the model sees a header,
+the first lines, and a path such as `/large_tool_results/<key>`. The whole result (up to `maxResultBytes`) is kept
+in the thread, oldest evicted first beyond `maxTotalBytes` (4 MiB by default). Mount `OffloadBackend` so file tools
+can read it:
+
+```scala
+import org.llm4s.agent.graph.tool.ToolSet
+import org.llm4s.agent.harness.{CompositeBackend, FileTools, OffloadBackend, StateFileBackend, ToolOutputOffload}
+
+for {
+  files <- CompositeBackend(StateFileBackend(), ToolOutputOffload.Mount -> OffloadBackend)
+  tools <- ToolSet.of(FileTools(files)*)
+  agent <- Agent.builder("assistant", client)
+             .withTools(tools)
+             .withMiddleware(new ToolOutputOffload(thresholdTokens = 20000))
+             .build()
+} yield agent
+```
+
+The mount is read-only. Only text is offloaded: images and documents in a result are passed on unchanged. With
+summarisation, results the summary covers are dropped; register `SummarizationMiddleware` before
+`ToolOutputOffload`. `ToolOutputOffload` also caps every tool result the model is sent at `thresholdTokens`,
+including errors and denials that no tool produced.
+
 ---
 
 ## Conversation Persistence
