@@ -350,6 +350,8 @@ private[harness] object Frontmatter:
     val nested = "nested lists and maps are not supported"
     // a list item that is only a comment (`- # off`) is empty, not the comment's text
     if plain.isEmpty then Some("a value is empty")
+    // the format's only separator is a space: a tab inside a plain value could separate an indicator (`a:<tab>b`)
+    else if plain.contains('\t') then Some("a plain value cannot hold a tab; quote it")
     else if plain.contains(": ") || plain.endsWith(":") then
       Some(if inList then nested else "a plain value cannot hold `: `; quote it")
     else if plain == "-" || plain.startsWith("- ") || plain == "?" || plain.startsWith("? ") then Some(nested)
