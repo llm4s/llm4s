@@ -630,7 +630,11 @@ class WorkspaceAgentInterfaceImpl(
           // and its content compared again, last thing before the move: a writer outside the runner (the host, through
           // a bind mount) that changed it while the replacement was written is caught, not overwritten. The move itself
           // is the one step left unfenced against such a writer, which no file system call can close.
-          expectedHash.foreach(checkExpected(path, resolvedPath, _))
+          // of `target` itself, the file the move replaces, not whatever the path resolves to by now
+          // (through a link to nothing, the file it names is still nothing)
+          expectedHash
+            .map(e => if (e == FileSnapshotResponse.Kind.Dangling) FileSnapshotResponse.Kind.Absent else e)
+            .foreach(checkExpected(path, target, _))
           Files.move(
             temp,
             target,
