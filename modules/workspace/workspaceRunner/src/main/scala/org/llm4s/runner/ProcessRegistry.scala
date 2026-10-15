@@ -211,11 +211,10 @@ final private[runner] class ProcessRegistry(
     Try(entry.process.destroyForcibly()).failed.foreach { e =>
       logger.error(s"Error killing command ${entry.commandId}: ${e.getMessage}", e)
     }
-    // gone only when the parent and every descendant found have exited, within the one wait
-    val deadline = System.nanoTime() + ProcessRegistry.KillWait.toNanos
-    def left     = math.max(0L, deadline - System.nanoTime())
-    val gone = Try(entry.process.waitFor(left, TimeUnit.NANOSECONDS)).getOrElse(false) &&
-      tree.forall(d => Try(d.onExit().get(left, TimeUnit.NANOSECONDS)).isSuccess || !d.isAlive)
+    // gone only once the registry has released it: the parent, every descendant found and every orphan the exit swept
+    // have exited (`released`), within the one wait. Every caller - a cancellation's acknowledgement, a timeout, a
+    // disconnect - judges the outcome by this, never by the part of the tree it could see
+    val gone = Try(entry.released.get(ProcessRegistry.KillWait.toMillis, TimeUnit.MILLISECONDS)).isSuccess
     if (!gone) logger.warn(s"Command ${entry.commandId} did not terminate when killed; it stays tracked until it exits")
     gone
   }
