@@ -131,15 +131,17 @@ Containerized workspace for safe tool execution with Docker isolation.
 
 ### Installation
 
-Add LLM4S to your `build.sbt`:
+Add LLM4S and the provider module you call to your `build.sbt`:
 
 ```scala
-libraryDependencies += "org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core"   % "{{ site.data.project.latest_release }}",
+  "org.llm4s" %% "llm4s-openai" % "{{ site.data.project.latest_release }}"
+)
 ```
 
-The provider clients are modules of their own (`llm4s-openai`, `llm4s-anthropic`, `llm4s-gemini`,
-`llm4s-ollama`, `llm4s-openai-compatible`), which you add alongside `llm4s-core` - e.g.
-`"org.llm4s" %% "llm4s-openai" % llm4sVersion`.
+`llm4s-core` ships no provider client: each is a module of its own (`llm4s-openai`, `llm4s-anthropic`,
+`llm4s-gemini`, `llm4s-ollama`, `llm4s-openai-compatible`, ...), registered by adding its dependency.
 
 {: .note }
 > **Latest release:** `{{ site.data.project.latest_release }}`

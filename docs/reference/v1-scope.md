@@ -11,19 +11,19 @@ This page states which parts of the LLM4S API are safe to build on ahead of a 1.
 
 Until 0.4.1 all of it shipped in one `core` Maven artifact of roughly 84k lines — agent runtime, RAG, MCP, speech, image, knowledge graph, and eleven provider clients together. There was no way to tell from the artifact alone which parts of that surface are meant to be a long-term contract and which are still moving fast.
 
-This page describes the **target state** of the in-progress modularisation programme tracked in [#1126](https://github.com/llm4s/llm4s/issues/1126). Rows marked **carved** below already live in their target module; every other row still ships inside `llm4s-core`, and its target-module column says where it is heading, not where it lives today.
+The modularisation programme tracked in [#1126](https://github.com/llm4s/llm4s/issues/1126) split it up. Rows marked **carved** below live in their target module; any other row still ships inside `llm4s-core`, and its target-module column says where it is heading, not where it lives today.
 
-What has actually moved so far, in the build but not yet in a release:
+The carves, all published from 0.5.0:
 
 | Slice | Modules carved | Status |
 |---|---|---|
-| [1](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` | in the build, unpublished |
-| [2](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` | in the build, unpublished |
-| [3](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` | in the build, unpublished |
-| [4](https://github.com/llm4s/llm4s/issues/1131) | none - the provider registration SPI (`ProviderDescriptor`, discovered through `META-INF/services`) that slice 5's modules register through | in the build, unpublished |
-| [5](https://github.com/llm4s/llm4s/issues/1132) | `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (with Mistral and Cohere), `llm4s-voyage` - `llm4s-core` now holds no provider client | in the build, unpublished |
-| [6](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability` (Langfuse, the trace collector, `CostTracker`); `OpenTelemetryConfig` joins the existing `llm4s-observability-otel`; `llm4s-observability-prometheus` (Prometheus). The tracing and metrics contracts stay in `llm4s-core`, which declares no observability dependency | in the build, unpublished |
-| [7](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (the built-in tools and their config), `llm4s-agent` (`agent`, `assistant`) | in the build, unpublished |
+| [1](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` | published in 0.5.0 |
+| [2](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` | published in 0.5.0 |
+| [3](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` | published in 0.5.0 |
+| [4](https://github.com/llm4s/llm4s/issues/1131) | none - the provider registration SPI (`ProviderDescriptor`, discovered through `META-INF/services`) that slice 5's modules register through | published in 0.5.0 |
+| [5](https://github.com/llm4s/llm4s/issues/1132) | `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (with Mistral and Cohere), `llm4s-voyage` - `llm4s-core` now holds no provider client | published in 0.5.0 |
+| [6](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability` (Langfuse, the trace collector, `CostTracker`); `OpenTelemetryConfig` joins the existing `llm4s-observability-otel`; `llm4s-observability-prometheus` (Prometheus). The tracing and metrics contracts stay in `llm4s-core`, which declares no observability dependency | published in 0.5.0 |
+| [7](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (the built-in tools and their config), `llm4s-agent` (`agent`, `assistant`) | published in 0.5.0 |
 
 **0.5.0** is the first release to publish separate module artifacts (0.4.x was a single `llm4s-core`; 0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). It sets no MiMa baseline: that comes at a pre-1.0 release, version to be decided, once the designs are final ([#1281](https://github.com/llm4s/llm4s/issues/1281)). Until then nothing is frozen: "Frozen at 1.0" is the tier a module will hold, not a constraint on changing it now.
 

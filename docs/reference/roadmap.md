@@ -17,7 +17,7 @@ LLM4S has broad, working framework functionality today: multi-provider clients (
 |---|---|
 | **Latest release tag** | v0.5.0 (2026-10-15) · see the [CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md) |
 | **Release sequence** | 0.4.x: coordinate rename and fixes (**done**) → **0.5.0**: modularisation complete, separate artifacts published (**done**) → a pre-1.0 release: designs final, MiMa baseline set → **1.0**: frozen surface, after it has survived two releases |
-| **Main branch** | Unreleased work for 0.5.0: the carved modules, provider SPI, Java/Kotlin/Spring/effect/ZIO modules, stability tiers, deployment template |
+| **Main branch** | Work after 0.5.0; see the CHANGELOG's `Unreleased` section |
 | **Artifacts** | `org.llm4s:llm4s-*`. The pre-0.4.0 coordinates (`org.llm4s:core`, …) stop at 0.3.4; see the [migration guide](migration#artifact-coordinate-rename-v040) |
 | **Stability** | Pre-1.0, API stabilizing; each package's tier is on [1.0 Scope](v1-scope) |
 | **Scala support** | Scala 3.7.1 only. Scala 2.13 is deferred to after 1.0 ([#874](https://github.com/llm4s/llm4s/issues/874)) |
@@ -60,7 +60,7 @@ The **Status** column in the phase tables below is separate from maturity: **Lan
 | **Testing and CI** | Broad suite, Ubuntu/Windows CI, integration suites in tiers (`@Local`, `@Docker`, `@Workspace`, `@Ollama`, `@Cloud`) enforced by `it/itTierCheck`, per-module coverage floors, DCO, config-policy check. | Suite timeouts / hang isolation; split fast/integration/Docker/provider/benchmark jobs. |
 | **API stability** | `@Stable`/`@Experimental` mark a public type's tier in the code; a [compatibility and deprecation policy](compatibility-policy) is published; `frozenDependencyCheck` and `publishedArtifactsCheck` guard the frozen modules and the artifact list; MiMa is wired into the build. | Set the MiMa baseline at a pre-1.0 release once the designs are final, and enforce it from 1.0 once the frozen surface has survived two releases. |
 | **Provider parity** | Broad coverage, one SPI, a provider testkit; uneven feature parity. | Generated capability matrix + fake-provider contracts. |
-| **JVM adoption** | Strong Scala-native design; Java, Kotlin, Spring Boot, cats-effect and ZIO modules on `main`. | Publish them; Maven and Gradle paths with CI-tested runnable samples. |
+| **JVM adoption** | Strong Scala-native design; Java, Kotlin, Spring Boot, cats-effect and ZIO modules, published from 0.5.0. | Maven and Gradle paths with CI-tested runnable samples. |
 | **Security** | Threat model, Dependabot, MCP auth/bind, redaction, config-policy, prompt-injection detector. | Default-deny tool/MCP, allowlists, audit logs, SBOM, release-gate tests. |
 | **Performance and cost** | JMH module, `CostTracker`, image/agent usage hooks. | Unified cost telemetry; JMH regression thresholds; failover/hedging. |
 | **Documentation trust** | Migrations, troubleshooting, governance docs, 1.0 scope, versioned install snippets, many samples. | Golden-path tutorials generated from tested capability metadata. |
