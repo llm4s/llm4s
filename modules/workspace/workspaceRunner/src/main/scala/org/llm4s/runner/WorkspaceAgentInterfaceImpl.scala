@@ -542,6 +542,16 @@ class WorkspaceAgentInterfaceImpl(
   private lazy val aclTools: Option[(Path, Path)] =
     WorkspaceAgentInterfaceImpl.aclTools(programSearch, Seq(rootPath, effective(rootPath)))
 
+  /**
+   * The bytes of the file at `path`, read to at most `maxFileSize + 1`: `None` for a file over the limit, however large
+   * it has grown since its size was checked, so it is never read whole into memory.
+   */
+  private def readBounded(path: Path): Option[Array[Byte]] =
+    Using.resource(Files.newInputStream(path)) { in =>
+      val bytes = in.readNBytes(math.min(maxFileSize + 1, Int.MaxValue.toLong - 8).toInt)
+      if (bytes.length.toLong > maxFileSize) None else Some(bytes)
+    }
+
   /** A file's hash, as [[currentHash]] gives it, from the bytes read. */
   private def digestOf(bytes: Array[Byte]): String =
     "sha256:" + java.security.MessageDigest.getInstance("SHA-256").digest(bytes).map(b => f"${b & 0xff}%02x").mkString
@@ -733,8 +743,18 @@ class WorkspaceAgentInterfaceImpl(
         case "create" => (Some(Kind.Absent), bytes)
         case "append" =>
           // what the file is and what it holds, from one read: a file deleted after it is read is still a mismatch
-          Try(Files.readAllBytes(target)) match {
-            case Success(existing)                             => (Some(digestOf(existing)), existing ++ bytes)
+          // and never more of it than the limit allows: a file grown since its size was checked is refused unread
+          def tooBig(size: Long) =
+            new WorkspaceAgentException(
+              s"Writing '$path' would leave it larger than the maximum size limit (${maxFileSize} bytes)",
+              "SIZE_LIMIT_EXCEEDED",
+              Some(s"Resulting size: at least $size bytes")
+            )
+          Try(readBounded(target)) match {
+            case Success(None) => throw tooBig(maxFileSize + 1)
+            case Success(Some(existing)) if existing.length.toLong + bytes.length > maxFileSize =>
+              throw tooBig(existing.length.toLong + bytes.length)
+            case Success(Some(existing))                       => (Some(digestOf(existing)), existing ++ bytes)
             case Failure(_: java.nio.file.NoSuchFileException) => (Some(Kind.Absent), bytes)
             case Failure(e)                                    => throw e
           }
@@ -815,8 +835,7 @@ class WorkspaceAgentInterfaceImpl(
     if (currentSize > maxFileSize) throw tooLarge(currentSize, "exceeds")
 
     // read once, strictly as UTF-8: the bytes edited are the bytes whose hash the commit compares with
-    val read = Files.readAllBytes(target)
-    if (read.length.toLong > maxFileSize) throw tooLarge(read.length.toLong, "exceeds")
+    val read = readBounded(target).getOrElse(throw tooLarge(Files.size(target), "exceeds"))
     val lines = Try(StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(read)).toString)
       .map(text => Source.fromString(text).getLines().toList) match {
       case Success(fileLines) => fileLines
@@ -950,6 +969,7 @@ class WorkspaceAgentInterfaceImpl(
           "HASH_MISMATCH",
           None
         )
+      expectedHash.foreach(checkExpected(path, entry, _, entryHash)) // and still what was compared
       ensureInTime(path)
       Try(Files.delete(entry)) match {
         case Success(_) => DeleteFileResponse("local", path, wasDirectory)
