@@ -119,9 +119,9 @@ final class InstructionMemoryMiddleware(
                   heading.length,
                   totalMarker
                 ) match
-                  case None =>
-                    full = true
-                    notListed(path)
+                  // this file neither fits whole nor leaves room for the cut marker; a later, shorter one still may,
+                  // so only this file is left out (the check before each read ends the walk when nothing can fit)
+                  case None => notListed(path)
                   case Some(totalCut) =>
                     if totalCut then
                       full = true
