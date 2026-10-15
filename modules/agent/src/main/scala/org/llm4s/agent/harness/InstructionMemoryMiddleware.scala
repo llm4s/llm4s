@@ -90,8 +90,9 @@ final class InstructionMemoryMiddleware(
     paths
       .foldLeft[Result[Unit]](Right(())) { (acc, path) =>
         acc.flatMap { _ =>
-          // full when no file could show: not even its heading and the cut marker fit in the room left
-          if full || text.remaining < headingOf(path).length.toLong + totalMarker.length then
+          // full when no file could show: not even its heading and one character fit in the room left (a short
+          // file needs no cut marker, so the marker's room is not asked for before the file is read)
+          if full || text.remaining < headingOf(path).length.toLong + 1 then
             full = true
             Right(notListed(path))
           else

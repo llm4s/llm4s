@@ -214,6 +214,20 @@ class InstructionMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Eit
     counting.reads.get shouldBe 1
   }
 
+  it should "show a short file that fits whole in room too small for the cut marker" in {
+    val first   = p("/a/AGENTS.md")
+    val second  = p("/b/AGENTS.md")
+    val backend = storeBackend()
+    // after the first file, room for the second's heading and one character, but not for the cut marker
+    val room = PromptSection.charsFor(200).toInt - InstructionMemoryMiddleware.Guide.length -
+      s"\n\n## ${first.value}\n".length - s"\n\n## ${second.value}\n".length - 1
+    seed(backend, first.value -> ("x" * room), second.value -> "y")
+    val mw = new InstructionMemoryMiddleware(Vector(first, second), backend, maxFileTokens = 200, maxTotalTokens = 200)
+    val shown = mw.instructions(testModelContext()).value
+    shown.map(i => (i.path, i.text, i.cut)).last shouldBe ((second, "y", false))
+    mw.promptSections(testModelContext()).value.head.text.length.toLong shouldBe PromptSection.charsFor(200)
+  }
+
   "An edit with FileTools' edit_file" should "show from the next run, not in the run that read the files (rule 1)" in {
     val store   = new InMemoryCheckpointer
     val thread  = ThreadId("edit")
