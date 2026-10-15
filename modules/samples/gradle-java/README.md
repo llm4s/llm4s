@@ -26,10 +26,12 @@ OPENAI_API_KEY=sk-... gradle run -Pllm4sVersion=0.5.0
 ```
 
 Without `-Pllm4sVersion` the build uses `0.1.0-SNAPSHOT`, the code in this checkout, which you publish to your
-local Maven repository first, from the root of this repository:
+local Maven repository first. From the root of this repository:
 
 ```bash
 sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
+cd modules/samples/gradle-java
+OPENAI_API_KEY=sk-... gradle run
 ```
 
 ### Another provider, or another model
