@@ -82,14 +82,19 @@ final private[harness] class RunCache[A](maxRuns: Int):
     def hit(entry: Entry): Result[A] =
       if entry.reporter == position.taskId then report(entry.value)
       Right(entry.value)
-    held match
-      case Some(entry) => hit(entry)
-      case None =>
-        val slot = lock.synchronized {
+    // the lookup and the enrolment are one step under the lock: a caller that misses is a registered waiter before
+    // anyone can complete, leave and be evicted, so it finds the value on its slot
+    val found: Either[Entry, Slot] = lock.synchronized {
+      Option(done.get(key)) match
+        case Some(entry) => Left(entry)
+        case None =>
           val s = inFlight.computeIfAbsent(key, _ => new Slot)
           s.users += 1
-          s
-        }
+          Right(s)
+    }
+    found match
+      case Left(entry) => hit(entry)
+      case Right(slot) =>
         // released whatever ends the wait or the computation - a value, a failure, or a throw `Try` would not catch,
         // such as an interrupt - so no slot outlives its callers
         def release(): Unit = lock.synchronized {
