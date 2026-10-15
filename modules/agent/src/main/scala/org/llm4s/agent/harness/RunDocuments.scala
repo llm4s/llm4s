@@ -20,7 +20,7 @@ import scala.util.control.Exception.ultimately
  * The key is the thread, the run id, the claim's fencing token and the runtime's own object for the run
  * (`RunContext.incarnation`): a run id can be reused (`RunConfig.withRunId`, a recovery under the same id), and two
  * runtimes over different stores can issue one thread the same token, but no two runs share that object - so a
- * recovered or resumed run, or one in another runtime, computes its value again. The value is computed under its incarnation's own lock, held until the last caller
+ * recovered or resumed run, or one in another runtime, computes its value again. The value is computed under its incarnation's own lock (a `ReentrantLock`, so a virtual thread waiting on it parks rather than pinning its carrier), held until the last caller
  * waiting on it leaves, so the concurrent hooks of one run compute it once - or, after a failure, one at a time, a
  * waiter retrying in turn - and never two at once. Only a computed value takes a place in the LRU: a computation in flight, or one that failed
  * (returned or thrown), evicts nothing and leaves nothing behind.
@@ -63,8 +63,11 @@ final private[harness] class RunCache[A](maxRuns: Int):
    * so a waiter finds it even when another run's value has evicted it from the LRU meanwhile.
    */
   final private class Slot:
-    var users: Int           = 0
-    var entry: Option[Entry] = None
+    var users: Int           = 0    // guarded by `lock`
+    var entry: Option[Entry] = None // guarded by `turn`
+    // a lock, not a monitor: the computation reads a backend while holding it, and a virtual thread blocked inside
+    // `synchronized` pins its carrier (JDK 21); a waiter parks instead, and an interrupt ends its wait
+    val turn = new java.util.concurrent.locks.ReentrantLock()
 
   // the incarnations being computed or waited on, one lock each, so the callers of one run compute one at a time: a
   // caller that waited finds the value, or - after a failure - retries in turn on the same lock. Removed when its
@@ -111,7 +114,8 @@ final private[harness] class RunCache[A](maxRuns: Int):
           if slot.users == 0 then inFlight.remove(key, slot): Unit
         }
         ultimately(release()) {
-          slot.synchronized {
+          slot.turn.lockInterruptibly()
+          ultimately(slot.turn.unlock()) {
             slot.entry.orElse(held) match
               case Some(entry) => hit(entry)
               case None        =>
