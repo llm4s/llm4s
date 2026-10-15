@@ -60,7 +60,7 @@ constructors remain, so source compiles unchanged, but code compiled against 0.4
 
 ## Stage 3 migration: the Deep Agents harness
 
-Not in a release yet. Stage 3 ([#1901](https://github.com/llm4s/llm4s/issues/1901)) builds the harness as middleware
+In 0.5.0. Stage 3 ([#1901](https://github.com/llm4s/llm4s/issues/1901)) builds the harness as middleware
 and tools on `AgentBuilder`. Each slice adds its part here as it lands:
 
 - [#1902](https://github.com/llm4s/llm4s/issues/1902), kernel hooks for the harness - state-writing hooks, prompt
@@ -266,7 +266,7 @@ Design: `docs/design/typed-agent-runtime/4.16-stage-2-slice-1-the-durable-checkp
 
 ## Stage 2 migration: durable execution
 
-Not in a release yet. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/1699)) makes agent and graph threads durable and adds human review. One note covers the whole stage; each slice adds its part here as it lands:
+In 0.5.0. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/1699)) makes agent and graph threads durable and adds human review. One note covers the whole stage; each slice adds its part here as it lands:
 
 - [#1700](https://github.com/llm4s/llm4s/issues/1700), the durable `Checkpointer` contract - run-claim leases, fencing tokens and a store contract suite: [below](#durable-checkpointer-contract-1700).
 - [#1703](https://github.com/llm4s/llm4s/issues/1703), tool side-effect safety - idempotency keys and one result per tool call: [below](#tool-side-effect-safety-1703).
@@ -460,7 +460,7 @@ A subscription now delivers the durable events of commits made through any runti
 
 ## Stage 1 migration: agent runtime
 
-Not in a release yet ([#1328](https://github.com/llm4s/llm4s/issues/1328), with [#1329](https://github.com/llm4s/llm4s/issues/1329)'s events and tracing, which restore the agent event stream #1328 removed). `Agent` now runs on `GraphRuntime`: the graph is the only agent loop, `AgentState` and the legacy loop are deleted, and nothing runs the old loop beside the new one. Tools, guardrails, handoffs and context pruning belong to the agent, set when you build it, and a conversation is carried by its `ThreadId` instead of by a value you pass back in. Design: `docs/design/typed-agent-runtime/4.13-stage-1-slice-2-the-agent-loop-on-the-graph-runtime.md` (§4.13). This note covers the whole of Stage 1 ([#1326](https://github.com/llm4s/llm4s/issues/1326)), five slices:
+In 0.5.0 ([#1328](https://github.com/llm4s/llm4s/issues/1328), with [#1329](https://github.com/llm4s/llm4s/issues/1329)'s events and tracing, which restore the agent event stream #1328 removed). `Agent` now runs on `GraphRuntime`: the graph is the only agent loop, `AgentState` and the legacy loop are deleted, and nothing runs the old loop beside the new one. Tools, guardrails, handoffs and context pruning belong to the agent, set when you build it, and a conversation is carried by its `ThreadId` instead of by a value you pass back in. Design: `docs/design/typed-agent-runtime/4.13-stage-1-slice-2-the-agent-loop-on-the-graph-runtime.md` (§4.13). This note covers the whole of Stage 1 ([#1326](https://github.com/llm4s/llm4s/issues/1326)), five slices:
 
 - [#1327](https://github.com/llm4s/llm4s/issues/1327), kernel completion: [below](#kernel-completion-1327).
 - [#1328](https://github.com/llm4s/llm4s/issues/1328), the agent loop on `GraphRuntime`: this section.
@@ -593,7 +593,7 @@ handle.foreach(_.cancel())   // instead of token.cancel()
 
 ## Agent middleware
 
-Not in a release yet ([#1279](https://github.com/llm4s/llm4s/issues/1279)). The graph tool loop
+In 0.5.0 ([#1279](https://github.com/llm4s/llm4s/issues/1279)). The graph tool loop
 takes a stack of `AgentMiddleware` in place of a `ToolCallPolicy`: one ordered extension point with
 `beforeAgent`, `afterAgent`, `wrapModelCall` and `wrapToolCall` hooks, for approval, guardrails,
 logging, retry and rate limits. The graph runtime is Experimental, so these are source breaks with
@@ -645,7 +645,7 @@ no shims. Design: `docs/design/typed-agent-runtime/4.08-stage-0-prototype-agent-
 
 ## Agent tool contract and handoff ids
 
-Not in a release yet ([#1278](https://github.com/llm4s/llm4s/issues/1278)). The graph tool loop
+In 0.5.0 ([#1278](https://github.com/llm4s/llm4s/issues/1278)). The graph tool loop
 runs `AgentTool`s, whose arguments are validated against their schema (rendered non-strict, so
 optional fields may be omitted) before any middleware or the tool runs, and legacy handoffs take an explicit id. The graph runtime is
 Experimental, so these are source breaks with no shims. Design:
@@ -709,7 +709,7 @@ Experimental, so these are source breaks with no shims. Design:
 
 ## Run API for graph runs
 
-Not in a release yet ([#1277](https://github.com/llm4s/llm4s/issues/1277)). `GraphRuntime.start`,
+In 0.5.0 ([#1277](https://github.com/llm4s/llm4s/issues/1277)). `GraphRuntime.start`,
 `recover` and `resume` return a `RunHandle` once the thread is claimed, and the run executes on a
 thread the runtime owns. The graph runtime is Experimental, so these are source breaks with no
 shims. Design: `docs/design/typed-agent-runtime/4.06-stage-0-prototype-run-api-and-event-dispatch.md` (§4.6).
@@ -762,7 +762,7 @@ shims. Design: `docs/design/typed-agent-runtime/4.06-stage-0-prototype-run-api-a
 
 ## Provider configs: build with `apply`, change with `with*`
 
-Not in a release yet ([#1388](https://github.com/llm4s/llm4s/issues/1388)). `OpenAIConfig`,
+In 0.5.0 ([#1388](https://github.com/llm4s/llm4s/issues/1388)). `OpenAIConfig`,
 `AnthropicConfig` and `OllamaConfig` follow the growth-prone pattern (pass 5 below), so a new field
 no longer breaks Java and Kotlin callers. The constructor and `copy` are private:
 
@@ -778,7 +778,7 @@ no longer breaks Java and Kotlin callers. The constructor and `copy` are private
 
 ## Image generation errors are `LLMError`s
 
-Not in a release yet ([#1331](https://github.com/llm4s/llm4s/issues/1331)). `llm4s-image`'s
+In 0.5.0 ([#1331](https://github.com/llm4s/llm4s/issues/1331)). `llm4s-image`'s
 generation clients return `Either[LLMError, _]`, so an interrupted call can return
 `CancelledError`, and `ImageGenerationError` extends `LLMError`. Source breaks, with no shims:
 
@@ -801,7 +801,7 @@ generation clients return `Either[LLMError, _]`, so an interrupted call can retu
 
 ## Cancellation by interrupt
 
-Not in a release yet ([#1270](https://github.com/llm4s/llm4s/issues/1270)). An interrupted call
+In 0.5.0 ([#1270](https://github.com/llm4s/llm4s/issues/1270)). An interrupted call
 now returns `Left(CancelledError)` with the thread's interrupt flag still set. Code that matched
 `ExecutionError`, `TimeoutError` or `SimpleError` to detect an interrupted call should match
 `CancelledError` instead, and `ToolCallError.Cancelled` for a tool call. `CancelledError` is
@@ -829,7 +829,7 @@ non-recoverable and is never retried. Chat clients no longer throw `InterruptedE
 
 ## Pre-baseline API cleanup, pass 8
 
-Not in a release yet; continues pass 7 below. It closes the last gaps in the frozen modules'
+In 0.5.0; continues pass 7 below. It closes the last gaps in the frozen modules'
 public API found by checking the [re-audit](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5935792540)
 against `main`.
 
@@ -850,7 +850,7 @@ against `main`.
 
 ## Pre-baseline API cleanup, pass 7
 
-Not in a release yet; continues pass 6 below, which typed the times a caller supplies. This pass
+In 0.5.0; continues pass 6 below, which typed the times a caller supplies. This pass
 types the times the library **reports**: an elapsed time is a `FiniteDuration`, a point in time an
 `Instant`, and the unit leaves the name. Every JSON, trace and wire format keeps its keys and
 millisecond values (`duration_ms`, `durationMs`, `executionTimeMs`, ...).
@@ -881,7 +881,7 @@ Check string interpolation in particular: `s"${duration}ms"` still compiles, but
 
 ## Pre-baseline API cleanup, pass 6
 
-Not in a release yet; continues pass 5 below. A time the caller supplies is typed: a duration is
+In 0.5.0; continues pass 5 below. A time the caller supplies is typed: a duration is
 a `scala.concurrent.duration.FiniteDuration` and a point in time a `java.time.Instant`, never a
 raw `Int`/`Long` whose unit lives in its name or its Scaladoc. Names lose their unit suffix
 (`timeoutMs` becomes `timeout`). Defaults are unchanged, and so are the wire formats: HOCON keys,
@@ -940,7 +940,7 @@ ScalaMock `onCall` lambda typed `_: Int` compiles but fails at runtime.
 
 ## Pre-baseline API cleanup, pass 5
 
-Not in a release yet; continues pass 4 below. It settles the provider-author SPI's API quality
+In 0.5.0; continues pass 4 below. It settles the provider-author SPI's API quality
 before the binary-compatibility baseline.
 
 ### Growth-prone data types: construct with named arguments, change with `with*`
@@ -1025,7 +1025,7 @@ with `Llm4sConfig.provider(name)` / `defaultProvider()` / `apiKeySources()`.
 
 ## Pre-baseline API cleanup, pass 4
 
-Not in a release yet; continues pass 3 below. Vendor fields leave `NamedProviderConfig`.
+In 0.5.0; continues pass 3 below. Vendor fields leave `NamedProviderConfig`.
 
 **Config files: no change.** `organization`, `endpoint`, `apiVersion`, `contextWindow` and
 `reserveCompletion` keep their names in `llm4s.providers.<name>` sections. What changed is who owns
@@ -1071,7 +1071,7 @@ type error while reading the block.
 
 ## Pre-baseline API cleanup, pass 3
 
-Not in a release yet; continues pass 2 below.
+In 0.5.0; continues pass 2 below.
 
 ### `llmconnect.middleware`, `ReliableProviders` and `ReliabilitySyntax` are removed
 
@@ -1123,7 +1123,7 @@ and `org.llm4s.llmconnect.serialization.{ToolCallDeserializer, StandardToolCallD
 
 ## Pre-baseline API cleanup, pass 2
 
-Not in a release yet; continues pass 1 below.
+In 0.5.0; continues pass 1 below.
 
 | Removed | Use instead |
 |---|---|
@@ -1150,7 +1150,7 @@ the module:
 
 ## Pre-baseline API cleanup, pass 1
 
-Not in a release yet; from the
+In 0.5.0; from the
 [spine re-audit](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5935792540). A later
 pre-1.0 release sets the binary-compatibility baseline, so public API that nothing used, or that was
 already deprecated, is removed now rather than frozen.
@@ -1268,7 +1268,7 @@ The `llm4s.tools.brave`, `.duckduckgo` and `.exa` keys, their defaults, and the
 
 ## Slice 7: `UsageSummary` and `ModelUsage` move to `org.llm4s.llmconnect.model`
 
-Not in a release yet; the preparation step of slice 7
+In 0.5.0; the preparation step of slice 7
 ([#1242](https://github.com/llm4s/llm4s/issues/1242), decision D1).
 
 Slice 7 carves the agent runtime out of `llm4s-core` into `llm4s-agent`. `UsageSummary` and
@@ -1293,7 +1293,7 @@ form is unchanged, so an `AgentState` saved before the move still loads.
 
 ## llm4s no longer brings a logging backend
 
-Not in a release yet; found by the slice 6 spine audit
+In 0.5.0; found by the slice 6 spine audit
 ([#1133](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5878475544)).
 
 Every llm4s module used to declare `logback-classic` and `log4j-to-slf4j` as compile
@@ -1316,7 +1316,7 @@ application, and the published modules now declare only `slf4j-api`.
 
 ## A failed read no longer deletes or clears indexed documents
 
-Follow-up to [#1236](https://github.com/llm4s/llm4s/pull/1236); not in a release yet.
+Follow-up to [#1236](https://github.com/llm4s/llm4s/pull/1236); in 0.5.0.
 
 `LoadResult.Failure` gains a fourth field, `documentId: Option[String] = None`: the id the
 failed document is (or would be) indexed under. `source` stays the path, key or URL. `RAG.sync`
@@ -1396,7 +1396,7 @@ no longer defaults to `ConfigSource.default`; call `default()` for that.
 
 ## A failed listing fails the sync
 
-[#1231](https://github.com/llm4s/llm4s/pull/1231); not in a release yet.
+[#1231](https://github.com/llm4s/llm4s/pull/1231); in 0.5.0.
 
 A document loader that cannot enumerate its documents - an S3 listing with no credentials, a
 missing bucket or access denied, a `DirectoryLoader` path that does not exist - now yields the
@@ -1425,7 +1425,7 @@ should return `LoadResult.listingFailure(source, error)`.
 ## Vendor credentials: a shared API key per provider
 
 [#1132](https://github.com/llm4s/llm4s/issues/1132), part of the modularisation programme
-([#1126](https://github.com/llm4s/llm4s/issues/1126)); not in a release yet. `0.4.1` and earlier
+([#1126](https://github.com/llm4s/llm4s/issues/1126)); in 0.5.0. `0.4.1` and earlier
 behave as before.
 
 **Credentials belong to a vendor, keyed by provider id; clients belong to a use.** Each provider
@@ -1813,7 +1813,7 @@ llm4s {
 Two things to know:
 
 - **Only the section you load is validated** (since
-  [#1132](https://github.com/llm4s/llm4s/issues/1132)'s follow-up; not in a release yet). A
+  [#1132](https://github.com/llm4s/llm4s/issues/1132)'s follow-up; in 0.5.0). A
   section whose required `apiKey` is unset, or whose provider module is not on the classpath,
   fails `provider("<that section>")` - and `defaultProvider()` when it is the default - but not
   a load of any other section. Up to 0.4.1 every section was validated on every load, so each
@@ -1835,7 +1835,7 @@ env check (`EnvCheckPolicies`).
 
 A named provider section can now carry keys of the provider's own, declared by the provider
 rather than squeezed into the shared fields ([#1215](https://github.com/llm4s/llm4s/issues/1215)).
-Not in a release yet.
+In 0.5.0.
 
 ### Vertex AI: `endpoint` becomes `project`, `organization` becomes `location`
 
@@ -1955,7 +1955,7 @@ env check reads `OPENAI_COMPATIBLE_BASE_URL` as that provider's endpoint instead
 ## Slice 5: Mistral, Cohere and Voyage leave core; core ships no provider
 
 The last provider clients leave `llm4s-core` ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
-None of this is in a release yet; `0.4.1` and earlier still ship Mistral, Cohere and Voyage inside
+This is in 0.5.0; `0.4.1` and earlier ship Mistral, Cohere and Voyage inside
 `llm4s-core`.
 
 | Provider | Now in | Add |
