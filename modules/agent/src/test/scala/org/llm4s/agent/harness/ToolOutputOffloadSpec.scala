@@ -341,6 +341,12 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
     ).maxTotalBytes shouldBe 138L
   }
 
+  it should "find only whole offload paths, so a key that prefixes another never matches it" in {
+    val text = "stored at /large_tool_results/abc123: read it; see also /large_tool_results/x_9."
+    ToolOutputOffload.PathPattern.findAllMatchIn(text).map(_.group(1)).toVector shouldBe Vector("abc123", "x_9")
+    ToolOutputOffload.PathPattern.findAllMatchIn(text).map(_.group(1)).toSet should not contain "abc"
+  }
+
   it should "hash a caller-built key that is not a path segment" in {
     ToolOutputOffload.segmentOf("abc") shouldBe "abc"
     (ToolOutputOffload.segmentOf("a/b") should have).length(64)

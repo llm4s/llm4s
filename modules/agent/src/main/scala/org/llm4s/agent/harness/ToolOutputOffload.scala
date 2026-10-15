@@ -114,8 +114,14 @@ final class ToolOutputOffload(
       through = history.indexWhere(_.id == summary.throughMessageId)
       if through >= 0
     yield
-      val results = history.take(through + 1).collect { case StoredToolText(t) => t }
-      offloads.results.map(_.key).filter(k => results.exists(_.contains(pathOf(k))))
+      // whole paths only: a key that is a prefix of another never matches it
+      val named = history
+        .take(through + 1)
+        .iterator
+        .collect { case StoredToolText(t) => t }
+        .flatMap(t => PathPattern.findAllMatchIn(t).map(_.group(1)))
+        .toSet
+      offloads.results.map(_.key).filter(named)
     ).getOrElse(Vector.empty)
 
 @Experimental
@@ -146,6 +152,10 @@ object ToolOutputOffload:
    */
   val key: StateKey[Offloads, OffloadUpdate] =
     StateKey[Offloads, OffloadUpdate]("offloads", Offloads.empty)((current, update) => Right(current.applied(update)))
+
+  /** A whole offload path in text, its segment the group: not followed by another segment character. */
+  private[harness] val PathPattern: scala.util.matching.Regex =
+    (java.util.regex.Pattern.quote(Mount.value) + "/([A-Za-z0-9_-]{1,64})(?![A-Za-z0-9_-])").r
 
   /** The path the model is shown for the result stored under `segment`. */
   def pathOf(segment: String): String = s"${Mount.value}/$segment"
