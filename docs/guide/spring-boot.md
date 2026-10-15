@@ -39,12 +39,8 @@ Spring Boot 4 is not supported yet; whether it needs its own artifact, as LangCh
 [#1467](https://github.com/llm4s/llm4s/issues/1467).
 
 {: .note }
-> **Not published yet.** `llm4s-spring-boot-starter` is not on Maven Central: the latest release, `0.4.1`, is a single
-> `llm4s-core` artifact, and the starter is planned to ship with `0.5.0`, together with the Java API it is built on.
-> Until then, build both from a checkout of the repository; the
-> [`gradle-java` sample](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java) shows the steps for the
-> Java API. Which JDK is the minimum is not settled yet: follow
-> [#1493](https://github.com/llm4s/llm4s/issues/1493).
+> `llm4s-spring-boot-starter` is published from `0.5.0` on, together with the Java API it is built on. Which JDK is
+> the minimum is not settled yet: follow [#1493](https://github.com/llm4s/llm4s/issues/1493).
 
 ## Add the dependency
 

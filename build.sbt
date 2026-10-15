@@ -134,11 +134,10 @@ addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 // ---- binary compatibility (MiMa) ----
 // MiMa compares a module with the artifact of the same name in a previous release. It can only
 // run once split artifacts exist: the last release (0.4.1) is a single `llm4s-core`, and the
-// modularisation (#1126) moved every package this check would cover. #1281 sets the baseline at
-// 0.5.0, the first release with the split coordinates, for the frozen modules only. Until then
-// `mimaBaselineVersion` is `None`, `mimaPreviousArtifacts` is empty and
-// `sbt mimaReportBinaryIssues` checks nothing. Set it to `Some("0.5.0")` when 0.5.0 is
-// published; see docs/reference/api-stability.md.
+// modularisation (#1126) moved every package this check would cover. 0.5.0 sets no baseline: #1281
+// sets it at a pre-1.0 release, version to be decided, once the designs are final, for the frozen
+// modules only. Until then `mimaBaselineVersion` is `None`, `mimaPreviousArtifacts` is empty and
+// `sbt mimaReportBinaryIssues` checks nothing; see docs/reference/api-stability.md.
 val mimaBaselineVersion: Option[String] = None
 
 // `module` is the artifact name (the project's `name`). Apply this to frozen modules only.

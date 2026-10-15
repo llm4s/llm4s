@@ -12,7 +12,7 @@ This page compares LLM4S with LangChain4j, Spring AI, Koog and Embabel, so that 
 your project. It states facts and trade-offs, not rankings.
 
 **Last verified: 2026-10-11.** The statements about LLM4S describe the `main` branch on that date; the latest release is
-v0.4.1, and the module split described in the [v1 scope](../reference/v1-scope) ships with 0.5.0. Every statement about
+v0.5.0, the first to publish the module split described in the [v1 scope](../reference/v1-scope). Every statement about
 another project comes from that project's own documentation, fetched on that date and listed under
 [Sources](#sources). A cell that says *not verified* means it was not checked, not that the feature is absent. The
 other projects change quickly: re-check anything that matters to you before relying on it, and expect this page to be
@@ -51,10 +51,10 @@ refreshed at each LLM4S release.
 | Model providers | 15 chat providers on `main`: OpenAI, Azure OpenAI, Anthropic, Gemini, Vertex AI, Ollama, Mistral, Cohere, DeepSeek, Z.ai, OpenRouter, Requesty, Amazon Bedrock, IBM watsonx.ai and a generic OpenAI-compatible one; 5 embedding providers ([providers](providers)) | A table of supported language models [L3] | A comparison table of supported chat models [S8] | not verified | not verified |
 | MCP | Client (stdio, SSE and Streamable HTTP transports) and a server class in `llm4s-mcp`; no user guide yet ([#1442](https://github.com/llm4s/llm4s/issues/1442)) | Client with Streamable HTTP, stdio, WebSocket and Docker stdio [L5]; a stdio server in the `langchain4j-community-mcp-server` module [L9] | Client and server; stdio, Streamable HTTP, stateless Streamable HTTP and SSE; Spring Boot starters [S3] | MCP and A2A integrations, both marked beta [K1] | not verified |
 | Observability | Langfuse, OpenTelemetry and Prometheus modules, a trace collector and cost tracking ([guide](observability/)) | Listeners and events; Micrometer listeners; OpenTelemetry semantic conventions; Arize integrations [L6] | Micrometer metrics and tracing for `ChatClient`, `ChatModel`, `EmbeddingModel`, `ImageModel` and `VectorStore` [S5] | OpenTelemetry is listed among its integrations [K1] | not verified |
-| Testing and evaluation | RAGAS-style metrics and a benchmark harness for RAG ([guide](rag-evaluation)); LLM-as-judge guardrails; **no published test kit for application code** ([#1475](https://github.com/llm4s/llm4s/issues/1475)); `llm4s-provider-testkit` is for provider authors | not verified | `Evaluator`, `RelevancyEvaluator` and `FactCheckingEvaluator` [S1] | not verified | not verified |
+| Testing and evaluation | RAGAS-style metrics and a benchmark harness for RAG ([guide](rag-evaluation)); LLM-as-judge guardrails; `llm4s-testkit` (scripted clients for application tests, [#1475](https://github.com/llm4s/llm4s/issues/1475)); `llm4s-provider-testkit` for provider authors | not verified | `Evaluator`, `RelevancyEvaluator` and `FactCheckingEvaluator` [S1] | not verified | not verified |
 | Frameworks and runtimes | Spring Boot starter (three providers), cats-effect ([guide](cats-effect)), ZIO ([guide](zio)), Pekko Streams ([guide](pekko)), a Kotlin module, a Java facade (incomplete) | Spring Boot 3 and 4 starters and `@AiService`; example projects for Spring Boot, Quarkus, Helidon, Payara Micro, WildFly and Jakarta EE/MicroProfile [L2][L8] | Spring AI 2.0.x supports Spring Boot 4.0.x and 4.1.x [S9]; Spring Boot starters, for example for its MCP client and server [S3] | Spring Boot and Ktor integrations (both beta) [K1] | Built on Spring [E1] |
 | Java baseline | JDK 21: CI runs only JDK 21, and the agent runtime depends on Ox, whose jars are JDK 21 bytecode ([#1493](https://github.com/llm4s/llm4s/issues/1493)) | Its Spring Boot integration page states a minimum Java version, quoted in the note below the table [L8] | not verified | not verified | not verified |
-| Maturity | Pre-1.0: latest release v0.4.1; stability tiers (Frozen, Beta, Experimental) in the [v1 scope](../reference/v1-scope) | Latest release 1.22.0, 2026-10-08 [R1]; some modules, such as agents and guardrails, are marked experimental [L10][L11] | Latest GA release 2.0.1, 2026-08-21 [R2] | Latest release 1.3.0, 2026-09-24 [R3]; its Spring Boot, Ktor and planner agents are marked beta [K1] | Latest release 1.5.3, 2026-10-05 [R4] |
+| Maturity | Pre-1.0: latest release v0.5.0; stability tiers (Frozen, Beta, Experimental) in the [v1 scope](../reference/v1-scope) | Latest release 1.22.0, 2026-10-08 [R1]; some modules, such as agents and guardrails, are marked experimental [L10][L11] | Latest GA release 2.0.1, 2026-08-21 [R2] | Latest release 1.3.0, 2026-09-24 [R3]; its Spring Boot, Ktor and planner agents are marked beta [K1] | Latest release 1.5.3, 2026-10-05 [R4] |
 
 Note on the *Java baseline* row: LangChain4j's Spring Boot integration page says "LangChain4j Spring Boot integration requires Java 17" [L8]. This is a statement about that project, quoted as fetched on 2026-10-11. <!-- doc-support: ignore -->
 
@@ -66,16 +66,13 @@ Plainly, as of the date above:
   mismatch with the handler shows up at run time ([#1472](https://github.com/llm4s/llm4s/issues/1472),
   [#1473](https://github.com/llm4s/llm4s/issues/1473)).
 - **A complete Java API.** See the audience note above.
-- **A test kit for application code** ([#1475](https://github.com/llm4s/llm4s/issues/1475)). Tests in this repository
-  use scripted clients like the ones in the [migration guide's](migrating-from-langchain4j) spec.
 - **A smaller integration catalogue.** Two vector-store modules that other projects offer, Elasticsearch/OpenSearch
   and Redis, are open issues ([#1469](https://github.com/llm4s/llm4s/issues/1469),
   [#1470](https://github.com/llm4s/llm4s/issues/1470)). The Spring Boot starter covers three providers
   ([#1467](https://github.com/llm4s/llm4s/issues/1467)). There is no Quarkus guide yet
   ([#1468](https://github.com/llm4s/llm4s/issues/1468)).
-- **No bill of materials** to align artifact versions ([#1462](https://github.com/llm4s/llm4s/issues/1462)).
 - **No Scala 2.13 artifact.** The artifacts are Scala 3 only.
-- **A stable 1.0 API.** The split artifacts are unpublished until 0.5.0, and the compatibility promise starts at 1.0.
+- **A stable 1.0 API.** The split artifacts are first published in 0.5.0, and the compatibility promise starts at 1.0.
 
 ## When not to choose LLM4S
 

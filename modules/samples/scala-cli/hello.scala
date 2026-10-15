@@ -1,6 +1,9 @@
 //> using scala 3.7.1
 //> using jvm 21
-//> using dep org.llm4s::llm4s-core:0.4.1
+//> using dep org.llm4s::llm4s-core:0.5.0
+//> using dep org.llm4s::llm4s-openai:0.5.0
+//> using dep org.llm4s::llm4s-ollama:0.5.0
+//> using dep ch.qos.logback:logback-classic:1.5.34
 //> using resourceDir resources
 //> using javaOpt -Dlogback.configurationFile=logback.xml
 
@@ -13,7 +16,7 @@
 // Run it from this directory: `logback.xml` is found relative to the working directory.
 // The provider comes from `resources/application.conf`, or `resources/ollama.conf` when selected as above
 // (named sections, see docs/getting-started/configuration.md). The version above is the latest release; update it
-// (and read the 0.5.0 note in docs/getting-started/scala-cli.md) when a newer one is published.
+// when a newer one is published. llm4s-core ships no provider and no logging backend, hence the extra lines.
 
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect

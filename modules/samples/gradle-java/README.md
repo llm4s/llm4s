@@ -17,22 +17,22 @@ committed (a wrapper jar is a binary); run `gradle wrapper` once if you want one
 
 ## Run it
 
-`llm4s-java-api` ships with 0.5.0 and is not on Maven Central yet, so for now publish it to your local Maven
-repository from the root of this repository, which is where `build.gradle.kts` looks:
-
-```bash
-sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
-```
-
-Then, with a provider key in the environment (the sample's default is OpenAI):
+`llm4s-java-api` is on Maven Central from 0.5.0. With a provider key in the environment (the sample's default is
+OpenAI), run the sample against a release:
 
 ```bash
 cd modules/samples/gradle-java
-OPENAI_API_KEY=sk-... gradle run
+OPENAI_API_KEY=sk-... gradle run -Pllm4sVersion=0.5.0
 ```
 
-Once 0.5.0 is published, skip the `sbt` step and run `gradle run -Pllm4sVersion=0.5.0`, and change the default
-`llm4sVersion` in `build.gradle.kts` to that release.
+Without `-Pllm4sVersion` the build uses `0.1.0-SNAPSHOT`, the code in this checkout, which you publish to your
+local Maven repository first. From the root of this repository:
+
+```bash
+sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
+cd modules/samples/gradle-java
+OPENAI_API_KEY=sk-... gradle run
+```
 
 ### Another provider, or another model
 

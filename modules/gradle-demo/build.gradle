@@ -13,21 +13,14 @@ repositories {
     mavenCentral()
 }
 
-def llm4sVersion = '0.4.1'
+def llm4sVersion = '0.5.0'
 
 dependencies {
     // Core module — note the _3 suffix for Scala 3
     implementation "org.llm4s:llm4s-core_3:${llm4sVersion}"
 
-    // Logback exclusion (Spring Boot / Ktor projects, llm4s-core 0.4.x only):
-    // implementation("org.llm4s:llm4s-core_3:${llm4sVersion}") {
-    //     exclude group: 'ch.qos.logback', module: 'logback-classic'
-    // }
-
-    // Azure exclusion (non-Azure projects, llm4s-core 0.4.x only):
-    // implementation("org.llm4s:llm4s-core_3:${llm4sVersion}") {
-    //     exclude group: 'com.azure', module: 'azure-ai-openai'
-    // }
+    // llm4s-core ships no provider client: add the module of each provider you call
+    implementation "org.llm4s:llm4s-openai_3:${llm4sVersion}"
 }
 
 // Pin the Scala 3 library (scala3-library_3 only; scala-library stays at 2.13.x)

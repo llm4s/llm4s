@@ -12,11 +12,10 @@ import org.llm4s.types.Result
  *  llm4s is published for Scala 3 only, so every snippet uses the `_3` artifact
  *  suffix (Gradle does not append it for you, unlike sbt's `%%`). The logback and
  *  Azure exclusions apply to `llm4s-core` 0.4.x, which declares those dependencies;
- *  the split modules on `main` do not.
+ *  the split modules (0.5.0 and later) do not.
  *
- *  `LLM4S_VERSION` is the latest published release. At 0.4.1 only `llm4s-core` exists as an
- *  artifact; the other module names (`llm4s-agent`, `llm4s-openai`, ...) resolve from 0.5.0, so
- *  bump `LLM4S_VERSION` when that release is published.
+ *  `LLM4S_VERSION` is the latest published release; bump it with each release. Every module
+ *  name (`llm4s-core`, `llm4s-agent`, `llm4s-openai`, ...) resolves at it from 0.5.0 on.
  *
  *  Snippets that take a module name or a Scala version return a [[org.llm4s.types.Result]]:
  *  both values are written into a build file between quotes, so a value that is not a plausible
@@ -27,7 +26,7 @@ import org.llm4s.types.Result
 object GradleSnippets {
 
   /** The latest released version whose coordinates the snippets use. */
-  val LLM4S_VERSION: String = "0.4.1"
+  val LLM4S_VERSION: String = "0.5.0"
 
   private val SCALA_SUFFIX = "3"
 
