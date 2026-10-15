@@ -477,25 +477,29 @@ final class HostFileBackend private (
   ): ReplayGuard.Plan[A] =
     ReplayGuard.Plan(before, after, presumed)(
       // the target's directory exists before its stripe is chosen, so every writer of the file, whether it
-      // created the directory or found it, takes the stripe of the one real directory
-      io(operation, path)(Try(Files.createDirectories(target.getParent)).toResult.map(_ => ())).flatMap(_ =>
-        exclusively(target) {
-          // checked again at each mutation: a mount made inside the root after `open` stops it here
-          unmounted(operation, path)
-            .flatMap(_ => resolve(operation, path))
-            .flatMap(again => io(operation, path)(digest(operation, path, again)))
-            .flatMap { now =>
-              if now == before then effect
-              else
-                Left(
-                  GraphError.EffectReplayRefused(
-                    s"file.$operation",
-                    s"${path.value} changed after it was planned: it is now ${now.value}, not ${before.value}"
+      // created the directory or found it, takes the stripe of the one real directory; it is created only
+      // once the root, its mounts and the path are checked again, so a refused effect leaves nothing behind
+      unmounted(operation, path)
+        .flatMap(_ => resolve(operation, path))
+        .flatMap(_ => io(operation, path)(Try(Files.createDirectories(target.getParent)).toResult.map(_ => ())))
+        .flatMap(_ =>
+          exclusively(target) {
+            // checked again at each mutation: a mount made inside the root after `open` stops it here
+            unmounted(operation, path)
+              .flatMap(_ => resolve(operation, path))
+              .flatMap(again => io(operation, path)(digest(operation, path, again)))
+              .flatMap { now =>
+                if now == before then effect
+                else
+                  Left(
+                    GraphError.EffectReplayRefused(
+                      s"file.$operation",
+                      s"${path.value} changed after it was planned: it is now ${now.value}, not ${before.value}"
+                    )
                   )
-                )
-            }
-        }
-      )
+              }
+          }
+        )
     )
 
   def write(path: VPath, content: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =

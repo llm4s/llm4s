@@ -835,4 +835,19 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     backend.write(p("/c.txt"), "w", call()).left.value.message should include("was replaced")
   }
 
+  "A mount found when a write's effect runs" should "refuse it before any parent directory is created" in {
+    backend.close()
+    val calls = new java.util.concurrent.atomic.AtomicInteger()
+    // the first look is open's: nothing; every later one, the effect's: a mount has appeared
+    backend = HostFileBackend
+      .open(
+        dir,
+        locks,
+        mountsBeneath = r => Right(if (calls.getAndIncrement() == 0) Vector.empty else Vector(r.resolve("m")))
+      )
+      .value
+    backend.write(p("/new/deep/f.txt"), "x", call()).left.value.message should include("mounted beneath it")
+    Files.exists(dir.resolve("new")) shouldBe false
+  }
+
 }
