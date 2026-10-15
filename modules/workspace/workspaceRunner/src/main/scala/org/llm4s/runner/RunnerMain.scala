@@ -127,29 +127,37 @@ object RunnerMain extends cask.MainRoutes {
 
         case cask.Ws.Close(code, reason) =>
           logger.info(s"WebSocket connection closed: code=$code, reason=$reason")
-          // Kill this client's processes only (per-client isolation)
-          clientEarlyCancels.remove(channel): Unit
-          Option(clientProcesses.remove(channel)).foreach { processes =>
-            processes.forEach { (_, running) =>
-              running.cancelled.set(true)
-              val terminateAttempt = Try {
-                val destroyedProcess = running.process.destroyForcibly()
-                if (!destroyedProcess.waitFor(5, TimeUnit.SECONDS)) {
-                  logger.warn("Process did not terminate within timeout after disconnect")
-                }
-              }
-              terminateAttempt.failed.foreach { ex =>
-                logger.error(s"Error destroying process on disconnect: ${ex.getMessage}", ex)
-              }
-            }
-          }
-          connections.remove(channel)
+          disconnect(channel, "disconnect")
 
         case cask.Ws.Error(ex) =>
+          // an error may end the socket with no Close after it: the same cleanup, so nothing of this client runs on
           logger.error(s"WebSocket error: ${ex.getMessage}", ex)
-          connections.remove(channel)
+          disconnect(channel, "socket error")
       }
     }
+
+  /**
+   * Ends a client's connection: its commands waiting at the gate never start (it no longer owns its process map, and
+   * its early cancellations go with it), and its running processes are killed - this client's only.
+   */
+  private def disconnect(channel: cask.WsChannelActor, why: String): Unit = {
+    clientEarlyCancels.remove(channel): Unit
+    Option(clientProcesses.remove(channel)).foreach { processes =>
+      processes.forEach { (_, running) =>
+        running.cancelled.set(true)
+        val terminateAttempt = Try {
+          val destroyedProcess = running.process.destroyForcibly()
+          if (!destroyedProcess.waitFor(5, TimeUnit.SECONDS)) {
+            logger.warn(s"Process did not terminate within timeout after $why")
+          }
+        }
+        terminateAttempt.failed.foreach { ex =>
+          logger.error(s"Error destroying process on $why: ${ex.getMessage}", ex)
+        }
+      }
+    }
+    connections.remove(channel): Unit
+  }
 
   private def handleWebSocketMessage(channel: cask.WsChannelActor, message: String): Unit = {
     logger.debug(s"Received WebSocket message: $message")
@@ -357,22 +365,7 @@ object RunnerMain extends cask.MainRoutes {
               logger.error(s"Error closing timed out connection: ${ex.getMessage}", ex)
             }
             // Also clean up processes for timed out connection
-            clientEarlyCancels.remove(channel): Unit
-            Option(clientProcesses.remove(channel)).foreach { processes =>
-              processes.forEach { (_, running) =>
-                running.cancelled.set(true)
-                val terminateAttempt = Try {
-                  val destroyedProcess = running.process.destroyForcibly()
-                  if (!destroyedProcess.waitFor(5, TimeUnit.SECONDS)) {
-                    logger.warn("Process did not terminate within timeout after heartbeat disconnect")
-                  }
-                }
-                terminateAttempt.failed.foreach { ex =>
-                  logger.error(s"Error destroying process on heartbeat timeout: ${ex.getMessage}", ex)
-                }
-              }
-            }
-            connections.remove(channel)
+            disconnect(channel, "heartbeat timeout")
           }
         }
       },

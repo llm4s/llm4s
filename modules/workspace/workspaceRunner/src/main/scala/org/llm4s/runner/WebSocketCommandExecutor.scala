@@ -94,6 +94,9 @@ final private[runner] class WebSocketCommandExecutor(
                   Some(ex.getStackTrace.mkString("\n"))
                 )
               case Success(process) =>
+                // the permit goes back when the process exits, however this path ends from here: registered first, so a
+                // failure to announce or stream it (a dropped socket) cannot keep the gate held
+                workspace.releaseOnExit(Some(process))
                 // registered before it is announced, so a cancellation from then on finds it; the timeout and the
                 // duration count from the start of the process, not from before the wait for the gate
                 val running =
@@ -110,8 +113,15 @@ final private[runner] class WebSocketCommandExecutor(
                   running.cancelled.set(true)
                   process.destroyForcibly(): Unit
                 }
-                send(CommandStartedMessage(cmd.commandId, cmd.command))
-                stream(cmd, prepared, running, processes, send, fail)
+                // a client that cannot be told it started gets no output and could not cancel it: it is stopped
+                Try(send(CommandStartedMessage(cmd.commandId, cmd.command))) match {
+                  case Success(_) => stream(cmd, prepared, running, processes, send, fail)
+                  case Failure(ex) =>
+                    logger.warn(s"Could not announce command ${cmd.commandId}; stopping it: ${ex.getMessage}")
+                    running.cancelled.set(true)
+                    processes.remove(cmd.commandId)
+                    process.destroyForcibly(): Unit
+                }
             }
         }
     }
@@ -255,7 +265,6 @@ final private[runner] class WebSocketCommandExecutor(
             -1
         } finally {
           processes.remove(cmd.commandId)
-          workspace.releaseOnExit(Some(process)) // once it has really exited: a forced kill can take a while
           exitDone.trySuccess(())
         }
       exitCodePromise.trySuccess(exitCode)

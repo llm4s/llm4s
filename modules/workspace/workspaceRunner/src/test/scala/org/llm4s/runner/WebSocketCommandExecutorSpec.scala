@@ -401,6 +401,28 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
     channel.started shouldBe empty
   }
 
+  it should "stop a command it cannot announce, and give its gate permit back when the process exits" in {
+    assume(!isWindowsHost)
+    Files.write(root.resolve("follow-gate.txt"), "x\n".getBytes(StandardCharsets.UTF_8))
+    val workspace = new WorkspaceAgentInterfaceImpl(
+      root.toString,
+      isWindowsHost,
+      Some(Permissive),
+      gateWait = 5.seconds
+    )
+    val executor  = new WebSocketCommandExecutor(workspace, 1024L * 1024L)
+    val processes = new ConcurrentHashMap[String, RunningCommand]()
+    // the socket fails as the command is announced
+    val send: WebSocketMessage => Unit = {
+      case _: CommandStartedMessage => throw new java.io.IOException("socket closed")
+      case _                        => ()
+    }
+    executor.execute(command("tail -f follow-gate.txt", timeout = Some(60.seconds)), processes, send)
+    processes shouldBe empty
+    // the gate is free again once the killed process has exited: a file mutation gets it well within its wait
+    workspace.writeFile("after-gate.txt", "x", expectedHash = Some("absent")).success shouldBe true
+  }
+
   it should "never start a command whose connection closed before it was registered" in {
     val executor = new WebSocketCommandExecutor(interfaceFor(Permissive), 1024L * 1024L)
     val channel  = new FakeChannel
