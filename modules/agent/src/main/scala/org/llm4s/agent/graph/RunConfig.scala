@@ -158,6 +158,13 @@ final class RunContext private[graph] (
   private[agent] def withAnswers(next: Map[String, (ujson.Value, ujson.Value)]): RunContext =
     new RunContext(config, position, sink, next, usage, journal, owner, resumeDigest)
 
+  /**
+   * An object unique to this run incarnation: the same for every task of one run of a runtime (or one execution of a
+   * graph outside one), and never for two runs - though two runtimes over different stores can issue one thread the
+   * same run id and fencing token. Compared by reference; a cache of something read once per run keys on it.
+   */
+  private[agent] def incarnation: AnyRef = journal
+
   /** The task this task's effect records belong to ([[Commit.releasesEffect]]). */
   private[graph] def effectOwner: TaskId = owner.fold(position.taskId)(_._1)
 

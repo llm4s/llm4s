@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** workspace backends: `WorkspaceFileBackend` (`Verifiable`, compare-and-set in the runner), `WorkspaceSandboxBackend`
   and the `execute` tool; `WorkspaceTools` **removed**, `CodeWorker` on the new tools [#1906](https://github.com/llm4s/llm4s/issues/1906); [design 4.33](docs/design/typed-agent-runtime/4.33-stage-3-slice-f2-workspace-backends.md).
+- **Added** Agent Skills: `SkillsMiddleware` lists `SKILL.md` skills found through a `FileBackend`
+  [#1909](https://github.com/llm4s/llm4s/issues/1909); [design §4.35](docs/design/typed-agent-runtime/4.35-stage-3-slice-f5-skills.md), [guide](docs/guide/agents/index.md#skills).
 - **Added** context management: `SummarizationMiddleware` (a kept, bounded summary in place of older messages) and
   `ToolOutputOffload` (large results to a read-only `OffloadBackend`, every tool result sent capped)
   [#1908](https://github.com/llm4s/llm4s/issues/1908); [design §4.34](docs/design/typed-agent-runtime/4.34-stage-3-slice-f4-context-management.md).

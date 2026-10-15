@@ -611,6 +611,40 @@ for {
   tool's lock registers `tool-queue`), so threads checkpointed before are refused with
   `RestoreRejected`: finish or `forget` them first.
 
+### Skills
+
+`SkillsMiddleware` gives an agent [Agent Skills](https://agentskills.io/): folders holding a
+`SKILL.md` whose frontmatter names and describes the skill. It finds them through a `FileBackend`
+and lists each skill's name, description and path in one prompt section; the model reads a skill's
+`SKILL.md`, and its other files, with `read_file` when a task matches it.
+
+```scala
+import org.llm4s.agent.harness.{SkillsMiddleware, VPath}
+
+for {
+  user    <- VPath("/user/skills")
+  project <- VPath("/project/skills")
+  agent <- Agent.builder("coder", client)
+             .withMiddleware(new SkillsMiddleware(Vector(user, project), backend))
+             .build()                                  // Result[Agent]
+} yield agent
+```
+
+- **Give the agent `FileTools(backend)` over the same backend** (or the composite it is mounted in),
+  so the paths in the section are the ones `read_file` takes.
+- **Read once per run**, on its first model call, and cached for the run. A skill added or edited
+  during a run shows from the next run; a recovered or resumed run reads again. A later source's
+  skill replaces an earlier one of the same name, so list the user's skills before the project's.
+- **Bounded.** At most `maxSkills` (default 20) skills, each description cut at
+  `maxDescriptionChars` (256), the section at most `maxSectionTokens` (1500), at most `maxScanned`
+  (100) folders examined, and only each `SKILL.md`'s frontmatter read.
+- **The frontmatter is a restricted YAML subset**, read without a YAML library: `key: value` scalars,
+  quoted strings, flat lists and a one-level `metadata` map. A block scalar (`description: |`), a
+  nested value or a name that does not match its folder makes the skill malformed.
+- **Problems never fail the run.** A malformed, unlisted, shadowed or unreadable skill is skipped and
+  named by path in a durable `HarnessEvents.DocumentsReported`. A missing source is skipped.
+- `allowed-tools` is parsed onto `Skill.allowedTools`, not enforced.
+
 ---
 
 ## Features

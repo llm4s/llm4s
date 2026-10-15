@@ -161,11 +161,8 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
           view
             .withPrefix(target.value + "/", 1)
             .flatMap(beneath =>
-              refused(
-                "delete",
-                target,
-                if beneath.nonEmpty then "is a directory; delete the files in it" else "not found"
-              )
+              if beneath.nonEmpty then refused("delete", target, "is a directory; delete the files in it")
+              else Left(BackendRefused.notFound("delete", target))
             )
     }
 

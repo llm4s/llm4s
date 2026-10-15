@@ -429,6 +429,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.32 | [Stage 3 slice F1: filesystem tools](typed-agent-runtime/4.32-stage-3-slice-f1-filesystem-tools.md) ([#1905](https://github.com/llm4s/llm4s/issues/1905)) |
 | 4.33 | [Stage 3 slice F2: workspace sandbox and file backends](typed-agent-runtime/4.33-stage-3-slice-f2-workspace-backends.md) ([#1906](https://github.com/llm4s/llm4s/issues/1906)) |
 | 4.34 | [Stage 3 slice F4: context management](typed-agent-runtime/4.34-stage-3-slice-f4-context-management.md) ([#1908](https://github.com/llm4s/llm4s/issues/1908)) |
+| 4.35 | [Stage 3 slice F5: Agent Skills](typed-agent-runtime/4.35-stage-3-slice-f5-skills.md) ([#1909](https://github.com/llm4s/llm4s/issues/1909)) |
 
 ### 4.9 Stage 0 carry-forward
 

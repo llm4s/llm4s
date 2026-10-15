@@ -108,8 +108,9 @@ trait FileBackendContract extends AnyFlatSpecLike with Matchers with EitherValue
   it should "delete a file, and refuse a missing one or a read of it after" in {
     val results = one(newBackend(), "write|/d/a.txt|x", "delete|/d/a.txt", "delete|/d/a.txt", "read|/d/a.txt")
     results(1) should include("wasDirectory=false")
-    results(2) should startWith("error:")
-    results(3) should startWith("error:")
+    // typed, so a caller can tell a missing file from any other refusal
+    results(2) should startWith("error: [NotFound]")
+    results(3) should startWith("error: [NotFound]")
   }
 
   it should "apply a walk's predicate before its limit, so a refused file takes no place" in {
@@ -119,8 +120,11 @@ trait FileBackendContract extends AnyFlatSpecLike with Matchers with EitherValue
   }
 
   it should "refuse a read or list of what is not there, and binary content" in {
-    val results = one(newBackend(), "read|/missing", "ls|/missing", "write|/bin|a\u0000b")
+    val results = one(newBackend(), "read|/missing", "ls|/missing", "write|/bin|a\u0000b", "edit|/missing|a|b")
     results.foreach(_ should startWith("error:"))
+    results(0) should startWith("error: [NotFound]")
+    results(1) should startWith("error: [NotFound]")
+    results(3) should startWith("error: [NotFound]")
   }
 
   "Two mutations of one path in one batch" should "both apply, the second against the first's result" in {
@@ -220,10 +224,16 @@ object FileBackendContract:
     }
     ToolSet.of(tool).fold(e => throw new IllegalStateException(e.message), identity)
 
-  /** A refusal as the text the model sees, prefixed `error:` so the cases can tell it apart. */
+  /**
+   * A refusal as the text the model sees, prefixed `error:` so the cases can tell it apart, and its kind when it is
+   * not a plain refusal (`error: [NotFound] ...`), so a case can check the kind a caller branches on.
+   */
   private def errorOf(error: org.llm4s.error.LLMError): ToolOutcome =
+    val kind = error match
+      case r: BackendRefused if r.kind != BackendRefused.Kind.Refused => s"[${r.kind}] "
+      case _                                                          => ""
     BackendRefused.toolOutcome(error) match
-      case ToolOutcome.Error(message) => ToolOutcome.Success(ToolContent.Json(ujson.Str(s"error: $message")))
+      case ToolOutcome.Error(message) => ToolOutcome.Success(ToolContent.Json(ujson.Str(s"error: $kind$message")))
       case fatal                      => fatal
 
   /** `created=true`, `replacements=2`: a product's fields by name. */

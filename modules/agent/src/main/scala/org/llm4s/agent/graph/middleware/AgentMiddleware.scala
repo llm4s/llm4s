@@ -114,6 +114,15 @@ object PromptSection:
   def apply(id: String, text: String, cacheable: Boolean = false): PromptSection =
     new PromptSection(id, text, cacheable)
 
+  /**
+   * The tokens `chars` characters of section text are estimated at - one per four, rounded up - the estimate the
+   * agent bounds its sections by (`maxPromptSectionTokens`), and a middleware bounds its own section by.
+   */
+  private[agent] def estimatedTokens(chars: Long): Long = (chars + 3) / 4
+
+  /** The most characters a section of `tokens` estimated tokens holds. */
+  private[agent] def charsFor(tokens: Int): Long = tokens.toLong * 4
+
 /**
  * One tool call as a tool wrapper sees it, after its arguments were validated and decoded. It is
  * read-only: a wrapper cannot change a call's arguments. `resources` are what the call touches, from

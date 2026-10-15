@@ -194,10 +194,6 @@ object TodoMiddleware:
 
   private def codePoints(s: String): Int = s.codePointCount(0, s.length)
 
-  /** `s` cut to `max` code points, marked with an ellipsis when cut. */
-  private def clip(s: String, max: Int): String =
-    if codePoints(s) <= max then s else s.substring(0, s.offsetByCodePoints(0, max)) + "…"
+  private def clip(s: String, max: Int): String = DocumentText.clipMarked(s, max)
 
-  /** `s` with line breaks and other control characters replaced by spaces, so it stays on its line. */
-  private def clean(s: String): String =
-    s.map(c => if Character.isISOControl(c) || c == ' ' || c == ' ' then ' ' else c)
+  private def clean(s: String): String = DocumentText.oneLine(s)
