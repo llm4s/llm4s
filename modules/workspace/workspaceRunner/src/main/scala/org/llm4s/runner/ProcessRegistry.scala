@@ -139,15 +139,26 @@ final private[runner] class ProcessRegistry(
               gate.release()
               entry.released.complete(()): Unit
             }
-            if (leftovers.isEmpty) done()
-            else {
+            // settled only when a sweep, made after everything found so far has exited, finds nothing more: a dying
+            // orphan that forked leaves a child the next sweep finds, so the permit is kept until none is left
+            // (bounded in rounds, each only after the last round's processes have all exited: a process that is
+            // dead but unreaped must never hold the gate for ever)
+            def settle(pending: List[ProcessHandle], round: Int): Unit =
+              if (pending.isEmpty) done()
+              else if (round >= ProcessRegistry.SettleRounds) {
+                logger.error(s"Command $commandId: its processes kept forking while killed; releasing it")
+                done()
+              } else
+                java.util.concurrent.CompletableFuture
+                  .allOf(pending.map(_.onExit()): _*)
+                  .whenComplete((_, _) =>
+                    settle(sweepOrphans(Try(entry.process.pid()).toOption).filter(_.isAlive), round + 1)
+                  ): Unit
+            if (leftovers.nonEmpty)
               logger.warn(
                 s"Command $commandId left ${leftovers.size} process(es) running; it holds the gate until they exit"
               )
-              java.util.concurrent.CompletableFuture
-                .allOf(leftovers.map(_.onExit()): _*)
-                .whenComplete((_, _) => done()): Unit
-            }
+            settle(leftovers, 0)
           }: Unit
           Right(entry)
       }
@@ -290,4 +301,7 @@ private[runner] object ProcessRegistry {
 
   /** How long a kill waits for the process to exit before it reports that it did not. */
   val KillWait: FiniteDuration = FiniteDuration(5, TimeUnit.SECONDS)
+
+  /** How many generations of processes forked while being killed a command's exit sweeps before it gives up. */
+  val SettleRounds: Int = 20
 }
