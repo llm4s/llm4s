@@ -206,6 +206,20 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     Files.readAttributes(other, attributes).group() shouldBe before.group()
   }
 
+  it should "keep the file's user extended attributes" in {
+    import java.nio.file.attribute.UserDefinedFileAttributeView
+    val file = root.resolve("tagged.txt")
+    Files.write(file, "one".getBytes(StandardCharsets.UTF_8))
+    val view = Option(Files.getFileAttributeView(file, classOf[UserDefinedFileAttributeView]))
+    assume(view.exists(v => Try(v.write("llm4s.tag", StandardCharsets.UTF_8.encode("kept"))).isSuccess))
+    workspace().writeFile("tagged.txt", "two", expectedHash = Some(hashOf("one")))
+    val after  = Files.getFileAttributeView(file, classOf[UserDefinedFileAttributeView])
+    val buffer = java.nio.ByteBuffer.allocate(after.size("llm4s.tag"))
+    after.read("llm4s.tag", buffer)
+    buffer.flip()
+    StandardCharsets.UTF_8.decode(buffer).toString shouldBe "kept"
+  }
+
   it should "refuse a mode other than overwrite, and a directory" in {
     val ws = workspace()
     code(ws.writeFile("a.txt", "x", mode = Some("append"), expectedHash = Some("absent"))) shouldBe "INVALID_ARGUMENT"

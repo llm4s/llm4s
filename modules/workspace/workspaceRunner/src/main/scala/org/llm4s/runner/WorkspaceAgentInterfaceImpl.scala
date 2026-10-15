@@ -1563,10 +1563,56 @@ private[runner] object WorkspaceAgentInterfaceImpl {
       val group = Files.readAttributes(from, classOf[java.nio.file.attribute.PosixFileAttributes]).group()
       Files.getFileAttributeView(to, classOf[PosixFileAttributeView]).setGroup(group)
     }: Unit
+    // an NFSv4 / Windows ACL, where the platform exposes one as a view
     Try {
       Option(Files.getFileAttributeView(from, classOf[AclFileAttributeView])).foreach { acl =>
         Files.getFileAttributeView(to, classOf[AclFileAttributeView]).setAcl(acl.getAcl)
       }
     }: Unit
+    // user extended attributes, where the file system has them
+    Try {
+      import java.nio.file.attribute.UserDefinedFileAttributeView
+      Option(Files.getFileAttributeView(from, classOf[UserDefinedFileAttributeView])).foreach { source =>
+        val target = Files.getFileAttributeView(to, classOf[UserDefinedFileAttributeView])
+        source.list().forEach { name =>
+          val buffer = java.nio.ByteBuffer.allocate(source.size(name))
+          source.read(name, buffer)
+          buffer.flip()
+          target.write(name, buffer): Unit
+        }
+      }
+    }: Unit
+    copyPosixAcl(from, to)
   }
+
+  /**
+   * A Linux POSIX ACL lives in an extended attribute (`system.posix_acl_access`) the JVM cannot read, so it is copied
+   * with `getfacl` and `setfacl`, run directly (no shell), when they are installed. Only an ACL beyond the mode bits
+   * (a named user or group, or a mask) is copied; the mode itself is already copied.
+   */
+  private def copyPosixAcl(from: Path, to: Path): Unit =
+    if (AclTools)
+      Try {
+        val get = new ProcessBuilder("getfacl", "--absolute-names", "--omit-header", from.toString)
+          .redirectErrorStream(false)
+          .start()
+        val acl = new String(get.getInputStream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+        if (
+          get.waitFor() == 0 && acl.linesIterator
+            .exists(l => l.startsWith("mask:") || l.matches("(user|group):[^:]+:.*"))
+        ) {
+          val set = new ProcessBuilder("setfacl", "--set-file=-", to.toString).start()
+          Using.resource(set.getOutputStream)(_.write(acl.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+          set.waitFor(): Unit
+        }
+      }: Unit
+
+  /** Whether `getfacl` and `setfacl` are on the runner's PATH. */
+  private lazy val AclTools: Boolean =
+    sys.props.get("os.name").forall(!_.startsWith("Windows")) &&
+      Seq("getfacl", "setfacl").forall(tool =>
+        ProgramSearch.host().path.toList.flatMap(_.split(java.io.File.pathSeparator)).exists { dir =>
+          Files.isExecutable(Paths.get(dir, tool))
+        }
+      )
 }
