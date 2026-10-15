@@ -380,4 +380,32 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
       ErrorMessage("No running command found for id no-such-command", "UNKNOWN_COMMAND_ID", Some("no-such-command"))
     )
   }
+
+  it should "never start a command its own client cancelled before it was registered, and only that client's" in {
+    val executor = new WebSocketCommandExecutor(interfaceFor(Permissive), 1024L * 1024L)
+    val (mine, theirs) = (
+      java.util.concurrent.ConcurrentHashMap.newKeySet[String](),
+      java.util.concurrent.ConcurrentHashMap.newKeySet[String]()
+    )
+    val cmd     = command("echo should-not-run")
+    val channel = new FakeChannel
+    executor.cancel(cmd.commandId, Some(channel.processes), channel.send, Some(mine))
+    theirs.contains(cmd.commandId) shouldBe false
+    // another client's command with the same id is not touched
+    val other = new FakeChannel
+    executor.execute(cmd, other.processes, other.send, () => true, theirs)
+    Await.result(other.completed.future, 30.seconds).exitCode shouldBe 0
+    // this client's command never starts: acknowledged as a cancellation
+    executor.execute(cmd, channel.processes, channel.send, () => true, mine)
+    Await.result(channel.completed.future, 30.seconds).exitCode shouldBe 143
+    channel.started shouldBe empty
+  }
+
+  it should "never start a command whose connection closed before it was registered" in {
+    val executor = new WebSocketCommandExecutor(interfaceFor(Permissive), 1024L * 1024L)
+    val channel  = new FakeChannel
+    executor.execute(command("echo should-not-run"), channel.processes, channel.send, () => false)
+    Await.result(channel.completed.future, 30.seconds).exitCode shouldBe 143
+    channel.started shouldBe empty
+  }
 }

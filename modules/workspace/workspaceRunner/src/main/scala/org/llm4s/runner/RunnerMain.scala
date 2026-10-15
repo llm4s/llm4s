@@ -89,6 +89,10 @@ object RunnerMain extends cask.MainRoutes {
   // Per-client process tracking (keyed by WebSocket channel to isolate clients)
   private val clientProcesses =
     new ConcurrentHashMap[cask.WsChannelActor, ConcurrentHashMap[String, RunningCommand]]()
+  // Per client, the cancellations of its commands not yet registered (waiting at the command gate): they never start.
+  private val clientEarlyCancels = new ConcurrentHashMap[cask.WsChannelActor, java.util.Set[String]]()
+  private def earlyCancels(channel: cask.WsChannelActor): java.util.Set[String] =
+    clientEarlyCancels.computeIfAbsent(channel, _ => ConcurrentHashMap.newKeySet[String]())
   private val heartbeatExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
 
   // Constants
@@ -124,6 +128,7 @@ object RunnerMain extends cask.MainRoutes {
         case cask.Ws.Close(code, reason) =>
           logger.info(s"WebSocket connection closed: code=$code, reason=$reason")
           // Kill this client's processes only (per-client isolation)
+          clientEarlyCancels.remove(channel): Unit
           Option(clientProcesses.remove(channel)).foreach { processes =>
             processes.forEach { (_, running) =>
               running.cancelled.set(true)
@@ -170,7 +175,8 @@ object RunnerMain extends cask.MainRoutes {
         commandExecutor.cancel(
           commandId,
           Option(clientProcesses.get(channel)),
-          message => sendMessage(channel, message)
+          message => sendMessage(channel, message),
+          Some(earlyCancels(channel))
         )
 
       case HeartbeatMessage(timestamp) =>
@@ -312,7 +318,8 @@ object RunnerMain extends cask.MainRoutes {
         cmd,
         processes,
         message => sendMessage(channel, message),
-        () => clientProcesses.get(channel) eq processes
+        () => clientProcesses.get(channel) eq processes,
+        earlyCancels(channel)
       )
     )(ec)
   }
@@ -350,6 +357,7 @@ object RunnerMain extends cask.MainRoutes {
               logger.error(s"Error closing timed out connection: ${ex.getMessage}", ex)
             }
             // Also clean up processes for timed out connection
+            clientEarlyCancels.remove(channel): Unit
             Option(clientProcesses.remove(channel)).foreach { processes =>
               processes.forEach { (_, running) =>
                 running.cancelled.set(true)
@@ -431,6 +439,7 @@ object RunnerMain extends cask.MainRoutes {
       }
     }
     clientProcesses.clear()
+    clientEarlyCancels.clear()
 
     Try {
       heartbeatExecutor.shutdown()

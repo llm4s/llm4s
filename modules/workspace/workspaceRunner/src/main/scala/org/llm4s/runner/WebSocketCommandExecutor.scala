@@ -51,12 +51,15 @@ final private[runner] class WebSocketCommandExecutor(
    * @param send      delivers a protocol message to the client
    * @param connected whether the client's connection is still open: a command whose connection closed while it waited at
    *                  the gate never starts, as the close handler cancels only what it can find
+   * @param cancelledEarly this client's cancellations of commands not yet registered (waiting at the gate), which
+   *                  therefore never start; one set per connection, shared with [[cancel]]
    */
   def execute(
     cmd: ExecuteCommandCommand,
     processes: ConcurrentHashMap[String, RunningCommand],
     send: WebSocketMessage => Unit,
-    connected: () => Boolean = () => true
+    connected: () => Boolean = () => true,
+    cancelledEarly: java.util.Set[String] = ConcurrentHashMap.newKeySet[String]()
   ): Unit = {
     val startTime = System.currentTimeMillis()
 
@@ -115,22 +118,18 @@ final private[runner] class WebSocketCommandExecutor(
   }
 
   /**
-   * Ids of commands cancelled before they were registered (waiting at the gate), so they never start. Bounded: an id
-   * that never arrives is dropped once the set is full.
-   */
-  private val cancelledEarly = java.util.concurrent.ConcurrentHashMap.newKeySet[String]()
-
-  /**
    * Cancel one of this client's running commands. Cancellation is acknowledged as completion, exit code 143.
    *
    * @param commandId the command to cancel
    * @param processes this client's running commands
    * @param send      delivers a protocol message to the client
+   * @param cancelledEarly this client's cancellations of commands not yet registered, as given to [[execute]]
    */
   def cancel(
     commandId: String,
     processes: Option[ConcurrentHashMap[String, RunningCommand]],
-    send: WebSocketMessage => Unit
+    send: WebSocketMessage => Unit,
+    cancelledEarly: Option[java.util.Set[String]] = None
   ): Unit =
     processes.flatMap(running => Option(running.get(commandId))) match {
       case Some(running) =>
@@ -153,8 +152,10 @@ final private[runner] class WebSocketCommandExecutor(
 
       case None =>
         // it may still be waiting at the gate: remember it, so it never starts
-        if (cancelledEarly.size >= WebSocketCommandExecutor.MaxEarlyCancellations) cancelledEarly.clear()
-        cancelledEarly.add(commandId): Unit
+        // this client's own set, bounded: past the bound a cancellation of a command not yet registered is not kept
+        cancelledEarly.foreach { early =>
+          if (early.size < WebSocketCommandExecutor.MaxEarlyCancellations) early.add(commandId): Unit
+        }
         logger.warn(s"Cancellation requested for unknown or non-running command id $commandId")
         send(ErrorMessage(s"No running command found for id $commandId", "UNKNOWN_COMMAND_ID", Some(commandId)))
     }
