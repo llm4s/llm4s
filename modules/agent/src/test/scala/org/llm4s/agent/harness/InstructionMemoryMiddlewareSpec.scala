@@ -200,6 +200,20 @@ class InstructionMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Eit
     counting.reads.get shouldBe 2
   }
 
+  it should "read no further file once the room left cannot show one, even when a file filled the section exactly" in {
+    val counting = new CountingBackend(storeBackend())
+    val first    = p("/a/AGENTS.md")
+    val second   = p("/b/AGENTS.md")
+    // the guide and the first heading, then exactly the room left: the section is full to its last character
+    val room =
+      PromptSection.charsFor(200).toInt - InstructionMemoryMiddleware.Guide.length - s"\n\n## ${first.value}\n".length
+    room should be <= 800
+    seed(counting, first.value -> ("x" * room), second.value -> "never read")
+    val mw = new InstructionMemoryMiddleware(Vector(first, second), counting, maxFileTokens = 200, maxTotalTokens = 200)
+    mw.instructions(testModelContext()).value.map(i => (i.path, i.cut)) shouldBe Vector((first, false))
+    counting.reads.get shouldBe 1
+  }
+
   "An edit with FileTools' edit_file" should "show from the next run, not in the run that read the files (rule 1)" in {
     val store   = new InMemoryCheckpointer
     val thread  = ThreadId("edit")

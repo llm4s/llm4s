@@ -69,9 +69,12 @@ final class InstructionMemoryMiddleware(
 
   override def promptSections(context: ModelContext): Result[Vector[PromptSection]] = documents.sections(context)
 
-  private val fileChars   = PromptSection.charsFor(maxFileTokens)
-  private val fileMarker  = s"\n[cut: this file is over $maxFileTokens tokens]"
-  private val totalMarker = s"\n[cut: the instructions are over $maxTotalTokens tokens]"
+  private val fileChars = PromptSection.charsFor(maxFileTokens)
+
+  /** The heading a file is shown under. */
+  private def headingOf(path: VPath): String = s"\n\n## ${path.value}\n"
+  private val fileMarker                     = s"\n[cut: this file is over $maxFileTokens tokens]"
+  private val totalMarker                    = s"\n[cut: the instructions are over $maxTotalTokens tokens]"
 
   /**
    * Every file in order, each read within `maxFileTokens` and added to the section as it is read, so at most one file
@@ -87,7 +90,10 @@ final class InstructionMemoryMiddleware(
     paths
       .foldLeft[Result[Unit]](Right(())) { (acc, path) =>
         acc.flatMap { _ =>
-          if full then Right(notListed(path))
+          // full when no file could show: not even its heading and the cut marker fit in the room left
+          if full || text.remaining < headingOf(path).length.toLong + totalMarker.length then
+            full = true
+            Right(notListed(path))
           else
             DocumentText.read(backend, path, fileChars, ctx) match
               case Left(refused: BackendRefused) =>
@@ -105,7 +111,7 @@ final class InstructionMemoryMiddleware(
               case Right(None)                                              => Right(())
               case Right(Some(read)) if !read.cut && read.text.trim.isEmpty => Right(())
               case Right(Some(read)) =>
-                val heading = s"\n\n## ${path.value}\n"
+                val heading = headingOf(path)
                 val before  = text.length
                 text.addCut(
                   heading + read.text + (if read.cut then fileMarker else ""),
