@@ -68,6 +68,18 @@ class PartEncodingSpec extends AnyFlatSpec with Matchers with EitherValues {
       Vector(image, ContentPart.Text("a"))
   }
 
+  "check and encodeAll" should "refuse a null part as invalid, not throw" in {
+    PartEncoding
+      .check("p", Seq(UserMessage(Vector(null, image))), { case _ => 1 }, PartEncoding.textOnly)
+      .left
+      .value
+      .message should
+      include("null part")
+    PartEncoding
+      .encodeAll("p", MessageRole.User, Vector(ContentPart.Text("a"), null)) { case _ => 1 }
+      .isLeft shouldBe true
+  }
+
   "isWebUrl" should "accept http and https only" in {
     PartEncoding.isWebUrl(URI.create("https://e.com/a")) shouldBe true
     PartEncoding.isWebUrl(URI.create("HTTP://e.com/a")) shouldBe true

@@ -908,6 +908,7 @@ object AnthropicClient {
       Right(
         DocumentBlockParam.builder().source(Base64PdfSource.builder().data(PartEncoding.base64(inline)).build()).build()
       )
+    // checkParts has refused bytes that are not UTF-8, so this decodes them exactly
     case ContentPart.Document(inline: MediaSource.Inline, MediaType.PlainText) =>
       val text = new String(PartEncoding.bytes(inline), java.nio.charset.StandardCharsets.UTF_8)
       Right(DocumentBlockParam.builder().source(PlainTextSource.builder().data(text).build()).build())
@@ -932,6 +933,33 @@ object AnthropicClient {
     PartEncoding
       .check(provider, messages, userPart, toolPart)
       .flatMap(_ => PartEncoding.checkImagesPerRequest(provider, messages, MaxImages))
+      .flatMap(_ => utf8Documents(messages))
+
+  /**
+   * A plain-text document is sent as text, decoded as UTF-8: bytes that are not valid UTF-8 are refused, rather than
+   * sent with each malformed sequence replaced, which would change the document.
+   */
+  private def utf8Documents(messages: Seq[org.llm4s.llmconnect.model.Message]): Result[Unit] =
+    messages
+      .flatMap {
+        case um: UserMessage => um.parts
+        case tm: ToolMessage => tm.parts
+        case _               => Vector.empty
+      }
+      .collectFirst {
+        case part @ ContentPart.Document(inline: MediaSource.Inline, MediaType.PlainText)
+            if scala.util
+              .Try(
+                java.nio.charset.StandardCharsets.UTF_8
+                  .newDecoder()
+                  .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                  .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                  .decode(java.nio.ByteBuffer.wrap(PartEncoding.bytes(inline)))
+              )
+              .isFailure =>
+          Left(org.llm4s.error.ValidationError("parts", s"a ${part.kind} part is not valid UTF-8 text"))
+      }
+      .getOrElse(Right(()))
 
   /** Anthropic takes at most 100 images in one request: counted over the whole conversation. */
   private[provider] val MaxImages: Int = 100

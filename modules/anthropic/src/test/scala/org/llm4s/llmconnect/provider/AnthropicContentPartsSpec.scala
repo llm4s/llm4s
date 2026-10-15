@@ -50,6 +50,19 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
     body(UserMessage("hi"))("messages").arr.head("content") shouldBe ujson.Str("hi")
   }
 
+  it should "refuse, before sending, a plain-text document that is not valid UTF-8" in {
+    val malformed = doc(MediaSource.Inline(IArray[Byte](0x61, 0xc3.toByte, 0x28)), MediaType.PlainText)
+    client
+      .complete(Conversation(Seq(UserMessage(Vector(ContentPart.Text("read"), malformed)))), CompletionOptions())
+      .left
+      .value
+      .message should include("is not valid UTF-8 text")
+    val valid = doc(MediaSource.Inline(IArray.from("café".getBytes("UTF-8"))), MediaType.PlainText)
+    AnthropicClient.checkParts("anthropic", Seq(UserMessage(Vector(ContentPart.Text("read"), valid)))) shouldBe Right(
+      ()
+    )
+  }
+
   it should "send no empty text block for a blank text part" in {
     val content = userContent(UserMessage(Vector(ContentPart.Text(""), image(url), ContentPart.Text("caption"))))
     content.map(_("type").str) shouldBe Seq("image", "text")

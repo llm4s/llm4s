@@ -117,7 +117,7 @@ class VertexAIClient(
           val url = modelUrl("generateContent")
 
           logger.debug(s"[VertexAI] Sending request to $url")
-          logger.debug(s"[VertexAI] Request body: $requestText")
+          logger.debug(s"[VertexAI] Request body: ${org.llm4s.util.Redaction.redactForLogging(requestText)}")
 
           for {
             token <- authProvider.getAccessToken()

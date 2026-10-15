@@ -22,9 +22,11 @@ private[llm4s] object PartEncoding {
   def encodeAll[A](provider: String, role: MessageRole, parts: Seq[ContentPart])(
     encode: PartialFunction[ContentPart, A]
   ): Result[Vector[A]] =
-    parts.find(!encode.isDefinedAt(_)) match {
-      case Some(part) => Left(unsupported(provider, part, role))
-      case None       => Right(parts.toVector.map(encode))
+    nullPart(role, parts).flatMap { _ =>
+      parts.find(!encode.isDefinedAt(_)) match {
+        case Some(part) => Left(unsupported(provider, part, role))
+        case None       => Right(parts.toVector.map(encode))
+      }
     }
 
   /**
@@ -54,7 +56,14 @@ private[llm4s] object PartEncoding {
     parts: Seq[ContentPart],
     encode: PartialFunction[ContentPart, Any]
   ): Result[Unit] =
-    parts.find(!encode.isDefinedAt(_)).fold[Result[Unit]](Right(()))(part => Left(unsupported(provider, part, role)))
+    nullPart(role, parts).flatMap(_ =>
+      parts.find(!encode.isDefinedAt(_)).fold[Result[Unit]](Right(()))(part => Left(unsupported(provider, part, role)))
+    )
+
+  // a null part is no part a provider can be asked about: refused as invalid before any is
+  private def nullPart(role: MessageRole, parts: Seq[ContentPart]): Result[Unit] =
+    if (parts == null || parts.contains(null)) Left(ValidationError("parts", s"a ${role.name} message has a null part"))
+    else Right(())
 
   /**
    * Whether `uri` is a web URL (`http` or `https`): the only URLs a provider that fetches media itself can
