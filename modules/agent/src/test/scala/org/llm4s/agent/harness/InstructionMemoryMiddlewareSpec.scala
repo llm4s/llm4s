@@ -272,6 +272,26 @@ class InstructionMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Eit
     mw.instructions(testModelContext()).value.map(_.path) shouldBe Vector(first, short)
   }
 
+  it should "never cut a marker: a file over both limits shows a whole file marker, or its text cut and the total's" in {
+    val only    = p("/b/AGENTS.md")
+    val backend = storeBackend()
+    seed(backend, only.value -> ("y" * 500))
+    val fileMarker = "\n[cut: this file is over 20 tokens]"
+    // every total from the guide's size up, so the room left ends at every point of the file's marker
+    val texts = (70 to 120).map { total =>
+      val mw   = new InstructionMemoryMiddleware(Vector(only), backend, maxFileTokens = 20, maxTotalTokens = total)
+      val text = mw.promptSections(testModelContext()).value.headOption.fold("")(_.text)
+      withClue(total) {
+        if (text.contains("[cut: this f")) text should endWith(fileMarker)
+        text.length.toLong should be <= PromptSection.charsFor(total)
+      }
+      text
+    }
+    // both outcomes occur in the range: the whole file marker, and the total's marker instead
+    texts.exists(_.endsWith(fileMarker)) shouldBe true
+    texts.exists(_.contains("[cut: the instructions are over")) shouldBe true
+  }
+
   "An edit with FileTools' edit_file" should "show from the next run, not in the run that read the files (rule 1)" in {
     val store   = new InMemoryCheckpointer
     val thread  = ThreadId("edit")

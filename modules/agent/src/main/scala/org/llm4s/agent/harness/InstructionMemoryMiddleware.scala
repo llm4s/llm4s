@@ -113,10 +113,12 @@ final class InstructionMemoryMiddleware(
               case Right(Some(read)) =>
                 val heading = headingOf(path)
                 val before  = text.length
+                // whole with its own marker, or cut from its text alone with the total's: never a cut marker
                 text.addCut(
                   heading + read.text + (if read.cut then fileMarker else ""),
                   heading.length,
-                  totalMarker
+                  totalMarker,
+                  cutFrom = Some(heading + read.text)
                 ) match
                   // this file neither fits whole nor leaves room for the cut marker; a later, shorter one still may,
                   // so only this file is left out (the check before each read ends the walk when nothing can fit)

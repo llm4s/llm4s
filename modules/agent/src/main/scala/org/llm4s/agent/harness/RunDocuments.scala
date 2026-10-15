@@ -251,13 +251,14 @@ final private[harness] class SectionText(maxChars: Long):
    * Adds `part`, or as much of it as fits followed by `marker`; `None` when not even `prefix` (the part's own
    * heading, never cut) and the marker fit, else whether it was cut. `part` must start with `prefix`.
    */
-  def addCut(part: String, prefix: Int, marker: String): Option[Boolean] =
+  def addCut(part: String, prefix: Int, marker: String, cutFrom: Option[String] = None): Option[Boolean] =
     if part.length.toLong <= remaining then
       out.append(part)
       Some(false)
     else
-      // a cut keeps at least one character of the part's own text: a heading and a marker alone show nothing
-      val kept = DocumentText.cut(part, remaining - marker.length)
+      // a cut keeps at least one character of the part's own text: a heading and a marker alone show nothing.
+      // `cutFrom` is what is cut instead of `part` - the part without a marker of its own, so no marker is ever cut
+      val kept = DocumentText.cut(cutFrom.getOrElse(part), remaining - marker.length)
       if kept.length <= prefix then None
       else
         out.append(kept).append(marker)
