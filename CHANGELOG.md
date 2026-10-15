@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** workspace backends: `WorkspaceFileBackend` (`Verifiable`, compare-and-set in the runner), `WorkspaceSandboxBackend`
   and the `execute` tool [#1906](https://github.com/llm4s/llm4s/issues/1906); [design 4.33](docs/design/typed-agent-runtime/4.33-stage-3-slice-f2-workspace-backends.md).
+- **Added** `FileTools(backend)`: `ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob` and `grep` over any `FileBackend`, bounded by `FileToolLimits`, and `FileToolsContract`
+  [#1905](https://github.com/llm4s/llm4s/issues/1905); [design §4.32](docs/design/typed-agent-runtime/4.32-stage-3-slice-f1-filesystem-tools.md).
 - **Added** multimodal content parts: user messages and tool results carry images and documents, which each provider
   sends or refuses before sending [#1913](https://github.com/llm4s/llm4s/issues/1913); [design 4.27](docs/design/typed-agent-runtime/4.27-stage-3-slice-f8b-multimodal-content-parts.md).
 - **Added** backend SPIs: `FileBackend` (state, composite, store), `SandboxBackend`, `LongTermStore` and `FileBackendContract`
