@@ -209,7 +209,9 @@ final class HostFileBackend private (
    * Its file-system reads are inside [[io]], so a file that vanishes meanwhile is a refusal, not a throw.
    */
   private def resolve(operation: String, path: VPath): Result[Path] =
-    rootIntact(operation, path).flatMap(_ => resolveIn(operation, path))
+    // every operation, reads and walks as much as mutations: a mount made beneath the root since `open`
+    // (a same-device bind mount has the root's device, so only the mount table shows it) is never entered
+    rootIntact(operation, path).flatMap(_ => unmounted(operation, path)).flatMap(_ => resolveIn(operation, path))
 
   private def resolveIn(operation: String, path: VPath): Result[Path] =
     if path.segments.exists(HostFileBackend.trailing) then
@@ -479,14 +481,12 @@ final class HostFileBackend private (
       // the target's directory exists before its stripe is chosen, so every writer of the file, whether it
       // created the directory or found it, takes the stripe of the one real directory; it is created only
       // once the root, its mounts and the path are checked again, so a refused effect leaves nothing behind
-      unmounted(operation, path)
-        .flatMap(_ => resolve(operation, path))
+      resolve(operation, path)
         .flatMap(_ => io(operation, path)(Try(Files.createDirectories(target.getParent)).toResult.map(_ => ())))
         .flatMap(_ =>
           exclusively(target) {
-            // checked again at each mutation: a mount made inside the root after `open` stops it here
-            unmounted(operation, path)
-              .flatMap(_ => resolve(operation, path))
+            // resolved again under the stripe: a mount made inside the root after `open` stops it here
+            resolve(operation, path)
               .flatMap(again => io(operation, path)(digest(operation, path, again)))
               .flatMap { now =>
                 if now == before then effect
@@ -565,7 +565,18 @@ final class HostFileBackend private (
         else
           Right(
             casPlan("delete", path, target)(directoryCheck, StateCheck.absent, FileDeleted(wasDirectory = true))(
-              Try(Files.delete(target)).toResult.map(_ => FileDeleted(wasDirectory = true))
+              // a child created since the plan leaves the directory's digest as it was: the delete is the
+              // compare-and-set that sees it, a conflict the model is told of, never a failure to recover
+              Try(Files.delete(target)) match
+                case Success(_) => Right(FileDeleted(wasDirectory = true))
+                case Failure(_: java.nio.file.DirectoryNotEmptyException) =>
+                  Left(
+                    GraphError.EffectReplayRefused(
+                      "file.delete",
+                      s"${path.value} is no longer empty: an entry was created in it after the delete was planned"
+                    )
+                  )
+                case Failure(e) => Failure[FileDeleted](e).toResult
             )
           )
       else
@@ -1009,7 +1020,7 @@ object HostFileBackend:
     val table = Path.of("/proc/self/mountinfo")
     if !Files.isReadable(table) then
       // no table is no mounts only where there is none to read; on Linux it is an unknown
-      if System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).startsWith("linux") then
+      if root.getFileSystem.provider.getClass.getName == "sun.nio.fs.LinuxFileSystemProvider" then
         Left(
           ValidationError(
             "root",

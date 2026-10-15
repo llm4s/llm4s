@@ -850,4 +850,33 @@ class HostFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues wi
     Files.exists(dir.resolve("new")) shouldBe false
   }
 
+  "A mount appearing beneath the root after open" should "refuse reads, listings and walks as well as mutations" in {
+    Files.writeString(dir.resolve("a.txt"), "x\n")
+    backend.close()
+    @volatile var mounted = false
+    backend = HostFileBackend
+      .open(dir, locks, mountsBeneath = r => Right(if (mounted) Vector(r.resolve("m")) else Vector.empty))
+      .value
+    backend.read(p("/a.txt"), 0, 1, call()).value.lines shouldBe Vector("x")
+    mounted = true
+    backend.read(p("/a.txt"), 0, 1, call()).left.value.message should include("mounted beneath it")
+    backend.ls(VPath.root, 10, call()).left.value.message should include("mounted beneath it")
+    backend.glob(Glob("**"), VPath.root, 10, call()).left.value.message should include("mounted beneath it")
+    backend.grep("x", VPath.root, None, 10, call()).left.value.message should include("mounted beneath it")
+  }
+
+  "An empty-directory delete" should "be refused as a conflict, not fail, when an entry appears before its effect" in {
+    Files.createDirectories(dir.resolve("d"))
+    val child = holding(backend.lockFileOf(p("/d")).value)
+    val del   = worker().submit(() => backend.delete(p("/d"), call()))
+    Thread.sleep(500)
+    Files.writeString(dir.resolve("d/new.txt"), "x")
+    child.getOutputStream.close()
+    val refusal = del.get(10, TimeUnit.SECONDS).left.value
+    refusal shouldBe a[org.llm4s.agent.graph.GraphError.EffectReplayRefused]
+    refusal.message should include("no longer empty")
+    Files.exists(dir.resolve("d/new.txt")) shouldBe true
+    child.waitFor(10, TimeUnit.SECONDS) shouldBe true
+  }
+
 }
