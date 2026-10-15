@@ -598,7 +598,7 @@ for {
   during a run shows from the next run; a recovered or resumed run reads again. A later source's
   skill replaces an earlier one of the same name, so list the user's skills before the project's.
 - **Bounded.** At most `maxSkills` (default 20) skills, each description cut at
-  `maxDescriptionChars` (256), the section at most `maxSectionTokens` (2000), at most `maxScanned`
+  `maxDescriptionChars` (256), the section at most `maxSectionTokens` (1500), at most `maxScanned`
   (100) folders examined, and only each `SKILL.md`'s frontmatter read.
 - **The frontmatter is a restricted YAML subset**, read without a YAML library: `key: value` scalars,
   quoted strings, flat lists and a one-level `metadata` map. A block scalar (`description: |`), a

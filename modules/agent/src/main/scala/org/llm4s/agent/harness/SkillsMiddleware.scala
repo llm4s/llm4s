@@ -171,7 +171,7 @@ object SkillsMiddleware:
   val DefaultMaxDescriptionChars: Int = 256
 
   /** The default for `maxSectionTokens`: with the other harness sections, within the agent's default budget. */
-  val DefaultMaxSectionTokens: Int = 2000
+  val DefaultMaxSectionTokens: Int = 1500
 
   /** The default for `maxScanned`. */
   val DefaultMaxScanned: Int = 100
