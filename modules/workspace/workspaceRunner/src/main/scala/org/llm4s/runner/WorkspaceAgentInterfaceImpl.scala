@@ -188,6 +188,16 @@ class WorkspaceAgentInterfaceImpl(
 
   private[runner] def releaseCommand(): Unit = commandGate.release()
 
+  /**
+   * Gives a command's permit back once its process has really exited (a forced kill can take a while), or at once
+   * if it never started: a mutation never runs while the process can still write.
+   */
+  private[runner] def releaseOnExit(process: Option[Process]): Unit =
+    process match {
+      case Some(p) => p.onExit().whenComplete((_, _) => releaseCommand()): Unit
+      case None    => releaseCommand()
+    }
+
   /** `body` with the file mutation lock and the whole command gate. */
   private def mutating[A](body: => A): A = mutationLock.synchronized {
     if (
@@ -216,16 +226,21 @@ class WorkspaceAgentInterfaceImpl(
     else if (Files.isDirectory(resolved)) FileSnapshotResponse.Kind.Directory
     else if (Files.size(resolved) > defaultLimits.maxFileSize) FileSnapshotResponse.Kind.Oversized
     else {
+      // read at most one byte past the limit, whatever the size said: a file growing while it is read is `oversized`
       val digest = java.security.MessageDigest.getInstance("SHA-256")
-      Using.resource(Files.newInputStream(resolved)) { in =>
+      val within = Using.resource(Files.newInputStream(resolved)) { in =>
         val buffer = new Array[Byte](8192)
+        var total  = 0L
         var n      = in.read(buffer)
-        while (n != -1) {
+        while (n != -1 && total <= defaultLimits.maxFileSize) {
           digest.update(buffer, 0, n)
-          n = in.read(buffer)
+          total += n
+          n = if (total <= defaultLimits.maxFileSize) in.read(buffer) else -1
         }
+        total <= defaultLimits.maxFileSize
       }
-      "sha256:" + digest.digest().map(b => f"${b & 0xff}%02x").mkString
+      if (within) "sha256:" + digest.digest().map(b => f"${b & 0xff}%02x").mkString
+      else FileSnapshotResponse.Kind.Oversized
     }
 
   private def checkExpected(path: String, resolved: Path, expected: String): Unit = {
@@ -1401,10 +1416,12 @@ class WorkspaceAgentInterfaceImpl(
     // the command holds a permit of the gate from before it starts until it has exited, so no file mutation runs
     // beside it ([[commandGate]])
     acquireCommand()
+    var started = Option.empty[Process]
     val exitCode =
       try
         Try {
           val process = builder.start()
+          started = Some(process)
 
           // Read stdout and stderr in background threads to prevent blocking
           val stdoutThread = capture(process.getInputStream, stdout, stdoutTruncated)
@@ -1444,7 +1461,7 @@ class WorkspaceAgentInterfaceImpl(
               None
             )
         }.get
-      finally releaseCommand()
+      finally releaseOnExit(started)
 
     val duration          = System.currentTimeMillis() - startTime
     val isStdoutTruncated = stdoutTruncated.get()

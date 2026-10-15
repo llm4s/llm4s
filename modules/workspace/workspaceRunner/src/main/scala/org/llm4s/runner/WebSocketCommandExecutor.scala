@@ -219,7 +219,7 @@ final private[runner] class WebSocketCommandExecutor(
             -1
         } finally {
           processes.remove(cmd.commandId)
-          workspace.releaseCommand()
+          workspace.releaseOnExit(Some(process)) // once it has really exited: a forced kill can take a while
           exitDone.trySuccess(())
         }
       exitCodePromise.trySuccess(exitCode)
