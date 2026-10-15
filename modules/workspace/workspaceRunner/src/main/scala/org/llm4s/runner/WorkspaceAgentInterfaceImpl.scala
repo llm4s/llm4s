@@ -597,6 +597,10 @@ class WorkspaceAgentInterfaceImpl(
         // written through, as Files.write writes through it: the file it names is replaced and the link stays, so
         // what the hash was taken of (the link followed) is what changes. `effective` already passed every path check.
         val target = effective(resolvedPath)
+        // the file it names, not only the path as written, is held to every write rule: a link to a missing file under
+        // .git or a read-only path is refused before anything is created
+        refuseGitMetadata(path, target)
+        refuseReadOnly(path, target)
         if (createDirs) Files.createDirectories(target.getParent)
         // created as an ordinary new file is (the process umask applies), not with a temporary file's fixed rw-------
         val temp = target.resolveSibling(s".llm4s-write-${java.util.UUID.randomUUID()}.tmp")
@@ -616,6 +620,7 @@ class WorkspaceAgentInterfaceImpl(
           // mutation lock and the command gate); this catches a writer outside the runner, up to the move itself.
           val again = effective(resolvePath(path))
           refuseReadOnly(path, resolvePath(path))
+          refuseGitMetadata(path, effective(resolvePath(path)))
           if (again != target)
             throw new WorkspaceAgentException(
               s"Path '$path' changed while it was written: it now leads to another file; nothing was written",
@@ -1506,6 +1511,14 @@ class WorkspaceAgentInterfaceImpl(
               process.destroyForcibly()
               process.waitFor(3, TimeUnit.SECONDS)
             }
+            // a timeout is an outcome only once the process is gone: one still alive may yet write, so its outcome
+            // is unknown, a failure, never a completed result a replay would return
+            if (process.isAlive)
+              throw new WorkspaceAgentException(
+                s"Command timed out after ${timeoutMs}ms and did not terminate when killed",
+                "EXECUTION_FAILED",
+                None
+              )
             throw new WorkspaceAgentException(
               s"Command execution timed out after ${timeoutMs}ms",
               "TIMEOUT",

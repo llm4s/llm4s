@@ -149,7 +149,8 @@ final private[runner] class WebSocketCommandExecutor(
     commandId: String,
     processes: Option[ConcurrentHashMap[String, RunningCommand]],
     send: WebSocketMessage => Unit,
-    cancelledEarly: Option[EarlyCancellations] = None
+    cancelledEarly: Option[EarlyCancellations] = None,
+    onOverflow: () => Unit = () => ()
   ): Unit =
     processes.flatMap(running => Option(running.get(commandId))) match {
       case Some(running) =>
@@ -173,7 +174,8 @@ final private[runner] class WebSocketCommandExecutor(
       case None =>
         // it may still be waiting at the gate: remember it, so it never starts. Always kept: a cancellation is never
         // dropped, and each is forgotten only once no command could still be waiting for it (EarlyCancellations)
-        cancelledEarly.foreach(_.add(commandId))
+        // a client past the bound is disconnected, which stops all its commands, rather than any cancellation dropped
+        cancelledEarly.foreach(early => if (!early.add(commandId)) onOverflow())
         logger.warn(s"Cancellation requested for unknown or non-running command id $commandId")
         send(ErrorMessage(s"No running command found for id $commandId", "UNKNOWN_COMMAND_ID", Some(commandId)))
     }
@@ -195,6 +197,7 @@ final private[runner] class WebSocketCommandExecutor(
     val stdoutTruncated   = new AtomicBoolean(false)
     val stderrTruncated   = new AtomicBoolean(false)
     val commandTimedOut   = new AtomicBoolean(false)
+    val survivedKill      = new AtomicBoolean(false)
     val stdoutAccumulator = new StringBuilder()
     val stderrAccumulator = new StringBuilder()
     // the client's bound on each stream, never more than the runner's own
@@ -258,6 +261,8 @@ final private[runner] class WebSocketCommandExecutor(
           } else if (timedOut) {
             commandTimedOut.set(true)
             process.destroyForcibly()
+            // a timeout is an outcome only once the process is gone
+            if (!process.waitFor(5, TimeUnit.SECONDS)) survivedKill.set(true)
             -1
           } else {
             process.exitValue()
@@ -283,6 +288,9 @@ final private[runner] class WebSocketCommandExecutor(
       .flatMap(_ => exitDone.future)
       .flatMap(_ => exitCodePromise.future)
       .onComplete {
+        case Success(_) if survivedKill.get() =>
+          // timed out and still alive after the kill: it may yet write, so its outcome is unknown, a failure
+          fail("Command timed out and did not terminate when killed", "EXECUTION_FAILED", None)
         case Success(rawExitCode) =>
           val durationMs = System.currentTimeMillis() - startTime
           val effectiveExitCode =
@@ -334,7 +342,11 @@ final private[runner] class EarlyCancellations(
     at.entrySet().removeIf(e => e.getValue.longValue < cutoff): Unit
   }
 
-  def add(id: String): Unit = { purge(); at.put(id, clock()): Unit }
+  /** Records `id`; `false`, recording nothing, when the client already has `capacity` live entries. */
+  def add(id: String): Boolean = {
+    purge()
+    if (at.size >= capacity) false else { at.put(id, clock()): Unit; true }
+  }
 
   /** Whether `id` was cancelled, forgetting it. */
   def remove(id: String): Boolean = at.remove(id) != null

@@ -423,14 +423,15 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
     workspace.writeFile("after-gate.txt", "x", expectedHash = Some("absent")).success shouldBe true
   }
 
-  "EarlyCancellations" should "keep every cancellation for its window, then forget it, and refuse new commands only while full" in {
+  "EarlyCancellations" should "keep each cancellation for its window, then forget it, and record none past its capacity" in {
     var now   = 0L
     val early = new EarlyCancellations(window = 10.seconds, capacity = 2, clock = () => now)
     early.add("a")
     early.add("b")
-    early.full shouldBe true // a third is still kept, never dropped
-    early.add("c")
-    early.remove("c") shouldBe true
+    early.full shouldBe true
+    // past the bound nothing is recorded: the caller disconnects the client instead of dropping a cancellation
+    early.add("c") shouldBe false
+    early.remove("c") shouldBe false
     now += 11.seconds.toNanos
     early.full shouldBe false // aged out: no command waits that long
     early.remove("a") shouldBe false

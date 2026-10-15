@@ -185,7 +185,11 @@ object RunnerMain extends cask.MainRoutes {
           commandId,
           Option(clientProcesses.get(channel)),
           message => sendMessage(channel, message),
-          Some(earlyCancels(channel))
+          Some(earlyCancels(channel)),
+          () => {
+            Try(channel.send(cask.Ws.Close(1008, "too many cancellations"))): Unit
+            disconnect(channel, "too many cancellations of commands not yet started")
+          }
         )
 
       case HeartbeatMessage(timestamp) =>
