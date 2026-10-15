@@ -181,7 +181,8 @@ object InstructionsConfig:
  * or over a `CompositeBackend` that also mounts `OffloadBackend` at `/large_tool_results` when `offload` is set; skills
  * and instructions read through the same backend. `execute` is added only when `sandbox` is set. Each tool of the
  * profile that declares no timeout is bounded by `toolTimeout`. The system prompt follows `systemPrompt`. After each
- * turn the root agent's thread is pruned to `retention`, which bounds the full-snapshot checkpoints it keeps.
+ * turn the root agent prunes the thread's earlier turns to `retention`, which bounds the full-snapshot checkpoints
+ * it keeps.
  *
  * `build()` refuses an invalid setting (a limit a component refuses, a blank `PromptMode.Replace`), a tool name the
  * selection does not know, `execute` selected without a sandbox, and `withSystemPrompt` beside a harness: set the
@@ -198,7 +199,7 @@ object InstructionsConfig:
  * @param systemPrompt the system prompt
  * @param permissions permission rules, first match wins; empty for no permission checks
  * @param toolTimeout the bound on each run of a profile tool that declares none
- * @param retention what a thread keeps of its checkpoints and events after each turn
+ * @param retention what a thread keeps of its earlier turns' checkpoints and events, applied before each turn
  */
 @Experimental
 final case class HarnessProfile private (

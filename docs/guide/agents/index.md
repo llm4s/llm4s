@@ -672,8 +672,9 @@ for {
   `PermissionMiddleware`; with rules, a call no rule allows is denied.
 - **The prompt** is the profile's (plan, act and verify; context; tool safety), `PromptMode.Replace`
   or `Suffix`. `withSystemPrompt` beside a harness is refused.
-- **Retention.** After each turn the thread keeps its latest 20 checkpoints (each is a full snapshot
-  of the files, plan and summary); `withRetention(RetentionPolicy.keepAll)` keeps everything.
+- **Retention.** Before each turn the thread's earlier turns are pruned to their latest 20 checkpoints
+  (each is a full snapshot of the files, plan and summary), so a finished turn stays whole until the
+  next one starts; `withRetention(RetentionPolicy.keepAll)` keeps everything.
 - **Defaults live in `llm4s-agent`'s `reference.conf`**, under `llm4s.agent.harness`; override them in
   `application.conf`. Backends, a sandbox, permission rules and a model compressor are set in code.
 - **Middleware order is checked.** A middleware that must run outside another says so

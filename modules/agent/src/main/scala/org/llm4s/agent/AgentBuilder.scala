@@ -134,8 +134,8 @@ final class AgentBuilder private (
    * Installs `profile` (design 4.37), replacing any set before: at [[build]], its tools join this agent's, its
    * middleware run outside this agent's own - permissions, summarisation, offload, skills, instructions, todos,
    * outermost first, each when the profile sets it - and its prompt is the system prompt, so [[withSystemPrompt]] is
-   * refused beside it (use `PromptMode.Replace` or `Suffix`). On the root agent, its `retention` prunes each thread
-   * after every turn; a handoff target's is ignored, as its runtime is. `build()` refuses what the profile refuses
+   * refused beside it (use `PromptMode.Replace` or `Suffix`). On the root agent, its `retention` prunes each thread's earlier turns
+   * before every turn; a handoff target's is ignored, as its runtime is. `build()` refuses what the profile refuses
    * (see [[org.llm4s.agent.harness.HarnessProfile]]).
    */
   def withHarness(profile: HarnessProfile): AgentBuilder = copy(harness = Some(profile))

@@ -10,7 +10,6 @@ import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
 import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.annotation.tailrec
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
@@ -26,15 +25,11 @@ final class AgentRun private[agent] (
   root: AgentId,
   runtime: GraphRuntime,
   tracing: Option[AgentTracing],
-  listening: Option[RunScope],
-  prune: Option[() => Result[Unit]]
+  listening: Option[RunScope]
 ):
   // the listener scopes `await` drains: the `stream*` listener's, and every `subscribe`'s
   private val scopes = new ConcurrentLinkedQueue[RunScope]()
   listening.foreach(scopes.add)
-
-  // set by the first `await` after the turn ended, which prunes the thread to the harness's retention
-  private val pruned = new AtomicBoolean(false)
 
   def threadId: ThreadId = handle.threadId
   def runId: RunId       = handle.runId
@@ -136,7 +131,6 @@ final class AgentRun private[agent] (
     if handle.status != RunStatus.Running then
       drain()
       tracing.foreach(_.detach())
-      retain()
     for
       result <- ended
       // only a kernel Block - the run closed its thread Failed - is a blocked turn; a GuardrailBlocked
@@ -152,23 +146,6 @@ final class AgentRun private[agent] (
         // turn, an output block removes it - with the usage the turn's model calls added
         case RunResult.Failed(state, _) => summary(state, None, status)
     yield agentResult
-
-  /**
-   * Prunes the thread to the harness's retention, once: housekeeping, so a failure is logged at WARN and the turn's
-   * outcome still returned; the thread's next turn prunes again. Pruning never removes the latest checkpoint or its
-   * pending writes, so it changes nothing `recover` or `resume` does next.
-   */
-  private def retain(): Unit =
-    prune.filter(_ => pruned.compareAndSet(false, true)).foreach { run =>
-      AgentRun
-        .uninterrupted(run())
-        .left
-        .foreach(error =>
-          AgentRun.logger.warn(
-            s"Pruning ${threadId.value} to its retention after run ${runId.value} failed: ${error.message}"
-          )
-        )
-    }
 
   /** Waits, within [[AgentRun.Drain]] in all, for every listener scope to end; see [[await]]. */
   private def drain(): Unit =
@@ -222,8 +199,7 @@ private[agent] object AgentRun:
     runtime: GraphRuntime,
     tracing: Option[Tracing],
     scope: Option[RunScope],
-    drain: Boolean,
-    prune: Option[() => Result[Unit]] = None
+    drain: Boolean
   ): AgentRun =
     scope.foreach(s => handle.observation.foreach(s.attach))
     new AgentRun(
@@ -232,8 +208,7 @@ private[agent] object AgentRun:
       root,
       runtime,
       tracing.map(AgentTracing(handle, root, loop, _)),
-      scope.filter(_ => drain),
-      prune
+      scope.filter(_ => drain)
     )
 
   /**

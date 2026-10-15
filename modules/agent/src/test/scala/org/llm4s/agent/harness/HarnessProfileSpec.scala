@@ -312,7 +312,7 @@ class HarnessProfileSpec extends AnyFlatSpec with Matchers with EitherValues wit
     state.get(TodoMiddleware.key).value.todos shouldBe empty
   }
 
-  "Retention" should "prune each thread to the profile's policy after every turn (rule 6)" in {
+  "Retention" should "prune a thread's earlier turns to the profile's policy before each turn (rule 6)" in {
     val store  = new InMemoryCheckpointer
     val thread = ThreadId("kept")
     val client = ScriptedLLMClient.of((1 to 6).map(i => CompletionFixture.simple(s"answer $i"))*)
@@ -322,13 +322,39 @@ class HarnessProfileSpec extends AnyFlatSpec with Matchers with EitherValues wit
         .withHarness(HarnessProfile().withRetention(RetentionPolicy(maxCheckpoints = Some(2))))
         .withRuntime(GraphRuntime(store))
     )
-    (1 to 3).foreach(i => agent.run(thread, s"turn $i").value)
-    store.history(thread, None, 100).value.size shouldBe 2
+    val results = (1 to 3).map(i => agent.run(thread, s"turn $i").value)
+    val history = store.history(thread, None, 100).value
+    // the latest turn whole, and the policy's two checkpoints from before it
+    val latest = history.filter(_.runId == results.last.runId.value)
+    latest should not be empty
+    history.size shouldBe latest.size + 2
     // the thread goes on from its latest checkpoint
     agent.run(thread, "turn 4").value.answer.value shouldBe "answer 4"
   }
 
-  it should "keep everything with RetentionPolicy.keepAll, and the default bound otherwise" in {
+  it should "leave a finished turn's own events, so its handle still replays it" in {
+    val store  = new InMemoryCheckpointer
+    val thread = ThreadId("replayed")
+    val client =
+      ScriptedLLMClient.of(CompletionFixture.simple("one"), call("ls", ujson.Obj()), CompletionFixture.simple("two"))
+    val agent = built(
+      Agent
+        .builder("assistant", client)
+        .withHarness(HarnessProfile().withRetention(RetentionPolicy(maxCheckpoints = Some(1), maxEvents = Some(1))))
+        .withRuntime(GraphRuntime(store))
+    )
+    agent.run(thread, "first").value
+    val run = agent.start(thread, "second").value
+    run.await().value.answer.value shouldBe "two"
+    val seen = new CopyOnWriteArrayList[StreamEvent]()
+    run.subscribe()(e => seen.add(e): Unit).value
+    run.await().value // returns once the listener has had the turn's last event
+    val events = seen.toArray.toVector
+    events.collect { case d: StreamEvent.Disconnected => d } shouldBe empty
+    events.collect { case d: StreamEvent.Durable => d } should not be empty
+  }
+
+  it should "skip RetentionPolicy.keepAll, and bound by the default otherwise" in {
     def kept(profile: HarnessProfile): Int = {
       val store  = new InMemoryCheckpointer
       val client = ScriptedLLMClient.of((1 to 3).map(i => CompletionFixture.simple(s"a$i"))*)
@@ -336,9 +362,8 @@ class HarnessProfileSpec extends AnyFlatSpec with Matchers with EitherValues wit
       (1 to 3).foreach(i => agent.run(ThreadId("t"), s"q$i").value)
       store.history(ThreadId("t"), None, 1000).value.size
     }
-    val all = kept(HarnessProfile().withRetention(RetentionPolicy.keepAll))
-    all should be > 2
-    kept(HarnessProfile().withRetention(RetentionPolicy(maxCheckpoints = Some(1)))) shouldBe 1
+    kept(HarnessProfile().withRetention(RetentionPolicy(maxCheckpoints = Some(1)))) should be <
+      kept(HarnessProfile().withRetention(RetentionPolicy.keepAll))
     HarnessProfile().retention.maxCheckpoints shouldBe Some(HarnessProfile.DefaultRetainedCheckpoints)
   }
 
