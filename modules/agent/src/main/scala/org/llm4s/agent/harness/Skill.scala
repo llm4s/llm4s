@@ -395,7 +395,9 @@ private[harness] object Frontmatter:
     else if NotAString.matches(plain) then Some("YAML reads this plain value as a null, boolean or number; quote it")
     else
       plain.headOption.flatMap(c =>
-        Unsupported.get(c).orElse(Option.when("[]{},#".contains(c))(s"a plain value cannot start with `$c`; quote it"))
+        Unsupported
+          .get(c)
+          .orElse(Option.when("[]{},#\"'".contains(c))(s"a plain value cannot start with `$c`; quote it"))
       )
 
   /** `value` up to a ` #` comment, trimmed. */
@@ -466,8 +468,12 @@ private[harness] object Frontmatter:
    * list costs time linear in its length (no suffix is copied per item).
    */
   private def flowList(n: Int, value: String): Parsed[Vector[String]] =
-    val len                                    = value.length
-    def skip(from: Int): Int                   = { var j = from; while j < len && value.charAt(j) == ' ' do j += 1; j }
+    val len = value.length
+    // YAML's whitespace between tokens: spaces and tabs, as everywhere else in the parser
+    def skip(from: Int): Int =
+      var j = from
+      while j < len && (value.charAt(j) == ' ' || value.charAt(j) == '\t') do j += 1
+      j
     val items                                  = Vector.newBuilder[String]
     var count                                  = 0
     var i                                      = 1 // past the `[`
