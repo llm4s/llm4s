@@ -306,7 +306,15 @@ object RunnerMain extends cask.MainRoutes {
   private def handleExecuteCommand(channel: cask.WsChannelActor, cmd: ExecuteCommandCommand): Unit = {
     // Ensure client has a process map (per-client isolation)
     val processes = clientProcesses.computeIfAbsent(channel, _ => new ConcurrentHashMap[String, RunningCommand]())
-    Future(commandExecutor.execute(cmd, processes, message => sendMessage(channel, message)))(ec)
+    // connected while this connection still owns its map: the close handlers remove it, then cancel what is in it
+    Future(
+      commandExecutor.execute(
+        cmd,
+        processes,
+        message => sendMessage(channel, message),
+        () => clientProcesses.get(channel) eq processes
+      )
+    )(ec)
   }
 
   private def sendMessage(channel: cask.WsChannelActor, message: WebSocketMessage): Unit = {

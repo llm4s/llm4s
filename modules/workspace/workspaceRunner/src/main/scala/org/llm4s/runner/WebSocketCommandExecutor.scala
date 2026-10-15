@@ -49,11 +49,14 @@ final private[runner] class WebSocketCommandExecutor(
    * @param cmd       the command from the client
    * @param processes this client's running commands, so [[cancel]] can find the process
    * @param send      delivers a protocol message to the client
+   * @param connected whether the client's connection is still open: a command whose connection closed while it waited at
+   *                  the gate never starts, as the close handler cancels only what it can find
    */
   def execute(
     cmd: ExecuteCommandCommand,
     processes: ConcurrentHashMap[String, RunningCommand],
-    send: WebSocketMessage => Unit
+    send: WebSocketMessage => Unit,
+    connected: () => Boolean = () => true
   ): Unit = {
     val startTime = System.currentTimeMillis()
 
@@ -74,7 +77,7 @@ final private[runner] class WebSocketCommandExecutor(
         Try(workspace.acquireCommand()) match {
           case Failure(busy: WorkspaceAgentException) => fail(busy.error, busy.code, busy.details)
           case Failure(other) => fail(Option(other.getMessage).getOrElse("Gate failed"), "EXECUTION_FAILED", None)
-          case Success(_) if cancelledEarly.remove(cmd.commandId) =>
+          case Success(_) if cancelledEarly.remove(cmd.commandId) || !connected() =>
             // cancelled while it waited at the gate: it never starts, and is acknowledged as a cancellation
             workspace.releaseCommand()
             send(CommandCompletedMessage(cmd.commandId, 143, (System.currentTimeMillis() - startTime).millis))
@@ -98,6 +101,11 @@ final private[runner] class WebSocketCommandExecutor(
                     new AtomicBoolean(false)
                   )
                 processes.put(cmd.commandId, running)
+                // the connection closed while it waited or started: its close handler has already run, so stop it here
+                if (!connected()) {
+                  running.cancelled.set(true)
+                  process.destroyForcibly(): Unit
+                }
                 send(CommandStartedMessage(cmd.commandId, cmd.command))
                 stream(cmd, prepared, running, processes, send, fail)
             }
