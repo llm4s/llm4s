@@ -705,10 +705,12 @@ class WorkspaceAgentInterfaceImpl(
         // a directory something else filled stays, as does one whose identity is unknown or another's
         if (made.isDefined && identity(d) == made) Try(Files.delete(d))
       }
+    // where the write lands, pinned once: its directories are made for it, and the commit must still lead to it
+    val pinned = effective(resolvedPath)
     if (createDirs) {
       // the directories are created where the write really lands, checked by the path policy just before: through a
       // dangling link (`link -> new/dir/file`), the link target's directories
-      val parent = effective(resolvedPath).getParent
+      val parent = pinned.getParent
       checkPolicy(path, parent, Access.Write)
       val missing = Iterator
         .iterate(parent)(_.getParent)
@@ -760,7 +762,15 @@ class WorkspaceAgentInterfaceImpl(
       // where the write really lands, held to the path policy now, immediately before anything is created there: a
       // link retargeted since the request was first checked cannot lead the write, or its directories, elsewhere. A
       // link is written through, as Files.write writes through it: the file it names changes and the link stays.
-      val target = effective(resolvedPath)
+      // The target is the one pinned before any directory was made: the path must still lead there, or nothing is
+      // written
+      val target = pinned
+      if (effective(resolvedPath) != pinned)
+        throw new WorkspaceAgentException(
+          s"Path '$path' changed while it was written: it now leads to another file; nothing was written",
+          "HASH_MISMATCH",
+          None
+        )
       checkPolicy(path, target, Access.Write)
       if (!Files.isDirectory(target.getParent))
         throw new WorkspaceAgentException(
@@ -1799,14 +1809,15 @@ private[runner] object WorkspaceAgentInterfaceImpl {
    */
   private def copyPosixAcl(from: Path, to: Path, getfacl: Path, setfacl: Path): Unit =
     Try {
-      val get = new ProcessBuilder(getfacl.toString, "--absolute-names", "--omit-header", from.toString)
-        .redirectErrorStream(false)
-        .start()
+      val get = ProcessRegistry.startHelper(
+        new ProcessBuilder(getfacl.toString, "--absolute-names", "--omit-header", from.toString)
+          .redirectErrorStream(false)
+      )
       val acl = new String(get.getInputStream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
       // set whatever it is, a basic one included: the replacement may have inherited a directory's default ACL,
       // which only setting the file's own access ACL removes
       if (get.waitFor() == 0 && acl.trim.nonEmpty) {
-        val set = new ProcessBuilder(setfacl.toString, "--set-file=-", to.toString).start()
+        val set = ProcessRegistry.startHelper(new ProcessBuilder(setfacl.toString, "--set-file=-", to.toString))
         Using.resource(set.getOutputStream)(_.write(acl.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
         set.waitFor(): Unit
       }

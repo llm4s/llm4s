@@ -276,7 +276,7 @@ private[runner] object GitSandbox {
     lister.environment().putAll(builder.environment())
     lister.redirectInput(builder.redirectInput())
     lister.redirectError(java.lang.ProcessBuilder.Redirect.DISCARD)
-    Try(lister.start()).toEither.left
+    Try(ProcessRegistry.startHelper(lister)).toEither.left
       .map(e => s"git could not be started to list its configuration (${e.getMessage})")
       .flatMap { process =>
         val out = new ByteArrayOutputStream()

@@ -84,13 +84,13 @@ final private[runner] class ProcessRegistry(
     else {
       // asked, started and registered in one step under the registry's lock: killAll and killOwner never miss a
       // process between the two, and a command cancelled (or whose client left) while it waited never starts
-      val started = synchronized {
+      val started = synchronized(ProcessRegistry.ledger.synchronized {
         // one process per id and owner: a second would hide the first from cancellation
         (if (closed) scala.util.Failure(new IllegalStateException("The runner is shutting down"))
          else if (closedOwners.contains(owner) || !proceed()) scala.util.Failure(NotStarted)
          else if (running.containsKey((owner, commandId)))
            scala.util.Failure(new IllegalStateException(s"Command $commandId is already running"))
-         else Try(start(builder))).map { process =>
+         else Try(ProcessRegistry.started(start(builder), ProcessRegistry.commands))).map { process =>
           val entry = RunningCommand(
             owner,
             commandId,
@@ -102,7 +102,7 @@ final private[runner] class ProcessRegistry(
           running.put((owner, commandId), entry)
           entry
         }
-      }
+      })
       started.toEither match {
         case Left(NotStarted) =>
           gate.release()
@@ -136,9 +136,11 @@ final private[runner] class ProcessRegistry(
    * helper (`getfacl`) never runs then: it needs the whole gate, and the exiting command still holds its permit.
    */
   private def sweepOrphans(): Unit =
-    if (ProcessHandle.current().pid() == 1L) {
-      val tracked = running.values().asScala.flatMap(e => Try(e.process.pid()).toOption).toSet
-      ProcessHandle.current().children().toList.asScala.filterNot(h => tracked(h.pid())).foreach { orphan =>
+    if (ProcessHandle.current().pid() == 1L) ProcessRegistry.ledger.synchronized {
+      // every process the runner starts itself is in the ledger from its start (a command, a helper), so a child that
+      // is in neither is a re-parented orphan, never a process being started or a helper at work
+      val own = ProcessRegistry.commands.asScala ++ ProcessRegistry.helpers.asScala
+      ProcessHandle.current().children().toList.asScala.filterNot(h => own.contains(h.pid())).foreach { orphan =>
         Try(orphan.descendants().toList.asScala).getOrElse(Nil).foreach(d => Try(d.destroyForcibly()): Unit)
         Try(orphan.destroyForcibly()): Unit
       }
@@ -196,6 +198,27 @@ final private[runner] class ProcessRegistry(
 }
 
 private[runner] object ProcessRegistry {
+
+  /**
+   * The ledger of the runner's own children, JVM-wide: every command's process and every helper (`git config`,
+   * `getfacl`, `setfacl`) is entered under this lock in the step that starts it, and leaves when it exits. The orphan
+   * sweep reads it under the same lock, so it never takes a process being started, or a helper, for an orphan.
+   */
+  private[runner] val ledger                                  = new Object
+  private[runner] val commands: java.util.Set[java.lang.Long] = ConcurrentHashMap.newKeySet[java.lang.Long]()
+  private[runner] val helpers: java.util.Set[java.lang.Long]  = ConcurrentHashMap.newKeySet[java.lang.Long]()
+
+  /** `process`, entered in `into` until it exits. Called within the step that started it. */
+  private[runner] def started(process: Process, into: java.util.Set[java.lang.Long]): Process = {
+    Try(process.pid()).foreach { pid =>
+      into.add(pid)
+      process.onExit().whenComplete((_, _) => into.remove(pid): Unit)
+    }
+    process
+  }
+
+  /** Starts a helper of the runner's own (not a command), entered in the ledger from its start. */
+  def startHelper(builder: java.lang.ProcessBuilder): Process = ledger.synchronized(started(builder.start(), helpers))
 
   /** The gate's permits: one per running command, all of them for a file operation. */
   val GatePermits: Int = 1 << 20
