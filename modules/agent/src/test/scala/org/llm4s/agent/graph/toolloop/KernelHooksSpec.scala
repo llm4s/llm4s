@@ -62,7 +62,10 @@ class KernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues with O
     writes = Set(files)
   ) { (args, context) =>
     val current = context.state.get(files).getOrElse(Map.empty)
-    ToolOutcome.Success(ujson.Str("ok"), StateUpdate.update(files, current + (args.text -> args.text)))
+    ToolOutcome.Success(
+      ToolContent.Json(ujson.Str("ok")),
+      StateUpdate.update(files, current + (args.text -> args.text))
+    )
   }
 
   /** A model turn calling `write` with `name`. */

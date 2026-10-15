@@ -5,6 +5,7 @@ import cats.effect.unsafe.implicits.global
 import org.llm4s.agent.AgentRun
 import org.llm4s.agent.graph.{ EventHandlers, RunEvent, StreamEvent, ThreadId }
 import org.llm4s.agent.graph.tool.ToolOutcome
+import org.llm4s.agent.graph.tool.ToolContent
 import org.llm4s.agent.testkit.Fixtures
 import org.llm4s.agent.testkit.Fixtures.Pings
 import org.llm4s.agent.testkit.Fixtures.Pings.Ping
@@ -76,7 +77,7 @@ class AgentIOEventsSpec extends AnyFlatSpec with Matchers {
       context => {
         Pings.Pinged.emit(context.run, Ping(1))
         release.await(5, TimeUnit.SECONDS)
-        ToolOutcome.Success(ujson.Str("ok"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
       },
       "e4"
     )

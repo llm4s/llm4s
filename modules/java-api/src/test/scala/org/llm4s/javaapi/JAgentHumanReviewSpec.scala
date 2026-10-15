@@ -3,7 +3,7 @@ package org.llm4s.javaapi
 import org.llm4s.agent.{ AgentNode, AgentStatus }
 import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, IdempotencyKey, InterruptId, NodeId }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, BoundaryResult, MiddlewareId, ModelContext, ToolCallRequest }
-import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome, ToolSet }
+import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome, ToolSet }
 import org.llm4s.agent.graph.toolloop.{
   ApprovalRequest,
   ApprovalSource,
@@ -34,7 +34,7 @@ class JAgentHumanReviewSpec extends AnyFlatSpec with Matchers {
 
   private val deploy = AgentTool(SuspensionFixtures.spec("deploy")) { (args, _) =>
     ran.add(args.text)
-    ToolOutcome.Success(ujson.Str(s"deployed ${args.text}"))
+    ToolOutcome.Success(ToolContent.Json(ujson.Str(s"deployed ${args.text}")))
   }
 
   private def tools: ToolSet = ToolSet.of(deploy).fold(e => throw new AssertionError(e.message), identity)

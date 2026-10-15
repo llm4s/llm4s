@@ -22,7 +22,7 @@ class PermissionMiddlewareSpec extends AnyFlatSpec with Matchers {
       approved
     )
 
-  private val ran = ToolOutcome.Success(ujson.Str("ran"))
+  private val ran = ToolOutcome.Success(ToolContent.Json(ujson.Str("ran")))
 
   private def decide(rules: Seq[PermissionRule], approved: Boolean, resources: ToolResource*): ToolOutcome =
     new PermissionMiddleware(rules)

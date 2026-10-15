@@ -335,11 +335,11 @@ is the same in every run of one call, so a tool with an external side effect pas
 system it calls, which then does the work once:
 
 ```scala
-import org.llm4s.agent.graph.tool.{AgentTool, ToolOutcome}
+import org.llm4s.agent.graph.tool.{AgentTool, ToolContent, ToolOutcome}
 
 val charge = AgentTool(chargeSpec) { (args, context) =>
   payments.charge(args.amount, idempotencyKey = context.idempotencyKey.value) match
-    case Right(receipt) => ToolOutcome.Success(ujson.Str(receipt.id))
+    case Right(receipt) => ToolOutcome.Success(ToolContent.Json(ujson.Str(receipt.id)))
     case Left(error)    => ToolOutcome.Error(error.message)
 }
 ```
@@ -404,7 +404,7 @@ val append = AgentTool(appendSpec) { (args, context) =>
       writeIfUnchanged(args.path, StateCheck.of(before), after).map(_ => after.length)
     })
   } match
-    case Right(length)                           => ToolOutcome.Success(ujson.Num(length))
+    case Right(length)                           => ToolOutcome.Success(ToolContent.Json(ujson.Num(length)))
     case Left(r: GraphError.EffectReplayRefused) => ToolOutcome.Error(r.message)
     case Left(other)                             => ToolOutcome.Fatal(other) // outcome unknown: recover replays it
 }

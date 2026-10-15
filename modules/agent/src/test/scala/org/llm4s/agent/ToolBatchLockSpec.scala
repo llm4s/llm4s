@@ -4,7 +4,15 @@ import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling, Text }
 import org.llm4s.agent.graph.{ GraphError, IdempotencyKey, RunBudgets, RunConfig, StateKey, StateUpdate, ThreadId }
 import org.llm4s.agent.graph.middleware.{ PermissionMiddleware, PermissionRule }
-import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, LockKey, Operation, ToolOutcome, ToolResource }
+import org.llm4s.agent.graph.tool.{
+  AgentTool,
+  AgentToolSpec,
+  LockKey,
+  Operation,
+  ToolContent,
+  ToolOutcome,
+  ToolResource
+}
 import org.llm4s.agent.graph.toolloop.ToolLoop
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
@@ -31,7 +39,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
   private def increment(locked: Boolean): AgentTool[Text] =
     AgentTool(lockedSpec("increment", locked), writes = Set(counter)) { (_, context) =>
       val next = context.state.get(counter).fold(e => fail(e.message), identity) + 1
-      ToolOutcome.Success(ujson.Str(next.toString), StateUpdate.update(counter, next))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str(next.toString)), StateUpdate.update(counter, next))
     }
 
   private def toolResults(result: AgentResult): Vector[String] =
@@ -64,7 +72,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
         latch.await(5, TimeUnit.SECONDS)
       }
       log.add(s"end ${context.toolCallId.value}")
-      ToolOutcome.Success(ujson.Str(if (met) "met" else "alone"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str(if (met) "met" else "alone")))
     }
 
   "Calls with non-conflicting locks" should "run concurrently; a conflicting later call waits for the earlier" in {
@@ -75,7 +83,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
       // a and b must be inside the tool at once; c runs alone, after a
       val met = if (context.toolCallId.value == "c") true else { meet.countDown(); meet.await(5, TimeUnit.SECONDS) }
       log.add(s"end ${context.toolCallId.value}")
-      ToolOutcome.Success(ujson.Str(s"${args.text}:${if (met) "met" else "alone"}"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str(s"${args.text}:${if (met) "met" else "alone"}")))
     }
     val client = ScriptedLLMClient.of(
       calling(call("a", "work", "x"), call("b", "work", "y"), call("c", "work", "x")),
@@ -106,7 +114,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
     val spec = SpecTools.spec("increment").withLocks(t => Set(LockKey(t.text)))
     val tool = AgentTool(spec, writes = Set(counter)) { (_, context) =>
       val next = context.state.get(counter).fold(e => fail(e.message), identity) + 1
-      ToolOutcome.Success(ujson.Str(next.toString), StateUpdate.update(counter, next))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str(next.toString)), StateUpdate.update(counter, next))
     }
     val client = ScriptedLLMClient.of(
       calling(
@@ -128,11 +136,11 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
     val tool = AgentTool(SpecTools.spec("step").withLocks(_ => Set(LockKey("shared")))) { (args, context) =>
       if (args.text == "one") {
         firstRuns.incrementAndGet()
-        ToolOutcome.Success(ujson.Str("one done"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("one done")))
       } else {
         keys.add(context.idempotencyKey)
         if (broken.get) ToolOutcome.Fatal(ValidationError("step", "backend down"))
-        else ToolOutcome.Success(ujson.Str("two done"))
+        else ToolOutcome.Success(ToolContent.Json(ujson.Str("two done")))
       }
     }
     val client = ScriptedLLMClient.of(
@@ -160,13 +168,13 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
     val tool = AgentTool(SpecTools.spec("step").withLocks(_ => Set(LockKey("shared")))) { (args, _) =>
       if (args.text == "one") {
         firstRuns.incrementAndGet()
-        ToolOutcome.Success(ujson.Str("one done"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("one done")))
       } else {
         if (block.get) {
           entered.countDown()
           Thread.sleep(60_000) // interrupted by cancel
         }
-        ToolOutcome.Success(ujson.Str("two done"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("two done")))
       }
     }
     val client = ScriptedLLMClient.of(
@@ -189,7 +197,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
 
   "Each further wave" should "cost two supersteps, counted by maxSupersteps" in {
     val tool = AgentTool(SpecTools.spec("step").withLocks(_ => Set(LockKey("shared"))))((_, _) =>
-      ToolOutcome.Success(ujson.Str("ok"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
     )
     def run(maxSupersteps: Int) = {
       val client = ScriptedLLMClient.of(
@@ -210,7 +218,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
     }
     val tool = AgentTool(spec, writes = Set(counter)) { (_, context) =>
       val next = context.state.get(counter).fold(e => fail(e.message), identity) + 1
-      ToolOutcome.Success(ujson.Str(next.toString), StateUpdate.update(counter, next))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str(next.toString)), StateUpdate.update(counter, next))
     }
     val client = ScriptedLLMClient.of(
       calling(call("c1", "increment", "a"), call("c2", "increment", "boom"), call("c3", "increment", "b")),
@@ -229,7 +237,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
     val tool = AgentTool(spec, writes = Set(counter)) { (t, context) =>
       ran.add(t.text)
       val next = context.state.get(counter).fold(e => fail(e.message), identity) + 1
-      ToolOutcome.Success(ujson.Str(next.toString), StateUpdate.update(counter, next))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str(next.toString)), StateUpdate.update(counter, next))
     }
     val client = ScriptedLLMClient.of(
       calling(call("c1", "increment", "/prod"), call("c2", "increment", "/tmp"), call("c3", "increment", "/prod")),
@@ -281,7 +289,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
       else {
         ran.add(t.text)
         val next = context.state.get(counter).fold(e => fail(e.message), identity) + 1
-        ToolOutcome.Success(ujson.Str(next.toString), StateUpdate.update(counter, next))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str(next.toString)), StateUpdate.update(counter, next))
       }
     }
     private val recording = new org.llm4s.agent.graph.middleware.AgentMiddleware {
@@ -388,7 +396,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
       .withLocks { t =>
         lockedOn.add(t.text); Set(LockKey("shared"))
       }
-    val tool = AgentTool(spec)((t, _) => ToolOutcome.Success(ujson.Str(t.text)))
+    val tool = AgentTool(spec)((t, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(t.text))))
     val client = ScriptedLLMClient.of(
       // c1 decodes but breaks the schema's enum; c2 fails the tool's own check; c3's resource function throws;
       // c4 and c5 are valid
@@ -420,7 +428,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
       )
       .withLocks(_ => Set(LockKey("shared")))
     val tool = AgentTool(spec) { (t, _) =>
-      ran.add(t.text); ToolOutcome.Success(ujson.Str(t.text))
+      ran.add(t.text); ToolOutcome.Success(ToolContent.Json(ujson.Str(t.text)))
     }
     val client =
       ScriptedLLMClient.of(calling(call("c1", "step", "p"), call("c2", "step", "q")), CompletionFixture.simple("ok"))
@@ -445,7 +453,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
       .withResources(t => Vector(ToolResource(Operation.Write, t.text)))
     val tool = AgentTool(spec, writes = Set(counter)) { (_, context) =>
       val next = context.state.get(counter).fold(e => fail(e.message), identity) + 1
-      ToolOutcome.Success(ujson.Str(next.toString), StateUpdate.update(counter, next))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str(next.toString)), StateUpdate.update(counter, next))
     }
     val batch = calling(call("c1", "write", "/prod"), call("c2", "write", "/prod/x"))
     val client =
@@ -479,7 +487,9 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
 
   "The tool queue" should "be a key the loop owns" in {
     val sneaky =
-      AgentTool(SpecTools.spec("sneaky"), writes = Set(ToolLoop.queue))((_, _) => ToolOutcome.Success(ujson.Str("x")))
+      AgentTool(SpecTools.spec("sneaky"), writes = Set(ToolLoop.queue))((_, _) =>
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("x")))
+      )
     val client = ScriptedLLMClient.of(CompletionFixture.simple("never"))
     Agent.builder("assistant", client).withTools(SpecTools.set(sneaky)).build().isLeft shouldBe true
   }

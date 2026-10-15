@@ -104,7 +104,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
   private def bare(name: String)(run: ToolContext => ToolOutcome): AgentTool[ujson.Value] =
     tool[ujson.Value](name)((_, context) => run(context))
 
-  private def text(s: String): ToolOutcome = ToolOutcome.Success(ujson.Str(s))
+  private def text(s: String): ToolOutcome = ToolOutcome.Success(ToolContent.Json(ujson.Str(s)))
 
   final private class Tools {
     val deploys = new CopyOnWriteArrayList[String]()
@@ -583,7 +583,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val counter = AgentTool(AgentToolSpec[ujson.Value]("count", "Counts", strings[ujson.Value]("c")), Set(hits)) {
       (_, context) =>
         val seen = context.state.get(hits).getOrElse(0)
-        ToolOutcome.Success(ujson.Obj("hits" -> (seen + 1)), StateUpdate.update(hits, seen + 1))
+        ToolOutcome.Success(ToolContent.Json(ujson.Obj("hits" -> (seen + 1))), StateUpdate.update(hits, seen + 1))
     }
     val model           = ScriptedModel(calls(("h1", "count", ujson.Obj())), summarise)
     val l               = buildSingle(model, set(counter)).value
@@ -593,8 +593,9 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
   }
 
   it should "fail the run when a tool updates a key it does not declare" in {
-    val hits   = StateKey.replace[Int]("hits", 0)
-    val sneaky = bare("sneaky")(_ => ToolOutcome.Success(ujson.Str("ok"), StateUpdate.update(hits, 1)))
+    val hits = StateKey.replace[Int]("hits", 0)
+    val sneaky =
+      bare("sneaky")(_ => ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")), StateUpdate.update(hits, 1)))
     val honest =
       AgentTool(AgentToolSpec[ujson.Value]("honest", "Honest", strings[ujson.Value]("h")), Set(hits))((_, _) =>
         text("ok")
@@ -1006,12 +1007,12 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val writer = AgentTool(AgentToolSpec[ujson.Value]("writer", "Writes", strings[ujson.Value]("w")), Set(attempts)) {
       (_, _) =>
         val n = runs.incrementAndGet()
-        ToolOutcome.Success(ujson.Str(s"attempt $n"), StateUpdate.update(attempts, n))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str(s"attempt $n")), StateUpdate.update(attempts, n))
     }
     val retry = wrapper("retry") { (_, _, next) =>
       next() match {
-        case ToolOutcome.Success(ujson.Str("attempt 1"), _) => next()
-        case other                                          => other
+        case ToolOutcome.Success(ToolContent.Json(ujson.Str("attempt 1")), _) => next()
+        case other                                                            => other
       }
     }
     val model           = ScriptedModel(calls(("r1", "writer", ujson.Obj())), summarise)
@@ -1890,8 +1891,12 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
   }
 
   "ToolLoop.results" should "refuse a second result for the same call" in {
-    val result = ToolResult("a", "t1", "ok", isError = false)
-    ToolLoop.results.applyUpdate(Vector(result), result.copy(content = "again")).left.value.message should
+    val result = ToolResult("a", "t1", Vector(ContentPart.Text("ok")), isError = false)
+    ToolLoop.results
+      .applyUpdate(Vector(result), result.copy(parts = Vector(ContentPart.Text("again"))))
+      .left
+      .value
+      .message should
       include("already has a result")
   }
 

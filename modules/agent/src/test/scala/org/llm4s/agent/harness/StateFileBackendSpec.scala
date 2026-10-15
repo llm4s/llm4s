@@ -6,7 +6,7 @@ import org.llm4s.agent.SpecTools.{ call, calling, Text }
 import org.llm4s.agent.graph.HarnessTestSupport.{ committed, stateOf }
 import org.llm4s.agent.graph.GraphTestSupport.testRunContext
 import org.llm4s.agent.graph.{ StateUpdate, ThreadState }
-import org.llm4s.agent.graph.tool.{ AgentTool, Glob, LockKey, ToolOutcome }
+import org.llm4s.agent.graph.tool.{ AgentTool, Glob, LockKey, ToolContent, ToolOutcome }
 import org.llm4s.agent.{ ScriptedLLMClient, SpecTools }
 import org.llm4s.llmconnect.model.ToolMessage
 import org.scalatest.EitherValues
@@ -322,7 +322,7 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
   private def tools(backend: FileBackend) = {
     def lockOf(path: String) = VPath(path).fold(_ => Set(LockKey("")), backend.locks)
     def outcome[A](r: org.llm4s.types.Result[(A, StateUpdate)]): ToolOutcome =
-      r.fold(BackendRefused.toolOutcome, (a, u) => ToolOutcome.Success(ujson.Str(a.toString), u))
+      r.fold(BackendRefused.toolOutcome, (a, u) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.toString)), u))
     val write =
       AgentTool(SpecTools.spec("write_file").withLocks(t => lockOf(t.text.takeWhile(_ != '|'))), backend.writes) {
         (args, context) =>
@@ -342,7 +342,10 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
     val read = AgentTool(SpecTools.spec("read_file")) { (args, context) =>
       backend
         .read(p(args.text), 0, 100, FileContext(context))
-        .fold(BackendRefused.toolOutcome, lines => ToolOutcome.Success(ujson.Str(lines.lines.mkString("\n"))))
+        .fold(
+          BackendRefused.toolOutcome,
+          lines => ToolOutcome.Success(ToolContent.Json(ujson.Str(lines.lines.mkString("\n"))))
+        )
     }
     SpecTools.set(write, edit, delete, read)
   }

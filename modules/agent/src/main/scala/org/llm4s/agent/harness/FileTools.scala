@@ -1,7 +1,15 @@
 package org.llm4s.agent.harness
 
 import org.llm4s.agent.graph.StateUpdate
-import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, LockKey, Operation, ToolOutcome, ToolResource }
+import org.llm4s.agent.graph.tool.{
+  AgentTool,
+  AgentToolSpec,
+  LockKey,
+  Operation,
+  ToolContent,
+  ToolOutcome,
+  ToolResource
+}
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, ValidationError }
 import org.llm4s.toolapi.{ Schema, ToolHints }
@@ -139,7 +147,8 @@ object FileTools:
     private def locksOf(path: String): Set[LockKey] = VPath(path).fold(_ => Set(LockKey("")), backend.locks)
 
     /** A tool's text result, cut at `maxResultChars`. */
-    private def text(s: String): ToolOutcome = ToolOutcome.Success(ujson.Str(Bounded.cap(s, maxResultChars)))
+    private def text(s: String): ToolOutcome =
+      ToolOutcome.Success(ToolContent.Json(ujson.Str(Bounded.cap(s, maxResultChars))))
 
     /** A backend error: a refusal the model sees, cut at `maxResultChars`; anything else is `Fatal`. */
     private def failed(error: LLMError): ToolOutcome =
@@ -150,7 +159,10 @@ object FileTools:
     private def argError(error: LLMError): ToolOutcome = ToolOutcome.Error(Bounded.cap(error.message, maxResultChars))
 
     private def mutated[A](result: Result[(A, StateUpdate)])(render: A => String): ToolOutcome =
-      result.fold(failed, (a, update) => ToolOutcome.Success(ujson.Str(Bounded.cap(render(a), maxResultChars)), update))
+      result.fold(
+        failed,
+        (a, update) => ToolOutcome.Success(ToolContent.Json(ujson.Str(Bounded.cap(render(a), maxResultChars))), update)
+      )
 
     private def stopped(listing: Listing[?]): Option[String] =
       Option.when(listing.truncated)(s"(stopped at $maxResults results; narrow the path or pattern)")

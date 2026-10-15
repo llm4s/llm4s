@@ -348,7 +348,7 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
   /** A tool that fails the run (`Fatal`) until `fixed`. */
   private def flaky(fixed: AtomicBoolean): AgentTool[?] =
     org.llm4s.agent.SpecTools.tool("flaky") { (_, _) =>
-      if fixed.get then ToolOutcome.Success(ujson.Str("fixed"))
+      if fixed.get then ToolOutcome.Success(org.llm4s.agent.graph.tool.ToolContent.Json(ujson.Str("fixed")))
       else ToolOutcome.Fatal(ValidationError("flaky", "down"))
     }
 

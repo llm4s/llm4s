@@ -2,6 +2,7 @@ package org.llm4s.agent
 
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.graph.tool.ToolOutcome
+import org.llm4s.agent.graph.tool.ToolContent
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
 import org.scalatest.flatspec.AnyFlatSpec
@@ -201,7 +202,7 @@ class AgentHandoffSpec extends AnyFlatSpec with Matchers {
       SpecTools.calling(SpecTools.call("p1", "gravity", "g")),
       CompletionFixture.simple("9.8")
     )
-    val gravity = SpecTools.tool("gravity")((_, _) => ToolOutcome.Success(ujson.Str("9.8 m/s2")))
+    val gravity = SpecTools.tool("gravity")((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("9.8 m/s2"))))
     val physics =
       Agent
         .builder("physics", physicsClient)

@@ -296,7 +296,7 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       """[{"entity_name": "Anthropic", "entity_type": "company", "fact": "Anthropic is an AI company that created Claude.", "importance": 0.9}]"""
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
-      val prompt = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse("")
+      val prompt = conversation.messages.collectFirst { case u: UserMessage => u.content }.getOrElse("")
       val reply  = if (prompt.contains("Return JSON array only")) entities else "A short summary of the older memories."
       Right(
         Completion(
