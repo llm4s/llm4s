@@ -5,6 +5,8 @@ import org.llm4s.agent.graph.middleware.{ MiddlewareId, ModelContext, PromptSect
 import org.llm4s.error.CancelledError
 import org.llm4s.types.Result
 
+import scala.util.control.Exception.ultimately
+
 /*
  * The mechanism shared by the middleware that show documents read through a backend as a prompt section - skills
  * (F5, §4.35) and instruction memory (F6, §4.36): read once per run, bounded per document and in total, cached by
@@ -54,6 +56,9 @@ final private[harness] class RunCache[A](maxRuns: Int):
   /** The number of incarnations whose value is held. */
   def cached: Int = lock.synchronized(done.size)
 
+  /** The number of incarnations being computed or waited on. */
+  def inFlightRuns: Int = lock.synchronized(inFlight.size)
+
   /** The run's value: computed by `compute` on the run's first call, and reported by `report` as above. */
   def apply(run: RunContext)(compute: => Result[A])(report: A => Unit): Result[A] =
     val position = run.position
@@ -70,23 +75,26 @@ final private[harness] class RunCache[A](maxRuns: Int):
           s.users += 1
           s
         }
-        val result = scala.util.Try(slot.synchronized {
-          held match
-            case Some(entry) => hit(entry)
-            case None =>
-              val computed = scala.util.Try(compute)
-              computed match
-                case scala.util.Success(Right(value)) =>
-                  lock.synchronized(done.put(key, Entry(value, position.taskId))): Unit
-                  report(value)
-                case _ => () // a failure, returned or thrown, keeps nothing; a waiter retries in turn
-              computed.get
-        })
-        lock.synchronized {
+        // released whatever ends the wait or the computation - a value, a failure, or a throw `Try` would not catch,
+        // such as an interrupt - so no slot outlives its callers
+        def release(): Unit = lock.synchronized {
           slot.users -= 1
           if slot.users == 0 then inFlight.remove(key, slot): Unit
         }
-        result.get
+        ultimately(release()) {
+          slot.synchronized {
+            held match
+              case Some(entry) => hit(entry)
+              case None        =>
+                // a failure, returned or thrown, keeps nothing; a waiter retries in turn
+                val computed = compute
+                computed.foreach { value =>
+                  lock.synchronized(done.put(key, Entry(value, position.taskId))): Unit
+                  report(value)
+                }
+                computed
+          }
+        }
 
 /** What one run's read produced: its value, the text of its section (if any), and its report. */
 final private[harness] case class RunRead[A](value: A, section: Option[String], report: Option[DocumentsReported])

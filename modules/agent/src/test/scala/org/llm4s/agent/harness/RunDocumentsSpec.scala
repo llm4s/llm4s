@@ -147,6 +147,17 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
     cache.cached shouldBe 1
   }
 
+  it should "leave no in-flight entry behind a computation an interrupt ended" in {
+    val events = new CopyOnWriteArrayList[(String, ujson.Value)]()
+    val cache  = new RunCache[String](4)
+    (1 to 3).foreach { i =>
+      an[InterruptedException] should be thrownBy
+        cache(recordingRunContext(events, run = s"i$i"))(throw new InterruptedException("cancelled"))(_ => ())
+    }
+    cache.inFlightRuns shouldBe 0
+    cache.cached shouldBe 0
+  }
+
   it should "not keep a failure, and hold at most maxRuns incarnations (rule 12)" in {
     val events = new CopyOnWriteArrayList[(String, ujson.Value)]()
     val cache  = new RunCache[String](2)
