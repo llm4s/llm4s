@@ -43,7 +43,9 @@ val llm4sVersion = "{{ site.data.project.latest_release }}"
 dependencies {
     // Scala 3 artifacts - note the explicit _3 suffix
     implementation("org.llm4s:llm4s-core_3:$llm4sVersion")
+{%- unless site.data.project.latest_release contains "0.4." %}
     implementation("org.llm4s:llm4s-openai_3:$llm4sVersion") // the provider module you use
+{%- endunless %}
 }
 
 // Pin the Scala 3 library to avoid binary incompatibility from transitive deps.
@@ -70,7 +72,9 @@ def llm4sVersion = '{{ site.data.project.latest_release }}'
 
 dependencies {
     implementation "org.llm4s:llm4s-core_3:${llm4sVersion}"
+{%- unless site.data.project.latest_release contains "0.4." %}
     implementation "org.llm4s:llm4s-openai_3:${llm4sVersion}" // the provider module you use
+{%- endunless %}
 }
 
 configurations.all {
@@ -181,7 +185,9 @@ dependencies {
     implementation("io.ktor:ktor-server-netty:$ktorVersion")
 
     implementation("org.llm4s:llm4s-core_3:$llm4sVersion")
+{%- unless site.data.project.latest_release contains "0.4." %}
     implementation("org.llm4s:llm4s-openai_3:$llm4sVersion")
+{%- endunless %}
     // With 0.4.x, exclude logback-classic from llm4s-core here (see above): Ktor manages its own logging backend
 }
 ```

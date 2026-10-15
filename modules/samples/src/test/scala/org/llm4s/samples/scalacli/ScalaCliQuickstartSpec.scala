@@ -234,7 +234,7 @@ class ScalaCliQuickstartSpec extends AnyFlatSpec with Matchers {
     text.linesIterator.map(_.stripTrailing()).filterNot(line => line.isBlank || isComment(line.trim)).toSeq
 
   it should "match the page's hello.scala block, rendered for the script's release" in {
-    latestRelease should not startWith "0.4."
+    latestRelease.startsWith("0.4.") shouldBe false
     code(render(block("scala"), latestRelease), scalaComment) shouldBe code(script, scalaComment)
   }
 
