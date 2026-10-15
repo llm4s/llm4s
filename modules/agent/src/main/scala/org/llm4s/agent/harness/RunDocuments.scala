@@ -25,10 +25,12 @@ import scala.util.control.Exception.ultimately
  * waiter retrying in turn - and never two at once. Only a computed value takes a place in the LRU: a computation in flight, or one that failed
  * (returned or thrown), evicts nothing and leaves nothing behind.
  *
- * `report` runs when the value is computed, in the task that computed it, and again whenever that task runs the hook
- * again - a retried attempt, whose durable events were discarded - so a report committed with the task's events is
- * committed at least once per run that computed the value. A later task of the run does not report: it runs only
- * after the computing task committed. An evicted run computes, and reports, again.
+ * `report` runs only on a reporting call (`reports`), and there in the first task of the run to make one, and again
+ * whenever that task makes one again - a retried attempt, whose durable events were discarded - so a report committed
+ * with the task's events is committed at least once per run. A later task of the run does not report: it runs only
+ * after the reporting task committed. A non-reporting call (a caller reading the value) never reports, so it cannot
+ * add a second report to a task that also reports; the one reporting caller, a section's build, is made once per
+ * model-step attempt by the loop. An evicted run computes, and reports, again.
  */
 final private[harness] class RunCache[A](maxRuns: Int):
   require(maxRuns >= 1, s"maxCachedRuns must be at least 1, was $maxRuns")
@@ -45,8 +47,9 @@ final private[harness] class RunCache[A](maxRuns: Int):
       case _                 => false
     override def hashCode: Int = (thread, run, token, System.identityHashCode(of)).hashCode
 
-  /** A computed value, and the task that computed it. */
-  final private case class Entry(value: A, reporter: TaskId)
+  /** A computed value, and the task that reported it, once one has (guarded by `lock`). */
+  final private class Entry(val value: A):
+    var reporter: Option[TaskId] = None
 
   // guards both maps; a computation runs outside it, under its incarnation's in-flight lock
   private val lock = new Object
@@ -75,12 +78,18 @@ final private[harness] class RunCache[A](maxRuns: Int):
   def inFlightRuns: Int = lock.synchronized(inFlight.size)
 
   /** The run's value: computed by `compute` on the run's first call, and reported by `report` as above. */
-  def apply(run: RunContext)(compute: => Result[A])(report: A => Unit): Result[A] =
+  def apply(run: RunContext, reports: Boolean)(compute: => Result[A])(report: A => Unit): Result[A] =
     val position = run.position
     val key      = new Incarnation(position.threadId, position.runId, position.fencingToken, run.incarnation)
     def held     = lock.synchronized(Option(done.get(key)))
     def hit(entry: Entry): Result[A] =
-      if entry.reporter == position.taskId then report(entry.value)
+      // the first reporting task reports, and the same task again when it is retried; no other caller does
+      val reporting = reports && lock.synchronized {
+        val first = entry.reporter.forall(_ == position.taskId)
+        if first then entry.reporter = Some(position.taskId)
+        first
+      }
+      if reporting then report(entry.value)
       Right(entry.value)
     // the lookup and the enrolment are one step under the lock: a caller that misses is a registered waiter before
     // anyone can complete, leave and be evicted, so it finds the value on its slot
@@ -108,13 +117,12 @@ final private[harness] class RunCache[A](maxRuns: Int):
               case None        =>
                 // a failure, returned or thrown, keeps nothing; a waiter retries in turn
                 val computed = compute
-                computed.foreach { value =>
-                  val entry = Entry(value, position.taskId)
+                computed.flatMap { value =>
+                  val entry = new Entry(value)
                   slot.entry = Some(entry)
                   lock.synchronized(done.put(key, entry)): Unit
-                  report(value)
+                  hit(entry)
                 }
-                computed
           }
         }
 
@@ -128,25 +136,27 @@ final private[harness] case class RunRead[A](value: A, section: Option[String], 
  * [[HarnessEvents.DocumentsReported]] as [[RunCache]] reports.
  */
 final private[harness] class RunDocuments[A](id: MiddlewareId, maxRuns: Int)(
-  read: (FileContext, Report) => Result[(A, Option[String])]
+  load: (FileContext, Report) => Result[(A, Option[String])]
 ):
   private val cache = new RunCache[RunRead[A]](maxRuns)
 
   /** The runs held. */
   def cached: Int = cache.cached
 
-  /** The run's read, made on its first call. */
-  def apply(context: ModelContext): Result[RunRead[A]] =
-    cache(context.run) {
+  /** The run's read, made on its first call; it reports nothing (the section's build does). */
+  def apply(context: ModelContext): Result[RunRead[A]] = read(context, reports = false)
+
+  /** The run's section, if it has one: the reporting call, made by the loop once per model-step attempt. */
+  def sections(context: ModelContext): Result[Vector[PromptSection]] =
+    read(context, reports = true).map(_.section.map(PromptSection(id.value, _, cacheable = true)).toVector)
+
+  private def read(context: ModelContext, reports: Boolean): Result[RunRead[A]] =
+    cache(context.run, reports) {
       val report = new Report
-      read(FileContext(context.run, context.state), report).map((value, section) =>
+      load(FileContext(context.run, context.state), report).map((value, section) =>
         RunRead(value, section, report.result(id))
       )
     }(done => Report.emit(context.run, done.report))
-
-  /** The run's section, if it has one. */
-  def sections(context: ModelContext): Result[Vector[PromptSection]] =
-    apply(context).map(_.section.map(PromptSection(id.value, _, cacheable = true)).toVector)
 
 /** A document's text as read: at most the bound asked for, `cut` when the file held more. */
 final private[harness] case class BoundedText(text: String, cut: Boolean)
