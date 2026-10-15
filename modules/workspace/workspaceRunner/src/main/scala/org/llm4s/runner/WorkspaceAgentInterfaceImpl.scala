@@ -665,7 +665,7 @@ class WorkspaceAgentInterfaceImpl(
         // mode it was created with. Not POSIX: the platform's defaults.
         // the name the metadata is copied onto is still the file staged through the handle (same file key), and each
         // change is made without following a link (copyOwnership), so a swapped directory cannot redirect them
-        secure.foreach { s =>
+        def sameStaged(): Unit = secure.foreach { s =>
           val staged =
             Try(
               s.getFileAttributeView(tempName, classOf[BasicFileAttributeView], LinkOption.NOFOLLOW_LINKS)
@@ -681,20 +681,32 @@ class WorkspaceAgentInterfaceImpl(
               None
             )
         }
-        if (Files.exists(target))
-          Try(
-            Files
-              .getFileAttributeView(
-                temp,
-                classOf[java.nio.file.attribute.PosixFileAttributeView],
-                LinkOption.NOFOLLOW_LINKS
-              )
-              .setPermissions(Files.getPosixFilePermissions(target))
-          )
         // the replacement is a new inode, so it takes the file's metadata as well as its mode: its owner and group
         // (the runner runs as root over a bind mount, and a root-owned replacement would lock its owner out) and its
         // ACL. Each where the platform has it; a runner that may not chown keeps the owner it has.
-        if (Files.exists(target)) WorkspaceAgentInterfaceImpl.copyOwnership(target, temp, aclTools)
+        if (Files.exists(target)) secure match {
+          case Some(s) =>
+            // the mode, owner and group read from, and set on, entries of the held directory: no path is resolved
+            Try {
+              val noFollow = LinkOption.NOFOLLOW_LINKS
+              val from =
+                s.getFileAttributeView(name, classOf[java.nio.file.attribute.PosixFileAttributeView], noFollow)
+                  .readAttributes()
+              val onto =
+                s.getFileAttributeView(tempName, classOf[java.nio.file.attribute.PosixFileAttributeView], noFollow)
+              Try(onto.setPermissions(from.permissions()))
+              Try(onto.setOwner(from.owner()))
+              Try(onto.setGroup(from.group()))
+            }: Unit
+            // the ACL and user extended attributes have no directory-relative call in the JVM: by path, never
+            // following a link, the staged file's identity checked immediately before
+            sameStaged()
+            WorkspaceAgentInterfaceImpl.copyExtended(target, temp, aclTools)
+          case None =>
+            // the mode kept (an executable script stays executable); a new file keeps the mode it was created with
+            Try(Files.setPosixFilePermissions(temp, Files.getPosixFilePermissions(target)))
+            WorkspaceAgentInterfaceImpl.copyOwnership(target, temp, aclTools)
+        }
         val again = effective(resolvePath(path, Access.Write))
         if (again != target)
           throw new WorkspaceAgentException(
@@ -1905,7 +1917,7 @@ private[runner] object WorkspaceAgentInterfaceImpl {
    * it; one it cannot is left as it is. For a replacement written beside a file and moved over it.
    */
   def copyOwnership(from: Path, to: Path, aclTools: Option[(Path, Path)] = None): Unit = {
-    import java.nio.file.attribute.{ AclFileAttributeView, PosixFileAttributeView }
+    import java.nio.file.attribute.PosixFileAttributeView
     // every change to `to` is made without following a link: the staged file is a plain file the runner made, so
     // whatever its name might be made to lead to by a directory swapped meanwhile, no other file is ever changed
     val noFollow = java.nio.file.LinkOption.NOFOLLOW_LINKS
@@ -1918,6 +1930,16 @@ private[runner] object WorkspaceAgentInterfaceImpl {
       val group = Files.readAttributes(from, classOf[java.nio.file.attribute.PosixFileAttributes]).group()
       Files.getFileAttributeView(to, classOf[PosixFileAttributeView], noFollow).setGroup(group)
     }: Unit
+    copyExtended(from, to, aclTools)
+  }
+
+  /**
+   * Gives `to` the ACL and user extended attributes of `from`, each where the platform has it, never following a link
+   * at `to`. The part of [[copyOwnership]] the JVM has no directory-relative call for.
+   */
+  def copyExtended(from: Path, to: Path, aclTools: Option[(Path, Path)]): Unit = {
+    import java.nio.file.attribute.AclFileAttributeView
+    val noFollow = java.nio.file.LinkOption.NOFOLLOW_LINKS
     // an NFSv4 / Windows ACL, where the platform exposes one as a view
     Try {
       Option(Files.getFileAttributeView(from, classOf[AclFileAttributeView])).foreach { acl =>
