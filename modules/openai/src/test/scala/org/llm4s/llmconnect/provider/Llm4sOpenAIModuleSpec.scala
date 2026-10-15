@@ -184,6 +184,14 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
         ContentPartCase.UserPdfFile
       )
       val respond = LocalProviderTestServer.sendJsonResponse(_, 200, LocalProviderTestServer.openAICompletion("done"))
+      // a provider's 400 or 413 - a vendor limit llm4s leaves to it - is a typed error with its message
+      assertProviderRejectionIsTyped((exchange, status, message) =>
+        LocalProviderTestServer.sendJsonResponse(
+          exchange,
+          status,
+          ujson.Obj("error" -> ujson.Obj("message" -> message, "type" -> "invalid_request_error")).render()
+        )
+      )(openAIClientAt)
       assertContentParts("openai", respond)(supported*)(openAIClientAt)
       assertContentParts("requesty", respond)(supported*) { baseUrl =>
         val config = OpenAIConfig.fromValues("openai/gpt-4o-mini", "rq-key", None, baseUrl).toOption.get

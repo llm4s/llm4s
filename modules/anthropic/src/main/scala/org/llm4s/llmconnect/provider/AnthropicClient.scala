@@ -43,7 +43,15 @@ import org.llm4s.llmconnect.streaming.*
 import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
-import org.llm4s.error.{ AuthenticationError, LLMError, ProcessingError, RateLimitError, UnknownError, ValidationError }
+import org.llm4s.error.{
+  AuthenticationError,
+  LLMError,
+  ProcessingError,
+  RateLimitError,
+  ServiceError,
+  UnknownError,
+  ValidationError
+}
 import org.llm4s.error.ThrowableOps.*
 import org.llm4s.util.{ BoundedJson, Redaction }
 
@@ -969,6 +977,11 @@ object AnthropicClient {
       case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", safe(e.getMessage))
       case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
       case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", safe(e.getMessage))
+      // the service refused the request - a vendor limit (an image count, a request size) among others: typed, with
+      // its message, as HttpErrorMapper maps the other providers' responses
+      case e: com.anthropic.errors.BadRequestException => ValidationError("request", safe(e.getMessage))
+      case e: com.anthropic.errors.AnthropicServiceException =>
+        ServiceError(e.statusCode(), "anthropic", safe(e.getMessage))
       case e =>
         e.toLLMError match {
           case unknown: UnknownError => UnknownError(safe(unknown.message), e)

@@ -89,6 +89,10 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
     "send text and inline images, and refuse every other content part" in {
       val done = """{"message":{"role":"assistant","content":"ok"},"done":true}"""
+      // a provider's 400 or 413 - a vendor limit llm4s leaves to it - is a typed error with its message
+      assertProviderRejectionIsTyped((exchange, status, message) =>
+        sendJsonResponse(exchange, status, ujson.Obj("error" -> message).render())
+      )(clientAt)
       assertContentParts("ollama", sendJsonResponse(_, 200, done))(ContentPartCase.UserImageInline)(clientAt)
     }
 

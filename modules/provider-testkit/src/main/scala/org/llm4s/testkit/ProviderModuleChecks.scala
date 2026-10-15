@@ -376,6 +376,41 @@ trait ProviderModuleChecks extends Assertions:
   // ---- content parts ----
 
   /**
+   * A provider's refusal of a request comes back as a typed error carrying the provider's message. llm4s leaves
+   * vendor limits - counts, sizes, formats - to the provider, so the provider's own 400 or 413 is how a caller learns
+   * of one. For each status, the server answers with `respond(exchange, status, message)`, an error body in the
+   * provider's format with `message` as its message; `complete` must return a `Left` that is not an `UnknownError`,
+   * whose message or context names it.
+   *
+   * @param respond answers a request with an error response of the given status and message
+   * @param path    the path the server answers on; `/` answers every path
+   * @param client  builds the client for the server's base URL
+   */
+  def assertProviderRejectionIsTyped(respond: (HttpExchange, Int, String) => Unit, path: String = "/")(
+    client: String => LLMClient
+  )(using pos: Position): Assertion =
+    Seq(400, 413).foreach { status =>
+      val message = s"llm4s-contract-rejection-$status"
+      var result  = Option.empty[Result[?]]
+      LocalProviderTestServer.withServer(path)(exchange => respond(exchange, status, message)) { baseUrl =>
+        val built = client(baseUrl)
+        val sent  = scala.util.Try(built.complete(Conversation(Seq(UserMessage("Hello")))))
+        scala.util.Try(built.close()): Unit
+        result = Some(sent.fold(thrown => failAt(s"HTTP $status: complete threw $thrown"), identity))
+      }
+      result match
+        case Some(Left(_: org.llm4s.error.UnknownError)) =>
+          failAt(s"HTTP $status came back as an UnknownError; map it to a typed LLMError")
+        case Some(Left(error)) if (error.message +: error.context.values.toSeq).exists(_.contains(message)) => ()
+        case Some(Left(error)) =>
+          failAt(
+            s"HTTP $status came back as ${error.getClass.getSimpleName} without the provider's message: ${error.message}"
+          )
+        case other => failAt(s"HTTP $status: expected a typed Left, got $other")
+    }
+    succeed
+
+  /**
    * `client` sends the content parts its provider takes and refuses every other before sending
    * anything - the [[ContentPartContract]]. Each [[ContentPartCase]] is sent with `complete` to a
    * [[LocalProviderTestServer]] that answers with `respond`:

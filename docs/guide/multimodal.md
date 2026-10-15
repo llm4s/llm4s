@@ -75,22 +75,21 @@ the role. No part is dropped and none is turned into text. A `ProviderFile` goes
 | OpenRouter, in addition | PDF `Url`, `Inline` | |
 | Mistral, in addition | PDF `Url` | |
 | DeepSeek | text | text |
-| Anthropic | text; image (PNG, JPEG, GIF, WebP) `Url`, `Inline`; PDF `Url`, `Inline`; plain text `Inline` | the same |
+| Anthropic | text; image (PNG, JPEG, GIF, WebP) `Url`, `Inline`; PDF `Url`, `Inline`; UTF-8 plain text `Inline` | the same |
 | Gemini API | text; image and document `Inline`, a web `Url`, own `ProviderFile` (its `uri`, or its name `files/abc`) | text |
-| Vertex AI | text; image, PDF and plain-text document `Inline` or a `gs://` `Url` | text |
+| Vertex AI | text; image and document `Inline` or a `gs://` `Url` | text |
 | Ollama | text; image `Inline` | text |
-| Bedrock | text; image (PNG, JPEG, GIF, WebP) and document (all five) `Inline` or an `s3://` `Url`; a document needs a text part beside it | the same |
-| watsonx.ai | text; one PNG or JPEG image `Inline` in a chat | text |
+| Bedrock | text; image (PNG, JPEG, GIF, WebP) and document (all five) `Inline` or an `s3://` `Url` | the same |
+| watsonx.ai | text; image `Inline` | text |
 
-Images: PNG, JPEG, WebP and GIF everywhere but Vertex AI and Ollama, which take PNG, JPEG and WebP,
-and watsonx.ai, which takes PNG and JPEG;
-BMP and TIFF are refused by every provider.
 A `Url` sent to OpenAI, an OpenAI-compatible provider, Anthropic or the Gemini API must be `http` or `https`.
 "Own `ProviderFile`" means a file whose `provider` is the client's own id (`openai`, `azure`, `requesty`, `gemini`;
 Vertex AI takes none). Several text parts with no media are sent as one string, joined by newlines, by the OpenAI-compatible
 providers and Ollama.
 
-A media type the wire format can name but a model rejects is the provider's error, as it is for text.
+llm4s refuses before sending only what would otherwise go silently wrong: a part a provider cannot send at all, a
+reference it cannot resolve, and llm4s's own bounds. A provider's own limits - how many images, how large a request,
+which formats a model reads - are the provider's to enforce: its refusal comes back as a typed error with its message.
 
 An agent thread holds at most 20 MiB of inline media across its messages (`Messages.MaxInlineBytes`). A message added past
 that keeps its text, and each of its inline parts that does not fit is replaced by a text part saying what was

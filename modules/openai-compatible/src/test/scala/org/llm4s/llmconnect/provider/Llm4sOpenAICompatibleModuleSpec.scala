@@ -171,6 +171,10 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
       )
       expectations.foreach { (descriptor, _, _) =>
         withClue(s"${descriptor.id.asString}: ") {
+          // a provider's 400 or 413 - a vendor limit llm4s leaves to it - is a typed error with its message
+          assertProviderRejectionIsTyped((exchange, status, message) =>
+            sendJsonResponse(exchange, status, ujson.Obj("error" -> ujson.Obj("message" -> message)).render())
+          )(baseUrl => assertBuildsClient(descriptor, section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl)))))
           assertContentParts(descriptor.id.asString, sendJsonResponse(_, 200, openAICompletion("done")))(
             supported(descriptor)*
           )(baseUrl => assertBuildsClient(descriptor, section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl)))))

@@ -207,6 +207,16 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
   "a client built by the gemini descriptor" should {
 
     "send text, images and documents in a user message, and refuse media in a tool result" in {
+      // a provider's 400 or 413 - a vendor limit llm4s leaves to it - is a typed error with its message
+      assertProviderRejectionIsTyped((exchange, status, message) =>
+        sendJsonResponse(
+          exchange,
+          status,
+          ujson
+            .Obj("error" -> ujson.Obj("code" -> status, "message" -> message, "status" -> "INVALID_ARGUMENT"))
+            .render()
+        )
+      )(geminiClientAt)
       assertContentParts("gemini", sendJsonResponse(_, 200, geminiReply))(geminiParts*)(geminiClientAt)
     }
 
@@ -230,6 +240,15 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
   "a client built by the vertexai descriptor" should {
 
     "send text, images and documents in a user message, and refuse media in a tool result" in {
+      assertProviderRejectionIsTyped((exchange, status, message) =>
+        sendJsonResponse(
+          exchange,
+          status,
+          ujson
+            .Obj("error" -> ujson.Obj("code" -> status, "message" -> message, "status" -> "INVALID_ARGUMENT"))
+            .render()
+        )
+      )(vertexClientAt)
       assertContentParts("vertexai", sendJsonResponse(_, 200, geminiReply))(vertexParts*)(vertexClientAt)
     }
 

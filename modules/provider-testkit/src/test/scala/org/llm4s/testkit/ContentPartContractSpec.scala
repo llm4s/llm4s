@@ -2,7 +2,7 @@ package org.llm4s.testkit
 
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
-import org.llm4s.llmconnect.provider.PartEncoding
+import org.llm4s.llmconnect.provider.{ HttpErrorMapper, PartEncoding }
 import org.llm4s.media.MediaSource
 import org.llm4s.types.Result
 import org.scalatest.exceptions.TestFailedException
@@ -102,4 +102,41 @@ class ContentPartContractSpec extends AnyFlatSpec with Matchers with ProviderMod
         case _                => messages.last.asInstanceOf[UserMessage].parts.last shouldBe c.part("acme")
       c.markers should not be empty
     }
+  }
+
+  /** Posts a request and maps a non-2xx answer with `map`. */
+  private class Rejected(baseUrl: String, map: (Int, String) => org.llm4s.error.LLMError) extends LLMClient:
+    def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+      val request  = HttpRequest.newBuilder(URI.create(baseUrl)).POST(HttpRequest.BodyPublishers.ofString("{}")).build()
+      val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+      Left(map(response.statusCode(), response.body()))
+    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+      complete(c, o)
+    def getContextWindow(): Int     = 1000
+    def getReserveCompletion(): Int = 100
+
+  private def openAIError: (com.sun.net.httpserver.HttpExchange, Int, String) => Unit = (exchange, status, message) =>
+    LocalProviderTestServer.sendJsonResponse(
+      exchange,
+      status,
+      ujson.Obj("error" -> ujson.Obj("message" -> message)).render()
+    )
+
+  "assertProviderRejectionIsTyped" should "pass a client that maps a 400 and a 413 with the provider's message" in {
+    assertProviderRejectionIsTyped(openAIError) { url =>
+      new Rejected(url, (status, body) => HttpErrorMapper.mapHttpError(status, body, "reference").left.toOption.get)
+    }
+  }
+
+  it should "fail a client that maps the refusal to an UnknownError, or loses its message" in {
+    intercept[TestFailedException] {
+      assertProviderRejectionIsTyped(openAIError)(url =>
+        new Rejected(url, (_, body) => org.llm4s.error.UnknownError(body, new RuntimeException(body)))
+      )
+    }.getMessage should include("UnknownError")
+    intercept[TestFailedException] {
+      assertProviderRejectionIsTyped(openAIError)(url =>
+        new Rejected(url, (status, _) => org.llm4s.error.ServiceError(status, "reference", "failed"))
+      )
+    }.getMessage should include("without the provider's message")
   }
