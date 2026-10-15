@@ -400,6 +400,15 @@ object FileSnapshotResponse {
     /** The `kind` of a symbolic link described as itself (`followLinks = false`); its hash is `link:<hex>`. */
     val Link: String = "link"
 
+    /**
+     * The `hash` of a link to nothing (kind [[Dangling]]): `dangling:` and a digest of where it points, so a link
+     * retargeted at another missing file is a different state.
+     */
+    def danglingHash(target: String): String = Dangling + ":" + linkHash(target).stripPrefix("link:")
+
+    /** Whether `hash` is a [[danglingHash]]. */
+    def isDangling(hash: String): Boolean = hash.startsWith(Dangling + ":")
+
     /** The `hash` of a link described as itself: what it points to, as written. */
     def linkHash(target: String): String =
       "link:" + FileSnapshotResponse

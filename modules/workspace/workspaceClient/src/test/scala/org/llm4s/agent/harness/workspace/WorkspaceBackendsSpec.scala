@@ -144,6 +144,15 @@ class WorkspaceBackendsSpec extends AnyFlatSpec with Matchers with EitherValues 
     found.truncated shouldBe true
   }
 
+  it should "skip an entry the workspace will not read as a file, such as a socket, in a search" in {
+    val workspace = new FakeWorkspace()
+    workspace.special("app.sock")
+    workspace.seed("t.txt", "hit")
+    val found = inCall(WorkspaceFixtures.files(workspace).grep("hit", p("/"), None, 10, _)).value
+    found.items.map(_.path.value) shouldBe Vector("/t.txt")
+    found.truncated shouldBe true
+  }
+
   it should "mark a listing the workspace cut as truncated, and keep search at its limit" in {
     val workspace = new FakeWorkspace(maxEntries = 2)
     (1 to 3).foreach(i => workspace.seed(s"f$i.txt", "x\nx"))

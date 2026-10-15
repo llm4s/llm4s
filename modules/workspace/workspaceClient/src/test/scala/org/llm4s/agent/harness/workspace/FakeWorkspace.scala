@@ -23,6 +23,11 @@ final class FakeWorkspace(
   // "" is the root; a path is its segments joined with '/'
   private val dirs  = mutable.Set[String]("")
   private val files = mutable.Map[String, Array[Byte]]()
+  // entries that are neither files nor directories (a FIFO, a socket): listed, never read
+  private val specials = mutable.Set[String]()
+
+  /** Adds a FIFO-like entry at `path`, which a snapshot refuses as NOT_A_FILE. */
+  def special(path: String): Unit = synchronized(specials += norm(path))
 
   /** Every compare-and-set the workspace has applied: (operation, path). */
   val applied: mutable.Buffer[(String, String)] = mutable.Buffer()
@@ -96,11 +101,17 @@ final class FakeWorkspace(
     val depth                  = if recursive.getOrElse(false) then maxDepth.getOrElse(3) else 1
     def depthOf(child: String) = (if p.isEmpty then child else child.drop(p.length + 1)).count(_ == '/') + 1
     def within(child: String)  = child.nonEmpty && (p.isEmpty || child.startsWith(p + "/")) && depthOf(child) <= depth
-    val all = (dirs.toVector.filter(within).map(_ -> true) ++ files.keys.toVector.filter(within).map(_ -> false))
-      .sortBy(_._1)
+    val all =
+      (dirs.toVector.filter(within).map(_ -> true) ++ (files.keys ++ specials).toVector.filter(within).map(_ -> false))
+        .sortBy(_._1)
     val entries = all.take(maxEntries).map { (child, isDir) =>
       val meta = Option.when(returnMetadata.getOrElse(false))(
-        FileMetadata(child, if isDir then 0L else files(child).length.toLong, isDir, "2026-10-15T00:00:00Z")
+        FileMetadata(
+          child,
+          if isDir then 0L else files.get(child).fold(0L)(_.length.toLong),
+          isDir,
+          "2026-10-15T00:00:00Z"
+        )
       )
       FileEntry(child, isDir, meta)
     }
@@ -136,6 +147,7 @@ final class FakeWorkspace(
   def fileSnapshot(path: String, includeContent: Boolean, followLinks: Boolean): FileSnapshotResponse = synchronized {
     import FileSnapshotResponse.Kind
     val p = norm(path)
+    if specials(p) then fail("NOT_A_FILE", s"Path '$path' is not a regular file")
     if dirs(p) then FileSnapshotResponse("local", path, Kind.Directory, Kind.Directory, 0L)
     else
       files.get(p) match

@@ -73,11 +73,20 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     Files.createSymbolicLink(root.resolve("new"), root.resolve("new-target"))
     val ws = workspace()
     ws.fileSnapshot("gone").kind shouldBe "dangling"
-    ws.fileSnapshot("gone").hash shouldBe "dangling"
+    ws.fileSnapshot("gone").hash shouldBe
+      FileSnapshotResponse.Kind.danglingHash(root.resolve("missing-target").toString)
     // a delete compares the link as itself
     ws.deleteFile("gone", Some(ws.fileSnapshot("gone", followLinks = false).hash)).wasDirectory shouldBe false
     Files.exists(root.resolve("gone"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
-    ws.writeFile("new", "x", expectedHash = Some("dangling")).success shouldBe true
+    // a write through a link to nothing compares where it points: retargeted, it is refused
+    val planned = ws.fileSnapshot("new").hash
+    Files.delete(root.resolve("new"))
+    Files.createSymbolicLink(root.resolve("new"), root.resolve("other-target"))
+    code(ws.writeFile("new", "x", expectedHash = Some(planned))) shouldBe "HASH_MISMATCH"
+    Files.exists(root.resolve("other-target")) shouldBe false
+    Files.delete(root.resolve("new"))
+    Files.createSymbolicLink(root.resolve("new"), root.resolve("new-target"))
+    ws.writeFile("new", "x", expectedHash = Some(planned)).success shouldBe true
     Files.isSymbolicLink(root.resolve("new")) shouldBe true
     ws.fileSnapshot("new-target").content shouldBe Some("x")
   }
@@ -110,6 +119,11 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     confined.deleteFile("src/out", Some(link.hash)).wasDirectory shouldBe false
     Files.exists(root.resolve("src/out"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
     Files.exists(outside.resolve("secret")) shouldBe true
+    // a link the allowed paths name exactly is its own entry: snapshotted as itself and deleted
+    Files.createSymbolicLink(root.resolve("only-link"), outside.resolve("secret"))
+    val exact = workspace(WorkspaceSandboxConfig(allowedPaths = List("only-link")))
+    val entry = exact.fileSnapshot("only-link", includeContent = false, followLinks = false)
+    exact.deleteFile("only-link", Some(entry.hash)).wasDirectory shouldBe false
     Files.delete(outside.resolve("secret"))
     Files.delete(outside)
   }

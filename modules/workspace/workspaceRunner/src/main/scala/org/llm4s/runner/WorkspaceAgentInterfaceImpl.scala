@@ -126,15 +126,23 @@ class WorkspaceAgentInterfaceImpl(
     val lexical = Try(rootPath.resolve(relativePath).normalize()).toOption
     lexical.filter(p => p.startsWith(rootPath) && p != rootPath && Files.isSymbolicLink(p)) match {
       case Some(link) =>
-        val parent = resolvePath(rootPath.relativize(link.getParent).toString)
-        // the entry's own name, beneath its checked directory, must itself be allowed
-        if (allowedRoots.nonEmpty && !allowedRoots.exists(link.startsWith))
+        // the entry where its directory really is (links above it resolved, the entry itself not followed)
+        val onDisk = effective(link.getParent).resolve(link.getFileName)
+        if (!onDisk.startsWith(effective(rootPath)))
+          throw new WorkspaceAgentException(
+            s"Path '$relativePath' leads outside the workspace through a link",
+            "PATH_ESCAPE_ATTEMPT",
+            None
+          )
+        // allowed when it is, or is beneath, an allowed path - by its text, and where it really is
+        def allowed(a: Path) = link.startsWith(a) && (a == link || onDisk.startsWith(effective(a)))
+        if (allowedRoots.nonEmpty && !allowedRoots.exists(allowed))
           throw new WorkspaceAgentException(
             s"Path '$relativePath' is outside the sandbox's allowed paths (${config.allowedPaths.mkString(", ")})",
             "PATH_NOT_ALLOWED",
             None
           )
-        parent.resolve(link.getFileName)
+        link
       case None => resolvePath(relativePath)
     }
   }
@@ -280,7 +288,9 @@ class WorkspaceAgentInterfaceImpl(
   private def currentHash(resolved: Path): String =
     if (!Files.exists(resolved))
       // a link to nothing is an entry of its own, which a delete removes: it is not the absence of one
-      if (Files.isSymbolicLink(resolved)) FileSnapshotResponse.Kind.Dangling else FileSnapshotResponse.Kind.Absent
+      if (Files.isSymbolicLink(resolved))
+        FileSnapshotResponse.Kind.danglingHash(Files.readSymbolicLink(resolved).toString)
+      else FileSnapshotResponse.Kind.Absent
     else if (Files.isDirectory(resolved)) FileSnapshotResponse.Kind.Directory
     else if (!Files.isRegularFile(resolved)) {
       refuseSpecial(rootPath.relativize(resolved).toString, resolved)
@@ -662,7 +672,7 @@ class WorkspaceAgentInterfaceImpl(
           // of `target` itself, the file the move replaces, not whatever the path resolves to by now
           // (through a link to nothing, the file it names is still nothing)
           expectedHash
-            .map(e => if (e == FileSnapshotResponse.Kind.Dangling) FileSnapshotResponse.Kind.Absent else e)
+            .map(e => if (FileSnapshotResponse.Kind.isDangling(e)) FileSnapshotResponse.Kind.Absent else e)
             .foreach(checkExpected(path, target, _))
           Files.move(
             temp,
@@ -794,7 +804,13 @@ class WorkspaceAgentInterfaceImpl(
       if (!followLinks && Files.isSymbolicLink(resolved))
         response(Kind.Link, entryHash(resolved), 0L, None, None)
       else if (!Files.exists(resolved) && Files.isSymbolicLink(resolved))
-        response(Kind.Dangling, Kind.Dangling, 0L, None, Some("a link to something that does not exist"))
+        response(
+          Kind.Dangling,
+          Kind.danglingHash(Files.readSymbolicLink(resolved).toString),
+          0L,
+          None,
+          Some("a link to something that does not exist")
+        )
       else if (!Files.exists(resolved))
         response(Kind.Absent, Kind.Absent, 0L, None, None)
       else if (Files.isDirectory(resolved)) response(Kind.Directory, Kind.Directory, 0L, None, None)
