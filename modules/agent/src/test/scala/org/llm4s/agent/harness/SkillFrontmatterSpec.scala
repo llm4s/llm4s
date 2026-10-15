@@ -136,6 +136,13 @@ class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
     )
   }
 
+  it should "refuse an escape spelling a NUL or an unpaired surrogate, and take a valid pair" in {
+    problem("---", "name: pdf-tools", "description: \"a\\uD800b\"", "---").problem should include("unpaired surrogate")
+    problem("---", "name: pdf-tools", "description: \"\\uDC00\"", "---").line shouldBe 3
+    problem("---", "name: pdf-tools", "description: \"a\\0\"", "---").problem should include("NUL")
+    parse("---", "name: pdf-tools", "description: \"\\uD83D\\uDE00\"", "---").value.description shouldBe "\uD83D\uDE00"
+  }
+
   it should "refuse a name over 64 characters" in {
     val long = "a" * 65
     val e    = Skill.parse(VPath(s"/s/$long/SKILL.md").value, s"---\nname: $long\ndescription: d\n---").left.value

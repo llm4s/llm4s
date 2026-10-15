@@ -324,7 +324,11 @@ private[harness] object Frontmatter:
             out.append('\'')
             loop(i + 2)
           else Right((out.toString, value.substring(i + 1)))
-        else if quote == '"' && c == '"' then Right((out.toString, value.substring(i + 1)))
+        else if quote == '"' && c == '"' then
+          // an escape can spell what no file backend accepts: a NUL, or half of a surrogate pair
+          val text = out.toString
+          if Text.binaryReason(text).isDefined then Left((n, "an escape makes a NUL or an unpaired surrogate"))
+          else Right((text, value.substring(i + 1)))
         else if quote == '"' && c == '\\' then
           if i + 1 >= value.length then Left((n, "a quoted string is not closed on its line"))
           else
