@@ -1,7 +1,7 @@
 package org.llm4s.agent.harness
 
 import org.llm4s.agent.graph.{ FencingToken, RunContext, RunId, TaskId, ThreadId }
-import org.llm4s.agent.graph.middleware.MiddlewareId
+import org.llm4s.agent.graph.middleware.{ MiddlewareId, ModelContext, PromptSection }
 import org.llm4s.error.CancelledError
 import org.llm4s.types.Result
 
@@ -58,6 +58,36 @@ final private[harness] class RunCache[A](maxRuns: Int):
             value
           }
     }
+
+/** What one run's read produced: its value, the text of its section (if any), and its report. */
+final private[harness] case class RunRead[A](value: A, section: Option[String], report: Option[DocumentsReported])
+
+/**
+ * A middleware's documents, read through a backend once per run incarnation ([[RunCache]], `maxRuns` runs) by `read`
+ * - from the run's first model step's snapshot, recording problems in the [[Report]] it is given - and shown as one
+ * cacheable prompt section whose id is the middleware's. The report is emitted as a durable
+ * [[HarnessEvents.DocumentsReported]] as [[RunCache]] reports.
+ */
+final private[harness] class RunDocuments[A](id: MiddlewareId, maxRuns: Int)(
+  read: (FileContext, Report) => Result[(A, Option[String])]
+):
+  private val cache = new RunCache[RunRead[A]](maxRuns)
+
+  /** The runs held. */
+  def cached: Int = cache.cached
+
+  /** The run's read, made on its first call. */
+  def apply(context: ModelContext): Result[RunRead[A]] =
+    cache(context.run) {
+      val report = new Report
+      read(FileContext(context.run, context.state), report).map((value, section) =>
+        RunRead(value, section, report.result(id))
+      )
+    }(done => Report.emit(context.run, done.report))
+
+  /** The run's section, if it has one. */
+  def sections(context: ModelContext): Result[Vector[PromptSection]] =
+    apply(context).map(_.section.map(PromptSection(id.value, _, cacheable = true)).toVector)
 
 /** A document's text as read: at most the bound asked for, `cut` when the file held more. */
 final private[harness] case class BoundedText(text: String, cut: Boolean)

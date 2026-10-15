@@ -50,25 +50,20 @@ final class SkillsMiddleware(
   require(maxSectionTokens >= 1, s"SkillsMiddleware: maxSectionTokens must be at least 1, was $maxSectionTokens")
   require(maxScanned >= 1, s"SkillsMiddleware: maxScanned must be at least 1, was $maxScanned")
 
-  private val cache = new RunCache[Listed](maxCachedRuns)
+  private val documents = new RunDocuments[Vector[Skill]](id, maxCachedRuns)(discover)
 
   override def writes: Set[StateKey[?, ?]] = backend.writes
 
   /** The runs whose skills are cached. */
-  private[harness] def cachedRuns: Int = cache.cached
+  private[harness] def cachedRuns: Int = documents.cached
 
   /** The skills this run lists, read on its first call. */
-  def skills(context: ModelContext): Result[Vector[Skill]] = listed(context).map(_.skills)
+  def skills(context: ModelContext): Result[Vector[Skill]] = documents(context).map(_.value)
 
-  override def promptSections(context: ModelContext): Result[Vector[PromptSection]] =
-    listed(context).map(l => l.section.map(text => PromptSection(id.value, text, cacheable = true)).toVector)
-
-  private def listed(context: ModelContext): Result[Listed] =
-    cache(context.run)(discover(FileContext(context.run, context.state)))(l => Report.emit(context.run, l.report))
+  override def promptSections(context: ModelContext): Result[Vector[PromptSection]] = documents.sections(context)
 
   /** Every source's skills, the listed ones rendered, and the report of what was left out. */
-  private def discover(ctx: FileContext): Result[Listed] =
-    val report = new Report
+  private def discover(ctx: FileContext, report: Report): Result[(Vector[Skill], Option[String])] =
     candidates(ctx, report).flatMap { found =>
       // a later source's skill of a name replaces an earlier one's
       val last = found.zipWithIndex.groupMapReduce(_._1.name)(_._2)(math.max)
@@ -102,7 +97,7 @@ final class SkillsMiddleware(
           )
       }
       val skills = listed.result()
-      Right(Listed(skills, Option.when(skills.nonEmpty)(section.text), report.result(id)))
+      Right((skills, Option.when(skills.nonEmpty)(section.text)))
     }
 
   /** `- name: description (path)` on a line of its own, the description on one line and clipped. */
@@ -189,13 +184,6 @@ object SkillsMiddleware:
     "Skills are available. Each is a folder with a SKILL.md file of instructions. When a task matches a skill's " +
       "description, read its SKILL.md with read_file before you start, and follow it; read the other files it names, " +
       "by paths relative to its folder, the same way. The skills:"
-
-  /** What one run lists: its skills, the section showing them, and the report of what it left out. */
-  final private[harness] case class Listed(
-    skills: Vector[Skill],
-    section: Option[String],
-    report: Option[DocumentsReported]
-  )
 
   /**
    * A stop predicate for [[DocumentText.read]]: true at the line closing the frontmatter, or at the first line when it
