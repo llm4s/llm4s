@@ -208,6 +208,21 @@ class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
     problem("---", "name: pdf-tools", "description: d", "allowed-tools: [Read, #x]", "---").line shouldBe 4
   }
 
+  it should "refuse a key YAML reads as a non-string, and a comment inside a flow list" in {
+    problem("---", "name: pdf-tools", "description: d", "metadata:", "  1: one", "---").line shouldBe 5
+    problem("---", "name: pdf-tools", "description: d", "metadata:", "  true: yes-ish", "---").line shouldBe 5
+    problem("---", "name: pdf-tools", "description: d", "null: x", "---").line shouldBe 4
+    problem("---", "name: pdf-tools", "description: d", "allowed-tools: [Read # disabled]", "---").line shouldBe 4
+    parse(
+      "---",
+      "name: pdf-tools",
+      "description: d",
+      "allowed-tools: [Read, Write] # both",
+      "---"
+    ).value.allowedTools shouldBe
+      Vector("Read", "Write")
+  }
+
   it should "refuse a name over 64 characters" in {
     val long = "a" * 65
     val e    = Skill.parse(VPath(s"/s/$long/SKILL.md").value, s"---\nname: $long\ndescription: d\n---").left.value

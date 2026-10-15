@@ -271,6 +271,9 @@ private[harness] object Frontmatter:
       val key  = text.substring(0, colon)
       val rest = text.substring(colon + 1)
       if !KeyPattern.matches(key) then Left((n, "a key must be letters, digits, `_`, `.` and `-`"))
+      // a key is a string: one YAML reads as a null, boolean or number (`1`, `true`) is not, and keys are never quoted
+      else if NotAString.matches(key) then
+        Left((n, "YAML reads this key as a null, boolean or number; keys are strings"))
       else if rest.nonEmpty && rest.head != ' ' then Left((n, "expected a space after the key's `:`"))
       else
         val value = rest.trim
@@ -402,6 +405,9 @@ private[harness] object Frontmatter:
               else
                 val plain = r.substring(0, end).trim
                 if plain.isEmpty then Left((n, "a flow list has an empty item"))
+                // a ` #` starts a comment, which would swallow the rest of the line and the list's `]` with it
+                else if plain.contains(" #") || plain.contains("\t#") then
+                  Left((n, "a flow list cannot hold a comment; it must close on its line"))
                 else if plain.exists(c => c == '[' || c == '{' || c == '}') then
                   Left((n, "nested lists and maps are not supported"))
                 else plainProblem(plain, inList = true).fold(Right((plain, r.substring(end))))(p => Left((n, p)))
