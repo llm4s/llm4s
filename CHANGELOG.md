@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent harness (Phase 3)
 
+- **Added** instruction memory: `InstructionMemoryMiddleware` shows `AGENTS.md` files read through a `FileBackend`
+  [#1910](https://github.com/llm4s/llm4s/issues/1910); [design §4.36](docs/design/typed-agent-runtime/4.36-stage-3-slice-f6-instruction-memory.md), [guide](docs/guide/agents/index.md#instruction-memory).
 - **Added** Agent Skills: `SkillsMiddleware` lists `SKILL.md` skills found through a `FileBackend`
   [#1909](https://github.com/llm4s/llm4s/issues/1909); [design §4.35](docs/design/typed-agent-runtime/4.35-stage-3-slice-f5-skills.md), [guide](docs/guide/agents/index.md#skills).
 - **Added** multimodal content parts: user messages and tool results carry images and documents, which each provider

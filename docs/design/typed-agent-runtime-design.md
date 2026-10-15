@@ -427,6 +427,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.30 | [Stage 3 slice F3: todos](typed-agent-runtime/4.30-stage-3-slice-f3-todos.md) ([#1907](https://github.com/llm4s/llm4s/issues/1907)) |
 | 4.31 | [Stage 3 slice F7: semantic memory](typed-agent-runtime/4.31-stage-3-slice-f7-semantic-memory.md) ([#1911](https://github.com/llm4s/llm4s/issues/1911)) |
 | 4.35 | [Stage 3 slice F5: Agent Skills](typed-agent-runtime/4.35-stage-3-slice-f5-skills.md) ([#1909](https://github.com/llm4s/llm4s/issues/1909)) |
+| 4.36 | [Stage 3 slice F6: instruction memory](typed-agent-runtime/4.36-stage-3-slice-f6-instruction-memory.md) ([#1910](https://github.com/llm4s/llm4s/issues/1910)) |
 
 ### 4.9 Stage 0 carry-forward
 

@@ -570,6 +570,35 @@ for {
   named by path in a durable `HarnessEvents.DocumentsReported`. A missing source is skipped.
 - `allowed-tools` is parsed onto `Skill.allowedTools`, not enforced.
 
+### Instruction Memory
+
+`InstructionMemoryMiddleware` shows standing instructions kept in `AGENTS.md` files to the model, as
+one prompt section: the files at the paths given, read through a `FileBackend` in order (a later
+file refines an earlier one), each under a heading naming its path.
+
+```scala
+import org.llm4s.agent.harness.{InstructionMemoryMiddleware, VPath}
+
+for {
+  user    <- VPath("/user/AGENTS.md")
+  project <- VPath("/project/AGENTS.md")
+  agent <- Agent.builder("coder", client)
+             .withMiddleware(new InstructionMemoryMiddleware(Vector(user, project), backend))
+             .build()                                  // Result[Agent]
+} yield agent
+```
+
+- **Read once per run**, as skills are: an edit during a run shows from the next run, and a recovered
+  or resumed run reads again. A missing file is skipped.
+- **Editable when permitted.** The agent edits a file with `edit_file` over the same backend when the
+  backend accepts the write and the permission rules allow `Write` on its path; deny it to keep a
+  scope read-only.
+- **Bounded.** Each file at most `maxFileTokens` (default 2000), the section at most
+  `maxTotalTokens` (4000); a file over either is cut and marked, files past a full section are left
+  out, and each is named by path in a durable `HarnessEvents.DocumentsReported`.
+- Instruction memory is a few whole files the agent always sees; [semantic memory](memory) is facts
+  recalled per query.
+
 ---
 
 ## Features
