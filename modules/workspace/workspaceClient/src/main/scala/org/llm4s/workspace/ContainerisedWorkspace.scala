@@ -387,7 +387,18 @@ class ContainerisedWorkspace(
         client.send(json)
         logger.debug(s"Sent command: ${command.getClass.getSimpleName} with ID: ${command.commandId}")
       }
-      response <- Try(future.get(responseTimeoutSeconds(command), TimeUnit.SECONDS)).toEither.left.map(_.getMessage)
+      // every way the wait can end without a response - a timeout, a failure, or an interrupt (a cancelled agent run;
+      // `Try` would let that one escape the cleanup below) - is a give-up, which cancels the command
+      response <- scala.util.control.Exception.allCatch
+        .withTry(future.get(responseTimeoutSeconds(command), TimeUnit.SECONDS))
+        .toEither
+        .left
+        .map {
+          case _: InterruptedException =>
+            Thread.currentThread().interrupt() // kept for the caller, which is being cancelled
+            "interrupted while waiting for the response"
+          case e => Option(e.getMessage).getOrElse(e.toString)
+        }
     } yield response
 
     sendEither.fold(

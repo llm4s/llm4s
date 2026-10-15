@@ -584,7 +584,10 @@ class WorkspaceAgentInterfaceImpl(
 
     // only now, every refusal made, is anything created: a refused write leaves no directory behind
     if (createDirs) {
-      Try(Files.createDirectories(resolvedPath.getParent)).failed.foreach { e =>
+      // the directories are created where the path really leads, checked by the path policy just before
+      val parent = effective(resolvedPath.getParent)
+      checkPolicy(path, parent, Access.Write)
+      Try(Files.createDirectories(parent)).failed.foreach { e =>
         throw new WorkspaceAgentException(
           s"Cannot create the parent directories of '$path': ${e.getMessage}",
           "PARENT_NOT_A_DIRECTORY",
@@ -604,9 +607,10 @@ class WorkspaceAgentInterfaceImpl(
         // replaced atomically: a reader, or a crash, sees the old content or the new, never part of either. A link is
         // written through, as Files.write writes through it: the file it names is replaced and the link stays, so
         // what the hash was taken of (the link followed) is what changes. `effective` already passed every path check.
+        // where the write really lands, held to the path policy now, immediately before anything is created there: a
+        // link retargeted since the request was first checked cannot lead the write, or its directories, elsewhere
         val target = effective(resolvedPath)
-        // the file it names, not only the path as written, is held to every write rule: a link to a missing file under
-        // .git or a read-only path is refused before anything is created
+        checkPolicy(path, target, Access.Write)
         if (createDirs) Files.createDirectories(target.getParent)
         // created as an ordinary new file is (the process umask applies), not with a temporary file's fixed rw-------
         val temp = target.resolveSibling(s".llm4s-write-${java.util.UUID.randomUUID()}.tmp")
