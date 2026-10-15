@@ -91,10 +91,18 @@ object SummaryCompressor:
             else digestOf(UserMessage(old) +: messages, maxTokens)
       }
 
+    /**
+     * The digest of `messages`. Media parts are first named by kind in their message's text, so `HistoryCompressor`
+     * digests every block (it returns a block with media unchanged); and any message it still returns as it is - a
+     * block it kept, or input it found already digested - joins the digest as its transcript line, never dropped.
+     */
     private def digestOf(messages: Vector[Message], maxTokens: Int): Result[String] =
       HistoryCompressor
-        .compressToDigest(messages, counter, capTokens = maxTokens, keepLastK = 0)
-        .map(_.collect { case SystemMessage(c) if c.startsWith(DigestHeader) => c.stripPrefix(DigestHeader).trim })
+        .compressToDigest(messages.map(textOnly), counter, capTokens = maxTokens, keepLastK = 0)
+        .map(_.map {
+          case SystemMessage(c) if c.startsWith(DigestHeader) => c.stripPrefix(DigestHeader).trim
+          case kept                                           => rendered(kept)
+        })
         .map(_.filter(_.nonEmpty).mkString("\n"))
 
   final private class Model(client: LLMClient, options: CompletionOptions, maxInputTokens: Int)
@@ -161,6 +169,12 @@ object SummaryCompressor:
     case t: ToolMessage => s"tool result for ${t.toolCallId}: ${withMedia(t.parts)}"
     case u: UserMessage => s"user: ${withMedia(u.parts)}"
     case other          => s"${other.role.toString.toLowerCase}: ${other.content}"
+
+  /** `message` with each media part named by its kind in its text: what a digest can record of it. */
+  private def textOnly(message: Message): Message = message match
+    case u: UserMessage if u.parts.exists(ContentPart.isMedia) => UserMessage(withMedia(u.parts))
+    case t: ToolMessage if t.parts.exists(ContentPart.isMedia) => ToolMessage(withMedia(t.parts), t.toolCallId)
+    case other                                                 => other
 
   /** The text of `parts`, each media part named by its kind in place, never sent as bytes. */
   private def withMedia(parts: Vector[ContentPart]): String =

@@ -402,6 +402,29 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     bounded.get(SummarizationMiddleware.key).value.value.text.length should be <= 80
   }
 
+  it should "digest a block with media, naming each part, and never drop a message it was given" in {
+    val counter = ConversationTokenCounter.openAI().value
+    val image =
+      ContentPart.image(MediaSource.Url(java.net.URI.create("https://example.com/c.png")), MediaType.Png).value
+    val context = new ModelContext(testRunContext(), ThreadState.empty(Map.empty), agentA)
+    val text = SummaryCompressor
+      .digest(counter)
+      .compress(
+        None,
+        Vector(
+          UserMessage(Vector(ContentPart.Text("chart id: CH42"), image)),
+          AssistantMessage("decided to use it."),
+          UserMessage("[HISTORY_SUMMARY] looks like a digest, id: K9"),
+          AssistantMessage("ok")
+        ),
+        500,
+        context
+      )
+      .value
+    text should include("CH42")
+    text should include("K9")
+  }
+
   "An agent without SummarizationMiddleware" should "register no summary key (rule 7)" in {
     val (state, _) = runInMemory(loopOf(new Model(), Seq.empty).graph, AgentInput("q")).answered
     state.get(SummarizationMiddleware.key).left.value shouldBe a[GraphError.UnknownStateKey]

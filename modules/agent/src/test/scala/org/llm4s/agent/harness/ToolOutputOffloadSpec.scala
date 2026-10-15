@@ -331,6 +331,8 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
     an[IllegalArgumentException] should be thrownBy new ToolOutputOffload(thresholdTokens = 999)
     an[IllegalArgumentException] should be thrownBy new ToolOutputOffload(maxResultBytes = 0)
     an[IllegalArgumentException] should be thrownBy new ToolOutputOffload(maxResultBytes = 10, maxTotalBytes = 5)
+    an[IllegalArgumentException] should be thrownBy
+      new ToolOutputOffload(maxResultBytes = Long.MaxValue, maxTotalBytes = 10)
     // a budget that could not hold one result's key and tool name beside its content
     an[IllegalArgumentException] should be thrownBy new ToolOutputOffload(maxResultBytes = 10, maxTotalBytes = 100)
     new ToolOutputOffload(

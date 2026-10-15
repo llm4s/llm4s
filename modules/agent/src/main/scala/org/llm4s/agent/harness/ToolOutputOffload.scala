@@ -55,7 +55,8 @@ final class ToolOutputOffload(
   require(thresholdTokens >= 1000, s"ToolOutputOffload: thresholdTokens must be at least 1000, was $thresholdTokens")
   require(maxResultBytes >= 1, s"ToolOutputOffload: maxResultBytes must be at least 1, was $maxResultBytes")
   require(
-    maxTotalBytes >= maxResultBytes + MetadataBytes,
+    // compared without adding, so no value overflows into passing
+    maxTotalBytes >= MetadataBytes && maxTotalBytes - MetadataBytes >= maxResultBytes,
     s"ToolOutputOffload: maxTotalBytes ($maxTotalBytes) must be at least maxResultBytes ($maxResultBytes) plus " +
       s"$MetadataBytes bytes for each result's key and tool name"
   )
