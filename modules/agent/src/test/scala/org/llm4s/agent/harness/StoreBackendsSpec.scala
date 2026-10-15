@@ -409,7 +409,7 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "fail before recording an intent when its runner cannot be resolved, so a retry runs" in {
     val runner    = new CountingRunner()
     var available = false
-    val sandbox = SandboxBackend.resolved(_ => Set(LockKey("sandbox")))(_ =>
+    val sandbox = SandboxBackend.resolved(_ => Set(LockKey("workspace")))(_ =>
       if available then Right(runner) else Left(org.llm4s.error.ProcessingError("sandbox", "unavailable"))
     )
     val same = call().tool.get
@@ -421,7 +421,7 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "resolve its runner per call" in {
     val runnerA = new CountingRunner("a")
-    val sandbox = SandboxBackend.resolved(_ => Set(LockKey("sandbox")))(ctx =>
+    val sandbox = SandboxBackend.resolved(_ => Set(LockKey("workspace")))(ctx =>
       ctx.run.config.tenantId
         .map(_.value)
         .filter(_ == "a")
@@ -468,4 +468,17 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     StoreFileBackend(InMemoryLongTermStore(), Vector("m" * 10000)).left.value.message should include("namespace")
   }
 
+  "SandboxBackend.resolved" should "fail before running when its declared locks do not cover the runner's" in {
+    val runner  = new CountingRunner()
+    val sandbox = SandboxBackend.resolved(_ => Set(LockKey("elsewhere")))(_ => Right(runner))
+    val error   = sandbox.execute("ls", VPath.root, 1.second, call()).left.value
+    error shouldBe a[org.llm4s.error.ValidationError]
+    error.message should include("workspace/w")
+    runner.runs.get shouldBe 0
+    // the runner's own lock, or an ancestor of it, covers it
+    SandboxBackend
+      .resolved(_ => Set(LockKey("workspace", "w")))(_ => Right(runner))
+      .execute("ls", VPath.root, 1.second, call())
+      .isRight shouldBe true
+  }
 }

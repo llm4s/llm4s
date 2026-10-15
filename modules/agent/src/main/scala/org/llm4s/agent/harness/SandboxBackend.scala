@@ -3,6 +3,7 @@ package org.llm4s.agent.harness
 import org.llm4s.agent.graph.{ ReplayGuard, ReplaySupport }
 import org.llm4s.agent.graph.tool.LockKey
 import org.llm4s.annotation.Experimental
+import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
@@ -94,12 +95,32 @@ final class SandboxBackend private (
            s"the command is longer than ${SandboxBackend.MaxCommandBytes} bytes"
          )
        )
-     else Right(())).flatMap(_ => resolve(ctx)).flatMap { runner =>
+     else Right(())).flatMap(_ => resolve(ctx)).flatMap(covered(workdir)).flatMap { runner =>
       val key = ctx.effectKey("sandbox.execute", command, workdir.value)
       ReplayGuard.unverifiable[ExecResult](ctx.run, key, idempotent = false)(
         runner.run(command, workdir, timeout, maxOutputBytes, ctx).map(bounded)
       )
     }
+
+  /**
+   * `runner`, if the locks this backend declares for `workdir` cover every lock the runner needs there;
+   * otherwise a failure before the guard records anything. A resolved backend declares its locks before
+   * any runner is chosen, so a runner needing a lock they do not cover could run beside another command
+   * on its workspace, unordered.
+   */
+  private def covered(workdir: VPath)(runner: SandboxRunner): Result[SandboxRunner] =
+    val declared = lockOf(workdir)
+    val missing =
+      runner.locks(workdir).filterNot(needed => declared.exists(d => needed.segments.startsWith(d.segments)))
+    if missing.isEmpty then Right(runner)
+    else
+      Left(
+        ValidationError(
+          "locks",
+          s"the sandbox runner for ${workdir.value} needs ${missing.map(_.segments.mkString("/")).mkString(", ")}, " +
+            "which the backend's declared locks do not cover"
+        )
+      )
 
   private def bounded(result: ExecResult): ExecResult =
     val (out, cutOut) = Text.cutEncoded(result.stdout, maxOutputBytes.toLong)
