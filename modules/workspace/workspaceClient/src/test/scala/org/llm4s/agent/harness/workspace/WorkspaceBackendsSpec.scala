@@ -105,6 +105,38 @@ class WorkspaceBackendsSpec extends AnyFlatSpec with Matchers with EitherValues 
     workspace.text("a.txt") shouldBe "three"
   }
 
+  "A harness agent over a workspace" should "write a file with the file tools and run a command that sees it" in {
+    lazy val workspace: FakeWorkspace = new FakeWorkspace(exec =
+      (_, _, _, _) =>
+        ExecuteCommandResponse(
+          "local",
+          workspace.text("notes.txt"),
+          "",
+          0,
+          isOutputTruncated = false,
+          duration = 1.milli
+        )
+    )
+    val files   = WorkspaceFixtures.files(workspace)
+    val sandbox = WorkspaceSandboxBackend("ws", workspace).value
+    val replies = Seq(
+      Reply.toolCalls(ToolCall("w", "write_file", ujson.Obj("path" -> "/notes.txt", "content" -> "from the harness"))),
+      Reply.toolCalls(ToolCall("x", "execute", ujson.Obj("command" -> "cat notes.txt"))),
+      Reply.text("done")
+    )
+    val agent = Agent
+      .builder("harness", ScriptedLLMClient.sequence(replies*))
+      .withHarness(HarnessProfile().withBackend(files).withSandbox(sandbox))
+      .build()
+      .value
+    val messages = agent.run(ThreadId(s"harness-${System.nanoTime()}"), "go").value.messages.collect {
+      case t: ToolMessage => t.content
+    }
+    workspace.text("notes.txt") shouldBe "from the harness"
+    messages.last should include("from the harness")
+    messages.last should include("exit code: 0")
+  }
+
   "The locks" should "put a command above every file of its workspace, and every workspace under the resolver's root" in {
     val files  = WorkspaceFixtures.files(new FakeWorkspace())
     val runner = WorkspaceSandboxRunner("ws", new FakeWorkspace()).value
