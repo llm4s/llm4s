@@ -133,7 +133,7 @@ final class FakeWorkspace(
     WriteFileResponse("local", success = true, path, bytes.length.toLong)
   }
 
-  def fileSnapshot(path: String, includeContent: Boolean): FileSnapshotResponse = synchronized {
+  def fileSnapshot(path: String, includeContent: Boolean, followLinks: Boolean): FileSnapshotResponse = synchronized {
     import FileSnapshotResponse.Kind
     val p = norm(path)
     if dirs(p) then FileSnapshotResponse("local", path, Kind.Directory, Kind.Directory, 0L)

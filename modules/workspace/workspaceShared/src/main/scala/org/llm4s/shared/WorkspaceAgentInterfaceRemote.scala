@@ -112,8 +112,15 @@ class WorkspaceAgentInterfaceRemote(handler: WorkspaceAgentCommand => WorkspaceA
     handleCommand(command, classOf[WriteFileResponse])
   }
 
-  override def fileSnapshot(path: String, includeContent: Boolean = true): FileSnapshotResponse =
-    handleCommand(FileSnapshotCommand(generateCommandId(), path, includeContent), classOf[FileSnapshotResponse])
+  override def fileSnapshot(
+    path: String,
+    includeContent: Boolean = true,
+    followLinks: Boolean = true
+  ): FileSnapshotResponse =
+    handleCommand(
+      FileSnapshotCommand(generateCommandId(), path, includeContent, followLinks),
+      classOf[FileSnapshotResponse]
+    )
 
   override def deleteFile(path: String, expectedHash: Option[String] = None): DeleteFileResponse =
     handleCommand(DeleteFileCommand(generateCommandId(), path, expectedHash), classOf[DeleteFileResponse])

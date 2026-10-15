@@ -352,7 +352,9 @@ object GetWorkspaceInfoResponse {
 case class FileSnapshotCommand(
   commandId: String,
   path: String,
-  includeContent: Boolean = true
+  includeContent: Boolean = true,
+  // false: a symbolic link at `path` is described as itself (kind `link`), not as what it names, as a delete needs
+  followLinks: Boolean = true
 ) extends WorkspaceAgentCommand
 
 object FileSnapshotCommand {
@@ -394,6 +396,15 @@ object FileSnapshotResponse {
 
     /** The `kind` and `hash` of a symbolic link to nothing: an entry a delete removes, which a read cannot. */
     val Dangling: String = "dangling"
+
+    /** The `kind` of a symbolic link described as itself (`followLinks = false`); its hash is `link:<hex>`. */
+    val Link: String = "link"
+
+    /** The `hash` of a link described as itself: what it points to, as written. */
+    def linkHash(target: String): String =
+      "link:" + FileSnapshotResponse
+        .hashOf(target.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+        .stripPrefix("sha256:")
   }
 
   /** The `hash` of a file of `bytes`. */

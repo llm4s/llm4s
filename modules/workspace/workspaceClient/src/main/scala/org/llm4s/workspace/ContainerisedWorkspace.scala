@@ -469,8 +469,12 @@ class ContainerisedWorkspace(
     sendCommand(command).asInstanceOf[WriteFileResponse]
   }
 
-  override def fileSnapshot(path: String, includeContent: Boolean = true): FileSnapshotResponse =
-    sendCommand(FileSnapshotCommand(java.util.UUID.randomUUID().toString, path, includeContent))
+  override def fileSnapshot(
+    path: String,
+    includeContent: Boolean = true,
+    followLinks: Boolean = true
+  ): FileSnapshotResponse =
+    sendCommand(FileSnapshotCommand(java.util.UUID.randomUUID().toString, path, includeContent, followLinks))
       .asInstanceOf[FileSnapshotResponse]
 
   override def deleteFile(path: String, expectedHash: Option[String] = None): DeleteFileResponse =

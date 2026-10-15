@@ -47,8 +47,14 @@ final class WorkspaceFileBackend private (val id: String, workspace: WorkspaceAg
 
   def locks(path: VPath): Set[LockKey] = Set(WorkspaceLocks.fileLock(id, path))
 
-  private def snapshot(operation: String, path: VPath, content: Boolean): Result[FileSnapshotResponse] =
-    call(operation, path)(workspace.fileSnapshot(relative(path), content))
+  /** What is at `path`; with `follow = false` a link is described as itself (a delete removes the link). */
+  private def snapshot(
+    operation: String,
+    path: VPath,
+    content: Boolean,
+    follow: Boolean = true
+  ): Result[FileSnapshotResponse] =
+    call(operation, path)(workspace.fileSnapshot(relative(path), content, follow))
 
   /** A runner path (`src/a.txt`) as a `VPath`, if it is one. */
   private def vpath(runnerPath: String): Option[VPath] =
@@ -158,13 +164,13 @@ final class WorkspaceFileBackend private (val id: String, workspace: WorkspaceAg
    * `plan`'s effect through C4's `Verifiable` guard under `ctx.effectKey("file.<operation>", path)`; the
    * probe reads the file's current hash.
    */
-  private def guarded[A: ReadWriter](operation: String, path: VPath, ctx: FileContext)(
+  private def guarded[A: ReadWriter](operation: String, path: VPath, ctx: FileContext, follow: Boolean = true)(
     plan: => Result[ReplayGuard.Plan[A]]
   ): Result[(A, StateUpdate)] =
     val key = ctx.effectKey(s"file.$operation", path.value)
     ReplayGuard
       .verifiable[A](ctx.run, key)(
-        snapshot(operation, path, content = false).flatMap(s => WorkspaceCalls.stateCheck(s.hash))
+        snapshot(operation, path, content = false, follow).flatMap(s => WorkspaceCalls.stateCheck(s.hash))
       )(plan)
       .map(a => (a, StateUpdate.empty))
 
@@ -228,9 +234,10 @@ final class WorkspaceFileBackend private (val id: String, workspace: WorkspaceAg
   def delete(path: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
     if path == VPath.root then Left(BackendRefused.at("delete", path, "is the root directory"))
     else
-      guarded[FileDeleted]("delete", path, ctx) {
+      // a link is deleted as itself, never through: its own state is what the delete compares
+      guarded[FileDeleted]("delete", path, ctx, follow = false) {
         for
-          before <- snapshot("delete", path, content = false)
+          before <- snapshot("delete", path, content = false, follow = false)
           _ <-
             if before.kind == FileSnapshotResponse.Kind.Absent then Left(BackendRefused.notFound("delete", path))
             else Right(())

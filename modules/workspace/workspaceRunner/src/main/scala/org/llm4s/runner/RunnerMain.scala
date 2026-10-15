@@ -275,7 +275,9 @@ object RunnerMain extends cask.MainRoutes {
           )
         case cmd: FileSnapshotCommand =>
           val result = Try(
-            workspaceInterface.fileSnapshot(cmd.path, cmd.includeContent).copy(commandId = cmd.commandId)
+            workspaceInterface
+              .fileSnapshot(cmd.path, cmd.includeContent, cmd.followLinks)
+              .copy(commandId = cmd.commandId)
           ).toEither.left
             .map(toErrorResponse(cmd.commandId))
           result.fold(

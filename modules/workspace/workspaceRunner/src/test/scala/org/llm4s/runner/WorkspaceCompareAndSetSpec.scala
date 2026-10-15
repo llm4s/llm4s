@@ -74,11 +74,27 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     val ws = workspace()
     ws.fileSnapshot("gone").kind shouldBe "dangling"
     ws.fileSnapshot("gone").hash shouldBe "dangling"
-    ws.deleteFile("gone", Some("dangling")).wasDirectory shouldBe false
+    // a delete compares the link as itself
+    ws.deleteFile("gone", Some(ws.fileSnapshot("gone", followLinks = false).hash)).wasDirectory shouldBe false
     Files.exists(root.resolve("gone"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
     ws.writeFile("new", "x", expectedHash = Some("dangling")).success shouldBe true
     Files.isSymbolicLink(root.resolve("new")) shouldBe true
     ws.fileSnapshot("new-target").content shouldBe Some("x")
+  }
+
+  it should "describe a link as itself when asked, so a link to a big file or a FIFO is deleted without touching it" in {
+    assume(!isWindowsHost)
+    Files.write(root.resolve("big"), ("x" * 20).getBytes(StandardCharsets.UTF_8))
+    Files.createSymbolicLink(root.resolve("to-big"), root.resolve("big"))
+    val small = workspace(WorkspaceSandboxConfig(limits = WorkspaceSandboxConfig.DefaultLimits.copy(maxFileSize = 10)))
+    val link  = small.fileSnapshot("to-big", includeContent = false, followLinks = false)
+    link.kind shouldBe "link"
+    link.hash shouldBe FileSnapshotResponse.Kind.linkHash(root.resolve("big").toString)
+    small.fileSnapshot("to-big", includeContent = false).hash shouldBe "oversized"
+    code(small.deleteFile("to-big", Some(hashOf("other")))) shouldBe "HASH_MISMATCH"
+    small.deleteFile("to-big", Some(link.hash)).wasDirectory shouldBe false
+    Files.exists(root.resolve("to-big"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+    Files.size(root.resolve("big")) shouldBe 20L
   }
 
   it should "refuse a FIFO without opening it, as every file operation does" in {

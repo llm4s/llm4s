@@ -279,8 +279,18 @@ class WorkspaceAgentInterfaceImpl(
       else FileSnapshotResponse.Kind.Oversized
     }
 
-  private def checkExpected(path: String, resolved: Path, expected: String): Unit = {
-    val current = currentHash(resolved)
+  /** What a delete compares: a link as itself (where it points), anything else as [[currentHash]] reads it. */
+  private def entryHash(resolved: Path): String =
+    if (Files.isSymbolicLink(resolved)) FileSnapshotResponse.Kind.linkHash(Files.readSymbolicLink(resolved).toString)
+    else currentHash(resolved)
+
+  private def checkExpected(
+    path: String,
+    resolved: Path,
+    expected: String,
+    hashOf: Path => String = currentHash
+  ): Unit = {
+    val current = hashOf(resolved)
     // an oversized file has no digest, so nothing can be compared with it
     if (current == FileSnapshotResponse.Kind.Oversized || expected == FileSnapshotResponse.Kind.Oversized)
       throw new WorkspaceAgentException(
@@ -729,13 +739,19 @@ class WorkspaceAgentInterfaceImpl(
    * What is at `path`, read under the mutation lock so it is never a write half done: its kind, the hash a
    * compare-and-set compares with and, when asked for, its exact text, with the hash taken from the same bytes.
    */
-  override def fileSnapshot(path: String, includeContent: Boolean = true): FileSnapshotResponse =
+  override def fileSnapshot(
+    path: String,
+    includeContent: Boolean = true,
+    followLinks: Boolean = true
+  ): FileSnapshotResponse =
     mutationLock.synchronized {
       import FileSnapshotResponse.Kind
       val resolved = resolvePath(path)
       def response(kind: String, hash: String, size: Long, content: Option[String], error: Option[String]) =
         FileSnapshotResponse("local", path, kind, hash, size, content, error)
-      if (!Files.exists(resolved) && Files.isSymbolicLink(resolved))
+      if (!followLinks && Files.isSymbolicLink(resolved))
+        response(Kind.Link, entryHash(resolved), 0L, None, None)
+      else if (!Files.exists(resolved) && Files.isSymbolicLink(resolved))
         response(Kind.Dangling, Kind.Dangling, 0L, None, Some("a link to something that does not exist"))
       else if (!Files.exists(resolved))
         response(Kind.Absent, Kind.Absent, 0L, None, None)
@@ -794,7 +810,7 @@ class WorkspaceAgentInterfaceImpl(
         throw new WorkspaceAgentException("The workspace root cannot be deleted", "INVALID_ARGUMENT", None)
       refuseGitMetadata(path, resolved)
       refuseReadOnly(path, resolved)
-      expectedHash.foreach(checkExpected(path, resolved, _))
+      expectedHash.foreach(checkExpected(path, resolved, _, entryHash))
       if (!Files.exists(resolved, java.nio.file.LinkOption.NOFOLLOW_LINKS))
         throw new WorkspaceAgentException(s"File '$path' does not exist", "FILE_NOT_FOUND", None)
       val wasDirectory = Files.isDirectory(resolved, java.nio.file.LinkOption.NOFOLLOW_LINKS)

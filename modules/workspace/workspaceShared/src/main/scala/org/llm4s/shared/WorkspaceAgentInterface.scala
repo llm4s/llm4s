@@ -71,9 +71,11 @@ trait WorkspaceAgentInterface {
 
   /**
    * What is at `path`: nothing, a directory, or a file with the hash of its bytes and, when `includeContent`, its exact
-   * text if it is valid UTF-8 and at most the workspace's `maxFileSize`.
+   * text if it is valid UTF-8 and at most the workspace's `maxFileSize`. With `followLinks = false`, a symbolic link at
+   * `path` is described as itself: kind `link` and a hash of where it points, which a [[deleteFile]] compares (it
+   * removes the link, not what it names).
    */
-  def fileSnapshot(path: String, includeContent: Boolean = true): FileSnapshotResponse
+  def fileSnapshot(path: String, includeContent: Boolean = true, followLinks: Boolean = true): FileSnapshotResponse
 
   /**
    * Delete the file, or the empty directory, `path`; with `expectedHash`, a compare-and-set as for [[writeFile]]
