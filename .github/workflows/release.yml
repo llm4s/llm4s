@@ -90,7 +90,9 @@ jobs:
       - name: Check sbt released the tag's version
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          SBT_VERSION="$(sbt -batch -error 'print ThisBuild / version' | tail -1 | tr -d '[:space:]')"
+          # Strip ANSI escapes and keep the version line: on the runner sbt's last line can be a bare `ESC[0J`,
+          # which failed 0.5.0's publish-kotlin with "sbt's version is ''".
+          SBT_VERSION="$(sbt -batch -no-colors -error 'print ThisBuild / version' | sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | tail -1 | tr -d '[:space:]')"
           if [ "$SBT_VERSION" != "$VERSION" ]; then
             echo "sbt's version is '$SBT_VERSION', the tag's is '$VERSION': the Kotlin artifact would not match the release."
             exit 1
@@ -207,7 +209,7 @@ jobs:
       - name: Generate and check the SBOMs
         run: |
           sbt -batch publishedSboms
-          sbt -batch -error listPublishedArtifacts | grep -E '^(artifact|stub) ' > target/published-artifacts.txt
+          sbt -batch -no-colors -error listPublishedArtifacts | sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -E '^(artifact|stub) ' > target/published-artifacts.txt
           scripts/check-sbom.sh target/sboms target/published-artifacts.txt
           # A BOM named for a snapshot would be attached to the wrong release: sbt-dynver derives the version from
           # the tag, so every file must carry exactly the tag's version.
