@@ -74,9 +74,9 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
   private def path(s: String): VPath = VPath(s).value
 
   "A large Success" should "be stored under its call's key, the model shown a preview and the path" in {
-    val big   = new Big
-    val model = ScriptedModel(calling("c1" -> 1000, "c2" -> 3), answer("done"))
-    val mw    = new ToolOutputOffload(thresholdTokens = 1000)
+    val big        = new Big
+    val model      = ScriptedModel(calling("c1" -> 1000, "c2" -> 3), answer("done"))
+    val mw         = new ToolOutputOffload(thresholdTokens = 1000)
     val (state, _) = runInMemory(loopOf(model, Seq(mw), big.tool).graph, AgentInput("go")).answered
     val key        = big.keys.asScala.find(k => offloadsOf(state).get(k).isDefined).value
     val stored     = offloadsOf(state).get(key).value
@@ -103,7 +103,7 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
     val stored     = offloadsOf(state).results.head
     stored.truncated shouldBe true
     // measured as a checkpoint stores it: each line break is two bytes in a JSON string
-    org.llm4s.agent.harness.Text.jsonBytes(stored.content) should (be <= 5000L and be > 4900L)
+    org.llm4s.agent.harness.Text.jsonBytes(stored.content) should ((be <= 5000L).and(be > 4900L))
     lines(1000) should startWith(stored.content)
     stored.originalBytes shouldBe lines(1000).length.toLong
     toolResults(state).head should include(s"Only its first ${stored.content.length} characters are stored")
@@ -113,9 +113,12 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
     val json = AgentTool(
       AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))
     )((a, _) => ToolOutcome.Success(ujson.Arr((1 to a.text.toInt).map(i => ujson.Obj("i" -> i, "pad" -> "y" * 30))*)))
-    val model      = ScriptedModel(calling("c1" -> 500), answer("done"))
+    val model = ScriptedModel(calling("c1" -> 500), answer("done"))
     val (state, _) =
-      runInMemory(loopOf(model, Seq(new ToolOutputOffload(thresholdTokens = 1000)), json).graph, AgentInput("go")).answered
+      runInMemory(
+        loopOf(model, Seq(new ToolOutputOffload(thresholdTokens = 1000)), json).graph,
+        AgentInput("go")
+      ).answered
     offloadsOf(state).results.head.content should startWith("""[{"i":1,"pad":"yyy""")
   }
 
@@ -153,7 +156,9 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
     val broken = new AtomicBoolean(true)
     val failing = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("failing")
-      override def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome = {
+      override def wrapToolCall(request: ToolCallRequest, context: ToolContext)(
+        next: () => ToolOutcome
+      ): ToolOutcome = {
         val out = next()
         if (broken.getAndSet(false)) ToolOutcome.Fatal(ValidationError("store", "down")) else out
       }
@@ -191,10 +196,10 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   "With summarisation" should "drop the offloads the summary covers, at the next model step" in {
-    val big   = new Big
-    val store = new InMemoryCheckpointer
+    val big    = new Big
+    val store  = new InMemoryCheckpointer
     val thread = ThreadId("cleanup")
-    val model = ScriptedModel(calling("c1" -> 1000), answer("first"), answer("second"), answer("third"), answer("4th"))
+    val model  = ScriptedModel(calling("c1" -> 1000), answer("first"), answer("second"), answer("third"), answer("4th"))
     val summary = new SummaryCompressor {
       def compress(p: Option[String], m: Vector[Message], max: Int, c: ModelContext): Result[String] = Right("summary")
     }
@@ -206,8 +211,8 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
       ),
       big.tool
     )
-    val rt                 = GraphRuntime(store)
-    def turn(q: String)    = rt.start(thread, loop.graph, AgentInput(q)).awaited.value.answered._1
+    val rt              = GraphRuntime(store)
+    def turn(q: String) = rt.start(thread, loop.graph, AgentInput(q)).awaited.value.answered._1
     offloadsOf(turn("one")).results should have size 1
     turn("two").get(SummarizationMiddleware.key).value shouldBe None
     // the third turn's request has 7 messages: the summary now covers the tool result
@@ -221,11 +226,13 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   "OffloadBackend" should "list and search the results beneath its mount, and refuse every mutation" in {
-    val big        = new Big
-    val model      = ScriptedModel(calling("c1" -> 1000), answer("done"))
+    val big   = new Big
+    val model = ScriptedModel(calling("c1" -> 1000), answer("done"))
     val (state, _) =
-      runInMemory(loopOf(model, Seq(new ToolOutputOffload(thresholdTokens = 1000)), big.tool).graph, AgentInput("go"))
-        .answered
+      runInMemory(
+        loopOf(model, Seq(new ToolOutputOffload(thresholdTokens = 1000)), big.tool).graph,
+        AgentInput("go")
+      ).answered
     val ctx  = FileContext(testRunContext(), state)
     val key  = offloadsOf(state).results.head.key
     val file = path(s"/large_tool_results/$key")
@@ -277,7 +284,7 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   it should "hash a caller-built key that is not a path segment" in {
     ToolOutputOffload.segmentOf("abc") shouldBe "abc"
-    ToolOutputOffload.segmentOf("a/b") should have length 64
-    ToolOutputOffload.segmentOf("..") should have length 64
+    (ToolOutputOffload.segmentOf("a/b") should have).length(64)
+    (ToolOutputOffload.segmentOf("..") should have).length(64)
   }
 }

@@ -25,8 +25,9 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   private val agentA = AgentId.unsafe("a")
 
   /** A model that answers `a<n>` to its n-th request (from 1), unless `play` says otherwise, recording each request. */
-  final private class Model(play: PartialFunction[(Int, Vector[Message]), Result[AssistantMessage]] = PartialFunction.empty)
-      extends ModelStep {
+  final private class Model(
+    play: PartialFunction[(Int, Vector[Message]), Result[AssistantMessage]] = PartialFunction.empty
+  ) extends ModelStep {
     val seen = new CopyOnWriteArrayList[Vector[Message]]()
     def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion] = {
       seen.add(messages)
@@ -66,12 +67,19 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   private def contents(messages: Vector[Message]): Vector[String] = messages.map(_.content)
 
   /** Runs `queries` as successive turns of one thread; the last turn's state. */
-  private def turns(loop: ToolLoop, queries: String*)(using store: InMemoryCheckpointer, thread: ThreadId): ThreadState =
+  private def turns(loop: ToolLoop, queries: String*)(using
+    store: InMemoryCheckpointer,
+    thread: ThreadId
+  ): ThreadState =
     queries.map(q => GraphRuntime(store).start(thread, loop.graph, AgentInput(q)).awaited.value.answered._1).last
 
   private val echo: AgentTool[Echo] =
     AgentTool(
-      AgentToolSpec[Echo]("echo", "Echo", Schema.`object`[Echo]("echo").withRequiredField("text", Schema.string("text")))
+      AgentToolSpec[Echo](
+        "echo",
+        "Echo",
+        Schema.`object`[Echo]("echo").withRequiredField("text", Schema.string("text"))
+      )
     )((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
 
   "SummarizationMiddleware" should "fold all but keepRecent messages into a summary sent in the same request (rule 3)" in {
@@ -83,8 +91,13 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     val state = turns(loopOf(model, Seq(mw)), "u1", "u2", "u3", "u4")
     // the fourth request had 7 messages: the first five folded, the last two kept
     compressor.calls.size shouldBe 1
-    compressor.call(0) shouldBe (None -> Vector(UserMessage("u1"), AssistantMessage("a1"), UserMessage("u2"),
-      AssistantMessage("a2"), UserMessage("u3")))
+    compressor.call(0) shouldBe (None -> Vector(
+      UserMessage("u1"),
+      AssistantMessage("a1"),
+      UserMessage("u2"),
+      AssistantMessage("a2"),
+      UserMessage("u3")
+    ))
     val fourth = model.request(3)
     summaryOf(fourth).value shouldBe "S1: u1,a1,u2,a2,u3"
     contents(fourth).drop(1) shouldBe Vector("a3", "u4")
@@ -106,8 +119,12 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     summaryOf(model.request(4)).value shouldBe "S1: u1,a1,u2,a2,u3"
     // the sixth fires again: the old summary and only the messages after it
     compressor.calls.size shouldBe 2
-    compressor.call(1) shouldBe (Some("S1: u1,a1,u2,a2,u3") -> Vector(AssistantMessage("a3"), UserMessage("u4"),
-      AssistantMessage("a4"), UserMessage("u5")))
+    compressor.call(1) shouldBe (Some("S1: u1,a1,u2,a2,u3") -> Vector(
+      AssistantMessage("a3"),
+      UserMessage("u4"),
+      AssistantMessage("a4"),
+      UserMessage("u5")
+    ))
     contents(model.request(5)).drop(1) shouldBe Vector("a5", "u6")
     state.get(SummarizationMiddleware.key).value.value.throughMessageId shouldBe state.get(Messages.key).value(8).id
   }
@@ -115,10 +132,13 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   it should "never separate a tool call from its results" in {
     given store: InMemoryCheckpointer = new InMemoryCheckpointer
     given thread: ThreadId            = ThreadId("pairs")
-    val model = new Model({
-      case (1, _) =>
-        Right(AssistantMessage(None, Seq(ToolCall("c1", "echo", ujson.Obj("text" -> "r1")),
-          ToolCall("c2", "echo", ujson.Obj("text" -> "r2")))))
+    val model = new Model({ case (1, _) =>
+      Right(
+        AssistantMessage(
+          None,
+          Seq(ToolCall("c1", "echo", ujson.Obj("text" -> "r1")), ToolCall("c2", "echo", ujson.Obj("text" -> "r2")))
+        )
+      )
     })
     val compressor = new Recording()
     // the last two of [u1, call, r1, r2] would start at a result: the cut moves back to the call
@@ -173,8 +193,12 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     given thread: ThreadId            = ThreadId("bounded")
     val model                         = new Model()
     val compressor                    = new Recording(Some("x" * 10000))
-    val mw    = new SummarizationMiddleware(SummaryTrigger.Messages(2), keepRecent = 1, compressor = compressor,
-      maxSummaryTokens = 10)
+    val mw = new SummarizationMiddleware(
+      SummaryTrigger.Messages(2),
+      keepRecent = 1,
+      compressor = compressor,
+      maxSummaryTokens = 10
+    )
     val loop  = loopOf(model, Seq(mw))
     val state = turns(loop, "u1", "u2")
     state.get(SummarizationMiddleware.key).value.value.text shouldBe "x" * 40
@@ -256,7 +280,7 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     given store: InMemoryCheckpointer = new InMemoryCheckpointer
     given thread: ThreadId            = ThreadId("accounted")
     val client                        = ScriptedLLMClient.of(CompletionFixture.withUsage("the summary", 100, 7))
-    val mw = new SummarizationMiddleware(SummaryTrigger.Messages(2), 1, SummaryCompressor.model(client))
+    val mw    = new SummarizationMiddleware(SummaryTrigger.Messages(2), 1, SummaryCompressor.model(client))
     val model = new Model()
     val state = turns(loopOf(model, Seq(mw)), "u1", "u2")
     summaryOf(model.last).value shouldBe "the summary"
@@ -283,9 +307,7 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     turns(loopOf(model, Seq(mw)), long, "u2", "u3")
     client.callCount shouldBe 2
     // each call is sent at most a chunk of transcript, plus the summary so far and fixed text
-    client.calls.foreach { (conversation, _) =>
-      conversation.messages.last.content.length should be < (20 * 4 + 60)
-    }
+    client.calls.foreach((conversation, _) => conversation.messages.last.content.length should be < (20 * 4 + 60))
     client.calls(1)._1.messages.last.content should include("first")
     client.calls.head._1.messages.last.content should include("[cut:")
   }
@@ -295,13 +317,17 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     given thread: ThreadId            = ThreadId("digest")
     val counter                       = ConversationTokenCounter.openAI().value
     val model                         = new Model()
-    val mw = new SummarizationMiddleware(SummaryTrigger.Messages(2), 1, SummaryCompressor.digest(counter))
+    val mw    = new SummarizationMiddleware(SummaryTrigger.Messages(2), 1, SummaryCompressor.digest(counter))
     val state = turns(loopOf(model, Seq(mw)), "use id: ABC123", "then id: XYZ789", "and more")
     val text  = state.get(SummarizationMiddleware.key).value.value.text
     text should (include("ABC123").and(include("XYZ789")))
 
-    val small = new SummarizationMiddleware(SummaryTrigger.Messages(2), 1, SummaryCompressor.digest(counter),
-      maxSummaryTokens = 20)
+    val small = new SummarizationMiddleware(
+      SummaryTrigger.Messages(2),
+      1,
+      SummaryCompressor.digest(counter),
+      maxSummaryTokens = 20
+    )
     val bounded =
       turns(loopOf(new Model(), Seq(small)), (1 to 6).map(i => s"step id: K$i must be kept.")*)(using
         store,
@@ -318,16 +344,25 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   "A stored summary" should "round-trip through the key's codec" in {
     val summary = Some(ConversationSummary("text", "m-1"))
     val json    = upickle.default.writeJs(summary)(using SummarizationMiddleware.key.stateCodec)
-    upickle.default.read[Option[ConversationSummary]](json)(using SummarizationMiddleware.key.stateCodec) shouldBe summary
+    upickle.default.read[Option[ConversationSummary]](json)(using
+      SummarizationMiddleware.key.stateCodec
+    ) shouldBe summary
   }
 
   "The limits" should "refuse values below 1" in {
     an[IllegalArgumentException] should be thrownBy SummaryTrigger.Messages(0)
     an[IllegalArgumentException] should be thrownBy SummaryTrigger.Tokens(0)
-    an[IllegalArgumentException] should be thrownBy new SummarizationMiddleware(SummaryTrigger.Messages(1), 0,
-      new Recording())
-    an[IllegalArgumentException] should be thrownBy new SummarizationMiddleware(SummaryTrigger.Messages(1), 1,
-      new Recording(), maxSummaryTokens = 0)
+    an[IllegalArgumentException] should be thrownBy new SummarizationMiddleware(
+      SummaryTrigger.Messages(1),
+      0,
+      new Recording()
+    )
+    an[IllegalArgumentException] should be thrownBy new SummarizationMiddleware(
+      SummaryTrigger.Messages(1),
+      1,
+      new Recording(),
+      maxSummaryTokens = 0
+    )
   }
 
   "Alignment" should "match a subsequence of the history from the end, leaving inserted messages unmatched" in {

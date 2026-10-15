@@ -71,7 +71,11 @@ final class SummarizationMiddleware(
     yield response.addUpdate(sent._2)
 
   /** What to send: the request with the stored summary applied, and, when the trigger fires, what to fold into it. */
-  private def planned(request: ModelRequest, history: Vector[StoredMessage], stored: Option[ConversationSummary]): Plan =
+  private def planned(
+    request: ModelRequest,
+    history: Vector[StoredMessage],
+    stored: Option[ConversationSummary]
+  ): Plan =
     val (system, rest) = request.messages.span(_.role == MessageRole.System)
     val matched        = align(rest, history)
     val throughIndex   = stored.map(s => history.indexWhere(_.id == s.throughMessageId)).filter(_ >= 0)
@@ -187,12 +191,13 @@ enum SummaryTrigger:
  */
 @Experimental
 final case class ConversationSummary private (text: String, throughMessageId: String):
-  def withText(t: String): ConversationSummary             = ConversationSummary(t, throughMessageId)
+  def withText(t: String): ConversationSummary              = ConversationSummary(t, throughMessageId)
   def withThroughMessageId(id: String): ConversationSummary = ConversationSummary(text, id)
 
 @Experimental
 object ConversationSummary:
-  def apply(text: String, throughMessageId: String): ConversationSummary = new ConversationSummary(text, throughMessageId)
+  def apply(text: String, throughMessageId: String): ConversationSummary =
+    new ConversationSummary(text, throughMessageId)
 
   final private case class Wire(text: String, throughMessageId: String) derives ReadWriter
 

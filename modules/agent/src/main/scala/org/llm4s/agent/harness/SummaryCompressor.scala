@@ -28,7 +28,12 @@ import org.llm4s.types.Result
  */
 @Experimental
 trait SummaryCompressor:
-  def compress(previous: Option[String], messages: Vector[Message], maxTokens: Int, context: ModelContext): Result[String]
+  def compress(
+    previous: Option[String],
+    messages: Vector[Message],
+    maxTokens: Int,
+    context: ModelContext
+  ): Result[String]
 
 @Experimental
 object SummaryCompressor:
@@ -95,16 +100,18 @@ object SummaryCompressor:
       context: ModelContext
     ): Result[String] =
       val accounted = context.accounted(client)
-      chunks(messages.map(rendered)).foldLeft[Result[Option[String]]](Right(previous)) { (acc, chunk) =>
-        acc.flatMap { summary =>
-          accounted
-            .complete(
-              Conversation(Seq(SystemMessage(prompt(maxTokens)), UserMessage(input(summary, chunk)))),
-              options.withMaxTokens(maxTokens)
-            )
-            .map(c => Some(SummarizationMiddleware.clamp(c.message.content.trim, maxTokens)))
+      chunks(messages.map(rendered))
+        .foldLeft[Result[Option[String]]](Right(previous)) { (acc, chunk) =>
+          acc.flatMap { summary =>
+            accounted
+              .complete(
+                Conversation(Seq(SystemMessage(prompt(maxTokens)), UserMessage(input(summary, chunk)))),
+                options.withMaxTokens(maxTokens)
+              )
+              .map(c => Some(SummarizationMiddleware.clamp(c.message.content.trim, maxTokens)))
+          }
         }
-      }.map(_.getOrElse(""))
+        .map(_.getOrElse(""))
 
     private def maxChars: Long = maxInputTokens.toLong * 4
 
@@ -133,7 +140,10 @@ object SummaryCompressor:
        |summary so far and the messages that followed it. Reply with the updated summary only: the summary so far
        |extended with what the new messages add. Keep every fact the agent may need to continue: the user's goals and
        |constraints, decisions made, identifiers, file paths, URLs, error messages and the results of tool calls.
-       |Drop pleasantries and repetition. Stay within about ${math.max(1L, maxTokens.toLong * 3 / 4)} words.""".stripMargin
+       |Drop pleasantries and repetition. Stay within about ${math.max(
+        1L,
+        maxTokens.toLong * 3 / 4
+      )} words.""".stripMargin
       .replace('\n', ' ')
 
   /** One message of the transcript a model compressor is sent. */

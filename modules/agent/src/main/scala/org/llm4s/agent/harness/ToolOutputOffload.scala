@@ -224,7 +224,7 @@ final case class Offloads private (results: Vector[OffloadedResult], evicted: Ve
       val appended = results.filterNot(_.key == result.key) :+ result
       // the oldest go first, until the rest fit; the total is kept as it falls, so this is linear
       var total = appended.iterator.map(_.bytes).sum
-      val kept  = appended.dropWhile { r =>
+      val kept = appended.dropWhile { r =>
         val over = total > maxTotalBytes
         if over then total -= r.bytes
         over

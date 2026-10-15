@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent harness (Phase 3)
 
+- **Added** context management: `SummarizationMiddleware` (a kept, bounded summary in place of older messages) and
+  `ToolOutputOffload` with a read-only `OffloadBackend` for large tool results
+  [#1908](https://github.com/llm4s/llm4s/issues/1908); [design §4.34](docs/design/typed-agent-runtime/4.34-stage-3-slice-f4-context-management.md).
 - **Added** backend SPIs: `FileBackend` (state, composite, store), `SandboxBackend`, `LongTermStore` and `FileBackendContract`
   [#1904](https://github.com/llm4s/llm4s/issues/1904); [design §4.25](docs/design/typed-agent-runtime/4.25-stage-3-slice-c3-backend-spis.md).
 
