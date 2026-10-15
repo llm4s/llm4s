@@ -31,7 +31,9 @@ trait RunHandle[O]:
    * Blocks until the run ends and returns its result; the result is retained, so every call
    * returns the same value. If the awaiting thread is interrupted, returns `Left(CancelledError)`
    * with the interrupt flag still set, and the run continues: only [[cancel]] stops a run. A run that
-   * ends `Failed` with [[GraphError.ClaimLost]] may be recovered once its thread is free; see there.
+   * ends `Failed` with [[GraphError.ClaimLost]] may be recovered once its thread is free; see there. A run
+   * whose closing commit stuck in the store ends [[GraphError.CommitTimedOut]], with its thread free; read
+   * the thread before acting on it.
    */
   def await(): Result[RunResult[O]]
 
@@ -238,7 +240,7 @@ final private[graph] class DefaultRunHandle[O](
         runThreadExited.countDown()
     })(_ => outcome = Some(DefaultRunHandle.guarded(body()).fold(crashed, identity)))
 
-  /** Taken by whichever settles the run: the run thread as it exits, or [[endWithin]]. */
+  /** Taken by whichever settles the run: the run thread as it exits, [[endWithin]] or [[closeWithin]]. */
   private val settling = new AtomicBoolean(false)
 
   /**
@@ -292,7 +294,48 @@ final private[graph] class DefaultRunHandle[O](
             case _ => ()
         }: Unit
 
-  /** A test hook run by [[endWithin]]'s thread once it has computed its outcome; a no-op by default. */
+  private val watchingClose = new AtomicBoolean(false)
+
+  /**
+   * Bounds the run's closing wait while its claim holds (#1919) - an `Async` run waiting for its queued commits,
+   * or an `OnExit` run's exit commit - as [[endWithin]] bounds a lost run's end, and through the same `settling`:
+   * a virtual thread, `llm4s-closing-<threadId>`, waits until `closed` (the closing wait returned) or the result is
+   * set, and gives the wait up once `stalledSince` - when the commit in flight began, or the last one returned,
+   * as a `System.nanoTime` value, or `None` with none in flight - has stayed the same for `bound` nanoseconds. It
+   * then takes the run, unless the run thread or the loss watchdog took it first, and only then computes
+   * `outcome`, which must neither throw nor wait on the store, and [[finish]]es the run with it. A drain that keeps
+   * making progress, however long, is never given up. Only the first call starts the thread.
+   */
+  private[graph] def closeWithin(
+    closed: CompletableFuture[Unit],
+    stalledSince: () => Option[Long],
+    bound: Long,
+    outcome: () => RunResult[O],
+    release: () => Unit
+  ): Unit =
+    if watchingClose.compareAndSet(false, true) then
+      val over = CompletableFuture.anyOf(closed, result)
+      Thread
+        .ofVirtual()
+        .name(s"llm4s-closing-${threadId.value}")
+        .start { () =>
+          @tailrec def watching(): Unit =
+            val since = stalledSince()
+            val wait  = math.max(0L, since.getOrElse(System.nanoTime()) + bound - System.nanoTime())
+            DefaultRunHandle.guarded(over.get(wait, TimeUnit.NANOSECONDS)) match
+              // the same commit, still in flight, for the whole bound: given up, unless the run was settled first
+              case Left(_: TimeoutException) if since.isDefined && stalledSince() == since =>
+                if settling.compareAndSet(false, true) then
+                  val settled = outcome()
+                  settlingWithoutRunThread()
+                  finish(settled, release)
+              case Left(_: TimeoutException) => watching()
+              // closed, or settled; nothing else interrupts this thread
+              case _ => ()
+          watching()
+        }: Unit
+
+  /** A test hook run by [[endWithin]]'s and [[closeWithin]]'s threads once they have their outcome; a no-op by default. */
   @volatile private[graph] var settlingWithoutRunThread: () => Unit = () => ()
 
   /** Opened as the run thread exits; for tests. */

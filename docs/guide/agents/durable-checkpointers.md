@@ -248,7 +248,8 @@ is free:
   store refused it), and otherwise with `ClaimLost`.
 - Commits on one thread are written one at a time, in this runtime, so that subscribers see them in order. A commit
   hung in the store holds up later commits on its thread - including a new run's claim commit there, until the
-  store returns - but never another thread's. A subscription's read of the store that hangs holds up only that
+  store returns, which the store's own bound on a call limits (see [When the store hangs](#when-the-store-hangs)) -
+  but never another thread's. A subscription's read of the store that hangs holds up only that
   subscription, and, for a read of events another runtime committed before this runtime's commit, that thread's
   commits: never another thread's runs, their admission or release, nor a lost run's bounded end.
 - A process that dies holds its threads for up to `ttl`; so does a store that fails to release a claim - except to
@@ -258,6 +259,55 @@ is free:
   of its own without waiting, and its result is set at once. A run whose claim was lost does not wait for its
   renewal at all. `fork`, `updateState` and a `deleteThread` that did not delete release the claim they hold the
   same way, so a renewal hung in a store that serialises its calls cannot keep them from returning.
+
+## When the store hangs
+
+Every store must return from each call within a bound it documents, and fail a call that reaches it, changing
+nothing ([#1919](https://github.com/llm4s/llm4s/issues/1919)). `SqliteCheckpointer`'s is twice its `busyTimeout`,
+plus the time its own SQL takes (see [The SQLite store](#the-sqlite-store)); `InMemoryCheckpointer` never waits on
+anything but its own brief lock. A store's bound should be well inside `ttl - renewEvery`, the time a renewal has
+to land, so that a slow call never costs a run its claim.
+
+The runtime bounds two waits itself, both by `2 × ttl`, so that a store that breaks the contract cannot hold a
+run's result or its thread:
+
+- **A run that lost its claim** ends within `2 × ttl` of the loss, whatever it was doing, with `ClaimLost` (see
+  [Fencing](#fencing-a-run-that-lost-its-claim-stops-and-records-nothing)). So does an admission, with `ClaimLost`,
+  and a `fork`, `updateState` or `deleteThread`, with `ThreadBusy`.
+- **A run's closing wait while it holds its claim.** An `Async` run waits for its queued commits before it returns,
+  and an `OnExit` run makes its one exit commit. If a commit stays in the store for `2 × ttl` with none returning,
+  the run ends with `GraphError.CommitTimedOut(threadId, after)`, without waiting for it: `await()` returns, its
+  thread is free in this runtime, and its claim is released on a thread of its own, which nothing waits for - a
+  store stuck on a commit may serialise the release behind it. A drain that keeps making progress is never cut
+  short, however long it takes in all. The commit is an orphan, as a lost run's late write is: it is fenced by the
+  run's claim, so once the release lands the store refuses it, but it can land first. Its events then reach the
+  thread's subscribers, never the run's own listeners or its tracing. So after `CommitTimedOut`, read the thread:
+  its latest checkpoint is either the run's last durable one, still `Running` - `recover` continues the run - or the
+  run's outcome.
+
+  The bound is twice `ttl` rather than a setting of its own. A store that keeps claims alive already returns well
+  inside `ttl`, since a renewal must land within `ttl - renewEvery` and a store that serialises its calls queues
+  renewals behind its commits; the runtime's bound is a backstop for a store that breaks the contract, and the same
+  `2 × ttl` that bounds a lost run's end.
+
+Every other call made while the claim holds - an admission's claim commit, a `Sync` run's commits, its outcome's
+included, a change's write, and the release of a claim that was not lost - is waited for as long as it takes:
+only the store's bound limits it. Nor can the runtime free what a call stuck in the store holds itself. While the
+call lasts:
+
+- **its thread stays alive.** A run thread, or the virtual thread on which an admission, `fork`, `updateState` or
+  `deleteThread` makes its store calls, stays inside the call after the runtime has given it up - and an `Async`
+  run's writer thread with it. Only the run's result, its slot and its claim are freed;
+- **it holds up the thread's later commits.** Commits on one thread are written one at a time in a runtime, so a
+  commit, or a hand-over's read of events another runtime committed, holds up every later commit on that thread
+  in that runtime until it returns - a new run's claim commit included - but never another thread's;
+- **it can hold up subscriptions.** A `GraphRuntime.subscribe` made while a run's claim commit is in the store, on
+  a thread with nothing of that run handed over yet - an admission given up on after a lost claim included - waits
+  for that commit to return, or to be cancelled, before it delivers its replay; a run-scoped subscription
+  (`RunHandle.subscribe`, `AgentRun.subscribe`) never does. And with the store watch disabled
+  (`WatchPolicy.disabled`), a replay made while a write a run gave up on is still in the store stops at the first
+  event another runtime committed after what this runtime has handed over; it gets the rest when this runtime
+  next commits on the thread, and a replay made once the write has returned has them all.
 
 ## Deleting a thread
 
@@ -397,6 +447,13 @@ applied, so two stores cannot both pass the checks.
   `busyTimeout` again for SQLite's lock if another process holds it. Writes from different processes are still
   ordered by SQLite's polling, so a process that writes steadily can starve another process's write. Raise
   `busyTimeout` there. A write interrupted while it waits for its turn returns a `CancelledError`.
+- **Every call is bounded.** A call waits for the store's own earlier calls, and a write then for its turn at the
+  file, up to `busyTimeout` from the call's start, and a write then up to `busyTimeout` again for SQLite's lock: so
+  every call returns within `2 × busyTimeout`, plus the time its own SQL takes, failing with a `ProcessingError` and
+  nothing changed once it reaches a limit. That SQL itself cannot be timed out: sqlite-jdbc's native calls ignore
+  interrupts, so a disk that stalls inside a write holds that call, and the store's later calls fail once they have
+  waited `busyTimeout` for it. With the default 5 seconds and the default `ttl` of 30 seconds, the bound is well
+  inside `ttl - renewEvery`; keep it so if you raise either (see [When the store hangs](#when-the-store-hangs)).
 - **Durable commits.** `synchronous = FULL`: a commit that returned survives a crash or a power loss.
 - **Calls within one store are serialised.** A store is one connection; it is safe to share between threads, and
   a busy runtime gains from a store of its own rather than from sharing another runtime's.
@@ -606,7 +663,12 @@ the contract. In short:
   store must stay usable by every other thread. A driver whose I/O goes through a
   `java.nio.channels.InterruptibleChannel` (a `FileChannel` or `SocketChannel`) closes the channel when the thread is
   interrupted mid-read, so a store sharing one such connection between threads must read on a connection of its own
-  for the watch, or replace a connection an interrupt closed.
+  for the watch, or replace a connection an interrupt closed;
+- return from every call within a bound you document - a configured timeout - whatever the storage is doing:
+  waiting for a lock, another connection's write, the store's own earlier calls or the network. A call that reaches
+  it fails, changing nothing; `awaitEventsAfter` returns within its `timeout` plus the bound. Say which calls, if
+  any, you cannot bound, and why. Keep the bound well inside `ttl - renewEvery` (see
+  [When the store hangs](#when-the-store-hangs)).
 
 ### Testing it with the contract suite
 
@@ -643,7 +705,7 @@ revealing its run to the thread's tenant through `ThreadBusy`, `RunRecovered.tak
 `awaitEventsAfter` itself, and subscriptions in one runtime that receive another runtime's commits in order, mid-run,
 across a restart, and only until they are cancelled or the thread is deleted. `InMemoryCheckpointer` passes it.
 
-Three hooks fit it to a durable store:
+Four hooks fit it to a durable store:
 
 ```scala
 class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
@@ -663,6 +725,11 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
 - **`sibling`** opens another store over the same storage, as another process would, while the first stays open:
   `MyCheckpointer.open(mine.location, clock)`. The change-notification cases put each runtime on a store of its own
   through it. It defaults to the same instance.
+- **`boundedStore`** gives the case that checks the bound on every call a store configured with a short one, the
+  bound it documents, and a way to make the storage busy from outside, as another process holding a write would:
+  `CheckpointerContract.BoundedStore(store, bound, busy)`. The case makes many calls at once while the storage is
+  busy, and fails if one takes longer than `bound` plus `boundGrace` (500 ms). It defaults to `None`, which skips the
+  case: right for a store whose storage nothing outside it can hold, as `InMemoryCheckpointer`'s.
 - **`advanceStoreClock`** is how the suite expires claims. By default it moves the `ManualClock` it handed to
   `newCheckpointer`, so the store must judge expiry by that `clock`. A store that can only use a clock of its own,
   such as a database server's `now()`, overrides it to make claims expire as if that clock had moved - by moving

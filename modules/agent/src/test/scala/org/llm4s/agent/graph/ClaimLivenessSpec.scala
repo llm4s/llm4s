@@ -492,12 +492,17 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     two.awaitEntered()
     time.broken = true
     time.advance(20.seconds)
+    // a renewal in flight as the clock broke may have read it first and landed; renewals run one at a time, so
+    // once two more have begun it has returned, and every renewal since has read the broken clock
     val failing = store.renewals.get
     eventually(store.renewals.get > failing + 1)
-    store.renewed.get shouldBe 0
+    val landedBefore = store.renewed.get
+    val since        = store.renewals.get
+    eventually(store.renewals.get > since + 1)
+    store.renewed.get shouldBe landedBefore
 
     time.broken = false
-    eventually(store.renewed.get > 0)
+    eventually(store.renewed.get > landedBefore)
     time.advance(25.seconds)
     // three renewals after the advance: a beat has judged the renewed lease still held since it
     val judged = store.renewals.get
@@ -2614,5 +2619,105 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
     taken.takenOverFrom shouldBe Some(RunId("first"))
     store.release(thread, taken.token).value
     store.claim(thread, ClaimRequest(RunId("third"), None, 1.second)).value.takenOverFrom shouldBe None
+  }
+
+  // ---- #1919: a closing wait stuck on a store that keeps the run's claim is bounded too ----
+
+  /**
+   * A store whose renewals always land, so the run never loses its claim, and whose commit of a completed checkpoint -
+   * an `Async` run's drain, or an `OnExit` run's exit commit - sticks in the store, ignoring interrupts, until
+   * `hang` opens; its release sticks until `releaseGate` opens. Records which thread released, and whether its
+   * interrupt flag was set then.
+   */
+  final private class StuckClose {
+    val time         = ManualTime()
+    val store        = Hooked(InMemoryCheckpointer(time))
+    val hang         = new CountDownLatch(1)
+    val entered      = new CountDownLatch(1)
+    val returned     = new CountDownLatch(1)
+    val releaseGate  = new CountDownLatch(1)
+    val releaseBegan = new CountDownLatch(1)
+    val releaser     = AtomicReference[Option[(String, Boolean)]](None)
+    store.onRenew = alwaysRenewed
+    store.onCommit = commit =>
+      if commit.checkpoint.exists(_.status == CheckpointStatus.Completed) then {
+        entered.countDown()
+        stuckUntil(hang)
+        val written = store.underlying.commit(thread, commit)
+        returned.countDown()
+        Some(written)
+      } else None
+    store.onRelease = () => {
+      releaser.compareAndSet(None, Some(Thread.currentThread().getName -> Thread.currentThread().isInterrupted)): Unit
+      releaseBegan.countDown()
+      stuckUntil(releaseGate)
+      None
+    }
+    val rt: GraphRuntime = runtime(store, time, second)
+    val two              = TwoStep()
+    two.gate.countDown()
+    def start(durability: Durability): RunHandle[Vector[String]] =
+      rt.start(thread, two.graph, "x", run("first"), durability).value
+  }
+
+  "A run whose closing commit sticks in a store that keeps its claim" should
+    "end CommitTimedOut within twice its ttl, its thread freed and its claim released on a detached thread, for Async and OnExit" in {
+      for durability <- Seq(Durability.Async, Durability.OnExit) do
+        withClue(s"$durability: ") {
+          val stuck  = StuckClose()
+          val handle = stuck.start(durability).asInstanceOf[DefaultRunHandle[Vector[String]]]
+          val own    = RunRecorder()
+          handle.subscribe()(own).value
+          stuck.entered.await(5, TimeUnit.SECONDS) shouldBe true
+
+          // the bound is 2 seconds, inside the 5 a test waits; the release, stuck too, is not waited for
+          val ended = within(handle.await()).value.value
+          ended.failed._2 shouldBe GraphError.CommitTimedOut("t", 2.seconds)
+          stuck.rt.heldLocally(thread) shouldBe false
+          stuck.releaseBegan.await(5, TimeUnit.SECONDS) shouldBe true
+          stuck.releaser.get.value._1 should startWith("llm4s-release-")
+          stuck.releaser.get.value._2 shouldBe false
+          own.ended.await(5, TimeUnit.SECONDS) shouldBe true
+          // the run thread is still in the store; the commit in flight is an orphan, so the hub keeps its mark
+          handle.runThreadExited.getCount shouldBe 1
+          stuck.rt.handOverMarked(thread) shouldBe true
+
+          // the commit lands - the release has not, so the claim still admits it - as an orphan of the run
+          stuck.hang.countDown()
+          stuck.returned.await(5, TimeUnit.SECONDS) shouldBe true
+          handle.runThreadExited.await(5, TimeUnit.SECONDS) shouldBe true
+          events(stuck.store).filter(_.runId == "first").map(_.event) should contain(RunEvent.RunCompleted)
+          own.eventsOf("first") should not contain RunEvent.RunCompleted
+          eventually(!stuck.rt.handOverMarked(thread))
+          // the run has its one result
+          handle.await().value shouldBe ended
+
+          // the release lands, and the thread can be claimed again at once
+          stuck.releaseGate.countDown()
+          eventually(stuck.store.released.get == 1)
+          stuck.store.underlying.claim(thread, ClaimRequest(RunId("next"), None, 1.hour)).isRight shouldBe true
+        }
+    }
+
+  it should "have its late commit refused once the release has landed, so nothing of its outcome is recorded" in {
+    for durability <- Seq(Durability.Async, Durability.OnExit) do
+      withClue(s"$durability: ") {
+        val stuck = StuckClose()
+        stuck.releaseGate.countDown()
+        val handle = stuck.start(durability).asInstanceOf[DefaultRunHandle[Vector[String]]]
+        stuck.entered.await(5, TimeUnit.SECONDS) shouldBe true
+        within(handle.await()).value.value.failed._2 shouldBe GraphError.CommitTimedOut("t", 2.seconds)
+        eventually(stuck.store.released.get == 1)
+
+        stuck.hang.countDown()
+        stuck.returned.await(5, TimeUnit.SECONDS) shouldBe true
+        handle.runThreadExited.await(5, TimeUnit.SECONDS) shouldBe true
+        events(stuck.store).filter(_.runId == "first").map(_.event) should not contain RunEvent.RunCompleted
+        stuck.store.latest(thread).value.value.checkpoint.status shouldBe CheckpointStatus.Running
+        eventually(!stuck.rt.handOverMarked(thread))
+        // the run's last durable checkpoint is still Running, so recover continues it
+        stuck.store.onCommit = _ => None
+        await(stuck.rt.recover(thread, stuck.two.graph, run("next")).value).completed._2 shouldBe Vector("x", "second")
+      }
   }
 }

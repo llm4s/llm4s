@@ -274,6 +274,26 @@ ever names another tenant's run. Code that only runs agents or graphs needs no c
 
 Design: `docs/design/typed-agent-runtime/4.16-stage-2-slice-1-the-durable-checkpointer-contract.md` (§4.16).
 
+### Bounded store calls (#1919)
+
+Code that only runs agents needs no change. A graph run may now end with one more error, and a store has one more
+duty.
+
+- **New `GraphError.CommitTimedOut(threadId, after)`**, from `RunHandle.await()` of a graph run with
+  `Durability.Async` or `OnExit` whose closing commit stayed in the store for twice `ClaimPolicy.ttl`. An `Agent`
+  runs `Sync`, so never sees it. An exhaustive `match` on `GraphError` gains a case. After it, read the thread
+  before `recover`: the commit may or may not have landed.
+- **A `Checkpointer` must return from every call within a bound it documents**, failing a call that reaches it with
+  nothing changed. A store whose calls could wait on a lock, another connection or a network with no limit must add
+  a timeout. To have `CheckpointerContract` check it, override `boundedStore` with
+  `CheckpointerContract.BoundedStore(store, bound, busy)`.
+- **`SqliteCheckpointer` calls fail sooner under contention inside one store**: a call waits for the store's own
+  earlier calls at most `busyTimeout` (with its turn at the file), then fails with a `ProcessingError`, where it
+  used to wait with no limit. Raise `SqliteCheckpointerConfig.busyTimeout` if many threads share one store and its
+  calls are slow.
+
+Design: `docs/design/typed-agent-runtime/4.16-stage-2-slice-1-the-durable-checkpointer-contract.md` (§4.16).
+
 ## Stage 2 migration: durable execution
 
 Not in a release yet. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/1699)) makes agent and graph threads durable and adds human review. One note covers the whole stage; each slice adds its part here as it lands:
