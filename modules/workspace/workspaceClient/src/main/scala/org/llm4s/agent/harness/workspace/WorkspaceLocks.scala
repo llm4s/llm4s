@@ -50,7 +50,6 @@ private[workspace] object WorkspaceCalls:
     "SIZE_LIMIT_EXCEEDED",
     "DIRECTORY_NOT_EMPTY",
     "PARENT_NOT_A_DIRECTORY",
-    "WORKSPACE_BUSY",
     "INVALID_ARGUMENT",
     "FILE_EXISTS"
   )
@@ -68,6 +67,9 @@ private[workspace] object WorkspaceCalls:
       case WorkspaceFailure(e) if NotFound(e.code)            => BackendRefused.notFound(operation, path)
       case WorkspaceFailure(e) if e.code == "NOT_A_DIRECTORY" => BackendRefused.notADirectory(operation, path)
       case WorkspaceFailure(e) if Refusals(e.code)            => BackendRefused.at(operation, path, e.error)
+      // the whole workspace is busy, not this entry: a refusal about no path, so a caller that skips an entry's
+      // refusals (grep) still stops on it
+      case WorkspaceFailure(e) if e.code == "WORKSPACE_BUSY" => BackendRefused(operation, "the workspace", e.error)
       case WorkspaceFailure(e) if e.code == "HASH_MISMATCH" =>
         GraphError.EffectReplayRefused(s"file.$operation", s"the workspace file changed under it: ${e.error}")
       case other => other

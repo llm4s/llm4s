@@ -147,10 +147,10 @@ final class WorkspaceFileBackend private (val id: String, workspace: WorkspaceAg
           while failure.isEmpty && count <= limit.toLong && candidates.hasNext do
             val path = candidates.next()
             snapshot("grep", path, content = true) match
-              // an entry the workspace will not read as a file (a FIFO, a socket, gone since the walk, a path the
-              // sandbox refuses) is skipped like unreadable text, the listing marked truncated; anything else fails
-              case Left(_: BackendRefused) => skipped = true
-              case Left(error)             => failure = Some(error)
+              // a refusal about the entry itself (a FIFO, a socket, gone since the walk, a path the sandbox refuses) skips
+              // it, the listing marked truncated; a workspace-wide one (busy) or any failure stops the search
+              case Left(r: BackendRefused) if r.path.isDefined => skipped = true
+              case Left(error)                                 => failure = Some(error)
               case Right(s) =>
                 s.content match
                   // not searched - not text, too large, or no longer a file since the walk: matches may be missing

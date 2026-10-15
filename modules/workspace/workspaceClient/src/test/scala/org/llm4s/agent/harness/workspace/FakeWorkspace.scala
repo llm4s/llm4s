@@ -29,6 +29,9 @@ final class FakeWorkspace(
   /** Adds a FIFO-like entry at `path`, which a snapshot refuses as NOT_A_FILE. */
   def special(path: String): Unit = synchronized(specials += norm(path))
 
+  /** When set, every snapshot is refused as the runner refuses a request while a command holds its gate. */
+  @volatile var busy: Boolean = false
+
   /** Every compare-and-set the workspace has applied: (operation, path). */
   val applied: mutable.Buffer[(String, String)] = mutable.Buffer()
 
@@ -147,6 +150,7 @@ final class FakeWorkspace(
   def fileSnapshot(path: String, includeContent: Boolean, followLinks: Boolean): FileSnapshotResponse = synchronized {
     import FileSnapshotResponse.Kind
     val p = norm(path)
+    if busy then fail("WORKSPACE_BUSY", "A command is in progress in the workspace")
     if specials(p) then fail("NOT_A_FILE", s"Path '$path' is not a regular file")
     if dirs(p) then FileSnapshotResponse("local", path, Kind.Directory, Kind.Directory, 0L)
     else

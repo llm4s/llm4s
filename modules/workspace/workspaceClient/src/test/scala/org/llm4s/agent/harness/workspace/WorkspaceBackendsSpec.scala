@@ -153,6 +153,16 @@ class WorkspaceBackendsSpec extends AnyFlatSpec with Matchers with EitherValues 
     found.truncated shouldBe true
   }
 
+  it should "stop a search, rather than skip entries, when the whole workspace is busy" in {
+    val workspace = new FakeWorkspace()
+    workspace.seed("t.txt", "hit")
+    workspace.busy = true
+    val refused = inCall(WorkspaceFixtures.files(workspace).grep("hit", p("/"), None, 10, _)).left.value
+    refused shouldBe a[BackendRefused]
+    refused.asInstanceOf[BackendRefused].path shouldBe None
+    refused.message should include("in progress")
+  }
+
   it should "mark a listing the workspace cut as truncated, and keep search at its limit" in {
     val workspace = new FakeWorkspace(maxEntries = 2)
     (1 to 3).foreach(i => workspace.seed(s"f$i.txt", "x\nx"))
