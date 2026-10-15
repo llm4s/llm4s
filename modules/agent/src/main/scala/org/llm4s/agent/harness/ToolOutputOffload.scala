@@ -92,12 +92,12 @@ final class ToolOutputOffload(
 
   /** What the model is shown in place of `full`: where it is stored, and its first lines. */
   private def preview(result: OffloadedResult, full: String): String =
-    val lines = Text.lines(full)
-    val shown = lines.take(PreviewLines).map(l => if l.length > PreviewLineChars then s"${cutChars(l)}..." else l)
+    val (head, total) = firstLines(full, PreviewLines)
+    val shown         = head.map(l => if l.length > PreviewLineChars then s"${cutChars(l)}..." else l)
     val cut =
       if result.truncated then s" Only its first ${result.content.length} characters are stored: the rest is lost."
       else ""
-    val more = Option.when(lines.size > shown.size)(s"[... ${lines.size - shown.size} more lines]")
+    val more = Option.when(total > shown.size)(s"[... ${total - shown.size} more lines]")
     (Vector(
       s"[The result of ${result.tool} is ${full.length} characters (about ${(full.length + 3) / 4} tokens), over " +
         s"this agent's limit of $thresholdTokens tokens, so it is not shown here. It is stored, read-only, at " +
@@ -163,6 +163,25 @@ object ToolOutputOffload:
       .map(b => f"${b & 0xff}%02x")
       .mkString
 
+  /**
+   * The first `n` lines of `s` as `Text.lines` splits it (on `\n`, a trailing `\r` dropped, no empty line after a
+   * last `\n`), each cut to [[PreviewLineChars]] plus one character, and the number of lines in all: one scan that
+   * copies only those `n` lines, so a result of many short lines costs no allocation per line.
+   */
+  private[harness] def firstLines(s: String, n: Int): (Vector[String], Long) =
+    val head  = Vector.newBuilder[String]
+    var count = 0L
+    var start = 0
+    while start < s.length do
+      val nl  = s.indexOf('\n', start)
+      val end = if nl < 0 then s.length else nl
+      if count < n then
+        val line = s.substring(start, math.min(end, start + PreviewLineChars + 1))
+        head += (if end - start <= PreviewLineChars + 1 then line.stripSuffix("\r") else line)
+      count += 1
+      start = if nl < 0 then s.length else nl + 1
+    (head.result(), count)
+
   private def cutChars(line: String): String = SummarizationMiddleware.cut(line, PreviewLineChars.toLong)
 
   /**
@@ -171,9 +190,9 @@ object ToolOutputOffload:
    * sized without rendering it.
    */
   private def resultText(content: ToolContent, limit: Long): Option[String] = content match
-    case ToolContent.Json(ujson.Str(s)) => Some(s)
-    case ToolContent.Json(other)        => Option.when(Text.jsonValueBytes(other, limit) > limit)(other.render())
-    case ToolContent.Parts(parts)       => Some(ContentPart.text(parts))
+    case ToolContent.Json(ujson.Str(s)) if s.trim.nonEmpty => Some(s)
+    case ToolContent.Json(other)  => Option.when(Text.jsonValueBytes(other, limit) > limit)(other.render())
+    case ToolContent.Parts(parts) => Some(ContentPart.text(parts))
 
   /**
    * What the model is sent in place of `content`: the preview, and for content parts every non-text part after it,

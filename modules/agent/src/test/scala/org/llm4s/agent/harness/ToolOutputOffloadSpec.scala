@@ -129,6 +129,28 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
     offloadsOf(state).results.head.content should startWith("""[{"i":1,"pad":"yyy""")
   }
 
+  it should "measure a blank string as the loop sends it, rendered as JSON" in {
+    val blank = AgentTool(
+      AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))
+    )((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("\n" * 3000))))
+    val model = ScriptedModel(calling("c1" -> 1), answer("done"))
+    val (state, _) =
+      runInMemory(
+        loopOf(model, Seq(new ToolOutputOffload(thresholdTokens = 1000)), blank).graph,
+        AgentInput("go")
+      ).answered
+    // 3000 characters raw, but 6002 as the JSON string the loop would send: over the 4000-character threshold
+    offloadsOf(state).results.head.content shouldBe ujson.Str("\n" * 3000).render()
+  }
+
+  "The preview" should "take the first lines in one scan, counting the rest" in {
+    val (head, total) = ToolOutputOffload.firstLines("a\r\nb\n" + "x" * 500 + "\nd\n", 3)
+    head shouldBe Vector("a", "b", "x" * 201)
+    total shouldBe 4L
+    ToolOutputOffload.firstLines("", 3) shouldBe (Vector.empty -> 0L)
+    ToolOutputOffload.firstLines("\n" * 1000000, 2)._2 shouldBe 1000000L
+  }
+
   it should "offload only the text of content parts, passing every image on in order" in {
     val chart = ContentPart.image(MediaSource.Url(URI.create("https://example.com/chart.png")), MediaType.Png).value
     val photo = ContentPart.image(MediaSource.Url(URI.create("https://example.com/photo.png")), MediaType.Png).value
