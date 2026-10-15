@@ -195,6 +195,9 @@ class WorkspaceBackendsSpec extends AnyFlatSpec with Matchers with EitherValues 
     refused shouldBe a[BackendRefused]
     refused.asInstanceOf[BackendRefused].path shouldBe None
     refused.message should include("in progress")
+    // and a glob of one file, whose snapshot is refused for the whole workspace, says so rather than finding nothing
+    val globbed = inCall(WorkspaceFixtures.files(workspace).find(p("/t.txt"), _ => true, 10, _)).left.value
+    globbed.asInstanceOf[BackendRefused].path shouldBe None
   }
 
   it should "mark a listing the workspace cut as truncated, and keep search at its limit" in {

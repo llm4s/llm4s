@@ -120,8 +120,10 @@ final class WorkspaceFileBackend private (val id: String, workspace: WorkspaceAg
         // refuses, is no file a listing names
         call(operation, under)(workspace.fileSnapshot(relative(under), includeContent = false)) match
           case Right(s) if s.kind == FileSnapshotResponse.Kind.File => Right((Vector(under), false))
-          case Right(_) | Left(_: BackendRefused)                   => Right((Vector.empty, false))
-          case Left(other)                                          => Left(other)
+          case Right(_)                                             => Right((Vector.empty, false))
+          // a refusal of this entry; one of the whole workspace (busy) is the caller's to see
+          case Left(r: BackendRefused) if r.path.isDefined => Right((Vector.empty, false))
+          case Left(other)                                 => Left(other)
       case Left(other) => Left(other)
 
   def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
