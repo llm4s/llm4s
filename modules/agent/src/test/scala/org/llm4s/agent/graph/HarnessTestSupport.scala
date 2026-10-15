@@ -21,7 +21,7 @@ object HarnessTestSupport {
     )
 
   /**
-   * A `RunContext` at `thread`, run `run`, claim `token` and task `task`, whose durable events are appended to
+   * A `RunContext` of runtime `runtime` at `thread`, run `run`, claim `token` and task `task`, whose durable events are appended to
    * `events` as (name, payload); [[discardAttempt]] empties it, as a runtime drops a failed attempt's events.
    */
   def recordingRunContext(
@@ -29,7 +29,8 @@ object HarnessTestSupport {
     thread: String = "t",
     run: String = "r",
     token: Option[Long] = None,
-    task: String = "task"
+    task: String = "task",
+    runtime: String = "rt"
   ): RunContext =
     val sink = new NodeEventSink:
       def custom(name: String, version: Int, payload: ujson.Value): Unit   = events.add(name -> payload): Unit
@@ -38,8 +39,12 @@ object HarnessTestSupport {
     new RunContext(
       RunConfig().withRunId(RunId(run)),
       RunPosition(ThreadId(thread), RunId(run), "", TaskId(task), NodeId("node"), 0, token.map(FencingToken(_))),
-      sink
+      sink,
+      // one journal per named runtime, so contexts of one runtime are one incarnation per (thread, run, token)
+      journal = journals.computeIfAbsent(runtime, _ => EffectJournal.local())
     )
+
+  private val journals = new java.util.concurrent.ConcurrentHashMap[String, EffectJournal]()
 
   /** Forgets the durable events `context` emitted, as a runtime does before retrying a failed attempt. */
   def discardAttempt(context: RunContext): Unit = context.discardAttempt()
