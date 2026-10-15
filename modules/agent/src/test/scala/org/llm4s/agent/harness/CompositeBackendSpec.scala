@@ -341,4 +341,20 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     refusal.path shouldBe None
     refusal.message should include("shadowed")
   }
+
+  it should "name no path for a refusal of an entry whose composite path would be too long" in {
+    val base = StateFileBackend(keyId = "base2")
+    val over = StateFileBackend(keyId = "over2")
+    val c    = CompositeBackend(base, p("/scratch") -> over).value
+    val long = p("/" + Seq.fill(5)("d" * 203).mkString("/")) // 1020 bytes: 1028 under /scratch
+    var st   = stateOf(base.files, over.files)
+    st = committed(
+      st,
+      StateUpdate.update(over.files, FileUpdate.Put(long, FileEntry("a\u0000b", java.time.Instant.EPOCH)))
+    ).value
+    val refusal = c.ls(p("/scratch"), 10, FileContext(testRunContext(), st)).left.value.asInstanceOf[BackendRefused]
+    refusal.kind shouldBe BackendRefused.Kind.Corrupt
+    refusal.path shouldBe None
+    refusal.message should include("longer than a path may be")
+  }
 }
