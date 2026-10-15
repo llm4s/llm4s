@@ -19,6 +19,9 @@ import upickle.default.ReadWriter
 /**
  * The bounds of [[FileTools]]' results (design §4.32, rule 12).
  *
+ * Every limit in characters counts UTF-16 units, as `String.length` does, so it bounds the text's size as stored
+ * and sent; a character outside the Basic Multilingual Plane (an emoji) counts 2. A cut never splits one.
+ *
  * @param readLimit the lines `read_file` returns when the model gives no `limit`, and the most it returns
  * @param maxLineChars the most characters of one line `read_file` and `grep` show; a longer line is cut and marked
  * @param maxResults the most entries `ls`, `glob` and `grep` return; a longer listing says it stopped
