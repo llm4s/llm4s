@@ -17,14 +17,14 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
   private def ctxOn(backend: FileBackend) =
     FileContext(org.llm4s.agent.graph.GraphTestSupport.testRunContext(), stateOf(backend.writes.toSeq*))
 
-  "DocumentText.read" should "read a file whole across pages, or None when it is missing" in {
+  "DocumentText.read" should "read a file whole in one call, one version of it, or None when it is missing" in {
     val backend = storeBackend()
     val lines   = (1 to 600).map(i => s"line $i")
     seed(backend, "/a.md" -> lines.mkString("\n"))
     val counting = new CountingBackend(backend)
     DocumentText.read(counting, p("/a.md"), 1_000_000L, ctxOn(backend)).value.value shouldBe
       BoundedText(lines.mkString("\n"), cut = false)
-    counting.reads.get shouldBe 3 // 256 lines a page
+    counting.reads.get shouldBe 1
     DocumentText.read(backend, p("/missing.md"), 100L, ctxOn(backend)).value shouldBe None
   }
 
@@ -42,7 +42,7 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
       BoundedText("abc\ndef\n\uD83D\uDE00xyz", cut = false)
   }
 
-  it should "stop after the line its predicate accepts, reading no further page" in {
+  it should "stop after the line its predicate accepts, asking for no more lines than the bound can hold" in {
     val backend = storeBackend()
     seed(backend, "/a.md" -> ((1 to 600).map(i => s"l$i").mkString("\n")))
     val counting = new CountingBackend(backend)

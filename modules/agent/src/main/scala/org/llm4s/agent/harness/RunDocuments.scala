@@ -148,13 +148,12 @@ final private[harness] case class BoundedText(text: String, cut: Boolean)
 
 private[harness] object DocumentText:
 
-  /** Lines asked of the backend per read. */
-  private val PageLines = 256
-
   /**
-   * At most `maxChars` characters of the file `path`, its lines joined with `\n`, cut on a code-point boundary; read
-   * page by page, stopping after the first line `stop` accepts. `None` when the file does not exist. Each line is
-   * bounded as it is added, so nothing over `maxChars` is kept.
+   * At most `maxChars` characters of the file `path`, its lines joined with `\n`, cut on a code-point boundary, and
+   * stopping after the first line `stop` accepts; `None` when the file does not exist. Read in one call, so the text
+   * is one version of the file even when another run writes it meanwhile (pages read separately could join two). The
+   * call asks for no more lines than `maxChars` characters can hold (each line takes at least its separator), and each
+   * line is bounded as it is added, so nothing over `maxChars` is kept.
    */
   def read(
     backend: FileBackend,
@@ -163,41 +162,35 @@ private[harness] object DocumentText:
     ctx: FileContext,
     stop: String => Boolean = _ => false
   ): Result[Option[BoundedText]] =
-    val out     = new java.lang.StringBuilder()
-    var started = false // whether a line was added: every later line is preceded by `\n`
-    @annotation.tailrec
-    def loop(offset: Int): Result[Option[BoundedText]] =
-      if Thread.currentThread().isInterrupted then Left(CancelledError(s"read ${path.value}"))
-      else
-        backend.read(path, offset, PageLines, ctx) match
-          case Left(refused: BackendRefused) if offset == 0 && refused.kind == BackendRefused.Kind.NotFound =>
-            Right(None)
-          case Left(error) => Left(error)
-          case Right(page) =>
-            val lines   = page.lines.iterator
-            var outcome = Option.empty[Boolean] // Some(cut) once reading is over
-            while outcome.isEmpty && lines.hasNext do
-              val line      = lines.next()
-              val separator = if started then 1 else 0
-              started = true
-              val room = maxChars - out.length - separator
-              // measured before anything is copied: a line over the room is cut, not appended whole
-              if room < 0 then outcome = Some(true)
+    if Thread.currentThread().isInterrupted then Left(CancelledError(s"read ${path.value}"))
+    else
+      val limit = math.min(maxChars + 2, Text.MaxLength.toLong).toInt
+      backend.read(path, 0, limit, ctx) match
+        case Left(refused: BackendRefused) if refused.kind == BackendRefused.Kind.NotFound => Right(None)
+        case Left(error)                                                                   => Left(error)
+        case Right(page) =>
+          val out     = new java.lang.StringBuilder()
+          val lines   = page.lines.iterator
+          var started = false                 // whether a line was added: every later line is preceded by `\n`
+          var outcome = Option.empty[Boolean] // Some(cut) once reading is over
+          while outcome.isEmpty && lines.hasNext do
+            val line      = lines.next()
+            val separator = if started then 1 else 0
+            started = true
+            val room = maxChars - out.length - separator
+            // measured before anything is copied: a line over the room is cut, not appended whole
+            if room < 0 then outcome = Some(true)
+            else
+              if separator == 1 then out.append('\n')
+              if line.length.toLong > room then
+                out.append(cut(line, room))
+                outcome = Some(true)
               else
-                if separator == 1 then out.append('\n')
-                if line.length.toLong > room then
-                  out.append(cut(line, room))
-                  outcome = Some(true)
-                else
-                  out.append(line)
-                  if stop(line) then outcome = Some(false)
-            val next = offset.toLong + page.lines.size
-            outcome match
-              case Some(wasCut) => Right(Some(BoundedText(out.toString, wasCut)))
-              case None if page.lines.isEmpty || next >= page.totalLines =>
-                Right(Some(BoundedText(out.toString, cut = false)))
-              case None => loop(next.toInt)
-    loop(0)
+                out.append(line)
+                if stop(line) then outcome = Some(false)
+          // lines the call did not return are lines the bound left out
+          val wasCut = outcome.getOrElse(page.lines.size < page.totalLines)
+          Right(Some(BoundedText(out.toString, wasCut)))
 
   /** At most `max` characters of `s`, on a code-point boundary. */
   def cut(s: String, max: Long): String =
