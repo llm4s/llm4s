@@ -187,6 +187,15 @@ trait AgentMiddleware:
   def runsAfter: Set[MiddlewareId] = Set.empty
 
   /**
+   * Where this middleware must run relative to `other`, when both are present; `None`, the default, when it does not
+   * matter. A requirement is checked, never arranged: [[MiddlewareStack.of]] - so `AgentBuilder.build()` - refuses a
+   * stack in which this middleware does not run outside `other`, and a [[Placement.OutsideAtBoundary]] is checked
+   * across an agent family too. Register the two in the right order, or name `other` in [[runsBefore]]. Name `other`
+   * by its type: ids are configurable.
+   */
+  def placement(@unused other: AgentMiddleware): Option[Placement] = None
+
+  /**
    * The state keys this middleware's hooks may write: an update from `beforeAgent`, `wrapModelCall` or
    * `afterAgent`, or one `wrapToolCall` adds to a `Success`. A hook's write to any other key fails the run.
    */
@@ -237,6 +246,26 @@ trait AgentMiddleware:
   def wrapToolCall(@unused request: ToolCallRequest, @unused context: ToolContext)(
     next: () => ToolOutcome
   ): ToolOutcome = next()
+
+/**
+ * Where a middleware must run relative to another ([[AgentMiddleware.placement]]): a position its correctness depends
+ * on, which the stack checks rather than leaving to the documentation.
+ */
+@Experimental
+enum Placement:
+
+  /** Why the placement is required, for the refusal. */
+  def reason: String
+
+  /** This middleware must wrap the other in one agent's stack: every hook of this one runs outside the other's. */
+  case Outside(reason: String)
+
+  /**
+   * As `Outside`, and across an agent family too, for a requirement about `beforeAgent` and `afterAgent`: the root
+   * agent's boundary hooks run outside the active agent's own, so this middleware on a handoff target is refused when
+   * the root has the other, whatever the order.
+   */
+  case OutsideAtBoundary(reason: String)
 
 object AgentMiddleware:
 

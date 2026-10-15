@@ -105,6 +105,8 @@ and tools on `AgentBuilder`. Each slice adds its part here as it lands:
 - [#1911](https://github.com/llm4s/llm4s/issues/1911), semantic memory - the new `llm4s-agent-memory` module and
   `TransactionalMemoryStore`: [below](#semantic-memory-1911).
 - [#1914](https://github.com/llm4s/llm4s/issues/1914), typed custom streams: [below](#typed-custom-streams-1914).
+- [#1915](https://github.com/llm4s/llm4s/issues/1915), the harness profile and middleware placement checks:
+  [below](#harness-profile-and-middleware-placement-1915).
 - [#1921](https://github.com/llm4s/llm4s/issues/1921), replay of external effects - `ReplayGuard`, `Checkpointer.effect`
   and `Commit.effects`: [below](#replay-of-external-effects-1921).
 - [#1926](https://github.com/llm4s/llm4s/issues/1926), the tenant on a run claim - `ClaimRequest` and `RunClaim`
@@ -216,6 +218,12 @@ Design §4.31. `SemanticMemoryMiddleware` is in a new module, `llm4s-agent-memor
 - **`PostgresMemoryStore.Config.tableName` is at most 55 characters** (was 63), so the names derived from it (`<table>_applied`, `<table>_fences`, the `idx_<table>_...` indexes) stay distinct within PostgreSQL's 63-byte identifier limit. A longer name is refused when the config is built: give the table a shorter name.
 - **SQLite memory files move to schema version 2.** Opening a file creates its two new tables, `memory_applied_writes` and `memory_fences`, and records version 2 beside version 1 in `schema_version`. A Postgres store creates `<table>_applied` and `<table>_fences` beside its table.
 - **Adding `SemanticMemoryMiddleware` to an existing agent** registers the `semantic-memory-recalled` key and changes the agent's version (§4.29). A thread at rest restores, with nothing recalled until its next turn, and restores again if the middleware is removed (the key is cleared at the end of each turn). A thread in flight - suspended, or `Running` after a crash - is refused with `RestoreRejected`: resume or recover it with the old agent first. Agents without it are unchanged.
+
+### Harness profile and middleware placement (#1915)
+
+Design §4.37. `HarnessProfile`, `AgentBuilder.withHarness` and `HarnessConfigLoader` (`org.llm4s.agent.harness`) are additions; `llm4s-agent` now ships a `reference.conf` with the `llm4s.agent.harness` block. One behaviour changes:
+
+- **`build()` refuses a middleware order that a middleware declares wrong** (`AgentMiddleware.placement`), with a `ValidationError` naming both middleware and the fix. A `SemanticMemoryMiddleware` registered after (inside) a `GuardrailMiddleware` or `GuardrailReviewMiddleware` - which recorded answers the guardrail then blocked - is refused: register it first, or name the guardrail's id in its `runsBefore`. So is one on a handoff target when the root agent has guardrail middleware, since the root's `afterAgent` runs after every agent's own: put both on the same agent. A `SummarizationMiddleware` registered after a `ToolOutputOffload` is refused too: register it first.
 
 ### Typed custom streams (#1914)
 

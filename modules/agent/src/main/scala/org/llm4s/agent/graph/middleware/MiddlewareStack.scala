@@ -181,7 +181,9 @@ object MiddlewareStack:
    * Orders `middleware` topologically by `runsBefore` / `runsAfter` (`a.runsBefore(b)` and
    * `b.runsAfter(a)` are the same edge, `a` outside `b`), breaking ties by registration order.
    * One `ValidationError` lists every invalid id, duplicate id, constraint naming an id that is not
-   * registered, cycle, and tool name contributed twice by one middleware or by more than one.
+   * registered, cycle, and tool name contributed twice by one middleware or by more than one; when there is none, the
+   * order is checked against every middleware's [[AgentMiddleware.placement]], and one `ValidationError` lists each
+   * middleware that runs inside one it must run outside.
    */
   def of(middleware: AgentMiddleware*): Result[MiddlewareStack] =
     val all   = middleware.toVector
@@ -240,8 +242,23 @@ object MiddlewareStack:
     val problems = (invalid ++ duplicates ++ unknown ++ cycles ++ clashes).toList
     if problems.nonEmpty then Left(ValidationError("middleware stack", problems))
     else
-      val byId = all.map(m => m.id -> m).toMap
-      Right(new MiddlewareStack(order.map(byId)))
+      val byId    = all.map(m => m.id -> m).toMap
+      val ordered = order.map(byId)
+      misplaced(ordered).toList match
+        case Nil       => Right(new MiddlewareStack(ordered))
+        case misplaced => Left(ValidationError("middleware stack", misplaced))
+
+  /**
+   * Every pair of `ordered` (outermost first) where a middleware's [[AgentMiddleware.placement]] requires it to run
+   * outside another that runs outside it, described with the fix.
+   */
+  private def misplaced(ordered: Vector[AgentMiddleware]): Vector[String] =
+    for
+      (inner, at) <- ordered.zipWithIndex
+      outer       <- ordered.take(at)
+      required    <- inner.placement(outer).toVector
+    yield s"middleware '${inner.id.value}' must run outside '${outer.id.value}' (${required.reason}), but runs " +
+      s"inside it: register '${inner.id.value}' before '${outer.id.value}'"
 
   /**
    * One cycle per strongly connected component of `blocked` that has one, starting and ending at

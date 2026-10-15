@@ -35,7 +35,8 @@ import java.util.regex.Pattern
  *   - **Content parts.** Only text is offloaded. Every non-text part of a result is passed on as it is, after the
  *     preview.
  *   - **Cleanup.** With a [[SummarizationMiddleware]], results whose path appears in a tool result the summary
- *     covers are dropped at the next model step. The bound does not depend on it.
+ *     covers are dropped at the next model step. The bound does not depend on it. The summariser runs outside
+ *     this middleware - `build()` refuses the other order (`SummarizationMiddleware.placement`).
  *
  * An output Block restores the key, so a blocked turn's results are never kept.
  *

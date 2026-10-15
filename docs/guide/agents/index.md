@@ -636,6 +636,49 @@ for {
 - Instruction memory is a few whole files the agent always sees; [semantic memory](memory) is facts
   recalled per query.
 
+### Harness Profile
+
+`HarnessProfile` assembles the pieces above into one value, installed with `withHarness`:
+
+```scala
+import org.llm4s.agent.graph.middleware.PermissionRule
+import org.llm4s.agent.graph.tool.Operation
+import org.llm4s.agent.harness.{HarnessConfigLoader, HarnessProfile, PromptMode}
+
+for {
+  profile <- HarnessConfigLoader.load()            // HarnessProfile.deepAgents, with llm4s.agent.harness applied
+  agent <- Agent.builder("researcher", client)
+             .withHarness(
+               profile
+                 .withSystemPrompt(PromptMode.Suffix("Write the report to /report.md."))
+                 .withPermissions(Vector(
+                   PermissionRule.allow(Operation.Read, "/**"),
+                   PermissionRule.allow(Operation.Write, "/report.md"),
+                   PermissionRule.allow(Operation.Invoke, "write_todos")
+                 ))
+             )
+             .build()                                // Result[Agent]
+} yield agent
+```
+
+- **`HarnessProfile.deepAgents`** turns everything on at its defaults: the file tools over a
+  `StateFileBackend`, todos, summarisation (the model-free digest compressor), offload of large tool
+  results, skills under `/skills` and instructions in `/AGENTS.md`. `HarnessProfile()` is the file
+  tools alone. Change either with the `with*` setters: `withBackend`, `withSandbox` (adds `execute`),
+  `withTools(ToolSelection.Only(...))`, `withTodos(None)`, `withToolTimeout`, `withRetention`, ...
+- **The order is fixed**, outermost first: permissions, summarisation, offload, skills, instructions,
+  todos, then the builder's own middleware. With no permission rules there is no
+  `PermissionMiddleware`; with rules, a call no rule allows is denied.
+- **The prompt** is the profile's (plan, act and verify; context; tool safety), `PromptMode.Replace`
+  or `Suffix`. `withSystemPrompt` beside a harness is refused.
+- **Retention.** After each turn the thread keeps its latest 20 checkpoints (each is a full snapshot
+  of the files, plan and summary); `withRetention(RetentionPolicy.keepAll)` keeps everything.
+- **Defaults live in `llm4s-agent`'s `reference.conf`**, under `llm4s.agent.harness`; override them in
+  `application.conf`. Backends, a sandbox, permission rules and a model compressor are set in code.
+- **Middleware order is checked.** A middleware that must run outside another says so
+  (`AgentMiddleware.placement`), and `build()` refuses the wrong order: a `SummarizationMiddleware`
+  inside a `ToolOutputOffload`, or a `SemanticMemoryMiddleware` inside guardrail middleware.
+
 ---
 
 ## Features

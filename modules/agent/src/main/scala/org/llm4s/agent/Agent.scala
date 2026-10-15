@@ -41,7 +41,8 @@ final class Agent private[agent] (
   runtime: GraphRuntime,
   tracing: Option[Tracing],
   interruptBefore: Set[NodeId] = Set.empty,
-  interruptAfter: Set[NodeId] = Set.empty
+  interruptAfter: Set[NodeId] = Set.empty,
+  retention: Option[RetentionPolicy] = None
 ):
 
   /**
@@ -160,7 +161,7 @@ final class Agent private[agent] (
 
   /** [[recover]], returning at once with the running turn - to cancel it, or to await its result. */
   def startRecover(threadId: ThreadId, config: RunConfig = RunConfig()): Result[AgentRun] =
-    runtime.recover(threadId, loop.graph, configured(config)).map(agentRun(_, None, drain = false))
+    runtime.recover(threadId, loop.graph, configured(config)).map(agentRun(_, None, drain = false, config))
 
   /**
    * Answers some of `threadId`'s pending approvals, questions and breakpoints - built with
@@ -181,7 +182,7 @@ final class Agent private[agent] (
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig = RunConfig()
   ): Result[AgentRun] =
-    runtime.resume(threadId, loop.graph, answers, configured(config)).map(agentRun(_, None, drain = false))
+    runtime.resume(threadId, loop.graph, answers, configured(config)).map(agentRun(_, None, drain = false, config))
 
   /**
    * Starts a turn on `threadId` as [[run]] does, returning at once with the running turn - to
@@ -267,7 +268,7 @@ final class Agent private[agent] (
     val (observer, scope) = observed(config, listening)
     runtime
       .resume(threadId, loop.graph, answers, configured(config), observer = Some(observer))
-      .map(agentRun(_, Some(scope), listening.drain))
+      .map(agentRun(_, Some(scope), listening.drain, config))
 
   /**
    * Starts a turn with `begin` and awaits it. A caller already interrupted starts nothing. An
@@ -298,7 +299,7 @@ final class Agent private[agent] (
     val (observer, scope) = observed(config, listening)
     runtime
       .recover(threadId, loop.graph, configured(config), observer = Some(observer))
-      .map(agentRun(_, Some(scope), listening.drain))
+      .map(agentRun(_, Some(scope), listening.drain, config))
 
   private def startWith(
     threadId: ThreadId,
@@ -325,7 +326,7 @@ final class Agent private[agent] (
             observer
           )
         )
-    started.map(agentRun(_, watching.map(_._2), listening.exists(_.drain)))
+    started.map(agentRun(_, watching.map(_._2), listening.exists(_.drain), config))
 
   /** An observer whose listener is `listening`'s scoped to the run `config` starts, calling its `onEnd` at the scope's end. */
   private def observed(config: RunConfig, listening: Listening): (Observer, RunScope) =
@@ -338,8 +339,18 @@ final class Agent private[agent] (
       Left(ValidationError("history", "system messages are not imported; prompts belong to agents"))
     else Message.validateConversation(history.toList)
 
-  private def agentRun(handle: RunHandle[TurnOutput], scope: Option[RunScope], drain: Boolean): AgentRun =
-    AgentRun(handle, loop, id, runtime, tracing, scope, drain)
+  /**
+   * `handle` as an [[AgentRun]]; with a harness's retention, its thread is pruned to it, under `config`'s tenant, once
+   * the turn has ended and `await` first returns its outcome (design 4.37).
+   */
+  private def agentRun(
+    handle: RunHandle[TurnOutput],
+    scope: Option[RunScope],
+    drain: Boolean,
+    config: RunConfig
+  ): AgentRun =
+    val prune = retention.map(policy => () => runtime.prune(handle.threadId, policy, config))
+    AgentRun(handle, loop, id, runtime, tracing, scope, drain, prune)
 
 object Agent:
   private val logger = LoggerFactory.getLogger(classOf[Agent])

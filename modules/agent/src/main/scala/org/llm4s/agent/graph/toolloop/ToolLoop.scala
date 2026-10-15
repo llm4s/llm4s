@@ -12,6 +12,7 @@ import org.llm4s.agent.graph.middleware.{
   ModelContext,
   ModelRequest,
   ModelResponse,
+  Placement,
   PromptSection,
   ToolCallRequest
 }
@@ -585,8 +586,27 @@ object ToolLoop:
       prepared <- agents.foldLeft[Result[Vector[Prepared]]](Right(Vector.empty)) { (acc, agent) =>
         acc.flatMap(done => prepare(agent).map(done :+ _))
       }
+      _    <- boundaryPlacements(root, prepared)
       loop <- assemble(id, version, root, prepared)
     yield loop
+
+  /**
+   * The root agent's `beforeAgent` runs before the active agent's own and its `afterAgent` after, so the root's
+   * middleware run outside every other agent's at the boundary, whatever their order: a handoff target's middleware
+   * whose [[org.llm4s.agent.graph.middleware.Placement.OutsideAtBoundary]] names one of the root's is refused.
+   */
+  private def boundaryPlacements(root: AgentId, prepared: Vector[Prepared]): Result[Unit] =
+    val rootStack = prepared.filter(_.agent.id == root).flatMap(_.stack.ordered)
+    val problems =
+      for
+        target <- prepared.filter(_.agent.id != root)
+        inner  <- target.stack.ordered
+        outer  <- rootStack
+        reason <- inner.placement(outer).collect { case p: Placement.OutsideAtBoundary => p.reason }.toVector
+      yield s"agent '${target.agent.id.value}': middleware '${inner.id.value}' must run outside '${outer.id.value}' " +
+        s"($reason), but the root agent '${root.value}' has '${outer.id.value}', whose boundary hooks run outside " +
+        "every agent's own: put both on the same agent"
+    if problems.isEmpty then Right(()) else Left(ValidationError("middleware stack", problems.toList))
 
   /**
    * An agent with its middleware stacked and its tools joined with the middleware's, checked. `tools`
