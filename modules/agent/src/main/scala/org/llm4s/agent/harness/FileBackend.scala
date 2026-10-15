@@ -249,7 +249,8 @@ final case class BackendRefused(
   operation: String,
   target: String,
   reason: String,
-  kind: BackendRefused.Kind = BackendRefused.Kind.Refused
+  kind: BackendRefused.Kind = BackendRefused.Kind.Refused,
+  path: Option[VPath] = None
 ) extends LLMError
     with NonRecoverableError:
   override val message: String = s"$operation $target: $reason"
@@ -264,13 +265,21 @@ object BackendRefused:
   enum Kind:
     case Refused, NotFound, NotADirectory
 
+  /**
+   * A refusal of the backend path `path`: its target is the path, and `path` says so, typed, so a
+   * composite rebases it through a mount. A target that is a key or a pattern has no `path`, whatever it
+   * looks like.
+   */
+  def at(operation: String, path: VPath, reason: String, kind: Kind = Kind.Refused): BackendRefused =
+    BackendRefused(operation, path.value, reason, kind, Some(path))
+
   /** `path` does not exist. */
   def notFound(operation: String, path: VPath): BackendRefused =
-    BackendRefused(operation, path.value, "not found", Kind.NotFound)
+    at(operation, path, "not found", Kind.NotFound)
 
   /** `path` is a file where a directory is needed. */
   def notADirectory(operation: String, path: VPath): BackendRefused =
-    BackendRefused(operation, path.value, "is a file, not a directory", Kind.NotADirectory)
+    at(operation, path, "is a file, not a directory", Kind.NotADirectory)
 
   /**
    * The tool outcome of a backend's error: a refusal is an `Error` the model sees; anything else - a
@@ -453,12 +462,12 @@ private[harness] object Text:
     replaceAll: Boolean,
     maxBytes: Long
   ): Result[(String, Int)] =
-    if old.isEmpty then Left(BackendRefused("edit", path.value, "`old` is empty"))
+    if old.isEmpty then Left(BackendRefused.at("edit", path, "`old` is empty"))
     else
       occurrences(content, old) match
-        case 0 => Left(BackendRefused("edit", path.value, "`old` was not found"))
+        case 0 => Left(BackendRefused.at("edit", path, "`old` was not found"))
         case n if n > 1 && !replaceAll =>
-          Left(BackendRefused("edit", path.value, s"`old` occurs $n times; make it unique or set replaceAll"))
+          Left(BackendRefused.at("edit", path, s"`old` occurs $n times; make it unique or set replaceAll"))
         case n =>
           val replaced  = if replaceAll then n else 1
           val projected = content.length.toLong + replaced.toLong * (replacement.length.toLong - old.length.toLong)
@@ -473,7 +482,7 @@ private[harness] object Text:
             )
           else
             val next = replacing(content, old, replacement, replaced, projected.toInt)
-            binaryReason(next).map(r => BackendRefused("edit", path.value, r)).toLeft((next, n))
+            binaryReason(next).map(r => BackendRefused.at("edit", path, r)).toLeft((next, n))
 
   /** `content` with its first `count` occurrences of `old` replaced, built in a builder of `size`. */
   private def replacing(content: String, old: String, replacement: String, count: Int, size: Int): String =
@@ -501,7 +510,7 @@ private[harness] object Text:
         case Right(true)  => Iterator(GrepMatch(path, i + 1, line))
         case Right(false) => Iterator.empty
         // the file is the target, so a composite rebases it through its mount like any other path
-        case Left(reason) => throw new SearchAborted(path.value, s"line ${i + 1}: the pattern was stopped: $reason")
+        case Left(reason) => throw new SearchAborted(path, s"line ${i + 1}: the pattern was stopped: $reason")
     }
 
   /**
@@ -514,7 +523,7 @@ private[harness] object Text:
       case scala.util.Failure(_: java.util.concurrent.CancellationException) =>
         Thread.currentThread().interrupt()
         Left(org.llm4s.error.CancelledError(operation))
-      case scala.util.Failure(e: SearchAborted) => Left(BackendRefused(operation, e.target, e.getMessage))
+      case scala.util.Failure(e: SearchAborted) => Left(BackendRefused.at(operation, e.path, e.getMessage))
       case failure                              => failure.toResult.flatten
 
   /** Lines `offset` to `offset + limit` of `lines`, the sum taken without overflow. */
@@ -525,4 +534,4 @@ private[harness] object Text:
     if limit >= 1 then Right(()) else Left(BackendRefused(operation, target, s"limit must be at least 1, was $limit"))
 
 /** A match `RegexSafetyManager` aborted; [[Text.interruptibly]] makes it a refusal. */
-final private[harness] class SearchAborted(val target: String, message: String) extends RuntimeException(message)
+final private[harness] class SearchAborted(val path: VPath, message: String) extends RuntimeException(message)

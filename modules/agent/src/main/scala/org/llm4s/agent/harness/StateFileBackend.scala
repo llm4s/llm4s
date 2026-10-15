@@ -89,7 +89,7 @@ final class StateFileBackend private (
     val total = all.iterator.map((p, e) => entryBytes(p, e.content)).sum
     val after = total - all.get(path).fold(0L)(e => entryBytes(path, e.content)) + entryBytes(path, content)
     val count = all.size + (if all.contains(path) then 0 else 1)
-    def refuse(reason: String) = Left(BackendRefused(operation, path.value, reason))
+    def refuse(reason: String) = Left(BackendRefused.at(operation, path, reason))
     for
       _ <- Text.binaryReason(content).fold[Result[Unit]](Right(()))(refuse)
       _ <- FileTree.writable(operation, all, path)
@@ -126,7 +126,7 @@ final class StateFileBackend private (
       // put NUL or an unpaired surrogate there, and an edit must not work on content a read refuses
       _ <- Text
         .binaryReason(entry.content)
-        .fold[Result[Unit]](Right(()))(r => Left(BackendRefused("edit", path.value, r)))
+        .fold[Result[Unit]](Right(()))(r => Left(BackendRefused.at("edit", path, r)))
       edited <- Text.edited(path, entry.content, old, replacement, replaceAll, maxBytes)
       _      <- admit("edit", all, path, edited._1)
     yield

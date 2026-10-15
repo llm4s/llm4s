@@ -261,6 +261,13 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
     }
   }
 
+  it should "refuse to list a tree in which one path is both a file and a directory" in {
+    val (backend, f) = fixture()
+    f.commit(StateUpdate.update(backend.files, FileUpdate.Put(p("/a"), FileEntry("file", clock.instant()))))
+    f.commit(StateUpdate.update(backend.files, FileUpdate.Put(p("/a/b"), FileEntry("beneath", clock.instant()))))
+    backend.ls(VPath.root, 10, f.ctx).left.value.message should include("both a file and a directory")
+  }
+
   it should "encode its key's values and updates, and refuse an invalid path on decode" in {
     val entry = FileEntry("x", clock.instant())
     upickle.default.read[FileEntry](upickle.default.write(entry)) shouldBe entry

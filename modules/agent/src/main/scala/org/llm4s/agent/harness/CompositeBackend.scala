@@ -45,23 +45,23 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
 
   /** `body` on `path` as a file, unless `path` holds a mount. */
   private def asFile[A](operation: String, path: VPath)(body: Routed => Result[A]): Result[A] =
-    if holdsMount(path) then Left(BackendRefused(operation, path.value, "is a directory"))
+    if holdsMount(path) then Left(BackendRefused.at(operation, path, "is a directory"))
     else
       val routed = route(path)
       renamed(routed)(body(routed))
 
   /**
-   * A routed backend's refusal, naming composite paths rather than routed ones: any target that is a path
-   * of the routed backend - the routed path itself, or a descendant a walk refused on - is rebased through
-   * the mount, so the model's next call reaches the same backend. A target that is not a path (a pattern,
-   * a key) is left as it is.
+   * A routed backend's refusal, naming composite paths rather than routed ones: a refusal that names a
+   * path of the routed backend ([[BackendRefused.path]]) - the routed path itself, or a descendant a walk
+   * refused on - is rebased through the mount, so the model's next call reaches the same backend. A
+   * target that is not a path (a pattern, a key), however it looks, is left as it is.
    */
   private def renamed[A](routed: Routed)(result: Result[A]): Result[A] =
     result.left.map {
       case r: BackendRefused =>
-        VPath(r.target).toOption
+        r.path
           .flatMap(_.rebase(VPath.root, routed.mount))
-          .fold[LLMError](r)(composite => r.copy(target = composite.value))
+          .fold[LLMError](r)(composite => r.copy(target = composite.value, path = Some(composite)))
       case other => other
     }
 

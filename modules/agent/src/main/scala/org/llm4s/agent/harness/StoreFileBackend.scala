@@ -77,7 +77,7 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
   private def file(text: String): ujson.Value = ujson.Obj("content" -> text)
 
   private def refused(operation: String, target: VPath, reason: String) =
-    Left(BackendRefused(operation, target.value, reason))
+    Left(BackendRefused.at(operation, target, reason))
 
   /** Whether `target` is a directory of the namespace as `view` sees it: some key lies beneath it. */
   private def isDirectory(view: StoreView, target: VPath): Result[Boolean] =
@@ -125,9 +125,9 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
       // the one text rule on what is stored too: an item written past the backend may hold NUL
       case Some(item) =>
         content(item)
-          .toRight(BackendRefused(operation, target.value, "is not a file"))
+          .toRight(BackendRefused.at(operation, target, "is not a file"))
           .flatMap(text =>
-            Text.binaryReason(text).fold(Right(text))(r => Left(BackendRefused(operation, target.value, r)))
+            Text.binaryReason(text).fold(Right(text))(r => Left(BackendRefused.at(operation, target, r)))
           )
       case None =>
         isDirectory(view, target).flatMap(dir =>

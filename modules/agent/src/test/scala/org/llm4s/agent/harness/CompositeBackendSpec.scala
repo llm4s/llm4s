@@ -40,11 +40,15 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   /** A backend whose `ls` refuses with `kind`; nothing else is asked of it. */
-  final private class Refusing(kind: BackendRefused.Kind) extends FileBackend {
-    private def no                                    = Left(BackendRefused("ls", "/", s"refused ($kind)", kind))
-    def writes                                        = Set.empty
-    def locks(path: VPath): Set[LockKey]              = Set.empty
-    def ls(path: VPath, limit: Int, ctx: FileContext) = no
+  final private class Refusing(kind: BackendRefused.Kind, typed: Boolean = false) extends FileBackend {
+    private def no =
+      Left(
+        if (typed) BackendRefused.at("ls", VPath.root, s"refused ($kind)", kind)
+        else BackendRefused("ls", "/", s"refused ($kind)", kind)
+      )
+    def writes                                                                                     = Set.empty
+    def locks(path: VPath): Set[LockKey]                                                           = Set.empty
+    def ls(path: VPath, limit: Int, ctx: FileContext)                                              = no
     def read(path: VPath, offset: Int, limit: Int, ctx: FileContext)                               = no
     def write(path: VPath, content: String, ctx: FileContext)                                      = no
     def edit(path: VPath, old: String, replacement: String, replaceAll: Boolean, ctx: FileContext) = no
@@ -264,5 +268,14 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     val refusal = composite.grep("(?:a(?=a)|a)*b", p("/scratch"), None, 10, ctx).left.value
     refusal shouldBe a[BackendRefused]
     refusal.asInstanceOf[BackendRefused].target shouldBe "/scratch/long.txt"
+  }
+
+  it should "rebase only a refusal that names a path, never a key or pattern that looks like one" in {
+    val untyped = CompositeBackend(main, p("/m") -> new Refusing(BackendRefused.Kind.Refused)).value
+    untyped.read(p("/m/x"), 0, 1, ctx).left.value.asInstanceOf[BackendRefused].target shouldBe "/"
+    val typed   = CompositeBackend(main, p("/m") -> new Refusing(BackendRefused.Kind.Refused, typed = true)).value
+    val refusal = typed.read(p("/m/x"), 0, 1, ctx).left.value.asInstanceOf[BackendRefused]
+    refusal.target shouldBe "/m"
+    refusal.path shouldBe Some(p("/m"))
   }
 }

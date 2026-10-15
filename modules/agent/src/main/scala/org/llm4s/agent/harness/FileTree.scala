@@ -16,12 +16,12 @@ private[harness] object FileTree:
   def fileOf(operation: String, all: Map[VPath, FileEntry], path: VPath): Result[FileEntry] =
     all.get(path) match
       case Some(entry)                    => Right(entry)
-      case None if isDirectory(all, path) => Left(BackendRefused(operation, path.value, "is a directory"))
-      case None                           => Left(BackendRefused(operation, path.value, "not found"))
+      case None if isDirectory(all, path) => Left(BackendRefused.at(operation, path, "is a directory"))
+      case None                           => Left(BackendRefused.at(operation, path, "not found"))
 
   /** `path` may be written as a file: not the root, not a directory, not beneath a file. */
   def writable(operation: String, all: Map[VPath, FileEntry], path: VPath): Result[Unit] =
-    def refuse(reason: String) = Left(BackendRefused(operation, path.value, reason))
+    def refuse(reason: String) = Left(BackendRefused.at(operation, path, reason))
     val ancestors              = Iterator.iterate(path.parent)(_.flatMap(_.parent)).takeWhile(_.isDefined).flatten
     if path == VPath.root then refuse("is the root directory")
     else if !all.contains(path) && isDirectory(all, path) then refuse("is a directory")
@@ -32,8 +32,8 @@ private[harness] object FileTree:
   def deletable(all: Map[VPath, FileEntry], path: VPath): Result[Unit] =
     if all.contains(path) then Right(())
     else if isDirectory(all, path) then
-      Left(BackendRefused("delete", path.value, "is a directory; delete the files in it"))
-    else Left(BackendRefused("delete", path.value, "not found"))
+      Left(BackendRefused.at("delete", path, "is a directory; delete the files in it"))
+    else Left(BackendRefused.at("delete", path, "not found"))
 
   def ls(all: Map[VPath, FileEntry], path: VPath, limit: Int): Result[Listing[FileInfo]] =
     for
@@ -42,8 +42,7 @@ private[harness] object FileTree:
         if all.contains(path) then Left(BackendRefused.notADirectory("ls", path))
         else if !isDirectory(all, path) then Left(BackendRefused.notFound("ls", path))
         else Right(())
-    yield
-      val children = all.toVector.flatMap { (p, entry) =>
+      children = all.toVector.flatMap { (p, entry) =>
         p.relativeTo(path).filter(_.nonEmpty).flatMap { rel =>
           (path / rel.takeWhile(_ != '/')).toOption.map { child =>
             if rel.contains('/') then FileInfo(child, isDirectory = true, 0L, None)
@@ -51,17 +50,31 @@ private[harness] object FileTree:
           }
         }
       }.distinct
-      Listing.of(children.sortBy(_.path).iterator, limit)
+      // a writer past the backend can store `/a` and `/a/b` both: `/a` is then a file and a directory, and
+      // a listing that showed it twice, with two kinds, would break its contract, so the shape is refused
+      _ <- children
+        .groupBy(_.path)
+        .collectFirst { case (child, infos) if infos.map(_.isDirectory).distinct.size > 1 => child }
+        .fold[Result[Unit]](Right(()))(child =>
+          Left(
+            BackendRefused.at(
+              "ls",
+              path,
+              s"the stored tree is inconsistent: ${child.value} is both a file and a directory, written past this backend"
+            )
+          )
+        )
+    yield Listing.of(children.sortBy(_.path).iterator, limit)
 
   def read(all: Map[VPath, FileEntry], path: VPath, offset: Int, limit: Int): Result[FileLines] =
     for
       _     <- Text.checkLimit("read", path.value, limit)
-      _     <- Either.cond(offset >= 0, (), BackendRefused("read", path.value, s"offset must be >= 0, was $offset"))
+      _     <- Either.cond(offset >= 0, (), BackendRefused.at("read", path, s"offset must be >= 0, was $offset"))
       entry <- fileOf("read", all, path)
       // one text rule for every source: a store item written past the backend can hold NUL
       _ <- Text
         .binaryReason(entry.content)
-        .fold[Result[Unit]](Right(()))(r => Left(BackendRefused("read", path.value, r)))
+        .fold[Result[Unit]](Right(()))(r => Left(BackendRefused.at("read", path, r)))
     yield
       val lines = Text.lines(entry.content)
       FileLines(Text.page(lines, offset, limit), offset, lines.size)
