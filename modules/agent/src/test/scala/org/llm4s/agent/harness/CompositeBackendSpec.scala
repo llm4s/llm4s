@@ -258,4 +258,11 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     outside.write(p("/x"), "y", ctx).left.value.message should include("locks outside files")
   }
 
+  it should "name a mounted backend's descendant in its refusal by its composite path" in {
+    commit(composite.write(p("/scratch/long.txt"), "a" * 50000, ctx))
+    // a pattern past the pre-screen whose match is stopped on the mounted file
+    val refusal = composite.grep("(?:a(?=a)|a)*b", p("/scratch"), None, 10, ctx).left.value
+    refusal shouldBe a[BackendRefused]
+    refusal.asInstanceOf[BackendRefused].target shouldBe "/scratch/long.txt"
+  }
 }

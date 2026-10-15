@@ -48,13 +48,21 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
     if holdsMount(path) then Left(BackendRefused(operation, path.value, "is a directory"))
     else
       val routed = route(path)
-      renamed(routed, path)(body(routed))
+      renamed(routed)(body(routed))
 
-  /** A routed backend's refusal, naming the composite path rather than the routed one. */
-  private def renamed[A](routed: Routed, path: VPath)(result: Result[A]): Result[A] =
+  /**
+   * A routed backend's refusal, naming composite paths rather than routed ones: any target that is a path
+   * of the routed backend - the routed path itself, or a descendant a walk refused on - is rebased through
+   * the mount, so the model's next call reaches the same backend. A target that is not a path (a pattern,
+   * a key) is left as it is.
+   */
+  private def renamed[A](routed: Routed)(result: Result[A]): Result[A] =
     result.left.map {
-      case r: BackendRefused if r.target == routed.path.value => r.copy(target = path.value)
-      case other                                              => other
+      case r: BackendRefused =>
+        VPath(r.target).toOption
+          .flatMap(_.rebase(VPath.root, routed.mount))
+          .fold[LLMError](r)(composite => r.copy(target = composite.value))
+      case other => other
     }
 
   def locks(path: VPath): Set[LockKey] =
@@ -76,7 +84,7 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
         case Left(r: BackendRefused)
             if mounted.nonEmpty && r.target == routed.path.value && CompositeBackend.ShapeKinds(r.kind) =>
           Right(Listing(Vector.empty, truncated = false))
-        case other => renamed(routed, path)(other)
+        case other => renamed(routed)(other)
     }
     base.map { listing =>
       val own = listing.items.flatMap(i =>
@@ -120,7 +128,7 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
       .foldLeft[Result[(Vector[A], Boolean)]](Right((Vector.empty, false))) { (acc, routed) =>
         for
           sofar   <- acc
-          listing <- renamed(routed, under)(query(routed, p => visible(routed.mount, p)))
+          listing <- renamed(routed)(query(routed, p => visible(routed.mount, p)))
         yield (
           sofar._1 ++ listing.items.flatMap(a => visible(routed.mount, pathOf(a)).map(cp => rebased(a, cp))),
           sofar._2 || listing.truncated

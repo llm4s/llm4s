@@ -500,7 +500,8 @@ private[harness] object Text:
       org.llm4s.security.RegexSafetyManager.safeFind(regex, line) match
         case Right(true)  => Iterator(GrepMatch(path, i + 1, line))
         case Right(false) => Iterator.empty
-        case Left(reason) => throw new SearchAborted("pattern", s"${path.value}:${i + 1}: $reason")
+        // the file is the target, so a composite rebases it through its mount like any other path
+        case Left(reason) => throw new SearchAborted(path.value, s"line ${i + 1}: the pattern was stopped: $reason")
     }
 
   /**
