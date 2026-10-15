@@ -55,6 +55,12 @@ object Skill:
   /** The longest name the standard allows. */
   val MaxNameChars: Int = 64
 
+  /** The longest description the standard allows, in characters (code points). */
+  val MaxDescriptionChars: Int = 1024
+
+  /** The longest `compatibility` the standard allows, in characters (code points). */
+  val MaxCompatibilityChars: Int = 500
+
   /**
    * The skill defined by `content`, the text of the `SKILL.md` at `path`: its frontmatter, read by a parser written
    * for it (no YAML library), then checked against the standard. A [[SkillFormatError]] names the line.
@@ -75,13 +81,20 @@ object Skill:
         case Some(Frontmatter.Field(Frontmatter.Value.Str(s), line)) =>
           if required && s.trim.isEmpty then error(line, s"`$key` is empty") else Right(Some(s.trim))
         case Some(Frontmatter.Field(_, line)) => error(line, s"`$key` must be a string")
+    def longer(key: String, value: String, max: Int): Result[Unit] =
+      if value.codePointCount(0, value.length) <= max then Right(())
+      else error(fields.get(key).fold(1)(_.line), s"`$key` is longer than $max characters")
     val folder = path.parent.map(_.name).getOrElse("")
     for
       name <- string("name", required = true).map(_.getOrElse(""))
       nameLine = fields.get("name").fold(1)(_.line)
       _           <- nameProblem(name, folder).fold[Result[Unit]](Right(()))(error(nameLine, _))
       description <- string("description", required = true).map(_.getOrElse(""))
+      _           <- longer("description", description, MaxDescriptionChars)
       license     <- string("license", required = false)
+      // not exposed, but held to the standard like every field it defines
+      compatibility <- string("compatibility", required = false)
+      _             <- compatibility.fold[Result[Unit]](Right(()))(longer("compatibility", _, MaxCompatibilityChars))
       tools <- fields.get("allowed-tools") match
         case None => Right(Vector.empty)
         case Some(Frontmatter.Field(Frontmatter.Value.Str(s), _)) =>

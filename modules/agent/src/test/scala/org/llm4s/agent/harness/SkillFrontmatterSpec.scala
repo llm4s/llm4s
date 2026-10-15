@@ -127,6 +127,15 @@ class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
     (e2.message should not).include("SECRET")
   }
 
+  it should "refuse a description over 1024 characters and a compatibility over 500, as the standard bounds them" in {
+    parse("---", "name: pdf-tools", s"description: ${"d" * 1024}", "---").value.description.length shouldBe 1024
+    problem("---", "name: pdf-tools", s"description: ${"d" * 1025}", "---").problem should include("longer than 1024")
+    problem("---", "name: pdf-tools", "description: d", s"compatibility: ${"c" * 501}", "---").line shouldBe 4
+    problem("---", "name: pdf-tools", "description: d", "compatibility: [a]", "---").problem should include(
+      "must be a string"
+    )
+  }
+
   it should "refuse a name over 64 characters" in {
     val long = "a" * 65
     val e    = Skill.parse(VPath(s"/s/$long/SKILL.md").value, s"---\nname: $long\ndescription: d\n---").left.value
