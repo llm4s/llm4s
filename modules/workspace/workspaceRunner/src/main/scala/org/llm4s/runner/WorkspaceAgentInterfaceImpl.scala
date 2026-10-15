@@ -83,7 +83,62 @@ class WorkspaceAgentInterfaceImpl(
       )
     }
 
+    // #870: with `allowedPaths`, only those paths and what is beneath them are accessible
+    if (allowedRoots.nonEmpty && !allowedRoots.exists(normalized.startsWith))
+      throw new WorkspaceAgentException(
+        s"Path '$relativePath' is outside the sandbox's allowed paths (${config.allowedPaths.mkString(", ")})",
+        "PATH_NOT_ALLOWED",
+        None
+      )
+
     normalized
+  }
+
+  // The sandbox's allowedPaths and readOnlyPaths, resolved against the root once; one that leads outside the root is
+  // the root's own business to refuse, so it is resolved as given and simply never matches a workspace path.
+  private val allowedRoots: List[Path]  = config.allowedPaths.map(p => rootPath.resolve(p).normalize())
+  private val readOnlyRoots: List[Path] = config.readOnlyPaths.map(p => rootPath.resolve(p).normalize())
+
+  /** Refuses (`PATH_READ_ONLY`) a mutation of a path the sandbox's `readOnlyPaths` cover (#870). */
+  private def refuseReadOnly(path: String, resolved: Path): Unit =
+    if (readOnlyRoots.exists(resolved.startsWith))
+      throw new WorkspaceAgentException(
+        s"Path '$path' is read-only in this sandbox (${config.readOnlyPaths.mkString(", ")})",
+        "PATH_READ_ONLY",
+        None
+      )
+
+  /**
+   * The lock every mutating file operation holds, so a compare-and-set (`expectedHash`) is atomic against every other
+   * file operation of this runner. A command the runner executes does not take it.
+   */
+  private val mutationLock = new Object
+
+  /** The current [[FileSnapshotResponse.hash]] of `resolved`, its bytes read as a stream. */
+  private def currentHash(resolved: Path): String =
+    if (!Files.exists(resolved, java.nio.file.LinkOption.NOFOLLOW_LINKS)) FileSnapshotResponse.Kind.Absent
+    else if (Files.isDirectory(resolved)) FileSnapshotResponse.Kind.Directory
+    else {
+      val digest = java.security.MessageDigest.getInstance("SHA-256")
+      Using.resource(Files.newInputStream(resolved)) { in =>
+        val buffer = new Array[Byte](8192)
+        var n      = in.read(buffer)
+        while (n != -1) {
+          digest.update(buffer, 0, n)
+          n = in.read(buffer)
+        }
+      }
+      "sha256:" + digest.digest().map(b => f"${b & 0xff}%02x").mkString
+    }
+
+  private def checkExpected(path: String, resolved: Path, expected: String): Unit = {
+    val current = currentHash(resolved)
+    if (current != expected)
+      throw new WorkspaceAgentException(
+        s"Path '$path' changed: it is now $current, not $expected",
+        "HASH_MISMATCH",
+        None
+      )
   }
 
   /**
@@ -285,15 +340,39 @@ class WorkspaceAgentInterfaceImpl(
     path: String,
     content: String,
     mode: Option[String] = None,
-    createDirectories: Option[Boolean] = None
-  ): WriteFileResponse = {
+    createDirectories: Option[Boolean] = None,
+    expectedHash: Option[String] = None
+  ): WriteFileResponse = mutationLock.synchronized {
     val resolvedPath = resolvePath(path)
     refuseGitMetadata(path, resolvedPath)
+    refuseReadOnly(path, resolvedPath)
     val writeMode  = mode.getOrElse("overwrite")
     val createDirs = createDirectories.getOrElse(false)
 
+    if (expectedHash.isDefined && writeMode != "overwrite")
+      throw new WorkspaceAgentException(
+        s"expectedHash needs mode 'overwrite', not '$writeMode'",
+        "INVALID_ARGUMENT",
+        None
+      )
+    // the content's size bounded before it is encoded: every character is at least one byte (#870)
+    if (content.length.toLong > defaultLimits.maxFileSize)
+      throw new WorkspaceAgentException(
+        s"Content for '$path' exceeds maximum size limit (${defaultLimits.maxFileSize} bytes)",
+        "SIZE_LIMIT_EXCEEDED",
+        None
+      )
+    // compared before anything is created, so a compare-and-set that loses changes nothing
+    expectedHash.foreach(checkExpected(path, resolvedPath, _))
+
     if (createDirs) {
-      Files.createDirectories(resolvedPath.getParent)
+      Try(Files.createDirectories(resolvedPath.getParent)).failed.foreach { e =>
+        throw new WorkspaceAgentException(
+          s"Cannot create the parent directories of '$path': ${e.getMessage}",
+          "PARENT_NOT_A_DIRECTORY",
+          None
+        )
+      }
     } else if (!Files.exists(resolvedPath.getParent)) {
       throw new WorkspaceAgentException(
         s"Parent directory for '$path' does not exist",
@@ -327,9 +406,41 @@ class WorkspaceAgentInterfaceImpl(
         )
     }
 
+    val bytes = content.getBytes(StandardCharsets.UTF_8)
+    if (bytes.length.toLong > defaultLimits.maxFileSize)
+      throw new WorkspaceAgentException(
+        s"Content for '$path' exceeds maximum size limit (${defaultLimits.maxFileSize} bytes)",
+        "SIZE_LIMIT_EXCEEDED",
+        Some(s"Content size: ${bytes.length} bytes")
+      )
+    if (expectedHash.isDefined && Files.isDirectory(resolvedPath))
+      throw new WorkspaceAgentException(s"Path '$path' is a directory, not a file", "NOT_A_FILE", None)
+
     Try {
-      val bytes = content.getBytes(StandardCharsets.UTF_8)
-      Files.write(resolvedPath, bytes, options: _*)
+      if (expectedHash.isDefined) {
+        // replaced atomically: a reader, or a crash, sees the old content or the new, never part of either
+        val temp = Files.createTempFile(resolvedPath.getParent, ".llm4s-write-", ".tmp")
+        Try {
+          Files.write(temp, bytes)
+          // the replacement keeps the file's permissions (an executable script stays executable); a new file gets
+          // the usual rw-r--r-- rather than a temporary file's rw-------. Not POSIX: the platform's defaults.
+          Try {
+            val permissions =
+              if (Files.exists(resolvedPath)) Files.getPosixFilePermissions(resolvedPath)
+              else java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--")
+            Files.setPosixFilePermissions(temp, permissions)
+          }
+          Files.move(
+            temp,
+            resolvedPath,
+            java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING
+          )
+        }.recover { case e =>
+          Files.deleteIfExists(temp)
+          throw e
+        }.get
+      } else Files.write(resolvedPath, bytes, options: _*)
 
       WriteFileResponse(
         commandId = "local",
@@ -352,9 +463,10 @@ class WorkspaceAgentInterfaceImpl(
   override def modifyFile(
     path: String,
     operations: List[FileOperation]
-  ): ModifyFileResponse = {
+  ): ModifyFileResponse = mutationLock.synchronized {
     val resolvedPath = resolvePath(path)
     refuseGitMetadata(path, resolvedPath)
+    refuseReadOnly(path, resolvedPath)
 
     if (!Files.exists(resolvedPath)) {
       throw new WorkspaceAgentException(
@@ -411,6 +523,87 @@ class WorkspaceAgentInterfaceImpl(
         )
     }
   }
+
+  /**
+   * What is at `path`, read under the mutation lock so it is never a write half done: its kind, the hash a
+   * compare-and-set compares with and, when asked for, its exact text, with the hash taken from the same bytes.
+   */
+  override def fileSnapshot(path: String, includeContent: Boolean = true): FileSnapshotResponse =
+    mutationLock.synchronized {
+      import FileSnapshotResponse.Kind
+      val resolved = resolvePath(path)
+      def response(kind: String, hash: String, size: Long, content: Option[String], error: Option[String]) =
+        FileSnapshotResponse("local", path, kind, hash, size, content, error)
+      if (!Files.exists(resolved, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+        response(Kind.Absent, Kind.Absent, 0L, None, None)
+      else if (Files.isDirectory(resolved)) response(Kind.Directory, Kind.Directory, 0L, None, None)
+      else {
+        val size = Files.size(resolved)
+        if (!includeContent) response(Kind.File, currentHash(resolved), size, None, None)
+        else if (size > defaultLimits.maxFileSize)
+          response(
+            Kind.File,
+            currentHash(resolved),
+            size,
+            None,
+            Some(s"the file is $size bytes, larger than the limit of ${defaultLimits.maxFileSize} bytes")
+          )
+        else {
+          // read once, bounded by the limit even if the file grew since its size was read
+          val bytes = Using.resource(Files.newInputStream(resolved))(_.readNBytes((math.min(defaultLimits.maxFileSize, Int.MaxValue - 9L) + 1).toInt))
+          if (bytes.length.toLong > defaultLimits.maxFileSize)
+            response(
+              Kind.File,
+              currentHash(resolved),
+              size,
+              None,
+              Some(s"the file is larger than the limit of ${defaultLimits.maxFileSize} bytes")
+            )
+          else {
+            val decoded = Try(
+              StandardCharsets.UTF_8
+                .newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                .decode(java.nio.ByteBuffer.wrap(bytes))
+                .toString
+            )
+            response(
+              Kind.File,
+              FileSnapshotResponse.hashOf(bytes),
+              bytes.length.toLong,
+              decoded.toOption,
+              decoded.failed.toOption.map(_ => "the file is not valid UTF-8 text")
+            )
+          }
+        }
+      }
+    }
+
+  /** Deletes the file, or the empty directory, `path`; with `expectedHash`, only if its hash is still that. */
+  override def deleteFile(path: String, expectedHash: Option[String] = None): DeleteFileResponse =
+    mutationLock.synchronized {
+      val resolved = resolvePath(path)
+      if (resolved == rootPath)
+        throw new WorkspaceAgentException("The workspace root cannot be deleted", "INVALID_ARGUMENT", None)
+      refuseGitMetadata(path, resolved)
+      refuseReadOnly(path, resolved)
+      expectedHash.foreach(checkExpected(path, resolved, _))
+      if (!Files.exists(resolved, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+        throw new WorkspaceAgentException(s"File '$path' does not exist", "FILE_NOT_FOUND", None)
+      val wasDirectory = Files.isDirectory(resolved, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+      Try(Files.delete(resolved)) match {
+        case Success(_) => DeleteFileResponse("local", path, wasDirectory)
+        case Failure(_: java.nio.file.DirectoryNotEmptyException) =>
+          throw new WorkspaceAgentException(
+            s"Directory '$path' is not empty; delete the files in it",
+            "DIRECTORY_NOT_EMPTY",
+            None
+          )
+        case Failure(e) =>
+          throw new WorkspaceAgentException(s"Failed to delete '$path': ${e.getMessage}", "WRITE_ERROR", None)
+      }
+    }
 
   /**
    * Apply file operations to a list of lines.
@@ -1023,50 +1216,45 @@ class WorkspaceAgentInterfaceImpl(
     command: String,
     workingDirectory: Option[String] = None,
     timeout: Option[FiniteDuration] = None,
-    environment: Option[Map[String, String]] = None
+    environment: Option[Map[String, String]] = None,
+    maxOutputChars: Option[Long] = None
   ): ExecuteCommandResponse = {
     val prepared =
       prepareCommand(command, workingDirectory, timeout, environment).fold(refused => throw refused, identity)
     val builder   = prepared.builder
     val timeoutMs = org.llm4s.shared.WireDurations.toWholeMillis(prepared.timeout)
+    val limit     = WebSocketCommandExecutor.outputLimit(maxOutputChars, defaultLimits.maxOutputSize)
 
-    val stdout    = new StringBuilder
-    val stderr    = new StringBuilder
-    val startTime = System.currentTimeMillis()
+    val stdout          = new StringBuilder
+    val stderr          = new StringBuilder
+    val stdoutTruncated = new java.util.concurrent.atomic.AtomicBoolean(false)
+    val stderrTruncated = new java.util.concurrent.atomic.AtomicBoolean(false)
+    val startTime       = System.currentTimeMillis()
+
+    // Read in chunks and keep at most `limit` characters, the rest read and discarded: a bound while the output is
+    // read, whatever its lines (a line read whole could be any size).
+    def capture(stream: java.io.InputStream, into: StringBuilder, truncated: java.util.concurrent.atomic.AtomicBoolean)
+      : Thread =
+      new Thread(() => {
+        val reader = new java.io.InputStreamReader(stream, Charset.defaultCharset())
+        try {
+          val buffer = new Array[Char](8192)
+          var n      = reader.read(buffer)
+          while (n != -1) {
+            val take = math.min(math.max(limit - into.length, 0L), n.toLong).toInt
+            into.appendAll(buffer, 0, take)
+            if (take < n) truncated.set(true)
+            n = reader.read(buffer)
+          }
+        } finally reader.close()
+      })
 
     val exitCode = Try {
       val process = builder.start()
 
       // Read stdout and stderr in background threads to prevent blocking
-      val stdoutThread = new Thread(() => {
-        val reader = new java.io.BufferedReader(
-          new java.io.InputStreamReader(process.getInputStream, Charset.defaultCharset())
-        )
-        try {
-          var line = reader.readLine()
-          while (line != null) {
-            if (stdout.length < defaultLimits.maxOutputSize) {
-              stdout.append(line).append("\n")
-            }
-            line = reader.readLine()
-          }
-        } finally reader.close()
-      })
-
-      val stderrThread = new Thread(() => {
-        val reader = new java.io.BufferedReader(
-          new java.io.InputStreamReader(process.getErrorStream, Charset.defaultCharset())
-        )
-        try {
-          var line = reader.readLine()
-          while (line != null) {
-            if (stderr.length < defaultLimits.maxOutputSize) {
-              stderr.append(line).append("\n")
-            }
-            line = reader.readLine()
-          }
-        } finally reader.close()
-      })
+      val stdoutThread = capture(process.getInputStream, stdout, stdoutTruncated)
+      val stderrThread = capture(process.getErrorStream, stderr, stderrTruncated)
 
       stdoutThread.setDaemon(true)
       stderrThread.setDaemon(true)
@@ -1104,8 +1292,8 @@ class WorkspaceAgentInterfaceImpl(
     }.get
 
     val duration          = System.currentTimeMillis() - startTime
-    val isStdoutTruncated = stdout.length >= defaultLimits.maxOutputSize
-    val isStderrTruncated = stderr.length >= defaultLimits.maxOutputSize
+    val isStdoutTruncated = stdoutTruncated.get()
+    val isStderrTruncated = stderrTruncated.get()
 
     ExecuteCommandResponse(
       commandId = "local",

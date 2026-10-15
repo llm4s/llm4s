@@ -220,7 +220,7 @@ object RunnerMain extends cask.MainRoutes {
           val result = scala.util
             .Try(
               workspaceInterface
-                .writeFile(cmd.path, cmd.content, cmd.mode, cmd.createDirectories)
+                .writeFile(cmd.path, cmd.content, cmd.mode, cmd.createDirectories, cmd.expectedHash)
                 .copy(commandId = cmd.commandId)
             )
             .toEither
@@ -251,6 +251,24 @@ object RunnerMain extends cask.MainRoutes {
                 .searchFiles(cmd.paths, cmd.query, cmd.`type`, cmd.recursive, cmd.excludePatterns, cmd.contextLines)
                 .copy(commandId = cmd.commandId)
             )
+            .toEither
+            .left
+            .map(toErrorResponse(cmd.commandId))
+          result.fold(
+            err => sendMessage(channel, ResponseMessage(err)),
+            ok => sendMessage(channel, ResponseMessage(ok))
+          )
+        case cmd: FileSnapshotCommand =>
+          val result = Try(workspaceInterface.fileSnapshot(cmd.path, cmd.includeContent).copy(commandId = cmd.commandId))
+            .toEither
+            .left
+            .map(toErrorResponse(cmd.commandId))
+          result.fold(
+            err => sendMessage(channel, ResponseMessage(err)),
+            ok => sendMessage(channel, ResponseMessage(ok))
+          )
+        case cmd: DeleteFileCommand =>
+          val result = Try(workspaceInterface.deleteFile(cmd.path, cmd.expectedHash).copy(commandId = cmd.commandId))
             .toEither
             .left
             .map(toErrorResponse(cmd.commandId))

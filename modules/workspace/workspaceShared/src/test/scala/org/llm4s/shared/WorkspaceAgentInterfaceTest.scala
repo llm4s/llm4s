@@ -69,6 +69,12 @@ class WorkspaceAgentInterfaceTest extends AnyFlatSpec with Matchers with OptionV
           path = cmd.path
         )
 
+      case cmd: FileSnapshotCommand =>
+        FileSnapshotResponse(cmd.commandId, cmd.path, "file", "sha256:00", 3, Option.when(cmd.includeContent)("abc"))
+
+      case cmd: DeleteFileCommand =>
+        DeleteFileResponse(cmd.commandId, cmd.path + cmd.expectedHash.getOrElse(""), wasDirectory = false)
+
       case cmd: SearchFilesCommand =>
         SearchFilesResponse(
           commandId = cmd.commandId,
@@ -109,6 +115,30 @@ class WorkspaceAgentInterfaceTest extends AnyFlatSpec with Matchers with OptionV
     val execResponse = interface.executeCommand("ls -la")
     execResponse.stdout shouldBe "Executed: ls -la"
     execResponse.exitCode shouldBe 0
+
+    // the compare-and-set calls carry their arguments
+    interface.fileSnapshot("a.txt").content shouldBe Some("abc")
+    interface.fileSnapshot("a.txt", includeContent = false).content shouldBe None
+    interface.deleteFile("a.txt", Some("sha256:00")).path shouldBe "a.txtsha256:00"
+  }
+
+  "The protocol's new fields" should "read from a message an older peer sent, without them" in {
+    import upickle.default.{ read, write }
+    // each written with the new field set, then the field removed, as an older peer would send it
+    def without(command: WorkspaceAgentCommand, field: String): WorkspaceAgentCommand = {
+      val json = ujson.read(write[WorkspaceAgentCommand](command))
+      json.obj.remove(field)
+      read[WorkspaceAgentCommand](json)
+    }
+    without(WriteFileCommand("1", "a", "x", expectedHash = Some("absent")), "expectedHash") shouldBe
+      WriteFileCommand("1", "a", "x")
+    without(FileSnapshotCommand("1", "a", includeContent = false), "includeContent") shouldBe
+      FileSnapshotCommand("1", "a", includeContent = true)
+    without(ExecuteCommandCommand("1", "ls", maxOutputChars = Some(5L)), "maxOutputChars") shouldBe
+      ExecuteCommandCommand("1", "ls")
+    val snapshot = FileSnapshotResponse("1", "a", "file", FileSnapshotResponse.hashOf("x".getBytes("UTF-8")), 1L)
+    read[WorkspaceAgentResponse](upickle.default.write[WorkspaceAgentResponse](snapshot)) shouldBe snapshot
+    snapshot.hash shouldBe "sha256:2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"
   }
 
   it should "throw WorkspaceAgentException when receiving ErrorResponse" in {

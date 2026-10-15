@@ -33,7 +33,8 @@ final private[runner] case class RunningCommand(
  * and duration, and cancellation through [[cancel]].
  *
  * @param workspace     checks and builds every command
- * @param maxOutputSize the most of each stream kept for the final `ExecuteCommandResponse`; chunks stream regardless
+ * @param maxOutputSize the most characters of each stream kept for the final `ExecuteCommandResponse`, and the upper
+ *                      bound on a command's `maxOutputChars`; chunks stream regardless
  */
 final private[runner] class WebSocketCommandExecutor(
   workspace: WorkspaceAgentInterfaceImpl,
@@ -138,6 +139,8 @@ final private[runner] class WebSocketCommandExecutor(
     val commandTimedOut   = new AtomicBoolean(false)
     val stdoutAccumulator = new StringBuilder()
     val stderrAccumulator = new StringBuilder()
+    // the client's bound on each stream, never more than the runner's own
+    val limit = WebSocketCommandExecutor.outputLimit(cmd.maxOutputChars, maxOutputSize)
 
     def streamOutput(
       outputType: String,
@@ -147,28 +150,23 @@ final private[runner] class WebSocketCommandExecutor(
       done: Promise[Unit]
     ): Unit =
       Future {
-        val buffer    = new Array[Byte](8192)
-        var bytesRead = 0
+        // decoded by a reader, so a character split across two reads is decoded whole, and kept by characters:
+        // at most `limit` of them, whatever the output's lines, while the rest is read and discarded
+        val reader    = new java.io.InputStreamReader(stream, StandardCharsets.UTF_8)
+        val buffer    = new Array[Char](8192)
+        var charsRead = 0
         var captured  = 0L
 
         try
           while ({
-            bytesRead = stream.read(buffer)
-            bytesRead != -1
+            charsRead = reader.read(buffer)
+            charsRead != -1
           }) {
-            val chunk = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8)
-            send(StreamingOutputMessage(cmd.commandId, outputType, chunk))
-
-            if (captured < maxOutputSize) {
-              val remaining = (maxOutputSize - captured).toInt
-              val toCopy    = math.min(remaining, bytesRead)
-              if (toCopy > 0) {
-                val toAppend = if (toCopy == bytesRead) chunk else chunk.substring(0, toCopy)
-                accumulator.append(toAppend)
-                captured += toCopy
-              }
-              if (toCopy < bytesRead) truncated.set(true)
-            } else truncated.set(true)
+            send(StreamingOutputMessage(cmd.commandId, outputType, new String(buffer, 0, charsRead)))
+            val take = math.min(math.max(limit - captured, 0L), charsRead.toLong).toInt
+            accumulator.appendAll(buffer, 0, take)
+            captured += take
+            if (take < charsRead) truncated.set(true)
           }
         catch {
           case ex: Exception =>
@@ -258,4 +256,11 @@ final private[runner] class WebSocketCommandExecutor(
           )
       }
   }
+}
+
+private[runner] object WebSocketCommandExecutor {
+
+  /** The most characters of each stream a command keeps: what it asked for, within `0..runnerMax`. */
+  def outputLimit(requested: Option[Long], runnerMax: Long): Long =
+    requested.fold(runnerMax)(r => math.min(math.max(r, 0L), runnerMax))
 }

@@ -55,14 +55,31 @@ trait WorkspaceAgentInterface {
    * @param content Content to write
    * @param mode Write mode (default: "overwrite")
    * @param createDirectories Create parent directories if they don't exist
+   * @param expectedHash A compare-and-set: write only if the path's current [[FileSnapshotResponse.hash]] is this,
+   *                     atomically against every other file operation, and replace the file atomically (a reader or
+   *                     a crash sees the old content or the new, never part of it); otherwise `HASH_MISMATCH`, and
+   *                     nothing is written. Only with mode "overwrite".
    * @return Response with write operation result
    */
   def writeFile(
     path: String,
     content: String,
     mode: Option[String] = None,
-    createDirectories: Option[Boolean] = None
+    createDirectories: Option[Boolean] = None,
+    expectedHash: Option[String] = None
   ): WriteFileResponse
+
+  /**
+   * What is at `path`: nothing, a directory, or a file with the hash of its bytes and, when `includeContent`, its exact
+   * text if it is valid UTF-8 and at most the workspace's `maxFileSize`.
+   */
+  def fileSnapshot(path: String, includeContent: Boolean = true): FileSnapshotResponse
+
+  /**
+   * Delete the file, or the empty directory, `path`; with `expectedHash`, a compare-and-set as for [[writeFile]]
+   * (`directory` for a directory).
+   */
+  def deleteFile(path: String, expectedHash: Option[String] = None): DeleteFileResponse
 
   /**
    * Perform targeted modifications to a file without rewriting the entire content.
@@ -105,13 +122,16 @@ trait WorkspaceAgentInterface {
    * @param workingDirectory Working directory (default: workspace root)
    * @param timeout Timeout (default: the sandbox's `defaultCommandTimeout`)
    * @param environment Environment variables
+   * @param maxOutputChars The most characters of each of stdout and stderr to keep (default and upper bound: the
+   *                       workspace's `maxOutputSize`); the rest is read and discarded, and `isOutputTruncated` set
    * @return Response with command execution result
    */
   def executeCommand(
     command: String,
     workingDirectory: Option[String] = None,
     timeout: Option[FiniteDuration] = None,
-    environment: Option[Map[String, String]] = None
+    environment: Option[Map[String, String]] = None,
+    maxOutputChars: Option[Long] = None
   ): ExecuteCommandResponse
 
   /**

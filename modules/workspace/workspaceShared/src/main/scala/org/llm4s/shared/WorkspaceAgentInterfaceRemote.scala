@@ -98,17 +98,25 @@ class WorkspaceAgentInterfaceRemote(handler: WorkspaceAgentCommand => WorkspaceA
     path: String,
     content: String,
     mode: Option[String] = None,
-    createDirectories: Option[Boolean] = None
+    createDirectories: Option[Boolean] = None,
+    expectedHash: Option[String] = None
   ): WriteFileResponse = {
     val command = WriteFileCommand(
       commandId = generateCommandId(),
       path = path,
       content = content,
       mode = mode,
-      createDirectories = createDirectories
+      createDirectories = createDirectories,
+      expectedHash = expectedHash
     )
     handleCommand(command, classOf[WriteFileResponse])
   }
+
+  override def fileSnapshot(path: String, includeContent: Boolean = true): FileSnapshotResponse =
+    handleCommand(FileSnapshotCommand(generateCommandId(), path, includeContent), classOf[FileSnapshotResponse])
+
+  override def deleteFile(path: String, expectedHash: Option[String] = None): DeleteFileResponse =
+    handleCommand(DeleteFileCommand(generateCommandId(), path, expectedHash), classOf[DeleteFileResponse])
 
   /**
    * Perform targeted modifications to a file without rewriting the entire content.
@@ -175,14 +183,16 @@ class WorkspaceAgentInterfaceRemote(handler: WorkspaceAgentCommand => WorkspaceA
     command: String,
     workingDirectory: Option[String] = None,
     timeout: Option[FiniteDuration] = None,
-    environment: Option[Map[String, String]] = None
+    environment: Option[Map[String, String]] = None,
+    maxOutputChars: Option[Long] = None
   ): ExecuteCommandResponse = {
     val cmd = ExecuteCommandCommand(
       commandId = generateCommandId(),
       command = command,
       workingDirectory = workingDirectory,
       timeout = timeout,
-      environment = environment
+      environment = environment,
+      maxOutputChars = maxOutputChars
     )
     handleCommand(cmd, classOf[ExecuteCommandResponse])
   }

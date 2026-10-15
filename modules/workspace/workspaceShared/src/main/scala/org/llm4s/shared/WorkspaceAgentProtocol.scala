@@ -27,7 +27,9 @@ object WorkspaceAgentCommand {
     macroRW[ModifyFileCommand],
     macroRW[SearchFilesCommand],
     macroRW[ExecuteCommandCommand],
-    macroRW[GetWorkspaceInfoCommand]
+    macroRW[GetWorkspaceInfoCommand],
+    macroRW[FileSnapshotCommand],
+    macroRW[DeleteFileCommand]
   )
 }
 
@@ -56,6 +58,8 @@ object WorkspaceAgentResponse {
     macroRW[SearchFilesResponse],
     macroRW[ExecuteCommandResponse],
     macroRW[GetWorkspaceInfoResponse],
+    macroRW[FileSnapshotResponse],
+    macroRW[DeleteFileResponse],
     macroRW[WorkspaceAgentErrorResponse]
   )
 }
@@ -150,7 +154,10 @@ case class WriteFileCommand(
   path: String,
   content: String,
   mode: Option[String] = None, // "create", "overwrite", or "append"
-  createDirectories: Option[Boolean] = None
+  createDirectories: Option[Boolean] = None,
+  // A compare-and-set: written, atomically and only in mode "overwrite", if the path's current
+  // FileSnapshotResponse.hash is this one; refused with HASH_MISMATCH, writing nothing, otherwise.
+  expectedHash: Option[String] = None
 ) extends WorkspaceAgentCommand
 
 object WriteFileCommand {
@@ -286,7 +293,9 @@ case class ExecuteCommandCommand(
   command: String,
   workingDirectory: Option[String] = None,
   timeout: Option[FiniteDuration] = None,
-  environment: Option[Map[String, String]] = None
+  environment: Option[Map[String, String]] = None,
+  // The most characters of each of stdout and stderr the runner keeps; its own maxOutputSize bounds it too.
+  maxOutputChars: Option[Long] = None
 ) extends WorkspaceAgentCommand
 
 object ExecuteCommandCommand {
@@ -337,6 +346,79 @@ case class GetWorkspaceInfoResponse(
 
 object GetWorkspaceInfoResponse {
   implicit val rw: ReadWriter[GetWorkspaceInfoResponse] = macroRW
+}
+
+// 8. FileSnapshot Command and Response
+case class FileSnapshotCommand(
+  commandId: String,
+  path: String,
+  includeContent: Boolean = true
+) extends WorkspaceAgentCommand
+
+object FileSnapshotCommand {
+  implicit val rw: ReadWriter[FileSnapshotCommand] = macroRW
+}
+
+/**
+ * What is at a path, as a compare-and-set reads it.
+ *
+ * @param kind      `absent`, `file` or `directory` ([[FileSnapshotResponse.Kind]])
+ * @param hash      `absent`, `directory`, or `sha256:` and the 64 lowercase hex digits of the SHA-256 of the
+ *                  file's bytes: what `WriteFileCommand.expectedHash` and `DeleteFileCommand.expectedHash`
+ *                  are compared with
+ * @param size      the file's size in bytes; 0 for a directory or nothing
+ * @param content   the file's exact text, when asked for, if it is at most `maxFileSize` bytes of valid UTF-8
+ * @param textError why a file's `content` is absent although it was asked for
+ */
+case class FileSnapshotResponse(
+  commandId: String,
+  path: String,
+  kind: String,
+  hash: String,
+  size: Long,
+  content: Option[String] = None,
+  textError: Option[String] = None
+) extends WorkspaceAgentResponse
+
+object FileSnapshotResponse {
+  implicit val rw: ReadWriter[FileSnapshotResponse] = macroRW
+
+  /** The values of `kind`, and of `hash` for what is not a file. */
+  object Kind {
+    val Absent: String    = "absent"
+    val File: String      = "file"
+    val Directory: String = "directory"
+  }
+
+  /** The `hash` of a file of `bytes`. */
+  def hashOf(bytes: Array[Byte]): String =
+    "sha256:" + java.security.MessageDigest
+      .getInstance("SHA-256")
+      .digest(bytes)
+      .map(b => f"${b & 0xff}%02x")
+      .mkString
+}
+
+// 9. DeleteFile Command and Response
+case class DeleteFileCommand(
+  commandId: String,
+  path: String,
+  // A compare-and-set, as WriteFileCommand.expectedHash.
+  expectedHash: Option[String] = None
+) extends WorkspaceAgentCommand
+
+object DeleteFileCommand {
+  implicit val rw: ReadWriter[DeleteFileCommand] = macroRW
+}
+
+case class DeleteFileResponse(
+  commandId: String,
+  path: String,
+  wasDirectory: Boolean
+) extends WorkspaceAgentResponse
+
+object DeleteFileResponse {
+  implicit val rw: ReadWriter[DeleteFileResponse] = macroRW
 }
 
 // WebSocket Protocol Messages

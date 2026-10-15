@@ -388,18 +388,20 @@ class ContainerisedWorkspace(
         logger.debug(s"Sent command: ${command.getClass.getSimpleName} with ID: ${command.commandId}")
       }
       response <- Try(future.get(responseTimeoutSeconds(command), TimeUnit.SECONDS)).toEither.left.map(_.getMessage)
-      finalResp <- response match {
-        case error: WorkspaceAgentErrorResponse => Left(s"${error.code}: ${error.error}")
-        case ok                                 => Right(ok)
-      }
-    } yield finalResp
+    } yield response
 
     sendEither.fold(
       err => {
         pendingResponses.remove(command.commandId)
         throw new WorkspaceAgentException(err, "EXECUTION_FAILED", None)
       },
-      ok => ok
+      {
+        // the runner's own code, as WorkspaceAgentInterfaceRemote keeps it: a caller tells a refusal (a path
+        // not found, a compare-and-set that lost) from a failure by it
+        case error: WorkspaceAgentErrorResponse =>
+          throw new WorkspaceAgentException(error.error, error.code, error.details)
+        case ok => ok
+      }
     )
   }
 
@@ -450,17 +452,27 @@ class ContainerisedWorkspace(
     path: String,
     content: String,
     mode: Option[String] = None,
-    createDirectories: Option[Boolean] = None
+    createDirectories: Option[Boolean] = None,
+    expectedHash: Option[String] = None
   ): WriteFileResponse = {
     val command = WriteFileCommand(
       commandId = java.util.UUID.randomUUID().toString,
       path = path,
       content = content,
       mode = mode,
-      createDirectories = createDirectories
+      createDirectories = createDirectories,
+      expectedHash = expectedHash
     )
     sendCommand(command).asInstanceOf[WriteFileResponse]
   }
+
+  override def fileSnapshot(path: String, includeContent: Boolean = true): FileSnapshotResponse =
+    sendCommand(FileSnapshotCommand(java.util.UUID.randomUUID().toString, path, includeContent))
+      .asInstanceOf[FileSnapshotResponse]
+
+  override def deleteFile(path: String, expectedHash: Option[String] = None): DeleteFileResponse =
+    sendCommand(DeleteFileCommand(java.util.UUID.randomUUID().toString, path, expectedHash))
+      .asInstanceOf[DeleteFileResponse]
 
   override def modifyFile(
     path: String,
@@ -498,14 +510,16 @@ class ContainerisedWorkspace(
     command: String,
     workingDirectory: Option[String] = None,
     timeout: Option[FiniteDuration] = None,
-    environment: Option[Map[String, String]] = None
+    environment: Option[Map[String, String]] = None,
+    maxOutputChars: Option[Long] = None
   ): ExecuteCommandResponse = {
     val cmd = ExecuteCommandCommand(
       commandId = java.util.UUID.randomUUID().toString,
       command = command,
       workingDirectory = workingDirectory,
       timeout = timeout,
-      environment = environment
+      environment = environment,
+      maxOutputChars = maxOutputChars
     )
     sendCommand(cmd).asInstanceOf[ExecuteCommandResponse]
   }
