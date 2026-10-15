@@ -435,7 +435,12 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     )
     val tight = SummaryCompressor.digest(counter).compress(Some(only), busy, 30, context).value
     tight.length should be <= 120
-    tight should startWith("Media: 21 image")
+    tight should startWith("Media: counted 21 image")
+    // counting again keeps the earlier count
+    val again = SummaryCompressor.digest(counter).compress(Some(tight), busy.take(2), 30, context).value
+    again should startWith("Media: counted 21 image\nMedia: [image (url, image/png)]\n")
+    val recounted = SummaryCompressor.digest(counter).compress(Some(again), busy, 30, context).value
+    recounted should startWith("Media: counted 42 image\n")
     val roomy = SummaryCompressor.digest(counter).compress(Some(only), busy.take(2), 100, context).value
     roomy.linesIterator.takeWhile(_.startsWith("Media: ")).toVector should have size 2
   }

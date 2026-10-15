@@ -129,6 +129,21 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
     offloadsOf(state).results.head.content should startWith("""[{"i":1,"pad":"yyy""")
   }
 
+  it should "measure rendered JSON in characters, so multibyte text under the threshold stays inline" in {
+    val cjk = AgentTool(
+      AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))
+    )((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Obj("text" -> "漢" * 1500))))
+    val model = ScriptedModel(calling("c1" -> 1), answer("done"))
+    val (state, _) =
+      runInMemory(
+        loopOf(model, Seq(new ToolOutputOffload(thresholdTokens = 1000)), cjk).graph,
+        AgentInput("go")
+      ).answered
+    // 4500 UTF-8 bytes, but about 1500 characters: under the 4000-character threshold
+    offloadsOf(state).results shouldBe empty
+    toolResults(state).head should include("漢" * 1500)
+  }
+
   it should "measure a blank string as the loop sends it, rendered as JSON" in {
     val blank = AgentTool(
       AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))

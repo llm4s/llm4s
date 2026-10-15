@@ -137,12 +137,28 @@ object SummaryCompressor:
     val joined = lines.mkString("\n")
     if lines.isEmpty then None
     else if joined.length.toLong <= max then Some(joined)
-    else
-      val counts = lines.flatMap(l => MediaKind.findAllMatchIn(l).map(_.group(1))).groupBy(identity)
-      val each   = counts.toVector.sortBy(_._1).map((kind, n) => s"${n.size} $kind").mkString(", ")
-      Some(
-        SummarizationMiddleware.cut(s"${MediaPrefix}$each (each named in the conversation before)", math.max(0L, max))
-      )
+    else Some(SummarizationMiddleware.cut(counted(mediaCounts(lines)), math.max(0L, max)))
+
+  /** The prefix of a media line that counts parts rather than naming them. */
+  private val CountedPrefix = s"${MediaPrefix}counted "
+
+  private val CountedKind = """(\d+) (image|document)""".r
+
+  /**
+   * How many parts of each kind `lines` record: one per named part (`[image ...]`), plus the counts of a counted line,
+   * so counting again never forgets what an earlier count recorded.
+   */
+  private def mediaCounts(lines: Vector[String]): Map[String, Long] =
+    lines
+      .flatMap { line =>
+        if line.startsWith(CountedPrefix) then
+          CountedKind.findAllMatchIn(line).map(m => m.group(2) -> m.group(1).toLongOption.getOrElse(0L)).toVector
+        else MediaKind.findAllMatchIn(line).map(_.group(1) -> 1L).toVector
+      }
+      .groupMapReduce(_._1)(_._2)(_ + _)
+
+  private def counted(counts: Map[String, Long]): String =
+    counts.toVector.sortBy(_._1).map((kind, n) => s"$n $kind").mkString(CountedPrefix, ", ", "")
 
   final private class Model(client: LLMClient, options: CompletionOptions, maxInputTokens: Int)
       extends SummaryCompressor:
