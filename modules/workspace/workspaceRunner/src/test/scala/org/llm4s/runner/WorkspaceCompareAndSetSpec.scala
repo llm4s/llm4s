@@ -55,6 +55,18 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     ws.fileSnapshot("dir/a.txt", includeContent = false) shouldBe snapshot.copy(content = None)
   }
 
+  it should "walk a link to a directory, used as the start of a walk, as the directory, under the link's name" in {
+    assume(!isWindowsHost)
+    Files.createDirectories(root.resolve("real/sub"))
+    Files.write(root.resolve("real/sub/a.txt"), "needle".getBytes(StandardCharsets.UTF_8))
+    Files.createSymbolicLink(root.resolve("link"), root.resolve("real"))
+    val ws = workspace()
+    ws.exploreFiles("link", recursive = Some(true)).files.map(_.path.replace('\\', '/')) should contain(
+      "link/sub/a.txt"
+    )
+    ws.searchFiles(List("link"), "needle", "literal", recursive = Some(true)).matches.map(_.path) should not be empty
+  }
+
   it should "refuse a FIFO without opening it, as every file operation does" in {
     assume(!isWindowsHost)
     val fifo = root.resolve("pipe")

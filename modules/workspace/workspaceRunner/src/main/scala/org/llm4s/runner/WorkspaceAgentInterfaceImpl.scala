@@ -119,6 +119,16 @@ class WorkspaceAgentInterfaceImpl(
    * allowed directory that leads outside it, or outside the workspace, is left out of a listing or a search before
    * anything follows it.
    */
+  /**
+   * The entries within `dir`, to `depth`, as `Files.walk` gives them, but with `dir` itself followed when it is a link:
+   * a walk does not follow its starting link, while every other operation (a listing, a read) does. Each entry is
+   * named beneath `dir` as written, so its path is the one the caller asked about, and [[withinPolicy]] judges it.
+   */
+  private def walkFrom(dir: Path, depth: Int): java.util.stream.Stream[Path] = {
+    val start = if (Files.isSymbolicLink(dir)) Try(dir.toRealPath()).getOrElse(dir) else dir
+    Files.walk(start, depth).map(p => dir.resolve(start.relativize(p)))
+  }
+
   private def withinPolicy(entry: Path): Boolean = Try(resolvePath(rootPath.relativize(entry).toString)).isSuccess
 
   /**
@@ -366,7 +376,7 @@ class WorkspaceAgentInterfaceImpl(
       )
     }
 
-    val stream = if (isRecursive) Files.walk(resolvedPath, depth) else Files.list(resolvedPath)
+    val stream = if (isRecursive) walkFrom(resolvedPath, depth) else Files.list(resolvedPath)
     Using(stream) { s =>
       // Use lazy evaluation: filter and limit on the iterator before materializing to a list
       // This prevents loading the entire directory tree into memory for large repos
@@ -947,7 +957,7 @@ class WorkspaceAgentInterfaceImpl(
       }
 
       if (Files.isDirectory(resolvedPath)) {
-        val stream = if (isRecursive) Files.walk(resolvedPath) else Files.list(resolvedPath)
+        val stream = if (isRecursive) walkFrom(resolvedPath, Int.MaxValue) else Files.list(resolvedPath)
         Using.resource(stream) { s =>
           s.iterator()
             .asScala
