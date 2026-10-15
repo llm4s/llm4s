@@ -311,6 +311,19 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     Files.readAttributes(other, attributes).group() shouldBe before.group()
   }
 
+  it should "copy an ACL only with getfacl and setfacl from trusted directories, never ones planted in the workspace" in {
+    assume(!isWindowsHost)
+    Seq("getfacl", "setfacl").foreach { tool =>
+      val planted = Files.write(root.resolve(tool), "#!/bin/sh\ntouch pwned\n".getBytes(StandardCharsets.UTF_8))
+      planted.toFile.setExecutable(true): Unit
+    }
+    // the workspace on PATH, as an entry or relatively: neither is ever used
+    Seq(root.toString, ".", "").foreach { entry =>
+      val search = ProgramSearch(windows = false, Nil, Some(entry), Some(root), None)
+      WorkspaceAgentInterfaceImpl.aclTools(search, Seq(root, root.toRealPath())) shouldBe None
+    }
+  }
+
   it should "keep the file's user extended attributes" in {
     import java.nio.file.attribute.UserDefinedFileAttributeView
     val file = root.resolve("tagged.txt")

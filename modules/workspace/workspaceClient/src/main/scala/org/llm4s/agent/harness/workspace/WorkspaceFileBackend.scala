@@ -115,8 +115,14 @@ final class WorkspaceFileBackend private (val id: String, workspace: WorkspaceAg
         )
       // as a state backend: nothing within a missing directory, and a file is within itself
       case Left(r: BackendRefused) if r.kind == BackendRefused.Kind.NotFound      => Right((Vector.empty, false))
-      case Left(r: BackendRefused) if r.kind == BackendRefused.Kind.NotADirectory => Right((Vector(under), false))
-      case Left(other)                                                            => Left(other)
+      case Left(r: BackendRefused) if r.kind == BackendRefused.Kind.NotADirectory =>
+        // only a regular file is within itself: a FIFO or socket (or a link to one), which every content operation
+        // refuses, is no file a listing names
+        call(operation, under)(workspace.fileSnapshot(relative(under), includeContent = false)) match
+          case Right(s) if s.kind == FileSnapshotResponse.Kind.File => Right((Vector(under), false))
+          case Right(_) | Left(_: BackendRefused)                   => Right((Vector.empty, false))
+          case Left(other)                                          => Left(other)
+      case Left(other) => Left(other)
 
   def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
     Text

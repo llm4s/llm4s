@@ -534,6 +534,14 @@ class WorkspaceAgentInterfaceImpl(
     }
   }
 
+  /**
+   * `getfacl` and `setfacl`, as absolute paths resolved as a command's program is ([[ProgramResolver]]): from trusted
+   * directories only, never the workspace or a relative `PATH` entry, so an agent cannot plant its own. `None` where
+   * either is missing, and then no POSIX ACL is copied.
+   */
+  private lazy val aclTools: Option[(Path, Path)] =
+    WorkspaceAgentInterfaceImpl.aclTools(programSearch, Seq(rootPath, effective(rootPath)))
+
   /** A file's hash, as [[currentHash]] gives it, from the bytes read. */
   private def digestOf(bytes: Array[Byte]): String =
     "sha256:" + java.security.MessageDigest.getInstance("SHA-256").digest(bytes).map(b => f"${b & 0xff}%02x").mkString
@@ -566,7 +574,7 @@ class WorkspaceAgentInterfaceImpl(
       // the replacement is a new inode, so it takes the file's metadata as well as its mode: its owner and group
       // (the runner runs as root over a bind mount, and a root-owned replacement would lock its owner out) and its
       // ACL. Each where the platform has it; a runner that may not chown keeps the owner it has.
-      if (Files.exists(target)) WorkspaceAgentInterfaceImpl.copyOwnership(target, temp)
+      if (Files.exists(target)) WorkspaceAgentInterfaceImpl.copyOwnership(target, temp, aclTools)
       val again = effective(resolvePath(path, Access.Write))
       if (again != target)
         throw new WorkspaceAgentException(
@@ -660,18 +668,32 @@ class WorkspaceAgentInterfaceImpl(
       // dangling link (`link -> new/dir/file`), the link target's directories
       val parent = effective(resolvedPath).getParent
       checkPolicy(path, parent, Access.Write)
-      createdDirs = Iterator
+      val missing = Iterator
         .iterate(parent)(_.getParent)
         .takeWhile(d => d != null && !Files.exists(d, java.nio.file.LinkOption.NOFOLLOW_LINKS))
         .toList
-      Try(Files.createDirectories(parent)).failed.foreach { e =>
-        rollBack()
-        throw new WorkspaceAgentException(
-          s"Cannot create the parent directories of '$path': ${e.getMessage}",
-          "PARENT_NOT_A_DIRECTORY",
-          None
-        )
-      }
+        .reverse // shallowest first
+      Try(missing.foreach { d =>
+        // one at a time, each recorded only once this request made it: one another writer made meanwhile is theirs,
+        // and a roll-back never removes it
+        Try(Files.createDirectory(d)) match {
+          case Success(_) => createdDirs = d :: createdDirs
+          case Failure(_: java.nio.file.FileAlreadyExistsException) if Files.isDirectory(d) => ()
+          case Failure(e)                                                                   => throw e
+        }
+      }).flatMap { _ =>
+        // a file in the way of the directory, already there, is as much a refusal as one met while creating
+        if (Files.isDirectory(parent)) Success(())
+        else Failure(new java.nio.file.NotDirectoryException(parent.toString))
+      }.failed
+        .foreach { e =>
+          rollBack()
+          throw new WorkspaceAgentException(
+            s"Cannot create the parent directories of '$path': ${e.getMessage}",
+            "PARENT_NOT_A_DIRECTORY",
+            None
+          )
+        }
     } else if (!Files.exists(resolvedPath.getParent)) {
       throw new WorkspaceAgentException(
         s"Parent directory for '$path' does not exist",
@@ -1675,7 +1697,7 @@ private[runner] object WorkspaceAgentInterfaceImpl {
    * Gives `to` the owner, the group and the ACL of `from`, each where the file system has it and the runner may set
    * it; one it cannot is left as it is. For a replacement written beside a file and moved over it.
    */
-  def copyOwnership(from: Path, to: Path): Unit = {
+  def copyOwnership(from: Path, to: Path, aclTools: Option[(Path, Path)] = None): Unit = {
     import java.nio.file.attribute.{ AclFileAttributeView, PosixFileAttributeView }
     Try(Files.setOwner(to, Files.getOwner(from))): Unit
     Try {
@@ -1701,7 +1723,7 @@ private[runner] object WorkspaceAgentInterfaceImpl {
         }
       }
     }: Unit
-    copyPosixAcl(from, to)
+    aclTools.foreach { case (getfacl, setfacl) => copyPosixAcl(from, to, getfacl, setfacl) }
   }
 
   /**
@@ -1709,28 +1731,27 @@ private[runner] object WorkspaceAgentInterfaceImpl {
    * with `getfacl` and `setfacl`, run directly (no shell), when they are installed. The whole access ACL is set, a
    * basic one included, so an ACL the replacement inherited from its directory's default never survives.
    */
-  private def copyPosixAcl(from: Path, to: Path): Unit =
-    if (AclTools)
-      Try {
-        val get = new ProcessBuilder("getfacl", "--absolute-names", "--omit-header", from.toString)
-          .redirectErrorStream(false)
-          .start()
-        val acl = new String(get.getInputStream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
-        // set whatever it is, a basic one included: the replacement may have inherited a directory's default ACL,
-        // which only setting the file's own access ACL removes
-        if (get.waitFor() == 0 && acl.trim.nonEmpty) {
-          val set = new ProcessBuilder("setfacl", "--set-file=-", to.toString).start()
-          Using.resource(set.getOutputStream)(_.write(acl.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
-          set.waitFor(): Unit
-        }
-      }: Unit
+  private def copyPosixAcl(from: Path, to: Path, getfacl: Path, setfacl: Path): Unit =
+    Try {
+      val get = new ProcessBuilder(getfacl.toString, "--absolute-names", "--omit-header", from.toString)
+        .redirectErrorStream(false)
+        .start()
+      val acl = new String(get.getInputStream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+      // set whatever it is, a basic one included: the replacement may have inherited a directory's default ACL,
+      // which only setting the file's own access ACL removes
+      if (get.waitFor() == 0 && acl.trim.nonEmpty) {
+        val set = new ProcessBuilder(setfacl.toString, "--set-file=-", to.toString).start()
+        Using.resource(set.getOutputStream)(_.write(acl.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+        set.waitFor(): Unit
+      }
+    }: Unit
 
-  /** Whether `getfacl` and `setfacl` are on the runner's PATH. */
-  private lazy val AclTools: Boolean =
-    sys.props.get("os.name").forall(!_.startsWith("Windows")) &&
-      Seq("getfacl", "setfacl").forall(tool =>
-        ProgramSearch.host().path.toList.flatMap(_.split(java.io.File.pathSeparator)).exists { dir =>
-          Files.isExecutable(Paths.get(dir, tool))
-        }
-      )
+  /** `getfacl` and `setfacl` from trusted directories, never under `untrustedRoots`; `None` on Windows or if missing. */
+  private[runner] def aclTools(search: ProgramSearch, untrustedRoots: Seq[Path]): Option[(Path, Path)] =
+    if (search.windows) None
+    else
+      for {
+        get <- ProgramResolver.resolve("getfacl", search, untrustedRoots).toOption
+        set <- ProgramResolver.resolve("setfacl", search, untrustedRoots).toOption
+      } yield (get, set)
 }
