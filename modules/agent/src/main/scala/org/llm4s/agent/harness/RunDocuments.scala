@@ -248,6 +248,9 @@ final private[harness] class SectionText(maxChars: Long):
 
   def text: String = out.toString
 
+  /** The text added from `start` on. */
+  def since(start: Int): String = out.substring(start)
+
 /** The issues of one read, at most [[Report.MaxIssues]] kept and the rest counted. */
 final private[harness] class Report:
   private val kept    = Vector.newBuilder[DocumentIssue]

@@ -191,6 +191,15 @@ class InstructionMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Eit
     def system(i: Int): String = seen.get(i).collectFirst { case s: SystemMessage => s.content }.getOrElse("")
   }
 
+  it should "read no file once the section is full, naming each left out" in {
+    val counting = new CountingBackend(storeBackend())
+    val many     = (1 to 50).map(i => p(s"/scope$i/AGENTS.md"))
+    seed(counting, many.map(path => path.value -> ("x" * 400))*)
+    val mw = new InstructionMemoryMiddleware(many.toVector, counting, maxFileTokens = 100, maxTotalTokens = 200)
+    mw.instructions(testModelContext()).value.size shouldBe 2
+    counting.reads.get shouldBe 2
+  }
+
   "An edit with FileTools' edit_file" should "show from the next run, not in the run that read the files (rule 1)" in {
     val store   = new InMemoryCheckpointer
     val thread  = ThreadId("edit")

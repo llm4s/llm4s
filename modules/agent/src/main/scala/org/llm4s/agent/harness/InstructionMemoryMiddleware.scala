@@ -73,55 +73,66 @@ final class InstructionMemoryMiddleware(
   private val fileMarker  = s"\n[cut: this file is over $maxFileTokens tokens]"
   private val totalMarker = s"\n[cut: the instructions are over $maxTotalTokens tokens]"
 
-  /** Every file in order, each bounded, and the section built from them within its bound. */
+  /**
+   * Every file in order, each read within `maxFileTokens` and added to the section as it is read, so at most one file
+   * is held beside the section; once the section is full, the files after it are not read, only named.
+   */
   private def load(ctx: FileContext, report: Report): Result[(Vector[Instructions], Option[String])] =
+    val text  = new SectionText(PromptSection.charsFor(maxTotalTokens))
+    val shown = Vector.newBuilder[Instructions]
+    // the guide first: when not even it fits, no file is shown
+    var full = !text.addWhole(Guide)
+    def notListed(path: VPath) =
+      report.add(DocumentIssue(path, DocumentIssue.Kind.NotListed, None, s"over maxTotalTokens of $maxTotalTokens"))
     paths
-      .foldLeft[Result[Vector[(VPath, BoundedText)]]](Right(Vector.empty)) { (acc, path) =>
-        acc.flatMap { read =>
-          DocumentText.read(backend, path, fileChars, ctx) match
-            case Left(refused: BackendRefused) =>
-              report.add(
-                DocumentIssue(path, DocumentIssue.Kind.Unreadable, None, s"the backend refused it (${refused.kind})")
-              )
-              Right(read)
-            case Left(error)                                              => Left(error)
-            case Right(None)                                              => Right(read)
-            case Right(Some(text)) if !text.cut && text.text.trim.isEmpty => Right(read)
-            case Right(Some(text))                                        => Right(read :+ (path -> text))
+      .foldLeft[Result[Unit]](Right(())) { (acc, path) =>
+        acc.flatMap { _ =>
+          if full then Right(notListed(path))
+          else
+            DocumentText.read(backend, path, fileChars, ctx) match
+              case Left(refused: BackendRefused) =>
+                Right(
+                  report.add(
+                    DocumentIssue(
+                      path,
+                      DocumentIssue.Kind.Unreadable,
+                      None,
+                      s"the backend refused it (${refused.kind})"
+                    )
+                  )
+                )
+              case Left(error)                                              => Left(error)
+              case Right(None)                                              => Right(())
+              case Right(Some(read)) if !read.cut && read.text.trim.isEmpty => Right(())
+              case Right(Some(read)) =>
+                val heading = s"\n\n## ${path.value}\n"
+                val before  = text.length
+                text.addCut(
+                  heading + read.text + (if read.cut then fileMarker else ""),
+                  heading.length,
+                  totalMarker
+                ) match
+                  case None =>
+                    full = true
+                    notListed(path)
+                  case Some(totalCut) =>
+                    if totalCut then
+                      full = true
+                      report.add(
+                        DocumentIssue(path, DocumentIssue.Kind.Cut, None, s"over maxTotalTokens of $maxTotalTokens")
+                      )
+                    else if read.cut then
+                      report.add(
+                        DocumentIssue(path, DocumentIssue.Kind.Cut, None, s"over maxFileTokens of $maxFileTokens")
+                      )
+                    shown += Instructions(path, text.since(before + heading.length), cut = read.cut || totalCut)
+                Right(())
         }
       }
-      .map(section(_, report))
-
-  /** The section of `files`: the guide, then each file under its heading, cut to the room left once it is full. */
-  private def section(files: Vector[(VPath, BoundedText)], report: Report): (Vector[Instructions], Option[String]) =
-    val text  = new SectionText(PromptSection.charsFor(maxTotalTokens))
-    val fits  = text.addWhole(Guide)
-    var full  = !fits
-    val shown = Vector.newBuilder[Instructions]
-    files.foreach { (path, read) =>
-      val heading = s"\n\n## ${path.value}\n"
-      val body    = read.text + (if read.cut then fileMarker else "")
-      if full then
-        report.add(DocumentIssue(path, DocumentIssue.Kind.NotListed, None, s"over maxTotalTokens of $maxTotalTokens"))
-      else
-        val before = text.length
-        text.addCut(heading + body, heading.length, totalMarker) match
-          case None =>
-            full = true
-            report.add(
-              DocumentIssue(path, DocumentIssue.Kind.NotListed, None, s"over maxTotalTokens of $maxTotalTokens")
-            )
-          case Some(totalCut) =>
-            if totalCut then
-              full = true
-              report.add(DocumentIssue(path, DocumentIssue.Kind.Cut, None, s"over maxTotalTokens of $maxTotalTokens"))
-            else if read.cut then
-              report.add(DocumentIssue(path, DocumentIssue.Kind.Cut, None, s"over maxFileTokens of $maxFileTokens"))
-            val added = text.text.substring(before + heading.length)
-            shown += Instructions(path, added, cut = read.cut || totalCut)
-    }
-    val all = shown.result()
-    (all, Option.when(all.nonEmpty)(text.text))
+      .map { _ =>
+        val all = shown.result()
+        (all, Option.when(all.nonEmpty)(text.text))
+      }
 
 @Experimental
 object InstructionMemoryMiddleware:
