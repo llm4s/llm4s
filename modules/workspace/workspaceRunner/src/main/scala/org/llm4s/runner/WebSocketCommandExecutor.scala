@@ -277,9 +277,27 @@ final private[runner] class WebSocketCommandExecutor(
             process.destroyForcibly()
             -1
         } finally {
-          processes.remove(cmd.commandId)
+          // a process that survived its kill stays registered, so a cancellation still finds it, until it exits
+          if (survivedKill.get())
+            process.onExit().whenComplete((_, _) => processes.remove(cmd.commandId): Unit): Unit
+          else processes.remove(cmd.commandId): Unit
           exitDone.trySuccess(())
         }
+      // timed out and still alive after the kill: it may yet write, so its outcome is unknown - reported now, as a
+      // failure, without waiting for output streams it may hold open
+      if (survivedKill.get() && running.completionSent.compareAndSet(false, true)) {
+        send(
+          ResponseMessage(
+            WorkspaceAgentErrorResponse(
+              cmd.commandId,
+              "Command timed out and did not terminate when killed",
+              "EXECUTION_FAILED",
+              None
+            )
+          )
+        )
+        send(CommandCompletedMessage(cmd.commandId, -1, (System.currentTimeMillis() - startTime).millis))
+      }
       exitCodePromise.trySuccess(exitCode)
     }
 
@@ -288,16 +306,19 @@ final private[runner] class WebSocketCommandExecutor(
       .flatMap(_ => exitDone.future)
       .flatMap(_ => exitCodePromise.future)
       .onComplete {
-        case Success(_) if survivedKill.get() =>
-          // timed out and still alive after the kill: it may yet write, so its outcome is unknown, a failure
-          fail("Command timed out and did not terminate when killed", "EXECUTION_FAILED", None)
+        case Success(_) if survivedKill.get() => () // reported when the kill failed
         case Success(rawExitCode) =>
           val durationMs = System.currentTimeMillis() - startTime
           val effectiveExitCode =
             if (running.cancelled.get()) 143
             else if (commandTimedOut.get()) -1
             else rawExitCode
-          val isOutputTruncated = stdoutTruncated.get() || stderrTruncated.get()
+          val marker =
+            if (commandTimedOut.get()) s"[timed out after ${prepared.timeout.toSeconds}s and was killed]\n" else ""
+          val fullStderr       = marker + stderrAccumulator.result()
+          val stderrWithMarker = fullStderr.take(math.min(limit, Int.MaxValue.toLong).toInt)
+          val isOutputTruncated =
+            stdoutTruncated.get() || stderrTruncated.get() || stderrWithMarker.length < fullStderr.length
 
           send(
             ResponseMessage(
@@ -306,9 +327,8 @@ final private[runner] class WebSocketCommandExecutor(
                 stdout = stdoutAccumulator.result(),
                 // a command its timeout killed says so, as the direct path's TIMEOUT does: exit -1 alone is ambiguous.
                 // First, so a bound that cuts stderr's end keeps it
-                stderr = (if (commandTimedOut.get())
-                            s"[timed out after ${prepared.timeout.toSeconds}s and was killed]\n"
-                          else "") + stderrAccumulator.result(),
+                // Within the stream's bound like any output: a marker that does not fit is cut, and says so.
+                stderr = stderrWithMarker,
                 exitCode = effectiveExitCode,
                 isOutputTruncated = isOutputTruncated,
                 duration = durationMs.millis
