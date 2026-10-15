@@ -72,6 +72,12 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
       .transactional[A](ctx.run, effect, store)(token =>
         store.modify[A](namespace(ctx), file.value, effect, token)(change)
       )
+      // the store names its key; the key is this backend's path, so its refusal names the path, typed
+      .left
+      .map {
+        case r: BackendRefused if r.path.isEmpty => BackendRefused.at(r.operation, file, r.reason, r.kind)
+        case other                               => other
+      }
       .map(a => (a, StateUpdate.empty))
 
   private def file(text: String): ujson.Value = ujson.Obj("content" -> text)

@@ -77,7 +77,7 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
     }.distinct
     // the fallback covers only the routed backend's refusal of the path itself (absent, or a file it
     // holds where a mount makes a directory), never an invalid argument, which is checked first
-    val base: Result[Listing[FileInfo]] = Text.checkLimit("ls", path.value, limit).flatMap { _ =>
+    val base: Result[Listing[FileInfo]] = Text.checkLimitAt("ls", path, limit).flatMap { _ =>
       routed.backend.ls(routed.path, limit, ctx) match
         // only the two path-shape kinds it means: a permission, a quota or a replay refusal is the routed
         // backend's answer, and propagates unchanged

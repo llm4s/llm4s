@@ -37,7 +37,7 @@ private[harness] object FileTree:
 
   def ls(all: Map[VPath, FileEntry], path: VPath, limit: Int): Result[Listing[FileInfo]] =
     for
-      _ <- Text.checkLimit("ls", path.value, limit)
+      _ <- Text.checkLimitAt("ls", path, limit)
       _ <-
         if all.contains(path) then Left(BackendRefused.notADirectory("ls", path))
         else if !isDirectory(all, path) then Left(BackendRefused.notFound("ls", path))
@@ -68,7 +68,7 @@ private[harness] object FileTree:
 
   def read(all: Map[VPath, FileEntry], path: VPath, offset: Int, limit: Int): Result[FileLines] =
     for
-      _     <- Text.checkLimit("read", path.value, limit)
+      _     <- Text.checkLimitAt("read", path, limit)
       _     <- Either.cond(offset >= 0, (), BackendRefused.at("read", path, s"offset must be >= 0, was $offset"))
       entry <- fileOf("read", all, path)
       // one text rule for every source: a store item written past the backend can hold NUL
@@ -83,7 +83,7 @@ private[harness] object FileTree:
     all.keysIterator.filter(p => p.isWithin(under) && accept(p)).toVector.sorted
 
   def find(all: Map[VPath, FileEntry], under: VPath, accept: VPath => Boolean, limit: Int): Result[Listing[VPath]] =
-    Text.checkLimit("glob", under.value, limit).map(_ => Listing.of(within(all, under, accept).iterator, limit))
+    Text.checkLimitAt("glob", under, limit).map(_ => Listing.of(within(all, under, accept).iterator, limit))
 
   def search(
     all: Map[VPath, FileEntry],
@@ -92,7 +92,7 @@ private[harness] object FileTree:
     accept: VPath => Boolean,
     limit: Int
   ): Result[Listing[GrepMatch]] =
-    Text.checkLimit("grep", under.value, limit).flatMap { _ =>
+    Text.checkLimitAt("grep", under, limit).flatMap { _ =>
       Text.interruptibly("grep") {
         val matches = within(all, under, accept).iterator
           .filter(p => Text.binaryReason(all(p).content).isEmpty)

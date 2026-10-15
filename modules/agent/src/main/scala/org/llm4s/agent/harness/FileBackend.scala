@@ -474,9 +474,9 @@ private[harness] object Text:
           val bound     = math.min(maxBytes, MaxLength.toLong)
           if projected > bound then
             Left(
-              BackendRefused(
+              BackendRefused.at(
                 "edit",
-                path.value,
+                path,
                 s"the result would be at least $projected bytes, larger than the limit of $maxBytes bytes"
               )
             )
@@ -529,6 +529,11 @@ private[harness] object Text:
   /** Lines `offset` to `offset + limit` of `lines`, the sum taken without overflow. */
   def page(lines: Vector[String], offset: Int, limit: Int): Vector[String] =
     lines.slice(offset, math.min(offset.toLong + limit, lines.size.toLong).toInt)
+
+  /** [[checkLimit]] of an operation on the backend path `path`: its refusal names the path, typed. */
+  def checkLimitAt(operation: String, path: VPath, limit: Int): Result[Unit] =
+    if limit >= 1 then Right(())
+    else Left(BackendRefused.at(operation, path, s"limit must be at least 1, was $limit"))
 
   def checkLimit(operation: String, target: String, limit: Int): Result[Unit] =
     if limit >= 1 then Right(()) else Left(BackendRefused(operation, target, s"limit must be at least 1, was $limit"))

@@ -278,4 +278,24 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     refusal.target shouldBe "/m"
     refusal.path shouldBe Some(p("/m"))
   }
+
+  it should "name the composite path for every refusal a mounted backend makes of a path" in {
+    val small       = StateFileBackend(keyId = "small", maxBytes = 40)
+    val store       = InMemoryLongTermStore(StoreLimits(maxItemBytes = 60))
+    val mem         = StoreFileBackend(store).value
+    val c           = CompositeBackend(main, p("/s") -> small, p("/mem") -> mem).value
+    var st          = stateOf(main.files, small.files)
+    def in          = FileContext(testRunContext(), st)
+    val (_, update) = c.write(p("/s/f"), "x", in).value
+    st = committed(st, update).value
+    // Text.edited's projection, past the state backend's bound
+    c.edit(p("/s/f"), "x", "y" * 100, replaceAll = false, in)
+      .left
+      .value
+      .asInstanceOf[BackendRefused]
+      .target shouldBe "/s/f"
+    // the store's own item bound, refused by the store under its key
+    c.write(p("/mem/g"), "z" * 100, in).left.value.asInstanceOf[BackendRefused].target shouldBe "/mem/g"
+    c.read(p("/s/f"), 0, 0, in).left.value.asInstanceOf[BackendRefused].target shouldBe "/s/f"
+  }
 }
