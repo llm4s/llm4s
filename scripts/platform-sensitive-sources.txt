@@ -12,10 +12,7 @@
 #   <module>:<suite>    a suite name (or glob) that PlatformTests.suites lists for that module, or
 #   none: <reason>      nothing runs it on Windows, and why that is acceptable.
 
-modules/agent-testkit/src/main/scala/org/llm4s/agent/testkit/FileBackendContract.scala             agentTestkit:org.llm4s.agent.testkit.HostFileBackendContractSpec
-modules/agent-testkit/src/main/scala/org/llm4s/agent/testkit/ReplayContract.scala                  none: matches only a Scaladoc example (Files.createTempDirectory); the suite itself does no file I/O
 modules/agent/src/main/scala/org/llm4s/agent/graph/Checkpointer.scala                              none: matches only a Scaladoc mention of FileChannel; the SQLite checkpointer's file I/O is agentCheckpointSqlite's
-modules/agent/src/main/scala/org/llm4s/agent/harness/HostFileBackend.scala                         agent:org.llm4s.agent.harness.HostFileBackendSpec
 modules/agent/src/main/scala/org/llm4s/assistant/SessionManager.scala                              agent:org.llm4s.assistant.*
 modules/anthropic/src/main/scala/org/llm4s/llmconnect/config/AnthropicWorkloadIdentity.scala       anthropic:org.llm4s.llmconnect.provider.AnthropicWorkloadIdentitySpec
 modules/config-policy/src/main/scala/org/llm4s/configpolicy/Doctor.scala                           configPolicy:org.llm4s.configpolicy.DoctorSpec

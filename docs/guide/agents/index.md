@@ -422,7 +422,7 @@ rules a caller relies on:
   finishes the task, however long the thread waits. `prune` never removes it, and `deleteThread`
   removes it with the thread.
 - **A Block does not undo an external effect.** A guardrail that blocks a turn restores every state
-  key the turn wrote, its messages included (§4.22), but a file the turn wrote on the host, a
+  key the turn wrote, its messages included (§4.22), but a file the turn wrote outside thread state, a
   command it ran or a record it stored stays as it is. The turn's replay evidence goes with its
   closing commit, so nothing replays it either.
 
@@ -430,22 +430,10 @@ rules a caller relies on:
 
 The harness keeps an agent's files in a `FileBackend` (`org.llm4s.agent.harness`): thread state
 (`StateFileBackend`, the default), a long-term store (`StoreFileBackend`, for `/memories/`), several at
-once (`CompositeBackend`), or a host directory (`HostFileBackend`). Each backend declares the locks its
-mutations hold, replays its external effects through `ReplayGuard`, and enforces its own size limits.
-
-**`HostFileBackend` needs a file system where one path names one file.** `HostFileBackend.open` checks this:
-it refuses a lock directory inside the root, and refuses a root whose file system resolves aliases it cannot see.
-It probes for 8.3 short names, which SMB/CIFS shares and some NTFS volumes have. Supported: local POSIX file
-systems (case-insensitive ones too). NTFS reports no hard-link counts, so a Windows root is refused
-unless the caller passes `allowUncheckedIdentity`, vouching for no 8.3 names and no hard links. Elsewhere, use the workspace sandbox's file backend
-or a `StoreFileBackend`. Never let two backends expose one directory, or overlapping ones, under different paths (bind mounts, symlinked mount points, nested roots), in any process. Within one JVM, `open` refuses a root overlapping an open one until that one is closed.
-
-**`HostFileBackend` is not a security boundary.** It is a convenience for a directory you trust. It
-refuses symbolic links and files with other hard links, and each write is a compare-and-set under
-file locks. Even so, a process that can write the root can swap a directory for a link between the
-backend's check and its open, and reach files outside the root. Never give it a root that an untrusted
-process can write, including a command run by a sandbox. To run untrusted commands, use the workspace
-sandbox and its file backend, which are the isolation boundary.
+once (`CompositeBackend`), or one chosen per run (`FileBackend.resolved`). Each backend declares the locks
+its mutations hold, replays its external effects through `ReplayGuard`, and enforces its own size
+limits. A backend over a host directory is not part of this release; it is tracked in
+[#1964](https://github.com/llm4s/llm4s/issues/1964).
 
 ### Tool Permissions, Timeouts and Locks
 

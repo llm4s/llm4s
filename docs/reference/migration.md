@@ -215,7 +215,6 @@ Design §4.25. New, opt-in API in `org.llm4s.agent.harness`; nothing existing ch
 
 - **`llm4s-agent-testkit` depends on `llm4s-testkit`**, whose `ScriptedLLMClient` drives `FileBackendContract`'s agent runs. A build that excludes `llm4s-testkit` from its test classpath adds it back.
 - **File tools over a `StateFileBackend` add the `files` key.** Every mutation holds the lock `files/state/<keyId>` (needed: it keeps two edits of one file in a batch from losing one, and the quota exact), so adding file tools over a `StateFileBackend` adds its `files` key and C2's `tool-queue`, and changes the agent's version. Under §4.29 (C5) a thread at rest continues, its files starting empty; a thread in flight (suspended, or `Running` after a crash) is refused with `RestoreRejected` until it is finished or forgotten. Taking the tools out again refuses only a thread whose files hold content: the last file's delete removes the key's entry, so a thread with no files restores.
-- A `HostFileBackend` keeps its cross-process lock files in the `lockDirectory` given to `open`; give every backend that may touch the same files, in any process, the same one. It refuses symbolic links and files with other hard links.
 
 ### Event records carry their claim's token (#1918)
 

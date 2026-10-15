@@ -355,7 +355,7 @@ OpenAI-compatible provider); workload identity, configurable timeouts, testkits 
   [#1903](https://github.com/llm4s/llm4s/issues/1903); [design
   §4.23](docs/design/typed-agent-runtime/4.23-stage-3-slice-c2-tool-permissions-timeouts-locks.md),
   [guide](docs/guide/agents/index.md#tool-permissions-timeouts-and-locks).
-- **Added** backend SPIs: `FileBackend` (state, host, composite, store), `SandboxBackend`, `LongTermStore` and `FileBackendContract`
+- **Added** backend SPIs: `FileBackend` (state, composite, store), `SandboxBackend`, `LongTermStore` and `FileBackendContract`
   [#1904](https://github.com/llm4s/llm4s/issues/1904); [design §4.25](docs/design/typed-agent-runtime/4.25-stage-3-slice-c3-backend-spis.md).
 - **Added** replay of external effects: `ReplayGuard`, `EffectKey` and `ReplayContract`
   [#1921](https://github.com/llm4s/llm4s/issues/1921); [design

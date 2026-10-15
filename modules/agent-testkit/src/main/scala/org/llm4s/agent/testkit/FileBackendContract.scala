@@ -23,8 +23,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * external backend's effects go through its replay guard, as they would in production:
  *
  * {{{
- * class HostFileBackendContractSpec extends AnyFlatSpec with FileBackendContract:
- *   protected def newBackend(): FileBackend = HostFileBackend.open(Files.createTempDirectory("c"), Files.createTempDirectory("locks")).toOption.get
+ * class StateFileBackendContractSpec extends AnyFlatSpec with FileBackendContract:
+ *   protected def newBackend(): FileBackend = StateFileBackend(maxBytes = 200)
  * }}}
  *
  * It checks each operation and its refusals; that two mutations of one path in one batch both apply,

@@ -64,7 +64,7 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
       val c = CompositeBackend(new Refusing(kind), p("/m") -> main).value
       c.ls(VPath.root, 10, ctx).value.items.map(_.path) shouldBe Vector(p("/m"))
     }
-    for (kind <- Seq(BackendRefused.Kind.Closed, BackendRefused.Kind.Refused)) {
+    for (kind <- Seq(BackendRefused.Kind.Refused)) {
       val c       = CompositeBackend(new Refusing(kind), p("/m") -> main).value
       val refusal = c.ls(VPath.root, 10, ctx).left.value
       refusal shouldBe a[BackendRefused]

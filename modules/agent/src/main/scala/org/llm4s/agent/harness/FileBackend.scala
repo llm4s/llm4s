@@ -68,8 +68,8 @@ object FileContext:
     new FileContext(run, ThreadState.empty(Map.empty), None)
 
 /**
- * Where an agent's files live: thread state ([[StateFileBackend]]), a host directory
- * ([[HostFileBackend]]), a [[LongTermStore]] ([[StoreFileBackend]]), several at once
+ * Where an agent's files live: thread state ([[StateFileBackend]]), a [[LongTermStore]]
+ * ([[StoreFileBackend]]), several at once
  * ([[CompositeBackend]]), or one chosen per run ([[FileBackend.resolved]]).
  *
  * A backend owns the four obligations of every mutation, so the tools that call it need not know them:
@@ -177,7 +177,7 @@ trait FileBackend:
 object FileBackend:
 
   /**
-   * The root of every file backend's locks (`files/state/<keyId>`, `files/host/<root>/...`,
+   * The root of every file backend's locks (`files/state/<keyId>`,
    * `files/store/<path>/...`); a backend of one's own locks under it too, so a resolved backend's lock
    * orders it with every other route to it.
    */
@@ -188,13 +188,13 @@ object FileBackend:
 
   /**
    * A backend chosen per operation by `resolve`, typically by `ctx.run.config.tenantId`: an application
-   * serving tenants builds one host or workspace backend per tenant, and this picks it (rule 8). Caching
+   * serving tenants builds one workspace or store backend per tenant, and this picks it (rule 8). Caching
    * is the resolver's.
    *
    * Locks are computed from a call's arguments, before any context exists, so they cannot ask the
    * resolved backend for its own. Every mutation therefore holds [[LockRoot]], the root of every file
    * backend's locks, which conflicts with whatever locking the resolved backend needs - a
-   * `StateFileBackend`'s backend-wide lock as much as a host backend's per-path locks - and with every
+   * `StateFileBackend`'s backend-wide lock as much as a store backend's per-path locks - and with every
    * other route to the same backend: another resolved wrapper or a direct mount. A resolved backend
    * whose locks are not under [[LockRoot]] is refused when used. The cost is that a batch's file
    * mutations run one after another while one goes through a resolved backend. `writes` must hold every key a resolved backend's updates touch, since a graph
@@ -262,7 +262,7 @@ object BackendRefused:
    * `Refused` for anything else - a permission, a bound, an argument.
    */
   enum Kind:
-    case Refused, NotFound, NotADirectory, Closed
+    case Refused, NotFound, NotADirectory
 
   /** `path` does not exist. */
   def notFound(operation: String, path: VPath): BackendRefused =
