@@ -1,7 +1,7 @@
 package org.llm4s.javaapi
 
 import org.llm4s.agent.graph.middleware.ApprovalMiddleware
-import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContext, ToolOutcome, ToolSet }
+import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContent, ToolContext, ToolOutcome, ToolSet }
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, ToolCall }
 import org.llm4s.toolapi.Schema
@@ -33,7 +33,7 @@ private[javaapi] object SuspensionFixtures {
   private val confirm = new AgentTool.Asking[Text, Confirm, Confirmed](spec("confirm")) {
     def execute(args: Text, context: ToolContext): ToolOutcome = ask(Confirm(s"really ${args.text}?"))
     def resume(args: Text, question: Confirm, answer: Confirmed, context: ToolContext): ToolOutcome =
-      ToolOutcome.Success(ujson.Str(s"${question.prompt} ${answer.ok}"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str(s"${question.prompt} ${answer.ok}")))
   }
 
   def call(id: String, name: String, text: String): ToolCall = ToolCall(id, name, ujson.Obj("text" -> text))
@@ -52,7 +52,7 @@ private[javaapi] object SuspensionFixtures {
   def agentOver(client: Scripted, ran: CopyOnWriteArrayList[String] = new CopyOnWriteArrayList()): JAgent = {
     val deploy = AgentTool(spec("deploy")) { (args, _) =>
       ran.add(args.text)
-      ToolOutcome.Success(ujson.Str(s"deployed ${args.text}"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str(s"deployed ${args.text}")))
     }
     val tools = ToolSet.of(deploy, confirm).fold(e => throw new AssertionError(e.message), identity)
     jAgentOf(client)(

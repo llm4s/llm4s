@@ -2,6 +2,7 @@ package org.llm4s.agent.graph.tool
 
 import org.llm4s.agent.graph.{ EffectKey, IdempotencyKey, RunContext, StateKey, StateUpdate, ThreadState, ToolCallId }
 import org.llm4s.error.LLMError
+import org.llm4s.llmconnect.model.ContentPart
 import org.llm4s.toolapi.{ SchemaDefinition, ToolFunction, ToolHints }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
@@ -219,11 +220,29 @@ object ToolContext:
   ): ToolContext =
     new ToolContext(run, toolCallId, idempotencyKey, state, approved, Some(phase))
 
+/**
+ * A successful call's result for the model: JSON, or content parts - text, images and documents.
+ *
+ * The loop sends `Json` as one text part: a non-blank string as itself, anything else rendered as
+ * JSON. It sends `Parts` as they are, in the `ToolMessage`, for the provider to map; a provider that
+ * cannot send one fails the model call with an `UnsupportedContentPartError`. `Parts` with no content,
+ * or carrying more than `ContentPart.MaxInlineBytes` of inline bytes in total, is the call's error
+ * result instead: every checkpoint copies the thread's messages, so larger media goes in a
+ * `MediaSource.Url` or a `MediaSource.ProviderFile`.
+ *
+ * It has a `ReadWriter`, so an effect guarded by `ReplayGuard` can record a `ToolContent` as its outcome and
+ * replay it, parts and all: its inline media is base64 in the record, and counts towards the guard's
+ * `maxOutcomeBytes` at that encoded size.
+ */
+enum ToolContent derives ReadWriter:
+  case Json(value: ujson.Value)
+  case Parts(parts: Vector[ContentPart])
+
 /** What a tool call produced, as data. */
 enum ToolOutcome:
 
   /** The call's result for the model, and an update to keys the tool declares in `writes`. */
-  case Success(content: ujson.Value, update: StateUpdate = StateUpdate.empty)
+  case Success(content: ToolContent, update: StateUpdate = StateUpdate.empty)
 
   /** A tool-level failure: the model sees `message`; the run continues. */
   case Error(message: String)
@@ -273,7 +292,7 @@ object AgentTool:
   /**
    * Adapts a core `ToolFunction`: the spec takes its name, description and schema (as a
    * `SchemaDefinition[ujson.Value]` - the type parameter is a phantom), and arguments arrive as
-   * raw JSON. `Right(json)` becomes `Success(json)`, `Left(error)` an `Error` with its formatted
+   * raw JSON. `Right(json)` becomes `Success(ToolContent.Json(json))`, `Left(error)` an `Error` with its formatted
    * message. It writes no state and never asks. Its name is not checked here; [[ToolSet.of]]
    * refuses an invalid one.
    */
@@ -312,7 +331,7 @@ object AgentTool:
 
     def execute(args: ujson.Value, context: ToolContext): ToolOutcome =
       function.execute(args) match
-        case Right(json) => ToolOutcome.Success(json)
+        case Right(json) => ToolOutcome.Success(ToolContent.Json(json))
         case Left(error) => ToolOutcome.Error(error.getFormattedMessage)
 
   /**

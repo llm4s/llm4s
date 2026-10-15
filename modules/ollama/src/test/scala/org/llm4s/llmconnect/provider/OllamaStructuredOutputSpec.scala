@@ -55,7 +55,9 @@ class OllamaStructuredOutputSpec extends AnyFunSuite with Matchers with BeforeAn
     new OllamaClient(OllamaConfig(model = "llama3.1", baseUrl = baseUrl, contextWindow = 4096, reserveCompletion = 512))
 
   private def body(rf: Option[ResponseFormat], stream: Boolean, opts: CompletionOptions = CompletionOptions()) =
-    mkClient().createRequestBody(conv, rf.fold(opts)(opts.withResponseFormat), stream)
+    mkClient()
+      .createRequestBody(conv, rf.fold(opts)(opts.withResponseFormat), stream)
+      .fold(e => fail(e.message), identity)
 
   // ---- request body ----
 

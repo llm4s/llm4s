@@ -282,6 +282,15 @@ class OpenAICompatibleClient(
         (),
         ValidationError("conversation", s"${settings.displayName} requires at least one message")
       )
+      // a part the dialect cannot send fails here, typed, before anything is built or sent
+      .flatMap(_ =>
+        PartEncoding.check(
+          providerName,
+          sendableMessages(conversation, options),
+          dialect.encodeUserPart,
+          PartEncoding.textOnly
+        )
+      )
       .flatMap { _ =>
         Try {
           val body = createRequestBody(conversation, options)
@@ -424,8 +433,11 @@ class OpenAICompatibleClient(
    */
   protected[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
     val messages = sendableMessages(conversation, options).map {
-      case UserMessage(content) =>
-        ujson.Obj("role" -> "user", "content" -> dialect.encodeContent(content))
+      case um: UserMessage if !um.parts.exists(ContentPart.isMedia) =>
+        ujson.Obj("role" -> "user", "content" -> dialect.encodeContent(um.content))
+      case um: UserMessage =>
+        // checked by renderRequest: every part is one the dialect encodes
+        ujson.Obj("role" -> "user", "content" -> ujson.Arr.from(um.parts.map(dialect.encodeUserPart)))
       case SystemMessage(content) =>
         ujson.Obj("role" -> dialect.systemRole, "content" -> dialect.encodeContent(content))
       case am: AssistantMessage =>
@@ -449,11 +461,12 @@ class OpenAICompatibleClient(
         }
         if (am.hasThinking) dialect.encodeThinking(message, am.thinking)
         message
-      case ToolMessage(content, toolCallId) =>
+      case tm: ToolMessage =>
+        // text only (checked by renderRequest); several text parts are sent as their text, joined
         ujson.Obj(
           "role"         -> "tool",
-          "tool_call_id" -> dialect.encodeToolCallId(toolCallId),
-          "content"      -> dialect.encodeContent(content)
+          "tool_call_id" -> dialect.encodeToolCallId(tm.toolCallId),
+          "content"      -> dialect.encodeContent(tm.content)
         )
     }
 

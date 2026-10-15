@@ -4,7 +4,7 @@ import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.graph.{ GraphError, IdempotencyKey, StateKey, StateUpdate, ThreadId }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ToolCallRequest }
-import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome }
+import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.llmconnect.model._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -27,7 +27,7 @@ class ToolTimeoutSpec extends AnyFlatSpec with Matchers {
     AgentTool(SpecTools.spec("hang").withTimeout(100.millis), writes = Set(written)) { (_, _) =>
       try Thread.sleep(60_000)
       catch { case _: InterruptedException => interrupted.countDown() }
-      ToolOutcome.Success(ujson.Str("late"), StateUpdate.update(written, 1))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("late")), StateUpdate.update(written, 1))
     }
 
   "A tool past its timeout" should "be interrupted, and the model see a tool error, not a failed run" in {
@@ -50,10 +50,12 @@ class ToolTimeoutSpec extends AnyFlatSpec with Matchers {
 
   "A tool within its timeout" should "succeed with its update committed" in {
     val read = AgentTool(SpecTools.spec("read"))((_, context) =>
-      ToolOutcome.Success(ujson.Str(context.state.get(written).fold(e => fail(e.message), _.toString)))
+      ToolOutcome.Success(
+        ToolContent.Json(ujson.Str(context.state.get(written).fold(e => fail(e.message), _.toString)))
+      )
     )
     val quick = AgentTool(SpecTools.spec("quick").withTimeout(5.seconds), writes = Set(written)) { (_, _) =>
-      ToolOutcome.Success(ujson.Str("quick"), StateUpdate.update(written, 7))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("quick")), StateUpdate.update(written, 7))
     }
     val client = ScriptedLLMClient.of(
       calling(call("c1", "quick")),
@@ -74,7 +76,7 @@ class ToolTimeoutSpec extends AnyFlatSpec with Matchers {
         entered.countDown()
         Thread.sleep(60_000) // interrupted by cancel
       }
-      ToolOutcome.Success(ujson.Str("slow done"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("slow done")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "slow")), CompletionFixture.simple("finished"))
     val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(slow)))
@@ -98,7 +100,7 @@ class ToolTimeoutSpec extends AnyFlatSpec with Matchers {
     val flaky = AgentTool(SpecTools.spec("flaky").withTimeout(100.millis)) { (_, context) =>
       keys.add(context.idempotencyKey)
       if (runs.incrementAndGet() == 1) Thread.sleep(60_000)
-      ToolOutcome.Success(ujson.Str("second time"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("second time")))
     }
     val retry = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("retry")

@@ -15,6 +15,9 @@ import com.openai.models.chat.completions.{
   ChatCompletion,
   ChatCompletionAssistantMessageParam,
   ChatCompletionChunk,
+  ChatCompletionContentPart,
+  ChatCompletionContentPartImage,
+  ChatCompletionContentPartText,
   ChatCompletionCreateParams,
   ChatCompletionMessage,
   ChatCompletionMessageFunctionToolCall,
@@ -42,6 +45,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
+import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.model.{ ModelRegistryService, TransformationResult }
 import org.llm4s.toolapi.{ OpenAIToolHelper, ToolRegistry }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -192,11 +196,12 @@ class OpenAIClient private[provider] (
         OpenAIModelRules.requiresMaxCompletionTokens(model),
         streaming = false
       )
+      body = serializeParams(params)
       response <- call("completion")(transport.createChatCompletion(params))
       completion = convertFromOpenAIFormat(response)
       _ = recordExchange(
         startedAt,
-        Some(serializeParams(params)),
+        Some(body),
         Some(serialize(response)),
         Right(completion)
       )
@@ -486,6 +491,16 @@ class OpenAIClient private[provider] (
     useMaxCompletionTokens: Boolean,
     streaming: Boolean
   ): Result[ChatCompletionCreateParams] =
+    convertToOpenAIMessages(conversation).flatMap(messages =>
+      buildParams(messages, options, useMaxCompletionTokens, streaming)
+    )
+
+  private def buildParams(
+    messages: Seq[ChatCompletionMessageParam],
+    options: CompletionOptions,
+    useMaxCompletionTokens: Boolean,
+    streaming: Boolean
+  ): Result[ChatCompletionCreateParams] =
     Try {
       val effort         = reasoningEffortFor(options)
       val reasoningModel = reasoningSupport == OpenAIReasoning.Support.Reasoning || effort.isDefined
@@ -493,7 +508,7 @@ class OpenAIClient private[provider] (
       val builder = ChatCompletionCreateParams
         .builder()
         .model(model)
-        .messages(convertToOpenAIMessages(conversation).asJava)
+        .messages(messages.asJava)
 
       if (reasoningModel && OpenAIReasoning.restrictsSampling(model))
         logger.debug(s"$displayName model $model is a reasoning model: not sending temperature, top_p or penalties")
@@ -537,12 +552,67 @@ class OpenAIClient private[provider] (
     }.toEither.left.map(_.toLLMError)
 
   /**
-   * Converts an llm4s Conversation to chat-completions request messages.
+   * The user parts Chat Completions takes: text, an image by URL or inline (`image_url`, inline as a
+   * `data:` URL), and a PDF inline (`file`, `file_data`) or uploaded to this client's own provider
+   * (`file_id`). Anything else fails the request with an `UnsupportedContentPartError`.
    */
-  private def convertToOpenAIMessages(conversation: Conversation): Seq[ChatCompletionMessageParam] =
-    conversation.messages.map {
-      case UserMessage(content) =>
-        ChatCompletionMessageParam.ofUser(ChatCompletionUserMessageParam.builder().content(content).build())
+  private val userPart: PartialFunction[ContentPart, ChatCompletionContentPart] = {
+    case ContentPart.Text(text) =>
+      ChatCompletionContentPart.ofText(ChatCompletionContentPartText.builder().text(text).build())
+    case ContentPart.Image(MediaSource.Url(uri), _) if PartEncoding.isWebUrl(uri) =>
+      imageUrl(uri.toString)
+    case ContentPart.Image(inline: MediaSource.Inline, mediaType) =>
+      imageUrl(PartEncoding.dataUrl(inline, mediaType))
+    case ContentPart.Document(inline: MediaSource.Inline, MediaType.Pdf) =>
+      pdfFile(_.filename("document.pdf").fileData(PartEncoding.dataUrl(inline, MediaType.Pdf)))
+    case ContentPart.Document(MediaSource.ProviderFile(owner, id), MediaType.Pdf) if owner == providerName =>
+      pdfFile(_.fileId(id))
+  }
+
+  private def imageUrl(url: String): ChatCompletionContentPart =
+    ChatCompletionContentPart.ofImageUrl(
+      ChatCompletionContentPartImage
+        .builder()
+        .imageUrl(ChatCompletionContentPartImage.ImageUrl.builder().url(url).build())
+        .build()
+    )
+
+  private def pdfFile(
+    set: ChatCompletionContentPart.File.FileObject.Builder => ChatCompletionContentPart.File.FileObject.Builder
+  ): ChatCompletionContentPart =
+    ChatCompletionContentPart.ofFile(
+      ChatCompletionContentPart.File
+        .builder()
+        .file(set(ChatCompletionContentPart.File.FileObject.builder()).build())
+        .build()
+    )
+
+  /**
+   * Converts an llm4s Conversation to chat-completions request messages. A user message of one text
+   * part goes as a string, as before parts; any other as an array of content parts. A tool result
+   * takes text parts only.
+   */
+  private def convertToOpenAIMessages(conversation: Conversation): Result[Seq[ChatCompletionMessageParam]] =
+    PartEncoding
+      .check(providerName, conversation.messages, userPart, PartEncoding.textOnly)
+      // the SDK builders throw on malformed content (a null text): inside the Result, as buildParams is
+      .flatMap(_ => Try(conversation.messages.map(toOpenAIMessage)).toEither.left.map(_.toLLMError))
+
+  // one text part goes as a plain string, as every message did before content parts
+  private def singleText(parts: Vector[ContentPart]): Boolean = parts match {
+    case Vector(ContentPart.Text(_)) => true
+    case _                           => false
+  }
+
+  private def toOpenAIMessage(message: Message): ChatCompletionMessageParam =
+    message match {
+      case um: UserMessage if singleText(um.parts) =>
+        ChatCompletionMessageParam.ofUser(ChatCompletionUserMessageParam.builder().content(um.content).build())
+
+      case um: UserMessage =>
+        ChatCompletionMessageParam.ofUser(
+          ChatCompletionUserMessageParam.builder().contentOfArrayOfContentParts(um.parts.map(userPart).asJava).build()
+        )
 
       case SystemMessage(content) =>
         ChatCompletionMessageParam.ofSystem(ChatCompletionSystemMessageParam.builder().content(content).build())
@@ -566,9 +636,20 @@ class OpenAIClient private[provider] (
         }
         ChatCompletionMessageParam.ofAssistant(msg.build())
 
-      case ToolMessage(content, toolCallId) =>
+      case tm: ToolMessage if singleText(tm.parts) =>
         ChatCompletionMessageParam.ofTool(
-          ChatCompletionToolMessageParam.builder().content(content).toolCallId(toolCallId).build()
+          ChatCompletionToolMessageParam.builder().content(tm.content).toolCallId(tm.toolCallId).build()
+        )
+
+      case tm: ToolMessage =>
+        val texts =
+          tm.parts.map(PartEncoding.textOnly).map(t => ChatCompletionContentPartText.builder().text(t).build())
+        ChatCompletionMessageParam.ofTool(
+          ChatCompletionToolMessageParam
+            .builder()
+            .contentOfArrayOfContentParts(texts.asJava)
+            .toolCallId(tm.toolCallId)
+            .build()
         )
     }
 

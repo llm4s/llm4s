@@ -5,7 +5,13 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.testkit.LocalProviderTestServer.{ holdOpen, sendJsonResponse, streamThenHold, withServer }
-import org.llm4s.testkit.{ CredentialsRoundTrip, LocalProviderTestServer, ProviderModuleChecks, ProviderTestConfig }
+import org.llm4s.testkit.{
+  ContentPartCase,
+  CredentialsRoundTrip,
+  LocalProviderTestServer,
+  ProviderModuleChecks,
+  ProviderTestConfig
+}
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -79,6 +85,15 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
       withServer("/")(exchange => sendJsonResponse(exchange, 200, ndjsonBody)) { baseUrl =>
         assertStreams(clientAt(baseUrl))
       }
+    }
+
+    "send text and inline images, and refuse every other content part" in {
+      val done = """{"message":{"role":"assistant","content":"ok"},"done":true}"""
+      // a provider's 400 or 413 - a vendor limit llm4s leaves to it - is a typed error with its message
+      assertProviderRejectionIsTyped((exchange, status, message) =>
+        sendJsonResponse(exchange, status, ujson.Obj("error" -> message).render())
+      )(clientAt)
+      assertContentParts("ollama", sendJsonResponse(_, 200, done))(ContentPartCase.UserImageInline)(clientAt)
     }
 
     "return CancelledError when a call is interrupted" in {

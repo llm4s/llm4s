@@ -1,7 +1,15 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
-import org.llm4s.llmconnect.model.{ CompletionOptions, ResponseFormat, ResponseFormatMapper, ThinkingBlock, ToolCall }
+import org.llm4s.llmconnect.model.{
+  CompletionOptions,
+  ContentPart,
+  ResponseFormat,
+  ResponseFormatMapper,
+  ThinkingBlock,
+  ToolCall
+}
+import org.llm4s.media.MediaSource
 import org.llm4s.util.BoundedJson
 
 /**
@@ -15,7 +23,8 @@ import org.llm4s.util.BoundedJson
  * format, so a provider overrides only where it departs from it:
  *
  *  - '''Request:''' extra [[headers]]; the role system messages go under
- *    ([[systemRole]]); how message text is encoded ([[encodeContent]]); whether an assistant turn with no text still sends
+ *    ([[systemRole]]); how message text is encoded ([[encodeContent]]); which parts of a user
+ *    message with media are sent, and how ([[encodeUserPart]]); whether an assistant turn with no text still sends
  *    `content` ([[alwaysSendAssistantContent]]) or is sent at all
  *    ([[sendEmptyAssistantTurns]]); the tool-call ids the provider
  *    accepts ([[encodeToolCallId]]); the `response_format` shape
@@ -52,6 +61,16 @@ trait OpenAICompatibleDialect:
 
   /** Encodes the text of a user, system, assistant or tool message. Standard: a JSON string. */
   def encodeContent(text: String): ujson.Value = ujson.Str(text)
+
+  /**
+   * The content parts of a user message that has an image or a document, each as one element of
+   * the message's `content` array; a part it does not cover fails the request with an
+   * [[org.llm4s.error.UnsupportedContentPartError]] before it is sent. A user message of text only
+   * is sent as [[encodeContent]] of its text, and a tool result takes text only. Standard:
+   * [[OpenAICompatibleDialect.standardUserParts]] - text, and an image by URL or inline (`image_url`,
+   * inline as a `data:` URL).
+   */
+  def encodeUserPart: PartialFunction[ContentPart, ujson.Value] = OpenAICompatibleDialect.standardUserParts
 
   /**
    * Whether an assistant message with no text still carries a `content` field
@@ -172,6 +191,22 @@ trait OpenAICompatibleDialect:
   def parseToolCalls(toolCalls: ujson.Value): Seq[ToolCall] = OpenAICompatibleDialect.lenientToolCalls(toolCalls)
 
 object OpenAICompatibleDialect:
+
+  /** A text part, as a `content` array element. */
+  val textPart: PartialFunction[ContentPart, ujson.Value] = { case ContentPart.Text(text) =>
+    ujson.Obj("type" -> "text", "text" -> text)
+  }
+
+  /** Text, and an image by URL or inline (`image_url`, inline as a `data:` URL): what chat completions takes. */
+  val standardUserParts: PartialFunction[ContentPart, ujson.Value] = textPart.orElse {
+    case ContentPart.Image(MediaSource.Url(uri), _) if PartEncoding.isWebUrl(uri) =>
+      imageUrl(uri.toString)
+    case ContentPart.Image(inline: MediaSource.Inline, mediaType) =>
+      imageUrl(PartEncoding.dataUrl(inline, mediaType))
+  }
+
+  private def imageUrl(url: String): ujson.Value =
+    ujson.Obj("type" -> "image_url", "image_url" -> ujson.Obj("url" -> url))
 
   /** The plain OpenAI chat-completions format, with no extra headers. */
   val Standard: OpenAICompatibleDialect = standard()

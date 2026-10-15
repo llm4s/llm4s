@@ -275,4 +275,16 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
     window.map(_.wasTrimmed) shouldBe Right(true)
     window.map(_.conversation.messages.contains(thinking)) shouldBe Right(false)
   }
+
+  "countMessage" should "count a message's media, which its text view leaves out" in {
+    val counter = ConversationTokenCounter.forModel("gpt-4o").toOption.get
+    val image = ContentPart
+      .image(org.llm4s.media.MediaSource.Url(java.net.URI.create("https://e.com/a.png")), org.llm4s.media.MediaType.Png)
+      .toOption
+      .get
+    val text = counter.countMessage(UserMessage("look"))
+    counter.countMessage(UserMessage(Vector(ContentPart.Text("look"), image, image))) shouldBe
+      text + 2 * ContentPart.EstimatedImageTokens
+    counter.countMessage(ToolMessage(Vector(image), "c")) should be >= ContentPart.EstimatedImageTokens
+  }
 }

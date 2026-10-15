@@ -258,4 +258,23 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
     markdown should include("Tool call `lookup` (call-1)")
     markdown should include("_Result of tool call call-1_")
   }
+
+  "A saved session" should "name a message's media in its markdown, and keep the media in its JSON" in {
+    val chart = ContentPart
+      .image(
+        org.llm4s.media.MediaSource.Url(java.net.URI.create("https://e.com/chart.png")),
+        org.llm4s.media.MediaType.Png
+      )
+      .toOption
+      .get
+    val manager = new SessionManager(DirectoryPath(tempDir.toString))
+    manager.saveSession(
+      stateWith(Vector(UserMessage(Vector(ContentPart.Text("see"), chart)), AssistantMessage("ok")), "media"),
+      Some("Media")
+    )
+    val markdown = new String(Files.readAllBytes(tempDir.resolve("Media.md")), "UTF-8")
+    markdown should include("see [image (url, image/png)]")
+    val json = new String(Files.readAllBytes(tempDir.resolve("Media.json")), "UTF-8")
+    json should include("https://e.com/chart.png")
+  }
 }

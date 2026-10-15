@@ -32,7 +32,8 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
     }
 
     val memory = Memory
-      .fromConversation(message.content, role, Some(conversationId))
+      // memory is text: a message's media is named in place, never stored (#1913)
+      .fromConversation(Message.textWithMedia(message), role, Some(conversationId))
       .copy(importance = importance.orElse(Some(config.defaultImportance)))
 
     store.store(memory).map(withStore).flatMap { recorded =>

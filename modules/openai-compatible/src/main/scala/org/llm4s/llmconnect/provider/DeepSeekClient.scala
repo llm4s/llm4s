@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, ProviderConfig }
-import org.llm4s.llmconnect.model.ThinkingBlock
+import org.llm4s.llmconnect.model.{ ContentPart, ThinkingBlock }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
@@ -84,6 +84,9 @@ object DeepSeekClient {
  */
 private[llm4s] object DeepSeekDialect extends OpenAICompatibleDialect:
   override val headers: Seq[(String, String)] = Seq("User-Agent" -> "llm4s/1.0")
+
+  /** Text only: DeepSeek's chat-completion reference takes no image or document input. */
+  override def encodeUserPart: PartialFunction[ContentPart, ujson.Value] = OpenAICompatibleDialect.textPart
 
   override def thinking(obj: ujson.Value): Option[String] =
     OpenAICompatibleDialect.firstString(obj, "reasoning_content")

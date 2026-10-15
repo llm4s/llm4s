@@ -7,7 +7,7 @@ import java.util.concurrent.locks.LockSupport
 
 import org.llm4s.agent.{ Agent, AgentBuilder }
 import org.llm4s.agent.graph.{ EventHandlers, EventType, GraphError, StreamEvent, ThreadId }
-import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContext, ToolOutcome, ToolSet }
+import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContent, ToolContext, ToolOutcome, ToolSet }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId }
 import org.llm4s.error.{ CancelledError, LLMError, SimpleError, UnknownError }
 import org.llm4s.llmconnect.LLMClient
@@ -245,7 +245,7 @@ object Fixtures {
       agent(
         context => {
           (1 to 50).foreach(i => Pinged.emit(context.run, Ping(i)))
-          ToolOutcome.Success(ujson.Str("ok"))
+          ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
         },
         turns = 25
       )
@@ -261,7 +261,7 @@ object Fixtures {
     val pinging: ToolContext => ToolOutcome = context => {
       Pinged.emit(context.run, Ping(1))
       Progressed.progress(context.run, Ping(2))
-      ToolOutcome.Success(ujson.Str("ok"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
     }
   }
 }

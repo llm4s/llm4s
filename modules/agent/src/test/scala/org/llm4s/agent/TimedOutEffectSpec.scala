@@ -4,7 +4,7 @@ import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.graph.{ GraphError, ReplayGuard, StateCheck }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ToolCallRequest }
-import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome }
+import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.llmconnect.model._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -34,7 +34,7 @@ class TimedOutEffectSpec extends AnyFlatSpec with Matchers {
   }
 
   private def outcome[A](result: Either[org.llm4s.error.LLMError, A]): ToolOutcome = result match {
-    case Right(value)                            => ToolOutcome.Success(ujson.Str(value.toString))
+    case Right(value)                            => ToolOutcome.Success(ToolContent.Json(ujson.Str(value.toString)))
     case Left(r: GraphError.EffectReplayRefused) => ToolOutcome.Error(r.message)
     case Left(other)                             => ToolOutcome.Fatal(other)
   }

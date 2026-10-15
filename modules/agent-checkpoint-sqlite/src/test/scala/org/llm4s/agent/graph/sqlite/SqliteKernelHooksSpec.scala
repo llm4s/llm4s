@@ -3,7 +3,7 @@ package org.llm4s.agent.graph.sqlite
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.*
-import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolOutcome, ToolSet }
+import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContent, ToolOutcome, ToolSet }
 import org.llm4s.agent.graph.toolloop.*
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.*
@@ -38,7 +38,10 @@ class SqliteKernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues 
     writes = Set(files)
   ) { (args, context) =>
     val current = context.state.get(files).getOrElse(Map.empty)
-    ToolOutcome.Success(ujson.Str("ok"), StateUpdate.update(files, current + (args.text -> args.text)))
+    ToolOutcome.Success(
+      ToolContent.Json(ujson.Str("ok")),
+      StateUpdate.update(files, current + (args.text -> args.text))
+    )
   }
 
   /** Notes each hook in `notes`, and blocks an answer that mentions a secret. */

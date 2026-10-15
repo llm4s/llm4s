@@ -4,6 +4,7 @@ import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.graph.{ GraphError, RunBudgets, RunConfig, ThreadId }
 import org.llm4s.agent.graph.tool.ToolOutcome
+import org.llm4s.agent.graph.tool.ToolContent
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
 import org.scalatest.flatspec.AnyFlatSpec
@@ -22,11 +23,11 @@ class AgentRecoverySpec extends AnyFlatSpec with Matchers {
     val broken   = new AtomicBoolean(true)
     val goodRuns = new AtomicInteger()
     val good = SpecTools.tool("good") { (_, _) =>
-      goodRuns.incrementAndGet(); ToolOutcome.Success(ujson.Str("good"))
+      goodRuns.incrementAndGet(); ToolOutcome.Success(ToolContent.Json(ujson.Str("good")))
     }
     val flaky = SpecTools.tool("flaky") { (_, _) =>
       if (broken.get) ToolOutcome.Fatal(ValidationError("flaky", "backend down"))
-      else ToolOutcome.Success(ujson.Str("fixed"))
+      else ToolOutcome.Success(ToolContent.Json(ujson.Str("fixed")))
     }
     val client = ScriptedLLMClient.of(
       calling(call("c1", "good"), call("c2", "flaky")),
@@ -59,7 +60,7 @@ class AgentRecoverySpec extends AnyFlatSpec with Matchers {
         started.countDown()
         Thread.sleep(60_000) // interrupted by cancel
       }
-      ToolOutcome.Success(ujson.Str("slow done"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("slow done")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "slow")), CompletionFixture.simple("finished"))
     val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(slow)))
@@ -82,7 +83,7 @@ class AgentRecoverySpec extends AnyFlatSpec with Matchers {
         entered.release()
         Thread.sleep(60_000) // interrupted by cancel
       }
-      ToolOutcome.Success(ujson.Str("slow done"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("slow done")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "slow")), CompletionFixture.simple("finished"))
     val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(slow)))
@@ -105,7 +106,7 @@ class AgentRecoverySpec extends AnyFlatSpec with Matchers {
     val block = new AtomicBoolean(true)
     val slow = SpecTools.tool("slow") { (_, _) =>
       if (block.get) Thread.sleep(60_000) // interrupted at the deadline
-      ToolOutcome.Success(ujson.Str("slow done"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("slow done")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "slow")), CompletionFixture.simple("in time"))
     val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(slow)))
@@ -118,7 +119,7 @@ class AgentRecoverySpec extends AnyFlatSpec with Matchers {
   }
 
   "StepLimitReached" should "be a completed turn: the next one runs normally" in {
-    val echo   = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
+    val echo   = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
     val client = ScriptedLLMClient.of(calling(call("c1", "echo")), CompletionFixture.simple("next turn"))
     val agent  = built(Agent.builder("assistant", client).withMaxSteps(1).withTools(SpecTools.set(echo)))
 

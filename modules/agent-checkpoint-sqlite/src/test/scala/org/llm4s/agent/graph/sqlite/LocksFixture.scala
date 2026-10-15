@@ -4,7 +4,7 @@ import org.llm4s.agent.{ Agent, AgentResult, AgentStatus }
 import org.llm4s.agent.graph.{ GraphRuntime, GraphSnapshot, InterruptId, StateKey, StateUpdate, ThreadId }
 import org.llm4s.agent.graph.toolloop.ApprovalDecision
 import org.llm4s.agent.graph.middleware.ApprovalMiddleware
-import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, LockKey, ToolOutcome, ToolSet }
+import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, LockKey, ToolContent, ToolOutcome, ToolSet }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -72,7 +72,8 @@ object LocksFixture:
     val step = AgentTool(spec, writes = Set(counter)) { (_, context) =>
       context.state.get(counter) match
         case Left(error) => ToolOutcome.Fatal(error)
-        case Right(n)    => ToolOutcome.Success(ujson.Str((n + 1).toString), StateUpdate.update(counter, n + 1))
+        case Right(n) =>
+          ToolOutcome.Success(ToolContent.Json(ujson.Str((n + 1).toString)), StateUpdate.update(counter, n + 1))
     }
     Agent
       .builder("assistant", client)

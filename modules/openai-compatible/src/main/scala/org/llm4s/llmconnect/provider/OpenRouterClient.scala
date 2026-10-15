@@ -4,7 +4,8 @@ import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.OpenAIConfig
-import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, ThinkingBlock, ToolCall }
+import org.llm4s.llmconnect.model.{ CompletionOptions, ContentPart, ReasoningEffort, ThinkingBlock, ToolCall }
+import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.llmconnect.serialization.StandardToolCallDeserializer
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
@@ -158,6 +159,20 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
     Seq("HTTP-Referer" -> "https://github.com/llm4s/llm4s", "X-Title" -> "LLM4S")
 
   override val alwaysSendAssistantContent: Boolean = true
+
+  /**
+   * The standard parts, and a PDF by URL or inline as OpenRouter's `file` part, whose `file_data`
+   * takes a URL or a `data:` URL.
+   */
+  override def encodeUserPart: PartialFunction[ContentPart, ujson.Value] =
+    OpenAICompatibleDialect.standardUserParts.orElse {
+      case ContentPart.Document(MediaSource.Url(uri), MediaType.Pdf) if PartEncoding.isWebUrl(uri) => pdf(uri.toString)
+      case ContentPart.Document(inline: MediaSource.Inline, MediaType.Pdf) =>
+        pdf(PartEncoding.dataUrl(inline, MediaType.Pdf))
+    }
+
+  private def pdf(data: String): ujson.Value =
+    ujson.Obj("type" -> "file", "file" -> ujson.Obj("filename" -> "document.pdf", "file_data" -> data))
 
   /**
    * Not sent. OpenRouter documents `stream_options.include_usage` as deprecated with no effect:
