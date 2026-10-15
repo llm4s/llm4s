@@ -173,6 +173,15 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     code(workspace().writeFile("out/a", "x")) shouldBe "PATH_ESCAPE_ATTEMPT"
     code(workspace().fileSnapshot("out")) shouldBe "PATH_ESCAPE_ATTEMPT"
     Files.list(outside).count() shouldBe 0L
+    // a dangling link: the write would create its target, outside the workspace or the allowed paths
+    Files.createSymbolicLink(root.resolve("dangling"), outside.resolve("new-file"))
+    Files.createSymbolicLink(root.resolve("src/dangling"), root.resolve("private/new-file"))
+    code(workspace().writeFile("dangling", "x")) shouldBe "PATH_ESCAPE_ATTEMPT"
+    code(workspace().writeFile("dangling", "x", expectedHash = Some("absent"))) shouldBe "PATH_ESCAPE_ATTEMPT"
+    code(confined.writeFile("src/dangling", "x")) shouldBe "PATH_NOT_ALLOWED"
+    Files.exists(outside.resolve("new-file")) shouldBe false
+    Files.exists(root.resolve("private/new-file")) shouldBe false
+    Files.delete(root.resolve("dangling"))
     Files.delete(root.resolve("out"))
     Files.delete(outside)
   }

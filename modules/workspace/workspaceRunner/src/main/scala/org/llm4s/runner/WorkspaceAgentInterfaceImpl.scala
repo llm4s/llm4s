@@ -110,14 +110,33 @@ class WorkspaceAgentInterfaceImpl(
    * of the path beneath that. A link that cannot be resolved (dangling, a loop) is taken as written, beneath its
    * resolved parent, so it never names more than its text does.
    */
-  private def effective(path: Path): Path = {
+  private def effective(path: Path): Path = effective(path, 0)
+
+  /**
+   * As [[effective]]; `hops` counts the links followed by hand. A link is found without following it, so a dangling
+   * one (`out -> /tmp/new-file`, whose target a write would create) is resolved to where it points, never taken as a
+   * plain missing name beneath the workspace. More than 40 hops (a loop) is refused.
+   */
+  private def effective(path: Path, hops: Int): Path = {
+    if (hops > 40)
+      throw new WorkspaceAgentException("Too many levels of symbolic links", "PATH_ESCAPE_ATTEMPT", None)
     @scala.annotation.tailrec
     def nearest(p: Path, rest: List[Path]): (Path, List[Path]) =
       if (p == null) (p, rest)
-      else if (Files.exists(p)) (p, rest)
+      else if (Files.exists(p, java.nio.file.LinkOption.NOFOLLOW_LINKS)) (p, rest)
       else nearest(p.getParent, Option(p.getFileName).toList ++ rest)
     val (existing, rest) = nearest(path, Nil)
-    val base             = Option(existing).flatMap(e => Try(e.toRealPath()).toOption).getOrElse(path.getRoot)
+    val base = Option(existing) match {
+      case None => path.getRoot
+      case Some(e) =>
+        Try(e.toRealPath()).toOption.getOrElse {
+          // it exists but does not resolve: a dangling link (or one beneath a dangling link) - follow it by hand
+          if (Files.isSymbolicLink(e)) {
+            val target = Files.readSymbolicLink(e)
+            effective(Option(e.getParent).fold(target)(_.resolve(target)).normalize(), hops + 1)
+          } else Option(e.getParent).fold(e)(parent => effective(parent, hops + 1).resolve(e.getFileName))
+        }
+    }
     rest.foldLeft(base)((acc, part) => acc.resolve(part)).normalize()
   }
 
