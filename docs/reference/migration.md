@@ -8,8 +8,9 @@ nav_order: 2
 # Migration Guide
 
 Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
-by what you use. The notes below are the per-change detail it links to. From 0.5.0 to 0.5.1 the one source break is
-[Multimodal content parts](#multimodal-content-parts-1913).
+by what you use. The notes below are the per-change detail it links to. From 0.5.0 to 0.5.1 the source breaks are
+[Multimodal content parts](#multimodal-content-parts-1913) and
+[Harness profile and middleware placement](#harness-profile-and-middleware-placement-1915).
 
 ## Multimodal content parts (#1913)
 
@@ -131,7 +132,8 @@ constructors remain, so source compiles unchanged, but code compiled against 0.4
 
 ## Stage 3 migration: the Deep Agents harness
 
-In 0.5.0. Stage 3 ([#1901](https://github.com/llm4s/llm4s/issues/1901)) builds the harness as middleware
+In 0.5.0, except the slices for #1904, #1905, #1908, #1909, #1910 and #1915, which are in 0.5.1. Stage 3
+([#1901](https://github.com/llm4s/llm4s/issues/1901)) builds the harness as middleware
 and tools on `AgentBuilder`. Each slice adds its part here as it lands:
 
 - [#1902](https://github.com/llm4s/llm4s/issues/1902), kernel hooks for the harness - state-writing hooks, prompt

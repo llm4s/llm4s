@@ -156,7 +156,7 @@ Target: v1.0 RC · **LFX + ESoC tracks**.
 | **v0.4.0** | Every published artifact renamed to `llm4s-*` (coordinates only; no API or package change). |
 | **v0.4.1** | Fixes to the Neo4j and Qdrant stores, and integration suites that had been run by nothing now run in tiers. |
 | **v0.5.0** | The modular split (slices 1–7); the provider SPI and testkit; Bedrock, watsonx.ai and Jina providers; `llm4s-java-api`, Spring Boot, cats-effect and ZIO modules; the typed graph runtime prototype; the `@Stable`/`@Experimental` tiers, the compatibility policy and MiMa wiring; the staged-deployment template. |
-| **v0.5.1** | `llm4s-kotlin-api`, the Kotlin coroutine API, which 0.5.0 left out; multimodal content parts in user messages and tool results; the agent harness's backend SPIs (`FileBackend`, `SandboxBackend`, `LongTermStore`), filesystem tools and context management (summarisation, tool-output offload). |
+| **v0.5.1** | `llm4s-kotlin-api`, the Kotlin coroutine API, which 0.5.0 left out; multimodal content parts in user messages and tool results; the agent harness's backend SPIs (`FileBackend`, `SandboxBackend`, `LongTermStore`), filesystem tools, context management (summarisation, tool-output offload), Agent Skills, instruction memory (`AGENTS.md`) and the harness profile (`HarnessProfile`). |
 
 ## Community Mentorship Tracks (2026)
 
