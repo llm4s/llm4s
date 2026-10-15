@@ -193,11 +193,40 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
       ): Unit
     )
     waiter.start()
-    while (waiter.getState != Thread.State.BLOCKED) Thread.sleep(1)
+    while (waiter.getState != Thread.State.WAITING) Thread.sleep(1)
     proceed.countDown()
     first.join()
     waiter.join()
     computed.get shouldBe 1
+  }
+
+  it should "let a virtual thread wait for its run's value without holding a monitor, and be interrupted" in {
+    val events  = new CopyOnWriteArrayList[(String, ujson.Value)]()
+    val cache   = new RunCache[String](4)
+    val started = new java.util.concurrent.CountDownLatch(1)
+    val proceed = new java.util.concurrent.CountDownLatch(1)
+    val holder = Thread.ofVirtual().start { () =>
+      cache(recordingRunContext(events, task = "a"), reports = true) {
+        started.countDown(); proceed.await(); Right("v")
+      }(_ => ()): Unit
+    }
+    started.await()
+    val outcome = new java.util.concurrent.atomic.AtomicReference[String]("none")
+    // what ends the waiter: its value, or the throw that escapes it (an interrupt is not caught by Try)
+    val waiter = Thread
+      .ofVirtual()
+      .uncaughtExceptionHandler((_, e) => outcome.set(e.getClass.getSimpleName))
+      .start { () =>
+        outcome.set(cache(recordingRunContext(events, task = "b"), reports = true)(Right("w"))(_ => ()).toString)
+      }
+    while (waiter.getState != Thread.State.WAITING) Thread.sleep(1)
+    waiter.interrupt()
+    waiter.join()
+    outcome.get shouldBe "InterruptedException"
+    proceed.countDown()
+    holder.join()
+    cache.inFlightRuns shouldBe 0
+    cache.cached shouldBe 1
   }
 
   it should "leave no in-flight entry behind a computation an interrupt ended" in {
