@@ -670,9 +670,23 @@ class WorkspaceAgentInterfaceImpl(
     // only now, every refusal made, is anything created: a refused write leaves no directory behind. The directories
     // this request creates are part of its change, so a write that does not commit (refused, failed, or past its
     // deadline) removes them again: a client that gave up never finds them
-    var createdDirs = List.empty[Path] // deepest first
+    // each with its identity (its file key) as made: a roll-back removes only that directory, never one put in its place
+    def identity(d: Path): Option[AnyRef] =
+      Try(
+        Files.readAttributes(
+          d,
+          classOf[java.nio.file.attribute.BasicFileAttributes],
+          java.nio.file.LinkOption.NOFOLLOW_LINKS
+        )
+      ).toOption
+        .filter(_.isDirectory)
+        .flatMap(a => Option(a.fileKey()))
+    var createdDirs = List.empty[(Path, Option[AnyRef])] // deepest first
     def rollBack(): Unit =
-      createdDirs.foreach(d => Try(Files.deleteIfExists(d))) // a directory something else filled stays
+      createdDirs.foreach { case (d, made) =>
+        // a directory something else filled stays, as does one whose identity is unknown or another's
+        if (made.isDefined && identity(d) == made) Try(Files.delete(d))
+      }
     if (createDirs) {
       // the directories are created where the write really lands, checked by the path policy just before: through a
       // dangling link (`link -> new/dir/file`), the link target's directories
@@ -695,7 +709,7 @@ class WorkspaceAgentInterfaceImpl(
           )
         checkPolicy(path, d, Access.Write)
         Try(Files.createDirectory(d)) match {
-          case Success(_) => createdDirs = d :: createdDirs
+          case Success(_) => createdDirs = (d, identity(d)) :: createdDirs
           case Failure(_: java.nio.file.FileAlreadyExistsException) if Files.isDirectory(d) => ()
           case Failure(e)                                                                   => throw e
         }
