@@ -31,8 +31,16 @@ private[provider] object GeminiParts {
   val ImageTypes: Set[org.llm4s.media.ImageMediaType] = Set(MediaType.Png, MediaType.Jpeg, MediaType.WebP)
 
   /** `Right` when a client with `fileUri` can send every part of `messages`. */
-  def check(provider: String, messages: Seq[Message], fileUri: FileUri): Result[Unit] =
-    PartEncoding.check(provider, messages, user(fileUri), PartEncoding.textOnly)
+  def check(provider: String, messages: Seq[Message], fileUri: FileUri, maxImages: Int): Result[Unit] =
+    PartEncoding
+      .check(provider, messages, user(fileUri), PartEncoding.textOnly)
+      .flatMap(_ => PartEncoding.checkImagesPerRequest(provider, messages, maxImages))
+
+  /** The images the Gemini API takes in one request: 3,600. */
+  val GeminiMaxImages: Int = 3600
+
+  /** The images Vertex AI takes in one prompt: 3,000. */
+  val VertexMaxImages: Int = 3000
 
   /**
    * Gemini and Vertex AI take a request of at most 20 MB, its text and inline data together: each part is

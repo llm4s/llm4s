@@ -100,29 +100,6 @@ private[llm4s] object PartEncoding {
       }
       .getOrElse(Right(()))
 
-  /**
-   * `Right` when no message of `messages` carries more than `limit` gives for a kind of part: `limit` counts a
-   * message's parts by a key (`"image"`, `"document"`) and gives the most a provider takes per message.
-   */
-  def checkPartCounts(
-    provider: String,
-    messages: Seq[Message],
-    key: ContentPart => Option[String],
-    limits: Map[String, Int]
-  ): Result[Unit] =
-    messages.zipWithIndex.iterator
-      .flatMap { (message, index) =>
-        partsOf(message).flatMap(key).groupBy(identity).collect {
-          case (k, found) if limits.get(k).exists(found.size > _) =>
-            ValidationError(
-              "parts",
-              s"$provider takes at most ${limits(k)} ${k}s in a message; message $index has ${found.size}"
-            )
-        }
-      }
-      .nextOption()
-      .toLeft(())
-
   /** The length of `bytes` bytes once base64-encoded. */
   def base64Length(bytes: Long): Long = (bytes + 2) / 3 * 4
 
@@ -163,6 +140,13 @@ private[llm4s] object PartEncoding {
           s"$provider takes at most $maxBytes bytes of files and images in a request; this one has $total"
         )
       )
+  }
+
+  /** `Right` when `messages` carry at most `max` images in all: a provider's limit on the images of one request. */
+  def checkImagesPerRequest(provider: String, messages: Seq[Message], max: Int): Result[Unit] = {
+    val images = messages.map(m => partsOf(m).count(_.isInstanceOf[ContentPart.Image])).sum
+    if (images <= max) Right(())
+    else Left(ValidationError("parts", s"$provider takes at most $max images in a request; this one has $images"))
   }
 
   /** Covers text parts only, as their text: for a role whose wire format takes nothing else. */

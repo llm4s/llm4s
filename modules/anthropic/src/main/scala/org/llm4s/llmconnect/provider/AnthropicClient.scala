@@ -931,21 +931,10 @@ object AnthropicClient {
   private[provider] def checkParts(provider: String, messages: Seq[org.llm4s.llmconnect.model.Message]): Result[Unit] =
     PartEncoding
       .check(provider, messages, userPart, toolPart)
-      .flatMap(_ =>
-        PartEncoding
-          .checkPartCounts(provider, Seq(UserMessage(messages.flatMap(partsIn).toVector)), imageKind, MaxImages)
-      )
+      .flatMap(_ => PartEncoding.checkImagesPerRequest(provider, messages, MaxImages))
 
   /** Anthropic takes at most 100 images in one request: counted over the whole conversation. */
-  private[provider] val MaxImages: Map[String, Int] = Map("image" -> 100)
-
-  private def imageKind(part: ContentPart): Option[String] = Option.when(part.isInstanceOf[ContentPart.Image])("image")
-
-  private def partsIn(message: org.llm4s.llmconnect.model.Message): Vector[ContentPart] = message match {
-    case um: UserMessage => um.parts
-    case tm: ToolMessage => tm.parts
-    case _               => Vector.empty
-  }
+  private[provider] val MaxImages: Int = 100
 
   /** The Messages API's limit on a whole request: 32 MB. */
   private[provider] val MaxRequestBytes: Long = 32000000L

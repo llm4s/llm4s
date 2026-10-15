@@ -48,12 +48,11 @@ class PartEncodingSpec extends AnyFlatSpec with Matchers with EitherValues {
     PartEncoding.base64Length(4) shouldBe 8
   }
 
-  "checkPartCounts" should "refuse a message with more parts of a kind than the provider takes" in {
-    val key: ContentPart => Option[String] = p => Option.when(p.isInstanceOf[ContentPart.Image])("image")
-    val two                                = Seq(UserMessage(Vector(image, image)))
-    PartEncoding.checkPartCounts("p", two, key, Map("image" -> 2)) shouldBe Right(())
-    PartEncoding.checkPartCounts("p", two, key, Map("image" -> 1)).left.value.message should
-      include("at most 1 images in a message; message 0 has 2")
+  "checkImagesPerRequest" should "count the images of every message" in {
+    val messages = Seq(UserMessage(Vector(image)), AssistantMessage("ok"), UserMessage(Vector(image)))
+    PartEncoding.checkImagesPerRequest("p", messages, 2) shouldBe Right(())
+    PartEncoding.checkImagesPerRequest("p", messages, 1).left.value.message should
+      include("at most 1 images in a request; this one has 2")
   }
 
   "checkInlineMediaTotal" should "count the decoded bytes of every inline part" in {

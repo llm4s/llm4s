@@ -544,15 +544,8 @@ object WatsonXClient {
   /** The chat API takes one image in a chat: counted over the whole conversation, which is sent as one request. */
   private[provider] val MaxImages: Int = 1
 
-  private[provider] def imageCount(provider: String, messages: Seq[Message]): Result[Unit] = {
-    val images = messages.collect { case u: UserMessage => u.parts.count(_.isInstanceOf[ContentPart.Image]) }.sum
-    if (images <= MaxImages) Right(())
-    else
-      Left(
-        org.llm4s.error
-          .ValidationError("parts", s"$provider takes at most $MaxImages image in a chat; this one has $images")
-      )
-  }
+  private[provider] def imageCount(provider: String, messages: Seq[Message]): Result[Unit] =
+    PartEncoding.checkImagesPerRequest(provider, messages, MaxImages)
 
   /**
    * The user-message parts the watsonx.ai chat API takes, in its OpenAI-style content array: text, and inline

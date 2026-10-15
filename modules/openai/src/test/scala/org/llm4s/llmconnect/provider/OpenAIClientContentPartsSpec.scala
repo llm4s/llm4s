@@ -133,4 +133,12 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
       s"at most ${OpenAIClient.MaxInlineMediaBytes} bytes of files and images"
     )
   }
+
+  it should "refuse, before sending, more than 500 images in a request" in {
+    val url = ContentPart.image(MediaSource.Url(URI.create("https://x.example/a.png")), MediaType.Png).value
+    sent(
+      Conversation(Seq(UserMessage(Vector(ContentPart.Text("x")) ++ Vector.fill(501)(url))))
+    ).left.value.message should
+      include(s"at most ${OpenAIClient.MaxImages} images in a request")
+  }
 }

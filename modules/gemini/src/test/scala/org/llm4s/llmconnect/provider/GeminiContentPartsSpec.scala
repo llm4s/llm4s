@@ -87,13 +87,26 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
   "GeminiParts.check" should "refuse media in a tool result and another provider's file, naming the part" in {
     val assistant = AssistantMessage(None, Seq(ToolCall("c1", "fetch", ujson.Obj())))
     GeminiParts
-      .check("gemini", Seq(UserMessage("go"), assistant, ToolMessage(Vector(inline), "c1")), gemini)
+      .check(
+        "gemini",
+        Seq(UserMessage("go"), assistant, ToolMessage(Vector(inline), "c1")),
+        gemini,
+        GeminiParts.GeminiMaxImages
+      )
       .left
       .value shouldBe
       UnsupportedContentPartError("gemini", inline.kind, "tool")
-    GeminiParts.check("vertexai", Seq(UserMessage(Vector(url))), GeminiParts.vertexFileUri).left.value shouldBe
+    GeminiParts
+      .check("vertexai", Seq(UserMessage(Vector(url))), GeminiParts.vertexFileUri, GeminiParts.VertexMaxImages)
+      .left
+      .value shouldBe
       UnsupportedContentPartError("vertexai", url.kind, "user")
-    GeminiParts.check("gemini", Seq(UserMessage(Vector(ContentPart.Text("a"), inline, url, file))), gemini) shouldBe
+    GeminiParts.check(
+      "gemini",
+      Seq(UserMessage(Vector(ContentPart.Text("a"), inline, url, file))),
+      gemini,
+      GeminiParts.GeminiMaxImages
+    ) shouldBe
       Right(())
   }
 
@@ -174,5 +187,22 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
       Seq(MediaType.Png, MediaType.Jpeg, MediaType.WebP).foreach(mt => encode.isDefinedAt(imageOf(mt)) shouldBe true)
       Seq(MediaType.Gif, MediaType.Bmp, MediaType.Tiff).foreach(mt => encode.isDefinedAt(imageOf(mt)) shouldBe false)
     }
+  }
+
+  "GeminiParts.check" should "refuse more images in a request than the API takes" in {
+    val small = ContentPart.image(MediaSource.Inline(IArray.fill[Byte](1)(1)), MediaType.Png).value
+    GeminiParts.check("gemini", Seq(UserMessage(Vector.fill(3)(small))), gemini, 3) shouldBe Right(())
+    GeminiParts
+      .check(
+        "gemini",
+        Seq(UserMessage(Vector.fill(2)(small)), AssistantMessage("ok"), UserMessage(Vector.fill(2)(small))),
+        gemini,
+        3
+      )
+      .left
+      .value
+      .message should include("at most 3 images in a request; this one has 4")
+    GeminiParts.GeminiMaxImages shouldBe 3600
+    GeminiParts.VertexMaxImages shouldBe 3000
   }
 }

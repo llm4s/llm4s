@@ -103,7 +103,11 @@ class VertexAIClient(
         dropUnsupported = true
       )
       // a part Gemini cannot take fails the request here, before anything is sent
-      .flatMap(transformed => GeminiParts.check(providerName, transformed.messages, fileUri).map(_ => transformed))
+      .flatMap(transformed =>
+        GeminiParts
+          .check(providerName, transformed.messages, fileUri, GeminiParts.VertexMaxImages)
+          .map(_ => transformed)
+      )
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
@@ -155,7 +159,11 @@ class VertexAIClient(
         dropUnsupported = true
       )
       // a part Gemini cannot take fails the request here, before anything is sent
-      .flatMap(transformed => GeminiParts.check(providerName, transformed.messages, fileUri).map(_ => transformed))
+      .flatMap(transformed =>
+        GeminiParts
+          .check(providerName, transformed.messages, fileUri, GeminiParts.VertexMaxImages)
+          .map(_ => transformed)
+      )
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)

@@ -598,6 +598,7 @@ class OpenAIClient private[provider] (
       .flatMap(_ =>
         PartEncoding.checkInlineMediaTotal(providerName, conversation.messages, OpenAIClient.MaxInlineMediaBytes)
       )
+      .flatMap(_ => PartEncoding.checkImagesPerRequest(providerName, conversation.messages, OpenAIClient.MaxImages))
       // the SDK builders throw on malformed content (a null text): inside the Result, as buildParams is
       .flatMap(_ => Try(conversation.messages.map(toOpenAIMessage)).toEither.left.map(_.toLLMError))
 
@@ -784,6 +785,9 @@ object OpenAIClient {
 
   /** Chat Completions' limit on the files and images of one request, decoded: 50 MB. */
   private[provider] val MaxInlineMediaBytes: Long = 50000000L
+
+  /** Chat Completions' limit on the images of one request: 500. */
+  private[provider] val MaxImages: Int = 500
 
   private[provider] def forTest(
     model: String,

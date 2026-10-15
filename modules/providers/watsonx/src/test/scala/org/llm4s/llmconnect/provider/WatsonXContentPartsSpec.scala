@@ -76,6 +76,6 @@ class WatsonXContentPartsSpec extends AnyFunSuite with Matchers with EitherValue
     WatsonXClient.imageCount("watsonx", one) shouldBe Right(())
     val two = one :+ AssistantMessage("ok") :+ UserMessage(Vector(imageOf(MediaType.Jpeg)))
     WatsonXClient.imageCount("watsonx", two).left.value.message should include(
-      "at most 1 image in a chat; this one has 2"
+      "at most 1 images in a request; this one has 2"
     )
   }
