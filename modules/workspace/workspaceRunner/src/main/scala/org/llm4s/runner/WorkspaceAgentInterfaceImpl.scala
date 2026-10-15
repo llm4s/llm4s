@@ -966,10 +966,18 @@ class WorkspaceAgentInterfaceImpl(
         response(Kind.Absent, Kind.Absent, 0L, None, None)
       else if (Files.isDirectory(resolved)) response(Kind.Directory, Kind.Directory, 0L, None, None)
       else {
-        refuseSpecial(path, resolved)
-        val size = Files.size(resolved)
-        if (!includeContent) response(Kind.File, currentHash(checkedForRead(path, resolved)), size, None, None)
-        else if (size > maxFileSize)
+        // classified, sized, hashed and read from one place: where the path leads now, checked immediately before, so
+        // a file deleted or replaced meanwhile is reported as what it has become, never as a file with another's hash
+        val place = checkedForRead(path, resolved)
+        def size  = Try(Files.size(place)).getOrElse(0L)
+        if (!Files.exists(place)) response(Kind.Absent, Kind.Absent, 0L, None, None)
+        else if (Files.isDirectory(place)) response(Kind.Directory, Kind.Directory, 0L, None, None)
+        else if (!includeContent) {
+          val hash = currentHash(place)
+          val kind =
+            if (hash == Kind.Absent) Kind.Absent else if (hash == Kind.Directory) Kind.Directory else Kind.File
+          response(kind, hash, if (kind == Kind.File) size else 0L, None, None)
+        } else if (size > maxFileSize)
           response(
             Kind.File,
             Kind.Oversized,
@@ -979,33 +987,36 @@ class WorkspaceAgentInterfaceImpl(
           )
         else {
           // read once, bounded by the limit even if the file grew since its size was read
-          val bytes = Using.resource(Files.newInputStream(checkedForRead(path, resolved)))(
-            _.readNBytes((maxFileSize + 1).toInt) // at most MaxFileSize + 1: fits an array
-          )
-          if (bytes.length.toLong > maxFileSize)
-            response(
-              Kind.File,
-              Kind.Oversized,
-              size,
-              None,
-              Some(s"the file is larger than the limit of ${maxFileSize} bytes")
-            )
-          else {
-            val decoded = Try(
-              StandardCharsets.UTF_8
-                .newDecoder()
-                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
-                .decode(java.nio.ByteBuffer.wrap(bytes))
-                .toString
-            )
-            response(
-              Kind.File,
-              FileSnapshotResponse.hashOf(bytes),
-              bytes.length.toLong,
-              decoded.toOption,
-              decoded.failed.toOption.map(_ => "the file is not valid UTF-8 text")
-            )
+          Try(Using.resource(Files.newInputStream(place))(_.readNBytes((maxFileSize + 1).toInt))) match {
+            // deleted since it was classified: what it has become
+            case Failure(_: java.nio.file.NoSuchFileException) => response(Kind.Absent, Kind.Absent, 0L, None, None)
+            case Failure(e)                                    => throw e
+            case Success(bytes) =>
+              if (bytes.length.toLong > maxFileSize)
+                response(
+                  Kind.File,
+                  Kind.Oversized,
+                  size,
+                  None,
+                  Some(s"the file is larger than the limit of ${maxFileSize} bytes")
+                )
+              else {
+                val decoded = Try(
+                  StandardCharsets.UTF_8
+                    .newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(bytes))
+                    .toString
+                )
+                response(
+                  Kind.File,
+                  FileSnapshotResponse.hashOf(bytes),
+                  bytes.length.toLong,
+                  decoded.toOption,
+                  decoded.failed.toOption.map(_ => "the file is not valid UTF-8 text")
+                )
+              }
           }
         }
       }
@@ -1724,12 +1735,17 @@ class WorkspaceAgentInterfaceImpl(
         val completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
 
         if (!completed) {
+          // its descendants recorded first, while they can still be found: the kill below takes them even if the parent
+          // has gone by then
+          Try(process.descendants().toList.asScala).getOrElse(Nil).foreach(entry.tree.add(_): Unit)
           process.destroy()
           // Wait up to 2 seconds for graceful termination before escalating
-          if (!process.waitFor(2, TimeUnit.SECONDS)) processes.kill(entry, asCancellation = false): Unit
+          process.waitFor(2, TimeUnit.SECONDS): Unit
+          // then the whole tree, through the registry, whether or not the parent went: a descendant may outlive it
+          val gone = processes.kill(entry, asCancellation = false)
           // a timeout is an outcome only once the process is gone: one still alive may yet write, so its outcome
           // is unknown, a failure, never a completed result a replay would return
-          if (process.isAlive)
+          if (!gone)
             throw new WorkspaceAgentException(
               s"Command timed out after ${timeoutMs}ms and did not terminate when killed",
               "EXECUTION_FAILED",

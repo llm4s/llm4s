@@ -128,10 +128,11 @@ final private[runner] class WebSocketCommandExecutor(
     ) match {
       case Right(running) =>
         // killed through the registry, which keeps it tracked until it has exited
-        registry.kill(running): Unit
+        val gone = registry.kill(running) // the parent and every descendant found
         logger.info(s"Command $commandId cancelled by client")
-        // acknowledged only once it is gone; one that survives the kill is reported by its exit watcher as a failure
-        if (!running.process.isAlive && running.completionSent.compareAndSet(false, true)) {
+        // acknowledged only once it is gone, its whole tree; one that survives the kill is reported by its exit watcher
+        // as a failure
+        if (gone && running.completionSent.compareAndSet(false, true)) {
           val durationMs = System.currentTimeMillis() - running.startTimeMs
           send(CommandCompletedMessage(commandId, 143, durationMs.millis))
         }
