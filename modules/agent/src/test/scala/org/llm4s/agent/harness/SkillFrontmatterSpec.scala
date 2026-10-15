@@ -312,6 +312,30 @@ class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
     )
   }
 
+  it should "trim only spaces and tabs, keeping any other whitespace as content" in {
+    problem("---", "name: pdf-tools", "description: \"PDFs\"\u2003", "---").line shouldBe 3
+    parse("---", "name: pdf-tools", "description: PDFs\u2003", "---").value.description shouldBe "PDFs\u2003"
+  }
+
+  /** A frontmatter of `n` metadata entries and as many other keys, parsed without the size bound. */
+  private def many(n: Int): Vector[String] =
+    Vector("---", "name: pdf-tools", "description: d", "metadata:") ++ (1 to n).map(i => s"  m$i: v") ++
+      (1 to n).map(i => s"x$i: v") :+ "---"
+
+  it should "parse many fields within the hang guard" in {
+    val lines = many(60000)
+    lines.map(_.length + 1).sum should be > 1000000
+    val started = System.nanoTime()
+    Frontmatter.parse(path, lines, closed = true).value.size shouldBe 60003
+    (System.nanoTime() - started).nanos should be < LinearTime.MegabyteHangGuard
+  }
+
+  it should "parse many fields in time linear in their number" taggedAs PerformanceTest in {
+    LinearTime.assertLinear("fields, 5,000 vs 20,000", many(5000), many(20000))(
+      Frontmatter.parse(path, _, closed = true)
+    )
+  }
+
   it should "refuse a name over 64 characters" in {
     val long = "a" * 65
     val e    = Skill.parse(VPath(s"/s/$long/SKILL.md").value, s"---\nname: $long\ndescription: d\n---").left.value
