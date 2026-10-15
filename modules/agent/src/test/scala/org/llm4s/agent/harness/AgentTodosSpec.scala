@@ -129,7 +129,8 @@ class AgentTodosSpec extends AnyFlatSpec with Matchers with EitherValues with Op
           .withTools(
             org.llm4s.agent.SpecTools.set(
               org.llm4s.agent.SpecTools.tool("echo")((a, _) =>
-                org.llm4s.agent.graph.tool.ToolOutcome.Success(ujson.Str(a.text))
+                org.llm4s.agent.graph.tool.ToolOutcome
+                  .Success(org.llm4s.agent.graph.tool.ToolContent.Json(ujson.Str(a.text)))
               )
             )
           )

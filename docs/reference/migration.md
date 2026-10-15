@@ -10,6 +10,36 @@ nav_order: 2
 Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
 by what you use. The notes below are the per-change detail it links to.
 
+## Multimodal content parts (#1913)
+
+Not in a release yet. Stage 3 slice F8b ([#1913](https://github.com/llm4s/llm4s/issues/1913)) gives user messages and tool results content parts: text, images and documents. Code that builds text messages and reads `content` needs no change. Source breaks, with no shims:
+
+- **`UserMessage(parts: Vector[ContentPart])` and `ToolMessage(parts: Vector[ContentPart], toolCallId)`.** `UserMessage(text)` and `ToolMessage(text, toolCallId)` still build a one-text-part message, and `content` is the text view: the text parts, joined by newlines, `""` for a message that is all media. A pattern binds the parts now, so match on the type:
+
+  ```scala
+  // before
+  case UserMessage(content)          => send(content)
+  case ToolMessage(content, callId)  => sendResult(callId, content)
+  // after
+  case u: UserMessage => send(u.content)          // or map u.parts
+  case t: ToolMessage => sendResult(t.toolCallId, t.content)
+  ```
+
+  The two are no longer case classes and have no extractor, so every positional pattern is a compile error: an extractor of the parts would have kept `s"$content"` compiling and printing the parts, and one of the text would have kept a client compiling that drops media. `msg.copy(content = ...)` becomes `msg.withParts(...)`.
+- **`ToolOutcome.Success(content: ToolContent, update)`**, with `ToolContent.Json(value)` for the JSON result a tool returned before and `ToolContent.Parts(parts)` for images and documents:
+
+  ```scala
+  ToolOutcome.Success(ujson.Str("done"))                    // before
+  ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))  // after
+  ToolOutcome.Success(ToolContent.Parts(Vector(ContentPart.Text("The chart:"), chart)))
+  ```
+
+  `Parts` with no content, or with more than `ContentPart.MaxInlineBytes` of inline bytes in total, is the call's error result.
+- **A custom `LLMClient`** that matched `UserMessage(content)` must decide what to do with media parts: send them, or return `Left(UnsupportedContentPartError(provider, part.kind, role))` before sending. `org.llm4s.llmconnect.provider.PartEncoding` is `private[llm4s]`; a provider outside llm4s uses `ContentPart.kind` and the error directly, and runs `ProviderModuleChecks.assertContentParts` in its module spec.
+- **Stored data needs nothing.** The JSON of a one-text message is unchanged, and the old shape reads, so memory stores, saved conversations and thinking bindings are unaffected. An agent thread's `messages` and `tool-results` keys move to schema version 2 and migrate on restore; a thread written by this version cannot be restored by an earlier one.
+- **A client refuses what it cannot send, before sending**: a part kind, source or format its wire format cannot carry is `UnsupportedContentPartError`. A provider's own limits (how many images, how large a request, which formats a model reads) are the provider's: its 400 or 413 comes back as a typed `ValidationError` or `ServiceError` with its message. The guide's [table](../guide/multimodal.html#what-each-provider-sends) lists what each takes.
+- **An agent thread holds at most 20 MiB of inline media** (`Messages.MaxInlineBytes`): media added past it is replaced by a text part naming what was removed. Context budgets (`ConversationTokenCounter`, `ContextPruning`) count media by estimate.
+- **Inline media is bounded** at 5 MiB per part by `ContentPart.image` / `ContentPart.document`, which return a `Result`. Every agent checkpoint copies the thread's messages, so larger media goes at a `MediaSource.Url` or in a `MediaSource.ProviderFile`. See [Multimodal content](../guide/multimodal.html).
 ## Smaller breaks since 0.4.1
 
 Changes too small for a section of their own. Each is listed under Breaking changes in the CHANGELOG.
@@ -673,7 +703,7 @@ Experimental, so these are source breaks with no shims. Design:
   final case class SearchArgs(query: String) derives ReadWriter
   val schema = Schema.`object`[SearchArgs]("Search arguments").withRequiredField("query", Schema.string("Query"))
   val spec   = AgentToolSpec[SearchArgs]("search", "Search the index", schema)
-  val search = AgentTool(spec)((args, context) => ToolOutcome.Success(ujson.Str(run(args.query))))
+  val search = AgentTool(spec)((args, context) => ToolOutcome.Success(ToolContent.Json(ujson.Str(run(args.query)))))
   ```
 
   `LoopTool.fromToolFunction(f)` becomes `AgentTool.fromToolFunction(f)`; its arguments are now

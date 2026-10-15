@@ -243,7 +243,8 @@ class SessionManager(
           case t: ToolMessage => s"\n\n_Result of tool call ${t.toolCallId}_"
           case _              => ""
         }
-        s"### ${i + 1}. ${message.role}\n\n${message.content}$calls\n"
+        // media is named in place, so an exported session shows where it was
+        s"### ${i + 1}. ${message.role}\n\n${Message.textWithMedia(message)}$calls\n"
       }
       .mkString("\n")
 

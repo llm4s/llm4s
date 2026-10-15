@@ -96,7 +96,9 @@ private[agent] object ContextPruning {
           case ThinkingBlock.Opaque(_, data) => org.llm4s.context.ConversationTokenCounter.estimateOpaqueTokens(data)
         }.sum
         (textWords * 1.3).toInt + opaque
-      case other => (words(other.content) * 1.3).toInt
+      case u: UserMessage => (words(u.content) * 1.3).toInt + u.parts.map(ContentPart.estimatedTokens).sum
+      case t: ToolMessage => (words(t.content) * 1.3).toInt + t.parts.map(ContentPart.estimatedTokens).sum
+      case other          => (words(other.content) * 1.3).toInt
     }
   }
 

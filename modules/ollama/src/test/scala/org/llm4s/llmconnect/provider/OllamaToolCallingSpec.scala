@@ -38,7 +38,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
   private val bodyBuilder = new OllamaClient(config("http://localhost:11434"))
 
   private def requestBody(conversation: Conversation, options: CompletionOptions = CompletionOptions()): ujson.Obj =
-    bodyBuilder.createRequestBody(conversation, options, stream = false)
+    bodyBuilder.createRequestBody(conversation, options, stream = false).fold(e => fail(e.message), identity)
 
   private val weather = ToolCall("call_a", "get_weather", ujson.Obj("location" -> "Paris"))
   private val time    = ToolCall("call_b", "get_time", ujson.Obj("zone" -> "UTC"))

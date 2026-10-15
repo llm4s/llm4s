@@ -3,7 +3,7 @@ package org.llm4s.agent
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling, Text }
 import org.llm4s.agent.graph.{ EffectKey, GraphError, ReplayGuard }
-import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome }
+import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.model._
 import org.scalatest.flatspec.AnyFlatSpec
@@ -46,7 +46,7 @@ class AgentToolEffectPhaseSpec extends AnyFlatSpec with Matchers {
           case Right(n) =>
             answered.add(question.prompt)
             // the same question again, answered the same: still a phase of its own
-            if answered.size < asks then ask(Confirm("sure?")) else ToolOutcome.Success(ujson.Num(n))
+            if answered.size < asks then ask(Confirm("sure?")) else ToolOutcome.Success(ToolContent.Json(ujson.Num(n)))
         }
     }
   }
@@ -109,7 +109,7 @@ class AgentToolEffectPhaseSpec extends AnyFlatSpec with Matchers {
         case Left(r: GraphError.EffectReplayRefused) => ToolOutcome.Error(r.message)
         case Left(error)                             => ToolOutcome.Fatal(error)
         case Right(n) if !context.approved           => ToolOutcome.NeedsApproval(s"applied $n")
-        case Right(n)                                => ToolOutcome.Success(ujson.Num(n))
+        case Right(n)                                => ToolOutcome.Success(ToolContent.Json(ujson.Num(n)))
       }
     }
     val agent  = agentWith(tool)

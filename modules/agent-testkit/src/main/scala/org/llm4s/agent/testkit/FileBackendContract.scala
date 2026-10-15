@@ -2,7 +2,7 @@ package org.llm4s.agent.testkit
 
 import org.llm4s.agent.{ Agent, AgentResult }
 import org.llm4s.agent.graph.{ ReplaySupport, RunConfig, RunContext, StateUpdate, TenantId, ThreadId }
-import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, Glob, LockKey, ToolOutcome, ToolSet }
+import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, Glob, LockKey, ToolContent, ToolOutcome, ToolSet }
 import org.llm4s.agent.harness.{ BackendRefused, FileBackend, FileContext, VPath }
 import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.model.{ ToolCall, ToolMessage }
@@ -192,9 +192,9 @@ object FileBackendContract:
         case op :: p :: _ if Mutations(op) => VPath(p).fold(_ => Set(LockKey("")), backend.locks)
         case _                             => Set.empty
     def mutated[A](r: Result[(A, StateUpdate)]): ToolOutcome =
-      r.fold(e => errorOf(e), (a, u) => ToolOutcome.Success(ujson.Str(fields(a)), u))
+      r.fold(e => errorOf(e), (a, u) => ToolOutcome.Success(ToolContent.Json(ujson.Str(fields(a))), u))
     def read[A](r: Result[A])(render: A => String): ToolOutcome =
-      r.fold(e => errorOf(e), a => ToolOutcome.Success(ujson.Str(render(a))))
+      r.fold(e => errorOf(e), a => ToolOutcome.Success(ToolContent.Json(ujson.Str(render(a)))))
     val tool = AgentTool(spec.withLocks(locks), backend.writes) { (call, context) =>
       val ctx = FileContext(context)
       call.text.split("\\|", -1).toList match
@@ -233,7 +233,7 @@ object FileBackendContract:
       case r: BackendRefused if r.kind != BackendRefused.Kind.Refused => s"[${r.kind}] "
       case _                                                          => ""
     BackendRefused.toolOutcome(error) match
-      case ToolOutcome.Error(message) => ToolOutcome.Success(ujson.Str(s"error: $kind$message"))
+      case ToolOutcome.Error(message) => ToolOutcome.Success(ToolContent.Json(ujson.Str(s"error: $kind$message")))
       case fatal                      => fatal
 
   /** `created=true`, `replacements=2`: a product's fields by name. */

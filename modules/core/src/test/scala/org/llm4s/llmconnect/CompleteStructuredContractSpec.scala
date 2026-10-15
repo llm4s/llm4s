@@ -144,7 +144,7 @@ class CompleteStructuredContractSpec extends AnyFlatSpec with Matchers {
     val pool = Executors.newFixedThreadPool(8)
     val ec   = ExecutionContext.fromExecutorService(pool)
     val c = new RecordingClient((cv, _) => {
-      val q = cv.messages.collect { case UserMessage(t) => t }.head
+      val q = cv.messages.collect { case u: UserMessage => u.content }.head
       Right(completion(s"""{"name":"$q","age":${q.length}}"""))
     })
     val futures = (1 to 200).map { i =>

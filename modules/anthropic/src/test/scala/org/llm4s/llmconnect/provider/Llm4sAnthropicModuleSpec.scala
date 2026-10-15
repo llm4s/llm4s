@@ -8,6 +8,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.testkit.LocalProviderTestServer.{
   anthropicMessage,
   holdOpen,
+  sendJsonResponse,
   sendSseResponse,
   streamThenHold,
   withServer
@@ -133,6 +134,31 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers with ProviderMo
       assertOneToolResultPerCall(ToolMessageFormat.AnthropicMessages, anthropicMessage("done"), "/v1/messages")(
         clientAt
       )
+    }
+
+    "send the content parts Anthropic takes and refuse the rest before sending" in {
+      import org.llm4s.testkit.ContentPartCase.*
+      // a provider's 400 or 413 - a vendor limit llm4s leaves to it - is a typed error with its message
+      assertProviderRejectionIsTyped(
+        (exchange, status, message) =>
+          sendJsonResponse(
+            exchange,
+            status,
+            ujson
+              .Obj("type" -> "error", "error" -> ujson.Obj("type" -> "invalid_request_error", "message" -> message))
+              .render()
+          ),
+        "/v1/messages"
+      )(clientAt)
+      assertContentParts("anthropic", sendJsonResponse(_, 200, anthropicMessage("done")), "/v1/messages")(
+        UserImageUrl,
+        UserImageInline,
+        UserPdfUrl,
+        UserPdfInline,
+        UserTextDocumentInline,
+        ToolImageInline,
+        ToolPdfInline
+      )(clientAt)
     }
 
     "return CancelledError when a stream is interrupted after its first event" in {

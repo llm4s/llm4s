@@ -3,6 +3,7 @@ package org.llm4s.agent
 import org.llm4s.agent.events.AgentEvents
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.tool.ToolOutcome
+import org.llm4s.agent.graph.tool.ToolContent
 import org.llm4s.error.SimpleError
 import org.scalatest.concurrent.Eventually
 import org.scalatest.flatspec.AnyFlatSpec
@@ -39,7 +40,7 @@ class TypedStreamSpec extends AnyFlatSpec with Matchers with Eventually:
   private val pinging: (SpecTools.Text, graph.tool.ToolContext) => ToolOutcome = (_, ctx) =>
     Pinged.emit(ctx.run, Ping(1))
     Progressed.progress(ctx.run, Ping(2))
-    ToolOutcome.Success(ujson.Str("ok"))
+    ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
 
   final private class Seen:
     private val all           = new CopyOnWriteArrayList[String]()
@@ -75,7 +76,7 @@ class TypedStreamSpec extends AnyFlatSpec with Matchers with Eventually:
       (1 to 3000).foreach(i => Progressed.progress(ctx.run, Ping(i)))
       emitted.countDown()
       Pinged.emit(ctx.run, Ping(0))
-      ToolOutcome.Success(ujson.Str("ok"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
     val progressed = new AtomicInteger(0)
     val gaps       = new AtomicInteger(0)
     val pinged     = new AtomicInteger(0)
@@ -106,7 +107,7 @@ class TypedStreamSpec extends AnyFlatSpec with Matchers with Eventually:
       Pinged.emit(ctx.run, Ping(attempt))
       Progressed.progress(ctx.run, Ping(attempt))
       if attempt == 1 then ToolOutcome.Fatal(SimpleError("first attempt fails"))
-      else ToolOutcome.Success(ujson.Str("ok"))
+      else ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
     val agent    = agentWith(failingFirst, runtime)
     val threadId = ThreadId("ts4")
     val first    = Seen()

@@ -122,6 +122,40 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     tracing.events.last shouldBe a[TraceEvent.CacheHit]
   }
 
+  test("A conversation with an image bypasses the cache: its prompt is embedded as text") {
+    val mockLLM   = new MockLLMClient()
+    val mockEmbed = new MockEmbeddingClient(Map("Hello" -> Seq(1.0, 0.0, 0.0)))
+    val tracing   = new MockTracing()
+    val client    = new CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing, new MockClock())
+    val image = ContentPart
+      .image(
+        org.llm4s.media.MediaSource.Url(java.net.URI.create("https://example.com/a.png")),
+        org.llm4s.media.MediaType.Png
+      )
+      .getOrElse(fail())
+    val withImage = Conversation(Seq(UserMessage(Vector(ContentPart.Text("Hello"), image))))
+
+    client.complete(withImage)
+    client.complete(withImage)
+    mockLLM.callCount shouldBe 2
+    tracing.events shouldBe empty
+  }
+
+  test("A conversation with a null part goes to the base client, never throws") {
+    val mockLLM = new MockLLMClient()
+    val client =
+      new CachingLLMClient(
+        mockLLM,
+        new MockEmbeddingClient(Map.empty),
+        embeddingModel,
+        config,
+        new MockTracing(),
+        new MockClock()
+      )
+    noException should be thrownBy client.complete(Conversation(Seq(UserMessage(null: Vector[ContentPart]))))
+    mockLLM.callCount shouldBe 1
+  }
+
   test("Cache miss on options mismatch logs OptionsMismatch") {
     val mockLLM   = new MockLLMClient()
     val mockEmbed = new MockEmbeddingClient(Map("Hello" -> Seq(1.0, 0.0, 0.0)))

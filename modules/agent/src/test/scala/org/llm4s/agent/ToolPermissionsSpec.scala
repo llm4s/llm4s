@@ -4,7 +4,7 @@ import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.graph.InterruptId
 import org.llm4s.agent.graph.middleware.{ ApprovalMiddleware, PermissionMiddleware, PermissionRule }
-import org.llm4s.agent.graph.tool.{ AgentTool, Operation, ToolOutcome, ToolResource }
+import org.llm4s.agent.graph.tool.{ AgentTool, Operation, ToolContent, ToolOutcome, ToolResource }
 import org.llm4s.llmconnect.model._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -25,7 +25,7 @@ class ToolPermissionsSpec extends AnyFlatSpec with Matchers {
   private def writer(ran: CopyOnWriteArrayList[String]) =
     AgentTool(SpecTools.spec("write").withResources(t => Vector(ToolResource(Operation.Write, t.text)))) { (t, _) =>
       ran.add(t.text)
-      ToolOutcome.Success(ujson.Str(s"wrote ${t.text}"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str(s"wrote ${t.text}")))
     }
 
   private def agentOver(client: ScriptedLLMClient, tools: AgentTool[?]*) =
@@ -62,7 +62,7 @@ class ToolPermissionsSpec extends AnyFlatSpec with Matchers {
   "A tool without resources" should "be checked as (Invoke, its name), and denied unless a rule allows it" in {
     val ran = new AtomicInteger()
     val plain = SpecTools.tool("lookup") { (_, _) =>
-      ran.incrementAndGet(); ToolOutcome.Success(ujson.Str("ok"))
+      ran.incrementAndGet(); ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "lookup")), CompletionFixture.simple("done"))
     toolResults(agentOver(client, plain).run("go").value) shouldBe Vector("""{"error":"Denied: invoke lookup"}""")
@@ -119,7 +119,7 @@ class ToolPermissionsSpec extends AnyFlatSpec with Matchers {
     val seen = new AtomicInteger()
     val tool = AgentTool(SpecTools.spec("write").withResources { t =>
       seen.incrementAndGet(); Vector(ToolResource(Operation.Write, t.text))
-    })((_, _) => ToolOutcome.Success(ujson.Str("never")))
+    })((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("never"))))
     val client = ScriptedLLMClient.of(
       calling(ToolCall("c1", "write", ujson.Obj("other" -> 1))),
       CompletionFixture.simple("done")
@@ -131,7 +131,7 @@ class ToolPermissionsSpec extends AnyFlatSpec with Matchers {
   "A resource function that throws" should "refuse the call as invalid arguments" in {
     val tool =
       AgentTool(SpecTools.spec("write").withResources(_ => throw new IllegalStateException("bad path")))((_, _) =>
-        ToolOutcome.Success(ujson.Str("never"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("never")))
       )
     val client = ScriptedLLMClient.of(calling(call("c1", "write", "/tmp/a")), CompletionFixture.simple("done"))
     toolResults(agentOver(client, tool).run("go").value).head should include("bad path")
@@ -170,7 +170,7 @@ class ToolPermissionsSpec extends AnyFlatSpec with Matchers {
       def resume(args: SpecTools.Text, q: Where, answer: Dest, context: org.llm4s.agent.graph.tool.ToolContext) =
         if (!org.llm4s.agent.graph.tool.Glob("/out/**").matches(answer.path))
           ToolOutcome.Error(s"${answer.path} is outside /out")
-        else { wrote.add(answer.path); ToolOutcome.Success(ujson.Str(s"saved to ${answer.path}")) }
+        else { wrote.add(answer.path); ToolOutcome.Success(ToolContent.Json(ujson.Str(s"saved to ${answer.path}"))) }
     }
     val recording = new org.llm4s.agent.graph.middleware.AgentMiddleware {
       val id = org.llm4s.agent.graph.middleware.MiddlewareId("recording")

@@ -5,7 +5,7 @@ import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.{ Keep, Sink }
 import org.llm4s.agent.AgentRun
 import org.llm4s.agent.graph.{ EventHandlers, ThreadId }
-import org.llm4s.agent.graph.tool.{ ToolContext, ToolOutcome }
+import org.llm4s.agent.graph.tool.{ ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.pekko.Fixtures.Pings
 import org.llm4s.pekko.Fixtures.Pings.Ping
 import org.llm4s.types.Result
@@ -90,7 +90,7 @@ class AgentPekkoEventsSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
       context => {
         Pings.Pinged.emit(context.run, Ping(1))
         release.await(5, TimeUnit.SECONDS)
-        ToolOutcome.Success(ujson.Str("ok"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
       },
       "pe4"
     )

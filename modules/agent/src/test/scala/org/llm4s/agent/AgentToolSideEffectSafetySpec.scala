@@ -6,6 +6,7 @@ import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.graph._
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelRequest }
 import org.llm4s.agent.graph.tool.ToolOutcome
+import org.llm4s.agent.graph.tool.ToolContent
 import org.llm4s.agent.graph.toolloop.ToolResultRule
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
@@ -56,7 +57,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
     }
     val record = SpecTools.tool("record") { (_, context) =>
       seen.add(context.idempotencyKey)
-      ToolOutcome.Success(ujson.Str("ok"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
     }
     val models = new ConcurrentLinkedQueue[RunPosition]()
     val client = ScriptedLLMClient.of(calling(call("c1", "record")), CompletionFixture.simple("done"))
@@ -78,7 +79,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
     val seen = new ConcurrentLinkedQueue[IdempotencyKey]()
     val record = SpecTools.tool("record") { (_, context) =>
       seen.add(context.idempotencyKey)
-      ToolOutcome.Success(ujson.Str("ok"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
     }
     val client = ScriptedLLMClient.of(
       calling(call("call_0", "record")),
@@ -110,7 +111,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
   "A model message whose tool call ids repeat" should "be refused before it is stored; recover asks again" in {
     val ran = new java.util.concurrent.atomic.AtomicInteger()
     val lookup = SpecTools.tool("lookup") { (_, _) =>
-      ran.incrementAndGet(); ToolOutcome.Success(ujson.Str("ok"))
+      ran.incrementAndGet(); ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
     }
     val client = new ScriptedLLMClient(
       Right(calling(call("c1", "lookup"), call("c1", "lookup"))),
@@ -133,7 +134,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
   }
 
   "A model message with a blank tool call id" should "be refused before it is stored" in {
-    val lookup = SpecTools.tool("lookup")((_, _) => ToolOutcome.Success(ujson.Str("ok")))
+    val lookup = SpecTools.tool("lookup")((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("ok"))))
     val client = ScriptedLLMClient.of(calling(call(" ", "lookup")))
     val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(lookup)))
     cause(agent.run(thread, "go").error).message should include("a tool call has a blank id")
@@ -147,7 +148,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
       ): Result[ModelResponse] =
         next(request.withMessages(request.messages.filterNot(_.isInstanceOf[ToolMessage])))
     }
-    val lookup = SpecTools.tool("lookup")((_, _) => ToolOutcome.Success(ujson.Str("ok")))
+    val lookup = SpecTools.tool("lookup")((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("ok"))))
     val client = ScriptedLLMClient.of(calling(call("c1", "lookup")), CompletionFixture.simple("never"))
     val agent =
       built(Agent.builder("assistant", client).withTools(SpecTools.set(lookup)).withMiddleware(dropping))

@@ -5,6 +5,7 @@ import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.config.WatsonXConfig
 import org.llm4s.llmconnect.model.*
+import org.llm4s.media.MediaSource
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
@@ -206,8 +207,9 @@ class WatsonXClient(
 
   override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
     completeWithMetrics {
-      bearerToken().flatMap { token =>
-        val requestText = createRequestBody(conversation, options).render()
+      // the parts are checked before the IAM exchange: a refused request sends nothing
+      createRequestBody(conversation, options).flatMap(body => bearerToken().map(_ -> body)).flatMap { (token, body) =>
+        val requestText = body.render()
         val startedAt   = Instant.now()
         httpClient
           .post(endpoint("/ml/v1/text/chat"), apiHeaders(token, "application/json"), requestText, requestTimeout)
@@ -233,8 +235,8 @@ class WatsonXClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
-    bearerToken().flatMap { token =>
-      val requestText = createRequestBody(conversation, options).render()
+    createRequestBody(conversation, options).flatMap(body => bearerToken().map(_ -> body)).flatMap { (token, body) =>
+      val requestText = body.render()
       val url         = endpoint("/ml/v1/text/chat_stream")
       val startedAt   = Instant.now()
       val raw         = new StringBuilder
@@ -419,7 +421,12 @@ class WatsonXClient(
 
   private def estimateCost(usage: TokenUsage): Option[Double] = CostEstimator.estimate(config.model, usage)
 
-  private[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
+  private[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): Result[ujson.Obj] =
+    PartEncoding
+      .check(providerName, conversation.messages, WatsonXClient.userPart, PartEncoding.textOnly)
+      .map(_ => requestBody(conversation, options))
+
+  private def requestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
     val body = ujson.Obj(
       "model_id"    -> config.model,
       "messages"    -> encodeMessages(conversation),
@@ -447,8 +454,14 @@ class WatsonXClient(
   private def encodeMessages(conversation: Conversation): ujson.Arr =
     ujson.Arr.from(conversation.messages.flatMap {
       case SystemMessage(content) => Some(ujson.Obj("role" -> "system", "content" -> content))
-      case UserMessage(content)   => Some(ujson.Obj("role" -> "user", "content" -> content))
-      case am: AssistantMessage   =>
+      case um: UserMessage        =>
+        // checked by createRequestBody: every part is text or an inline image
+        val content = um.parts match {
+          case Vector(ContentPart.Text(text)) => ujson.Str(text)
+          case parts                          => ujson.Arr.from(parts.map(WatsonXClient.userPart))
+        }
+        Some(ujson.Obj("role" -> "user", "content" -> content))
+      case am: AssistantMessage =>
         // an assistant turn with neither text nor calls says nothing: it is dropped
         if (am.content.isEmpty && am.toolCalls.isEmpty) None
         else {
@@ -466,8 +479,8 @@ class WatsonXClient(
             })
           Some(message)
         }
-      case ToolMessage(content, toolCallId) =>
-        Some(ujson.Obj("role" -> "tool", "tool_call_id" -> toolCallId, "content" -> content))
+      case tm: ToolMessage =>
+        Some(ujson.Obj("role" -> "tool", "tool_call_id" -> tm.toolCallId, "content" -> tm.content))
     })
 
   private def parseCompletion(body: String): Result[Completion] =
@@ -522,6 +535,16 @@ class WatsonXClient(
 }
 
 object WatsonXClient {
+
+  /**
+   * The user-message parts the watsonx.ai chat API takes, in its OpenAI-style content array: text, and inline
+   * images as a base64 `data:` URL in `image_url`. The service fetches no remote URL and takes no documents.
+   */
+  private[provider] val userPart: PartialFunction[ContentPart, ujson.Value] = {
+    case ContentPart.Text(text) => ujson.Obj("type" -> "text", "text" -> text)
+    case ContentPart.Image(inline: MediaSource.Inline, mediaType) =>
+      ujson.Obj("type" -> "image_url", "image_url" -> ujson.Obj("url" -> PartEncoding.dataUrl(inline, mediaType)))
+  }
 
   /** The timeout of a non-streaming call when the section sets no `timeouts.request`: two minutes. */
   val DefaultRequestTimeout: FiniteDuration = 120.seconds

@@ -2,7 +2,7 @@ package org.llm4s.zio
 
 import org.llm4s.agent.AgentRun
 import org.llm4s.agent.graph.{ EventHandlers, ThreadId }
-import org.llm4s.agent.graph.tool.{ ToolContext, ToolOutcome }
+import org.llm4s.agent.graph.tool.{ ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.agent.testkit.Fixtures
 import org.llm4s.agent.testkit.Fixtures.Pings
 import org.llm4s.agent.testkit.Fixtures.Pings.Ping
@@ -76,7 +76,7 @@ object AgentZEventsSpec extends ZIOSpecDefault {
           context => {
             Pings.Pinged.emit(context.run, Ping(1))
             release.await(5, TimeUnit.SECONDS)
-            ToolOutcome.Success(ujson.Str("ok"))
+            ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
           },
           "ze4"
         )

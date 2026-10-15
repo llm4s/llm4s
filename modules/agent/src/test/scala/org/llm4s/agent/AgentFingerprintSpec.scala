@@ -11,6 +11,7 @@ import org.llm4s.agent.graph.middleware.{
 }
 import org.llm4s.types.Result
 import org.llm4s.agent.graph.tool.ToolOutcome
+import org.llm4s.agent.graph.tool.ToolContent
 import org.llm4s.llmconnect.model._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -20,8 +21,8 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
 
   private val client = ScriptedLLMClient.of()
 
-  private val echo  = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
-  private val other = SpecTools.tool("other")((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
+  private val echo  = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
+  private val other = SpecTools.tool("other")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
 
   private def base: AgentBuilder =
     Agent
@@ -72,7 +73,7 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
           .`object`[SpecTools.Text]("lookup")
           .withRequiredField("text", org.llm4s.toolapi.Schema.string("Text"))
       )
-    )((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
+    )((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
     override def tools: Vector[org.llm4s.agent.graph.tool.AgentTool[?]] = Vector(lookup)
   }
 
@@ -189,7 +190,7 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
     built(Agent.builder("root", client).withTools(SpecTools.set(tool))).loop.graph.fingerprint
 
   private def echoWith(spec: org.llm4s.agent.graph.tool.AgentToolSpec[SpecTools.Text]) =
-    org.llm4s.agent.graph.tool.AgentTool(spec)((a, _) => ToolOutcome.Success(ujson.Str(a.text)))
+    org.llm4s.agent.graph.tool.AgentTool(spec)((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
 
   "The structural fingerprint" should "not change with timeouts or resources, nor without locks: no tool-queue key" in {
     import scala.concurrent.duration._
@@ -290,7 +291,10 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
     val spec    = policy.fold(SpecTools.spec("step"))(SpecTools.spec("step").withLocks(_))
     val step = org.llm4s.agent.graph.tool.AgentTool(spec, writes = Set(counter)) { (_, context) =>
       val next = context.state.get(counter).fold(e => fail(e.message), identity) + 1
-      ToolOutcome.Success(ujson.Str(next.toString), org.llm4s.agent.graph.StateUpdate.update(counter, next))
+      ToolOutcome.Success(
+        ToolContent.Json(ujson.Str(next.toString)),
+        org.llm4s.agent.graph.StateUpdate.update(counter, next)
+      )
     }
     built(
       Agent
@@ -364,11 +368,14 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
         writes = Set(counter)
       ) { (_, context) =>
         val next = context.state.get(counter).fold(e => fail(e.message), identity) + 1
-        ToolOutcome.Success(ujson.Str(next.toString), org.llm4s.agent.graph.StateUpdate.update(counter, next))
+        ToolOutcome.Success(
+          ToolContent.Json(ujson.Str(next.toString)),
+          org.llm4s.agent.graph.StateUpdate.update(counter, next)
+        )
       }
       val helperTool =
         org.llm4s.agent.graph.tool.AgentTool(SpecTools.spec("other").withLocks(_ => Set(LockKey("h"))))((a, _) =>
-          ToolOutcome.Success(ujson.Str(a.text))
+          ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text)))
         )
       built(
         Agent
