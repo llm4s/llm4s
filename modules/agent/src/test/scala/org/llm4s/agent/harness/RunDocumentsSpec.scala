@@ -134,6 +134,10 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
       throw new IllegalStateException("boom")
     )(_ => ())
     cache.cached shouldBe 1
+    // a full cache: a failure evicts no value
+    cache(recordingRunContext(events, run = "second"))(Right("s"))(_ => ()).value shouldBe "s"
+    cache(recordingRunContext(events, run = "f9"))(Left(ValidationError("store", "down")))(_ => ()).isLeft shouldBe true
+    cache.cached shouldBe 2
     val again = new java.util.concurrent.atomic.AtomicInteger(0)
     cache(run) { again.incrementAndGet(); Right("w") }(_ => ()).value shouldBe "v"
     again.get shouldBe 0
