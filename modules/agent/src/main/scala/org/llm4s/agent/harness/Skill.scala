@@ -336,8 +336,11 @@ private[harness] object Frontmatter:
 
   /** `value` up to a ` #` comment, trimmed. */
   private def withoutComment(value: String): String =
-    val i = if value.startsWith("#") then 0 else value.indexOf(" #")
+    // a `#` at the start, or after YAML whitespace (a space or a tab), starts a comment
+    val i = CommentStart.findFirstMatchIn(value).fold(-1)(_.start)
     (if i < 0 then value else value.substring(0, i)).trim
+
+  private val CommentStart = "(?:^|(?<=[ \\t]))#".r
 
   /** Only a comment may follow a closing quote or bracket. */
   private def trailing(n: Int, rest: String): Parsed[Unit] =
@@ -406,7 +409,7 @@ private[harness] object Frontmatter:
                 val plain = r.substring(0, end).trim
                 if plain.isEmpty then Left((n, "a flow list has an empty item"))
                 // a ` #` starts a comment, which would swallow the rest of the line and the list's `]` with it
-                else if plain.contains(" #") || plain.contains("\t#") then
+                else if CommentStart.findFirstIn(plain).isDefined then
                   Left((n, "a flow list cannot hold a comment; it must close on its line"))
                 else if plain.exists(c => c == '[' || c == '{' || c == '}') then
                   Left((n, "nested lists and maps are not supported"))
