@@ -150,6 +150,33 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
     cache.cached shouldBe 1
   }
 
+  it should "give a waiter its run's value even when another run evicted it from the LRU meanwhile" in {
+    val events   = new CopyOnWriteArrayList[(String, ujson.Value)]()
+    val cache    = new RunCache[String](1)
+    val computed = new AtomicInteger(0)
+    val started  = new java.util.concurrent.CountDownLatch(1)
+    val proceed  = new java.util.concurrent.CountDownLatch(1)
+    val first = new Thread(() =>
+      cache(recordingRunContext(events, task = "a")) {
+        started.countDown(); proceed.await(); computed.incrementAndGet(); Right("v")
+      }(_ =>
+        // while this caller still holds the slot, another run's value evicts this run's from the LRU (maxRuns 1)
+        cache(recordingRunContext(events, run = "other"))(Right("o"))(_ => ()): Unit
+      ): Unit
+    )
+    first.start()
+    started.await()
+    val waiter = new Thread(() =>
+      cache(recordingRunContext(events, task = "b")) { computed.incrementAndGet(); Right("again") }(_ => ()): Unit
+    )
+    waiter.start()
+    while (waiter.getState != Thread.State.BLOCKED) Thread.sleep(1)
+    proceed.countDown()
+    first.join()
+    waiter.join()
+    computed.get shouldBe 1
+  }
+
   it should "leave no in-flight entry behind a computation an interrupt ended" in {
     val events = new CopyOnWriteArrayList[(String, ujson.Value)]()
     val cache  = new RunCache[String](4)
