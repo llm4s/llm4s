@@ -12,7 +12,7 @@ This page compares LLM4S with LangChain4j, Spring AI, Koog and Embabel, so that 
 your project. It states facts and trade-offs, not rankings.
 
 **Last verified: 2026-10-11.** The statements about LLM4S describe the `main` branch on that date; the latest release is
-v0.5.0, the first to publish the module split described in the [v1 scope](../reference/v1-scope). Every statement about
+v0.5.1; v0.5.0 was the first to publish the module split described in the [v1 scope](../reference/v1-scope). Every statement about
 another project comes from that project's own documentation, fetched on that date and listed under
 [Sources](#sources). A cell that says *not verified* means it was not checked, not that the feature is absent. The
 other projects change quickly: re-check anything that matters to you before relying on it, and expect this page to be
@@ -54,7 +54,7 @@ refreshed at each LLM4S release.
 | Testing and evaluation | RAGAS-style metrics and a benchmark harness for RAG ([guide](rag-evaluation)); LLM-as-judge guardrails; `llm4s-testkit` (scripted clients for application tests, [#1475](https://github.com/llm4s/llm4s/issues/1475)); `llm4s-provider-testkit` for provider authors | not verified | `Evaluator`, `RelevancyEvaluator` and `FactCheckingEvaluator` [S1] | not verified | not verified |
 | Frameworks and runtimes | Spring Boot starter (three providers), cats-effect ([guide](cats-effect)), ZIO ([guide](zio)), Pekko Streams ([guide](pekko)), a Kotlin module, a Java facade (incomplete) | Spring Boot 3 and 4 starters and `@AiService`; example projects for Spring Boot, Quarkus, Helidon, Payara Micro, WildFly and Jakarta EE/MicroProfile [L2][L8] | Spring AI 2.0.x supports Spring Boot 4.0.x and 4.1.x [S9]; Spring Boot starters, for example for its MCP client and server [S3] | Spring Boot and Ktor integrations (both beta) [K1] | Built on Spring [E1] |
 | Java baseline | JDK 21: CI runs only JDK 21, and the agent runtime depends on Ox, whose jars are JDK 21 bytecode ([#1493](https://github.com/llm4s/llm4s/issues/1493)) | Its Spring Boot integration page states a minimum Java version, quoted in the note below the table [L8] | not verified | not verified | not verified |
-| Maturity | Pre-1.0: latest release v0.5.0; stability tiers (Frozen, Beta, Experimental) in the [v1 scope](../reference/v1-scope) | Latest release 1.22.0, 2026-10-08 [R1]; some modules, such as agents and guardrails, are marked experimental [L10][L11] | Latest GA release 2.0.1, 2026-08-21 [R2] | Latest release 1.3.0, 2026-09-24 [R3]; its Spring Boot, Ktor and planner agents are marked beta [K1] | Latest release 1.5.3, 2026-10-05 [R4] |
+| Maturity | Pre-1.0: latest release v0.5.1; stability tiers (Frozen, Beta, Experimental) in the [v1 scope](../reference/v1-scope) | Latest release 1.22.0, 2026-10-08 [R1]; some modules, such as agents and guardrails, are marked experimental [L10][L11] | Latest GA release 2.0.1, 2026-08-21 [R2] | Latest release 1.3.0, 2026-09-24 [R3]; its Spring Boot, Ktor and planner agents are marked beta [K1] | Latest release 1.5.3, 2026-10-05 [R4] |
 
 Note on the *Java baseline* row: LangChain4j's Spring Boot integration page says "LangChain4j Spring Boot integration requires Java 17" [L8]. This is a statement about that project, quoted as fetched on 2026-10-11. <!-- doc-support: ignore -->
 

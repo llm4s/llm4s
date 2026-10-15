@@ -8,11 +8,12 @@ nav_order: 2
 # Migration Guide
 
 Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
-by what you use. The notes below are the per-change detail it links to.
+by what you use. The notes below are the per-change detail it links to. From 0.5.0 to 0.5.1 the one source break is
+[Multimodal content parts](#multimodal-content-parts-1913).
 
 ## Multimodal content parts (#1913)
 
-Not in a release yet. Stage 3 slice F8b ([#1913](https://github.com/llm4s/llm4s/issues/1913)) gives user messages and tool results content parts: text, images and documents. Code that builds text messages and reads `content` needs no change. Source breaks, with no shims:
+In 0.5.1. Stage 3 slice F8b ([#1913](https://github.com/llm4s/llm4s/issues/1913)) gives user messages and tool results content parts: text, images and documents. Code that builds text messages and reads `content` needs no change. Source breaks, with no shims:
 
 - **`UserMessage(parts: Vector[ContentPart])` and `ToolMessage(parts: Vector[ContentPart], toolCallId)`.** `UserMessage(text)` and `ToolMessage(text, toolCallId)` still build a one-text-part message, and `content` is the text view: the text parts, joined by newlines, `""` for a message that is all media. A pattern binds the parts now, so match on the type:
 

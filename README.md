@@ -79,7 +79,7 @@ LLM4S provides a simple, robust, and scalable framework for building LLM applica
 
 ## Current Status
 
-LLM4S is under active pre-1.0 development. The latest published release is [v0.5.0](https://github.com/llm4s/llm4s/releases/tag/v0.5.0), the first with the split module artifacts, targeting Scala 3.7.1 and JDK 21. Its APIs are usable today but are still being stabilized ahead of the 1.0 compatibility commitment.
+LLM4S is under active pre-1.0 development. The latest published release is [v0.5.1](https://github.com/llm4s/llm4s/releases/tag/v0.5.1); [v0.5.0](https://github.com/llm4s/llm4s/releases/tag/v0.5.0) was the first with the split module artifacts. Both target Scala 3.7.1 and JDK 21. Its APIs are usable today but are still being stabilized ahead of the 1.0 compatibility commitment.
 
 The framework already provides multi-provider clients, agents and tool calling, RAG and vector stores, memory, guardrails, tracing and metrics, reliability wrappers, workspace isolation, MCP support, and image and speech APIs.
 

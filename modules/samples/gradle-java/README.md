@@ -22,7 +22,7 @@ OpenAI), run the sample against a release:
 
 ```bash
 cd modules/samples/gradle-java
-OPENAI_API_KEY=sk-... gradle run -Pllm4sVersion=0.5.0
+OPENAI_API_KEY=sk-... gradle run -Pllm4sVersion=0.5.1
 ```
 
 Without `-Pllm4sVersion` the build uses `0.1.0-SNAPSHOT`, the code in this checkout, which you publish to your

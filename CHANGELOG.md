@@ -7,8 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- The net change since 0.5.0, by area. Add an entry to its area's list; a follow-up to unreleased work edits
+<!-- The net change since 0.5.1, by area. Add an entry to its area's list; a follow-up to unreleased work edits
      its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
+
+## [0.5.1] - 2026-10-15
 
 ### Breaking changes
 
@@ -41,8 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
-- **Fixed** `llm4s-kotlin-api` is published again: the release's version check read a terminal escape as sbt's
-  version, so 0.5.0 shipped without it. It first ships in 0.5.1.
+- **Fixed** `llm4s-kotlin-api` is published, first in 0.5.1: the release's version check read a terminal escape as
+  sbt's version, so 0.5.0 shipped without it and `llm4s-bom` 0.5.0's Kotlin entry does not resolve.
 
 ## [0.5.0] - 2026-10-15
 
@@ -951,7 +953,8 @@ Initial release. Versions 0.1.0 through 0.1.7 were primarily focused on establis
 
 ---
 
-[Unreleased]: https://github.com/llm4s/llm4s/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/llm4s/llm4s/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/llm4s/llm4s/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/llm4s/llm4s/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/llm4s/llm4s/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/llm4s/llm4s/compare/v0.3.4...v0.4.0

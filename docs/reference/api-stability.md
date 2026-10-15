@@ -20,8 +20,9 @@ Binary compatibility is enforced between releases with [MiMa](https://github.com
 
 | Release type | Guarantee |
 |---|---|
-| **Patch** (0.x.y to 0.x.z) | No binary-breaking changes in frozen modules |
-| **Minor** (0.x to 0.y) | Binary-breaking changes allowed, with a `@deprecated` migration path where one exists |
+| **Before the baseline** (0.5.x now) | Still stabilising: any release, patch included, may break, with a CHANGELOG entry and a migration note and no `@deprecated` shim |
+| **Patch, after the baseline** (0.x.y to 0.x.z) | No binary-breaking changes in frozen modules |
+| **Minor, after the baseline** (0.x to 0.y) | Binary-breaking changes allowed, with a CHANGELOG entry and a migration note |
 | **1.0.0 and later** | Full SemVer: a MAJOR version for breaking changes |
 
 ---

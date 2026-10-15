@@ -34,8 +34,9 @@ version number:
 
 | Release | Frozen modules |
 |---|---|
-| **Patch** (0.x.y to 0.x.z) | No binary-breaking change. |
-| **Minor** (0.x to 0.y) | A binary-breaking change is allowed, with a `@deprecated` path where one exists, and is listed in the CHANGELOG. |
+| **Before the baseline** (0.5.x now) | Still stabilising: any release, patch included, may break source or binary compatibility. Each break is listed under the CHANGELOG's *Breaking changes* with a migration note, and ships with no `@deprecated` shim. |
+| **Patch, after the baseline** (0.x.y to 0.x.z) | No binary-breaking change. |
+| **Minor, after the baseline** (0.x to 0.y) | A binary-breaking change is allowed and is listed in the CHANGELOG with a migration note. |
 | **1.0.0 and later** | Semantic versioning: a breaking change needs a new major version. |
 
 Binary compatibility will be checked by MiMa against a baseline set at a pre-1.0 release, version to be

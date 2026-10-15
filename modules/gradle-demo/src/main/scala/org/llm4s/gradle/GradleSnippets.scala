@@ -26,7 +26,7 @@ import org.llm4s.types.Result
 object GradleSnippets {
 
   /** The latest released version whose coordinates the snippets use. */
-  val LLM4S_VERSION: String = "0.5.0"
+  val LLM4S_VERSION: String = "0.5.1"
 
   private val SCALA_SUFFIX = "3"
 
