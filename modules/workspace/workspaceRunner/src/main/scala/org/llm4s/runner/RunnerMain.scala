@@ -327,17 +327,25 @@ object RunnerMain extends cask.MainRoutes {
     else {
       // Ensure client has a process map (per-client isolation)
       val processes = clientProcesses.computeIfAbsent(channel, _ => new ConcurrentHashMap[String, RunningCommand]())
-      // connected while the connection is open and still owns this map: `disconnect` removes the connection first,
-      // then the map, then cancels what is in it, so a map made after it closed never counts
-      Future(
-        commandExecutor.execute(
-          cmd,
-          processes,
-          message => sendMessage(channel, message),
-          () => connections.containsKey(channel) && (clientProcesses.get(channel) eq processes),
-          earlyCancels(channel)
-        )
-      )(ec)
+      val early     = earlyCancels(channel)
+      if (!connections.containsKey(channel)) {
+        // `disconnect` ran between the check above and this state's creation: remove what this call made (only if it
+        // is still this call's), so a closed channel keeps nothing, and drop the command
+        clientProcesses.remove(channel, processes): Unit
+        clientEarlyCancels.remove(channel, early): Unit
+        logger.warn(s"Dropped command ${cmd.commandId}: its connection closed")
+      } else
+        // connected while the connection is open and still owns this map: `disconnect` removes the connection first,
+        // then the map, then cancels what is in it, so a map made after it closed never counts
+        Future(
+          commandExecutor.execute(
+            cmd,
+            processes,
+            message => sendMessage(channel, message),
+            () => connections.containsKey(channel) && (clientProcesses.get(channel) eq processes),
+            early
+          )
+        )(ec)
     }
 
   private def sendMessage(channel: cask.WsChannelActor, message: WebSocketMessage): Unit = {

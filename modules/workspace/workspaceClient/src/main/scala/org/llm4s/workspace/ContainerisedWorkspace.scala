@@ -393,6 +393,15 @@ class ContainerisedWorkspace(
     sendEither.fold(
       err => {
         pendingResponses.remove(command.commandId)
+        // a command this client gave up waiting for is cancelled, however late the runner would have started it (a
+        // slow preparation, a wait at the gate): its outcome stays unknown to the caller, but it never runs on unseen
+        command match {
+          case exec: ExecuteCommandCommand =>
+            Try(write[WebSocketMessage](CancelCommandMessage(exec.commandId))).foreach { json =>
+              Option(wsClient.get()).filter(_.isOpen).foreach(client => Try(client.send(json)))
+            }
+          case _ => ()
+        }
         throw new WorkspaceAgentException(err, "EXECUTION_FAILED", None)
       },
       {
