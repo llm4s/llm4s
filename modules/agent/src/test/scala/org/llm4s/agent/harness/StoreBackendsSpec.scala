@@ -219,56 +219,45 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     refusal.message should include("larger than the limit")
   }
 
-  it should "refuse a store item with NUL in it as binary, and skip it in grep" in {
-    val store = InMemoryLongTermStore()
-    val files = storeFiles(store)
-    val key = org.llm4s.agent.graph.HarnessTestSupport
-      .runOn("another writer")
-      .effectKey("seed", "/nul.md")
-    store
-      .modify[Unit](Namespace(None, Vector("memories")), "/nul.md", key, FencingToken(0))(_ =>
-        Right(StoreChange.Put(ujson.Obj("content" -> "a\u0000b find"), ()))
-      )
-      .value
-    files.read(p("/nul.md"), 0, 10, call()).left.value.message should include("binary")
-    files.edit(p("/nul.md"), "\u0000", "", replaceAll = false, call()).left.value.message should include("binary")
-    files.grep("find", VPath.root, None, 10, call()).value.items shouldBe empty
-    // a delete reads no content, so a malformed file can still be cleaned up
-    done(files.delete(p("/nul.md"), call())) shouldBe FileDeleted(wasDirectory = false)
-    files.read(p("/nul.md"), 0, 10, call()).left.value.message should include("not found")
-  }
-
-  it should "shape its tree by files only: an item that is not a file neither makes a directory nor is overwritten" in {
-    val store = InMemoryLongTermStore()
-    val files = storeFiles(store)
-    val ns    = Namespace(None, Vector("memories"))
-    val key   = org.llm4s.agent.graph.HarnessTestSupport.runOn("another writer").effectKey("seed", "meta")
-    store
-      .modify[Unit](ns, "/docs/meta", key, FencingToken(0))(_ =>
-        Right(StoreChange.Put(ujson.Obj("kind" -> "meta"), ()))
-      )
-      .value
-    done(files.write(p("/docs"), "a file, as /docs holds no file beneath it", call())).created shouldBe true
-    files.write(p("/docs/meta"), "x", call()).left.value.message should include("not a file")
-    store.get(ns, "/docs/meta").value.map(_.value("kind").str) shouldBe Some("meta")
-    val key2 = org.llm4s.agent.graph.HarnessTestSupport.runOn("another writer").effectKey("seed", "other")
-    store.modify[Unit](ns, "/other", key2, FencingToken(0))(_ => Right(StoreChange.Put(ujson.Num(1), ()))).value
-    files.write(p("/other"), "x", call()).left.value.message should include("not a file")
-    store.get(ns, "/other").value.map(_.value.num) shouldBe Some(1)
-  }
-
-  it should "keep a non-canonical key out of its view, so reads and mutations address one item" in {
-    val store = InMemoryLongTermStore()
-    val files = storeFiles(store)
-    val ns    = Namespace(None, Vector("memories"))
-    val key   = org.llm4s.agent.graph.HarnessTestSupport.runOn("another writer").effectKey("seed", "slash")
-    store
-      .modify[Unit](ns, "/a/", key, FencingToken(0))(_ => Right(StoreChange.Put(ujson.Obj("content" -> "odd"), ())))
-      .value
-    files.read(p("/a"), 0, 1, call()).left.value.message should include("not found")
-    files.ls(VPath.root, 10, call()).value.items shouldBe empty
-    done(files.write(p("/a"), "canonical", call())).created shouldBe true
-    files.read(p("/a"), 0, 1, call()).value.lines shouldBe Vector("canonical")
+  it should "refuse a namespace another writer left invalid as Corrupt, for every operation but delete" in {
+    val memories = Namespace(None, Vector("memories"))
+    def corrupt[A](r: Result[A], problem: String): Unit =
+      r.left.value match {
+        case b: BackendRefused =>
+          b.kind shouldBe BackendRefused.Kind.Corrupt
+          b.message should include(problem)
+        case other => fail(s"expected a Corrupt refusal, got $other")
+      }
+    def seed(store: LongTermStore, key: String, value: ujson.Value): Unit = {
+      val effect = org.llm4s.agent.graph.HarnessTestSupport.runOn(s"seed-$key").effectKey("seed", key)
+      store.modify[Unit](memories, key, effect, FencingToken(0))(_ => Right(StoreChange.Put(value, ()))).value
+    }
+    def text(s: String) = ujson.Obj("content" -> s)
+    val cases = Seq[(String, Seq[(String, ujson.Value)], Option[String], String)](
+      // (the shape, what another writer stored, the file to delete (else the store's own delete), what is said)
+      ("a key that is not a path", Seq("notes" -> text("x")), None, "not a file path"),
+      ("a key that is not canonical", Seq("/a/" -> text("x")), None, "not a file path"),
+      ("an item that is not a file", Seq("/meta" -> ujson.Obj("tags" -> ujson.Arr("t"))), Some("/meta"), "not a file"),
+      ("binary content", Seq("/nul" -> text("a\u0000b")), Some("/nul"), "binary"),
+      ("an unpaired surrogate", Seq("/s" -> text("a\uD800b")), Some("/s"), "not valid Unicode"),
+      ("a file that is also a directory", Seq("/a" -> text("x"), "/a/b" -> text("y")), Some("/a"), "both a file")
+    )
+    for ((shape, stored, offending, problem) <- cases) withClue(shape) {
+      val store = InMemoryLongTermStore()
+      val files = storeFiles(store)
+      stored.foreach((key, value) => seed(store, key, value))
+      corrupt(files.ls(VPath.root, 10, call()), problem)
+      corrupt(files.read(p("/x"), 0, 1, call()), problem)
+      corrupt(files.write(p("/new"), "y", call()), problem)
+      corrupt(files.edit(p("/x"), "x", "y", replaceAll = false, call()), problem)
+      corrupt(files.glob(Glob("**"), VPath.root, 10, call()), problem)
+      corrupt(files.grep("x", VPath.root, None, 10, call()), problem)
+      offending match {
+        case Some(path) => done(files.delete(p(path), call())) shouldBe FileDeleted(wasDirectory = false)
+        case None       => store.delete(memories, stored.head._1, call()).value shouldBe true
+      }
+      files.ls(VPath.root, 10, call()).isRight shouldBe true
+    }
   }
 
   it should "edit inside the transaction, list implicit directories, glob and grep" in {
@@ -488,22 +477,5 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     val a     = ctx.effectKey("op", "x")
     val b     = ctx.effectKey("op", "x")
     Set(first, a, b).size shouldBe 3
-  }
-
-  "StoreFileBackend" should "refuse to write or edit a file that also has items beneath it, but delete it" in {
-    val store = InMemoryLongTermStore()
-    val files = storeFiles(store)
-    val ns    = Namespace(None, Vector("memories"))
-    def seed(key: String, text: String): Unit = {
-      val effect = org.llm4s.agent.graph.HarnessTestSupport.runOn(s"seed-$key").effectKey("seed", key)
-      store
-        .modify[Unit](ns, key, effect, FencingToken(0))(_ => Right(StoreChange.Put(ujson.Obj("content" -> text), ())))
-        .value
-    }
-    seed("/a", "file")
-    seed("/a/b", "beneath")
-    files.write(p("/a"), "again", call()).left.value.message should include("is a directory")
-    files.edit(p("/a"), "file", "x", replaceAll = false, call()).left.value.message should include("is a directory")
-    done(files.delete(p("/a"), call())) shouldBe FileDeleted(wasDirectory = false)
   }
 }

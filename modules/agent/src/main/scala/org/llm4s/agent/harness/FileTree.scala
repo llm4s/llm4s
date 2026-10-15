@@ -6,9 +6,82 @@ import java.util.regex.Pattern
 
 /**
  * Reads over a map of files whose directories are implicit - a path is a directory when an entry lies
- * beneath it - shared by [[StateFileBackend]] and [[StoreFileBackend]].
+ * beneath it - shared by [[StateFileBackend]] and [[StoreFileBackend]]. Every map they hand it has been
+ * through [[validated]], so its operations take the tree as well-formed.
  */
 private[harness] object FileTree:
+
+  /** The bounds a backend keeps on what it stores, which [[validated]] checks stored state against. */
+  final case class Bounds(maxFiles: Int, maxEntryBytes: Long, maxTotalBytes: Long)
+
+  /**
+   * `all`, if it is a tree this backend could have written; otherwise a refusal of kind `Corrupt` naming
+   * the problem. A backend bounds and shapes what it writes itself, but another declared writer of its
+   * state key, or a direct user of its store, may have stored anything, so every operation that uses the
+   * stored files runs this first, at the one point the backend reads them. In order, each check bounded
+   * by the ones before it:
+   *
+   *  - at most `maxFiles` entries, by the map's size alone, before anything is scanned;
+   *  - each entry's content at most `maxEntryBytes` as a JSON string, and all entries (paths and
+   *    contents) at most `maxTotalBytes`, counted only until a bound is passed;
+   *  - each entry text under the one text rule (no NUL, no unpaired surrogate);
+   *  - no path both a file and a directory: no entry beneath another.
+   *
+   * Keys are already `VPath`s: the state key's reader validates them, and the store backend refuses a
+   * key that is not one before it builds the map. A delete does not run this, so the entry a refusal
+   * names can be deleted, and the tree repaired.
+   */
+  def validated(operation: String, all: Map[VPath, FileEntry], bounds: Bounds): Result[Map[VPath, FileEntry]] =
+    if all.size > bounds.maxFiles then
+      Left(
+        corrupt(operation, None, s"holds ${all.size} files, more than the limit of ${bounds.maxFiles}; delete some")
+      )
+    else
+      val entries = all.iterator
+      var total   = 0L
+      var problem = Option.empty[BackendRefused]
+      while problem.isEmpty && entries.hasNext do
+        val (path, entry) = entries.next()
+        val ancestor      = Iterator.iterate(path.parent)(_.flatMap(_.parent)).takeWhile(_.isDefined).flatten
+        if Text.jsonBytesOver(entry.content, math.min(bounds.maxEntryBytes, bounds.maxTotalBytes - total)) then
+          problem = Some(
+            corrupt(
+              operation,
+              Some(path),
+              s"is larger than the limit of ${bounds.maxEntryBytes} bytes a file, ${bounds.maxTotalBytes} in all"
+            )
+          )
+        else
+          total += Text.jsonBytes(path.value) + Text.jsonBytes(entry.content)
+          problem = Text
+            .binaryReason(entry.content)
+            .map(reason => corrupt(operation, Some(path), reason))
+            .orElse(
+              ancestor
+                .find(all.contains)
+                .map(file =>
+                  corrupt(operation, Some(file), s"is both a file and a directory (${path.value} is beneath it)")
+                )
+            )
+            .orElse(
+              Option.when(total > bounds.maxTotalBytes)(
+                corrupt(operation, Some(path), s"takes the files past their limit of ${bounds.maxTotalBytes} bytes")
+              )
+            )
+      problem.toLeft(all)
+
+  /** A refusal of stored state: `path` names the entry to delete, where there is one. */
+  def corrupt(operation: String, path: Option[VPath], problem: String): BackendRefused =
+    path.fold(
+      BackendRefused(operation, "files", s"the stored files are corrupt: $problem", BackendRefused.Kind.Corrupt)
+    )(p =>
+      BackendRefused.at(
+        operation,
+        p,
+        s"the stored files are corrupt: $problem; delete it to repair them",
+        BackendRefused.Kind.Corrupt
+      )
+    )
 
   def isDirectory(all: Map[VPath, FileEntry], path: VPath): Boolean =
     path == VPath.root || all.keysIterator.exists(p => p != path && p.isWithin(path))
@@ -19,45 +92,21 @@ private[harness] object FileTree:
       case None if isDirectory(all, path) => Left(BackendRefused.at(operation, path, "is a directory"))
       case None                           => Left(BackendRefused.at(operation, path, "not found"))
 
-  /**
-   * `path` may be written as a file: not the root, not a directory, not beneath a file. A path that is a
-   * file and also has entries beneath it (stored past the backend) is a directory too, and refused: only
-   * `delete` cleans such a tree up.
-   */
+  /** `path` may be written as a file: not the root, not a directory, not beneath a file. */
   def writable(operation: String, all: Map[VPath, FileEntry], path: VPath): Result[Unit] =
     def refuse(reason: String) = Left(BackendRefused.at(operation, path, reason))
     val ancestors              = Iterator.iterate(path.parent)(_.flatMap(_.parent)).takeWhile(_.isDefined).flatten
     if path == VPath.root then refuse("is the root directory")
-    else if isDirectory(all, path) then refuse("is a directory")
+    else if !all.contains(path) && isDirectory(all, path) then refuse("is a directory")
     else if ancestors.exists(all.contains) then refuse("is beneath a file")
     else Right(())
 
-  /** `path` may be deleted: it is a file. */
+  /** `path` may be deleted: it is a file. Run on the stored map as it is, so a corrupt entry can go. */
   def deletable(all: Map[VPath, FileEntry], path: VPath): Result[Unit] =
     if all.contains(path) then Right(())
     else if isDirectory(all, path) then
       Left(BackendRefused.at("delete", path, "is a directory; delete the files in it"))
     else Left(BackendRefused.at("delete", path, "not found"))
-
-  /**
-   * `all`, if it holds at most `maxEntries` files: a backend bounds its files itself, but another writer
-   * of its key may have stored more, and a listing or walk copies and sorts the keys, so it refuses first.
-   */
-  def counted(
-    operation: String,
-    path: VPath,
-    all: Map[VPath, FileEntry],
-    maxEntries: Int
-  ): Result[Map[VPath, FileEntry]] =
-    if all.size <= maxEntries then Right(all)
-    else
-      Left(
-        BackendRefused.at(
-          operation,
-          path,
-          s"the backend holds ${all.size} files, more than its limit of $maxEntries, written past it; delete some"
-        )
-      )
 
   def ls(all: Map[VPath, FileEntry], path: VPath, limit: Int): Result[Listing[FileInfo]] =
     for
@@ -66,9 +115,10 @@ private[harness] object FileTree:
         if all.contains(path) then Left(BackendRefused.notADirectory("ls", path))
         else if !isDirectory(all, path) then Left(BackendRefused.notFound("ls", path))
         else Right(())
-      // each child once, a file with its entry; sizes are counted only for the children listed, so a
-      // listing scans no more content than the page it returns
-      children = all.toVector
+    yield
+      // each child once (the tree is valid, so a child is a file or a directory, never both); sizes are
+      // counted only for the children listed
+      val children = all.toVector
         .flatMap { (p, entry) =>
           p.relativeTo(path).filter(_.nonEmpty).flatMap { rel =>
             (path / rel.takeWhile(_ != '/')).toOption.map { child =>
@@ -76,50 +126,21 @@ private[harness] object FileTree:
             }
           }
         }
-        .distinctBy((child, entry) => (child, entry.isDefined))
-      // a writer past the backend can store `/a` and `/a/b` both: `/a` is then a file and a directory, and
-      // a listing that showed it twice, with two kinds, would break its contract, so the shape is refused
-      _ <- children
-        .groupBy(_._1)
-        .collectFirst { case (child, kinds) if kinds.size > 1 => child }
-        .fold[Result[Unit]](Right(()))(child =>
-          Left(
-            BackendRefused.at(
-              "ls",
-              path,
-              s"the stored tree is inconsistent: ${child.value} is both a file and a directory, written past this backend"
-            )
-          )
-        )
-    yield Listing.of(
-      children.sortBy(_._1).iterator.map {
-        case (child, None) => FileInfo(child, isDirectory = true, 0L, None)
-        case (child, Some(entry)) =>
-          FileInfo(child, isDirectory = false, Text.utf8Bytes(entry.content), Some(entry.modified))
-      },
-      limit
-    )
+        .distinctBy(_._1)
+      Listing.of(
+        children.sortBy(_._1).iterator.map {
+          case (child, None) => FileInfo(child, isDirectory = true, 0L, None)
+          case (child, Some(entry)) =>
+            FileInfo(child, isDirectory = false, Text.utf8Bytes(entry.content), Some(entry.modified))
+        },
+        limit
+      )
 
-  /**
-   * `entry` within the backend's bound on stored content (`maxBytes`, as a JSON string): what the backend
-   * writes it checks itself, but another writer of its key or store may have stored more, and an
-   * operation that consumes the content checks before it copies or scans it.
-   */
-  def bounded(operation: String, path: VPath, entry: FileEntry, maxBytes: Long): Result[FileEntry] =
-    if Text.jsonBytesOver(entry.content, maxBytes) then
-      Left(BackendRefused.at(operation, path, s"is larger than this backend's limit of $maxBytes bytes"))
-    else Right(entry)
-
-  def read(all: Map[VPath, FileEntry], path: VPath, offset: Int, limit: Int, maxBytes: Long): Result[FileLines] =
+  def read(all: Map[VPath, FileEntry], path: VPath, offset: Int, limit: Int): Result[FileLines] =
     for
       _     <- Text.checkLimitAt("read", path, limit)
       _     <- Either.cond(offset >= 0, (), BackendRefused.at("read", path, s"offset must be >= 0, was $offset"))
-      found <- fileOf("read", all, path)
-      entry <- bounded("read", path, found, maxBytes)
-      // one text rule for every source: a store item written past the backend can hold NUL
-      _ <- Text
-        .binaryReason(entry.content)
-        .fold[Result[Unit]](Right(()))(r => Left(BackendRefused.at("read", path, r)))
+      entry <- fileOf("read", all, path)
     yield
       val lines = Text.lines(entry.content)
       FileLines(Text.page(lines, offset, limit), offset, lines.size)
@@ -135,27 +156,11 @@ private[harness] object FileTree:
     under: VPath,
     regex: Pattern,
     accept: VPath => Boolean,
-    limit: Int,
-    maxBytes: Long,
-    totalBytes: Long
+    limit: Int
   ): Result[Listing[GrepMatch]] =
     Text.checkLimitAt("grep", under, limit).flatMap { _ =>
       Text.interruptibly("grep") {
-        // the scan spends a budget of `totalBytes` of content, the backend's bound on all it holds: other
-        // writers may have stored more in all, each file within its own bound, and the walk stops there,
-        // truncated, rather than scan it all
-        var spent  = 0L
-        var capped = false
-        val matches = within(all, under, accept).iterator
-          // skipped, as content that is not text is: one stored past the backend's bound is not scanned
-          .filter(p => !Text.jsonBytesOver(all(p).content, maxBytes) && Text.binaryReason(all(p).content).isEmpty)
-          .takeWhile { p =>
-            spent += Text.jsonBytes(all(p).content)
-            capped = spent > totalBytes
-            !capped
-          }
-          .flatMap(p => Text.matches(p, all(p).content, regex))
-        val listing = Listing.of(matches, limit)
-        Right(Listing(listing.items, listing.truncated || capped))
+        val matches = within(all, under, accept).iterator.flatMap(p => Text.matches(p, all(p).content, regex))
+        Right(Listing.of(matches, limit))
       }
     }

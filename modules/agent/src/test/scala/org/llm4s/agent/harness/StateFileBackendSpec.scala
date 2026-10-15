@@ -252,59 +252,48 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
     a.writes shouldBe Set(a.files)
   }
 
-  it should "refuse to edit stored content its read refuses, written past it by another writer of the key" in {
-    val (backend, f) = fixture()
-    for (bad <- Seq("a\u0000b", "a\uD800b")) {
-      f.commit(StateUpdate.update(backend.files, FileUpdate.Put(p("/bad"), FileEntry(bad, clock.instant()))))
-      backend.read(p("/bad"), 0, 1, f.ctx).isLeft shouldBe true
-      backend.edit(p("/bad"), bad.substring(1, 2), "", replaceAll = false, f.ctx).left.value shouldBe a[BackendRefused]
+  "Stored files another writer of the key left invalid" should
+    "be refused as Corrupt by every operation but delete, which repairs them" in {
+      def corrupt[A](r: org.llm4s.types.Result[A], problem: String): Unit =
+        r.left.value match {
+          case b: BackendRefused =>
+            b.kind shouldBe BackendRefused.Kind.Corrupt
+            b.message should include(problem)
+          case other => fail(s"expected a Corrupt refusal, got $other")
+        }
+      val small = StateFileBackend(maxFiles = 2, maxBytes = 60, clock = clock)
+      val cases = Seq(
+        // (the shape, the backend, what another writer stored, the entry to delete, what the refusal says)
+        ("too many files", small, Seq("/a" -> "x", "/b" -> "x", "/c" -> "x"), "/c", "more than the limit of 2"),
+        ("a file over the bound", small, Seq("/big" -> "x" * 70), "/big", "larger than the limit"),
+        ("files over the bound together", small, Seq("/a" -> "x" * 40, "/b" -> "x" * 40), "/b", "limit"),
+        ("binary content", StateFileBackend(clock = clock), Seq("/nul" -> "a\u0000b"), "/nul", "binary"),
+        ("an unpaired surrogate", StateFileBackend(clock = clock), Seq("/s" -> "a\uD800b"), "/s", "not valid Unicode"),
+        (
+          "a file that is also a directory",
+          StateFileBackend(clock = clock),
+          Seq("/a" -> "x", "/a/b" -> "y"),
+          "/a",
+          "both a file and a directory"
+        )
+      )
+      for ((shape, backend, stored, offending, problem) <- cases) withClue(shape) {
+        val f = new Fixture(backend)
+        stored.foreach((path, text) =>
+          f.commit(StateUpdate.update(backend.files, FileUpdate.Put(p(path), FileEntry(text, clock.instant()))))
+        )
+        corrupt(backend.ls(VPath.root, 10, f.ctx), problem)
+        corrupt(backend.read(p(stored.head._1), 0, 1, f.ctx), problem)
+        corrupt(backend.write(p("/new"), "y", f.ctx), problem)
+        corrupt(backend.edit(p(stored.head._1), "x", "y", replaceAll = false, f.ctx), problem)
+        corrupt(backend.glob(Glob("**"), VPath.root, 10, f.ctx), problem)
+        corrupt(backend.grep("x", VPath.root, None, 10, f.ctx), problem)
+        // a delete reads the key as it is: the named entry goes, and the tree is valid again
+        val (_, update) = backend.delete(p(offending), f.ctx).value
+        f.commit(update)
+        backend.ls(VPath.root, 10, f.ctx).isRight shouldBe true
+      }
     }
-  }
-
-  it should "refuse to list a tree in which one path is both a file and a directory" in {
-    val (backend, f) = fixture()
-    f.commit(StateUpdate.update(backend.files, FileUpdate.Put(p("/a"), FileEntry("file", clock.instant()))))
-    f.commit(StateUpdate.update(backend.files, FileUpdate.Put(p("/a/b"), FileEntry("beneath", clock.instant()))))
-    backend.ls(VPath.root, 10, f.ctx).left.value.message should include("both a file and a directory")
-    backend.write(p("/a"), "again", f.ctx).left.value.message should include("is a directory")
-    backend.edit(p("/a"), "file", "x", replaceAll = false, f.ctx).left.value.message should include("is a directory")
-    backend.delete(p("/a"), f.ctx).isRight shouldBe true
-  }
-
-  it should "refuse to read or edit, and skip in grep, content another writer stored past its bound" in {
-    val (backend, f) = fixture(StateFileBackend(maxBytes = 100, clock = clock))
-    f.commit(StateUpdate.update(backend.files, FileUpdate.Put(p("/big"), FileEntry("needle " * 100, clock.instant()))))
-    backend.read(p("/big"), 0, 1, f.ctx).left.value.message should include("larger than")
-    backend.edit(p("/big"), "needle", "x", replaceAll = false, f.ctx).left.value.message should include("larger than")
-    backend.grep("needle", VPath.root, None, 10, f.ctx).value.items shouldBe empty
-    // and it can still be deleted
-    backend.delete(p("/big"), f.ctx).isRight shouldBe true
-  }
-
-  it should "spend at most its total bound scanning, however much other writers stored, and say it stopped" in {
-    val (backend, f) = fixture(StateFileBackend(maxBytes = 100, clock = clock))
-    // ten files, each within the bound, together ten times over it
-    for (i <- 0 until 10)
-      f.commit(StateUpdate.update(backend.files, FileUpdate.Put(p(s"/f$i"), FileEntry("x" * 90, clock.instant()))))
-    val found = backend.grep("x", VPath.root, None, 100, f.ctx).value
-    found.items.size shouldBe 1
-    found.truncated shouldBe true
-  }
-
-  it should "refuse to list or walk more files than its limit, stored past it, but still delete them" in {
-    val (backend, f) = fixture(StateFileBackend(maxFiles = 3, clock = clock))
-    for (i <- 0 until 5)
-      f.commit(StateUpdate.update(backend.files, FileUpdate.Put(p(s"/f$i"), FileEntry("x", clock.instant()))))
-    backend.ls(VPath.root, 10, f.ctx).left.value.message should include("more than its limit of 3")
-    backend.glob(Glob("**"), VPath.root, 10, f.ctx).left.value.message should include("more than its limit")
-    backend.grep("x", VPath.root, None, 10, f.ctx).left.value.message should include("more than its limit")
-    backend.delete(p("/f0"), f.ctx).isRight shouldBe true
-    // a write or edit is refused on the count, before any scan of the oversized key
-    backend.write(p("/new"), "y", f.ctx).left.value.message should include("over this thread's limit of 3")
-    backend.edit(p("/f1"), "x", "y", replaceAll = false, f.ctx).left.value.message should include(
-      "over this thread's limit of 3"
-    )
-  }
 
   it should "encode its key's values and updates, and refuse an invalid path on decode" in {
     val entry = FileEntry("x", clock.instant())

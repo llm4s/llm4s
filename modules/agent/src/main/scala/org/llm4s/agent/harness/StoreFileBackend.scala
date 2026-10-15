@@ -33,27 +33,53 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
 
   private def content(item: StoreItem): Option[String] = item.value.objOpt.flatMap(_.get("content")).flatMap(_.strOpt)
 
-  /** Every file of the namespace; an item that is not a file, or whose key is not a path, is skipped. */
-  private def all(ctx: FileContext): Result[Map[VPath, FileEntry]] =
-    store.list(namespace(ctx), "/", store.limits.maxItems).map { listing =>
-      listing.items.flatMap { e =>
-        for
-          // only a key that is its own canonical path: `/a/` would read as `/a` while every mutation
-          // addresses the item `/a`, so a non-canonical key is no file of the view
-          p <- VPath(e.key).toOption.filter(_.value == e.key)
-          c <- content(e.item)
-        yield p -> FileEntry(c, e.item.updated)
-      }.toMap
-    }
+  private val bounds =
+    FileTree.Bounds(store.limits.maxItems, store.limits.maxItemBytes.toLong, store.limits.maxBytes)
+
+  /**
+   * The namespace as files, validated: every item's key a canonical `VPath` (`/a/` would read as `/a`
+   * while every mutation addresses `/a`) and its value `{"content": string}`, then [[FileTree.validated]].
+   * The namespace is this backend's: an item it could not have written is corrupt stored state, refused
+   * with kind `Corrupt`, never skipped, and a delete of the path it names removes it.
+   */
+  private def filesOf(operation: String, entries: Vector[StoreEntry], more: Boolean): Result[Map[VPath, FileEntry]] =
+    if more then Left(FileTree.corrupt(operation, None, s"holds more than ${store.limits.maxItems} items; delete some"))
+    else
+      entries
+        .foldLeft[Result[Map[VPath, FileEntry]]](Right(Map.empty)) { (acc, e) =>
+          acc.flatMap { files =>
+            VPath(e.key).toOption.filter(_.value == e.key) match
+              case None =>
+                Left(
+                  FileTree
+                    .corrupt(operation, None, s"holds the item '${Text.quoted(e.key)}', whose key is not a file path")
+                )
+              case Some(path) =>
+                content(e.item) match
+                  case None       => Left(FileTree.corrupt(operation, Some(path), "is a store item that is not a file"))
+                  case Some(text) => Right(files.updated(path, FileEntry(text, e.item.updated)))
+          }
+        }
+        .flatMap(FileTree.validated(operation, _, bounds))
+
+  /** The files, for a read: the one point a read takes the namespace. */
+  private def all(operation: String, ctx: FileContext): Result[Map[VPath, FileEntry]] =
+    store.list(namespace(ctx), "", store.limits.maxItems).flatMap(l => filesOf(operation, l.items, l.truncated))
+
+  /** The files as `view` sees them, in the transaction: the one point a mutation but `delete` takes them. */
+  private def viewed(operation: String, view: StoreView): Result[Map[VPath, FileEntry]] =
+    view
+      .withPrefix("", store.limits.maxItems + 1)
+      .flatMap(es => filesOf(operation, es.take(store.limits.maxItems), es.size > store.limits.maxItems))
 
   def ls(dir: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
-    all(ctx).flatMap(FileTree.ls(_, dir, limit))
+    all("ls", ctx).flatMap(FileTree.ls(_, dir, limit))
 
   def read(file: VPath, offset: Int, limit: Int, ctx: FileContext): Result[FileLines] =
-    all(ctx).flatMap(FileTree.read(_, file, offset, limit, store.limits.maxItemBytes.toLong))
+    all("read", ctx).flatMap(FileTree.read(_, file, offset, limit))
 
   def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
-    all(ctx).flatMap(FileTree.find(_, under, accept, limit))
+    all("glob", ctx).flatMap(FileTree.find(_, under, accept, limit))
 
   def search(
     under: VPath,
@@ -62,9 +88,7 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
     limit: Int,
     ctx: FileContext
   ): Result[Listing[GrepMatch]] =
-    all(ctx).flatMap(
-      FileTree.search(_, under, regex, accept, limit, store.limits.maxItemBytes.toLong, store.limits.maxBytes)
-    )
+    all("grep", ctx).flatMap(FileTree.search(_, under, regex, accept, limit))
 
   private def guarded[A: ReadWriter](operation: String, file: VPath, ctx: FileContext)(
     change: StoreView => Result[StoreChange[A]]
@@ -87,78 +111,13 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
   private def refused(operation: String, target: VPath, reason: String) =
     Left(BackendRefused.at(operation, target, reason))
 
-  /** Whether `target` is a directory of the namespace as `view` sees it: some key lies beneath it. */
-  private def isDirectory(view: StoreView, target: VPath): Result[Boolean] =
-    // only the items the backend takes for files shape the tree, as only they are listed
-    if target == VPath.root then Right(true)
-    else
-      view
-        .withPrefix(target.value + "/", store.limits.maxItems)
-        .map(_.exists(e => VPath(e.key).exists(_.value == e.key) && content(e.item).isDefined))
-
-  /** Whether some ancestor of `target` is a file, so `target` would be beneath one. */
-  private def beneathFile(view: StoreView, target: VPath): Result[Boolean] =
-    Iterator
-      .iterate(target.parent)(_.flatMap(_.parent))
-      .takeWhile(_.isDefined)
-      .flatten
-      .foldLeft[Result[Boolean]](Right(false)) { (acc, ancestor) =>
-        acc.flatMap(found =>
-          if found then Right(true) else view.get(ancestor.value).map(_.exists(i => content(i).isDefined))
-        )
-      }
-
-  /**
-   * `target` may be written as a file: not the root, not a directory, not beneath a file. Decided in the
-   * store's transaction, so a concurrent write of an ancestor or descendant cannot slip between the
-   * check and the write.
-   */
-  private def writable(operation: String, view: StoreView, target: VPath): Result[Unit] =
-    if target == VPath.root then refused(operation, target, "is the root directory")
-    else
-      for
-        directory <- isDirectory(view, target)
-        beneath   <- beneathFile(view, target)
-        _ <-
-          if view.current.exists(i => content(i).isEmpty) then
-            refused(operation, target, "holds a store item that is not a file")
-          // a file with items beneath it (stored past the backend) is a directory too: only `delete` cleans it
-          else if directory then refused(operation, target, "is a directory")
-          else if beneath then refused(operation, target, "is beneath a file")
-          else Right(())
-      yield ()
-
-  /** The current file's content, whatever it holds, or why there is none: missing, a directory, or not a file. */
-  private def currentFile(operation: String, view: StoreView, target: VPath): Result[String] =
-    view.current match
-      case Some(item) => content(item).toRight(BackendRefused.at(operation, target, "is not a file"))
-      case None =>
-        isDirectory(view, target).flatMap(dir =>
-          refused(operation, target, if dir then "is a directory; delete the files in it" else "not found")
-        )
-
-  /**
-   * The current file's text: [[currentFile]] under the one text rule, for an operation that uses the
-   * content (an edit). An item written past the backend may hold NUL; a delete, which does not read it,
-   * takes [[currentFile]], so such a file can still be cleaned up.
-   */
-  private def currentText(operation: String, view: StoreView, target: VPath): Result[String] =
-    currentFile(operation, view, target)
-      .flatMap(text =>
-        // the store's own item bound, which a store that is not this one's may not have kept
-        if Text.jsonBytesOver(text, store.limits.maxItemBytes.toLong) then
-          Left(
-            BackendRefused
-              .at(operation, target, s"is larger than the store's item limit of ${store.limits.maxItemBytes} bytes")
-          )
-        else Right(text)
-      )
-      .flatMap(text => Text.binaryReason(text).fold(Right(text))(r => Left(BackendRefused.at(operation, target, r))))
-
   def write(target: VPath, text: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
     Text.binaryReason(text).fold[Result[Unit]](Right(()))(r => refused("write", target, r)).flatMap { _ =>
+      // decided in the store's transaction, so a concurrent write of an ancestor or descendant cannot slip
+      // between the check and the write
       guarded[FileWritten]("write", target, ctx)(view =>
-        writable("write", view, target)
+        viewed("write", view)
+          .flatMap(FileTree.writable("write", _, target))
           .map(_ => StoreChange.Put(file(text), FileWritten(view.current.isEmpty, Text.utf8Bytes(text))))
       )
     }
@@ -171,16 +130,35 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
     ctx: FileContext
   ): Result[(FileEdited, StateUpdate)] =
     guarded[FileEdited]("edit", target, ctx) { view =>
-      writable("edit", view, target)
-        .flatMap(_ => currentText("edit", view, target))
-        .flatMap(Text.edited(target, _, old, replacement, replaceAll, store.limits.maxItemBytes.toLong))
-        .map((next, n) => StoreChange.Put(file(next), FileEdited(n)))
+      for
+        files  <- viewed("edit", view)
+        _      <- FileTree.writable("edit", files, target)
+        entry  <- FileTree.fileOf("edit", files, target)
+        edited <- Text.edited(target, entry.content, old, replacement, replaceAll, store.limits.maxItemBytes.toLong)
+      yield StoreChange.Put(file(edited._1), FileEdited(edited._2))
     }
 
+  /**
+   * Removes the item at `target`, whatever it holds: the namespace is not validated, so an item a refusal
+   * names as corrupt can be deleted. A directory (items beneath) or nothing is refused.
+   */
   def delete(target: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
-    guarded[FileDeleted]("delete", target, ctx)(view =>
-      currentFile("delete", view, target).map(_ => StoreChange.Remove(FileDeleted(wasDirectory = false)))
-    )
+    guarded[FileDeleted]("delete", target, ctx) { view =>
+      if target == VPath.root then refused("delete", target, "is the root directory")
+      else
+        view.current match
+          case Some(_) => Right(StoreChange.Remove(FileDeleted(wasDirectory = false)))
+          case None =>
+            view
+              .withPrefix(target.value + "/", 1)
+              .flatMap(beneath =>
+                refused(
+                  "delete",
+                  target,
+                  if beneath.nonEmpty then "is a directory; delete the files in it" else "not found"
+                )
+              )
+    }
 
 object StoreFileBackend:
 

@@ -75,51 +75,44 @@ final class StateFileBackend private (
     ctx.advance(files, next)
     (result, update)
 
+  private val bounds = FileTree.Bounds(maxFiles, maxBytes, maxBytes)
+
+  /**
+   * The files, validated ([[FileTree.validated]]): the one point every operation but `delete` reads the
+   * key, so none of them works on a map another writer of the key left outside this backend's bounds or
+   * shape. A `delete` reads the key as it is, so the entry a refusal names can be removed.
+   */
+  private def valid(operation: String, ctx: FileContext): Result[Map[VPath, FileEntry]] =
+    current(ctx).flatMap(FileTree.validated(operation, _, bounds))
+
   def ls(path: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
-    current(ctx).flatMap(FileTree.counted("ls", path, _, maxFiles)).flatMap(FileTree.ls(_, path, limit))
+    valid("ls", ctx).flatMap(FileTree.ls(_, path, limit))
 
   def read(path: VPath, offset: Int, limit: Int, ctx: FileContext): Result[FileLines] =
-    current(ctx).flatMap(FileTree.read(_, path, offset, limit, maxBytes))
+    valid("read", ctx).flatMap(FileTree.read(_, path, offset, limit))
 
   // what each checkpoint stores: the path, and the content as a JSON string, escapes included
   private def entryBytes(path: VPath, content: String): Long = Text.jsonBytes(path.value) + Text.jsonBytes(content)
 
-  /** `path` may hold `content`: text, a writable path, and within this thread's bounds. */
+  /** `path` may hold `content` in the valid map `all`: text, a writable path, and within the bounds. */
   private def admit(operation: String, all: Map[VPath, FileEntry], path: VPath, content: String): Result[Unit] =
     val count                  = all.size + (if all.contains(path) then 0 else 1)
     def refuse(reason: String) = Left(BackendRefused.at(operation, path, reason))
-    // the count first, in O(1): a key another writer filled past `maxFiles` is refused before any scan
-    if count > maxFiles then refuse(s"there would be $count files, over this thread's limit of $maxFiles")
-    else admitWithin(operation, all, path, content, refuse)
-
-  private def admitWithin(
-    operation: String,
-    all: Map[VPath, FileEntry],
-    path: VPath,
-    content: String,
-    refuse: String => Result[Unit]
-  ): Result[Unit] =
-    // the other files' total, counted only until it passes the bound (another writer of the key may have
-    // stored far more), then this one's: what the thread would hold after the write
-    val others = all.iterator
-      .filter(_._1 != path)
-      .map((p, e) => entryBytes(p, e.content))
-      .scanLeft(0L)(_ + _)
-      .find(_ > maxBytes)
-      .getOrElse(all.iterator.filter(_._1 != path).map((p, e) => entryBytes(p, e.content)).sum)
-    val after = if others > maxBytes then others else others + entryBytes(path, content)
+    lazy val after =
+      all.iterator.filter(_._1 != path).map((p, e) => entryBytes(p, e.content)).sum + entryBytes(path, content)
     for
       _ <- Text.binaryReason(content).fold[Result[Unit]](Right(()))(refuse)
       _ <- FileTree.writable(operation, all, path)
       _ <-
-        if after > maxBytes then
-          refuse(s"the files would total at least $after bytes, over this thread's limit of $maxBytes")
+        if count > maxFiles then refuse(s"there would be $count files, over this thread's limit of $maxFiles")
+        else if after > maxBytes then
+          refuse(s"the files would total $after bytes, over this thread's limit of $maxBytes")
         else Right(())
     yield ()
 
   def write(path: VPath, content: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
     for
-      all <- current(ctx)
+      all <- valid("write", ctx)
       _   <- admit("write", all, path, content)
     yield
       val entry = FileEntry(content, clock.instant())
@@ -138,14 +131,8 @@ final class StateFileBackend private (
     ctx: FileContext
   ): Result[(FileEdited, StateUpdate)] =
     for
-      all   <- current(ctx)
-      found <- FileTree.fileOf("edit", all, path)
-      entry <- FileTree.bounded("edit", path, found, maxBytes)
-      // the one text rule on what is stored too, as `read` applies it: another writer of the key may have
-      // put NUL or an unpaired surrogate there, and an edit must not work on content a read refuses
-      _ <- Text
-        .binaryReason(entry.content)
-        .fold[Result[Unit]](Right(()))(r => Left(BackendRefused.at("edit", path, r)))
+      all    <- valid("edit", ctx)
+      entry  <- FileTree.fileOf("edit", all, path)
       edited <- Text.edited(path, entry.content, old, replacement, replaceAll, maxBytes)
       _      <- admit("edit", all, path, edited._1)
     yield
@@ -159,6 +146,7 @@ final class StateFileBackend private (
 
   def delete(path: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
     for
+      // the key as it is, not validated: a delete is how a corrupt entry is repaired
       all <- current(ctx)
       _   <- FileTree.deletable(all, path)
     // the last file's delete removes the key's entry, so the backend can later be taken out of an agent
@@ -171,7 +159,7 @@ final class StateFileBackend private (
     )
 
   def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
-    current(ctx).flatMap(FileTree.counted("glob", under, _, maxFiles)).flatMap(FileTree.find(_, under, accept, limit))
+    valid("glob", ctx).flatMap(FileTree.find(_, under, accept, limit))
 
   def search(
     under: VPath,
@@ -180,9 +168,7 @@ final class StateFileBackend private (
     limit: Int,
     ctx: FileContext
   ): Result[Listing[GrepMatch]] =
-    current(ctx)
-      .flatMap(FileTree.counted("grep", under, _, maxFiles))
-      .flatMap(FileTree.search(_, under, regex, accept, limit, maxBytes, maxBytes))
+    valid("grep", ctx).flatMap(FileTree.search(_, under, regex, accept, limit))
 
 object StateFileBackend:
 

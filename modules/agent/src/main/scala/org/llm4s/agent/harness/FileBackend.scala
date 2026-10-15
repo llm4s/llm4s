@@ -259,11 +259,12 @@ object BackendRefused:
 
   /**
    * What a refusal says about the tree, for a caller that must tell the shape of a path from any other
-   * refusal (a composite listing a directory a mount makes): `NotFound` and `NotADirectory`, or
-   * `Refused` for anything else - a permission, a bound, an argument.
+   * refusal (a composite listing a directory a mount makes): `NotFound` and `NotADirectory`; `Corrupt`
+   * for stored state the backend could not have written (another writer's), which a delete of the entry
+   * it names repairs; or `Refused` for anything else - a permission, a bound, an argument.
    */
   enum Kind:
-    case Refused, NotFound, NotADirectory
+    case Refused, NotFound, NotADirectory, Corrupt
 
   /**
    * A refusal of the backend path `path`: its target is the path, and `path` says so, typed, so a
