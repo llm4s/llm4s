@@ -611,41 +611,95 @@ class WorkspaceAgentInterfaceImpl(
     expected: Option[String],
     expectedAtPath: Option[String] = None
   ): Unit = {
-    // created as an ordinary new file is (the process umask applies), not with a temporary file's fixed rw-------
-    val temp = target.resolveSibling(s".llm4s-write-${java.util.UUID.randomUUID()}.tmp")
-    Try {
-      Using.resource(Files.newOutputStream(temp, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE))(
-        _.write(bytes)
-      )
-      // the replacement keeps the file's permissions (an executable script stays executable); a new file keeps the
-      // mode it was created with. Not POSIX: the platform's defaults.
-      if (Files.exists(target)) Try(Files.setPosixFilePermissions(temp, Files.getPosixFilePermissions(target)))
-      // the replacement is a new inode, so it takes the file's metadata as well as its mode: its owner and group
-      // (the runner runs as root over a bind mount, and a root-owned replacement would lock its owner out) and its
-      // ACL. Each where the platform has it; a runner that may not chown keeps the owner it has.
-      if (Files.exists(target)) WorkspaceAgentInterfaceImpl.copyOwnership(target, temp, aclTools)
-      val again = effective(resolvePath(path, Access.Write))
-      if (again != target)
-        throw new WorkspaceAgentException(
-          s"Path '$path' changed while it was written: it now leads to another file; nothing was written",
-          "HASH_MISMATCH",
-          None
+    import java.nio.file.{ LinkOption, SecureDirectoryStream }
+    import java.nio.file.attribute.{ BasicFileAttributeView, BasicFileAttributes }
+    val parent   = target.getParent
+    val name     = target.getFileName
+    val tempName = name.getFileSystem.getPath(s".llm4s-write-${java.util.UUID.randomUUID()}.tmp")
+    val temp     = parent.resolve(tempName)
+    // the directory held open: where the platform has secure directory streams (Linux), the staged file is created,
+    // and moved into place, relative to this handle, so a parent swapped for a link cannot redirect either
+    Using.resource(Files.newDirectoryStream(parent)) { stream =>
+      val secure = stream match {
+        case s: SecureDirectoryStream[Path @unchecked] => Some(s)
+        case _                                         => None
+      }
+      // the handle, and the path, are still the directory the target was resolved in: the path still resolves to
+      // itself (no part of it a link since), and the handle is the same directory as what the path names now
+      def stillPinned(): Unit = {
+        val held = secure.flatMap(s =>
+          Try(s.getFileAttributeView(classOf[BasicFileAttributeView]).readAttributes().fileKey()).toOption
+            .flatMap(Option(_))
         )
-      checkPolicy(path, target, Access.Write)
-      expected.foreach(checkExpected(path, target, _))
-      // and, when the change began at a link to nothing, the link itself: still that link, pointing where it did
-      expectedAtPath.foreach(checkExpected(path, resolvePath(path, Access.Write), _))
-      ensureInTime(path)
-      Files.move(
-        temp,
-        target,
-        java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-        java.nio.file.StandardCopyOption.REPLACE_EXISTING
-      )
-    }.recover { case e =>
-      Files.deleteIfExists(temp)
-      throw e
-    }.get
+        val named =
+          Try(Files.readAttributes(parent, classOf[BasicFileAttributes], LinkOption.NOFOLLOW_LINKS).fileKey()).toOption
+            .flatMap(Option(_))
+        // (without a secure stream there is no handle to compare: the path check alone, immediately before each step)
+        if (effective(parent) != parent || (secure.isDefined && held != named))
+          throw new WorkspaceAgentException(
+            s"Path '$path' changed while it was written: its directory was replaced; nothing was written",
+            "HASH_MISMATCH",
+            None
+          )
+      }
+      stillPinned()
+      Try {
+        // created as an ordinary new file is (the process umask applies), not with a temporary file's fixed rw-------
+        secure match {
+          case Some(s) =>
+            val options = new java.util.HashSet[java.nio.file.OpenOption]()
+            options.add(StandardOpenOption.CREATE_NEW)
+            options.add(StandardOpenOption.WRITE)
+            options.add(LinkOption.NOFOLLOW_LINKS)
+            Using.resource(s.newByteChannel(tempName, options)) { channel =>
+              val buffer = java.nio.ByteBuffer.wrap(bytes)
+              while (buffer.hasRemaining) channel.write(buffer): Unit
+            }
+          case None =>
+            Using.resource(Files.newOutputStream(temp, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE))(
+              _.write(bytes)
+            )
+        }
+        stillPinned()
+        // the replacement keeps the file's permissions (an executable script stays executable); a new file keeps the
+        // mode it was created with. Not POSIX: the platform's defaults.
+        if (Files.exists(target)) Try(Files.setPosixFilePermissions(temp, Files.getPosixFilePermissions(target)))
+        // the replacement is a new inode, so it takes the file's metadata as well as its mode: its owner and group
+        // (the runner runs as root over a bind mount, and a root-owned replacement would lock its owner out) and its
+        // ACL. Each where the platform has it; a runner that may not chown keeps the owner it has.
+        if (Files.exists(target)) WorkspaceAgentInterfaceImpl.copyOwnership(target, temp, aclTools)
+        val again = effective(resolvePath(path, Access.Write))
+        if (again != target)
+          throw new WorkspaceAgentException(
+            s"Path '$path' changed while it was written: it now leads to another file; nothing was written",
+            "HASH_MISMATCH",
+            None
+          )
+        checkPolicy(path, target, Access.Write)
+        expected.foreach(checkExpected(path, target, _))
+        // and, when the change began at a link to nothing, the link itself: still that link, pointing where it did
+        expectedAtPath.foreach(checkExpected(path, resolvePath(path, Access.Write), _))
+        ensureInTime(path)
+        stillPinned()
+        secure match {
+          // a rename within the held directory: atomic, and it replaces the file there
+          case Some(s) => s.move(tempName, s, name)
+          case None =>
+            Files.move(
+              temp,
+              target,
+              java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+              java.nio.file.StandardCopyOption.REPLACE_EXISTING
+            ): Unit
+        }
+      }.recover { case e =>
+        secure match {
+          case Some(s) => Try(s.deleteFile(tempName)): Unit
+          case None    => Try(Files.deleteIfExists(temp)): Unit
+        }
+        throw e
+      }.get
+    }
   }
 
   /**
