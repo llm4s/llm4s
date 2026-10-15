@@ -881,22 +881,6 @@ final class GraphRuntime(
     }
 
   /**
-   * [[prune]], only when `threadId` is at rest: its latest checkpoint is not `Running`, so no run is in flight or left
-   * for `recover`, whose replay a prune could cut. Otherwise, and for an unknown thread, `Right(())`. For a harness's
-   * retention, applied before each turn (design 4.37).
-   */
-  private[agent] def pruneAtRest(threadId: ThreadId, policy: RetentionPolicy, config: RunConfig): Result[Unit] =
-    admission(threadId) {
-      checkpointer
-        .latest(threadId)
-        .flatMap {
-          case Some(latest) if latest.checkpoint.status != CheckpointStatus.Running =>
-            checkTenant(threadId, latest, config).flatMap(_ => checkpointer.prune(threadId, policy))
-          case _ => Right(())
-        }
-    }
-
-  /**
    * A store's refusal of a change's commit - `fork`'s or `updateState`'s - as the change reports it. One
    * refused as stale means the change's claim lapsed, or another run took the thread over, before the
    * commit landed: nothing was applied, and the change may be retried once the thread is free, so it is
@@ -2102,6 +2086,8 @@ final class GraphRuntime(
             )
           )
           admitted = outcome.isRight
+          // under the claim, before the first superstep: a refused run never prunes (RunConfig.withRetention)
+          if admitted then config.retention.foreach(retain)
           outcome
         }
       }
@@ -2176,6 +2162,14 @@ final class GraphRuntime(
         claimSeq = seq
         deadline = config.budgets.timeout.map(timeout => System.nanoTime() + timeout.toNanos)
         this
+
+    /** Prunes the thread to `policy` as the run is admitted; a failure is logged, never the run's. */
+    private def retain(policy: RetentionPolicy): Unit =
+      Try(checkpointer.prune(threadId, policy)).toResult.flatten.left.foreach(error =>
+        GraphRuntime.logger.warn(
+          s"Pruning ${threadId.value} to its retention as run ${runId.value} was admitted failed: ${error.message}"
+        )
+      )
 
     /** The store claim this run holds, from [[admit]] on; `None` before it, or if it was refused. */
     @volatile private var claim: Option[RunClaim] = None

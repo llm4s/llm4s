@@ -53,6 +53,9 @@ final class Agent private[agent] (
     config
       .withInterruptBefore(config.interruptBefore ++ interruptBefore)
       .withInterruptAfter(config.interruptAfter ++ interruptAfter)
+      // a harness's retention, applied as each turn is admitted (design 4.37), unless the run sets its own;
+      // keepAll removes nothing, so it is not applied at all
+      .withRetention(config.retention.orElse(retention).filter(_ != RetentionPolicy.keepAll))
 
   /**
    * One turn on a new thread with a random id. The thread stays in the agent's runtime - on the
@@ -161,7 +164,6 @@ final class Agent private[agent] (
 
   /** [[recover]], returning at once with the running turn - to cancel it, or to await its result. */
   def startRecover(threadId: ThreadId, config: RunConfig = RunConfig()): Result[AgentRun] =
-    retain(threadId, config)
     runtime.recover(threadId, loop.graph, configured(config)).map(agentRun(_, None, drain = false))
 
   /**
@@ -183,7 +185,6 @@ final class Agent private[agent] (
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig = RunConfig()
   ): Result[AgentRun] =
-    retain(threadId, config)
     runtime.resume(threadId, loop.graph, answers, configured(config)).map(agentRun(_, None, drain = false))
 
   /**
@@ -267,7 +268,6 @@ final class Agent private[agent] (
     config: RunConfig,
     listening: Listening
   ): Result[AgentRun] =
-    retain(threadId, config)
     val (observer, scope) = observed(config, listening)
     runtime
       .resume(threadId, loop.graph, answers, configured(config), observer = Some(observer))
@@ -299,7 +299,6 @@ final class Agent private[agent] (
       }
 
   private def recoverWith(threadId: ThreadId, config: RunConfig, listening: Listening): Result[AgentRun] =
-    retain(threadId, config)
     val (observer, scope) = observed(config, listening)
     runtime
       .recover(threadId, loop.graph, configured(config), observer = Some(observer))
@@ -312,7 +311,6 @@ final class Agent private[agent] (
     history: Seq[Message],
     listening: Option[Listening]
   ): Result[AgentRun] =
-    retain(threadId, config)
     val input    = AgentInput(query, history.toVector)
     val watching = listening.map(observed(config, _))
     val observer = watching.map(_._1)
@@ -346,24 +344,6 @@ final class Agent private[agent] (
 
   private def agentRun(handle: RunHandle[TurnOutput], scope: Option[RunScope], drain: Boolean): AgentRun =
     AgentRun(handle, loop, id, runtime, tracing, scope, drain)
-
-  /**
-   * Before a turn begins on `threadId`: with a harness's retention, the thread's earlier turns are pruned to it, under
-   * `config`'s tenant, when the thread is at rest (design 4.37). So a turn's own checkpoints and events stay whole until
-   * the thread's next turn starts - a finished turn's handle can still replay it - and a thread keeps at most the
-   * policy's checkpoints plus its latest turn's. Housekeeping: a failure is logged at WARN and the turn starts anyway;
-   * `start`, `resume` and `recover` decide the thread's state as before. `RetentionPolicy.keepAll` prunes nothing, so
-   * it is skipped.
-   */
-  private def retain(threadId: ThreadId, config: RunConfig): Unit =
-    retention.filter(_ != RetentionPolicy.keepAll).foreach { policy =>
-      runtime
-        .pruneAtRest(threadId, policy, config)
-        .left
-        .foreach(error =>
-          Agent.logger.warn(s"Pruning ${threadId.value} to its retention before a turn failed: ${error.message}")
-        )
-    }
 
 object Agent:
   private val logger = LoggerFactory.getLogger(classOf[Agent])

@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Agent harness (Phase 3)
 
 - **Added** the harness profile: `HarnessProfile` (`deepAgents` preset, `HarnessConfigLoader`) installed by `AgentBuilder.withHarness`, and
-  middleware ordering checked at `build()` (`AgentMiddleware.placement`) [#1915](https://github.com/llm4s/llm4s/issues/1915); [design §4.37](docs/design/typed-agent-runtime/4.37-stage-3-slice-p1-harness-profile.md), [guide](docs/guide/agents/index.md#harness-profile).
+  `RunConfig.withRetention`, and middleware ordering checked at `build()` (`AgentMiddleware.placement`) [#1915](https://github.com/llm4s/llm4s/issues/1915); [design §4.37](docs/design/typed-agent-runtime/4.37-stage-3-slice-p1-harness-profile.md), [guide](docs/guide/agents/index.md#harness-profile).
 - **Added** instruction memory: `InstructionMemoryMiddleware` shows `AGENTS.md` files read through a `FileBackend`
   [#1910](https://github.com/llm4s/llm4s/issues/1910); [design §4.36](docs/design/typed-agent-runtime/4.36-stage-3-slice-f6-instruction-memory.md), [guide](docs/guide/agents/index.md#instruction-memory).
 - **Added** Agent Skills: `SkillsMiddleware` lists `SKILL.md` skills found through a `FileBackend`

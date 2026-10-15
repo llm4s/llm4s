@@ -181,8 +181,8 @@ object InstructionsConfig:
  * or over a `CompositeBackend` that also mounts `OffloadBackend` at `/large_tool_results` when `offload` is set; skills
  * and instructions read through the same backend. `execute` is added only when `sandbox` is set. Each tool of the
  * profile that declares no timeout is bounded by `toolTimeout`. The system prompt follows `systemPrompt`. After each
- * turn the root agent prunes the thread's earlier turns to `retention`, which bounds the full-snapshot checkpoints
- * it keeps.
+ * turn, as it is admitted, the root agent prunes the thread to `retention` (`RunConfig.withRetention`), which bounds
+ * the full-snapshot checkpoints it keeps.
  *
  * `build()` refuses an invalid setting (a limit a component refuses, a blank `PromptMode.Replace`), a tool name the
  * selection does not know, `execute` selected without a sandbox, and `withSystemPrompt` beside a harness: set the
@@ -199,7 +199,7 @@ object InstructionsConfig:
  * @param systemPrompt the system prompt
  * @param permissions permission rules, first match wins; empty for no permission checks
  * @param toolTimeout the bound on each run of a profile tool that declares none
- * @param retention what a thread keeps of its earlier turns' checkpoints and events, applied before each turn
+ * @param retention what a thread keeps of its checkpoints and events, applied as each turn is admitted
  */
 @Experimental
 final case class HarnessProfile private (
@@ -242,7 +242,7 @@ final case class HarnessProfile private (
   /** The tools, middleware, prompt and retention this profile installs, each checked; see the class's Scaladoc. */
   private[llm4s] def assembled: Result[Harness] =
     for
-      selected   <- selection
+      selected   <- selection(sandboxLater = false)
       prompt     <- promptText
       _          <- timeoutValid
       files      <- filesBackend
@@ -251,18 +251,37 @@ final case class HarnessProfile private (
       val chosen = (FileTools(files) ++ sandbox.map(ExecuteTool(_))).filter(t => selected(t.spec.name))
       Harness(chosen.map(bounded), middleware, prompt, retention)
 
+  /**
+   * The checks [[assembled]] makes, for a profile whose sandbox is set later in code: `execute` selected without one is
+   * not yet a problem. What `HarnessConfigLoader` checks at the app edge.
+   */
+  private[llm4s] def checkedBeforeSandbox: Result[Unit] =
+    for
+      _     <- selection(sandboxLater = true)
+      _     <- promptText
+      _     <- timeoutValid
+      files <- filesBackend
+      _     <- middlewareOver(files)
+    yield ()
+
   private def bounded[A](tool: AgentTool[A]): AgentTool[A] =
     toolTimeout.fold(tool)(AgentTool.withDefaultTimeout(tool, _))
 
-  private def selection: Result[Set[String]] =
+  /**
+   * The selected tool names. A name that is not a harness tool is refused, and so is `execute` selected by `Only`
+   * without a sandbox - unless `sandboxLater`, for a profile loaded from configuration whose sandbox is set in code.
+   * `Except` naming `execute` without a sandbox excludes a tool that is not there, which is harmless.
+   */
+  private def selection(sandboxLater: Boolean): Result[Set[String]] =
     val known = toolNames.toSet
     val (named, chosen) = tools match
       case ToolSelection.All           => (Set.empty[String], known)
       case ToolSelection.Only(names)   => (names, names)
       case ToolSelection.Except(names) => (names, known -- names)
-    val executeWithout = Option.when(sandbox.isEmpty && named(ExecuteTool.Name))(
-      s"'${ExecuteTool.Name}' needs a sandbox: set one with withSandbox"
-    )
+    val executeWithout = tools match
+      case ToolSelection.Only(names) if sandbox.isEmpty && !sandboxLater && names(ExecuteTool.Name) =>
+        Some(s"'${ExecuteTool.Name}' needs a sandbox: set one with withSandbox")
+      case _ => None
     val unknown = (named - ExecuteTool.Name)
       .diff(known)
       .toVector
@@ -401,7 +420,7 @@ object HarnessProfile:
    * Its parts are fixed text, so its size is bounded by them.
    */
   def defaultPrompt(profile: HarnessProfile): String =
-    val selected = profile.selection.getOrElse(Set.empty)
+    val selected = profile.selection(sandboxLater = false).getOrElse(Set.empty)
     val files    = FileTools.Names.exists(selected)
     val parts = Vector(
       Some(Prompt.Intro),

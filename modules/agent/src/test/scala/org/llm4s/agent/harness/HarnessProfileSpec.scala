@@ -149,6 +149,14 @@ class HarnessProfileSpec extends AnyFlatSpec with Matchers with EitherValues wit
     error.message should include("'read_flie' is not a harness tool")
     error.message should include("'execute' needs a sandbox")
     HarnessProfile().withTools(ToolSelection.Except(Set("nope"))).assembled.left.value.message should include("'nope'")
+    // excluding execute without a sandbox excludes nothing that is there
+    HarnessProfile()
+      .withTools(ToolSelection.Except(Set(ExecuteTool.Name)))
+      .assembled
+      .value
+      .tools
+      .map(_.spec.name) shouldBe
+      FileTools.Names
   }
 
   "A setting a component refuses" should "be a ValidationError from build(), naming the profile field" in {
@@ -324,12 +332,30 @@ class HarnessProfileSpec extends AnyFlatSpec with Matchers with EitherValues wit
     )
     val results = (1 to 3).map(i => agent.run(thread, s"turn $i").value)
     val history = store.history(thread, None, 100).value
-    // the latest turn whole, and the policy's two checkpoints from before it
+    // pruned to two as the latest turn was admitted - its claim checkpoint and one before it - then the turn whole
     val latest = history.filter(_.runId == results.last.runId.value)
-    latest should not be empty
-    history.size shouldBe latest.size + 2
+    latest.size should be > 1
+    history.size shouldBe latest.size + 1
     // the thread goes on from its latest checkpoint
     agent.run(thread, "turn 4").value.answer.value shouldBe "answer 4"
+  }
+
+  it should "leave the thread unchanged when a turn is refused" in {
+    val store  = new InMemoryCheckpointer
+    val thread = ThreadId("refused")
+    val client = ScriptedLLMClient.of((1 to 3).map(i => CompletionFixture.simple(s"answer $i"))*)
+    val agent = built(
+      Agent
+        .builder("assistant", client)
+        .withHarness(HarnessProfile().withRetention(RetentionPolicy(maxCheckpoints = Some(1), maxEvents = Some(1))))
+        .withRuntime(GraphRuntime(store))
+    )
+    agent.run(thread, "first").value
+    val before = (store.history(thread, None, 100).value, store.eventsAfter(thread, 0L, 1000).value)
+    agent.run(thread, " ").isLeft shouldBe true          // a blank query
+    agent.recover(thread).isLeft shouldBe true           // nothing to recover
+    agent.resume(thread, Map.empty).isLeft shouldBe true // not suspended
+    (store.history(thread, None, 100).value, store.eventsAfter(thread, 0L, 1000).value) shouldBe before
   }
 
   it should "leave a finished turn's own events, so its handle still replays it" in {

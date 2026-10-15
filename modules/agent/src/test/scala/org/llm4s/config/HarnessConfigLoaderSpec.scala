@@ -61,6 +61,18 @@ class HarnessConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValue
     loaded.retention shouldBe RetentionPolicy(maxAge = Some(7.days), maxCheckpoints = Some(5))
   }
 
+  "execute selected in configuration" should "load, and build once the sandbox is set in code" in {
+    val loaded = load("""llm4s.agent.harness.tools { mode = "only", names = ["execute", "read_file"] }""").value
+    loaded.assembled.left.value.message should include("needs a sandbox")
+    val runner = new SandboxRunner {
+      def locks(workdir: VPath) = Set(org.llm4s.agent.graph.tool.LockKey("sandbox"))
+      def run(command: String, workdir: VPath, timeout: FiniteDuration, maxOutputBytes: Int, ctx: FileContext) =
+        Right(ExecResult(0, "", ""))
+    }
+    loaded.withSandbox(SandboxBackend(runner)).assembled.value.tools.map(_.spec.name) shouldBe
+      Vector("read_file", "execute")
+  }
+
   "A bad value" should "be a ConfigurationError naming its key, at the app edge" in {
     def refused(hocon: String, mentions: String) = {
       val error = load(s"llm4s.agent.harness { $hocon }").left.value

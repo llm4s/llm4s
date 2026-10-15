@@ -37,7 +37,8 @@ import scala.util.Try
  * yield agent
  * }}}
  *
- * The loaded profile is checked as `AgentBuilder.build()` checks it, so a bad value is a `ConfigurationError` here.
+ * The loaded profile is checked as `AgentBuilder.build()` checks it, so a bad value is a `ConfigurationError` here -
+ * except that `execute` may be selected before the sandbox it needs is set.
  * Backends, a sandbox, permission rules and a model compressor are code: set them on the loaded profile.
  */
 @Experimental
@@ -58,7 +59,9 @@ object HarnessConfigLoader:
         .left
         .map(failures => ConfigurationError(s"Failed to read $Path: ${failures.prettyPrint()}", List(Path)))
       profile <- read(config)
-      _       <- profile.assembled.left.map(error => ConfigurationError(s"Invalid $Path: ${error.message}", List(Path)))
+      _ <- profile.checkedBeforeSandbox.left.map(error =>
+        ConfigurationError(s"Invalid $Path: ${error.message}", List(Path))
+      )
     yield profile
 
   private def read(c: Config): Result[HarnessProfile] =
