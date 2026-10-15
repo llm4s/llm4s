@@ -458,7 +458,7 @@ yield agent
 - **Permissions.** An `execute` call touches `(Execute, <command>)` and is `destructive` and
   `openWorld`, so `PermissionRule.allow(Operation.Execute, "sbt *")` lets the agent run builds and
   nothing else. The runner refuses anything its command policy forbids as well
-  ([Workspace sandbox](../../reference/workspace-sandbox.md)), and enforces `allowedPaths`,
+  ([Workspace sandbox](../../reference/workspace-sandbox.html)), and enforces `allowedPaths`,
   `readOnlyPaths` and its size limits itself.
 - **Order.** A file mutation locks `files/workspace/<id>/<path>` and a command `files/workspace/<id>`,
   so in one batch a command waits for every edit before it in its workspace, and an edit for every
