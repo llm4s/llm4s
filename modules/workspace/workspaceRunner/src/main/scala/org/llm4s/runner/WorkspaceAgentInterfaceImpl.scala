@@ -593,15 +593,18 @@ class WorkspaceAgentInterfaceImpl(
 
   /**
    * `secure(dir, name)` on `place`'s final name, relative to its directory held open, where the platform has secure
-   * directory streams (Linux) and `place` is a physical path (no link in it): the directory is first checked to be the
-   * one the path names (same file key, the path still resolving to itself), so a parent swapped for a link
-   * afterwards cannot redirect the operation. Elsewhere, `plain`, by path, immediately after the caller's checks.
+   * directory streams (Linux). `place`'s directory is a physical path (no link in it); the held directory is first
+   * checked to be the one that path names (same file key, the path still resolving to itself), and a mismatch is
+   * refused (`HASH_MISMATCH`), so a parent swapped for a link cannot redirect the operation. Only on a platform
+   * without secure directory streams is `plain` run, by path, immediately after the caller's checks.
    */
   private def held[A](place: Path)(secure: (java.nio.file.SecureDirectoryStream[Path], Path) => A)(plain: => A): A = {
     import java.nio.file.{ LinkOption, SecureDirectoryStream }
     import java.nio.file.attribute.{ BasicFileAttributeView, BasicFileAttributes }
     val parent = place.getParent
-    if (parent == null || Try(effective(place) != place).getOrElse(true)) plain
+    // a directory that no longer resolves to itself is refused below, never used by path: the plain path is only for a
+    // platform without secure directory streams
+    if (parent == null) plain
     else {
       val stream = Files.newDirectoryStream(parent)
       stream match {
@@ -633,7 +636,8 @@ class WorkspaceAgentInterfaceImpl(
 
   /** `place` opened for reading through [[held]]: relative to its held directory, never following a final link. */
   private def openRead(place: Path): java.io.InputStream =
-    held(place) { (dir, name) =>
+    // where the path leads, every link followed (a read follows them), opened by name through its held directory
+    held(effective(place)) { (dir, name) =>
       val options = new java.util.HashSet[java.nio.file.OpenOption]()
       options.add(StandardOpenOption.READ)
       options.add(java.nio.file.LinkOption.NOFOLLOW_LINKS)
