@@ -363,7 +363,7 @@ object FileSnapshotCommand {
  * What is at a path, as a compare-and-set reads it.
  *
  * @param kind      `absent`, `file` or `directory` ([[FileSnapshotResponse.Kind]])
- * @param hash      `absent`, `directory`, or `sha256:` and the 64 lowercase hex digits of the SHA-256 of the
+ * @param hash      `absent`, `directory`, `oversized` (a file over `maxFileSize`, never read), or `sha256:` and the 64 lowercase hex digits of the SHA-256 of the
  *                  file's bytes: what `WriteFileCommand.expectedHash` and `DeleteFileCommand.expectedHash`
  *                  are compared with
  * @param size      the file's size in bytes; 0 for a directory or nothing
@@ -388,6 +388,9 @@ object FileSnapshotResponse {
     val Absent: String    = "absent"
     val File: String      = "file"
     val Directory: String = "directory"
+
+    /** The `hash` of a file over the workspace's `maxFileSize`: never read, so it has no digest to compare. */
+    val Oversized: String = "oversized"
   }
 
   /** The `hash` of a file of `bytes`. */

@@ -42,11 +42,18 @@ final class FakeWorkspace(
 
   private def hashOf(p: String): String =
     if dirs(p) then FileSnapshotResponse.Kind.Directory
-    else files.get(p).fold(FileSnapshotResponse.Kind.Absent)(FileSnapshotResponse.hashOf)
+    else
+      files
+        .get(p)
+        .fold(FileSnapshotResponse.Kind.Absent)(b =>
+          if b.length.toLong > maxFileSize then FileSnapshotResponse.Kind.Oversized else FileSnapshotResponse.hashOf(b)
+        )
 
   private def checkExpected(p: String, expected: Option[String]): Unit =
     expected.foreach { e =>
       val current = hashOf(p)
+      if current == FileSnapshotResponse.Kind.Oversized || e == FileSnapshotResponse.Kind.Oversized then
+        fail("SIZE_LIMIT_EXCEEDED", s"Path '$p' is too large to compare")
       if current != e then fail("HASH_MISMATCH", s"Path '$p' changed: it is now $current, not $e")
     }
 
@@ -153,7 +160,7 @@ final class FakeWorkspace(
             "local",
             path,
             Kind.File,
-            FileSnapshotResponse.hashOf(bytes),
+            hashOf(p),
             bytes.length.toLong,
             decoded.toOption.flatten,
             decoded.left.toOption

@@ -165,9 +165,14 @@ class WorkspaceAgentInterfaceImpl(
   private val mutationLock = new Object
 
   /** The current [[FileSnapshotResponse.hash]] of `resolved`, its bytes read as a stream. */
+  /**
+   * The [[FileSnapshotResponse.hash]] of what `resolved` names, a link followed (to nothing, for a dangling one): a file
+   * over `maxFileSize` is `oversized`, never read, so no snapshot or comparison reads more than the limit.
+   */
   private def currentHash(resolved: Path): String =
-    if (!Files.exists(resolved, java.nio.file.LinkOption.NOFOLLOW_LINKS)) FileSnapshotResponse.Kind.Absent
+    if (!Files.exists(resolved)) FileSnapshotResponse.Kind.Absent
     else if (Files.isDirectory(resolved)) FileSnapshotResponse.Kind.Directory
+    else if (Files.size(resolved) > defaultLimits.maxFileSize) FileSnapshotResponse.Kind.Oversized
     else {
       val digest = java.security.MessageDigest.getInstance("SHA-256")
       Using.resource(Files.newInputStream(resolved)) { in =>
@@ -183,6 +188,13 @@ class WorkspaceAgentInterfaceImpl(
 
   private def checkExpected(path: String, resolved: Path, expected: String): Unit = {
     val current = currentHash(resolved)
+    // an oversized file has no digest, so nothing can be compared with it
+    if (current == FileSnapshotResponse.Kind.Oversized || expected == FileSnapshotResponse.Kind.Oversized)
+      throw new WorkspaceAgentException(
+        s"Path '$path' is larger than the maximum size limit (${defaultLimits.maxFileSize} bytes); it cannot be compared",
+        "SIZE_LIMIT_EXCEEDED",
+        None
+      )
     if (current != expected)
       throw new WorkspaceAgentException(
         s"Path '$path' changed: it is now $current, not $expected",
@@ -472,21 +484,25 @@ class WorkspaceAgentInterfaceImpl(
 
     Try {
       if (expectedHash.isDefined) {
-        // replaced atomically: a reader, or a crash, sees the old content or the new, never part of either
-        val temp = Files.createTempFile(resolvedPath.getParent, ".llm4s-write-", ".tmp")
+        // replaced atomically: a reader, or a crash, sees the old content or the new, never part of either. A link is
+        // written through, as Files.write writes through it: the file it names is replaced and the link stays, so
+        // what the hash was taken of (the link followed) is what changes. `effective` already passed every path check.
+        val target = effective(resolvedPath)
+        if (createDirs) Files.createDirectories(target.getParent)
+        val temp = Files.createTempFile(target.getParent, ".llm4s-write-", ".tmp")
         Try {
           Files.write(temp, bytes)
           // the replacement keeps the file's permissions (an executable script stays executable); a new file gets
           // the usual rw-r--r-- rather than a temporary file's rw-------. Not POSIX: the platform's defaults.
           Try {
             val permissions =
-              if (Files.exists(resolvedPath)) Files.getPosixFilePermissions(resolvedPath)
+              if (Files.exists(target)) Files.getPosixFilePermissions(target)
               else java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--")
             Files.setPosixFilePermissions(temp, permissions)
           }
           Files.move(
             temp,
-            resolvedPath,
+            target,
             java.nio.file.StandardCopyOption.ATOMIC_MOVE,
             java.nio.file.StandardCopyOption.REPLACE_EXISTING
           )
@@ -602,7 +618,7 @@ class WorkspaceAgentInterfaceImpl(
       val resolved = resolvePath(path)
       def response(kind: String, hash: String, size: Long, content: Option[String], error: Option[String]) =
         FileSnapshotResponse("local", path, kind, hash, size, content, error)
-      if (!Files.exists(resolved, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+      if (!Files.exists(resolved))
         response(Kind.Absent, Kind.Absent, 0L, None, None)
       else if (Files.isDirectory(resolved)) response(Kind.Directory, Kind.Directory, 0L, None, None)
       else {
@@ -611,7 +627,7 @@ class WorkspaceAgentInterfaceImpl(
         else if (size > defaultLimits.maxFileSize)
           response(
             Kind.File,
-            currentHash(resolved),
+            Kind.Oversized,
             size,
             None,
             Some(s"the file is $size bytes, larger than the limit of ${defaultLimits.maxFileSize} bytes")
@@ -624,7 +640,7 @@ class WorkspaceAgentInterfaceImpl(
           if (bytes.length.toLong > defaultLimits.maxFileSize)
             response(
               Kind.File,
-              currentHash(resolved),
+              Kind.Oversized,
               size,
               None,
               Some(s"the file is larger than the limit of ${defaultLimits.maxFileSize} bytes")

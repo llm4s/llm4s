@@ -67,10 +67,30 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     val big   = small.fileSnapshot("big")
     big.content shouldBe None
     big.textError.get should include("larger")
-    big.hash shouldBe hashOf("x" * 20)
+    big.hash shouldBe "oversized"
   }
 
-  "A compare-and-set write" should "write when the hash matches, creating the file and its parents" in {
+  "A compare-and-set write" should "write through a link to the file it names, keeping the link" in {
+    assume(!isWindowsHost)
+    Files.write(root.resolve("real.txt"), "one".getBytes(StandardCharsets.UTF_8))
+    Files.createSymbolicLink(root.resolve("link.txt"), root.resolve("real.txt"))
+    val ws = workspace()
+    ws.fileSnapshot("link.txt").hash shouldBe hashOf("one")
+    ws.writeFile("link.txt", "two", expectedHash = Some(hashOf("one")))
+    Files.isSymbolicLink(root.resolve("link.txt")) shouldBe true
+    ws.fileSnapshot("real.txt").content shouldBe Some("two")
+  }
+
+  it should "refuse to compare with a file over the size limit, which is never read" in {
+    Files.write(root.resolve("big"), ("x" * 20).getBytes(StandardCharsets.UTF_8))
+    val small = workspace(WorkspaceSandboxConfig(limits = WorkspaceSandboxConfig.DefaultLimits.copy(maxFileSize = 10)))
+    small.fileSnapshot("big", includeContent = false).hash shouldBe "oversized"
+    code(small.writeFile("big", "y", expectedHash = Some("oversized"))) shouldBe "SIZE_LIMIT_EXCEEDED"
+    code(small.deleteFile("big", Some("oversized"))) shouldBe "SIZE_LIMIT_EXCEEDED"
+    Files.size(root.resolve("big")) shouldBe 20L
+  }
+
+  it should "write when the hash matches, creating the file and its parents" in {
     val ws = workspace()
     ws.writeFile("d/e/a.txt", "hello", createDirectories = Some(true), expectedHash = Some("absent"))
     ws.fileSnapshot("d/e/a.txt").content shouldBe Some("hello")

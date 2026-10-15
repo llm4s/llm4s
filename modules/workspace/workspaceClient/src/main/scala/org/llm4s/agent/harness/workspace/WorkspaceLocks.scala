@@ -82,7 +82,9 @@ private[workspace] object WorkspaceCalls:
   /** A runner snapshot's `hash` as C4's [[StateCheck]], or a failure for a value the runner cannot have sent. */
   def stateCheck(hash: String): Result[StateCheck] =
     if hash == FileSnapshotResponse.Kind.Absent then Right(StateCheck.absent)
-    else if hash == FileSnapshotResponse.Kind.Directory || Sha256.matches(hash) then
+    else if hash == FileSnapshotResponse.Kind.Directory || hash == FileSnapshotResponse.Kind.Oversized || Sha256
+        .matches(hash)
+    then
       // compared, never interpreted: the runner's digest is in StateCheck's own format
       Try(upickle.default.read[StateCheck](ujson.Str(hash))).toEither.left.map(e =>
         ProcessingError("workspace.snapshot", s"the workspace sent an unreadable hash: ${e.getMessage}", Some(e))
