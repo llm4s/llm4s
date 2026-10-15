@@ -12,7 +12,7 @@ This page compares LLM4S with LangChain4j, Spring AI, Koog and Embabel, so that 
 your project. It states facts and trade-offs, not rankings.
 
 **Last verified: 2026-10-11.** The statements about LLM4S describe the `main` branch on that date; the latest release is
-v0.5.0, the first to publish the module split described in the [v1 scope](../reference/v1-scope). Every statement about
+v0.5.1; v0.5.0 was the first to publish the module split described in the [v1 scope](../reference/v1-scope). Every statement about
 another project comes from that project's own documentation, fetched on that date and listed under
 [Sources](#sources). A cell that says *not verified* means it was not checked, not that the feature is absent. The
 other projects change quickly: re-check anything that matters to you before relying on it, and expect this page to be
