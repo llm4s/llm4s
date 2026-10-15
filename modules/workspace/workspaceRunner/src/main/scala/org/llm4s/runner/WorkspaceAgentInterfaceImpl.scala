@@ -873,6 +873,14 @@ class WorkspaceAgentInterfaceImpl(
       if (!Files.exists(resolved, java.nio.file.LinkOption.NOFOLLOW_LINKS))
         throw new WorkspaceAgentException(s"File '$path' does not exist", "FILE_NOT_FOUND", None)
       val wasDirectory = Files.isDirectory(resolved, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+      // immediately before the removal, as before a write's commit: the path still names the same entry, through the
+      // same links and passing the path policy, and the change is within its deadline
+      if (resolveEntry(path, Access.Write) != resolved)
+        throw new WorkspaceAgentException(
+          s"Path '$path' changed while it was deleted: it now leads elsewhere; nothing was deleted",
+          "HASH_MISMATCH",
+          None
+        )
       ensureInTime(path)
       Try(Files.delete(resolved)) match {
         case Success(_) => DeleteFileResponse("local", path, wasDirectory)
