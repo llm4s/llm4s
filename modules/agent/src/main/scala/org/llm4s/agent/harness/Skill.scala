@@ -281,6 +281,15 @@ private[harness] object Frontmatter:
     if value.startsWith("[") then flowList(n, value).map(Value.Items(_))
     else scalar(n, value, inList = false).map(Value.Str(_))
 
+  /**
+   * The plain values YAML 1.2's core schema reads as something other than a string: null, a boolean, an integer
+   * (decimal, octal `0o`, hex `0x`) or a float (with `.inf` and `.nan`). Every field here is a string, so such a value
+   * must be quoted.
+   */
+  private val NotAString =
+    ("~|null|Null|NULL|true|True|TRUE|false|False|FALSE|[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+|" +
+      "[-+]?(\\.[0-9]+|[0-9]+(\\.[0-9]*)?)([eE][-+]?[0-9]+)?|[-+]?\\.(inf|Inf|INF)|\\.(nan|NaN|NAN)").r
+
   private val Unsupported: Map[Char, String] = Map(
     '{' -> "flow maps are not supported",
     '|' -> "block scalars (`|`, `>`) are not supported",
@@ -313,6 +322,7 @@ private[harness] object Frontmatter:
     if plain.contains(": ") || plain.endsWith(":") then
       Some(if inList then nested else "a plain value cannot hold `: `; quote it")
     else if plain == "-" || plain.startsWith("- ") || plain == "?" || plain.startsWith("? ") then Some(nested)
+    else if NotAString.matches(plain) then Some("YAML reads this plain value as a null, boolean or number; quote it")
     else
       plain.headOption.flatMap(c =>
         Unsupported.get(c).orElse(Option.when("[]{},".contains(c))(s"a plain value cannot start with `$c`; quote it"))

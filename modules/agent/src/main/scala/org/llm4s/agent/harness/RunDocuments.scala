@@ -55,9 +55,13 @@ final private[harness] class RunCache[A](maxRuns: Int):
   private val done = new java.util.LinkedHashMap[Incarnation, Entry](16, 0.75f, true):
     override def removeEldestEntry(eldest: java.util.Map.Entry[Incarnation, Entry]): Boolean = this.size() > maxRuns
 
-  /** An incarnation's in-flight lock, and how many callers hold or wait on it. */
+  /**
+   * An incarnation's in-flight lock, how many callers hold or wait on it, and the value once computed - kept here too,
+   * so a waiter finds it even when another run's value has evicted it from the LRU meanwhile.
+   */
   final private class Slot:
-    var users: Int = 0
+    var users: Int           = 0
+    var entry: Option[Entry] = None
 
   // the incarnations being computed or waited on, one lock each, so the callers of one run compute one at a time: a
   // caller that waited finds the value, or - after a failure - retries in turn on the same lock. Removed when its
@@ -94,13 +98,15 @@ final private[harness] class RunCache[A](maxRuns: Int):
         }
         ultimately(release()) {
           slot.synchronized {
-            held match
+            slot.entry.orElse(held) match
               case Some(entry) => hit(entry)
               case None        =>
                 // a failure, returned or thrown, keeps nothing; a waiter retries in turn
                 val computed = compute
                 computed.foreach { value =>
-                  lock.synchronized(done.put(key, Entry(value, position.taskId))): Unit
+                  val entry = Entry(value, position.taskId)
+                  slot.entry = Some(entry)
+                  lock.synchronized(done.put(key, entry)): Unit
                   report(value)
                 }
                 computed

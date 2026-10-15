@@ -186,6 +186,18 @@ class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
       Vector("Read", "Write")
   }
 
+  it should "refuse a plain value YAML reads as a null, boolean or number, and take it quoted" in {
+    for (v <- Seq("true", "False", "null", "~", "1", "-2", "1.0", "1e3", ".5", "0x1F", "0o17", ".inf", ".NaN"))
+      withClue(v)(
+        problem("---", "name: pdf-tools", "description: d", "metadata:", s"  version: $v", "---").line shouldBe 5
+      )
+    problem("---", "name: pdf-tools", "description: true", "---").problem should include("quote it")
+    problem("---", "name: pdf-tools", "description: d", "allowed-tools: [Read, 1]", "---").line shouldBe 4
+    parse("---", "name: pdf-tools", "description: d", "metadata:", "  version: \"1.0\"", "---").value.metadata shouldBe
+      Map("version" -> "1.0")
+    parse("---", "name: pdf-tools", "description: v1.0 trueish", "---").value.description shouldBe "v1.0 trueish"
+  }
+
   it should "refuse a name over 64 characters" in {
     val long = "a" * 65
     val e    = Skill.parse(VPath(s"/s/$long/SKILL.md").value, s"---\nname: $long\ndescription: d\n---").left.value
