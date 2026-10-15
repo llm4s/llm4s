@@ -8,7 +8,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{ ConcurrentHashMap, Semaphore, TimeUnit }
 import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters._
-import scala.util.Try
+import java.nio.file.Files
+import scala.jdk.OptionConverters._
+import scala.util.{ Try, Using }
 
 /** A process the runner started, as the [[ProcessRegistry]] tracks it. */
 final private[runner] case class RunningCommand(
@@ -95,18 +97,19 @@ final private[runner] class ProcessRegistry(
          else if (closedOwners.contains(owner) || !proceed()) scala.util.Failure(NotStarted)
          else if (running.containsKey((owner, commandId)))
            scala.util.Failure(new IllegalStateException(s"Command $commandId is already running"))
-         else Try(ProcessRegistry.started(start(builder), ProcessRegistry.commands))).map { process =>
-          val entry = RunningCommand(
-            owner,
-            commandId,
-            process,
-            new AtomicBoolean(false),
-            System.currentTimeMillis(),
-            new AtomicBoolean(false)
-          )
-          running.put((owner, commandId), entry)
-          entry
-        }
+         else Try(ProcessRegistry.started(start(ProcessRegistry.inOwnGroup(builder)), ProcessRegistry.commands)))
+          .map { process =>
+            val entry = RunningCommand(
+              owner,
+              commandId,
+              process,
+              new AtomicBoolean(false),
+              System.currentTimeMillis(),
+              new AtomicBoolean(false)
+            )
+            running.put((owner, commandId), entry)
+            entry
+          }
       })
       started.toEither match {
         case Left(NotStarted) =>
@@ -132,15 +135,16 @@ final private[runner] class ProcessRegistry(
             // runs beside a process of this command. One that survives its kill keeps the entry tracked, holding the
             // permit, until it has really exited, as a surviving parent does
             val leftovers =
-              (entry.tree.asScala.toList ++ sweepOrphans(Try(entry.process.pid()).toOption)).distinct.filter(_.isAlive)
+              (entry.tree.asScala.toList ++ groupOf(entry)).distinct.filter(_.isAlive)
             leftovers.foreach(h => Try(h.destroyForcibly()): Unit)
             def done(): Unit = {
               running.remove((owner, commandId), entry)
               gate.release()
               entry.released.complete(()): Unit
             }
-            // settled only when a sweep, made after everything found so far has exited, finds nothing more: a dying
-            // orphan that forked leaves a child the next sweep finds, so the permit is kept until none is left
+            // settled only when a look at its process group, made after everything found so far has exited, finds
+            // nothing more: a dying process that forked leaves a child the next look finds, so the permit is kept
+            // until none is left
             // Never released while anything found is alive. Past `SettleRounds` generations the command is reported
             // once, and each further round waits a second first, so the sweeps never spin
             def settle(pending: List[ProcessHandle], round: Int): Unit =
@@ -149,7 +153,7 @@ final private[runner] class ProcessRegistry(
                 if (round == ProcessRegistry.SettleRounds)
                   logger.error(s"Command $commandId: its processes keep forking while killed; it holds the gate")
                 val next: Runnable =
-                  () => settle(sweepOrphans(Try(entry.process.pid()).toOption).filter(_.isAlive), round + 1)
+                  () => settle(groupOf(entry).filter(_.isAlive), round + 1)
                 java.util.concurrent.CompletableFuture
                   .allOf(pending.map(_.onExit()): _*)
                   .whenComplete { (_, _) =>
@@ -172,52 +176,18 @@ final private[runner] class ProcessRegistry(
     }
 
   /**
-   * Kills what a command that exited on its own left behind. A descendant whose parent has exited is re-parented to
-   * the init process, which in the runner's container is the runner itself (PID 1): every child of the runner that is
-   * no tracked command is such an orphan, and is killed with its tree. Outside a container (the runner not PID 1) an
-   * orphan goes to the host's init and cannot be found; there the container is the boundary. A file operation's own
-   * helper (`getfacl`) never runs then: it needs the whole gate, and the exiting command still holds its permit.
-   *
-   * An orphan cannot be told apart from the re-parented descendant of a command still running, so the sweep is made
-   * only by the last command to exit (`self` is the exiting one): while another runs, nothing is swept, and no file
-   * operation can run either (that command holds a permit), so an orphan never runs beside a file change; the last
-   * command's exit sweeps every orphan before its permit is given back.
+   * The live processes of `entry`'s process group, the command's own: each command is started as the leader of a new
+   * session ([[ProcessRegistry.inOwnGroup]]), so every process it starts, and every one those start, is in its group
+   * however it is re-parented, until one leaves it by starting a session of its own (a daemon). Found through `/proc`
+   * and killed; the group of a command is never another's (Linux reuses no PID still a process group's id). Without
+   * `setsid` or `/proc` (macOS, Windows) only the descendants a kill finds are known: there the container is the
+   * boundary.
    */
-  private def sweepOrphans(self: Option[Long]): List[ProcessHandle] =
-    if (ProcessHandle.current().pid() != 1L) Nil
-    else
-      ProcessRegistry.ledger.synchronized {
-        val othersRunning = ProcessRegistry.commands.asScala.exists { pid =>
-          !self.contains(pid.longValue) && ProcessHandle.of(pid).map[Boolean](_.isAlive).orElse(false)
-        }
-        if (othersRunning) Nil
-        else {
-          // swept until a scan finds nothing: an orphan that forked before it was killed leaves a child, re-parented to
-          // the runner, that the next scan finds. A killed process forks no more, so this ends; bounded all the same
-          val found = Iterator.continually(sweepAll()).take(100).takeWhile(_.nonEmpty).flatten.toList
-          found
-        }
-      }
-
-  private def sweepAll(): List[ProcessHandle] =
-    ProcessRegistry.ledger.synchronized {
-      // every process the runner starts itself is in the ledger from its start (a command, a helper), so a child that
-      // is in neither is a re-parented orphan, never a process being started or a helper at work
-      val own = ProcessRegistry.commands.asScala ++ ProcessRegistry.helpers.asScala
-      ProcessHandle
-        .current()
-        .children()
-        .toList
-        .asScala
-        .filter(_.isAlive)
-        .filterNot(h => own.contains(h.pid()))
-        .toList
-        .flatMap { orphan =>
-          val tree = Try(orphan.descendants().toList.asScala.toList).getOrElse(Nil)
-          tree.foreach(d => Try(d.destroyForcibly()): Unit)
-          Try(orphan.destroyForcibly()): Unit
-          orphan :: tree
-        }
+  private def groupOf(entry: RunningCommand): List[ProcessHandle] =
+    Try(entry.process.pid()).toOption.toList.flatMap { pid =>
+      val members = ProcessRegistry.group(pid)
+      members.foreach(h => Try(h.destroyForcibly()): Unit)
+      members
     }
 
   /** The owner's process `commandId`, while it runs. */
@@ -236,6 +206,8 @@ final private[runner] class ProcessRegistry(
     // its whole tree, children first, collected before the parent dies and they are re-parented out of reach: a
     // command's build tool or shell never leaves a process changing the workspace after it is killed
     Try(entry.process.descendants().toList.asScala).getOrElse(Nil).foreach(entry.tree.add(_): Unit)
+    // and its process group: a process it started that has already been re-parented is still in it
+    Try(entry.process.pid()).toOption.toList.flatMap(ProcessRegistry.group).foreach(entry.tree.add(_): Unit)
     // every descendant ever found, this kill's and an earlier one's: a repeated kill still waits for a survivor
     val tree = entry.tree.asScala.toList.filter(_.isAlive)
     tree.foreach(d => Try(d.destroyForcibly()): Unit)
@@ -278,6 +250,46 @@ final private[runner] class ProcessRegistry(
 }
 
 private[runner] object ProcessRegistry {
+
+  /** `setsid`, from the system's own directories, on Linux: what starts each command as a new session's leader. */
+  private lazy val groupLauncher: Option[String] =
+    if (!System.getProperty("os.name", "").startsWith("Linux")) None
+    else Seq("/usr/bin/setsid", "/bin/setsid").find(p => Files.isExecutable(java.nio.file.Paths.get(p)))
+
+  /**
+   * `builder`, set to start its program as the leader of a new session and process group (`setsid`, which execs it in
+   * place: the PID is the program's), so everything the command starts can be found and killed with it. Unchanged
+   * where there is no `setsid`, or when its program is not an absolute path (`setsid` would search for it).
+   */
+  def inOwnGroup(builder: java.lang.ProcessBuilder): java.lang.ProcessBuilder = {
+    val command = builder.command().asScala.toList
+    groupLauncher.foreach { launcher =>
+      if (
+        command.headOption.exists(p => java.nio.file.Paths.get(p).isAbsolute) && !command.headOption.contains(launcher)
+      )
+        builder.command((launcher :: command).asJava): Unit
+    }
+    builder
+  }
+
+  /** The live, non-zombie processes whose process group is `pgid`, the leader itself excepted; empty without `/proc`. */
+  def group(pgid: Long): List[ProcessHandle] = {
+    val proc = java.nio.file.Paths.get("/proc")
+    if (!Files.isDirectory(proc)) Nil
+    else
+      Try(Using.resource(Files.list(proc))(_.iterator().asScala.map(_.getFileName.toString).toList))
+        .getOrElse(Nil)
+        .filter(n => n.nonEmpty && n.forall(_.isDigit) && n != pgid.toString)
+        .flatMap { name =>
+          // `pid (comm) state ppid pgrp ...`: the fields after the command name, which may itself hold spaces
+          Try(
+            new String(Files.readAllBytes(proc.resolve(name).resolve("stat")), java.nio.charset.StandardCharsets.UTF_8)
+          ).toOption
+            .map(stat => stat.substring(stat.lastIndexOf(')') + 2).split(' '))
+            .filter(f => f.length > 2 && f(2) == pgid.toString && f(0) != "Z")
+            .flatMap(_ => ProcessHandle.of(name.toLong).toScala)
+        }
+  }
 
   /**
    * The ledger of the runner's own children, JVM-wide: every command's process and every helper (`git config`,

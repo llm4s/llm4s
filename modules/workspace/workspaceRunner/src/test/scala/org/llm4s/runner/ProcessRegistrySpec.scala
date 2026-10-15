@@ -137,6 +137,24 @@ class ProcessRegistrySpec extends AnyFlatSpec with Matchers {
     eventually(!ProcessHandle.of(child).map[Boolean](_.isAlive).orElse(false)) shouldBe true
   }
 
+  "A command that exits leaving a detached process" should "be released only once that process is gone" in {
+    assume(System.getProperty("os.name", "").startsWith("Linux")) // its process group, through setsid and /proc
+    val workspace = new WorkspaceAgentInterfaceImpl(
+      Files.createTempDirectory("process-group").toString,
+      isWindowsHost,
+      Some(WorkspaceSandboxConfig.Permissive)
+    )
+    // the subshell exits at once, so `sleep` is re-parented away from the command before it ends
+    val entry = workspace.processes
+      .spawn(new Object, "orphan", new java.lang.ProcessBuilder("/bin/sh", "-c", "(sleep 60 & echo $!); exit 0"))
+      .toOption
+      .get
+    val orphan =
+      new java.io.BufferedReader(new java.io.InputStreamReader(entry.process.getInputStream)).readLine().toLong
+    entry.released.get(20, TimeUnit.SECONDS)
+    ProcessHandle.of(orphan).map[Boolean](_.isAlive).orElse(false) shouldBe false
+  }
+
   "A command whose working directory became a link before it started" should "not start" in {
     assume(!isWindowsHost)
     val root = Files.createTempDirectory("process-wd").toRealPath()
