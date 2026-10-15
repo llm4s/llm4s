@@ -229,7 +229,8 @@ class WorkspaceAgentInterfaceImpl(
    * Every process this runner starts, and the command gate (design §4.33): the one holder of process references.
    * Cancel, disconnect, shutdown and the gate all act through it, and a process leaves it only when it has exited.
    */
-  private[runner] val processes = new ProcessRegistry(gateWait, startProcess)
+  // each start, inside the registry's locked start step, first re-checks where the command runs
+  private[runner] val processes = new ProcessRegistry(gateWait, b => { checkWorkingDirectory(b); startProcess(b) })
 
   /** The owner of the processes the direct [[executeCommand]] starts. */
   private val DirectOwner = new Object
@@ -551,12 +552,32 @@ class WorkspaceAgentInterfaceImpl(
     WorkspaceAgentInterfaceImpl.aclTools(programSearch, Seq(rootPath, effective(rootPath)))
 
   /**
+   * The directory a command is about to start in, checked immediately before it starts (within the registry's start
+   * step): it was pinned where it physically was, so it must still resolve to itself (no part of it swapped for a
+   * link since) and still pass the path policy. A process never starts in a directory the policy has not just passed.
+   */
+  private def checkWorkingDirectory(builder: java.lang.ProcessBuilder): Unit =
+    Option(builder.directory()).map(_.toPath).foreach { dir =>
+      val relative = Try(effective(rootPath).relativize(dir).toString).getOrElse(dir.toString)
+      if (effective(dir) != dir || !Files.isDirectory(dir, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+        throw new WorkspaceAgentException(
+          s"The working directory '$relative' changed before the command started; it was not started",
+          "PATH_ESCAPE_ATTEMPT",
+          None
+        )
+      checkPolicy(relative, dir, Access.Read)
+    }
+
+  /**
    * Where `lex` physically leads, held to the path policy for a read: called immediately before a file is opened, so a
    * link retargeted since the request was first checked never leads a read outside the workspace or its allowed paths.
    */
   private def checkedForRead(path: String, lex: Path): Path = {
     val place = effective(lex)
     checkPolicy(path, place, Access.Read)
+    // and what is there now must still be a file to open: a link retargeted at a FIFO is refused, never opened (an
+    // open of one blocks until a writer comes)
+    refuseSpecial(path, place)
     place
   }
 
@@ -1466,7 +1487,8 @@ class WorkspaceAgentInterfaceImpl(
     }
 
     // the default, the workspace root, goes through the path policy like any directory given
-    val workDir = resolvePath(workingDirectory.getOrElse(".")).toFile
+    // pinned where it physically is: the process starts there, re-checked immediately before (checkWorkingDirectory)
+    val workDir = effective(resolvePath(workingDirectory.getOrElse("."))).toFile
 
     if (!workDir.exists() || !workDir.isDirectory) {
       throw new WorkspaceAgentException(

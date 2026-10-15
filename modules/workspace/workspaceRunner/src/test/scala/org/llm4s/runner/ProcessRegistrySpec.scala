@@ -137,6 +137,18 @@ class ProcessRegistrySpec extends AnyFlatSpec with Matchers {
     eventually(!ProcessHandle.of(child).map[Boolean](_.isAlive).orElse(false)) shouldBe true
   }
 
+  "A command whose working directory became a link before it started" should "not start" in {
+    assume(!isWindowsHost)
+    val root = Files.createTempDirectory("process-wd").toRealPath()
+    Files.createDirectories(root.resolve("real"))
+    Files.createSymbolicLink(root.resolve("wd"), root.resolve("real"))
+    val workspace =
+      new WorkspaceAgentInterfaceImpl(root.toString, isWindowsHost, Some(WorkspaceSandboxConfig.Permissive))
+    val builder = new java.lang.ProcessBuilder("true").directory(root.resolve("wd").toFile)
+    workspace.processes.spawn(new Object, "wd", builder).left.map(_.code) shouldBe Left("PATH_ESCAPE_ATTEMPT")
+    workspace.processes.all shouldBe empty
+  }
+
   "A command waiting to start when its client leaves" should "never start" in {
     val workspace = workspaceWith(new StubbornProcess)
     val owner     = new Object

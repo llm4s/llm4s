@@ -107,6 +107,10 @@ final private[runner] class ProcessRegistry(
         case Left(NotStarted) =>
           gate.release()
           Left(new WorkspaceAgentException("Cancelled before it started", ProcessRegistry.NotStarted, None))
+        case Left(refused: WorkspaceAgentException) =>
+          // a check the start step made (where it would run) refused it: nothing started, its own code kept
+          gate.release()
+          Left(refused)
         case Left(e) =>
           gate.release()
           Left(
