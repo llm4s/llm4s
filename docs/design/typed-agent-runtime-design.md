@@ -419,6 +419,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.22 | [Stage 3 slice C1: kernel hooks for the harness](typed-agent-runtime/4.22-stage-3-slice-c1-kernel-hooks.md) ([#1902](https://github.com/llm4s/llm4s/issues/1902)) |
 | 4.23 | [Stage 3 slice C2: tool permissions, timeouts and batch locks](typed-agent-runtime/4.23-stage-3-slice-c2-tool-permissions-timeouts-locks.md) ([#1903](https://github.com/llm4s/llm4s/issues/1903)) |
 | 4.24 | [Stage 3 slice C4: replay of external effects](typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md) ([#1921](https://github.com/llm4s/llm4s/issues/1921)) |
+| 4.25 | [Stage 3 slice C3: backend SPIs](typed-agent-runtime/4.25-stage-3-slice-c3-backend-spis.md) ([#1904](https://github.com/llm4s/llm4s/issues/1904)) |
 | 4.26 | [Stage 3 slice F8a: response format for the agent's answer](typed-agent-runtime/4.26-stage-3-slice-f8a-response-format.md) ([#1912](https://github.com/llm4s/llm4s/issues/1912)) |
 | 4.27 | [Stage 3 slice F8b: multimodal content parts](typed-agent-runtime/4.27-stage-3-slice-f8b-multimodal-content-parts.md) ([#1913](https://github.com/llm4s/llm4s/issues/1913)) |
 | 4.28 | [Stage 3 slice F9: typed custom streams](typed-agent-runtime/4.28-stage-3-slice-f9-typed-custom-streams.md) ([#1914](https://github.com/llm4s/llm4s/issues/1914)) |

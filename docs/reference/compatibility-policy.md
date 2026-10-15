@@ -38,8 +38,9 @@ version number:
 | **Minor** (0.x to 0.y) | A binary-breaking change is allowed, with a `@deprecated` path where one exists, and is listed in the CHANGELOG. |
 | **1.0.0 and later** | Semantic versioning: a breaking change needs a new major version. |
 
-Binary compatibility is checked by MiMa against a baseline of **0.5.0**, the first release with the
-split coordinates. Until the baseline is set the check passes without checking anything; see
+Binary compatibility will be checked by MiMa against a baseline set at a pre-1.0 release, version to be
+decided, once the designs are final; 0.5.0 sets none. Until the baseline is set the check passes without
+checking anything; see
 [The Baseline](api-stability#the-baseline).
 
 Every published module has the same version, from one tag, so a provider module's version number
@@ -104,7 +105,7 @@ why, and a CHANGELOG entry. Before 1.0 that is a minor-release change; after it,
 
 ## Deprecating and removing
 
-**Until the 0.5.0 baseline is set**, nothing is frozen: a Frozen-at-1.0 API that is wrong is fixed
+**Until the MiMa baseline is set**, nothing is frozen: a Frozen-at-1.0 API that is wrong is fixed
 outright, with a CHANGELOG entry and a migration note, not kept for compatibility. A Frozen module gains no speculative public types and no
 `@deprecated` members: an API that should not be frozen is deleted, with a migration note, not deprecated.
 The [migration guide](migration) records each such removal.

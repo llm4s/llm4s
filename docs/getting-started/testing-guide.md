@@ -218,8 +218,7 @@ ollama serve
 ### Test Configuration
 
 Put a named provider section in your test resources and select it as the default, with
-`llm4s-ollama` as a test dependency (in v0.4.1 and earlier the Ollama provider is inside
-`llm4s-core`). See [Named provider sections](configuration#named-provider-sections).
+`llm4s-ollama` as a test dependency. See [Named provider sections](configuration#named-provider-sections).
 
 ```hocon
 # src/test/resources/application.conf

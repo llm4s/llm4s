@@ -404,7 +404,7 @@ val append = AgentTool(appendSpec) { (args, context) =>
       writeIfUnchanged(args.path, StateCheck.of(before), after).map(_ => after.length)
     })
   } match
-    case Right(length)                           => ToolOutcome.Success(ujson.Num(length))
+    case Right(length)                           => ToolOutcome.Success(ToolContent.Json(ujson.Num(length)))
     case Left(r: GraphError.EffectReplayRefused) => ToolOutcome.Error(r.message)
     case Left(other)                             => ToolOutcome.Fatal(other) // outcome unknown: recover replays it
 }
@@ -422,9 +422,18 @@ rules a caller relies on:
   finishes the task, however long the thread waits. `prune` never removes it, and `deleteThread`
   removes it with the thread.
 - **A Block does not undo an external effect.** A guardrail that blocks a turn restores every state
-  key the turn wrote, its messages included (§4.22), but a file the turn wrote on the host, a
+  key the turn wrote, its messages included (§4.22), but a file the turn wrote outside thread state, a
   command it ran or a record it stored stays as it is. The turn's replay evidence goes with its
   closing commit, so nothing replays it either.
+
+### Harness File Backends
+
+The harness keeps an agent's files in a `FileBackend` (`org.llm4s.agent.harness`): thread state
+(`StateFileBackend`, the default), a long-term store (`StoreFileBackend`, for `/memories/`), several at
+once (`CompositeBackend`), or one chosen per run (`FileBackend.resolved`). Each backend declares the locks
+its mutations hold, replays its external effects through `ReplayGuard`, and enforces its own size
+limits. A backend over a host directory is not part of this release; it is tracked in
+[#1964](https://github.com/llm4s/llm4s/issues/1964).
 
 ### Tool Permissions, Timeouts and Locks
 

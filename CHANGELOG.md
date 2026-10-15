@@ -7,8 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- The net change since 0.4.1, by area. Add an entry to its area's list; a follow-up to unreleased work edits
+<!-- The net change since 0.5.0, by area. Add an entry to its area's list; a follow-up to unreleased work edits
      its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
+
+### Breaking changes
+
+- `UserMessage`/`ToolMessage` carry `parts` and have no extractor; `ToolOutcome.Success` takes a `ToolContent`;
+  [migration](docs/reference/migration.md#multimodal-content-parts-1913).
+
+### Agent harness (Phase 3)
+
+- **Added** multimodal content parts: user messages and tool results carry images and documents, which each provider
+  sends or refuses before sending [#1913](https://github.com/llm4s/llm4s/issues/1913); [design 4.27](docs/design/typed-agent-runtime/4.27-stage-3-slice-f8b-multimodal-content-parts.md).
+- **Added** backend SPIs: `FileBackend` (state, composite, store), `SandboxBackend`, `LongTermStore` and `FileBackendContract`
+  [#1904](https://github.com/llm4s/llm4s/issues/1904); [design §4.25](docs/design/typed-agent-runtime/4.25-stage-3-slice-c3-backend-spis.md).
+
+## [0.5.0] - 2026-10-15
 
 ### Highlights
 
@@ -91,13 +105,9 @@ OpenAI-compatible provider); workload identity, configurable timeouts, testkits 
 - `AudioFormat` gains `Mp3`, and `RegexValidator`'s primary constructor changed (recompile); migration:
   [Mp3](docs/reference/migration.md#audioformatmp3-1307),
   [RegexValidator](docs/reference/migration.md#regexvalidators-constructor).
-- `UserMessage`/`ToolMessage` carry `parts` and have no extractor; `ToolOutcome.Success` takes a `ToolContent`;
-  [migration](docs/reference/migration.md#multimodal-content-parts-1913).
 
 ### Core
 
-- **Added** multimodal content parts: user messages and tool results carry images and documents, which each provider
-  sends or refuses before sending [#1913](https://github.com/llm4s/llm4s/issues/1913); [design 4.27](docs/design/typed-agent-runtime/4.27-stage-3-slice-f8b-multimodal-content-parts.md).
 - **Added** `CancelledError`: an interrupted call returns `Left(CancelledError)` with the interrupt flag kept, never
   retried; chat, embedding, reranker, MCP, image and speech clients follow it
   [#1270](https://github.com/llm4s/llm4s/issues/1270) [#1331](https://github.com/llm4s/llm4s/issues/1331); [design
@@ -546,7 +556,7 @@ OpenAI-compatible provider); workload identity, configurable timeouts, testkits 
 ### Build & tooling
 
 - **Added** `llm4s-bom`, one version for every llm4s artifact [#1462](https://github.com/llm4s/llm4s/issues/1462).
-- **Added** MiMa on the frozen modules, a MiMa dry run, `sbt stabilityTierCheck`, `frozenDependencyCheck` and
+- **Added** MiMa wiring on the frozen modules (0.5.0 sets no baseline), a MiMa dry run, `sbt stabilityTierCheck`, `frozenDependencyCheck` and
   `publishedArtifactsCheck` [#924](https://github.com/llm4s/llm4s/issues/924)
   [#1281](https://github.com/llm4s/llm4s/issues/1281) [#1126](https://github.com/llm4s/llm4s/issues/1126); [API
   stability](docs/reference/api-stability.md).
@@ -919,7 +929,8 @@ Initial release. Versions 0.1.0 through 0.1.7 were primarily focused on establis
 
 ---
 
-[Unreleased]: https://github.com/llm4s/llm4s/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/llm4s/llm4s/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/llm4s/llm4s/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/llm4s/llm4s/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/llm4s/llm4s/compare/v0.3.4...v0.4.0
 [0.3.4]: https://github.com/llm4s/llm4s/compare/v0.3.3...v0.3.4

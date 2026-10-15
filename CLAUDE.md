@@ -19,7 +19,7 @@
 
 ## Status
 
-The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/issues/1126)) is done; slice 8 ([#1281](https://github.com/llm4s/llm4s/issues/1281)) is the 0.5.0 release, MiMa baseline and compatibility policy, then 1.0. **Nothing is frozen until 0.5.0 is published and the MiMa baseline is set.** "Frozen module" below means a module in 1.0 Scope's *Frozen at 1.0* tier (those calling `mimaFrozen` in `build.sbt`); it is a target, not a constraint. Never argue for or against a design from "frozen", "the baseline" or "can be added later without breaking": fix a bad API outright, record the break in the CHANGELOG and migration guide, and add no shim or `@deprecated` overload. Coverage floors are in [#1127](https://github.com/llm4s/llm4s/issues/1127); they ratchet upward and are never lowered.
+The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/issues/1126)) is done; slice 8 ([#1281](https://github.com/llm4s/llm4s/issues/1281)) is the 0.5.0 release (published, no MiMa baseline), a MiMa baseline at a pre-1.0 release once the designs are final, then 1.0. **Nothing is frozen until that baseline is set.** "Frozen module" below means a module in 1.0 Scope's *Frozen at 1.0* tier (those calling `mimaFrozen` in `build.sbt`); it is a target, not a constraint. Never argue for or against a design from "frozen", "the baseline" or "can be added later without breaking": fix a bad API outright, record the break in the CHANGELOG and migration guide, and add no shim or `@deprecated` overload. Coverage floors are in [#1127](https://github.com/llm4s/llm4s/issues/1127); they ratchet upward and are never lowered.
 
 ## Architecture rules
 

@@ -797,7 +797,7 @@ encoding against `ToolResultContract.cases` the same way.
 
 ## Stability
 
-`llm4s-core` reaches a binary-compatibility baseline (MiMa) at 0.5.0 and freezes at 1.0. The
+`llm4s-core` reaches a binary-compatibility baseline (MiMa) at a pre-1.0 release, once the designs are final, and freezes at 1.0. The
 provider-author SPI described on this page is **public and frozen at 1.0**: binary-compatible
 across all 1.x releases, so a provider compiled against 1.0 keeps working. That covers:
 

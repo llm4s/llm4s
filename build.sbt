@@ -134,11 +134,10 @@ addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 // ---- binary compatibility (MiMa) ----
 // MiMa compares a module with the artifact of the same name in a previous release. It can only
 // run once split artifacts exist: the last release (0.4.1) is a single `llm4s-core`, and the
-// modularisation (#1126) moved every package this check would cover. #1281 sets the baseline at
-// 0.5.0, the first release with the split coordinates, for the frozen modules only. Until then
-// `mimaBaselineVersion` is `None`, `mimaPreviousArtifacts` is empty and
-// `sbt mimaReportBinaryIssues` checks nothing. Set it to `Some("0.5.0")` when 0.5.0 is
-// published; see docs/reference/api-stability.md.
+// modularisation (#1126) moved every package this check would cover. 0.5.0 sets no baseline: #1281
+// sets it at a pre-1.0 release, version to be decided, once the designs are final, for the frozen
+// modules only. Until then `mimaBaselineVersion` is `None`, `mimaPreviousArtifacts` is empty and
+// `sbt mimaReportBinaryIssues` checks nothing; see docs/reference/api-stability.md.
 val mimaBaselineVersion: Option[String] = None
 
 // `module` is the artifact name (the project's `name`). Apply this to frozen modules only.
@@ -1598,10 +1597,11 @@ lazy val agent = (project in file("modules/agent"))
 // `deleteThread`, run-claim leases and fencing, and two `GraphRuntime`s contending over one store -
 // plus the `ManualClock` it drives claim expiry with. It is published so that a store outside this
 // repository proves itself the way the in-repo ones do, as `llm4s-provider-testkit` is for providers.
+// It also has `FileBackendContract` (#1904), whose agent runs are driven by `llm4s-testkit`'s `ScriptedLLMClient`.
 // A test library, so ScalaTest is a compile dependency. `llm4s-agent`'s own tests cannot use it - that
 // would be a project cycle - so `InMemoryCheckpointer` passes it here, in the testkit's own tests.
 lazy val agentTestkit = (project in file("modules/agent-testkit"))
-  .dependsOn(agent)
+  .dependsOn(agent, testkit)
   .settings(
     name := "llm4s-agent-testkit",
     commonSettings,

@@ -21,8 +21,8 @@ import scala.jdk.CollectionConverters.*
  * target offers, one spec each.
  *
  * {{{
- * class HostFileBackendReplaySpec extends AnyFlatSpec with ReplayContract:
- *   protected def newSubject(): ReplayContract.Subject = HostFileSubject(freshRoot())
+ * class StoreFileBackendReplaySpec extends AnyFlatSpec with ReplayContract:
+ *   protected def newSubject(): ReplayContract.Subject = StoreFileSubject(InMemoryLongTermStore())
  * }}}
  *
  * Each case runs a one-task graph on a real [[GraphRuntime]] whose task performs the subject's two

@@ -4,7 +4,7 @@ import org.llm4s.annotation.Experimental
 
 /**
  * A lock a tool call holds while it runs, as its tool declares with [[AgentToolSpec.withLocks]]: a
- * path of segments, such as `state-files`, `workspace/<id>` or `workspace/<id>/src/a.scala`. Two keys
+ * path of segments, such as `files/state/files`, `workspace/<id>` or `workspace/<id>/src/a.scala`. Two keys
  * conflict when one is a prefix of the other, segment by segment, so a workspace-wide lock conflicts
  * with every file lock in that workspace, and a directory's with every lock beneath it; `a/b` does
  * not conflict with `a/bc`. The key with no segments is the root, and conflicts with every key.

@@ -365,10 +365,6 @@ subscriptions with `ThreadDeleted`, with the exceptions [Deleting a thread](#del
 
 ## The SQLite store
 
-{: .note }
-> Not yet published. `llm4s-agent-checkpoint-sqlite` exists in the build as of
-> [#1701](https://github.com/llm4s/llm4s/issues/1701) but ships in the next release.
-
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-agent-checkpoint-sqlite" % llm4sVersion // same version as llm4s-agent
 ```
@@ -671,10 +667,6 @@ the contract. In short:
   [When the store hangs](#when-the-store-hangs)).
 
 ### Testing it with the contract suite
-
-{: .note }
-> Not yet published. `llm4s-agent-testkit` exists in the build as of
-> [#1700](https://github.com/llm4s/llm4s/issues/1700) but ships in the next release.
 
 ```scala
 // same version as llm4s-agent; test scope only

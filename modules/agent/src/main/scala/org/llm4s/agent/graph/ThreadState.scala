@@ -47,5 +47,5 @@ final class ThreadState private[graph] (
   override def toString: String =
     values.toSeq.sortBy(_._1.value).map((id, v) => s"${id.value}=$v").mkString("ThreadState(", ", ", ")")
 
-private[graph] object ThreadState:
+private[agent] object ThreadState:
   def empty(keys: Map[StateKeyId, StateKey[?, ?]]): ThreadState = new ThreadState(keys, Map.empty)

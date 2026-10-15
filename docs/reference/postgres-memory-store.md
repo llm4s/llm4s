@@ -13,11 +13,6 @@ parent: Reference
 
 ## Dependency
 
-{: .note }
-> Not yet published. `llm4s-memory-postgres` exists in the build as of
-> [#1129](https://github.com/llm4s/llm4s/issues/1129) but ships in the next release;
-> in `0.4.1` and earlier this code is inside `llm4s-core`.
-
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-memory-postgres" % llm4sVersion
 ```

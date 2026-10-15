@@ -1,0 +1,542 @@
+package org.llm4s.agent.harness
+
+import org.llm4s.agent.graph.GraphTestSupport.testRunContext
+import org.llm4s.agent.graph.HarnessTestSupport.stateOf
+import org.llm4s.agent.graph.{
+  FencingToken,
+  GraphError,
+  IdempotencyKey,
+  ReplaySupport,
+  RunConfig,
+  StateUpdate,
+  TenantId,
+  ToolCallId
+}
+import org.llm4s.agent.graph.tool.{ Glob, LockKey, ToolContext }
+import org.llm4s.types.Result
+import org.scalatest.EitherValues
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+
+import java.time.{ Clock, Instant, ZoneOffset }
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
+import scala.concurrent.duration._
+
+class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
+
+  private val clock = Clock.fixed(Instant.parse("2026-10-14T00:00:00Z"), ZoneOffset.UTC)
+
+  private def p(s: String): VPath = VPath(s).value
+
+  private def storeFiles(store: LongTermStore, path: Vector[String] = Vector("memories")): StoreFileBackend =
+    StoreFileBackend(store, path).value
+
+  private def call(tenant: Option[String] = None): FileContext = {
+    val config = RunConfig().withTenantId(tenant.map(TenantId(_)))
+    FileContext(
+      ToolContext(testRunContext(config), ToolCallId("c"), IdempotencyKey(UUID.randomUUID().toString), stateOf())
+    )
+  }
+
+  private def done[A](r: Result[(A, StateUpdate)]): A = r.value._1
+
+  private val ns = Namespace(None, Vector("notes"))
+
+  "InMemoryLongTermStore" should "put, get, list by prefix, search and delete, through the guard" in {
+    val store = InMemoryLongTermStore(clock = clock)
+    store.replaySupport shouldBe ReplaySupport.Transactional
+    store.put(ns, "a/1", ujson.Obj("text" -> "Scala is nice"), call()).value shouldBe true
+    store.put(ns, "a/1", ujson.Obj("text" -> "Scala is great"), call()).value shouldBe false
+    store.put(ns, "b/1", ujson.Str("other"), call()).value shouldBe true
+    store.get(ns, "a/1").value.map(_.value("text").str) shouldBe Some("Scala is great")
+    store.get(ns, "a/1").value.map(_.updated) shouldBe Some(clock.instant())
+    store.list(ns, "a/", 10).value.items.map(_.key) shouldBe Vector("a/1")
+    store.search(ns, "GREAT", 10).value.items.map(_.key) shouldBe Vector("a/1")
+    store.search(ns, "b/", 10).value.items.map(_.key) shouldBe Vector("b/1")
+    store.delete(ns, "a/1", call()).value shouldBe true
+    store.delete(ns, "a/1", call()).value shouldBe false
+    store.appliedKeys shouldBe 0
+  }
+
+  it should "refuse an over-long key, prefix, query or namespace first, quoting only a prefix" in {
+    val store = InMemoryLongTermStore()
+    val huge  = "k" * 10000000
+    def short(r: Result[?]) = {
+      val e = r.left.value
+      e shouldBe a[BackendRefused]
+      e.message.length should be < 400
+      e.message
+    }
+    short(store.put(ns, huge, ujson.Str("v"), call())) should include("longer than 1024 bytes")
+    short(store.delete(ns, huge, call())) should include("longer than 1024 bytes")
+    short(store.get(ns, huge)) should include("longer than 1024 bytes")
+    short(store.list(ns, huge, 10)) should include("longer than 1024 bytes")
+    short(store.search(ns, huge, 10)) should include("longer than 1024 bytes")
+    val wide = Namespace(None, Vector.fill(2000)("n"))
+    short(store.put(wide, "k", ujson.Str("v"), call())) should include("namespace")
+    short(store.get(wide, "k")) should include("namespace")
+    // empty segments have no characters, but a million of them would render a million-element array
+    val many = Namespace(None, Vector.fill(1000000)(""))
+    short(store.put(many, "k", ujson.Str("v"), call())) should include("segments")
+    short(store.delete(many, "k", call())) should include("segments")
+  }
+
+  it should "keep namespaces apart, the tenant included" in {
+    val store = InMemoryLongTermStore()
+    val nsA   = Namespace(Some(TenantId("a")), Vector("notes"))
+    store.put(nsA, "k", ujson.Str("a's"), call()).value
+    store.get(ns, "k").value shouldBe None
+    store.get(Namespace(Some(TenantId("b")), Vector("notes")), "k").value shouldBe None
+    nsA.render should not be ns.render
+    Namespace(Some(TenantId("x")), Vector.empty).render should not be Namespace(None, Vector("x")).render
+  }
+
+  it should "bound items and namespaces inside the transaction, as refusals" in {
+    val store = InMemoryLongTermStore(StoreLimits(maxItemBytes = 20, maxItems = 2, maxBytes = 30))
+    store.put(ns, "k", ujson.Str("x" * 30), call()).left.value.message should include("over the limit of 20")
+    store.put(ns, "a", ujson.Str("0123456789"), call()).value // 1 + 12
+    store.put(ns, "b", ujson.Str("0123456789"), call()).value // 26
+    store.put(ns, "c", ujson.Str(""), call()).left.value.message should include("3 items")
+    store.put(ns, "b", ujson.Str("0123456789012345"), call()).left.value.message should include(
+      "bytes, over its limit of 30"
+    )
+    store.get(ns, "c").value shouldBe None
+    an[IllegalArgumentException] should be thrownBy StoreLimits(maxItemBytes = 2 << 20)
+  }
+
+  it should "return a recorded outcome for an applied key, writing nothing, even after another writer" in {
+    val store = InMemoryLongTermStore()
+    val same  = call()
+    val key   = same.effectKey("test.put", "k")
+    val runs  = new AtomicInteger()
+    def change(view: StoreView) = {
+      runs.incrementAndGet(); Right(StoreChange.Put(ujson.Str("first"), view.current.isEmpty))
+    }
+    store.modify[Boolean](ns, "k", key, FencingToken(0))(change).value shouldBe true
+    store.put(ns, "k", ujson.Str("someone else"), call()).value
+    store.modify[Boolean](ns, "k", key, FencingToken(0))(change).value shouldBe true
+    runs.get shouldBe 1
+    store.get(ns, "k").value.map(_.value.str) shouldBe Some("someone else")
+    store.appliedKeys shouldBe 1
+    store.forget(key, FencingToken(0)).value
+    store.appliedKeys shouldBe 0
+  }
+
+  it should "refuse an older claim's token per thread, changing nothing, for modify and forget alike" in {
+    val store = InMemoryLongTermStore()
+    val ctx   = call()
+    val key   = ctx.effectKey("test.put", "k")
+    def put(token: Long, value: String) =
+      store.modify[Unit](ns, "k", key, FencingToken(token))(_ => Right(StoreChange.Put(ujson.Str(value), ())))
+    put(5, "new claimant").value
+    store.forget(key, FencingToken(5)).value
+    put(3, "stale").left.value.message should include("stale claim")
+    store.get(ns, "k").value.map(_.value.str) shouldBe Some("new claimant")
+    store.forget(key, FencingToken(3)).left.value.message should include("stale claim")
+    // another thread's keys have a scope of their own
+    val other = FileContext(org.llm4s.agent.graph.HarnessTestSupport.runOn("another thread"), stateOf())
+      .effectKey("test.put", "k")
+    store.modify[Unit](ns, "k2", other, FencingToken(1))(_ => Right(StoreChange.Keep(()))).isRight shouldBe true
+  }
+
+  it should "match case-insensitively whatever the JVM's locale, and refuse a key that is not valid Unicode" in {
+    val store = InMemoryLongTermStore()
+    store.put(ns, "title", ujson.Str("istanbul"), call()).value
+    val previous = java.util.Locale.getDefault
+    java.util.Locale.setDefault(java.util.Locale.forLanguageTag("tr"))
+    val hits = store.search(ns, "ISTANBUL", 10)
+    java.util.Locale.setDefault(previous)
+    hits.value.items.map(_.key) shouldBe Vector("title")
+    store.put(ns, "bad\ud800", ujson.Str("x"), call()).left.value.message should include("not valid Unicode")
+  }
+
+  it should "refuse an outcome over the replay cap, writing and recording nothing" in {
+    val store = InMemoryLongTermStore()
+    val key   = call().effectKey("test.put", "k")
+    store
+      .modify[String](ns, "k", key, FencingToken(0))(_ => Right(StoreChange.Keep("x" * (2 << 20))))
+      .left
+      .value
+      .message should include("replay cap")
+    store.appliedKeys shouldBe 0
+  }
+
+  it should "refuse a value nested deeper than MaxDepth, without overflowing the stack" in {
+    val store = InMemoryLongTermStore()
+    val deep  = (1 to 100000).foldLeft[ujson.Value](ujson.Num(1))((v, _) => ujson.Arr(v))
+    // 100 000 levels are over the size cap too, which is counted first, iteratively: refused, no overflow
+    store.put(ns, "deep", deep, call()).left.value.message should include("over the limit")
+    val deeper = (1 to LongTermStore.MaxDepth + 1).foldLeft[ujson.Value](ujson.Num(1))((v, _) => ujson.Arr(v))
+    store.put(ns, "deeper", deeper, call()).left.value.message should include("nested deeper")
+    val ok = (1 to LongTermStore.MaxDepth - 1).foldLeft[ujson.Value](ujson.Num(1))((v, _) => ujson.Arr(v))
+    store.put(ns, "ok", ok, call()).value shouldBe true
+    store.appliedKeys shouldBe 0
+  }
+
+  it should "keep a recorded outcome its caller cannot change, and bound an outcome's depth" in {
+    val store = InMemoryLongTermStore()
+    val key   = call().effectKey("test.json", "k")
+    def run() =
+      store.modify[ujson.Value](ns, "k", key, FencingToken(0))(_ => Right(StoreChange.Keep(ujson.Obj("n" -> 1))))
+    run().value("n") = 2
+    run().value("n") = 3
+    run().value("n").num shouldBe 1
+    val deep  = (1 to 100000).foldLeft[ujson.Value](ujson.Num(1))((v, _) => ujson.Arr(v))
+    val other = call().effectKey("test.json", "deep")
+    store
+      .modify[ujson.Value](ns, "d", other, FencingToken(0))(_ => Right(StoreChange.Keep(deep)))
+      .left
+      .value
+      .message should
+      include("nested deeper")
+  }
+
+  it should "record nothing for a refused change" in {
+    val store = InMemoryLongTermStore()
+    val key   = call().effectKey("test.put", "k")
+    store
+      .modify[Boolean](ns, "k", key, FencingToken(0))(_ => Left(BackendRefused("put", "k", "no")))
+      .left
+      .value shouldBe a[BackendRefused]
+    store.appliedKeys shouldBe 0
+  }
+
+  "StoreFileBackend" should "keep files in the run's tenant's namespace" in {
+    val store = InMemoryLongTermStore(clock = clock)
+    val files = storeFiles(store)
+    done(files.write(p("/notes.md"), "a's note", call(Some("a")))) shouldBe FileWritten(created = true, 8)
+    files.read(p("/notes.md"), 0, 10, call(Some("a"))).value.lines shouldBe Vector("a's note")
+    files.read(p("/notes.md"), 0, 10, call(Some("b"))).left.value.message should include("not found")
+    files.read(p("/notes.md"), 0, 10, call()).left.value.message should include("not found")
+    store.get(Namespace(Some(TenantId("a")), Vector("memories")), "/notes.md").value.isDefined shouldBe true
+  }
+
+  it should "refuse an edit whose result would pass the item limit before building it" in {
+    val store = InMemoryLongTermStore()
+    val files = storeFiles(store)
+    done(files.write(p("/big.md"), "a" * 10000, call()))
+    // 10 000 occurrences each grown by 999 999 characters: about 10^10, which no JVM here could allocate
+    val refusal = files.edit(p("/big.md"), "a", "b" * 1000000, replaceAll = true, call()).left.value
+    refusal shouldBe a[BackendRefused]
+    refusal.message should include("larger than the limit")
+  }
+
+  it should "refuse a namespace another writer left invalid as Corrupt, for every operation but delete" in {
+    val memories = Namespace(None, Vector("memories"))
+    def corrupt[A](r: Result[A], problem: String): Unit =
+      r.left.value match {
+        case b: BackendRefused =>
+          b.kind shouldBe BackendRefused.Kind.Corrupt
+          b.message should include(problem)
+        case other => fail(s"expected a Corrupt refusal, got $other")
+      }
+    def seed(store: LongTermStore, key: String, value: ujson.Value): Unit = {
+      val effect = org.llm4s.agent.graph.HarnessTestSupport.runOn(s"seed-$key").effectKey("seed", key)
+      store.modify[Unit](memories, key, effect, FencingToken(0))(_ => Right(StoreChange.Put(value, ()))).value
+    }
+    def text(s: String) = ujson.Obj("content" -> s)
+    val cases = Seq[(String, Seq[(String, ujson.Value)], Option[String], String)](
+      // (the shape, what another writer stored, the file to delete (else the store's own delete), what is said)
+      ("a key that is not a path", Seq("notes" -> text("x")), None, "not a file path"),
+      ("a key that is not canonical", Seq("/a/" -> text("x")), None, "not a file path"),
+      ("an item that is not a file", Seq("/meta" -> ujson.Obj("tags" -> ujson.Arr("t"))), Some("/meta"), "not a file"),
+      (
+        "a file with other fields",
+        Seq("/rich" -> ujson.Obj("content" -> "x", "metadata" -> ujson.Obj("k" -> "v"))),
+        Some("/rich"),
+        "not a file"
+      ),
+      ("binary content", Seq("/nul" -> text("a\u0000b")), Some("/nul"), "binary"),
+      ("an unpaired surrogate", Seq("/s" -> text("a\uD800b")), Some("/s"), "not valid Unicode"),
+      ("a file at the root", Seq("/" -> text("x")), Some("/"), "at the root"),
+      ("a file that is also a directory", Seq("/a" -> text("x"), "/a/b" -> text("y")), Some("/a"), "both a file")
+    )
+    for ((shape, stored, offending, problem) <- cases) withClue(shape) {
+      val store = InMemoryLongTermStore()
+      val files = storeFiles(store)
+      stored.foreach((key, value) => seed(store, key, value))
+      corrupt(files.ls(VPath.root, 10, call()), problem)
+      corrupt(files.read(p("/x"), 0, 1, call()), problem)
+      corrupt(files.write(p("/new"), "y", call()), problem)
+      corrupt(files.edit(p("/x"), "x", "y", replaceAll = false, call()), problem)
+      corrupt(files.glob(Glob("**"), VPath.root, 10, call()), problem)
+      corrupt(files.grep("x", VPath.root, None, 10, call()), problem)
+      offending match {
+        case Some(path) => done(files.delete(p(path), call())) shouldBe FileDeleted(wasDirectory = false)
+        case None       => store.delete(memories, stored.head._1, call()).value shouldBe true
+      }
+      files.ls(VPath.root, 10, call()).isRight shouldBe true
+    }
+  }
+
+  it should "edit inside the transaction, list implicit directories, glob and grep" in {
+    val files = storeFiles(InMemoryLongTermStore(clock = clock))
+    done(files.write(p("/user/prefs.md"), "likes scala\nlikes tea", call()))
+    done(files.edit(p("/user/prefs.md"), "tea", "coffee", replaceAll = false, call())) shouldBe FileEdited(1)
+    files.edit(p("/user/prefs.md"), "tea", "x", replaceAll = false, call()).left.value.message should include(
+      "not found"
+    )
+    files.edit(p("/nope"), "a", "b", replaceAll = false, call()).left.value.message should include("not found")
+    files.ls(VPath.root, 10, call()).value.items.map(i => (i.path.value, i.isDirectory)) shouldBe Vector(
+      "/user" -> true
+    )
+    files.glob(Glob("**/*.md"), VPath.root, 10, call()).value.items shouldBe Vector(p("/user/prefs.md"))
+    files.grep("coffee", VPath.root, None, 10, call()).value.items shouldBe Vector(
+      GrepMatch(p("/user/prefs.md"), 2, "likes coffee")
+    )
+    files.write(p("/user"), "x", call()).left.value.message should include("is a directory")
+    files.delete(p("/user"), call()).left.value.message should include("is a directory")
+    done(files.delete(p("/user/prefs.md"), call())) shouldBe FileDeleted(wasDirectory = false)
+    files.delete(p("/user/prefs.md"), call()).left.value.message should include("not found")
+  }
+
+  it should "return a replayed edit's first result, not \"`old` was not found\"" in {
+    val files = storeFiles(InMemoryLongTermStore())
+    done(files.write(p("/a.md"), "x y", call()))
+    val same = call().tool.get
+    done(files.edit(p("/a.md"), "x", "z", replaceAll = false, FileContext(same))) shouldBe FileEdited(1)
+    done(files.edit(p("/a.md"), "x", "z", replaceAll = false, FileContext(same))) shouldBe FileEdited(1)
+    files.read(p("/a.md"), 0, 1, call()).value.lines shouldBe Vector("z y")
+  }
+
+  it should "decide the tree's shape in the transaction: of a file and a path beneath it written at once, one wins" in {
+    (1 to 50).foreach { _ =>
+      val files = storeFiles(InMemoryLongTermStore())
+      val start = new java.util.concurrent.CyclicBarrier(2)
+      val pool  = java.util.concurrent.Executors.newFixedThreadPool(2)
+      val writes = Vector("/a", "/a/b").map(path =>
+        pool.submit { () =>
+          start.await(); files.write(p(path), "x", call())
+        }
+      )
+      val results = writes.map(_.get(10, java.util.concurrent.TimeUnit.SECONDS))
+      pool.shutdown()
+      results.count(_.isRight) shouldBe 1
+      results.collect { case Left(e) => e }.head shouldBe a[BackendRefused]
+    }
+  }
+
+  "InMemoryLongTermStore" should "copy values in and out, so no caller can change what it stores" in {
+    val store = InMemoryLongTermStore()
+    val input = ujson.Obj("n" -> 1)
+    store.put(ns, "k", input, call()).value
+    input("n") = 2
+    store.get(ns, "k").value.get.value("n").num shouldBe 1
+    store.get(ns, "k").value.get.value("n") = 3
+    store.list(ns, "", 10).value.items.head.item.value("n") = 4
+    store.search(ns, "k", 10).value.items.head.item.value("n") = 5
+    store.get(ns, "k").value.get.value("n").num shouldBe 1
+    val key = call().effectKey("test.put", "k")
+    store
+      .modify[Unit](ns, "k", key, FencingToken(0)) { view =>
+        view.current.get.value("n") = 6
+        Left(BackendRefused("put", "k", "no"))
+      }
+      .left
+      .value shouldBe a[BackendRefused]
+    store.get(ns, "k").value.get.value("n").num shouldBe 1
+  }
+
+  it should "refuse a write over the store's bounds as a tool error, and lock by path" in {
+    val files = storeFiles(InMemoryLongTermStore(StoreLimits(maxItemBytes = 40)), Vector("mem"))
+    val error = files.write(p("/big.md"), "x" * 50, call()).left.value
+    BackendRefused.toolOutcome(error) shouldBe a[org.llm4s.agent.graph.tool.ToolOutcome.Error]
+    files.locks(p("/a/b.md")) shouldBe Set(LockKey("files/store/mem/a/b.md"))
+  }
+
+  // Sandbox
+
+  final private class CountingRunner(output: String = "ok") extends SandboxRunner {
+    val runs                                = new AtomicInteger()
+    def locks(workdir: VPath): Set[LockKey] = Set(LockKey("workspace", "w"))
+    def run(
+      command: String,
+      workdir: VPath,
+      timeout: FiniteDuration,
+      maxOutputBytes: Int,
+      ctx: FileContext
+    ): Result[ExecResult] = {
+      runs.incrementAndGet()
+      Right(ExecResult(0, output, s"$command in ${workdir.value}"))
+    }
+  }
+
+  "SandboxBackend" should "refuse an over-long command before its effect key or runner sees it" in {
+    val runner  = new CountingRunner()
+    val sandbox = SandboxBackend(runner)
+    val refusal = sandbox.execute("x" * 10000000, p("/src"), 1.second, call()).left.value
+    refusal shouldBe a[BackendRefused]
+    refusal.message should include("longer than 65536 bytes")
+    refusal.message.length should be < 400
+    runner.runs.get shouldBe 0
+  }
+
+  "SandboxBackend" should "run through the guard, replaying a completed command's result without running it" in {
+    val runner  = new CountingRunner()
+    val sandbox = SandboxBackend(runner)
+    sandbox.replaySupport shouldBe ReplaySupport.Unverifiable
+    sandbox.locks(p("/src")) shouldBe Set(LockKey("workspace/w"))
+    val same = call().tool.get
+    sandbox.execute("ls", p("/src"), 1.second, FileContext(same)).value shouldBe ExecResult(0, "ok", "ls in /src")
+    sandbox.execute("ls", p("/src"), 1.second, FileContext(same)).value shouldBe ExecResult(0, "ok", "ls in /src")
+    runner.runs.get shouldBe 1
+    sandbox.execute("ls", p("/src"), 1.second, call()).value
+    runner.runs.get shouldBe 2
+  }
+
+  it should "cut each stream at maxOutputBytes on a character boundary before recording it" in {
+    val sandbox = SandboxBackend(new CountingRunner("é" * 10), maxOutputBytes = 5)
+    val result  = sandbox.execute("cmd", VPath.root, 1.second, call()).value
+    result.stdout shouldBe "éé"
+    result.stderr shouldBe "cmd i"
+    result.truncated shouldBe true
+    an[IllegalArgumentException] should be thrownBy SandboxBackend(new CountingRunner(), maxOutputBytes = 1 << 20)
+  }
+
+  it should "bound each stream's encoded size, so an output of control characters still fits a record" in {
+    val sandbox = SandboxBackend(new CountingRunner("\u0001" * 100), maxOutputBytes = 60)
+    val result  = sandbox.execute("cmd", VPath.root, 1.second, call()).value
+    result.stdout shouldBe "\u0001" * 10 // 6 encoded bytes each
+    result.truncated shouldBe true
+    Text.jsonBytes(result.stdout) should be <= 60L
+    val worst = SandboxBackend(new CountingRunner("\u0001" * (1 << 20)), maxOutputBytes = SandboxBackend.MaxOutputBytes)
+    val recorded = upickle.default.write(worst.execute("x" * 1000, VPath.root, 1.second, call()).value)
+    recorded.length should be < org.llm4s.agent.graph.ReplayGuard.DefaultMaxOutcomeBytes
+  }
+
+  it should "fail before recording an intent when its runner cannot be resolved, so a retry runs" in {
+    val runner    = new CountingRunner()
+    var available = false
+    val sandbox = SandboxBackend.resolved(_ => Set(LockKey("workspace")))(_ =>
+      if available then Right(runner) else Left(org.llm4s.error.ProcessingError("sandbox", "unavailable"))
+    )
+    val same = call().tool.get
+    sandbox.execute("ls", VPath.root, 1.second, FileContext(same)).left.value.message should include("unavailable")
+    available = true
+    sandbox.execute("ls", VPath.root, 1.second, FileContext(same)).value.stdout shouldBe "ok"
+    runner.runs.get shouldBe 1
+  }
+
+  it should "resolve its runner per call" in {
+    val runnerA = new CountingRunner("a")
+    val sandbox = SandboxBackend.resolved(_ => Set(LockKey("workspace")))(ctx =>
+      ctx.run.config.tenantId
+        .map(_.value)
+        .filter(_ == "a")
+        .map(_ => runnerA)
+        .toRight(BackendRefused("execute", "x", "no sandbox"))
+    )
+    sandbox.execute("ls", VPath.root, 1.second, call(Some("a"))).value.stdout shouldBe "a"
+    sandbox.execute("ls", VPath.root, 1.second, call(Some("b"))).left.value shouldBe a[BackendRefused]
+  }
+
+  it should "encode its result" in {
+    val r = ExecResult(2, "out", "err", truncated = true)
+    upickle.default.read[ExecResult](upickle.default.write(r)) shouldBe r
+  }
+
+  "BackendRefused.toolOutcome" should "make refusals tool errors and anything else fatal" in {
+    import org.llm4s.agent.graph.tool.ToolOutcome
+    BackendRefused.toolOutcome(BackendRefused("a", "b", "c")) shouldBe ToolOutcome.Error("a b: c")
+    BackendRefused.toolOutcome(GraphError.EffectReplayRefused("op", "why")) shouldBe a[ToolOutcome.Error]
+    BackendRefused.toolOutcome(org.llm4s.error.ProcessingError("x", "y")) shouldBe a[ToolOutcome.Fatal]
+  }
+
+  "InMemoryLongTermStore.modify" should "record the outcome its codec emitted once, whatever a second run would emit" in {
+    final case class Shifty(v: String)
+    val calls = new AtomicInteger()
+    given upickle.default.ReadWriter[Shifty] = upickle.default
+      .readwriter[ujson.Value]
+      .bimap[Shifty](
+        s => if calls.incrementAndGet() == 1 then ujson.Str(s.v) else ujson.Str("x" * 2000000),
+        j => Shifty(j.str)
+      )
+    val store = InMemoryLongTermStore()
+    val key   = org.llm4s.agent.graph.HarnessTestSupport.runOn("t").effectKey("shifty", "k")
+    store.modify[Shifty](ns, "k", key, FencingToken(0))(_ => Right(StoreChange.Keep(Shifty("small")))).value shouldBe
+      Shifty("small")
+    calls.get shouldBe 1
+    // replayed: the recorded outcome, the one that was sized
+    store.modify[Shifty](ns, "k", key, FencingToken(0))(_ => Right(StoreChange.Keep(Shifty("other")))).value shouldBe
+      Shifty("small")
+  }
+
+  "StoreFileBackend.apply" should "refuse a path over the namespace bounds before building its lock key" in {
+    StoreFileBackend(InMemoryLongTermStore(), Vector.fill(1000000)("")).left.value.message should include("segments")
+    StoreFileBackend(InMemoryLongTermStore(), Vector("m" * 10000)).left.value.message should include("namespace")
+  }
+
+  "SandboxBackend.resolved" should "fail before running when its declared locks do not cover the runner's" in {
+    val runner  = new CountingRunner()
+    val sandbox = SandboxBackend.resolved(_ => Set(LockKey("elsewhere")))(_ => Right(runner))
+    val error   = sandbox.execute("ls", VPath.root, 1.second, call()).left.value
+    error shouldBe a[org.llm4s.error.ValidationError]
+    error.message should include("workspace/w")
+    runner.runs.get shouldBe 0
+    // the runner's own lock, or an ancestor of it, covers it
+    SandboxBackend
+      .resolved(_ => Set(LockKey("workspace", "w")))(_ => Right(runner))
+      .execute("ls", VPath.root, 1.second, call())
+      .isRight shouldBe true
+  }
+
+  "FileContext.effectKey" should "give every request its own key, whatever discriminators a caller passes" in {
+    val ctx   = call()
+    val first = ctx.effectKey("op", "x", "#1")
+    val a     = ctx.effectKey("op", "x")
+    val b     = ctx.effectKey("op", "x")
+    Set(first, a, b).size shouldBe 3
+  }
+
+  "StoreFileBackend over a store of Int.MaxValue items" should "still see a file's ancestor in its transaction" in {
+    val files = storeFiles(InMemoryLongTermStore(StoreLimits(maxItems = Int.MaxValue)))
+    done(files.write(p("/a"), "x", call()))
+    files.write(p("/a/b"), "y", call()).left.value.message should include("beneath a file")
+  }
+
+  "Text.jsonValueBytes" should "count an object's keys only as far as the cap" in {
+    Text.jsonValueBytes(ujson.Obj("k" * 10000000 -> ujson.Null), 100) should be <= 110L
+  }
+
+  "InMemoryLongTermStore.modify" should "refuse a change that calls back into the store, so no write is lost" in {
+    val store = InMemoryLongTermStore()
+    val outer = org.llm4s.agent.graph.HarnessTestSupport.runOn("outer").effectKey("outer", "a")
+    val inner = org.llm4s.agent.graph.HarnessTestSupport.runOn("inner").effectKey("inner", "b")
+    val nested = store.modify[Unit](ns, "a", outer, FencingToken(0)) { _ =>
+      store
+        .modify[Unit](ns, "b", inner, FencingToken(0))(_ => Right(StoreChange.Put(ujson.Str("b"), ())))
+        .map(_ => StoreChange.Put(ujson.Str("a"), ()))
+    }
+    nested.left.value.message should include("inside another transaction")
+    store.get(ns, "a").value shouldBe None
+    store.get(ns, "b").value shouldBe None
+    // and the store is usable after
+    store
+      .modify[Unit](ns, "a", outer, FencingToken(0))(_ => Right(StoreChange.Put(ujson.Str("a"), ())))
+      .isRight shouldBe true
+  }
+
+  it should "refuse a wide value by its size before walking it for depth" in {
+    val store = InMemoryLongTermStore()
+    val wide  = ujson.Arr.from(Iterator.fill(2000000)(ujson.Null))
+    val key   = org.llm4s.agent.graph.HarnessTestSupport.runOn("wide").effectKey("wide", "w")
+    store
+      .modify[Unit](ns, "w", key, FencingToken(0))(_ => Right(StoreChange.Put(wide, ())))
+      .left
+      .value
+      .message should include("over the limit")
+    // a deep value within the size cap is still refused for its depth
+    val deep = (1 to 100).foldLeft[ujson.Value](ujson.Null)((v, _) => ujson.Arr(v))
+    store
+      .modify[Unit](
+        ns,
+        "d",
+        org.llm4s.agent.graph.HarnessTestSupport.runOn("deep").effectKey("deep", "d"),
+        FencingToken(0)
+      )(_ => Right(StoreChange.Put(deep, ())))
+      .left
+      .value
+      .message should include("nested deeper")
+  }
+}

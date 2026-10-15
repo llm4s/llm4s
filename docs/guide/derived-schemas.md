@@ -11,7 +11,7 @@ nav_order: 28
 Write the type once and let `llm4s-schema-derivation` build the JSON schema for structured output from it.
 {: .fs-6 .fw-300 }
 
-> **Experimental.** The module is new and not part of the 1.0 frozen surface. It is not published yet: until a release carries it, build it from a checkout (`sbt schemaDerivation/publishLocal`).
+> **Experimental.** The module is new and not part of the 1.0 frozen surface. It is published from `0.5.0` on.
 
 1. TOC
 {:toc}

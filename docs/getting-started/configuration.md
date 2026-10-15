@@ -73,8 +73,7 @@ libraryDependencies ++= Seq(
 | `bedrock` | `llm4s-bedrock` |
 | `deepseek`, `zai`, `openrouter`, `mistral`, `cohere`, `openai-compatible` | `llm4s-openai-compatible` |
 
-The provider modules are on `main` but not yet published: `0.4.1` ships every provider inside
-`llm4s-core`, so with `0.4.1` the `llm4s-core` dependency alone is enough.
+Before 0.5.0, every provider shipped inside `llm4s-core`, so the `llm4s-core` dependency alone was enough.
 
 **2. Add a section to `src/main/resources/application.conf`:**
 

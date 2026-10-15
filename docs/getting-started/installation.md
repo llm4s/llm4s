@@ -133,7 +133,7 @@ No build at all: declare the dependency in the file.
 {%- endunless %}
 ```
 
-From 0.5.0, add the provider module you use next to `llm4s-core` (`llm4s-openai` above). The
+Add the provider module you use next to `llm4s-core` (`llm4s-openai` above). The
 [Scala CLI quick start](scala-cli) has a complete file that makes a first call.
 
 ### Multi-Module Project
@@ -152,10 +152,6 @@ lazy val myProject = (project in file("."))
 ```
 
 ### Align versions with the BOM
-
-{: .note }
-> Not yet published. `llm4s-bom` exists in the build as of
-> [#1462](https://github.com/llm4s/llm4s/issues/1462) but ships in the next release.
 
 A project that uses several llm4s modules (a provider, `llm4s-rag`, `llm4s-observability`) can state the
 version once, in the bill of materials `llm4s-bom`, and leave it off every module. The BOM contains no code;
@@ -232,8 +228,8 @@ sbt version        # prints the version it published, for example 0.4.1+165-b455
 
 Then depend on that version, for example
 `libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.4.1+165-b455b8ea-SNAPSHOT"` (use the one `sbt version`
-printed). `main` describes modules and configuration that the latest release does not have yet, so the
-rest of this guide matches `main`, not the released artifact, wherever it says a module is not yet published.
+printed). This guide describes the latest release; `main` may have modules and configuration that it does not
+have yet.
 
 ---
 
@@ -270,15 +266,10 @@ The starter kit includes:
 ## Optional Dependencies
 
 {: .note }
-> Additional modules are published separately. The core library includes most functionality.
-> Check [Maven Central](https://central.sonatype.com/namespace/org.llm4s) for available artifacts.
+> `llm4s-core` is the spine: types, configuration, the `LLMClient` interface and the tool API. Providers, the agent
+> runtime and everything below are separate modules, released at the same version. Check [Maven Central](https://central.sonatype.com/namespace/org.llm4s) for available artifacts.
 
 ### For RAG, vector stores, chunking, reranking and document extraction
-
-{: .note }
-> Not yet published. `llm4s-rag` exists in the build as of
-> [#1128](https://github.com/llm4s/llm4s/issues/1128) but ships in the next release;
-> in `0.4.1` and earlier this code is still inside `llm4s-core`.
 
 ```scala
 // same version as llm4s-core
@@ -291,11 +282,6 @@ Package names are unchanged, so existing `org.llm4s.rag.*` imports keep working;
 [migration note](../reference/migration#slice-1-llm4s-rag-and-llm4s-knowledgegraph).
 
 ### For agent memory
-
-{: .note }
-> Not yet published. `llm4s-memory` and `llm4s-memory-postgres` exist in the build as of
-> [#1129](https://github.com/llm4s/llm4s/issues/1129) but ship in the next release;
-> in `0.4.1` and earlier this code is still inside `llm4s-core`.
 
 ```scala
 // same version as llm4s-core
@@ -314,11 +300,6 @@ dependencies `llm4s-core` no longer carries. Package names are unchanged, so exi
 
 ### For MCP (Model Context Protocol)
 
-{: .note }
-> Not yet published. `llm4s-mcp` exists in the build as of
-> [#1130](https://github.com/llm4s/llm4s/issues/1130) but ships in the next release;
-> in `0.4.1` and earlier this code is still inside `llm4s-core`.
-
 ```scala
 // same version as llm4s-core
 libraryDependencies += "org.llm4s" %% "llm4s-mcp" % llm4sVersion
@@ -330,11 +311,6 @@ imports keep working; see the
 [migration note](../reference/migration#slice-3-llm4s-mcp).
 
 ### For speech (STT / TTS)
-
-{: .note }
-> Not yet published. `llm4s-speech` exists in the build as of
-> [#1130](https://github.com/llm4s/llm4s/issues/1130) but ships in the next release;
-> in `0.4.1` and earlier this code is still inside `llm4s-core`.
 
 ```scala
 // same version as llm4s-core
@@ -348,11 +324,6 @@ the point of the split. Package names are unchanged; see the
 [migration note](../reference/migration#slice-3-llm4s-speech).
 
 ### For Ollama (local models)
-
-{: .note }
-> Not yet published. `llm4s-ollama` exists in the build as of
-> [#1132](https://github.com/llm4s/llm4s/issues/1132) but ships in the next release;
-> in `0.4.1` and earlier Ollama is still inside `llm4s-core`.
 
 ```scala
 // same version as llm4s-core
@@ -368,11 +339,6 @@ unchanged; see the
 [migration note](../reference/migration#slice-5-llm4s-ollama).
 
 ### For Gemini and Vertex AI
-
-{: .note }
-> Not yet published. `llm4s-gemini` exists in the build as of
-> [#1132](https://github.com/llm4s/llm4s/issues/1132) but ships in the next release;
-> in `0.4.1` and earlier Gemini and Vertex AI are still inside `llm4s-core`.
 
 ```scala
 // same version as llm4s-core
@@ -390,11 +356,6 @@ are. Package names are unchanged; see the
 
 ### For Anthropic
 
-{: .note }
-> Not yet published. `llm4s-anthropic` exists in the build as of
-> [#1132](https://github.com/llm4s/llm4s/issues/1132) but ships in the next release;
-> in `0.4.1` and earlier Anthropic is still inside `llm4s-core`.
-
 ```scala
 // same version as llm4s-core
 libraryDependencies += "org.llm4s" %% "llm4s-anthropic" % llm4sVersion
@@ -409,11 +370,6 @@ providers that are. Package names are unchanged; see the
 [migration note](../reference/migration#slice-5-llm4s-anthropic).
 
 ### For OpenAI, Azure OpenAI and Requesty
-
-{: .note }
-> Not yet published. `llm4s-openai` exists in the build as of
-> [#1132](https://github.com/llm4s/llm4s/issues/1132) but ships in the next release;
-> in `0.4.1` and earlier these providers are still inside `llm4s-core`.
 
 ```scala
 // same version as llm4s-core
@@ -439,12 +395,6 @@ unchanged; see the [migration note](../reference/migration#slice-5-llm4s-openai)
 
 ### For DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any OpenAI-compatible endpoint
 
-{: .note }
-> Not yet published. `llm4s-openai-compatible` exists in the build as of
-> [#1132](https://github.com/llm4s/llm4s/issues/1132) but ships in the next release;
-> in `0.4.1` and earlier DeepSeek, Z.ai, OpenRouter, Mistral and Cohere are still inside
-> `llm4s-core`.
-
 ```scala
 // same version as llm4s-core
 libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % llm4sVersion
@@ -464,10 +414,6 @@ are unchanged; see the
 Cohere [this one](../reference/migration#slice-5-mistral-cohere-and-voyage-leave-core-core-ships-no-provider).
 
 ### For AWS Bedrock
-
-{: .note }
-> Not yet published. `llm4s-bedrock` exists in the build as of
-> [#1008](https://github.com/llm4s/llm4s/issues/1008) but ships in the next release.
 
 ```scala
 // same version as llm4s-core
@@ -493,11 +439,6 @@ instance or task role), or from a `profile`, or from explicit `accessKeyId` / `s
 
 ### For Voyage AI embeddings
 
-{: .note }
-> Not yet published. `llm4s-voyage` exists in the build as of
-> [#1132](https://github.com/llm4s/llm4s/issues/1132) but ships in the next release;
-> in `0.4.1` and earlier Voyage is still inside `llm4s-core`.
-
 ```scala
 // same version as llm4s-core
 libraryDependencies += "org.llm4s" %% "llm4s-voyage" % llm4sVersion
@@ -508,10 +449,6 @@ The Voyage AI embedding provider (`EMBEDDING_MODEL=voyage/<model>`), with its
 `modules/providers/`, and brings no dependency beyond `llm4s-core`.
 
 ### For Jina AI embeddings
-
-{: .note }
-> Not yet published. `llm4s-jina` exists in the build as of
-> [#1028](https://github.com/llm4s/llm4s/issues/1028) but ships in the next release.
 
 ```scala
 // same version as llm4s-core
@@ -525,9 +462,6 @@ dependency beyond `llm4s-core`.
 
 ### For Cohere embeddings
 
-{: .note }
-> Not yet published. `llm4s-cohere` exists in the build but ships in the next release.
-
 ```scala
 // same version as llm4s-core
 libraryDependencies += "org.llm4s" %% "llm4s-cohere" % llm4sVersion
@@ -539,10 +473,6 @@ with its `llm4s.embeddings.cohere` config block and a typed `CohereInputType` (`
 provider module under `modules/providers/`; it brings no dependency beyond `llm4s-core`.
 
 ### For the Jev decision model
-
-{: .note }
-> Not yet published. `llm4s-jev` exists in the build as of [#1265](https://github.com/llm4s/llm4s/issues/1265) but ships in
-> the next release.
 
 ```scala
 // same version as llm4s-core
@@ -566,11 +496,6 @@ The IBM watsonx.ai chat provider (`provider = "watsonx"`), brings no dependency 
 
 ### For Java, Spring Boot, cats-effect and ZIO
 
-{: .note }
-> Not yet published. These modules exist in the build as of
-> [#934](https://github.com/llm4s/llm4s/issues/934), [#935](https://github.com/llm4s/llm4s/issues/935)
-> and [#936](https://github.com/llm4s/llm4s/issues/936) but ship in the next release.
-
 ```scala
 // same version as llm4s-core
 libraryDependencies += "org.llm4s" %% "llm4s-java-api"             % llm4sVersion  // Java facade
@@ -586,10 +511,6 @@ libraryDependencies += "org.llm4s" %% "llm4s-pekko"                % llm4sVersio
 `llm4s-zio` and `llm4s-pekko` wrap `LLMClient` and `Agent` for their effect and streaming systems.
 
 ### For Kotlin (coroutines and Flow)
-
-{: .note }
-> Not yet published. `llm4s-kotlin-api` ships to Maven Central from the next release on
-> ([#1494](https://github.com/llm4s/llm4s/issues/1494)), with every release after it.
 
 `llm4s-kotlin-api` is the Kotlin coroutine API over the Java facade: `LLMClientKt` and `AgentKt` with suspend
 functions, and `Flow`s of an agent turn's events. It is a Kotlin artifact, so it has **no** `_3` suffix, and it is
@@ -610,11 +531,6 @@ in `modules/kotlin-api` (it builds at `0.1.0-SNAPSHOT` unless you pass `-Pllm4sV
 
 ### For image generation and vision
 
-{: .note }
-> Not yet published. `llm4s-image` exists in the build as of
-> [#1130](https://github.com/llm4s/llm4s/issues/1130) but ships in the next release;
-> in `0.4.1` and earlier this code is still inside `llm4s-core`.
-
 ```scala
 // same version as llm4s-core
 libraryDependencies += "org.llm4s" %% "llm4s-image" % llm4sVersion
@@ -630,10 +546,6 @@ Package names are unchanged, so existing `org.llm4s.imagegeneration.*` and
 in `llm4s-media`. See the [migration note](../reference/migration#slice-3-llm4s-image).
 
 ### For media types (`MediaType`, `MediaCategory`)
-
-{: .note }
-> Not yet published. `llm4s-media` exists in the build as of
-> [#1130](https://github.com/llm4s/llm4s/issues/1130) but ships in the next release.
 
 ```scala
 // same version as llm4s-core
@@ -652,11 +564,6 @@ types that used to ship in `llm4s-core`, which is a source break — see the
 
 ### For agents (`Agent`, guardrails, handoffs, graphs)
 
-{: .note }
-> Not yet published. `llm4s-agent` exists in the build as of
-> [#1242](https://github.com/llm4s/llm4s/issues/1242) but ships in the next release;
-> in `0.4.1` and earlier this code is still inside `llm4s-core`.
-
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-agent" % llm4sVersion // same version as llm4s-core
 ```
@@ -670,10 +577,6 @@ contract. Package names are unchanged. See the
 
 ### For durable agent threads (SQLite checkpointer)
 
-{: .note }
-> Not yet published. `llm4s-agent-checkpoint-sqlite` exists in the build as of
-> [#1701](https://github.com/llm4s/llm4s/issues/1701) but ships in the next release.
-
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-agent-checkpoint-sqlite" % llm4sVersion // same version as llm4s-agent
 ```
@@ -685,10 +588,6 @@ not depend on. See [Durable Checkpointers](../guide/agents/durable-checkpointers
 
 ### For semantic memory in agents
 
-{: .note }
-> Not yet published. `llm4s-agent-memory` exists in the build as of
-> [#1911](https://github.com/llm4s/llm4s/issues/1911) but ships in the next release.
-
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-agent-memory" % llm4sVersion // same version as llm4s-agent
 ```
@@ -698,11 +597,6 @@ records the turn after it, on an `llm4s-memory` store. It depends on `llm4s-agen
 [Semantic Memory Middleware](../guide/agents/memory#semantic-memory-middleware).
 
 ### For built-in tools (web search, HTTP, filesystem, shell)
-
-{: .note }
-> Not yet published. `llm4s-agent-tools` exists in the build as of
-> [#1242](https://github.com/llm4s/llm4s/issues/1242) but ships in the next release;
-> in `0.4.1` and earlier this code is still inside `llm4s-core`.
 
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-agent-tools" % llm4sVersion // same version as llm4s-core
@@ -715,11 +609,6 @@ tool API they implement (`ToolFunction`, `ToolRegistry`). Package names are unch
 [migration note](../reference/migration#slice-7-llm4s-agent-tools---the-built-in-tools-leave-core).
 
 ### For tracing and metrics (Langfuse, OpenTelemetry, in-process trace store, Prometheus)
-
-{: .note }
-> Not yet published. `llm4s-observability` and `llm4s-observability-prometheus` exist in the build as of
-> [#1133](https://github.com/llm4s/llm4s/issues/1133) but ships in the next release;
-> in `0.4.1` and earlier this code is still inside `llm4s-core`.
 
 ```scala
 // same version as llm4s-core
@@ -759,23 +648,15 @@ and `llm4s-knowledgegraph` and brings the Neo4j driver.
 
 ### Structured output from a case class
 
-{: .note }
-> Not yet published. `llm4s-schema-derivation` exists in the build as of
-> [#1472](https://github.com/llm4s/llm4s/issues/1472) but ships in a release after 0.4.1. It is experimental.
-
 ```scala
 // same version as llm4s-core
 libraryDependencies += "org.llm4s" %% "llm4s-schema-derivation" % llm4sVersion
 ```
 
 `SchemaOf` and `client.completeStructuredOf[A]`: the JSON schema of `completeStructured`, derived from a case class
-with `derives`. It depends on `llm4s-core` only. See [Derived Schemas](../guide/derived-schemas).
+with `derives`. It is experimental, and depends on `llm4s-core` only. See [Derived Schemas](../guide/derived-schemas).
 
 ### Testing your own code (the testkit)
-
-{: .note }
-> Not yet published. `llm4s-testkit` exists in the build as of
-> [#1475](https://github.com/llm4s/llm4s/issues/1475) but ships in the next release.
 
 ```scala
 // same version as llm4s-core; test scope only
@@ -788,10 +669,6 @@ injected errors and recorded requests, with no network and no API key. It depend
 
 ### For provider authors (testing a provider module)
 
-{: .note }
-> Not yet published. `llm4s-provider-testkit` exists in the build as of
-> [#1133](https://github.com/llm4s/llm4s/issues/1133) but ships in the next release.
-
 ```scala
 // same version as llm4s-core; test scope only
 libraryDependencies += "org.llm4s" %% "llm4s-provider-testkit" % llm4sVersion % Test
@@ -803,10 +680,6 @@ and its local test server run on virtual threads. See
 [Writing a provider](../guide/writing-a-provider#testing).
 
 ### For checkpoint store authors (testing a `Checkpointer`)
-
-{: .note }
-> Not yet published. `llm4s-agent-testkit` exists in the build as of
-> [#1700](https://github.com/llm4s/llm4s/issues/1700) but ships in the next release.
 
 ```scala
 // same version as llm4s-agent; test scope only
