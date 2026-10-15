@@ -101,8 +101,9 @@ final private[runner] class WebSocketCommandExecutor(
                     new AtomicBoolean(false)
                   )
                 processes.put(cmd.commandId, running)
-                // the connection closed while it waited or started: its close handler has already run, so stop it here
-                if (!connected()) {
+                // registered: a cancellation from now on finds it. One that came while it started, before it was
+                // registered, is in `cancelledEarly`, and a closed connection's handler has already run: either stops it here
+                if (cancelledEarly.remove(cmd.commandId) || !connected()) {
                   running.cancelled.set(true)
                   process.destroyForcibly(): Unit
                 }
