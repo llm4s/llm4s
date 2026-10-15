@@ -62,7 +62,9 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
     limit: Int,
     ctx: FileContext
   ): Result[Listing[GrepMatch]] =
-    all(ctx).flatMap(FileTree.search(_, under, regex, accept, limit, store.limits.maxItemBytes.toLong))
+    all(ctx).flatMap(
+      FileTree.search(_, under, regex, accept, limit, store.limits.maxItemBytes.toLong, store.limits.maxBytes)
+    )
 
   private def guarded[A: ReadWriter](operation: String, file: VPath, ctx: FileContext)(
     change: StoreView => Result[StoreChange[A]]

@@ -86,15 +86,23 @@ final class StateFileBackend private (
 
   /** `path` may hold `content`: text, a writable path, and within this thread's bounds. */
   private def admit(operation: String, all: Map[VPath, FileEntry], path: VPath, content: String): Result[Unit] =
-    val total = all.iterator.map((p, e) => entryBytes(p, e.content)).sum
-    val after = total - all.get(path).fold(0L)(e => entryBytes(path, e.content)) + entryBytes(path, content)
-    val count = all.size + (if all.contains(path) then 0 else 1)
+    // the other files' total, counted only until it passes the bound (another writer of the key may have
+    // stored far more), then this one's: what the thread would hold after the write
+    val others = all.iterator
+      .filter(_._1 != path)
+      .map((p, e) => entryBytes(p, e.content))
+      .scanLeft(0L)(_ + _)
+      .find(_ > maxBytes)
+      .getOrElse(all.iterator.filter(_._1 != path).map((p, e) => entryBytes(p, e.content)).sum)
+    val after                  = if others > maxBytes then others else others + entryBytes(path, content)
+    val count                  = all.size + (if all.contains(path) then 0 else 1)
     def refuse(reason: String) = Left(BackendRefused.at(operation, path, reason))
     for
       _ <- Text.binaryReason(content).fold[Result[Unit]](Right(()))(refuse)
       _ <- FileTree.writable(operation, all, path)
       _ <-
-        if after > maxBytes then refuse(s"the files would total $after bytes, over this thread's limit of $maxBytes")
+        if after > maxBytes then
+          refuse(s"the files would total at least $after bytes, over this thread's limit of $maxBytes")
         else if count > maxFiles then refuse(s"there would be $count files, over this thread's limit of $maxFiles")
         else Right(())
     yield ()
@@ -162,7 +170,7 @@ final class StateFileBackend private (
     limit: Int,
     ctx: FileContext
   ): Result[Listing[GrepMatch]] =
-    current(ctx).flatMap(FileTree.search(_, under, regex, accept, limit, maxBytes))
+    current(ctx).flatMap(FileTree.search(_, under, regex, accept, limit, maxBytes, maxBytes))
 
 object StateFileBackend:
 

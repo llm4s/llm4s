@@ -278,6 +278,16 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
     backend.delete(p("/big"), f.ctx).isRight shouldBe true
   }
 
+  it should "spend at most its total bound scanning, however much other writers stored, and say it stopped" in {
+    val (backend, f) = fixture(StateFileBackend(maxBytes = 100, clock = clock))
+    // ten files, each within the bound, together ten times over it
+    for (i <- 0 until 10)
+      f.commit(StateUpdate.update(backend.files, FileUpdate.Put(p(s"/f$i"), FileEntry("x" * 90, clock.instant()))))
+    val found = backend.grep("x", VPath.root, None, 100, f.ctx).value
+    found.items.size shouldBe 1
+    found.truncated shouldBe true
+  }
+
   it should "encode its key's values and updates, and refuse an invalid path on decode" in {
     val entry = FileEntry("x", clock.instant())
     upickle.default.read[FileEntry](upickle.default.write(entry)) shouldBe entry
