@@ -37,7 +37,8 @@ final class FakeWorkspace(
   private def parentOf(p: String): Option[String] =
     if p.isEmpty then None else Some(if p.contains('/') then p.substring(0, p.lastIndexOf('/')) else "")
 
-  private def ancestors(p: String): List[String] = Iterator.iterate(parentOf(p))(_.flatMap(parentOf)).takeWhile(_.isDefined).flatten.toList
+  private def ancestors(p: String): List[String] =
+    Iterator.iterate(parentOf(p))(_.flatMap(parentOf)).takeWhile(_.isDefined).flatten.toList
 
   private def hashOf(p: String): String =
     if dirs(p) then FileSnapshotResponse.Kind.Directory
@@ -85,7 +86,7 @@ final class FakeWorkspace(
     val p = norm(path)
     if files.contains(p) then fail("NOT_A_DIRECTORY", s"Path '$path' is not a directory")
     if !dirs(p) then fail("PATH_NOT_FOUND", s"Path '$path' does not exist")
-    val depth = if recursive.getOrElse(false) then maxDepth.getOrElse(3) else 1
+    val depth                  = if recursive.getOrElse(false) then maxDepth.getOrElse(3) else 1
     def depthOf(child: String) = (if p.isEmpty then child else child.drop(p.length + 1)).count(_ == '/') + 1
     def within(child: String)  = child.nonEmpty && (p.isEmpty || child.startsWith(p + "/")) && depthOf(child) <= depth
     val all = (dirs.toVector.filter(within).map(_ -> true) ++ files.keys.toVector.filter(within).map(_ -> false))
@@ -110,7 +111,8 @@ final class FakeWorkspace(
     expectedHash: Option[String]
   ): WriteFileResponse = synchronized {
     val p = norm(path)
-    if expectedHash.isDefined && mode.exists(_ != "overwrite") then fail("INVALID_ARGUMENT", "expectedHash needs overwrite")
+    if expectedHash.isDefined && mode.exists(_ != "overwrite") then
+      fail("INVALID_ARGUMENT", "expectedHash needs overwrite")
     val bytes = content.getBytes(StandardCharsets.UTF_8)
     if bytes.length.toLong > maxFileSize then fail("SIZE_LIMIT_EXCEEDED", s"Content for '$path' is too large")
     checkExpected(p, expectedHash)

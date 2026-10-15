@@ -85,7 +85,10 @@ class ExecuteToolSpec extends AnyFlatSpec with Matchers with EitherValues with O
       runner,
       Seq(calls("a" -> ujson.Obj("command" -> "first"), "b" -> ujson.Obj("command" -> "second")))
     ).value
-    out shouldBe Vector("exit code: 0\nstdout:\nran first\nstderr:\n(empty)", "exit code: 0\nstdout:\nran second\nstderr:\n(empty)")
+    out shouldBe Vector(
+      "exit code: 0\nstdout:\nran first\nstderr:\n(empty)",
+      "exit code: 0\nstdout:\nran second\nstderr:\n(empty)"
+    )
     runner.runs.asScala.map(_._1).toVector shouldBe Vector("first", "second")
   }
 
@@ -117,7 +120,9 @@ class ExecuteToolSpec extends AnyFlatSpec with Matchers with EitherValues with O
 
   it should "be matched by a permission rule on its command" in {
     val runner = new Recording(ok)
-    val rules  = new PermissionMiddleware(Seq(PermissionRule.deny(Operation.Execute, "rm *")))
+    val rules = new PermissionMiddleware(
+      Seq(PermissionRule.deny(Operation.Execute, "rm *"), PermissionRule.allow(Operation.Execute, "*"))
+    )
     val out = results(
       runner,
       Seq(calls("a" -> ujson.Obj("command" -> "rm -rf /"), "b" -> ujson.Obj("command" -> "ls"))),

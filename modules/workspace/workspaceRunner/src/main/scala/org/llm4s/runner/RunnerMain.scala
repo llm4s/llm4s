@@ -259,19 +259,18 @@ object RunnerMain extends cask.MainRoutes {
             ok => sendMessage(channel, ResponseMessage(ok))
           )
         case cmd: FileSnapshotCommand =>
-          val result = Try(workspaceInterface.fileSnapshot(cmd.path, cmd.includeContent).copy(commandId = cmd.commandId))
-            .toEither
-            .left
+          val result = Try(
+            workspaceInterface.fileSnapshot(cmd.path, cmd.includeContent).copy(commandId = cmd.commandId)
+          ).toEither.left
             .map(toErrorResponse(cmd.commandId))
           result.fold(
             err => sendMessage(channel, ResponseMessage(err)),
             ok => sendMessage(channel, ResponseMessage(ok))
           )
         case cmd: DeleteFileCommand =>
-          val result = Try(workspaceInterface.deleteFile(cmd.path, cmd.expectedHash).copy(commandId = cmd.commandId))
-            .toEither
-            .left
-            .map(toErrorResponse(cmd.commandId))
+          val result =
+            Try(workspaceInterface.deleteFile(cmd.path, cmd.expectedHash).copy(commandId = cmd.commandId)).toEither.left
+              .map(toErrorResponse(cmd.commandId))
           result.fold(
             err => sendMessage(channel, ResponseMessage(err)),
             ok => sendMessage(channel, ResponseMessage(ok))

@@ -93,5 +93,5 @@ private[workspace] object WorkspaceCalls:
 
 /** A `WorkspaceAgentException` the runner raised, before a caller sorts it; never returned to a tool as is. */
 final private[workspace] case class WorkspaceFailure(exception: WorkspaceAgentException) extends LLMError:
-  override val message: String       = s"${exception.code}: ${exception.error}"
+  override val message: String      = s"${exception.code}: ${exception.error}"
   override def code: Option[String] = Some(exception.code)

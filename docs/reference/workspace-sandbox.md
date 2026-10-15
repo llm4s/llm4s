@@ -686,10 +686,18 @@ Run the containerized runner with locked sandbox:
 - **Complexity**: Low
 - **Risks**: Minimal; backward compatible (default = permissive)
 
-### Phase 2: Enforcement
-- **Affected**: WorkspaceAgentInterfaceImpl (readOnlyPaths, allowedPaths), tools
-- **Complexity**: Medium
-- **Risks**: Path validation edge cases; breaking changes if strict
+### Phase 2: Enforcement (paths and limits ✓, network open)
+- **Done** ([#1906](https://github.com/llm4s/llm4s/issues/1906)): the runner refuses any file operation, and a command's
+  working directory, outside `allowedPaths` (`PATH_NOT_ALLOWED`), and any mutation (`writeFile`, `modifyFile`,
+  `deleteFile`) under `readOnlyPaths` (`PATH_READ_ONLY`). A write over `maxFileSize` is `SIZE_LIMIT_EXCEEDED`, and a
+  command keeps at most `maxOutputSize` characters of each stream (or the client's smaller `maxOutputChars`) while it
+  reads, whatever its lines.
+- **Open** ([#870](https://github.com/llm4s/llm4s/issues/870)): `networkAllowed` is documentation only, and a
+  command's path arguments are checked against the workspace (the command policy), not against `allowedPaths`.
+- **Compare-and-set.** `fileSnapshot(path)` returns what is at a path with the SHA-256 of its bytes (`sha256:<hex>`,
+  `absent` or `directory`); `writeFile(..., expectedHash)` and `deleteFile(path, expectedHash)` apply only if the hash
+  is still that one (`HASH_MISMATCH` otherwise, changing nothing), under one lock every file operation of the runner
+  takes, and the write replaces the file atomically. The harness's `WorkspaceFileBackend` is built on them.
 
 ### Phase 3: Advanced policies (optional)
 - **Affected**: New policies module, profiles (dev/staging/prod)

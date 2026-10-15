@@ -1,6 +1,15 @@
 package org.llm4s.agent.harness
 
-import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, LockKey, Operation, ToolContext, ToolOutcome, ToolResource }
+import org.llm4s.agent.graph.tool.{
+  AgentTool,
+  AgentToolSpec,
+  LockKey,
+  Operation,
+  ToolContent,
+  ToolContext,
+  ToolOutcome,
+  ToolResource
+}
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ValidationError
 import org.llm4s.toolapi.{ Schema, ToolHints }
@@ -96,7 +105,10 @@ object ExecuteTool:
         val timeout = args.timeoutSeconds.fold(defaultTimeout)(_.toLong.seconds)
         backend
           .execute(args.command, workdir, timeout, FileContext(context))
-          .fold(BackendRefused.toolOutcome, r => ToolOutcome.Success(ujson.Str(render(r, backend.maxOutputBytes))))
+          .fold(
+            BackendRefused.toolOutcome,
+            r => ToolOutcome.Success(ToolContent.Json(ujson.Str(render(r, backend.maxOutputBytes))))
+          )
 
   /** The result as the model reads it. */
   private[harness] def render(result: ExecResult, maxOutputBytes: Int): String =

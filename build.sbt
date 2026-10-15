@@ -1247,7 +1247,8 @@ lazy val workspaceShared = (project in file("modules/workspace/workspaceShared")
 
 lazy val workspaceClient = (project in file("modules/workspace/workspaceClient"))
   // `agent` is for `codegen.CodeWorker` and `CodeGenExample`, which drive an `Agent` (#1242).
-  .dependsOn(workspaceShared, core, agent)
+  // agentTestkit (tests): the workspace backends pass FileBackendContract and ReplayContract (design 4.33).
+  .dependsOn(workspaceShared, core, agent, agentTestkit % Test)
   .settings(
     name := "llm4s-workspace-client",
     commonSettings,
@@ -1752,7 +1753,8 @@ lazy val it = (project in file("modules/it"))
     observability,
     observabilityPrometheus,
     traceOpentelemetry,
-    agent
+    agent,
+    agentTestkit % Test
   )
   .settings(
     name := "llm4s-it",

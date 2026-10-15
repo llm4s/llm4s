@@ -40,6 +40,23 @@ Not in a release yet. Stage 3 slice F8b ([#1913](https://github.com/llm4s/llm4s/
 - **A client refuses what it cannot send, before sending**: a part kind, source or format its wire format cannot carry is `UnsupportedContentPartError`. A provider's own limits (how many images, how large a request, which formats a model reads) are the provider's: its 400 or 413 comes back as a typed `ValidationError` or `ServiceError` with its message. The guide's [table](../guide/multimodal.html#what-each-provider-sends) lists what each takes.
 - **An agent thread holds at most 20 MiB of inline media** (`Messages.MaxInlineBytes`): media added past it is replaced by a text part naming what was removed. Context budgets (`ConversationTokenCounter`, `ContextPruning`) count media by estimate.
 - **Inline media is bounded** at 5 MiB per part by `ContentPart.image` / `ContentPart.document`, which return a `Result`. Every agent checkpoint copies the thread's messages, so larger media goes at a `MediaSource.Url` or in a `MediaSource.ProviderFile`. See [Multimodal content](../guide/multimodal.html).
+## Workspace backends (#1906)
+
+Not in a release yet. Stage 3 slice F2 ([#1906](https://github.com/llm4s/llm4s/issues/1906)) puts the workspace behind the harness's `FileBackend` and `SandboxBackend` ([design 4.33](../design/typed-agent-runtime/4.33-stage-3-slice-f2-workspace-backends.md)). Source and behaviour breaks, with no shims:
+
+- **`WorkspaceAgentInterface` has two new methods and two new parameters.** `fileSnapshot(path, includeContent)` and `deleteFile(path, expectedHash)`; `writeFile(..., expectedHash)` and `executeCommand(..., maxOutputChars)`. A class implementing the interface implements them; a caller that passes arguments by position is unaffected. The wire messages' new fields have defaults, so an older client and a newer runner (or the reverse) still talk, without the new calls.
+- **`ContainerisedWorkspace` keeps the runner's error code.** A refused call used to throw `WorkspaceAgentException(..., "EXECUTION_FAILED")` with the code in the message; it now throws the runner's own code (`FILE_NOT_FOUND`, `PATH_NOT_ALLOWED`, ...), as `WorkspaceAgentInterfaceRemote` does. `EXECUTION_FAILED` now means the transport failed.
+- **The runner enforces the sandbox's paths and limits** (#870): a file operation or a command's working directory outside `allowedPaths` is `PATH_NOT_ALLOWED`, a mutation under `readOnlyPaths` is `PATH_READ_ONLY`, and a write over `maxFileSize` is `SIZE_LIMIT_EXCEEDED`. A config that set these and relied on them being ignored now has its calls refused.
+- **Command output is kept as it was written**, up to `maxOutputSize` characters per stream. The direct `executeCommand` path used to read it line by line, ending every line with `\n` (a final line without one gained it, `\r\n` became `\n`) and keeping whole lines past the bound.
+
+```scala
+// a FileBackend and a SandboxBackend over a running ContainerisedWorkspace
+for
+  files   <- WorkspaceFileBackend("ws1", workspace)
+  sandbox <- WorkspaceSandboxBackend("ws1", workspace)
+yield (files, ExecuteTool(sandbox))
+```
+
 ## Smaller breaks since 0.4.1
 
 Changes too small for a section of their own. Each is listed under Breaking changes in the CHANGELOG.

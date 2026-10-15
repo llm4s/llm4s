@@ -104,12 +104,14 @@ final class WorkspaceFileBackend private (val id: String, workspace: WorkspaceAg
       case Left(other)                                                            => Left(other)
 
   def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
-    Text.checkLimitAt("glob", under, limit).flatMap(_ =>
-      files("glob", under).map { (all, cut) =>
-        val listing = Listing.of(all.iterator.filter(accept), limit)
-        listing.copy(truncated = listing.truncated || cut)
-      }
-    )
+    Text
+      .checkLimitAt("glob", under, limit)
+      .flatMap(_ =>
+        files("glob", under).map { (all, cut) =>
+          val listing = Listing.of(all.iterator.filter(accept), limit)
+          listing.copy(truncated = listing.truncated || cut)
+        }
+      )
 
   def search(
     under: VPath,
@@ -118,35 +120,37 @@ final class WorkspaceFileBackend private (val id: String, workspace: WorkspaceAg
     limit: Int,
     ctx: FileContext
   ): Result[Listing[GrepMatch]] =
-    Text.checkLimitAt("grep", under, limit).flatMap(_ =>
-      files("grep", under).flatMap { (all, cut) =>
-        // file by file, stopping once one more match than the limit is found, so no file past it is read
-        val found      = Vector.newBuilder[GrepMatch]
-        var count      = 0L
-        var skipped    = false
-        var failure    = Option.empty[org.llm4s.error.LLMError]
-        val candidates = all.iterator.filter(accept)
-        while failure.isEmpty && count <= limit.toLong && candidates.hasNext do
-          val path = candidates.next()
-          snapshot("grep", path, content = true) match
-            case Left(error) => failure = Some(error)
-            case Right(s) =>
-              s.content match
-                // gone since the walk, or not text a line search can read
-                case None => skipped = skipped || s.kind == FileSnapshotResponse.Kind.File
-                case Some(text) =>
-                  val wanted = math.min(limit.toLong + 1 - count, Int.MaxValue.toLong).toInt
-                  Text.interruptibly("grep")(Right(Text.matches(path, text, regex).take(wanted).toVector)) match
-                    case Left(error) => failure = Some(error)
-                    case Right(matches) =>
-                      found ++= matches
-                      count += matches.size
-        failure.toLeft(()).map { _ =>
-          val listing = Listing.of(found.result().iterator, limit)
-          listing.copy(truncated = listing.truncated || cut || skipped)
+    Text
+      .checkLimitAt("grep", under, limit)
+      .flatMap(_ =>
+        files("grep", under).flatMap { (all, cut) =>
+          // file by file, stopping once one more match than the limit is found, so no file past it is read
+          val found      = Vector.newBuilder[GrepMatch]
+          var count      = 0L
+          var skipped    = false
+          var failure    = Option.empty[org.llm4s.error.LLMError]
+          val candidates = all.iterator.filter(accept)
+          while failure.isEmpty && count <= limit.toLong && candidates.hasNext do
+            val path = candidates.next()
+            snapshot("grep", path, content = true) match
+              case Left(error) => failure = Some(error)
+              case Right(s) =>
+                s.content match
+                  // gone since the walk, or not text a line search can read
+                  case None => skipped = skipped || s.kind == FileSnapshotResponse.Kind.File
+                  case Some(text) =>
+                    val wanted = math.min(limit.toLong + 1 - count, Int.MaxValue.toLong).toInt
+                    Text.interruptibly("grep")(Right(Text.matches(path, text, regex).take(wanted).toVector)) match
+                      case Left(error) => failure = Some(error)
+                      case Right(matches) =>
+                        found ++= matches
+                        count += matches.size
+          failure.toLeft(()).map { _ =>
+            val listing = Listing.of(found.result().iterator, limit)
+            listing.copy(truncated = listing.truncated || cut || skipped)
+          }
         }
-      }
-    )
+      )
 
   /**
    * `plan`'s effect through C4's `Verifiable` guard under `ctx.effectKey("file.<operation>", path)`; the

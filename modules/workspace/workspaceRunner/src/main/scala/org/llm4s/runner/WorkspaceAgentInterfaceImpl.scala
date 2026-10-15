@@ -550,7 +550,9 @@ class WorkspaceAgentInterfaceImpl(
           )
         else {
           // read once, bounded by the limit even if the file grew since its size was read
-          val bytes = Using.resource(Files.newInputStream(resolved))(_.readNBytes((math.min(defaultLimits.maxFileSize, Int.MaxValue - 9L) + 1).toInt))
+          val bytes = Using.resource(Files.newInputStream(resolved))(
+            _.readNBytes((math.min(defaultLimits.maxFileSize, Int.MaxValue - 9L) + 1).toInt)
+          )
           if (bytes.length.toLong > defaultLimits.maxFileSize)
             response(
               Kind.File,
@@ -1233,8 +1235,11 @@ class WorkspaceAgentInterfaceImpl(
 
     // Read in chunks and keep at most `limit` characters, the rest read and discarded: a bound while the output is
     // read, whatever its lines (a line read whole could be any size).
-    def capture(stream: java.io.InputStream, into: StringBuilder, truncated: java.util.concurrent.atomic.AtomicBoolean)
-      : Thread =
+    def capture(
+      stream: java.io.InputStream,
+      into: StringBuilder,
+      truncated: java.util.concurrent.atomic.AtomicBoolean
+    ): Thread =
       new Thread(() => {
         val reader = new java.io.InputStreamReader(stream, Charset.defaultCharset())
         try {
