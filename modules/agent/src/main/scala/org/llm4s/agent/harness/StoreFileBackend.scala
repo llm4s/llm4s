@@ -101,8 +101,11 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
       // the store names its key; the key is this backend's path, so its refusal names the path, typed
       .left
       .map {
-        case r: BackendRefused if r.path.isEmpty => BackendRefused.at(r.operation, file, r.reason, r.kind)
-        case other                               => other
+        // the store's own refusals of the key (bounds, depth) concern this file; a Corrupt refusal of the
+        // namespace as a whole names no file, and stays untyped so no composite rebases it onto one
+        case r: BackendRefused if r.path.isEmpty && r.kind != BackendRefused.Kind.Corrupt =>
+          BackendRefused.at(r.operation, file, r.reason, r.kind)
+        case other => other
       }
       .map(a => (a, StateUpdate.empty))
 
@@ -112,7 +115,10 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
     Left(BackendRefused.at(operation, target, reason))
 
   def write(target: VPath, text: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
-    Text.binaryReason(text).fold[Result[Unit]](Right(()))(r => refused("write", target, r)).flatMap { _ =>
+    // the content's size first, by its length and then a capped count, before anything scans all of it
+    (if Text.oversized(text, store.limits.maxItemBytes.toLong) then
+       refused("write", target, s"content is larger than the store's item limit of ${store.limits.maxItemBytes} bytes")
+     else Text.binaryReason(text).fold[Result[Unit]](Right(()))(r => refused("write", target, r))).flatMap { _ =>
       // decided in the store's transaction, so a concurrent write of an ancestor or descendant cannot slip
       // between the check and the write
       guarded[FileWritten]("write", target, ctx)(view =>

@@ -308,4 +308,20 @@ class CompositeBackendSpec extends AnyFlatSpec with Matchers with EitherValues {
     val refused = CompositeBackend(new Refusing(BackendRefused.Kind.Refused, typed = true), p("/y") -> main).value
     refused.glob(Glob("**"), VPath.root, 10, ctx).left.value shouldBe a[BackendRefused]
   }
+
+  it should "leave a store's namespace-wide Corrupt refusal untyped, so no mount rebases it onto a file" in {
+    val store    = InMemoryLongTermStore()
+    val memories = Namespace(None, Vector("memories"))
+    val effect   = org.llm4s.agent.graph.HarnessTestSupport.runOn("seed").effectKey("seed", "notes")
+    store
+      .modify[Unit](memories, "notes", effect, org.llm4s.agent.graph.FencingToken(0))(_ =>
+        Right(StoreChange.Put(ujson.Obj("content" -> "x"), ()))
+      )
+      .value
+    val c       = CompositeBackend(main, p("/mem") -> StoreFileBackend(store).value).value
+    val refusal = c.write(p("/mem/f"), "y", ctx).left.value.asInstanceOf[BackendRefused]
+    refusal.kind shouldBe BackendRefused.Kind.Corrupt
+    refusal.path shouldBe None
+    refusal.target shouldBe "files"
+  }
 }

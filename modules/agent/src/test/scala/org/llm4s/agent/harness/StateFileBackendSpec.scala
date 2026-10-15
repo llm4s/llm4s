@@ -295,6 +295,16 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
       }
     }
 
+  it should "refuse oversized content by its size before scanning it, in state and store alike" in {
+    val (backend, f) = fixture(StateFileBackend(maxBytes = 100, clock = clock))
+    // NUL past the bound: refused for its size, which is checked first
+    backend.write(p("/big"), "x" * 200 + "\u0000", f.ctx).left.value.message should include("larger than")
+    val store = StoreFileBackend(InMemoryLongTermStore(org.llm4s.agent.harness.StoreLimits(maxItemBytes = 100))).value
+    store.write(p("/big"), "x" * 200 + "\u0000", f.ctx).left.value.message should include("larger than")
+    // a value's size is counted only as far as the cap
+    org.llm4s.agent.harness.Text.jsonValueBytes(ujson.Str("x" * 10000000), 100) should be <= 103L
+  }
+
   it should "encode its key's values and updates, and refuse an invalid path on decode" in {
     val entry = FileEntry("x", clock.instant())
     upickle.default.read[FileEntry](upickle.default.write(entry)) shouldBe entry

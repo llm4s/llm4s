@@ -375,7 +375,8 @@ private[harness] object Text:
       if !top.hasNext then stack.pop()
       else
         top.next() match
-          case ujson.Str(s) => total += 2 + jsonBytes(s)
+          // counted only until the cap is passed, so an oversized string costs no more than the cap
+          case ujson.Str(s) => total += 2 + jsonBytesUpTo(s, max - total)
           case ujson.Arr(items) =>
             if total + least(items.size, 1) > max then total += least(items.size, 1)
             else
@@ -410,6 +411,24 @@ private[harness] object Text:
 
   /** The bytes `s` takes encoded as a JSON string, quotes excluded: what a checkpoint or record stores. */
   def jsonBytes(s: String): Long = s.codePoints.iterator.asScala.map(cp => jsonWidth(cp.intValue).toLong).sum
+
+  /** The [[jsonBytes]] of `s`, or some count over `max` once it passes it, counted only that far. */
+  def jsonBytesUpTo(s: String, max: Long): Long =
+    @annotation.tailrec
+    def loop(i: Int, bytes: Long): Long =
+      if bytes > max || i >= s.length then bytes
+      else
+        val cp = s.codePointAt(i)
+        loop(i + Character.charCount(cp), bytes + jsonWidth(cp))
+    loop(0, 0L)
+
+  /**
+   * Whether `content` is over `maxBytes` as a JSON string, decided without scanning past the bound: a
+   * character is at least one byte, so its length alone decides an oversized one, else a count capped at
+   * the bound does. Checked before anything else scans the content.
+   */
+  def oversized(content: String, maxBytes: Long): Boolean =
+    content.length.toLong > maxBytes || jsonBytesOver(content, maxBytes)
 
   /** Whether `s` takes more than `max` [[jsonBytes]], counted only until it does. */
   def jsonBytesOver(s: String, max: Long): Boolean =

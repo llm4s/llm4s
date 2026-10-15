@@ -101,6 +101,11 @@ final class StateFileBackend private (
     lazy val after =
       all.iterator.filter(_._1 != path).map((p, e) => entryBytes(p, e.content)).sum + entryBytes(path, content)
     for
+      // the content's size first, by its length and then a capped count, before anything scans all of it
+      _ <-
+        if Text.oversized(content, maxBytes) then
+          refuse(s"content is larger than this thread's limit of $maxBytes bytes")
+        else Right(())
       _ <- Text.binaryReason(content).fold[Result[Unit]](Right(()))(refuse)
       _ <- FileTree.writable(operation, all, path)
       _ <-
