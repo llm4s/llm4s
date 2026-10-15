@@ -166,7 +166,8 @@ final private[runner] class WebSocketCommandExecutor(
           logger.error(s"Error destroying process for command $commandId: ${ex.getMessage}", ex)
         }
         logger.info(s"Command $commandId cancelled by client")
-        if (running.completionSent.compareAndSet(false, true)) {
+        // acknowledged only once it is gone; one that survives the kill is reported by its exit watcher as a failure
+        if (!running.process.isAlive && running.completionSent.compareAndSet(false, true)) {
           val durationMs = System.currentTimeMillis() - running.startTimeMs
           send(CommandCompletedMessage(commandId, 143, durationMs.millis))
         }
@@ -257,6 +258,8 @@ final private[runner] class WebSocketCommandExecutor(
             }
           if (running.cancelled.get()) {
             process.destroyForcibly()
+            // a cancellation is an outcome only once the process is gone, as a timeout is
+            if (!process.waitFor(5, TimeUnit.SECONDS)) survivedKill.set(true)
             143
           } else if (timedOut) {
             commandTimedOut.set(true)
@@ -290,7 +293,7 @@ final private[runner] class WebSocketCommandExecutor(
           ResponseMessage(
             WorkspaceAgentErrorResponse(
               cmd.commandId,
-              "Command timed out and did not terminate when killed",
+              "Command did not terminate when killed (timed out or cancelled); it may still be running",
               "EXECUTION_FAILED",
               None
             )
