@@ -118,6 +118,16 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     Files.setPosixFilePermissions(file, java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-x---"))
     workspace().writeFile("run.sh", "echo hi", expectedHash = Some(hashOf("echo")))
     java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(file)) shouldBe "rwxr-x---"
+    // and its owner and group: copied from the file onto the replacement before it is moved
+    val attributes = classOf[java.nio.file.attribute.PosixFileAttributes]
+    val before     = Files.readAttributes(file, attributes)
+    workspace().writeFile("run.sh", "echo again", expectedHash = Some(hashOf("echo hi")))
+    val after = Files.readAttributes(file, attributes)
+    (after.owner(), after.group()) shouldBe ((before.owner(), before.group()))
+    // the copy itself: onto a file of another owner or group it sets them where the runner may, and never throws
+    val other = Files.createTempFile(root, "other", ".txt")
+    WorkspaceAgentInterfaceImpl.copyOwnership(file, other)
+    Files.readAttributes(other, attributes).group() shouldBe before.group()
   }
 
   it should "refuse a mode other than overwrite, and a directory" in {

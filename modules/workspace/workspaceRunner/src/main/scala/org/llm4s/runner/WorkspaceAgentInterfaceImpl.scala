@@ -509,6 +509,10 @@ class WorkspaceAgentInterfaceImpl(
               else java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--")
             Files.setPosixFilePermissions(temp, permissions)
           }
+          // the replacement is a new inode, so it takes the file's metadata as well as its mode: its owner and group
+          // (the runner runs as root over a bind mount, and a root-owned replacement would lock its owner out) and its
+          // ACL. Each where the platform has it; a runner that may not chown keeps the owner it has.
+          if (Files.exists(target)) WorkspaceAgentInterfaceImpl.copyOwnership(target, temp)
           Files.move(
             temp,
             target,
@@ -1424,3 +1428,24 @@ class WorkspaceAgentInterfaceImpl(
  * @param timeout the caller's timeout, else the sandbox's `defaultCommandTimeout`
  */
 final private[runner] case class PreparedCommand(builder: java.lang.ProcessBuilder, timeout: FiniteDuration)
+
+private[runner] object WorkspaceAgentInterfaceImpl {
+
+  /**
+   * Gives `to` the owner, the group and the ACL of `from`, each where the file system has it and the runner may set
+   * it; one it cannot is left as it is. For a replacement written beside a file and moved over it.
+   */
+  def copyOwnership(from: Path, to: Path): Unit = {
+    import java.nio.file.attribute.{ AclFileAttributeView, PosixFileAttributeView }
+    Try(Files.setOwner(to, Files.getOwner(from))): Unit
+    Try {
+      val group = Files.readAttributes(from, classOf[java.nio.file.attribute.PosixFileAttributes]).group()
+      Files.getFileAttributeView(to, classOf[PosixFileAttributeView]).setGroup(group)
+    }: Unit
+    Try {
+      Option(Files.getFileAttributeView(from, classOf[AclFileAttributeView])).foreach { acl =>
+        Files.getFileAttributeView(to, classOf[AclFileAttributeView]).setAcl(acl.getAcl)
+      }
+    }: Unit
+  }
+}
