@@ -4,7 +4,7 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, NonRecoverableError }
 import org.llm4s.types.Result
 
-import scala.collection.immutable.ListMap
+import scala.collection.immutable.VectorMap
 
 /**
  * One [[https://agentskills.io/ Agent Skill]]: the frontmatter of its `SKILL.md`, at `path`. The model reads the file
@@ -90,7 +90,7 @@ object Skill:
       .parse(path, if lastLineCut then lines.dropRight(1) else lines, closed)
       .flatMap(fields => fromFields(path, fields))
 
-  private def fromFields(path: VPath, fields: ListMap[String, Frontmatter.Field]): Result[Skill] =
+  private def fromFields(path: VPath, fields: VectorMap[String, Frontmatter.Field]): Result[Skill] =
     def error(line: Int, problem: String) = Left(SkillFormatError(path, line, problem))
     def string(key: String, required: Boolean): Result[Option[String]] =
       fields.get(key) match
@@ -122,11 +122,12 @@ object Skill:
       tools <- fields.get("allowed-tools") match
         case None => Right(Vector.empty)
         case Some(Frontmatter.Field(Frontmatter.Value.Str(s), _)) if s.trim.nonEmpty =>
-          Right(s.trim.split("\\s+").toVector.filter(_.nonEmpty))
-        case Some(Frontmatter.Field(Frontmatter.Value.Items(xs), _)) => Right(xs.map(_.trim).filter(_.nonEmpty))
+          Right(Frontmatter.yamlTrim(s).split("[ \\t]+").toVector.filter(_.nonEmpty))
+        case Some(Frontmatter.Field(Frontmatter.Value.Items(xs), _)) =>
+          Right(xs.map(Frontmatter.yamlTrim).filter(_.nonEmpty))
         case Some(Frontmatter.Field(_, line)) => error(line, "`allowed-tools` must be a string or a list")
       metadata <- fields.get("metadata") match
-        case None                                                     => Right(ListMap.empty[String, String])
+        case None                                                     => Right(VectorMap.empty[String, String])
         case Some(Frontmatter.Field(Frontmatter.Value.Entries(m), _)) => Right(m)
         case Some(Frontmatter.Field(_, line)) => error(line, "`metadata` must be a map of strings")
     yield Skill(name, description, path, tools, license, metadata)
@@ -159,7 +160,7 @@ private[harness] object Frontmatter:
   enum Value:
     case Str(value: String)
     case Items(values: Vector[String])
-    case Entries(values: ListMap[String, String])
+    case Entries(values: VectorMap[String, String])
 
     /** A key with no value, and nothing beneath it. */
     case Empty
@@ -179,10 +180,10 @@ private[harness] object Frontmatter:
    * lines are the whole file or reach the closing `---`; when they do not, a frontmatter that does not close in them
    * is too long.
    */
-  def parse(path: VPath, lines: Vector[String], closed: Boolean): Result[ListMap[String, Field]] =
+  def parse(path: VPath, lines: Vector[String], closed: Boolean): Result[VectorMap[String, Field]] =
     val first = lines.headOption.map(l => fence(l.stripPrefix("\uFEFF")))
     val body  = lines.iterator.zipWithIndex.drop(1).map((l, i) => (l, i + 1))
-    val parsed: Parsed[ListMap[String, Field]] =
+    val parsed: Parsed[VectorMap[String, Field]] =
       if !first.contains("---") then Left((1, "the file must start with a `---` line opening the frontmatter"))
       else
         val upTo = body.takeWhile((l, _) => fence(l) != "---").toVector
@@ -212,7 +213,7 @@ private[harness] object Frontmatter:
     )
 
   /** The parsed values, refused when an escape spelled a character YAML forbids raw (other than a line break or tab). */
-  private def checkedValues(found: ListMap[String, Field]): Parsed[ListMap[String, Field]] =
+  private def checkedValues(found: VectorMap[String, Field]): Parsed[VectorMap[String, Field]] =
     def ok(s: String) = printable(s.replace('\n', ' ').replace('\r', ' '))
     found.collectFirst {
       case (_, Field(Value.Str(s), n)) if !ok(s)                   => n
@@ -226,32 +227,41 @@ private[harness] object Frontmatter:
    * `line` with trailing spaces and tabs dropped, the only whitespace YAML allows there: a fence followed by any other
    * character (a control character `stripTrailing` would also drop) is not a fence.
    */
-  private[harness] def fence(line: String): String =
-    var end = line.length
-    while end > 0 && (line.charAt(end - 1) == ' ' || line.charAt(end - 1) == '\t') do end -= 1
-    line.substring(0, end)
+  private[harness] def fence(line: String): String = yamlStripTrailing(line)
+
+  /** `s` without trailing YAML whitespace - spaces and tabs only; any other character is content. */
+  def yamlStripTrailing(s: String): String =
+    var end = s.length
+    while end > 0 && (s.charAt(end - 1) == ' ' || s.charAt(end - 1) == '\t') do end -= 1
+    s.substring(0, end)
+
+  /** `s` without leading or trailing YAML whitespace (spaces and tabs). */
+  def yamlTrim(s: String): String =
+    var start = 0
+    while start < s.length && (s.charAt(start) == ' ' || s.charAt(start) == '\t') do start += 1
+    yamlStripTrailing(s.substring(start))
 
   /** An open block: a key with no inline value, and what has followed it. */
   final private case class Block(
     key: String,
     line: Int,
     items: Vector[String],
-    entries: ListMap[String, String],
+    entries: VectorMap[String, String],
     indent: Option[Int]
   )
 
-  private def fields(lines: Vector[(String, Int)]): Parsed[ListMap[String, Field]] =
+  private def fields(lines: Vector[(String, Int)]): Parsed[VectorMap[String, Field]] =
     @annotation.tailrec
     def loop(
       rest: List[(String, Int)],
-      done: ListMap[String, Field],
+      done: VectorMap[String, Field],
       open: Option[Block]
-    ): Parsed[ListMap[String, Field]] =
+    ): Parsed[VectorMap[String, Field]] =
       rest match
         case Nil => close(done, open)
         case (raw, n) :: tail =>
-          val line    = raw.stripTrailing
-          val trimmed = line.trim
+          val line    = Frontmatter.yamlStripTrailing(raw)
+          val trimmed = Frontmatter.yamlTrim(line)
           if trimmed.isEmpty || trimmed.startsWith("#") then loop(tail, done, open)
           else
             val leading = line.takeWhile(c => c == ' ' || c == '\t')
@@ -259,7 +269,7 @@ private[harness] object Frontmatter:
             else
               val indent = leading.length
               if trimmed == "-" || trimmed.startsWith("- ") then
-                listItem(n, indent, trimmed.drop(1).trim, open) match
+                listItem(n, indent, Frontmatter.yamlTrim(trimmed.drop(1)), open) match
                   case Left(e)      => Left(e)
                   case Right(block) => loop(tail, done, Some(block))
               else if indent == 0 then
@@ -270,15 +280,15 @@ private[harness] object Frontmatter:
                       case Left(e)                                 => Left(e)
                       case Right((key, _)) if closed.contains(key) => Left((n, "a key is given more than once"))
                       case Right((key, None)) =>
-                        loop(tail, closed, Some(Block(key, n, Vector.empty, ListMap.empty, None)))
+                        loop(tail, closed, Some(Block(key, n, Vector.empty, VectorMap.empty, None)))
                       case Right((key, Some(value))) => loop(tail, closed.updated(key, Field(value, n)), None)
               else
                 mapEntry(n, indent, trimmed, open) match
                   case Left(e)      => Left(e)
                   case Right(block) => loop(tail, done, Some(block))
-    loop(lines.toList, ListMap.empty, None)
+    loop(lines.toList, VectorMap.empty, None)
 
-  private def close(done: ListMap[String, Field], open: Option[Block]): Parsed[ListMap[String, Field]] =
+  private def close(done: VectorMap[String, Field], open: Option[Block]): Parsed[VectorMap[String, Field]] =
     Right(open.fold(done) { b =>
       val value =
         if b.entries.nonEmpty then Value.Entries(b.entries)
@@ -328,7 +338,7 @@ private[harness] object Frontmatter:
         Left((n, "YAML reads this key as a null, boolean or number; keys are strings"))
       else if rest.nonEmpty && rest.head != ' ' then Left((n, "expected a space after the key's `:`"))
       else
-        val value = rest.trim
+        val value = yamlTrim(rest)
         if value.isEmpty || value.startsWith("#") then Right((key, None))
         else inlineValue(n, value).map(v => (key, Some(v)))
 
@@ -392,14 +402,14 @@ private[harness] object Frontmatter:
   private def withoutComment(value: String): String =
     // a `#` at the start, or after YAML whitespace (a space or a tab), starts a comment
     val i = CommentStart.findFirstMatchIn(value).fold(-1)(_.start)
-    (if i < 0 then value else value.substring(0, i)).trim
+    yamlTrim(if i < 0 then value else value.substring(0, i))
 
   private val CommentStart = "(?:^|(?<=[ \\t]))#".r
 
   /** Only a comment may follow a closing quote or bracket. */
   private def trailing(n: Int, rest: String): Parsed[Unit] =
     // a comment only after whitespace, by the one rule plain values use: `"a"#b` is not a comment
-    val r = rest.trim
+    val r = yamlTrim(rest)
     if r.isEmpty then Right(())
     else if r.startsWith("#") && CommentStart.findFirstMatchIn(rest).exists(_.start > 0) then Right(())
     else Left((n, "unexpected text after a closing quote or bracket"))
@@ -481,7 +491,7 @@ private[harness] object Frontmatter:
               while end < len && value.charAt(end) != ',' && value.charAt(end) != ']' do end += 1
               if end >= len then Left((n, "a flow list is not closed on its line"))
               else
-                val plain = value.substring(j, end).trim
+                val plain = yamlTrim(value.substring(j, end))
                 if plain.isEmpty then Left((n, "a flow list has an empty item"))
                 // a ` #` starts a comment, which would swallow the rest of the line and the list's `]` with it
                 else if CommentStart.findFirstIn(plain).isDefined then
