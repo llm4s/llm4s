@@ -304,7 +304,11 @@ final private[runner] class WebSocketCommandExecutor(
               ExecuteCommandResponse(
                 commandId = cmd.commandId,
                 stdout = stdoutAccumulator.result(),
-                stderr = stderrAccumulator.result(),
+                // a command its timeout killed says so, as the direct path's TIMEOUT does: exit -1 alone is ambiguous
+                stderr =
+                  stderrAccumulator.result() + (if (commandTimedOut.get())
+                                                  s"\n[timed out after ${prepared.timeout.toSeconds}s and was killed]"
+                                                else ""),
                 exitCode = effectiveExitCode,
                 isOutputTruncated = isOutputTruncated,
                 duration = durationMs.millis

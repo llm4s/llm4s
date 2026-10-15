@@ -346,6 +346,8 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
     val elapsed         = (System.nanoTime() - started).nanos
     done.exitCode shouldBe -1
     channel.responses.map(_.exitCode) shouldBe Seq(-1)
+    // and says why: exit -1 alone does not
+    channel.responses.head.stderr should include("timed out after 1s")
     elapsed should be < 15.seconds
   }
 
