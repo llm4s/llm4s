@@ -100,9 +100,9 @@ class ContentPartSpec extends AnyFlatSpec with Matchers with EitherValues {
       ContentPart.image(remote, MediaType.Png).value
     ) shouldBe ContentPart.EstimatedImageTokens
     val csv = MediaSource.Inline(IArray.fill[Byte](4000)(65))
-    ContentPart.estimatedTokens(ContentPart.document(csv, MediaType.Csv).value) shouldBe 1000
+    ContentPart.estimatedTokens(ContentPart.document(csv, MediaType.Csv).value) shouldBe 4000
     val pdf = MediaSource.Inline(IArray.fill[Byte](320000)(1))
-    ContentPart.estimatedTokens(ContentPart.document(pdf, MediaType.Pdf).value) shouldBe 80000
+    ContentPart.estimatedTokens(ContentPart.document(pdf, MediaType.Pdf).value) shouldBe 320000
     ContentPart.estimatedTokens(
       ContentPart.document(png, MediaType.Pdf).value
     ) shouldBe ContentPart.EstimatedDocumentTokens

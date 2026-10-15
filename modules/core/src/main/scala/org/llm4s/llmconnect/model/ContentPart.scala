@@ -109,9 +109,10 @@ object ContentPart {
    * true cost is the provider's and depends on the image's size or the document's pages; these err high, which
    * only prunes early:
    *  - an image, [[EstimatedImageTokens]] (a large image on Anthropic; more than OpenAI's high-detail cost);
-   *  - an inline text document (plain text, Markdown, HTML, CSV), its bytes over four;
-   *  - an inline PDF, its bytes over four, at least [[EstimatedDocumentTokens]]: as for text, since an uncompressed
-   *    PDF can hold about that much text, and nothing here reads its pages;
+   *  - an inline text document (plain text, Markdown, HTML, CSV), one token a byte: a token is at least a byte, so
+   *    this bounds any tokenizer's count;
+   *  - an inline PDF, one token a byte, at least [[EstimatedDocumentTokens]]: as for text, since nothing here reads
+   *    its pages;
    *  - a document at a URL or in a provider file, whose size is unknown here, [[EstimatedReferencedDocumentTokens]]:
    *    a large document's cost, since nothing here bounds it; a caller that knows a document is small and is short of
    *    room can send it inline, where its size is counted.
@@ -120,8 +121,8 @@ object ContentPart {
   private[llm4s] def estimatedTokens(part: ContentPart): Int = part match {
     case _: Text                                             => 0
     case _: Image                                            => EstimatedImageTokens
-    case Document(inline: MediaSource.Inline, MediaType.Pdf) => math.max(EstimatedDocumentTokens, inline.length / 4)
-    case Document(inline: MediaSource.Inline, _)             => inline.length / 4
+    case Document(inline: MediaSource.Inline, MediaType.Pdf) => math.max(EstimatedDocumentTokens, inline.length)
+    case Document(inline: MediaSource.Inline, _)             => inline.length
     case _: Document                                         => EstimatedReferencedDocumentTokens
   }
 
