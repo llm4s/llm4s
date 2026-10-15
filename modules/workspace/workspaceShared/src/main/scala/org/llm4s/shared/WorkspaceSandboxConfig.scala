@@ -382,6 +382,12 @@ object WorkspaceSandboxConfig {
    */
   val CommandGateWait: FiniteDuration = 30.seconds
 
+  /**
+   * The largest `limits.maxFileSize` the runner keeps: a snapshot holds a file whole in memory, in one array. A config
+   * over it is refused by [[validate]], and a runner given one unvalidated uses this instead.
+   */
+  val MaxFileSize: Long = 256L * 1024L * 1024L
+
   val DefaultLimits: WorkspaceLimits = WorkspaceLimits(
     maxFileSize = 1048576L, // 1MB
     maxDirectoryEntries = 500,
@@ -445,6 +451,11 @@ object WorkspaceSandboxConfig {
 
     for {
       _ <- check(config.limits.maxFileSize > 0, "limits.maxFileSize must be positive")
+      // a snapshot holds a file whole, in one array: a larger limit could not be kept
+      _ <- check(
+        config.limits.maxFileSize <= WorkspaceSandboxConfig.MaxFileSize,
+        s"limits.maxFileSize must be at most ${WorkspaceSandboxConfig.MaxFileSize} bytes"
+      )
       _ <- check(config.limits.maxDirectoryEntries > 0, "limits.maxDirectoryEntries must be positive")
       _ <- check(config.limits.maxSearchResults > 0, "limits.maxSearchResults must be positive")
       _ <- check(config.limits.maxOutputSize > 0, "limits.maxOutputSize must be positive")

@@ -44,6 +44,8 @@ class WorkspaceAgentInterfaceImpl(
 
   private val config        = sandboxConfig.getOrElse(WorkspaceSandboxConfig.Permissive)
   private val defaultLimits = config.limits
+  // the file size limit as kept: never more than a snapshot can hold whole, whatever an unvalidated config says
+  private val maxFileSize: Long = math.min(defaultLimits.maxFileSize, WorkspaceSandboxConfig.MaxFileSize)
   private val defaultExclusions =
     if (config.excludePatterns.nonEmpty) config.excludePatterns
     else WorkspaceSandboxConfig.DefaultExclusions
@@ -260,7 +262,7 @@ class WorkspaceAgentInterfaceImpl(
     else if (!Files.isRegularFile(resolved)) {
       refuseSpecial(rootPath.relativize(resolved).toString, resolved)
       FileSnapshotResponse.Kind.Absent // not reached: refuseSpecial throws for what is neither a directory nor a file
-    } else if (Files.size(resolved) > defaultLimits.maxFileSize) FileSnapshotResponse.Kind.Oversized
+    } else if (Files.size(resolved) > maxFileSize) FileSnapshotResponse.Kind.Oversized
     else {
       // read at most one byte past the limit, whatever the size said: a file growing while it is read is `oversized`
       val digest = java.security.MessageDigest.getInstance("SHA-256")
@@ -268,12 +270,12 @@ class WorkspaceAgentInterfaceImpl(
         val buffer = new Array[Byte](8192)
         var total  = 0L
         var n      = in.read(buffer)
-        while (n != -1 && total <= defaultLimits.maxFileSize) {
+        while (n != -1 && total <= maxFileSize) {
           digest.update(buffer, 0, n)
           total += n
-          n = if (total <= defaultLimits.maxFileSize) in.read(buffer) else -1
+          n = if (total <= maxFileSize) in.read(buffer) else -1
         }
-        total <= defaultLimits.maxFileSize
+        total <= maxFileSize
       }
       if (within) "sha256:" + digest.digest().map(b => f"${b & 0xff}%02x").mkString
       else FileSnapshotResponse.Kind.Oversized
@@ -294,7 +296,7 @@ class WorkspaceAgentInterfaceImpl(
     // an oversized file has no digest, so nothing can be compared with it
     if (current == FileSnapshotResponse.Kind.Oversized || expected == FileSnapshotResponse.Kind.Oversized)
       throw new WorkspaceAgentException(
-        s"Path '$path' is larger than the maximum size limit (${defaultLimits.maxFileSize} bytes); it cannot be compared",
+        s"Path '$path' is larger than the maximum size limit (${maxFileSize} bytes); it cannot be compared",
         "SIZE_LIMIT_EXCEEDED",
         None
       )
@@ -461,9 +463,9 @@ class WorkspaceAgentInterfaceImpl(
     refuseSpecial(path, resolvedPath)
 
     val fileSize = Files.size(resolvedPath)
-    if (fileSize > defaultLimits.maxFileSize) {
+    if (fileSize > maxFileSize) {
       throw new WorkspaceAgentException(
-        s"File '$path' exceeds maximum size limit (${defaultLimits.maxFileSize} bytes)",
+        s"File '$path' exceeds maximum size limit (${maxFileSize} bytes)",
         "SIZE_LIMIT_EXCEEDED",
         Some(s"File size: $fileSize bytes")
       )
@@ -524,9 +526,9 @@ class WorkspaceAgentInterfaceImpl(
         None
       )
     // the content's size bounded before it is encoded: every character is at least one byte (#870)
-    if (content.length.toLong > defaultLimits.maxFileSize)
+    if (content.length.toLong > maxFileSize)
       throw new WorkspaceAgentException(
-        s"Content for '$path' exceeds maximum size limit (${defaultLimits.maxFileSize} bytes)",
+        s"Content for '$path' exceeds maximum size limit (${maxFileSize} bytes)",
         "SIZE_LIMIT_EXCEEDED",
         None
       )
@@ -563,9 +565,9 @@ class WorkspaceAgentInterfaceImpl(
     val resulting =
       bytes.length.toLong + (if (writeMode == "append" && Files.isRegularFile(resolvedPath)) Files.size(resolvedPath)
                              else 0L)
-    if (resulting > defaultLimits.maxFileSize)
+    if (resulting > maxFileSize)
       throw new WorkspaceAgentException(
-        s"Writing '$path' would leave it larger than the maximum size limit (${defaultLimits.maxFileSize} bytes)",
+        s"Writing '$path' would leave it larger than the maximum size limit (${maxFileSize} bytes)",
         "SIZE_LIMIT_EXCEEDED",
         Some(s"Resulting size: $resulting bytes")
       )
@@ -684,12 +686,12 @@ class WorkspaceAgentInterfaceImpl(
     // the file it reads, and the file it leaves, are both within the size limit (#870)
     def tooLarge(size: Long, what: String) =
       new WorkspaceAgentException(
-        s"File '$path' $what the maximum size limit (${defaultLimits.maxFileSize} bytes)",
+        s"File '$path' $what the maximum size limit (${maxFileSize} bytes)",
         "SIZE_LIMIT_EXCEEDED",
         Some(s"Size: $size bytes")
       )
     val currentSize = Files.size(resolvedPath)
-    if (currentSize > defaultLimits.maxFileSize) throw tooLarge(currentSize, "exceeds")
+    if (currentSize > maxFileSize) throw tooLarge(currentSize, "exceeds")
 
     // Read the file content
     val lines = Using(Source.fromFile(resolvedPath.toFile, StandardCharsets.UTF_8.name()))(_.getLines().toList) match {
@@ -707,7 +709,7 @@ class WorkspaceAgentInterfaceImpl(
     val separator     = System.lineSeparator().length.toLong
     val resultingSize =
       modifiedLines.iterator.map(l => l.getBytes(StandardCharsets.UTF_8).length.toLong + separator).sum
-    if (resultingSize > defaultLimits.maxFileSize) throw tooLarge(resultingSize, "would exceed")
+    if (resultingSize > maxFileSize) throw tooLarge(resultingSize, "would exceed")
 
     // Write back to file using UTF-8 encoding
     Using(
@@ -744,7 +746,8 @@ class WorkspaceAgentInterfaceImpl(
     includeContent: Boolean = true,
     followLinks: Boolean = true
   ): FileSnapshotResponse =
-    mutationLock.synchronized {
+    // under the gate as well as the lock: a command cannot swap a link it resolved through while it is read
+    mutating {
       import FileSnapshotResponse.Kind
       val resolved = resolvePath(path)
       def response(kind: String, hash: String, size: Long, content: Option[String], error: Option[String]) =
@@ -760,26 +763,26 @@ class WorkspaceAgentInterfaceImpl(
         refuseSpecial(path, resolved)
         val size = Files.size(resolved)
         if (!includeContent) response(Kind.File, currentHash(resolved), size, None, None)
-        else if (size > defaultLimits.maxFileSize)
+        else if (size > maxFileSize)
           response(
             Kind.File,
             Kind.Oversized,
             size,
             None,
-            Some(s"the file is $size bytes, larger than the limit of ${defaultLimits.maxFileSize} bytes")
+            Some(s"the file is $size bytes, larger than the limit of ${maxFileSize} bytes")
           )
         else {
           // read once, bounded by the limit even if the file grew since its size was read
           val bytes = Using.resource(Files.newInputStream(resolved))(
-            _.readNBytes((math.min(defaultLimits.maxFileSize, Int.MaxValue - 9L) + 1).toInt)
+            _.readNBytes((maxFileSize + 1).toInt) // at most MaxFileSize + 1: fits an array
           )
-          if (bytes.length.toLong > defaultLimits.maxFileSize)
+          if (bytes.length.toLong > maxFileSize)
             response(
               Kind.File,
               Kind.Oversized,
               size,
               None,
-              Some(s"the file is larger than the limit of ${defaultLimits.maxFileSize} bytes")
+              Some(s"the file is larger than the limit of ${maxFileSize} bytes")
             )
           else {
             val decoded = Try(
@@ -1547,7 +1550,7 @@ class WorkspaceAgentInterfaceImpl(
       commandId = "local",
       root = rootPath.toString,
       defaultExclusions = defaultExclusions,
-      limits = defaultLimits
+      limits = defaultLimits.copy(maxFileSize = maxFileSize)
     )
 }
 

@@ -21,6 +21,10 @@ class WorkspaceSandboxConfigSpec extends AnyFlatSpec with Matchers {
       limits = WorkspaceLimits(maxFileSize = 0, 500, 100, 1048576)
     )
     WorkspaceSandboxConfig.validate(bad) shouldBe Left("limits.maxFileSize must be positive")
+    val huge = WorkspaceSandboxConfig.Permissive.copy(
+      limits = WorkspaceLimits(maxFileSize = WorkspaceSandboxConfig.MaxFileSize + 1, 500, 100, 1048576)
+    )
+    WorkspaceSandboxConfig.validate(huge).left.toOption.get should include("at most")
   }
 
   it should "keep the defaultCommandTimeoutSeconds JSON key, in whole seconds" in {
