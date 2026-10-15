@@ -7,7 +7,7 @@ nav_order: 5
 
 # LLM4S Roadmap
 
-This page reflects the pre-1.0 roadmap as of **October 2026**: the latest release is **v0.5.0**, the first with the split module artifacts. It replaces the June 2026 snapshot, which still named v0.3.2 as current, and it links the community mentorship tracks ([LFX](https://github.com/llm4s/llm4s/blob/main/LFX%20Mentorship/Project%20Ideas/2026.md), [ESoC](https://github.com/llm4s/llm4s/blob/main/European%20Summer%20of%20Code/Project%20Ideas/2026.md)) to the phases they advance. Which packages 1.0 freezes is stated on [1.0 Scope](v1-scope); this page is the plan for getting there.
+This page reflects the pre-1.0 roadmap as of **October 2026**: the latest release is **v0.5.1**; v0.5.0 was the first with the split module artifacts. It replaces the June 2026 snapshot, which still named v0.3.2 as current, and it links the community mentorship tracks ([LFX](https://github.com/llm4s/llm4s/blob/main/LFX%20Mentorship/Project%20Ideas/2026.md), [ESoC](https://github.com/llm4s/llm4s/blob/main/European%20Summer%20of%20Code/Project%20Ideas/2026.md)) to the phases they advance. Which packages 1.0 freezes is stated on [1.0 Scope](v1-scope); this page is the plan for getting there.
 
 LLM4S has broad, working framework functionality today: multi-provider clients (including Vertex AI and AWS Bedrock), agents, tool calling, RAG/vector stores, GraphRAG/Neo4j, memory, guardrails (including prompt-injection detection), tracing, metrics, JMH benchmarks, reliability wrappers, workspace isolation, MCP transports with auth hardening, multimodal APIs (vision, image generation, speech), and Java, Kotlin, Spring Boot, cats-effect and ZIO integrations. The code that used to ship as one `core` artifact is split into per-concern modules ([#1126](https://github.com/llm4s/llm4s/issues/1126)); that split shipped in 0.5.0. The remaining v1.0 work is productization: a binary-compatibility baseline, provider capability parity, default-deny tool/MCP security, unified cost telemetry, deterministic CI, runnable docs, and polished reference applications.
 
@@ -15,9 +15,9 @@ LLM4S has broad, working framework functionality today: multi-provider clients (
 
 | | |
 |---|---|
-| **Latest release tag** | v0.5.0 (2026-10-15) · see the [CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md) |
-| **Release sequence** | 0.4.x: coordinate rename and fixes (**done**) → **0.5.0**: modularisation complete, separate artifacts published (**done**) → a pre-1.0 release: designs final, MiMa baseline set → **1.0**: frozen surface, after it has survived two releases |
-| **Main branch** | Work after 0.5.0; see the CHANGELOG's `Unreleased` section |
+| **Latest release tag** | v0.5.1 (2026-10-15) · see the [CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md) |
+| **Release sequence** | 0.4.x: coordinate rename and fixes (**done**) → **0.5.0**: modularisation complete, separate artifacts published (**done**), with 0.5.1 adding the Kotlin API → a pre-1.0 release: designs final, MiMa baseline set → **1.0**: frozen surface, after it has survived two releases |
+| **Main branch** | Work after 0.5.1; see the CHANGELOG's `Unreleased` section |
 | **Artifacts** | `org.llm4s:llm4s-*`. The pre-0.4.0 coordinates (`org.llm4s:core`, …) stop at 0.3.4; see the [migration guide](migration#artifact-coordinate-rename-v040) |
 | **Stability** | Pre-1.0, API stabilizing; each package's tier is on [1.0 Scope](v1-scope) |
 | **Scala support** | Scala 3.7.1 only. Scala 2.13 is deferred to after 1.0 ([#874](https://github.com/llm4s/llm4s/issues/874)) |
