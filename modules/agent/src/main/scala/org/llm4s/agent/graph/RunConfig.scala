@@ -83,12 +83,12 @@ final case class RunConfig private (
   def withInterruptAfter(nodes: Set[NodeId]): RunConfig = copy(interruptAfter = nodes)
 
   /**
-   * Prunes the thread to `policy` ([[Checkpointer.prune]]) as the run is admitted: once its claim has committed and
-   * before its first superstep, so a run that is refused - a busy thread, a pending interrupt, another tenant's thread
-   * - leaves the thread unchanged, and nothing else writes to the thread while it prunes. The run's claim checkpoint is
-   * the latest, which pruning never removes, so the run is unaffected; earlier runs' checkpoints and events beyond the
-   * policy are removed, raising the replay floor for their handles. The run's own replay is never cut: `maxEvents` is
-   * applied as at least 1, so the claim's event, where the run's replay starts, stays. `RetentionPolicy.keepAll`
+   * Prunes the thread to `policy` ([[Checkpointer.prune]]) as the run is admitted: once the store has granted its claim
+   * and before the run commits anything, so a run refused at admission - a blank query, a busy thread, a pending
+   * interrupt, another tenant's thread - leaves the thread unchanged, nothing else writes to the thread while it prunes,
+   * and nothing of the run exists yet to be pruned, by any limit, so its own replay is whole. Pruning never removes the
+   * latest checkpoint or its pending writes, so what the run continues from is unchanged; earlier runs' checkpoints and
+   * events beyond the policy are removed, raising the replay floor for their handles. `RetentionPolicy.keepAll`
    * removes nothing and is skipped. A prune that fails is logged at WARN and the run goes on: retention is
    * housekeeping.
    */

@@ -425,9 +425,13 @@ object HarnessProfile:
     val parts = Vector(
       Some(Prompt.Intro),
       Some(Prompt.work(profile.todos.isDefined)),
-      Option.when(files)(Prompt.Files),
+      Option.when(files)(Prompt.files(selected)),
       Option.when(profile.summarization.isDefined || profile.offload.isDefined)(
-        Prompt.context(profile.summarization.isDefined, profile.offload.isDefined && selected(FileTools.ReadFile))
+        Prompt.context(
+          profile.summarization.isDefined,
+          selected(FileTools.WriteFile),
+          profile.offload.isDefined && selected(FileTools.ReadFile)
+        )
       ),
       Option.when(profile.sandbox.isDefined && selected(ExecuteTool.Name))(Prompt.Execute),
       Some(Prompt.Safety)
@@ -454,15 +458,32 @@ object HarnessProfile:
          |- Act: take one step at a time, and read the result of each tool call before the next.
          |- Verify: check your work before you answer - read back what you wrote, run what you can - and say what you could not check.""".stripMargin
 
-    val Files: String =
-      """Files: paths are absolute (/src/main.scala). Use ls, glob and grep to find files, and read_file before you
-        |edit one. Prefer edit_file for a change to an existing file over rewriting it with write_file. A read in the
-        |same message as a write may not see that write.""".stripMargin.replace('\n', ' ')
+    /** The file guidance, naming only the `selected` file tools. */
+    def files(selected: String => Boolean): String =
+      def listed(names: Vector[String]): String =
+        if names.size <= 1 then names.mkString else s"${names.init.mkString(", ")} and ${names.last}"
+      val finders  = Vector(FileTools.Ls, FileTools.Glob, FileTools.Grep).filter(selected)
+      val read     = selected(FileTools.ReadFile)
+      val edit     = selected(FileTools.EditFile)
+      val write    = selected(FileTools.WriteFile)
+      val mutating = edit || write || selected(FileTools.Delete)
+      Vector(
+        Some("Files: paths are absolute (/src/main.scala)."),
+        Option.when(finders.nonEmpty)(s"Use ${listed(finders)} to find files."),
+        Option.when(read && (edit || write))("Read a file with read_file before you change it."),
+        Option.when(edit && write)(
+          "Prefer edit_file for a change to an existing file over rewriting it with write_file."
+        ),
+        Option.when(mutating && (read || finders.nonEmpty))(
+          "A read in the same message as a write may not see that write."
+        )
+      ).flatten.mkString(" ")
 
-    def context(summaries: Boolean, offloaded: Boolean): String =
+    def context(summaries: Boolean, canWrite: Boolean, offloaded: Boolean): String =
       val parts = Vector(
         Option.when(summaries)(
-          "Older messages of a long conversation are replaced by a summary: keep what you need verbatim in a file."
+          "Older messages of a long conversation are replaced by a summary" +
+            (if canWrite then ": keep what you need verbatim in a file with write_file." else ".")
         ),
         Option.when(offloaded)(
           s"A large tool result is saved under ${ToolOutputOffload.Mount.value} and shown as a preview with its path: " +

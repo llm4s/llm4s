@@ -180,6 +180,22 @@ class HarnessProfileSpec extends AnyFlatSpec with Matchers with EitherValues wit
     bare should include("Tool safety:")
   }
 
+  it should "name only the tools the selection gives" in {
+    val writeOnly = HarnessProfile.defaultPrompt(
+      HarnessProfile.deepAgents.withTools(ToolSelection.Only(Set(FileTools.WriteFile)))
+    )
+    def names(prompt: String, tool: String) = s"\\b$tool\\b".r.findFirstIn(prompt).isDefined
+    Seq("read_file", "edit_file", "ls", "glob", "grep", "execute").filter(names(writeOnly, _)) shouldBe empty
+    writeOnly should include("Files:")
+    val readOnly = HarnessProfile.defaultPrompt(
+      HarnessProfile.deepAgents.withTools(ToolSelection.Only(Set(FileTools.ReadFile, FileTools.Grep)))
+    )
+    Seq("write_file", "edit_file", "ls", "glob").filter(names(readOnly, _)) shouldBe empty
+    (readOnly should not).include("may not see that write")
+    readOnly should include("Use grep to find files.")
+    readOnly should include("/large_tool_results")
+  }
+
   it should "stay a fixed size: the whole preset's is under 1,000 estimated tokens" in {
     val full = HarnessProfile.defaultPrompt(HarnessProfile.deepAgents.withSandbox(SandboxBackend(Echo)))
     PromptSection.estimatedTokens(full.length.toLong) should be < 1000L
@@ -332,10 +348,10 @@ class HarnessProfileSpec extends AnyFlatSpec with Matchers with EitherValues wit
     )
     val results = (1 to 3).map(i => agent.run(thread, s"turn $i").value)
     val history = store.history(thread, None, 100).value
-    // pruned to two as the latest turn was admitted - its claim checkpoint and one before it - then the turn whole
+    // pruned to two as the latest turn was admitted, before it committed anything, then the turn whole
     val latest = history.filter(_.runId == results.last.runId.value)
-    latest.size should be > 1
-    history.size shouldBe latest.size + 1
+    latest should not be empty
+    history.size shouldBe latest.size + 2
     // the thread goes on from its latest checkpoint
     agent.run(thread, "turn 4").value.answer.value shouldBe "answer 4"
   }
@@ -366,7 +382,10 @@ class HarnessProfileSpec extends AnyFlatSpec with Matchers with EitherValues wit
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withHarness(HarnessProfile().withRetention(RetentionPolicy(maxCheckpoints = Some(1), maxEvents = Some(0))))
+        .withHarness(
+          HarnessProfile()
+            .withRetention(RetentionPolicy(maxAge = Some(1.nanosecond), maxCheckpoints = Some(1), maxEvents = Some(0)))
+        )
         .withRuntime(GraphRuntime(store))
     )
     agent.run(thread, "first").value
