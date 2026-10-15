@@ -630,8 +630,8 @@ for {
 - **Editable when permitted.** The agent edits a file with `edit_file` (`FileTools(backend)`) over the same backend when the
   backend accepts the write and the permission rules allow `Write` on its path; deny it to keep a
   scope read-only.
-- **Bounded.** Each file at most `maxFileTokens` (default 2000), the section at most
-  `maxTotalTokens` (4000); a file over either is cut and marked, files past a full section are left
+- **Bounded.** Each file at most `maxFileTokens` (default 1000), the section at most
+  `maxTotalTokens` (2000); a file over either is cut and marked, files past a full section are left
   out, and each is named by path in a durable `HarnessEvents.DocumentsReported`.
 - Instruction memory is a few whole files the agent always sees; [semantic memory](memory) is facts
   recalled per query.

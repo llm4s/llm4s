@@ -146,10 +146,10 @@ final class InstructionMemoryMiddleware(
 object InstructionMemoryMiddleware:
 
   /** The default for `maxFileTokens`. */
-  val DefaultMaxFileTokens: Int = 2000
+  val DefaultMaxFileTokens: Int = 1000
 
-  /** The default for `maxTotalTokens`: with the other harness sections, within the agent's default budget. */
-  val DefaultMaxTotalTokens: Int = 4000
+  /** The default for `maxTotalTokens`: with the other harness sections at their defaults, within the agent's default budget (tested). */
+  val DefaultMaxTotalTokens: Int = 2000
 
   /** The default for `maxCachedRuns`. */
   val DefaultMaxCachedRuns: Int = 64

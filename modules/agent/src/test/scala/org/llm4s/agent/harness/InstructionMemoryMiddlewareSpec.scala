@@ -292,6 +292,37 @@ class InstructionMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Eit
     texts.exists(_.contains("[cut: the instructions are over")) shouldBe true
   }
 
+  "The harness middleware at their defaults" should "fit the agent's default section budget together, each full" in {
+    // a plan at TodoMiddleware's limits: 50 todos of 200 characters with the longest ids, rendered as sent
+    val plan = TodoList(
+      (1 to TodoMiddleware.DefaultMaxTodos).toVector
+        .map(i => Todo(f"$i%020d", "c" * TodoMiddleware.DefaultMaxTodoChars, TodoStatus.InProgress)),
+      51L
+    )
+    val state = org.llm4s.agent.graph.HarnessTestSupport
+      .committed(
+        org.llm4s.agent.graph.HarnessTestSupport.stateOf(TodoMiddleware.key),
+        StateUpdate.update(TodoMiddleware.key, plan)
+      )
+      .value
+    val todoText = new TodoMiddleware()
+      .promptSections(new ModelContext(testRunContext(), state, agentA))
+      .value
+      .map(_.text.length.toLong)
+    // skills and instructions at their own bounds, which they hold by construction (tested above and in F5)
+    val lengths = todoText ++ Vector(
+      PromptSection.charsFor(SkillsMiddleware.DefaultMaxSectionTokens),
+      PromptSection.charsFor(InstructionMemoryMiddleware.DefaultMaxTotalTokens),
+      // llm4s-agent-memory's recalled memories (MemoryRecall's default 1024 tokens, with its heading), a module
+      // this one cannot see
+      PromptSection.charsFor(1024 + 64)
+    )
+    // as the loop counts them: the texts and a two-character separator before each
+    PromptSection.estimatedTokens(
+      lengths.sum + 2L * lengths.size
+    ) should be <= LoopAgent.DefaultMaxPromptSectionTokens.toLong
+  }
+
   "An edit with FileTools' edit_file" should "show from the next run, not in the run that read the files (rule 1)" in {
     val store   = new InMemoryCheckpointer
     val thread  = ThreadId("edit")
