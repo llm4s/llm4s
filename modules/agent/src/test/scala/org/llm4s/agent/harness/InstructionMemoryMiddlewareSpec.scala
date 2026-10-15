@@ -242,6 +242,21 @@ class InstructionMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Eit
     mw.instructions(testModelContext()).value.map(_.path) shouldBe Vector(first, short)
   }
 
+  it should "leave out unread a file whose long path cannot fit, and still show a later one with a short path" in {
+    val first    = p("/a/AGENTS.md")
+    val deep     = p("/" + ("d" * 60) + "/AGENTS.md")
+    val short    = p("/s/AGENTS.md")
+    val counting = new CountingBackend(storeBackend())
+    // after the first file: room for the short heading and its one character, not for the deep heading
+    val room = PromptSection.charsFor(200).toInt - InstructionMemoryMiddleware.Guide.length -
+      s"\n\n## ${first.value}\n".length - s"\n\n## ${short.value}\n".length - 1
+    seed(counting, first.value -> ("x" * room), deep.value -> "never read", short.value -> "z")
+    val mw =
+      new InstructionMemoryMiddleware(Vector(first, deep, short), counting, maxFileTokens = 200, maxTotalTokens = 200)
+    mw.instructions(testModelContext()).value.map(_.path) shouldBe Vector(first, short)
+    counting.reads.get shouldBe 2
+  }
+
   "An edit with FileTools' edit_file" should "show from the next run, not in the run that read the files (rule 1)" in {
     val store   = new InMemoryCheckpointer
     val thread  = ThreadId("edit")

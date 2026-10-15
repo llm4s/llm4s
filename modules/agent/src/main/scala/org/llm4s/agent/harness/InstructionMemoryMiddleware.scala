@@ -90,11 +90,10 @@ final class InstructionMemoryMiddleware(
     paths
       .foldLeft[Result[Unit]](Right(())) { (acc, path) =>
         acc.flatMap { _ =>
-          // full when no file could show: not even its heading and one character fit in the room left (a short
-          // file needs no cut marker, so the marker's room is not asked for before the file is read)
-          if full || text.remaining < headingOf(path).length.toLong + 1 then
-            full = true
-            Right(notListed(path))
+          // this file cannot show when not even its heading and one character fit in the room left (a short file
+          // needs no cut marker, so the marker's room is not asked for before it is read): it is left out unread,
+          // and a later file with a shorter path is still tried. `full` is set only once the section is cut.
+          if full || text.remaining < headingOf(path).length.toLong + 1 then Right(notListed(path))
           else
             DocumentText.read(backend, path, fileChars, ctx) match
               case Left(refused: BackendRefused) =>
