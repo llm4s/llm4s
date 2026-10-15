@@ -19,12 +19,16 @@ private[harness] object FileTree:
       case None if isDirectory(all, path) => Left(BackendRefused.at(operation, path, "is a directory"))
       case None                           => Left(BackendRefused.at(operation, path, "not found"))
 
-  /** `path` may be written as a file: not the root, not a directory, not beneath a file. */
+  /**
+   * `path` may be written as a file: not the root, not a directory, not beneath a file. A path that is a
+   * file and also has entries beneath it (stored past the backend) is a directory too, and refused: only
+   * `delete` cleans such a tree up.
+   */
   def writable(operation: String, all: Map[VPath, FileEntry], path: VPath): Result[Unit] =
     def refuse(reason: String) = Left(BackendRefused.at(operation, path, reason))
     val ancestors              = Iterator.iterate(path.parent)(_.flatMap(_.parent)).takeWhile(_.isDefined).flatten
     if path == VPath.root then refuse("is the root directory")
-    else if !all.contains(path) && isDirectory(all, path) then refuse("is a directory")
+    else if isDirectory(all, path) then refuse("is a directory")
     else if ancestors.exists(all.contains) then refuse("is beneath a file")
     else Right(())
 

@@ -266,6 +266,9 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
     f.commit(StateUpdate.update(backend.files, FileUpdate.Put(p("/a"), FileEntry("file", clock.instant()))))
     f.commit(StateUpdate.update(backend.files, FileUpdate.Put(p("/a/b"), FileEntry("beneath", clock.instant()))))
     backend.ls(VPath.root, 10, f.ctx).left.value.message should include("both a file and a directory")
+    backend.write(p("/a"), "again", f.ctx).left.value.message should include("is a directory")
+    backend.edit(p("/a"), "file", "x", replaceAll = false, f.ctx).left.value.message should include("is a directory")
+    backend.delete(p("/a"), f.ctx).isRight shouldBe true
   }
 
   it should "refuse to read or edit, and skip in grep, content another writer stored past its bound" in {

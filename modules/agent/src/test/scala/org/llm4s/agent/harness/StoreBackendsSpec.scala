@@ -489,4 +489,21 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     val b     = ctx.effectKey("op", "x")
     Set(first, a, b).size shouldBe 3
   }
+
+  "StoreFileBackend" should "refuse to write or edit a file that also has items beneath it, but delete it" in {
+    val store = InMemoryLongTermStore()
+    val files = storeFiles(store)
+    val ns    = Namespace(None, Vector("memories"))
+    def seed(key: String, text: String): Unit = {
+      val effect = org.llm4s.agent.graph.HarnessTestSupport.runOn(s"seed-$key").effectKey("seed", key)
+      store
+        .modify[Unit](ns, key, effect, FencingToken(0))(_ => Right(StoreChange.Put(ujson.Obj("content" -> text), ())))
+        .value
+    }
+    seed("/a", "file")
+    seed("/a/b", "beneath")
+    files.write(p("/a"), "again", call()).left.value.message should include("is a directory")
+    files.edit(p("/a"), "file", "x", replaceAll = false, call()).left.value.message should include("is a directory")
+    done(files.delete(p("/a"), call())) shouldBe FileDeleted(wasDirectory = false)
+  }
 }

@@ -113,17 +113,18 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
    * store's transaction, so a concurrent write of an ancestor or descendant cannot slip between the
    * check and the write.
    */
-  private def writable(view: StoreView, target: VPath): Result[Unit] =
-    if target == VPath.root then refused("write", target, "is the root directory")
+  private def writable(operation: String, view: StoreView, target: VPath): Result[Unit] =
+    if target == VPath.root then refused(operation, target, "is the root directory")
     else
       for
         directory <- isDirectory(view, target)
         beneath   <- beneathFile(view, target)
         _ <-
           if view.current.exists(i => content(i).isEmpty) then
-            refused("write", target, "holds a store item that is not a file")
-          else if view.current.isEmpty && directory then refused("write", target, "is a directory")
-          else if beneath then refused("write", target, "is beneath a file")
+            refused(operation, target, "holds a store item that is not a file")
+          // a file with items beneath it (stored past the backend) is a directory too: only `delete` cleans it
+          else if directory then refused(operation, target, "is a directory")
+          else if beneath then refused(operation, target, "is beneath a file")
           else Right(())
       yield ()
 
@@ -157,7 +158,7 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
   def write(target: VPath, text: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
     Text.binaryReason(text).fold[Result[Unit]](Right(()))(r => refused("write", target, r)).flatMap { _ =>
       guarded[FileWritten]("write", target, ctx)(view =>
-        writable(view, target)
+        writable("write", view, target)
           .map(_ => StoreChange.Put(file(text), FileWritten(view.current.isEmpty, Text.utf8Bytes(text))))
       )
     }
@@ -170,7 +171,8 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
     ctx: FileContext
   ): Result[(FileEdited, StateUpdate)] =
     guarded[FileEdited]("edit", target, ctx) { view =>
-      currentText("edit", view, target)
+      writable("edit", view, target)
+        .flatMap(_ => currentText("edit", view, target))
         .flatMap(Text.edited(target, _, old, replacement, replaceAll, store.limits.maxItemBytes.toLong))
         .map((next, n) => StoreChange.Put(file(next), FileEdited(n)))
     }
