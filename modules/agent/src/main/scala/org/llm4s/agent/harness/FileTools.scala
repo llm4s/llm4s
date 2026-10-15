@@ -262,7 +262,7 @@ object FileTools:
     }
 
     private def readResult(path: VPath, lines: FileLines): ToolOutcome =
-      if lines.totalLines == 0 then text(s"(${path.value} is an empty file)")
+      if lines.totalLines == 0 && lines.offset == 0 then text(s"(${path.value} is an empty file)")
       else if lines.lines.isEmpty then
         ToolOutcome.Error(
           Bounded.error(

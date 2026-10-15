@@ -178,7 +178,8 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
         read("/a.txt", "offset" -> ujson.Num(3), "limit" -> ujson.Num(100)),
         read("/a.txt", "offset" -> ujson.Num(5)),
         write("/empty", ""),
-        read("/empty")
+        read("/empty"),
+        read("/empty", "offset" -> ujson.Num(2))
       ),
       limits
     )
@@ -187,6 +188,7 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
     out(2) shouldBe "     3\t3\n     4\t4\n(lines 3-4 of 5; continue with offset=5)"
     out(3) shouldBe "     5\t01234 [... line cut at 5 characters]"
     out(5) shouldBe "(/empty is an empty file)"
+    out(6) shouldBe err("offset 2 is past the end of /empty, which has 0 lines")
   }
 
   "ls, glob and grep" should "stop at maxResults and say so" in {
