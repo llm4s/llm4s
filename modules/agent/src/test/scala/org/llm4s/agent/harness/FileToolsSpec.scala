@@ -213,6 +213,38 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
     out(7) shouldBe "No lines match zzz under /"
   }
 
+  /** A backend whose walks stop at a scan bound of their own before finding anything. */
+  final private class StoppedEarly(inner: StateFileBackend) extends FileBackend {
+    def writes                                        = inner.writes
+    def locks(path: VPath)                            = inner.locks(path)
+    def ls(path: VPath, limit: Int, ctx: FileContext) = Right(Listing(Vector.empty[FileInfo], truncated = true))
+    def read(path: VPath, offset: Int, limit: Int, ctx: FileContext) = inner.read(path, offset, limit, ctx)
+    def write(path: VPath, content: String, ctx: FileContext)        = inner.write(path, content, ctx)
+    def edit(path: VPath, old: String, replacement: String, replaceAll: Boolean, ctx: FileContext) =
+      inner.edit(path, old, replacement, replaceAll, ctx)
+    def delete(path: VPath, ctx: FileContext) = inner.delete(path, ctx)
+    def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext) =
+      Right(Listing(Vector.empty[VPath], truncated = true))
+    def search(under: VPath, regex: java.util.regex.Pattern, accept: VPath => Boolean, limit: Int, ctx: FileContext) =
+      Right(Listing(Vector.empty[GrepMatch], truncated = true))
+  }
+
+  "An empty listing a backend stopped early" should "say the search stopped, never that there is nothing" in {
+    val out = sequential(
+      new StoppedEarly(StateFileBackend()),
+      Seq(
+        FileTools.Ls   -> ujson.Obj(),
+        FileTools.Glob -> ujson.Obj("pattern" -> "*"),
+        FileTools.Grep -> ujson.Obj("pattern" -> "x")
+      )
+    )
+    out.foreach { r =>
+      r should include("stopped early")
+      (r should not).include("No ")
+      (r should not).include("is empty")
+    }
+  }
+
   "Every result" should "be at most maxResultChars, cut with a note, whatever the backend returns" in {
     val limits = FileToolLimits(maxResultChars = 300, maxLineChars = 1000)
     val line   = "y" * 100

@@ -178,7 +178,11 @@ object FileTools:
       )
 
     private def stopped(listing: Listing[?]): Option[String] =
-      Option.when(listing.truncated)(s"(stopped at $maxResults results; narrow the path or pattern)")
+      Option.when(listing.truncated)(
+        if listing.items.size >= maxResults then s"(stopped at $maxResults results; narrow the path or pattern)"
+        // a backend may stop its walk at a scan bound of its own before it fills the limit, even with nothing found
+        else s"(the search stopped early, at a bound of the backend; there may be more: narrow the path or pattern)"
+      )
 
     // ---- ls ----
 
@@ -202,7 +206,7 @@ object FileTools:
             .fold(
               failed,
               listing =>
-                if listing.items.isEmpty then text(s"${path.value} is empty")
+                if listing.items.isEmpty && !listing.truncated then text(s"${path.value} is empty")
                 else
                   text(
                     Bounded.render(
@@ -390,7 +394,8 @@ object FileTools:
             .fold(
               failed,
               listing =>
-                if listing.items.isEmpty then text(s"No files match ${Text.quoted(args.pattern)} under ${under.value}")
+                if listing.items.isEmpty && !listing.truncated then
+                  text(s"No files match ${Text.quoted(args.pattern)} under ${under.value}")
                 else text(Bounded.render(listing.items.iterator.map(_.value), stopped(listing), maxResultChars))
             )
       )
@@ -438,7 +443,8 @@ object FileTools:
             .fold(
               failed,
               listing =>
-                if listing.items.isEmpty then text(s"No lines match ${Text.quoted(args.pattern)} under ${under.value}")
+                if listing.items.isEmpty && !listing.truncated then
+                  text(s"No lines match ${Text.quoted(args.pattern)} under ${under.value}")
                 else
                   text(
                     Bounded.render(
