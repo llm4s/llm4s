@@ -18,7 +18,7 @@ import org.llm4s.types.Result
  * The key is the thread, the run id and the claim's fencing token: a run id can be reused (`RunConfig.withRunId`, a
  * recovery under the same id), the token is new for every run that claims the thread, so a recovered or resumed run
  * computes its value again. The value is computed under its entry's lock, so the concurrent hooks of one run compute
- * it once; a failure is not kept.
+ * it once; a failure, returned or thrown, leaves no entry behind.
  *
  * `report` runs when the value is computed, in the task that computed it, and again whenever that task runs the hook
  * again - a retried attempt, whose durable events were discarded - so a report committed with the task's events is
@@ -51,12 +51,18 @@ final private[harness] class RunCache[A](maxRuns: Int):
           if slot.reporter.contains(position.taskId) then report(value)
           Right(value)
         case None =>
-          compute.map { value =>
-            slot.value = Some(value)
-            slot.reporter = Some(position.taskId)
-            report(value)
-            value
-          }
+          val computed = scala.util.Try(compute)
+          computed match
+            case scala.util.Success(Right(value)) =>
+              slot.value = Some(value)
+              slot.reporter = Some(position.taskId)
+              // a waiter on a slot an earlier failure removed puts it back, so its value is kept
+              slots.synchronized(slots.putIfAbsent(key, slot)): Unit
+              report(value)
+            case _ =>
+              // a failure - returned or thrown - keeps no entry, so it takes no place from a run that has its value
+              slots.synchronized(slots.remove(key, slot)): Unit
+          computed.get
     }
 
 /** What one run's read produced: its value, the text of its section (if any), and its report. */

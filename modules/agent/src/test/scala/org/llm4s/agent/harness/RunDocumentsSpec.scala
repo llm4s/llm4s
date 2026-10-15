@@ -123,8 +123,20 @@ class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val events = new CopyOnWriteArrayList[(String, ujson.Value)]()
     val cache  = new RunCache[String](2)
     val run    = recordingRunContext(events, token = Some(1L))
-    cache(run)(Left(ValidationError("store", "down")))(_ => ()).isLeft shouldBe true
     cache(run)(Right("v"))(_ => ()).value shouldBe "v"
+    // failures of other runs, returned or thrown, take no place from the run that has its value
+    (1 to 3).foreach { i =>
+      cache(recordingRunContext(events, run = s"f$i"))(Left(ValidationError("store", "down")))(_ =>
+        ()
+      ).isLeft shouldBe true
+    }
+    an[IllegalStateException] should be thrownBy cache(recordingRunContext(events, run = "thrown"))(
+      throw new IllegalStateException("boom")
+    )(_ => ())
+    cache.cached shouldBe 1
+    val again = new java.util.concurrent.atomic.AtomicInteger(0)
+    cache(run) { again.incrementAndGet(); Right("w") }(_ => ()).value shouldBe "v"
+    again.get shouldBe 0
     (1 to 5).foreach(i => cache(recordingRunContext(events, run = s"r$i"))(Right("v"))(_ => ()))
     cache.cached shouldBe 2
     an[IllegalArgumentException] should be thrownBy new RunCache[String](0)
