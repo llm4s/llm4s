@@ -110,4 +110,8 @@ class VPathSpec extends AnyFlatSpec with Matchers with EitherValues {
     cut shouldBe ("a" * 63 + "... (165 characters)")
   }
 
+  "VPath./" should "refuse an empty name, rather than return the parent" in {
+    (VPath("/a").value / "").left.value.message should include("empty name")
+    (VPath.root / "").left.value.message should include("empty name")
+  }
 }

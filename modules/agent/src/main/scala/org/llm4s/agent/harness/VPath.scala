@@ -67,7 +67,9 @@ object VPath:
     /** The child `name` of this path; `name` must be one valid segment. */
     def /(name: String): Result[VPath] =
       // bounded before the concatenation copies it
-      if name.length > MaxSegmentBytes then
+      // an empty name is no segment: `/a` / "" would read back as `/a` itself, the trailing `/` dropped
+      if name.isEmpty then Left(ValidationError("path", "an empty name is not a segment"))
+      else if name.length > MaxSegmentBytes then
         Left(ValidationError("path", s"'${Text.quoted(name)}' is longer than $MaxSegmentBytes bytes"))
       else if name.contains('/') then Left(ValidationError("path", s"'${Text.quoted(name)}' is not one segment"))
       else VPath(if path == root then s"/$name" else s"$path/$name")
