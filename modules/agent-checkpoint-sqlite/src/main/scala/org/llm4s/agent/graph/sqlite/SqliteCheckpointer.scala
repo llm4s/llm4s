@@ -59,6 +59,17 @@ import scala.util.{ Try, Using }
  *
  * One store is one connection, and its calls are serialised: it is safe to call from any number of threads.
  * Every failure of the database itself is a `ProcessingError`, and so is any call after [[close]].
+ *
+ * '''Every call returns within twice the busy timeout''', plus the time its own SQL takes, as the `Checkpointer`
+ * contract requires (#1919). A call waits for this store's earlier calls, and a write then for its turn at the file,
+ * at most `busyTimeout` from the call's start; a write then waits for SQLite's own lock, which another process may
+ * hold, at most `busyTimeout` again. A call that reaches either limit fails with a `ProcessingError`, changing
+ * nothing. A read never waits for a writer in WAL mode, so it waits only for this store's earlier calls.
+ * `awaitEventsAfter` polls, so it returns within its `timeout` plus that bound. What no limit here covers is the SQL
+ * itself once it holds the connection: sqlite-jdbc's native calls cannot be timed out or interrupted, so a disk that
+ * stalls inside a write - `synchronous = FULL` waits for the disk to sync every commit - holds that call, and the
+ * store's later calls fail once they have waited `busyTimeout` for it. Keep the bound well inside
+ * `ClaimPolicy.ttl - ClaimPolicy.renewEvery`: with the default 5 second busy timeout and 30 second `ttl`, it is.
  */
 final class SqliteCheckpointer private (
   val path: Path,
@@ -450,14 +461,40 @@ final class SqliteCheckpointer private (
     lock.lock()
     Using.resource(Unlock(lock))(_ => body)
 
-  /** `body` on the connection, serialised with every other call; any exception is a `ProcessingError`. */
-  private def guarded[A](operation: String)(body: Connection => Result[A]): Result[A] = locked {
-    if shut then Left(failure(operation, "the store is closed", None))
+  /**
+   * `body` on the connection, serialised with every other call; any exception is a `ProcessingError`. A call waits
+   * for this store's earlier calls only until `deadline` (a `System.nanoTime` value), and then fails as a busy file
+   * does, with a `ProcessingError` and nothing changed (#1919): a call stuck on the connection - one waiting out a
+   * busy file, or a disk that stalls - must not hold every later call of the store with it.
+   */
+  private def guarded[A](operation: String, deadline: Long)(body: Connection => Result[A]): Result[A] =
+    if !lockBy(deadline) then Left(failure(operation, storeBusy(busyTimeout), None))
     else
-      Try(body(connection)).toEither.left
-        .map(e => failure(operation, Option(e.getMessage).getOrElse(e.getClass.getName), Some(e)))
-        .flatten
-  }
+      Using.resource(Unlock(lock)) { _ =>
+        if shut then Left(failure(operation, "the store is closed", None))
+        else
+          Try(body(connection)).toEither.left
+            .map(e => failure(operation, Option(e.getMessage).getOrElse(e.getClass.getName), Some(e)))
+            .flatten
+      }
+
+  /**
+   * Takes the store's lock, waiting at most until `deadline` (a `System.nanoTime` value); whether it was taken. As
+   * `lock()` does, it ignores an interrupt while it waits and sets the flag again afterwards: a call's interrupt
+   * flag decides nothing here, as before the wait was bounded.
+   */
+  private def lockBy(deadline: Long): Boolean =
+    @scala.annotation.tailrec
+    def waiting(interrupted: Boolean): (Boolean, Boolean) =
+      CancelledError.catchInterrupt(lock.tryLock(math.max(0L, deadline - System.nanoTime()), NANOSECONDS)) match
+        case Right(taken) => (taken, interrupted)
+        case Left(_)      => waiting(interrupted = true)
+    // a free lock is taken at once, whatever the caller's interrupt flag says
+    lock.tryLock() || {
+      val (taken, interrupted) = waiting(Thread.interrupted())
+      if interrupted then Thread.currentThread().interrupt()
+      taken
+    }
 
   /**
    * `body` in one `BEGIN IMMEDIATE` transaction, committed if it returns `Right` and rolled back otherwise - also
@@ -468,11 +505,16 @@ final class SqliteCheckpointer private (
    * The transaction runs holding the file's [[WriteGate]], so the stores of this process write in turn rather than
    * by SQLite's polling; a wait for the gate that outlasts the busy timeout fails as a busy file does, and one that
    * is interrupted returns a `CancelledError`, with the interrupt flag set again.
+   *
+   * The waits are bounded together (#1919): for this store's earlier calls and then for the gate, at most
+   * `busyTimeout` from the call's start, and then for SQLite's own lock, held by another process, at most
+   * `busyTimeout` again - so a write waits at most twice `busyTimeout` in all before it fails, changing nothing.
    */
   private def writing[A](operation: String)(body: Connection => Result[A]): Result[A] =
-    guarded(operation) { c =>
+    val deadline = System.nanoTime() + busyTimeout.toNanos
+    guarded(operation, deadline) { c =>
       val written = CancelledError.catchInterrupt {
-        gate.holding(busyTimeout) {
+        gate.holding(math.max(0L, deadline - System.nanoTime()).nanos) {
           transaction(c, "BEGIN IMMEDIATE") { guard =>
             val result = body(c)
             if result.isRight then
@@ -490,9 +532,12 @@ final class SqliteCheckpointer private (
           Left(CancelledError(s"sqlite-checkpointer.$operation", Some(interrupted)))
     }
 
-  /** `body` in one read transaction, so the rows it reads are from one snapshot of the file. */
+  /**
+   * `body` in one read transaction, so the rows it reads are from one snapshot of the file. In WAL mode a read never
+   * waits for a writer, so it waits only for this store's earlier calls, at most `busyTimeout` (#1919).
+   */
   private def reading[A](operation: String)(body: Connection => Result[A]): Result[A] =
-    guarded(operation) { c =>
+    guarded(operation, System.nanoTime() + busyTimeout.toNanos) { c =>
       transaction(c, "BEGIN DEFERRED") { guard =>
         val result = body(c)
         execute(c, "COMMIT")
@@ -606,6 +651,9 @@ object SqliteCheckpointer:
     }
     require(mode.equalsIgnoreCase("wal"), s"the database's journal could not be switched to WAL (it is '$mode')")
     execute(connection, "PRAGMA synchronous = FULL")
+
+  private def storeBusy(busyTimeout: FiniteDuration): String =
+    s"the store was busy: its earlier calls held its connection for the whole busy timeout ($busyTimeout)"
 
   private def gateTimedOut(busyTimeout: FiniteDuration): String =
     s"the database file is busy: other stores in this process were writing it for the whole busy timeout ($busyTimeout)"

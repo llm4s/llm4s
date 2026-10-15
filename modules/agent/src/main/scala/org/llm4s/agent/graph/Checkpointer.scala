@@ -67,7 +67,40 @@ import scala.util.Try
  *  - tolerate the thread calling [[eventsAfter]] or [[awaitEventsAfter]] being interrupted at any
  *    point: cancelling a subscription interrupts its watch mid-read, so an interrupt must end that
  *    one call - with `Left(CancelledError)` or a failed result - and leave the store usable by every
- *    other thread and later call (see [[awaitEventsAfter]]).
+ *    other thread and later call (see [[awaitEventsAfter]]);
+ *  - return from every call within a bound it documents (#1919) - see below.
+ *
+ * '''Every call returns within a bound.''' A store times out its own calls: it documents a bound, set by its
+ * configuration (such as `SqliteCheckpointerConfig.busyTimeout`), within which every call returns, whatever its
+ * storage is doing - waiting for a lock, for another connection's or process's write, for the store's own earlier
+ * calls, or for a network - and a call that reaches the bound fails, changing nothing. [[awaitEventsAfter]] returns
+ * within its `timeout` plus that bound. A store that cannot bound some call - a disk that stalls inside a write, say,
+ * which no driver can time out - documents which call, and why. Keep the bound well inside `ClaimPolicy.ttl -
+ * ClaimPolicy.renewEvery`: a renewal must land within that, and a store that serialises its calls queues a renewal
+ * behind a slow commit.
+ *
+ * A [[GraphRuntime]] bounds what it can without the store: a run's result, its slot in the runtime and its claim are
+ * freed within twice `ClaimPolicy.ttl` of a lost claim being found ([[GraphError.ClaimLost]]), and of a closing
+ * commit - an `Async` run's drain, or an `OnExit` run's exit commit - sticking while the claim holds
+ * ([[GraphError.CommitTimedOut]]). Every other call made while a claim holds - an admission's claim commit, a `Sync`
+ * run's commits, its outcome's included, a change's write, and the release of a claim that was not lost - is waited
+ * for as long as it takes, and only the store's bound limits it. Nor can the runtime free what a call stuck in the
+ * store holds itself, so these last as long as the call does:
+ *
+ *  - '''the calling thread.''' A run thread, or the virtual thread an admission, `fork`, `updateState` or
+ *    `deleteThread` makes its store calls on, stays alive inside the call, and an `Async` run's writer thread with
+ *    it, after the runtime has given the call up;
+ *  - '''the thread's later commits.''' Commits on one thread are written one at a time in a runtime, so a commit -
+ *    or a subscription's read of events another runtime committed, which a commit's hand-over makes under the same
+ *    lock - holds up every later commit on that thread in that runtime, a new run's claim commit included, until it
+ *    returns; never another thread's;
+ *  - '''subscriptions behind a commit.''' A `GraphRuntime.subscribe` made while a run's claim commit is in the store,
+ *    on a thread with nothing of the run handed over yet - a claim commit its admission gave up on after a lost claim
+ *    included - waits for that commit to return, or for the subscription to be cancelled, before it delivers its
+ *    replay; a run-scoped subscription never does. And with [[WatchPolicy.disabled]], a replay made while a write a
+ *    run gave up on is still in the store stops at the first event another runtime committed above what this runtime
+ *    has handed over; it receives the rest when this runtime next commits on the thread, and a replay made once the
+ *    write has returned has them all.
  *
  * The holder of a claim may commit and [[renew]] it after `expiresAt` for as long as no other claim
  * has replaced it: expiry only lets another run take the thread over. `CheckpointerContract` in
@@ -246,7 +279,9 @@ object Checkpointer:
  * whole store, so they never repeat for a thread, even after it is deleted; a deleted thread that
  * numbered any event leaves a tombstone record of its next event number. [[awaitEventsAfter]] wakes
  * on the store's own commits and deletes, so every runtime sharing the instance sees a commit as soon
- * as it lands, without polling.
+ * as it lands, without polling. Its calls wait for nothing but one another's brief turn at its lock, which no
+ * call holds across I/O or a wait, so each returns at once - [[awaitEventsAfter]] within its `timeout` - and it
+ * needs no timeout of its own to meet the contract's bound.
  */
 final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Checkpointer:
 

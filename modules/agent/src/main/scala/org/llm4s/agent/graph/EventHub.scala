@@ -237,7 +237,8 @@ private[graph] trait Dispatched extends Subscription:
  * the run is handed over - the replay of a subscription to it that joins then, which waits for that
  * commit's hand-over to judge what it read ([[Dispatcher]]'s `settled`). A commit of a launched run
  * that the run gave up on never holds one up that way: the run's claim was handed over, so the thread
- * has a mark, and it is kept until that commit returns. A failed watch
+ * has a mark, and it is kept until that commit returns. Each of these waits lasts as long as the stalled call,
+ * which only the store's own bound on a call limits ([[Checkpointer]], #1919). A failed watch
  * or gap read ends the subscription once its queue is delivered, with
  * `Disconnected(lastSeq, ReplayFailed(error))`.
  *

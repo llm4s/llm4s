@@ -298,14 +298,16 @@ OpenAI-compatible provider); workload identity, configurable timeouts, testkits 
   [#1731](https://github.com/llm4s/llm4s/issues/1731); [design
   §4.14](docs/design/typed-agent-runtime/4.14-stage-1-slice-3-events-and-tracing.md),
   [guide](docs/guide/agents/streaming.md).
-- **Added** durable runs: run claims with fencing tokens and tenant isolation, and `CheckpointerContract` in the new
+- **Added** durable runs: run claims with fencing tokens and tenant isolation, store calls bounded by the store
+  (a stuck closing commit ends the run `CommitTimedOut`), and `CheckpointerContract` in the new
   `llm4s-agent-testkit` [#1699](https://github.com/llm4s/llm4s/issues/1699)
   [#1700](https://github.com/llm4s/llm4s/issues/1700) [#1918](https://github.com/llm4s/llm4s/issues/1918)
-  [#1926](https://github.com/llm4s/llm4s/issues/1926); [design
+  [#1919](https://github.com/llm4s/llm4s/issues/1919) [#1926](https://github.com/llm4s/llm4s/issues/1926); [design
   §4.16](docs/design/typed-agent-runtime/4.16-stage-2-slice-1-the-durable-checkpointer-contract.md),
   [guide](docs/guide/agents/durable-checkpointers.md).
 - **Added** `llm4s-agent-checkpoint-sqlite`: `SqliteCheckpointer`, so a run survives a restart and `recover` continues
-  it [#1701](https://github.com/llm4s/llm4s/issues/1701) [#1951](https://github.com/llm4s/llm4s/issues/1951); [design
+  it [#1701](https://github.com/llm4s/llm4s/issues/1701) [#1951](https://github.com/llm4s/llm4s/issues/1951)
+  [#1919](https://github.com/llm4s/llm4s/issues/1919); [design
   §4.20](docs/design/typed-agent-runtime/4.20-stage-2-slice-2-the-sqlite-checkpointer.md).
 - **Added** checkpoint history, `fork`, `updateState` and retention (`prune`)
   [#1702](https://github.com/llm4s/llm4s/issues/1702); [design

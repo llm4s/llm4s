@@ -2,6 +2,8 @@ package org.llm4s.agent.graph
 
 import org.llm4s.error.{ LLMError, NonRecoverableError, RecoverableError }
 
+import scala.concurrent.duration.FiniteDuration
+
 /**
  * Errors raised while building, running or restoring a typed graph. Every case is a
  * [[NonRecoverableError]] except [[GraphError.DeadlineExceeded]] - `recover` with a new budget
@@ -304,6 +306,27 @@ object GraphError:
     override val message: String =
       s"Run on thread '$threadId' lost its claim (token ${token.value}, current: ${current
           .fold("not named")(_.value.toString)}); it stopped and committed nothing more"
+
+  /**
+   * The run's closing wait - an `Async` run waiting for its queued commits, or an `OnExit` run's exit commit - was
+   * given up on: a commit had been in the store for `after`, twice the runtime's `ClaimPolicy.ttl`, with no commit
+   * returning meanwhile, while the run still held its claim. The run ended without waiting for it: its thread is
+   * free in this runtime, and its claim is released on a thread of its own. Every [[Checkpointer]] must return from
+   * each call within a bound it documents, so this is a store that broke that contract, or one whose bound is not
+   * well inside `after`.
+   *
+   * The commit given up on, and any queued behind it, may or may not land. One still in the store is fenced by the
+   * run's claim: once the release lands, or another run takes the thread over, the store refuses it, but it can
+   * land first. So read the thread before acting on it: its latest checkpoint is either the last one the run made
+   * durable, still `Running` - `recover` continues the run once the thread is free - or the run's outcome, which
+   * `recover` reports as it finds it ([[NothingToRecover]], or [[PendingInterrupts]] for a suspended thread). A late
+   * commit's events are in the thread's log and reach the thread's subscribers, but never the run's own listeners
+   * or its tracing.
+   */
+  final case class CommitTimedOut(threadId: String, after: FiniteDuration) extends GraphError with NonRecoverableError:
+    override val message: String =
+      s"Run on thread '$threadId' ended without its closing commit, which had not returned after $after; " +
+        "it may still land, so read the thread before recovering it"
 
   /**
    * An unexpected throwable - such as a `Clock` that threw - refused the run at admission, or

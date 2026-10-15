@@ -6,10 +6,11 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 
 import java.nio.file.{ Files, Path }
+import java.sql.DriverManager
 import java.time.Clock
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.*
 import scala.util.{ Try, Using }
 
 /**
@@ -59,6 +60,33 @@ class SqliteCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContra
       case sqlite: SqliteCheckpointer => SqliteFiles.opened(sqlite.path, clock)
       case other                      => fail(s"not a SqliteCheckpointer: $other")
     }
+
+  /**
+   * A store with a 300 ms busy timeout, so its documented bound is 600 ms: a write waits up to `busyTimeout` for this
+   * store's earlier calls and the file's turn, then up to `busyTimeout` again for SQLite's lock. The storage is made
+   * busy as another process would make it: a connection of its own, outside every store, holding a write transaction.
+   */
+  override protected def boundedStore(clock: Clock): Option[CheckpointerContract.BoundedStore] = {
+    val busyTimeout = 300.millis
+    val path        = SqliteFiles.fresh()
+    val store = SqliteCheckpointer
+      .open(path, clock, SqliteCheckpointerConfig(busyTimeout))
+      .fold(e => throw new IllegalStateException(e.message), identity)
+    Some(
+      CheckpointerContract.BoundedStore(
+        store,
+        busyTimeout * 2,
+        () => {
+          val writer = DriverManager.getConnection(SqliteCheckpointer.jdbcUrl(path))
+          Using.resource(writer.createStatement())(_.execute("BEGIN IMMEDIATE")): Unit
+          () => {
+            Using.resource(writer.createStatement())(_.execute("ROLLBACK")): Unit
+            writer.close()
+          }
+        }
+      )
+    )
+  }
 }
 
 /**
