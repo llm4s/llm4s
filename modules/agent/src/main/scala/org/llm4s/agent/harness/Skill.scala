@@ -78,8 +78,10 @@ object Skill:
       fields.get(key) match
         case None if required => error(1, s"`$key` is required")
         case None             => Right(None)
+        // a field the standard defines is never empty when given: a key with no value, or a blank one, is malformed
+        case Some(Frontmatter.Field(Frontmatter.Value.Empty, line)) => error(line, s"`$key` is empty")
         case Some(Frontmatter.Field(Frontmatter.Value.Str(s), line)) =>
-          if required && s.trim.isEmpty then error(line, s"`$key` is empty") else Right(Some(s.trim))
+          if s.trim.isEmpty then error(line, s"`$key` is empty") else Right(Some(s.trim))
         case Some(Frontmatter.Field(_, line)) => error(line, s"`$key` must be a string")
     // the standard bounds a field it defines from 1 character to `max`: empty is as non-conforming as too long
     def longer(key: String, value: String, max: Int): Result[Unit] =
@@ -100,16 +102,13 @@ object Skill:
       _             <- compatibility.fold[Result[Unit]](Right(()))(longer("compatibility", _, MaxCompatibilityChars))
       tools <- fields.get("allowed-tools") match
         case None => Right(Vector.empty)
-        case Some(Frontmatter.Field(Frontmatter.Value.Str(s), _)) =>
+        case Some(Frontmatter.Field(Frontmatter.Value.Str(s), _)) if s.trim.nonEmpty =>
           Right(s.trim.split("\\s+").toVector.filter(_.nonEmpty))
         case Some(Frontmatter.Field(Frontmatter.Value.Items(xs), _)) => Right(xs.map(_.trim).filter(_.nonEmpty))
         case Some(Frontmatter.Field(_, line)) => error(line, "`allowed-tools` must be a string or a list")
       metadata <- fields.get("metadata") match
         case None                                                     => Right(ListMap.empty[String, String])
         case Some(Frontmatter.Field(Frontmatter.Value.Entries(m), _)) => Right(m)
-        case Some(Frontmatter.Field(Frontmatter.Value.Items(xs), _)) if xs.isEmpty =>
-          Right(ListMap.empty[String, String])
-        case Some(Frontmatter.Field(Frontmatter.Value.Str(s), _)) if s.isEmpty => Right(ListMap.empty[String, String])
         case Some(Frontmatter.Field(_, line)) => error(line, "`metadata` must be a map of strings")
     yield Skill(name, description, path, tools, license, metadata)
 
@@ -142,6 +141,9 @@ private[harness] object Frontmatter:
     case Str(value: String)
     case Items(values: Vector[String])
     case Entries(values: ListMap[String, String])
+
+    /** A key with no value, and nothing beneath it. */
+    case Empty
 
   /** A key's value and the line its key is on. */
   final case class Field(value: Value, line: Int)
@@ -228,7 +230,7 @@ private[harness] object Frontmatter:
       val value =
         if b.entries.nonEmpty then Value.Entries(b.entries)
         else if b.items.nonEmpty then Value.Items(b.items)
-        else Value.Str("")
+        else Value.Empty
       done.updated(b.key, Field(value, b.line))
     })
 
@@ -297,8 +299,14 @@ private[harness] object Frontmatter:
       case c if Unsupported.contains(c) => Left((n, Unsupported(c)))
       case _ =>
         val plain = withoutComment(value)
-        if inList && (plain.contains(": ") || plain.endsWith(":")) then
-          Left((n, "nested lists and maps are not supported"))
+        // YAML reads `a: b` as a map, wherever it stands: a plain value holding one is malformed, not a string
+        if plain.contains(": ") || plain.endsWith(":") then
+          Left(
+            (
+              n,
+              if inList then "nested lists and maps are not supported" else "a plain value cannot hold `: `; quote it"
+            )
+          )
         else Right(plain)
 
   /** `value` up to a ` #` comment, trimmed. */
