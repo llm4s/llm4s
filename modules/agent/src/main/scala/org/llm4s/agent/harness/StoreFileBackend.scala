@@ -119,20 +119,24 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
           else Right(())
       yield ()
 
-  /** The current file's text, or why there is none: missing, a directory, or not a file. */
-  private def currentText(operation: String, view: StoreView, target: VPath): Result[String] =
+  /** The current file's content, whatever it holds, or why there is none: missing, a directory, or not a file. */
+  private def currentFile(operation: String, view: StoreView, target: VPath): Result[String] =
     view.current match
-      // the one text rule on what is stored too: an item written past the backend may hold NUL
-      case Some(item) =>
-        content(item)
-          .toRight(BackendRefused.at(operation, target, "is not a file"))
-          .flatMap(text =>
-            Text.binaryReason(text).fold(Right(text))(r => Left(BackendRefused.at(operation, target, r)))
-          )
+      case Some(item) => content(item).toRight(BackendRefused.at(operation, target, "is not a file"))
       case None =>
         isDirectory(view, target).flatMap(dir =>
           refused(operation, target, if dir then "is a directory; delete the files in it" else "not found")
         )
+
+  /**
+   * The current file's text: [[currentFile]] under the one text rule, for an operation that uses the
+   * content (an edit). An item written past the backend may hold NUL; a delete, which does not read it,
+   * takes [[currentFile]], so such a file can still be cleaned up.
+   */
+  private def currentText(operation: String, view: StoreView, target: VPath): Result[String] =
+    currentFile(operation, view, target).flatMap(text =>
+      Text.binaryReason(text).fold(Right(text))(r => Left(BackendRefused.at(operation, target, r)))
+    )
 
   def write(target: VPath, text: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
     Text.binaryReason(text).fold[Result[Unit]](Right(()))(r => refused("write", target, r)).flatMap { _ =>
@@ -157,7 +161,7 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
 
   def delete(target: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
     guarded[FileDeleted]("delete", target, ctx)(view =>
-      currentText("delete", view, target).map(_ => StoreChange.Remove(FileDeleted(wasDirectory = false)))
+      currentFile("delete", view, target).map(_ => StoreChange.Remove(FileDeleted(wasDirectory = false)))
     )
 
 object StoreFileBackend:

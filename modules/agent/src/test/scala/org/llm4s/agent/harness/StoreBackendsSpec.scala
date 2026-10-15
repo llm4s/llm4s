@@ -233,6 +233,9 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     files.read(p("/nul.md"), 0, 10, call()).left.value.message should include("binary")
     files.edit(p("/nul.md"), "\u0000", "", replaceAll = false, call()).left.value.message should include("binary")
     files.grep("find", VPath.root, None, 10, call()).value.items shouldBe empty
+    // a delete reads no content, so a malformed file can still be cleaned up
+    done(files.delete(p("/nul.md"), call())) shouldBe FileDeleted(wasDirectory = false)
+    files.read(p("/nul.md"), 0, 10, call()).left.value.message should include("not found")
   }
 
   it should "shape its tree by files only: an item that is not a file neither makes a directory nor is overwritten" in {
