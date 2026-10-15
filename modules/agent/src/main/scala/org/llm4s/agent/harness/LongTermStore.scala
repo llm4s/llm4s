@@ -116,6 +116,10 @@ trait LongTermStore extends AppliedKeys:
    * nothing written or recorded), then the namespace's and item's bounds, then the write and
    * `(effect, outcome)` recorded together. An over-limit change is a [[BackendRefused]]. The newest
    * token per scope is kept as long as the store keeps that thread's data: durably, in a real store.
+   *
+   * The outcome returned is the recorded one, decoded, so a first run and its replay return the same
+   * value. `A`'s codec must be a pure function of its value: C4's guard encodes the outcome again for its
+   * journal, and a codec that answered differently would record two things.
    */
   def modify[A: ReadWriter](ns: Namespace, key: String, effect: EffectKey, token: FencingToken)(
     change: StoreView => Result[StoreChange[A]]
@@ -352,11 +356,15 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
                   )
                 case Right(encoded) =>
                   val recorded = ujson.copy(encoded)
-                  within(key, next).map { _ =>
-                    next.foreach(n => namespaces = if n.isEmpty then namespaces - ns else namespaces.updated(ns, n))
-                    applied = applied.updated(effect.value, recorded)
-                    outcome
-                  }
+                  // the outcome returned is the one recorded, decoded, so this run and a replay of it return
+                  // the same value, read from the one encoding that was sized
+                  within(key, next)
+                    .flatMap(_ => Try(upickle.default.read[A](ujson.copy(recorded))).toResult)
+                    .map { decoded =>
+                      next.foreach(n => namespaces = if n.isEmpty then namespaces - ns else namespaces.updated(ns, n))
+                      applied = applied.updated(effect.value, recorded)
+                      decoded
+                    }
           }
   })
 

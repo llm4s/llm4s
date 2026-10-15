@@ -86,6 +86,19 @@ final class StateFileBackend private (
 
   /** `path` may hold `content`: text, a writable path, and within this thread's bounds. */
   private def admit(operation: String, all: Map[VPath, FileEntry], path: VPath, content: String): Result[Unit] =
+    val count                  = all.size + (if all.contains(path) then 0 else 1)
+    def refuse(reason: String) = Left(BackendRefused.at(operation, path, reason))
+    // the count first, in O(1): a key another writer filled past `maxFiles` is refused before any scan
+    if count > maxFiles then refuse(s"there would be $count files, over this thread's limit of $maxFiles")
+    else admitWithin(operation, all, path, content, refuse)
+
+  private def admitWithin(
+    operation: String,
+    all: Map[VPath, FileEntry],
+    path: VPath,
+    content: String,
+    refuse: String => Result[Unit]
+  ): Result[Unit] =
     // the other files' total, counted only until it passes the bound (another writer of the key may have
     // stored far more), then this one's: what the thread would hold after the write
     val others = all.iterator
@@ -94,16 +107,13 @@ final class StateFileBackend private (
       .scanLeft(0L)(_ + _)
       .find(_ > maxBytes)
       .getOrElse(all.iterator.filter(_._1 != path).map((p, e) => entryBytes(p, e.content)).sum)
-    val after                  = if others > maxBytes then others else others + entryBytes(path, content)
-    val count                  = all.size + (if all.contains(path) then 0 else 1)
-    def refuse(reason: String) = Left(BackendRefused.at(operation, path, reason))
+    val after = if others > maxBytes then others else others + entryBytes(path, content)
     for
       _ <- Text.binaryReason(content).fold[Result[Unit]](Right(()))(refuse)
       _ <- FileTree.writable(operation, all, path)
       _ <-
         if after > maxBytes then
           refuse(s"the files would total at least $after bytes, over this thread's limit of $maxBytes")
-        else if count > maxFiles then refuse(s"there would be $count files, over this thread's limit of $maxFiles")
         else Right(())
     yield ()
 

@@ -299,6 +299,11 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
     backend.glob(Glob("**"), VPath.root, 10, f.ctx).left.value.message should include("more than its limit")
     backend.grep("x", VPath.root, None, 10, f.ctx).left.value.message should include("more than its limit")
     backend.delete(p("/f0"), f.ctx).isRight shouldBe true
+    // a write or edit is refused on the count, before any scan of the oversized key
+    backend.write(p("/new"), "y", f.ctx).left.value.message should include("over this thread's limit of 3")
+    backend.edit(p("/f1"), "x", "y", replaceAll = false, f.ctx).left.value.message should include(
+      "over this thread's limit of 3"
+    )
   }
 
   it should "encode its key's values and updates, and refuse an invalid path on decode" in {
