@@ -155,6 +155,19 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
     out(6) should include("not a directory")
   }
 
+  it should "refuse an oversized glob or grep pattern before it becomes a resource a rule compares" in {
+    val long = "*" * 1001
+    val out = sequential(
+      StateFileBackend(),
+      Seq(
+        FileTools.Glob -> ujson.Obj("pattern" -> long),
+        FileTools.Grep -> ujson.Obj("pattern" -> "x", "include" -> long),
+        FileTools.Grep -> ujson.Obj("pattern" -> long)
+      )
+    )
+    out.foreach(_ should include("longer than 1000"))
+  }
+
   "read_file" should "page by readLimit, number lines from offset, and cut long lines" in {
     val limits = FileToolLimits(readLimit = 2, maxLineChars = 5)
     val out = sequential(

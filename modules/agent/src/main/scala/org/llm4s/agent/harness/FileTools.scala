@@ -353,7 +353,8 @@ object FileTools:
           .withRequiredField("pattern", Schema.string("The glob, relative to path"))
           .withOptionalField("path", nullable(Schema.string("The absolute directory to search; / when null")))
       ).withHints(readOnly)
-        .withValidation(a => pathOr(a.path).map(_ => ()))
+        // the pattern bounded before the resource is built from it, so a permission rule never compares an oversized glob
+        .withValidation(a => Text.checkPattern(Glob, a.pattern).flatMap(_ => pathOr(a.path)).map(_ => ()))
         .withResources(a =>
           pathOr(a.path).toOption.map(p => ToolResource(Operation.Read, beneath(p, a.pattern))).toVector
         )
@@ -391,7 +392,13 @@ object FileTools:
           .withOptionalField("path", nullable(Schema.string("The absolute directory to search; / when null")))
           .withOptionalField("include", nullable(Schema.string("A glob limiting the files searched; all when null")))
       ).withHints(readOnly)
-        .withValidation(a => pathOr(a.path).map(_ => ()))
+        .withValidation(a =>
+          for
+            _ <- Text.checkPattern(Grep, a.pattern)
+            _ <- a.include.fold[Result[Unit]](Right(()))(Text.checkPattern(Grep, _))
+            _ <- pathOr(a.path)
+          yield ()
+        )
         .withResources(a => pathOr(a.path).toOption.map(p => ToolResource(Operation.Read, grepEnvelope(a, p))).toVector)
     ) { (args, context) =>
       pathOr(args.path).fold(

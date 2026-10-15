@@ -438,7 +438,7 @@ limits. A backend over a host directory is not part of this release; it is track
 ### Harness File Tools
 
 `FileTools(backend)` gives the model seven tools over any `FileBackend`: `ls`, `read_file`,
-`write_file`, `edit_file`, `delete`, `glob` and `grep` ([design §4.32](../../design/typed-agent-runtime/4.32-stage-3-slice-f1-filesystem-tools.md)).
+`write_file`, `edit_file`, `delete`, `glob` and `grep` ([design §4.32](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.32-stage-3-slice-f1-filesystem-tools.md)).
 
 ```scala
 import org.llm4s.agent.graph.tool.ToolSet
