@@ -193,8 +193,17 @@ class WorkspaceAgentInterfaceImpl(
    */
   private val commandGate = new java.util.concurrent.Semaphore(WorkspaceAgentInterfaceImpl.GatePermits, true)
 
-  /** Takes a command's permit; [[releaseCommand]] gives it back once the process has exited. */
-  private[runner] def acquireCommand(): Unit = commandGate.acquire()
+  /**
+   * Takes a command's permit, waiting at most `gateWait` for a file mutation to finish; refused (`WORKSPACE_BUSY`,
+   * nothing started) if it cannot. [[releaseOnExit]] gives it back once the process has exited.
+   */
+  private[runner] def acquireCommand(): Unit =
+    if (!commandGate.tryAcquire(gateWait.toMillis, TimeUnit.MILLISECONDS))
+      throw new WorkspaceAgentException(
+        s"A file change is in progress in the workspace; the command was not started (waited $gateWait)",
+        "WORKSPACE_BUSY",
+        None
+      )
 
   private[runner] def releaseCommand(): Unit = commandGate.release()
 
@@ -1533,7 +1542,7 @@ private[runner] object WorkspaceAgentInterfaceImpl {
   val GatePermits: Int = 1 << 20
 
   /** How long a file mutation waits for running commands to end before it is refused as `WORKSPACE_BUSY`. */
-  val GateWait: FiniteDuration = FiniteDuration(30, TimeUnit.SECONDS)
+  val GateWait: FiniteDuration = WorkspaceSandboxConfig.CommandGateWait
 
   /**
    * Gives `to` the owner, the group and the ACL of `from`, each where the file system has it and the runner may set

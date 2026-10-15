@@ -375,6 +375,13 @@ object WorkspaceSandboxConfig {
     "move"
   )
 
+  /**
+   * The longest the runner keeps a request waiting at its command gate - a command for a file mutation to finish, or
+   * a file mutation for running commands to end - before refusing it as `WORKSPACE_BUSY`, having done nothing. A
+   * client waiting for a response allows for it on top of the request's own time.
+   */
+  val CommandGateWait: FiniteDuration = 30.seconds
+
   val DefaultLimits: WorkspaceLimits = WorkspaceLimits(
     maxFileSize = 1048576L, // 1MB
     maxDirectoryEntries = 500,

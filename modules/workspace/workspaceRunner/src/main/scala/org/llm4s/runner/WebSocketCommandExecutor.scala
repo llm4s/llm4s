@@ -68,27 +68,48 @@ final private[runner] class WebSocketCommandExecutor(
         fail(refused.error, refused.code, refused.details)
 
       case Right(prepared) =>
-        send(CommandStartedMessage(cmd.commandId, cmd.command))
-        // a permit of the workspace's command gate, from before the process starts until it has exited: no file
-        // mutation runs beside it
-        workspace.acquireCommand()
-        Try(prepared.builder.start()) match {
-          case Failure(ex) =>
+        // a permit of the workspace's command gate, from before the process starts until it has exited, so no file
+        // mutation runs beside it; taken before the command is announced, and refused (nothing started) if a file
+        // change holds the gate past its bounded wait
+        Try(workspace.acquireCommand()) match {
+          case Failure(busy: WorkspaceAgentException) => fail(busy.error, busy.code, busy.details)
+          case Failure(other) => fail(Option(other.getMessage).getOrElse("Gate failed"), "EXECUTION_FAILED", None)
+          case Success(_) if cancelledEarly.remove(cmd.commandId) =>
+            // cancelled while it waited at the gate: it never starts, and is acknowledged as a cancellation
             workspace.releaseCommand()
-            fail(
-              Option(ex.getMessage).getOrElse("Failed to start process"),
-              "EXECUTION_FAILED",
-              Some(ex.getStackTrace.mkString("\n"))
-            )
-          case Success(process) =>
-            // the timeout and duration count from the start of the process, not from before any wait for the gate
-            val running =
-              RunningCommand(process, new AtomicBoolean(false), System.currentTimeMillis(), new AtomicBoolean(false))
-            processes.put(cmd.commandId, running)
-            stream(cmd, prepared, running, processes, send, fail)
+            send(CommandCompletedMessage(cmd.commandId, 143, (System.currentTimeMillis() - startTime).millis))
+          case Success(_) =>
+            Try(prepared.builder.start()) match {
+              case Failure(ex) =>
+                workspace.releaseCommand()
+                fail(
+                  Option(ex.getMessage).getOrElse("Failed to start process"),
+                  "EXECUTION_FAILED",
+                  Some(ex.getStackTrace.mkString("\n"))
+                )
+              case Success(process) =>
+                // registered before it is announced, so a cancellation from then on finds it; the timeout and the
+                // duration count from the start of the process, not from before the wait for the gate
+                val running =
+                  RunningCommand(
+                    process,
+                    new AtomicBoolean(false),
+                    System.currentTimeMillis(),
+                    new AtomicBoolean(false)
+                  )
+                processes.put(cmd.commandId, running)
+                send(CommandStartedMessage(cmd.commandId, cmd.command))
+                stream(cmd, prepared, running, processes, send, fail)
+            }
         }
     }
   }
+
+  /**
+   * Ids of commands cancelled before they were registered (waiting at the gate), so they never start. Bounded: an id
+   * that never arrives is dropped once the set is full.
+   */
+  private val cancelledEarly = java.util.concurrent.ConcurrentHashMap.newKeySet[String]()
 
   /**
    * Cancel one of this client's running commands. Cancellation is acknowledged as completion, exit code 143.
@@ -122,6 +143,9 @@ final private[runner] class WebSocketCommandExecutor(
         }
 
       case None =>
+        // it may still be waiting at the gate: remember it, so it never starts
+        if (cancelledEarly.size >= WebSocketCommandExecutor.MaxEarlyCancellations) cancelledEarly.clear()
+        cancelledEarly.add(commandId): Unit
         logger.warn(s"Cancellation requested for unknown or non-running command id $commandId")
         send(ErrorMessage(s"No running command found for id $commandId", "UNKNOWN_COMMAND_ID", Some(commandId)))
     }
@@ -266,6 +290,9 @@ final private[runner] class WebSocketCommandExecutor(
 }
 
 private[runner] object WebSocketCommandExecutor {
+
+  /** The most cancellations of not-yet-registered commands remembered at once. */
+  val MaxEarlyCancellations: Int = 1024
 
   /** The most characters of each stream a command keeps: what it asked for, within `0..runnerMax`. */
   def outputLimit(requested: Option[Long], runnerMax: Long): Long =

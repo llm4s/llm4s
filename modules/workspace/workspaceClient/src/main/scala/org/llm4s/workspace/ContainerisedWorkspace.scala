@@ -405,15 +405,18 @@ class ContainerisedWorkspace(
     )
   }
 
-  private def responseTimeoutSeconds(command: WorkspaceAgentCommand): Long =
+  // every request may first wait at the runner's command gate, which then refuses rather than run late
+  private def responseTimeoutSeconds(command: WorkspaceAgentCommand): Long = {
+    val gateSec = WireDurations.toWholeSeconds(WorkspaceSandboxConfig.CommandGateWait)
     command match {
       case exec: ExecuteCommandCommand =>
         val commandTimeoutSec =
           exec.timeout.map(WireDurations.toWholeSeconds).getOrElse(DefaultCommandTimeoutSec.toLong)
-        commandTimeoutSec + ResponseTimeoutBufferSec
+        gateSec + commandTimeoutSec + ResponseTimeoutBufferSec
       case _ =>
-        (DefaultCommandTimeoutSec + ResponseTimeoutBufferSec).toLong
+        gateSec + (DefaultCommandTimeoutSec + ResponseTimeoutBufferSec).toLong
     }
+  }
 
   // WorkspaceAgentInterface implementation
   override def exploreFiles(

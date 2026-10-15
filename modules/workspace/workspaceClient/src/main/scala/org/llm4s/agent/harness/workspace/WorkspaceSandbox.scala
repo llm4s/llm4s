@@ -60,6 +60,7 @@ object WorkspaceSandboxRunner:
   /** The runner's codes for a command it refused before starting it: nothing ran. */
   private[workspace] val Refusals: Set[String] = Set(
     "SHELL_DISABLED",
+    "WORKSPACE_BUSY",
     "INVALID_DIRECTORY",
     "EMPTY_COMMAND",
     "FORBIDDEN_CHARACTERS",
