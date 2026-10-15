@@ -272,18 +272,27 @@ object FileTools:
         )
       else
         val first = lines.offset + 1
-        val last  = lines.offset + lines.lines.size
-        val more =
+        // the continuation is from the last line actually shown: the cap may stop the page before the backend's end
+        def more(shown: Int): Option[String] =
+          val last = lines.offset + shown
           Option.when(last < lines.totalLines)(
             s"(lines $first-$last of ${lines.totalLines}; continue with offset=${last + 1})"
           )
         text(
           Bounded.render(
-            lines.lines.iterator.zipWithIndex.map((line, i) => f"${first + i}%6d\t${Bounded.line(line, maxLineChars)}"),
+            lines.lines.iterator.zipWithIndex.map((line, i) =>
+              f"${first + i}%6d\t${Bounded.line(line, readLineChars)}"
+            ),
             more,
             maxResultChars
           )
         )
+
+    /**
+     * The most characters of a line `read_file` shows: `maxLineChars`, or less when one numbered line would not fit
+     * a result whole, so every page shows at least one whole line and a continuation always moves forward.
+     */
+    private def readLineChars: Int = math.max(1, math.min(maxLineChars, Bounded.body(maxResultChars) - 64))
 
     // ---- write_file ----
 
@@ -530,27 +539,37 @@ private[harness] object Bounded:
       val note = s"\n${cutNote(max)}"
       s"${escapedPrefix(message, budget - escapedLength(note, budget))}$note"
 
+  /** The most characters a trailer takes; a longer one is cut to it. */
+  private val TrailerChars: Int = 128
+
+  /** The characters of a result of `max` left for its items, room for a trailer and the cut note kept back. */
+  def body(max: Int): Int = max - (TrailerChars + 1) - (cutNote(max).length + 1)
+
+  def render(items: Iterator[String], trailer: Option[String], max: Int): String = render(items, _ => trailer, max)
+
   /**
-   * `items` one per line, then `trailer`, in at most `max` characters: room for the trailer and the cut note is
-   * kept back, and once an item would not fit, what fits of it is kept, the note added, and no further item read.
+   * `items` one per line, then `trailer(shown)`, in at most `max` characters, where `shown` is how many items were
+   * kept whole: room for the trailer and the cut note is kept back, and once an item would not fit, what fits of it
+   * is kept, the note added, and no further item read. So a trailer can say where the result really stopped.
    */
-  def render(items: Iterator[String], trailer: Option[String], max: Int): String =
-    val note   = cutNote(max)
-    val budget = max - trailer.fold(0)(_.length + 1) - note.length - 1
+  def render(items: Iterator[String], trailer: Int => Option[String], max: Int): String =
+    val budget = body(max)
     val out    = new java.lang.StringBuilder()
     var cut    = false
+    var shown  = 0
     while !cut && items.hasNext do
       val item = items.next()
       val sep  = if out.length == 0 then 0 else 1
       val room = budget - out.length - sep
       if item.length <= room then
         if sep == 1 then out.append('\n')
-        out.append(item): Unit
+        out.append(item)
+        shown += 1
       else
         if room > 0 then
           if sep == 1 then out.append('\n')
           out.append(prefix(item, room)): Unit
         cut = true
-    trailer.foreach(t => out.append('\n').append(t))
-    if cut then out.append('\n').append(note)
+    trailer(shown).foreach(t => out.append('\n').append(prefix(t, TrailerChars)))
+    if cut then out.append('\n').append(cutNote(max))
     out.toString

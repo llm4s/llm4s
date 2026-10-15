@@ -264,11 +264,32 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
     out(2) should endWith("[output cut at 300 characters]")
   }
 
+  "A page the result cap stops" should "continue from the last line shown, never past lines it did not show" in {
+    val text = (1 to 50).map(i => s"$i:" + "y" * 100).mkString("\n")
+    val out = sequential(
+      StateFileBackend(),
+      Seq(
+        write("/big.txt", text),
+        read("/big.txt"),
+        read("/big.txt", "offset" -> ujson.Num(2))
+      ),
+      FileToolLimits(maxResultChars = 300)
+    )
+    // one numbered line fits a 300-character result whole (its line cut to fit), so each page moves on by one
+    out(1) should include("     1\t1:")
+    out(1) should include("(lines 1-1 of 50; continue with offset=2)")
+    out(2) should include("     2\t2:")
+    out(2) should include("(lines 2-2 of 50; continue with offset=3)")
+    out.foreach(_.length should be <= 300)
+  }
+
   "Bounded" should "keep the trailer and the cut note within the bound, never splitting a surrogate pair" in {
-    val rendered = Bounded.render(Iterator.fill(100)("abcdefghij"), Some("(trailer)"), 60)
-    rendered.length should be <= 60
-    rendered should endWith("(trailer)\n[output cut at 60 characters]")
-    Bounded.render(Iterator("a", "b"), None, 60) shouldBe "a\nb"
+    val rendered = Bounded.render(Iterator.fill(100)("abcdefghij"), (n: Int) => Some(s"(shown $n)"), 256)
+    rendered.length should be <= 256
+    val shown = rendered.linesIterator.count(_ == "abcdefghij")
+    rendered should endWith(s"(shown $shown)\n[output cut at 256 characters]")
+    Bounded.render(Iterator("a", "b"), None, 256) shouldBe "a\nb"
+    Bounded.render(Iterator("a"), Some("x" * 1000), 256).length should be <= 256
     val pair = "😀" * 10
     Bounded.line(pair, 3) should startWith("😀 [")
     Bounded.cap("x" * 1000, 256).length should be <= 256
