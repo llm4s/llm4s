@@ -353,18 +353,24 @@ class WorkspaceAgentInterfaceImpl(
     // Simple glob matching implementation
     // In a real implementation, use a proper glob library
     val normalizedPath = path.replace("\\", "/")
-    excludePatterns.exists { pattern =>
-      val normalizedPattern = pattern.replace("\\", "/")
-      // Use a placeholder to avoid corrupting ** when replacing *
-      val placeholder = "\u0000DOUBLESTAR\u0000"
-      val regex = normalizedPattern
-        .replace("**", placeholder) // protect ** first
-        .replace(".", "\\.")        // escape dots
-        .replace("*", "[^/]+")      // single * matches path segment chars
-        .replace(placeholder, ".*") // restore ** as .* to match any path
+    // a leading `**/` matches no directory as well as any, so `**/.git/**` excludes the root's `.git` too
+    excludePatterns
+      .flatMap { p =>
+        val n = p.replace("\\", "/")
+        if (n.startsWith("**/")) List(n, n.drop(3)) else List(n)
+      }
+      .exists { pattern =>
+        val normalizedPattern = pattern
+        // Use a placeholder to avoid corrupting ** when replacing *
+        val placeholder = "\u0000DOUBLESTAR\u0000"
+        val regex = normalizedPattern
+          .replace("**", placeholder) // protect ** first
+          .replace(".", "\\.")        // escape dots
+          .replace("*", "[^/]+")      // single * matches path segment chars
+          .replace(placeholder, ".*") // restore ** as .* to match any path
 
-      normalizedPath.matches(regex) || (normalizedPath + "/").matches(regex)
-    }
+        normalizedPath.matches(regex) || (normalizedPath + "/").matches(regex)
+      }
   }
 
   /**
@@ -1623,8 +1629,8 @@ private[runner] object WorkspaceAgentInterfaceImpl {
 
   /**
    * A Linux POSIX ACL lives in an extended attribute (`system.posix_acl_access`) the JVM cannot read, so it is copied
-   * with `getfacl` and `setfacl`, run directly (no shell), when they are installed. Only an ACL beyond the mode bits
-   * (a named user or group, or a mask) is copied; the mode itself is already copied.
+   * with `getfacl` and `setfacl`, run directly (no shell), when they are installed. The whole access ACL is set, a
+   * basic one included, so an ACL the replacement inherited from its directory's default never survives.
    */
   private def copyPosixAcl(from: Path, to: Path): Unit =
     if (AclTools)
@@ -1633,10 +1639,9 @@ private[runner] object WorkspaceAgentInterfaceImpl {
           .redirectErrorStream(false)
           .start()
         val acl = new String(get.getInputStream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
-        if (
-          get.waitFor() == 0 && acl.linesIterator
-            .exists(l => l.startsWith("mask:") || l.matches("(user|group):[^:]+:.*"))
-        ) {
+        // set whatever it is, a basic one included: the replacement may have inherited a directory's default ACL,
+        // which only setting the file's own access ACL removes
+        if (get.waitFor() == 0 && acl.trim.nonEmpty) {
           val set = new ProcessBuilder("setfacl", "--set-file=-", to.toString).start()
           Using.resource(set.getOutputStream)(_.write(acl.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
           set.waitFor(): Unit

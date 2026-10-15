@@ -125,6 +125,19 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     big.hash shouldBe "oversized"
   }
 
+  "A walk" should "leave out the default exclusions at the workspace root as well as beneath it" in {
+    Files.createDirectories(root.resolve(".git"))
+    Files.write(root.resolve(".git/config"), "x".getBytes(StandardCharsets.UTF_8))
+    Files.createDirectories(root.resolve("node_modules/pkg"))
+    Files.write(root.resolve("node_modules/pkg/index.js"), "x".getBytes(StandardCharsets.UTF_8))
+    Files.createDirectories(root.resolve("src/.git"))
+    Files.write(root.resolve("src/.git/config"), "x".getBytes(StandardCharsets.UTF_8))
+    Files.write(root.resolve("src/a.scala"), "x".getBytes(StandardCharsets.UTF_8))
+    val listed = workspace().exploreFiles(".", recursive = Some(true), maxDepth = Some(10)).files.map(_.path)
+    listed should contain("src/a.scala")
+    listed.filter(p => p.contains(".git") || p.contains("node_modules")) shouldBe empty
+  }
+
   "A compare-and-set write" should "write through a link to the file it names, keeping the link" in {
     assume(!isWindowsHost)
     Files.write(root.resolve("real.txt"), "one".getBytes(StandardCharsets.UTF_8))
