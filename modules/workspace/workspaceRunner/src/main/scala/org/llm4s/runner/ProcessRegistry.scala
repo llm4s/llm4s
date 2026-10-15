@@ -20,7 +20,9 @@ final private[runner] case class RunningCommand(
   completionSent: AtomicBoolean,
   // the descendants a kill found (they may outlive the parent): the entry is tracked, and holds its permit, until
   // every one of them has exited too
-  tree: java.util.Set[ProcessHandle] = java.util.concurrent.ConcurrentHashMap.newKeySet[ProcessHandle]()
+  tree: java.util.Set[ProcessHandle] = java.util.concurrent.ConcurrentHashMap.newKeySet[ProcessHandle](),
+  // completed when the registry releases it: the parent and everything it left running have exited
+  released: java.util.concurrent.CompletableFuture[Unit] = new java.util.concurrent.CompletableFuture[Unit]()
 )
 
 /**
@@ -135,6 +137,7 @@ final private[runner] class ProcessRegistry(
             def done(): Unit = {
               running.remove((owner, commandId), entry)
               gate.release()
+              entry.released.complete(()): Unit
             }
             if (leftovers.isEmpty) done()
             else {

@@ -244,6 +244,14 @@ final private[runner] class WebSocketCommandExecutor(
         } finally
           // the registry, not this watcher, drops the process: when it has exited
           exitDone.trySuccess(())
+      // complete only once the registry has released it: what it left running (a backgrounded process) is killed and
+      // waited for first, so no later command or file change runs beside it. Not released in time is a survivor.
+      if (
+        !survivedKill.get() && Try(
+          running.released.get(WebSocketCommandExecutor.ReleaseWait.toMillis, TimeUnit.MILLISECONDS)
+        ).isFailure
+      )
+        survivedKill.set(true)
       // timed out and still alive after the kill: it may yet write, so its outcome is unknown - reported now, as a
       // failure, without waiting for output streams it may hold open
       if (survivedKill.get() && running.completionSent.compareAndSet(false, true)) {
@@ -251,7 +259,7 @@ final private[runner] class WebSocketCommandExecutor(
           ResponseMessage(
             WorkspaceAgentErrorResponse(
               cmd.commandId,
-              "Command did not terminate when killed (timed out or cancelled); it may still be running",
+              "Command, or a process it started, did not terminate when killed; it may still be running",
               "EXECUTION_FAILED",
               None
             )
@@ -349,6 +357,9 @@ private[runner] object EarlyCancellations {
 }
 
 private[runner] object WebSocketCommandExecutor {
+
+  /** How long a command's end waits for the registry to release it: kill and wait for what it left running. */
+  val ReleaseWait: FiniteDuration = ProcessRegistry.KillWait * 2
 
   /** The most characters of each stream a command keeps: what it asked for, within `0..runnerMax`. */
   def outputLimit(requested: Option[Long], runnerMax: Long): Long =

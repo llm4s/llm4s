@@ -1762,6 +1762,13 @@ class WorkspaceAgentInterfaceImpl(
         stdoutThread.join(2000)
         stderrThread.join(2000)
 
+        // complete only once the registry has released it: what it left running is killed and waited for first
+        if (Try(entry.released.get(WebSocketCommandExecutor.ReleaseWait.toMillis, TimeUnit.MILLISECONDS)).isFailure)
+          throw new WorkspaceAgentException(
+            "A process the command started did not terminate when killed; it may still be running",
+            "EXECUTION_FAILED",
+            None
+          )
         process.exitValue()
       }.recover {
         case e: Exception if !e.isInstanceOf[WorkspaceAgentException] =>
