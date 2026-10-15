@@ -366,7 +366,7 @@ class HarnessProfileSpec extends AnyFlatSpec with Matchers with EitherValues wit
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withHarness(HarnessProfile().withRetention(RetentionPolicy(maxCheckpoints = Some(1), maxEvents = Some(1))))
+        .withHarness(HarnessProfile().withRetention(RetentionPolicy(maxCheckpoints = Some(1), maxEvents = Some(0))))
         .withRuntime(GraphRuntime(store))
     )
     agent.run(thread, "first").value

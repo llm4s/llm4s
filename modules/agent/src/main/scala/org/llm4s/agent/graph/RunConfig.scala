@@ -87,8 +87,10 @@ final case class RunConfig private (
    * before its first superstep, so a run that is refused - a busy thread, a pending interrupt, another tenant's thread
    * - leaves the thread unchanged, and nothing else writes to the thread while it prunes. The run's claim checkpoint is
    * the latest, which pruning never removes, so the run is unaffected; earlier runs' checkpoints and events beyond the
-   * policy are removed, raising the replay floor for their handles. A prune that fails is logged at WARN and the run
-   * goes on: retention is housekeeping.
+   * policy are removed, raising the replay floor for their handles. The run's own replay is never cut: `maxEvents` is
+   * applied as at least 1, so the claim's event, where the run's replay starts, stays. `RetentionPolicy.keepAll`
+   * removes nothing and is skipped. A prune that fails is logged at WARN and the run goes on: retention is
+   * housekeeping.
    */
   def withRetention(policy: RetentionPolicy): RunConfig = copy(retention = Some(policy))
 

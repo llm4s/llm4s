@@ -2163,13 +2163,20 @@ final class GraphRuntime(
         deadline = config.budgets.timeout.map(timeout => System.nanoTime() + timeout.toNanos)
         this
 
-    /** Prunes the thread to `policy` as the run is admitted; a failure is logged, never the run's. */
+    /**
+     * Prunes the thread to `policy` as the run is admitted; a failure is logged, never the run's. `keepAll` removes
+     * nothing, so it is skipped. The run's own events are never pruned: its claim's checkpoint is the latest, which
+     * pruning keeps with its events, and `maxEvents` is raised to at least 1, so the claim's event - where the run's
+     * replay starts - stays.
+     */
     private def retain(policy: RetentionPolicy): Unit =
-      Try(checkpointer.prune(threadId, policy)).toResult.flatten.left.foreach(error =>
-        GraphRuntime.logger.warn(
-          s"Pruning ${threadId.value} to its retention as run ${runId.value} was admitted failed: ${error.message}"
+      val clamped = policy.withMaxEvents(policy.maxEvents.map(math.max(_, 1)))
+      if clamped != RetentionPolicy.keepAll then
+        Try(checkpointer.prune(threadId, clamped)).toResult.flatten.left.foreach(error =>
+          GraphRuntime.logger.warn(
+            s"Pruning ${threadId.value} to its retention as run ${runId.value} was admitted failed: ${error.message}"
+          )
         )
-      )
 
     /** The store claim this run holds, from [[admit]] on; `None` before it, or if it was refused. */
     @volatile private var claim: Option[RunClaim] = None
