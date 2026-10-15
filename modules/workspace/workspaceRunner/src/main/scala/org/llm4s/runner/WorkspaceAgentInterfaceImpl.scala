@@ -113,6 +113,13 @@ class WorkspaceAgentInterfaceImpl(
   private def effective(path: Path): Path = effective(path, 0)
 
   /**
+   * Whether an entry a walk produced passes the same checks as a path asked for ([[resolvePath]]): a link beneath an
+   * allowed directory that leads outside it, or outside the workspace, is left out of a listing or a search before
+   * anything follows it.
+   */
+  private def withinPolicy(entry: Path): Boolean = Try(resolvePath(rootPath.relativize(entry).toString)).isSuccess
+
+  /**
    * As [[effective]]; `hops` counts the links followed by hand. A link is found without following it, so a dangling
    * one (`out -> /tmp/new-file`, whose target a write would create) is resolved to where it points, never taken as a
    * plain missing name beneath the workspace. More than 40 hops (a loop) is refused.
@@ -301,6 +308,7 @@ class WorkspaceAgentInterfaceImpl(
       val filteredFiles = s
         .iterator()
         .asScala
+        .filter(withinPolicy) // before anything follows a link it lists
         .filterNot { p =>
           val relativePath = rootPath.relativize(p).toString
           isExcluded(relativePath, patterns)
@@ -427,22 +435,6 @@ class WorkspaceAgentInterfaceImpl(
     // compared before anything is created, so a compare-and-set that loses changes nothing
     expectedHash.foreach(checkExpected(path, resolvedPath, _))
 
-    if (createDirs) {
-      Try(Files.createDirectories(resolvedPath.getParent)).failed.foreach { e =>
-        throw new WorkspaceAgentException(
-          s"Cannot create the parent directories of '$path': ${e.getMessage}",
-          "PARENT_NOT_A_DIRECTORY",
-          None
-        )
-      }
-    } else if (!Files.exists(resolvedPath.getParent)) {
-      throw new WorkspaceAgentException(
-        s"Parent directory for '$path' does not exist",
-        "DIRECTORY_NOT_FOUND",
-        None
-      )
-    }
-
     val options = writeMode match {
       case "create" =>
         if (Files.exists(resolvedPath)) {
@@ -481,6 +473,23 @@ class WorkspaceAgentInterfaceImpl(
       )
     if (expectedHash.isDefined && Files.isDirectory(resolvedPath))
       throw new WorkspaceAgentException(s"Path '$path' is a directory, not a file", "NOT_A_FILE", None)
+
+    // only now, every refusal made, is anything created: a refused write leaves no directory behind
+    if (createDirs) {
+      Try(Files.createDirectories(resolvedPath.getParent)).failed.foreach { e =>
+        throw new WorkspaceAgentException(
+          s"Cannot create the parent directories of '$path': ${e.getMessage}",
+          "PARENT_NOT_A_DIRECTORY",
+          None
+        )
+      }
+    } else if (!Files.exists(resolvedPath.getParent)) {
+      throw new WorkspaceAgentException(
+        s"Parent directory for '$path' does not exist",
+        "DIRECTORY_NOT_FOUND",
+        None
+      )
+    }
 
     Try {
       if (expectedHash.isDefined) {
@@ -858,6 +867,7 @@ class WorkspaceAgentInterfaceImpl(
         Using.resource(stream) { s =>
           s.iterator()
             .asScala
+            .filter(withinPolicy) // before anything follows a link it lists
             .filter(p => Files.isRegularFile(p))
             .filterNot { p =>
               val relativePath = rootPath.relativize(p).toString

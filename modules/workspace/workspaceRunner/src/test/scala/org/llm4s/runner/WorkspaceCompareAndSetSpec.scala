@@ -200,6 +200,16 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     code(workspace().writeFile("dangling", "x", expectedHash = Some("absent"))) shouldBe "PATH_ESCAPE_ATTEMPT"
     code(confined.writeFile("src/dangling", "x")) shouldBe "PATH_NOT_ALLOWED"
     Files.exists(outside.resolve("new-file")) shouldBe false
+    // a walk leaves out a link that leads outside the allowed paths, before it follows it
+    Files.write(root.resolve("src/ok.txt"), "secret too".getBytes(StandardCharsets.UTF_8))
+    confined.exploreFiles("src", returnMetadata = Some(true)).files.map(_.path) should contain("src/ok.txt")
+    confined.exploreFiles("src").files.map(_.path) should not contain "src/link"
+    confined.exploreFiles("src", recursive = Some(true)).files.map(_.path) should not contain "src/link"
+    confined
+      .searchFiles(List("src"), "s", "literal", recursive = Some(true))
+      .matches
+      .map(_.path)
+      .exists(_.contains("link")) shouldBe false
     Files.exists(root.resolve("private/new-file")) shouldBe false
     Files.delete(root.resolve("dangling"))
     Files.delete(root.resolve("out"))
@@ -212,6 +222,9 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     // four characters, eight bytes
     code(small.writeFile("a.txt", "éééé", expectedHash = Some("absent"))) shouldBe "SIZE_LIMIT_EXCEEDED"
     Files.exists(root.resolve("a.txt")) shouldBe false
+    // more UTF-8 bytes than the limit in no more characters than it: refused before any directory is created
+    code(small.writeFile("new/dir/a.txt", "€€", createDirectories = Some(true))) shouldBe "SIZE_LIMIT_EXCEEDED"
+    Files.exists(root.resolve("new")) shouldBe false
   }
 
   it should "bound the file it leaves: an append or a line edit past the limit is refused" in {
