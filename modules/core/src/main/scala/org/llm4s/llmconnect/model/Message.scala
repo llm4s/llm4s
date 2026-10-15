@@ -112,13 +112,15 @@ object Message {
 
   /** A message's content with each media part named by its kind, for `toString`. */
   private[model] def describe(parts: Vector[ContentPart]): String =
-    parts
-      .map {
-        case ContentPart.Text(text) => text
-        case null                   => "[null part]"
-        case media                  => s"[${media.kind}]"
-      }
-      .mkString(" ")
+    if (parts == null) "[null parts]"
+    else
+      parts
+        .map {
+          case ContentPart.Text(text) => text
+          case null                   => "[null part]"
+          case media                  => s"[${media.kind}]"
+        }
+        .mkString(" ")
 
   /** Whether `parts` has content: at least one part that is media or non-blank text, and no null part. */
   private[llm4s] def hasContent(parts: Vector[ContentPart]): Boolean =

@@ -672,22 +672,14 @@ class BedrockClient(
 
   // ---- exchange logging ----
 
-  // the text, with each media part named by its kind: the log never carries the bytes
-  private def describeParts(parts: Vector[ContentPart]): String =
-    parts
-      .map {
-        case ContentPart.Text(text) => text
-        case media                  => s"[${media.kind}]"
-      }
-      .mkString(" ")
-
   private def serializeRequestForLogging(conversation: Conversation, options: CompletionOptions): String = {
     val msgs = conversation.messages.map {
       case SystemMessage(content) => ujson.Obj("role" -> "system", "content" -> content)
-      case msg: UserMessage       => ujson.Obj("role" -> "user", "content" -> describeParts(msg.parts))
-      case msg: AssistantMessage  => ujson.Obj("role" -> "assistant", "content" -> msg.content)
+      // the text, each media part named by its kind (null-safe): the log never carries the bytes
+      case msg: UserMessage      => ujson.Obj("role" -> "user", "content" -> Message.textWithMedia(msg))
+      case msg: AssistantMessage => ujson.Obj("role" -> "assistant", "content" -> msg.content)
       case msg: ToolMessage =>
-        ujson.Obj("role" -> "tool", "toolCallId" -> msg.toolCallId, "content" -> describeParts(msg.parts))
+        ujson.Obj("role" -> "tool", "toolCallId" -> msg.toolCallId, "content" -> Message.textWithMedia(msg))
     }
     ujson
       .Obj(

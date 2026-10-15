@@ -118,7 +118,15 @@ class BedrockContentPartsSpec extends AnyFlatSpec with Matchers with EitherValue
     blocks(1)("text").str shouldBe "caption"
   }
 
-  "complete" should "refuse, before sending, each part Converse cannot take" in {
+  "complete" should "refuse null parts as invalid, also on its logging path, and never throw" in {
+    Seq(UserMessage(null: Vector[ContentPart]), UserMessage(Vector(ContentPart.Text("x"), null))).foreach { message =>
+      val (sent, result) = send(Conversation(Seq(message)))
+      sent shouldBe None
+      result.left.value.message should include("null part")
+    }
+  }
+
+  it should "refuse, before sending, each part Converse cannot take" in {
     val refused = Seq(
       image(https)                                        -> "image (url, image/png)",
       image(bytes, MediaType.Bmp)                         -> "image (inline, image/bmp)",
