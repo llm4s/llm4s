@@ -11,14 +11,6 @@ import scala.concurrent.duration.{ DurationInt, DurationLong, FiniteDuration }
 import scala.concurrent.{ ExecutionContext, Future, Promise }
 import scala.util.{ Failure, Success, Try }
 
-/** A process started for a WebSocket `ExecuteCommandCommand`, tracked so the client can cancel it. */
-final private[runner] case class RunningCommand(
-  process: Process,
-  cancelled: AtomicBoolean,
-  startTimeMs: Long,
-  completionSent: AtomicBoolean
-)
-
 /**
  * Runs the WebSocket protocol's `ExecuteCommandCommand`, streaming the process's output as it arrives.
  *
@@ -47,7 +39,8 @@ final private[runner] class WebSocketCommandExecutor(
    * Check, start and stream one command.
    *
    * @param cmd       the command from the client
-   * @param processes this client's running commands, so [[cancel]] can find the process
+   * @param owner     the client (its connection): the owner its process is registered under, which [[cancel]] and a
+   *                  disconnect act on
    * @param send      delivers a protocol message to the client
    * @param connected whether the client's connection is still open: a command whose connection closed while it waited at
    *                  the gate never starts, as the close handler cancels only what it can find
@@ -56,7 +49,7 @@ final private[runner] class WebSocketCommandExecutor(
    */
   def execute(
     cmd: ExecuteCommandCommand,
-    processes: ConcurrentHashMap[String, RunningCommand],
+    owner: AnyRef,
     send: WebSocketMessage => Unit,
     connected: () => Boolean = () => true,
     cancelledEarly: EarlyCancellations = new EarlyCancellations()
@@ -74,97 +67,64 @@ final private[runner] class WebSocketCommandExecutor(
         fail(refused.error, refused.code, refused.details)
 
       case Right(prepared) =>
-        // a permit of the workspace's command gate, from before the process starts until it has exited, so no file
-        // mutation runs beside it; taken before the command is announced, and refused (nothing started) if a file
-        // change holds the gate past its bounded wait
         // a client that has flooded its cancellations takes no new commands until they age out: the bound holds
         // without ever forgetting a cancellation a waiting command needs
-        (if (cancelledEarly.full)
-           Failure(
-             new WorkspaceAgentException(
-               "Too many cancellations of commands not yet started; try again shortly",
-               "WORKSPACE_BUSY",
-               None
-             )
-           )
-         else Try(workspace.acquireCommand())) match {
-          case Failure(busy: WorkspaceAgentException) => fail(busy.error, busy.code, busy.details)
-          case Failure(other) => fail(Option(other.getMessage).getOrElse("Gate failed"), "EXECUTION_FAILED", None)
-          case Success(_) if cancelledEarly.remove(cmd.commandId) || !connected() =>
-            // cancelled while it waited at the gate: it never starts, and is acknowledged as a cancellation
-            workspace.releaseCommand()
-            send(CommandCompletedMessage(cmd.commandId, 143, (System.currentTimeMillis() - startTime).millis))
-          case Success(_) =>
-            Try(prepared.builder.start()) match {
-              case Failure(ex) =>
-                workspace.releaseCommand()
-                fail(
-                  Option(ex.getMessage).getOrElse("Failed to start process"),
-                  "EXECUTION_FAILED",
-                  Some(ex.getStackTrace.mkString("\n"))
-                )
-              case Success(process) =>
-                // the permit goes back when the process exits, however this path ends from here: registered first, so a
-                // failure to announce or stream it (a dropped socket) cannot keep the gate held
-                workspace.releaseOnExit(Some(process))
-                // registered before it is announced, so a cancellation from then on finds it; the timeout and the
-                // duration count from the start of the process, not from before the wait for the gate
-                val running =
-                  RunningCommand(
-                    process,
-                    new AtomicBoolean(false),
-                    System.currentTimeMillis(),
-                    new AtomicBoolean(false)
-                  )
-                processes.put(cmd.commandId, running)
-                // registered: a cancellation from now on finds it. One that came while it started, before it was
-                // registered, is in `cancelledEarly`, and a closed connection's handler has already run: either stops it here
-                if (cancelledEarly.remove(cmd.commandId) || !connected()) {
-                  running.cancelled.set(true)
-                  process.destroyForcibly(): Unit
-                }
-                // a client that cannot be told it started gets no output and could not cancel it: it is stopped
-                Try(send(CommandStartedMessage(cmd.commandId, cmd.command))) match {
-                  case Success(_) => stream(cmd, prepared, running, processes, send, fail)
-                  case Failure(ex) =>
-                    logger.warn(s"Could not announce command ${cmd.commandId}; stopping it: ${ex.getMessage}")
-                    running.cancelled.set(true)
-                    processes.remove(cmd.commandId)
-                    process.destroyForcibly(): Unit
-                }
-            }
-        }
+        if (cancelledEarly.full)
+          fail("Too many cancellations of commands not yet started; try again shortly", "WORKSPACE_BUSY", None)
+        else if (cancelledEarly.remove(cmd.commandId) || !connected())
+          // cancelled, or its connection closed, before it started: it never starts (exit 143)
+          send(CommandCompletedMessage(cmd.commandId, 143, (System.currentTimeMillis() - startTime).millis))
+        else
+          // the registry waits at the gate (bounded), starts the process and tracks it until it exits, whatever
+          // happens from here: nothing below holds or drops the process itself
+          registry.spawn(
+            owner,
+            cmd.commandId,
+            prepared.builder,
+            () => !cancelledEarly.remove(cmd.commandId) && connected()
+          ) match {
+            case Left(notStarted) if notStarted.code == ProcessRegistry.NotStarted =>
+              // cancelled, or its connection closed, while it waited at the gate: it never started (exit 143)
+              send(CommandCompletedMessage(cmd.commandId, 143, (System.currentTimeMillis() - startTime).millis))
+            case Left(refused)  => fail(refused.error, refused.code, refused.details)
+            case Right(running) =>
+              // tracked: a cancellation from now on finds it. One that came while it waited or started is in
+              // `cancelledEarly`, and a closed connection's handler has already run: either kills it here
+              if (cancelledEarly.remove(cmd.commandId) || !connected()) registry.kill(running): Unit
+              // a client that cannot be told it started gets no output and could not cancel it: it is killed, and
+              // stays tracked until it has exited
+              Try(send(CommandStartedMessage(cmd.commandId, cmd.command))) match {
+                case Success(_) => stream(cmd, prepared, running, send, fail)
+                case Failure(ex) =>
+                  logger.warn(s"Could not announce command ${cmd.commandId}; stopping it: ${ex.getMessage}")
+                  registry.kill(running): Unit
+              }
+          }
     }
   }
+
+  /** The runner's process registry: the workspace's. */
+  private[runner] def registry: ProcessRegistry = workspace.processes
 
   /**
    * Cancel one of this client's running commands. Cancellation is acknowledged as completion, exit code 143.
    *
    * @param commandId the command to cancel
-   * @param processes this client's running commands
+   * @param owner     the client, whose processes alone it can cancel
    * @param send      delivers a protocol message to the client
    * @param cancelledEarly this client's cancellations of commands not yet registered, as given to [[execute]]
    */
   def cancel(
     commandId: String,
-    processes: Option[ConcurrentHashMap[String, RunningCommand]],
+    owner: AnyRef,
     send: WebSocketMessage => Unit,
     cancelledEarly: Option[EarlyCancellations] = None,
     onOverflow: () => Unit = () => ()
   ): Unit =
-    processes.flatMap(running => Option(running.get(commandId))) match {
+    registry.find(owner, commandId) match {
       case Some(running) =>
-        running.cancelled.set(true)
-        val terminationAttempt = Try {
-          val destroyedProcess = running.process.destroyForcibly()
-          // Wait briefly for the process to actually terminate
-          if (!destroyedProcess.waitFor(5, TimeUnit.SECONDS)) {
-            logger.warn(s"Process for command $commandId did not terminate within timeout after cancellation")
-          }
-        }
-        terminationAttempt.failed.foreach { ex =>
-          logger.error(s"Error destroying process for command $commandId: ${ex.getMessage}", ex)
-        }
+        // killed through the registry, which keeps it tracked until it has exited
+        registry.kill(running): Unit
         logger.info(s"Command $commandId cancelled by client")
         // acknowledged only once it is gone; one that survives the kill is reported by its exit watcher as a failure
         if (!running.process.isAlive && running.completionSent.compareAndSet(false, true)) {
@@ -185,7 +145,6 @@ final private[runner] class WebSocketCommandExecutor(
     cmd: ExecuteCommandCommand,
     prepared: PreparedCommand,
     running: RunningCommand,
-    processes: ConcurrentHashMap[String, RunningCommand],
     send: WebSocketMessage => Unit,
     fail: (String, String, Option[String]) => Unit
   ): Unit = {
@@ -257,15 +216,13 @@ final private[runner] class WebSocketCommandExecutor(
               finished = process.waitFor(500, TimeUnit.MILLISECONDS)
             }
           if (running.cancelled.get()) {
-            process.destroyForcibly()
             // a cancellation is an outcome only once the process is gone, as a timeout is
-            if (!process.waitFor(5, TimeUnit.SECONDS)) survivedKill.set(true)
+            if (!registry.kill(running)) survivedKill.set(true)
             143
           } else if (timedOut) {
             commandTimedOut.set(true)
-            process.destroyForcibly()
             // a timeout is an outcome only once the process is gone
-            if (!process.waitFor(5, TimeUnit.SECONDS)) survivedKill.set(true)
+            if (!registry.kill(running, asCancellation = false)) survivedKill.set(true)
             -1
           } else {
             process.exitValue()
@@ -273,19 +230,15 @@ final private[runner] class WebSocketCommandExecutor(
         } catch {
           case _: InterruptedException =>
             Thread.currentThread().interrupt()
-            process.destroyForcibly()
+            if (!registry.kill(running, asCancellation = false)) survivedKill.set(true)
             -1
           case ex: Exception =>
             logger.error(s"Error waiting for process ${cmd.commandId}: ${ex.getMessage}", ex)
-            process.destroyForcibly()
+            if (!registry.kill(running, asCancellation = false)) survivedKill.set(true)
             -1
-        } finally {
-          // a process that survived its kill stays registered, so a cancellation still finds it, until it exits
-          if (survivedKill.get())
-            process.onExit().whenComplete((_, _) => processes.remove(cmd.commandId): Unit): Unit
-          else processes.remove(cmd.commandId): Unit
+        } finally
+          // the registry, not this watcher, drops the process: when it has exited
           exitDone.trySuccess(())
-        }
       // timed out and still alive after the kill: it may yet write, so its outcome is unknown - reported now, as a
       // failure, without waiting for output streams it may hold open
       if (survivedKill.get() && running.completionSent.compareAndSet(false, true)) {

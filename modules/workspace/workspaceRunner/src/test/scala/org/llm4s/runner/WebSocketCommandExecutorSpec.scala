@@ -8,7 +8,7 @@ import org.scalatest.matchers.should.Matchers
 import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Path }
 import java.util.Comparator
-import java.util.concurrent.{ ConcurrentHashMap, ConcurrentLinkedQueue }
+import java.util.concurrent.ConcurrentLinkedQueue
 import scala.concurrent.duration._
 import scala.concurrent.{ Await, ExecutionContext, Promise }
 import scala.jdk.CollectionConverters._
@@ -42,7 +42,7 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
   /** One WebSocket client: the messages it was sent, and its running commands. */
   final private class FakeChannel {
     val messages  = new ConcurrentLinkedQueue[WebSocketMessage]()
-    val processes = new ConcurrentHashMap[String, RunningCommand]()
+    val owner     = new Object
     val completed = Promise[CommandCompletedMessage]()
 
     def send(message: WebSocketMessage): Unit = {
@@ -84,7 +84,7 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
   ): (FakeChannel, CommandCompletedMessage) = {
     val channel  = new FakeChannel
     val executor = new WebSocketCommandExecutor(interfaceFor(config), 1024L * 1024L)
-    executor.execute(cmd, channel.processes, channel.send)
+    executor.execute(cmd, channel.owner, channel.send)
     val done = Await.result(channel.completed.future, 30.seconds)
     // The final response is sent before CommandCompletedMessage, so everything the client will see is in.
     (channel, done)
@@ -356,16 +356,16 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
     val channel  = new FakeChannel
     val executor = new WebSocketCommandExecutor(interfaceFor(Permissive), 1024L * 1024L)
     val cmd      = command("tail -f notes.txt", timeout = Some(60.seconds))
-    executor.execute(cmd, channel.processes, channel.send)
+    executor.execute(cmd, channel.owner, channel.send)
 
     val deadline = System.nanoTime() + 30.seconds.toNanos
-    while (!channel.processes.containsKey(cmd.commandId) && System.nanoTime() < deadline) Thread.sleep(20)
+    while (!executor.registry.tracked(channel.owner, cmd.commandId) && System.nanoTime() < deadline) Thread.sleep(20)
     withClue(s"messages ${channel.all}: ") {
-      channel.processes.containsKey(cmd.commandId) shouldBe true
+      executor.registry.tracked(channel.owner, cmd.commandId) shouldBe true
     }
-    val process = channel.processes.get(cmd.commandId).process
+    val process = executor.registry.find(channel.owner, cmd.commandId).get.process
 
-    executor.cancel(cmd.commandId, Some(channel.processes), channel.send)
+    executor.cancel(cmd.commandId, channel.owner, channel.send)
     // A cancellation that did not stop it would end at the 60 s timeout as exit -1, after this wait gives up;
     // exit 143 is the signal, so the wait is only a backstop.
     val done = Await.result(channel.completed.future, 30.seconds)
@@ -376,8 +376,8 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
   it should "answer a cancellation for an unknown command with UNKNOWN_COMMAND_ID" in {
     val channel  = new FakeChannel
     val executor = new WebSocketCommandExecutor(interfaceFor(Permissive), 1024L * 1024L)
-    executor.cancel("no-such-command", Some(channel.processes), channel.send)
-    executor.cancel("no-such-command", None, channel.send)
+    executor.cancel("no-such-command", channel.owner, channel.send)
+    executor.cancel("no-such-command", new Object, channel.send)
     channel.all shouldBe Seq.fill(2)(
       ErrorMessage("No running command found for id no-such-command", "UNKNOWN_COMMAND_ID", Some("no-such-command"))
     )
@@ -391,14 +391,14 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
     )
     val cmd     = command("echo should-not-run")
     val channel = new FakeChannel
-    executor.cancel(cmd.commandId, Some(channel.processes), channel.send, Some(mine))
+    executor.cancel(cmd.commandId, channel.owner, channel.send, Some(mine))
     theirs.remove(cmd.commandId) shouldBe false
     // another client's command with the same id is not touched
     val other = new FakeChannel
-    executor.execute(cmd, other.processes, other.send, () => true, theirs)
+    executor.execute(cmd, other.owner, other.send, () => true, theirs)
     Await.result(other.completed.future, 30.seconds).exitCode shouldBe 0
     // this client's command never starts: acknowledged as a cancellation
-    executor.execute(cmd, channel.processes, channel.send, () => true, mine)
+    executor.execute(cmd, channel.owner, channel.send, () => true, mine)
     Await.result(channel.completed.future, 30.seconds).exitCode shouldBe 143
     channel.started shouldBe empty
   }
@@ -412,15 +412,19 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
       Some(Permissive),
       gateWait = 5.seconds
     )
-    val executor  = new WebSocketCommandExecutor(workspace, 1024L * 1024L)
-    val processes = new ConcurrentHashMap[String, RunningCommand]()
+    val executor = new WebSocketCommandExecutor(workspace, 1024L * 1024L)
+    val owner    = new Object
     // the socket fails as the command is announced
     val send: WebSocketMessage => Unit = {
       case _: CommandStartedMessage => throw new java.io.IOException("socket closed")
       case _                        => ()
     }
-    executor.execute(command("tail -f follow-gate.txt", timeout = Some(60.seconds)), processes, send)
-    processes shouldBe empty
+    val cmd = command("tail -f follow-gate.txt", timeout = Some(60.seconds))
+    executor.execute(cmd, owner, send)
+    // killed, it leaves the registry only once it has exited
+    val deadline = System.nanoTime() + 10.seconds.toNanos
+    while (executor.registry.tracked(owner, cmd.commandId) && System.nanoTime() < deadline) Thread.sleep(20)
+    executor.registry.tracked(owner, cmd.commandId) shouldBe false
     // the gate is free again once the killed process has exited: a file mutation gets it well within its wait
     workspace.writeFile("after-gate.txt", "x", expectedHash = Some("absent")).success shouldBe true
   }
@@ -442,7 +446,7 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
   "WebSocketCommandExecutor" should "never start a command whose connection closed before it was registered" in {
     val executor = new WebSocketCommandExecutor(interfaceFor(Permissive), 1024L * 1024L)
     val channel  = new FakeChannel
-    executor.execute(command("echo should-not-run"), channel.processes, channel.send, () => false)
+    executor.execute(command("echo should-not-run"), channel.owner, channel.send, () => false)
     Await.result(channel.completed.future, 30.seconds).exitCode shouldBe 143
     channel.started shouldBe empty
   }

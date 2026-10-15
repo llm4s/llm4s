@@ -28,14 +28,17 @@ import scala.util.chaining._
  *                      no standalone `.exe` on Windows.
  * @param sandboxConfig Optional sandbox config; if None, uses [[WorkspaceSandboxConfig.Permissive]]
  * @param programSearch where the programs a command names are looked for (#1790); the host's, bar in tests
- * @param gateWait      how long a file mutation waits for running commands to end before it is refused (`WORKSPACE_BUSY`)
+ * @param gateWait      how long a command or a file operation waits at the command gate before it is refused
+ *                      (`WORKSPACE_BUSY`)
+ * @param startProcess  starts a process for the [[ProcessRegistry]]; the platform's, bar in tests
  */
 class WorkspaceAgentInterfaceImpl(
   workspaceRoot: String,
   isWindows: Boolean,
   sandboxConfig: Option[WorkspaceSandboxConfig] = None,
   programSearch: ProgramSearch = ProgramSearch.host(),
-  gateWait: FiniteDuration = WorkspaceAgentInterfaceImpl.GateWait
+  gateWait: FiniteDuration = WorkspaceAgentInterfaceImpl.GateWait,
+  startProcess: java.lang.ProcessBuilder => Process = _.start()
 ) extends WorkspaceAgentInterface {
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -222,38 +225,13 @@ class WorkspaceAgentInterfaceImpl(
   private val fileLock = new java.util.concurrent.locks.ReentrantLock(true)
 
   /**
-   * The gate between file mutations and commands, which write files too: a running command holds one permit, from
-   * before its process starts until it has exited, and a file mutation holds them all, so a compare-and-set never runs
-   * beside a command this runner started, from any client. Commands still run beside one another. Fair, so a mutation
-   * waiting for commands to end is not overtaken by new ones; a mutation that cannot have the gate within
-   * `gateWait` (default [[WorkspaceAgentInterfaceImpl.GateWait]]) is refused (`WORKSPACE_BUSY`), having changed nothing. What a command leaves running after it exits,
-   * and writers outside the runner (the host, over a bind mount), are not fenced.
+   * Every process this runner starts, and the command gate (design §4.33): the one holder of process references.
+   * Cancel, disconnect, shutdown and the gate all act through it, and a process leaves it only when it has exited.
    */
-  private val commandGate = new java.util.concurrent.Semaphore(WorkspaceAgentInterfaceImpl.GatePermits, true)
+  private[runner] val processes = new ProcessRegistry(gateWait, startProcess)
 
-  /**
-   * Takes a command's permit, waiting at most `gateWait` for a file mutation to finish; refused (`WORKSPACE_BUSY`,
-   * nothing started) if it cannot. [[releaseOnExit]] gives it back once the process has exited.
-   */
-  private[runner] def acquireCommand(): Unit =
-    if (!commandGate.tryAcquire(gateWait.toMillis, TimeUnit.MILLISECONDS))
-      throw new WorkspaceAgentException(
-        s"A file change is in progress in the workspace; the command was not started (waited $gateWait)",
-        "WORKSPACE_BUSY",
-        None
-      )
-
-  private[runner] def releaseCommand(): Unit = commandGate.release()
-
-  /**
-   * Gives a command's permit back once its process has really exited (a forced kill can take a while), or at once
-   * if it never started: a mutation never runs while the process can still write.
-   */
-  private[runner] def releaseOnExit(process: Option[Process]): Unit =
-    process match {
-      case Some(p) => p.onExit().whenComplete((_, _) => releaseCommand()): Unit
-      case None    => releaseCommand()
-    }
+  /** The owner of the processes the direct [[executeCommand]] starts. */
+  private val DirectOwner = new Object
 
   /**
    * `body` with the file lock and the whole command gate, both taken within one `gateWait` in all: a request queued
@@ -270,12 +248,8 @@ class WorkspaceAgentInterfaceImpl(
         None
       )
     if (!fileLock.tryLock(remaining, TimeUnit.NANOSECONDS)) throw busy("Another file operation")
-    try {
-      if (!commandGate.tryAcquire(WorkspaceAgentInterfaceImpl.GatePermits, remaining, TimeUnit.NANOSECONDS))
-        throw busy("A command")
-      try body
-      finally commandGate.release(WorkspaceAgentInterfaceImpl.GatePermits)
-    } finally fileLock.unlock()
+    try processes.exclusive(remaining)(body)
+    finally fileLock.unlock()
   }
 
   /** The current [[FileSnapshotResponse.hash]] of `resolved`, its bytes read as a stream. */
@@ -1520,63 +1494,57 @@ class WorkspaceAgentInterfaceImpl(
         } finally reader.close()
       })
 
-    // the command holds a permit of the gate from before it starts until it has exited, so no file mutation runs
-    // beside it ([[commandGate]])
-    acquireCommand()
-    var started = Option.empty[Process]
+    // started through the registry: it holds a gate permit and stays tracked (killable by shutdown) until it exits
+    val entry = processes
+      .spawn(DirectOwner, java.util.UUID.randomUUID().toString, builder)
+      .fold(refused => throw refused, identity)
     val exitCode =
-      try
-        Try {
-          val process = builder.start()
-          started = Some(process)
+      Try {
+        val process = entry.process
 
-          // Read stdout and stderr in background threads to prevent blocking
-          val stdoutThread = capture(process.getInputStream, stdout, stdoutTruncated)
-          val stderrThread = capture(process.getErrorStream, stderr, stderrTruncated)
+        // Read stdout and stderr in background threads to prevent blocking
+        val stdoutThread = capture(process.getInputStream, stdout, stdoutTruncated)
+        val stderrThread = capture(process.getErrorStream, stderr, stderrTruncated)
 
-          stdoutThread.setDaemon(true)
-          stderrThread.setDaemon(true)
-          stdoutThread.start()
-          stderrThread.start()
+        stdoutThread.setDaemon(true)
+        stderrThread.setDaemon(true)
+        stdoutThread.start()
+        stderrThread.start()
 
-          val completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+        val completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
 
-          if (!completed) {
-            process.destroy()
-            // Wait up to 2 seconds for graceful termination before escalating
-            if (!process.waitFor(2, TimeUnit.SECONDS)) {
-              process.destroyForcibly()
-              process.waitFor(3, TimeUnit.SECONDS)
-            }
-            // a timeout is an outcome only once the process is gone: one still alive may yet write, so its outcome
-            // is unknown, a failure, never a completed result a replay would return
-            if (process.isAlive)
-              throw new WorkspaceAgentException(
-                s"Command timed out after ${timeoutMs}ms and did not terminate when killed",
-                "EXECUTION_FAILED",
-                None
-              )
+        if (!completed) {
+          process.destroy()
+          // Wait up to 2 seconds for graceful termination before escalating
+          if (!process.waitFor(2, TimeUnit.SECONDS)) processes.kill(entry, asCancellation = false): Unit
+          // a timeout is an outcome only once the process is gone: one still alive may yet write, so its outcome
+          // is unknown, a failure, never a completed result a replay would return
+          if (process.isAlive)
             throw new WorkspaceAgentException(
-              s"Command execution timed out after ${timeoutMs}ms",
-              "TIMEOUT",
-              None
-            )
-          }
-
-          // Wait for output threads to finish capturing
-          stdoutThread.join(2000)
-          stderrThread.join(2000)
-
-          process.exitValue()
-        }.recover {
-          case e: Exception if !e.isInstanceOf[WorkspaceAgentException] =>
-            throw new WorkspaceAgentException(
-              s"Failed to execute command: ${e.getMessage}",
+              s"Command timed out after ${timeoutMs}ms and did not terminate when killed",
               "EXECUTION_FAILED",
               None
             )
-        }.get
-      finally releaseOnExit(started)
+          throw new WorkspaceAgentException(
+            s"Command execution timed out after ${timeoutMs}ms",
+            "TIMEOUT",
+            None
+          )
+        }
+
+        // Wait for output threads to finish capturing
+        stdoutThread.join(2000)
+        stderrThread.join(2000)
+
+        process.exitValue()
+      }.recover {
+        case e: Exception if !e.isInstanceOf[WorkspaceAgentException] =>
+          throw new WorkspaceAgentException(
+            s"Failed to execute command: ${e.getMessage}",
+            "EXECUTION_FAILED",
+            None
+          )
+      }.get
 
     val duration          = System.currentTimeMillis() - startTime
     val isStdoutTruncated = stdoutTruncated.get()
@@ -1614,9 +1582,6 @@ class WorkspaceAgentInterfaceImpl(
 final private[runner] case class PreparedCommand(builder: java.lang.ProcessBuilder, timeout: FiniteDuration)
 
 private[runner] object WorkspaceAgentInterfaceImpl {
-
-  /** The command gate's permits: one per running command, all of them for a file mutation. */
-  val GatePermits: Int = 1 << 20
 
   /** How long a file mutation waits for running commands to end before it is refused as `WORKSPACE_BUSY`. */
   val GateWait: FiniteDuration = WorkspaceSandboxConfig.CommandGateWait

@@ -86,9 +86,7 @@ object RunnerMain extends cask.MainRoutes {
 
   // Track active connections and their last heartbeat
   private val connections = new ConcurrentHashMap[cask.WsChannelActor, AtomicLong]()
-  // Per-client process tracking (keyed by WebSocket channel to isolate clients)
-  private val clientProcesses =
-    new ConcurrentHashMap[cask.WsChannelActor, ConcurrentHashMap[String, RunningCommand]]()
+  // Processes are the workspace's ProcessRegistry's alone, each owned by its client's channel (per-client isolation)
   // Per client, the cancellations of its commands not yet registered (waiting at the command gate): they never start.
   private val clientEarlyCancels = new ConcurrentHashMap[cask.WsChannelActor, EarlyCancellations]()
   private def earlyCancels(channel: cask.WsChannelActor): EarlyCancellations =
@@ -137,27 +135,16 @@ object RunnerMain extends cask.MainRoutes {
     }
 
   /**
-   * Ends a client's connection: its commands waiting at the gate never start (it no longer owns its process map, and
-   * its early cancellations go with it), and its running processes are killed - this client's only.
+   * Ends a client's connection: its commands waiting at the gate never start (it is no longer connected, and its early
+   * cancellations go with it), and its running processes are killed through the registry - this client's only. A
+   * process that survives the kill stays tracked until it exits.
    */
   private def disconnect(channel: cask.WsChannelActor, why: String): Unit = {
     // the connection first: from here on nothing of this client counts as connected
     connections.remove(channel): Unit
     clientEarlyCancels.remove(channel): Unit
-    Option(clientProcesses.remove(channel)).foreach { processes =>
-      processes.forEach { (_, running) =>
-        running.cancelled.set(true)
-        val terminateAttempt = Try {
-          val destroyedProcess = running.process.destroyForcibly()
-          if (!destroyedProcess.waitFor(5, TimeUnit.SECONDS)) {
-            logger.warn(s"Process did not terminate within timeout after $why")
-          }
-        }
-        terminateAttempt.failed.foreach { ex =>
-          logger.error(s"Error destroying process on $why: ${ex.getMessage}", ex)
-        }
-      }
-    }
+    logger.info(s"Killing the processes of a closed connection ($why)")
+    workspaceInterface.processes.killOwner(channel)
   }
 
   private def handleWebSocketMessage(channel: cask.WsChannelActor, message: String): Unit = {
@@ -183,7 +170,7 @@ object RunnerMain extends cask.MainRoutes {
         // Only kill THIS client's process. Cancellation is acknowledged as command completion (exit 143).
         commandExecutor.cancel(
           commandId,
-          Option(clientProcesses.get(channel)),
+          channel,
           message => sendMessage(channel, message),
           Some(earlyCancels(channel)),
           () => {
@@ -329,24 +316,21 @@ object RunnerMain extends cask.MainRoutes {
     if (!connections.containsKey(channel))
       logger.warn(s"Dropped command ${cmd.commandId}: its connection has closed")
     else {
-      // Ensure client has a process map (per-client isolation)
-      val processes = clientProcesses.computeIfAbsent(channel, _ => new ConcurrentHashMap[String, RunningCommand]())
-      val early     = earlyCancels(channel)
+      val early = earlyCancels(channel)
       if (!connections.containsKey(channel)) {
-        // `disconnect` ran between the check above and this state's creation: remove what this call made (only if it
-        // is still this call's), so a closed channel keeps nothing, and drop the command
-        clientProcesses.remove(channel, processes): Unit
+        // `disconnect` ran between the check above and this state's creation: remove it (only if it is still this
+        // call's), so a closed channel keeps nothing, and drop the command
         clientEarlyCancels.remove(channel, early): Unit
         logger.warn(s"Dropped command ${cmd.commandId}: its connection closed")
       } else
-        // connected while the connection is open and still owns this map: `disconnect` removes the connection first,
-        // then the map, then cancels what is in it, so a map made after it closed never counts
+        // the channel owns its processes in the registry; it counts as connected while its connection is open, which
+        // `disconnect` ends before it kills the channel's processes
         Future(
           commandExecutor.execute(
             cmd,
-            processes,
+            channel,
             message => sendMessage(channel, message),
-            () => connections.containsKey(channel) && (clientProcesses.get(channel) eq processes),
+            () => connections.containsKey(channel),
             early
           )
         )(ec)
@@ -436,22 +420,8 @@ object RunnerMain extends cask.MainRoutes {
   def shutdown(): Unit = {
     logger.info("Shutting down WebSocket Runner service")
 
-    // Kill all remaining processes
-    clientProcesses.forEach { (_, processes) =>
-      processes.forEach { (_, running) =>
-        running.cancelled.set(true)
-        val terminateAttempt = Try {
-          val destroyedProcess = running.process.destroyForcibly()
-          if (!destroyedProcess.waitFor(5, TimeUnit.SECONDS)) {
-            logger.warn("Process did not terminate within timeout during shutdown")
-          }
-        }
-        terminateAttempt.failed.foreach { ex =>
-          logger.error(s"Error destroying process on shutdown: ${ex.getMessage}", ex)
-        }
-      }
-    }
-    clientProcesses.clear()
+    // Kill all remaining processes, through the registry: each stays tracked until it exits
+    workspaceInterface.processes.killAll()
     clientEarlyCancels.clear()
 
     Try {
