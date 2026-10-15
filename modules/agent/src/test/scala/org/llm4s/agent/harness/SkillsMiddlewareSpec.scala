@@ -82,6 +82,43 @@ class SkillsMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues w
     sections.map(s => (s.id, s.cacheable)) shouldBe Vector(("skills", true))
   }
 
+  it should "let the model load a listed skill with FileTools' read_file over the same backend, adding no tool" in {
+    val backend = StateFileBackend()
+    val mw      = new SkillsMiddleware(Vector(p("/skills")), backend)
+    val store   = new InMemoryCheckpointer
+    val thread  = ThreadId("load")
+    val rt      = GraphRuntime(store)
+    val tools   = ToolSet.of(FileTools(backend)*).value
+    rt.start(thread, loopOf(new Recording, Seq(mw), tools).graph, AgentInput("one")).awaited.value.answered
+    rt.updateState(
+      thread,
+      loopOf(new Recording, Seq(mw), tools).graph,
+      store.latest(thread).value.value.checkpoint.id,
+      StateUpdate.update(
+        backend.files,
+        FileUpdate.Put(p("/skills/pdf/SKILL.md"), FileEntry(skill("pdf", "PDFs."), java.time.Instant.EPOCH))
+      )
+    ).isRight shouldBe true
+    val seen = new CopyOnWriteArrayList[Vector[Message]]()
+    val model = new ModelStep {
+      def next(messages: Vector[Message], offered: ToolSet, call: ModelCall): Result[Completion] = {
+        seen.add(messages)
+        if (seen.size == 1) {
+          // the path is the one the section shows
+          val system = messages.collectFirst { case s: SystemMessage => s.content }.getOrElse("")
+          val path   = "\\(([^)]*SKILL\\.md)\\)".r.findFirstMatchIn(system).map(_.group(1)).getOrElse("missing")
+          Right(completion(AssistantMessage(None, Seq(ToolCall("r1", FileTools.ReadFile, ujson.Obj("path" -> path))))))
+        } else Right(completion(AssistantMessage("done")))
+      }
+    }
+    mw.tools shouldBe empty
+    val (state, _) = rt.start(thread, loopOf(model, Seq(mw), tools).graph, AgentInput("two")).awaited.value.answered
+    val results = state.get(org.llm4s.agent.graph.toolloop.Messages.key).value.map(_.message).collect {
+      case t: ToolMessage => t.content
+    }
+    results.last should include("Body of pdf.")
+  }
+
   it should "add no section when no source holds a skill, and report nothing for a missing source" in {
     val store = new InMemoryCheckpointer
     val model = new Recording

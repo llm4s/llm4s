@@ -592,8 +592,8 @@ for {
 } yield agent
 ```
 
-- **Give the agent file tools over the same backend** (or the composite it is mounted in), so the
-  paths in the section are the ones `read_file` takes.
+- **Give the agent `FileTools(backend)` over the same backend** (or the composite it is mounted in),
+  so the paths in the section are the ones `read_file` takes.
 - **Read once per run**, on its first model call, and cached for the run. A skill added or edited
   during a run shows from the next run; a recovered or resumed run reads again. A later source's
   skill replaces an earlier one of the same name, so list the user's skills before the project's.
