@@ -112,6 +112,12 @@ trait FileBackendContract extends AnyFlatSpecLike with Matchers with EitherValue
     results(3) should startWith("error:")
   }
 
+  it should "apply a walk's predicate before its limit, so a refused file takes no place" in {
+    val results = one(newBackend(), "write|/a.txt|x", "write|/b.txt|x", "first|/|/a.txt", "firstmatch|/|x|/a.txt")
+    results(2) shouldBe "/b.txt"
+    results(3) shouldBe "/b.txt:1:x"
+  }
+
   it should "refuse a read or list of what is not there, and binary content" in {
     val results = one(newBackend(), "read|/missing", "ls|/missing", "write|/bin|a\u0000b")
     results.foreach(_ should startWith("error:"))
@@ -199,6 +205,13 @@ object FileBackendContract:
           )
         case "glob" :: p :: pattern :: Nil =>
           read(backend.glob(Glob(pattern), path(p), 1000, ctx))(_.items.map(_.value).mkString("\n"))
+        // the first file `find` returns that is not `skip`: `accept` must apply before the limit
+        case "first" :: p :: skip :: Nil =>
+          read(backend.find(path(p), _.value != skip, 1, ctx))(_.items.map(_.value).mkString("\n"))
+        case "firstmatch" :: p :: regex :: skip :: Nil =>
+          read(backend.search(path(p), java.util.regex.Pattern.compile(regex), _.value != skip, 1, ctx))(
+            _.items.map(m => s"${m.path.value}:${m.line}:${m.text}").mkString("\n")
+          )
         case "grep" :: p :: regex :: Nil =>
           read(backend.grep(regex, path(p), None, 1000, ctx))(
             _.items.map(m => s"${m.path.value}:${m.line}:${m.text}").mkString("\n")
