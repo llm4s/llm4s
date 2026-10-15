@@ -389,10 +389,7 @@ class ContainerisedWorkspace(
       }
       // every way the wait can end without a response - a timeout, a failure, or an interrupt (a cancelled agent run;
       // `Try` would let that one escape the cleanup below) - is a give-up, which cancels the command
-      response <- scala.util.control.Exception.allCatch
-        .withTry(future.get(responseTimeoutSeconds(command), TimeUnit.SECONDS))
-        .toEither
-        .left
+      response <- awaitResponse(command, future).toEither.left
         .map {
           case _: InterruptedException =>
             Thread.currentThread().interrupt() // kept for the caller, which is being cancelled
@@ -423,6 +420,34 @@ class ContainerisedWorkspace(
         case ok => ok
       }
     )
+  }
+
+  /**
+   * The response to `command`, waited for up to its deadline. A command is given up on when interrupted (and then
+   * cancelled). A file request is not: it has no cancellation, so an interrupt (a cancelled agent run) waits on for the
+   * response, which the runner sends by its commit deadline, before this deadline, so the caller never stops waiting
+   * while a change it cannot see may still commit. The interrupt is kept for the caller either way.
+   */
+  private def awaitResponse(
+    command: WorkspaceAgentCommand,
+    future: CompletableFuture[WorkspaceAgentResponse]
+  ): Try[WorkspaceAgentResponse] = {
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(responseTimeoutSeconds(command))
+    val cancellable = command match {
+      case _: ExecuteCommandCommand => true
+      case _                        => false
+    }
+    @scala.annotation.tailrec
+    def await(interrupted: Boolean): (Try[WorkspaceAgentResponse], Boolean) =
+      scala.util.control.Exception.allCatch.withTry(
+        future.get(math.max(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS)
+      ) match {
+        case scala.util.Failure(_: InterruptedException) if !cancellable => await(interrupted = true)
+        case other                                                       => (other, interrupted)
+      }
+    val (result, interrupted) = await(interrupted = false)
+    if (interrupted) Thread.currentThread().interrupt()
+    result
   }
 
   // every request may first wait at the runner's command gate, which then refuses rather than run late

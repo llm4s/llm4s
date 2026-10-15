@@ -505,7 +505,7 @@ class WorkspaceAgentInterfaceImpl(
 
     val metadata = createFileMetadata(resolvedPath)
 
-    Using(Source.fromFile(resolvedPath.toFile, StandardCharsets.UTF_8.name())) { source =>
+    Using(Source.fromFile(checkedForRead(path, resolvedPath).toFile, StandardCharsets.UTF_8.name())) { source =>
       val lines      = source.getLines().toList
       val totalLines = lines.size
 
@@ -541,6 +541,16 @@ class WorkspaceAgentInterfaceImpl(
    */
   private lazy val aclTools: Option[(Path, Path)] =
     WorkspaceAgentInterfaceImpl.aclTools(programSearch, Seq(rootPath, effective(rootPath)))
+
+  /**
+   * Where `lex` physically leads, held to the path policy for a read: called immediately before a file is opened, so a
+   * link retargeted since the request was first checked never leads a read outside the workspace or its allowed paths.
+   */
+  private def checkedForRead(path: String, lex: Path): Path = {
+    val place = effective(lex)
+    checkPolicy(path, place, Access.Read)
+    place
+  }
 
   /**
    * The bytes of the file at `path`, read to at most `maxFileSize + 1`: `None` for a file over the limit, however large
@@ -919,7 +929,7 @@ class WorkspaceAgentInterfaceImpl(
       else {
         refuseSpecial(path, resolved)
         val size = Files.size(resolved)
-        if (!includeContent) response(Kind.File, currentHash(resolved), size, None, None)
+        if (!includeContent) response(Kind.File, currentHash(checkedForRead(path, resolved)), size, None, None)
         else if (size > maxFileSize)
           response(
             Kind.File,
@@ -930,7 +940,7 @@ class WorkspaceAgentInterfaceImpl(
           )
         else {
           // read once, bounded by the limit even if the file grew since its size was read
-          val bytes = Using.resource(Files.newInputStream(resolved))(
+          val bytes = Using.resource(Files.newInputStream(checkedForRead(path, resolved)))(
             _.readNBytes((maxFileSize + 1).toInt) // at most MaxFileSize + 1: fits an array
           )
           if (bytes.length.toLong > maxFileSize)
@@ -1192,46 +1202,48 @@ class WorkspaceAgentInterfaceImpl(
     for (file <- filesToSearch if !done) {
       val relativePath = rootPath.relativize(file).toString
 
-      Try(Files.readAllLines(file, StandardCharsets.UTF_8).asScala.toList).toOption.foreach { lines =>
-        for ((line, lineIndex) <- lines.zipWithIndex if !done) {
-          val isMatch =
-            WorkspaceRegexSafetyManager.safeFind(pattern, line) match {
-              case Right(m) => m
-              case Left(err) =>
-                if (!loggedRuntimeFallback) {
-                  logger.warn(
-                    s"Regex search aborted at runtime ($err) for query '$query'; " +
-                      "falling back to literal substring match for affected lines."
-                  )
-                  loggedRuntimeFallback = true
-                }
-                literalFallbackPattern.matcher(line).find()
-            }
+      // opened where it physically is, checked immediately before: an entry retargeted since the walk is skipped
+      Try(Files.readAllLines(checkedForRead(relativePath, file), StandardCharsets.UTF_8).asScala.toList).toOption
+        .foreach { lines =>
+          for ((line, lineIndex) <- lines.zipWithIndex if !done) {
+            val isMatch =
+              WorkspaceRegexSafetyManager.safeFind(pattern, line) match {
+                case Right(m) => m
+                case Left(err) =>
+                  if (!loggedRuntimeFallback) {
+                    logger.warn(
+                      s"Regex search aborted at runtime ($err) for query '$query'; " +
+                        "falling back to literal substring match for affected lines."
+                    )
+                    loggedRuntimeFallback = true
+                  }
+                  literalFallbackPattern.matcher(line).find()
+              }
 
-          if (isMatch) {
-            totalMatches += 1
+            if (isMatch) {
+              totalMatches += 1
 
-            if (matches.size < defaultLimits.maxSearchResults) {
-              val lineNumber    = lineIndex + 1
-              val beforeContext = lines.slice(math.max(0, lineIndex - context), lineIndex)
-              val afterContext  = lines.slice(lineIndex + 1, math.min(lines.size, lineIndex + context + 1))
+              if (matches.size < defaultLimits.maxSearchResults) {
+                val lineNumber    = lineIndex + 1
+                val beforeContext = lines.slice(math.max(0, lineIndex - context), lineIndex)
+                val afterContext  = lines.slice(lineIndex + 1, math.min(lines.size, lineIndex + context + 1))
 
-              matches += SearchMatch(
-                path = relativePath,
-                line = lineNumber,
-                matchText = line,
-                contextBefore = beforeContext,
-                contextAfter = afterContext
-              )
-            }
+                matches += SearchMatch(
+                  path = relativePath,
+                  line = lineNumber,
+                  matchText = line,
+                  contextBefore = beforeContext,
+                  contextAfter = afterContext
+                )
+              }
 
-            // once we've seen one hit past the cap we can stop scanning entirely
-            if (totalMatches > defaultLimits.maxSearchResults) {
-              done = true
+              // once we've seen one hit past the cap we can stop scanning entirely
+              if (totalMatches > defaultLimits.maxSearchResults) {
+                done = true
+              }
             }
           }
         }
-      }
     }
 
     SearchFilesResponse(
