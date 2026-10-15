@@ -33,7 +33,7 @@ object Instructions:
  *   - **Bounds.** Each file is read at most `maxFileTokens` estimated tokens, and the section - guide, headings and
  *     markers included - is at most `maxTotalTokens`. A file over either is shown cut and marked; the files after the
  *     section is full are left out. Each is named, by path, in a durable [[HarnessEvents.DocumentsReported]].
- *   - **Problems.** A missing file is skipped, and an empty one shows nothing. A file the backend refuses is skipped
+ *   - **Problems.** A missing file is skipped, and so is one that is only whitespace (one cut at its limit is shown, cut). A file the backend refuses is skipped
  *     and reported. A backend error that is not a refusal fails the step, which `recover` runs again.
  *
  * Instruction memory is a few whole files the agent always sees; semantic memory (`llm4s-agent-memory`) is facts
@@ -84,10 +84,10 @@ final class InstructionMemoryMiddleware(
                 DocumentIssue(path, DocumentIssue.Kind.Unreadable, None, s"the backend refused it (${refused.kind})")
               )
               Right(read)
-            case Left(error)                                 => Left(error)
-            case Right(None)                                 => Right(read)
-            case Right(Some(text)) if text.text.trim.isEmpty => Right(read)
-            case Right(Some(text))                           => Right(read :+ (path -> text))
+            case Left(error)                                              => Left(error)
+            case Right(None)                                              => Right(read)
+            case Right(Some(text)) if !text.cut && text.text.trim.isEmpty => Right(read)
+            case Right(Some(text))                                        => Right(read :+ (path -> text))
         }
       }
       .map(section(_, report))

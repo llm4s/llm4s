@@ -114,6 +114,21 @@ class InstructionMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Eit
     (store.eventsAfter(ThreadId("cut"), 0L, 1000).value.map(_.event.toString).mkString should not).include("SECRET")
   }
 
+  it should "be shown and reported when its kept prefix is only whitespace, since it was cut, not empty" in {
+    val store   = new InMemoryCheckpointer
+    val backend = storeBackend()
+    seed(backend, "/user/AGENTS.md" -> ((" " * 100) + "\nReal instructions."))
+    val mw = new InstructionMemoryMiddleware(Vector(user), backend, maxFileTokens = 10, maxTotalTokens = 500)
+    GraphRuntime(store)
+      .start(ThreadId("blank"), loopOf(new Recording, Seq(mw)).graph, AgentInput("q"))
+      .awaited
+      .value
+      .answered
+    mw.instructions(testModelContext()).value.map(i => (i.path, i.cut)) shouldBe Vector((user, true))
+    reports(store, ThreadId("blank")).flatMap(_.issues).map(i => (i.path, i.kind)) shouldBe
+      Vector((user, DocumentIssue.Kind.Cut))
+  }
+
   "The section" should "stay within maxTotalTokens, cutting the file that fills it and leaving out the rest (rule 12)" in {
     val store   = new InMemoryCheckpointer
     val backend = storeBackend()
