@@ -6,7 +6,6 @@ import scala.concurrent.duration.{ DurationLong, FiniteDuration }
 import org.llm4s.shared._
 import org.slf4j.LoggerFactory
 
-import java.io.{ BufferedWriter, PrintWriter }
 import java.nio.charset.{ Charset, StandardCharsets }
 import java.nio.file.{ Files, Path, Paths, StandardOpenOption }
 import java.time.Instant
@@ -535,6 +534,55 @@ class WorkspaceAgentInterfaceImpl(
     }
   }
 
+  /** A file's hash, as [[currentHash]] gives it, from the bytes read. */
+  private def digestOf(bytes: Array[Byte]): String =
+    "sha256:" + java.security.MessageDigest.getInstance("SHA-256").digest(bytes).map(b => f"${b & 0xff}%02x").mkString
+
+  /**
+   * Commits `bytes` as the content of `target`, where `path` really leads, atomically and in time: every file change
+   * (a write in any mode, a line edit) is staged in a temporary file beside it and moved into place, so a reader, a
+   * crash or a client that gave up sees the old content or the new, never part of either. Immediately before the move,
+   * the path must still lead to `target` through the same links and pass the path policy, `target` must still be
+   * `expected` when that is given, and the change must be within its deadline ([[ensureInTime]]). File operations and
+   * this runner's commands cannot change it meanwhile (the mutation lock and the command gate); these checks catch a
+   * writer outside the runner, up to the move itself, the one step no file system call can fence.
+   */
+  private def commitStaged(path: String, target: Path, bytes: Array[Byte], expected: Option[String]): Unit = {
+    // created as an ordinary new file is (the process umask applies), not with a temporary file's fixed rw-------
+    val temp = target.resolveSibling(s".llm4s-write-${java.util.UUID.randomUUID()}.tmp")
+    Try {
+      Using.resource(Files.newOutputStream(temp, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE))(
+        _.write(bytes)
+      )
+      // the replacement keeps the file's permissions (an executable script stays executable); a new file keeps the
+      // mode it was created with. Not POSIX: the platform's defaults.
+      if (Files.exists(target)) Try(Files.setPosixFilePermissions(temp, Files.getPosixFilePermissions(target)))
+      // the replacement is a new inode, so it takes the file's metadata as well as its mode: its owner and group
+      // (the runner runs as root over a bind mount, and a root-owned replacement would lock its owner out) and its
+      // ACL. Each where the platform has it; a runner that may not chown keeps the owner it has.
+      if (Files.exists(target)) WorkspaceAgentInterfaceImpl.copyOwnership(target, temp)
+      val again = effective(resolvePath(path, Access.Write))
+      if (again != target)
+        throw new WorkspaceAgentException(
+          s"Path '$path' changed while it was written: it now leads to another file; nothing was written",
+          "HASH_MISMATCH",
+          None
+        )
+      checkPolicy(path, target, Access.Write)
+      expected.foreach(checkExpected(path, target, _))
+      ensureInTime(path)
+      Files.move(
+        temp,
+        target,
+        java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING
+      )
+    }.recover { case e =>
+      Files.deleteIfExists(temp)
+      throw e
+    }.get
+  }
+
   /**
    * Write content to a file, creating the file if it doesn't exist.
    */
@@ -566,23 +614,11 @@ class WorkspaceAgentInterfaceImpl(
     // compared before anything is created, so a compare-and-set that loses changes nothing
     expectedHash.foreach(checkExpected(path, resolvedPath, _))
 
-    val options = writeMode match {
+    writeMode match {
       case "create" =>
-        if (Files.exists(resolvedPath)) {
-          throw new WorkspaceAgentException(
-            s"File '$path' already exists and mode is 'create'",
-            "FILE_EXISTS",
-            None
-          )
-        }
-        Array(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
-
-      case "append" =>
-        Array(StandardOpenOption.CREATE, StandardOpenOption.APPEND)
-
-      case "overwrite" =>
-        Array(StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)
-
+        if (Files.exists(resolvedPath))
+          throw new WorkspaceAgentException(s"File '$path' already exists and mode is 'create'", "FILE_EXISTS", None)
+      case "append" | "overwrite" => ()
       case _ =>
         throw new WorkspaceAgentException(
           s"Invalid write mode: $writeMode. Must be 'create', 'overwrite', or 'append'",
@@ -602,7 +638,7 @@ class WorkspaceAgentInterfaceImpl(
         "SIZE_LIMIT_EXCEEDED",
         Some(s"Resulting size: $resulting bytes")
       )
-    if (writeMode == "overwrite" && Files.isDirectory(resolvedPath))
+    if (Files.isDirectory(resolvedPath))
       throw new WorkspaceAgentException(s"Path '$path' is a directory, not a file", "NOT_A_FILE", None)
 
     // only now, every refusal made, is anything created: a refused write leaves no directory behind
@@ -626,66 +662,34 @@ class WorkspaceAgentInterfaceImpl(
     }
 
     Try {
-      // an overwrite, with or without a compare-and-set, replaces the file atomically: checked, and in time, before the
-      // move that commits it, never left half-written by a slow file system or a client that gave up
-      if (expectedHash.isDefined || writeMode == "overwrite") {
-        // replaced atomically: a reader, or a crash, sees the old content or the new, never part of either. A link is
-        // written through, as Files.write writes through it: the file it names is replaced and the link stays, so
-        // what the hash was taken of (the link followed) is what changes. `effective` already passed every path check.
-        // where the write really lands, held to the path policy now, immediately before anything is created there: a
-        // link retargeted since the request was first checked cannot lead the write, or its directories, elsewhere
-        val target = effective(resolvedPath)
-        checkPolicy(path, target, Access.Write)
-        if (createDirs) Files.createDirectories(target.getParent)
-        // created as an ordinary new file is (the process umask applies), not with a temporary file's fixed rw-------
-        val temp = target.resolveSibling(s".llm4s-write-${java.util.UUID.randomUUID()}.tmp")
-        Try {
-          Using.resource(Files.newOutputStream(temp, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE))(
-            _.write(bytes)
-          )
-          // the replacement keeps the file's permissions (an executable script stays executable); a new file keeps the
-          // mode it was created with. Not POSIX: the platform's defaults.
-          if (Files.exists(target)) Try(Files.setPosixFilePermissions(temp, Files.getPosixFilePermissions(target)))
-          // the replacement is a new inode, so it takes the file's metadata as well as its mode: its owner and group
-          // (the runner runs as root over a bind mount, and a root-owned replacement would lock its owner out) and its
-          // ACL. Each where the platform has it; a runner that may not chown keeps the owner it has.
-          if (Files.exists(target)) WorkspaceAgentInterfaceImpl.copyOwnership(target, temp)
-          // checked again just before the move: the path must still name the same file, through the same links, and
-          // still pass every path check. File operations and this runner's commands cannot change it meanwhile (the
-          // mutation lock and the command gate); this catches a writer outside the runner, up to the move itself.
-          val again = effective(resolvePath(path, Access.Write))
-          if (again != target)
-            throw new WorkspaceAgentException(
-              s"Path '$path' changed while it was written: it now leads to another file; nothing was written",
-              "HASH_MISMATCH",
-              None
-            )
-          // and its content compared again, last thing before the move: a writer outside the runner (the host, through
-          // a bind mount) that changed it while the replacement was written is caught, not overwritten. The move itself
-          // is the one step left unfenced against such a writer, which no file system call can close.
-          // of `target` itself, the file the move replaces, not whatever the path resolves to by now
-          // (through a link to nothing, the file it names is still nothing)
-          expectedHash
-            .map(e => if (FileSnapshotResponse.Kind.isDangling(e)) FileSnapshotResponse.Kind.Absent else e)
-            .foreach(checkExpected(path, target, _))
-          ensureInTime(path)
-          Files.move(
-            temp,
-            target,
-            java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-            java.nio.file.StandardCopyOption.REPLACE_EXISTING
-          )
-        }.recover { case e =>
-          Files.deleteIfExists(temp)
-          throw e
-        }.get
-      } else {
-        // create or append: written where the path really leads, held to the path policy immediately before, in time
-        val target = effective(resolvedPath)
-        checkPolicy(path, target, Access.Write)
-        ensureInTime(path)
-        Files.write(target, bytes, options: _*)
+      // where the write really lands, held to the path policy now, immediately before anything is created there: a
+      // link retargeted since the request was first checked cannot lead the write, or its directories, elsewhere. A
+      // link is written through, as Files.write writes through it: the file it names changes and the link stays.
+      val target = effective(resolvedPath)
+      checkPolicy(path, target, Access.Write)
+      if (createDirs) Files.createDirectories(target.getParent)
+      import FileSnapshotResponse.Kind
+      // every mode is staged and committed atomically, in time (commitStaged): what the file must still be when the
+      // change commits, and what it then holds
+      val (expected, staged) = writeMode match {
+        case "create" => (Some(Kind.Absent), bytes)
+        case "append" =>
+          val existing = if (Files.isRegularFile(target)) Files.readAllBytes(target) else Array.emptyByteArray
+          (Some(if (Files.exists(target)) digestOf(existing) else Kind.Absent), existing ++ bytes)
+        case _ =>
+          // of `target` itself, the file the move replaces (through a link to nothing, the file it names is nothing)
+          (expectedHash.map(e => if (Kind.isDangling(e)) Kind.Absent else e), bytes)
       }
+      if (staged.length.toLong > maxFileSize)
+        throw new WorkspaceAgentException(
+          s"Writing '$path' would leave it larger than the maximum size limit (${maxFileSize} bytes)",
+          "SIZE_LIMIT_EXCEEDED",
+          Some(s"Resulting size: ${staged.length} bytes")
+        )
+      Try(commitStaged(path, target, staged, expected)).recover {
+        case e: WorkspaceAgentException if writeMode == "create" && e.code == "HASH_MISMATCH" =>
+          throw new WorkspaceAgentException(s"File '$path' already exists and mode is 'create'", "FILE_EXISTS", None)
+      }.get
 
       WriteFileResponse(
         commandId = "local",
@@ -737,11 +741,17 @@ class WorkspaceAgentInterfaceImpl(
         "SIZE_LIMIT_EXCEEDED",
         Some(s"Size: $size bytes")
       )
-    val currentSize = Files.size(resolvedPath)
+    // read, and later replaced, where the path really leads, held to the path policy there
+    val target = effective(resolvedPath)
+    checkPolicy(path, target, Access.Write)
+    val currentSize = Files.size(target)
     if (currentSize > maxFileSize) throw tooLarge(currentSize, "exceeds")
 
-    // Read the file content
-    val lines = Using(Source.fromFile(resolvedPath.toFile, StandardCharsets.UTF_8.name()))(_.getLines().toList) match {
+    // read once, strictly as UTF-8: the bytes edited are the bytes whose hash the commit compares with
+    val read = Files.readAllBytes(target)
+    if (read.length.toLong > maxFileSize) throw tooLarge(read.length.toLong, "exceeds")
+    val lines = Try(StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(read)).toString)
+      .map(text => Source.fromString(text).getLines().toList) match {
       case Success(fileLines) => fileLines
       case Failure(e) =>
         throw new WorkspaceAgentException(
@@ -758,24 +768,16 @@ class WorkspaceAgentInterfaceImpl(
       modifiedLines.iterator.map(l => l.getBytes(StandardCharsets.UTF_8).length.toLong + separator).sum
     if (resultingSize > maxFileSize) throw tooLarge(resultingSize, "would exceed")
 
-    // Write back to file using UTF-8 encoding
-    ensureInTime(path)
-    Using(
-      new PrintWriter(
-        new BufferedWriter(
-          new java.io.OutputStreamWriter(
-            new java.io.FileOutputStream(resolvedPath.toFile),
-            StandardCharsets.UTF_8
-          )
-        )
-      )
-    )(writer => modifiedLines.foreach(writer.println)) match {
+    // committed atomically and in time, as a write is, and only if the file is still what was read
+    val edited = modifiedLines.iterator.map(_ + System.lineSeparator()).mkString.getBytes(StandardCharsets.UTF_8)
+    Try(commitStaged(path, target, edited, Some(digestOf(read)))) match {
       case Success(_) =>
         ModifyFileResponse(
           commandId = "local",
           success = true,
           path = path
         )
+      case Failure(refused: WorkspaceAgentException) => throw refused
       case Failure(e) =>
         throw new WorkspaceAgentException(
           s"Failed to write modified content to file '$path': ${e.getMessage}",

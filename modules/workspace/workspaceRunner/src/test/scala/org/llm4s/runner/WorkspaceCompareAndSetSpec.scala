@@ -235,6 +235,11 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
 
     code(late.writeFile("late.txt", "two", expectedHash = Some(hashOf("one")))) shouldBe "WORKSPACE_BUSY"
     code(late.deleteFile("late.txt", Some(hashOf("one")))) shouldBe "WORKSPACE_BUSY"
+    // every kind of change is held to it: an append, a create and a line edit too
+    code(late.writeFile("late.txt", "more", mode = Some("append"))) shouldBe "WORKSPACE_BUSY"
+    code(late.writeFile("new.txt", "x", mode = Some("create"))) shouldBe "WORKSPACE_BUSY"
+    code(late.modifyFile("late.txt", List(InsertOperation(afterLine = 0, newContent = "z")))) shouldBe "WORKSPACE_BUSY"
+    Files.exists(root.resolve("new.txt")) shouldBe false
     workspace().fileSnapshot("late.txt").content shouldBe Some("one")
   }
 
