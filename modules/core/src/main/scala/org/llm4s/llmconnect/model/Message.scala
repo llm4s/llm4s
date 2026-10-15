@@ -89,12 +89,15 @@ object Message {
   )
 
   /** Whether any of `messages` carries an image or a document. */
-  def hasMedia(messages: Seq[Message]): Boolean =
+  def hasMedia(messages: Seq[Message]): Boolean = {
+    // a null part (or parts) is not plain text either: such a conversation goes to a client whose checks refuse it
+    def media(parts: Vector[ContentPart]) = parts == null || parts.exists(p => p == null || ContentPart.isMedia(p))
     messages.exists {
-      case um: UserMessage => um.parts.exists(ContentPart.isMedia)
-      case tm: ToolMessage => tm.parts.exists(ContentPart.isMedia)
+      case um: UserMessage => media(um.parts)
+      case tm: ToolMessage => media(tm.parts)
       case _               => false
     }
+  }
 
   /**
    * `message`'s text with each media part named by its kind in place (`see [image (url, image/png)]`): for code

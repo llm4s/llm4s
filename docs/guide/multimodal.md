@@ -76,13 +76,14 @@ the role. No part is dropped and none is turned into text. A `ProviderFile` goes
 | Mistral, in addition | PDF `Url` | |
 | DeepSeek | text | text |
 | Anthropic | text; image (PNG, JPEG, GIF, WebP) `Url`, `Inline`; PDF `Url`, `Inline`; UTF-8 plain text `Inline` | the same |
-| Gemini API | text; image and document `Inline`, a web `Url`, own `ProviderFile` (its `uri`, or its name `files/abc`) | text |
+| Gemini API | text; image and document `Inline`, own `ProviderFile` (its Files API `uri`, or its name `files/abc`) | text |
 | Vertex AI | text; image and document `Inline` or a `gs://` `Url` | text |
 | Ollama | text; image `Inline` | text |
 | Bedrock | text; image (PNG, JPEG, GIF, WebP) and document (all five) `Inline` or an `s3://` `Url` | the same |
 | watsonx.ai | text; image `Inline` | text |
 
-A `Url` sent to OpenAI, an OpenAI-compatible provider, Anthropic or the Gemini API must be `http` or `https`.
+A `Url` sent to OpenAI, an OpenAI-compatible provider or Anthropic must be `http` or `https`; the Gemini API fetches no web
+URL, so upload the file or send it inline.
 "Own `ProviderFile`" means a file whose `provider` is the client's own id (`openai`, `azure`, `requesty`, `gemini`;
 Vertex AI takes none). Several text parts with no media are sent as one string, joined by newlines, by the OpenAI-compatible
 providers and Ollama.

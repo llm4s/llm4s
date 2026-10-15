@@ -32,12 +32,13 @@ private[provider] object GeminiParts {
     PartEncoding.check(provider, messages, user(fileUri), PartEncoding.textOnly)
 
   /**
-   * The Gemini API's references: a web URL (`http`/`https`), or a file uploaded to `provider` through the
-   * Files API - by its `uri`, or by its name (`files/abc`, or `abc`), resolved against `baseUrl` as the
-   * Files API forms the `uri` (`<baseUrl>/files/abc`).
+   * The Gemini API's references: a file uploaded to `provider` through the Files API - by its `uri`, or by its
+   * name (`files/abc`, or `abc`), resolved against `baseUrl` as the Files API forms the `uri`
+   * (`<baseUrl>/files/abc`) - or a `Url` that is such a `uri`. `generateContent` does not fetch an arbitrary web
+   * URL, so any other is refused: upload it, or send its bytes inline.
    */
   def geminiFileUri(provider: String, baseUrl: String): FileUri = {
-    case MediaSource.Url(uri) if PartEncoding.isWebUrl(uri) => Some(uri.toString)
+    case MediaSource.Url(uri) if uri.toString.startsWith(s"${baseUrl.stripSuffix("/")}/files/") => Some(uri.toString)
     case MediaSource.ProviderFile(owner, id) if owner == provider =>
       if (id.startsWith("https://")) Some(id)
       else Some(s"${baseUrl.stripSuffix("/")}/${if (id.startsWith("files/")) id else s"files/$id"}")

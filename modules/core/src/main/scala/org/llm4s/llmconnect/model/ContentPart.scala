@@ -82,7 +82,7 @@ object ContentPart {
 
   /** The text parts of `parts`, joined by newlines: a message's text view. Empty when there are none. */
   def text(parts: Seq[ContentPart]): String =
-    parts.collect { case Text(t) => t }.mkString("\n")
+    if (parts == null) "" else parts.collect { case Text(t) => t }.mkString("\n")
 
   /** The number of inline bytes `parts` carry, in total. */
   def inlineBytes(parts: Seq[ContentPart]): Long =
@@ -110,7 +110,8 @@ object ContentPart {
    * only prunes early:
    *  - an image, [[EstimatedImageTokens]] (a large image on Anthropic; more than OpenAI's high-detail cost);
    *  - an inline text document (plain text, Markdown, HTML, CSV), its bytes over four;
-   *  - an inline PDF, its bytes over 32, at least [[EstimatedDocumentTokens]];
+   *  - an inline PDF, its bytes over four, at least [[EstimatedDocumentTokens]]: as for text, since an uncompressed
+   *    PDF can hold about that much text, and nothing here reads its pages;
    *  - a document at a URL or in a provider file, whose size is unknown here, [[EstimatedReferencedDocumentTokens]]:
    *    a large document's cost, since nothing here bounds it; a caller that knows a document is small and is short of
    *    room can send it inline, where its size is counted.
@@ -119,7 +120,7 @@ object ContentPart {
   private[llm4s] def estimatedTokens(part: ContentPart): Int = part match {
     case _: Text                                             => 0
     case _: Image                                            => EstimatedImageTokens
-    case Document(inline: MediaSource.Inline, MediaType.Pdf) => math.max(EstimatedDocumentTokens, inline.length / 32)
+    case Document(inline: MediaSource.Inline, MediaType.Pdf) => math.max(EstimatedDocumentTokens, inline.length / 4)
     case Document(inline: MediaSource.Inline, _)             => inline.length / 4
     case _: Document                                         => EstimatedReferencedDocumentTokens
   }

@@ -141,6 +141,21 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     tracing.events shouldBe empty
   }
 
+  test("A conversation with a null part goes to the base client, never throws") {
+    val mockLLM = new MockLLMClient()
+    val client =
+      new CachingLLMClient(
+        mockLLM,
+        new MockEmbeddingClient(Map.empty),
+        embeddingModel,
+        config,
+        new MockTracing(),
+        new MockClock()
+      )
+    noException should be thrownBy client.complete(Conversation(Seq(UserMessage(null: Vector[ContentPart]))))
+    mockLLM.callCount shouldBe 1
+  }
+
   test("Cache miss on options mismatch logs OptionsMismatch") {
     val mockLLM   = new MockLLMClient()
     val mockEmbed = new MockEmbeddingClient(Map("Hello" -> Seq(1.0, 0.0, 0.0)))

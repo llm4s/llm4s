@@ -124,11 +124,10 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
     """{"candidates":[{"content":{"parts":[{"text":"ok"}],"role":"model"},"finishReason":"STOP"}]}"""
 
   /** What both clients send: everything but media in a tool result and another provider's file. */
+  // generateContent fetches no arbitrary web URL, so the contract's https URLs are refused
   private val geminiParts = Seq(
-    ContentPartCase.UserImageUrl,
     ContentPartCase.UserImageInline,
     ContentPartCase.UserImageFile,
-    ContentPartCase.UserPdfUrl,
     ContentPartCase.UserPdfInline,
     ContentPartCase.UserPdfFile,
     ContentPartCase.UserTextDocumentInline

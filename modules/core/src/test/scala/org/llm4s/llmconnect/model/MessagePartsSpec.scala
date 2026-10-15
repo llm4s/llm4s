@@ -69,6 +69,12 @@ class MessagePartsSpec extends AnyFlatSpec with Matchers with EitherValues {
     UserMessage(Vector(null)).toString shouldBe "user: [null part]"
   }
 
+  "Null parts" should "be no plain text for hasMedia and an empty text view, never a throw" in {
+    Message.hasMedia(Seq(UserMessage(null: Vector[ContentPart]))) shouldBe true
+    Message.hasMedia(Seq(ToolMessage(Vector(null), "c"))) shouldBe true
+    UserMessage(null: Vector[ContentPart]).content shouldBe ""
+  }
+
   "Message.hasMedia" should "say whether any message carries an image or a document" in {
     Message.hasMedia(Seq(SystemMessage("s"), UserMessage("text"), ToolMessage("r", "c"))) shouldBe false
     Message.hasMedia(Seq(UserMessage("text"), ToolMessage(Vector(image), "c"))) shouldBe true

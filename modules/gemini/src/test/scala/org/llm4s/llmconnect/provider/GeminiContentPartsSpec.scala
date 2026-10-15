@@ -21,10 +21,14 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
 
   private val bytes  = IArray[Byte](1, 2, 3)
   private val inline = ContentPart.image(MediaSource.Inline(bytes), MediaType.Png).value
-  private val url  = ContentPart.document(MediaSource.Url(URI.create("https://example.com/r.pdf")), MediaType.Pdf).value
-  private val gcs  = ContentPart.document(MediaSource.Url(URI.create("gs://bucket/r.pdf")), MediaType.Pdf).value
-  private val s3   = ContentPart.document(MediaSource.Url(URI.create("s3://bucket/r.pdf")), MediaType.Pdf).value
-  private val base = "https://generativelanguage.googleapis.com/v1beta"
+  private val url = ContentPart.document(MediaSource.Url(URI.create("https://example.com/r.pdf")), MediaType.Pdf).value
+  private val filesUri =
+    ContentPart
+      .document(MediaSource.Url(URI.create("https://generativelanguage.googleapis.com/v1beta/files/r")), MediaType.Pdf)
+      .value
+  private val gcs    = ContentPart.document(MediaSource.Url(URI.create("gs://bucket/r.pdf")), MediaType.Pdf).value
+  private val s3     = ContentPart.document(MediaSource.Url(URI.create("s3://bucket/r.pdf")), MediaType.Pdf).value
+  private val base   = "https://generativelanguage.googleapis.com/v1beta"
   private val gemini = GeminiParts.geminiFileUri("gemini", base)
   private val file   = ContentPart.image(MediaSource.ProviderFile("gemini", "files/abc"), MediaType.Jpeg).value
   private val csv    = ContentPart.document(MediaSource.Inline(bytes), MediaType.Csv).value
@@ -45,13 +49,16 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
     http
   )
 
-  "GeminiParts.user" should "encode text, inline media, URLs and the provider's own files" in {
+  "GeminiParts.user" should "encode text, inline media, Files API URIs and the provider's own files" in {
     val encode = GeminiParts.user(gemini)
     encode(ContentPart.Text("hi")) shouldBe ujson.Obj("text" -> "hi")
     encode(inline) shouldBe ujson.Obj("inlineData" -> ujson.Obj("mimeType" -> "image/png", "data" -> "AQID"))
     encode(csv) shouldBe ujson.Obj("inlineData" -> ujson.Obj("mimeType" -> "text/csv", "data" -> "AQID"))
-    encode(url) shouldBe
-      ujson.Obj("fileData" -> ujson.Obj("mimeType" -> "application/pdf", "fileUri" -> "https://example.com/r.pdf"))
+    encode(filesUri) shouldBe ujson.Obj(
+      "fileData" -> ujson.Obj("mimeType" -> "application/pdf", "fileUri" -> s"$base/files/r")
+    )
+    // generateContent fetches no arbitrary web URL: upload it or send it inline
+    encode.isDefinedAt(url) shouldBe false
     encode(file) shouldBe
       ujson.Obj("fileData" -> ujson.Obj("mimeType" -> "image/jpeg", "fileUri" -> s"$base/files/abc"))
   }
@@ -96,7 +103,11 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
       .left
       .value shouldBe
       UnsupportedContentPartError("vertexai", url.kind, "user")
-    GeminiParts.check("gemini", Seq(UserMessage(Vector(ContentPart.Text("a"), inline, url, file))), gemini) shouldBe
+    GeminiParts.check(
+      "gemini",
+      Seq(UserMessage(Vector(ContentPart.Text("a"), inline, filesUri, file))),
+      gemini
+    ) shouldBe
       Right(())
   }
 
