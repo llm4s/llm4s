@@ -132,6 +132,14 @@ object FileTools:
   private def beneath(path: VPath, rest: String): String =
     if path == VPath.root then s"/$rest" else s"${path.value}/$rest"
 
+  /**
+   * What a search from `root` may read: the envelope beneath it, and `root` itself, which a backend searches when
+   * it is a file (a path is within itself). The root is declared whatever it is, since what it is can change
+   * between the permission check and the read.
+   */
+  private def searched(root: VPath, envelope: String): Vector[ToolResource] =
+    Vector(ToolResource(Operation.Read, root.value), ToolResource(Operation.Read, envelope))
+
   private def nullable[A](schema: org.llm4s.toolapi.SchemaDefinition[A]) = Schema.nullable(schema)
 
   /** Unit, or a `ValidationError` listing `problems`. */
@@ -153,10 +161,10 @@ object FileTools:
     /** A backend error: a refusal the model sees, cut at `maxResultChars`; anything else is `Fatal`. */
     private def failed(error: LLMError): ToolOutcome =
       BackendRefused.toolOutcome(error) match
-        case ToolOutcome.Error(message) => ToolOutcome.Error(Bounded.cap(message, maxResultChars))
+        case ToolOutcome.Error(message) => ToolOutcome.Error(Bounded.error(message, maxResultChars))
         case other                      => other
 
-    private def argError(error: LLMError): ToolOutcome = ToolOutcome.Error(Bounded.cap(error.message, maxResultChars))
+    private def argError(error: LLMError): ToolOutcome = ToolOutcome.Error(Bounded.error(error.message, maxResultChars))
 
     private def mutated[A](result: Result[(A, StateUpdate)])(render: A => String): ToolOutcome =
       result.fold(
@@ -248,7 +256,7 @@ object FileTools:
       if lines.totalLines == 0 then text(s"(${path.value} is an empty file)")
       else if lines.lines.isEmpty then
         ToolOutcome.Error(
-          Bounded.cap(
+          Bounded.error(
             s"offset ${lines.offset + 1} is past the end of ${path.value}, which has ${lines.totalLines} lines",
             maxResultChars
           )
@@ -367,9 +375,7 @@ object FileTools:
       ).withHints(readOnly)
         // the pattern bounded before the resource is built from it, so a permission rule never compares an oversized glob
         .withValidation(a => Text.checkPattern(Glob, a.pattern).flatMap(_ => pathOr(a.path)).map(_ => ()))
-        .withResources(a =>
-          pathOr(a.path).toOption.map(p => ToolResource(Operation.Read, beneath(p, a.pattern))).toVector
-        )
+        .withResources(a => pathOr(a.path).toOption.toVector.flatMap(p => searched(p, beneath(p, a.pattern))))
     ) { (args, context) =>
       pathOr(args.path).fold(
         argError,
@@ -411,7 +417,7 @@ object FileTools:
             _ <- pathOr(a.path)
           yield ()
         )
-        .withResources(a => pathOr(a.path).toOption.map(p => ToolResource(Operation.Read, grepEnvelope(a, p))).toVector)
+        .withResources(a => pathOr(a.path).toOption.toVector.flatMap(p => searched(p, grepEnvelope(a, p))))
     ) { (args, context) =>
       pathOr(args.path).fold(
         argError,
@@ -465,6 +471,53 @@ private[harness] object Bounded:
     else
       val note = cutNote(max)
       s"${prefix(s, max - note.length - 1)}\n$note"
+
+  /** The characters `c` takes inside a JSON string as ujson renders it; a lone surrogate counted high. */
+  private def escapedWidth(c: Char): Int =
+    if c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '\t' || c == '\b' || c == '\f' then 2
+    else if c < 0x20 || Character.isSurrogate(c) then 6
+    else 1
+
+  /** The characters `s` takes inside a JSON string, counted only until it passes `max`. */
+  private def escapedLength(s: String, max: Int): Int =
+    var total = 0
+    var i     = 0
+    while i < s.length && total <= max do
+      total += escapedWidth(s.charAt(i))
+      i += 1
+    total
+
+  /** The longest prefix of `s` that takes at most `max` characters escaped, never splitting a surrogate pair. */
+  private def escapedPrefix(s: String, max: Int): String =
+    var total = 0
+    var i     = 0
+    // a surrogate pair is kept whole: both halves fit, or neither
+    def width(at: Int): (Int, Int) =
+      if Character.isHighSurrogate(s.charAt(at)) && at + 1 < s.length && Character.isLowSurrogate(s.charAt(at + 1))
+      then (2, 2)
+      else (escapedWidth(s.charAt(at)), 1)
+    var done = false
+    while !done && i < s.length do
+      val (w, n) = width(i)
+      if total + w > max then done = true
+      else
+        total += w
+        i += n
+    s.substring(0, i)
+
+  /** What `{"error":""}` adds around an error's message when the loop renders it for the model. */
+  private val ErrorEnvelope: Int = ujson.Obj("error" -> "").render().length
+
+  /**
+   * An error's message cut so that the loop's rendering of it, `{"error": <message>}` with JSON escapes, is at
+   * most `max` characters: quotes, backslashes and control characters take more than one escaped.
+   */
+  def error(message: String, max: Int): String =
+    val budget = max - ErrorEnvelope
+    if escapedLength(message, budget) <= budget then message
+    else
+      val note = s"\n${cutNote(max)}"
+      s"${escapedPrefix(message, budget - escapedLength(note, budget))}$note"
 
   /**
    * `items` one per line, then `trailer`, in at most `max` characters: room for the trailer and the cut note is

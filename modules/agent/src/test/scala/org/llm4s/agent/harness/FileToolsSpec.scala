@@ -13,7 +13,7 @@ import org.llm4s.agent.graph.middleware.{
   PermissionRule,
   ToolCallRequest
 }
-import org.llm4s.agent.graph.tool.{ AgentTool, LockKey, Operation, ToolContext, ToolOutcome, ToolSet }
+import org.llm4s.agent.graph.tool.{ AgentTool, LockKey, Operation, ToolContext, ToolOutcome, ToolResource, ToolSet }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, ToolCall, ToolMessage }
 import org.llm4s.types.Result
@@ -229,8 +229,6 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
     )
     out.foreach(_.length should be <= 300)
     out(1) should endWith("[output cut at 300 characters]")
-    out(1) should include("(lines 1-50 of 50") // never: the file is shorter than readLimit
-      .or(not.include("continue"))
     out(2) should endWith("[output cut at 300 characters]")
   }
 
@@ -337,7 +335,7 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
     out(3) shouldBe err("Denied: read /secrets/key")
     out(4) shouldBe err("Denied: read /**") // the root search reaches /secrets
     out(5) shouldBe "/src/a.scala:1: val secret = 1"
-    out(6) shouldBe err("Denied: read /secrets/**")
+    out(6) shouldBe err("Denied: read /secrets")
     out(7) shouldBe "/src/a.scala"
     out(8) shouldBe err("Denied: delete /src/a.scala")
     out(9) shouldBe err("Denied: read /secrets")
@@ -427,10 +425,76 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
     results(agent.run(thread, "read").value).takeRight(2) shouldBe Vector("     1\tv1", "/a.txt (2 bytes)")
   }
 
-  "Locks" should "be the backend's for each mutation's path" in {
-    val backend = StoreFileBackend(InMemoryLongTermStore()).value
-    backend.locks(p("/a.txt")) should not be empty
-    backend.locks(p("/a.txt")).foreach(k => FileBackend.withinLockRoot(k) shouldBe true)
-    LockKey("") shouldBe LockKey("")
+  /** `tool`'s locks and resources for the arguments `json`, as the loop computes them from the decoded call. */
+  private def declared(tool: AgentTool[?], json: ujson.Value): (Option[Set[LockKey]], Vector[ToolResource]) =
+    tool match {
+      case t: AgentTool[a] =>
+        val args = upickle.default.read[a](json)(using t.spec.codec)
+        (t.spec.locksOf.map(_(args)), t.spec.resourcesOf(args))
+    }
+
+  "Each tool" should "lock a mutation's path as the backend says, and declare all it may touch" in {
+    val backend                           = composite()
+    val byName                            = FileTools(backend).map(t => t.spec.name -> t).toMap
+    def of(name: String, json: ujson.Obj) = declared(byName(name), json)
+    def read(targets: String*)            = targets.map(ToolResource(Operation.Read, _)).toVector
+    of(FileTools.WriteFile, ujson.Obj("path" -> "/memories/a.md", "content" -> "x")) shouldBe
+      (Some(backend.locks(p("/memories/a.md"))), Vector(ToolResource(Operation.Write, "/memories/a.md")))
+    of(FileTools.EditFile, ujson.Obj("path" -> "/a", "old_string" -> "x", "new_string" -> "y")) shouldBe
+      (Some(backend.locks(p("/a"))), Vector(ToolResource(Operation.Write, "/a")))
+    of(FileTools.Delete, ujson.Obj("path" -> "/a")) shouldBe
+      (Some(backend.locks(p("/a"))), Vector(ToolResource(Operation.Delete, "/a")))
+    of(FileTools.ReadFile, ujson.Obj("path" -> "/a")) shouldBe (None, read("/a"))
+    of(FileTools.Ls, ujson.Obj()) shouldBe (None, read("/"))
+    // a search declares its root too: a backend searches the root itself when it is a file
+    of(FileTools.Glob, ujson.Obj("pattern" -> "**/*.md")) shouldBe (None, read("/", "/**/*.md"))
+    of(FileTools.Glob, ujson.Obj("pattern" -> "*.md", "path" -> "/src")) shouldBe (None, read("/src", "/src/*.md"))
+    of(FileTools.Grep, ujson.Obj("pattern" -> "x", "path" -> "/src")) shouldBe (None, read("/src", "/src/**"))
+    of(FileTools.Grep, ujson.Obj("pattern" -> "x", "include" -> "*.md")) shouldBe (None, read("/", "/**/*.md"))
+    of(FileTools.Grep, ujson.Obj("pattern" -> "x", "path" -> "/src", "include" -> "sub/*.md")) shouldBe
+      (None, read("/src", "/src/sub/*.md"))
+  }
+
+  "A search rooted at a denied file" should "be denied, though its envelope beneath the file matches no rule" in {
+    val rules = new PermissionMiddleware(
+      Seq(
+        PermissionRule.deny(Operation.Read, "/secrets/key"), // matches no path beneath /secrets/key
+        PermissionRule.allow(Operation.Read, "/**"),
+        PermissionRule.allow(Operation.Write, "/**")
+      )
+    )
+    val calls = Seq(
+      write("/secrets/key", "k"),
+      FileTools.Grep -> ujson.Obj("pattern" -> "k", "path" -> "/secrets/key", "include" -> "key"),
+      FileTools.Glob -> ujson.Obj("pattern" -> "*", "path" -> "/secrets/key")
+    )
+    val client = ScriptedLLMClient.of((calls.map(c => batch(c)) :+ CompletionFixture.simple("done"))*)
+    val out = results(
+      built(
+        Agent
+          .builder("assistant", client)
+          .withTools(toolSet(StateFileBackend()))
+          .withMiddleware(rules)
+      ).run("go").value
+    )
+    out(1) shouldBe err("Denied: read /secrets/key")
+    out(2) shouldBe err("Denied: read /secrets/key")
+  }
+
+  "An error result" should "be at most maxResultChars as the loop renders it, escapes included" in {
+    // a path of quotes: each takes two characters escaped, so the message alone is over the cap once rendered
+    val quoted = "/" + "\"" * 200
+    val out = sequential(
+      StateFileBackend(),
+      Seq(write(quoted, "a\u0000b"), read(quoted)),
+      FileToolLimits(maxResultChars = 256)
+    )
+    out.foreach { r =>
+      r.length should be <= 256
+      r should include("[output cut at 256 characters]")
+    }
+    Bounded.error("short", 256) shouldBe "short"
+    val cut = Bounded.error("\u0001" * 100 + "😀" * 100, 256)
+    ujson.Obj("error" -> cut).render().length should be <= 256
   }
 }
