@@ -128,7 +128,9 @@ No build at all: declare the dependency in the file.
 //> using scala 3.7.1
 //> using jvm 21
 //> using dep org.llm4s::llm4s-core:{{ site.data.project.latest_release }}
+{%- unless site.data.project.latest_release contains "0.4." %}
 //> using dep org.llm4s::llm4s-openai:{{ site.data.project.latest_release }}
+{%- endunless %}
 ```
 
 Add the provider module you use next to `llm4s-core` (`llm4s-openai` above). The
