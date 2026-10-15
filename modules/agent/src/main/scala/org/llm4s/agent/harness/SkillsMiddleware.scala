@@ -154,7 +154,7 @@ final class SkillsMiddleware(
           case Left(error) => Left(error)
           case Right(None) => Right(None)
           case Right(Some(read)) =>
-            Skill.fromLines(path, Text.lines(read.text), closed = !read.cut) match
+            Skill.fromLines(path, Text.lines(read.text), closed = !read.cut, lastLineCut = read.lastLineCut) match
               case Right(skill) => Right(Some(skill))
               case Left(e: SkillFormatError) =>
                 report.add(DocumentIssue(path, DocumentIssue.Kind.Malformed, Some(e.line), e.problem))

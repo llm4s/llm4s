@@ -268,6 +268,11 @@ class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
     val fill = "x" * (Skill.MaxFrontmatterChars - head.length - 4)
     val text = head + fill + "\n-----\n---\n"
     Skill.parse(path, text).left.value.message should include("not closed within")
+    // a whole closing fence ending exactly at the bound, the file going on after it, closes the frontmatter
+    val body = "---\nname: pdf-tools\ndescription: d\nnote: "
+    val upTo = body + ("y" * (Skill.MaxFrontmatterChars - body.length - 4)) + "\n---"
+    upTo.length shouldBe Skill.MaxFrontmatterChars
+    Skill.parse(path, upTo + "\n# body\n" + ("z" * 100)).value.name shouldBe "pdf-tools"
   }
 
   it should "refuse a name over 64 characters" in {
