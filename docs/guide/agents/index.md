@@ -643,7 +643,8 @@ for {
 ```scala
 import org.llm4s.agent.graph.middleware.PermissionRule
 import org.llm4s.agent.graph.tool.Operation
-import org.llm4s.agent.harness.{HarnessConfigLoader, HarnessProfile, PromptMode}
+import org.llm4s.agent.harness.{HarnessProfile, PromptMode}
+import org.llm4s.config.HarnessConfigLoader
 
 for {
   profile <- HarnessConfigLoader.load()            // HarnessProfile.deepAgents, with llm4s.agent.harness applied

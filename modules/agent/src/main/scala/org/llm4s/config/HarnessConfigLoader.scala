@@ -1,8 +1,20 @@
 // scalafix:off DisableSyntax.NoPureConfigDefault
-package org.llm4s.agent.harness
+package org.llm4s.config
 
 import com.typesafe.config.Config
 import org.llm4s.agent.graph.RetentionPolicy
+import org.llm4s.agent.harness.{
+  HarnessProfile,
+  InstructionsConfig,
+  OffloadConfig,
+  PromptMode,
+  SkillsConfig,
+  SummarizationConfig,
+  SummaryTrigger,
+  TodoConfig,
+  ToolSelection,
+  VPath
+}
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ ConfigurationError, LLMError }
 import org.llm4s.types.Result
@@ -13,8 +25,8 @@ import scala.jdk.DurationConverters.*
 import scala.util.Try
 
 /**
- * Loads a [[HarnessProfile]] from `llm4s.agent.harness` at the application's edge (design §4.37): the
- * [[HarnessProfile.deepAgents]] preset with the configured settings - which tools, the tool timeout, the prompt mode,
+ * Loads a [[org.llm4s.agent.harness.HarnessProfile]] from `llm4s.agent.harness` at the application's edge (design §4.37): the
+ * [[org.llm4s.agent.harness.HarnessProfile.deepAgents]] preset with the configured settings - which tools, the tool timeout, the prompt mode,
  * each feature's limits or `enabled = false`, and the retention. `llm4s-agent`'s `reference.conf` holds the defaults,
  * which are the preset's, and the application's `application.conf` or `-D` system properties override them.
  *

@@ -172,7 +172,7 @@ object InstructionsConfig:
  * A harness for an agent (design §4.37): file tools over a backend, optionally `execute` over a sandbox, and the
  * middleware that plan, manage context, load skills and instructions and check permissions - assembled in a fixed
  * order by `AgentBuilder.withHarness`. Start from [[HarnessProfile.deepAgents]], or from `HarnessProfile()` (the file
- * tools alone), and change it with the `with*` setters; [[HarnessConfigLoader]] loads the preset's settings from
+ * tools alone), and change it with the `with*` setters; [[org.llm4s.config.HarnessConfigLoader]] loads the preset's settings from
  * `llm4s.agent.harness`.
  *
  * `build()` installs, outermost first and before the builder's own middleware: a `PermissionMiddleware` over
@@ -239,7 +239,7 @@ final case class HarnessProfile private (
   def toolNames: Vector[String] = FileTools.Names ++ sandbox.map(_ => ExecuteTool.Name)
 
   /** The tools, middleware, prompt and retention this profile installs, each checked; see the class's Scaladoc. */
-  private[agent] def assembled: Result[Harness] =
+  private[llm4s] def assembled: Result[Harness] =
     for
       selected   <- selection
       prompt     <- promptText
@@ -334,7 +334,7 @@ final case class HarnessProfile private (
       case errors => Left(ValidationError("harness", errors.map(_.message)))
 
 /** What a [[HarnessProfile]] installs on an agent, assembled and checked. */
-final private[agent] case class Harness(
+final private[llm4s] case class Harness(
   tools: Vector[AgentTool[?]],
   middleware: Vector[AgentMiddleware],
   systemPrompt: String,

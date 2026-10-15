@@ -1,7 +1,7 @@
-package org.llm4s.agent.harness
+package org.llm4s.config
 
 import org.llm4s.agent.graph.RetentionPolicy
-import org.llm4s.config.ReferenceConfig
+import org.llm4s.agent.harness.*
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
 import org.scalatest.EitherValues

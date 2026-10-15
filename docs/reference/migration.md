@@ -221,7 +221,7 @@ Design §4.31. `SemanticMemoryMiddleware` is in a new module, `llm4s-agent-memor
 
 ### Harness profile and middleware placement (#1915)
 
-Design §4.37. `HarnessProfile`, `AgentBuilder.withHarness` and `HarnessConfigLoader` (`org.llm4s.agent.harness`) are additions; `llm4s-agent` now ships a `reference.conf` with the `llm4s.agent.harness` block. One behaviour changes:
+Design §4.37. `HarnessProfile` (`org.llm4s.agent.harness`), `AgentBuilder.withHarness` and `org.llm4s.config.HarnessConfigLoader` are additions; `llm4s-agent` now ships a `reference.conf` with the `llm4s.agent.harness` block. One behaviour changes:
 
 - **`build()` refuses a middleware order that a middleware declares wrong** (`AgentMiddleware.placement`), with a `ValidationError` naming both middleware and the fix. A `SemanticMemoryMiddleware` registered after (inside) a `GuardrailMiddleware` or `GuardrailReviewMiddleware` - which recorded answers the guardrail then blocked - is refused: register it first, or name the guardrail's id in its `runsBefore`. So is one on a handoff target when the root agent has guardrail middleware, since the root's `afterAgent` runs after every agent's own: put both on the same agent. A `SummarizationMiddleware` registered after a `ToolOutputOffload` is refused too: register it first.
 
