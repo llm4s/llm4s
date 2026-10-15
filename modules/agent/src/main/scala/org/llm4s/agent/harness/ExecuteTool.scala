@@ -57,9 +57,11 @@ object ExecuteTool:
     defaultTimeout: FiniteDuration = 60.seconds,
     maxTimeout: FiniteDuration = 10.minutes
   ): AgentTool[Args] =
-    require(defaultTimeout > Duration.Zero && maxTimeout > Duration.Zero, "timeouts must be positive")
+    require(defaultTimeout > Duration.Zero, "defaultTimeout must be positive")
+    // the model asks in whole seconds, so a maximum under one second could not be kept by any request of its own
+    require(maxTimeout >= 1.second, s"maxTimeout must be at least one second, was $maxTimeout")
     require(defaultTimeout <= maxTimeout, s"defaultTimeout ($defaultTimeout) must be at most maxTimeout ($maxTimeout)")
-    val maxSeconds = math.max(1L, maxTimeout.toSeconds).min(Int.MaxValue.toLong).toInt
+    val maxSeconds = maxTimeout.toSeconds.min(Int.MaxValue.toLong).toInt
     val spec = AgentToolSpec[Args](
       Name,
       "Run a command in the sandbox and return its exit code, stdout and stderr. The command is a program and " +
@@ -88,8 +90,8 @@ object ExecuteTool:
 
   private def checked(args: Args, maxTimeout: FiniteDuration): Result[VPath] =
     if args.command.isBlank then Left(ValidationError("command", "must not be empty"))
-    else if args.timeoutSeconds.exists(s => s < 1 || s.toLong.seconds > maxTimeout.max(1.second)) then
-      Left(ValidationError("timeout_seconds", s"must be in 1..${math.max(1L, maxTimeout.toSeconds)}"))
+    else if args.timeoutSeconds.exists(s => s < 1 || s.toLong.seconds > maxTimeout) then
+      Left(ValidationError("timeout_seconds", s"must be in 1..${maxTimeout.toSeconds}"))
     else VPath(args.workdir.getOrElse("/"))
 
   private def run(

@@ -150,12 +150,48 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     code(confined.executeCommand("ls", workingDirectory = Some("docs"))) shouldBe "PATH_NOT_ALLOWED"
   }
 
+  they should "be checked on what a path names through a link, not only on its text" in {
+    assume(!isWindowsHost)
+    Files.createDirectories(root.resolve("src"))
+    Files.createDirectories(root.resolve("private"))
+    Files.createDirectories(root.resolve("docs"))
+    Files.write(root.resolve("private/secret"), "s".getBytes(StandardCharsets.UTF_8))
+    Files.createSymbolicLink(root.resolve("src/link"), root.resolve("private"))
+    Files.createSymbolicLink(root.resolve("src/docs"), root.resolve("docs"))
+    val outside = Files.createTempDirectory("workspace-outside")
+    Files.createSymbolicLink(root.resolve("out"), outside)
+
+    val confined = workspace(WorkspaceSandboxConfig(allowedPaths = List("src")))
+    code(confined.fileSnapshot("src/link/secret")) shouldBe "PATH_NOT_ALLOWED"
+    code(confined.writeFile("src/link/new", "x", createDirectories = Some(true))) shouldBe "PATH_NOT_ALLOWED"
+    Files.exists(root.resolve("private/new")) shouldBe false
+
+    val readOnly = workspace(WorkspaceSandboxConfig(readOnlyPaths = List("docs")))
+    code(readOnly.writeFile("src/docs/a.md", "x")) shouldBe "PATH_READ_ONLY"
+    code(readOnly.deleteFile("src/docs")) shouldBe "PATH_READ_ONLY"
+
+    code(workspace().writeFile("out/a", "x")) shouldBe "PATH_ESCAPE_ATTEMPT"
+    code(workspace().fileSnapshot("out")) shouldBe "PATH_ESCAPE_ATTEMPT"
+    Files.list(outside).count() shouldBe 0L
+    Files.delete(root.resolve("out"))
+    Files.delete(outside)
+  }
+
   "A write" should "refuse content over the sandbox's file size limit, writing nothing" in {
     val small = workspace(WorkspaceSandboxConfig(limits = WorkspaceSandboxConfig.DefaultLimits.copy(maxFileSize = 4)))
     code(small.writeFile("a.txt", "12345")) shouldBe "SIZE_LIMIT_EXCEEDED"
     // four characters, eight bytes
     code(small.writeFile("a.txt", "éééé", expectedHash = Some("absent"))) shouldBe "SIZE_LIMIT_EXCEEDED"
     Files.exists(root.resolve("a.txt")) shouldBe false
+  }
+
+  it should "bound the file it leaves: an append or a line edit past the limit is refused" in {
+    val small = workspace(WorkspaceSandboxConfig(limits = WorkspaceSandboxConfig.DefaultLimits.copy(maxFileSize = 4)))
+    small.writeFile("a.txt", "abcd").success shouldBe true
+    code(small.writeFile("a.txt", "e", mode = Some("append"))) shouldBe "SIZE_LIMIT_EXCEEDED"
+    code(small.modifyFile("a.txt", List(InsertOperation(afterLine = 1, newContent = "more")))) shouldBe
+      "SIZE_LIMIT_EXCEEDED"
+    small.fileSnapshot("a.txt").content shouldBe Some("abcd")
   }
 
   "A command's output" should "be kept to the characters asked for, the rest read and discarded" in {

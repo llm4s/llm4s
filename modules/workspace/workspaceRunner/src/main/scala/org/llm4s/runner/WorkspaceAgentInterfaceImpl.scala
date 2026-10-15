@@ -83,8 +83,19 @@ class WorkspaceAgentInterfaceImpl(
       )
     }
 
+    // Every check below is made on what the path names on disk as well as on its text: a symbolic link inside the
+    // workspace (`src/link -> ../private`, or `-> /etc`) would otherwise lead an operation past it.
+    val onDisk = effective(normalized)
+    if (!onDisk.startsWith(effective(rootPath))) {
+      throw new WorkspaceAgentException(
+        s"Path '$relativePath' leads outside the workspace through a link",
+        "PATH_ESCAPE_ATTEMPT",
+        None
+      )
+    }
+
     // #870: with `allowedPaths`, only those paths and what is beneath them are accessible
-    if (allowedRoots.nonEmpty && !allowedRoots.exists(normalized.startsWith))
+    if (allowedRoots.nonEmpty && !allowedRoots.exists(a => normalized.startsWith(a) && onDisk.startsWith(effective(a))))
       throw new WorkspaceAgentException(
         s"Path '$relativePath' is outside the sandbox's allowed paths (${config.allowedPaths.mkString(", ")})",
         "PATH_NOT_ALLOWED",
@@ -94,14 +105,34 @@ class WorkspaceAgentInterfaceImpl(
     normalized
   }
 
+  /**
+   * What `path` names on disk: its nearest existing ancestor (itself included) with every link resolved, and the rest
+   * of the path beneath that. A link that cannot be resolved (dangling, a loop) is taken as written, beneath its
+   * resolved parent, so it never names more than its text does.
+   */
+  private def effective(path: Path): Path = {
+    @scala.annotation.tailrec
+    def nearest(p: Path, rest: List[Path]): (Path, List[Path]) =
+      if (p == null) (p, rest)
+      else if (Files.exists(p)) (p, rest)
+      else nearest(p.getParent, Option(p.getFileName).toList ++ rest)
+    val (existing, rest) = nearest(path, Nil)
+    val base             = Option(existing).flatMap(e => Try(e.toRealPath()).toOption).getOrElse(path.getRoot)
+    rest.foldLeft(base)((acc, part) => acc.resolve(part)).normalize()
+  }
+
   // The sandbox's allowedPaths and readOnlyPaths, resolved against the root once; one that leads outside the root is
-  // the root's own business to refuse, so it is resolved as given and simply never matches a workspace path.
+  // the root's own business to refuse, so it is resolved as given and simply never matches a workspace path. Each is
+  // compared by its text and, through `effective`, by what it names on disk when the check runs.
   private val allowedRoots: List[Path]  = config.allowedPaths.map(p => rootPath.resolve(p).normalize())
   private val readOnlyRoots: List[Path] = config.readOnlyPaths.map(p => rootPath.resolve(p).normalize())
 
-  /** Refuses (`PATH_READ_ONLY`) a mutation of a path the sandbox's `readOnlyPaths` cover (#870). */
+  /**
+   * Refuses (`PATH_READ_ONLY`) a mutation of a path the sandbox's `readOnlyPaths` cover (#870), by its text or by
+   * what it names on disk: a link elsewhere into a read-only directory is read-only too.
+   */
   private def refuseReadOnly(path: String, resolved: Path): Unit =
-    if (readOnlyRoots.exists(resolved.startsWith))
+    if (readOnlyRoots.exists(ro => resolved.startsWith(ro) || effective(resolved).startsWith(effective(ro))))
       throw new WorkspaceAgentException(
         s"Path '$path' is read-only in this sandbox (${config.readOnlyPaths.mkString(", ")})",
         "PATH_READ_ONLY",
@@ -407,11 +438,15 @@ class WorkspaceAgentInterfaceImpl(
     }
 
     val bytes = content.getBytes(StandardCharsets.UTF_8)
-    if (bytes.length.toLong > defaultLimits.maxFileSize)
+    // the bound is on the file the write leaves: an append adds to what is there (under the mutation lock)
+    val resulting =
+      bytes.length.toLong + (if (writeMode == "append" && Files.isRegularFile(resolvedPath)) Files.size(resolvedPath)
+                             else 0L)
+    if (resulting > defaultLimits.maxFileSize)
       throw new WorkspaceAgentException(
-        s"Content for '$path' exceeds maximum size limit (${defaultLimits.maxFileSize} bytes)",
+        s"Writing '$path' would leave it larger than the maximum size limit (${defaultLimits.maxFileSize} bytes)",
         "SIZE_LIMIT_EXCEEDED",
-        Some(s"Content size: ${bytes.length} bytes")
+        Some(s"Resulting size: $resulting bytes")
       )
     if (expectedHash.isDefined && Files.isDirectory(resolvedPath))
       throw new WorkspaceAgentException(s"Path '$path' is a directory, not a file", "NOT_A_FILE", None)
@@ -484,6 +519,16 @@ class WorkspaceAgentInterfaceImpl(
       )
     }
 
+    // the file it reads, and the file it leaves, are both within the size limit (#870)
+    def tooLarge(size: Long, what: String) =
+      new WorkspaceAgentException(
+        s"File '$path' $what the maximum size limit (${defaultLimits.maxFileSize} bytes)",
+        "SIZE_LIMIT_EXCEEDED",
+        Some(s"Size: $size bytes")
+      )
+    val currentSize = Files.size(resolvedPath)
+    if (currentSize > defaultLimits.maxFileSize) throw tooLarge(currentSize, "exceeds")
+
     // Read the file content
     val lines = Using(Source.fromFile(resolvedPath.toFile, StandardCharsets.UTF_8.name()))(_.getLines().toList) match {
       case Success(fileLines) => fileLines
@@ -497,6 +542,10 @@ class WorkspaceAgentInterfaceImpl(
 
     // Apply operations
     val modifiedLines = applyOperations(lines, operations)
+    val separator     = System.lineSeparator().length.toLong
+    val resultingSize =
+      modifiedLines.iterator.map(l => l.getBytes(StandardCharsets.UTF_8).length.toLong + separator).sum
+    if (resultingSize > defaultLimits.maxFileSize) throw tooLarge(resultingSize, "would exceed")
 
     // Write back to file using UTF-8 encoding
     Using(
