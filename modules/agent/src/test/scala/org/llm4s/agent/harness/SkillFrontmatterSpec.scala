@@ -258,6 +258,18 @@ class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
       Vector("Read")
   }
 
+  it should "hold a frontmatter given to parse directly to the same bound, and never take a cut line as its fence" in {
+    val padding = (1 to 4000).map(i => s"k$i: v").mkString("\n")
+    problem("---", "name: pdf-tools", "description: d", padding, "---").problem should include(
+      s"not closed within ${Skill.MaxFrontmatterChars}"
+    )
+    // the bound falls inside a `-----` line: its cut start is not the closing fence
+    val head = "---\nname: pdf-tools\ndescription: d\nnote: "
+    val fill = "x" * (Skill.MaxFrontmatterChars - head.length - 4)
+    val text = head + fill + "\n-----\n---\n"
+    Skill.parse(path, text).left.value.message should include("not closed within")
+  }
+
   it should "refuse a name over 64 characters" in {
     val long = "a" * 65
     val e    = Skill.parse(VPath(s"/s/$long/SKILL.md").value, s"---\nname: $long\ndescription: d\n---").left.value
