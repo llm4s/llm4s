@@ -90,9 +90,9 @@ object RunnerMain extends cask.MainRoutes {
   private val clientProcesses =
     new ConcurrentHashMap[cask.WsChannelActor, ConcurrentHashMap[String, RunningCommand]]()
   // Per client, the cancellations of its commands not yet registered (waiting at the command gate): they never start.
-  private val clientEarlyCancels = new ConcurrentHashMap[cask.WsChannelActor, java.util.Set[String]]()
-  private def earlyCancels(channel: cask.WsChannelActor): java.util.Set[String] =
-    clientEarlyCancels.computeIfAbsent(channel, _ => ConcurrentHashMap.newKeySet[String]())
+  private val clientEarlyCancels = new ConcurrentHashMap[cask.WsChannelActor, EarlyCancellations]()
+  private def earlyCancels(channel: cask.WsChannelActor): EarlyCancellations =
+    clientEarlyCancels.computeIfAbsent(channel, _ => new EarlyCancellations())
   private val heartbeatExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
 
   // Constants

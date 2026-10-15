@@ -7,7 +7,7 @@ import org.slf4j.LoggerFactory
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{ ConcurrentHashMap, TimeUnit }
-import scala.concurrent.duration.DurationLong
+import scala.concurrent.duration.{ DurationInt, DurationLong, FiniteDuration }
 import scala.concurrent.{ ExecutionContext, Future, Promise }
 import scala.util.{ Failure, Success, Try }
 
@@ -59,7 +59,7 @@ final private[runner] class WebSocketCommandExecutor(
     processes: ConcurrentHashMap[String, RunningCommand],
     send: WebSocketMessage => Unit,
     connected: () => Boolean = () => true,
-    cancelledEarly: java.util.Set[String] = ConcurrentHashMap.newKeySet[String]()
+    cancelledEarly: EarlyCancellations = new EarlyCancellations()
   ): Unit = {
     val startTime = System.currentTimeMillis()
 
@@ -77,7 +77,17 @@ final private[runner] class WebSocketCommandExecutor(
         // a permit of the workspace's command gate, from before the process starts until it has exited, so no file
         // mutation runs beside it; taken before the command is announced, and refused (nothing started) if a file
         // change holds the gate past its bounded wait
-        Try(workspace.acquireCommand()) match {
+        // a client that has flooded its cancellations takes no new commands until they age out: the bound holds
+        // without ever forgetting a cancellation a waiting command needs
+        (if (cancelledEarly.full)
+           Failure(
+             new WorkspaceAgentException(
+               "Too many cancellations of commands not yet started; try again shortly",
+               "WORKSPACE_BUSY",
+               None
+             )
+           )
+         else Try(workspace.acquireCommand())) match {
           case Failure(busy: WorkspaceAgentException) => fail(busy.error, busy.code, busy.details)
           case Failure(other) => fail(Option(other.getMessage).getOrElse("Gate failed"), "EXECUTION_FAILED", None)
           case Success(_) if cancelledEarly.remove(cmd.commandId) || !connected() =>
@@ -139,7 +149,7 @@ final private[runner] class WebSocketCommandExecutor(
     commandId: String,
     processes: Option[ConcurrentHashMap[String, RunningCommand]],
     send: WebSocketMessage => Unit,
-    cancelledEarly: Option[java.util.Set[String]] = None
+    cancelledEarly: Option[EarlyCancellations] = None
   ): Unit =
     processes.flatMap(running => Option(running.get(commandId))) match {
       case Some(running) =>
@@ -161,11 +171,9 @@ final private[runner] class WebSocketCommandExecutor(
         }
 
       case None =>
-        // it may still be waiting at the gate: remember it, so it never starts
-        // this client's own set, bounded: past the bound a cancellation of a command not yet registered is not kept
-        cancelledEarly.foreach { early =>
-          if (early.size < WebSocketCommandExecutor.MaxEarlyCancellations) early.add(commandId): Unit
-        }
+        // it may still be waiting at the gate: remember it, so it never starts. Always kept: a cancellation is never
+        // dropped, and each is forgotten only once no command could still be waiting for it (EarlyCancellations)
+        cancelledEarly.foreach(_.add(commandId))
         logger.warn(s"Cancellation requested for unknown or non-running command id $commandId")
         send(ErrorMessage(s"No running command found for id $commandId", "UNKNOWN_COMMAND_ID", Some(commandId)))
     }
@@ -308,10 +316,42 @@ final private[runner] class WebSocketCommandExecutor(
   }
 }
 
-private[runner] object WebSocketCommandExecutor {
+/**
+ * One client's cancellations of commands not yet registered (waiting at the gate, or not yet taken up). Each is kept
+ * for `window`, longer than any command can wait before it starts or is refused (the gate's bounded wait, plus its
+ * preparation), and then forgotten: no cancellation a waiting command needs is ever dropped. Past `capacity` live
+ * entries the client is [[full]], and takes no new command until they age out, so the set is bounded either way.
+ */
+final private[runner] class EarlyCancellations(
+  window: FiniteDuration = EarlyCancellations.Window,
+  capacity: Int = EarlyCancellations.Capacity,
+  clock: () => Long = () => System.nanoTime()
+) {
+  private val at = new ConcurrentHashMap[String, java.lang.Long]()
 
-  /** The most cancellations of not-yet-registered commands remembered at once. */
-  val MaxEarlyCancellations: Int = 1024
+  private def purge(): Unit = {
+    val cutoff = clock() - window.toNanos
+    at.entrySet().removeIf(e => e.getValue.longValue < cutoff): Unit
+  }
+
+  def add(id: String): Unit = { purge(); at.put(id, clock()): Unit }
+
+  /** Whether `id` was cancelled, forgetting it. */
+  def remove(id: String): Boolean = at.remove(id) != null
+
+  def full: Boolean = { purge(); at.size >= capacity }
+}
+
+private[runner] object EarlyCancellations {
+
+  /** Longer than any command waits before it starts or is refused. */
+  val Window: FiniteDuration = WorkspaceSandboxConfig.CommandGateWait + 2.minutes
+
+  /** The most live cancellations of commands not yet started one client may have before its new commands wait. */
+  val Capacity: Int = 1024
+}
+
+private[runner] object WebSocketCommandExecutor {
 
   /** The most characters of each stream a command keeps: what it asked for, within `0..runnerMax`. */
   def outputLimit(requested: Option[Long], runnerMax: Long): Long =

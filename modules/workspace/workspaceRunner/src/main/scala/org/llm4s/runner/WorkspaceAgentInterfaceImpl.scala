@@ -376,7 +376,7 @@ class WorkspaceAgentInterfaceImpl(
     excludePatterns: Option[List[String]] = None,
     maxDepth: Option[Int] = None,
     returnMetadata: Option[Boolean] = None
-  ): ExploreFilesResponse = {
+  ): ExploreFilesResponse = mutating { // under the gate: no command swaps a link between the checks and the reads
     val resolvedPath    = resolvePath(path)
     val isRecursive     = recursive.getOrElse(false)
     val depth           = maxDepth.getOrElse(if (isRecursive) 3 else 1)
@@ -442,7 +442,7 @@ class WorkspaceAgentInterfaceImpl(
     path: String,
     startLine: Option[Int] = None,
     endLine: Option[Int] = None
-  ): ReadFileResponse = {
+  ): ReadFileResponse = mutating { // under the gate, as every read: see fileSnapshot
     val resolvedPath = resolvePath(path)
 
     if (!Files.exists(resolvedPath)) {
@@ -946,7 +946,7 @@ class WorkspaceAgentInterfaceImpl(
     recursive: Option[Boolean] = None,
     excludePatterns: Option[List[String]] = None,
     contextLines: Option[Int] = None
-  ): SearchFilesResponse = {
+  ): SearchFilesResponse = mutating { // under the gate, as every read: see fileSnapshot
     val isRecursive = recursive.getOrElse(true)
     val context     = contextLines.getOrElse(2)
     val patterns    = excludePatterns.getOrElse(defaultExclusions)

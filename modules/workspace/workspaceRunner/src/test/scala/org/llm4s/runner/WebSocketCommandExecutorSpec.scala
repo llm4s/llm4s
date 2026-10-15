@@ -384,13 +384,13 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
   it should "never start a command its own client cancelled before it was registered, and only that client's" in {
     val executor = new WebSocketCommandExecutor(interfaceFor(Permissive), 1024L * 1024L)
     val (mine, theirs) = (
-      java.util.concurrent.ConcurrentHashMap.newKeySet[String](),
-      java.util.concurrent.ConcurrentHashMap.newKeySet[String]()
+      new EarlyCancellations(),
+      new EarlyCancellations()
     )
     val cmd     = command("echo should-not-run")
     val channel = new FakeChannel
     executor.cancel(cmd.commandId, Some(channel.processes), channel.send, Some(mine))
-    theirs.contains(cmd.commandId) shouldBe false
+    theirs.remove(cmd.commandId) shouldBe false
     // another client's command with the same id is not touched
     val other = new FakeChannel
     executor.execute(cmd, other.processes, other.send, () => true, theirs)
@@ -423,7 +423,20 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
     workspace.writeFile("after-gate.txt", "x", expectedHash = Some("absent")).success shouldBe true
   }
 
-  it should "never start a command whose connection closed before it was registered" in {
+  "EarlyCancellations" should "keep every cancellation for its window, then forget it, and refuse new commands only while full" in {
+    var now   = 0L
+    val early = new EarlyCancellations(window = 10.seconds, capacity = 2, clock = () => now)
+    early.add("a")
+    early.add("b")
+    early.full shouldBe true // a third is still kept, never dropped
+    early.add("c")
+    early.remove("c") shouldBe true
+    now += 11.seconds.toNanos
+    early.full shouldBe false // aged out: no command waits that long
+    early.remove("a") shouldBe false
+  }
+
+  "WebSocketCommandExecutor" should "never start a command whose connection closed before it was registered" in {
     val executor = new WebSocketCommandExecutor(interfaceFor(Permissive), 1024L * 1024L)
     val channel  = new FakeChannel
     executor.execute(command("echo should-not-run"), channel.processes, channel.send, () => false)
