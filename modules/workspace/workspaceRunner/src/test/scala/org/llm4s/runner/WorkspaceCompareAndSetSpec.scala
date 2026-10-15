@@ -67,6 +67,20 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     ws.searchFiles(List("link"), "needle", "literal", recursive = Some(true)).matches.map(_.path) should not be empty
   }
 
+  it should "tell a link to nothing from nothing, so it can be deleted, or written through" in {
+    assume(!isWindowsHost)
+    Files.createSymbolicLink(root.resolve("gone"), root.resolve("missing-target"))
+    Files.createSymbolicLink(root.resolve("new"), root.resolve("new-target"))
+    val ws = workspace()
+    ws.fileSnapshot("gone").kind shouldBe "dangling"
+    ws.fileSnapshot("gone").hash shouldBe "dangling"
+    ws.deleteFile("gone", Some("dangling")).wasDirectory shouldBe false
+    Files.exists(root.resolve("gone"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+    ws.writeFile("new", "x", expectedHash = Some("dangling")).success shouldBe true
+    Files.isSymbolicLink(root.resolve("new")) shouldBe true
+    ws.fileSnapshot("new-target").content shouldBe Some("x")
+  }
+
   it should "refuse a FIFO without opening it, as every file operation does" in {
     assume(!isWindowsHost)
     val fifo = root.resolve("pipe")

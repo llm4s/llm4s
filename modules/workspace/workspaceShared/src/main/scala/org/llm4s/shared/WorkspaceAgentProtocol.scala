@@ -391,6 +391,9 @@ object FileSnapshotResponse {
 
     /** The `hash` of a file over the workspace's `maxFileSize`: never read, so it has no digest to compare. */
     val Oversized: String = "oversized"
+
+    /** The `kind` and `hash` of a symbolic link to nothing: an entry a delete removes, which a read cannot. */
+    val Dangling: String = "dangling"
   }
 
   /** The `hash` of a file of `bytes`. */

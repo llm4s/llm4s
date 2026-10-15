@@ -82,7 +82,9 @@ final class WorkspaceFileBackend private (val id: String, workspace: WorkspaceAg
   /** The text of the file `snapshot` read, or the refusal of what it is instead. */
   private def textOf(operation: String, path: VPath, snapshot: FileSnapshotResponse): Result[String] =
     snapshot.kind match
-      case FileSnapshotResponse.Kind.Absent    => Left(BackendRefused.notFound(operation, path))
+      case FileSnapshotResponse.Kind.Absent => Left(BackendRefused.notFound(operation, path))
+      // a link to nothing: there is no file to read or edit, though a delete removes the link
+      case FileSnapshotResponse.Kind.Dangling  => Left(BackendRefused.notFound(operation, path))
       case FileSnapshotResponse.Kind.Directory => Left(BackendRefused.at(operation, path, "is a directory"))
       case _ =>
         snapshot.content.toRight(
@@ -192,7 +194,10 @@ final class WorkspaceFileBackend private (val id: String, workspace: WorkspaceAg
           _      <- notDirectory("write", path, before)
           check  <- WorkspaceCalls.stateCheck(before.hash)
         yield
-          val written = FileWritten(before.kind == FileSnapshotResponse.Kind.Absent, Text.utf8Bytes(content))
+          // a write through a link to nothing creates the file it names
+          val created =
+            before.kind == FileSnapshotResponse.Kind.Absent || before.kind == FileSnapshotResponse.Kind.Dangling
+          val written = FileWritten(created, Text.utf8Bytes(content))
           ReplayGuard.Plan(check, StateCheck.of(content), written)(
             casWrite("write", path, content, before).map(_ => written)
           )

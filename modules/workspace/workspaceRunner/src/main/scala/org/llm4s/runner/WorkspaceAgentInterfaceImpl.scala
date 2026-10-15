@@ -253,7 +253,9 @@ class WorkspaceAgentInterfaceImpl(
       )
 
   private def currentHash(resolved: Path): String =
-    if (!Files.exists(resolved)) FileSnapshotResponse.Kind.Absent
+    if (!Files.exists(resolved))
+      // a link to nothing is an entry of its own, which a delete removes: it is not the absence of one
+      if (Files.isSymbolicLink(resolved)) FileSnapshotResponse.Kind.Dangling else FileSnapshotResponse.Kind.Absent
     else if (Files.isDirectory(resolved)) FileSnapshotResponse.Kind.Directory
     else if (!Files.isRegularFile(resolved)) {
       refuseSpecial(rootPath.relativize(resolved).toString, resolved)
@@ -608,6 +610,10 @@ class WorkspaceAgentInterfaceImpl(
               "HASH_MISMATCH",
               None
             )
+          // and its content compared again, last thing before the move: a writer outside the runner (the host, through
+          // a bind mount) that changed it while the replacement was written is caught, not overwritten. The move itself
+          // is the one step left unfenced against such a writer, which no file system call can close.
+          expectedHash.foreach(checkExpected(path, resolvedPath, _))
           Files.move(
             temp,
             target,
@@ -729,7 +735,9 @@ class WorkspaceAgentInterfaceImpl(
       val resolved = resolvePath(path)
       def response(kind: String, hash: String, size: Long, content: Option[String], error: Option[String]) =
         FileSnapshotResponse("local", path, kind, hash, size, content, error)
-      if (!Files.exists(resolved))
+      if (!Files.exists(resolved) && Files.isSymbolicLink(resolved))
+        response(Kind.Dangling, Kind.Dangling, 0L, None, Some("a link to something that does not exist"))
+      else if (!Files.exists(resolved))
         response(Kind.Absent, Kind.Absent, 0L, None, None)
       else if (Files.isDirectory(resolved)) response(Kind.Directory, Kind.Directory, 0L, None, None)
       else {

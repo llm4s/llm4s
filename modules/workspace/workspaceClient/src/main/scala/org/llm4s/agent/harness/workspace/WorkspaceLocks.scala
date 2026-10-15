@@ -83,9 +83,7 @@ private[workspace] object WorkspaceCalls:
   /** A runner snapshot's `hash` as C4's [[StateCheck]], or a failure for a value the runner cannot have sent. */
   def stateCheck(hash: String): Result[StateCheck] =
     if hash == FileSnapshotResponse.Kind.Absent then Right(StateCheck.absent)
-    else if hash == FileSnapshotResponse.Kind.Directory || hash == FileSnapshotResponse.Kind.Oversized || Sha256
-        .matches(hash)
-    then
+    else if Named(hash) || Sha256.matches(hash) then
       // compared, never interpreted: the runner's digest is in StateCheck's own format
       Try(upickle.default.read[StateCheck](ujson.Str(hash))).toEither.left.map(e =>
         ProcessingError("workspace.snapshot", s"the workspace sent an unreadable hash: ${e.getMessage}", Some(e))
@@ -93,6 +91,13 @@ private[workspace] object WorkspaceCalls:
     else Left(ProcessingError("workspace.snapshot", s"the workspace sent an unknown hash '${hash.take(80)}'"))
 
   private val Sha256 = "sha256:[0-9a-f]{64}".r
+
+  /** The hashes of what is not a readable file: each its own state, never equal to a digest or to another. */
+  private val Named = Set(
+    FileSnapshotResponse.Kind.Directory,
+    FileSnapshotResponse.Kind.Oversized,
+    FileSnapshotResponse.Kind.Dangling
+  )
 
 /** A `WorkspaceAgentException` the runner raised, before a caller sorts it; never returned to a tool as is. */
 final private[workspace] case class WorkspaceFailure(exception: WorkspaceAgentException) extends LLMError:
