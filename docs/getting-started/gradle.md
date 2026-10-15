@@ -205,7 +205,7 @@ run it. CI builds it on every pull request, so it stays current.
 
 The `modules/gradle-demo/` directory in the llm4s repository contains:
 
-- `build.gradle.kts` - Kotlin DSL reference with the exclusion recipes commented in-line
+- `build.gradle.kts` - Kotlin DSL reference: `llm4s-core` plus a provider module
 - `build.gradle` - Groovy DSL equivalent
 - `settings.gradle.kts` - Minimal settings file
 

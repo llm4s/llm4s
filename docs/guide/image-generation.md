@@ -28,10 +28,13 @@ This client connects to an instance of the [AUTOMATIC1111/stable-diffusion-webui
 
 ### Setup
 
-First, ensure your `build.sbt` includes the LLM4S dependency.
+First, ensure your `build.sbt` includes the LLM4S dependencies. Image generation is in `llm4s-image`.
 
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"
+{%- unless site.data.project.latest_release contains "0.4." %}
+libraryDependencies += "org.llm4s" %% "llm4s-image" % "{{ site.data.project.latest_release }}"
+{%- endunless %}
 ```
 
 ### Example Usage
