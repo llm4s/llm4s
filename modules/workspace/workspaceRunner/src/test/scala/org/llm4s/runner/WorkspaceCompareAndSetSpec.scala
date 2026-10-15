@@ -332,6 +332,8 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     code(confined.exploreFiles(".")) shouldBe "PATH_NOT_ALLOWED"
     code(confined.writeFile("srcx/a", "y", createDirectories = Some(true))) shouldBe "PATH_NOT_ALLOWED"
     code(confined.executeCommand("ls", workingDirectory = Some("docs"))) shouldBe "PATH_NOT_ALLOWED"
+    // the default directory, the root, is held to the same policy
+    code(confined.executeCommand("ls")) shouldBe "PATH_NOT_ALLOWED"
   }
 
   they should "be checked on what a path names through a link, not only on its text" in {

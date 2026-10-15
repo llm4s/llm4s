@@ -1288,9 +1288,8 @@ class WorkspaceAgentInterfaceImpl(
       )
     }
 
-    val workDir = workingDirectory
-      .map(dir => resolvePath(dir).toFile)
-      .getOrElse(rootPath.toFile)
+    // the default, the workspace root, goes through the path policy like any directory given
+    val workDir = resolvePath(workingDirectory.getOrElse(".")).toFile
 
     if (!workDir.exists() || !workDir.isDirectory) {
       throw new WorkspaceAgentException(
