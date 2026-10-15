@@ -206,7 +206,7 @@ private[harness] object Frontmatter:
             else
               val indent = leading.length
               if trimmed == "-" || trimmed.startsWith("- ") then
-                listItem(n, trimmed.drop(1).trim, open) match
+                listItem(n, indent, trimmed.drop(1).trim, open) match
                   case Left(e)      => Left(e)
                   case Right(block) => loop(tail, done, Some(block))
               else if indent == 0 then
@@ -234,15 +234,17 @@ private[harness] object Frontmatter:
       done.updated(b.key, Field(value, b.line))
     })
 
-  private def listItem(n: Int, item: String, open: Option[Block]): Parsed[Block] =
+  private def listItem(n: Int, indent: Int, item: String, open: Option[Block]): Parsed[Block] =
     open match
       case None                          => Left((n, "a list item must follow a key with no value"))
       case Some(b) if b.entries.nonEmpty => Left((n, "a list item cannot follow map entries"))
+      // an item at another indentation would be nested, or a new list
+      case Some(b) if b.indent.exists(_ != indent) =>
+        Left((n, "list items must share one indentation; nested lists are not supported"))
       case Some(b) =>
-        if item.startsWith("- ") || item == "-" || item.startsWith("[") || item.startsWith("{") then
-          Left((n, "nested lists and maps are not supported"))
+        if item.startsWith("[") then Left((n, "nested lists and maps are not supported"))
         else if item.isEmpty then Left((n, "a list item is empty"))
-        else scalar(n, item, inList = true).map(v => b.copy(items = b.items :+ v))
+        else scalar(n, item, inList = true).map(v => b.copy(items = b.items :+ v, indent = Some(indent)))
 
   private def mapEntry(n: Int, indent: Int, text: String, open: Option[Block]): Parsed[Block] =
     open match
@@ -299,15 +301,22 @@ private[harness] object Frontmatter:
       case c if Unsupported.contains(c) => Left((n, Unsupported(c)))
       case _ =>
         val plain = withoutComment(value)
-        // YAML reads `a: b` as a map, wherever it stands: a plain value holding one is malformed, not a string
-        if plain.contains(": ") || plain.endsWith(":") then
-          Left(
-            (
-              n,
-              if inList then "nested lists and maps are not supported" else "a plain value cannot hold `: `; quote it"
-            )
-          )
-        else Right(plain)
+        plainProblem(plain, inList).fold(Right(plain))(problem => Left((n, problem)))
+
+  /**
+   * Why `plain`, an unquoted value, is not one YAML reads as the same string, if it is not - one rule for every place a
+   * plain value stands (a key's value, a `metadata` value, a block or flow list item): `a: b` or `a:` is a map, a
+   * leading `- ` or `? ` an entry, and a leading indicator is not text.
+   */
+  private def plainProblem(plain: String, inList: Boolean): Option[String] =
+    val nested = "nested lists and maps are not supported"
+    if plain.contains(": ") || plain.endsWith(":") then
+      Some(if inList then nested else "a plain value cannot hold `: `; quote it")
+    else if plain == "-" || plain.startsWith("- ") || plain == "?" || plain.startsWith("? ") then Some(nested)
+    else
+      plain.headOption.flatMap(c =>
+        Unsupported.get(c).orElse(Option.when("[]{},".contains(c))(s"a plain value cannot start with `$c`; quote it"))
+      )
 
   /** `value` up to a ` #` comment, trimmed. */
   private def withoutComment(value: String): String =
@@ -380,9 +389,9 @@ private[harness] object Frontmatter:
               else
                 val plain = r.substring(0, end).trim
                 if plain.isEmpty then Left((n, "a flow list has an empty item"))
-                else if plain.contains(": ") || plain.exists(c => c == '[' || c == '{' || c == '}') then
+                else if plain.exists(c => c == '[' || c == '{' || c == '}') then
                   Left((n, "nested lists and maps are not supported"))
-                else Right((plain, r.substring(end)))
+                else plainProblem(plain, inList = true).fold(Right((plain, r.substring(end))))(p => Left((n, p)))
         item match
           case Left(e) => Left(e)
           case Right((v, after)) =>

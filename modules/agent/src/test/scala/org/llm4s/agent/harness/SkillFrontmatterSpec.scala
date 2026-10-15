@@ -157,6 +157,35 @@ class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
       withClue(bad)(problem("---", "name: pdf-tools", "description: d", bad, "---").line shouldBe 4)
   }
 
+  it should "hold every plain value, in a list or not, to one rule, and a block list to one indentation" in {
+    problem("---", "name: pdf-tools", "description: d", "allowed-tools: [Read:]", "---").line shouldBe 4
+    problem("---", "name: pdf-tools", "description: d", "allowed-tools: [a: b]", "---").line shouldBe 4
+    problem(
+      "---",
+      "name: pdf-tools",
+      "description: d",
+      "allowed-tools:",
+      "  - Read",
+      "    - Write",
+      "---"
+    ).line shouldBe 6
+    problem("---", "name: pdf-tools", "description: d", "allowed-tools:", "  - Read", "- Write", "---").line shouldBe 6
+    problem("---", "name: pdf-tools", "description: - d", "---").line shouldBe 3
+    problem("---", "name: pdf-tools", "description: ? d", "---").line shouldBe 3
+    problem("---", "name: pdf-tools", "description: ], d", "---").problem should include("cannot start with")
+    problem("---", "name: pdf-tools", "description: d", "metadata:", "  a: &x b", "---").line shouldBe 5
+    parse(
+      "---",
+      "name: pdf-tools",
+      "description: d",
+      "allowed-tools:",
+      "- Read",
+      "- Write",
+      "---"
+    ).value.allowedTools shouldBe
+      Vector("Read", "Write")
+  }
+
   it should "refuse a name over 64 characters" in {
     val long = "a" * 65
     val e    = Skill.parse(VPath(s"/s/$long/SKILL.md").value, s"---\nname: $long\ndescription: d\n---").left.value
