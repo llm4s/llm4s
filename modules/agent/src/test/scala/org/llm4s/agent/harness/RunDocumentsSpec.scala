@@ -1,0 +1,132 @@
+package org.llm4s.agent.harness
+
+import org.llm4s.agent.graph.HarnessTestSupport.{ discardAttempt, recordingRunContext, stateOf }
+import org.llm4s.agent.graph.middleware.MiddlewareId
+import org.llm4s.agent.harness.HarnessFiles.*
+import org.llm4s.error.ValidationError
+import org.scalatest.{ EitherValues, OptionValues }
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
+
+/** Stage 3 slice F5 (#1909, design §4.35): the read-once, bounded document mechanism F5 and F6 share. */
+class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+
+  private def ctxOn(backend: FileBackend) =
+    FileContext(org.llm4s.agent.graph.GraphTestSupport.testRunContext(), stateOf(backend.writes.toSeq*))
+
+  "DocumentText.read" should "read a file whole across pages, or None when it is missing" in {
+    val backend = storeBackend()
+    val lines   = (1 to 600).map(i => s"line $i")
+    seed(backend, "/a.md" -> lines.mkString("\n"))
+    val counting = new CountingBackend(backend)
+    DocumentText.read(counting, p("/a.md"), 1_000_000L, ctxOn(backend)).value.value shouldBe
+      BoundedText(lines.mkString("\n"), cut = false)
+    counting.reads.get shouldBe 3 // 256 lines a page
+    DocumentText.read(backend, p("/missing.md"), 100L, ctxOn(backend)).value shouldBe None
+  }
+
+  it should "keep at most maxChars, cut on a code point, and say it was cut" in {
+    val backend = storeBackend()
+    seed(backend, "/a.md" -> "abc\ndef\n\uD83D\uDE00xyz")
+    DocumentText.read(backend, p("/a.md"), 5L, ctxOn(backend)).value.value shouldBe BoundedText("abc\nd", cut = true)
+    // the 9th character would split the surrogate pair, so the cut stops before it
+    DocumentText.read(backend, p("/a.md"), 9L, ctxOn(backend)).value.value shouldBe BoundedText(
+      "abc\ndef\n",
+      cut = true
+    )
+    DocumentText.read(backend, p("/a.md"), 7L, ctxOn(backend)).value.value shouldBe BoundedText("abc\ndef", cut = true)
+    DocumentText.read(backend, p("/a.md"), 13L, ctxOn(backend)).value.value shouldBe
+      BoundedText("abc\ndef\n\uD83D\uDE00xyz", cut = false)
+  }
+
+  it should "stop after the line its predicate accepts, reading no further page" in {
+    val backend = storeBackend()
+    seed(backend, "/a.md" -> ((1 to 600).map(i => s"l$i").mkString("\n")))
+    val counting = new CountingBackend(backend)
+    DocumentText.read(counting, p("/a.md"), 1_000_000L, ctxOn(backend), _ == "l3").value.value shouldBe
+      BoundedText("l1\nl2\nl3", cut = false)
+    counting.reads.get shouldBe 1
+  }
+
+  it should "pass on an error that is not a missing file" in {
+    val counting = new CountingBackend(storeBackend())
+    counting.failing = Some(ValidationError("store", "down"))
+    DocumentText.read(counting, p("/a.md"), 10L, ctxOn(counting)).left.value shouldBe ValidationError("store", "down")
+  }
+
+  "SectionText" should "add a part whole or not at all, or cut it with a marker counted in the bound" in {
+    val s = new SectionText(20)
+    s.addWhole("0123456789") shouldBe true
+    s.addWhole("0123456789X") shouldBe false
+    s.addCut("## h\nbody body", prefix = 5, marker = "[cut]") shouldBe Some(true)
+    s.text shouldBe "0123456789## h\n[cut]"
+    s.text.length should be <= 20
+    s.addCut("## h\n", prefix = 5, marker = "[cut]") shouldBe None
+  }
+
+  "Report" should "keep at most 32 issues and count the rest" in {
+    val r = new Report
+    (1 to 40).foreach(i => r.add(DocumentIssue(p(s"/f$i"), DocumentIssue.Kind.NotListed, None, "x")))
+    val reported = r.result(MiddlewareId("m")).value
+    reported.issues.size shouldBe Report.MaxIssues
+    reported.omitted shouldBe 8
+    new Report().result(MiddlewareId("m")) shouldBe None
+  }
+
+  "A DocumentsReported" should "round-trip through its codec, kinds by name (rule 7)" in {
+    val event = DocumentsReported(
+      "skills",
+      Vector(DocumentIssue(p("/s/a/SKILL.md"), DocumentIssue.Kind.Malformed, Some(3), "x")),
+      2
+    )
+    val json = HarnessEvents.DocumentsReported.encode(event)
+    json("issues")(0)("kind").str shouldBe "Malformed"
+    HarnessEvents.DocumentsReported.decode(json) shouldBe Some(event)
+  }
+
+  "RunCache" should "compute once per run incarnation and report in the computing task" in {
+    val events   = new CopyOnWriteArrayList[(String, ujson.Value)]()
+    val cache    = new RunCache[String](4)
+    val computed = new AtomicInteger(0)
+    def get(run: org.llm4s.agent.graph.RunContext) =
+      cache(run) { computed.incrementAndGet(); Right("v") }(_ => run.emit("reported", 1, ujson.Null))
+    val first = recordingRunContext(events, token = Some(1L), task = "1.0")
+    get(first).value shouldBe "v"
+    get(recordingRunContext(events, token = Some(1L), task = "2.0")).value shouldBe "v"
+    computed.get shouldBe 1
+    events.size shouldBe 1 // the later task does not report again
+    // the same run id under a new claim (a recovery) computes and reports again
+    get(recordingRunContext(events, token = Some(2L), task = "1.0")).value shouldBe "v"
+    computed.get shouldBe 2
+    events.size shouldBe 2
+    // another thread with the same run id and token is its own entry
+    get(recordingRunContext(events, thread = "other", token = Some(1L), task = "1.0"))
+    computed.get shouldBe 3
+  }
+
+  it should "report again when the computing task runs again after its attempt's events were discarded (rule 10)" in {
+    val events = new CopyOnWriteArrayList[(String, ujson.Value)]()
+    val cache  = new RunCache[String](4)
+    val run    = recordingRunContext(events, token = Some(1L), task = "1.0")
+    def get()  = cache(run)(Right("v"))(_ => run.emit("reported", 1, ujson.Null))
+    get()
+    discardAttempt(run)
+    events.size shouldBe 0
+    get()
+    events.size shouldBe 1
+  }
+
+  it should "not keep a failure, and hold at most maxRuns incarnations (rule 12)" in {
+    val events = new CopyOnWriteArrayList[(String, ujson.Value)]()
+    val cache  = new RunCache[String](2)
+    val run    = recordingRunContext(events, token = Some(1L))
+    cache(run)(Left(ValidationError("store", "down")))(_ => ()).isLeft shouldBe true
+    cache(run)(Right("v"))(_ => ()).value shouldBe "v"
+    (1 to 5).foreach(i => cache(recordingRunContext(events, run = s"r$i"))(Right("v"))(_ => ()))
+    cache.cached shouldBe 2
+    an[IllegalArgumentException] should be thrownBy new RunCache[String](0)
+  }
+}

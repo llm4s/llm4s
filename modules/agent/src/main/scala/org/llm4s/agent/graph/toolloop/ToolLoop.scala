@@ -887,7 +887,7 @@ object ToolLoop:
     sections: Vector[(MiddlewareId, PromptSection)],
     budget: Int
   ): Result[Option[String]] =
-    def tokens(chars: Long): Long = (chars + 3) / 4
+    def tokens(chars: Long): Long = PromptSection.estimatedTokens(chars)
     def each = sections
       .map((owner, section) => s"${owner.value}/${section.id}: ${tokens(section.text.length.toLong)}")
       .mkString(", ")

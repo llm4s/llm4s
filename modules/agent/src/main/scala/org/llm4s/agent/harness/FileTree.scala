@@ -93,7 +93,7 @@ private[harness] object FileTree:
     all.get(path) match
       case Some(entry)                    => Right(entry)
       case None if isDirectory(all, path) => Left(BackendRefused.at(operation, path, "is a directory"))
-      case None                           => Left(BackendRefused.at(operation, path, "not found"))
+      case None                           => Left(BackendRefused.notFound(operation, path))
 
   /** `path` may be written as a file: not the root, not a directory, not beneath a file. */
   def writable(operation: String, all: Map[VPath, FileEntry], path: VPath): Result[Unit] =
@@ -109,7 +109,7 @@ private[harness] object FileTree:
     if all.contains(path) then Right(())
     else if isDirectory(all, path) then
       Left(BackendRefused.at("delete", path, "is a directory; delete the files in it"))
-    else Left(BackendRefused.at("delete", path, "not found"))
+    else Left(BackendRefused.notFound("delete", path))
 
   def ls(all: Map[VPath, FileEntry], path: VPath, limit: Int): Result[Listing[FileInfo]] =
     for

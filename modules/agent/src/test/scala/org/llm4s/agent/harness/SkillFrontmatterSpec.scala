@@ -1,0 +1,135 @@
+package org.llm4s.agent.harness
+
+import org.scalatest.EitherValues
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+
+/** Stage 3 slice F5 (#1909, design §4.35): the restricted `SKILL.md` frontmatter parser. */
+class SkillFrontmatterSpec extends AnyFlatSpec with Matchers with EitherValues {
+
+  private val path = VPath("/skills/pdf-tools/SKILL.md").value
+
+  private def parse(lines: String*) = Skill.parse(path, lines.mkString("\n"))
+
+  private def problem(lines: String*): SkillFormatError =
+    parse(lines*).left.value match {
+      case e: SkillFormatError => e
+      case other               => fail(s"not a format error: $other")
+    }
+
+  "Skill.parse" should "read the standard's fields: scalars, quoted strings, a flat list and a one-level metadata map" in {
+    val skill = parse(
+      "---",
+      "# a comment",
+      "name: pdf-tools",
+      "description: \"Extract text: tables and \\\"forms\\\" from PDFs\" # trailing",
+      "license: 'Apache-2.0 (it''s fine)'",
+      "",
+      "allowed-tools:",
+      "  - Read",
+      "  - \"Bash(git:*)\"",
+      "metadata:",
+      "  author: example-org",
+      "  version: \"1.0\"",
+      "compatibility: anything # ignored",
+      "---",
+      "# Body",
+      "not: [parsed"
+    ).value
+    skill.name shouldBe "pdf-tools"
+    skill.description shouldBe "Extract text: tables and \"forms\" from PDFs"
+    skill.license shouldBe Some("Apache-2.0 (it's fine)")
+    skill.allowedTools shouldBe Vector("Read", "Bash(git:*)")
+    skill.metadata.toVector shouldBe Vector("author" -> "example-org", "version" -> "1.0")
+    skill.path shouldBe path
+  }
+
+  it should "take allowed-tools as the standard's space-separated string, or a flow list" in {
+    parse(
+      "---",
+      "name: pdf-tools",
+      "description: d",
+      "allowed-tools: Bash(git:*)  Read",
+      "---"
+    ).value.allowedTools shouldBe
+      Vector("Bash(git:*)", "Read")
+    parse(
+      "---",
+      "name: pdf-tools",
+      "description: d",
+      "allowed-tools: [Read, 'Write', \"Glob\"]",
+      "---"
+    ).value.allowedTools shouldBe
+      Vector("Read", "Write", "Glob")
+    parse("---", "name: pdf-tools", "description: d", "allowed-tools: []", "---").value.allowedTools shouldBe empty
+  }
+
+  it should "drop a BOM and a trailing \\r, and read a frontmatter with no body" in {
+    Skill.parse(path, "\uFEFF---\r\nname: pdf-tools\r\ndescription: d\r\n---\r\n").value.description shouldBe "d"
+  }
+
+  it should "refuse what the restricted format does not take, naming the line" in {
+    val cases = Vector(
+      Seq("---", "name: pdf-tools", "description: |", "  multi", "---")                       -> (3, "block scalars"),
+      Seq("---", "name: pdf-tools", "description: >-", "---")                                 -> (3, "block scalars"),
+      Seq("---", "name: pdf-tools", "description: d", "metadata:", "  a:", "    b: c", "---") -> (5, "nested maps"),
+      Seq(
+        "---",
+        "name: pdf-tools",
+        "description: d",
+        "tags:",
+        "  a: b",
+        "---"
+      ) -> (5, "only `metadata` may hold a map"),
+      Seq("---", "name: pdf-tools", "description: d", "tags:", "  - - x", "---")  -> (5, "nested lists"),
+      Seq("---", "name: pdf-tools", "description: d", "tags:", "  - a: b", "---") -> (5, "nested lists"),
+      Seq("---", "name: pdf-tools", "description: d", "tags: [a, [b]]", "---")    -> (4, "nested lists"),
+      Seq("---", "name: pdf-tools", "description: {a: b}", "---")                 -> (3, "flow maps"),
+      Seq("---", "name: pdf-tools", "description: &x d", "---")                   -> (3, "anchors"),
+      Seq("---", "name: pdf-tools", "description: *x", "---")                     -> (3, "aliases"),
+      Seq("---", "name: pdf-tools", "description: !!str d", "---")                -> (3, "tags"),
+      Seq("---", "name: pdf-tools", "\tdescription: d", "---")                    -> (3, "tabs"),
+      Seq("---", "name: pdf-tools", "name: other", "description: d", "---")       -> (3, "more than once"),
+      Seq("---", "name: pdf-tools", "description: d", "  continued", "---")       -> (4, "multi-line"),
+      Seq("---", "name: pdf-tools", "description: \"open", "---")                 -> (3, "not closed"),
+      Seq("---", "name: pdf-tools", "description: \"a\" b", "---")                -> (3, "after a closing quote"),
+      Seq("---", "name: pdf-tools", "just text", "---")                           -> (3, "expected `key: value`"),
+      Seq("---", "name: pdf-tools", "a key: v", "---")                            -> (3, "a key must be"),
+      Seq("---", "name: pdf-tools", "description:d", "---")                       -> (3, "a space after"),
+      Seq("---", "name: pdf-tools", "description: d", "- x", "---")               -> (4, "must follow a key"),
+      Seq("name: pdf-tools", "description: d")                                    -> (1, "must start with"),
+      Seq("---", "name: pdf-tools", "description: d")                             -> (1, "not closed"),
+      Seq("---", "description: d", "---")                                         -> (1, "`name` is required"),
+      Seq("---", "name: pdf-tools", "---")                                        -> (1, "`description` is required"),
+      Seq("---", "name: pdf-tools", "description: \"  \"", "---")                 -> (3, "`description` is empty"),
+      Seq("---", "name: [a]", "description: d", "---")                            -> (2, "`name` must be a string"),
+      Seq("---", "name: other-name", "description: d", "---") -> (2, "equal the name of the skill's folder"),
+      Seq("---", "name: PDF_Tools", "description: d", "---")  -> (2, "lowercase"),
+      Seq("---", "name: pdf--tools", "description: d", "---") -> (2, "lowercase"),
+      Seq("---", "name: pdf-tools", "description: d", "metadata: [a]", "---") -> (4, "`metadata` must be a map"),
+      Seq("---", "name: pdf-tools", "description: d", "license: [a]", "---")  -> (4, "`license` must be a string")
+    )
+    cases.foreach { case (lines, (line, text)) =>
+      withClue(lines.mkString("\\n")) {
+        val e = problem(lines*)
+        e.line shouldBe line
+        e.problem should include(text)
+        e.path shouldBe path
+        e.message should startWith(s"${path.value}:$line: ")
+      }
+    }
+  }
+
+  it should "never quote the file in a problem" in {
+    val e = problem("---", "name: pdf-tools", "description: |", "  SECRET", "---")
+    (e.message should not).include("SECRET")
+    val e2 = problem("---", "name: pdf-tools", "SECRET-key here", "---")
+    (e2.message should not).include("SECRET")
+  }
+
+  it should "refuse a name over 64 characters" in {
+    val long = "a" * 65
+    val e    = Skill.parse(VPath(s"/s/$long/SKILL.md").value, s"---\nname: $long\ndescription: d\n---").left.value
+    e.message should include("longer than 64")
+  }
+}
