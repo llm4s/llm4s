@@ -76,7 +76,7 @@ final class StateFileBackend private (
     (result, update)
 
   def ls(path: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
-    current(ctx).flatMap(FileTree.ls(_, path, limit))
+    current(ctx).flatMap(FileTree.counted("ls", path, _, maxFiles)).flatMap(FileTree.ls(_, path, limit))
 
   def read(path: VPath, offset: Int, limit: Int, ctx: FileContext): Result[FileLines] =
     current(ctx).flatMap(FileTree.read(_, path, offset, limit, maxBytes))
@@ -161,7 +161,7 @@ final class StateFileBackend private (
     )
 
   def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
-    current(ctx).flatMap(FileTree.find(_, under, accept, limit))
+    current(ctx).flatMap(FileTree.counted("glob", under, _, maxFiles)).flatMap(FileTree.find(_, under, accept, limit))
 
   def search(
     under: VPath,
@@ -170,7 +170,9 @@ final class StateFileBackend private (
     limit: Int,
     ctx: FileContext
   ): Result[Listing[GrepMatch]] =
-    current(ctx).flatMap(FileTree.search(_, under, regex, accept, limit, maxBytes, maxBytes))
+    current(ctx)
+      .flatMap(FileTree.counted("grep", under, _, maxFiles))
+      .flatMap(FileTree.search(_, under, regex, accept, limit, maxBytes, maxBytes))
 
 object StateFileBackend:
 

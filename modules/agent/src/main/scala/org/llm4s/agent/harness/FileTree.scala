@@ -35,6 +35,26 @@ private[harness] object FileTree:
       Left(BackendRefused.at("delete", path, "is a directory; delete the files in it"))
     else Left(BackendRefused.at("delete", path, "not found"))
 
+  /**
+   * `all`, if it holds at most `maxEntries` files: a backend bounds its files itself, but another writer
+   * of its key may have stored more, and a listing or walk copies and sorts the keys, so it refuses first.
+   */
+  def counted(
+    operation: String,
+    path: VPath,
+    all: Map[VPath, FileEntry],
+    maxEntries: Int
+  ): Result[Map[VPath, FileEntry]] =
+    if all.size <= maxEntries then Right(all)
+    else
+      Left(
+        BackendRefused.at(
+          operation,
+          path,
+          s"the backend holds ${all.size} files, more than its limit of $maxEntries, written past it; delete some"
+        )
+      )
+
   def ls(all: Map[VPath, FileEntry], path: VPath, limit: Int): Result[Listing[FileInfo]] =
     for
       _ <- Text.checkLimitAt("ls", path, limit)

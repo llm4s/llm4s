@@ -288,6 +288,16 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
     found.truncated shouldBe true
   }
 
+  it should "refuse to list or walk more files than its limit, stored past it, but still delete them" in {
+    val (backend, f) = fixture(StateFileBackend(maxFiles = 3, clock = clock))
+    for (i <- 0 until 5)
+      f.commit(StateUpdate.update(backend.files, FileUpdate.Put(p(s"/f$i"), FileEntry("x", clock.instant()))))
+    backend.ls(VPath.root, 10, f.ctx).left.value.message should include("more than its limit of 3")
+    backend.glob(Glob("**"), VPath.root, 10, f.ctx).left.value.message should include("more than its limit")
+    backend.grep("x", VPath.root, None, 10, f.ctx).left.value.message should include("more than its limit")
+    backend.delete(p("/f0"), f.ctx).isRight shouldBe true
+  }
+
   it should "encode its key's values and updates, and refuse an invalid path on decode" in {
     val entry = FileEntry("x", clock.instant())
     upickle.default.read[FileEntry](upickle.default.write(entry)) shouldBe entry

@@ -481,4 +481,12 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
       .execute("ls", VPath.root, 1.second, call())
       .isRight shouldBe true
   }
+
+  "FileContext.effectKey" should "give every request its own key, whatever discriminators a caller passes" in {
+    val ctx   = call()
+    val first = ctx.effectKey("op", "x", "#1")
+    val a     = ctx.effectKey("op", "x")
+    val b     = ctx.effectKey("op", "x")
+    Set(first, a, b).size shouldBe 3
+  }
 }
