@@ -111,7 +111,8 @@ class VertexAIClient(
             fileUri,
             GeminiParts.VertexMaxImages,
             GeminiParts.VertexDocumentTypes,
-            Some(GeminiParts.VertexMaxDocuments)
+            Some(GeminiParts.VertexMaxDocuments),
+            GeminiParts.VertexImageTypes
           )
           .map(_ => transformed)
       )
@@ -174,7 +175,8 @@ class VertexAIClient(
             fileUri,
             GeminiParts.VertexMaxImages,
             GeminiParts.VertexDocumentTypes,
-            Some(GeminiParts.VertexMaxDocuments)
+            Some(GeminiParts.VertexMaxDocuments),
+            GeminiParts.VertexImageTypes
           )
           .map(_ => transformed)
       )
@@ -306,7 +308,9 @@ class VertexAIClient(
         contents += ujson.Obj(
           "role" -> "user",
           "parts" -> ujson.Arr.from(
-            PartEncoding.withoutBlankText(um.parts).map(GeminiParts.user(fileUri, GeminiParts.VertexDocumentTypes))
+            PartEncoding
+              .withoutBlankText(um.parts)
+              .map(GeminiParts.user(fileUri, GeminiParts.VertexDocumentTypes, GeminiParts.VertexImageTypes))
           )
         )
 

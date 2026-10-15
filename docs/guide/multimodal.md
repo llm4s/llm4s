@@ -82,7 +82,7 @@ the role. No part is dropped and none is turned into text. A `ProviderFile` goes
 | Bedrock | text; image (PNG, JPEG, GIF, WebP) and document (all five) `Inline` or an `s3://` `Url`; a document needs a text part beside it | the same |
 | watsonx.ai | text; one PNG or JPEG image `Inline` in a chat | text |
 
-Images: PNG, JPEG, WebP and GIF everywhere but the Gemini API, Vertex AI and Ollama, which take PNG, JPEG and WebP,
+Images: PNG, JPEG, WebP and GIF everywhere but Vertex AI and Ollama, which take PNG, JPEG and WebP,
 and watsonx.ai, which takes PNG and JPEG;
 BMP and TIFF are refused by every provider.
 A `Url` sent to OpenAI, an OpenAI-compatible provider, Anthropic or the Gemini API must be `http` or `https`.

@@ -23,10 +23,11 @@ private[provider] object GeminiParts {
   /** The `parts` entry for each user-message part a client with `fileUri`, taking `documentTypes`, sends. */
   def user(
     fileUri: FileUri,
-    documentTypes: Set[DocumentMediaType] = GeminiDocumentTypes
+    documentTypes: Set[DocumentMediaType] = GeminiDocumentTypes,
+    imageTypes: Set[org.llm4s.media.ImageMediaType] = GeminiImageTypes
   ): PartialFunction[ContentPart, ujson.Value] = {
     case ContentPart.Text(text)                                                    => ujson.Obj("text" -> text)
-    case ContentPart.Image(source, mt) if ImageTypes(mt) && sends(fileUri, source) => encode(fileUri, source, mt)
+    case ContentPart.Image(source, mt) if imageTypes(mt) && sends(fileUri, source) => encode(fileUri, source, mt)
     case ContentPart.Document(source, mt) if documentTypes(mt) && sends(fileUri, source) =>
       encode(fileUri, source, mt)
   }
@@ -40,8 +41,12 @@ private[provider] object GeminiParts {
   /** The documents Vertex AI takes in one prompt: 3,000. */
   val VertexMaxDocuments: Int = 3000
 
-  /** The image formats Gemini and Vertex AI take that llm4s names: PNG, JPEG and WebP (HEIC and HEIF have no `MediaType`). */
-  val ImageTypes: Set[org.llm4s.media.ImageMediaType] = Set(MediaType.Png, MediaType.Jpeg, MediaType.WebP)
+  /** The image formats the Gemini API takes that llm4s names: PNG, JPEG, WebP and GIF (HEIC and HEIF have no `MediaType`). */
+  val GeminiImageTypes: Set[org.llm4s.media.ImageMediaType] =
+    Set(MediaType.Png, MediaType.Jpeg, MediaType.WebP, MediaType.Gif)
+
+  /** The image formats Vertex AI's Gemini models take that llm4s names: PNG, JPEG and WebP. */
+  val VertexImageTypes: Set[org.llm4s.media.ImageMediaType] = Set(MediaType.Png, MediaType.Jpeg, MediaType.WebP)
 
   /** `Right` when a client with `fileUri` can send every part of `messages`. */
   def check(
@@ -50,10 +55,11 @@ private[provider] object GeminiParts {
     fileUri: FileUri,
     maxImages: Int,
     documentTypes: Set[DocumentMediaType] = GeminiDocumentTypes,
-    maxDocuments: Option[Int] = None
+    maxDocuments: Option[Int] = None,
+    imageTypes: Set[org.llm4s.media.ImageMediaType] = GeminiImageTypes
   ): Result[Unit] =
     PartEncoding
-      .check(provider, messages, user(fileUri, documentTypes), PartEncoding.textOnly)
+      .check(provider, messages, user(fileUri, documentTypes, imageTypes), PartEncoding.textOnly)
       .flatMap(_ => PartEncoding.checkImagesPerRequest(provider, messages, maxImages))
       .flatMap(_ =>
         maxDocuments.fold[Result[Unit]](Right(()))(PartEncoding.checkDocumentsPerRequest(provider, messages, _))

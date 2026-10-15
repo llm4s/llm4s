@@ -182,10 +182,20 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
   private def imageOf(mt: org.llm4s.media.ImageMediaType) =
     ContentPart.image(MediaSource.Inline(IArray[Byte](1, 2, 3)), mt).fold(e => fail(e.message), identity)
 
-  "An image" should "be sent only as PNG, JPEG or WebP, by Gemini and Vertex AI" in {
-    Seq(GeminiParts.user(gemini), GeminiParts.user(GeminiParts.vertexFileUri)).foreach { encode =>
-      Seq(MediaType.Png, MediaType.Jpeg, MediaType.WebP).foreach(mt => encode.isDefinedAt(imageOf(mt)) shouldBe true)
-      Seq(MediaType.Gif, MediaType.Bmp, MediaType.Tiff).foreach(mt => encode.isDefinedAt(imageOf(mt)) shouldBe false)
+  "An image" should "be sent in the formats each API takes: GIF too for the Gemini API" in {
+    val geminiEncode = GeminiParts.user(gemini)
+    Seq(MediaType.Png, MediaType.Jpeg, MediaType.WebP, MediaType.Gif).foreach(mt =>
+      geminiEncode.isDefinedAt(imageOf(mt)) shouldBe true
+    )
+    val vertexEncode =
+      GeminiParts.user(GeminiParts.vertexFileUri, GeminiParts.VertexDocumentTypes, GeminiParts.VertexImageTypes)
+    Seq(MediaType.Png, MediaType.Jpeg, MediaType.WebP).foreach(mt =>
+      vertexEncode.isDefinedAt(imageOf(mt)) shouldBe true
+    )
+    vertexEncode.isDefinedAt(imageOf(MediaType.Gif)) shouldBe false
+    Seq(MediaType.Bmp, MediaType.Tiff).foreach { mt =>
+      geminiEncode.isDefinedAt(imageOf(mt)) shouldBe false
+      vertexEncode.isDefinedAt(imageOf(mt)) shouldBe false
     }
   }
 
