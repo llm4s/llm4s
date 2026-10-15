@@ -214,7 +214,7 @@ class WorkspaceAgentInterfaceImpl(
    * The lock every mutating file operation holds, so a compare-and-set (`expectedHash`) is atomic against every other
    * file operation of this runner.
    */
-  private val mutationLock = new Object
+  private val fileLock = new java.util.concurrent.locks.ReentrantLock(true)
 
   /**
    * The gate between file mutations and commands, which write files too: a running command holds one permit, from
@@ -250,22 +250,27 @@ class WorkspaceAgentInterfaceImpl(
       case None    => releaseCommand()
     }
 
-  /** `body` with the file mutation lock and the whole command gate. */
-  private def mutating[A](body: => A): A = mutationLock.synchronized {
-    if (
-      !commandGate.tryAcquire(
-        WorkspaceAgentInterfaceImpl.GatePermits,
-        gateWait.toMillis,
-        TimeUnit.MILLISECONDS
-      )
-    )
-      throw new WorkspaceAgentException(
-        s"A command is running in the workspace; the file was not changed (waited $gateWait)",
+  /**
+   * `body` with the file lock and the whole command gate, both taken within one `gateWait` in all: a request queued
+   * behind another file operation or a command is refused (`WORKSPACE_BUSY`, having done nothing) rather than started
+   * after its client, whose deadline allows for one `gateWait`, has given up on it.
+   */
+  private def mutating[A](body: => A): A = {
+    val deadline  = System.nanoTime() + gateWait.toNanos
+    def remaining = math.max(0L, deadline - System.nanoTime())
+    def busy(what: String) =
+      new WorkspaceAgentException(
+        s"$what is in progress in the workspace; nothing was done (waited $gateWait)",
         "WORKSPACE_BUSY",
         None
       )
-    try body
-    finally commandGate.release(WorkspaceAgentInterfaceImpl.GatePermits)
+    if (!fileLock.tryLock(remaining, TimeUnit.NANOSECONDS)) throw busy("Another file operation")
+    try {
+      if (!commandGate.tryAcquire(WorkspaceAgentInterfaceImpl.GatePermits, remaining, TimeUnit.NANOSECONDS))
+        throw busy("A command")
+      try body
+      finally commandGate.release(WorkspaceAgentInterfaceImpl.GatePermits)
+    } finally fileLock.unlock()
   }
 
   /** The current [[FileSnapshotResponse.hash]] of `resolved`, its bytes read as a stream. */
