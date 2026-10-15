@@ -46,6 +46,9 @@ final private[runner] class ProcessRegistry(
   private val gate    = new Semaphore(ProcessRegistry.GatePermits, true)
   private val running = new ConcurrentHashMap[(AnyRef, String), RunningCommand]()
 
+  // set by killAll, under the registry's lock: from then on nothing is started, so no process outlives the runner
+  @volatile private var closed = false
+
   private def busy(what: String) =
     new WorkspaceAgentException(
       s"$what is in progress in the workspace; nothing was started (waited $gateWait)",
@@ -74,7 +77,8 @@ final private[runner] class ProcessRegistry(
       // start and register under the registry's lock, so killAll never misses a process between the two
       val started = synchronized {
         // one process per id and owner: a second would hide the first from cancellation
-        (if (running.containsKey((owner, commandId)))
+        (if (closed) scala.util.Failure(new IllegalStateException("The runner is shutting down"))
+         else if (running.containsKey((owner, commandId)))
            scala.util.Failure(new IllegalStateException(s"Command $commandId is already running"))
          else Try(start(builder))).map { process =>
           val entry = RunningCommand(
@@ -134,8 +138,11 @@ final private[runner] class ProcessRegistry(
   def killOwner(owner: AnyRef): Unit =
     running.values().asScala.filter(_.owner eq owner).toList.foreach(kill(_): Unit)
 
-  /** Kills every process (shutdown); each stays tracked until it exits. */
-  def killAll(): Unit = synchronized(running.values().asScala.toList).foreach(kill(_): Unit)
+  /**
+   * Kills every process (shutdown); each stays tracked until it exits. The registry is closed in the same step, so a
+   * command still waiting to start is refused, never started after the processes were collected.
+   */
+  def killAll(): Unit = synchronized { closed = true; running.values().asScala.toList }.foreach(kill(_): Unit)
 
   /** Every process still tracked. */
   def all: List[RunningCommand] = running.values().asScala.toList

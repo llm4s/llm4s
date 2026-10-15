@@ -543,11 +543,17 @@ class WorkspaceAgentInterfaceImpl(
    * (a write in any mode, a line edit) is staged in a temporary file beside it and moved into place, so a reader, a
    * crash or a client that gave up sees the old content or the new, never part of either. Immediately before the move,
    * the path must still lead to `target` through the same links and pass the path policy, `target` must still be
-   * `expected` when that is given, and the change must be within its deadline ([[ensureInTime]]). File operations and
+   * `expected` when that is given (and the path itself `expectedAtPath`), and the change must be within its deadline ([[ensureInTime]]). File operations and
    * this runner's commands cannot change it meanwhile (the mutation lock and the command gate); these checks catch a
    * writer outside the runner, up to the move itself, the one step no file system call can fence.
    */
-  private def commitStaged(path: String, target: Path, bytes: Array[Byte], expected: Option[String]): Unit = {
+  private def commitStaged(
+    path: String,
+    target: Path,
+    bytes: Array[Byte],
+    expected: Option[String],
+    expectedAtPath: Option[String] = None
+  ): Unit = {
     // created as an ordinary new file is (the process umask applies), not with a temporary file's fixed rw-------
     val temp = target.resolveSibling(s".llm4s-write-${java.util.UUID.randomUUID()}.tmp")
     Try {
@@ -570,6 +576,8 @@ class WorkspaceAgentInterfaceImpl(
         )
       checkPolicy(path, target, Access.Write)
       expected.foreach(checkExpected(path, target, _))
+      // and, when the change began at a link to nothing, the link itself: still that link, pointing where it did
+      expectedAtPath.foreach(checkExpected(path, resolvePath(path, Access.Write), _))
       ensureInTime(path)
       Files.move(
         temp,
@@ -706,7 +714,9 @@ class WorkspaceAgentInterfaceImpl(
           "SIZE_LIMIT_EXCEEDED",
           Some(s"Resulting size: ${staged.length} bytes")
         )
-      Try(commitStaged(path, target, staged, expected)).recover {
+      // a compare-and-set from a link to nothing compares the link too, as it was first compared, not only its target
+      val atPath = expectedHash.filter(Kind.isDangling)
+      Try(commitStaged(path, target, staged, expected, atPath)).recover {
         case e: WorkspaceAgentException if writeMode == "create" && e.code == "HASH_MISMATCH" =>
           throw new WorkspaceAgentException(s"File '$path' already exists and mode is 'create'", "FILE_EXISTS", None)
       }.get
