@@ -217,6 +217,9 @@ class WorkspaceBackendsSpec extends AnyFlatSpec with Matchers with EitherValues 
       "ws",
       new FakeWorkspace(exec = (_, _, _, _) => throw new WorkspaceAgentException("refused", code, None))
     ).value
+    BackendRefused.toolOutcome(
+      inCall(sandbox("CONNECTION_CLOSED").execute("ls", p("/"), 1.second, _)).left.value
+    ) shouldBe a[ToolOutcome.Fatal]
     inCall(sandbox("EXECUTABLE_NOT_ALLOWED").execute("curl x", p("/"), 1.second, _)).left.value shouldBe a[
       BackendRefused
     ]

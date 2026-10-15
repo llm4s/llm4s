@@ -81,7 +81,9 @@ final private[runner] class WebSocketCommandExecutor(
               Some(ex.getStackTrace.mkString("\n"))
             )
           case Success(process) =>
-            val running = RunningCommand(process, new AtomicBoolean(false), startTime, new AtomicBoolean(false))
+            // the timeout and duration count from the start of the process, not from before any wait for the gate
+            val running =
+              RunningCommand(process, new AtomicBoolean(false), System.currentTimeMillis(), new AtomicBoolean(false))
             processes.put(cmd.commandId, running)
             stream(cmd, prepared, running, processes, send, fail)
         }

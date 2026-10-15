@@ -55,6 +55,19 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     ws.fileSnapshot("dir/a.txt", includeContent = false) shouldBe snapshot.copy(content = None)
   }
 
+  it should "refuse a FIFO without opening it, as every file operation does" in {
+    assume(!isWindowsHost)
+    val fifo = root.resolve("pipe")
+    assume(new ProcessBuilder("mkfifo", fifo.toString).start().waitFor() == 0)
+    val ws = workspace()
+    code(ws.fileSnapshot("pipe")) shouldBe "NOT_A_FILE"
+    code(ws.fileSnapshot("pipe", includeContent = false)) shouldBe "NOT_A_FILE"
+    code(ws.readFile("pipe")) shouldBe "NOT_A_FILE"
+    code(ws.writeFile("pipe", "x")) shouldBe "NOT_A_FILE"
+    code(ws.writeFile("pipe", "x", expectedHash = Some("absent"))) shouldBe "NOT_A_FILE"
+    code(ws.modifyFile("pipe", List(InsertOperation(afterLine = 0, newContent = "z")))) shouldBe "NOT_A_FILE"
+  }
+
   it should "give the hash but no text for a file that is not UTF-8 or is over the size limit" in {
     Files.write(root.resolve("bin"), Array[Byte](0xff.toByte, 0xfe.toByte))
     val binary = workspace().fileSnapshot("bin")

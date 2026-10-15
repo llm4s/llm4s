@@ -221,10 +221,25 @@ class WorkspaceAgentInterfaceImpl(
    * The [[FileSnapshotResponse.hash]] of what `resolved` names, a link followed (to nothing, for a dangling one): a file
    * over `maxFileSize` is `oversized`, never read, so no snapshot or comparison reads more than the limit.
    */
+  /**
+   * Refuses (`NOT_A_FILE`) what is neither a directory nor a regular file - a FIFO, a socket, a device - before
+   * anything opens it: opening a FIFO with no writer would block, and every file operation reads through here.
+   */
+  private def refuseSpecial(path: String, resolved: Path): Unit =
+    if (Files.exists(resolved) && !Files.isDirectory(resolved) && !Files.isRegularFile(resolved))
+      throw new WorkspaceAgentException(
+        s"Path '$path' is not a regular file (a FIFO, socket or device); it is not read or written",
+        "NOT_A_FILE",
+        None
+      )
+
   private def currentHash(resolved: Path): String =
     if (!Files.exists(resolved)) FileSnapshotResponse.Kind.Absent
     else if (Files.isDirectory(resolved)) FileSnapshotResponse.Kind.Directory
-    else if (Files.size(resolved) > defaultLimits.maxFileSize) FileSnapshotResponse.Kind.Oversized
+    else if (!Files.isRegularFile(resolved)) {
+      refuseSpecial(rootPath.relativize(resolved).toString, resolved)
+      FileSnapshotResponse.Kind.Absent // not reached: refuseSpecial throws for what is neither a directory nor a file
+    } else if (Files.size(resolved) > defaultLimits.maxFileSize) FileSnapshotResponse.Kind.Oversized
     else {
       // read at most one byte past the limit, whatever the size said: a file growing while it is read is `oversized`
       val digest = java.security.MessageDigest.getInstance("SHA-256")
@@ -412,6 +427,7 @@ class WorkspaceAgentInterfaceImpl(
         None
       )
     }
+    refuseSpecial(path, resolvedPath)
 
     val fileSize = Files.size(resolvedPath)
     if (fileSize > defaultLimits.maxFileSize) {
@@ -466,6 +482,7 @@ class WorkspaceAgentInterfaceImpl(
     val resolvedPath = resolvePath(path)
     refuseGitMetadata(path, resolvedPath)
     refuseReadOnly(path, resolvedPath)
+    refuseSpecial(path, resolvedPath)
     val writeMode  = mode.getOrElse("overwrite")
     val createDirs = createDirectories.getOrElse(false)
 
@@ -628,6 +645,7 @@ class WorkspaceAgentInterfaceImpl(
       )
     }
 
+    refuseSpecial(path, resolvedPath)
     // the file it reads, and the file it leaves, are both within the size limit (#870)
     def tooLarge(size: Long, what: String) =
       new WorkspaceAgentException(
@@ -696,6 +714,7 @@ class WorkspaceAgentInterfaceImpl(
         response(Kind.Absent, Kind.Absent, 0L, None, None)
       else if (Files.isDirectory(resolved)) response(Kind.Directory, Kind.Directory, 0L, None, None)
       else {
+        refuseSpecial(path, resolved)
         val size = Files.size(resolved)
         if (!includeContent) response(Kind.File, currentHash(resolved), size, None, None)
         else if (size > defaultLimits.maxFileSize)

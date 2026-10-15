@@ -48,13 +48,32 @@ final class WorkspaceSandboxRunner private (val id: String, workspace: Workspace
       .flatMap {
         // the direct runner path reports a kill on timeout as an error; it ran, so it is an outcome
         case WorkspaceFailure(e) if e.code == "TIMEOUT" => Right(ExecResult(-1, "", e.error, truncated = false))
-        // EXECUTION_FAILED is the transport's, or a process whose fate is unknown: a failure, never a refusal
-        case WorkspaceFailure(e) if e.code != "EXECUTION_FAILED" =>
+        // only the runner's refusals before the process starts; any other code (the transport's, an unknown one) leaves
+        // the outcome unknown: a failure, so the task fails and the guard refuses an ambiguous replay
+        case WorkspaceFailure(e) if WorkspaceSandboxRunner.Refusals(e.code) =>
           Left(BackendRefused("execute", Text.quoted(command), s"${e.code}: ${e.error}"))
         case other => Left(other)
       }
 
 object WorkspaceSandboxRunner:
+
+  /** The runner's codes for a command it refused before starting it: nothing ran. */
+  private[workspace] val Refusals: Set[String] = Set(
+    "SHELL_DISABLED",
+    "INVALID_DIRECTORY",
+    "EMPTY_COMMAND",
+    "FORBIDDEN_CHARACTERS",
+    "EXECUTABLE_NOT_ALLOWED",
+    "EXECUTABLE_NOT_FOUND",
+    "EXECUTABLE_PATH_NOT_ALLOWED",
+    "ARGUMENT_NOT_ALLOWED",
+    "ENVIRONMENT_NOT_ALLOWED",
+    "GIT_CONFIG_NOT_ALLOWED",
+    "PATH_ESCAPE_ATTEMPT",
+    "PATH_NOT_ALLOWED",
+    "PATH_NOT_FOUND",
+    "INVALID_ARGUMENT"
+  )
 
   /** The runner over `workspace`, named `id` in lock keys. */
   def apply(id: String, workspace: WorkspaceAgentInterface): Result[WorkspaceSandboxRunner] =
