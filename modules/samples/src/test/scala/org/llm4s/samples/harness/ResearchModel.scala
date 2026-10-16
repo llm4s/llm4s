@@ -73,7 +73,8 @@ object ResearchModel {
             call(
               "read-page",
               "read_file",
-              "path"   -> path,
+              "path" -> path,
+              // read_file's offset is the 1-based line to start at, as the page's lines are numbered
               "offset" -> DeepResearch.KeyFactLine,
               "limit"  -> 1
             )

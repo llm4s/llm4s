@@ -102,7 +102,10 @@ object CodingWorkspaceExample {
     }
   }
 
-  /** Opens the same file in a fresh runtime, asks you about each pending command, and resumes the turn. */
+  /**
+   * Opens the same file in a fresh runtime, asks you about each pending command, and resumes the turn; again for each
+   * command the agent asks to run after that, until the turn ends.
+   */
   private def processTwo(
     client: LLMClient,
     workspace: ContainerisedWorkspace,
@@ -110,25 +113,33 @@ object CodingWorkspaceExample {
     asked: AgentResult
   ): Result[Unit] = {
     println("--- process 2: review, and resume in a fresh runtime ---")
-    val answers = asked.status match {
+    within(dir) { (store, memories) =>
+      CodingWorkspace.agent(client, GraphRuntime(store), workspace, memories.store).flatMap { coder =>
+        @annotation.tailrec
+        def reviewing(pending: AgentResult): Result[AgentResult] =
+          coder.agent.streamResume(thread, review(pending), config)(printing).flatMap(_.await()) match {
+            case Right(next) if next.status.isInstanceOf[AgentStatus.Suspended] => reviewing(next)
+            case other                                                          => other
+          }
+        reviewing(asked).map(result => println(s"\n\nResumed: ${result.status}"))
+      }
+    }
+  }
+
+  /** Your answer to each command `pending` waits on: approved only on `y`; anything else, or no answer, rejects it. */
+  private def review(pending: AgentResult): Map[InterruptId, ujson.Value] =
+    pending.status match {
       case AgentStatus.Suspended(approvals, _, _, _) =>
         approvals.map { (id, request) =>
           // the person decides: Ask is a review, never an allow
           print(s"\nThe agent asks to run: ${request.call.arguments.render()}\nApprove? [y/N] ")
           Option(StdIn.readLine()).map(_.trim.toLowerCase) match {
-            case Some("y") | Some("yes") => asked.approve(id)
-            case _                       => asked.reject(id, "the reviewer did not approve this command")
+            case Some("y") | Some("yes") => pending.approve(id)
+            case _                       => pending.reject(id, "the reviewer did not approve this command")
           }
         }.toMap
-      case _ => Map.empty[InterruptId, ujson.Value]
+      case _ => Map.empty
     }
-    within(dir) { (store, memories) =>
-      for {
-        coder  <- CodingWorkspace.agent(client, GraphRuntime(store), workspace, memories.store)
-        result <- coder.agent.streamResume(thread, answers, config)(printing).flatMap(_.await())
-      } yield println(s"\n\nResumed: ${result.status}")
-    }
-  }
 
   /** `body` over a store on the example's SQLite file and its memory files, both closed afterwards. */
   private def within[A](dir: Path)(body: (SqliteCheckpointer, MemoryFiles) => Result[A]): Result[A] =
