@@ -191,7 +191,7 @@ class WorkspaceAgentInterfaceRemote(handler: WorkspaceAgentCommand => WorkspaceA
     workingDirectory: Option[String] = None,
     timeout: Option[FiniteDuration] = None,
     environment: Option[Map[String, String]] = None,
-    maxOutputChars: Option[Long] = None
+    maxOutputBytes: Option[Long] = None
   ): ExecuteCommandResponse = {
     val cmd = ExecuteCommandCommand(
       commandId = generateCommandId(),
@@ -199,7 +199,7 @@ class WorkspaceAgentInterfaceRemote(handler: WorkspaceAgentCommand => WorkspaceA
       workingDirectory = workingDirectory,
       timeout = timeout,
       environment = environment,
-      maxOutputChars = maxOutputChars
+      maxOutputBytes = maxOutputBytes
     )
     handleCommand(cmd, classOf[ExecuteCommandResponse])
   }

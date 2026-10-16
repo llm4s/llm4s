@@ -566,7 +566,7 @@ class ContainerisedWorkspace(
     workingDirectory: Option[String] = None,
     timeout: Option[FiniteDuration] = None,
     environment: Option[Map[String, String]] = None,
-    maxOutputChars: Option[Long] = None
+    maxOutputBytes: Option[Long] = None
   ): ExecuteCommandResponse = {
     val cmd = ExecuteCommandCommand(
       commandId = java.util.UUID.randomUUID().toString,
@@ -574,7 +574,7 @@ class ContainerisedWorkspace(
       workingDirectory = workingDirectory,
       timeout = timeout,
       environment = environment,
-      maxOutputChars = maxOutputChars
+      maxOutputBytes = maxOutputBytes
     )
     sendCommand(cmd).asInstanceOf[ExecuteCommandResponse]
   }

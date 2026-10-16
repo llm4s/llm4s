@@ -26,7 +26,7 @@ import scala.util.{ Failure, Success, Try }
  *
  * @param workspace     checks and builds every command
  * @param maxOutputSize the most characters of each stream kept for the final `ExecuteCommandResponse`, and the upper
- *                      bound on a command's `maxOutputChars`; chunks stream regardless
+ *                      bound on a command's `maxOutputBytes`; chunks stream regardless
  */
 final private[runner] class WebSocketCommandExecutor(
   workspace: WorkspaceAgentInterfaceImpl,
@@ -166,7 +166,7 @@ final private[runner] class WebSocketCommandExecutor(
     val stdoutAccumulator = new StringBuilder()
     val stderrAccumulator = new StringBuilder()
     // the client's bound on each stream, never more than the runner's own
-    val limit = WebSocketCommandExecutor.outputLimit(cmd.maxOutputChars, maxOutputSize)
+    val limit = WebSocketCommandExecutor.outputLimit(cmd.maxOutputBytes, maxOutputSize)
 
     def streamOutput(
       outputType: String,
@@ -176,8 +176,8 @@ final private[runner] class WebSocketCommandExecutor(
       done: Promise[Unit]
     ): Unit =
       Future {
-        // decoded by a reader, so a character split across two reads is decoded whole, and kept by characters:
-        // at most `limit` of them, whatever the output's lines, while the rest is read and discarded
+        // decoded by a reader, so a character split across two reads is decoded whole, and kept by its encoded bytes:
+        // at most `limit` of them (and so of characters), whatever the output's lines, the rest read and discarded
         val reader    = new java.io.InputStreamReader(stream, StandardCharsets.UTF_8)
         val buffer    = new Array[Char](8192)
         var charsRead = 0
@@ -189,9 +189,9 @@ final private[runner] class WebSocketCommandExecutor(
             charsRead != -1
           }) {
             send(StreamingOutputMessage(cmd.commandId, outputType, new String(buffer, 0, charsRead)))
-            val take = math.min(math.max(limit - captured, 0L), charsRead.toLong).toInt
+            val (take, used) = WebSocketCommandExecutor.fitting(buffer, charsRead, math.max(limit - captured, 0L))
             accumulator.appendAll(buffer, 0, take)
-            captured += take
+            captured += used
             if (take < charsRead) truncated.set(true)
           }
         catch {
@@ -362,6 +362,39 @@ private[runner] object WebSocketCommandExecutor {
   val ReleaseWait: FiniteDuration = ProcessRegistry.KillWait * 2
 
   /** The most characters of each stream a command keeps: what it asked for, within `0..runnerMax`. */
+  /**
+   * The bytes a code point takes in the JSON a command's output is carried and recorded in, UTF-8 and escaped as a
+   * JSON string escapes it: what an output bound is measured in, so a bound of `n` keeps at most `n` such bytes (and
+   * so at most `n` characters).
+   */
+  def encodedWidth(cp: Int): Int =
+    if (cp == '"' || cp == '\\' || cp == '\n' || cp == '\r' || cp == '\t' || cp == '\b' || cp == '\f') 2
+    else if (cp < 0x20 || (cp >= 0xd800 && cp <= 0xdfff)) 6
+    else if (cp < 0x80) 1
+    else if (cp < 0x800) 2
+    else if (cp < 0x10000) 3
+    else 4
+
+  /**
+   * How many of `buffer`'s first `n` characters fit in `budget` encoded bytes, never splitting a surrogate pair, and
+   * the bytes they take.
+   */
+  def fitting(buffer: Array[Char], n: Int, budget: Long): (Int, Long) = {
+    var i    = 0
+    var used = 0L
+    var full = false
+    while (!full && i < n) {
+      val cp    = Character.codePointAt(buffer, i, n)
+      val width = encodedWidth(cp)
+      if (used + width > budget) full = true
+      else {
+        used += width
+        i += Character.charCount(cp)
+      }
+    }
+    (i, used)
+  }
+
   def outputLimit(requested: Option[Long], runnerMax: Long): Long =
     requested.fold(runnerMax)(r => math.min(math.max(r, 0L), runnerMax))
 }

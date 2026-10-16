@@ -124,8 +124,9 @@ trait WorkspaceAgentInterface {
    * @param workingDirectory Working directory (default: workspace root)
    * @param timeout Timeout (default: the sandbox's `defaultCommandTimeout`)
    * @param environment Environment variables
-   * @param maxOutputChars The most characters of each of stdout and stderr to keep (default and upper bound: the
-   *                       workspace's `maxOutputSize`); the rest is read and discarded, and `isOutputTruncated` set
+   * @param maxOutputBytes The most bytes of each of stdout and stderr to keep, measured as the output is carried (UTF-8,
+   *                       JSON-escaped; so also at most that many characters). Default and upper bound: the
+   *                       workspace's `maxOutputSize`; the rest is read and discarded, and `isOutputTruncated` set
    * @return Response with command execution result
    */
   def executeCommand(
@@ -133,7 +134,7 @@ trait WorkspaceAgentInterface {
     workingDirectory: Option[String] = None,
     timeout: Option[FiniteDuration] = None,
     environment: Option[Map[String, String]] = None,
-    maxOutputChars: Option[Long] = None
+    maxOutputBytes: Option[Long] = None
   ): ExecuteCommandResponse
 
   /**

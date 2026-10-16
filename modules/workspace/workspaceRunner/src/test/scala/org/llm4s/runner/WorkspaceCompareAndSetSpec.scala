@@ -478,14 +478,21 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     small.fileSnapshot("a.txt").content shouldBe Some("abcd")
   }
 
-  "A command's output" should "be kept to the characters asked for, the rest read and discarded" in {
+  "A command's output" should "be kept to the bytes asked for, the rest read and discarded" in {
     assume(!isWindowsHost)
     Files.write(root.resolve("long.txt"), ("y" * 50000).getBytes(StandardCharsets.UTF_8)) // one line, no newline
-    val response = workspace().executeCommand("cat long.txt", maxOutputChars = Some(10L))
+    val response = workspace().executeCommand("cat long.txt", maxOutputBytes = Some(10L))
     response.stdout shouldBe "y" * 10
     response.isOutputTruncated shouldBe true
     WebSocketCommandExecutor.outputLimit(Some(10L), 5L) shouldBe 5L
     WebSocketCommandExecutor.outputLimit(Some(-1L), 5L) shouldBe 0L
     WebSocketCommandExecutor.outputLimit(None, 5L) shouldBe 5L
+    // measured as it is carried: four-byte characters fill the bound four times as fast, and a pair is never split
+    val wide = "\uD83D\uDE00" * 4 // four emoji, 16 bytes
+    Files.write(root.resolve("wide.txt"), wide.getBytes(StandardCharsets.UTF_8))
+    val bounded = workspace().executeCommand("cat wide.txt", maxOutputBytes = Some(9L))
+    bounded.stdout shouldBe "\uD83D\uDE00" * 2
+    bounded.isOutputTruncated shouldBe true
+    WebSocketCommandExecutor.fitting("a\"b".toCharArray, 3, 3L) shouldBe ((2, 3L)) // the quote is two
   }
 }

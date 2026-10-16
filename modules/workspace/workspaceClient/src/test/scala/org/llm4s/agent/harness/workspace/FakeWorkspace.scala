@@ -216,8 +216,8 @@ final class FakeWorkspace(
     workingDirectory: Option[String],
     timeout: Option[FiniteDuration],
     environment: Option[Map[String, String]],
-    maxOutputChars: Option[Long]
-  ): ExecuteCommandResponse = exec(command, workingDirectory, timeout, maxOutputChars)
+    maxOutputBytes: Option[Long]
+  ): ExecuteCommandResponse = exec(command, workingDirectory, timeout, maxOutputBytes)
 
   def getWorkspaceInfo(): GetWorkspaceInfoResponse =
     GetWorkspaceInfoResponse("local", "/workspace", Nil, WorkspaceLimits(maxFileSize, maxEntries, 100, 1024L * 1024L))

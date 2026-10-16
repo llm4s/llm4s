@@ -134,7 +134,7 @@ class WorkspaceAgentInterfaceTest extends AnyFlatSpec with Matchers with OptionV
       WriteFileCommand("1", "a", "x")
     without(FileSnapshotCommand("1", "a", includeContent = false), "includeContent") shouldBe
       FileSnapshotCommand("1", "a", includeContent = true)
-    without(ExecuteCommandCommand("1", "ls", maxOutputChars = Some(5L)), "maxOutputChars") shouldBe
+    without(ExecuteCommandCommand("1", "ls", maxOutputBytes = Some(5L)), "maxOutputBytes") shouldBe
       ExecuteCommandCommand("1", "ls")
     val snapshot = FileSnapshotResponse("1", "a", "file", FileSnapshotResponse.hashOf("x".getBytes("UTF-8")), 1L)
     read[WorkspaceAgentResponse](upickle.default.write[WorkspaceAgentResponse](snapshot)) shouldBe snapshot

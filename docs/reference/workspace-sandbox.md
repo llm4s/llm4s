@@ -690,8 +690,8 @@ Run the containerized runner with locked sandbox:
 - **Done** ([#1906](https://github.com/llm4s/llm4s/issues/1906)): the runner refuses any file operation, and a command's
   working directory, outside `allowedPaths` (`PATH_NOT_ALLOWED`), and any mutation (`writeFile`, `modifyFile`,
   `deleteFile`) under `readOnlyPaths` (`PATH_READ_ONLY`). A write over `maxFileSize` is `SIZE_LIMIT_EXCEEDED`, and a
-  command keeps at most `maxOutputSize` characters of each stream (or the client's smaller `maxOutputChars`) while it
-  reads, whatever its lines.
+  command keeps at most `maxOutputSize` bytes of each stream, UTF-8 and JSON-escaped (or the client's smaller
+  `maxOutputBytes`), while it reads, whatever its lines.
 - **Open** ([#870](https://github.com/llm4s/llm4s/issues/870)): `networkAllowed` is documentation only, and a
   command's path arguments are checked against the workspace (the command policy), not against `allowedPaths`.
 - **Compare-and-set.** `fileSnapshot(path)` returns what is at a path with the SHA-256 of its bytes (`sha256:<hex>`,

@@ -39,7 +39,7 @@ final class WorkspaceSandboxRunner private (val id: String, workspace: Workspace
           Some(WorkspaceCalls.relative(workdir)),
           Some(timeout),
           None,
-          // a character is at least one byte of the recorded JSON, so this many characters bound it
+          // the runner bounds each stream by its encoded (JSON, UTF-8) bytes, so the budget holds while it captures
           Some(maxOutputBytes.toLong)
         )
       )

@@ -1836,13 +1836,13 @@ class WorkspaceAgentInterfaceImpl(
     workingDirectory: Option[String] = None,
     timeout: Option[FiniteDuration] = None,
     environment: Option[Map[String, String]] = None,
-    maxOutputChars: Option[Long] = None
+    maxOutputBytes: Option[Long] = None
   ): ExecuteCommandResponse = {
     val prepared =
       prepareCommand(command, workingDirectory, timeout, environment).fold(refused => throw refused, identity)
     val builder   = prepared.builder
     val timeoutMs = org.llm4s.shared.WireDurations.toWholeMillis(prepared.timeout)
-    val limit     = WebSocketCommandExecutor.outputLimit(maxOutputChars, defaultLimits.maxOutputSize)
+    val limit     = WebSocketCommandExecutor.outputLimit(maxOutputBytes, defaultLimits.maxOutputSize)
 
     val stdout          = new StringBuilder
     val stderr          = new StringBuilder
@@ -1860,11 +1860,13 @@ class WorkspaceAgentInterfaceImpl(
       new Thread(() => {
         val reader = new java.io.InputStreamReader(stream, Charset.defaultCharset())
         try {
-          val buffer = new Array[Char](8192)
-          var n      = reader.read(buffer)
+          val buffer   = new Array[Char](8192)
+          var captured = 0L // in encoded bytes, as the WebSocket path bounds it
+          var n        = reader.read(buffer)
           while (n != -1) {
-            val take = math.min(math.max(limit - into.length, 0L), n.toLong).toInt
+            val (take, used) = WebSocketCommandExecutor.fitting(buffer, n, math.max(limit - captured, 0L))
             into.appendAll(buffer, 0, take)
+            captured += used
             if (take < n) truncated.set(true)
             n = reader.read(buffer)
           }

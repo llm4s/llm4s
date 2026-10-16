@@ -294,8 +294,9 @@ case class ExecuteCommandCommand(
   workingDirectory: Option[String] = None,
   timeout: Option[FiniteDuration] = None,
   environment: Option[Map[String, String]] = None,
-  // The most characters of each of stdout and stderr the runner keeps; its own maxOutputSize bounds it too.
-  maxOutputChars: Option[Long] = None
+  // The most bytes of each of stdout and stderr the runner keeps, UTF-8 and JSON-escaped; its own maxOutputSize bounds
+  // it too.
+  maxOutputBytes: Option[Long] = None
 ) extends WorkspaceAgentCommand
 
 object ExecuteCommandCommand {
