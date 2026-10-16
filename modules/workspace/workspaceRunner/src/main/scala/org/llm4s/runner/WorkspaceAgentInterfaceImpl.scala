@@ -296,7 +296,8 @@ class WorkspaceAgentInterfaceImpl(
     if (!Files.exists(resolved))
       // a link to nothing is an entry of its own, which a delete removes: it is not the absence of one
       if (Files.isSymbolicLink(resolved))
-        FileSnapshotResponse.Kind.danglingHash(Files.readSymbolicLink(resolved).toString)
+        // by the missing place the whole chain of links ends at: a link further along retargeted is another state
+        FileSnapshotResponse.Kind.danglingHash(effective(resolved).toString)
       else FileSnapshotResponse.Kind.Absent
     else if (Files.isDirectory(resolved)) FileSnapshotResponse.Kind.Directory
     else if (!Files.isRegularFile(resolved)) {
@@ -1104,7 +1105,7 @@ class WorkspaceAgentInterfaceImpl(
       else if (!Files.exists(resolved) && Files.isSymbolicLink(resolved))
         response(
           Kind.Dangling,
-          Kind.danglingHash(Files.readSymbolicLink(resolved).toString),
+          Kind.danglingHash(effective(resolved).toString), // where the whole chain ends, as currentHash
           0L,
           None,
           Some("a link to something that does not exist")

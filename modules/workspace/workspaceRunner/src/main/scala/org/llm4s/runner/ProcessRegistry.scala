@@ -147,8 +147,12 @@ final private[runner] class ProcessRegistry(
             // until none is left
             // Never released while anything found is alive. Past `SettleRounds` generations the command is reported
             // once, and each further round waits a second first, so the sweeps never spin
-            def settle(pending: List[ProcessHandle], round: Int): Unit =
-              if (pending.isEmpty) done()
+            // An empty look is confirmed by a second before the release: a member that forked and exited while the
+            // first read `/proc` leaves its child for the second to find
+            def settle(pending: List[ProcessHandle], round: Int, confirmed: Boolean = false): Unit =
+              if (pending.isEmpty)
+                if (confirmed) done()
+                else settle(groupOf(entry).filter(_.isAlive), round, confirmed = true)
               else {
                 if (round == ProcessRegistry.SettleRounds)
                   logger.error(s"Command $commandId: its processes keep forking while killed; it holds the gate")

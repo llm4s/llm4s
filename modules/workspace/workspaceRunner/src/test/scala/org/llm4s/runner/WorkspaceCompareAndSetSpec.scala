@@ -74,7 +74,7 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     val ws = workspace()
     ws.fileSnapshot("gone").kind shouldBe "dangling"
     ws.fileSnapshot("gone").hash shouldBe
-      FileSnapshotResponse.Kind.danglingHash(root.resolve("missing-target").toString)
+      FileSnapshotResponse.Kind.danglingHash(root.toRealPath().resolve("missing-target").toString)
     // a delete compares the link as itself
     ws.deleteFile("gone", Some(ws.fileSnapshot("gone", followLinks = false).hash)).wasDirectory shouldBe false
     Files.exists(root.resolve("gone"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
@@ -93,6 +93,14 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     Files.createSymbolicLink(root.resolve("deeplink"), root.resolve("made/for/file"))
     ws.writeFile("deeplink", "y", createDirectories = Some(true)).success shouldBe true
     ws.fileSnapshot("made/for/file").content shouldBe Some("y")
+    // a chain of links to nothing is known by where it ends: a link along it retargeted is another state
+    Files.createSymbolicLink(root.resolve("hop"), root.resolve("missing-1"))
+    Files.createSymbolicLink(root.resolve("chain"), root.resolve("hop"))
+    val chained = ws.fileSnapshot("chain").hash
+    Files.delete(root.resolve("hop"))
+    Files.createSymbolicLink(root.resolve("hop"), root.resolve("missing-2"))
+    code(ws.writeFile("chain", "z", expectedHash = Some(chained))) shouldBe "HASH_MISMATCH"
+    Files.exists(root.resolve("missing-2")) shouldBe false
   }
 
   it should "delete the entry the path physically names, compared where it is" in {
