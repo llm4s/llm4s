@@ -10,10 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- The net change since 0.5.1, by area. Add an entry to its area's list; a follow-up to unreleased work edits
      its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
 
+### Breaking changes
+
+- `WorkspaceTools` is removed (use `FileTools` over `WorkspaceFileBackend` and `ExecuteTool`); `WorkspaceAgentInterface` gains `fileSnapshot`, `deleteFile` and compare-and-set writes; the runner enforces
+  `allowedPaths`/`readOnlyPaths`; [migration](docs/reference/migration.md#workspace-backends-1906).
+
 ### Agent harness (Phase 3)
 
+- **Added** workspace backends: `WorkspaceFileBackend` (`Verifiable`, compare-and-set in the runner), `WorkspaceSandboxBackend`
+  and the `execute` tool; `WorkspaceTools` **removed**, `CodeWorker` on the new tools [#1906](https://github.com/llm4s/llm4s/issues/1906); [design 4.33](docs/design/typed-agent-runtime/4.33-stage-3-slice-f2-workspace-backends.md).
 - **Added** the exit examples, `DeepResearchExample` and `CodingWorkspaceExample` with acceptance suites on a scripted model, and
   `StaticFileBackend` (read-only application files, e.g. skills) [#1916](https://github.com/llm4s/llm4s/issues/1916); [design §4.38](docs/design/typed-agent-runtime/4.38-stage-3-slice-p2-exit-examples.md).
+
+### Build & tooling
+
+- **Fixed** `llm4s-kotlin-api` is published, first in 0.5.2: the release's version check now reads sbt's tab-indented
+  version, which left Kotlin out of 0.5.0 and 0.5.1.
 
 ## [0.5.1] - 2026-10-15
 
@@ -23,13 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [migration](docs/reference/migration.md#harness-profile-and-middleware-placement-1915).
 - `UserMessage`/`ToolMessage` carry `parts` and have no extractor; `ToolOutcome.Success` takes a `ToolContent`;
   [migration](docs/reference/migration.md#multimodal-content-parts-1913).
-- `WorkspaceTools` is removed (use `FileTools` over `WorkspaceFileBackend` and `ExecuteTool`); `WorkspaceAgentInterface` gains `fileSnapshot`, `deleteFile` and compare-and-set writes; the runner enforces
-  `allowedPaths`/`readOnlyPaths`; [migration](docs/reference/migration.md#workspace-backends-1906).
 
 ### Agent harness (Phase 3)
 
-- **Added** workspace backends: `WorkspaceFileBackend` (`Verifiable`, compare-and-set in the runner), `WorkspaceSandboxBackend`
-  and the `execute` tool; `WorkspaceTools` **removed**, `CodeWorker` on the new tools [#1906](https://github.com/llm4s/llm4s/issues/1906); [design 4.33](docs/design/typed-agent-runtime/4.33-stage-3-slice-f2-workspace-backends.md).
 - **Added** the harness profile: `HarnessProfile` (`deepAgents` preset, `HarnessConfigLoader`) installed by `AgentBuilder.withHarness`, and
   `RunConfig.withRetention`, and middleware ordering checked at `build()` (`AgentMiddleware.placement`) [#1915](https://github.com/llm4s/llm4s/issues/1915); [design §4.37](docs/design/typed-agent-runtime/4.37-stage-3-slice-p1-harness-profile.md), [guide](docs/guide/agents/index.md#harness-profile).
 - **Added** instruction memory: `InstructionMemoryMiddleware` shows `AGENTS.md` files read through a `FileBackend`
@@ -48,8 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
-- **Fixed** `llm4s-kotlin-api` is published, first in 0.5.1: the release's version check read a terminal escape as
-  sbt's version, so 0.5.0 shipped without it and `llm4s-bom` 0.5.0's Kotlin entry does not resolve.
+- **Changed** the release's version check strips terminal escapes. `llm4s-kotlin-api` still did not ship in 0.5.1 (the
+  check missed sbt's tab-indented version), so `llm4s-bom` 0.5.1's Kotlin entry does not resolve either.
 
 ## [0.5.0] - 2026-10-15
 

@@ -126,7 +126,8 @@ jobs:
           # something like 0.4.0+3-abc1234-SNAPSHOT, which is NOT resolvable from
           # Maven Central. It is fine to display, but must never appear in an
           # install snippet.
-          VERSION=$(sbt -no-colors 'print version' | tail -1 | tr -d '\n')
+          # `print` indents the value with a tab and may end with a terminal escape: keep the trimmed version line.
+          VERSION=$(sbt -batch -no-colors -error 'print version' | sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -E '^[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+' | tail -1 | tr -d '[:space:]')
 
           # Latest published release, from the GitHub Releases API. Install snippets use
           # this, and it is deliberately NOT `git describe`: a tag exists from the moment

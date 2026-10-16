@@ -113,7 +113,7 @@ llm4s/
 │   ├── llm4s-pekko/           # Apache Pekko Streams Sources over LLMClient.streamComplete and Agent runs (published)
 │   ├── java-api/              # Java facade over the client and agent (published)
 │   ├── spring-boot-starter/   # Spring Boot auto-configuration on java-api (published)
-│   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.5.1
+│   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.5.2
 │   ├── samples/               # Usage examples
 │   ├── deploy-service/        # /health and /llm-check service + image for the staged-deployment template (unpublished)
 │   ├── workspace/             # Containerized execution

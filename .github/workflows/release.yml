@@ -90,9 +90,10 @@ jobs:
       - name: Check sbt released the tag's version
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          # Strip ANSI escapes and keep the version line: on the runner sbt's last line can be a bare `ESC[0J`,
-          # which failed 0.5.0's publish-kotlin with "sbt's version is ''".
-          SBT_VERSION="$(sbt -batch -no-colors -error 'print ThisBuild / version' | sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | tail -1 | tr -d '[:space:]')"
+          # `print` writes `<project> / version` then the value on its own line, indented with a tab (`\t0.5.1`), and
+          # on the runner the last line can be a bare `ESC[0J`. Strip escapes, keep the last version line, trim it:
+          # reading the last line failed 0.5.0's publish-kotlin, and a `^[0-9]` match failed 0.5.1's.
+          SBT_VERSION="$(sbt -batch -no-colors -error 'print ThisBuild / version' | sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -E '^[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+' | tail -1 | tr -d '[:space:]')"
           if [ "$SBT_VERSION" != "$VERSION" ]; then
             echo "sbt's version is '$SBT_VERSION', the tag's is '$VERSION': the Kotlin artifact would not match the release."
             exit 1
