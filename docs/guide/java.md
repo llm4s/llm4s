@@ -43,10 +43,11 @@ not for you either: each takes a first parameter of a type only the package can 
 `Llm4s.wrapClient(client)`; a Scala `EmbeddingClient`, with `Llm4s.wrapEmbeddingClient(client, model)`.
 
 {: .note }
-> `llm4s-java-api` is published from `0.5.0` on. The
-> [`gradle-java` sample](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java) is a complete Java
-> project you can copy. Which JDK is the minimum is not settled (CI runs JDK 21 only today): follow
-> [#1493](https://github.com/llm4s/llm4s/issues/1493).
+> `llm4s-java-api` is on Maven Central from `0.5.0` on; the current release is {{ site.data.project.latest_release }}.
+> The [`gradle-java` sample](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java) is a complete Java
+> project you can copy. It needs **JDK 21**: it depends on `llm4s-agent`, which is compiled for JDK 21 and starts
+> virtual threads (see [Scala and JDK support](/reference/v1-scope#scala-and-jdk-support)). Whether some artifacts get a
+> lower floor before 1.0 is tracked in [#1493](https://github.com/llm4s/llm4s/issues/1493).
 
 ## Add the dependency
 

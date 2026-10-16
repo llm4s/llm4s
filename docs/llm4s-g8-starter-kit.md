@@ -39,13 +39,20 @@ sbt new llm4s/llm4s.g8 \
 --name=llm4s-template \
 --package=org.llm4s.template \
 --version=0.1.0 \
---llm4s_version=0.3.2 \
+--llm4s_version=0.5.1 \
 --scala_version=3.7.1 \
 --munit_version=1.1.1 \
 --directory=org.llm4s.template \
 --force
 ```
 in the folder where you want to clone the template.
+
+> **Version note:** since 0.5.0 `llm4s-core` ships no provider client, so the generated `build.sbt` needs `llm4s-core`
+> and at least one provider module at the same version. The template is being moved to 0.5.x
+> ([llm4s.g8#6](https://github.com/llm4s/llm4s.g8/pull/6)): that version adds `llm4s-ollama` and `llm4s-openai`
+> itself and makes a local Ollama section the default. A template from before it defaults to llm4s 0.4.0 and adds
+> `llm4s-core` only, so pass `--llm4s_version=0.5.1` and add the provider you use (for example `llm4s-openai` at
+> 0.5.1); without it, loading the `openai-main` section fails because no module registers the `openai` provider.
 
 Template usage (with local template): to create a project
 --------------
@@ -56,7 +63,7 @@ sbt new file:///<absolute-path>/llm4s/llm4s.g8 \
 --name=llm4s-template \
 --package=org.llm4s.template \
 --version=0.1.0 \
---llm4s_version=0.3.2 \
+--llm4s_version=0.5.1 \
 --scala_version=3.7.1 \
 --munit_version=1.1.1 \
 --directory=org.llm4s.template \
@@ -72,8 +79,9 @@ Run the app
    ```
    `llm4s-openai` binds it to OpenAI's shared key, `llm4s.credentials.openai.apiKey`, which the
    generated project's `openai-main` named provider section in
-   `src/main/resources/application.conf` uses; that section is also the default (`llm4s.providers.provider`,
-   overridable with the template's own `LLM4S_PROVIDER` binding). To use another provider,
+   `src/main/resources/application.conf` uses. Make it the default with the template's own `LLM4S_PROVIDER`
+   binding (`export LLM4S_PROVIDER=openai-main`) if it is not already (the 0.5.x template defaults to a local
+   Ollama section, which needs no key). To use another provider,
    uncomment its section there. See the
    [configuration guide](getting-started/configuration.md#named-provider-sections).
 

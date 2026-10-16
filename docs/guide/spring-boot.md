@@ -39,8 +39,10 @@ Spring Boot 4 is not supported yet; whether it needs its own artifact, as LangCh
 [#1467](https://github.com/llm4s/llm4s/issues/1467).
 
 {: .note }
-> `llm4s-spring-boot-starter` is published from `0.5.0` on, together with the Java API it is built on. Which JDK is
-> the minimum is not settled yet: follow [#1493](https://github.com/llm4s/llm4s/issues/1493).
+> `llm4s-spring-boot-starter` is on Maven Central from `0.5.0` on, together with the Java API it is built on; the
+> current release is {{ site.data.project.latest_release }}. It needs **JDK 21**, like the Java API (see
+> [Scala and JDK support](/reference/v1-scope#scala-and-jdk-support)); whether some artifacts get a lower floor before
+> 1.0 is tracked in [#1493](https://github.com/llm4s/llm4s/issues/1493).
 
 ## Add the dependency
 

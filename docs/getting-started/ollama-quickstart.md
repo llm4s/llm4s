@@ -36,8 +36,8 @@ Perfect for **development**, **testing**, and **production** workloads where pri
 ## Prerequisites
 
 - **JDK 21**
-- **Scala 3.7.1**
-- **SBT 1.10.6+**
+- **Scala 3.7.x** (llm4s {{ site.data.project.latest_release }} is built with 3.7.1)
+- **sbt 1.10.6+**
 - **4-8GB RAM** (depending on model size)
 
 No API keys needed! 🎉
@@ -45,10 +45,16 @@ No API keys needed! 🎉
 Ollama support ships in its own artifact, alongside `llm4s-core`:
 
 ```scala
-libraryDependencies += "org.llm4s" %% "llm4s-ollama" % llm4sVersion
+val llm4sVersion = "{{ site.data.project.latest_release }}"
+
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core"   % llm4sVersion,
+  "org.llm4s" %% "llm4s-ollama" % llm4sVersion,
+  "org.llm4s" %% "llm4s-agent"  % llm4sVersion  // only for the agent under "Tool Calling"
+)
 ```
 
-Adding it registers the provider; there is nothing else to wire up. Before 0.5.0, Ollama was
+Adding `llm4s-ollama` registers the provider; there is nothing else to wire up. Before 0.5.0, Ollama was
 part of `llm4s-core`. See the
 [installation guide](installation.md#for-ollama-local-models).
 

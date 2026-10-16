@@ -4,8 +4,9 @@
 # The hash is printed by `sbt docSnippetsReport`; editing a skipped block makes its entry stale and fails the build.
 getting-started/configuration.md | a87b6dca4f | skip | sbt build definition, not Scala source
 getting-started/configuration.md | 710572c7c5 | skip | sbt build definition, not Scala source
-getting-started/ollama-quickstart.md | 7eb63d2dc1 | skip | sbt build definition, not Scala source
+getting-started/ollama-quickstart.md | 546e0e227c | skip | sbt build definition, not Scala source
 getting-started/ollama-quickstart.md | b523e171b9 | skip | sbt build definition, not Scala source
+getting-started/first-example.md | 9beb2bb95c | skip | sbt build definition, not Scala source
 getting-started/first-example.md | a984c0ef30 | skip | three lines of a for-comprehension shown on their own: they are the generators of the full example above
 getting-started/configuration.md | c54b304c14 | with | import org.llm4s.config.Llm4sConfig
 getting-started/configuration.md | 7b6f72222c | with | import org.llm4s.llmconnect.model._

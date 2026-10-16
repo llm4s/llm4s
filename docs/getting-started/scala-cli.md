@@ -159,8 +159,12 @@ The wording depends on the model.
 
 ## If something goes wrong
 
-**`ConfigurationError: OpenAI provider 'openai-main' is missing required fields:`** followed by `apiKey`: the key
-is not set in the shell that runs `scala-cli`. Check `echo $OPENAI_API_KEY`, or use the Ollama command above.
+**`Error: ConfigurationError: Provider 'openai-main' (provider = openai) is missing required fields:`** followed by
+`- apiKey: set OPENAI_API_KEY, or set apiKey under llm4s.providers.openai-main in application.conf`: the key is not set
+in the shell that runs `scala-cli`. Check `echo $OPENAI_API_KEY`, or use the Ollama command above.
+
+**`Error: NetworkError: POST http://localhost:11434/api/chat: connection failed`** (the Ollama run): no Ollama server
+is listening. Start it with `ollama serve`, or point `OLLAMA_BASE_URL` at the one you have.
 
 **A wall of `DEBUG` lines before the answer**: `logback.xml` was not found. Run from the directory that
 contains it, and check the name and the `javaOpt` line.

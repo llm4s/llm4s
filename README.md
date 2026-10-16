@@ -161,6 +161,30 @@ To get started with the LLM4S project, check out this teaser talk presented by *
 
 <br>
 
+### Use LLM4S in your project
+
+LLM4S is on Maven Central; the current release is **0.5.1**, for Scala 3.7.x (built with 3.7.1) on JDK 21.
+`llm4s-core` holds no provider client, so add the module of the provider you call next to it:
+
+```scala
+// build.sbt
+ThisBuild / scalaVersion := "3.7.1"
+
+val llm4sVersion = "0.5.1"
+
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core"   % llm4sVersion,
+  "org.llm4s" %% "llm4s-openai" % llm4sVersion  // or llm4s-anthropic, llm4s-gemini, llm4s-ollama, ...
+)
+```
+
+Providers are named sections in your `application.conf` (see [Setup your LLM Environment](#setup-your-llm-environment)).
+To start from a generated project instead, use the [starter kit](#usage-using-starter-kit-llm4sg8). The
+[installation guide](https://llm4s.org/getting-started/installation) has Maven, Gradle, the BOM (`llm4s-bom`) and
+every optional module; the [Scala CLI quick start](https://llm4s.org/getting-started/scala-cli) makes a first call
+from a single file, and [first steps](https://llm4s.org/getting-started/first-example) walks through the API.
+The sections below, from pre-commit hooks to the containerised demo, are for working on LLM4S itself.
+
 ### Setting Up Pre-commit Hooks
 
 To ensure code quality, we use a Git pre-commit hook that automatically checks code formatting and runs tests before allowing commits:
@@ -286,7 +310,7 @@ sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ### Run containerized demo
 
 ```bash
-sbt docker:publishLocal
+sbt workspaceRunner/Docker/publishLocal
 sbt "workspaceSamples/runMain org.llm4s.samples.workspace.ContainerisedWorkspaceDemo"
 ```
 
@@ -443,7 +467,7 @@ sbt new llm4s/llm4s.g8 \
 --name=<your.project.name> \
 --package=<your.organization> \
 --version=<your.project.version> \
---llm4s_version=0.3.2 \
+--llm4s_version=0.5.1 \
 --scala_version=3.7.1 \
 --munit_version=1.1.1 \
 --directory=<your.project.name> \
@@ -451,6 +475,12 @@ sbt new llm4s/llm4s.g8 \
 ```
 
 to create new project.
+
+Since 0.5.0 `llm4s-core` ships no provider, so the generated `build.sbt` needs `llm4s-core` and at least one provider
+module at the same version. The template is being moved to 0.5.x
+([llm4s.g8#6](https://github.com/llm4s/llm4s.g8/pull/6)), which adds `llm4s-ollama` and `llm4s-openai` itself; a
+template from before that lists `llm4s-core` only (and defaults to llm4s 0.4.0 if you leave out `--llm4s_version`),
+so add the provider you use, for example `llm4s-openai` at 0.5.1.
 
 For more information about the template, including compatibility matrix and documentation, visit the [template repository](https://github.com/llm4s/llm4s.g8).
 Use the comprehensive [documentation](docs/llm4s-g8-starter-kit.md) to get started with the project using starter kit.
