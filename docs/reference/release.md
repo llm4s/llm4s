@@ -260,9 +260,8 @@ need a maintainer:
 ## Release readiness: a MiMa dry run
 
 `mimaBaselineVersion` in `build.sbt` is `None`, so `sbt mimaReportBinaryIssues` compiles the build and checks
-nothing ([The Baseline](api-stability#the-baseline)). 0.5.0 is the release that sets it
-([#1281](https://github.com/llm4s/llm4s/issues/1281)), and MiMa cannot run before a release exists to compare
-with. `scripts/mima-dry-run.sh` does those steps early, against a throwaway version, to show that they will work:
+nothing ([The Baseline](api-stability#the-baseline)). It is set at a pre-1.0 release, version to be decided, once
+the designs are final ([#1281](https://github.com/llm4s/llm4s/issues/1281)); 0.5.0 sets none. `scripts/mima-dry-run.sh` does those steps early, against a throwaway version, to show that they will work:
 
 ```bash
 scripts/mima-dry-run.sh                 # on JDK 21, from a clean checkout of the commit you want to check
@@ -282,11 +281,11 @@ touched), sets `mimaBaselineVersion` there, publishes every module to a temporar
 
 It took about three minutes on a laptop with warm caches (between 156 s and 184 s over three runs; an independent run took 175 s). It proves the wiring: the coordinates, the
 `_3` suffix, resolution, that the check can fail, and that `@Experimental` types are outside the freeze. It does
-**not** prove that any API is compatible with anything: there is no 0.5.0 baseline yet. It is a manual script,
+**not** prove that any API is compatible with anything: there is no baseline yet. It is a manual script,
 not a CI job, because it publishes the whole build. `scripts/test-mima-dry-run.sh` tests the script itself
 without sbt.
 
-At the cut: publish 0.5.0, confirm the frozen artifacts are on Central
+At the baseline release: publish it, confirm the frozen artifacts are on Central
 ([Verify Release](#5-verify-release)), then follow
 [Setting and bumping the baseline](api-stability#setting-and-bumping-the-baseline).
 
@@ -364,4 +363,6 @@ We follow semantic versioning (MAJOR.MINOR.PATCH):
 - MINOR: New features, backwards compatible
 - PATCH: Bug fixes, backwards compatible
 
-Current documented version series: 0.4.x (pre-1.0 development)
+Current documented version series: 0.5.x (pre-1.0 development). Until the MiMa baseline is set, any release,
+patch included, may carry a breaking change, listed in the CHANGELOG with a migration note; see
+[Compatibility Policy](compatibility-policy#versions).

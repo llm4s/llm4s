@@ -1,8 +1,8 @@
 // A standalone Gradle project that calls llm4s from Java through `llm4s-java-api`.
 //
-// llm4s-java-api is not published yet: it ships with 0.5.0. Until then this build resolves it from your
-// local Maven repository, where `sbt publishM2` puts it (see README.md). Once 0.5.0 is on Maven Central, run
-// with `-Pllm4sVersion=0.5.0`, and change the default below to that release.
+// Run against a release with `-Pllm4sVersion=0.5.0` (or later). The default is the locally built snapshot that
+// `sbt publishM2` puts in your local Maven repository (see README.md); CI builds the sample against it, so the
+// sample cannot drift from the API on `main`.
 plugins {
     java
     application

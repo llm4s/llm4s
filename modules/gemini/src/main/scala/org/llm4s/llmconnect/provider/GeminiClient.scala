@@ -88,6 +88,9 @@ class GeminiClient(
   // thought signatures are replayed only to the provider and model id they were produced by (see ReplayOrigin)
   private val replayOrigin = ReplayOrigin(providerName, config.model)
 
+  // the references Gemini takes: web URLs and this provider's uploaded files
+  private val fileUri = GeminiParts.geminiFileUri(providerName, config.baseUrl)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
@@ -100,6 +103,12 @@ class GeminiClient(
         conversation.messages,
         org.llm4s.model.RequestTransformer.default(registryService),
         dropUnsupported = true
+      )
+      // a part Gemini cannot take fails the request here, before anything is sent
+      .flatMap(transformed =>
+        GeminiParts
+          .check(providerName, transformed.messages, fileUri)
+          .map(_ => transformed)
       )
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
@@ -145,6 +154,12 @@ class GeminiClient(
         org.llm4s.model.RequestTransformer.default(registryService),
         dropUnsupported = true
       )
+      // a part Gemini cannot take fails the request here, before anything is sent
+      .flatMap(transformed =>
+        GeminiParts
+          .check(providerName, transformed.messages, fileUri)
+          .map(_ => transformed)
+      )
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
@@ -172,8 +187,8 @@ class GeminiClient(
             var textLength = 0 // characters of answer text streamed so far: where a text signature sits
             var refused = Option.empty[LLMError] // a chunk nested too deeply: the stream fails with it, unread
 
-            val result = Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) {
-              reader =>
+            val result =
+              Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) { reader =>
                 Iterator.continually(reader.readLine()).takeWhile(l => l != null && refused.isEmpty).foreach { line =>
                   rawStream.append(line).append('\n')
                   val trimmed = line.trim
@@ -210,22 +225,22 @@ class GeminiClient(
                     }
                   }
                 }
-            }.toEither.left
-              .map(HttpFailures.streamReadError(_, url, streamTimeout))
-              .flatMap(_ => refused.toLeft(()))
-              .flatMap(_ =>
-                accumulator.toCompletion.map { c =>
-                  val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-                  // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
-                  val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
-                  c.withModel(config.model)
-                    .withToolCalls(
-                      c.message.toolCalls.toList
-                    ) // the accumulator keeps streamed calls on the message only
-                    .withEstimatedCost(cost)
-                    .withMessage(ThinkingReplay.bindOrigin(replayOrigin, message))
-                }
-              )
+              }.toEither.left
+                .map(HttpFailures.streamReadError(_, url, streamTimeout))
+                .flatMap(_ => refused.toLeft(()))
+                .flatMap(_ =>
+                  accumulator.toCompletion.map { c =>
+                    val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+                    // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
+                    val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
+                    c.withModel(config.model)
+                      .withToolCalls(
+                        c.message.toolCalls.toList
+                      ) // the accumulator keeps streamed calls on the message only
+                      .withEstimatedCost(cost)
+                      .withMessage(ThinkingReplay.bindOrigin(replayOrigin, message))
+                  }
+                )
 
             recordingExchange(startedAt, requestText)(result)(
               successResponse = Some(rawStream.result()),
@@ -271,10 +286,11 @@ class GeminiClient(
         // Gemini handles system messages via systemInstruction
         systemInstr = Some(content)
 
-      case UserMessage(content) =>
+      case um: UserMessage =>
+        // checked before the body is built: GeminiParts covers every part
         contents += ujson.Obj(
           "role"  -> "user",
-          "parts" -> ujson.Arr(ujson.Obj("text" -> content))
+          "parts" -> ujson.Arr.from(PartEncoding.withoutBlankText(um.parts).map(GeminiParts.user(fileUri)))
         )
 
       case am: AssistantMessage =>
@@ -297,7 +313,8 @@ class GeminiClient(
         if (parts.nonEmpty && (am.toolCalls.nonEmpty || am.contentOpt.isDefined))
           contents += ujson.Obj("role" -> "model", "parts" -> ujson.Arr(parts: _*))
 
-      case ToolMessage(content, toolCallId) =>
+      case tm: ToolMessage =>
+        val toolCallId = tm.toolCallId
         // Gemini uses functionResponse for tool results
         // The name field should be the function name, not the tool call ID
         // Look up the function name from our mapping, fallback to toolCallId if not found
@@ -309,7 +326,7 @@ class GeminiClient(
               "functionResponse" -> {
                 val response = ujson.Obj(
                   "name"     -> functionName,
-                  "response" -> ujson.Obj("result" -> content)
+                  "response" -> ujson.Obj("result" -> tm.content)
                 )
                 // a populated functionCall.id must come back on the matching functionResponse
                 if (callIdsSentWithId.contains(toolCallId)) response("id") = toolCallId

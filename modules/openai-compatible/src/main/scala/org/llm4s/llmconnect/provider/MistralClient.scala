@@ -3,7 +3,8 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ MistralConfig, ProviderConfig }
-import org.llm4s.llmconnect.model.ThinkingBlock
+import org.llm4s.llmconnect.model.{ ContentPart, ThinkingBlock }
+import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
@@ -104,6 +105,13 @@ private[llm4s] object MistralDialect extends OpenAICompatibleDialect:
   private val Alphabet          = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
   override val sendEmptyAssistantTurns: Boolean = false
+
+  /** The standard parts, and a PDF by URL as Mistral's `document_url` chunk. */
+  override def encodeUserPart: PartialFunction[ContentPart, ujson.Value] =
+    OpenAICompatibleDialect.standardUserParts.orElse {
+      case ContentPart.Document(MediaSource.Url(uri), MediaType.Pdf) if PartEncoding.isWebUrl(uri) =>
+        ujson.Obj("type" -> "document_url", "document_url" -> uri.toString)
+    }
 
   /**
    * Not sent. `stream_options` is not in Mistral's chat-completions schema, and Mistral rejects

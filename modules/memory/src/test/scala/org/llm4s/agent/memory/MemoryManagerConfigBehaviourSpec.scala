@@ -119,7 +119,7 @@ class MemoryManagerConfigBehaviourSpec extends AnyFlatSpec with Matchers with Ei
     var prompts: Vector[String] = Vector.empty
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
-      val prompt = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse("")
+      val prompt = conversation.messages.collectFirst { case u: UserMessage => u.content }.getOrElse("")
       prompts = prompts :+ prompt
       val response =
         """[{"entity_name": "Martin Odersky", "entity_type": "person", "fact": "Martin Odersky created Scala.", "importance": 0.9}]"""

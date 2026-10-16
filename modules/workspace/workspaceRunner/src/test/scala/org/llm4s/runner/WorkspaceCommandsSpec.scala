@@ -8,7 +8,7 @@ import org.scalatest.matchers.should.Matchers
 import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Path }
 import java.util.Comparator
-import java.util.concurrent.{ ConcurrentHashMap, ConcurrentLinkedQueue }
+import java.util.concurrent.ConcurrentLinkedQueue
 import scala.concurrent.duration._
 import scala.concurrent.{ Await, ExecutionContext, Promise }
 import scala.jdk.CollectionConverters._
@@ -23,8 +23,8 @@ import scala.util.Try
  * a suite sends that the runner refuses, or that behaves differently from what the suite asserts, would first fail
  * there. This spec runs each of those exact strings on every PR and asserts what the suite asserts:
  *
- *   - `WorkspaceAgentIntegrationSpec` (modules/it): through `WorkspaceTools`' `execute_command`, which sends the
- *     working directory `/workspace` (the workspace root) and the tool's `timeout` in seconds;
+ *   - `WorkspaceAgentIntegrationSpec` (modules/it): through the harness's `execute` tool (`WorkspaceSandboxRunner`), which sends the
+ *     working directory `.` (the workspace root, the tool's `/`) and the tool's timeout in seconds;
  *   - `ContainerisedWorkspaceTest` (modules/it): `ContainerisedWorkspace.executeCommand` with no working directory;
  *   - `ContainerisedWorkspaceDemo`, `LockedDownSandboxDemo` (workspaceSamples) and `CodeGenExample` (workspaceClient).
  *
@@ -50,12 +50,12 @@ class WorkspaceCommandsSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
   private def write(name: String, content: String): Unit =
     Files.write(root.resolve(name), content.getBytes(StandardCharsets.UTF_8))
 
-  /** `WorkspaceTools.defaultExecuteHandler`'s working directory: `/workspace`, the container's workspace root. */
-  private def toolWorkingDirectory: Option[String] = Some(root.toString)
+  /** The `execute` tool's working directory for `/`: `.`, the workspace root. */
+  private def toolWorkingDirectory: Option[String] = Some(".")
 
   final private class Channel {
     val messages  = new ConcurrentLinkedQueue[WebSocketMessage]()
-    val processes = new ConcurrentHashMap[String, RunningCommand]()
+    val owner     = new Object
     val completed = Promise[CommandCompletedMessage]()
 
     def send(message: WebSocketMessage): Unit = {
@@ -94,7 +94,7 @@ class WorkspaceCommandsSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
       environment = None
     )
     val started = System.nanoTime()
-    new WebSocketCommandExecutor(workspace, 1024L * 1024L).execute(cmd, channel.processes, channel.send)
+    new WebSocketCommandExecutor(workspace, 1024L * 1024L).execute(cmd, channel.owner, channel.send)
     val done    = Await.result(channel.completed.future, 60.seconds)
     val elapsed = (System.nanoTime() - started).nanos
     withClue(s"'$command' messages ${channel.all}: ") {
@@ -114,7 +114,7 @@ class WorkspaceCommandsSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
     assume(!isWindowsHost, "the workspace-runner container is Linux")
     val channel = new Channel
     val cmd = ExecuteCommandCommand(java.util.UUID.randomUUID().toString, command, None, Some(5.seconds), environment)
-    new WebSocketCommandExecutor(workspace, 1024L * 1024L).execute(cmd, channel.processes, channel.send)
+    new WebSocketCommandExecutor(workspace, 1024L * 1024L).execute(cmd, channel.owner, channel.send)
     Await.result(channel.completed.future, 30.seconds).exitCode shouldBe 1
     withClue(s"'$command' messages ${channel.all}: ") {
       channel.responses shouldBe empty

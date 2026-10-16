@@ -375,6 +375,26 @@ object WorkspaceSandboxConfig {
     "move"
   )
 
+  /**
+   * The longest the runner keeps a request waiting at its command gate - a command for a file mutation to finish, or
+   * a file mutation for running commands to end - before refusing it as `WORKSPACE_BUSY`, having done nothing. A
+   * client waiting for a response allows for it on top of the request's own time.
+   */
+  val CommandGateWait: FiniteDuration = 30.seconds
+
+  /**
+   * How long after its wait at the gate a file change may still commit. The runner refuses, changing nothing, a change
+   * not committed within `CommandGateWait + CommitAfterGate` of its start, and a client waits longer than that for the
+   * response, so a change is never applied after its client gave up on it.
+   */
+  val CommitAfterGate: FiniteDuration = 30.seconds
+
+  /**
+   * The largest `limits.maxFileSize` the runner keeps: a snapshot holds a file whole in memory, in one array. A config
+   * over it is refused by [[validate]], and a runner given one unvalidated uses this instead.
+   */
+  val MaxFileSize: Long = 256L * 1024L * 1024L
+
   val DefaultLimits: WorkspaceLimits = WorkspaceLimits(
     maxFileSize = 1048576L, // 1MB
     maxDirectoryEntries = 500,
@@ -438,6 +458,11 @@ object WorkspaceSandboxConfig {
 
     for {
       _ <- check(config.limits.maxFileSize > 0, "limits.maxFileSize must be positive")
+      // a snapshot holds a file whole, in one array: a larger limit could not be kept
+      _ <- check(
+        config.limits.maxFileSize <= WorkspaceSandboxConfig.MaxFileSize,
+        s"limits.maxFileSize must be at most ${WorkspaceSandboxConfig.MaxFileSize} bytes"
+      )
       _ <- check(config.limits.maxDirectoryEntries > 0, "limits.maxDirectoryEntries must be positive")
       _ <- check(config.limits.maxSearchResults > 0, "limits.maxSearchResults must be positive")
       _ <- check(config.limits.maxOutputSize > 0, "limits.maxOutputSize must be positive")

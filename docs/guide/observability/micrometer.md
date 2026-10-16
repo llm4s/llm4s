@@ -33,10 +33,6 @@ the `MetricsCollector` contract that every client accepts.
 
 ## Install
 
-{: .note }
-> Not yet published. The module exists in the build as of
-> [#1466](https://github.com/llm4s/llm4s/issues/1466) and ships in the next release.
-
 ```scala
 // same version as llm4s-core
 libraryDependencies += "org.llm4s" %% "llm4s-observability-micrometer" % llm4sVersion

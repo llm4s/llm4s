@@ -8,11 +8,18 @@ import org.llm4s.testkit.LocalProviderTestServer.{
   holdOpen,
   openAICompletion,
   openAISseBody,
+  sendJsonResponse,
   sendSseResponse,
   streamThenHold,
   withServer
 }
-import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig, ToolMessageFormat }
+import org.llm4s.testkit.{
+  ContentPartCase,
+  CredentialsRoundTrip,
+  ProviderModuleChecks,
+  ProviderTestConfig,
+  ToolMessageFormat
+}
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -145,6 +152,32 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
           assertOneToolResultPerCall(ToolMessageFormat.OpenAIChat, openAICompletion("done")) { baseUrl =>
             assertBuildsClient(descriptor, section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))))
           }
+        }
+      }
+    }
+  }
+
+  "a client built by each openai-compatible descriptor" should {
+
+    "send the content parts its dialect takes and refuse the rest before sending (#1913)" in {
+      val images = Seq(ContentPartCase.UserImageUrl, ContentPartCase.UserImageInline)
+      val supported: Map[ProviderDescriptor, Seq[ContentPartCase]] = Map(
+        OpenAICompatibleProvider -> images,
+        DeepSeekProvider         -> Nil,
+        ZaiProvider              -> images,
+        OpenRouterProvider       -> (images ++ Seq(ContentPartCase.UserPdfUrl, ContentPartCase.UserPdfInline)),
+        MistralProvider          -> (images :+ ContentPartCase.UserPdfUrl),
+        CohereProvider           -> images
+      )
+      expectations.foreach { (descriptor, _, _) =>
+        withClue(s"${descriptor.id.asString}: ") {
+          // a provider's 400 or 413 - a vendor limit llm4s leaves to it - is a typed error with its message
+          assertProviderRejectionIsTyped((exchange, status, message) =>
+            sendJsonResponse(exchange, status, ujson.Obj("error" -> ujson.Obj("message" -> message)).render())
+          )(baseUrl => assertBuildsClient(descriptor, section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl)))))
+          assertContentParts(descriptor.id.asString, sendJsonResponse(_, 200, openAICompletion("done")))(
+            supported(descriptor)*
+          )(baseUrl => assertBuildsClient(descriptor, section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl)))))
         }
       }
     }

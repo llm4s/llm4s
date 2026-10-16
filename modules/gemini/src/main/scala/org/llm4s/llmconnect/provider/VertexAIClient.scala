@@ -68,7 +68,11 @@ class VertexAIClient(
   /** How long a streamed call may take: the section's `timeouts.stream`, else VertexAIClient.DefaultStreamTimeout. */
   protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(VertexAIClient.DefaultStreamTimeout)
 
-  private val authProvider = new VertexAIAuthProvider(config.credentialFilePath, httpClient)
+  private val authProvider = new VertexAIAuthProvider(
+    config.credentialFilePath,
+    httpClient,
+    wellKnownCredentialPath = config.wellKnownCredentialPath
+  )
 
   protected def clientDescription: String = s"Vertex AI client for model ${config.model}"
   protected def providerName: String      = "vertexai"
@@ -76,6 +80,9 @@ class VertexAIClient(
 
   // thought signatures are replayed only to the provider and model id they were produced by (see ReplayOrigin)
   private val replayOrigin = ReplayOrigin(providerName, config.model)
+
+  // the references Vertex AI takes: Cloud Storage objects
+  private val fileUri = GeminiParts.vertexFileUri
 
   private def modelUrl(suffix: String): String = {
     val base = config.computedBaseUrl
@@ -95,6 +102,12 @@ class VertexAIClient(
         org.llm4s.model.RequestTransformer.default(registryService),
         dropUnsupported = true
       )
+      // a part Gemini cannot take fails the request here, before anything is sent
+      .flatMap(transformed =>
+        GeminiParts
+          .check(providerName, transformed.messages, fileUri)
+          .map(_ => transformed)
+      )
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
@@ -102,7 +115,7 @@ class VertexAIClient(
         val url                     = modelUrl("generateContent")
 
         logger.debug(s"[VertexAI] Sending request to $url")
-        logger.debug(s"[VertexAI] Request body: $requestText")
+        logger.debug(s"[VertexAI] Request body: ${org.llm4s.util.Redaction.redactForLogging(requestText)}")
 
         for {
           token <- authProvider.getAccessToken()
@@ -142,6 +155,12 @@ class VertexAIClient(
         org.llm4s.model.RequestTransformer.default(registryService),
         dropUnsupported = true
       )
+      // a part Gemini cannot take fails the request here, before anything is sent
+      .flatMap(transformed =>
+        GeminiParts
+          .check(providerName, transformed.messages, fileUri)
+          .map(_ => transformed)
+      )
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
@@ -158,7 +177,8 @@ class VertexAIClient(
               recordExchange(startedAt, requestText, None, Left(error))
               Left(error)
             case Right(response) if response.statusCode < 200 || response.statusCode >= 300 =>
-              val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
+              val err =
+                Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
               val errorResult = handleErrorResponse(response.statusCode, err, response.headers)
               recordExchange(startedAt, requestText, Some(err), errorResult)
               errorResult
@@ -166,7 +186,8 @@ class VertexAIClient(
               val accumulator = StreamingAccumulator.create()
               val messageId   = UUID.randomUUID().toString
               val rawStream   = StringBuilder()
-              val signatures = scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
+              val signatures =
+                scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
               var textLength = 0 // characters of answer text streamed so far: where a text signature sits
               // a chunk nested too deeply: the stream fails with it, unread
               var refused = Option.empty[org.llm4s.error.LLMError]
@@ -260,8 +281,16 @@ class VertexAIClient(
       case SystemMessage(content) =>
         systemInstr = Some(content)
 
-      case UserMessage(content) =>
-        contents += ujson.Obj("role" -> "user", "parts" -> ujson.Arr(ujson.Obj("text" -> content)))
+      case um: UserMessage =>
+        // checked before the body is built: GeminiParts covers every part
+        contents += ujson.Obj(
+          "role" -> "user",
+          "parts" -> ujson.Arr.from(
+            PartEncoding
+              .withoutBlankText(um.parts)
+              .map(GeminiParts.user(fileUri))
+          )
+        )
 
       case am: AssistantMessage =>
         // Tool call IDs map to function names so the following ToolMessages can be keyed by name
@@ -283,7 +312,8 @@ class VertexAIClient(
         if (parts.nonEmpty && (am.toolCalls.nonEmpty || am.contentOpt.isDefined))
           contents += ujson.Obj("role" -> "model", "parts" -> ujson.Arr(parts: _*))
 
-      case ToolMessage(content, toolCallId) =>
+      case tm: ToolMessage =>
+        val toolCallId   = tm.toolCallId
         val functionName = toolCallIdToName.getOrElse(toolCallId, toolCallId)
         contents += ujson.Obj(
           "role" -> "user",
@@ -292,7 +322,7 @@ class VertexAIClient(
               "functionResponse" -> {
                 val response = ujson.Obj(
                   "name"     -> functionName,
-                  "response" -> ujson.Obj("result" -> content)
+                  "response" -> ujson.Obj("result" -> tm.content)
                 )
                 // a populated functionCall.id must come back on the matching functionResponse
                 if (callIdsSentWithId.contains(toolCallId)) response("id") = toolCallId

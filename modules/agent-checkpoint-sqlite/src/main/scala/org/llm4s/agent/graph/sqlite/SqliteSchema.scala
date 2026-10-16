@@ -14,13 +14,22 @@ import scala.util.Using
  *    `deleteThread`, so a token is never issued twice.
  *  - `llm4s_checkpoint_threads`: one row per thread that has a checkpoint, a claim, or an event number spent - the
  *    latest checkpoint as JSON with its id (the thread's version), the next event number and the replay floor,
- *    and the claim (holder, token, expiry as epoch seconds and nanoseconds).
+ *    the first event number of the thread now under the id (`first_seq`, version 2), and the claim (holder, token,
+ *    expiry as epoch seconds and nanoseconds, and from version 5 its tenant: `claim_tenant`, with
+ *    `claim_tenant_token` the token of the claim it was recorded for, so the tenant is the claim's only when the two
+ *    tokens agree). `deleteThread` keeps the row of a thread that numbered any event,
+ *    emptied, as a tombstone: `next_seq`, `first_seq` and the replay floor move one past the deleted thread's next
+ *    number, so a new thread of the same id numbers its events past the deleted one's, and a read from inside the
+ *    deleted log is told so (`GraphError.ThreadDeleted`). The tombstone holds no data of the deleted thread.
  *  - `llm4s_checkpoint_history`: every checkpoint of every thread's history, latest included, as JSON, keyed by
  *    `(thread, position)` - the position counts up along the thread, so paging newest first reads the primary key
  *    backwards - and unique by `(thread, checkpoint id)`, so a read by id and the duplicate-id check use that index.
  *    The checkpoint's status and creation time sit beside it for retraction and retention.
  *  - `llm4s_checkpoint_pending_writes`: the latest checkpoint's pending writes as JSON, in commit order.
  *  - `llm4s_checkpoint_events`: the durable event log, one JSON `EventRecord` per `(thread, seq)`.
+ *  - `llm4s_checkpoint_effects` (version 3): the thread's effect records (design §4.24), one JSON `EffectRecord`
+ *    per `(thread, effect key)`, with the task it belongs to - its id and, from version 4, its lineage - which
+ *    decide when a commit releases it (`Commit.releasesEffect`), and the token of the commit that wrote it.
  *
  * Opening a store brings the file to [[Current]] in one transaction, applying each step `n -> n + 1` in turn, and
  * refuses a file whose version is newer than this build knows. Version 0 is a file with none of these tables.
@@ -28,13 +37,66 @@ import scala.util.Using
 private[sqlite] object SqliteSchema:
 
   /** The schema version this build writes. */
-  val Current: Int = 1
+  val Current: Int = 5
 
   /** A migration from the version it is keyed by to the next. */
   type Step = Connection => Unit
 
   /** The steps, keyed by the version each upgrades from. */
-  val steps: Map[Int, Step] = Map(0 -> createTables)
+  val steps: Map[Int, Step] = Map(
+    0 -> createTables,
+    1 -> addFirstSeq,
+    2 -> addEffects,
+    3 -> addEffectLineages,
+    4 -> addClaimTenants
+  )
+
+  /**
+   * Version 5: the tenant of each claim (#1926), so that a refusal or a takeover names the claim's holder only to a
+   * caller of the same tenant. `claim_tenant` is the tenant, NULL for a claim of no tenant, and `claim_tenant_token`
+   * the token of the claim it was recorded for. A claim a version-4 file holds has no `claim_tenant_token`, so its
+   * tenant reads as unknown: it matches no tenant, and its holder is never named - not in a refusal, and not as
+   * `takenOverFrom` once it lapses. Such a claim is no older than its `ttl`, so this lasts at most that long.
+   */
+  private def addClaimTenants(connection: Connection): Unit =
+    statements(
+      connection,
+      "ALTER TABLE llm4s_checkpoint_threads ADD COLUMN claim_tenant TEXT",
+      "ALTER TABLE llm4s_checkpoint_threads ADD COLUMN claim_tenant_token INTEGER"
+    )
+
+  /**
+   * Version 4: the lineage of the task each effect record belongs to (#1921 follow-up), which decides with its
+   * id when a commit releases the record. A version-3 file's records read with an empty lineage, which no task
+   * of a restored run has, so they never answer for one (format 6 never shipped).
+   */
+  private def addEffectLineages(connection: Connection): Unit =
+    statements(connection, "ALTER TABLE llm4s_checkpoint_effects ADD COLUMN task_lineage TEXT NOT NULL DEFAULT ''")
+
+  /**
+   * Version 3: effect records, the replay evidence of `ReplayGuard` (#1921). A version-2 file holds none: no build
+   * that wrote one performed a guarded effect.
+   */
+  private def addEffects(connection: Connection): Unit =
+    statements(
+      connection,
+      """CREATE TABLE llm4s_checkpoint_effects (
+        |  thread_id    TEXT NOT NULL,
+        |  effect_key   TEXT NOT NULL,
+        |  task_id      TEXT NOT NULL,
+        |  writer_token INTEGER NOT NULL,
+        |  record_json  TEXT NOT NULL,
+        |  PRIMARY KEY (thread_id, effect_key)
+        |) WITHOUT ROWID""".stripMargin
+    )
+
+  /**
+   * Version 2: the first event number of the thread now under each id, so that a thread deleted and created again
+   * numbers on past the deleted one's events. Every thread a version-1 file holds numbers its events from 1 - a
+   * version-1 delete restarted an id's numbering - so its `first_seq` is 1.
+   */
+  private def addFirstSeq(connection: Connection): Unit =
+    statements(connection, "ALTER TABLE llm4s_checkpoint_threads ADD COLUMN first_seq INTEGER NOT NULL DEFAULT 1")
 
   private def createTables(connection: Connection): Unit =
     statements(

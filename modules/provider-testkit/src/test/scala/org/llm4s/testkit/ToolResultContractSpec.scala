@@ -18,10 +18,10 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
 
   private def openAI(messages: Seq[Message]): ujson.Value =
     ujson.Obj("messages" -> ujson.Arr.from(messages.map {
-      case UserMessage(text)   => ujson.Obj("role" -> "user", "content" -> text)
+      case u: UserMessage      => ujson.Obj("role" -> "user", "content" -> u.content)
       case SystemMessage(text) => ujson.Obj("role" -> "system", "content" -> text)
-      case ToolMessage(text, id) =>
-        ujson.Obj("role" -> "tool", "tool_call_id" -> id, "content" -> text)
+      case t: ToolMessage =>
+        ujson.Obj("role" -> "tool", "tool_call_id" -> t.toolCallId, "content" -> t.content)
       case a: AssistantMessage =>
         val calls = a.toolCalls.map { c =>
           ujson.Obj(
@@ -39,14 +39,14 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
     val turns = messages.foldLeft(Vector.empty[ujson.Obj]) { (acc, message) =>
       message match
         case _: SystemMessage => acc
-        case UserMessage(text) =>
-          acc :+ ujson.Obj("role" -> "user", "content" -> ujson.Arr(ujson.Obj("type" -> "text", "text" -> text)))
+        case u: UserMessage =>
+          acc :+ ujson.Obj("role" -> "user", "content" -> ujson.Arr(ujson.Obj("type" -> "text", "text" -> u.content)))
         case a: AssistantMessage =>
           val text = Option.when(a.content.nonEmpty)(ujson.Obj("type" -> "text", "text" -> a.content)).toSeq
           val uses = a.toolCalls.map(c => ujson.Obj("type" -> "tool_use", "id" -> c.id, "name" -> c.name))
           acc :+ ujson.Obj("role" -> "assistant", "content" -> ujson.Arr.from(text ++ uses))
-        case ToolMessage(text, id) =>
-          val block = ujson.Obj("type" -> "tool_result", "tool_use_id" -> id, "content" -> text)
+        case t: ToolMessage =>
+          val block = ujson.Obj("type" -> "tool_result", "tool_use_id" -> t.toolCallId, "content" -> t.content)
           acc.lastOption match
             case Some(last)
                 if last("role").str == "user" && last("content").arr.forall(_("type").str == "tool_result") =>

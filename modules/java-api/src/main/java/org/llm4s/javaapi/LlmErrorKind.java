@@ -36,7 +36,7 @@ public enum LlmErrorKind {
    */
   SERVICE,
 
-  /** The request itself is wrong: a missing or invalid argument or field ({@code ValidationError}, {@code InvalidInputError}). */
+  /** The request itself is wrong: a missing or invalid argument or field ({@code ValidationError}, {@code InvalidInputError}), or a content part the provider cannot send ({@code UnsupportedContentPartError}). */
   VALIDATION,
 
   /** The library is configured wrongly: a missing or invalid setting ({@code ConfigurationError}). */

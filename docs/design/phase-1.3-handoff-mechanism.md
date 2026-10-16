@@ -1,6 +1,6 @@
 # Phase 1.3: Handoff Mechanism
 
-> **Superseded in part:** this document describes the pre-#1328 agent API (`new Agent(client)`, `AgentState`, per-run tools and guardrails). `Agent` now runs on the graph runtime and is built with `Agent.builder(...)`; see [typed-agent-runtime-design.md §4.13](typed-agent-runtime-design.md) and the [Stage 1 migration note](../reference/migration.md#stage-1-migration-agent-runtime). Kept as history.
+> **Superseded in part:** this document describes the pre-#1328 agent API (`new Agent(client)`, `AgentState`, per-run tools and guardrails). `Agent` now runs on the graph runtime and is built with `Agent.builder(...)`; see [Typed Agent Runtime §4.13](typed-agent-runtime/4.13-stage-1-slice-2-the-agent-loop-on-the-graph-runtime.md) and the [Stage 1 migration note](../reference/migration.md#stage-1-migration-agent-runtime). Kept as history.
 
 > **Superseded by [#1330](https://github.com/llm4s/llm4s/issues/1330):** the DAG orchestration (`PlanRunner`, `DAGPlan`) this document compares handoffs with is removed; multi-agent workflows are graphs - see the [multi-agent graph recipe](../examples/cookbook/multi-agent-graph.md).
 

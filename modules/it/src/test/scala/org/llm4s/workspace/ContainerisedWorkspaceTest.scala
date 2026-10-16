@@ -179,8 +179,8 @@ class ContainerisedWorkspaceTest extends AnyFunSuite with Matchers with BeforeAn
       val e = intercept[WorkspaceAgentException] {
         workspace.executeCommand(command, None, Some(5.seconds), environment)
       }
-      // The client reports a refusal as "<runner code>: <message>".
-      e.error.takeWhile(_ != ':')
+      // The client keeps the runner's code (#1906).
+      e.code
     }
 
     refusedCode("echo one ; touch chained.txt") shouldBe "FORBIDDEN_CHARACTERS"

@@ -47,7 +47,7 @@ class HandoffRouteSpec extends AnyFlatSpec with Matchers with EitherValues {
       )
     ) { (args, _) =>
       count.incrementAndGet()
-      ToolOutcome.Success(ujson.Str(args.text))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str(args.text)))
     }
 
   private val triageTools  = ToolSet.of(tool("route")).value

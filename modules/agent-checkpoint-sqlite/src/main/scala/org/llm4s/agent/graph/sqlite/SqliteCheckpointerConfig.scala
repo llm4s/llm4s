@@ -11,7 +11,12 @@ import scala.concurrent.duration.*
  * `busyTimeout` is how long a write waits for the database's write lock while another connection - another
  * store over the same file, in this process or another - holds it, before the call fails. SQLite allows one
  * writer at a time per file, and every write here is short (one transaction per call), so a wait is brief; a
- * call that still times out returns a `ProcessingError` and changes nothing. It is rounded up to whole
+ * call that still times out returns a `ProcessingError` and changes nothing. The stores in one process that write the
+ * same file take turns, first come first served, and a write waits up to `busyTimeout` for the writes queued ahead of
+ * it, then up to `busyTimeout` again for SQLite's lock, which another process may hold. A call also waits for the
+ * store's own earlier calls - one store is one connection - within the same first `busyTimeout`, so every call returns
+ * within twice `busyTimeout` plus the time its own SQL takes: the bound the `Checkpointer` contract asks a store to
+ * document (#1919). Keep that well inside `ClaimPolicy.ttl - ClaimPolicy.renewEvery`. It is rounded up to whole
  * milliseconds, and must be positive and at most `Int.MaxValue` milliseconds: `apply` and the `with*` setters
  * throw `IllegalArgumentException` otherwise, and [[SqliteCheckpointerConfig.of]] returns a `ValidationError`.
  *

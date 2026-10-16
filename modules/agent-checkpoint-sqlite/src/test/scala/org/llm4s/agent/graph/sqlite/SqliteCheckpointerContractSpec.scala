@@ -6,10 +6,11 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 
 import java.nio.file.{ Files, Path }
+import java.sql.DriverManager
 import java.time.Clock
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.*
 import scala.util.{ Try, Using }
 
 /**
@@ -59,6 +60,33 @@ class SqliteCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContra
       case sqlite: SqliteCheckpointer => SqliteFiles.opened(sqlite.path, clock)
       case other                      => fail(s"not a SqliteCheckpointer: $other")
     }
+
+  /**
+   * A store with a 300 ms busy timeout, so its documented bound is 600 ms: a write waits up to `busyTimeout` for this
+   * store's earlier calls and the file's turn, then up to `busyTimeout` again for SQLite's lock. The storage is made
+   * busy as another process would make it: a connection of its own, outside every store, holding a write transaction.
+   */
+  override protected def boundedStore(clock: Clock): Option[CheckpointerContract.BoundedStore] = {
+    val busyTimeout = 300.millis
+    val path        = SqliteFiles.fresh()
+    val store = SqliteCheckpointer
+      .open(path, clock, SqliteCheckpointerConfig(busyTimeout))
+      .fold(e => throw new IllegalStateException(e.message), identity)
+    Some(
+      CheckpointerContract.BoundedStore(
+        store,
+        busyTimeout * 2,
+        () => {
+          val writer = DriverManager.getConnection(SqliteCheckpointer.jdbcUrl(path))
+          Using.resource(writer.createStatement())(_.execute("BEGIN IMMEDIATE")): Unit
+          () => {
+            Using.resource(writer.createStatement())(_.execute("ROLLBACK")): Unit
+            writer.close()
+          }
+        }
+      )
+    )
+  }
 }
 
 /**
@@ -97,7 +125,9 @@ class SqliteTwoConnectionsContractSpec extends AnyFlatSpec with CheckpointerCont
     }
 
   final private case class Alternating(path: Path, clock: Clock, stores: Vector[SqliteCheckpointer])
-      extends Checkpointer {
+      extends Checkpointer
+      with AutoCloseable {
+    def close(): Unit              = stores.foreach(_.close())
     private val turn               = new AtomicInteger()
     private def next: Checkpointer = stores(Math.floorMod(turn.getAndIncrement(), stores.size))
     def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim] = next.claim(threadId, request)
@@ -105,11 +135,12 @@ class SqliteTwoConnectionsContractSpec extends AnyFlatSpec with CheckpointerCont
       next.renew(threadId, token, ttl)
     def release(threadId: ThreadId, token: FencingToken): Result[Unit]          = next.release(threadId, token)
     def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = next.commit(threadId, commit)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)        = next.effect(threadId, key)
     def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]            = next.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       next.eventsAfter(threadId, afterSeq, limit)
-    def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = next.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId): Result[Unit]                   = next.deleteThread(threadId)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit]    = next.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] = next.deleteThread(threadId, token)
     def history(threadId: ThreadId, before: Option[String], limit: Int): Result[Vector[Checkpoint]] =
       next.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String): Result[Option[Checkpoint]] =

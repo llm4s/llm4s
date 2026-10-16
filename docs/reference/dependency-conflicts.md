@@ -21,10 +21,10 @@ LLM4S transitively pulls several large dependencies. This page documents known c
 
 ## Which version does this apply to?
 
-LLM4S is being split from one `llm4s-core` jar into focused modules (see the [migration guide](/reference/migration)). The conflicts differ between the two shapes:
+In `0.5.0` LLM4S was split from one `llm4s-core` jar into focused modules (see the [migration guide](/reference/migration)). The conflicts differ between the two shapes:
 
-- **`0.4.x`** (latest release): `llm4s-core` contains everything, and declares `logback-classic` and `com.azure:azure-ai-openai` as compile dependencies.
-- **`main` / the split modules**: `llm4s-core` and the provider modules depend on `slf4j-api` only (logback is test-scoped) and have no Azure dependency. Provider modules bring the vendor SDKs (`openai-java`, `anthropic-java`) and with them OkHttp and the Kotlin standard library.
+- **`0.4.x`**: `llm4s-core` contains everything, and declares `logback-classic` and `com.azure:azure-ai-openai` as compile dependencies.
+- **`0.5.0` and later**: `llm4s-core` and the provider modules depend on `slf4j-api` only (logback is test-scoped) and have no Azure dependency. Provider modules bring the vendor SDKs (`openai-java`, `anthropic-java`) and with them OkHttp and the Kotlin standard library.
 
 These were checked against the `0.4.1` build definition and the dependency trees of the `openai`, `anthropic` and `gemini` modules on `main`.
 

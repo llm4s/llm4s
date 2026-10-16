@@ -4,7 +4,7 @@ import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.Text
 import org.llm4s.agent.graph._
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, ApprovalMiddleware, MiddlewareId, ToolCallRequest }
-import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome }
+import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.agent.graph.toolloop.ToolResultRule
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
@@ -190,12 +190,13 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
           toolWrites.addAndGet(commit.pendingWrites.count(_.nodeId.endsWith("/call-tool"))): Unit
           records
         }
-    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]] = underlying.latest(threadId)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey) = underlying.effect(threadId, key)
+    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]     = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
       underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId): Result[Unit]                  = underlying.deleteThread(threadId)
+    def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] = underlying.deleteThread(threadId, token)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
@@ -230,7 +231,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
 
     s"[$name] A parallel batch" should "answer success, error, throw, unknown tool and invalid arguments, one result each" in {
       val keys = new Keys
-      val ok   = tool("ok", keys)((_, _) => ToolOutcome.Success(ujson.Str("fine")))
+      val ok   = tool("ok", keys)((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("fine"))))
       val err  = tool("err", keys)((_, _) => ToolOutcome.Error("broken"))
       val boom = tool("boom", keys)((_, _) => throw new RuntimeException("boom"))
       scripted(
@@ -260,9 +261,9 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
       val ran  = new ConcurrentLinkedQueue[String]()
       val deploy = tool("deploy", keys) { (args, _) =>
         ran.add(args.text)
-        ToolOutcome.Success(ujson.Str("deployed"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("deployed")))
       }
-      val danger = tool("danger", keys)((_, _) => ToolOutcome.Success(ujson.Str("never")))
+      val danger = tool("danger", keys)((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("never"))))
       scripted(
         wire,
         Reply.Calls(
@@ -320,10 +321,10 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
         }
         def resume(args: Text, question: Confirm, answer: Answer, context: ToolContext): ToolOutcome = {
           keys.record(context)
-          ToolOutcome.Success(ujson.Str(s"${question.prompt} ${answer.ok}"))
+          ToolOutcome.Success(ToolContent.Json(ujson.Str(s"${question.prompt} ${answer.ok}")))
         }
       }
-      val ok = tool("ok", keys)((_, _) => ToolOutcome.Success(ujson.Str("fine")))
+      val ok = tool("ok", keys)((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("fine"))))
       scripted(wire, Reply.Calls(toolCall("q1", "confirm"), toolCall("k1", "ok")), Reply.Says("confirmed")) {
         (client, requests) =>
           val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(asker, ok)))
@@ -342,8 +343,8 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
 
     it should "answer every call of a refused handoff batch, then hand off" in {
       val keys    = new Keys
-      val lookup  = tool("lookup", keys)((_, _) => ToolOutcome.Success(ujson.Str("found")))
-      val refund  = tool("refund", keys)((_, _) => ToolOutcome.Success(ujson.Str("refunded")))
+      val lookup  = tool("lookup", keys)((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("found"))))
+      val refund  = tool("refund", keys)((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("refunded"))))
       val handoff = ujson.Obj("reason" -> "refund")
       scripted(
         wire,
@@ -369,8 +370,9 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
     }
 
     it should "pair results with calls when the provider reuses call ids, and give each call its own key" in {
-      val keys   = new Keys
-      val lookup = tool("lookup", keys)((args, _) => ToolOutcome.Success(ujson.Str(s"found ${args.text}")))
+      val keys = new Keys
+      val lookup =
+        tool("lookup", keys)((args, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(s"found ${args.text}"))))
       scripted(
         wire,
         Reply.Calls(toolCall("call_0", "lookup", text("one"))),
@@ -398,14 +400,14 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
       val started = new CountDownLatch(1)
       val fast = tool("fast", keys) { (_, _) =>
         fastRan.incrementAndGet()
-        ToolOutcome.Success(ujson.Str("fast"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("fast")))
       }
       val slow = tool("slow", keys) { (_, _) =>
         if (block.get) {
           started.countDown()
           Thread.sleep(60_000) // interrupted by cancel
         }
-        ToolOutcome.Success(ujson.Str("slow"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("slow")))
       }
       val store = new ProbeCheckpointer(new InMemoryCheckpointer)
       scripted(wire, Reply.Calls(toolCall("f1", "fast"), toolCall("s1", "slow")), Reply.Says("recovered")) {
@@ -438,11 +440,11 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
       val goodRan = new AtomicInteger()
       val good = tool("good", keys) { (_, _) =>
         goodRan.incrementAndGet()
-        ToolOutcome.Success(ujson.Str("good"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("good")))
       }
       val flaky = tool("flaky", keys) { (_, _) =>
         if (broken.get) ToolOutcome.Fatal(ValidationError("flaky", "backend down"))
-        else ToolOutcome.Success(ujson.Str("fixed"))
+        else ToolOutcome.Success(ToolContent.Json(ujson.Str("fixed")))
       }
       scripted(wire, Reply.Calls(toolCall("g1", "good"), toolCall("x1", "flaky")), Reply.Says("all done")) {
         (client, requests) =>
@@ -468,7 +470,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
       val dying   = new ProbeCheckpointer(healthy)
       val done = tool("done", keys) { (_, _) =>
         doneRan.incrementAndGet()
-        ToolOutcome.Success(ujson.Str("done"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))
       }
       // the first time, waits for its sibling's result to be stored, then the process "dies"
       val crashed = new AtomicBoolean(false)
@@ -477,7 +479,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
           await(dying.toolWrites.get >= 1)
           dying.dead.set(true)
         }
-        ToolOutcome.Success(ujson.Str("crashed once"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("crashed once")))
       }
       scripted(wire, Reply.Calls(toolCall("d1", "done"), toolCall("k1", "crasher")), Reply.Says("after the crash")) {
         (client, requests) =>

@@ -19,8 +19,6 @@ import scala.jdk.CollectionConverters.*
  */
 class PayloadLogSpec extends AnyFlatSpec with Matchers with MockFactory {
 
-  private val isWindows: Boolean = System.getProperty("os.name").toLowerCase.contains("win")
-
   "PayloadLog.preview" should "pass a short payload through unchanged" in {
     PayloadLog.preview("""{"jsonrpc":"2.0","id":"1"}""") shouldBe """{"jsonrpc":"2.0","id":"1"}"""
   }
@@ -37,16 +35,8 @@ class PayloadLogSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   "StdioTransportImpl" should "log a one-megabyte request as a bounded, redacted preview" in {
-    assume(!isWindows, "Bash not available on Windows")
-    val echoServer = Seq(
-      "bash",
-      "-c",
-      """while IFS= read -r line; do
-           id=$(echo "$line" | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
-           [ -n "$id" ] && echo "{\"jsonrpc\":\"2.0\",\"id\":\"$id\",\"result\":{}}"
-         done"""
-    )
-    val transport = new StdioTransportImpl(echoServer, startupTimeout = 500.millis, name = "payload-log")
+    val echoServer = StdioTestServers.echo("""{"jsonrpc":"2.0","id":"$id","result":{}}""", "--ready")
+    val transport  = new StdioTransportImpl(echoServer, startupTimeout = 500.millis, name = "payload-log")
     val request = JsonRpcRequest(
       "2.0",
       "big",
@@ -69,24 +59,24 @@ class PayloadLogSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "bound and redact the server's stderr in the error it returns and logs" in {
-    assume(!isWindows, "Bash not available on Windows")
-    // Reads the request, then writes ~10 KB to stderr and exits: the pending request fails, and the transport
-    // reports the server's stderr in its ERROR log and in the returned error. The script assembles the secret at
+    // Reads the request, then writes ~3 KB to stderr (over MaxChars, under a pipe buffer) and exits: the pending request fails, and the transport
+    // reports the server's stderr in its ERROR log and in the returned error. The server assembles the secret at
     // run time, because the transport logs its command line.
-    val failingServer = Seq(
-      "bash",
-      "-c",
-      """read -r line; k=hunter2-SENT; printf '{"api_key":"%sINEL","x":"%s"}\n' "$k" "$(printf 'x%.0s' $(seq 1 10000))" >&2; exit 1"""
-    )
-    val transport = new StdioTransportImpl(failingServer, startupTimeout = 500.millis, name = "stderr-log")
+    val failingServer = StdioTestServers.command("--stderr-flood")
+    val transport     = new StdioTransportImpl(failingServer, startupTimeout = 500.millis, name = "stderr-log")
 
+    val started = System.nanoTime()
     val (result, logged) = capturingDebug(classOf[StdioTransportImpl]) {
       try transport.sendRequest(JsonRpcRequest("2.0", "1", "tools/list", None))
       finally transport.close()
     }
+    val elapsed = (System.nanoTime() - started).nanos
 
     val error = result.left.map(_.message)
     error.isLeft shouldBe true
+    // The process-exit path, not the 30 s response timeout: a blocked server would end on the timeout.
+    elapsed should be < 15.seconds
+    error.left.foreach(message => (message should not).include("Timeout waiting"))
     error.left.foreach { message =>
       message should include("Server stderr:")
       message.length should be < PayloadLog.MaxChars + 300

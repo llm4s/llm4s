@@ -8,11 +8,361 @@ nav_order: 2
 # Migration Guide
 
 Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
-by what you use. The notes below are the per-change detail it links to.
+by what you use. The notes below are the per-change detail it links to. From 0.5.0 to 0.5.1 the one source break is
+[Multimodal content parts](#multimodal-content-parts-1913).
+
+## Multimodal content parts (#1913)
+
+In 0.5.1. Stage 3 slice F8b ([#1913](https://github.com/llm4s/llm4s/issues/1913)) gives user messages and tool results content parts: text, images and documents. Code that builds text messages and reads `content` needs no change. Source breaks, with no shims:
+
+- **`UserMessage(parts: Vector[ContentPart])` and `ToolMessage(parts: Vector[ContentPart], toolCallId)`.** `UserMessage(text)` and `ToolMessage(text, toolCallId)` still build a one-text-part message, and `content` is the text view: the text parts, joined by newlines, `""` for a message that is all media. A pattern binds the parts now, so match on the type:
+
+  ```scala
+  // before
+  case UserMessage(content)          => send(content)
+  case ToolMessage(content, callId)  => sendResult(callId, content)
+  // after
+  case u: UserMessage => send(u.content)          // or map u.parts
+  case t: ToolMessage => sendResult(t.toolCallId, t.content)
+  ```
+
+  The two are no longer case classes and have no extractor, so every positional pattern is a compile error: an extractor of the parts would have kept `s"$content"` compiling and printing the parts, and one of the text would have kept a client compiling that drops media. `msg.copy(content = ...)` becomes `msg.withParts(...)`.
+- **`ToolOutcome.Success(content: ToolContent, update)`**, with `ToolContent.Json(value)` for the JSON result a tool returned before and `ToolContent.Parts(parts)` for images and documents:
+
+  ```scala
+  ToolOutcome.Success(ujson.Str("done"))                    // before
+  ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))  // after
+  ToolOutcome.Success(ToolContent.Parts(Vector(ContentPart.Text("The chart:"), chart)))
+  ```
+
+  `Parts` with no content, or with more than `ContentPart.MaxInlineBytes` of inline bytes in total, is the call's error result.
+- **A custom `LLMClient`** that matched `UserMessage(content)` must decide what to do with media parts: send them, or return `Left(UnsupportedContentPartError(provider, part.kind, role))` before sending. `org.llm4s.llmconnect.provider.PartEncoding` is `private[llm4s]`; a provider outside llm4s uses `ContentPart.kind` and the error directly, and runs `ProviderModuleChecks.assertContentParts` in its module spec.
+- **Stored data needs nothing.** The JSON of a one-text message is unchanged, and the old shape reads, so memory stores, saved conversations and thinking bindings are unaffected. An agent thread's `messages` and `tool-results` keys move to schema version 2 and migrate on restore; a thread written by this version cannot be restored by an earlier one.
+- **A client refuses what it cannot send, before sending**: a part kind, source or format its wire format cannot carry is `UnsupportedContentPartError`. A provider's own limits (how many images, how large a request, which formats a model reads) are the provider's: its 400 or 413 comes back as a typed `ValidationError` or `ServiceError` with its message. The guide's [table](../guide/multimodal.html#what-each-provider-sends) lists what each takes.
+- **An agent thread holds at most 20 MiB of inline media** (`Messages.MaxInlineBytes`): media added past it is replaced by a text part naming what was removed. Context budgets (`ConversationTokenCounter`, `ContextPruning`) count media by estimate.
+- **Inline media is bounded** at 5 MiB per part by `ContentPart.image` / `ContentPart.document`, which return a `Result`. Every agent checkpoint copies the thread's messages, so larger media goes at a `MediaSource.Url` or in a `MediaSource.ProviderFile`. See [Multimodal content](../guide/multimodal.html).
+## Workspace backends (#1906)
+
+Not in a release yet. Stage 3 slice F2 ([#1906](https://github.com/llm4s/llm4s/issues/1906)) puts the workspace behind the harness's `FileBackend` and `SandboxBackend` ([design 4.33](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.33-stage-3-slice-f2-workspace-backends.md)). Source and behaviour breaks, with no shims:
+
+- **`org.llm4s.toolapi.WorkspaceTools` and `createDefaultWorkspaceTools` are deleted.** Their `ToolFunction`s called the workspace directly, with no locks, no replay guard and no bounds of their own. Build the harness tools over the workspace instead and give the agent a `ToolSet`; `codegen.CodeWorker` does this itself:
+
+  ```scala
+  // before
+  WorkspaceTools.createDefaultWorkspaceTools(workspace).map(tools => builder.withTools(new ToolRegistry(tools)))
+  // after
+  for
+    files   <- WorkspaceFileBackend("ws1", workspace)
+    sandbox <- WorkspaceSandboxBackend("ws1", workspace)
+    tools   <- ToolSet.of((FileTools(files) :+ ExecuteTool(sandbox))*)
+  yield builder.withTools(tools)
+  ```
+
+  | Old tool | Replacement | Notes |
+  |---|---|---|
+  | `explore_files` | `ls`, `glob` | paths are absolute (`/src`), the workspace root is `/` |
+  | `read_file` | `read_file` | numbered lines, paged by `offset` / `limit` |
+  | `write_file` | `write_file` | creates parent directories; no append mode |
+  | `modify_file` | `edit_file` | replaces exact text (`old_string`, `new_string`), not line ranges |
+  | `search_files` | `grep` | a regex; `include` filters files |
+  | `execute_command` | `execute` | `workdir` (default `/`), `timeout_seconds`; the result is text, `exit code: N` then `stdout:` and `stderr:` |
+
+  An `execute` call is the resource `(Execute, <command>)`, so it needs a `PermissionMiddleware` rule if you use one.
+- **`WorkspaceAgentInterface` has two new methods and two new parameters.** `fileSnapshot(path, includeContent, followLinks)` and `deleteFile(path, expectedHash)`; `writeFile(..., expectedHash)` and `executeCommand(..., maxOutputBytes)` (each stream's bound in UTF-8, JSON-escaped bytes). A class implementing the interface implements them; a caller that passes arguments by position is unaffected. The wire messages' new fields have defaults, so an older client and a newer runner (or the reverse) still talk, without the new calls.
+- **`ContainerisedWorkspace` keeps the runner's error code.** A refused call used to throw `WorkspaceAgentException(..., "EXECUTION_FAILED")` with the code in the message; it now throws the runner's own code (`FILE_NOT_FOUND`, `PATH_NOT_ALLOWED`, ...), as `WorkspaceAgentInterfaceRemote` does. `EXECUTION_FAILED` now means the transport failed.
+- **The runner enforces the sandbox's paths and limits** (#870): a file operation or a command's working directory outside `allowedPaths` is `PATH_NOT_ALLOWED`, a mutation under `readOnlyPaths` is `PATH_READ_ONLY`, and a write, append or line edit that would leave a file over `maxFileSize` is `SIZE_LIMIT_EXCEEDED`. Each path check is made on what the path names through symbolic links as well as on its text, so a file operation through a link that leads outside the workspace is now `PATH_ESCAPE_ATTEMPT`. A config that set these and relied on them being ignored now has its calls refused.
+- **Command output is kept as it was written**, up to `maxOutputSize` bytes per stream (UTF-8, JSON-escaped, as it is carried). The direct `executeCommand` path used to read it line by line, ending every line with `\n` (a final line without one gained it, `\r\n` became `\n`) and keeping whole lines past the bound.
+
+```scala
+// a FileBackend and a SandboxBackend over a running ContainerisedWorkspace
+for
+  files   <- WorkspaceFileBackend("ws1", workspace)
+  sandbox <- WorkspaceSandboxBackend("ws1", workspace)
+yield (files, ExecuteTool(sandbox))
+```
+
+## Smaller breaks since 0.4.1
+
+Changes too small for a section of their own. Each is listed under Breaking changes in the CHANGELOG.
+
+### `AssistantMessage` and `Completion.thinking` (#1381)
+
+`AssistantMessage` is a growth-prone type ([#1381](https://github.com/llm4s/llm4s/issues/1381)): build it with
+`AssistantMessage(...)` and change it with `withContent`, `withToolCalls` and `withThinking`; `.copy` is private. A
+positional pattern takes four fields: `case AssistantMessage(content, toolCalls, thinking, thinkingBinding)`.
+`Completion` loses its `thinking` parameter and `withThinking`: `Completion.thinking` is `message.thinkingText`, so set
+it with `completion.withMessage(completion.message.withThinking(...))`.
+
+### `JSONValidator` checks property types (#922)
+
+A schema's `properties.<field>.type` is now enforced on the top-level fields the output contains
+([#922](https://github.com/llm4s/llm4s/issues/922)). Output that passed because the type was ignored may now be
+rejected; correct the schema or the output. Nested `properties`, `items` and `enum` are still not checked.
+
+### `Result.traverse` and `recoverWithBackoff` (#960)
+
+`Result.traverse` stops calling its function at the first `Left`, so side effects no longer run for the elements after
+a failure ([#960](https://github.com/llm4s/llm4s/issues/960)). `ErrorRecovery.recoverWithBackoff` returns an error it
+does not retry unchanged instead of wrapping it in an `ExecutionError`, and retries a `ServiceError` only for a 5xx,
+429 or 408 status.
+
+### Vertex AI Application Default Credentials (#1939)
+
+`VertexAIAuthProvider`'s `wellKnownCredentialPath` is an `Option[String]`, and `None` (the default) looks up no gcloud
+credentials file ([#1939](https://github.com/llm4s/llm4s/issues/1939)). A client built from a named section finds the
+file as Google's libraries do. A hand-built `VertexAIClient` keeps the fallback by setting the path:
+
+```scala
+VertexAIAdcConfigLoader.load().map(config.withWellKnownCredentialPath)
+```
+
+`GOOGLE_APPLICATION_CREDENTIALS` still wins.
+
+### `AudioFormat.Mp3` (#1307)
+
+`AudioFormat` has a new case, `Mp3` ([#1307](https://github.com/llm4s/llm4s/issues/1307)), so an exhaustive `match`
+needs one more branch. PCM stays the default; the WAV writers and `AudioPreprocessing.standardizeForSTT` refuse MP3
+with a `ValidationError`.
+
+### `RegexValidator`'s constructor
+
+The primary constructor of `RegexValidator` takes a compiled `Pattern` and a description. The `Regex`-based
+constructors remain, so source compiles unchanged, but code compiled against 0.4.1 must be recompiled.
+
+## Stage 3 migration: the Deep Agents harness
+
+In 0.5.0. Stage 3 ([#1901](https://github.com/llm4s/llm4s/issues/1901)) builds the harness as middleware
+and tools on `AgentBuilder`. Each slice adds its part here as it lands:
+
+- [#1902](https://github.com/llm4s/llm4s/issues/1902), kernel hooks for the harness - state-writing hooks, prompt
+  sections, accounted model calls, and a Block that restores the whole turn: [below](#kernel-hooks-for-the-harness-1902).
+- [#1934](https://github.com/llm4s/llm4s/issues/1934), restoring a checkpoint after the graph gains a key - which
+  shape changes keep a thread restorable: [below](#restoring-after-the-graph-changes-1934).
+- [#1903](https://github.com/llm4s/llm4s/issues/1903), tool permissions, timeouts and batch locks:
+  [below](#tool-permissions-timeouts-and-batch-locks-1903).
+- [#1907](https://github.com/llm4s/llm4s/issues/1907), todos: [below](#todos-1907).
+- [#1908](https://github.com/llm4s/llm4s/issues/1908), context management - summarisation and large tool-output
+  offload: [below](#context-management-1908).
+- [#1911](https://github.com/llm4s/llm4s/issues/1911), semantic memory - the new `llm4s-agent-memory` module and
+  `TransactionalMemoryStore`: [below](#semantic-memory-1911).
+- [#1914](https://github.com/llm4s/llm4s/issues/1914), typed custom streams: [below](#typed-custom-streams-1914).
+- [#1915](https://github.com/llm4s/llm4s/issues/1915), the harness profile and middleware placement checks:
+  [below](#harness-profile-and-middleware-placement-1915).
+- [#1921](https://github.com/llm4s/llm4s/issues/1921), replay of external effects - `ReplayGuard`, `Checkpointer.effect`
+  and `Commit.effects`: [below](#replay-of-external-effects-1921).
+- [#1926](https://github.com/llm4s/llm4s/issues/1926), the tenant on a run claim - `ClaimRequest` and `RunClaim`
+  carry it: [below](#the-tenant-on-a-run-claim-1926).
+
+Design: `docs/design/typed-agent-runtime/4.22-stage-3-slice-c1-kernel-hooks.md` (§4.22) onwards.
+
+### Kernel hooks for the harness (#1902)
+
+Code that only builds agents with the built-in middleware needs no change. A middleware of your own that overrides
+`beforeAgent`, `afterAgent` or `wrapModelCall` does. Source breaks, with no shims:
+
+- **The boundary hooks take a `ModelContext` and return a `BoundaryResult`.** `context.run` is the `RunContext` they
+  took before; `context.state` the committed state the task read. Wrap the text, and add an update to keys the
+  middleware declares in `writes` if it has one:
+
+  ```scala
+  // before
+  override def beforeAgent(input: String, context: RunContext): Result[String] = Right(input.trim)
+  // after
+  override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
+    Right(BoundaryResult(input.trim))
+  ```
+
+  `AgentMiddleware.Asking.answered` takes the `ModelContext` too.
+- **`wrapModelCall` takes a `ModelContext` and its `next` returns a `ModelResponse`.** A wrapper that passed `next`
+  through needs only the new signature. One that read the completion reads `response.completion`; one that changed it
+  uses `response.withCompletion(c)`, which keeps the inner wrappers' updates; one that answered without calling
+  `next` returns `ModelResponse(completion)`. A wrapper adds writes with `response.addUpdate(update)`.
+- **`writes` covers every hook.** An update from any hook may touch only that middleware's own `writes`; any other
+  key fails the run with a `ValidationError`.
+- **An output Block restores every key the turn wrote.** Before, only the turn's messages, the active agent and the
+  transfer were rolled back, and a key a tool or middleware wrote during a blocked turn kept its new value. Now
+  every such key returns to its value before the turn; `usage` is kept. A file, sandbox or memory store outside the
+  thread state is not restored.
+- **Usage counts provider calls.** A retrying wrapper's discarded calls are now in `AgentResult.usage`, and a
+  completion a wrapper returned without calling the model (a cache, a reviewed answer) no longer counts as a request.
+  `ModelCallCompleted` is one event per provider call, `attempts` that call's attempt number (0 for a hook's own call
+  through `ModelContext.accounted`). A hook that calls a model itself - or hands a client to a library that does -
+  wraps the client with `context.accounted(client)`, so its calls are counted.
+- **`RunEvent.RunFailed` gains `usage`; `RunCancelled` and `RunTimedOut` become case classes with `usage`**: the
+  calls of the attempts that committed nothing - a task that failed, or one the cancel or deadline cut short. Match
+  them as `RunFailed(message, _)`, `RunCancelled(_)` and `RunTimedOut(_)`; build them as `RunCancelled()`. Events
+  stored before decode with `None`.
+- **Guardrails take the hook's context.** `Guardrail` gains `validate(value, context: ModelContext)`, defaulting to
+  `validate(value)`; `GuardrailMiddleware` calls it. A guardrail of your own that calls a model overrides it to call
+  through `context.accounted(client)`; one that combines guardrails passes `context` on. A subclass of
+  `LLMGuardrail` that called `evaluateWithLLM(content)` passes the client too: `evaluateWithLLM(content, llmClient)`.
+- **An output Block keeps edits made by others.** A key `updateState` changed while the turn waited for review keeps
+  the edit; only keys still holding the turn's writes are restored.
+- **New hook `promptSections`** adds system-prompt content per request, never stored; together the sections are
+  capped by `AgentBuilder.withMaxPromptSectionTokens` (default 8192, four characters a token, measured on the
+  rendered prompt, separators included) and to 64 per request, over which the run fails. `LoopAgent` gains `maxPromptSectionTokens` and `TurnState` gains `priorValues`; a stored `TurnState` without
+  it decodes.
+
+### Restoring after the graph changes (#1934)
+
+Each checkpoint now records its graph's shape (`GraphSnapshot.shape`, `CompiledGraph.shape`), and a restore accepts the
+changes the restored run cannot observe (design §4.29). No code change is needed; what is refused changes:
+
+- **Now restored:** a thread at rest (`Completed`, or `Failed` after a Block) into a graph of another `version`, with
+  other edges or joins, or more nodes or keys - for an agent, a family with another prompt, or with a tool, middleware
+  or handoff added. Any thread into a graph that only gained keys (each reads its initial value) or gained nodes no
+  stored node has a static edge or join to.
+- **Still refused:** a node removed; a key removed while the thread holds a value for it (finish with the old graph,
+  `Remove` the entry, or `forget` the thread); and, for a thread in flight (suspended, or `Running` after a crash),
+  another version, a stored node's changed out-edges, or a changed join over stored nodes. Resume or recover such a
+  thread with the graph it was written by before changing it.
+- **Snapshots written before this change** carry no shape. They restore into their own version when the graph only
+  gained keys, and are refused for anything else until they run once more.
+- `RestoreRejected` problems name the change; "snapshot's graph structure differs from this graph's" is gone.
+- **Effect records (#1921) stay valid.** A thread restored in flight keeps its task ids, so a task `recover` runs again
+  replays its recorded effects; a refused restore commits nothing and leaves them in place.
+- A harness key that should stay removable `Remove`s its entry when it is empty again: removal is judged by the stored
+  entry, which cannot be decoded once its key is gone.
+### Tool permissions, timeouts and batch locks (#1903)
+
+Design §4.23. Additive, bar one reserved key: an agent without `PermissionMiddleware`, `withTimeout` or `withLocks` behaves as before.
+
+- **`tool-queue` is a key the loop owns.** A tool or middleware that declares a `StateKey` with id `tool-queue` is refused at build, as `tool-results` is. Rename it.
+- **`ToolCallRequest` carries `resources`.** `ToolCallRequest(spec, call)` still compiles and gives the tool's `defaultResource`, `(Invoke, <name>)`; the loop builds every request with the call's own resources. A wrapper that builds one for a tool with `withResources` passes them: `ToolCallRequest(spec, call, resources)`.
+- **`PermissionMiddleware` denies what no rule allows**, a tool without `withResources` included: add `PermissionRule.allow(Operation.Invoke, "<name>")` (or `"*"`) for each tool the agent may call. See [Tool Permissions, Timeouts and Locks](/guide/agents/#tool-permissions-timeouts-and-locks).
+- **Adopting locks adds the `tool-queue` key.** The loop registers `tool-queue` only for an agent with a tool that declares `withLocks`. Since #1934 an added key keeps old checkpoints restorable, so threads checkpointed before the first tool adopted locks continue, at rest or suspended. Dropping every lock while a suspended thread still has calls queued in `tool-queue` is refused with `RestoreRejected` rather than stranding them: resume such a thread with its locks first. Once an agent has the key, changing lock functions is safe for threads in flight: a batch keeps the lock schedule it was made with. Agents without locks, timeouts and resources included, restore their existing threads unchanged.
+- **Locked calls cost supersteps.** Each further round of a batch whose calls hold conflicting locks costs two supersteps; raise `RunBudgets.maxSupersteps` if a long batch of conflicting calls reaches it.
+
+### Todos (#1907)
+
+Design §4.30. Additive: `TodoMiddleware` (`org.llm4s.agent.harness`) gives an agent a `write_todos` tool and a plan prompt section.
+
+- **Adding `TodoMiddleware` to an existing agent** registers the `todos` key, and its tool's lock registers `tool-queue`. Since #1934 a thread at rest continues, its plan starting empty. A thread in flight (suspended, or `Running` after a crash) is refused with `RestoreRejected`: resume or recover it with the old agent first. So is a thread last checkpointed before #1934, until it has run once under the agent it was written by. Removing `TodoMiddleware` refuses a thread whose plan holds items. Agents without it are unchanged.
+- **`todos` is a key id the middleware owns.** A `StateKey` of your own with id `todos` in a family that also uses `TodoMiddleware` is refused at build, as two keys with one id are. Rename it.
+- **With `PermissionMiddleware`, allow the tool**: `PermissionRule.allow(Operation.Invoke, "write_todos")`.
+
+### Context management (#1908)
+
+Design §4.34. Additive: `SummarizationMiddleware` and `ToolOutputOffload` (`org.llm4s.agent.harness`).
+
+- **Adding either to an existing agent** registers its key (`summary`, `offloads`), which changes the agent's version as any middleware key does (§4.29): a thread at rest continues, starting with no summary or offloads; a thread in flight is refused until it is resumed or recovered with the old agent. Agents without them are unchanged.
+- **`summary` and `offloads` are key ids the middleware own.** A `StateKey` of your own with either id in a family that uses the middleware is refused at build. Rename it.
+- **Use `SummarizationMiddleware` or `ContextWindowMiddleware`, not both.** `ContextWindowMiddleware` is unchanged, the pruning-only option.
+
+### Semantic memory (#1911)
+
+Design §4.31. `SemanticMemoryMiddleware` is in a new module, `llm4s-agent-memory` (package `org.llm4s.agent.harness.memory`); add the dependency to use it. In `llm4s-memory`:
+
+- **`InMemoryStore`, `SQLiteMemoryStore` and `PostgresMemoryStore` are `TransactionalMemoryStore`s.** Nothing changes for code that only stores and recalls. `InMemoryStore` carries its applied writes and fencing tokens in its value, and `clear()` keeps them.
+- **`MemoryStore.replace(add, remove)` is new**, with a default that stores, then deletes; the SQL stores override it as one transaction. A store of your own that writes in place should override it too.
+- **`LLMMemoryManager.consolidateMemories` replaces each group with one `store.replace(Seq(summary), groupIds)`** instead of a store followed by one delete per memory. A store of your own that overrides `store` and `delete` but not `replace` gets the same writes as before, in the same order.
+- **`PostgresMemoryStore.Config.tableName` is at most 55 characters** (was 63), so the names derived from it (`<table>_applied`, `<table>_fences`, the `idx_<table>_...` indexes) stay distinct within PostgreSQL's 63-byte identifier limit. A longer name is refused when the config is built: give the table a shorter name.
+- **SQLite memory files move to schema version 2.** Opening a file creates its two new tables, `memory_applied_writes` and `memory_fences`, and records version 2 beside version 1 in `schema_version`. A Postgres store creates `<table>_applied` and `<table>_fences` beside its table.
+- **Adding `SemanticMemoryMiddleware` to an existing agent** registers the `semantic-memory-recalled` key and changes the agent's version (§4.29). A thread at rest restores, with nothing recalled until its next turn, and restores again if the middleware is removed (the key is cleared at the end of each turn). A thread in flight - suspended, or `Running` after a crash - is refused with `RestoreRejected`: resume or recover it with the old agent first. Agents without it are unchanged.
+
+### Harness profile and middleware placement (#1915)
+
+Design §4.37. `HarnessProfile` (`org.llm4s.agent.harness`), `AgentBuilder.withHarness` and `org.llm4s.config.HarnessConfigLoader` are additions; `llm4s-agent` now ships a `reference.conf` with the `llm4s.agent.harness` block. One behaviour changes:
+
+- **`build()` refuses a middleware order that a middleware declares wrong** (`AgentMiddleware.placement`), with a `ValidationError` naming both middleware and the fix. A `SemanticMemoryMiddleware` registered after (inside) a `GuardrailMiddleware` or `GuardrailReviewMiddleware` - which recorded answers the guardrail then blocked - is refused: register it first, or name the guardrail's id in its `runsBefore`. So is one on a handoff target when the root agent has guardrail middleware, since the root's `afterAgent` runs after every agent's own: put both on the same agent. A `SummarizationMiddleware` registered after a `ToolOutputOffload` is refused too: register it first.
+
+### Typed custom streams (#1914)
+
+`EventHandlers` and the effect modules' `events(run, ...)` are additions. One behaviour changes:
+
+- **An fs2, ZIO, Pekko or Java agent stream whose consumer stops draining now fails** once more than `Agent.StreamCapacity` (1024) durable events wait for it, with an error naming the last `seq` it took, as the runtime already disconnects a listener that far behind (`Disconnected(lastSeq, Lagging)`). Before, the stream's buffer kept every durable event without limit. A `stream*` that fails this way cancels its turn, as any failure of those streams does; resume from the thread's log with `GraphRuntime.subscribe(threadId, afterSeq = lastSeq)`. A consumer that keeps up, even slowly, is unaffected: a run's own events stay far below the bound.
+
+### Replay of external effects (#1921)
+
+Effects outside thread state replay through `ReplayGuard`: an intent and an outcome per `EffectKey`, kept in the thread's own store. Code that only runs agents or graphs compiles and works unchanged. Code that implements `Checkpointer`, or wraps one, changes:
+
+- **`Checkpointer` gains `effect(threadId, key): Result[Option[EffectRecord]]`.** A wrapper forwards it:
+
+  ```scala
+  def effect(threadId: ThreadId, key: EffectKey) = underlying.effect(threadId, key)
+  ```
+
+- **`Commit` gains `effects: Vector[EffectRecord]`**, defaulted in `apply`, so existing calls compile. A store must do three things with it:
+  - Upsert a commit's records by `key`.
+  - On every commit that carries a checkpoint, first remove each record for which `commit.releasesEffect(record.taskId, record.lineage)` holds.
+  - Remove a thread's records in `deleteThread`. Never remove them in `prune`.
+
+  Persist records with `EffectRecord.toJson` and read them with `EffectRecord.fromJson`. `CheckpointerContract` gains the cases that check all of this.
+- **`GraphError` gains `EffectReplayRefused(operation, reason)`.** A `match` on `GraphError` that must be exhaustive gains a case.
+- **The SQLite schema moves to version 3** (`llm4s_checkpoint_effects`). A version-2 file is migrated when it is opened. A build from before this change refuses a version-3 file, as it refuses any newer schema.
+- **A `Transactional` target fences itself by the claim token.** `AppliedKeys.forget(key, token)` and the effect given to `ReplayGuard.transactional` (`token => ...`) refuse a token older than the newest seen for `key.scope`. A `Verifiable` target's effect is a compare-and-set against the plan's `before`.
+- **A store keys release by the record's task and lineage.** `Commit.releasesEffect(taskId, lineage)` replaces `releasesEffect(taskId, writer)`; persist `EffectRecord.lineage` with the record (SQLite: schema 4, `task_lineage`), and `PendingWrite.resultDigest` with the write. A store that persists the write's and the snapshot's JSON whole needs no change; the snapshot gains `PendingTask.resumeDigest` and `ParkedContinuation.questionDigest` / `resumeDigest`. `GraphSnapshot.liveTasks` is a set of `(id, lineage)` pairs. The checkpoint format moves to 7 (`PendingTask.lineage`, `originLineage`); format 6 never shipped (v0.4.1 has no graph checkpoints), so a format-6 checkpoint restores with no legacy keys: each task gets a fresh root lineage at admission, and any effect record it wrote is ignored.
+- **A tool call's idempotency key now names the issuing model task and the call itself** (`IdempotencyKey.ofCall`), not the model call's checkpoint: a request asked again that answers with the same call gets the same key. `IdempotencyKey.derive` is removed: the loop no longer uses it, and a test builds a key with `IdempotencyKey("...")`.
+- **`ToolQuestionRequest` gains `phase: Option[IdempotencyKey]`** (defaulted; a stored request without it decodes as `None`). An asking tool's `resume` gets effect keys of its own, distinct from `execute`'s.
+- **New, opt-in API**: `RunContext.taskKey`, `RunContext.effectKey` and `ToolContext.effectKey`; `ReplayGuard` and its `Plan`; `ReplaySupport`, `StateCheck`, `AppliedKeys` and `EffectRecord`; and, in `llm4s-agent-testkit`, `ReplayContract`, which every external target of the harness passes. See [Tool side effects](../guide/agents/#tool-side-effects).
+
+Design: `docs/design/typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md` (§4.24).
+
+### Harness backend SPIs (#1904)
+
+Design §4.25. New, opt-in API in `org.llm4s.agent.harness`; nothing existing changes, except:
+
+- **`llm4s-agent-testkit` depends on `llm4s-testkit`**, whose `ScriptedLLMClient` drives `FileBackendContract`'s agent runs. A build that excludes `llm4s-testkit` from its test classpath adds it back.
+- **File tools over a `StateFileBackend` add the `files` key.** Every mutation holds the lock `files/state/<keyId>` (needed: it keeps two edits of one file in a batch from losing one, and the quota exact), so adding file tools over a `StateFileBackend` adds its `files` key and C2's `tool-queue`, and changes the agent's version. Under §4.29 (C5) a thread at rest continues, its files starting empty; a thread in flight (suspended, or `Running` after a crash) is refused with `RestoreRejected` until it is finished or forgotten. Taking the tools out again refuses only a thread whose files hold content: the last file's delete removes the key's entry, so a thread with no files restores.
+
+### Event records carry their claim's token (#1918)
+
+A run is told from an earlier run with the same `RunId` by its claim's fencing token. Code that only runs agents or graphs is unaffected.
+
+- **`EventRecord` gains `token: FencingToken`, after `runId`.** A `Checkpointer` builds each record with `EventRecord.committed(threadId, seq, commit.token, draft)` (the token is a new parameter) and returns and replays it as stored. `CheckpointerContract` checks that every record carries the token of the commit that stored it.
+- **Persisted logs stay readable.** A store that keeps the record's JSON, as both shipped stores do, needs no schema change: a record written before this change has no `token` key and reads as `FencingToken(0)`, which no store issues. An older build reading a newer record ignores the key.
+- **Positional constructions and patterns gain a field.** `EventRecord(threadId, seq, runId, checkpointId, ...)` becomes `EventRecord(threadId, seq, runId, token, checkpointId, ...)`, and `case EventRecord(_, _, _, _, _, _, _, event)` gains a `_`.
+- **`StreamEvent.Live` gains `token: FencingToken`, after `runId`**: the claim token of the run that sent the progress. `StreamEvent.Live(threadId, runId, taskId, nodeId, name, version, payload)` becomes `StreamEvent.Live(threadId, runId, token, taskId, nodeId, name, version, payload)`, and a positional pattern gains a `_`. Matching with `EventType` or `EventHandlers`, as `AgentEvents.TextDelta(d)` does, needs no change. A run's observer and its run-scoped streams no longer deliver progress of another claim under their `RunId`, and a run that has lost its claim sends none.
+
+### The tenant on a run claim (#1926)
+
+A claim records the tenant of the run that holds it, so that neither `ThreadBusy` nor `RunRecovered.takenOverFrom`
+ever names another tenant's run. Code that only runs agents or graphs needs no change. Code that calls
+`Checkpointer.claim` itself, builds a `RunClaim`, or implements `Checkpointer` changes:
+
+- **`ClaimRequest(holder, ttl)` is `ClaimRequest(holder, tenantId, ttl)`**, `tenantId: Option[TenantId]`, also in
+  `ClaimRequest.of`; `withTenantId` sets it. Pass the run's `RunConfig.tenantId`, or `None` for a run of no tenant.
+  `claim`'s signature is unchanged, so a wrapper that forwards it needs no change.
+- **`RunClaim(threadId, holder, token, expiresAt, takenOverFrom)` is `RunClaim(threadId, holder, tenantId, token,
+  expiresAt, takenOverFrom)`**: the claim's own tenant, with `withTenantId`.
+- **A store records the tenant with each claim, and names a claim's holder only to a claim of the same tenant**: a
+  refusal is `ThreadBusy(..., BusyHolder.Run(holder))` only then, and `BusyHolder.Unnamed` otherwise, and a
+  takeover's `takenOverFrom` is `None` when the replaced claim was another tenant's. A claim whose tenant the store
+  cannot tell - one stored before it recorded tenants - is of no tenant. `CheckpointerContract` checks all of this.
+- **`ThreadBusy` from a runtime now names a holder of the caller's own tenant on a thread with no checkpoint yet**:
+  before, a holder in another runtime was `Unnamed` until the thread's first checkpoint. A holder of another tenant
+  is `Unnamed`, also when the thread's latest checkpoint is the caller's.
+- **`RunEvent.RunRecovered.takenOverFrom` is `None` for a takeover of another tenant's claim.**
+- **The SQLite schema moves to version 5** (`claim_tenant`, `claim_tenant_token` on `llm4s_checkpoint_threads`). A
+  version-4 file is migrated when it is opened; a claim it holds then is of no tenant, so its holder is named to
+  nobody until it is released or lapses, at most `ttl` later. A build from before this change refuses a version-5
+  file.
+
+Design: `docs/design/typed-agent-runtime/4.16-stage-2-slice-1-the-durable-checkpointer-contract.md` (§4.16).
+
+### Bounded store calls (#1919)
+
+Code that only runs agents needs no change. A graph run may now end with one more error, and a store has one more
+duty.
+
+- **New `GraphError.CommitTimedOut(threadId, after)`**, from `RunHandle.await()` of a graph run with
+  `Durability.Async` or `OnExit` whose closing commit stayed in the store for twice `ClaimPolicy.ttl`. An `Agent`
+  runs `Sync`, so never sees it. An exhaustive `match` on `GraphError` gains a case. After it, read the thread
+  before `recover`: the commit may or may not have landed.
+- **A `Checkpointer` must return from every call within a bound it documents**, failing a call that reaches it with
+  nothing changed. A store whose calls could wait on a lock, another connection or a network with no limit must add
+  a timeout. To have `CheckpointerContract` check it, override `boundedStore` with
+  `CheckpointerContract.BoundedStore(store, bound, busy)`.
+- **`SqliteCheckpointer` calls fail sooner under contention inside one store**: a call waits for the store's own
+  earlier calls at most `busyTimeout` (with its turn at the file), then fails with a `ProcessingError`, where it
+  used to wait with no limit. Raise `SqliteCheckpointerConfig.busyTimeout` if many threads share one store and its
+  calls are slow.
+
+Design: `docs/design/typed-agent-runtime/4.16-stage-2-slice-1-the-durable-checkpointer-contract.md` (§4.16).
 
 ## Stage 2 migration: durable execution
 
-Not in a release yet. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/1699)) makes agent and graph threads durable and adds human review. One note covers the whole stage; each slice adds its part here as it lands:
+In 0.5.0. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/1699)) makes agent and graph threads durable and adds human review. One note covers the whole stage; each slice adds its part here as it lands:
 
 - [#1700](https://github.com/llm4s/llm4s/issues/1700), the durable `Checkpointer` contract - run-claim leases, fencing tokens and a store contract suite: [below](#durable-checkpointer-contract-1700).
 - [#1703](https://github.com/llm4s/llm4s/issues/1703), tool side-effect safety - idempotency keys and one result per tool call: [below](#tool-side-effect-safety-1703).
@@ -21,7 +371,7 @@ Not in a release yet. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/169
 - [#1701](https://github.com/llm4s/llm4s/issues/1701), the SQLite checkpointer - a new module, nothing to change: [below](#sqlite-checkpointer-1701).
 - [#1705](https://github.com/llm4s/llm4s/issues/1705), live subscriptions across runtimes - `Checkpointer.awaitEventsAfter` and `WatchPolicy`: [below](#live-subscriptions-across-runtimes-1705).
 
-Design: `docs/design/typed-agent-runtime-design.md` §4.16 onwards. Guide: [Durable Checkpointers](../guide/agents/durable-checkpointers.html).
+Design: `docs/design/typed-agent-runtime/4.16-stage-2-slice-1-the-durable-checkpointer-contract.md` (§4.16) onwards. Guide: [Durable Checkpointers](../guide/agents/durable-checkpointers.html).
 
 ### Durable `Checkpointer` contract (#1700)
 
@@ -36,13 +386,31 @@ A run now holds a lease on its thread - a `RunClaim` with an expiry and a `Fenci
   ```
 
   Test a store with `CheckpointerContract` from the new `llm4s-agent-testkit` (see the guide).
-- **`Commit(checkpoint, pendingWrites, events)` is `Commit(token, checkpoint, pendingWrites, events)`**, with a private constructor: build it with `Commit(token, ...)` (all but the token default to empty) and change it with `withCheckpoint`, `withPendingWrites`, `withEvents` and `withToken`. A commit to `InMemoryCheckpointer` - or any store - now needs a claim first: `store.claim(threadId, ClaimRequest(runId, ttl))` returns the `RunClaim` whose `token` it carries.
+- **`Commit(checkpoint, pendingWrites, events)` is `Commit(token, checkpoint, pendingWrites, events)`**, with a private constructor: build it with `Commit(token, ...)` (all but the token default to empty) and change it with `withCheckpoint`, `withPendingWrites`, `withEvents` and `withToken`. A commit to `InMemoryCheckpointer` - or any store - now needs a claim first: `store.claim(threadId, ClaimRequest(runId, tenantId, ttl))` (the tenant since [#1926](#the-tenant-on-a-run-claim-1926)) returns the `RunClaim` whose `token` it carries.
 - **`Checkpoint` and `RunPosition` have private constructors and gain `fencingToken: Option[FencingToken]`.** Build them with `Checkpoint(...)` and `RunPosition(...)` as before (the new field defaults to `None`) and change them with `with*` setters; `checkpoint.copy(parent = p)` is `checkpoint.withParent(p)`. A run's position carries its claim's token; `None` outside a runtime.
 - **`Checkpoint.CurrentFormat` is 5.** Format 4 and earlier checkpoints still read (as written by no claim, `fencingToken = None`); a build before this change refuses format 5.
-- **`GraphError.ThreadBusy(threadId, latestCheckpoint)` gains `holder: Option[String]`**, the holding run's id. A pattern `case GraphError.ThreadBusy(t, c)` becomes `case GraphError.ThreadBusy(t, c, _)`. `ThreadBusy` is now also returned when another runtime or process holds a live claim on the thread.
-- **`GraphError.StaleClaim(threadId, token, current)` is new**: a commit, renewal or release made with a token that is not the thread's current claim. A run that lost its claim ends with `CheckpointWriteFailed(StaleClaim)`.
-- **`InMemoryCheckpointer` takes an optional `Clock`** (default the system clock), by which its claims expire, and **`GraphRuntime` an optional `ClaimPolicy`** (`ttl` 30 seconds, `renewEvery` 10 seconds). Java and Kotlin keep `new InMemoryCheckpointer()`, `new GraphRuntime(store)` and `new GraphRuntime(store, clock)`.
+- **`GraphError.ThreadBusy(threadId, latestCheckpoint)` gains `holder: GraphError.BusyHolder`** (default `BusyHolder.Unnamed`): `BusyHolder.Run(runId)` names the holding run when the caller may see it; `Unnamed` is another run that cannot be named; `Lapsed` is a `fork`, `updateState` or `deleteThread` whose own claim lapsed before its write was known to land, with no other run known to hold the thread - a write it had already sent may still land, so read the thread before retrying. A pattern `case GraphError.ThreadBusy(t, c)` becomes `case GraphError.ThreadBusy(t, c, _)`, and one on a named holder `case GraphError.ThreadBusy(_, _, GraphError.BusyHolder.Run(runId))`. `ThreadBusy` is now also returned when another runtime or process holds a live claim on the thread, and by `updateState` and a `fork` onto a held target.
+- **`GraphError.ThreadBusy` is a `RecoverableError`** (it was a `NonRecoverableError`): a retry may get past it once the thread is free, so generic retry code - `LLMError.isRecoverable`, `RetryPolicy`, `ErrorRecovery`, and a node given an explicit `RetryPolicy` (the default node policy retries nothing) - now retries it. Code that treated every `GraphError` but `DeadlineExceeded` as final should let `ThreadBusy` through to its retry. A call wrapped in `ErrorRecovery.recoverWithBackoff` that is still `ThreadBusy` after its last attempt now ends with an `ExecutionError` naming the attempts and the last error, not with the `ThreadBusy` itself; match on that, and beware that `ExecutionError` is itself recoverable, so nested retry layers multiply attempts.
+- **`GraphError.StaleClaim(threadId, token: FencingToken, current: Option[FencingToken])` is new**: a commit, renewal or release made with a token that is not the thread's current claim. Build it, or compare with it, with `FencingToken(n)`, not a bare `Long`. It is the store's refusal. No runtime call returns it, wrapped or not: a run that loses its claim, or a `start`, `recover` or `resume` whose claim's commit is refused as stale, ends with `ClaimLost` (below), and a `fork`, `updateState` or `deleteThread` whose claim lapsed or was taken over mid-operation returns `ThreadBusy` - nothing was applied, so retry.
+- **A run that lost its claim ends with `GraphError.ClaimLost(threadId, token, current)`, not `CheckpointWriteFailed(StaleClaim)`.** It is new: the run's lease passed with no renewal landing (the run judges it by its own monotonic clock), or a renewal or commit was refused as stale - the claim's own commit at admission included, so `start`, `recover` and `resume` return it too. The run stops at once, its tasks interrupted, and commits nothing more. A pattern `case GraphError.CheckpointWriteFailed(_, _: GraphError.StaleClaim, _)` becomes `case _: GraphError.ClaimLost`. Unlike `CheckpointWriteFailed`, it is not a store outage. `recover` may be attempted once the thread is free: it is refused with `ThreadBusy` while a successor holds it, a successor that finished leaves the thread's state showing it, and a lease that lapsed with no successor leaves the run for `recover` to continue.
+- **`RunEvent.RunRecovered` gains `takenOverFrom: Option[String]`**, the run id whose expired claim the recovery took over, and **`RunClaim` gains `takenOverFrom: Option[RunId]`**, which a store sets when a claim replaces an expired, unreleased one. Both default to `None`, so a log written before still reads; a pattern `case RunEvent.RunRecovered(c, t, p)` becomes `case RunEvent.RunRecovered(c, t, p, _)`. A store reports the replaced holder from `claim` (`CheckpointerContract` checks it).
+- **`InMemoryCheckpointer` takes an optional `Clock`** (default the system clock), by which its claims expire, and **`GraphRuntime` an optional `ClaimPolicy`** (`ttl` 30 seconds, `renewEvery` 10 seconds). Java and Kotlin keep `new InMemoryCheckpointer()`, `new GraphRuntime(store)` and `new GraphRuntime(store, clock)`. **`GraphRuntime.inMemory(clock, claims)`** gives its store the same clock - before, the store used the system clock whatever `clock` was - so a test that moves `clock` now moves claim expiry and `prune`'s ages too.
 - **`GraphRuntime.deleteThread` claims the thread before deleting it**, so it is refused with `ThreadBusy` while a run holds the thread in any runtime, not only in its own.
+- **`Checkpointer.deleteThread(threadId)` is `deleteThread(threadId, token: FencingToken)`**, fenced like a commit: a store deletes only while `token` is the thread's current claim, checked atomically with the delete, and otherwise returns `GraphError.StaleClaim` and deletes nothing. A thread with no claim - an unknown one included - is therefore refused too; claim it first (`GraphRuntime.deleteThread` does). A wrapper that delegates to another store forwards the token:
+
+  ```scala
+  def deleteThread(threadId: ThreadId, token: FencingToken) = underlying.deleteThread(threadId, token)
+  ```
+
+  A store implementation checks the token as its `commit` does, in the same lock or transaction as the delete. `GraphRuntime.deleteThread` passes its own claim's token, and reports a delete whose claim another runtime took over as `ThreadBusy` (or `TenantMismatch`, for another tenant's run), with nothing deleted.
+- **A new thread under a deleted thread's id numbers its events on past the deleted thread's**, not from 1 again: one past the deleted thread's next number, which is never used. A store keeps a tombstone of that number (no data) for each deleted thread that numbered an event, refuses a read of the log after one of the deleted thread's numbers with the new **`GraphError.ThreadDeleted(threadId, afterSeq, firstSeq)`** (`Checkpointer.deleted(afterSeq, firstSeq)` is the rule), and reads from `afterSeq = 0` from the current thread's first event. Code that assumed a thread's first event is `1` should read from `0`.
+- **`DisconnectReason` gains `ThreadDeleted`.** A subscription to a deleted thread - in the deleting runtime, or in another runtime sharing the store, at its next read of the store - ends with `Disconnected(lastSeq, ThreadDeleted)` and never delivers a new thread of the same id as a continuation of the old one; subscribe again from `0` to follow that one. (A subscription in another runtime that has delivered no event yet cannot be told from a new one, and follows the new thread.) A `match` on `DisconnectReason` needs the new case. Before, a subscription in another runtime went on delivering the new thread's events as if they continued the old log, so the old advice to cancel subscriptions before deleting a thread is no longer needed.
+- **`GraphRuntime.subscribe` takes the caller's `RunConfig`, and refuses another tenant's thread.** `subscribe(threadId, afterSeq, capacity)(listener)` is `subscribe(threadId, afterSeq, capacity, config)(listener)`, and `TracingSubscriber.attach(runtime, threadId, tracing, afterSeq)` gains `config` too; both default to `RunConfig()`. A thread whose latest checkpoint is another tenant's - or, with no checkpoint yet, whose run admitting or executing in this runtime is - is refused with `GraphError.TenantMismatch` before the subscription joins, as `history` and `checkpoint` refuse it; a failed read of the thread is returned. Before, any caller could replay and follow any tenant's thread. Pass the `config` your runs use: a multi-tenant caller that subscribed with no `config` is now refused. `RunHandle.subscribe` and `AgentRun.subscribe` use their run's tenant and are unchanged.
+- **`DisconnectReason` gains `TenantMismatch`.** A subscription screens each event against its tenant, so that a thread created under its id by another tenant after it subscribed - or deleted and created again by another tenant through another runtime - is never delivered: it ends with `Disconnected(lastSeq, TenantMismatch)` before that thread's first event. A `match` on `DisconnectReason` needs the new case.
+- **A `ThreadBusy` whose re-read fails names nothing.** When a claim is refused, or a run's claim commit conflicts, the runtime re-reads the thread to check its tenant before naming its checkpoint. If that re-read failed, the error named the store's own, unchecked checkpoint id - another tenant's, possibly, with that tenant's run id in it. It is now `ThreadBusy(threadId, None, BusyHolder.Unnamed)`.
+- **`CheckpointerContract` no longer requires a store to delete regardless of claims.** It checks a delete with the current token, a stale token and another holder's live token, a runtime delete whose claim was taken over, the numbering of a recreated thread, `ThreadDeleted` from `eventsAfter` and `awaitEventsAfter`, and a subscription in another runtime ending with `ThreadDeleted`.
+- **The SQLite schema is version 2** (`first_seq` on `llm4s_checkpoint_threads`). Opening a version-1 file upgrades it in one transaction; a build that knows only version 1 refuses a version-2 file. Stop every process on the older build first: one that already has the file open is not refused, and its deletes are unfenced and drop tombstones.
+- **There is no unfenced `deleteThread`.** To delete a thread outside a runtime, claim it and delete with the claim's token. A deleted id that numbered events keeps a small tombstone (its next event number) for good.
 
 ### Tool side-effect safety (#1703)
 
@@ -62,7 +430,7 @@ ToolQuestionRequest(messageId, call, question, IdempotencyKey("key-1"))
 
 - **`ToolContext` takes the call's key**, after `toolCallId`: `ToolContext(run, toolCallId, idempotencyKey, state,
   approved)`, with `withIdempotencyKey`. You build one only to unit-test a tool; any key will do there
-  (`IdempotencyKey("test")`, or `IdempotencyKey.derive(threadId, checkpointId, superstep, taskId, toolCallId)`).
+  (`IdempotencyKey("test")`).
 - **`ToolTask`, `ApprovalRequest` and `ToolQuestionRequest` gain `idempotencyKey`** - last in `ApprovalRequest` and
   `ToolTask`, before the defaulted `approved` in `ToolQuestionRequest`. Code that only reads them (`AgentResult`'s
   `Suspended`, `ToolLoop.requests`/`questions`, the Java and Kotlin `PendingInterrupt`) is unchanged.
@@ -188,7 +556,7 @@ A subscription now delivers the durable events of commits made through any runti
 
 ## Stage 1 migration: agent runtime
 
-Not in a release yet ([#1328](https://github.com/llm4s/llm4s/issues/1328), with [#1329](https://github.com/llm4s/llm4s/issues/1329)'s events and tracing, which restore the agent event stream #1328 removed). `Agent` now runs on `GraphRuntime`: the graph is the only agent loop, `AgentState` and the legacy loop are deleted, and nothing runs the old loop beside the new one. Tools, guardrails, handoffs and context pruning belong to the agent, set when you build it, and a conversation is carried by its `ThreadId` instead of by a value you pass back in. Design: `docs/design/typed-agent-runtime-design.md` §4.13. This note covers the whole of Stage 1 ([#1326](https://github.com/llm4s/llm4s/issues/1326)), five slices:
+In 0.5.0 ([#1328](https://github.com/llm4s/llm4s/issues/1328), with [#1329](https://github.com/llm4s/llm4s/issues/1329)'s events and tracing, which restore the agent event stream #1328 removed). `Agent` now runs on `GraphRuntime`: the graph is the only agent loop, `AgentState` and the legacy loop are deleted, and nothing runs the old loop beside the new one. Tools, guardrails, handoffs and context pruning belong to the agent, set when you build it, and a conversation is carried by its `ThreadId` instead of by a value you pass back in. Design: `docs/design/typed-agent-runtime/4.13-stage-1-slice-2-the-agent-loop-on-the-graph-runtime.md` (§4.13). This note covers the whole of Stage 1 ([#1326](https://github.com/llm4s/llm4s/issues/1326)), five slices:
 
 - [#1327](https://github.com/llm4s/llm4s/issues/1327), kernel completion: [below](#kernel-completion-1327).
 - [#1328](https://github.com/llm4s/llm4s/issues/1328), the agent loop on `GraphRuntime`: this section.
@@ -215,7 +583,7 @@ val result = for {
 - **`new Agent(client).run(q, tools, ...)` is `Agent.builder(id, client)...build()` then `run(q)`.** `tools`, `systemMessage`, `completionOptions`, `maxSteps` and `handoffs` move to `withTools` (a `ToolRegistry`, `MCPToolRegistry` included, or a `ToolSet`), `withSystemPrompt`, `withCompletionOptions`, `withMaxSteps` and `withHandoffs`. `build()` returns `Result[Agent]` and refuses clashing tool names, an invalid or duplicate handoff id, and `maxSteps < 1`. `run` has the overloads `run(query, config)`, `run(threadId, query)`, `run(threadId, query, config)` and `run(threadId, query, config, history)`; `config` is a `RunConfig` (budgets, deadline).
 - **Per-run guardrails are middleware.** `inputGuardrails`/`outputGuardrails` arguments become `.withMiddleware(new GuardrailMiddleware(input, output))` on the builder. A block is no longer an error: the run returns `Right` with `AgentStatus.Blocked(guardrail, reason)` and the thread stays usable (its checkpoint is `Failed`, which `recover` has nothing to continue and the next `run` accepts). An input block stores nothing of that turn's query (a new thread still keeps its imported `history`); an output block removes the whole turn - query, tool calls and results, answer, and any handoff made in it - so `result.messages` is the history from before the turn; `usage` keeps the turn's model calls. Another middleware's `beforeAgent`/`afterAgent` `Left` ends the run the same way but is returned as that `Left`, and a blank query - given, or produced by a `beforeAgent` - is a `ValidationError` with nothing stored. A guardrail that transforms (`PIIMasker`) now applies its transformation. Guardrails - and any run-boundary middleware (`beforeAgent`, `afterAgent`) - on the root agent guard the whole handoff family: they apply to every turn's query and final answer, whichever agent is active, outside the active agent's own. Give them to the root only; model and tool wrappers stay per agent.
 - **`continueConversation(state, ...)` is `continueConversation(result, ...)`.** It reads only `result.threadId`; `run(threadId, query)` is the same call by thread. A turn on a `Suspended` result is refused, not layered on parked work.
-- **Threads are kept until forgotten.** An `AgentState` was garbage once dropped; a thread lives in the agent's runtime, and one-shot `run` threads stay in the runtime until `forget`. Call `agent.forget(threadId)` (or `GraphRuntime.deleteThread(threadId, config)`) for a conversation you will not continue. `Checkpointer` implementations gain `deleteThread(threadId)`.
+- **Threads are kept until forgotten.** An `AgentState` was garbage once dropped; a thread lives in the agent's runtime, and one-shot `run` threads stay in the runtime until `forget`. Call `agent.forget(threadId)` (or `GraphRuntime.deleteThread(threadId, config)`) for a conversation you will not continue. `Checkpointer` implementations gain `deleteThread(threadId, token)` (fenced by the claim's token since the [#1700](#durable-checkpointer-contract-1700) follow-up).
 - **`runMultiTurn` with `contextWindowConfig` is `runMultiTurn(first, followUps, config)` on an agent built with `new ContextWindowMiddleware(config)`.** Pruning trims what is sent to the model and never what the thread stores; the current turn (latest user message onward) is never pruned - the strategy, `Custom` included, runs only on the history before it, with the budget the turn leaves - the request always starts with a user message (so it may exceed the budget), and the system prompt is outside the budget. `runMultiTurn` stops at the first status that is not `Completed`.
 - **`AgentState` fields move to `AgentResult`.**
 
@@ -321,11 +689,11 @@ handle.foreach(_.cancel())   // instead of token.cancel()
 
 ## Agent middleware
 
-Not in a release yet ([#1279](https://github.com/llm4s/llm4s/issues/1279)). The graph tool loop
+In 0.5.0 ([#1279](https://github.com/llm4s/llm4s/issues/1279)). The graph tool loop
 takes a stack of `AgentMiddleware` in place of a `ToolCallPolicy`: one ordered extension point with
 `beforeAgent`, `afterAgent`, `wrapModelCall` and `wrapToolCall` hooks, for approval, guardrails,
 logging, retry and rate limits. The graph runtime is Experimental, so these are source breaks with
-no shims. Design: `docs/design/typed-agent-runtime-design.md` §4.8. (The `ToolLoop.build` signature shown below was generalised by #1328: see [Stage 1 migration](#stage-1-migration-agent-runtime).)
+no shims. Design: `docs/design/typed-agent-runtime/4.08-stage-0-prototype-agent-middleware.md` (§4.8). (The `ToolLoop.build` signature shown below was generalised by #1328: see [Stage 1 migration](#stage-1-migration-agent-runtime).)
 
 - **`ToolCallPolicy` and `PolicyDecision` are removed, and `ToolLoop.build` loses `policy`.** It
   takes `middleware: Seq[AgentMiddleware] = Nil` instead. A policy becomes an `AgentMiddleware`
@@ -373,11 +741,11 @@ no shims. Design: `docs/design/typed-agent-runtime-design.md` §4.8. (The `ToolL
 
 ## Agent tool contract and handoff ids
 
-Not in a release yet ([#1278](https://github.com/llm4s/llm4s/issues/1278)). The graph tool loop
+In 0.5.0 ([#1278](https://github.com/llm4s/llm4s/issues/1278)). The graph tool loop
 runs `AgentTool`s, whose arguments are validated against their schema (rendered non-strict, so
 optional fields may be omitted) before any middleware or the tool runs, and legacy handoffs take an explicit id. The graph runtime is
 Experimental, so these are source breaks with no shims. Design:
-`docs/design/typed-agent-runtime-design.md` §4.7.
+`docs/design/typed-agent-runtime/4.07-stage-0-prototype-agent-tool-contract.md` (§4.7).
 
 (Since #1328, `Handoff` targets are builders and `ToolLoop.build` takes a family of `LoopAgent`s: see
 [Stage 1 migration](#stage-1-migration-agent-runtime).)
@@ -394,7 +762,7 @@ Experimental, so these are source breaks with no shims. Design:
   final case class SearchArgs(query: String) derives ReadWriter
   val schema = Schema.`object`[SearchArgs]("Search arguments").withRequiredField("query", Schema.string("Query"))
   val spec   = AgentToolSpec[SearchArgs]("search", "Search the index", schema)
-  val search = AgentTool(spec)((args, context) => ToolOutcome.Success(ujson.Str(run(args.query))))
+  val search = AgentTool(spec)((args, context) => ToolOutcome.Success(ToolContent.Json(ujson.Str(run(args.query)))))
   ```
 
   `LoopTool.fromToolFunction(f)` becomes `AgentTool.fromToolFunction(f)`; its arguments are now
@@ -437,10 +805,10 @@ Experimental, so these are source breaks with no shims. Design:
 
 ## Run API for graph runs
 
-Not in a release yet ([#1277](https://github.com/llm4s/llm4s/issues/1277)). `GraphRuntime.start`,
+In 0.5.0 ([#1277](https://github.com/llm4s/llm4s/issues/1277)). `GraphRuntime.start`,
 `recover` and `resume` return a `RunHandle` once the thread is claimed, and the run executes on a
 thread the runtime owns. The graph runtime is Experimental, so these are source breaks with no
-shims. Design: `docs/design/typed-agent-runtime-design.md` §4.6.
+shims. Design: `docs/design/typed-agent-runtime/4.06-stage-0-prototype-run-api-and-event-dispatch.md` (§4.6).
 
 - **`NodeContext` is `RunContext`.** `context.taskId`, `context.nodeId` and `context.superstep`
   become `context.position.taskId`, `.nodeId` and `.superstep`; `emit` and `progress` are
@@ -490,7 +858,7 @@ shims. Design: `docs/design/typed-agent-runtime-design.md` §4.6.
 
 ## Provider configs: build with `apply`, change with `with*`
 
-Not in a release yet ([#1388](https://github.com/llm4s/llm4s/issues/1388)). `OpenAIConfig`,
+In 0.5.0 ([#1388](https://github.com/llm4s/llm4s/issues/1388)). `OpenAIConfig`,
 `AnthropicConfig` and `OllamaConfig` follow the growth-prone pattern (pass 5 below), so a new field
 no longer breaks Java and Kotlin callers. The constructor and `copy` are private:
 
@@ -506,7 +874,7 @@ no longer breaks Java and Kotlin callers. The constructor and `copy` are private
 
 ## Image generation errors are `LLMError`s
 
-Not in a release yet ([#1331](https://github.com/llm4s/llm4s/issues/1331)). `llm4s-image`'s
+In 0.5.0 ([#1331](https://github.com/llm4s/llm4s/issues/1331)). `llm4s-image`'s
 generation clients return `Either[LLMError, _]`, so an interrupted call can return
 `CancelledError`, and `ImageGenerationError` extends `LLMError`. Source breaks, with no shims:
 
@@ -529,7 +897,7 @@ generation clients return `Either[LLMError, _]`, so an interrupted call can retu
 
 ## Cancellation by interrupt
 
-Not in a release yet ([#1270](https://github.com/llm4s/llm4s/issues/1270)). An interrupted call
+In 0.5.0 ([#1270](https://github.com/llm4s/llm4s/issues/1270)). An interrupted call
 now returns `Left(CancelledError)` with the thread's interrupt flag still set. Code that matched
 `ExecutionError`, `TimeoutError` or `SimpleError` to detect an interrupted call should match
 `CancelledError` instead, and `ToolCallError.Cancelled` for a tool call. `CancelledError` is
@@ -557,7 +925,7 @@ non-recoverable and is never retried. Chat clients no longer throw `InterruptedE
 
 ## Pre-baseline API cleanup, pass 8
 
-Not in a release yet; continues pass 7 below. It closes the last gaps in the frozen modules'
+In 0.5.0; continues pass 7 below. It closes the last gaps in the frozen modules'
 public API found by checking the [re-audit](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5935792540)
 against `main`.
 
@@ -578,7 +946,7 @@ against `main`.
 
 ## Pre-baseline API cleanup, pass 7
 
-Not in a release yet; continues pass 6 below, which typed the times a caller supplies. This pass
+In 0.5.0; continues pass 6 below, which typed the times a caller supplies. This pass
 types the times the library **reports**: an elapsed time is a `FiniteDuration`, a point in time an
 `Instant`, and the unit leaves the name. Every JSON, trace and wire format keeps its keys and
 millisecond values (`duration_ms`, `durationMs`, `executionTimeMs`, ...).
@@ -609,7 +977,7 @@ Check string interpolation in particular: `s"${duration}ms"` still compiles, but
 
 ## Pre-baseline API cleanup, pass 6
 
-Not in a release yet; continues pass 5 below. A time the caller supplies is typed: a duration is
+In 0.5.0; continues pass 5 below. A time the caller supplies is typed: a duration is
 a `scala.concurrent.duration.FiniteDuration` and a point in time a `java.time.Instant`, never a
 raw `Int`/`Long` whose unit lives in its name or its Scaladoc. Names lose their unit suffix
 (`timeoutMs` becomes `timeout`). Defaults are unchanged, and so are the wire formats: HOCON keys,
@@ -668,7 +1036,7 @@ ScalaMock `onCall` lambda typed `_: Int` compiles but fails at runtime.
 
 ## Pre-baseline API cleanup, pass 5
 
-Not in a release yet; continues pass 4 below. It settles the provider-author SPI's API quality
+In 0.5.0; continues pass 4 below. It settles the provider-author SPI's API quality
 before the binary-compatibility baseline.
 
 ### Growth-prone data types: construct with named arguments, change with `with*`
@@ -753,7 +1121,7 @@ with `Llm4sConfig.provider(name)` / `defaultProvider()` / `apiKeySources()`.
 
 ## Pre-baseline API cleanup, pass 4
 
-Not in a release yet; continues pass 3 below. Vendor fields leave `NamedProviderConfig`.
+In 0.5.0; continues pass 3 below. Vendor fields leave `NamedProviderConfig`.
 
 **Config files: no change.** `organization`, `endpoint`, `apiVersion`, `contextWindow` and
 `reserveCompletion` keep their names in `llm4s.providers.<name>` sections. What changed is who owns
@@ -799,7 +1167,7 @@ type error while reading the block.
 
 ## Pre-baseline API cleanup, pass 3
 
-Not in a release yet; continues pass 2 below.
+In 0.5.0; continues pass 2 below.
 
 ### `llmconnect.middleware`, `ReliableProviders` and `ReliabilitySyntax` are removed
 
@@ -851,7 +1219,7 @@ and `org.llm4s.llmconnect.serialization.{ToolCallDeserializer, StandardToolCallD
 
 ## Pre-baseline API cleanup, pass 2
 
-Not in a release yet; continues pass 1 below.
+In 0.5.0; continues pass 1 below.
 
 | Removed | Use instead |
 |---|---|
@@ -878,10 +1246,10 @@ the module:
 
 ## Pre-baseline API cleanup, pass 1
 
-Not in a release yet; from the
-[spine re-audit](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5935792540). 0.5.0 sets
-the binary-compatibility baseline for `llm4s-core` and `llm4s-agent`, so public API that nothing
-used, or that was already deprecated, is removed now rather than frozen.
+In 0.5.0; from the
+[spine re-audit](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5935792540). A later
+pre-1.0 release sets the binary-compatibility baseline, so public API that nothing used, or that was
+already deprecated, is removed now rather than frozen.
 
 | Removed | Use instead |
 |---|---|
@@ -996,7 +1364,7 @@ The `llm4s.tools.brave`, `.duckduckgo` and `.exa` keys, their defaults, and the
 
 ## Slice 7: `UsageSummary` and `ModelUsage` move to `org.llm4s.llmconnect.model`
 
-Not in a release yet; the preparation step of slice 7
+In 0.5.0; the preparation step of slice 7
 ([#1242](https://github.com/llm4s/llm4s/issues/1242), decision D1).
 
 Slice 7 carves the agent runtime out of `llm4s-core` into `llm4s-agent`. `UsageSummary` and
@@ -1021,7 +1389,7 @@ form is unchanged, so an `AgentState` saved before the move still loads.
 
 ## llm4s no longer brings a logging backend
 
-Not in a release yet; found by the slice 6 spine audit
+In 0.5.0; found by the slice 6 spine audit
 ([#1133](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5878475544)).
 
 Every llm4s module used to declare `logback-classic` and `log4j-to-slf4j` as compile
@@ -1044,7 +1412,7 @@ application, and the published modules now declare only `slf4j-api`.
 
 ## A failed read no longer deletes or clears indexed documents
 
-Follow-up to [#1236](https://github.com/llm4s/llm4s/pull/1236); not in a release yet.
+Follow-up to [#1236](https://github.com/llm4s/llm4s/pull/1236); in 0.5.0.
 
 `LoadResult.Failure` gains a fourth field, `documentId: Option[String] = None`: the id the
 failed document is (or would be) indexed under. `source` stays the path, key or URL. `RAG.sync`
@@ -1124,7 +1492,7 @@ no longer defaults to `ConfigSource.default`; call `default()` for that.
 
 ## A failed listing fails the sync
 
-[#1231](https://github.com/llm4s/llm4s/pull/1231); not in a release yet.
+[#1231](https://github.com/llm4s/llm4s/pull/1231); in 0.5.0.
 
 A document loader that cannot enumerate its documents - an S3 listing with no credentials, a
 missing bucket or access denied, a `DirectoryLoader` path that does not exist - now yields the
@@ -1153,7 +1521,7 @@ should return `LoadResult.listingFailure(source, error)`.
 ## Vendor credentials: a shared API key per provider
 
 [#1132](https://github.com/llm4s/llm4s/issues/1132), part of the modularisation programme
-([#1126](https://github.com/llm4s/llm4s/issues/1126)); not in a release yet. `0.4.1` and earlier
+([#1126](https://github.com/llm4s/llm4s/issues/1126)); in 0.5.0. `0.4.1` and earlier
 behave as before.
 
 **Credentials belong to a vendor, keyed by provider id; clients belong to a use.** Each provider
@@ -1378,7 +1746,7 @@ LangfuseConfigLoader.default().map(RAGASLangfuseObserver.from)
 
 ### Source breaks
 
-These are taken before 0.5.0 sets the MiMa baseline, and none of them changes a package name.
+These are taken before the MiMa baseline is set, and none of them changes a package name.
 
 1. **Langfuse, the collector, its model and store, and `CostTracker` need `llm4s-observability`**
    (table above).
@@ -1541,7 +1909,7 @@ llm4s {
 Two things to know:
 
 - **Only the section you load is validated** (since
-  [#1132](https://github.com/llm4s/llm4s/issues/1132)'s follow-up; not in a release yet). A
+  [#1132](https://github.com/llm4s/llm4s/issues/1132)'s follow-up; in 0.5.0). A
   section whose required `apiKey` is unset, or whose provider module is not on the classpath,
   fails `provider("<that section>")` - and `defaultProvider()` when it is the default - but not
   a load of any other section. Up to 0.4.1 every section was validated on every load, so each
@@ -1563,7 +1931,7 @@ env check (`EnvCheckPolicies`).
 
 A named provider section can now carry keys of the provider's own, declared by the provider
 rather than squeezed into the shared fields ([#1215](https://github.com/llm4s/llm4s/issues/1215)).
-Not in a release yet.
+In 0.5.0.
 
 ### Vertex AI: `endpoint` becomes `project`, `organization` becomes `location`
 
@@ -1683,7 +2051,7 @@ env check reads `OPENAI_COMPATIBLE_BASE_URL` as that provider's endpoint instead
 ## Slice 5: Mistral, Cohere and Voyage leave core; core ships no provider
 
 The last provider clients leave `llm4s-core` ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
-None of this is in a release yet; `0.4.1` and earlier still ship Mistral, Cohere and Voyage inside
+This is in 0.5.0; `0.4.1` and earlier ship Mistral, Cohere and Voyage inside
 `llm4s-core`.
 
 | Provider | Now in | Add |

@@ -95,15 +95,13 @@ class RestoreSpec extends AnyFlatSpec with Matchers with EitherValues with LoneE
     snapshotAt(3).staticJoins shouldBe Vector(GraphSnapshot.StaticArrivals("both", Vector("summarize")))
   }
 
-  "Restore" should "reject a snapshot of another graph, version or structure" in {
+  "Restore" should "reject a snapshot of another graph, or of another version while in flight" in {
     val snapshot = snapshotAt(1)
-    (problems(graph(version = "v2").restore(snapshot)) should contain).allOf(
-      "snapshot is of version 'v1', this graph is version 'v2'",
-      "snapshot's graph structure differs from this graph's"
+    problems(graph(version = "v2").restore(snapshot)) shouldBe List(
+      "snapshot is of version 'v1', this graph is version 'v2'; a run in flight restores only into its own version"
     )
-    problems(graph(extraNode = true).restore(snapshot)) shouldBe List(
-      "snapshot's graph structure differs from this graph's"
-    )
+    // a node nothing stored reaches is not a change the run can observe (GraphEvolutionSpec has the rest)
+    graph(extraNode = true).restore(snapshot).value
     problems(graph().restore(snapshot.copy(graphId = "elsewhere", superstep = -1))) shouldBe List(
       "snapshot is of graph 'elsewhere'",
       "superstep -1 is negative"

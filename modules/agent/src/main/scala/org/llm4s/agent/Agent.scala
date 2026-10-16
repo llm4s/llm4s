@@ -29,7 +29,11 @@ import org.slf4j.LoggerFactory
  * leave the thread unchanged, as does another middleware's `beforeAgent` or `afterAgent` failure
  * (a Block without a guardrail; a blank query or answer from a hook is one), which also ends the
  * run; a failed run - a provider error, a tool's `Fatal`, a model or tool wrapper's failure,
- * cancellation, a deadline - leaves the thread for [[recover]].
+ * cancellation, a deadline - leaves the thread for [[recover]]. So does a run that lost its claim on the
+ * thread (`GraphError.ClaimLost`), once the thread is free: `recover` is refused with `ThreadBusy` while
+ * another runtime sharing the store holds it - retry - and if a successor finished the work, the
+ * thread's state shows it (`recover` then reports `NothingToRecover`). If the lease merely lapsed, with
+ * no successor, `recover` continues the interrupted turn.
  */
 final class Agent private[agent] (
   val id: AgentId,
@@ -37,7 +41,8 @@ final class Agent private[agent] (
   runtime: GraphRuntime,
   tracing: Option[Tracing],
   interruptBefore: Set[NodeId] = Set.empty,
-  interruptAfter: Set[NodeId] = Set.empty
+  interruptAfter: Set[NodeId] = Set.empty,
+  retention: Option[RetentionPolicy] = None
 ):
 
   /**
@@ -48,6 +53,9 @@ final class Agent private[agent] (
     config
       .withInterruptBefore(config.interruptBefore ++ interruptBefore)
       .withInterruptAfter(config.interruptAfter ++ interruptAfter)
+      // a harness's retention, applied as each turn is admitted (design 4.37), unless the run sets its own;
+      // keepAll removes nothing, so it is not applied at all
+      .withRetention(config.retention.orElse(retention).filter(_ != RetentionPolicy.keepAll))
 
   /**
    * One turn on a new thread with a random id. The thread stays in the agent's runtime - on the
@@ -139,9 +147,10 @@ final class Agent private[agent] (
   /**
    * Removes `threadId` - its history, usage and event log - from the agent's runtime, so that its id
    * names a new thread again. Threads are kept until forgotten, one-shot [[run]]s included.
-   * Refused, with nothing removed, for a thread whose run is active in this runtime
-   * (`GraphError.ThreadBusy`) or that belongs to another tenant than `config`'s
-   * (`GraphError.TenantMismatch`). Forgetting an unknown thread is `Right(())`.
+   * Refused, with nothing removed, for a thread that a run holds - one active in this runtime, or one
+   * holding a live claim on it in any runtime or process sharing the store (`GraphError.ThreadBusy`) - or
+   * that belongs to another tenant than `config`'s (`GraphError.TenantMismatch`). Forgetting an unknown
+   * thread is `Right(())`.
    */
   def forget(threadId: ThreadId, config: RunConfig = RunConfig()): Result[Unit] =
     runtime.deleteThread(threadId, config)

@@ -9,7 +9,7 @@ import java.nio.file.Path
 import java.sql.{ Connection, DriverManager, PreparedStatement, ResultSet }
 import java.time.{ Clock, Instant }
 import java.util.concurrent.locks.ReentrantLock
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.*
 import scala.util.{ Try, Using }
 
 /**
@@ -32,6 +32,10 @@ import scala.util.{ Try, Using }
  *    `retractTurn` or [[deleteThread]] removes it; each of those is one write transaction too.
  *  - '''Fencing tokens''' come from one counter for the whole file, stored in it, so they keep increasing across
  *    restarts and [[deleteThread]], and are never issued twice.
+ *  - '''Fenced deletes, numbered incarnations.''' [[deleteThread]] checks the deleter's token in its own write
+ *    transaction, as a commit does. It keeps the thread's next event number in the file, so a new thread of the same
+ *    id numbers its events past the deleted one's, in this process and every other, and a read from inside the
+ *    deleted log is refused with `GraphError.ThreadDeleted`.
  *  - '''Data only.''' Checkpoints, pending writes and events are stored as JSON - the checkpoint through
  *    `Checkpoint.toJson`, which records its format version - and decoded on read, so nothing executable is stored.
  *  - '''Change notification by polling.''' SQLite cannot tell a connection that another has committed, so this
@@ -44,11 +48,36 @@ import scala.util.{ Try, Using }
  * `ProcessingError`, changing nothing. WAL needs shared memory between the processes that open the file, so keep
  * the file on a local disk - not on a network file system.
  *
+ * '''Fair writes within a process.''' SQLite does not queue a waiting writer: it sleeps and tries again, and wins
+ * only if it wakes while no other connection is writing, so a store beside one that writes back to back can wait
+ * out its whole busy timeout although every write is short (#1951). The stores in one JVM that opened the same path
+ * therefore take turns through a fair, first-come-first-served lock for the file before they begin a write (and an
+ * opener before its migration): each waits for the writes queued ahead of it, up to the busy timeout, and only
+ * then for SQLite's lock, which another process may hold - up to the busy timeout again. Between processes SQLite's
+ * polling still decides the order, so a process writing steadily can starve another's write; raise `busyTimeout`
+ * there.
+ *
  * One store is one connection, and its calls are serialised: it is safe to call from any number of threads.
  * Every failure of the database itself is a `ProcessingError`, and so is any call after [[close]].
+ *
+ * '''Every call returns within twice the busy timeout''', plus the time its own SQL takes, as the `Checkpointer`
+ * contract requires (#1919). A call waits for this store's earlier calls, and a write then for its turn at the file,
+ * at most `busyTimeout` from the call's start; a write then waits for SQLite's own lock, which another process may
+ * hold, at most `busyTimeout` again. A call that reaches either limit fails with a `ProcessingError`, changing
+ * nothing. A read never waits for a writer in WAL mode, so it waits only for this store's earlier calls.
+ * `awaitEventsAfter` polls, so it returns within its `timeout` plus that bound. What no limit here covers is the SQL
+ * itself once it holds the connection: sqlite-jdbc's native calls cannot be timed out or interrupted, so a disk that
+ * stalls inside a write - `synchronous = FULL` waits for the disk to sync every commit - holds that call, and the
+ * store's later calls fail once they have waited `busyTimeout` for it. Keep the bound well inside
+ * `ClaimPolicy.ttl - ClaimPolicy.renewEvery`: with the default 5 second busy timeout and 30 second `ttl`, it is.
  */
-final class SqliteCheckpointer private (val path: Path, clock: Clock, connection: Connection)
-    extends Checkpointer
+final class SqliteCheckpointer private (
+  val path: Path,
+  clock: Clock,
+  connection: Connection,
+  busyTimeout: FiniteDuration,
+  gate: WriteGate
+) extends Checkpointer
     with AutoCloseable:
 
   import SqliteCheckpointer.*
@@ -64,12 +93,22 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
     val now     = clock.instant()
     current.flatMap(_.claim).filter(live => now.isBefore(live.expiresAt)) match
       case Some(live) =>
-        Left(GraphError.ThreadBusy(threadId.value, current.flatMap(_.checkpointId), Some(live.holder)))
+        // another tenant's holder, or one whose tenant is not recorded, is never named
+        val holder =
+          if live.of(request.tenantId) then GraphError.BusyHolder.Run(RunId(live.holder))
+          else GraphError.BusyHolder.Unnamed
+        Left(GraphError.ThreadBusy(threadId.value, current.flatMap(_.checkpointId), holder))
       case None =>
-        val claim = Claim(request.holder.value, nextToken(c), now.plusNanos(request.ttl.toNanos))
+        val claim = Claim(
+          request.holder.value,
+          Some(request.tenantId.map(_.value)),
+          nextToken(c),
+          now.plusNanos(request.ttl.toNanos)
+        )
         ensureRow(c, threadId)
         setClaim(c, threadId, Some(claim))
-        Right(granted(threadId, claim))
+        // a claim still held here has expired: this one takes it over
+        Right(granted(threadId, claim, current.flatMap(_.claim)))
   }
 
   def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration): Result[RunClaim] = writing("renew") { c =>
@@ -158,9 +197,41 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
         update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
       }
       appendWrites(c, threadId, commit.pendingWrites)
+      // released before this commit's own records are applied
+      if commit.checkpoint.isDefined then
+        query(
+          c,
+          "SELECT effect_key, task_id, task_lineage FROM llm4s_checkpoint_effects WHERE thread_id = ?",
+          threadId.value
+        )(row => (row.getString(1), TaskId(row.getString(2)), row.getString(3)))
+          .filter((_, task, lineage) => commit.releasesEffect(task, lineage))
+          .foreach { (key, _, _) =>
+            update(
+              c,
+              "DELETE FROM llm4s_checkpoint_effects WHERE thread_id = ? AND effect_key = ?",
+              threadId.value,
+              key
+            )
+          }
+      commit.effects.foreach { record =>
+        update(
+          c,
+          """INSERT INTO llm4s_checkpoint_effects (thread_id, effect_key, task_id, task_lineage, writer_token, record_json)
+            |VALUES (?, ?, ?, ?, ?, ?)
+            |ON CONFLICT (thread_id, effect_key) DO UPDATE SET
+            |  task_id = excluded.task_id, task_lineage = excluded.task_lineage, writer_token = excluded.writer_token,
+            |  record_json = excluded.record_json""".stripMargin,
+          threadId.value,
+          record.key.value,
+          record.taskId.value,
+          record.lineage,
+          commit.token.value,
+          ujson.write(EffectRecord.toJson(record))
+        )
+      }
       val stored = commit.events.zipWithIndex.map { (draft, i) =>
         val seq = nextSeq + i
-        seq -> upickle.default.write(EventRecord.committed(threadId.value, seq, draft))
+        seq -> upickle.default.write(EventRecord.committed(threadId.value, seq, commit.token, draft))
       }
       Using.resource(
         c.prepareStatement(
@@ -206,6 +277,28 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
           checkpoint <- decodeCheckpoint("latest", json)
           decoded    <- decoding("latest", "pending write")(writes.map(upickle.default.read[PendingWrite](_)))
         yield Some(StoredCheckpoint(checkpoint, decoded))
+    }
+
+  def effect(threadId: ThreadId, key: EffectKey): Result[Option[EffectRecord]] =
+    reading("effect") { c =>
+      Right(
+        query(
+          c,
+          "SELECT record_json FROM llm4s_checkpoint_effects WHERE thread_id = ? AND effect_key = ?",
+          threadId.value,
+          key.value
+        )(_.getString(1)).headOption
+      )
+    }.flatMap {
+      case None => Right(None)
+      case Some(json) =>
+        decoding("effect", "effect record")(ujson.read(json)).flatMap { parsed =>
+          EffectRecord
+            .fromJson(parsed)
+            .left
+            .map(e => undecodable("effect", "effect record", e.message, None))
+            .map(Some(_))
+        }
     }
 
   def history(threadId: ThreadId, before: Option[String], limit: Int): Result[Vector[Checkpoint]] =
@@ -286,8 +379,13 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
 
   def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
     reading("eventsAfter") { c =>
-      val earliest = readRow(c, threadId).fold(1L)(_.earliestSeq)
-      if afterSeq + 1 < earliest then Left(GraphError.ReplayUnavailable(threadId.value, earliest))
+      val row      = readRow(c, threadId)
+      val first    = row.fold(1L)(_.firstSeq)
+      val earliest = row.fold(1L)(_.earliestSeq)
+      // a reader from the start reads the thread now under the id, from its first event
+      if Checkpointer.deleted(afterSeq, first) then Left(GraphError.ThreadDeleted(threadId.value, afterSeq, first))
+      else if math.max(afterSeq, first - 1) + 1 < earliest then
+        Left(GraphError.ReplayUnavailable(threadId.value, earliest))
       else if limit <= 0 then Right(Vector.empty)
       else
         Right(
@@ -310,12 +408,37 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
     Right(())
   }
 
-  def deleteThread(threadId: ThreadId): Result[Unit] = writing("deleteThread") { c =>
-    update(c, "DELETE FROM llm4s_checkpoint_events WHERE thread_id = ?", threadId.value)
-    update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
-    update(c, "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ?", threadId.value)
-    update(c, "DELETE FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)
-    Right(())
+  /**
+   * Deletes the thread in one write transaction, which first checks that `token` is the thread's current claim -
+   * so the check and the delete see one state of the file, whatever other stores on it are doing. The thread's row
+   * stays, emptied, as a tombstone (see [[SqliteSchema]]) once it has numbered an event, so that a new thread of the
+   * id numbers on past it.
+   */
+  def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] = writing("deleteThread") { c =>
+    val current = readRow(c, threadId)
+    if !current.flatMap(_.claim).exists(_.token == token.value) then Left(stale(threadId, current, token))
+    else
+      update(c, "DELETE FROM llm4s_checkpoint_events WHERE thread_id = ?", threadId.value)
+      update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
+      update(c, "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ?", threadId.value)
+      update(c, "DELETE FROM llm4s_checkpoint_effects WHERE thread_id = ?", threadId.value)
+      update(
+        c,
+        // every SET expression reads the row as it was: the next thread starts one past the deleted one's next
+        // number, which is never used (see `Checkpointer.deleted`); a thread that numbered no event leaves nothing,
+        // and a tombstone that numbered no event since its delete keeps its numbering
+        """UPDATE llm4s_checkpoint_threads
+          |SET checkpoint_id = NULL, checkpoint_json = NULL,
+          |    next_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+          |    first_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+          |    earliest_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+          |    claim_holder = NULL, claim_token = NULL, claim_expires_second = NULL, claim_expires_nano = NULL,
+          |    claim_tenant = NULL, claim_tenant_token = NULL
+          |WHERE thread_id = ?""".stripMargin,
+        threadId.value
+      )
+      dropIfEmpty(c, threadId)
+      Right(())
   }
 
   /**
@@ -325,6 +448,7 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
   def close(): Unit = locked {
     if !shut then
       shut = true
+      WriteGate.release(gate)
       connection.close()
   }
 
@@ -337,35 +461,83 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
     lock.lock()
     Using.resource(Unlock(lock))(_ => body)
 
-  /** `body` on the connection, serialised with every other call; any exception is a `ProcessingError`. */
-  private def guarded[A](operation: String)(body: Connection => Result[A]): Result[A] = locked {
-    if shut then Left(failure(operation, "the store is closed", None))
+  /**
+   * `body` on the connection, serialised with every other call; any exception is a `ProcessingError`. A call waits
+   * for this store's earlier calls only until `deadline` (a `System.nanoTime` value), and then fails as a busy file
+   * does, with a `ProcessingError` and nothing changed (#1919): a call stuck on the connection - one waiting out a
+   * busy file, or a disk that stalls - must not hold every later call of the store with it.
+   */
+  private def guarded[A](operation: String, deadline: Long)(body: Connection => Result[A]): Result[A] =
+    if !lockBy(deadline) then Left(failure(operation, storeBusy(busyTimeout), None))
     else
-      Try(body(connection)).toEither.left
-        .map(e => failure(operation, Option(e.getMessage).getOrElse(e.getClass.getName), Some(e)))
-        .flatten
-  }
+      Using.resource(Unlock(lock)) { _ =>
+        if shut then Left(failure(operation, "the store is closed", None))
+        else
+          Try(body(connection)).toEither.left
+            .map(e => failure(operation, Option(e.getMessage).getOrElse(e.getClass.getName), Some(e)))
+            .flatten
+      }
+
+  /**
+   * Takes the store's lock, waiting at most until `deadline` (a `System.nanoTime` value); whether it was taken. As
+   * `lock()` does, it ignores an interrupt while it waits and sets the flag again afterwards: a call's interrupt
+   * flag decides nothing here, as before the wait was bounded.
+   */
+  private def lockBy(deadline: Long): Boolean =
+    @scala.annotation.tailrec
+    def waiting(interrupted: Boolean): (Boolean, Boolean) =
+      CancelledError.catchInterrupt(lock.tryLock(math.max(0L, deadline - System.nanoTime()), NANOSECONDS)) match
+        case Right(taken) => (taken, interrupted)
+        case Left(_)      => waiting(interrupted = true)
+    // a free lock is taken at once, whatever the caller's interrupt flag says
+    lock.tryLock() || {
+      val (taken, interrupted) = waiting(Thread.interrupted())
+      if interrupted then Thread.currentThread().interrupt()
+      taken
+    }
 
   /**
    * `body` in one `BEGIN IMMEDIATE` transaction, committed if it returns `Right` and rolled back otherwise - also
    * when it throws. `IMMEDIATE` takes the write lock before the first read, so the checks a write makes and the
    * write itself see the same state, and a busy file is waited for (up to the busy timeout) before anything is
    * read: a deferred transaction that read first could not wait for the lock.
+   *
+   * The transaction runs holding the file's [[WriteGate]], so the stores of this process write in turn rather than
+   * by SQLite's polling; a wait for the gate that outlasts the busy timeout fails as a busy file does, and one that
+   * is interrupted returns a `CancelledError`, with the interrupt flag set again.
+   *
+   * The waits are bounded together (#1919): for this store's earlier calls and then for the gate, at most
+   * `busyTimeout` from the call's start, and then for SQLite's own lock, held by another process, at most
+   * `busyTimeout` again - so a write waits at most twice `busyTimeout` in all before it fails, changing nothing.
    */
   private def writing[A](operation: String)(body: Connection => Result[A]): Result[A] =
-    guarded(operation) { c =>
-      transaction(c, "BEGIN IMMEDIATE") { guard =>
-        val result = body(c)
-        if result.isRight then
-          execute(c, "COMMIT")
-          guard.committed = true
-        result
+    val deadline = System.nanoTime() + busyTimeout.toNanos
+    guarded(operation, deadline) { c =>
+      val written = CancelledError.catchInterrupt {
+        gate.holding(math.max(0L, deadline - System.nanoTime()).nanos) {
+          transaction(c, "BEGIN IMMEDIATE") { guard =>
+            val result = body(c)
+            if result.isRight then
+              execute(c, "COMMIT")
+              guard.committed = true
+            result
+          }
+        }
       }
+      written match
+        case Right(Some(result)) => result
+        case Right(None)         => Left(failure(operation, gateTimedOut(busyTimeout), None))
+        case Left(interrupted) =>
+          Thread.currentThread().interrupt()
+          Left(CancelledError(s"sqlite-checkpointer.$operation", Some(interrupted)))
     }
 
-  /** `body` in one read transaction, so the rows it reads are from one snapshot of the file. */
+  /**
+   * `body` in one read transaction, so the rows it reads are from one snapshot of the file. In WAL mode a read never
+   * waits for a writer, so it waits only for this store's earlier calls, at most `busyTimeout` (#1919).
+   */
   private def reading[A](operation: String)(body: Connection => Result[A]): Result[A] =
-    guarded(operation) { c =>
+    guarded(operation, System.nanoTime() + busyTimeout.toNanos) { c =>
       transaction(c, "BEGIN DEFERRED") { guard =>
         val result = body(c)
         execute(c, "COMMIT")
@@ -397,12 +569,16 @@ object SqliteCheckpointer:
   def open(path: Path, clock: Clock, config: SqliteCheckpointerConfig): Result[SqliteCheckpointer] =
     openWith(path, clock, config, url => DriverManager.getConnection(url))
 
-  /** [[open]] on a connection from `connect`, so a test can see that a failed open closes what it opened. */
+  /**
+   * [[open]] on a connection from `connect`, so a test can see that a failed open closes what it opened; `onBusy`
+   * runs each time the open finds the file busy, just before it pauses to try again.
+   */
   private[sqlite] def openWith(
     path: Path,
     clock: Clock,
     config: SqliteCheckpointerConfig,
-    connect: String => Connection
+    connect: String => Connection,
+    onBusy: () => Unit = () => ()
   ): Result[SqliteCheckpointer] =
     given ErrorContext = ErrorContext(path)
     Try {
@@ -411,28 +587,36 @@ object SqliteCheckpointer:
     }.toEither.left.map(e => failure("open", Option(e.getMessage).getOrElse(e.getClass.getName), Some(e))).flatMap {
       connection =>
         val deadline = System.nanoTime() + config.busyTimeout.toNanos
+        val gate     = WriteGate.acquire(path)
         // an interrupt while waiting out a busy file is not NonFatal, so `Try` would let it escape and leak the
         // connection: `attempt` returns it as a CancelledError, with the thread's interrupt flag set again
         val prepared = CancelledError
           .attempt("sqlite-checkpointer.open") {
             Try {
-              prepare(connection, config, deadline)
-              retryingBusy(deadline) {
-                transaction(connection, "BEGIN IMMEDIATE") { guard =>
-                  val migrated = SqliteSchema.migrate(connection)
-                  if migrated.isRight then
-                    execute(connection, "COMMIT")
-                    guard.committed = true
-                  migrated
+              prepare(connection, config, deadline, onBusy)
+              // in turn with the writes of this process's stores on the file, as a write is
+              gate
+                .holding(math.max(deadline - System.nanoTime(), 0L).nanos) {
+                  retryingBusy(deadline, onBusy) {
+                    transaction(connection, "BEGIN IMMEDIATE") { guard =>
+                      val migrated = SqliteSchema.migrate(connection)
+                      if migrated.isRight then
+                        execute(connection, "COMMIT")
+                        guard.committed = true
+                      migrated
+                    }
+                  }
                 }
-              }
+                .getOrElse(Left(gateTimedOut(config.busyTimeout)))
             }.toEither.left
               .map(e => failure("open", Option(e.getMessage).getOrElse(e.getClass.getName), Some(e)))
               .flatMap(_.left.map(problem => failure("open", problem, None)))
           }
-          .map(_ => new SqliteCheckpointer(path, clock, connection))
+          .map(_ => new SqliteCheckpointer(path, clock, connection, config.busyTimeout, gate))
         // a connection that is not handed out must not leak: an open handle keeps the file locked
-        if prepared.isLeft then Try(connection.close()): Unit
+        if prepared.isLeft then
+          WriteGate.release(gate)
+          Try(connection.close()): Unit
         prepared
     }
 
@@ -451,9 +635,14 @@ object SqliteCheckpointer:
    * once with `SQLITE_BUSY`. The switch is therefore retried, with a short pause, until `deadline` (the busy timeout
    * from the start of the open), as a transaction would have waited.
    */
-  private def prepare(connection: Connection, config: SqliteCheckpointerConfig, deadline: Long): Unit =
+  private def prepare(
+    connection: Connection,
+    config: SqliteCheckpointerConfig,
+    deadline: Long,
+    onBusy: () => Unit
+  ): Unit =
     execute(connection, s"PRAGMA busy_timeout = ${DurationRounding.ceilMillisInt(config.busyTimeout)}")
-    val mode = retryingBusy(deadline) {
+    val mode = retryingBusy(deadline, onBusy) {
       Using.resource(connection.createStatement()) { statement =>
         Using.resource(statement.executeQuery("PRAGMA journal_mode = WAL")) { rows =>
           if rows.next() then rows.getString(1) else ""
@@ -462,6 +651,12 @@ object SqliteCheckpointer:
     }
     require(mode.equalsIgnoreCase("wal"), s"the database's journal could not be switched to WAL (it is '$mode')")
     execute(connection, "PRAGMA synchronous = FULL")
+
+  private def storeBusy(busyTimeout: FiniteDuration): String =
+    s"the store was busy: its earlier calls held its connection for the whole busy timeout ($busyTimeout)"
+
+  private def gateTimedOut(busyTimeout: FiniteDuration): String =
+    s"the database file is busy: other stores in this process were writing it for the whole busy timeout ($busyTimeout)"
 
   /** `SQLITE_BUSY`: the low byte of the (possibly extended) result code sqlite-jdbc reports as the error code. */
   private val SqliteBusy = 5
@@ -477,19 +672,32 @@ object SqliteCheckpointer:
    * not passed; any other failure, or a busy one past the deadline, is thrown as it was.
    */
   @scala.annotation.tailrec
-  private def retryingBusy[A](deadline: Long, pauseMillis: Long = 1)(body: => A): A =
+  private def retryingBusy[A](deadline: Long, onBusy: () => Unit, pauseMillis: Long = 1)(body: => A): A =
     Try(body) match
       case scala.util.Success(value) => value
       case scala.util.Failure(e) if isBusy(e) && System.nanoTime() < deadline =>
+        onBusy()
         Thread.sleep(pauseMillis + java.util.concurrent.ThreadLocalRandom.current().nextLong(pauseMillis + 1))
-        retryingBusy(deadline, math.min(pauseMillis * 2, 25L))(body)
+        retryingBusy(deadline, onBusy, math.min(pauseMillis * 2, 25L))(body)
       case scala.util.Failure(e) => throw e
 
   // ---- rows ----
 
-  final private case class Claim(holder: String, token: Long, expiresAt: Instant)
+  /**
+   * A stored claim. `tenant` is the tenant it was requested for, or `None` when the row does not record it: a claim
+   * a version-4 file held when it was migrated (see [[SqliteSchema]]). Such a claim is of no tenant: its holder is
+   * never named.
+   */
+  final private case class Claim(holder: String, tenant: Option[Option[String]], token: Long, expiresAt: Instant):
+    def of(tenantId: Option[TenantId]): Boolean = tenant.contains(tenantId.map(_.value))
 
-  final private case class Row(checkpointId: Option[String], nextSeq: Long, earliestSeq: Long, claim: Option[Claim])
+  final private case class Row(
+    checkpointId: Option[String],
+    nextSeq: Long,
+    earliestSeq: Long,
+    firstSeq: Long,
+    claim: Option[Claim]
+  )
 
   final private case class ErrorContext(path: Path)
 
@@ -509,24 +717,38 @@ object SqliteCheckpointer:
       undecodable(operation, what, Option(e.getMessage).getOrElse(e.getClass.getName), Some(e))
     )
 
-  private def granted(threadId: ThreadId, claim: Claim): RunClaim =
-    RunClaim(threadId, RunId(claim.holder), FencingToken(claim.token), claim.expiresAt)
+  // a granted or renewed claim always records its tenant; the replaced one is named only if it is of that tenant
+  private def granted(threadId: ThreadId, claim: Claim, replaced: Option[Claim] = None): RunClaim =
+    val tenant = claim.tenant.flatten.map(TenantId(_))
+    RunClaim(
+      threadId,
+      RunId(claim.holder),
+      tenant,
+      FencingToken(claim.token),
+      claim.expiresAt,
+      replaced.filter(r => claim.tenant.isDefined && r.of(tenant)).map(r => RunId(r.holder))
+    )
 
   private def stale(threadId: ThreadId, current: Option[Row], token: FencingToken): GraphError =
-    GraphError.StaleClaim(threadId.value, token.value, current.flatMap(_.claim).map(_.token))
+    GraphError.StaleClaim(threadId.value, token, current.flatMap(_.claim).map(c => FencingToken(c.token)))
 
   private def readRow(c: Connection, threadId: ThreadId): Option[Row] =
     query(
       c,
-      """SELECT checkpoint_id, next_seq, earliest_seq, claim_holder, claim_token, claim_expires_second, claim_expires_nano
-        |FROM llm4s_checkpoint_threads WHERE thread_id = ?""".stripMargin,
+      """SELECT checkpoint_id, next_seq, earliest_seq, first_seq, claim_holder, claim_token, claim_expires_second,
+        |claim_expires_nano, claim_tenant, claim_tenant_token FROM llm4s_checkpoint_threads WHERE thread_id = ?""".stripMargin,
       threadId.value
     ) { rows =>
-      val token = rows.getLong(5)
+      val token = rows.getLong(6)
       val claim = Option.when(!rows.wasNull()) {
-        Claim(rows.getString(4), token, Instant.ofEpochSecond(rows.getLong(6), rows.getLong(7)))
+        val tenant      = Option(rows.getString(9))
+        val tenantToken = rows.getLong(10)
+        // the tenant is the claim's only if it was recorded with this claim's token: a row migrated from version 4
+        // has none, and a build without the column that claimed since would have left another claim's behind
+        val recorded = Option.when(!rows.wasNull() && tenantToken == token)(tenant)
+        Claim(rows.getString(5), recorded, token, Instant.ofEpochSecond(rows.getLong(7), rows.getLong(8)))
       }
-      Row(Option(rows.getString(1)), rows.getLong(2), rows.getLong(3), claim)
+      Row(Option(rows.getString(1)), rows.getLong(2), rows.getLong(3), rows.getLong(4), claim)
     }.headOption
 
   private def ensureRow(c: Connection, threadId: ThreadId): Unit =
@@ -540,12 +762,15 @@ object SqliteCheckpointer:
     update(
       c,
       """UPDATE llm4s_checkpoint_threads
-        |SET claim_holder = ?, claim_token = ?, claim_expires_second = ?, claim_expires_nano = ?
+        |SET claim_holder = ?, claim_token = ?, claim_expires_second = ?, claim_expires_nano = ?,
+        |    claim_tenant = ?, claim_tenant_token = ?
         |WHERE thread_id = ?""".stripMargin,
       claim.map(_.holder),
       claim.map(_.token),
       claim.map(_.expiresAt.getEpochSecond),
       claim.map(_.expiresAt.getNano.toLong),
+      claim.flatMap(_.tenant).flatten,
+      claim.filter(_.tenant.isDefined).map(_.token),
       threadId.value
     )
 
@@ -554,7 +779,8 @@ object SqliteCheckpointer:
     update(
       c,
       """DELETE FROM llm4s_checkpoint_threads
-        |WHERE thread_id = ? AND checkpoint_id IS NULL AND claim_token IS NULL AND next_seq = 1""".stripMargin,
+        |WHERE thread_id = ? AND checkpoint_id IS NULL AND claim_token IS NULL AND next_seq = 1
+        |  AND NOT EXISTS (SELECT 1 FROM llm4s_checkpoint_effects e WHERE e.thread_id = llm4s_checkpoint_threads.thread_id)""".stripMargin,
       threadId.value
     )
 

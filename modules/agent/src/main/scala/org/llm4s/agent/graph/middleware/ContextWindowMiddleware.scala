@@ -1,8 +1,7 @@
 package org.llm4s.agent.graph.middleware
 
 import org.llm4s.agent.{ ContextPruning, ContextWindowConfig }
-import org.llm4s.agent.graph.RunContext
-import org.llm4s.llmconnect.model.{ Completion, Message, MessageRole }
+import org.llm4s.llmconnect.model.{ Message, MessageRole }
 import org.llm4s.types.Result
 
 /**
@@ -20,8 +19,8 @@ final class ContextWindowMiddleware(
   val id: MiddlewareId = MiddlewareId("context-window")
 ) extends AgentMiddleware:
 
-  override def wrapModelCall(request: ModelRequest, context: RunContext)(
-    next: ModelRequest => Result[Completion]
-  ): Result[Completion] =
+  override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+    next: ModelRequest => Result[ModelResponse]
+  ): Result[ModelResponse] =
     val (system, others) = request.messages.partition(_.role == MessageRole.System)
     next(request.withMessages(system ++ ContextPruning.prune(others, config, tokenCounter).toVector))

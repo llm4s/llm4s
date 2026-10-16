@@ -11,9 +11,6 @@ nav_order: 29
 
 It is for people who *use* llm4s. If you are writing a provider module, see [Writing a provider](writing-a-provider) instead (`llm4s-provider-testkit`).
 
-{: .note }
-> Not yet published. `llm4s-testkit` exists in the build as of [#1475](https://github.com/llm4s/llm4s/issues/1475) but ships in the next release.
-
 ```sbt
 // same version as llm4s-core; test scope only
 libraryDependencies += "org.llm4s" %% "llm4s-testkit" % llm4sVersion % Test

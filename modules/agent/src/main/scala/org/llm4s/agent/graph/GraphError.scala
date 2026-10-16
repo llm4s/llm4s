@@ -2,10 +2,12 @@ package org.llm4s.agent.graph
 
 import org.llm4s.error.{ LLMError, NonRecoverableError, RecoverableError }
 
+import scala.concurrent.duration.FiniteDuration
+
 /**
  * Errors raised while building, running or restoring a typed graph. Every case is a
- * [[NonRecoverableError]] except [[GraphError.DeadlineExceeded]]: `recover` with a new budget
- * continues that run.
+ * [[NonRecoverableError]] except [[GraphError.DeadlineExceeded]] - `recover` with a new budget
+ * continues that run - and [[GraphError.ThreadBusy]], which a retry may get past once the thread is free.
  */
 sealed trait GraphError extends LLMError
 
@@ -64,6 +66,17 @@ object GraphError:
    */
   final case class MiddlewareFailed(middleware: String, cause: Throwable) extends GraphError with NonRecoverableError:
     override val message: String = s"Middleware '$middleware' failed: ${describe(cause)}"
+
+  /**
+   * An agent's answer did not match its response format (`AgentBuilder.withOutput`, design 4.26) after one
+   * corrective retry: the turn ended as a Block, removed from the thread, with both model calls in its usage.
+   * `errors` are the second answer's problems, each prefixed with a JSON path - at most 20, each at most 300
+   * characters. They quote the answer, so `message`, which durable events record, gives only their count.
+   */
+  final case class OutputInvalid(errors: Vector[String]) extends GraphError with NonRecoverableError:
+    private val problems = if errors.size == 1 then "1 problem" else s"${errors.size} problems"
+    override val message: String =
+      s"The agent's answer did not match its response format after a corrective retry ($problems)"
 
   private def describe(thrown: Throwable): String = Option(thrown.getMessage).getOrElse(thrown.toString)
 
@@ -142,6 +155,19 @@ object GraphError:
   final case class ReplayUnavailable(threadId: String, earliestSeq: Long) extends GraphError with NonRecoverableError:
     override val message: String = s"Thread '$threadId' can replay events from sequence $earliestSeq only"
 
+  /**
+   * A read of the thread's event log after `afterSeq` was refused because that point is in the log of a
+   * thread of the same id that [[Checkpointer.deleteThread]] removed ([[Checkpointer.deleted]]): the
+   * thread now under the id - if one has been created - numbers its events from `firstSeq`, so its log
+   * is not a continuation of the one the reader was following. A subscription ends on it with
+   * [[DisconnectReason.ThreadDeleted]]. Read from `0` to follow the thread now under the id.
+   */
+  final case class ThreadDeleted(threadId: String, afterSeq: Long, firstSeq: Long)
+      extends GraphError
+      with NonRecoverableError:
+    override val message: String =
+      s"Thread '$threadId' was deleted after event $afterSeq; the thread now under its id starts at event $firstSeq"
+
   /** `start` was called on a thread whose latest checkpoint is mid-execution; use `recover`. */
   final case class IncompleteRun(threadId: String, checkpointId: String) extends GraphError with NonRecoverableError:
     override val message: String =
@@ -190,19 +216,62 @@ object GraphError:
     override val message: String = s"Thread '$threadId' has no suspended run to resume"
 
   /**
-   * Another run holds the thread: it is still executing in this runtime, another runtime or process
-   * holds a live claim on it ([[RunClaim]]), or it claimed the thread between this call reading it
-   * and claiming it. Nothing was accepted or discarded - retry once that run has suspended or
-   * completed, or once its claim has expired. `holder` is the run id of the claim's holder when it
-   * is known and the caller may see it: it is never named for a thread that has no checkpoint yet in
-   * the store, whose tenant cannot be checked.
+   * Who holds a thread that a call was refused with [[ThreadBusy]], as far as the caller may know.
    */
-  final case class ThreadBusy(threadId: String, latestCheckpoint: Option[String], holder: Option[String] = None)
-      extends GraphError
-      with NonRecoverableError:
+  enum BusyHolder:
+    /**
+     * Run `runId` holds the thread: it is executing in this runtime, or holds a live claim on it. Named
+     * only when it is of the caller's tenant - a run of this runtime with the caller's tenant, or a claim
+     * the store recorded for the caller's tenant ([[ClaimRequest.tenantId]]) - and the thread's latest
+     * checkpoint, if it has one, is the caller's tenant's too.
+     */
+    case Run(runId: RunId)
+
+    /**
+     * Another run holds the thread, or took it over, but is not named: its claim is another tenant's, or
+     * recorded no tenant (a claim persisted before claims carried one); or the store refused the call's
+     * write as stale naming only the claim that replaced its own.
+     */
+    case Unnamed
+
+    /**
+     * No other run is known to hold the thread: the call's own claim was lost - its lease passed with no
+     * renewal landing, or the store found no current claim - before its write was known to land. A write
+     * not yet sent was never applied; one already in the store when the loss was found may still land,
+     * fenced by the claim's token, so read the thread before retrying. A retry may still be refused: by
+     * this call's own claim until its release lands, or by another run that took the thread over meanwhile.
+     */
+    case Lapsed
+
+  /**
+   * The thread is held, so the call was refused: another run is still executing on it in this runtime,
+   * another runtime or process holds a live claim on it ([[RunClaim]]), or it claimed the thread
+   * between this call reading it and claiming it; or the call's own claim lapsed before its write
+   * landed. `start`, `recover`, `resume`, `deleteThread`, `updateState` and `fork` (on its target
+   * thread) are refused this way, so it is recoverable: retry once that run has suspended or completed,
+   * or once its claim has expired. A refusal up front accepted, applied and discarded nothing. A
+   * [[BusyHolder.Lapsed]] refusal is the exception: a write the call had already sent may still land.
+   *
+   * `holder` says who holds the thread as far as the caller may know ([[BusyHolder]]): a run's id when
+   * it is known and of the caller's tenant - a run of this runtime, or a claim recorded for the caller's
+   * tenant - and the thread's latest checkpoint, if any, is the caller's tenant's;
+   * [[BusyHolder.Unnamed]] when another run holds it but cannot be named, such as another tenant's; and
+   * [[BusyHolder.Lapsed]] when it is the call's own claim that lapsed, with no other run known to hold
+   * the thread. A caller of another tenant is refused with [[TenantMismatch]] instead, and learns nothing.
+   */
+  final case class ThreadBusy(
+    threadId: String,
+    latestCheckpoint: Option[String],
+    holder: BusyHolder = BusyHolder.Unnamed
+  ) extends GraphError
+      with RecoverableError:
     override val message: String =
-      s"Thread '$threadId' is held by ${holder.fold("another run")(h => s"run '$h'")} (now at ${latestCheckpoint
-          .getOrElse("<none>")}); retry"
+      val at = latestCheckpoint.getOrElse("<none>")
+      holder match
+        case BusyHolder.Run(runId) => s"Thread '$threadId' is held by run '${runId.value}' (now at $at); retry"
+        case BusyHolder.Unnamed    => s"Thread '$threadId' is held by another run (now at $at); retry"
+        case BusyHolder.Lapsed =>
+          s"Thread '$threadId': this call's claim on it lapsed before its write was known to land, and no other run is known to hold it; a write already sent may still land (now at $at); retry"
 
   /**
    * A commit, renewal or release presented a fencing token that is not the thread's current claim:
@@ -211,11 +280,53 @@ object GraphError:
    * writer that lost its claim cannot record anything after another run took the thread over.
    * `current` is the token of the thread's current claim, if there is one.
    */
-  final case class StaleClaim(threadId: String, token: Long, current: Option[Long])
+  final case class StaleClaim(threadId: String, token: FencingToken, current: Option[FencingToken])
       extends GraphError
       with NonRecoverableError:
     override val message: String =
-      s"Claim token $token on thread '$threadId' is stale (current: ${current.fold("none")(_.toString)})"
+      s"Claim token ${token.value} on thread '$threadId' is stale (current: ${current.fold("none")(_.value.toString)})"
+
+  /**
+   * The run lost its claim on the thread, so it stopped: its lease passed with no renewal landing (the
+   * run judges this itself, by its own monotonic clock), a renewal was refused ([[StaleClaim]]), or the
+   * store refused one of its commits as stale. The run commits nothing more - not even a `RunFailed` -
+   * and drops what it had not yet written; whatever it made durable before stands. `token` is the run's
+   * own claim, and `current` the thread's current claim when the store named one: another run then
+   * holds the thread. `None` means the store named none - the run judged its lease passed without
+   * asking it, or the store found no current claim (a successor that took over has since released
+   * it). A failure the run was recording when its commit was refused is logged, not carried. Unlike
+   * [[CheckpointWriteFailed]], it is not a store outage. `recover` may be attempted once the thread is
+   * free: it is refused with [[ThreadBusy]] while a successor holds the thread, so retry; a successor
+   * that finished the work leaves the thread's state showing it ([[NothingToRecover]]); and a lease that
+   * lapsed with no successor leaves the last checkpoint `Running`, which `recover` continues.
+   */
+  final case class ClaimLost(threadId: String, token: FencingToken, current: Option[FencingToken])
+      extends GraphError
+      with NonRecoverableError:
+    override val message: String =
+      s"Run on thread '$threadId' lost its claim (token ${token.value}, current: ${current
+          .fold("not named")(_.value.toString)}); it stopped and committed nothing more"
+
+  /**
+   * The run's closing wait - an `Async` run waiting for its queued commits, or an `OnExit` run's exit commit - was
+   * given up on: a commit had been in the store for `after`, twice the runtime's `ClaimPolicy.ttl`, with no commit
+   * returning meanwhile, while the run still held its claim. The run ended without waiting for it: its thread is
+   * free in this runtime, and its claim is released on a thread of its own. Every [[Checkpointer]] must return from
+   * each call within a bound it documents, so this is a store that broke that contract, or one whose bound is not
+   * well inside `after`.
+   *
+   * The commit given up on, and any queued behind it, may or may not land. One still in the store is fenced by the
+   * run's claim: once the release lands, or another run takes the thread over, the store refuses it, but it can
+   * land first. So read the thread before acting on it: its latest checkpoint is either the last one the run made
+   * durable, still `Running` - `recover` continues the run once the thread is free - or the run's outcome, which
+   * `recover` reports as it finds it ([[NothingToRecover]], or [[PendingInterrupts]] for a suspended thread). A late
+   * commit's events are in the thread's log and reach the thread's subscribers, but never the run's own listeners
+   * or its tracing.
+   */
+  final case class CommitTimedOut(threadId: String, after: FiniteDuration) extends GraphError with NonRecoverableError:
+    override val message: String =
+      s"Run on thread '$threadId' ended without its closing commit, which had not returned after $after; " +
+        "it may still land, so read the thread before recovering it"
 
   /**
    * An unexpected throwable - such as a `Clock` that threw - refused the run at admission, or
@@ -225,3 +336,11 @@ object GraphError:
    */
   final case class RunCrashed(threadId: String, cause: Throwable) extends GraphError with NonRecoverableError:
     override val message: String = s"Run on thread '$threadId' crashed: $cause"
+
+  /**
+   * [[ReplayGuard]] did not perform or replay effect `operation`, for `reason`: its target changed after
+   * the effect began, it may already have run and cannot be checked, or its outcome was not kept. A
+   * refusal the model should see: a tool maps it to `ToolOutcome.Error` (design §4.24).
+   */
+  final case class EffectReplayRefused(operation: String, reason: String) extends GraphError with NonRecoverableError:
+    override val message: String = s"The effect '$operation' was not replayed: $reason"

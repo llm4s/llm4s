@@ -16,8 +16,48 @@ final class Execution private[graph] (
   private[graph] val staticArrivals: Map[JoinId, Set[NodeId]],
   private[graph] val dynamicActivations: Vector[DynamicActivation],
   private[graph] val parked: Vector[Parked],
-  private[graph] val paused: Boolean
+  private[graph] val paused: Boolean,
+  /**
+   * Effect records of guards run by [[CompiledGraph.step]] outside a runtime (design §4.24): carried from
+   * each execution to the next, so a continuation resumed in memory replays what its task recorded before
+   * it suspended. Inside a [[GraphRuntime]] the thread's store holds them instead. Not part of a snapshot:
+   * an execution restored from one starts with none, as a process restarted without a durable store would.
+   */
+  private[graph] val journal: EffectJournal.Local = EffectJournal.local()
 ):
+
+  /** The tasks that can still run from here, as [[GraphSnapshot.liveTasks]] says of a snapshot. */
+  private[graph] def liveTasks: Set[(String, String)] =
+    frontier.iterator.flatMap(t => Iterator(t.id.value -> t.lineage, t.arrivalId.value -> t.arrivalLineage)).toSet ++
+      parked.map(p => p.origin.task.value -> p.origin.lineage)
+
+  /**
+   * This execution as run `token` admits it: every task created for the run before it was admitted - a new
+   * entry task, a resumed continuation - gets a root lineage of the run's claim (design §4.24). The claim's
+   * checkpoint holds them, so they keep it in every later run. Restored and scheduled tasks keep theirs.
+   */
+  private[graph] def stampedBy(token: Long): Execution =
+    new Execution(
+      owner,
+      superstep,
+      state,
+      frontier.map { t =>
+        val origin = t.origin.map(o =>
+          if o.lineage == Task.Unstamped then o.copy(lineage = Task.rootLineage(token, o.task)) else o
+        )
+        val lineage = if t.lineage == Task.Unstamped then Task.rootLineage(token, t.id) else t.lineage
+        t.copy(lineage = lineage, origin = origin)
+      },
+      staticArrivals,
+      dynamicActivations,
+      parked.map { p =>
+        if p.origin.lineage == Task.Unstamped then
+          p.copy(origin = p.origin.copy(lineage = Task.rootLineage(token, p.origin.task)))
+        else p
+      },
+      paused,
+      journal
+    )
 
   /** No task is ready: the next step completes the run, suspends it, or reports an unsatisfied join. */
   def isQuiescent: Boolean = frontier.isEmpty
@@ -36,16 +76,16 @@ final class Execution private[graph] (
     parked: Vector[Parked] = parked,
     paused: Boolean = paused
   ): Execution =
-    new Execution(owner, superstep, state, frontier, staticArrivals, dynamicActivations, parked, paused)
+    new Execution(owner, superstep, state, frontier, staticArrivals, dynamicActivations, parked, paused, journal)
 
   /** This execution with `state` in place of its own, at superstep `at`; everything scheduled stays. */
   private[graph] def edited(state: ThreadState, at: Int): Execution =
-    new Execution(owner, at, state, frontier, staticArrivals, dynamicActivations, parked, paused)
+    new Execution(owner, at, state, frontier, staticArrivals, dynamicActivations, parked, paused, journal)
 
 final private[graph] case class JoinSlot(join: JoinId, fanOutTask: TaskId)
 
 /** The suspended task a continuation stands in for: its join arrivals are made in this name. */
-final private[graph] case class Origin(task: TaskId, node: NodeId)
+final private[graph] case class Origin(task: TaskId, node: NodeId, lineage: String = "")
 
 /**
  * A scheduled task. `passedBefore` is set on the continuation of a task an `interruptBefore` breakpoint
@@ -60,10 +100,25 @@ final private[graph] case class Task(
   slot: Option[JoinSlot],
   origin: Option[Origin] = None,
   passedBefore: Boolean = false,
-  replay: Option[List[Route]] = None
+  replay: Option[List[Route]] = None,
+  /**
+   * With the id, the task's identity for its effects (design §4.24): a digest of what scheduled it - the
+   * tasks of the superstep before, their ids, lineages and results - or, for a task created before its run
+   * was admitted, of the run's claim. Work planned again after a takeover from the same results is the same
+   * task, so it replays the first plan's evidence; work planned from other results is another task.
+   */
+  lineage: String = Task.Unstamped,
+  /**
+   * For a continuation of a resume node, the digest of its question and answer, taken when the answer was
+   * applied ([[CompiledGraph.resumeDigest]]) and kept with the task, never recomputed from its decoded input.
+   */
+  resumeDigest: Option[String] = None
 ):
   /** The task id a dynamic join counts this task's completion as. */
   def arrivalId: TaskId = origin.fold(id)(_.task)
+
+  /** The lineage of the task a continuation stands in for, else this task's. */
+  def arrivalLineage: String = origin.fold(lineage)(_.lineage)
 
   /** The node a static join counts this task's completion as. */
   def arrivalNode: NodeId = origin.fold(node)(_.node)
@@ -72,13 +127,35 @@ final private[graph] case class Task(
  * A suspended task's continuation, waiting for an answer. For a task a static breakpoint holds,
  * `hold` says what continues it, `resumeNode` is the held task's own node and `question` is unused.
  */
+private[graph] object Task:
+  /**
+   * The lineage of a task created before its run was admitted, and of a task of a format-6 checkpoint, which has
+   * none (format 6 never shipped); admission stamps it with a root lineage of its claim ([[rootLineage]]).
+   */
+  val Unstamped: String = ""
+
+  /** The lineage of task `id` created for the run of claim `token` before it was admitted. */
+  def rootLineage(token: Long, id: TaskId): String =
+    KeyDigest.of(Seq("llm4s-lineage-root-v1", token.toString, id.value))
+
+  /**
+   * The lineage of task `id` scheduled by a superstep whose tasks and their results digest to `superstep`
+   * ([[CompiledGraph.schedule]]).
+   */
+  def scheduledLineage(superstep: String, id: TaskId): String =
+    KeyDigest.of(Seq("llm4s-lineage-v1", superstep, id.value))
+
 final private[graph] case class Parked(
   interrupt: InterruptId,
   resumeNode: NodeId,
   question: Any,
   origin: Origin,
   slot: Option[JoinSlot],
-  hold: Option[Hold] = None
+  hold: Option[Hold] = None,
+  /** For a question, the digest of the question as first encoded ([[CompiledGraph.questionDigest]]). */
+  questionDigest: Option[String] = None,
+  /** For a task held before it ran, the held task's [[Task.resumeDigest]]. */
+  resumeDigest: Option[String] = None
 )
 
 /** What a static breakpoint holds: a task before it runs, or a task's routes after it ran. */
@@ -127,7 +204,9 @@ enum Step[+O]:
  * decoded and checked against the graph that restores them.
  *
  * Each value records its codec's version and is migrated on restore; the snapshot itself is
- * versioned by the [[Checkpoint]] that carries it.
+ * versioned by the [[Checkpoint]] that carries it. `shape` is the writing graph's declared structure, which
+ * [[CompiledGraph.restore]] compares with its own; `None` on a snapshot written before shapes were recorded (#1934),
+ * which is matched by `fingerprint` alone.
  */
 final case class GraphSnapshot(
   graphId: String,
@@ -139,8 +218,21 @@ final case class GraphSnapshot(
   staticJoins: Vector[GraphSnapshot.StaticArrivals],
   dynamicJoins: Vector[GraphSnapshot.Activation],
   parked: Vector[GraphSnapshot.ParkedContinuation],
-  paused: Boolean
-) derives ReadWriter
+  paused: Boolean,
+  shape: Option[GraphShape] = None
+) derives ReadWriter:
+
+  /**
+   * The tasks that can still run from this snapshot, by id: the frontier's, and the tasks the
+   * frontier's and the parked continuations stand in for. Their effect records are kept; every other
+   * task of the thread has finished, or will be planned again ([[Commit.releasesEffect]]).
+   */
+  def liveTasks: Set[(String, String)] =
+    frontier.iterator
+      .flatMap(task =>
+        Iterator(task.taskId -> task.lineage) ++ task.originTask.map(_ -> task.originLineage.getOrElse(task.lineage))
+      )
+      .toSet ++ parked.map(p => p.originTask -> p.originLineage)
 
 object GraphSnapshot:
   /**
@@ -157,7 +249,13 @@ object GraphSnapshot:
     originTask: Option[String],
     originNode: Option[String],
     passedBefore: Boolean = false,
-    replay: Option[Vector[EncodedRoute]] = None
+    replay: Option[Vector[EncodedRoute]] = None,
+    /** The task's lineage (design §4.24); empty for a task written before lineages (format 6). */
+    lineage: String = "",
+    /** The lineage of the task a continuation stands in for. */
+    originLineage: Option[String] = None,
+    /** A resume continuation's digest of its question and answer (design §4.24); computed from `input` if absent. */
+    resumeDigest: Option[String] = None
   ) derives ReadWriter
 
   final case class StaticArrivals(joinId: String, arrived: Vector[String]) derives ReadWriter
@@ -179,5 +277,21 @@ object GraphSnapshot:
     joinId: Option[String],
     fanOutTask: Option[String],
     breakpoint: Option[BreakpointPhase] = None,
-    heldRoutes: Vector[EncodedRoute] = Vector.empty
+    heldRoutes: Vector[EncodedRoute] = Vector.empty,
+    /** The lineage of the task the continuation stands in for; empty before lineages (format 6). */
+    originLineage: String = "",
+    /** A question's digest as first encoded (design §4.24); computed from `question` if absent. */
+    questionDigest: Option[String] = None,
+    /** A task held before it ran: its resume digest, if it is a resume continuation. */
+    resumeDigest: Option[String] = None
   ) derives ReadWriter
+
+/** A result decoded from a pending write, with the digest its successors' lineage is computed from. */
+final private[graph] case class ReusedWrite(result: TaskResult, digest: String)
+
+/**
+ * A task's result in a superstep, with its digest (design §4.24): taken once, where the result was produced or
+ * read - from its pending write as encoded, or as recorded - and never by scheduling, which sees only the digest
+ * for lineage.
+ */
+final private[graph] case class Settled(task: Task, result: TaskResult, digest: String)

@@ -1,10 +1,12 @@
 package org.llm4s.agent
 
+import org.llm4s.agent.graph.middleware.{ ModelContext, ModelResponse }
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.graph._
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelRequest }
 import org.llm4s.agent.graph.tool.ToolOutcome
+import org.llm4s.agent.graph.tool.ToolContent
 import org.llm4s.agent.graph.toolloop.ToolResultRule
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
@@ -23,33 +25,8 @@ import scala.jdk.CollectionConverters._
 class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
 
   private val thread = ThreadId("t")
-  private val callId = ToolCallId("call_0")
 
-  private val task = TaskId("1.0")
-
-  "IdempotencyKey.derive" should "be 64 lowercase hex characters, the same for the same call" in {
-    val key = IdempotencyKey.derive(thread, "run/1", 1, task, callId)
-    (key.value should fullyMatch).regex("[0-9a-f]{64}")
-    IdempotencyKey.derive(thread, "run/1", 1, task, callId) shouldBe key
-  }
-
-  it should "differ when the thread, the checkpoint, the superstep, the task or the call differs" in {
-    val key = IdempotencyKey.derive(thread, "run/1", 1, task, callId)
-    IdempotencyKey.derive(ThreadId("u"), "run/1", 1, task, callId) should not be key
-    IdempotencyKey.derive(thread, "run/2", 1, task, callId) should not be key
-    IdempotencyKey.derive(thread, "run/1", 2, task, callId) should not be key
-    IdempotencyKey.derive(thread, "run/1", 1, TaskId("1.1"), callId) should not be key
-    IdempotencyKey.derive(thread, "run/1", 1, task, ToolCallId("call_1")) should not be key
-  }
-
-  it should "not confuse inputs whose parts concatenate alike" in {
-    IdempotencyKey.derive(ThreadId("ab"), "c", 1, task, callId) should not be
-      IdempotencyKey.derive(ThreadId("a"), "bc", 1, task, callId)
-    IdempotencyKey.derive(thread, "run/1", 11, TaskId("1.0"), callId) should not be
-      IdempotencyKey.derive(thread, "run/1", 1, TaskId("11.0"), callId)
-  }
-
-  it should "encode as a plain JSON string" in {
+  "IdempotencyKey" should "encode as a plain JSON string" in {
     val key = IdempotencyKey("k-1")
     upickle.default.write(key) shouldBe "\"k-1\""
     upickle.default.read[IdempotencyKey]("\"k-1\"") shouldBe key
@@ -58,31 +35,43 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
   /** A middleware recording where each model call ran. */
   private def modelPositions(seen: ConcurrentLinkedQueue[RunPosition]): AgentMiddleware = new AgentMiddleware {
     val id: MiddlewareId = MiddlewareId("model-positions")
-    override def wrapModelCall(request: ModelRequest, context: RunContext)(
-      next: ModelRequest => Result[Completion]
-    ): Result[Completion] = {
-      seen.add(context.position)
+    override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+      next: ModelRequest => Result[ModelResponse]
+    ): Result[ModelResponse] = {
+      seen.add(context.run.position)
       next(request)
     }
   }
 
-  "The key a tool sees" should "be derived from where the model call ran and the call id" in {
-    val seen = new ConcurrentLinkedQueue[IdempotencyKey]()
+  "The key a tool sees" should "be derived from the model task that issued the call and the call itself" in {
+    val seen  = new ConcurrentLinkedQueue[IdempotencyKey]()
+    val tasks = new ConcurrentLinkedQueue[IdempotencyKey]()
+    val modelTasks = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("model-tasks")
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] = {
+        tasks.add(context.run.taskKey)
+        next(request)
+      }
+    }
     val record = SpecTools.tool("record") { (_, context) =>
       seen.add(context.idempotencyKey)
-      ToolOutcome.Success(ujson.Str("ok"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
     }
     val models = new ConcurrentLinkedQueue[RunPosition]()
     val client = ScriptedLLMClient.of(calling(call("c1", "record")), CompletionFixture.simple("done"))
     val agent = built(
-      Agent.builder("assistant", client).withTools(SpecTools.set(record)).withMiddleware(modelPositions(models))
+      Agent
+        .builder("assistant", client)
+        .withTools(SpecTools.set(record))
+        .withMiddleware(modelPositions(models))
+        .withMiddleware(modelTasks)
     )
     agent.run(thread, "go").value.answer shouldBe Some("done")
 
-    val issuing = models.asScala.head
-    seen.asScala.toVector shouldBe Vector(
-      IdempotencyKey.derive(thread, issuing.checkpointId, issuing.superstep, issuing.taskId, ToolCallId("c1"))
-    )
+    // the model task's key carries its lineage: the same work issues the same call under the same key (§4.24)
+    seen.asScala.toVector shouldBe Vector(IdempotencyKey.ofCall(thread, tasks.asScala.head, call("c1", "record")))
   }
 
   /** A `record` tool that keeps every key it sees, and a model that calls it as `call_0` in two turns. */
@@ -90,7 +79,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
     val seen = new ConcurrentLinkedQueue[IdempotencyKey]()
     val record = SpecTools.tool("record") { (_, context) =>
       seen.add(context.idempotencyKey)
-      ToolOutcome.Success(ujson.Str("ok"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
     }
     val client = ScriptedLLMClient.of(
       calling(call("call_0", "record")),
@@ -122,7 +111,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
   "A model message whose tool call ids repeat" should "be refused before it is stored; recover asks again" in {
     val ran = new java.util.concurrent.atomic.AtomicInteger()
     val lookup = SpecTools.tool("lookup") { (_, _) =>
-      ran.incrementAndGet(); ToolOutcome.Success(ujson.Str("ok"))
+      ran.incrementAndGet(); ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
     }
     val client = new ScriptedLLMClient(
       Right(calling(call("c1", "lookup"), call("c1", "lookup"))),
@@ -145,7 +134,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
   }
 
   "A model message with a blank tool call id" should "be refused before it is stored" in {
-    val lookup = SpecTools.tool("lookup")((_, _) => ToolOutcome.Success(ujson.Str("ok")))
+    val lookup = SpecTools.tool("lookup")((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("ok"))))
     val client = ScriptedLLMClient.of(calling(call(" ", "lookup")))
     val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(lookup)))
     cause(agent.run(thread, "go").error).message should include("a tool call has a blank id")
@@ -154,12 +143,12 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
   "A model wrapper that drops a tool result" should "never reach the model" in {
     val dropping = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("drop-results")
-      override def wrapModelCall(request: ModelRequest, context: RunContext)(
-        next: ModelRequest => Result[Completion]
-      ): Result[Completion] =
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] =
         next(request.withMessages(request.messages.filterNot(_.isInstanceOf[ToolMessage])))
     }
-    val lookup = SpecTools.tool("lookup")((_, _) => ToolOutcome.Success(ujson.Str("ok")))
+    val lookup = SpecTools.tool("lookup")((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("ok"))))
     val client = ScriptedLLMClient.of(calling(call("c1", "lookup")), CompletionFixture.simple("never"))
     val agent =
       built(Agent.builder("assistant", client).withTools(SpecTools.set(lookup)).withMiddleware(dropping))

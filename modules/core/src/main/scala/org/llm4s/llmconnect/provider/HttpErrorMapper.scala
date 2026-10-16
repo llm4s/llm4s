@@ -132,6 +132,16 @@ object HttpErrorMapper {
               error.strOpt.orElse(error.objOpt.flatMap(_.get("message").flatMap(_.strOpt)))
             }
           )
+          // IBM watsonx: {"errors": [{"code": ..., "message": ...}]}
+          .orElse(
+            json
+              .get("errors")
+              .flatMap(_.arrOpt)
+              .flatMap(_.headOption)
+              .flatMap(_.objOpt)
+              .flatMap(_.get("message"))
+              .flatMap(_.strOpt)
+          )
       }
       .getOrElse(defaultMsg)
     sanitize(raw)

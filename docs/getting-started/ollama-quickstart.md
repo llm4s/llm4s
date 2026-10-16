@@ -42,15 +42,14 @@ Perfect for **development**, **testing**, and **production** workloads where pri
 
 No API keys needed! 🎉
 
-From the release after `0.4.1`, Ollama support ships in its own artifact, alongside
-`llm4s-core`:
+Ollama support ships in its own artifact, alongside `llm4s-core`:
 
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-ollama" % llm4sVersion
 ```
 
-Adding it registers the provider; there is nothing else to wire up. In `0.4.1` and earlier,
-Ollama is part of `llm4s-core`. See the
+Adding it registers the provider; there is nothing else to wire up. Before 0.5.0, Ollama was
+part of `llm4s-core`. See the
 [installation guide](installation.md#for-ollama-local-models).
 
 ---
@@ -152,8 +151,7 @@ libraryDependencies ++= Seq(
 )
 ```
 
-`llm4s-ollama` is a module on `main` that has not been published yet: in v0.4.1 and earlier the
-Ollama provider ships inside `llm4s-core`, so `llm4s-core` alone is enough there.
+Before 0.5.0 the Ollama provider shipped inside `llm4s-core`, so `llm4s-core` alone was enough.
 
 ### Add an `ollama-local` section
 

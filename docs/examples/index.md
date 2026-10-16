@@ -47,7 +47,7 @@ and is run in CI:
 |----------|-------|-------------|
 | [Playground](#playground) | 1 | Offline demo — no API key needed |
 | [Basic Examples](#basic-examples) | 9 | Getting started, streaming, tracing |
-| [Agent Examples](#agent-examples) | 8 | Multi-turn agents, persistence, built-in tools |
+| [Agent Examples](#agent-examples) | 10 | Multi-turn agents, persistence, built-in tools, the harness exit examples |
 | [Tool Examples](#tool-examples) | 7 | Tool calling, built-in tools, parallel execution |
 | [Guardrails Examples](#guardrails-examples) | 7 | Input/output validation, LLM-as-Judge |
 | [Handoff Examples](#handoff-examples) | 3 | Agent-to-agent delegation |
@@ -475,6 +475,49 @@ sbt "samples/runMain org.llm4s.samples.agent.BuiltinToolsAgentExample"
 ```
 
 [View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/BuiltinToolsAgentExample.scala)
+
+---
+
+### DeepResearchExample {#deep-research}
+
+**File:** [`DeepResearchExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/harness/DeepResearchExample.scala)
+
+The first harness exit example ([design §4.38](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.38-stage-3-slice-p2-exit-examples.md)):
+`HarnessProfile.deepAgents` on state files, with a skill and an `AGENTS.md` the application ships
+(`StaticFileBackend`), permission rules, offload of a long fetched page, summarisation, semantic memory, a typed
+answer and the SQLite checkpointer. Its first "process" stops once the first tool result is committed; the second
+`recover`s the run from the same file and prints the report the agent wrote.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.harness.DeepResearchExample"
+```
+
+**What it demonstrates:**
+- Tool policy: reads anywhere, writes under `/research/` and to `/report.md`, fetches from one site
+- Context management: offload to `/large_tool_results`, read back by path; summarisation
+- Streaming: the plan (`TodosUpdated`) and the answer (`TextDelta`) through `EventHandlers`
+- Checkpoint and `recover` in a fresh runtime; persisted artifacts read back from SQLite
+
+`DeepResearchAcceptanceSpec` runs the same agent on a scripted model, with a crash at each point that matters.
+
+---
+
+### CodingWorkspaceExample {#coding-workspace}
+
+**File:** [`CodingWorkspaceExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/harness/CodingWorkspaceExample.scala)
+
+The second harness exit example: a coding agent in a workspace container (`WorkspaceFileBackend`, `execute`), under
+rules that allow writes under `/src/` and ask before `execute`. The run suspends when the agent asks to run its
+check; a fresh runtime over the same SQLite file shows you the command, asks you to approve it, and `resume`s the
+run with your answer: an approved command runs once, a rejected one not at all.
+Needs Docker and the workspace-runner image (`sbt workspaceRunner/Docker/publishLocal`).
+
+```bash
+sbt "samples/runMain org.llm4s.samples.harness.CodingWorkspaceExample llm4s/workspace-runner:<tag>"
+```
+
+`CodingWorkspaceAcceptanceSpec` runs the same agent on a scripted model over an in-memory workspace;
+`CodingWorkspaceIntegrationSpec` (`sbt testWorkspace`) runs the scenario against the container.
 
 ---
 

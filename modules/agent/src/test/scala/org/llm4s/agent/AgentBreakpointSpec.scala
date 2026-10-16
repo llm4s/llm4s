@@ -1,18 +1,10 @@
 package org.llm4s.agent
 
+import org.llm4s.agent.graph.middleware.{ ModelContext, ModelResponse }
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.AgentMiddlewareQuestionSpec.{ Info, Need, Review }
 import org.llm4s.agent.SpecTools.{ call, calling, Text }
-import org.llm4s.agent.graph.{
-  BreakpointPhase,
-  GraphError,
-  GraphRuntime,
-  InterruptId,
-  NodeId,
-  RunConfig,
-  RunContext,
-  ThreadId
-}
+import org.llm4s.agent.graph.{ BreakpointPhase, GraphError, GraphRuntime, InterruptId, NodeId, RunConfig, ThreadId }
 import org.llm4s.agent.graph.middleware.{
   AgentMiddleware,
   ApprovalMiddleware,
@@ -20,7 +12,7 @@ import org.llm4s.agent.graph.middleware.{
   ModelRequest,
   ToolCallRequest
 }
-import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome }
+import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.agent.graph.toolloop.{ BreakpointRequest, ToolLoop }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
@@ -39,7 +31,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with Matchers {
 
   private val deploy = SpecTools.tool("deploy") { (a, _) =>
     ran.add(a.text)
-    ToolOutcome.Success(ujson.Str(s"deployed ${a.text}"))
+    ToolOutcome.Success(ToolContent.Json(ujson.Str(s"deployed ${a.text}")))
   }
 
   private def breakpointsOf(result: AgentResult): Vector[(InterruptId, BreakpointRequest)] = result.status match {
@@ -58,9 +50,9 @@ class AgentBreakpointSpec extends AnyFlatSpec with Matchers {
   /** Asks before every model call, and lets it go ahead once answered. */
   final private class SpendGate extends AgentMiddleware.Asking[Need, Boolean] {
     val id: MiddlewareId = MiddlewareId("spend")
-    override def wrapModelCall(request: ModelRequest, context: RunContext)(
-      next: ModelRequest => Result[Completion]
-    ): Result[Completion] = answered(context).fold(ask(Need("spend?")))(_ => next(request))
+    override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+      next: ModelRequest => Result[ModelResponse]
+    ): Result[ModelResponse] = answered(context).fold(ask(Need("spend?")))(_ => next(request))
   }
 
   /** Asks which environment each tool call is for, and runs it once answered. */
@@ -242,7 +234,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with Matchers {
     val confirm = new AgentTool.Asking[Text, Need, Boolean](SpecTools.spec("confirm")) {
       def execute(args: Text, context: ToolContext): ToolOutcome = ask(Need("sure?"))
       def resume(args: Text, question: Need, answer: Boolean, context: ToolContext): ToolOutcome =
-        ToolOutcome.Success(ujson.Str(s"confirmed $answer"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str(s"confirmed $answer")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "confirm")), CompletionFixture.simple("done"))
     val agent =
@@ -349,7 +341,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with Matchers {
     val flaky = SpecTools.tool("deploy") { (_, _) =>
       runs.incrementAndGet()
       if failOnce.getAndSet(false) then ToolOutcome.Fatal(ValidationError("deploy", "store down"))
-      else ToolOutcome.Success(ujson.Str("ok"))
+      else ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "deploy")), CompletionFixture.simple("done"))
     val agent =
@@ -368,7 +360,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with Matchers {
         entered.countDown()
         Thread.sleep(60_000) // interrupted by cancel
       }
-      ToolOutcome.Success(ujson.Str("ok"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "deploy")), CompletionFixture.simple("done"))
     val agent =

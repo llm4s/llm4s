@@ -2,7 +2,9 @@ package org.llm4s.codegen
 
 import org.llm4s.agent.{ Agent, AgentResult, AgentStatus }
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.toolapi._
+import org.llm4s.agent.graph.tool.ToolSet
+import org.llm4s.agent.harness.{ ExecuteTool, FileTools }
+import org.llm4s.agent.harness.workspace.{ WorkspaceFileBackend, WorkspaceSandboxBackend }
 import org.llm4s.workspace.ContainerisedWorkspace
 import org.slf4j.LoggerFactory
 import org.llm4s.types.Result
@@ -32,10 +34,15 @@ class CodeWorker(
   private val logger    = LoggerFactory.getLogger(getClass)
   private val workspace = new ContainerisedWorkspace(sourceDirectory, imageName, hostPort, extraAllowedCommands)
 
-  // Custom tool definitions for working with code
-  private val toolRegistryResult: Result[ToolRegistry] = for {
-    tools <- WorkspaceTools.createDefaultWorkspaceTools(workspace)
-  } yield new ToolRegistry(tools)
+  /**
+   * The harness's file tools over the workspace's files, and `execute` over its sandbox (design §4.33): every
+   * file change and command is ordered by its locks and replayed through C4's guards.
+   */
+  private val toolSetResult: Result[ToolSet] = for {
+    files   <- WorkspaceFileBackend(CodeWorker.WorkspaceId, workspace)
+    sandbox <- WorkspaceSandboxBackend(CodeWorker.WorkspaceId, workspace)
+    tools   <- ToolSet.of((FileTools(files) :+ ExecuteTool(sandbox))*)
+  } yield tools
 
   /**
    * Initialize the workspace and prepare for code tasks
@@ -64,8 +71,8 @@ class CodeWorker(
     logger.info(s"Executing code task: $task")
 
     val result = for {
-      toolRegistry <- toolRegistryResult
-      builder = Agent.builder("codegen", client).withTools(toolRegistry)
+      toolSet <- toolSetResult
+      builder = Agent.builder("codegen", client).withTools(toolSet)
       agent   <- maxSteps.fold(builder)(builder.withMaxSteps).build()
       outcome <- agent.run(task)
     } yield outcome
@@ -94,4 +101,10 @@ class CodeWorker(
 
   override def close(): Unit =
     shutdown()
+}
+
+object CodeWorker {
+
+  /** The name the worker's workspace has in its tools' lock keys: one worker, one workspace. */
+  val WorkspaceId: String = "codegen"
 }

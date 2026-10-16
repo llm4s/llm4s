@@ -35,9 +35,10 @@ class CrossRuntimeSubscriptionSpec extends AnyFlatSpec with Matchers with Either
     def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) = underlying.renew(threadId, token, ttl)
     def release(threadId: ThreadId, token: FencingToken)                    = underlying.release(threadId, token)
     def commit(threadId: ThreadId, commit: Commit)                          = underlying.commit(threadId, commit)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)    = underlying.effect(threadId, key)
     def latest(threadId: ThreadId)                                          = underlying.latest(threadId)
     def compactEvents(threadId: ThreadId, beforeSeq: Long)              = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId)                                = underlying.deleteThread(threadId)
+    def deleteThread(threadId: ThreadId, token: FencingToken)           = underlying.deleteThread(threadId, token)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
@@ -108,7 +109,7 @@ class CrossRuntimeSubscriptionSpec extends AnyFlatSpec with Matchers with Either
   "Checkpointer.awaitEventsAfter's default" should "poll: return what is there at once, else wait the timeout and return nothing" in {
     val store  = Polled(InMemoryCheckpointer())
     val thread = newThread()
-    val token  = store.claim(thread, ClaimRequest(RunId("r"), 1.minute)).value.token
+    val token  = store.claim(thread, ClaimRequest(RunId("r"), None, 1.minute)).value.token
     store
       .commit(
         thread,
@@ -139,7 +140,7 @@ class CrossRuntimeSubscriptionSpec extends AnyFlatSpec with Matchers with Either
   "InMemoryCheckpointer.awaitEventsAfter" should "wake on a commit instead of waiting out its timeout" in {
     val store  = InMemoryCheckpointer()
     val thread = newThread()
-    val token  = store.claim(thread, ClaimRequest(RunId("r"), 1.minute)).value.token
+    val token  = store.claim(thread, ClaimRequest(RunId("r"), None, 1.minute)).value.token
     val found  = new ConcurrentLinkedQueue[Result[Vector[EventRecord]]]()
     val waiter = Thread.ofVirtual().start(() => found.add(store.awaitEventsAfter(thread, 0L, 10, 1.hour)): Unit)
     Thread.sleep(50)
