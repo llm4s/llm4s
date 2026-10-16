@@ -135,7 +135,7 @@ and community outreach.
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="docs/people/ansh-k-shah.jpg" alt="Ansh K Shah" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Ansh K Shah** |  | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
+| <img src="docs/people/ansh-k-shah.jpg" alt="Ansh K Shah" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Ansh K Shah** | [@anshshah2111](https://github.com/anshshah2111) | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
 | <img alt="Shubham Vishwakarma" src="docs/people/shubham-vishwakarma.jpg" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Shubham Vishwakarma** | [@Vi-shub](https://github.com/Vi-shub) | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
 | <img src="docs/people/gopi-trinadh.jpg" alt="Gopi Trinadh" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Gopi Trinadh** | [@GOPITRINADH3561](https://github.com/GOPITRINADH3561) | [https://www.linkedin.com/in/gopitrinadhmaddikunta/](https://www.linkedin.com/in/gopitrinadhmaddikunta/) |
 
