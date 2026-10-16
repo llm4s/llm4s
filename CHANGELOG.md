@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `ProviderDiscoveryExample` demonstrating dynamic provider discovery via `ProviderRegistry.discover()`,
   `ProviderRegistryReport` diagnostics and explicit module registration [#1548](https://github.com/llm4s/llm4s/issues/1548).
 
+### Build & tooling
+
+- **Changed** CI runs the `@Workspace` tier on PRs that change the workspace, and All Tests Pass requires it there; a manual
+  run picks its tiers with `-f tier=workspace|mcp-reference|cloud-smoke|all|none` [#1982](https://github.com/llm4s/llm4s/issues/1982).
+
 ## [0.5.1] - 2026-10-15
 
 ### Breaking changes

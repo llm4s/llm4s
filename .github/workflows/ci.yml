@@ -11,7 +11,15 @@ on:
   # The push-to-main-only tiers below (Ollama, Workspace, MCP reference) stay off it: they are not required checks.
   merge_group:
     types: [checks_requested]
+  # A manual run (`gh workflow run ci.yml --ref <branch> -f tier=workspace`) runs the PR jobs plus the tier(s) named:
+  # `all` (the default) is every on-demand tier, so on a branch without the cloud keys pick the one you need (#1982).
   workflow_dispatch:
+    inputs:
+      tier:
+        description: 'On-demand tier(s) to run besides the PR jobs'
+        type: choice
+        options: [all, workspace, mcp-reference, cloud-smoke, none]
+        default: all
   workflow_call:
 
 # Concurrency settings to prevent conflicts
@@ -120,6 +128,10 @@ jobs:
       # or if a step reads github.event.pull_request without a pull_request gate. Needs ruby, on the runner.
       - name: Test that the required workflows run in a merge queue
         run: scripts/test-merge-queue-workflows.sh
+
+      # Which pull requests run the workspace tier (#1982): scripts/workspace-tier-changes.sh against scratch git repos.
+      - name: Test the workspace-tier change detection
+        run: scripts/test-workspace-tier-changes.sh
 
       # Fails on a broken internal link in docs/ that scripts/docs-link-baseline.txt does not list, and on a
       # listed link that no longer breaks (the baseline only shrinks). Links are resolved the way llm4s.org serves
@@ -1216,7 +1228,9 @@ jobs:
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [quick-checks, test, performance-tests, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest]
+    # workspace-changes and workspace-integration run only where they apply (#1982): skipped is a pass for them, failed
+    # is not, so a PR that changes the workspace cannot merge with the live suites red.
+    needs: [quick-checks, test, performance-tests, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest, workspace-changes, workspace-integration]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1262,6 +1276,14 @@ jobs:
           fi
           if [[ "${{ needs.spring-boot-latest.result }}" != "success" ]]; then
             echo "Spring Boot 3.x (latest) tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.workspace-changes.result }}" != "success" && "${{ needs.workspace-changes.result }}" != "skipped" ]]; then
+            echo "Deciding whether the change touches the workspace failed"
+            exit 1
+          fi
+          if [[ "${{ needs.workspace-integration.result }}" != "success" && "${{ needs.workspace-integration.result }}" != "skipped" ]]; then
+            echo "Workspace integration tests failed"
             exit 1
           fi
           echo "All tests passed!"
@@ -1338,6 +1360,27 @@ jobs:
           PGVECTOR_PASSWORD: postgres
         run: sbt testOllama
 
+  # Whether a pull request touches the workspace, so the workspace tier runs on it (#1982). The checkout is the PR's
+  # merge commit, so its first parent is the base and HEAD^1..HEAD is exactly the PR's change; no PR context is read.
+  # scripts/workspace-tier-changes.sh lists the paths.
+  workspace-changes:
+    name: Workspace Changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: Check whether the change touches the workspace
+        id: diff
+        run: scripts/workspace-tier-changes.sh HEAD^1 HEAD >> "$GITHUB_OUTPUT"
+
   # Tier 2: containerised workspace tests. Split from the `integration-tests` job because
   # this one has to build the workspace-runner image first (apt + sdkman + the Scala 3
   # toolchain), which is far too slow for every PR. The image tag comes from the build
@@ -1345,9 +1388,15 @@ jobs:
   workspace-integration:
     name: Workspace Integration
     runs-on: ubuntu-latest
-    # On a push to main, and on demand: `gh workflow run ci.yml --ref <branch>` runs it for a branch that changes the
-    # workspace (it is too slow for every PR, and not a required check).
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    # On a push to main, on a pull request that changes the workspace (workspace-changes; All Tests Pass then requires
+    # it to pass), and on demand: `gh workflow run ci.yml --ref <branch> -f tier=workspace`. Not on a merge group: the
+    # queued PR already ran it. `!cancelled()` because workspace-changes is skipped on every event but a pull request.
+    needs: [workspace-changes]
+    if: >-
+      !cancelled() && (
+        (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'workspace')) ||
+        needs.workspace-changes.outputs.changed == 'true')
     permissions:
       contents: read
 
@@ -1389,12 +1438,14 @@ jobs:
   # MCPReferenceServerSpec, #1006). Split from `integration-tests` because starting the server
   # downloads the node image from Docker Hub and the server's pinned dependency tree from npm on
   # every run; an outage of either would fail unrelated PRs. So, like the Workspace and Ollama
-  # tiers, it runs on pushes to main - and also on manual dispatch, to check a branch on demand.
-  # Not in `all-tests-pass` for the same reason.
+  # tiers, it runs on pushes to main - and also on manual dispatch (`-f tier=mcp-reference`), to check a branch on
+  # demand. Not in `all-tests-pass` for the same reason.
   mcp-reference-integration:
     name: MCP Reference Server Integration
     runs-on: ubuntu-latest
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'mcp-reference'))
     permissions:
       contents: read
 
@@ -1448,11 +1499,11 @@ jobs:
           retention-days: 5
 
   # Tier 4: Cloud smoke tests — minimal sanity checks against real cloud APIs.
-  # Manual trigger only (workflow_dispatch) to avoid unintended API costs.
+  # Manual trigger only (workflow_dispatch, `-f tier=cloud-smoke`) to avoid unintended API costs.
   cloud-smoke:
     name: Cloud Smoke Tests
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'cloud-smoke')
     permissions:
       contents: read
 

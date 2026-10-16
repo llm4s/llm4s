@@ -8,7 +8,9 @@
 #
 # For each required workflow this checks:
 #   - it triggers on `merge_group` with `types: [checks_requested]`;
-#   - each required check (a job name) exists, and neither it nor anything it needs is skipped by an event condition;
+#   - each required check (a job name) exists, and neither it nor anything it needs is skipped by an event condition,
+#     except a need the job runs without (`if: always()`) and whose `skipped` result its steps accept as a pass (the
+#     workspace tier, which runs only on PRs that change the workspace: #1982);
 #   - nothing in it reads `github.event.pull_request` unless its step or job runs only on pull_request;
 #   - its concurrency neither cancels a merge group nor shares a group with one (a group's ref is unique);
 #   - the DCO job does run dco-check on pull requests and reports on merge groups (it needs the pull request);
@@ -82,14 +84,20 @@ REQUIRED.each do |file, checks|
     id = by_name[name]
     check.call("#{file}: required check '#{name}' is a job", !id.nil?, "jobs: #{by_name.keys.inspect}")
     next unless id
-    # the required job and everything it needs, transitively, must run on a merge group
+    # the required job and everything it needs, transitively, must run on a merge group - but a need it explicitly
+    # passes when skipped (it runs regardless, and a step accepts that need's `skipped` result) may skip, and so may
+    # whatever only that need needs
+    tolerates = lambda do |job, need|
+      job['if'].to_s.strip.match?(/\A(\$\{\{\s*)?always\(\)(\s*\}\})?\z/) &&
+        (job['steps'] || []).any? { |st| st['run'].to_s.include?(%("${{ needs.#{need}.result }}" != "skipped")) }
+    end
     seen = []
     todo = [id]
     until todo.empty?
       j = todo.shift
       next if seen.include?(j)
       seen << j
-      todo.concat(Array(jobs[j]['needs']))
+      todo.concat(Array(jobs[j]['needs']).reject { |n| tolerates.call(jobs[j], n) })
     end
     skipped = seen.select { |j| skips_merge_group.call(jobs[j]['if']) }
     check.call("#{file}: '#{name}' and the #{seen.size - 1} job(s) it needs run on a merge group", skipped.empty?,
