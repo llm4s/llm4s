@@ -665,6 +665,7 @@ Stay updated with talks, workshops, and presentations about **LLM4S** happening 
   <img src="docs/image_assets/talks/Oaisys_2025_AI_Practitioners_Conference/Banner_LLM4S_Building_Reliable_AI_Systems_in_the_JVM_Ecosystem_Kannupriya_Kalra.png" alt="Oaisys AI Practitioners Conference 2025 – LLM4S Building Reliable AI Systems (Kannupriya Kalra)" width="400" style="margin-right: 10px;"/>
   <img src="docs\image_assets\talks\AI_Compute_&_Hardware_Conference\Banner_Functional_Intelligence_Building_Scalable_AI_Systems_for_the_Hardware_Era_2025_Kannupriya_Kalra.jpg" alt="AI Compute & Hardware 2025 Conference - Functional Intelligence: Building Scalable AI Systems for the Hardware Era" width="400" style="margin-right: 10px;"/>
   <img src="docs/image_assets/talks/Microsoft_Global_Hackathon_2026/Build_with_LLMs_Open_Source_AI_for_the_JVM_with_Kannupriya_Kalra_Microsoft_Global_Hackathon_2026.png" alt="Microsoft Global Hackathon 2026 – Build with LLMs: Open Source AI for the JVM" width="400" style="margin-right: 10px;"/>
+  <img src="docs/image_assets/talks/DataverseHub_2026/Banner_DataverseHub_LLM4S_Foundation_A_Retrospective_2026_Kannupriya_Kalra.png" alt="DataverseHub 2026 – LLM4S Foundation: A Retrospective" width="400" style="margin-right: 10px;"/>
 
 </p>
 <p align="center">
