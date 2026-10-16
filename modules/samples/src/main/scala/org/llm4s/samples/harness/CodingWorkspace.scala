@@ -75,7 +75,7 @@ object CodingWorkspace {
   )
 
   /** The agent and its notes backend, so a caller can read the notes back from a checkpoint. */
-  final case class Coder(agent: Agent, notes: StateFileBackend, memory: SemanticMemoryMiddleware) {
+  final case class Coder(agent: Agent, notes: StateFileBackend) {
 
     /** The notes, by path under [[NotesMount]], as the latest checkpoint of `thread` in `store` holds them. */
     def notesIn(store: Checkpointer, thread: ThreadId): Result[Map[String, String]] =
@@ -127,6 +127,6 @@ object CodingWorkspace {
         .withMaxSteps(20)
         .withRuntime(runtime)
         .build()
-    } yield Coder(agent, notes, memory)
+    } yield Coder(agent, notes)
   }
 }

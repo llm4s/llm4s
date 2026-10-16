@@ -148,7 +148,7 @@ object DeepResearch {
   )
 
   /** The agent and the backend its files are in, so a caller can read them back from a checkpoint. */
-  final case class Research(agent: Agent, files: StateFileBackend, memory: SemanticMemoryMiddleware) {
+  final case class Research(agent: Agent, files: StateFileBackend) {
 
     /** The agent's own files (not the application's), as the latest checkpoint of `thread` in `store` holds them. */
     def filesIn(store: Checkpointer, thread: ThreadId): Result[Map[String, String]] =
@@ -211,6 +211,6 @@ object DeepResearch {
         .withMaxSteps(20)
         .withRuntime(runtime)
         .build()
-    } yield Research(agent, files, memory)
+    } yield Research(agent, files)
   }
 }

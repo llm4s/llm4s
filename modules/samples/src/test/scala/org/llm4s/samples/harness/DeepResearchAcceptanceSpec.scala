@@ -244,6 +244,16 @@ class DeepResearchAcceptanceSpec extends AnyFlatSpec with Matchers with EitherVa
     second.close()
   }
 
+  "MemoryFiles" should "give runs without a tenant and every tenant a file of their own, inside its directory" in {
+    val dir   = Files.createTempDirectory("llm4s-memory-files")
+    val files = new MemoryFiles(dir)
+    val names = Vector(None, Some(TenantId("default")), Some(TenantId("Default")), Some(TenantId("../x")))
+      .map(files.fileOf)
+    names.distinct should have size 4
+    names.foreach(_.getParent shouldBe dir)
+    files.fileOf(Some(TenantId("t" * 10000))).getFileName.toString.length should be < 100
+  }
+
   "An output Block" should "leave no file, plan, summary or memory from the blocked turn" in {
     val world   = new World
     val thread  = ThreadId("blocked")
