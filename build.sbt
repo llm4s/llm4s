@@ -1370,11 +1370,17 @@ lazy val samples = (project in file("modules//samples"))
     agent,
     agentTools,
     agentCheckpointSqlite,
+    // The exit examples (design 4.38): semantic memory, and the coding agent's workspace backends. Test scope:
+    // the workspace client's `FakeWorkspace`, and agent-testkit's `ManualClock` for the claims a stopped run leaves.
+    agentMemory,
+    workspaceClient % "compile->compile;test->test",
     llm4sEffect,
     llm4sZio,
     llm4sPekko,
-    // Test scope: the guide `docs/guide/testing-with-the-testkit` is run by a spec in this module.
-    testkit % Test
+    // Test scope: the guide `docs/guide/testing-with-the-testkit` is run by a spec in this module, and the exit
+    // examples' acceptance suites script their model with it.
+    testkit      % Test,
+    agentTestkit % Test
   )
   .settings(
     name := "llm4s-samples",
@@ -1754,7 +1760,10 @@ lazy val it = (project in file("modules/it"))
     observabilityPrometheus,
     traceOpentelemetry,
     agent,
-    agentTestkit % Test
+    agentTestkit % Test,
+    // CodingWorkspaceIntegrationSpec (design 4.38): a scripted model, and a run suspended and resumed over SQLite
+    testkit               % Test,
+    agentCheckpointSqlite % Test
   )
   .settings(
     name := "llm4s-it",

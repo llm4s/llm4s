@@ -430,7 +430,9 @@ rules a caller relies on:
 
 The harness keeps an agent's files in a `FileBackend` (`org.llm4s.agent.harness`): thread state
 (`StateFileBackend`, the default), a long-term store (`StoreFileBackend`, for `/memories/`), several at
-once (`CompositeBackend`), or one chosen per run (`FileBackend.resolved`). Each backend declares the locks
+once (`CompositeBackend`), files the application ships, read-only (`StaticFileBackend`: mount it at `/app`
+and point `SkillsConfig.withSources` and `InstructionsConfig.withPaths` there, since on state files only a tool
+call writes a file), or one chosen per run (`FileBackend.resolved`). Each backend declares the locks
 its mutations hold, replays its external effects through `ReplayGuard`, and enforces its own size
 limits. A backend over a host directory is not part of this release; it is tracked in
 [#1964](https://github.com/llm4s/llm4s/issues/1964).
@@ -980,6 +982,8 @@ Supported by OpenAI o1/o3 and Anthropic Claude models.
 | [LongConversationExample](/examples/#long-conversation) | Context window pruning |
 | [ConversationPersistenceExample](/examples/#persistence) | Save and resume |
 | [BuiltinToolsAgentExample](/examples/#agent-examples) | Built-in tools |
+| [DeepResearchExample](/examples/#deep-research) | The harness on state files: plan, offload, summary, memory, recover after a stop |
+| [CodingWorkspaceExample](/examples/#coding-workspace) | The harness in a workspace: permissions, approval of `execute`, resume |
 
 [Browse all examples →](/examples/)
 
