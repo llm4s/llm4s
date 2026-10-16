@@ -20,10 +20,18 @@ import org.llm4s.error.LLMError
  *
  * Usage:
  * {{{
+ * import org.llm4s.config.Llm4sConfig
+ * import org.llm4s.model.ModelRegistryService
+ * import org.llm4s.rag.RAG
+ * import org.llm4s.rag.RAG.RAGConfigOps
+ *
+ * // ProviderRegistry.default is a given already.
+ * given ModelRegistryService = Llm4sConfig.modelRegistryService().toOption.get
+ *
  * // At build time - pre-ingest documents
  * val rag = RAG.builder()
  *   .withDocuments(DirectoryLoader("./docs"))
- *   .build()
+ *   .build.toOption.get
  *
  * // At ingest time - add documents later
  * rag.ingest(UrlLoader(urls))
