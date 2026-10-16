@@ -490,7 +490,8 @@ sbt "samples/runMain org.llm4s.samples.harness.DeepResearchExample"
 
 The second harness exit example: a coding agent in a workspace container (`WorkspaceFileBackend`, `execute`), under
 rules that allow writes under `/src/` and ask before `execute`. The run suspends when the agent asks to run its
-check; a fresh runtime over the same SQLite file approves it and `resume`s the run, which runs the command once.
+check; a fresh runtime over the same SQLite file shows you the command, asks you to approve it, and `resume`s the
+run with your answer: an approved command runs once, a rejected one not at all.
 Needs Docker and the workspace-runner image (`sbt workspaceRunner/Docker/publishLocal`).
 
 ```bash

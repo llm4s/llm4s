@@ -12,6 +12,7 @@ import org.llm4s.types.Result
 import org.llm4s.workspace.ContainerisedWorkspace
 
 import java.nio.file.{ Files, Path }
+import scala.io.StdIn
 import scala.util.Using
 
 /**
@@ -20,8 +21,10 @@ import scala.util.Using
  *
  * The agent ([[CodingWorkspace]]) edits the workspace's files under rules that allow writes under `/src/` and ask
  * before `execute`. The first "process" runs until the agent asks to run a command: the run suspends, and the process
- * ends. The second opens the same SQLite file in a fresh runtime, approves the command, and `resume`s the run, which
- * runs the command once and finishes. The edited files are then in the workspace directory. The example streams the
+ * ends. The second opens the same SQLite file in a fresh runtime, shows you each command the agent asks to run and
+ * asks you to approve it, and `resume`s the run with your answers: an approved command runs once, a rejected one not
+ * at all, and the model is told which. With no answer (stdin closed) a command is rejected. The edited files are
+ * then in the workspace directory. The example streams the
  * plan, the tools and the answer as they happen.
  *
  * Needs Docker and the workspace-runner image (`sbt workspaceRunner/Docker/publishLocal`):
@@ -99,17 +102,25 @@ object CodingWorkspaceExample {
     }
   }
 
-  /** Opens the same file in a fresh runtime, approves every pending command, and resumes the turn. */
+  /** Opens the same file in a fresh runtime, asks you about each pending command, and resumes the turn. */
   private def processTwo(
     client: LLMClient,
     workspace: ContainerisedWorkspace,
     dir: Path,
     asked: AgentResult
   ): Result[Unit] = {
-    println("--- process 2: approve, and resume in a fresh runtime ---")
+    println("--- process 2: review, and resume in a fresh runtime ---")
     val answers = asked.status match {
-      case AgentStatus.Suspended(approvals, _, _, _) => approvals.map((id, _) => asked.approve(id)).toMap
-      case _                                         => Map.empty[InterruptId, ujson.Value]
+      case AgentStatus.Suspended(approvals, _, _, _) =>
+        approvals.map { (id, request) =>
+          // the person decides: Ask is a review, never an allow
+          print(s"\nThe agent asks to run: ${request.call.arguments.render()}\nApprove? [y/N] ")
+          Option(StdIn.readLine()).map(_.trim.toLowerCase) match {
+            case Some("y") | Some("yes") => asked.approve(id)
+            case _                       => asked.reject(id, "the reviewer did not approve this command")
+          }
+        }.toMap
+      case _ => Map.empty[InterruptId, ujson.Value]
     }
     within(dir) { (store, memories) =>
       for {
