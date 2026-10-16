@@ -188,8 +188,9 @@ final private[runner] class WebSocketCommandExecutor(
             charsRead = reader.read(buffer)
             charsRead != -1
           }) {
-            send(StreamingOutputMessage(cmd.commandId, outputType, new String(buffer, 0, charsRead)))
             val (take, used) = WebSocketCommandExecutor.fitting(buffer, charsRead, math.max(limit - captured, 0L))
+            // streamed within the same bound as it is kept: past it, the output is drained and dropped, never sent
+            if (take > 0) send(StreamingOutputMessage(cmd.commandId, outputType, new String(buffer, 0, take)))
             accumulator.appendAll(buffer, 0, take)
             captured += used
             if (take < charsRead) truncated.set(true)
