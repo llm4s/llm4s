@@ -247,9 +247,16 @@ class DeepResearchAcceptanceSpec extends AnyFlatSpec with Matchers with EitherVa
   "MemoryFiles" should "give runs without a tenant and every tenant a file of their own, inside its directory" in {
     val dir   = Files.createTempDirectory("llm4s-memory-files")
     val files = new MemoryFiles(dir)
-    val names = Vector(None, Some(TenantId("default")), Some(TenantId("Default")), Some(TenantId("../x")))
+    val names = Vector(
+      None,
+      Some(TenantId("default")),
+      Some(TenantId("Default")),
+      Some(TenantId("../x")),
+      Some(TenantId("\uD800")),
+      Some(TenantId("?"))
+    )
       .map(files.fileOf)
-    names.distinct should have size 4
+    names.distinct should have size 6
     names.foreach(_.getParent shouldBe dir)
     files.fileOf(Some(TenantId("t" * 10000))).getFileName.toString.length should be < 100
   }

@@ -4,7 +4,7 @@ import org.llm4s.agent.graph.TenantId
 import org.llm4s.agent.memory.{ MemoryStore, SQLiteMemoryStore }
 import org.llm4s.types.Result
 
-import java.nio.charset.StandardCharsets
+import java.nio.ByteBuffer
 import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
@@ -19,12 +19,14 @@ final class MemoryFiles(dir: Path) extends AutoCloseable {
 
   /**
    * The file of `tenant`'s memories. Runs without a tenant and each tenant get names no other can: `memory.db`, and
-   * `memory-<SHA-256 of the id's UTF-8 bytes, in hex>.db`, so no id - `default`, `../x`, one of any length - shares a
+   * `memory-<SHA-256 of the id's UTF-16 code units, in hex>.db` (every code unit as it is, so even an
+   * unpaired surrogate, which a UTF-8 encoder would replace with `?`, keeps two ids apart), so no id - `default`, `../x`, one of any length - shares a
    * file with another, names one outside `dir`, or makes a name too long for the file system.
    */
   def fileOf(tenant: Option[TenantId]): Path =
     dir.resolve(tenant.fold("memory.db") { t =>
-      val digest = MessageDigest.getInstance("SHA-256").digest(t.value.getBytes(StandardCharsets.UTF_8))
+      val units  = t.value.foldLeft(ByteBuffer.allocate(t.value.length * 2))((b, c) => b.putChar(c))
+      val digest = MessageDigest.getInstance("SHA-256").digest(units.array())
       s"memory-${digest.map(b => f"${b & 0xff}%02x").mkString}.db"
     })
 
