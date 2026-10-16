@@ -166,7 +166,7 @@ testing, design, and event support. To get involved, join the
 
 | Step | How |
 |---|---|
-| **Foundation Core Team** | Fund Foundation initiatives |
+| **Foundation Core Team** | Make sustained contributions to Foundation initiatives, such as funding, advancing LLM4S adoption, building the community, mentoring contributors, forming partnerships, or organising events |
 | **LLM4S Global Chapter Leader** | Organise local community events and provide leadership for the city’s LLM4S community |
 | **Contributor** | Have a pull request merged |
 | **Significant Individual Contributor** | Consistent, high-quality PRs over time; nominated by an existing member |
