@@ -494,5 +494,6 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     bounded.stdout shouldBe "\uD83D\uDE00" * 2
     bounded.isOutputTruncated shouldBe true
     WebSocketCommandExecutor.fitting("a\"b".toCharArray, 3, 3L) shouldBe ((2, 3L)) // the quote is two
+    WebSocketCommandExecutor.cutEncoded("[marker]\uD83D\uDE00\uD83D\uDE00", 12L) shouldBe "[marker]\uD83D\uDE00"
   }
 }

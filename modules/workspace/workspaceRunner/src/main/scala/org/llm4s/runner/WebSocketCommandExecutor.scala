@@ -284,8 +284,9 @@ final private[runner] class WebSocketCommandExecutor(
             else rawExitCode
           val marker =
             if (commandTimedOut.get()) s"[timed out after ${prepared.timeout.toSeconds}s and was killed]\n" else ""
-          val fullStderr       = marker + stderrAccumulator.result()
-          val stderrWithMarker = fullStderr.take(math.min(limit, Int.MaxValue.toLong).toInt)
+          val fullStderr = marker + stderrAccumulator.result()
+          // cut by its encoded bytes, as it was captured: the marker counts against the same bound
+          val stderrWithMarker = WebSocketCommandExecutor.cutEncoded(fullStderr, limit)
           val isOutputTruncated =
             stdoutTruncated.get() || stderrTruncated.get() || stderrWithMarker.length < fullStderr.length
 
@@ -393,6 +394,12 @@ private[runner] object WebSocketCommandExecutor {
       }
     }
     (i, used)
+  }
+
+  /** `s` cut to at most `limit` encoded bytes ([[encodedWidth]]), never inside a surrogate pair. */
+  def cutEncoded(s: String, limit: Long): String = {
+    val chars = s.toCharArray
+    s.substring(0, fitting(chars, chars.length, math.max(limit, 0L))._1)
   }
 
   def outputLimit(requested: Option[Long], runnerMax: Long): Long =
