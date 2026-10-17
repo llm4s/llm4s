@@ -29,9 +29,10 @@ When running the workspace runner (e.g. in Docker):
 |----------|-------------|---------|
 | `WORKSPACE_PATH` | Workspace root directory | `/workspace` |
 | `WORKSPACE_SANDBOX_PROFILE` | Sandbox profile: `permissive` or `locked`; any other value stops the runner | `permissive` |
+| `WORKSPACE_SANDBOX_CONFIG` | The whole `WorkspaceSandboxConfig` as JSON, used in place of the profile; setting it with `WORKSPACE_SANDBOX_PROFILE`, or an invalid one, stops the runner. `ContainerisedWorkspace(..., sandboxConfig = Some(...))` sets it | none |
 | `WORKSPACE_EXTRA_COMMANDS` | Programs added to the profile's `allowedCommands`, separated by commas or whitespace (for example `sbt`); a name that is not a bare program name, is a `.bat` / `.cmd` batch file, or is a shell, interpreter, launcher, loader or other program that runs another (in any case, with or without `.exe` / `.com` or a version), stops the runner, as does any name with the `locked` profile, which runs no command | none |
 
-These two variables are the only things that decide what the runner enforces.
+These variables are the only things that decide what the runner enforces.
 
 ### Adding programs to the allowlist
 
@@ -114,9 +115,9 @@ use `WorkspaceSandboxConfig.fromProfileName`.
 | `excludePatterns` | List[String] | Glob patterns excluded from explore/search (e.g. node_modules, .git) |
 | `shellAllowed` | Boolean | Whether executeCommand is allowed |
 | `defaultCommandTimeout` | FiniteDuration | Default timeout for shell commands (more than zero, at most 1 hour) |
-| `readOnlyPaths` | List[String] | Paths under workspace that are read-only (Phase 2) |
-| `allowedPaths` | List[String] | If non-empty, only these paths accessible (Phase 2) |
-| `networkAllowed` | Boolean | Documentation only; Phase 2: enforce network restrictions |
+| `readOnlyPaths` | List[String] | Paths under workspace that are read-only; bind commands too on Linux ([Command confinement](#command-confinement)) |
+| `allowedPaths` | List[String] | If non-empty, only these paths accessible; bind commands too on Linux ([Command confinement](#command-confinement)) |
+| `networkAllowed` | Boolean | Whether commands may open network sockets (default false). Enforced on Linux by the runner's seccomp filter |
 | `allowedCommands` | Set[String] | Executable names `executeCommand` may run; field default `ReadOnlyCommands`; the permissive profile (the default profile) uses `ReadWriteCommands`, which adds write-capable ones (`cp`, `mv`, `rm`, `mkdir`, …). Arguments are checked too: see [Command policy](#command-policy) |
 
 ## Command policy
@@ -645,6 +646,47 @@ writes files without naming them can still write into `.git`; the layers above s
 writes. The configuration is listed just before the command, so a concurrent command that swaps in another
 repository between the two is not seen.
 
+## Command confinement
+
+On Linux every `execute` command runs under `llm4s-confine` (built into the image at `/usr/local/bin/llm4s-confine`),
+which applies a Landlock ruleset and, with `networkAllowed = false`, a seccomp filter before it starts the program.
+Both are inherited by everything the command starts. A command that breaks a rule fails as any command does
+("Permission denied"); the runner does not refuse it. Design: [§4.39](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md).
+
+What a command is granted:
+
+- read and execute on `/usr`, `/bin`, `/sbin`, `/lib`, `/lib32`, `/lib64`, `/libx32`, `/etc`, `/opt` and the JDK;
+- read only on `/proc`, `/sys`, `/dev/urandom`, `/dev/random` and `/dev/zero`; read and write on `/dev/null`;
+- read, write and execute on the runner user's home (`/root` in the image), where build tools keep their caches;
+- read and write on its own temporary directory (`TMPDIR`), removed when it ends;
+- in the workspace, read and write on the root, or on each `allowedPaths` entry instead, and read only on each
+  `readOnlyPaths` entry.
+
+A home or system grant that contains the workspace, or lies inside it, is dropped, so a workspace under the home
+directory gets no home grant. With `networkAllowed = false`, `socket` fails for every family but `AF_UNIX`.
+
+**Limits.** With a read-only path, a command cannot create, delete or rename entries directly in the directories
+above it (with `readOnlyPaths = ["ro"]`, in the workspace root); the runner's own file operations still can. Landlock
+has no metadata rights, so `chmod`, `chown` and timestamps on a read-only path are not refused, only its content. An
+existing hard link into a read-only file can write it, and a read-only symlink protects its target, not the link.
+`/proc` is readable: another process's `environ` and `mem` are not, but its `cmdline` and `status` are. Abstract Unix
+sockets stay reachable without network, and a command can signal the runner. A daemon a command starts (`setsid`)
+stays confined but outlives the command ([#2008](https://github.com/llm4s/llm4s/issues/2008)).
+
+**When it cannot confine** (no helper, Landlock below ABI v3, or a failing call), the command is refused with
+`SANDBOX_UNAVAILABLE` and never starts. **Off Linux** (macOS, Windows) commands run unconfined, under the command
+policy only, and the runner logs this once.
+
+To set these fields in a container, pass the whole config; the runner receives it as `WORKSPACE_SANDBOX_CONFIG`:
+
+```scala
+val workspace = new ContainerisedWorkspace(
+  dir, image, 8080,
+  extraAllowedCommands = Set("sbt"),
+  sandboxConfig = Some(WorkspaceSandboxConfig.Permissive.copy(readOnlyPaths = List("docs"), networkAllowed = true))
+)
+```
+
 ## Security Gaps Addressed
 
 | Gap | Phase 1 | Phase 2 |
@@ -653,9 +695,9 @@ repository between the two is not seen.
 | Validation at startup | ✓ | |
 | Shell allow/block | ✓ shellAllowed | |
 | Resource limits | ✓ limits configurable | |
-| Read-only areas | Config present | Enforcement |
-| Allowed/blocked paths | Config present | Enforcement |
-| Network restrictions | Documentation only | Enforcement |
+| Read-only areas | Config present | Enforced (file operations; commands on Linux, Landlock) |
+| Allowed/blocked paths | Config present | Enforced (file operations; commands on Linux, Landlock) |
+| Network restrictions | Documentation only | Enforced on Linux (seccomp) |
 
 ## Example: Locked-Down Sandbox
 
@@ -686,14 +728,15 @@ Run the containerized runner with locked sandbox:
 - **Complexity**: Low
 - **Risks**: Minimal; backward compatible (default = permissive)
 
-### Phase 2: Enforcement (paths and limits ✓, network open)
+### Phase 2: Enforcement ✓
 - **Done** ([#1906](https://github.com/llm4s/llm4s/issues/1906)): the runner refuses any file operation, and a command's
   working directory, outside `allowedPaths` (`PATH_NOT_ALLOWED`), and any mutation (`writeFile`, `modifyFile`,
   `deleteFile`) under `readOnlyPaths` (`PATH_READ_ONLY`). A write over `maxFileSize` is `SIZE_LIMIT_EXCEEDED`, and a
   command keeps at most `maxOutputSize` bytes of each stream, UTF-8 and JSON-escaped (or the client's smaller
   `maxOutputBytes`), while it reads, whatever its lines.
-- **Open** ([#870](https://github.com/llm4s/llm4s/issues/870)): `networkAllowed` is documentation only, and a
-  command's path arguments are checked against the workspace (the command policy), not against `allowedPaths`.
+- **Done** ([#1983](https://github.com/llm4s/llm4s/issues/1983)): on Linux the kernel confines every command, so
+  `allowedPaths` and `readOnlyPaths` bind what a command and its children touch, whatever its arguments, and
+  `networkAllowed = false` (the default) leaves commands no network. See [Command confinement](#command-confinement).
 - **Compare-and-set.** `fileSnapshot(path)` returns what is at a path with the SHA-256 of its bytes (`sha256:<hex>`,
   `absent` or `directory`); `writeFile(..., expectedHash)` and `deleteFile(path, expectedHash)` apply only if the hash
   is still that one (`HASH_MISMATCH` otherwise, changing nothing), under one lock every file operation of the runner

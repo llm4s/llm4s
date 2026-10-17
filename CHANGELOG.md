@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent harness (Phase 3)
 
+- **Changed** on Linux every workspace `execute` command runs under kernel confinement (Landlock paths, seccomp
+  no-network): `readOnlyPaths`/`allowedPaths` bind commands, and **commands have no network unless
+  `networkAllowed = true`**; `WORKSPACE_SANDBOX_CONFIG` configures a container [#1983](https://github.com/llm4s/llm4s/issues/1983); [design §4.39](docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md).
 - **Added** the exit examples, `DeepResearchExample` and `CodingWorkspaceExample` with acceptance suites on a scripted model, and
   `StaticFileBackend` (read-only application files, e.g. skills) [#1916](https://github.com/llm4s/llm4s/issues/1916); [design §4.38](docs/design/typed-agent-runtime/4.38-stage-3-slice-p2-exit-examples.md).
 

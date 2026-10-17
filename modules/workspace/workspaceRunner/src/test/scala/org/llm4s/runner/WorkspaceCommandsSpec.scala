@@ -26,6 +26,7 @@ import scala.util.Try
  *   - `WorkspaceAgentIntegrationSpec` (modules/it): through the harness's `execute` tool (`WorkspaceSandboxRunner`), which sends the
  *     working directory `.` (the workspace root, the tool's `/`) and the tool's timeout in seconds;
  *   - `ContainerisedWorkspaceTest` (modules/it): `ContainerisedWorkspace.executeCommand` with no working directory;
+ *   - `WorkspaceConfinementIntegrationSpec` (modules/it): its own sandbox configs, through `WORKSPACE_SANDBOX_CONFIG`;
  *   - `ContainerisedWorkspaceDemo`, `LockedDownSandboxDemo` (workspaceSamples) and `CodeGenExample` (workspaceClient).
  *
  * The container runs `RunnerMain` with no `WORKSPACE_SANDBOX_PROFILE`, so `WorkspaceAgentInterfaceImpl` gets no
@@ -218,6 +219,37 @@ class WorkspaceCommandsSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
     write("long-operation.txt", "")
     containerDefault.prepareCommand("tail -f long-operation.txt", None, Some(8.seconds), None).isRight shouldBe true
     run("echo still-connected").response.exitCode shouldBe 0
+  }
+
+  // --- WorkspaceConfinementIntegrationSpec -------------------------------------------------------------------------
+
+  "The commands WorkspaceConfinementIntegrationSpec sends" should "be accepted, so only the kernel can stop them" in {
+    assume(!isWindowsHost, "the workspace-runner container is Linux")
+    Files.createDirectories(root.resolve("ro"))
+    write("ro/a", "original")
+    write("b", "replacement")
+    Files.createDirectories(root.resolve("src"))
+    Files.createDirectories(root.resolve("secret"))
+    write("secret/s", "secret")
+    def container(config: WorkspaceSandboxConfig) =
+      new WorkspaceAgentInterfaceImpl(
+        root.toString,
+        isWindowsHost,
+        Some(config.withExtraCommands("curl").fold(fail(_), identity))
+      )
+    val curl = "curl -sS --max-time 5 http://127.0.0.1:8080/"
+    // case A: readOnlyPaths = ["ro"], networkAllowed = false
+    val a = container(WorkspaceSandboxConfig.Permissive.copy(readOnlyPaths = List("ro"), networkAllowed = false))
+    for (command <- Seq("cat b", "rm ro/a", "cp b ro/a", curl))
+      withClue(command) {
+        a.prepareCommand(command, None, Some(20.seconds), None).isRight shouldBe true
+      }
+    // case B: allowedPaths = ["src"], networkAllowed = true; both run from src
+    val b = container(WorkspaceSandboxConfig.Permissive.copy(allowedPaths = List("src"), networkAllowed = true))
+    for (command <- Seq("cat ../secret/s", curl))
+      withClue(command) {
+        b.prepareCommand(command, Some("src"), Some(20.seconds), None).isRight shouldBe true
+      }
   }
 
   // --- Samples -----------------------------------------------------------------------------------------------------

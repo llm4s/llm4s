@@ -50,7 +50,15 @@ object WorkspaceRunnerDocker {
         "[ -d /root/.sdkman/candidates/scala/$v ] || { echo \"scala $v was not installed after 5 attempts\" >&2; exit 1; }; " +
         "done'"
     ),
-    Cmd("ENV", "PATH=/root/.sdkman/candidates/scala/current/bin:$PATH")
+    Cmd("ENV", "PATH=/root/.sdkman/candidates/scala/current/bin:$PATH"),
+    // llm4s-confine (design §4.39): every execute command runs under it. Static, so it needs nothing from the image at
+    // run time; the compiler is removed in the same layer.
+    Cmd(
+      "RUN",
+      "apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && " +
+        "gcc -O2 -static -Wall -Wextra -Werror -o /usr/local/bin/llm4s-confine /opt/docker/confine/llm4s-confine.c && " +
+        "apt-get purge -y gcc libc6-dev && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*"
+    )
   )
 
   // Core image settings used by workspaceRunner
@@ -61,6 +69,7 @@ object WorkspaceRunnerDocker {
     dockerBaseImage             := "eclipse-temurin:21-jdk",
     Docker / version            := version.value.replace('+', '-'),
     Docker / dockerBuildOptions := Seq("--platform=linux/amd64"),
+    Docker / mappings += (baseDirectory.value / "src" / "main" / "c" / "llm4s-confine.c") -> "/opt/docker/confine/llm4s-confine.c",
     dockerCommands ++= devToolingCommands,
     dockerLabels ++= Map(
       "org.opencontainers.image.title"       -> "llm4s workspace-runner",
