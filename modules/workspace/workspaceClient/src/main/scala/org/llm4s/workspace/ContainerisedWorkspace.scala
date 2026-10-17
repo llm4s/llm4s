@@ -30,8 +30,9 @@ import scala.concurrent.duration._
  * - Supporting real-time streaming of command output
  * - Eliminating thread pool blocking during long commands
  *
- * Commands run without a shell, and only programs on the runner's allowlist run (#1756): the runner's
- * `WORKSPACE_SANDBOX_PROFILE` (unset, `permissive`) chooses the list, and `extraAllowedCommands` adds to it.
+ * Commands run without a shell, and only programs on the runner's allowlist run (#1756): `sandboxConfig`, when given,
+ * chooses the list (and the paths, limits and network a command gets, design §4.39); otherwise the runner's
+ * `WORKSPACE_SANDBOX_PROFILE` (unset, `permissive`) does. `extraAllowedCommands` adds to either.
  *
  * @param workspaceDir         the host directory mounted as the container's `/workspace`
  * @param imageName            the workspace-runner image

@@ -660,10 +660,12 @@ What a command is granted:
 - read, write and execute on the runner user's home (`/root` in the image), where build tools keep their caches;
 - read and write on its own temporary directory (`TMPDIR`), removed when it ends;
 - in the workspace, read and write on the root, or on each `allowedPaths` entry instead, and read only on each
-  `readOnlyPaths` entry.
+  `readOnlyPaths` entry; a `readOnlyPaths` entry that does not exist yet cannot be created.
 
-A home or system grant that contains the workspace, or lies inside it, is dropped, so a workspace under the home
-directory gets no home grant, and build tools run there cannot write their caches. With `networkAllowed = false`, `socket` fails for every family but `AF_UNIX`.
+Nothing in the workspace or `TMPDIR` is executable: a binary built there, or `./gradlew` run as a program, fails with
+exit status 126. A home or system grant that contains the workspace, or lies inside it, is dropped, so a workspace
+under the home directory gets no home grant, and build tools run there cannot write their caches. With
+`networkAllowed = false`, `socket` fails for every family but `AF_UNIX`.
 
 **Limits.** With a read-only path, a command cannot create, delete or rename entries directly in the directories
 above it (with `readOnlyPaths = ["ro"]`, in the workspace root); the runner's own file operations still can. Landlock
@@ -671,8 +673,9 @@ has no metadata rights, so `chmod`, `chown` and timestamps on a read-only path a
 existing hard link into a read-only file can write it, and a read-only symlink protects its target, not the link.
 `/proc` is readable: another process's `environ` and `mem` are not, but its `cmdline` and `status` are. Abstract Unix
 sockets stay reachable without network, and a command can signal the runner. A daemon a command starts (`setsid`)
-stays confined but outlives the command ([#2008](https://github.com/llm4s/llm4s/issues/2008)). The runner's own git
-configuration lister runs unconfined: it is the runner's fixed invocation, not the agent's command.
+stays confined but outlives the command ([#2008](https://github.com/llm4s/llm4s/issues/2008)). The runner's own
+helper programs (the git configuration lister, `getfacl`, `setfacl`) run unconfined, so they are taken from `/usr/bin`
+or `/bin` only, never from `PATH`, which includes the writable home directory.
 
 **When it cannot confine** (no helper, Landlock below ABI v3, or a failing call), the command is refused with
 `SANDBOX_UNAVAILABLE` and never starts. **Off Linux** (macOS, Windows) commands run unconfined, under the command

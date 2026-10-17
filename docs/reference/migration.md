@@ -41,6 +41,19 @@ In 0.5.1. Stage 3 slice F8b ([#1913](https://github.com/llm4s/llm4s/issues/1913)
 - **A client refuses what it cannot send, before sending**: a part kind, source or format its wire format cannot carry is `UnsupportedContentPartError`. A provider's own limits (how many images, how large a request, which formats a model reads) are the provider's: its 400 or 413 comes back as a typed `ValidationError` or `ServiceError` with its message. The guide's [table](../guide/multimodal.html#what-each-provider-sends) lists what each takes.
 - **An agent thread holds at most 20 MiB of inline media** (`Messages.MaxInlineBytes`): media added past it is replaced by a text part naming what was removed. Context budgets (`ConversationTokenCounter`, `ContextPruning`) count media by estimate.
 - **Inline media is bounded** at 5 MiB per part by `ContentPart.image` / `ContentPart.document`, which return a `Result`. Every agent checkpoint copies the thread's messages, so larger media goes at a `MediaSource.Url` or in a `MediaSource.ProviderFile`. See [Multimodal content](../guide/multimodal.html).
+## Workspace command confinement (#1983)
+
+Not in a release yet. On Linux, the workspace runner now starts every `execute` command under Landlock and, unless the network is allowed, a seccomp filter ([#1983](https://github.com/llm4s/llm4s/issues/1983), [design 4.39](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md)). Behaviour breaks, with no opt-out; off Linux (macOS, Windows) nothing changes:
+
+- **Commands lose the network by default.** `networkAllowed` (default `false`) now binds commands: `socket` fails for every family but `AF_UNIX`, so `sbt`, `curl` or a package manager that fetches fails. Set `networkAllowed = true` where a command needs it; in a container, pass the whole config:
+
+  ```scala
+  new ContainerisedWorkspace(dir, image, 8080,
+    sandboxConfig = Some(WorkspaceSandboxConfig.Permissive.copy(networkAllowed = true)))
+  ```
+- **`readOnlyPaths` and `allowedPaths` bind commands too**, not only the runner's own file operations: a command cannot write under a read-only path (nor create one that does not exist yet), cannot create or delete entries directly in a directory above one, and cannot read outside `allowedPaths`.
+- **A kernel without Landlock ABI v3** (Linux 6.2), or an image without the `llm4s-confine` helper, refuses every command `SANDBOX_UNAVAILABLE`; it never runs one unconfined. An amd64 image under emulation (Docker Desktop's Rosetta on Apple silicon) is such a case: build the image for the host architecture.
+
 ## Workspace backends (#1906)
 
 Not in a release yet. Stage 3 slice F2 ([#1906](https://github.com/llm4s/llm4s/issues/1906)) puts the workspace behind the harness's `FileBackend` and `SandboxBackend` ([design 4.33](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.33-stage-3-slice-f2-workspace-backends.md)). Source and behaviour breaks, with no shims:
