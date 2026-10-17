@@ -24,6 +24,22 @@ git init -q "$repo"
 g() { git -C "$repo" -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false "$@"; }
 mkdir -p "$repo/.github/workflows"
 cp "$CI" "$repo/.github/workflows/ci.yml"
+# a build.sbt shaped like the real one: projects defined at column 0, their settings indented
+cat > "$repo/build.sbt" <<'SBT'
+addCommandAlias("testWorkspace", ItTiers.alias(ItTiers.Workspace))
+
+lazy val rag = (project in file("modules/rag"))
+  .settings(
+    name := "llm4s-rag",
+    libraryDependencies ++= Seq(Deps.cats)
+  )
+
+lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner"))
+  .settings(
+    Compile / mainClass := Some("org.llm4s.runner.RunnerMain"),
+    libraryDependencies ++= Seq(Deps.cask)
+  )
+SBT
 echo base > "$repo/README.md"
 g add -A && g commit -qm base
 BASE="$(g rev-parse HEAD)"
@@ -50,6 +66,11 @@ expect 'the workspace sample'     true  "touchp modules/samples/src/main/scala/o
 expect 'the image build'          true  "touchp project/WorkspaceRunnerDocker.scala"
 expect 'this decision script'     true  "touchp scripts/workspace-tier-changes.sh"
 expect 'a deleted watched file'   true  "touchp modules/workspace/x.txt; git add -A && git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -qm add-x && git rm -q modules/workspace/x.txt"
+expect 'a watched file renamed out' true  "touchp modules/workspace/moved.txt; git add -A && git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -qm add-moved && mkdir -p docs && git mv modules/workspace/moved.txt docs/moved.txt"
+expect 'the tier alias helper'    true  "touchp project/ItTiers.scala"
+expect 'build.sbt, workspace project' true "sed -i.bak 's/Deps.cask/Deps.cask, Deps.config/' build.sbt && rm build.sbt.bak"
+expect 'build.sbt, the tier alias' true "sed -i.bak 's/ItTiers.Workspace))/ItTiers.Workspace)) \/\/ x/' build.sbt && rm build.sbt.bak"
+expect 'build.sbt, another project' false "sed -i.bak 's/Deps.cats/Deps.cats, Deps.config/' build.sbt && rm build.sbt.bak"
 expect 'an unrelated module'      false "touchp modules/rag/src/main/scala/Rag.scala"
 expect 'another harness file'     false "touchp modules/agent/src/main/scala/org/llm4s/agent/harness/TodoMiddleware.scala"
 expect 'another @Docker suite'    false "touchp modules/it/src/test/scala/org/llm4s/vectorstore/PgSpec.scala"
