@@ -86,7 +86,7 @@ expect 'ci.yml, the decision job' true  "sed -i.bak 's/fetch-depth: 2/fetch-dept
 expect 'no change'                false ":"
 
 # ci.yml wires the verdict to the tier, and the tier into All Tests Pass
-label='ci.yml runs the tier on the verdict and All Tests Pass needs it'
+label='ci.yml runs the tier on the verdict, and All Tests Pass needs it to pass when the verdict is true'
 # shellcheck disable=SC2016 # the ${{ }} are GitHub expressions, matched literally
 if ruby -ryaml -e '
   jobs = YAML.load_file(ARGV[0])["jobs"]
@@ -97,7 +97,8 @@ if ruby -ryaml -e '
        Array(wi["needs"]).include?("workspace-changes") &&
        wi["if"].include?("needs.workspace-changes.outputs.changed == '"'"'true'"'"'") &&
        wi["if"].include?("!cancelled()") &&
-       (Array(atp["needs"]) & %w[workspace-changes workspace-integration]).size == 2
+       (Array(atp["needs"]) & %w[workspace-changes workspace-integration]).size == 2 &&
+       atp["steps"].any? { |s| s["run"].to_s.include?(%q{"${{ needs.workspace-changes.outputs.changed }}" == "true" && "${{ needs.workspace-integration.result }}" != "success"}) }
   exit(ok ? 0 : 1)
 ' "$CI"; then ok "$label"; else bad "$label"; fi
 

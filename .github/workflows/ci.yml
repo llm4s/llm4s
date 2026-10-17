@@ -1286,6 +1286,11 @@ jobs:
             echo "Workspace integration tests failed"
             exit 1
           fi
+          # skipped passes only where the tier does not apply: a change that touches the workspace must run it
+          if [[ "${{ needs.workspace-changes.outputs.changed }}" == "true" && "${{ needs.workspace-integration.result }}" != "success" ]]; then
+            echo "The change touches the workspace but Workspace Integration did not run and pass"
+            exit 1
+          fi
           echo "All tests passed!"
 
   # Tier 3: Ollama integration tests — verifies full round-trip against a real
