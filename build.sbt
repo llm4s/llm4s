@@ -1293,6 +1293,24 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
     ),
     appLogging,
     publish / skip := true,
+    // llm4s-confine (design §4.39), compiled for this machine so the runner's tests confine commands as the image does.
+    // Linux only: elsewhere commands run unconfined and the helper is never used. A Linux machine without `cc` fails
+    // here, by design: on Linux an unconfined command is refused, so the tests could not run.
+    Test / resourceGenerators += Def.task {
+      val log = streams.value.log
+      if (!sys.props.getOrElse("os.name", "").startsWith("Linux")) Nil
+      else {
+        val src = (Compile / sourceDirectory).value / "c" / "llm4s-confine.c"
+        val out = target.value / "llm4s-confine"
+        if (!out.exists || src.lastModified > out.lastModified) {
+          val cmd = Seq("cc", "-O2", "-Wall", "-Wextra", "-Werror", "-o", out.getAbsolutePath, src.getAbsolutePath)
+          log.info(s"Compiling ${src.getName}")
+          if (scala.sys.process.Process(cmd).! != 0) sys.error(s"Could not compile ${src}: ${cmd.mkString(" ")}")
+        }
+        sys.props("llm4s.workspace.confine") = out.getAbsolutePath
+        Nil
+      }
+    }.taskValue,
     // Not measured: Docker entry point, excluded via ThisBuild / coverageExcludedPackages
     // (org.llm4s.runner.*) and exercised only by containerised integration tests.
     coverageDisabled
