@@ -1460,8 +1460,8 @@ ollama pull mistral        # Downloads model
 ollama serve               # Runs on http://localhost:11434
 ```
 
-3. **Add a named section** to `application.conf` and select it as the default. No API key needed,
-   but `baseUrl` is required - Ollama sections have no default (below).
+3. **Add a named section** to `application.conf` and select it as the default. No API key is
+   needed, and `baseUrl` defaults to `http://localhost:11434`, where `ollama serve` listens.
 
 ### Configuration
 
@@ -1475,8 +1475,8 @@ llm4s {
     ollama-local {
       provider = "ollama"
       model    = "mistral"
-      baseUrl  = "http://localhost:11434"   # required
-      # baseUrl = ${?OLLAMA_BASE_URL}       # optional: let your own variable override it
+      # baseUrl = "http://gpu-box:11434"  # optional: the default is http://localhost:11434
+      # baseUrl = ${?OLLAMA_BASE_URL}       # optional: let OLLAMA_BASE_URL override the default
     }
   }
 }
@@ -1818,7 +1818,7 @@ place. Defaults when `baseUrl` is omitted:
 | `openrouter` | `https://openrouter.ai/api/v1` |
 | `zai` | `https://api.z.ai/api/paas/v4` |
 | `requesty` | `https://router.requesty.ai/v1` |
-| `ollama` | none - required |
+| `ollama` | `http://localhost:11434` |
 | `openai-compatible` | none - required |
 
 ---

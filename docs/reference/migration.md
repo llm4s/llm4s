@@ -1902,7 +1902,7 @@ llm4s {
 |---|---|
 | `LLM_MODEL=openai/gpt-4o-mini` | a section with `provider = "openai"`, `model = "gpt-4o-mini"`, selected by `llm4s.providers.provider` |
 | `OPENAI_API_KEY=...` read automatically | `apiKey = ${?OPENAI_API_KEY}` in that section, and the same variable exported |
-| `OPENAI_BASE_URL`, `OLLAMA_BASE_URL`, ... | `baseUrl = "..."` (or `baseUrl = ${?OLLAMA_BASE_URL}`) in the section; Ollama sections require it |
+| `OPENAI_BASE_URL`, `OLLAMA_BASE_URL`, ... | `baseUrl = "..."` (or `baseUrl = ${?OLLAMA_BASE_URL}`) in the section; an Ollama section defaults to `http://localhost:11434` |
 | switching model by changing `LLM_MODEL` | a second section, selected by changing `provider`, by `-Dllm4s.providers.provider=<name>`, by your own `provider = ${?LLM4S_PROVIDER}` binding, or loaded directly with `Llm4sConfig.provider("<name>")` |
 | `Llm4sConfig.provider()` | `Llm4sConfig.defaultProvider()` |
 

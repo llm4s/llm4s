@@ -165,7 +165,7 @@ llm4s {
     ollama-local {
       provider = "ollama"
       model    = "mistral"
-      baseUrl  = "http://localhost:11434"   # required: Ollama has no default base URL
+      # baseUrl defaults to http://localhost:11434, where `ollama serve` listens
     }
   }
 }
@@ -179,8 +179,7 @@ variables yourself - the names are yours to choose:
       provider = "ollama"
       model    = "mistral"
       model    = ${?OLLAMA_MODEL}            # optional override from the environment
-      baseUrl  = "http://localhost:11434"
-      baseUrl  = ${?OLLAMA_BASE_URL}
+      baseUrl  = ${?OLLAMA_BASE_URL}         # unset: the default, http://localhost:11434
     }
 ```
 
@@ -642,7 +641,7 @@ volumes:
 ```
 
 This assumes the app's `ollama-local` section binds the server address, as in Step 4:
-`baseUrl = "http://localhost:11434"` followed by `baseUrl = ${?OLLAMA_BASE_URL}`.
+`baseUrl = ${?OLLAMA_BASE_URL}`. Without the variable the section uses `http://localhost:11434`.
 
 ### Pre-pull Models
 

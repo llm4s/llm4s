@@ -292,7 +292,7 @@ section with an `apiKey`.
 | `provider` | Required. The provider id, e.g. `openai`, `anthropic`, `ollama` (table above) |
 | `model` | Required. The model name as the provider spells it, e.g. `gpt-4o-mini` |
 | `apiKey` | The API key; required by every cloud provider. Optional in the section when the vendor's shared key is set ([API keys](#api-keys)) |
-| `baseUrl` | Overrides the provider's default endpoint; **required** for `ollama` and `openai-compatible` |
+| `baseUrl` | Overrides the provider's default endpoint (`ollama`: `http://localhost:11434`); **required** for `openai-compatible` |
 | `headers` | Extra HTTP headers; sent by generic `openai-compatible` endpoints and by model listing |
 | `timeouts` | How long a request and a stream may take: `timeouts { request = 3m, stream = 15m }`. Every provider that makes HTTP calls reads it; see [Timeouts](#timeouts) |
 | `organization` | OpenAI, Requesty and OpenRouter: the OpenAI organisation id, sent as `OpenAI-Organization` |
@@ -391,8 +391,7 @@ llm4s {
     ollama-local {
       provider = "ollama"
       model    = "llama3.2"
-      baseUrl  = "http://localhost:11434"
-      baseUrl  = ${?OLLAMA_BASE_URL}       # optional override
+      baseUrl  = ${?OLLAMA_BASE_URL}       # optional override; the default is http://localhost:11434
     }
   }
 }
