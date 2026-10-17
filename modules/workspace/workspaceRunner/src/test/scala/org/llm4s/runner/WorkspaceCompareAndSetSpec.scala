@@ -6,7 +6,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.nio.charset.StandardCharsets
-import java.nio.file.{ Files, Path }
+import java.nio.file.{ Files, Path, Paths }
 import scala.jdk.CollectionConverters._
 import scala.util.{ Try, Using }
 
@@ -325,17 +325,32 @@ class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAn
     Files.readAttributes(other, attributes).group() shouldBe before.group()
   }
 
-  it should "copy an ACL only with getfacl and setfacl from trusted directories, never ones planted in the workspace" in {
+  it should "copy an ACL only with getfacl and setfacl from the system directories, never ones found on PATH" in {
     assume(!isWindowsHost)
-    Seq("getfacl", "setfacl").foreach { tool =>
-      val planted = Files.write(root.resolve(tool), "#!/bin/sh\ntouch pwned\n".getBytes(StandardCharsets.UTF_8))
-      planted.toFile.setExecutable(true): Unit
+    val elsewhere = Files.createTempDirectory("acl-elsewhere")
+    Seq(root, elsewhere).foreach { dir =>
+      Seq("getfacl", "setfacl").foreach { tool =>
+        val planted = Files.write(dir.resolve(tool), "#!/bin/sh\ntouch pwned\n".getBytes(StandardCharsets.UTF_8))
+        planted.toFile.setExecutable(true): Unit
+      }
     }
-    // the workspace on PATH, as an entry or relatively: neither is ever used
-    Seq(root.toString, ".", "").foreach { entry =>
+    // the workspace on PATH, as an entry or relatively, and a directory outside it: none is ever used
+    Seq(root.toString, ".", "", elsewhere.toString).foreach { entry =>
       val search = ProgramSearch(windows = false, Nil, Some(entry), Some(root), None)
-      WorkspaceAgentInterfaceImpl.aclTools(search, Seq(root, root.toRealPath())) shouldBe None
+      WorkspaceAgentInterfaceImpl.aclTools(search, Seq(root, root.toRealPath()), Seq(Paths.get("/no-such"))) shouldBe
+        None
+      WorkspaceAgentInterfaceImpl.aclTools(search, Seq(root, root.toRealPath())).foreach { case (get, set) =>
+        Seq(get, set).forall(t => ProgramResolver.RunnerToolDirectories.contains(t.getParent)) shouldBe true
+      }
     }
+    // the system directories are vetted too: one inside the workspace is never used
+    WorkspaceAgentInterfaceImpl.aclTools(
+      ProgramSearch(windows = false, Nil, None, None, None),
+      Seq(root, root.toRealPath()),
+      Seq(root)
+    ) shouldBe None
+    Seq("getfacl", "setfacl").foreach(tool => Files.delete(elsewhere.resolve(tool)))
+    Files.delete(elsewhere)
   }
 
   it should "keep the file's user extended attributes" in {

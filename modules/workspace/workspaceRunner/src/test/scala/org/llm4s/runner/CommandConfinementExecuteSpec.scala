@@ -232,6 +232,47 @@ class CommandConfinementExecuteSpec extends AnyFlatSpec with Matchers with Befor
     outcome(ws, "touch src/new").map(_.exitCode) shouldBe Right(0)
   }
 
+  "the runner's own helpers" should "never be a git, getfacl or setfacl planted on PATH, since they run unconfined" in {
+    val confiner = linuxConfiner()
+    assume(
+      ProgramResolver.resolveRunnerTool("git", Nil).isDefined,
+      "git is not installed in /usr/bin or /bin"
+    )
+    // A directory first on the runner's PATH that a confined command could write (as it can the home directory), and
+    // a marker outside every grant: the planted programs write it whenever they run unconfined.
+    val planted = Files.createTempDirectory("confine-planted")
+    val outside = Files.createTempDirectory(Paths.get("/var/tmp"), "confine-marker")
+    made = planted :: outside :: made
+    val marker = outside.resolve("ran-unconfined")
+    for (tool <- List("git", "getfacl", "setfacl")) {
+      val real = ProgramResolver.resolveRunnerTool(tool, Nil).map(_.toString).getOrElse("/bin/true")
+      val f    = planted.resolve(tool)
+      Files.writeString(f, s"#!/bin/sh\necho $tool >> $marker\nexec $real \"$$@\"\n")
+      f.toFile.setExecutable(true): Unit
+    }
+    val search = ProgramSearch(windows = false, Nil, Some(s"$planted:/usr/bin:/bin"), None, None)
+    val dir    = tree()
+    val ws = new WorkspaceAgentInterfaceImpl(
+      dir.toString,
+      isWindows = false,
+      Some(WorkspaceSandboxConfig.Permissive),
+      programSearch = search,
+      confiner = confiner
+    )
+    // git's configuration lister runs before every git subcommand; the command's own git runs confined
+    outcome(ws, "git status")
+    // a compare-and-set write copies the file's ACL with getfacl and setfacl
+    ws.writeFile(
+      "b",
+      "changed",
+      expectedHash = Some(FileSnapshotResponse.hashOf("bee".getBytes(StandardCharsets.UTF_8)))
+    )
+    Files.readString(dir.resolve("b")) shouldBe "changed"
+    withClue(Try(Files.readString(marker)).getOrElse("")) {
+      Files.exists(marker) shouldBe false
+    }
+  }
+
   /** `curl` against a server on 127.0.0.1: whether it connected, and curl's outcome. */
   private def curlLocal(networkAllowed: Boolean): (Boolean, Either[String, ExecuteCommandResponse]) = {
     val confiner = linuxConfiner()

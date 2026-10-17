@@ -260,9 +260,10 @@ private[runner] object GitSandbox {
     name.nonEmpty && name.forall(c => c >= 0x21 && c <= 0x7e && c != '=' && c != '"')
 
   /**
-   * Lists the configuration a `git` command started by `builder` would read: the same program, working directory and
-   * environment, the fixed overrides, and `config --list --no-includes --show-scope -z`. `Left` with the reason when
-   * it cannot be listed, which refuses the command.
+   * Lists the configuration a `git` command started by `builder` would read: the same working directory and
+   * environment, the fixed overrides, and `config --list --no-includes --show-scope -z`, run by `git`, which on POSIX
+   * is the system's (`/usr/bin` or `/bin`), never one found on `PATH`, since this runs unconfined (design §4.39).
+   * `Left` with the reason when it cannot be listed, which refuses the command.
    */
   def listConfiguration(builder: java.lang.ProcessBuilder, git: String, empty: Path): Either[String, Array[Byte]] = {
     val lister = new java.lang.ProcessBuilder(

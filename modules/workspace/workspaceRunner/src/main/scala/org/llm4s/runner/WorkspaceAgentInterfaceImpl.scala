@@ -557,9 +557,9 @@ class WorkspaceAgentInterfaceImpl(
   }
 
   /**
-   * `getfacl` and `setfacl`, as absolute paths resolved as a command's program is ([[ProgramResolver]]): from trusted
-   * directories only, never the workspace or a relative `PATH` entry, so an agent cannot plant its own. `None` where
-   * either is missing, and then no POSIX ACL is copied.
+   * `getfacl` and `setfacl`, as absolute paths from `/usr/bin` or `/bin` only, never `PATH`: they run unconfined, so
+   * neither an agent nor a confined command can plant its own. `None` where either is missing, and then no POSIX ACL
+   * is copied.
    */
   private lazy val aclTools: Option[(Path, Path)] =
     WorkspaceAgentInterfaceImpl.aclTools(programSearch, Seq(rootPath, effective(rootPath)))
@@ -1852,11 +1852,19 @@ class WorkspaceAgentInterfaceImpl(
 
     val empty = GitSandbox.checkedEmptyDirectory(realRoot).fold(failed, identity)
     GitSandbox.environment(builder.environment(), empty)
+    // The lister runs unconfined, so on POSIX it is the system's git, never the command's from PATH: a confined
+    // command may write a PATH directory (the home), and its own git there must never run with the runner's rights.
+    def lister: String =
+      if (programSearch.windows) git
+      else
+        ProgramResolver
+          .resolveRunnerTool("git", Seq(rootPath, realRoot))
+          .fold(failed("there is no git in /usr/bin or /bin to list its configuration"))(_.toString)
     val drivers =
       if (!GitSandbox.hasSubcommand(args)) Nil
       else
         GitSandbox
-          .listConfiguration(builder, git, empty)
+          .listConfiguration(builder, lister, empty)
           .fold(failed, identity)
           .pipe(GitSandbox.driverOverrides)
           .fold(refused => throw new WorkspaceAgentException(refused.message, refused.code, None), identity)
@@ -2109,12 +2117,19 @@ private[runner] object WorkspaceAgentInterfaceImpl {
       }
     }: Unit
 
-  /** `getfacl` and `setfacl` from trusted directories, never under `untrustedRoots`; `None` on Windows or if missing. */
-  private[runner] def aclTools(search: ProgramSearch, untrustedRoots: Seq[Path]): Option[(Path, Path)] =
+  /**
+   * `getfacl` and `setfacl` from the system directories only ([[ProgramResolver.RunnerToolDirectories]]), never
+   * `PATH` and never under `untrustedRoots`; `None` on Windows or if missing.
+   */
+  private[runner] def aclTools(
+    search: ProgramSearch,
+    untrustedRoots: Seq[Path],
+    directories: Seq[Path] = ProgramResolver.RunnerToolDirectories
+  ): Option[(Path, Path)] =
     if (search.windows) None
     else
       for {
-        get <- ProgramResolver.resolve("getfacl", search, untrustedRoots).toOption
-        set <- ProgramResolver.resolve("setfacl", search, untrustedRoots).toOption
+        get <- ProgramResolver.resolveRunnerTool("getfacl", untrustedRoots, directories)
+        set <- ProgramResolver.resolveRunnerTool("setfacl", untrustedRoots, directories)
       } yield (get, set)
 }

@@ -114,6 +114,29 @@ private[runner] object ProgramResolver {
   ): Either[CommandPolicy.Refusal, Path] =
     resolveIn(program, search, untrustedRoots, search.systemDirectories.map(_.toString))
 
+  /**
+   * Where the runner's own helper programs come from on POSIX: git's configuration lister, `getfacl` and `setfacl`.
+   * They run unconfined (design §4.39), so never from `PATH`, whose entries (the runner user's home, for one) a
+   * confined command may be able to write: a program planted there would run with the runner's own rights.
+   */
+  val RunnerToolDirectories: Seq[Path] = Seq(Paths.get("/usr/bin"), Paths.get("/bin"))
+
+  /**
+   * The absolute path of one of the runner's own helper programs, found only in `directories` (never `PATH`, never
+   * under `untrustedRoots`); None when it is not there.
+   */
+  def resolveRunnerTool(
+    program: String,
+    untrustedRoots: Seq[Path],
+    directories: Seq[Path] = RunnerToolDirectories
+  ): Option[Path] =
+    resolveIn(
+      program,
+      ProgramSearch(windows = false, directories, None, None, None),
+      untrustedRoots,
+      directories.map(_.toString)
+    ).toOption
+
   /** The `PATH` entries as written, in order, the empty ones as `""`. */
   private def pathEntries(search: ProgramSearch): Seq[String] =
     search.path.toSeq.flatMap(_.split(File.pathSeparator, -1).toSeq).map { entry =>
