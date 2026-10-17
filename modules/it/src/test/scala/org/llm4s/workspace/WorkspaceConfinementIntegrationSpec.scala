@@ -18,8 +18,10 @@ import scala.util.{ Failure, Success, Try }
  *
  * Two containers, since a container's sandbox config is fixed when it starts:
  *   - A: `readOnlyPaths = ["ro"]`, `networkAllowed = false`, with `jcmd` and `java` allowed for the `/tmp` cases, and a
- *     git repository made by the image's own user (one made on the host is another user's in the container, which
- *     git refuses as dubious ownership);
+ *     git repository in `repo` owned by uid 1001, not the runner's user (root), as a Linux host's user owns a
+ *     bind-mounted workspace: git runs there only because the runner accepts the workspace as `safe.directory`
+ *     (#2014). Docker Desktop on macOS keeps no ownership a container sets on a bind mount, so there the repository is
+ *     root's and the case shows nothing; on Linux it must be 1001's;
  *   - B: `allowedPaths = ["src"]`, `networkAllowed = true`.
  *
  * Each command here must be accepted by the runner and fail (or succeed) by itself, so a command refused before it runs,
@@ -35,6 +37,9 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
   // WorkspaceBackendsIntegrationSpec (8082) and CodingWorkspaceIntegrationSpec (8083)
   private val HostPortA = 8084
   private val HostPortB = 8085
+
+  /** The owner of the git cases' repository: not the runner's user (root). */
+  private val RepoOwner = 1001
 
   /** The runner's own HTTP port inside the container, so the network cases need no internet. */
   private val CurlRunner = "curl -sS --max-time 5 http://127.0.0.1:8080/"
@@ -88,7 +93,8 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
       readOnlyPaths = List("ro"),
       networkAllowed = false
     )
-    // a repository for the git case, made by the image's user: the runner refuses `git init`
+    // a repository for the git cases, made in a throwaway container (the runner refuses `git init`) and given to
+    // another user than the runner's, whose git otherwise refuses it as dubious ownership (#2014)
     val init = new ProcessBuilder(
       "docker",
       "run",
@@ -96,13 +102,16 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
       "-v",
       s"$dirA:/workspace",
       "--entrypoint",
-      "git",
+      "sh",
       ContainerisedWorkspaceTest.image,
-      "init",
-      "-q",
-      "/workspace/repo"
-    ).inheritIO().start().waitFor()
-    if (init != 0) fail(s"git init in the image failed ($init)")
+      "-c",
+      s"git init -q /workspace/repo && chown -R $RepoOwner:$RepoOwner /workspace/repo && stat -c %u /workspace/repo/.git"
+    ).redirectErrorStream(true).start()
+    val owner = new String(init.getInputStream.readAllBytes(), StandardCharsets.UTF_8).trim
+    if (init.waitFor() != 0) fail(s"making the repository in the image failed: $owner")
+    // On a Linux host the ownership is kept, so the case cannot pass for want of another owner.
+    if (System.getProperty("os.name", "").startsWith("Linux") && owner != RepoOwner.toString)
+      fail(s"the repository is owned by uid $owner in the container, not $RepoOwner")
     start(dirA, HostPortA, config, extra = Set("curl", "jcmd"))
   }
 
@@ -194,6 +203,21 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
     withClue(s"java: $r") {
       r.exitCode shouldBe 0
       r.stdout should startWith("/tmp/")
+    }
+  }
+
+  it should "run git in a repository in the workspace that another user owns (#2014)" in {
+    val ws     = live(workspaceA)
+    val status = runCommand(ws, "git status --porcelain --branch", Some("repo"))
+    withClue(s"git status: $status") {
+      status.exitCode shouldBe 0
+      status.stdout should startWith("## ")
+      (status.stderr should not).include("dubious ownership")
+    }
+    val top = runCommand(ws, "git rev-parse --show-toplevel", Some("repo"))
+    withClue(s"git rev-parse: $top") {
+      top.exitCode shouldBe 0
+      top.stdout.trim shouldBe "/workspace/repo"
     }
   }
 
