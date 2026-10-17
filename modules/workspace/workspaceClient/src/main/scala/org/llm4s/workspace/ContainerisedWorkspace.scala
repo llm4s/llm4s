@@ -40,12 +40,15 @@ import scala.concurrent.duration._
  *                             passed to the container as `WORKSPACE_EXTRA_COMMANDS`; each is a bare program name,
  *                             never a shell or a launcher (see [[WorkspaceSandboxConfig.withExtraCommands]]), and
  *                             a container is not started with a name the runner would refuse
+ * @param sandboxConfig        the runner's whole sandbox config, passed as `WORKSPACE_SANDBOX_CONFIG`; `None` leaves
+ *                             the runner on its profile
  */
 class ContainerisedWorkspace(
   val workspaceDir: String,
   val imageName: String,
   val hostPort: Int,
-  val extraAllowedCommands: Set[String] = Set.empty
+  val extraAllowedCommands: Set[String] = Set.empty,
+  val sandboxConfig: Option[WorkspaceSandboxConfig] = None
 ) extends WorkspaceAgentInterface {
   private val logger        = LoggerFactory.getLogger(getClass)
   private val containerName = s"workspace-runner-${java.util.UUID.randomUUID().toString}"
@@ -177,9 +180,17 @@ class ContainerisedWorkspace(
 
     // Run the docker container with the workspace directory mounted
     val dockerProcess = ContainerisedWorkspace
-      .dockerRunArgs(containerName, hostPort, containerPort, workspaceDir, imageName, extraAllowedCommands)
+      .dockerRunArgs(
+        containerName,
+        hostPort,
+        containerPort,
+        workspaceDir,
+        imageName,
+        extraAllowedCommands,
+        sandboxConfig
+      )
       .left
-      .map(msg => new IllegalArgumentException(s"extraAllowedCommands: $msg"))
+      .map(msg => new IllegalArgumentException(s"sandbox config: $msg"))
       .toTry
       .flatMap(args =>
         Try {
@@ -622,7 +633,7 @@ object ContainerisedWorkspace {
   /**
    * The `docker run` command that starts a workspace-runner container.
    *
-   * @return the argument vector, or why `extraAllowedCommands` holds a name the runner would refuse
+   * @return the argument vector, or why the sandbox config or `extraAllowedCommands` is one the runner would refuse
    */
   private[workspace] def dockerRunArgs(
     containerName: String,
@@ -630,16 +641,23 @@ object ContainerisedWorkspace {
     containerPort: Int,
     workspaceDir: String,
     imageName: String,
-    extraAllowedCommands: Set[String]
+    extraAllowedCommands: Set[String],
+    sandboxConfig: Option[WorkspaceSandboxConfig]
   ): Either[String, Seq[String]] = {
     val extra = extraAllowedCommands.toSeq.sorted.mkString(",")
-    WorkspaceSandboxConfig.Permissive.withExtraCommands(extra).map { _ =>
+    for {
+      _ <- sandboxConfig.fold[Either[String, Unit]](Right(()))(WorkspaceSandboxConfig.validate)
+      _ <- sandboxConfig.getOrElse(WorkspaceSandboxConfig.Permissive).withExtraCommands(extra)
+    } yield {
       val extraEnv =
         if (extra.isEmpty) Seq.empty
         else Seq("-e", s"${WorkspaceSandboxConfig.ExtraCommandsEnvVar}=$extra")
+      val configEnv =
+        sandboxConfig.toSeq.flatMap(c =>
+          Seq("-e", s"${WorkspaceSandboxConfig.ConfigEnvVar}=${upickle.default.write(c)}")
+        )
       Seq("docker", "run", "-d", "--name", containerName, "-p", s"$hostPort:$containerPort") ++
-        extraEnv ++
-        Seq("-v", s"$workspaceDir:/workspace", imageName)
+        extraEnv ++ configEnv ++ Seq("-v", s"$workspaceDir:/workspace", imageName)
     }
   }
 }

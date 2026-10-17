@@ -21,7 +21,7 @@ import scala.concurrent.duration.*
  * @param defaultCommandTimeout Default timeout for shell commands (more than zero, at most an hour)
  * @param readOnlyPaths        Paths under workspace root that are read-only (writes denied)
  * @param allowedPaths         If non-empty, only these paths are accessible; if empty, whole workspace
- * @param networkAllowed       Documentation: whether network access from commands is assumed (Phase 2: enforce)
+ * @param networkAllowed       Whether commands may open network sockets; on Linux the runner enforces it (design §4.39)
  * @param allowedCommands      Set of bare executable names permitted by executeCommand.
  *                             Defaults to [[WorkspaceSandboxConfig.ReadOnlyCommands]].
  *                             Use [[WorkspaceSandboxConfig.ReadWriteCommands]] to also permit
@@ -79,6 +79,18 @@ object WorkspaceSandboxConfig {
    * whitespace (for example `sbt`); see [[WorkspaceSandboxConfig.withExtraCommands]].
    */
   val ExtraCommandsEnvVar: String = "WORKSPACE_EXTRA_COMMANDS"
+
+  /** The runner's environment variable holding a whole sandbox config as JSON, in place of a profile (design §4.39). */
+  val ConfigEnvVar: String = "WORKSPACE_SANDBOX_CONFIG"
+
+  /** A config from its JSON (as `rw` writes it; missing keys take the defaults), validated. */
+  def fromJson(json: String): Either[String, WorkspaceSandboxConfig] =
+    scala.util
+      .Try(upickle.default.read[WorkspaceSandboxConfig](json))
+      .toEither
+      .left
+      .map(e => s"$ConfigEnvVar is not a valid sandbox config: ${e.getMessage}")
+      .flatMap(cfg => validate(cfg).map(_ => cfg))
 
   /**
    * Programs [[WorkspaceSandboxConfig.withExtraCommands]] refuses to add: shells, interpreters, launchers and loaders

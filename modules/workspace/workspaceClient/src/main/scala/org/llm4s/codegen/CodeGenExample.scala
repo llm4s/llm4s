@@ -4,6 +4,7 @@ import org.llm4s.agent.AgentResult
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.SimpleError
 import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.shared.WorkspaceSandboxConfig
 import org.slf4j.LoggerFactory
 
 import scala.util.Using
@@ -21,6 +22,10 @@ object CodeGenExample {
 
   /** The programs this example needs besides the runner's default allowlist. */
   val ExtraAllowedCommands: Set[String] = Set("sbt")
+
+  /** sbt fetches the build's dependencies, so its commands need the network (design §4.39). */
+  val SandboxConfig: WorkspaceSandboxConfig =
+    WorkspaceSandboxConfig.Permissive.copy(networkAllowed = true)
 
   /** The task given to the agent. Each command it names is one program and its arguments, as the runner requires. */
   val Task: String =
@@ -49,7 +54,7 @@ object CodeGenExample {
       client <- LLMConnect.getClient(providerCfg)
 
       finalState <- Using.resource(
-        new CodeWorker(ws.workspaceDir, ws.imageName, ws.hostPort, client, ExtraAllowedCommands)
+        new CodeWorker(ws.workspaceDir, ws.imageName, ws.hostPort, client, ExtraAllowedCommands, Some(SandboxConfig))
       ) { codeWorker =>
         for {
           _          <- Either.cond(codeWorker.initialize(), (), SimpleError("Failed to initialize CodeWorker"))

@@ -35,6 +35,7 @@ object RunnerMain extends cask.MainRoutes {
   private val isWindows: Boolean = System.getProperty("os.name").contains("Windows")
 
   // Resolve sandbox config:
+  // - WORKSPACE_SANDBOX_CONFIG, a whole config as JSON (validated), replaces the profile; setting both fails fast
   // - If WORKSPACE_SANDBOX_PROFILE is not set or empty -> default to permissive (backwards compatible)
   // - If set to a known profile name -> use that profile (validated)
   // - If set to an unknown name -> log error and fail fast (do NOT silently weaken sandbox)
@@ -58,13 +59,27 @@ object RunnerMain extends cask.MainRoutes {
   }
 
   private def profileConfig: Option[WorkspaceSandboxConfig] = {
-    val rawProfile = Option(System.getenv("WORKSPACE_SANDBOX_PROFILE")).map(_.trim)
+    val rawProfile = Option(System.getenv("WORKSPACE_SANDBOX_PROFILE")).map(_.trim).filter(_.nonEmpty)
+    val rawJson    = Option(System.getenv(WorkspaceSandboxConfig.ConfigEnvVar)).map(_.trim).filter(_.nonEmpty)
 
-    rawProfile match {
-      case None | Some("") =>
+    (rawJson, rawProfile) match {
+      case (Some(_), Some(_)) =>
+        val msg = s"Set ${WorkspaceSandboxConfig.ConfigEnvVar} or WORKSPACE_SANDBOX_PROFILE, not both"
+        logger.error(msg)
+        throw new IllegalArgumentException(msg)
+
+      case (Some(json), None) =>
+        WorkspaceSandboxConfig.fromJson(json) match {
+          case Right(cfg) => Some(cfg)
+          case Left(msg) =>
+            logger.error(msg)
+            throw new IllegalArgumentException(msg)
+        }
+
+      case (None, None) =>
         None // let WorkspaceAgentInterfaceImpl apply default Permissive
 
-      case Some(value) =>
+      case (None, Some(value)) =>
         WorkspaceSandboxConfig.fromProfileName(value) match {
           case Right(cfg) =>
             WorkspaceSandboxConfig.validate(cfg) match {

@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.agent.graph.tool.ToolSet
 import org.llm4s.agent.harness.{ ExecuteTool, FileTools }
 import org.llm4s.agent.harness.workspace.{ WorkspaceFileBackend, WorkspaceSandboxBackend }
+import org.llm4s.shared.WorkspaceSandboxConfig
 import org.llm4s.workspace.ContainerisedWorkspace
 import org.slf4j.LoggerFactory
 import org.llm4s.types.Result
@@ -23,16 +24,19 @@ import org.llm4s.error.ValidationError
  * @param hostPort             The host port for the container
  * @param client               The LLM that drives the agent
  * @param extraAllowedCommands Programs the runner may run besides its default allowlist, for example `Set("sbt")`
+ * @param sandboxConfig        The runner's whole sandbox config, or `None` for its profile
  */
 class CodeWorker(
   sourceDirectory: String,
   imageName: String,
   hostPort: Int,
   client: LLMClient,
-  extraAllowedCommands: Set[String] = Set.empty
+  extraAllowedCommands: Set[String] = Set.empty,
+  sandboxConfig: Option[WorkspaceSandboxConfig] = None
 ) extends AutoCloseable {
-  private val logger    = LoggerFactory.getLogger(getClass)
-  private val workspace = new ContainerisedWorkspace(sourceDirectory, imageName, hostPort, extraAllowedCommands)
+  private val logger = LoggerFactory.getLogger(getClass)
+  private val workspace =
+    new ContainerisedWorkspace(sourceDirectory, imageName, hostPort, extraAllowedCommands, sandboxConfig)
 
   /**
    * The harness's file tools over the workspace's files, and `execute` over its sandbox (design §4.33): every
