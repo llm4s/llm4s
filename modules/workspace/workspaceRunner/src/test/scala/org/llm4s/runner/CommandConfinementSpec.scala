@@ -70,10 +70,42 @@ class CommandConfinementSpec extends AnyFlatSpec with Matchers {
       List(Rule(Grant.ReadOnly, root.resolve("src")))
   }
 
-  it should "treat a missing allowed path as no grant and a missing read-only path as none" in {
+  it should "treat a missing allowed path as no grant" in {
     val root = tree()
     CommandConfinement.workspaceRules(cfg(allowed = List("nope")), root) shouldBe Nil
-    CommandConfinement.workspaceRules(cfg(ro = List("nope")), root) shouldBe List(Rule(Grant.ReadWrite, root))
+  }
+
+  it should "carve a missing read-only path to its deepest existing ancestor, so it cannot be created" in {
+    val root = tree("ro/a", "ro/sub/", "src/", "b")
+    CommandConfinement.workspaceRules(cfg(ro = List("ro/new")), root).toSet shouldBe Set(
+      Rule(Grant.ReadOnly, root),
+      Rule(Grant.ReadWrite, root.resolve("src")),
+      Rule(Grant.WriteFile, root.resolve("b")),
+      Rule(Grant.ReadOnly, root.resolve("ro")),
+      Rule(Grant.ReadWrite, root.resolve("ro/sub")),
+      Rule(Grant.WriteFile, root.resolve("ro/a"))
+    )
+    // several missing levels: the deepest existing one is the root
+    CommandConfinement.workspaceRules(cfg(ro = List("later/deeper")), root) should contain(Rule(Grant.ReadOnly, root))
+    CommandConfinement.workspaceRules(cfg(ro = List("later/deeper")), root) should not contain
+      Rule(Grant.ReadWrite, root)
+  }
+
+  it should "give a dangling link named by a missing read-only path no rule, and its directory read only" in {
+    val root = tree("ro/")
+    Files.createSymbolicLink(root.resolve("ro/l"), root.resolve("nowhere"))
+    CommandConfinement.workspaceRules(cfg(ro = List("ro/l")), root).toSet shouldBe Set(
+      Rule(Grant.ReadOnly, root),
+      Rule(Grant.ReadOnly, root.resolve("ro"))
+    )
+  }
+
+  it should "leave a file where a missing read-only path's directory would be writable" in {
+    val root = tree("f")
+    CommandConfinement.workspaceRules(cfg(ro = List("f/x")), root).toSet shouldBe Set(
+      Rule(Grant.ReadOnly, root),
+      Rule(Grant.WriteFile, root.resolve("f"))
+    )
   }
 
   it should "give a symlink child of a walked directory no rule" in {

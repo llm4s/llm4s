@@ -216,6 +216,22 @@ class CommandConfinementExecuteSpec extends AnyFlatSpec with Matchers with Befor
     Files.exists(dir.resolve("src/new")) shouldBe true
   }
 
+  it should "not create a read-only path that does not exist yet" in {
+    val confiner = linuxConfiner()
+    val dir      = tree()
+    val config   = WorkspaceSandboxConfig.Permissive.copy(readOnlyPaths = List("ro/new", "later/deeper"))
+    val ws       = workspace(dir, config, confiner)
+    for (command <- List("touch ro/new", "mkdir ro/new", "mkdir later"))
+      withClue(s"$command: ") {
+        outcome(ws, command).map(_.exitCode).fold(_ => 1, identity) should not be 0
+      }
+    Files.exists(dir.resolve("ro/new")) shouldBe false
+    Files.exists(dir.resolve("later")) shouldBe false
+    // what lies beside it stays writable
+    outcome(ws, "touch ro/a").map(_.exitCode) shouldBe Right(0)
+    outcome(ws, "touch src/new").map(_.exitCode) shouldBe Right(0)
+  }
+
   /** `curl` against a server on 127.0.0.1: whether it connected, and curl's outcome. */
   private def curlLocal(networkAllowed: Boolean): (Boolean, Either[String, ExecuteCommandResponse]) = {
     val confiner = linuxConfiner()

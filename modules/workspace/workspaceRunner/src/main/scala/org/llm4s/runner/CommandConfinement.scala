@@ -13,7 +13,8 @@ import scala.util.{ Try, Using }
  * Landlock grants are allow-only and a right on a directory covers everything beneath it, so a read-only path inside
  * a writable one is carved out by a walk: each directory above it gets read only, its other entries read-write, and
  * its existing files write. A command therefore cannot create or delete entries directly in a directory above a
- * read-only path.
+ * read-only path. A read-only path that does not exist yet is carved to its deepest existing ancestor, so a command
+ * cannot create it.
  */
 private[runner] object CommandConfinement {
 
@@ -50,12 +51,28 @@ private[runner] object CommandConfinement {
       .filterNot(r => realRoot.startsWith(r.path) || r.path.startsWith(realRoot))
   }
 
-  /** The workspace's rules: allowedPaths (or the root), with readOnlyPaths carved out by the walk. */
+  /**
+   * The workspace's rules: allowedPaths (or the root), with readOnlyPaths carved out by the walk.
+   *
+   * A read-only path that does not exist yet is carved down to its deepest existing ancestor, which therefore gets
+   * read only: a command cannot create it, nor any directory on the way to it.
+   */
   def workspaceRules(config: WorkspaceSandboxConfig, realRoot: Path): List[Rule] = {
     def real(p: String): Option[Path] =
       Try(realRoot.resolve(p).normalize().toRealPath()).toOption.filter(_.startsWith(realRoot))
+    // where a missing path would be: its deepest existing ancestor's real path, with the rest appended
+    def wouldBe(p: String): Option[Path] = {
+      val target = realRoot.resolve(p).normalize()
+      Iterator
+        .iterate(Option(target))(_.flatMap(a => Option(a.getParent)))
+        .takeWhile(_.isDefined)
+        .flatten
+        .flatMap(a => Try(a.toRealPath().resolve(a.relativize(target)).normalize()).toOption)
+        .nextOption()
+        .filter(_.startsWith(realRoot))
+    }
     val bases    = if (config.allowedPaths.isEmpty) List(realRoot) else config.allowedPaths.flatMap(real).distinct
-    val readOnly = config.readOnlyPaths.flatMap(real).distinct
+    val readOnly = config.readOnlyPaths.flatMap(p => real(p).orElse(wouldBe(p))).distinct
     bases.flatMap { base =>
       if (readOnly.exists(r => base.startsWith(r))) List(Rule(Grant.ReadOnly, base))
       else carve(base, readOnly.filter(_.startsWith(base)))
@@ -70,8 +87,11 @@ private[runner] object CommandConfinement {
       val children = Using(Files.list(dir))(_.iterator().asScala.toList.sorted).getOrElse(Nil)
       Rule(Grant.ReadOnly, dir) :: children.flatMap { child =>
         val under = readOnly.filter(_.startsWith(child))
-        if (under.nonEmpty) carve(child, under)
-        else if (Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS)) List(Rule(Grant.ReadWrite, child))
+        val isDir = Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS)
+        // a read-only path itself (a real path, never a link) or a directory on the way to one; a link on the way (a
+        // missing read-only path's name may be a dangling one) is handled as any other link
+        if (under.nonEmpty && !Files.isSymbolicLink(child) && (isDir || readOnly.contains(child))) carve(child, under)
+        else if (isDir) List(Rule(Grant.ReadWrite, child))
         else if (Files.isRegularFile(child, LinkOption.NOFOLLOW_LINKS)) List(Rule(Grant.WriteFile, child))
         else Nil // a link, socket or device: reached, if at all, through its target's own rule
       }
