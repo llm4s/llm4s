@@ -153,6 +153,20 @@ class CommandConfinementExecuteSpec extends AnyFlatSpec with Matchers with Befor
     ws.prepareCommand("ls", None, None, None).swap.map(_.code) shouldBe Right("SANDBOX_UNAVAILABLE")
   }
 
+  it should "refuse git EXECUTION_FAILED when git's empty directory lies in a /tmp commands share" in {
+    assume(!isWindowsHost && Files.isDirectory(Paths.get("/tmp")) && Files.isDirectory(Confiner.ScratchBase))
+    val empty = GitSandbox.emptyDirectory.fold(e => fail(e), identity)
+    // only where this JVM's java.io.tmpdir is /tmp (Linux): the image points it at a runner-private directory instead
+    assume(empty.startsWith(Paths.get("/tmp").toRealPath()), "java.io.tmpdir is not /tmp here")
+    // a workspace outside /tmp, so commands are granted /tmp
+    val dir = Files.createTempDirectory(Confiner.ScratchBase, "confine-git")
+    made = dir :: made
+    val ws = workspace(dir, WorkspaceSandboxConfig.Permissive, Some(Confiner(fake, sharedTmp = true)))
+    val e  = intercept[WorkspaceAgentException](ws.executeCommand("git status"))
+    e.code shouldBe "EXECUTION_FAILED"
+    e.error should (include("which commands may write").and(include("java.io.tmpdir")))
+  }
+
   "a confined command" should "start through the helper" in {
     val confiner = linuxConfiner()
     val ws       = workspace(tree(), WorkspaceSandboxConfig.Permissive, confiner)
@@ -184,13 +198,13 @@ class CommandConfinementExecuteSpec extends AnyFlatSpec with Matchers with Befor
     outcome(workspace(dir, config, confiner), "java T.java")
   }
 
-  it should "let a JVM write its temporary files in /tmp when the runner's attach mechanism is off" in {
+  it should "let a JVM write its temporary files in /tmp when the runner's JVM keeps nothing there" in {
     val result = jvmTempFile(sharedTmp = true)
     result.map(_.exitCode) shouldBe Right(0)
     result.map(_.stdout.startsWith("/tmp/")) shouldBe Right(true)
   }
 
-  it should "not grant /tmp when the runner's attach mechanism could not be verified off" in {
+  it should "not grant /tmp when the runner's JVM could not be verified to keep nothing there" in {
     val result = jvmTempFile(sharedTmp = false)
     result.map(_.exitCode).fold(_ => 1, identity) should not be 0
     result.map(_.stderr).getOrElse("") should include("Permission denied")

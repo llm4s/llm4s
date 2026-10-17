@@ -62,6 +62,9 @@ object WorkspaceRunnerDocker {
     )
   )
 
+  /** The runner JVM's java.io.tmpdir: owner-only, never granted to a command (design §4.39). */
+  val RunnerTmpDir: String = "/var/tmp/llm4s-runner"
+
   // Core image settings used by workspaceRunner
   val settings: Seq[Setting[_]] = Seq(
     Docker / maintainer         := "llm4s",
@@ -71,10 +74,15 @@ object WorkspaceRunnerDocker {
     Docker / version            := version.value.replace('+', '-'),
     Docker / dockerBuildOptions := Seq("--platform=linux/amd64"),
     Docker / mappings += (baseDirectory.value / "src" / "main" / "c" / "llm4s-confine.c") -> "/opt/docker/confine/llm4s-confine.c",
-    // The runner grants commands /tmp only with its attach mechanism off (design §4.39): its trigger file and socket
-    // are in /tmp, so a command could otherwise attach to the unconfined runner. No shared perf-data file in /tmp.
-    Universal / javaOptions ++= Seq("-J-XX:+DisableAttachMechanism", "-J-XX:+PerfDisableSharedMem"),
-    dockerCommands ++= devToolingCommands,
+    // The runner grants commands /tmp only when its JVM keeps nothing there (design §4.39): no attach mechanism (its
+    // trigger file and socket are in /tmp, so a command could otherwise attach to the unconfined runner), no shared
+    // perf-data file, and its own temporary files (git's empty directory) in a runner-private directory, made below.
+    Universal / javaOptions ++= Seq(
+      "-J-XX:+DisableAttachMechanism",
+      "-J-XX:+PerfDisableSharedMem",
+      s"-J-Djava.io.tmpdir=$RunnerTmpDir"
+    ),
+    dockerCommands ++= devToolingCommands :+ Cmd("RUN", s"mkdir -p -m 0700 $RunnerTmpDir"),
     dockerLabels ++= Map(
       "org.opencontainers.image.title"       -> "llm4s workspace-runner",
       "org.opencontainers.image.source"      -> "https://github.com/llm4s/llm4s",

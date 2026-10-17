@@ -82,7 +82,7 @@ private[runner] object GitSandbox {
   private[runner] val MaxDrivers = 200
 
   /**
-   * An empty directory the runner made outside any workspace, for `HOME`, `XDG_CONFIG_HOME`, `core.hooksPath` and the
+   * An empty directory the runner made under `java.io.tmpdir` (the image's is runner-private), for `HOME`, `XDG_CONFIG_HOME`, `core.hooksPath` and the
    * `gpg.*.program` overrides (a directory cannot be run). Made once; `Left` when it cannot be.
    */
   lazy val emptyDirectory: Either[String, Path] =
@@ -305,13 +305,19 @@ private[runner] object GitSandbox {
   }
 
   /**
-   * The empty directory, checked: it must still be empty and lie outside the workspace, or `core.hooksPath` and `HOME`
-   * would name files the agent could write.
+   * The empty directory, checked: it must still be empty and lie outside the workspace and every other path commands
+   * may write (`writable`, real paths, such as `/tmp` when commands share it), or `core.hooksPath` and `HOME` would
+   * name files the agent could write.
    */
-  def checkedEmptyDirectory(realRoot: Path): Either[String, Path] =
+  def checkedEmptyDirectory(realRoot: Path, writable: Seq[Path] = Nil): Either[String, Path] =
     emptyDirectory.flatMap { dir =>
       if (dir.startsWith(realRoot))
         Left(s"the empty directory git is run with ('$dir') lies inside the workspace; set java.io.tmpdir elsewhere")
+      else if (writable.exists(dir.startsWith(_)))
+        Left(
+          s"the empty directory git is run with ('$dir') lies inside ${writable.filter(dir.startsWith(_)).mkString(", ")}, " +
+            "which commands may write; set java.io.tmpdir to a directory only the runner can write"
+        )
       else if (!Try(Using.resource(Files.list(dir))(_.findAny().isEmpty)).getOrElse(false))
         Left(s"the directory git is run with ('$dir') is not empty")
       else Right(dir)

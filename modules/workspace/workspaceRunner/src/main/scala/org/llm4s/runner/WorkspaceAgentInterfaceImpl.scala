@@ -56,7 +56,15 @@ class WorkspaceAgentInterfaceImpl(
    */
   private[runner] lazy val scratchParent: scala.util.Try[Path] = {
     scratchParentMade = true
-    Confiner.scratchParent(Confiner.ScratchBase, effective(rootPath))
+    Confiner.scratchParent(Confiner.ScratchBase, effective(rootPath), commandWritable)
+  }
+
+  /**
+   * The system paths a confined command may write (`/tmp` when commands share it, the home directory), by real path:
+   * the runner's own files (the scratch parent, git's empty directory) must lie outside every one. Empty unconfined.
+   */
+  private lazy val commandWritable: List[Path] = confiner.toList.flatMap { c =>
+    CommandConfinement.writablePaths(CommandConfinement.systemRules(home, javaHome, effective(rootPath), c.sharedTmp))
   }
   @volatile private var scratchParentMade = false
 
@@ -1869,7 +1877,7 @@ class WorkspaceAgentInterfaceImpl(
     def failed(why: String): Nothing =
       throw new WorkspaceAgentException(s"git was not run: $why.", "EXECUTION_FAILED", None)
 
-    val empty = GitSandbox.checkedEmptyDirectory(realRoot).fold(failed, identity)
+    val empty = GitSandbox.checkedEmptyDirectory(realRoot, commandWritable).fold(failed, identity)
     GitSandbox.environment(builder.environment(), empty)
     // The lister runs unconfined, so on Linux it is the system's git, never the command's from PATH: a confined
     // command may write a PATH directory (the home), and its own git there must never run with the runner's rights.

@@ -53,6 +53,7 @@ Not in a release yet. On Linux, the workspace runner now starts every `execute` 
   ```
 - **`readOnlyPaths` and `allowedPaths` bind commands too**, not only the runner's own file operations: a command cannot write under a read-only path (nor create one that does not exist yet), cannot create or delete entries directly in a directory above one, and cannot read outside `allowedPaths`.
 - **A kernel without Landlock ABI v3** (Linux 6.2), or an image without the `llm4s-confine` helper, refuses every command `SANDBOX_UNAVAILABLE`; it never runs one unconfined. An amd64 image under emulation (Docker Desktop's Rosetta on Apple silicon) is such a case: build the image for the host architecture.
+- **A runner started outside the image** grants commands `/tmp` only with `-XX:+DisableAttachMechanism` and `-XX:+PerfDisableSharedMem`, and then refuses git commands (`EXECUTION_FAILED`) while its `java.io.tmpdir` lies in `/tmp` or another path commands may write: set it to an owner-only directory elsewhere, as the image does (`/var/tmp/llm4s-runner`).
 
 ## Workspace backends (#1906)
 

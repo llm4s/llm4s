@@ -659,10 +659,13 @@ What a command is granted:
 - read only on `/proc`, `/sys`, `/dev/urandom`, `/dev/random` and `/dev/zero`; read and write on `/dev/null`;
 - read, write and execute on the runner user's home (`/root` in the image), where build tools keep their caches;
 - read and write on its own temporary directory (`TMPDIR`), removed when it ends;
-- read and write on `/tmp`, shared by every command, only when the runner's JVM runs with
-  `-XX:+DisableAttachMechanism` (the image's does). The JVM attach socket lives in `/tmp`, so a command that could
-  write there could otherwise attach to the unconfined runner. Without the flag the runner warns at startup and JVM
-  tools such as `sbt`, which write `/tmp` whatever `TMPDIR` says, fail confined;
+- read and write on `/tmp`, shared by every command, only when the runner's JVM runs with both
+  `-XX:+DisableAttachMechanism` and `-XX:+PerfDisableSharedMem` (the image's does). The JVM attach socket lives in
+  `/tmp`, so a command that could write there could otherwise attach to the unconfined runner. Without both flags the
+  runner warns at startup and JVM tools such as `sbt`, which write `/tmp` whatever `TMPDIR` says, fail confined. The
+  runner keeps its own temporary files out of `/tmp`: the image sets its `java.io.tmpdir` to the owner-only
+  `/var/tmp/llm4s-runner`. A runner started otherwise, whose `java.io.tmpdir` lies in a path commands may write,
+  refuses git commands (`EXECUTION_FAILED`, naming `java.io.tmpdir`);
 - in the workspace, read and write on the root, or on each `allowedPaths` entry instead, and read only on each
   `readOnlyPaths` entry; a `readOnlyPaths` entry that does not exist yet cannot be created.
 

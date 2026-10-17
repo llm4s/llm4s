@@ -17,7 +17,8 @@ import scala.util.{ Failure, Success, Try }
  * Kernel confinement of `execute` commands (design §4.39, #1983) in the workspace-runner image: the issue's acceptance.
  *
  * Two containers, since a container's sandbox config is fixed when it starts:
- *   - A: `readOnlyPaths = ["ro"]`, `networkAllowed = false`, with `jcmd` and `java` allowed for the `/tmp` cases;
+ *   - A: `readOnlyPaths = ["ro"]`, `networkAllowed = false`, with `jcmd` and `java` allowed for the `/tmp` cases, and a
+ *     git repository;
  *   - B: `allowedPaths = ["src"]`, `networkAllowed = true`.
  *
  * Each command here must be accepted by the runner and fail (or succeed) by itself, so a command refused before it runs,
@@ -86,6 +87,9 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
       readOnlyPaths = List("ro"),
       networkAllowed = false
     )
+    // a repository, for the git case (git's own files are the runner's, written on the host here)
+    if (new ProcessBuilder("git", "init", "-q", dirA.toString).inheritIO().start().waitFor() != 0)
+      fail("git init failed on the host")
     start(dirA, HostPortA, config, extra = Set("curl", "jcmd"))
   }
 
@@ -171,12 +175,21 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
     }
   }
 
-  it should "let a JVM write its temporary files in /tmp, since the image's runner has attach disabled" in {
+  it should "let a JVM write its temporary files in /tmp, since the image's runner keeps nothing there" in {
     val ws = live(workspaceA)
     val r  = runCommand(ws, "java T.java")
     withClue(s"java: $r") {
       r.exitCode shouldBe 0
       r.stdout should startWith("/tmp/")
+    }
+  }
+
+  it should "run git with its empty directory (core.hooksPath) in the runner's private java.io.tmpdir, not /tmp" in {
+    val ws = live(workspaceA)
+    val r  = runCommand(ws, "git rev-parse --git-path hooks")
+    withClue(s"git: $r") {
+      r.exitCode shouldBe 0
+      r.stdout should startWith("/var/tmp/llm4s-runner/llm4s-git-")
     }
   }
 

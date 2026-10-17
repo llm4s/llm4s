@@ -105,8 +105,9 @@ object RunnerMain extends cask.MainRoutes {
       logger.info(s"Commands are confined by ${c.helper} (Landlock, and seccomp when networkAllowed=false)")
       if (!c.sharedTmp)
         logger.warn(
-          "This JVM does not run with -XX:+DisableAttachMechanism, so commands are not granted /tmp: JVM tools " +
-            "that write there (sbt) fail confined. Start the runner with that flag (the image does) (design §4.39)"
+          "This JVM does not run with both -XX:+DisableAttachMechanism and -XX:+PerfDisableSharedMem, so commands " +
+            "are not granted /tmp: JVM tools that write there (sbt) fail confined. Start the runner with both flags " +
+            "and java.io.tmpdir outside /tmp (the image does) (design §4.39)"
         )
     case None => logger.warn("Not on Linux: commands run unconfined; only the command policy applies (design §4.39)")
   }

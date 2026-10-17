@@ -41,8 +41,8 @@ private[runner] object CommandConfinement {
    * `/opt` is read and execute because the runner itself is installed under `/opt/docker`; a command may read the
    * runner's jars, which is harmless.
    *
-   * `/tmp` is read-write only with `sharedTmp` ([[Confiner.sharedTmp]]: the runner's JVM attach mechanism is off), and
-   * is then shared by every command.
+   * `/tmp` is read-write only with `sharedTmp` ([[Confiner.sharedTmp]]: the runner's JVM keeps nothing there), and is
+   * then shared by every command.
    */
   def systemRules(home: Path, javaHome: Option[Path], realRoot: Path, sharedTmp: Boolean): List[Rule] = {
     val rx = (SystemDirs.map(Paths.get(_)) ++ javaHome).map(Rule(Grant.ReadExec, _))
@@ -53,6 +53,13 @@ private[runner] object CommandConfinement {
       .flatMap(r => Try(r.path.toRealPath()).toOption.map(Rule(r.grant, _)))
       .filterNot(r => realRoot.startsWith(r.path) || r.path.startsWith(realRoot))
   }
+
+  /**
+   * The paths `rules` let a command write (or create entries in), by real path. The runner's own files, such as the
+   * empty directory git runs with and the commands' scratch, must lie outside every one.
+   */
+  def writablePaths(rules: List[Rule]): List[Path] =
+    rules.collect { case Rule(Grant.ReadWrite | Grant.ReadWriteExec | Grant.WriteFile, p) => p }
 
   /**
    * The workspace's rules: allowedPaths (or the root), with readOnlyPaths carved out by the walk.

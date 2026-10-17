@@ -193,4 +193,51 @@ class CommandConfinementSpec extends AnyFlatSpec with Matchers {
     Files.list(root).count() shouldBe 0
     Confiner.scratchParent(root.resolve("missing"), tree()).isFailure shouldBe true
   }
+
+  it should "fail, leaving nothing, when it would lie inside a path commands may write" in {
+    val base    = tree()
+    val failure = Confiner.scratchParent(base, tree(), writable = List(base)).failed.get
+    failure.getMessage should include("which commands may write")
+    Files.list(base).count() shouldBe 0
+  }
+
+  "Confiner.jvmLeavesTmpAlone" should "require both the attach mechanism and the shared perf-data file off" in {
+    def flags(on: String*): String => Option[String] =
+      name => Some(if (on.contains(name)) "true" else "false")
+    Confiner.jvmLeavesTmpAlone(flags("DisableAttachMechanism", "PerfDisableSharedMem")) shouldBe true
+    Confiner.jvmLeavesTmpAlone(flags("DisableAttachMechanism")) shouldBe false
+    Confiner.jvmLeavesTmpAlone(flags("PerfDisableSharedMem")) shouldBe false
+    Confiner.jvmLeavesTmpAlone(flags()) shouldBe false
+  }
+
+  it should "be false when a flag cannot be read" in {
+    Confiner.jvmLeavesTmpAlone(name => if (name == "DisableAttachMechanism") Some("true") else None) shouldBe false
+    Confiner.jvmLeavesTmpAlone(_ => None) shouldBe false
+  }
+
+  "CommandConfinement.writablePaths" should "list the paths a command may write, not those it may only read" in {
+    val (rw, rwx, wf, ro, rx) = (tree(), tree(), tree(), tree(), tree())
+    CommandConfinement.writablePaths(
+      List(
+        Rule(Grant.ReadWrite, rw),
+        Rule(Grant.ReadWriteExec, rwx),
+        Rule(Grant.WriteFile, wf),
+        Rule(Grant.ReadOnly, ro),
+        Rule(Grant.ReadExec, rx)
+      )
+    ) shouldBe List(rw, rwx, wf)
+  }
+
+  "GitSandbox.checkedEmptyDirectory" should "refuse an empty directory inside a path commands may write" in {
+    val dir = GitSandbox.emptyDirectory.toOption.get
+    GitSandbox.checkedEmptyDirectory(tree(), Nil) shouldBe Right(dir)
+    val refused = GitSandbox.checkedEmptyDirectory(tree(), List(dir.getParent))
+    refused.isLeft shouldBe true
+    refused.left.toOption.get should (include("which commands may write").and(include("java.io.tmpdir")))
+  }
+
+  it should "refuse an empty directory inside the workspace" in {
+    val dir = GitSandbox.emptyDirectory.toOption.get
+    GitSandbox.checkedEmptyDirectory(dir.getParent).left.toOption.get should include("inside the workspace")
+  }
 }

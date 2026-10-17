@@ -240,7 +240,7 @@ class WorkspaceCommandsSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
     val curl = "curl -sS --max-time 5 http://127.0.0.1:8080/"
     // case A: readOnlyPaths = ["ro"], networkAllowed = false
     val a = container(WorkspaceSandboxConfig.Permissive.copy(readOnlyPaths = List("ro"), networkAllowed = false))
-    for (command <- Seq("cat b", "rm ro/a", "cp b ro/a", curl))
+    for (command <- Seq("cat b", "rm ro/a", "cp b ro/a", curl, "git rev-parse --git-path hooks"))
       withClue(command) {
         a.prepareCommand(command, None, Some(20.seconds), None).isRight shouldBe true
       }
