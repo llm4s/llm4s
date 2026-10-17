@@ -3,7 +3,8 @@
 #
 # The tier builds the workspace-runner image and runs the live suites against it: too slow for every PR, so it runs on
 # a PR only when the diff touches something those suites exercise. That is the runner and its shared protocol
-# (modules/workspace), the agent's workspace backends and the harness types they implement, ExecuteTool, the
+# (modules/workspace), the whole agent harness package (the suites import it by wildcard and drive its backends,
+# tools and middleware against the container), the agent-testkit contracts they run, the
 # @Workspace suites and their tag, the sample they drive, the image build, this script, and the CI jobs that decide and
 # run the tier. A change to ci.yml counts only when it changes one of those jobs (compared as parsed YAML), since
 # ci.yml changes for many other reasons. Likewise build.sbt counts only when a changed line, or the project definition
@@ -20,8 +21,8 @@ HEAD="${2:?usage: $0 BASE HEAD}"
 # Paths whose change runs the tier. Extended regular expressions, matched against repo-relative paths.
 PATTERNS=(
   '^modules/workspace/'
-  '^modules/agent/src/main/scala/org/llm4s/agent/harness/workspace/'
-  '^modules/agent/src/main/scala/org/llm4s/agent/harness/(ExecuteTool|SandboxBackend|FileBackend)\.scala$'
+  '^modules/agent/src/main/scala/org/llm4s/agent/harness/'
+  '^modules/agent-testkit/src/main/scala/org/llm4s/agent/testkit/(FileBackend|FileTools|Replay)Contract\.scala$'
   '^modules/it/src/test/scala/org/llm4s/workspace/'
   '^modules/it/src/test/java/org/llm4s/it/tags/Workspace\.java$'
   '^modules/samples/src/main/scala/org/llm4s/samples/harness/CodingWorkspace[A-Za-z]*\.scala$'
