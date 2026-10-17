@@ -72,7 +72,6 @@ object WorkspaceRunnerDocker {
     dockerExposedPorts          := Seq(8080),
     dockerBaseImage             := "eclipse-temurin:21-jdk",
     Docker / version            := version.value.replace('+', '-'),
-    Docker / dockerBuildOptions := Seq("--platform=linux/amd64"),
     Docker / mappings += (baseDirectory.value / "src" / "main" / "c" / "llm4s-confine.c") -> "/opt/docker/confine/llm4s-confine.c",
     // The runner grants commands /tmp only when its JVM keeps nothing there (design §4.39): no attach mechanism (its
     // trigger file and socket are in /tmp, so a command could otherwise attach to the unconfined runner), no shared
