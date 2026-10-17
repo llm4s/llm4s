@@ -196,7 +196,9 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   cut off after its `,` has it, a `pytest` assertion diff whose lines start with `E` and its `+`/`-` markers,
   a notebook's `text/plain` line array in an `.ipynb` file, `str(dict)` inside a `repr`
   (`{'body': '{\'password\': "it\'s..."}'}`), Python's `\'` inside a JSON string
-  (`"{'password': 'a\\'b\"c'}"`), `Settings(token=['a', 'b'])` and a `\"` in an earlier leaf are redacted; a
+  (`"{'password': 'a\\'b\"c'}"`), `Settings(token=['a', 'b'])`, a call under a sensitive key
+  (`Settings(token=SecretStr('...'))`, `api_key=module.Secret(value='...')`) and a `\"` in an earlier leaf are
+  redacted; a `"` of a credential in a single-quoted string is replaced with it (`'[REDACTED]'`), while a
   `"` that delimits a JSON string, at any depth, is never replaced, so the JSON still parses, and what this
   reading replaces is added only where no other replacement is), `key=value` pairs and quoted
   `KEY="value"` / `KEY='value'` assignments outside a query string (for example `password=...`,
@@ -218,13 +220,21 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   with `_` and `-` dropped, is `token`, `authorization`, `proxyauthorization`, `credential(s)`,
   `cookie(s)` or `setcookie`, or ends in `apikey`, `secret`, `password`, `passwd`, `privatekey`,
   `accesstoken`, `refreshtoken`, `idtoken`, `authtoken`, `sessiontoken`, `securitytoken` or
-  `bearertoken`: `client_secret`, `x-api-key`, `api-key`, `x-goog-api-key`, `x-auth-token`,
+  `bearertoken`, or the plural `secrets`, `passwords` or `apikeys`: `client_secret`, `x-api-key`, `api-key`,
+  `x-goog-api-key`, `x-auth-token`, `secrets`, `api_keys`, `db_passwords`,
   `x-amz-security-token`, `refresh_token`, `db_password`, `Proxy-Authorization`, `Cookie` and
   `Set-Cookie` are redacted, as a header line, a JSON field or header map (escaped too) and a
   `key=value` pair; `max_tokens`, `prompt_tokens`, `token_count`, `next_page_token`, `cookie_policy` and
-  `cookie_consent` are not, because the match is never on a substring. URL query parameters are also
+  `cookie_consent` are not, because the match is never on a substring; nor is `tokens`, a count in every
+  provider exchange. URL query parameters are also
   matched against a second, substring list (`key`, `token`, `secret`, `password`, `auth` and similar), so
-  `?x_api_key_id=` is redacted too. A query value written right before JSON
+  `?x_api_key_id=` is redacted too, and a third, matched whole, of parameters that carry a short-lived
+  credential: `sig`, `signature`, `X-Amz-Signature`, `X-Goog-Signature`, `code` (an OAuth authorization code),
+  `session`, `sessionid` and `jsessionid` (also as the matrix parameter `;jsessionid=`, and in a URL's fragment,
+  `#code=...`, and after an HTML-escaped separator, `?sv=...&amp;sig=...`); a field `"code": 400`
+  is left, since only a query parameter's key is read so. The password of a URL's userinfo is redacted wherever the URL is
+  (`https://alice:[REDACTED]@gw.example.com/v1`, also with JSON's `\/`), every URL of a list joined by `,` or
+  `;` included; the user and the host are kept. A query value written right before JSON
   (`?token=...,{"api_key": "..."}`, also with the quotes escaped) does not hide the field after it.
 - **Where a cookie header's value ends.** Outside any string (a raw request dump, a log line), at the end
   of its line, quotes, apostrophes and backslashes included: `Cookie: sid="abc"; x=y` becomes

@@ -40,6 +40,7 @@ import org.llm4s.agent.graph.middleware.AgentMiddleware
 import org.llm4s.agent.graph.middleware.ApprovalMiddleware
 import org.llm4s.agent.graph.tool.AgentTool
 import org.llm4s.agent.graph.tool.AgentToolSpec
+import org.llm4s.agent.graph.tool.ToolContent
 import org.llm4s.agent.graph.tool.ToolContext
 import org.llm4s.agent.graph.tool.ToolOutcome
 import org.llm4s.agent.graph.tool.ToolSet
@@ -100,7 +101,7 @@ class AgentKtPendingTest {
             json,
         )
 
-    private fun success(text: String): ToolOutcome = ToolOutcome.Success.apply(ujson.Str(text), StateUpdate.empty())
+    private fun success(text: String): ToolOutcome = ToolOutcome.Success.apply(ToolContent.Json.apply(ujson.Str(text)), StateUpdate.empty())
 
     /** Approval before it runs, from the agent's middleware; records each run. */
     private val ran = CopyOnWriteArrayList<String>()
@@ -182,9 +183,9 @@ class AgentKtPendingTest {
             return store.commit(threadId, commit)
         }
 
-        override fun deleteThread(threadId: String): Either<LLMError, BoxedUnit> {
+        override fun deleteThread(threadId: String, token: Long): Either<LLMError, BoxedUnit> {
             deleted.add(threadId)
-            return store.deleteThread(threadId)
+            return store.deleteThread(threadId, token)
         }
     }
 
@@ -379,6 +380,51 @@ class AgentKtPendingTest {
         val kept = agent.run("again")
         assertTrue(store.stored.contains(kept.threadId()))
         assertFalse(store.deleted.contains(kept.threadId()))
+    }
+
+    // ---- forget(threadId): a named conversation whose turn left no result -----------------------
+
+    @Test
+    fun `forget by thread id removes a named stream's failed conversation, which no result carries`() = runBlocking {
+        val store = WatchedStore()
+        val down = NetworkError.apply("down", Option.empty(), "http://x")
+        val agent = agentOn(store, { Left(down) })
+        assertFailsWith<LLMException> { agent.stream("named", "go").toList() }
+        // the failed turn is kept, for recover - until it is forgotten
+        assertTrue(store.stored.contains("named"))
+        assertTrue(store.deleted.isEmpty())
+
+        agent.forget("named")
+        assertEquals(setOf("named"), store.deleted.toSet())
+        val gone = assertFailsWith<LLMException> { agent.recover("named") }
+        assertTrue(gone.message.orEmpty().contains("no incomplete execution"), gone.message)
+    }
+
+    @Test
+    fun `forget by thread id succeeds for a thread the agent never ran`() = runBlocking {
+        val store = WatchedStore()
+        val agent = agentOn(store)
+        agent.forget("no-such-thread")
+        assertTrue(store.stored.isEmpty())
+    }
+
+    @Test
+    fun `forget by thread id refuses a thread whose turn is running, removing nothing, and forgets it once the turn has ended`() = runBlocking {
+        val parked = CountDownLatch(1)
+        val unparked = CountDownLatch(1)
+        val store = WatchedStore()
+        val agent = agentOn(store, { completion("", listOf(call("c1", "whoami", "x"))) }, parking(parked, unparked))
+        val running = async(Dispatchers.Default) { agent.stream("busy", "go").toList() }
+        assertTrue(withContext(Dispatchers.IO) { parked.await(seconds, TimeUnit.SECONDS) })
+
+        val refused = assertFailsWith<LLMException> { agent.forget("busy") }
+        assertIs<GraphError.ThreadBusy>((refused.cause as LlmException).error())
+        assertTrue(store.deleted.isEmpty())
+
+        withTimeout(seconds * 1000) { running.cancelAndJoin() }
+        assertTrue(withContext(Dispatchers.IO) { unparked.await(seconds, TimeUnit.SECONDS) }, "the model call was interrupted")
+        agent.forget("busy")
+        assertEquals(setOf("busy"), store.deleted.toSet())
     }
 
     @Test

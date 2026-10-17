@@ -1,12 +1,14 @@
 package org.llm4s.agent.graph.tool
 
-import org.llm4s.agent.graph.{ IdempotencyKey, RunContext, StateKey, StateUpdate, ThreadState, ToolCallId }
+import org.llm4s.agent.graph.{ EffectKey, IdempotencyKey, RunContext, StateKey, StateUpdate, ThreadState, ToolCallId }
 import org.llm4s.error.LLMError
+import org.llm4s.llmconnect.model.ContentPart
 import org.llm4s.toolapi.{ SchemaDefinition, ToolFunction, ToolHints }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
 import scala.annotation.unused
+import scala.concurrent.duration.{ Duration, FiniteDuration }
 
 /**
  * What a tool tells the model and the loop: its name, description and argument schema, how its
@@ -22,6 +24,9 @@ import scala.annotation.unused
  * @param validateDecoded a check on the decoded arguments; `Left` becomes an error the model sees
  * @param question the question this tool may ask; set by [[AgentTool.Asking]]
  * @param hints what the tool is likely to do, for a middleware to read; see [[ToolHints]]
+ * @param timeout how long one run of the tool may take; see [[withTimeout]]
+ * @param resourcesOf what a call touches, from its decoded arguments; see [[withResources]]
+ * @param locksOf the locks a call holds, from its decoded arguments, when the tool declares any; see [[withLocks]]
  */
 final case class AgentToolSpec[A] private (
   name: String,
@@ -29,7 +34,10 @@ final case class AgentToolSpec[A] private (
   schema: SchemaDefinition[A],
   validateDecoded: A => Result[Unit],
   question: Option[ToolQuestion[?, ?]],
-  hints: ToolHints
+  hints: ToolHints,
+  timeout: Option[FiniteDuration],
+  resourcesOf: A => Vector[ToolResource],
+  locksOf: Option[A => Set[LockKey]]
 )(using val codec: ReadWriter[A]):
 
   /** Adds a check on the decoded arguments, replacing any earlier one. */
@@ -37,6 +45,50 @@ final case class AgentToolSpec[A] private (
 
   /** Declares what the tool is likely to do, replacing any earlier hints. */
   def withHints(hints: ToolHints): AgentToolSpec[A] = copy(hints = hints)(using codec)
+
+  /**
+   * Bounds each run of the tool - its `execute`, or its `resume` after a question - to `timeout`. A run
+   * past it is interrupted, and the call's outcome is `ToolOutcome.Error("Tool '<name>' timed out after
+   * <n> ms")`, an error the model sees; a wrapper that retries gets a fresh bound. The tool runs on a
+   * thread of its own, which is joined before the call goes on, so a tool that ignores its interrupt
+   * holds its batch past the timeout: block interruptibly. A cancelled run is still a cancellation,
+   * which records nothing. `timeout` must be positive.
+   */
+  def withTimeout(timeout: FiniteDuration): AgentToolSpec[A] =
+    require(timeout > Duration.Zero, s"tool '$name': timeout must be positive, was $timeout")
+    copy(timeout = Some(timeout))(using codec)
+
+  /**
+   * Declares what a call touches, from its decoded arguments, replacing the default
+   * `Vector(ToolResource(Operation.Invoke, name))`; an empty vector is checked as that default. A
+   * `PermissionMiddleware` reads them from `ToolCallRequest.resources`. A function that throws refuses
+   * the call as invalid arguments.
+   *
+   * They are the call's whole envelope, over every run of it: what `execute` may touch, and what `resume`
+   * may touch after a question, whatever the answer. The runtime checks them; it cannot see what the
+   * tool then does. So a tool whose answer chooses its target (asking for a missing destination)
+   * declares a resource covering every target it may pick (`Write /out/&#42;&#42;`), and refuses an answer
+   * outside it as an error.
+   */
+  def withResources(resources: A => Vector[ToolResource]): AgentToolSpec[A] =
+    copy(resourcesOf = resources)(using codec)
+
+  /**
+   * Declares the locks a call holds, from its decoded arguments; by default it holds none. When one
+   * model message has several calls, a call whose locks conflict with an earlier call's (one
+   * [[LockKey]] a prefix of the other) waits for it: it runs in a later superstep, in call order, and
+   * sees the state the earlier call committed. Calls without conflicting locks run concurrently, as
+   * before. Each further round of calls costs two supersteps of `RunBudgets.maxSupersteps`. A function
+   * that throws gives the call the root lock, which conflicts with every lock.
+   *
+   * As with [[withResources]], they cover every run of the call, `resume` included: a tool whose answer
+   * chooses its target locks a key above every target it may pick, and an approval edit may narrow the
+   * locks but not take one they do not cover (it is refused).
+   */
+  def withLocks(locks: A => Set[LockKey]): AgentToolSpec[A] = copy(locksOf = Some(locks))(using codec)
+
+  /** The resource a call of this tool touches when it declares none: invoking the tool. */
+  def defaultResource: ToolResource = ToolResource(Operation.Invoke, name)
 
   /** Declares the question this tool asks and the answer it takes; only [[AgentTool.Asking]] calls it. */
   private[tool] def withQuestion[Q: ReadWriter, Ans: ReadWriter]: AgentToolSpec[A] =
@@ -88,7 +140,17 @@ object AgentToolSpec:
     description: String,
     schema: SchemaDefinition[A]
   ): AgentToolSpec[A] =
-    new AgentToolSpec(name, description, schema, _ => Right(()), None, ToolHints.default)
+    new AgentToolSpec(
+      name,
+      description,
+      schema,
+      _ => Right(()),
+      None,
+      ToolHints.default,
+      None,
+      _ => Vector(ToolResource(Operation.Invoke, name)),
+      None
+    )
 
 /** The codecs of a tool's question and of the answer it takes. */
 final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec: ReadWriter[Ans])
@@ -101,20 +163,41 @@ final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec:
  * A tool with an external side effect passes `idempotencyKey` to the system it calls (an
  * `Idempotency-Key` header, a client token, a unique column), because the runtime may run the
  * same call more than once: a retrying wrapper, `recover` after a failure, cancellation or crash,
- * and an approval each run it again with the same key.
+ * and an approval each run it again with the same key. A call can even run twice at once: a worker
+ * paused past its claim's lease may still be running it when another runtime takes the thread over
+ * and runs it too, with the same key. A system that can fence writers can refuse the stale worker:
+ * `run.position.fencingToken` is the run's claim token, which grows with every claim on the thread,
+ * so the system keeps the highest token it has seen and refuses a lower one.
  */
 final case class ToolContext private (
   run: RunContext,
   toolCallId: ToolCallId,
   idempotencyKey: IdempotencyKey,
   state: ThreadState,
-  approved: Boolean
+  approved: Boolean,
+  /**
+   * The phase of the call this context runs: `None` for `execute` (also when an approval or a
+   * wrapper runs it again), or the key of one answered resume (design §4.24). Set by the loop only.
+   */
+  private[graph] val phase: Option[IdempotencyKey]
 ):
   def withRun(r: RunContext): ToolContext                  = copy(run = r)
   def withToolCallId(id: ToolCallId): ToolContext          = copy(toolCallId = id)
   def withIdempotencyKey(key: IdempotencyKey): ToolContext = copy(idempotencyKey = key)
   def withState(s: ThreadState): ToolContext               = copy(state = s)
   def withApproved(a: Boolean): ToolContext                = copy(approved = a)
+
+  /**
+   * The key of one external effect of this phase of the call - `operation`, such as `file.edit`, on
+   * what `discriminator` names (a path) - for [[org.llm4s.agent.graph.ReplayGuard]] (design §4.24). In
+   * `execute` its base is [[idempotencyKey]], so it is the same in every run of `execute`: a retrying
+   * wrapper, `recover`, and a re-run after approval. An answered `resume` is another phase of the call,
+   * keyed by the call, the phase that asked, the question and the answer: the same in every run of that
+   * resume (`recover` of a failed one included), different from `execute` and from every other resume
+   * of the call, a resume that asks again included.
+   */
+  def effectKey(operation: String, discriminator: String*): EffectKey =
+    run.effectKeyUnder(phase.getOrElse(idempotencyKey), operation, discriminator)
 
 object ToolContext:
   def apply(
@@ -124,13 +207,42 @@ object ToolContext:
     state: ThreadState,
     approved: Boolean = false
   ): ToolContext =
-    new ToolContext(run, toolCallId, idempotencyKey, state, approved)
+    new ToolContext(run, toolCallId, idempotencyKey, state, approved, None)
+
+  /** The context of an answered resume of the call, whose effect keys are its phase's (see `effectKey`). */
+  private[graph] def resuming(
+    run: RunContext,
+    toolCallId: ToolCallId,
+    idempotencyKey: IdempotencyKey,
+    state: ThreadState,
+    approved: Boolean,
+    phase: IdempotencyKey
+  ): ToolContext =
+    new ToolContext(run, toolCallId, idempotencyKey, state, approved, Some(phase))
+
+/**
+ * A successful call's result for the model: JSON, or content parts - text, images and documents.
+ *
+ * The loop sends `Json` as one text part: a non-blank string as itself, anything else rendered as
+ * JSON. It sends `Parts` as they are, in the `ToolMessage`, for the provider to map; a provider that
+ * cannot send one fails the model call with an `UnsupportedContentPartError`. `Parts` with no content,
+ * or carrying more than `ContentPart.MaxInlineBytes` of inline bytes in total, is the call's error
+ * result instead: every checkpoint copies the thread's messages, so larger media goes in a
+ * `MediaSource.Url` or a `MediaSource.ProviderFile`.
+ *
+ * It has a `ReadWriter`, so an effect guarded by `ReplayGuard` can record a `ToolContent` as its outcome and
+ * replay it, parts and all: its inline media is base64 in the record, and counts towards the guard's
+ * `maxOutcomeBytes` at that encoded size.
+ */
+enum ToolContent derives ReadWriter:
+  case Json(value: ujson.Value)
+  case Parts(parts: Vector[ContentPart])
 
 /** What a tool call produced, as data. */
 enum ToolOutcome:
 
   /** The call's result for the model, and an update to keys the tool declares in `writes`. */
-  case Success(content: ujson.Value, update: StateUpdate = StateUpdate.empty)
+  case Success(content: ToolContent, update: StateUpdate = StateUpdate.empty)
 
   /** A tool-level failure: the model sees `message`; the run continues. */
   case Error(message: String)
@@ -180,7 +292,7 @@ object AgentTool:
   /**
    * Adapts a core `ToolFunction`: the spec takes its name, description and schema (as a
    * `SchemaDefinition[ujson.Value]` - the type parameter is a phantom), and arguments arrive as
-   * raw JSON. `Right(json)` becomes `Success(json)`, `Left(error)` an `Error` with its formatted
+   * raw JSON. `Right(json)` becomes `Success(ToolContent.Json(json))`, `Left(error)` an `Error` with its formatted
    * message. It writes no state and never asks. Its name is not checked here; [[ToolSet.of]]
    * refuses an invalid one.
    */
@@ -192,6 +304,21 @@ object AgentTool:
    */
   def fromToolFunction(tool: ToolFunction[?, ?], hints: ToolHints): AgentTool[ujson.Value] =
     new FromToolFunction(tool, hints)
+
+  /**
+   * `tool` with each run bounded by `timeout` ([[AgentToolSpec.withTimeout]]) when its spec declares no timeout of its
+   * own, and `tool` itself when it does. The bounded tool writes the same keys, and asks and takes the same questions.
+   */
+  private[agent] def withDefaultTimeout[A](tool: AgentTool[A], timeout: FiniteDuration): AgentTool[A] =
+    if tool.spec.timeout.isDefined then tool
+    else
+      val bounded = tool.spec.withTimeout(timeout)
+      new AgentTool[A]:
+        val spec: AgentToolSpec[A]                              = bounded
+        override def writes: Set[StateKey[?, ?]]                = tool.writes
+        def execute(args: A, context: ToolContext): ToolOutcome = tool.execute(args, context)
+        override private[tool] def resumeErased(args: A, question: Any, answer: Any, context: ToolContext) =
+          tool.resumeErased(args, question, answer, context)
 
   /**
    * Continues `tool`'s call `args` with `question` answered by `answer`, both decoded with the codecs
@@ -219,7 +346,7 @@ object AgentTool:
 
     def execute(args: ujson.Value, context: ToolContext): ToolOutcome =
       function.execute(args) match
-        case Right(json) => ToolOutcome.Success(json)
+        case Right(json) => ToolOutcome.Success(ToolContent.Json(json))
         case Left(error) => ToolOutcome.Error(error.getFormattedMessage)
 
   /**

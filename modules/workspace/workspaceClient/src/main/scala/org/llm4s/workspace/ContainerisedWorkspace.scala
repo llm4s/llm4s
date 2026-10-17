@@ -387,31 +387,84 @@ class ContainerisedWorkspace(
         client.send(json)
         logger.debug(s"Sent command: ${command.getClass.getSimpleName} with ID: ${command.commandId}")
       }
-      response <- Try(future.get(responseTimeoutSeconds(command), TimeUnit.SECONDS)).toEither.left.map(_.getMessage)
-      finalResp <- response match {
-        case error: WorkspaceAgentErrorResponse => Left(s"${error.code}: ${error.error}")
-        case ok                                 => Right(ok)
-      }
-    } yield finalResp
+      // every way the wait can end without a response - a timeout, a failure, or an interrupt (a cancelled agent run;
+      // `Try` would let that one escape the cleanup below) - is a give-up, which cancels the command
+      response <- awaitResponse(command, future).toEither.left
+        .map {
+          case _: InterruptedException =>
+            Thread.currentThread().interrupt() // kept for the caller, which is being cancelled
+            "interrupted while waiting for the response"
+          case e => Option(e.getMessage).getOrElse(e.toString)
+        }
+    } yield response
 
     sendEither.fold(
       err => {
         pendingResponses.remove(command.commandId)
+        // a command this client gave up waiting for is cancelled, however late the runner would have started it (a
+        // slow preparation, a wait at the gate): its outcome stays unknown to the caller, but it never runs on unseen
+        command match {
+          case exec: ExecuteCommandCommand =>
+            Try(write[WebSocketMessage](CancelCommandMessage(exec.commandId))).foreach { json =>
+              Option(wsClient.get()).filter(_.isOpen).foreach(client => Try(client.send(json)))
+            }
+          case _ => ()
+        }
         throw new WorkspaceAgentException(err, "EXECUTION_FAILED", None)
       },
-      ok => ok
+      {
+        // the runner's own code, as WorkspaceAgentInterfaceRemote keeps it: a caller tells a refusal (a path
+        // not found, a compare-and-set that lost) from a failure by it
+        case error: WorkspaceAgentErrorResponse =>
+          throw new WorkspaceAgentException(error.error, error.code, error.details)
+        case ok => ok
+      }
     )
   }
 
-  private def responseTimeoutSeconds(command: WorkspaceAgentCommand): Long =
+  /**
+   * The response to `command`, waited for up to its deadline. A command is given up on when interrupted (and then
+   * cancelled). A file change is not: it has no cancellation, so an interrupt (a cancelled agent run) waits on for the
+   * response, which the runner sends by its commit deadline, before this deadline, so the caller never stops waiting
+   * while a change it cannot see may still commit. The interrupt is kept for the caller either way.
+   */
+  private def awaitResponse(
+    command: WorkspaceAgentCommand,
+    future: CompletableFuture[WorkspaceAgentResponse]
+  ): Try[WorkspaceAgentResponse] = {
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(responseTimeoutSeconds(command))
+    // only a change waits out an interrupt: a read commits nothing, so abandoning its response is safe and prompt
+    val cancellable = command match {
+      case _: WriteFileCommand | _: ModifyFileCommand | _: DeleteFileCommand => false
+      case _                                                                 => true
+    }
+    @scala.annotation.tailrec
+    def await(interrupted: Boolean): (Try[WorkspaceAgentResponse], Boolean) =
+      scala.util.control.Exception.allCatch.withTry(
+        future.get(math.max(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS)
+      ) match {
+        case scala.util.Failure(_: InterruptedException) if !cancellable => await(interrupted = true)
+        case other                                                       => (other, interrupted)
+      }
+    val (result, interrupted) = await(interrupted = false)
+    if (interrupted) Thread.currentThread().interrupt()
+    result
+  }
+
+  // every request may first wait at the runner's command gate, which then refuses rather than run late
+  private def responseTimeoutSeconds(command: WorkspaceAgentCommand): Long = {
+    val gateSec = WireDurations.toWholeSeconds(WorkspaceSandboxConfig.CommandGateWait)
     command match {
       case exec: ExecuteCommandCommand =>
         val commandTimeoutSec =
           exec.timeout.map(WireDurations.toWholeSeconds).getOrElse(DefaultCommandTimeoutSec.toLong)
-        commandTimeoutSec + ResponseTimeoutBufferSec
+        gateSec + commandTimeoutSec + ResponseTimeoutBufferSec
       case _ =>
-        (DefaultCommandTimeoutSec + ResponseTimeoutBufferSec).toLong
+        // longer than the runner lets a file change take before it must commit, so the runner refuses an overdue
+        // change before this client gives up on it
+        gateSec + WireDurations.toWholeSeconds(WorkspaceSandboxConfig.CommitAfterGate) + ResponseTimeoutBufferSec
     }
+  }
 
   // WorkspaceAgentInterface implementation
   override def exploreFiles(
@@ -450,17 +503,31 @@ class ContainerisedWorkspace(
     path: String,
     content: String,
     mode: Option[String] = None,
-    createDirectories: Option[Boolean] = None
+    createDirectories: Option[Boolean] = None,
+    expectedHash: Option[String] = None
   ): WriteFileResponse = {
     val command = WriteFileCommand(
       commandId = java.util.UUID.randomUUID().toString,
       path = path,
       content = content,
       mode = mode,
-      createDirectories = createDirectories
+      createDirectories = createDirectories,
+      expectedHash = expectedHash
     )
     sendCommand(command).asInstanceOf[WriteFileResponse]
   }
+
+  override def fileSnapshot(
+    path: String,
+    includeContent: Boolean = true,
+    followLinks: Boolean = true
+  ): FileSnapshotResponse =
+    sendCommand(FileSnapshotCommand(java.util.UUID.randomUUID().toString, path, includeContent, followLinks))
+      .asInstanceOf[FileSnapshotResponse]
+
+  override def deleteFile(path: String, expectedHash: Option[String] = None): DeleteFileResponse =
+    sendCommand(DeleteFileCommand(java.util.UUID.randomUUID().toString, path, expectedHash))
+      .asInstanceOf[DeleteFileResponse]
 
   override def modifyFile(
     path: String,
@@ -498,14 +565,16 @@ class ContainerisedWorkspace(
     command: String,
     workingDirectory: Option[String] = None,
     timeout: Option[FiniteDuration] = None,
-    environment: Option[Map[String, String]] = None
+    environment: Option[Map[String, String]] = None,
+    maxOutputBytes: Option[Long] = None
   ): ExecuteCommandResponse = {
     val cmd = ExecuteCommandCommand(
       commandId = java.util.UUID.randomUUID().toString,
       command = command,
       workingDirectory = workingDirectory,
       timeout = timeout,
-      environment = environment
+      environment = environment,
+      maxOutputBytes = maxOutputBytes
     )
     sendCommand(cmd).asInstanceOf[ExecuteCommandResponse]
   }

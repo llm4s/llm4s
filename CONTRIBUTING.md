@@ -133,6 +133,13 @@ and [API keys](docs/getting-started/configuration.md#api-keys).
    - Reference related issues: `Fixes #123`
    - Respond to reviewer feedback
 
+6. **Landing on `main`:**
+   - Two pull requests can each be green and still break `main` together (merge skew), because a PR's CI tests the
+     merge with `main` as it was when that run started. CI also runs on GitHub's `merge_group` event, so `main` can be
+     protected by a merge queue that tests each PR on top of current `main` before it lands.
+   - When the queue bounces your PR, merge `origin/main` into your branch (`git merge --signoff origin/main`), fix the
+     clash and push. Maintainers: see [Protecting main](docs/reference/merge-queue.md) for enabling the queue.
+
 ## Code Conventions
 
 See [CLAUDE.md](CLAUDE.md) for detailed guidelines. Key points:
@@ -191,6 +198,29 @@ See [AGENTS.md](AGENTS.md#testing-guidelines) for details:
 - Use ScalaTest's FlatSpec style
 - Test both happy path and error cases
 - Maintain 80%+ coverage
+
+### Performance tests
+
+A test that checks how an operation's cost grows with its input - linear, not quadratic - with
+`LinearTime.assertLinear` (or any other timing ratio) is tagged `taggedAs(PerformanceTest)`, from
+`org.llm4s.testutil`. `sbt test` and the coverage run leave the tag out, and `sbt
+testPerformance` runs only it: CI runs it once, uninstrumented, in the ubuntu `Performance tests`
+job and nightly, not on Windows or under coverage, where it cost most of each job's time and
+measured nothing more. Keep one ordinary test per such spec that pushes a single ~1 MB worst-case
+input through the same operation under a generous hang guard (`LinearTime.timed(label, hangGuard =
+...)`), so `sbt test` still catches a catastrophic regression. Details in the
+[Testing Guide](docs/reference/testing-guide.md#performance-tests-sbt-testperformance).
+
+### Platform tests
+
+CI's Windows job runs only `sbt testPlatform`, the tests of behaviour that differs between
+platforms (file paths and separators, permissions, deleting open files, processes, SQLite files,
+line endings written to files, temp files), listed in `project/PlatformTests.scala`. If your change
+makes code platform-sensitive, make sure a test of it runs on Windows: put it in a module listed in
+`PlatformTests.wholeModules`, or add its suite to `PlatformTests.suites`, and list a main source
+outside those modules in `scripts/platform-sensitive-sources.txt`; `scripts/check-platform-tests.sh`
+fails in Quick Checks otherwise. Details in the
+[Testing Guide](docs/reference/testing-guide.md#platform-tests-sbt-testplatform).
 
 ### Tests that need a real service
 

@@ -81,7 +81,7 @@ The runtime owns scheduling, state transitions, checkpoints, interrupts, and run
 
 ### 3.1 Module placement and API baseline
 
-`llm4s-core` is designated as the stable spine for 1.0, but no module has an active MiMa baseline yet. Keep agent-specific runtime and harness APIs in `llm4s-agent`; any proposed change to core must be demonstrably core-neutral, finalized before enabling MiMa, and must not pull graph/runtime concepts into the spine. Put the graph kernel in the existing `llm4s-agent` module under `org.llm4s.agent.graph`; it is agent-specific today, so a separate graph artifact adds maintenance and release work without a demonstrated independent consumer. This adds Ox as an implementation dependency for `llm4s-agent` consumers; keep Ox types out of public signatures and document the dependency in the 1.0 migration note. Keep `llm4s-agent-tools` independent and core-only for reusable simple tools. Define `SandboxBackend` in `llm4s-agent`; implement its first workspace adapter in `workspaceClient`, which already depends on `agent`, so dependency direction stays acyclic. Keep SQLite and PostgreSQL checkpoint adapters in separate `llm4s-agent-checkpoint-sqlite` and `llm4s-agent-checkpoint-postgres` modules so JDBC dependencies do not leak through common settings. Each new published adapter module must declare a coverage floor or explicit disabled policy, Codecov flag, docs-project entry, migration note, integration suite tier in `modules/it`, and project registration in `hooks/pre-commit`.
+`llm4s-core` is designated as the stable spine for 1.0, but no module has an active MiMa baseline yet. Keep agent-specific runtime and harness APIs in `llm4s-agent`; any proposed change to core must be demonstrably core-neutral, finalized before enabling MiMa, and must not pull graph/runtime concepts into the spine. Put the graph kernel in the existing `llm4s-agent` module under `org.llm4s.agent.graph`; it is agent-specific today, so a separate graph artifact adds maintenance and release work without a demonstrated independent consumer. This adds Ox as an implementation dependency for `llm4s-agent` consumers; keep Ox types out of public signatures and document the dependency in the 1.0 migration note. Keep `llm4s-agent-tools` independent and core-only for reusable simple tools. Define `SandboxBackend` in `llm4s-agent`; implement its first workspace adapter in `workspaceClient`, which already depends on `agent`, so dependency direction stays acyclic. Keep SQLite and PostgreSQL checkpoint adapters in separate `llm4s-agent-checkpoint-sqlite` and `llm4s-agent-checkpoint-postgres` modules so JDBC dependencies do not leak through common settings. Each new published adapter module must declare a coverage floor or explicit disabled policy, Codecov flag, docs-project entry, migration note, integration suite tier in `modules/it`, and project registration in `hooks/pre-commit`. The `modules/it` suite is for an adapter whose store needs a service, container or key (PostgreSQL); an adapter whose store needs none - SQLite, a local file - runs all its suites, including any cross-process one, in its own module's tests under `sbt test` instead, as §4.20 records.
 
 ## 4. State, update, routing, and run model
 
@@ -392,263 +392,47 @@ The runtime supports per-node retry/cache policy, a recursion/superstep limit, i
 
 Static `interruptBefore`/`interruptAfter` breakpoints complement dynamic typed interrupts. `updateState` creates a versioned state update before resume; `history` inspects checkpoints; `fork` starts a new thread from a selected checkpoint. Subgraphs use hierarchical checkpoint namespaces and emit events with parent and child run IDs.
 
-### 4.2 Stage 0 prototype: typed state, routing, and joins ([#1267](https://github.com/llm4s/llm4s/issues/1267))
-
-`org.llm4s.agent.graph` in `llm4s-agent` prototypes the kernel contracts of §4 and §4.1 that do not depend on suspension, checkpoints, or Ox: `StateKey[A, U]`, `StateUpdate`, `ThreadState`, `GraphBuilder` with `NodeRef[I]`, `StaticJoin`, and `DynamicJoin` handles, `Command`/`Route`/`NodeResult`, a superstep scheduler in `CompiledGraph[I, O]`, and `GraphSnapshot` restore. Its specs (`ThreadStateSpec`, `GraphBuilderSpec`, `SuperstepSpec`, `JoinSpec`, `RestoreSpec`) are the executable form of the decisions below.
-
-Decisions, including where the prototype refines the §4 sketch:
-
-- **Handles are builder-owned classes, not opaque IDs.** An opaque `NodeRef[I] = NodeId` cannot distinguish a handle from another builder that reuses an ID, so `NodeRef[I]`, `StaticJoin`, and `DynamicJoin` carry their builder's identity. `compile` rejects foreign handles in edges, joins, and the entry; the scheduler rejects them in returned routes. IDs (`NodeId`, `TaskId`, `JoinId`, `StateKeyId`) stay opaque strings. Cycles use `declare[I]` followed by `implement`; `node[I]` does both.
-- **Fan-out is its own route.** `Route.FanOut(join, target, payloads)` replaces `Send(..., join = Some(id))`. An empty fan-out must still open an activation, which releases immediately, and the item index in the `(emittingTaskOrdinal, routeIndex, itemIndex)` order comes from the payload vector. `Send` is one untracked item. A task may fan out to a given join at most once per command.
-- **Static join arrival is completion.** A source arrives when one of its tasks completes; it does not route to the join. Each source counts once per activation however many of its tasks complete, and the join re-arms after release. A dynamic child arrives when its task completes; routes it emits do not delay the release.
-- **Next-frontier order.** For each completed task in frontier order: its static edges in declaration order, then its command routes in route order, with fan-out payloads in item order. Then the targets of joins released by this commit: static joins in declaration order, then dynamic activations in the order they opened. Task IDs are `"<superstep>.<ordinal>"`.
-- **`combine` is sequential composition.** `a.combine(b)` applies `a`'s operations and then `b`'s. "Later wins" holds only for replacement keys; for an operation-valued key, both operations apply.
-- **`ThreadState` is an immutable snapshot**, so there is no separate `ThreadStateView`. `get` returns `Result[A]`. A key the graph did not register, or a different key instance that shares a registered ID, is `UnknownStateKey`. A registered key without an entry reads as its initial value. The graph registers every key in a node's write set, plus read-only keys passed to `stateKey`. Two distinct keys with one ID fail compilation.
-- **A superstep commits atomically.** If any task fails, writes an undeclared key, returns an invalid route, or has an update rejected by its key, nothing from that superstep commits. The run fails with the first error in frontier order, and `RunResult.Failed` carries the last committed state. Under `GraphRuntime`, each completed task's result is also recorded as a pending write before the superstep commits, so `recover` keeps completed siblings (§4.3).
-- **`UnsatisfiedJoin` is detected at quiescence.** Routes are values computed at run time, so the scheduler cannot prove early that a source is unreachable. A join that is still open when the frontier empties fails the run. With suspension ([#1269](https://github.com/llm4s/llm4s/issues/1269)), the same check must also treat parked continuations as possible arrivals.
-- **Restore validates against the compiled graph and reports every problem.** It checks the graph ID and the caller-supplied `version`, which names behaviour. It also checks a SHA-256 structural fingerprint over nodes, entry, edges, joins, and key IDs. It then checks that every state value and pending input decodes with this graph's codec, that each join exists with the right kind, that static arrivals come from sources, that every open join is partial (an empty or fully arrived activation would already have released), and that every arrival a dynamic activation still expects is pending in that fan-out. An in-memory `Execution` is bound to the `CompiledGraph` instance that created or restored it (`ForeignExecution`). Another instance of the same definition, including one in another process, goes through `snapshot`/`restore`.
-- **Concurrency is behind a private seam.** `TaskExecutor` runs a frontier and returns results in task order. The default was sequential; since §4.4 it is a bounded Ox scope. The specs run every ordering scenario with tasks executed last-first and concurrently with random delays, and commit order does not change.
-
-Limits that later Stage 0 issues resolve: `NodeResult` has no `Suspend` yet ([#1269](https://github.com/llm4s/llm4s/issues/1269)). Versioned checkpoints and codec migrations followed in §4.3 ([#1268](https://github.com/llm4s/llm4s/issues/1268)). `NodeContext` (task, node, superstep) and `compile(maxSupersteps)` stood in for `RunContext` and `RunBudgets`, which replaced them in §4.6. The fingerprint does not cover node input types; a changed input type is caught when a pending input fails to decode. The message key is Stage 1 work (§4.9); retry and cache policy and Mermaid export followed in §4.11.
-
-### 4.3 Stage 0 prototype: checkpoints and commit-gated event replay ([#1268](https://github.com/llm4s/llm4s/issues/1268))
-
-`GraphRuntime` runs a `CompiledGraph` on a durable thread over a `Checkpointer`. It adds `start`, `recover`, and `subscribe`, and the `Sync`, `Async`, and `OnExit` durability modes. `InMemoryCheckpointer` is the reference store. Its specs are `CheckpointFormatSpec`, `InMemoryCheckpointerSpec`, and `GraphRuntimeSpec`.
-
-Decisions:
-
-- **Checkpoints are versioned data.** `Checkpoint` carries `formatVersion`, `id`, `parent`, thread and run IDs, `status` (`Running` or `Completed`), `createdAt`, and the `GraphSnapshot`. `Checkpoint.fromJson` migrates older formats through a `SchemaVersion` chain and refuses newer ones (`UnsupportedCheckpointFormat`). The reference store keeps checkpoints and pending writes as JSON, so nothing executable survives a round trip.
-- **Three codecs per graph are versioned.** A key's state codec, a key's update codec, and a node's input codec each have a `SchemaVersion`: a current version plus migration steps `n -> n + 1`. Every encoded value is a `VersionedJson(version, value)`, so a codec's stable ID is its key or node ID with that version. Restore migrates and then decodes. The migration functions belong to the compiled graph and are never persisted.
-- **Pending writes are commands as data.** A completed task's `Command` is encoded as a `PendingWrite` of `EncodedOperation`s and `EncodedRoute`s, keyed to the checkpoint whose frontier the task ran in. Recovery decodes the command and rebinds it to the graph's keys, nodes, and joins instead of running the task again.
-- **One atomic write.** `Checkpointer.commit` takes a `Commit`: an optional new checkpoint, pending writes, and event drafts. The store applies all of it or none of it. A new checkpoint is accepted only if its `parent` is the thread's latest (`CheckpointConflict`); this optimistic thread version is the precursor of Stage 2's run-claim fencing. Pending writes must name the resulting latest checkpoint. A new checkpoint drops the previous one's pending writes.
-- **The store numbers events.** Per-thread sequence numbers are allocated inside the commit, contiguously, and are never reused. A refused commit consumes none. `eventsAfter(afterSeq, limit)` pages the log. `compactEvents(beforeSeq)` raises a floor that never moves back, and replay from before it fails with `ReplayUnavailable(earliestSeq)`.
-- **Delivery follows commit in every mode.** The runtime commits and delivers under one lock, so subscribers receive durable events in commit order, only after the commit succeeds, and at most once each. `subscribe(afterSeq)` replays the log and then continues live, without gaps or duplicates, even when it joins mid-run. Live-only `NodeContext.progress` bypasses the log and is delivered immediately. `NodeContext.emit` custom events are committed with the task's pending write and discarded if the task fails.
-- **Durable events.** The durable events are `RunStarted`, `RunRecovered`, `TaskCompleted`, `TaskFailed`, `CheckpointCommitted`, `RunCompleted`, `RunFailed`, and `Custom(name, version, payload)`. Each record carries the thread, run, checkpoint, task, and node IDs, a timestamp, and its sequence number.
-- **Durability modes.** In `Sync`, every pending write and checkpoint is committed before the run proceeds. In `Async`, commits go through a single ordered writer while the run continues. The first failed commit stops the queue, so nothing lands on top of a lost write; the run drains the queue before returning and reports `CheckpointWriteFailed`. In `OnExit`, the run buffers everything after its claim (§4.5) and commits once at exit: the last checkpoint, re-parented to the claim, plus its pending writes and every event. A failed `OnExit` run therefore still keeps its completed siblings. If the commit that records a run's failure fails too, in any mode, the result is `CheckpointWriteFailed`, with the run's own error kept as `runError`, so the caller knows the failure was not made durable. All three modes share the delivery rule above, so the crash spec shows that an Async subscriber's events are a prefix of what a later process replays.
-- **`start` and `recover`.** `start` creates a thread, or applies its input to a `Completed` thread's state. It refuses a `Running` thread with `IncompleteRun`. A failed run leaves its latest checkpoint `Running` with its pending writes. `recover` restores it with no new input, reuses every pending write, and runs only failed or unstarted tasks. Each call is a new run ID, and the superstep limit counts per run.
-
-Limits:
-
-- **Suspension:** suspension was not modelled in this step. [#1269](https://github.com/llm4s/llm4s/issues/1269) implemented it (§4.5), including persisting every suspension before it is returned.
-- **Retry:** a failed task failed the run, and `recover` ran it again; per-node retry policy followed in §4.11 ([#1327](https://github.com/llm4s/llm4s/issues/1327)).
-- **Retention:** the store kept only the latest checkpoint and compacted events only when asked. Checkpoint history, fork, retention by age or size, and claim fencing are Stage 2; claim fencing landed with #1700 (§4.16), and history, fork, `updateState` and retention with #1702 (§4.19).
-- **Delivery threads and queues:** events are delivered on the committing thread. Subscribers have unbounded queues and are registered per runtime instance. §4.6 replaced this with an ordered dispatcher and a bounded queue per subscription.
-- **Run API:** runs return `Result[RunResult]` synchronously. §4.6 added the dispatcher, bounded queues, `RunHandle`, and `RunConfig`.
-
-### 4.4 Stage 0 prototype: Ox cancellation and provider interruption ([#1270](https://github.com/llm4s/llm4s/issues/1270))
-
-Interrupting a thread is how a run is cancelled. This step defines what an interrupted provider or tool call returns, makes core and every chat client follow that rule, and runs each superstep in a bounded Ox scope so that a cancelled run leaves no task running. The specs are `CancellationSpec` (graph and runtime), the core error and retry-layer specs, and the two interruption checks in each chat provider's module spec.
-
-Contract decisions:
-
-- **An interrupted call returns `Left(CancelledError)` with the interrupt flag still set.** `org.llm4s.error.CancelledError(context)` is a `NonRecoverableError`, so no retry layer retries it. The call does not throw `InterruptedException`, which keeps `Result[A]` as the only failure channel, and it does not clear the flag, so the caller can still see that it was interrupted.
-- **One rule decides what counts as a cancellation.** A failure is a cancellation if the current thread's interrupt flag is set when the failure is mapped, or if the failure is caused by `InterruptedException` or `ClosedByInterruptException`. A bare `InterruptedIOException` is not enough on its own: OkHttp reports its call timeout as `InterruptedIOException("timeout")`, which openai-java and the Anthropic SDK wrap, and `SocketTimeoutException` is one by inheritance. Both stay timeouts unless the flag is set or an `InterruptedException` lies beneath them. The flag test is what makes the rule work: on a JDK 21 virtual thread, an interrupt during a blocking socket read closes the socket, so the client sees an ordinary `SocketException`. `CancelledError` exposes the rule as a public helper, because external provider authors must follow the same contract and the testkit checks it.
-- **Mapping classifies; it never sets the flag.** `DefaultErrorMapper`, `CancelledError.fromThrowable` and `HttpFailures.toLLMError` only decide what an exception is. The flag belongs to the thread that was interrupted, and mapping can run elsewhere: `Safety.future.fromFuture` and `Future#toResult` map in a `recover` on a pool thread, where a set flag would cancel the next, unrelated callback. Only code that itself caught an `InterruptedException` on the current thread restores the flag: `CancelledError.attempt` and other `catchInterrupt` callers, `HttpFailures.attempt`, and the catch sites in `ReliableClient`, `LLMClientRetry` and `ToolRegistry`. An interrupt that closes a socket on a virtual thread, or that the JDK's response body stream reports, leaves the flag set by itself. `ToolRegistry.executeAsync` clears the flag on its pool thread after a cancelled call, since the `Future` carries the outcome.
-- **Core follows the rule throughout.** `Llm4sHttpClient` returns `CancelledError` for an interrupt before the response or during a stream read, where it used to return a recoverable `ExecutionError` or `NetworkError`. `ReliableClient`, `LLMClientRetry` and `ErrorRecovery` return it, including for an interrupt during a backoff sleep, and never retry it. That includes `ReliableClient`'s wait for a local rate-limit token, which used to return the local `RateLimitError`; the circuit still counts it as it would that throttle, so only a provider failure earlier in the call counts. A provider call made with the flag already set returns `CancelledError` without running, because an SDK that ignores the flag would still send the billed request. `DefaultErrorMapper` applies the rule, so code that maps exceptions with `Try(...).toResult` inherits it. When the thread waiting on `ToolRegistry`'s timeout join is interrupted, that is a cancellation, not a timeout: the registry interrupts the worker and returns a cancelled tool error.
-- **Every chat client follows the rule.**
-  - **OpenAI and Anthropic** apply the rule in their error mapping. They also catch the `InterruptedException` that the SDK's retry sleep throws once its own retry of the interrupted request fails.
-  - **Anthropic** closes its stream on every path.
-  - **Gemini, Vertex AI, Ollama and the OpenAI-compatible clients** inherit `Llm4sHttpClient`'s behaviour. An interrupt during an error-body read is still reported as `CancelledError` by the client wrapper, whatever the read returned (Gemini, Vertex AI and Ollama still read a failed body as empty).
-- **Interrupts are prompt on virtual threads.** JDK 21 makes blocking socket I/O interruptible on a virtual thread, and the runtime runs every task on one. On a platform thread, OkHttp's socket read cannot be interrupted, so an SDK client still returns `CancelledError` but only once its read completes or times out.
-
-Runtime decisions:
-
-- **A superstep is a bounded Ox scope.** The private `TaskExecutor` seam stays, so specs can still impose orderings. Its default is now Ox `parLimit` on virtual threads, with a private default limit of 16; it used to run a superstep's tasks one after another. Every task is forked, a lone one included: run inline on the calling thread, a task that caught the interrupt and returned normally would clear the caller's flag and the run would carry on. `CompiledGraph.run` and `GraphRuntime` both use it. Because tasks now run concurrently, node code must be thread-safe, a task does not inherit the caller's `ThreadLocal` or MDC context, and `Sync`-mode durable events and live progress are delivered on task threads. Ox is an implementation dependency of `llm4s-agent`, and no Ox type appears in a public signature.
-- **A run is cancelled by interrupting its calling thread.** That is the thread that called `start`, `recover`, `resume` or `CompiledGraph.run`. (§4.6 moves the run to a thread the runtime owns, cancelled through `RunHandle.cancel`.) Ox interrupts every task in the superstep and joins them before the interrupt reaches the run loop, so no task outlives the call. A task that ignores its interrupt therefore delays the cancellation, and in a durable run its completed result is kept (an in-memory run keeps nothing from the cancelled superstep).
-- **An interrupted task records nothing.** If a task's thread is interrupted when it finishes, the task is cancelled whatever its node returned. It submits no pending write and no task event, so a cancelled tool call never records a result, and `recover` runs the task again. Siblings that finished before the interrupt keep their pending writes in `Sync` and `Async`, as a failed sibling's do.
-- **A cancelled run ends cleanly and reports it.** Once the scope has unwound, the run loop clears the interrupt flag so that its final commits can complete. It then commits a `RunCancelled` event, leaves the checkpoint `Running`, closes the committer, and releases the thread claim. Finally it sets the flag again and returns `RunResult.Failed(state, GraphError.Cancelled(threadId: Option[String], lastCheckpoint: Option[String]))` (both `None` for an in-memory `CompiledGraph.run`). The interrupt is caught with the private `CancelledError.catchInterrupt`, which llm4s uses in place of `scala.util.control.Exception.catching`, because `catching` rethrows `InterruptedException`. The thread claim is now always released, so an interrupted run no longer leaves its thread `ThreadBusy`. Closing an `Async` queue after an interrupt still waits for it to drain, so the claim never fences a run whose commits are still landing. If the closing commit fails, the result is `CheckpointWriteFailed`, keeping the cancellation as its `runError`.
-- **A timeout is an interrupt from outside.** Until `RunBudgets` (§4.6), a deadline is applied by wrapping the call, for example with Ox `timeout`. The specs check that every sibling has stopped by the time the timeout returns, and that `recover` then completes the run without re-running finished work.
-
-Testkit decisions:
-
-- **`LocalProviderTestServer` can hold a request open.** It runs handlers on their own executor, and gives a test a way to release a held handler, so a request held open by a test cannot block the server's shutdown.
-- **`ProviderModuleChecks.assertCancelsWhenInterrupted` and `assertCancelsStreamWhenInterrupted`** run on a virtual thread against two servers: one that never answers, and one that streams a single chunk and then stalls. For `complete` and `streamComplete` it interrupts the call and asserts that the call returns promptly with `Left(CancelledError)` and the interrupt flag set. For the stream it also asserts that the first chunk was delivered. Every chat provider's module spec calls them: OpenAI, Anthropic, Gemini, Vertex AI, Ollama and OpenAI-compatible. Vertex AI's runs against a stalled mock HTTP client, because its base URL derives from `location`.
-
-Limits (owners in §4.9):
-
-- Embedding, reranker, MCP, image and speech clients follow the contract since §4.12.
-- On a platform thread, cancelling an SDK client call is not prompt.
-- Cancellation, the concurrency limit and deadlines have no public API until `RunHandle`, `RunConfig` and `RunBudgets`, which §4.6 added.
-- `CancellationToken` was deleted with `PlanRunner` (#1330, §4.15).
-
-### 4.5 Stage 0 prototype: resumable approval and tool-call barriers ([#1269](https://github.com/llm4s/llm4s/issues/1269))
-
-The kernel gains typed suspension, and `org.llm4s.agent.graph.toolloop` proves the model/tool loop on top of it. The specs are `SuspendSpec` (kernel) and `ToolLoopSpec` (loop, in memory and durable).
-
-Kernel decisions:
-
-- **Suspension is a node result.** `NodeResult.Suspend(update, question: Q, resumeAt: ResumeRef[Q, A])` replaces the sketch's `TypedInterrupt`. `GraphBuilder.declareResume[Q, A]` issues a `ResumeRef` whose node consumes `Resumed[Q, A]` and carries the question and answer codecs. A checkpoint therefore stores the question as `VersionedJson`, and a resume supplies the answer as JSON; both are decoded by the compiled graph. The interrupt ID is the suspended task's ID: one suspension per task, stable across processes and re-runs.
-- **A continuation stands in for its task.** The parked continuation inherits the suspended task's dynamic join slot, and its *origin* (task and node). When it completes, it fills that task's dynamic arrival under the original task ID and makes the static arrival as the original node. The barrier never waits on the continuation's own scheduler ID. A continuation that suspends again keeps the original origin. The suspended task makes no arrival and fires none of its node's static edges.
-- **The whole run pauses after the superstep.** Siblings finish and their updates commit, along with the suspending task's own update. `Execution.paused` stops the next superstep. `CompiledGraph.resume(execution, answers)` accepts any non-empty subset. It rejects unknown IDs and undecodable answers without changing anything (`InvalidResume`), and appends each answered continuation to the frontier in parking order. Unanswered ones stay parked. At quiescence, a join that is waiting only for parked continuations reports `Suspended`. A join waiting for an arrival that nothing can make fails with `UnsatisfiedJoin`, even while unrelated continuations are parked.
-- **Snapshots carry parked continuations.** `GraphSnapshot` gains `parked`, `paused`, and task origins, and restore validates them. A dynamic join's expected arrival may be satisfied by a pending task or by a parked continuation in its slot. The checkpoint format moves to 2, with a real 1 -> 2 migration. `PendingWrite.suspension` defaults to `None`, so writes recorded against a format-1 checkpoint still read.
-
-Runtime decisions:
-
-- **Checkpoint status.** `Suspended` joins `Running` and `Completed`. `start` and `recover` refuse a suspended thread with `PendingInterrupts`. `resume` requires one, and returns `NotSuspended` otherwise. `recover` still accepts a `Running` thread that has parked continuations, such as a resumed run that crashed: it runs what is runnable and suspends again.
-- **Every run claims its thread.** Before running anything, `start`, `recover`, and `resume` synchronously commit a checkpoint whose parent is the latest checkpoint they read; `recover` also carries the pending writes over to it. If another run claimed the thread first, the call returns `ThreadBusy` and its input or answers are neither accepted nor discarded. This also makes "persist every suspension before returning it" hold in every mode, because each mode drains its commits before a run returns. A runtime also refuses any call on a thread whose run it is still executing with `ThreadBusy`, before reading the thread: an executing run's latest checkpoint is `Running`, which `recover` would otherwise take for an abandoned run and execute again, repeating its side effects. Across processes a live run was not yet distinguishable from a dead one; #1700 added claim leases and fencing against a stale worker (§4.16).
-- **Suspension events.** `TaskSuspended(interruptId)` is committed with the suspended task's pending write, so recovery does not re-run a task that suspended. `RunSuspended(interrupts)` and `RunResumed(answered)` mark the run boundaries.
-
-Tool-loop decisions (`ToolLoop`):
-
-- **One task per call.** `model` appends the assistant message and fans its calls out to `call-tool`, one task each, behind a dynamic join named `tool-batch`. `collect` runs only when that barrier releases. It requires exactly one result per call, appends the `ToolMessage`s in call order, clears the results key, and routes back to `model`. The model therefore never sees a partial batch, and `model` re-checks `Message.validateConversation` before every call.
-- **The loop writes every result.** A tool returns `ToolOutcome.Completed`, `Failed`, or `NeedsApproval`, never a message. The loop records the single `ToolResult` per call for success, failure, a thrown tool, policy denial, rejection, an unknown tool, and a tool that asks again after approval. The results key refuses a second result for the same call.
-- **Approvals converge on one node.** A policy `RequireApproval` and a tool's `NeedsApproval` both suspend with an `ApprovalRequest` (call, reason, source) and resume at the one `approval` node. `Approve` runs the call with `approved = true`. `Reject` records an error result. `Edit(arguments)` first applies `MessageUpdate.EditToolCall` to the source assistant message, then runs the edited call. The policy can still deny edited arguments; it is not asked to approve them again.
-- **Edits are an operation.** `MessageUpdate.EditToolCall` changes one call's arguments in place, so two approvals that edit calls of the same message in one superstep both apply. Under the sketch's whole-message `Replace`, the second edit would overwrite the first.
-- **Message IDs.** Each `StoredMessage` ID is derived from the task that wrote it, so a re-run writes the same IDs. Core `Message` stays ID-free, as §4 requires.
-
-Limits (owners in §4.9):
-
-- `LoopTool`, `ToolCallPolicy`, and `ModelStep` are prototype contracts. §4.7 replaced `LoopTool` with `AgentTool` and gave `ModelStep` the tool set.
-- Tool-argument schema validation is not implemented. §4.7 added it.
-- A thrown tool is always a tool-level failure. It still is; §4.7 added `ToolOutcome.Fatal` for a failure that must fail the run.
-
-### 4.6 Stage 0 prototype: run API and event dispatch ([#1277](https://github.com/llm4s/llm4s/issues/1277))
-
-`start`, `recover` and `resume` now admit a run on the caller's thread and return a `RunHandle` as soon as the thread is claimed; the run executes on a thread the runtime owns. `RunConfig` carries the run's identity and its `RunBudgets`, `RunContext` replaces `NodeContext`, each subscription has its own ordered dispatcher with a bounded queue, and `TracingSubscriber` bridges durable run events to core's `Tracing`. `GraphRuntime.inMemory()` replaces `CompiledGraph.run`. The specs are `RunHandleSpec`, `RunBudgetsSpec`, `RunConfigSpec`, `TenantSpec`, `RebindSpec`, `EventDispatchSpec` and `TracingSubscriberSpec`, with the earlier graph and tool-loop specs ported to the new signatures.
-
-Contract decisions:
-
-- **A run is a handle, and admission never throws.** `start(threadId, graph, input, config, durability)`, `recover(threadId, graph, config, durability)` and `resume(threadId, graph, answers, config, durability)` - thread first, then graph, in all three - return `Result[RunHandle[O]]`. Admission runs on the caller's thread, in order: in-process exclusivity (`ThreadBusy`), the tenant check against the latest checkpoint if there is one (`TenantMismatch`), that checkpoint's status (`IncompleteRun`, `PendingInterrupts`, `NothingToRecover`, `NotSuspended`), restoring the graph and decoding answers or reused pending writes, and the claim commit (`ThreadBusy` if another run claimed the thread first; if re-reading the thread then fails, still `ThreadBusy`, naming the conflict's checkpoint). The tenant check comes before anything that describes the thread, so a caller from another tenant learns nothing about it: where `ThreadBusy` would name the latest checkpoint of another tenant's thread - a live run, or a lost claim - the call gets `TenantMismatch` instead. A `Left` means no run exists and the thread is free again. A non-fatal throwable during admission - from the store, the clock or restoring the graph - is `Left(GraphError.RunCrashed)`, and an interrupt is `Left(CancelledError)` with the flag set again. A checkpointer whose `commit` throws rather than returning `Left` is reported as `CheckpointWriteFailed`, at the claim and in every durability mode. `RunHandle` has `threadId`, `runId`, `status`, `await`, `cancel` and `subscribe(capacity)`. `CompiledGraph.step(threadId, execution, config)` stays as the low-level stepping API; it runs at most `maxConcurrency` tasks at a time, checks no superstep limit, and outside a runtime `emit` and `progress` are no-ops and `checkpointId` is `""`.
-- **Budgets and deadlines are per run.** `RunBudgets(maxSupersteps, timeout, maxConcurrency)` is part of `RunConfig`; there are no graph-level defaults, and `compile` no longer takes a superstep limit. `RunBudgets.apply` and the `with*` setters reject a non-positive value with `IllegalArgumentException`, as a programming error; `RunBudgets.of` returns `Left(ValidationError)` for untrusted input. The superstep limit counts the supersteps of this run. A timeout is measured from the claim commit. When it passes, the run stops exactly as a cancelled run does, commits `RunEvent.RunTimedOut` instead of `RunCancelled`, and ends with `GraphError.DeadlineExceeded`. A deadline that has already passed when the run thread starts ends the run that way before any superstep. `cancel()` and expiry each record a stop cause with a compare-and-set, and the first one wins, so a run reports exactly one. `DeadlineExceeded` is the only `GraphError` that is a `RecoverableError` (the trait now extends `LLMError`, and every other case is a `NonRecoverableError`): `recover` with a new budget continues the run without re-running finished work.
-- **The tenant is part of a thread's identity.** `RunConfig` carries `tenantId: Option[TenantId]` and `principal: Option[Principal]`. Every checkpoint records the run's tenant (checkpoint format 3; earlier checkpoints read as `tenantId = None`). Admission compares the run's tenant with the latest checkpoint's and refuses a difference with `TenantMismatch(threadId, requested)`, which names only the caller's tenant and never the owner's; `None` and `Some` differ, and a thread with no checkpoint accepts any tenant. `RunStarted`, `RunRecovered` and `RunResumed` record both `tenantId` and `principal`. The principal is recorded, never checked: authorisation belongs to the caller. Events written before this change, including the old `RunStarted` encoding, still read.
-- **Dependencies are captured, not carried.** `RunContext` is `(config, position)` with `emit`, `progress` and `isCancelled`; `RunPosition` is the thread, run, checkpoint, task, node and superstep. Clients, tools and other services are captured by node closures when the graph is built. A per-tenant or per-thread resource comes from a captured resolver keyed by `config.tenantId` or `position`. A restored run rebinds because checkpoints are data and the caller supplies a freshly built graph, so a thread suspended under one client resumes under another (`RebindSpec`). See §9 for why there is no dependency bag or context type parameter.
-
-Runtime decisions:
-
-- **A run has its own thread.** After the claim, the run loop runs on a virtual thread named `llm4s-run-<threadId>`. The thread stays in the runtime's active set from the start of admission until that run thread exits, so `recover` cannot mistake a live run's `Running` checkpoint for an abandoned one. The run thread releases the thread before it sets the result, on every exit, so a caller that has seen the result can start the next run at once. An unexpected throwable escaping the run loop ends it with `RunCrashed`; no terminal event is committed and the checkpoint stays `Running`. #1270's cancellation semantics apply unchanged to this thread.
-- **`cancel` interrupts the run thread; `await` interrupts nothing.** `cancel()` returns at once, is idempotent, and is a no-op once the run has ended. `await()` blocks until the run ends, and the result is retained, so every call returns the same value. If the awaiting thread is interrupted, `await` returns `Left(CancelledError)` with the flag still set, and the run continues. `status` never blocks: `Running` until the result is set, then the result's case. An interrupt from inside the run, such as one a node raises, cancels it too and records `Cancelled` as its cause, so a deadline that passes later sends no interrupt into the run's closing commits.
-- **A late stop cannot break a commit.** On a virtual thread a database-backed `Checkpointer` sees an interrupt, so a stop's interrupt must not land on a commit the run depends on. Before committing its outcome - its completed or suspended checkpoint, or a failed run's `RunFailed` (under `OnExit`, the exit commit that carries it) - the run records a third stop cause, `Finishing`, with the same compare-and-set: a later `cancel()` or expiry then records nothing and sends no interrupt, and the run ends with its outcome. If a cancel or expiry was recorded first, the run is stopped instead and does not commit its outcome. A cancel or expiry can still interrupt a superstep's `Sync` commit. A store that throws `InterruptedException` takes the cancellation path as before; one that returns `Left` leaves a failed commit with `Cancelled` or `Expired` recorded, and the run takes the cancellation path for that too - `Cancelled` or `DeadlineExceeded`, not `CheckpointWriteFailed`, naming the last durable checkpoint, so a deadline stays recoverable. The interrupted failure is forgotten so that `RunCancelled` or `RunTimedOut` is committed with the flag cleared; if that commit fails as well, the run reports `CheckpointWriteFailed`.
-- **One dispatcher per subscription.** Each subscription has a queue of `capacity` entries drained in order by its own virtual thread, the only thread its listener is called on - never a task, run, writer or committing thread. Commit and hand-off happen under one lock, and the commit path offers events to each queue without blocking, so a slow listener never holds up a run and each queue receives events in commit order. Durable events keep #1268's guarantees: ascending `seq`, no gaps or duplicates, delivery only after the commit that numbered them, in every durability mode. `handle.subscribe` subscribes from just before the run's claim event, so it replays the run from its start whenever it is called. A subscription belongs to the thread, not the run: `handle.subscribe` keeps delivering later runs on the same thread, and every subscription holds its dispatcher (a parked virtual thread while idle) until it is cancelled or disconnected.
-- **Overflow policies differ by event kind.** A durable event that does not fit marks the subscriber lagging: what is already queued is delivered, then a `LiveGap(n)` for any live events dropped since the last marker (so the count is never lost), then `Disconnected(lastSeq, Lagging)`, where `lastSeq` is the last durable `seq` delivered, and resubscribing with `afterSeq = lastSeq` continues with no gap. Durable and live events are bounded separately, each by `capacity`, so a burst of live events never crowds out a durable one and only a subscriber `capacity` durable events behind lags. A live event is accepted only while two live slots are free, so the gap marker always fits; otherwise it is dropped and counted, and the next accepted event is preceded by `LiveGap(n)`. When the next event is durable (or a run's end-of-run barrier), the gap rides in that item's slot instead of taking a live one, so a queue never holds more than `2 * capacity` events and markers plus one barrier per ended run, however dropped live events and commits interleave. `subscribe` therefore requires `capacity >= 2` and returns `Left(ValidationError)` below that.
-- **Replay, then switch.** `subscribe` returns at once and replay runs on the dispatcher thread, reading pages of 500 until one is empty. Then, under the hub lock, it reads pages until one is not full, queues them, and joins the live set. Commits hand events over under the same lock, so none lands between the last read and joining, and de-duplication by `seq` delivers a commit that landed during the switch exactly once. A failed read ends the subscription with `Disconnected(lastSeq, ReplayFailed(error))`.
-- **A throwing listener is disconnected.** It ends its subscription with `Disconnected(lastSeq, ListenerFailed(cause))`, where `lastSeq` excludes the event that threw; #1268 swallowed the exception. `Subscription.cancel()` stops the dispatcher and nothing is delivered after it returns, not even `Disconnected`. Called from another thread, it interrupts a listener call in progress and waits for it to end, so it blocks while a listener ignores its interrupt, and two listeners that cancel each other's subscriptions can deadlock. Called from inside the listener, it neither interrupts nor waits: it returns at once, and the dispatcher stops when the call returns.
-- **Tracing is a subscriber.** `TracingSubscriber.attach(runtime, threadId, tracing, afterSeq)` projects each durable event onto `TraceEvent.CustomEvent("graph.<event>", data, timestamp)`, where `<event>` is the `RunEvent` case in snake case (`graph.run_started`, `graph.run_timed_out`) and `data` holds the thread, run, sequence, checkpoint, task and node IDs and the event's own fields. Failures are custom events too, because `ErrorOccurred` needs a `Throwable` that the event log does not keep. Live events are not traced, a `Disconnected` is logged at WARN, and a `Left` from the backend is logged at WARN without ending the subscription. A `Disconnected(lastSeq, Lagging)` ends tracing: nothing re-attaches by itself, so the caller attaches again with `afterSeq = lastSeq`. `RunEvent` stays in `llm4s-agent` and core gains no `TraceEvent` case until Stage 1 shows a need.
-- **No lock pins a carrier.** Every lock a task or run thread can take - the commit lock, the active set, the event hub, the subscription dispatchers, `OnExitCommitter`, the task sink and `InMemoryCheckpointer` - is a `ReentrantLock` rather than `synchronized`, which pins a virtual thread's carrier on JDK 21. A source check in `TracingSubscriberSpec` keeps `synchronized` out of `org.llm4s.agent.graph`: it fails if it cannot find the sources, and matches the word only in code, not in comments.
-
-Source breaks, with no shims (the CHANGELOG lists the same):
-
-- `NodeContext` becomes `RunContext`; `context.taskId`, `context.nodeId` and `context.superstep` become `context.position.taskId`, `.nodeId` and `.superstep`.
-- `compile(entry, maxSupersteps)` becomes `compile(entry)`, and `ToolLoop.build` drops `maxSupersteps`; limits are `RunBudgets` in `RunConfig`.
-- `CompiledGraph.run(input)` becomes `GraphRuntime.inMemory().start(threadId, graph, input).flatMap(_.await())`.
-- `step(execution)` becomes `step(threadId, execution, config)`.
-- `GraphRuntime.start`/`recover`/`resume(..., runId, durability)` become `(..., config, durability)` and return `Result[RunHandle[O]]`; a run is cancelled with `handle.cancel()`, not by interrupting the caller.
-- `recover(graph, threadId, ...)` becomes `recover(threadId, graph, ...)`, and `resume(graph, threadId, answers, ...)` becomes `resume(threadId, graph, answers, ...)`, matching `start`.
-- A call from another tenant is refused with `TenantMismatch` before any status error, and instead of `ThreadBusy` when the thread is another tenant's.
-- `subscribe` gains `capacity` (at least 2); listeners run on a dispatcher thread; a throwing listener is disconnected; `StreamEvent` gains `LiveGap` and `Disconnected`.
-- `GraphError` no longer extends `NonRecoverableError`: it extends `LLMError`, and each case is a `NonRecoverableError` except `DeadlineExceeded`, which is a `RecoverableError`; `GraphError.RunCrashed`, `TenantMismatch` and `DeadlineExceeded`, and `RunEvent.RunTimedOut`, are new cases, and `RunStarted`, `RunRecovered` and `RunResumed` gain `tenantId` and `principal`.
-
-Limits (owners in §4.9):
-
-- Cancelling a run does not reach child runs it started; nested runs and their cancellation are Stage 3.
-- `RunContext` has no dependency accessor, by decision (§9).
-- `RunPosition` has no fencing token; fencing is Stage 2, with run-claim leases. Closed by #1700 (§4.16).
-- A `Subscription` dropped without `cancel()` keeps its dispatcher's virtual thread parked for the life of the runtime.
-- A subscription is fed live only by commits made through its own `GraphRuntime`. Commits by another runtime or process sharing the `Checkpointer` are seen only by subscribing again, which replays the log.
-- `Subscription.cancel()` blocks while a listener ignores its interrupt, and two listeners that cancel each other's subscriptions deadlock.
-- The hub lock is runtime-wide, so a long catch-up during a replay-to-live switch briefly delays commits on other threads.
-- If the caller is interrupted after a slow store has saved the claim, admission returns `Left(CancelledError)` and the thread is left with a `Running` claim, which `recover` continues.
-
-### 4.7 Stage 0 prototype: agent tool contract ([#1278](https://github.com/llm4s/llm4s/issues/1278))
-
-`org.llm4s.agent.graph.tool` replaces the prototype `LoopTool` with the tool contract that Stage 1's `Agent` and [#1279](https://github.com/llm4s/llm4s/issues/1279)'s middleware build on: `AgentTool[A]` and `AgentToolSpec[A]` with typed, schema-validated arguments, `ToolSet`, a pluggable `ToolArgumentValidator`, and an adapter for core's `ToolFunction`. `ToolLoop` runs them. The same issue gives legacy handoffs explicit, stable IDs and adds the stop handshake left by #1277. Nothing in `llm4s-core` changes. The specs are `ToolArgumentValidatorSpec`, `ToolSetSpec`, `AgentToolContractSpec`, `ToolLoopSpec`, `HandoffSpec`, `HandoffExecutorSpec` and `RunHandleSpec`.
-
-Contract decisions:
-
-- **A tool returns data and does not route.** `AgentTool[A]` has `spec`, `writes: Set[StateKey[?, ?]]` and `execute(args: A, context: ToolContext): ToolOutcome`. `ToolContext(run, toolCallId, state, approved)` gives it the run, its call, the thread state to read and whether the call was approved. `ToolOutcome` is `Success(content: ujson.Value, update)`, `Error(message)`, `NeedsApproval(reason)`, `Ask(question)` or `Fatal(error: LLMError)`. A `Success` update may touch only the keys in `writes`. The sketch's `routes` are gone: routing belongs to the loop. So is its `Suspend(update, interrupt, resumeAt)`, because a tool cannot hold a builder-issued `ResumeRef`. `AgentTool(spec, writes)((args, context) => ...)` builds a tool from a function.
-- **Arguments are checked against the non-strict schema.** `AgentToolSpec(name, description, schema: SchemaDefinition[A])` takes a `ReadWriter[A]`; `withValidation(A => Result[Unit])` adds a check on the decoded value. `argumentSchema` is `schema.toJsonSchema(strict = false)`, rendered once, and is what the validator checks: only the required fields are required. Core's clients render each tool's schema themselves from `ToolFunction.schema` and do not agree on strictness - Anthropic, Gemini and Vertex AI send the non-strict schema, OpenAI and the OpenAI-compatible clients the strict one. A strict call carries every field, which the non-strict schema also accepts; validating the strict schema instead would refuse every Anthropic or Gemini call that omits an optional field. There is no `strict` option on the spec. `toolDefinition` is the strict OpenAI-format definition (`ToolFunction.toOpenAITool(true)`'s shape), for callers that send definitions themselves; core's clients never see it. Its parameters are a fresh copy on each call, a cheap defence so that editing one definition changes no other. A name must match `[a-zA-Z0-9_-]{1,64}`: `apply` throws `IllegalArgumentException` for an invalid one, as a programming error, and `ToolSet.of` checks again. The spec's constructor and `copy` are private.
-- **Unsupported constraints are refused when the tool set is built.** `ToolArgumentValidator` has `unsupported(schema)`, the JSON paths of keywords it cannot check, and `validate(schema, arguments)`, every violation prefixed with its JSON path (`$.limit: 500 is above maximum 100`). The default is in-house and supports exactly the subset core's `SchemaDefinition` emits: `type` (a string, or an array such as `["string", "null"]`), `description` (ignored), `properties`, `required`, `additionalProperties` (boolean), `enum`, `minLength`/`maxLength` (in code points), `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf` (exact in decimal, no tolerance), `items`, `minItems`, `maxItems` and `uniqueItems`. A supported keyword with a malformed value - a bound that is not a finite number, a `multipleOf` that is not a positive finite number, a length or count that is not a non-negative whole number, a non-boolean `uniqueItems`, a `required` that is not an array of strings, a non-array `enum`, a non-object `properties` - is unsupported too, at its path. `ToolSet.of(tools*)` and `ToolSet.of(validator, tools*)` report invalid names, duplicate names, an argument schema whose root is not `type: object` (core's clients assume an object) and every unsupported keyword in one `ValidationError`, so no call is checked against a schema whose constraints the validator would skip. `ToolArgumentValidatorSpec` generates a case for each `SchemaDefinition` constructor to prove that every keyword core emits is supported.
-- **Tools reach the provider through core.** Core's clients take tools only as `ToolFunction`s in `CompletionOptions.tools`. `ToolSet.toolFunctions` supplies them in order: a tool made by `AgentTool.fromToolFunction` is its original function; any other is a stand-in with the spec's name, description and schema whose handler refuses to run. `ModelStep.next(messages, tools: ToolSet)` receives the set, and `ModelStep.fromClient` sends `options.withTools(tools.toolFunctions)`.
-- **Questions are typed and declared.** Approval stays built in (`NeedsApproval`, `ToolContext.approved`, the loop's approval node). Any other question needs a tool that extends `AgentTool.Asking[A, Q, Ans](spec)`: it declares the question and answer codecs on its spec, asks with `ask(question: Q)`, and continues in `resume(args, question: Q, answer: Ans, context)`. Only `Asking` can declare a question, so tool authors never see `Any`.
-- **Two failure channels.** `Error` is a tool-level failure: the model sees it and the run continues. `Fatal` is an infrastructure failure: the run fails with `GraphError.ToolFailed(tool, toolCallId, cause)`, reported as `NodeFailed(call-tool, task, ToolFailed(...))` because the graph wraps every node failure. The checkpoint stays `Running`, and `recover` re-runs only that call. A tool that returns `Fatal` after a side effect must be idempotent; `(position.threadId, position.checkpointId, toolCallId)` is the key (refined by #1703, §4.17: the checkpoint is the issuing model call's, and the key reaches the tool as `ToolContext.idempotencyKey`). A thrown non-fatal exception is an error result (`Tool 'x' failed: ...`), never a run failure.
-- **Core tools adapt.** `AgentTool.fromToolFunction(tool)` takes the function's name, description and schema, so its arguments are validated like any other tool's, and maps `Right(json)` to `Success(json)` and `Left(error)` to `Error(error.getFormattedMessage)`. It writes no state and never asks.
-
-Loop decisions (`ToolLoop`):
-
-- **Checks before policy, policy before side effects.** Each `call-tool` task looks its tool up, validates the raw arguments against `argumentSchema` (`null` arguments are first read as `{}` for a tool that requires nothing, as core's `ToolFunction.execute` does), decodes them, and runs `validateDecoded`. Any failure is one error result (`Invalid arguments for 'x': <violation>; <violation>`), and neither the policy nor the tool runs; so is a validator or `validateDecoded` that throws, unless the throw is a cancellation, which cancels the task as a cancelled tool's does. Then `ToolCallPolicy` decides, then the tool runs. A `Success` whose content is a JSON string records the string itself, not a quoted string, unless it is blank (a `ToolMessage` refuses blank content), which is recorded quoted. A handoff whose tool name (`handoff_to_<id>`) is already a registered tool is refused with the other handoff-id errors, before any model call.
-- **A question suspends at a node of the asking tool's own.** `Ask(q)` encodes `q` with the declared codec and suspends with `ToolQuestionRequest(assistantMessageId, call, question, approved)` at `ask/<tool name>`, one resume node per asking tool. `ToolLoop.questions` reads the pending questions, `ToolLoop.question[Q](request): Result[Q]` decodes one's question as the tool's type, and `ToolLoop.answer(id, answer)` encodes an answer of the tool's type, to merge with `answers` into one resume map. The resume node decodes the answer, decodes the stored arguments again without re-validating them, and calls `resume` with the `approved` the call asked with, so an approved call is not asked for approval again. Its outcome is handled as `execute`'s is, so a tool may ask again. An answer that does not decode is that call's error result rather than a refused resume, because the graph-level answer type is JSON. `NeedsApproval` from `resume` is an error result too: approving runs `execute` again and would lose the answer.
-- **A tool bug fails the run, not the call.** An update to a key outside the tool's `writes`, an `Ask` from a tool that declares no question, and an `Ask` whose question does not encode with the declared codec each fail the run with `ToolFailed`, whose cause is a `ValidationError` naming the problem. The `call-tool`, approval and `ask/<name>` nodes declare the union of the tools' `writes`, and each call is checked against its own tool's. `ToolLoop.build` refuses a tool that declares `ToolLoop.results` or `Messages.key`: the loop alone writes those, which is how every call gets exactly one result.
-- **Edited arguments are checked again.** `ApprovalDecision.Edit(arguments)` amends the assistant message as in §4.5, then the edited arguments are validated, decoded and checked by `validateDecoded` again, and the policy decides once more. Only `Deny` refuses an edit: `RequireApproval` counts as satisfied, because the reviewer has just approved these arguments. `Approve` repeats the argument checks but not the policy.
-- **Cancellation follows §4.4.** An `InterruptedException` is not caught. A thrown exception that `CancelledError.fromThrowable` classifies as a cancellation (an interrupt wrapped in another exception, or any throw while the flag is set) and `Fatal(CancelledError)` restore the interrupt flag, so the task is cancelled: it records nothing, and the run ends `Cancelled` rather than failing with `ToolFailed`.
-
-Handoffs and the stop handshake:
-
-- **Handoff IDs are explicit and stable.** `Handoff(id, targetAgent, transferReason, preserveContext, transferSystemMessage)`; `Handoff.to(id, agent)` and `Handoff.to(id, agent, reason)` throw `IllegalArgumentException` for an invalid id, and `Handoff.of(id, agent, reason): Result[Handoff]` returns `Left(ValidationError)`. An id matches `[a-zA-Z0-9_-]{1,52}`, so the tool name `handoff_to_<id>` fits the 64-character limit. It replaces `handoff_to_agent_<hash code>`, which differed between processes, so a stored conversation could not be matched to its handoff after a restart. `HandoffExecutor.createHandoffTools` refuses invalid and duplicate ids, so an agent run given either fails before any model call, and `detectHandoff` matches a tool call only by the exact `handoffId` of an available handoff.
-- **No stop's interrupt lands on a closing commit.** #1277's `DefaultRunHandle.stop` recorded its cause and then interrupted, in two steps. A run that saw the cause in between could clear its interrupt flag to close and then take the interrupt on its `RunCancelled` or exit commit, misreporting the outcome. The handle and the run now share a `StopSignal`: the cause, a lock and an `acknowledged` flag. `stop` records the cause by compare-and-set, then interrupts, holding the lock, only if the run has not acknowledged. The run acknowledges, holding the lock, before it clears its flag. `RunHandleSpec` forces the interleaving with a hook between the two steps of `stop`.
-
-Source breaks, with no shims (the CHANGELOG lists the same):
-
-- `toolloop.LoopTool` is removed: use `tool.AgentTool[A]` (`AgentTool(spec)((args, context) => ...)`), and `AgentTool.fromToolFunction` for `LoopTool.fromToolFunction`.
-- `toolloop.ToolOutcome` (`Completed`, `Failed`, `NeedsApproval`) is replaced by `tool.ToolOutcome` (`Success`, `Error`, `NeedsApproval`, `Ask`, `Fatal`).
-- `ToolLoop.build(..., tools: Seq[LoopTool], ...)` becomes `ToolLoop.build(..., tools: ToolSet, ...)`.
-- `ModelStep.next(messages)` becomes `next(messages, tools)`, and `ModelStep.fromClient` replaces `options.tools` with `tools.toolFunctions`.
-- `Handoff(agent, ...)` and `Handoff.to(agent, ...)` become `Handoff(id, agent, ...)` and `Handoff.to(id, agent, ...)`; `handoffId` is `handoff_to_<id>`.
-
-Limits (owners in §4.9):
-
-- `AgentToolSpec` has no policy metadata (side-effect class, permissions, timeout, idempotency). #1279 adds it with the middleware that reads it; until then `ToolCallPolicy` is the stand-in, and a policy that throws fails the run. #1279 added `ToolHints` (§4.8).
-- Tools reach the provider as core `ToolFunction`s, stand-ins for any tool not adapted from one, because core's clients take no other form.
-- `ToolContext` and `GraphError.ToolFailed` are plain case classes with `String` IDs, not yet in the pattern for growth-prone types (private constructor, `with*` setters).
-- The legacy `Agent` does not run `AgentTool`s; Stage 1 moves it onto `ToolLoop`.
-- The `Handoff` case-class constructor does not check its id; `Handoff.to`, `Handoff.of` and `createHandoffTools` do.
-
-### 4.8 Stage 0 prototype: agent middleware ([#1279](https://github.com/llm4s/llm4s/issues/1279))
-
-`org.llm4s.agent.graph.middleware` adds `AgentMiddleware`: one ordered, composable extension point for model and tool cross-cutting concerns - approval, guardrails, logging, retry, rate limits - that Stage 1's `Agent.run` builds on. It replaces `ToolCallPolicy`, makes approval a middleware that suspends with #1269's semantics, and runs the existing input/output and LLM-as-judge guardrails at the run boundary with their current behaviour. `AgentToolSpec` gains the policy metadata the middleware reads. Nothing in `llm4s-core` changes. The specs are `MiddlewareStackSpec`, `ToolLoopSpec`, `ApprovalMiddlewareSpec` and `GuardrailMiddlewareSpec`.
-
-```scala
-trait AgentMiddleware:
-  def id: MiddlewareId                                  // [a-zA-Z0-9_-]{1,64}
-  def runsBefore: Set[MiddlewareId] = Set.empty
-  def runsAfter: Set[MiddlewareId]  = Set.empty
-  def writes: Set[StateKey[?, ?]]   = Set.empty         // keys its wrapToolCall may add to a Success update
-  def tools: Vector[AgentTool[?]]   = Vector.empty      // merged into the loop's ToolSet
-
-  def beforeAgent(input: String, context: RunContext): Result[String] = Right(input)
-  def afterAgent(answer: String, context: RunContext): Result[String] = Right(answer)
-  def wrapModelCall(request: ModelRequest, context: RunContext)(
-    next: ModelRequest => Result[AssistantMessage]
-  ): Result[AssistantMessage] = next(request)
-  def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome = next()
-```
-
-Contract decisions:
-
-- **Four hooks, all pass-through by default.** `beforeAgent` sees the run's input, `afterAgent` its final answer, `wrapModelCall` each model call and `wrapToolCall` each tool call. §5.6's `beforeModel`, `afterModel` and `afterToolCall` are not separate hooks: each is a wrapper that does its work before or after `next`, so there is one way to write each concern and less API to freeze.
-- **A tool wrapper returns a `ToolOutcome`.** No new result type: a wrapper denies with `Error("Denied: ...")`, asks for approval with `NeedsApproval(reason)`, fails the run with `Fatal`, and short-circuits by not calling `next`. It may call `next` more than once (retry), and may transform the outcome `next` returns. `ToolCallRequest(spec, call)` is read-only: a wrapper cannot change a call's arguments, so none can get round argument validation; only an approval `Edit` changes arguments, and those are validated again.
-- **A model wrapper rewrites the request and cannot suspend.** `ModelRequest(messages, tools: ToolSet)`; a wrapper may change either (inject a system note, filter tools), call `next` again (retry, fallback), or return `Left`, which fails the run. Filtering `ModelRequest.tools` shapes what the model is offered and is not a permission control: a tool the model calls anyway still runs through `wrapToolCall`, where denial belongs. Model wrappers do not suspend: the only middleware suspension is approval of a tool call (below). This narrows §5.6 and the §9 entry "model wrappers can suspend"; typed middleware questions are carried forward (§4.9). **Amended by #1704 (§4.18):** an `AgentMiddleware.Asking` wrapper suspends by asking its typed question.
-- **Run-boundary hooks transform or fail.** `beforeAgent` and `afterAgent` return the input or answer, possibly changed, or `Left`, which fails the run with that error.
-- **Middleware contributes tools and keys.** A middleware's `tools` join the loop's `ToolSet` and are validated like any other tool's; a name that clashes with another tool is refused. Its `writes` are the keys its `wrapToolCall` may add to a `Success` update. `ToolLoop.build` still refuses a declaration of `ToolLoop.results` or `Messages.key`, from a tool or a middleware.
-- **Tools carry MCP-style hints.** `AgentToolSpec.withHints(ToolHints(readOnly, destructive, idempotent, openWorld))`, with the meanings of MCP tool annotations and their conservative defaults: not read-only, destructive, not idempotent, open-world. `AgentTool.fromToolFunction` gets the defaults. Permissions and timeout are not added: nothing in this slice reads them (§4.9).
-
-Ordering decisions:
-
-- **A stack is built once and checked whole.** `MiddlewareStack.of(middleware*): Result[MiddlewareStack]` orders registrations topologically by `runsBefore`/`runsAfter`, breaking ties by registration order. One `ValidationError` reports every invalid id, duplicate id, constraint naming an id that is not registered, cycle, and contributed tool whose name clashes. An unknown id fails closed rather than being ignored, so a typo cannot silently reorder approval after a side-effecting wrapper.
-- **Wrappers nest; boundary hooks mirror them.** The first middleware in stack order is the outermost wrapper and the first `beforeAgent`; unwinding runs in reverse, and so does `afterAgent`. A failure propagates out through every enclosing wrapper, each of which sees it as `next`'s result.
-
-Loop decisions (`ToolLoop`):
-
-- **`build(id, version, model, tools, middleware: Seq[AgentMiddleware] = Nil)`.** `policy` is removed. The `input` node runs `beforeAgent`; the `model` node runs `wrapModelCall` around `ModelStep.next`; a final answer routes to a new `finish` node, which runs `afterAgent` and replaces the answer's content when a hook changes it.
-- **Validation first, then the chain, then the tool.** Each `call-tool` task looks its tool up, validates, decodes and runs `validateDecoded` exactly as §4.7, then runs the `wrapToolCall` chain, whose innermost `next` is `execute`. Middleware cannot be placed before validation. A tool's `resume` after an answered question runs inside the same chain, with the `approved` the call asked with, so a wrapper sees every invocation of a tool. A `Success` update may touch the tool's `writes` and the `writes` of the middleware in the stack; any other key fails the run with `ToolFailed`, as an undeclared tool write does.
-- **Approval resumes through the whole chain.** Every `NeedsApproval`, from a tool or a wrapper, suspends with an `ApprovalRequest` at the loop's one `approval` node; `ApprovalSource` becomes `Tool | Middleware(id)`. `Approve` repeats the argument checks and runs the whole chain again from the outermost wrapper with `ToolContext.approved = true`. `Edit(arguments)` amends the assistant message (§4.5), validates the new arguments and runs the whole chain with `approved = true`, so a deny rule still refuses edited arguments. `Reject` records an error result. Nothing about the chain's position is checkpointed, so a graph rebuilt with a different stack resumes cleanly (§4.6 rebinding); the cost is that wrappers outside the approval run again, which is already required of them because `recover` re-runs a task.
-- **Approval is asked once.** A `NeedsApproval` while `approved = true`, from a tool or a wrapper, is an error result (`asked for approval again`), as a tool's is today. `ApprovalMiddleware(requires: ToolCallRequest => Option[String])` asks when `requires` returns a reason and passes when the call is approved; `ApprovalMiddleware.unlessReadOnly` asks for every tool whose hints are not `readOnly`.
-- **A throwing hook fails the run.** A hook that throws a non-fatal exception fails the run with `GraphError.MiddlewareFailed(id, cause)`; the checkpoint stays `Running`, and `recover` re-runs only that task. A thrown cancellation cancels the task (§4.4). A cancelled tool is never run again by a wrapper that retries: the cancellation - a bare `InterruptedException` too, from the tool or a hook - restores the interrupt flag at once, and the chain's innermost call returns the same cancellation to every later `next`, and refuses to start while the thread is interrupted, so a tool that reports its cancellation as an `Error` is not run again either. The model call does the same: it is not called while the thread is interrupted, so a retrying model wrapper gets `Left(CancelledError)`. `wrapToolCall` runs concurrently for the calls of one batch, on task threads, so a middleware's own state must be thread-safe; a wrapper should pass `Fatal(CancelledError)` through rather than retry it. A wrapper that wants a tool's failure to be an error result catches it around `next` itself.
-
-Guardrail decisions:
-
-- **Guardrails are a middleware.** `GuardrailMiddleware(input: Seq[InputGuardrail], output: Seq[OutputGuardrail])` runs the input guardrails in `beforeAgent` and the output guardrails in `afterAgent`. Each list runs in order, each guardrail on the value the previous one returned; failures are collected and reported as `CompositeGuardrail.all` reports them. `Block` fails the run with that error (reported, as every node failure is, inside `NodeFailed`), before any model call for input; `Fix` transforms; `Warn` logs and passes. One deliberate difference: `CompositeGuardrail.all` validates every guardrail against the original value and returns it, so the legacy `Agent` never applied a guardrail's transformation, on input or output (`PIIMasker` never masked anything); the middleware applies them. The LLM-as-judge guardrails are `OutputGuardrail`s and run unchanged. A guardrail does not suspend; an application that wants human review of an answer, or guardrail outcomes that branch, uses explicit graph nodes.
-
-Source breaks, with no shims (the CHANGELOG lists the same):
-
-- `ToolCallPolicy` and `PolicyDecision` are removed, and `ToolLoop.build` loses `policy`. A policy becomes an `AgentMiddleware` overriding `wrapToolCall`: `Allow` is `next()`, `Deny(reason)` is `ToolOutcome.Error(s"Denied: $reason")`, `RequireApproval(reason)` is `if context.approved then next() else ToolOutcome.NeedsApproval(reason)`, or use `ApprovalMiddleware`.
-- `ApprovalSource.Policy` becomes `ApprovalSource.Middleware(id)`.
-- `Approve` now runs the middleware chain again, where it skipped the policy; a deny rule that depends only on the call refuses the same calls as before.
-
-Limits (owners in §4.9):
-
-- ~~Only tool-call approval suspends; model wrappers and guardrails cannot ask typed questions.~~ **Closed by #1704** (§4.18).
-- `llm4s-mcp` reads `ToolHints` from MCP tool annotations since §4.12.
-- The legacy `Agent` still runs guardrails through `GuardrailApplicator`; Stage 1 moves it onto `ToolLoop` and `GuardrailMiddleware`.
-- A guardrail `Block` - any `beforeAgent`/`afterAgent` `Left` - fails the run and leaves the checkpoint `Running`. `start` on the thread then returns `IncompleteRun`, and `recover` replays the same input or answer through the same guardrail, which refuses it again, so the thread cannot continue. An output `Block` also leaves the unguarded assistant answer committed, in thread state and in `RunResult.Failed`'s state. Decided: a `Block` becomes a terminal failure that leaves the thread usable (§9, "Guardrail Block outcome"); Stage 1 implements it.
+### Slice records
+
+Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its own file under [`typed-agent-runtime/`](typed-agent-runtime/). §4.1, §4.9 and §4.10 stay in this document.
+
+| § | Record |
+|---|---|
+| 4.2 | [Stage 0 prototype: typed state, routing, and joins](typed-agent-runtime/4.02-stage-0-prototype-typed-state-routing-and-joins.md) ([#1267](https://github.com/llm4s/llm4s/issues/1267)) |
+| 4.3 | [Stage 0 prototype: checkpoints and commit-gated event replay](typed-agent-runtime/4.03-stage-0-prototype-checkpoints-and-commit-gated-event-replay.md) ([#1268](https://github.com/llm4s/llm4s/issues/1268)) |
+| 4.4 | [Stage 0 prototype: Ox cancellation and provider interruption](typed-agent-runtime/4.04-stage-0-prototype-ox-cancellation-and-provider-interruption.md) ([#1270](https://github.com/llm4s/llm4s/issues/1270)) |
+| 4.5 | [Stage 0 prototype: resumable approval and tool-call barriers](typed-agent-runtime/4.05-stage-0-prototype-resumable-approval-and-tool-call-barriers.md) ([#1269](https://github.com/llm4s/llm4s/issues/1269)) |
+| 4.6 | [Stage 0 prototype: run API and event dispatch](typed-agent-runtime/4.06-stage-0-prototype-run-api-and-event-dispatch.md) ([#1277](https://github.com/llm4s/llm4s/issues/1277)) |
+| 4.7 | [Stage 0 prototype: agent tool contract](typed-agent-runtime/4.07-stage-0-prototype-agent-tool-contract.md) ([#1278](https://github.com/llm4s/llm4s/issues/1278)) |
+| 4.8 | [Stage 0 prototype: agent middleware](typed-agent-runtime/4.08-stage-0-prototype-agent-middleware.md) ([#1279](https://github.com/llm4s/llm4s/issues/1279)) |
+| 4.11 | [Stage 1 slice 1: kernel completion](typed-agent-runtime/4.11-stage-1-slice-1-kernel-completion.md) ([#1327](https://github.com/llm4s/llm4s/issues/1327)) |
+| 4.12 | [Stage 1 slice 5: cancellation for non-chat clients and ToolHints from MCP annotations](typed-agent-runtime/4.12-stage-1-slice-5-non-chat-cancellation-and-toolhints.md) ([#1331](https://github.com/llm4s/llm4s/issues/1331)) |
+| 4.13 | [Stage 1 slice 2: the agent loop on the graph runtime](typed-agent-runtime/4.13-stage-1-slice-2-the-agent-loop-on-the-graph-runtime.md) ([#1328](https://github.com/llm4s/llm4s/issues/1328)) |
+| 4.14 | [Stage 1 slice 3: events and tracing](typed-agent-runtime/4.14-stage-1-slice-3-events-and-tracing.md) ([#1329](https://github.com/llm4s/llm4s/issues/1329)) |
+| 4.15 | [Stage 1 slice 4: orchestration removed](typed-agent-runtime/4.15-stage-1-slice-4-orchestration-removed.md) ([#1330](https://github.com/llm4s/llm4s/issues/1330)) |
+| 4.16 | [Stage 2 slice 1: the durable `Checkpointer` contract](typed-agent-runtime/4.16-stage-2-slice-1-the-durable-checkpointer-contract.md) ([#1700](https://github.com/llm4s/llm4s/issues/1700)) |
+| 4.17 | [Stage 2 slice 4: tool side-effect safety](typed-agent-runtime/4.17-stage-2-slice-4-tool-side-effect-safety.md) ([#1703](https://github.com/llm4s/llm4s/issues/1703)) |
+| 4.18 | [Stage 2 slice 5: human-review interrupts](typed-agent-runtime/4.18-stage-2-slice-5-human-review-interrupts.md) ([#1704](https://github.com/llm4s/llm4s/issues/1704)) |
+| 4.19 | [Stage 2 slice 3: checkpoint history, fork, `updateState` and retention](typed-agent-runtime/4.19-stage-2-slice-3-checkpoint-history-fork-and-retention.md) ([#1702](https://github.com/llm4s/llm4s/issues/1702)) |
+| 4.20 | [Stage 2 slice 2: the SQLite checkpointer](typed-agent-runtime/4.20-stage-2-slice-2-the-sqlite-checkpointer.md) ([#1701](https://github.com/llm4s/llm4s/issues/1701)) |
+| 4.21 | [Stage 2 slice 6: live subscriptions across runtimes](typed-agent-runtime/4.21-stage-2-slice-6-live-subscriptions-across-runtimes.md) ([#1705](https://github.com/llm4s/llm4s/issues/1705)) |
+| 4.22 | [Stage 3 slice C1: kernel hooks for the harness](typed-agent-runtime/4.22-stage-3-slice-c1-kernel-hooks.md) ([#1902](https://github.com/llm4s/llm4s/issues/1902)) |
+| 4.23 | [Stage 3 slice C2: tool permissions, timeouts and batch locks](typed-agent-runtime/4.23-stage-3-slice-c2-tool-permissions-timeouts-locks.md) ([#1903](https://github.com/llm4s/llm4s/issues/1903)) |
+| 4.24 | [Stage 3 slice C4: replay of external effects](typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md) ([#1921](https://github.com/llm4s/llm4s/issues/1921)) |
+| 4.25 | [Stage 3 slice C3: backend SPIs](typed-agent-runtime/4.25-stage-3-slice-c3-backend-spis.md) ([#1904](https://github.com/llm4s/llm4s/issues/1904)) |
+| 4.26 | [Stage 3 slice F8a: response format for the agent's answer](typed-agent-runtime/4.26-stage-3-slice-f8a-response-format.md) ([#1912](https://github.com/llm4s/llm4s/issues/1912)) |
+| 4.27 | [Stage 3 slice F8b: multimodal content parts](typed-agent-runtime/4.27-stage-3-slice-f8b-multimodal-content-parts.md) ([#1913](https://github.com/llm4s/llm4s/issues/1913)) |
+| 4.28 | [Stage 3 slice F9: typed custom streams](typed-agent-runtime/4.28-stage-3-slice-f9-typed-custom-streams.md) ([#1914](https://github.com/llm4s/llm4s/issues/1914)) |
+| 4.29 | [Stage 3 slice C5: restore a checkpoint after the graph gains a key](typed-agent-runtime/4.29-stage-3-slice-c5-graph-evolution.md) ([#1934](https://github.com/llm4s/llm4s/issues/1934)) |
+| 4.30 | [Stage 3 slice F3: todos](typed-agent-runtime/4.30-stage-3-slice-f3-todos.md) ([#1907](https://github.com/llm4s/llm4s/issues/1907)) |
+| 4.31 | [Stage 3 slice F7: semantic memory](typed-agent-runtime/4.31-stage-3-slice-f7-semantic-memory.md) ([#1911](https://github.com/llm4s/llm4s/issues/1911)) |
+| 4.32 | [Stage 3 slice F1: filesystem tools](typed-agent-runtime/4.32-stage-3-slice-f1-filesystem-tools.md) ([#1905](https://github.com/llm4s/llm4s/issues/1905)) |
+| 4.33 | [Stage 3 slice F2: workspace sandbox and file backends](typed-agent-runtime/4.33-stage-3-slice-f2-workspace-backends.md) ([#1906](https://github.com/llm4s/llm4s/issues/1906)) |
+| 4.34 | [Stage 3 slice F4: context management](typed-agent-runtime/4.34-stage-3-slice-f4-context-management.md) ([#1908](https://github.com/llm4s/llm4s/issues/1908)) |
+| 4.35 | [Stage 3 slice F5: Agent Skills](typed-agent-runtime/4.35-stage-3-slice-f5-skills.md) ([#1909](https://github.com/llm4s/llm4s/issues/1909)) |
+| 4.36 | [Stage 3 slice F6: instruction memory](typed-agent-runtime/4.36-stage-3-slice-f6-instruction-memory.md) ([#1910](https://github.com/llm4s/llm4s/issues/1910)) |
+| 4.37 | [Stage 3 slice P1: the harness profile](typed-agent-runtime/4.37-stage-3-slice-p1-harness-profile.md) ([#1915](https://github.com/llm4s/llm4s/issues/1915)) |
+| 4.38 | [Stage 3 slice P2: the exit examples](typed-agent-runtime/4.38-stage-3-slice-p2-exit-examples.md) ([#1916](https://github.com/llm4s/llm4s/issues/1916)) |
 
 ### 4.9 Stage 0 carry-forward
 
@@ -658,17 +442,18 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 |---|---|---|
 | ~~Typed middleware questions (a middleware declaring `Q`/`Ans` like `AgentTool.Asking`), suspension from model wrappers and guardrails (today: tool-call approval only)~~ **closed by #1704** (§4.18: `AgentMiddleware.Asking`, `GuardrailReviewMiddleware`) | #1279 | Stage 2, with output review and missing-information interrupts (§5.3). Not needed in Stage 1: the loop's approvals come from tools and tool wrappers (`ToolOutcome.NeedsApproval`) and its questions from tools (`ToolOutcome.Ask`), while guardrails and model wrappers block or fail |
 | ~~A guardrail Block (any run-boundary `Left`) leaves the thread `Running` with no way forward, and an output Block leaves the blocked answer in state~~ **closed by #1350 and #1328** (§4.13: `CheckpointStatus.Failed`, the blocked turn removed, `AgentStatus.Blocked`) | #1279 | Stage 1 |
-| Tool permissions and timeouts on `AgentToolSpec`, with the ordered deny-if-unmatched permission rules of §5.6 | #1279 | Stage 3 |
+| ~~Tool permissions and timeouts on `AgentToolSpec`, with the ordered deny-if-unmatched permission rules of §5.6~~ **closed by #1903** (§4.23: `withResources`, `PermissionMiddleware`, `withTimeout`, and batch locks with `withLocks`) | #1279 | Stage 3: #1903 (slice C2 of #1901) |
 | `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop` and `AgentTool` (**closed by #1328**); `ModelStep` streaming through live progress, `AgentEvent` replaced (**closed by #1329**); `PlanRunner` rebuilt or removed (**closed by #1330**: removed, §4.15) | #1269 | Stage 1 |
 | ~~Delete `CancellationToken` with the `PlanRunner` rebuild~~ **closed by #1330** (§4.15) | #1270 | Stage 1 |
 | Prompt cancellation of SDK client calls on platform threads (today: prompt on virtual threads, where the runtime runs tasks) | #1270 | - |
-| Durable checkpointer backends (SQLite first) and a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`); **the contract suite and idempotency keys closed by #1703** (§4.17) | #1268, #1269 | Stage 2 |
+| ~~Durable checkpointer backends (SQLite first)~~ **SQLite closed by #1701** (§4.20: `llm4s-agent-checkpoint-sqlite`; PostgreSQL is Stage 5); a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`); **the contract suite and idempotency keys closed by #1703** (§4.17) | #1268, #1269 | Stage 2 |
 | ~~Run-claim leases, so `recover` in another process refuses a live run, and fencing tokens on every commit and in `RunPosition`~~ **closed by #1700** (§4.16: `RunClaim`, `FencingToken`, `StaleClaim`, `llm4s-agent-testkit`) | #1268, #1269, #1277 | Stage 2 |
-| Cancelling a run cancels the child runs it started | #1277 | Stage 3 |
-| Store-level change notification (or polling), so a subscription sees live commits made by another `GraphRuntime` or process sharing the checkpointer (today: live delivery only for commits through the subscribing runtime; others by resubscribing and replaying) | #1277 | Stage 2 |
+| Cancelling a run cancels the child runs it started | #1277 | Stage 4 (moved by #1901: there are no child runs before delegation) |
+| ~~Store-level change notification (or polling), so a subscription sees live commits made by another `GraphRuntime` or process sharing the checkpointer~~ **closed by #1705** (§4.21: `Checkpointer.awaitEventsAfter`, `WatchPolicy`) | #1277 | Stage 2 |
 | ~~Checkpoint history, fork, `updateState`, retention by age or size (today: latest checkpoint only, explicit event compaction). History and fork must never keep or expose a snapshot whose turn a later guardrail `Block` removed (§9, "Guardrail Block outcome"), or the tool loop must guard the answer before its first commit~~ **closed by #1702** (§4.19: `history`, `checkpoint`, `fork`, `updateState`, `prune` and `RetentionPolicy`; a Block's closing commit retracts its turn) | #1268 | Stage 2 |
 | ~~Static `interruptBefore`/`interruptAfter` breakpoints~~ **closed by #1704** (§4.18) | #1269 | Stage 2 |
 | Known limits, not planned: a `Subscription` dropped without `cancel()` keeps a parked virtual thread; `cancel()` blocks while a listener ignores its interrupt; the hub lock is runtime-wide; `RunContext` has no dependency accessor (by decision) | #1277 | - |
+| Known limit, documented: another runtime's commits have no fixed position among this runtime's live events, differing per subscription (durable `seq` order holds); structural fix is one ordered per-thread log (§4.21) | #1920 | - |
 | Known limit, not planned: tools reach the provider as core `ToolFunction`s (`ToolSet.toolFunctions`), stand-ins for agent tools, because core's clients take no other form | #1278 | - |
 | Known limit, not planned: the structural fingerprint does not cover node input types; a changed input type is caught when a pending input fails to decode | #1267 | - |
 
@@ -686,6 +471,10 @@ Closed by [#1328](https://github.com/llm4s/llm4s/issues/1328) (§4.13): `Agent.r
 
 Closed by [#1329](https://github.com/llm4s/llm4s/issues/1329) (§4.14): `ModelStep` token streaming through live progress and the replacement of `AgentEvent` by `AgentEvents` run events (left by #1269).
 
+Closed by [#1701](https://github.com/llm4s/llm4s/issues/1701) (§4.20): the first durable checkpointer backend, SQLite, in its own module (left by #1268).
+
+Closed by [#1705](https://github.com/llm4s/llm4s/issues/1705) (§4.21): live subscriptions across runtimes, through store-level change notification with a polling default (left by #1277).
+
 Closed by [#1700](https://github.com/llm4s/llm4s/issues/1700) (§4.16): run-claim leases with expiry and renewal, so `recover` in another runtime or process refuses a live run and takes over a dead one, and fencing tokens on every commit and in `RunPosition` (left by #1268, #1269 and #1277), with the store contract suite in `llm4s-agent-testkit`.
 
 Closed by [#1702](https://github.com/llm4s/llm4s/issues/1702) (§4.19): checkpoint history, fork to a new thread, `updateState` and retention by age or size (left by #1268), with a guardrail Block retracting its turn from the history (left by #1279 and #1328).
@@ -693,544 +482,6 @@ Closed by [#1702](https://github.com/llm4s/llm4s/issues/1702) (§4.19): checkpoi
 ### 4.10 Durable workflow API
 
 Explore a Scala `Workflow[A]`/`Durable[A]` for-comprehension as a peer frontend to the graph DSL. It should compile to the same runtime/checkpoint kernel, not create a second durable engine. Durable boundaries must be explicit named steps with serializable inputs/outputs; arbitrary Scala closures are not replayable. The workflow API can express sequence, parallel composition, retry, timeout, and typed suspension in direct Scala style. Prototype after the superstep kernel exists, and adopt only if it substantially improves ordinary Scala ergonomics.
-
-### 4.11 Stage 1 slice 1: kernel completion ([#1327](https://github.com/llm4s/llm4s/issues/1327))
-
-The kernel items Stage 0 left: a per-node retry policy, a per-node cache policy, Mermaid export of a compiled graph, and the run-facing types in the growth-prone pattern. Independent of the agent-loop cutover (#1328). The specs are `RetryPolicySpec`, `NodeRetrySpec`, `NodeCacheSpec`, `MermaidExportSpec` and `GrowthProneTypesSpec`.
-
-Decisions:
-
-- **A retry re-runs a node after its own failure, inside the run.** `GraphBuilder.implement`, `node` and `resumeNode` take `retry: RetryPolicy` (default `RetryPolicy.none`, one attempt). A node that throws, or returns `NodeResult.Fail`, is run again against the same committed snapshot while its error passes `retryOn` and attempts remain. `retryOn` defaults to `RetryPolicy.transientOnly`, the library's one retry rule (`reliability.RetryPolicy.isRetryable`): a recoverable error, except a client-error response and an `OptimisticLockFailure`, so a `NonRecoverableError` ends the retries at once. What is never retried: a cancellation (`CancelledError`), a result that fails the kernel's checks (an undeclared write, an invalid route, a rejected update: running the node again returns the same thing), and a suspension. The error that fails the run is the last attempt's, unchanged, in `GraphError.NodeFailed`.
-- **Backoff is exponential, capped, and has no jitter.** The wait after the n-th failed attempt is `initialBackoff * backoffFactor^(n-1)`, at most `maxBackoff`. Every value is validated like `RunBudgets`: `apply` and the `with*` setters throw `IllegalArgumentException`, `RetryPolicy.of` returns a `ValidationError`. Jitter is rejected for now: it exists to spread many clients over one overloaded service, which a single run does not need, and it would make the schedule untestable without a seeded source. A field can be added later by the pattern in §4.11's last decision.
-- **A wait is an interruptible wait, so retries obey cancellation and the deadline.** The wait goes through `CancelledError.attempt`: an interrupt during it returns `Left(CancelledError)` with the flag set, and no further attempt starts. `RunBudgets.timeout` interrupts the run, so it bounds all attempts together, not each one.
-- **Attempts are per run, not per task.** A run that exhausts a node's attempts fails and leaves its checkpoint `Running`; `recover` runs the task again with the node's full policy. The old "recover retries once" becomes "recover runs it again"; the worst case across `recover` calls is attempts times calls, which the caller controls.
-- **A failed attempt leaves no durable trace.** `RunContext.emit` events from an attempt that failed are discarded before the next attempt, as they are for a failed task (§4.3), so a retry cannot commit two attempts' events. `progress` is live-only and is not taken back: subscribers saw it. Only the attempt that succeeds produces a pending write and a `TaskCompleted` event.
-- **A cache hit skips the node, and the node must be pure in its input.** `cache: Option[CachePolicy]` (default none) declares that a node's result depends only on its input: not on `ThreadState`, the clock, or an external system. The key is the node ID, its input schema version, and a SHA-256 of the input's encoded JSON. A hit returns the stored `Command` and the node does not run: a cached node should not rely on `emit` or `progress`. A hit still produces an ordinary pending write and `TaskCompleted` event, so checkpoints and replay do not change. Only `Continue` results are stored: a failure, or a suspension, is not.
-- **The cache is process-local, bounded, and not checkpointed.** It belongs to the `CompiledGraph` instance and is shared by its runs, so another instance, another process, or a restart starts empty and recomputes, which is the at-least-once rule of §4.1 unchanged. `CachePolicy` has an optional `ttl` and a `maxEntries` (default 1024) with least-recently-used eviction. Two tasks with the same input running at once both run the node: there is no single-flight. Rejected: keying on state as well (a node that needs state can take the part it needs as input, and a snapshot is too large a key), caching suspensions, and a persistent cache (a store SPI, Stage 2).
-- **Neither policy is part of the structural fingerprint.** They change how a node is run, not the graph's shape, so restoring a snapshot into a graph with different policies is allowed, as it is for a changed node body. `version` still names behaviour (§4.2).
-- **`CompiledGraph.toMermaid` draws the declared structure, deterministically.** Nodes are ordered by ID, joins by ID, and one node's edges in declaration order, so the output does not depend on the order nodes were declared in. Identifiers are generated (`n0`, `j0`, `d0`) and labels are quoted and escaped, so any node ID is safe. Resume nodes are drawn as stadiums, joins as hexagons, the entry with a `start` marker. Routes a node returns at run time (`Goto`, `Send`, `FanOut`) are values, not declarations (§4.2), so they are not drawn; a dynamic join is drawn with a dotted edge to its target.
-- **The growth-prone pattern, with typed IDs.** `ToolContext`, `GraphError.ToolFailed`, `ModelRequest` and `ToolCallRequest` are `final case class X private (...)` with a public companion `apply` that carries the defaults, `with*` setters, and a private `copy`. `ToolContext.toolCallId` and `ToolFailed.tool` and `toolCallId` are the new opaque `ToolCallId` and `ToolName`. Core's `ToolCall` keeps its string fields: core does not know the graph's ID types, and `ToolCallRequest.toolCallId` and `toolName` convert at the boundary. Adding a field after the baseline follows CLAUDE.md: a new constructor field, an `apply` default, an overload of the previous `apply` without it, and a `with*` setter.
-
-Source breaks (pre-1.0, no shims): the four types lose their public constructor, `copy` and field-type compatibility (`String` to `ToolCallId` / `ToolName`); `GraphBuilder.implement`, `node` and `resumeNode` gain two defaulted parameters before the node body.
-
-Limits: `ToolLoop` sets no policy on its nodes, so the tool loop is unchanged; the agent-loop cutover ([#1328](https://github.com/llm4s/llm4s/issues/1328)) decides whether a tool call or a model step retries. The retry condition looks at the node's error, not at provider hints such as `Retry-After`, which the provider clients already honour inside the call (§4.4).
-
-### 4.12 Stage 1 slice 5: cancellation for non-chat clients and ToolHints from MCP annotations ([#1331](https://github.com/llm4s/llm4s/issues/1331))
-
-§4.4 made `CancelledError` the result of an interrupted call for core and every chat client and left the rest of the
-network clients flattening an interrupt into an error type of their own. This slice brings the rest under the same
-rule, and reads `ToolHints` from the annotations an MCP server attaches to its tools. The checks are
-`ProviderModuleChecks.assertCallCancelsWhenInterrupted` and `assertEmbeddingCancelsWhenInterrupted` (new in
-`llm4s-provider-testkit`: run on a virtual thread against a server that never answers, interrupt, and require
-`Left(CancelledError)` promptly with the interrupt flag still set), and the specs named below.
-
-Contract decisions:
-
-- **A cancellation passes through; it is not mapped.** Where a client turned an `Llm4sHttpClient` failure into its
-  own error (`EmbeddingError`, `RerankError`, `UnknownError`, `SimpleError`), a `CancelledError` is now returned as it
-  is, and the public call is wrapped in `CancelledError.attempt`, which also turns any failure that ends with the
-  thread interrupted into a cancellation. *Rejected:* a `cancelled` flag on each client's error type - a caller would
-  need one check per client, and the retry layers recognise only `CancelledError`.
-- **Embeddings** (Voyage, Jina, Ollama, OpenAI, Cohere): `embed` is declared `Result[EmbeddingResponse]`, which is what
-  `EmbeddingProvider` already promised; the concrete providers had narrowed it to `Either[EmbeddingError, _]`, which
-  could not carry the cancellation. Ollama sends one request per text and now stops at the first failure, so a
-  cancelled batch does not go on to send the rest. `llm4s-cohere` (#1348) landed after this slice was cut and
-  follows the same rule: its module spec runs `assertEmbeddingCancelsWhenInterrupted`, so the rule holds for every
-  embedding provider on `main`.
-- **Rerankers.** `CohereReranker` as above. `LLMReranker` gives a batch the model fails on neutral scores so that one
-  bad answer does not lose the ranking; a cancellation is not a bad answer, and used to be swallowed the same way, so
-  a cancelled rerank went on through the remaining batches and returned `Right`. It now ends the call at once with
-  the `CancelledError`, and an ordinary failure keeps its neutral scores.
-- **Speech.** The five cloud clients already returned the HTTP client's `CancelledError` untouched, and
-  `CloudSpeechCancellationSpec` pins that. Whisper and Tacotron2 run a command-line program with `scala.sys.process`'s
-  `!` and `!!`, which do not honour interruption: the interrupted wait throws `InterruptedException`, which `Try` does
-  not catch, so it escaped a `Result`-returning method and left the program running. `CommandRuns` runs the program,
-  destroys it on interrupt, sets the flag again and reports the interrupt, which the engine returns as
-  `CancelledError`; every other outcome is what `!` and `!!` gave. *Rejected:* catching around `!!` - it cannot
-  reach the process to destroy it.
-- **Image processing.** The OpenAI and Anthropic vision clients turned an HTTP failure into a `RuntimeException` and
-  then into a generic `apiCallFailed`; they return the HTTP client's `CancelledError` as it is, and every other message
-  is unchanged. `GeminiVisionClient` already did.
-- **Image generation** *(a call for Rory)*. The clients returned `Either[ImageGenerationError, _]`, a hierarchy of
-  their own that is not an `LLMError`, so a `CancelledError` could not be returned at all. `ImageGenerationError` now
-  extends `LLMError`, the client methods return `Either[LLMError, _]`, and every place a provider turns a `Throwable`
-  into an error goes through one classifier, `ImageErrors.fromThrowable`. `ServiceError(message, code: Int)` clashed
-  with `LLMError.code: Option[String]`: the field is `statusCode`, and `code` is derived from it. Five cases shared a
-  name with an `org.llm4s.error` type, and as `LLMError`s both of each pair can reach the same `match`, where the
-  wrong import compiles and never fires; they carry an `Image` prefix (`ImageAuthenticationError`,
-  `ImageRateLimitError`, `ImageServiceError`, `ImageValidationError`, `ImageUnknownError`). The instrumented
-  client records a cancelled call as `ErrorKind.Cancelled`. *Rejected:* an `ImageGenerationError.Cancelled` case -
-  callers would have to special-case a second cancellation type, and no retry layer would recognise it; and retiring
-  the hierarchy for core's errors, a larger break that this slice does not need.
-  **Every case also says whether a retry can help**, because an `LLMError` must: `LLMError.isRecoverable` (and
-  `recoverableErrors`, `nonRecoverableErrors`, and the graph's former `RetryPolicy.recoverableOnly`, now `transientOnly`) match only `RecoverableError` and
-  `NonRecoverableError` and threw a `MatchError` on an image error, which before this slice could not reach them.
-  `ImageRateLimitError` is recoverable, and so is an `ImageServiceError` whose status is transient (`0` - no answer at all, as in
-  a failed health check - `408`, `429`, any `5xx`); a rejected credential, request or prompt, `InsufficientResources`,
-  an unsupported operation and an `ImageUnknownError` are not (an unknown failure is not retried blindly). A status is
-  a value and a marker trait is a type, so `ImageServiceError` is a sealed type with two cases behind
-  `ImageServiceError(message, status)` and `case ImageServiceError(message, status)`, picked by
-  `ImageServiceError.isTransientStatus`. *Rejected:* marking every `ImageServiceError` recoverable, as core's own
-  `ServiceError` is - a `400` or `403` would be retried to the same answer; and a default case in
-  `LLMError.isRecoverable` - a silent default would hide the next error type that forgets to say. (Superseded by
-  [#1380](https://github.com/llm4s/llm4s/issues/1380): `isRecoverable` is now total and answers `false` for an
-  unmarked error, as `RetryPolicy.isTransient` already did, because several library families could not take a
-  marker per type and made it throw. The image errors keep their markers, which still decide the answer.)
-- **MCP.** The error channel was a `String` (`Either[String, _]` on the transports, `MCPClient.initialize` and
-  `getTools`), which cannot carry a cancellation. These return `Result`, and every existing message is kept byte for
-  byte as `SimpleError(message)`. The HTTP transports pass the HTTP client's `CancelledError` through; the stdio
-  transport returns it for an interrupt while awaiting a response, and for one during startup, when it also stops the
-  half-started server (the process was recorded but no reader thread had started, so the next request would have found
-  a live process that never answers). `MCPClientImpl.getTools` returned failures as an empty list but not a
-  cancellation (it now returns every failure as a `Left`, #1319). `MCPToolRegistry` applies to MCP tools the rule
-  `ToolRegistry` applies to local ones - a call that ends while its thread is interrupted is cancelled, whatever it
-  returned, and a tool that throws an interruption wrapped in another exception is cancelled with the flag restored,
-  in both registries - and a cancelled discovery is not "no such tool", drops no client and caches nothing. A tool
-  handler keeps core's `Either[String, _]` shape: the interrupt flag the transport leaves set is how the registry knows. *Rejected:* a
-  dedicated `MCPError` type (`SimpleError` carries the message and nothing more is needed); changing
-  `ToolFunction.handler`'s error type, which would change every tool, local ones included, for MCP's sake alone.
-
-`ToolHints` from MCP annotations *(a call for Rory)*:
-
-- `MCPToolAnnotations` models what a server sends (`title`, `readOnlyHint`, `destructiveHint`, `idempotentHint`,
-  `openWorldHint`; every one optional) and is read leniently - a missing object, an unknown key or a hint of the wrong
-  type is ignored, since annotations are advisory and must not fail a tool list. `toToolHints` fills a missing hint
-  with the specification's conservative default, which are `ToolHints.default`'s. `MCPClientImpl` records the hints
-  of every tool it lists (`MCPClient.getToolHints`, empty by default so implementors are unaffected) and
-  `MCPToolRegistry.toolHints(name)` answers by name, with none for a tool a local tool shadows. A listing that
-  fails, whatever the reason short of a cancellation, and `close()` clear the recorded hints: `getTools` turns a
-  failure into `Right(Seq.empty)`, which the registry takes for a refresh that worked, so a tool the server no longer
-  advertises would otherwise keep answering with its old hints.
-- **A server's annotations are untrusted unless the caller says otherwise** *(a call for Rory)*. The MCP
-  specification requires a client to treat annotations from an untrusted server as untrusted, and
-  `ApprovalMiddleware.unlessReadOnly` skips approval for a tool whose hints say read-only. Hints that came straight
-  from the server would let a server mark `delete_everything` read-only and have it run unapproved by an application
-  that followed the documented path, `AgentTool.fromToolFunction(tool, registry.toolHints(name).getOrElse(ToolHints.default))`.
-  `MCPServerConfig` therefore has `trustAnnotations: Boolean = false` (a new field with a default, and a parameter of
-  the `stdio`, `streamableHTTP` and `sse` factories). For a server that is not trusted `MCPClient.getToolHints` is
-  empty and `MCPToolRegistry.toolHints` is `None`, so `ToolHints.default` - approval required - applies; only a server
-  the caller has chosen to trust, because they operate or have reviewed it, can relax approval. The check is made once,
-  in the client, so every way to read the hints is safe by default. *Rejected:* enforcing it only in the registry - a
-  caller of `MCPClient.getToolHints` directly would still see untrusted hints; trusting by default and documenting the
-  risk - the first malicious server wins; a per-tool or per-hint trust setting - configuration the specification does
-  not ask for and nobody would keep up to date; and not mapping `readOnlyHint` at all - it loses the legitimate case,
-  a server the application itself runs.
-- **`ToolHints` moves from `llm4s-agent` to `llm4s-core`** (`org.llm4s.toolapi.ToolHints`, `@Experimental` like the tool
-  contract it belongs to). `llm4s-mcp` cannot depend on `llm4s-agent` without pulling the agent runtime, Ox and fansi
-  into every MCP client, and `llm4s-agent` depending on `llm4s-mcp` would put the MCP client on every agent user's
-  classpath, so core is the one module both see. *Rejected:* hints on `ToolFunction` (every tool would carry a field
-  only the agent's middleware reads); and keeping `ToolHints` in the agent and exposing only
-  the raw annotations from `llm4s-mcp`, which leaves the conversion to every application. `AgentTool.fromToolFunction(
-  tool, hints)` attaches hints to the adapted tool.
-
-Source breaks, with no shims (the CHANGELOG lists the same):
-
-- `ToolHints` is `org.llm4s.toolapi.ToolHints`.
-- `llm4s-image`: `ImageGenerationError` is an `LLMError`; `ServiceError`'s second field is `statusCode`; the generation
-  clients return `Either[LLMError, _]`, so a match on their result needs a case for other errors.
-- `llm4s-mcp`: `MCPTransportImpl.sendRequest`, `sendNotification`, `MCPClient.initialize` and `getTools` return
-  `Result`; read the old string as `error.message`. `MCPServerConfig` gains `trustAnnotations` (default `false`);
-  source-compatible for construction, but a pattern match on the case class needs the fourth field.
-- The concrete embedding providers' `embed` returns `Result[EmbeddingResponse]`.
-
-Limits:
-
-- Vosk recognises in-process, through JNA, and an interrupt does not stop it mid-recognition.
-- `MCPServer` (the server half) is not changed; it does not advertise annotations.
-- Only logback was exercised for the logs these paths write.
-- On a platform thread an interrupt is not prompt for a client on a blocking socket (§4.4); the specs run on virtual
-  threads, as the runtime does.
-
-### 4.13 Stage 1 slice 2: the agent loop on the graph runtime ([#1328](https://github.com/llm4s/llm4s/issues/1328))
-
-Slice 2 of [#1326](https://github.com/llm4s/llm4s/issues/1326): the graph runtime is the only agent loop. This section is the implemented record; the proposals it held before the cutover (token usage through the model step, data-only thread state, the `Agent` front end, handoffs by stable id as a route on the same thread, deleting the legacy loop) are implemented as described below.
-
-**The terminal outcome of a guardrail Block (#1350, the decision of [#1322](https://github.com/llm4s/llm4s/pull/1322)).** Landed first, on the old front end; the kernel half of the cutover.
-
-- A run-boundary guardrail `Left` (any `beforeAgent` or `afterAgent` failure other than a cancellation) fails the run with the guardrail's error, so callers of the kernel get the error the legacy `Agent` returned (the cutover's `Agent` reports a guardrail's Block as `AgentStatus.Blocked`, below). What changes is that the failure is a *finished* outcome, not an interrupted run.
-- `NodeResult.Block(error, update)` is the node's way to say so. The superstep commits `update` together with every sibling's result, and the run's closing checkpoint gets the new status `CheckpointStatus.Failed`, with a `RunFailed` event; the caller receives `RunResult.Failed(state, error)`. The status is terminal: `start` accepts a `Failed` thread exactly like a `Completed` one (it restores the committed state and applies the new input), `recover` refuses it (`NothingToRecover`), and `resume` refuses it (`NotSuspended`).
-- `MessageUpdate.RemoveTurn(id)` removes the stored message `id` and every message after it. `RemoveThrough` drops history *up to* a message; a turn's writes are the user input, the assistant messages, the tool calls and results, and the answer, all of which come after the turn's user message. An *input* Block happens before the loop stores anything, so it commits no update (the cutover commits a new thread's history seed; below). An *output* Block commits `RemoveTurn` of the turn's user message: the closing checkpoint holds no blocked content, and the next `start` continues from the history before the turn. The answer was committed once, by the model step's superstep, before `finish` guarded it. That snapshot is the latest checkpoint only until the closing commit, so a crash in between leaves it there until `recover` blocks again. Stage 2 history and fork must not keep it (§4.9); since #1702 the closing commit retracts the turn's checkpoints from the history (§4.19).
-- Not changed: a cancellation or deadline, a tool or model-wrapper failure (`ToolFailed`, `MiddlewareFailed`) and a checkpoint-store failure still leave the checkpoint `Running`, so `recover` continues them. Only the run boundaries block.
-- A blocked task records no pending write, because its error cannot be replayed from data; if the process dies between the guardrail's decision and the closing commit, `recover` runs the guardrail again, which is the behaviour of any other task that had not completed.
-- `Checkpoint.CurrentFormat` becomes 4, with an identity migration from 3: a build that predates the status refuses format 4 rather than misreading `Failed`.
-- Rejected: a refusal answer that completes the run (it stores an answer nobody gave; the `Agent`'s typed `Blocked` result is derived from the Block, not stored); guarding output before it is stored (alone it leaves the thread stuck, and `recover` would ask the model again).
-
-**The cutover.** `org.llm4s.agent.Agent` now runs on `GraphRuntime` through a generalised `ToolLoop`, with `AgentTool`s and `AgentMiddleware`: the graph is the sole agent loop. `AgentState`, `AgentContext`, the step loop, `ToolProcessor`, `GuardrailApplicator`, `HandoffExecutor` and the event-streaming executor are deleted, with no shim running the old loop beside the new one. Tools, guardrails, handoffs and the context window belong to the agent, set at build time, because the compiled graph's fingerprint must cover them. A conversation is carried by `ThreadId`, not by a value passed back in. Nothing in `llm4s-core` changes. The specs are `AgentRunSpec`, `AgentConversationSpec`, `AgentGuardrailSpec`, `AgentHandoffSpec`, `AgentRecoverySpec`, `AgentSuspensionSpec`, `AgentFingerprintSpec`, `AgentUsageSpec`, `AgentErrorPropagationSpec`, `ContextWindowMiddlewareSpec` and `AgentRunTracingSpec`.
-
-```scala
-val agent: Result[Agent] = Agent
-  .builder("assistant", client)                    // AgentId, LLMClient
-  .withTools(tools)                                // ToolSet, or a ToolRegistry
-  .withSystemPrompt("You are ...")
-  .withMiddleware(new GuardrailMiddleware(...), new ContextWindowMiddleware(config))
-  .withHandoffs(Handoff.to("physics", physicsBuilder, "physics questions"))
-  .withMaxSteps(50)
-  .withTracing(tracing)
-  .build()
-
-agent.flatMap(_.run("Hello"))                      // Result[AgentResult]
-```
-
-Construction and running:
-
-- **`AgentBuilder` is immutable and `build()` checks the whole agent.** It refuses tool name clashes, owned-key conflicts, an invalid or duplicate handoff id, one `AgentId` reached with two different builders, and `maxSteps < 1`. `AgentId` is an opaque type with the handoff id's pattern.
-- **Blocking calls are `start` then `await`.** `Agent.start`, `startRecover` and `startResume` return an `AgentRun` (`threadId`, `runId`, `status`, `await(): Result[AgentResult]`, `cancel()`); `run`, `recover` and `resume` await it. `run` has four overloads: `run(query, config)` on a new thread, `run(threadId, query)`, `run(threadId, query, config)` and `run(threadId, query, config, history)`. `continueConversation(previous, query, config)` reads only `previous.threadId`. There is no `subscribe` until #1329.
-- **Threads are kept until forgotten.** `forget(threadId, config)` removes a thread through `GraphRuntime.deleteThread` and `Checkpointer.deleteThread`; one-shot `run(query)` threads stay in the runtime until then. It refuses a thread with an active run (`ThreadBusy`) or of another tenant (`TenantMismatch`).
-- **`history` imports conversation, not execution.** It is accepted only on a thread that does not exist, after `Message.validateConversation`, and system messages in it are refused: prompts belong to the agents. On an existing thread it is a `ValidationError`.
-- **`AgentResult` is a value to read.** `threadId`, `runId`, `activeAgent`, `status`, `messages` (the thread's full history, never a system prompt) and `usage`, with `answer` and the `approve`/`reject`/`edit`/`reply` helpers that build `resume` answers. It follows the growth-prone pattern (private constructor, no public `copy`) and is built only by `Agent`.
-
-Graph and state decisions:
-
-- **One graph per agent family.** The root and every agent reachable through handoffs are compiled together, keyed by `AgentId`, with per-agent node prefixes (`<id>/model`, `<id>/call-tool`, `<id>/approval`, `<id>/ask/<tool>`, `<id>/collect`, `<id>/finish`) and one shared `input` node. The graph version hashes each agent's id, tool names and schemas, middleware ids, handoff targets and system prompt, so a thread from a changed family is refused rather than misread. The completion options and client are rebound on restore, as §4.6 defines.
-- **Data-only thread state.** Loop-owned keys hold the shared messages, the active agent, the last transfer, per-model usage and the turn (`steps`, `outcome`, and the agent and transfer it started with, for an output Block to restore). No live `ToolRegistry`, `Handoff` or `Agent` is in state. A system prompt is prepended to each request and never stored.
-- **Step limit per turn.** The current agent's `maxSteps` is compared with a step count shared by the whole turn, so a handoff does not reset it. At the limit the turn ends `StepLimitReached` without calling the model, and the next turn works.
-
-Handoffs:
-
-- **A handoff is a route inside the graph.** The model sees each target as `handoff_to_<id>`. `Handoff.to(id, builder, reason)` requires `id` to equal the target builder's id; `Handoff.toId(id, reason?, preserveContext?)` names a target by id, which is how a cycle (A to B, B back to A) is written. `transferSystemMessage` is removed. A self-handoff is refused at build.
-- **A handoff must be the only tool call in its message.** A handoff mixed with other calls, or two handoffs, is refused: every call in the message gets an error result and the batch returns to the same agent's model. The model never sees a partial batch.
-- **The root's boundary hooks are family-wide.** The root agent's `beforeAgent` stack runs on every turn's query, before the active agent's own, and its `afterAgent` stack on every final answer, after the answering agent's own, so a root `GuardrailMiddleware` keeps guarding a conversation after a handoff. `wrapModelCall` and `wrapToolCall` stay per agent.
-- **`preserveContext = false` narrows what the target is sent.** The target receives the last user message before the transfer, then the transfer onwards, so its request starts with the user's question. The transfers are recorded in a loop-owned key and the view is computed on each call, never stored; the history is untouched. The next turn starts with the active agent.
-
-Guardrails, pruning and errors:
-
-- **A guardrail block is a Block, reported as an outcome.** The kernel semantics are the Block above, unchanged. `GuardrailMiddleware` fails with `GuardrailBlocked(guardrail, reason)` - the first failing guardrail's name and every failure's error - so the guardrail can be named; `Agent` maps a run that ends as a Block with it (its closing checkpoint `Failed`) to `Right(AgentResult)` with `AgentStatus.Blocked(guardrail, reason)`, `messages` the thread's committed history (an input block stores nothing of the turn, an output block removes it) and `usage` as committed, which keeps the blocked turn's model calls. Every other failure stays `Left`, a `GuardrailBlocked` that a model or tool wrapper returns included (an ordinary failure: the thread stays `Running` for `recover`); a Block whose error is not `GuardrailBlocked` (another middleware's `beforeAgent`/`afterAgent` `Left`, a blank answer from `afterAgent`) is `Left` with the thread usable. `run` and `continueConversation` on a blocked thread work, since `start` accepts `Failed`. An input block on a new thread commits the thread's seed - its imported `history` and the root as active agent - as the Block's update, so the history survives. An output block also restores the active agent and last transfer the turn started with, which the turn records in its `TurnState`: a handoff inside the removed turn would otherwise leave a target active whose transfer message no longer exists. A guardrail that transforms (`PIIMasker`) completes with the transformed text stored. *Rejected:* a refusal message stored in place of a blocked answer (an earlier draft of this slice) - it keeps a fabricated assistant turn in the history and diverges from the kernel's Block.
-- **A blank query is refused before it is stored.** `Agent.run`/`start` refuse a blank query with a `ValidationError` before any thread is claimed. A `beforeAgent` that turns the query blank blocks the run (`ValidationError("query", ...)`, no update but a new thread's seed), so the thread is `Failed` and usable instead of `Running` with a user message every model call and every `recover` would reject; `Agent` returns it as `Left`.
-- **Pruning trims what is sent, not what is stored.** `ContextWindowMiddleware(config)` is a `wrapModelCall` middleware applying the configured `PruningStrategy`. It never separates a tool call from its result, never prunes the current turn (the latest user message onward), and the request always starts with a user message, so it may exceed the budget. The system prompt is outside the budget.
-- **Errors are `GraphError`s.** A provider, tool or model/tool-wrapper failure is `Left(GraphError...)`, provider errors as `GraphError.NodeFailed(cause)`; the thread stays `Running` and `recover` re-runs only failed or unstarted work. The error content a tool failure gives the model is `{"error": ...}`. Runtime refusals (`ThreadBusy`, `IncompleteRun`, `PendingInterrupts`) are returned unchanged. No agent error hierarchy is added.
-- **Tracing is the runtime's.** `withTracing` attaches `TracingSubscriber` to each run and emits the `graph.*` custom events of §4.6. `TraceEvent.AgentStateUpdated` is no longer emitted; #1329 removed the type and replaced it with `TraceEvent.AgentRunEnded` (§4.14).
-
-Callers moved with it: `AssistantAgent` builds its agent once and keeps a `ThreadId`; `AgentIO` and `AgentZ` (`LLMClientIO.agent(id)(configure)`, `LLMClientZ.agent(id)(configure)`) expose `run`, `continueConversation`, `recover` and `resume`, fiber cancellation cancels the run, and a thrown exception arrives as `NodeFailed` carrying the original; `CodeWorker.executeTask` returns `Result[AgentResult]` and loses `traceLogPath`; the samples use the builder.
-
-Source breaks, with no shims (the CHANGELOG lists the same): `AgentState`, `AgentContext` and the old `AgentStatus` are removed; `runStep`, `runWithStrategy`, `runWithEvents` and their relatives are removed; `ToolExecutionStrategy` stays in core as a `ToolRegistry` feature, and only the agent's use of it is gone (`RunBudgets.maxConcurrency` bounds parallel tool calls).
-
-Limits (owners in §4.9):
-
-- Agent-level event subscription, model token streaming and `AgentEvent`'s replacement: closed by #1329 (§4.14).
-- `PlanRunner`, `DAG`, `TypedAgent` and `CancellationToken`: removed by #1330 (§4.15).
-- `ToolLoop` sets no retry or cache policy (#1327) on its nodes: a failed model step or tool call is continued by `recover`. Durable checkpointers are Stage 2.
-
-### 4.14 Stage 1 slice 3: events and tracing ([#1329](https://github.com/llm4s/llm4s/issues/1329))
-
-Implemented. Spec: `docs/superpowers/specs/2026-10-06-events-and-tracing-design.md`; guide:
-`docs/guide/agents/streaming.md`.
-
-Decisions:
-
-- **Durable events carry no content.** Agent events stored in the log hold identifiers, names, usage,
-  durations and outcomes, never assistant text, thinking, tool arguments or results, or guardrail
-  reasons. Content is live-only, and reaches tracing once, in `AgentRunEnded.messages`, from the run's
-  final state, where a Block has already removed the blocked turn. The §4.13 Block guarantee is
-  unchanged.
-- **One vocabulary, typed payloads.** Listeners receive the kernel's `StreamEvent`; agent events are
-  `EventType[A]` values (`org.llm4s.agent.graph`) in `org.llm4s.agent.events.AgentEvents`, named
-  `agent.<snake_case>`, version 1. `EventType.emit` is durable (`RunEvent.Custom`), `progress` is
-  live (`StreamEvent.Live`, which gains `name` and `version`), and `unapply` is `None` for another
-  name or version or an undecodable payload. Durable: `ModelCallCompleted`, `ToolExecuted`,
-  `HandedOff`, `GuardrailBlocked`, emitted by the node whose task commits them, so they inherit the
-  commit gate (no duplicate from a retry, failed task or `recover`). Live: `ModelCallStarted`,
-  `TextDelta`, `ThinkingDelta`, `ToolCallStarted`, `ToolCallResult`.
-- **Streaming is opt-in** (`AgentBuilder.withStreaming()`, not part of the graph fingerprint).
-  `ModelStep.next` takes the call (`next(messages, tools, call)`: the `RunContext`, agent id and
-  attempt) so a streaming step sends deltas and `callModel` numbers attempts under a retrying
-  `wrapModelCall`.
-- **Observers at admission.** `GraphRuntime.start`/`recover`/`resume` take `observer: Option[Observer]`,
-  subscribed after the claim commits and before the run thread starts. `AgentRun.subscribe(capacity)`
-  is run-scoped (this run's `Durable`, `Live`, `LiveGap`, and a `Disconnected` only for `Lagging`,
-  `ListenerFailed` or `ReplayFailed`), ending after the terminal event. A run that commits no
-  terminal event (a crash, or a failed terminal commit) ends its run-scoped listeners at a
-  deterministic barrier ([#1378](https://github.com/llm4s/llm4s/issues/1378)): as the run thread
-  exits - after every event of the run was handed to the hub, and before it releases the thread
-  claim, so no later run's event can precede the barrier - the run's handle gives each subscription
-  made for the run (its observer's, each `subscribe`) an end-of-run marker, queued behind everything
-  already queued, or, for a subscription still replaying, behind everything its switch to live
-  catches up. The dispatcher never passes the marker to the listener as an event: it calls the
-  run-scoped listener's `runEnded(runId)`, which ends a scope of that run - once, sharing the end's
-  CAS with the terminal event, a `Disconnected` and the caller's cancel. Thread-scoped subscribers
-  are never given one. The marker is exempt from the queue's capacity, so it never makes a
-  subscriber lag; a subscriber already lagging is given none and ends with its
-  `Disconnected`. This replaced #1329's 1 s quiet close. `Agent.stream`, `streamResume`
-  and `streamRecover` subscribe a listener at admission (capacity `Agent.StreamCapacity`, 1024).
-  `AgentRun.await` returns only once each such listener has returned from the run's last event,
-  waiting at most `AgentRun.Drain` (5 s), then a WARN; the bridges' private variants do not drain.
-- **`AgentRunEnded` replaces `AgentStateUpdated`.** One event per traced run - thread, run, active
-  agent, status, this turn's messages, the run's own `UsageSummary` (summed from its
-  `ModelCallCompleted` events, so per-operation backend conventions such as `gen_ai.usage.*` do not
-  double count) - sent by `AgentTracing`
-  on the run-scoped subscription together with the run's `graph.*`/`agent.*` custom events and a
-  `TokenUsageRecorded` per model call. A run is recognised as Blocked by its own durable
-  `agent.guardrail_blocked` event, not the thread's latest checkpoint, so a later run on the thread
-  is never mistaken for it. A run that crashes without a terminal event is traced as `ErrorOccurred`
-  with a WARN. Langfuse: trace id = run id, session id = thread id; OpenTelemetry: an "Agent Run" span;
-  `TraceCollector`: an `AgentCall` span.
-- **fs2 and ZIO.** `AgentIO.stream*` and `AgentZ.stream*` yield `AgentStreamItem.Event | Done` over a
-  buffer that never blocks the dispatcher: durable events are always queued, and live events past its
-  capacity are dropped and reported as one `LiveGap`, so a slow consumer loses deltas, not the run.
-  Interrupting or stopping early cancels the turn; a kernel `Disconnected` fails the stream.
-- **Java and Kotlin** ([#1377](https://github.com/llm4s/llm4s/issues/1377)). `JAgent.stream*` take an
-  `AgentStreamListener` (`onEvent`, then one of `onComplete` / `onError`) and return an `AgentStream`
-  (`await`, `cancel`); one virtual thread per stream drains the same buffer into the listener, so a
-  slow listener gets a `LiveGap`, and one that throws cancels the turn. `AgentKt.stream*` are cold
-  `Flow<AgentStreamItem>`s over that listener and a channel it fills: cancelling the collection cancels
-  the turn, and starting and cancelling it run on `Dispatchers.IO`. Resume answers are `Answer`s
-  (JSON as `String`), so no Scala or ujson type is in either signature. `Llm4s.createAgent(client,
-  tools, streaming)` gives either facade text deltas; `Llm4s.wrapAgent` takes a builder-made agent.
-  [#1392](https://github.com/llm4s/llm4s/issues/1392) adds the suspended turn to both facades.
-  `JAgent.pending(result)` and `AgentKt.pending` read `AgentStatus.Suspended` as a
-  `java.util.List<PendingInterrupt>`. Approvals come first, then questions. Each item has an id, a
-  Java-enum `InterruptKind`, the tool name and its arguments as JSON text, and either the reason or the
-  question as JSON text, in an `Optional`. `JAgent.resume` and `recover` block as `run` does.
-  `AgentKt.resume` and `recover` are `suspend` functions over the `streamResume` and `streamRecover`
-  flows, so cancelling the caller cancels the turn; since #1663 `AgentKt.run` and `continueConversation`
-  run over `stream` the same way. `PendingInterrupt` is the view that the Java-friendly
-  `JAgentResult` of [#1393](https://github.com/llm4s/llm4s/issues/1393) reuses: a `SUSPENDED`
-  `JAgentStatus` carries the same list, built by the same `PendingInterrupt.of`.
-- **The JVM facades return Java values (#1393).** `JAgent` and `AgentKt` turns, `AgentStream.await()` and
-  `onComplete` hand over a `JAgentResult` (in `llm4s-java-api`; `llm4s-agent` is unchanged): `String` ids,
-  `Optional<String> answer()`, an unmodifiable `java.util.List<JMessage>` (Java enum `JMessageRole`, tool calls
-  as `JToolCall` with JSON text), a `JUsageSummary` (`long`s, `BigDecimal`, a sorted per-model map), and a
-  `JAgentStatus` - a Java enum `kind()` (`AgentStatusKind`) plus per-case `Optional` accessors and `pending()`.
-  A kind enum with accessors, not a Java sealed hierarchy, matches `PendingInterrupt`/`InterruptKind` and keeps
-  `switch` and `when` working on JDK 17. Every type is a final class with a private constructor, so fields can be
-  added. `JavaInteropSpec` walks every type reachable from what the facade hands a caller and fails on
-  `scala.*`/`ujson.*`, stopping only at named boundaries (`LLMError`, #1487; `Conversation`, #1488; `StreamEvent`).
-- **Durable names are the agent's.** `ToolExecuted.tool` is `"<unknown>"` for a tool the agent does
-  not have; each non-handoff call of a mixed handoff batch is reported as `Errored`. The live tool
-  result is `ToolCallResult` (`agent.tool_call_result`), apart from the loop's `toolloop.ToolResult`.
-
-Refinements found in implementation: `Completion` has no finish reason, so `ModelCallCompleted` has no
-`finishReason`; the model step needs the attempt, hence `next(messages, tools, call)` rather than a
-bare `RunContext`; `TokenUsage` has no codec, so the durable payload carries `CallUsage` (plain ints),
-with the completion's `estimatedCost` so a run's usage keeps its cost. The final review changed four
-things: `await` drains the listeners; the fs2/ZIO bridge never blocks (it had disconnected a slow
-consumer as `Lagging` and cancelled the run); `AgentRunEnded.usage` is per run; the live tool result
-was renamed `ToolCallResult`.
-
-Specs added: `EventTypeSpec`, `ObserverAdmissionSpec`, `AgentStreamingSpec`, `AgentEventsSpec`
-(including that no `agent.*` payload holds message content), `AgentRunSubscribeSpec`,
-`AgentRunTracingSpec`, `AgentIOSpec` and `AgentZSpec` stream cases.
-
-Source breaks, with no shims (the CHANGELOG lists the same): `RunContext.progress(payload)` is
-`progress(name, version, payload)`; `ModelStep.next` takes the call; `TraceEvent.AgentStateUpdated`
-and `AgentState#toTraceEvent` are removed for `AgentRunEnded`; `TracingSubscriber` no longer serves
-`Agent`.
-
-Limits:
-
-- The kernel's `TaskFailed` and `RunFailed` events store error messages, so a guardrail reason that quotes
-  user text reaches the log through them. This predates #1329; `agent.*` payloads are content-free.
-- Live events are not replayed, and a late `AgentRun.subscribe` misses earlier ones.
-- An approved or edited tool call yields two `agent.tool_executed` events for one call id across runs.
-- `agent.guardrail_blocked` is a guardrail's block only; other middleware refusals emit no agent event.
-
-
-### 4.15 Stage 1 slice 4: orchestration removed ([#1330](https://github.com/llm4s/llm4s/issues/1330))
-
-`org.llm4s.agent.orchestration` is deleted rather than rebuilt: `PlanRunner`, `Plan`/`Node`/`Edge`, `TypedAgent`, `Policies`, `OrchestrationError`, `MDCContext` and `CancellationToken`, with core's `PlanId` and `AgentId`, which only the package used (the agent's id is `org.llm4s.agent.AgentId`). `PlanRunner.execute` took and returned `Map[String, Any]` and cast every node to `TypedAgent[Any, Any]`; that boundary was its contract, and §7 and §8 say to remove it rather than preserve it. `GraphBuilder` already gives typed nodes, edges, static and dynamic joins, parallel supersteps, per-node retry and cache, `RunBudgets.maxConcurrency` and `timeout`, and cancellation through `RunHandle`. A typed DSL over it would be a second public way to build the same graphs, and would overlap Stage 4's typed delegation. Nothing outside the package used it.
-
-- **A blocking agent call cancels its turn when interrupted.** `Agent.run` (and with it `continueConversation` and `runMultiTurn`), `recover` and `resume` await their `AgentRun`. When the wait is interrupted they cancel the turn, wait (uninterruptibly, within 5 seconds, `RunHandle.awaitEnd`) for it to end so the thread is free for `recover` - a turn whose provider ignores its interrupt for longer is logged at WARN and left to end on its own, the thread `ThreadBusy` until it does, because an unbounded wait would let such a provider hang a cancelled graph run - and return `Left(CancelledError)` with the flag still set; a caller already interrupted starts no turn. An agent called inside a graph node is therefore cancelled with the graph run. This is the synchronous case of "cancelling a run cancels the child runs it started" (§4.9); a node that `start`s a turn without awaiting it, and child runs on another runtime, remain Stage 3. `start`/`AgentRun.await` are unchanged.
-- **`multi-agent-graph` cookbook recipe.** Two specialist agents in one superstep append to one key, and a static join releases an editor agent. Its spec checks deterministic update order with the first task finishing last, the barrier, one checkpoint per superstep, failure before the join, and cancellation reaching the specialists' agent turns. It is the parallel update sample of Stage 1's exit criteria (§6).
-
-The specs are `AgentRunCancellationSpec` and `MultiAgentGraphRecipeSpec`.
-
-### 4.16 Stage 2 slice 1: the durable `Checkpointer` contract ([#1700](https://github.com/llm4s/llm4s/issues/1700))
-
-Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/1699)) makes threads durable. Before any durable store implements the `Checkpointer` SPI, this slice makes it safe for a store that several runtimes or processes share: a run holds a lease on its thread, every commit is fenced with the lease's token, and a reusable suite states the contract every store must pass. It fixes the interface that the SQLite store ([#1701](https://github.com/llm4s/llm4s/issues/1701)) and checkpoint history and fork ([#1702](https://github.com/llm4s/llm4s/issues/1702)) implement. The specs are `RunClaimSpec`, `InMemoryCheckpointerSpec` and `CheckpointFormatSpec` in `llm4s-agent`, and `CheckpointerContract`, run against `InMemoryCheckpointer` by `InMemoryCheckpointerContractSpec` and `OwnClockContractSpec`, in `llm4s-agent-testkit`.
-
-Store decisions (the `Checkpointer` SPI):
-
-- **A claim is a lease the store grants.** `claim(threadId, ClaimRequest(holder, ttl))` returns a `RunClaim(threadId, holder, token, expiresAt)` if no claim on the thread is live, and `Left(ThreadBusy)` naming the live claim's holder otherwise, the same holder included: a claim is not re-entrant. `renew(threadId, token, ttl)` extends it and `release(threadId, token)` ends it. A thread needs no checkpoint to be claimed. A claim is live until `expiresAt`, judged by **the store's own clock**; the request carries a duration, never an instant. The runtimes sharing a store need not agree on the time only while the store has one clock: a database server's `now()`, or one process's clock. An embedded store that each process opens itself (SQLite on a shared file) judges expiry by whichever process's clock grants or renews, so clock skew between hosts shortens or lengthens the effective `ttl`. Fencing still keeps every write safe; skew costs liveness (a live run taken over early, a dead one held longer) and duplicated side effects. An expired claim is replaced, which is how a dead process's thread is taken over.
-- **Fencing tokens are per thread, strictly increasing, and never reused.** Every claim gets a `FencingToken` greater than every token issued for that thread before, across releases, takeovers and `deleteThread`. `InMemoryCheckpointer` uses one counter for the whole store.
-- **Every commit is fenced.** `Commit` gains `token` and is applied only if it is the thread's current claim's token; otherwise `Left(GraphError.StaleClaim(threadId, token, current))`, with nothing applied and no sequence number spent. The token is checked before the thread version, so a stale writer cannot learn the thread's state from a conflict. The thread version stays the latest checkpoint's id: a new checkpoint's `parent` and a pending write's `checkpointId` are the version the writer expects, checked as in §4.3 (`CheckpointConflict`, `InvalidCommit`). No separate counter is added; #1702's history keeps the same head.
-- **Expiry only lets another run in.** A holder whose claim has expired but has not been replaced may still commit and renew: the token, not the clock, fences. So a run whose renewal is late by a pause does not fail unless another run actually took over.
-- **`release` never frees a successor.** A token that is not the current claim's is a no-op `Right(())`, so a run that lost its claim, releasing as it ends, leaves its successor's claim alone. `renew` with such a token is `StaleClaim`.
-- **`deleteThread` removes the claim with the thread.** Tokens issued afterwards still exceed every earlier one, so a stale writer of the deleted thread cannot write into the new one.
-
-Runtime decisions (`GraphRuntime`):
-
-- **Admission claims in two steps.** After in-process exclusivity, the tenant check, the status check and restoring the graph (§4.6, unchanged and in that order, so another tenant still learns nothing), the run asks the store for its claim, then commits its claim checkpoint fenced with the token. A live claim elsewhere is `ThreadBusy(threadId, latestCheckpoint, holder)`; a conflicting claim commit is `ThreadBusy` as before. If anything after the claim fails or throws, the claim is released before admission returns. A store that cannot grant a claim is `CheckpointWriteFailed`. So `recover` in another runtime or process refuses a live run, and takes over a dead one once its claim has expired, reusing its pending writes (§4.3). `recover` reads the thread, and validates its pending writes, before it claims, then reads the pending writes again once the claim is granted and carries those over: a holder whose claim had expired but was not yet replaced may still have added one in between, and only the claim stops it.
-- **`ThreadBusy` names the holder.** It gains `holder: Option[String]`, the holding run's id: from this runtime's active set, or from the store's refusal. A thread with no checkpoint yet has no tenant to check, so a refusal from the store does not name its holder there; this runtime's own admission does, its tenant being known.
-- **A running run renews its claim; ending releases it.** `GraphRuntime(checkpointer, clock, claims: ClaimPolicy)`: `ClaimPolicy(ttl = 30.seconds, renewEvery = 10.seconds)`, validated like `RunBudgets` (`renewEvery < ttl`). A virtual thread named `llm4s-claim-<threadId>` renews every `renewEvery` until the run ends, retrying a store that fails and stopping on `StaleClaim`. The run thread releases the claim as it exits, just before it releases the thread in this runtime and sets its result, so a caller that has seen the result can start the next run at once, from any runtime. A release the store fails is logged at WARN; the claim then lapses after `ttl`.
-- **A run that lost its claim fails at its next commit, or its next superstep.** Losing the claim does not interrupt the run: its in-flight tasks finish, their pending writes are refused, and the run ends with `CheckpointWriteFailed(StaleClaim)` without committing a `RunFailed` it no longer may. When renewal is the first to hear `StaleClaim`, it records that, and the run stops with the same error at the start of its next superstep, so an `Async` or `OnExit` run, whose commits are deferred, does not execute further supersteps whose results the store would refuse. There is no new stop cause. The successor's state and event log are untouched.
-- **`RunPosition` carries the token**, as `fencingToken: Option[FencingToken]` (`None` outside a runtime), so a node that writes to a system able to fence can pass it on. `RunPosition` becomes a growth-prone type (private constructor, `apply`, `with*`).
-- **Checkpoints record their writer's token.** `Checkpoint.fencingToken`; checkpoint format 5, with a 4 -> 5 migration to `None`. `Checkpoint` and `Commit` become growth-prone types too.
-- **`deleteThread` claims the thread first**, so it is refused while a run is live in any runtime, and gives the claim back if the store does not delete. It checks the tenant on its read before the claim and again after the claim is granted: a delete names no parent checkpoint, so unlike a commit nothing else would notice a thread another runtime created, for another tenant, in between.
-
-Contract suite decisions (`llm4s-agent-testkit`):
-
-- **A published test library, as `llm4s-provider-testkit` is for providers.** `CheckpointerContract` is a ScalaTest `AnyFlatSpecLike` trait: a store's spec mixes it in and implements `newCheckpointer(clock: java.time.Clock)`. It runs every case of the SPI's Scaladoc against the store directly - atomic commits, conflicts, event numbering, paging, compaction, `deleteThread`, round trips, and claims and fencing, also from many threads at once - and four cases with two or more `GraphRuntime`s over one store: a live run refuses a second runtime, renewal keeps a run's claim, an expired claim is recovered elsewhere without re-running completed tasks while the stale run's commits are refused, and of several runtimes recovering one thread only one is admitted.
-- **The suite drives expiry through the store's clock.** By default it hands the store a `ManualClock` and moves it past `ttl`, never waiting for real time, so the store takes an injected `Clock` for claim expiry. A store that can only use a clock of its own, such as a database server's `now()`, overrides `advanceStoreClock(store, clock, by)` to make claims expire as if that clock had moved (moving every stored expiry back, say) and sets `exactExpiry = false`, so the cases check `expiresAt` by its effect only. `OwnClockContractSpec` runs the suite that way.
-- **The suite reopens the store.** `reopen(store, clock)` closes the store and opens its storage again, as a restarted process would; it defaults to the same instance, which is right for `InMemoryCheckpointer`. A durable store overrides it, and the cases check that a live claim, its holder and its token survive a reopen, that a stale holder is still fenced off after one, and that tokens keep increasing across it and `deleteThread`. Two more cases check that of many concurrent takeovers of an expired claim exactly one is granted, and that compaction followed by `deleteThread` resets the replay floor, so a new thread of the same id replays from 1.
-- **`llm4s-agent`'s own tests cannot use the testkit**, which depends on it, so `InMemoryCheckpointer` passes the contract in the testkit's own tests; the agent keeps its own `InMemoryCheckpointerSpec` and `RunClaimSpec`. Failures carry text only: a `ujson` value in a ScalaTest failure is not serializable and broke the forked test JVM.
-
-Source breaks, with no shims (the CHANGELOG and the Stage 2 migration note list the same): `Checkpointer` gains `claim`, `renew` and `release`; `Commit(checkpoint, writes, events)` is `Commit(token, checkpoint, writes, events)`, with a private constructor; `Checkpoint` and `RunPosition` have private constructors and gain `fencingToken`; `Checkpoint.CurrentFormat` is 5; `ThreadBusy` gains `holder`; `InMemoryCheckpointer` takes a `Clock`; `GraphRuntime` takes a `ClaimPolicy`.
-
-Limits:
-
-- A run that lost its claim keeps running its in-flight tasks until their commits are refused, so their external side effects can happen twice, once for each run; that is the at-least-once boundary of §4.1, and the idempotency keys of [#1703](https://github.com/llm4s/llm4s/issues/1703) (§4.17) let a tool deduplicate them.
-- A task of an expired holder that finishes after the takeover is run again by the successor: its pending write and its `TaskCompleted` are refused, so the event log records the task once, but its side effects happen in both runs. One that finished before the claim is carried over instead (see admission above). The same at-least-once boundary.
-- A run that lost its claim keeps delivering its tasks' live progress events (`StreamEvent.Live`, which are never stored) to its own runtime's subscribers until it ends. Its durable events are refused with its commits.
-- A process that stops renewing holds its threads for up to `ttl` after it dies; a store that fails to release does the same.
-- Subscriptions still see live only the commits made through their own runtime ([#1705](https://github.com/llm4s/llm4s/issues/1705)).
-- Renewal is timed by the runtime's wall time and expiry by the store's clock; a store whose clock runs much faster than the runtime's can expire a live run's claim between renewals. Keep `renewEvery` well inside `ttl`. An embedded store opened by several hosts has as many clocks as hosts, and their skew changes the effective `ttl` (see the first store decision).
-
-### 4.17 Stage 2 slice 4: tool side-effect safety ([#1703](https://github.com/llm4s/llm4s/issues/1703))
-
-Implemented. Slice 4 of [#1699](https://github.com/llm4s/llm4s/issues/1699), independent of the store slices: idempotency keys reach tools, every model request keeps one result per tool call whatever happened to the batch, and a provider contract suite proves it in the OpenAI and Anthropic formats. Nothing in `llm4s-core` changes. The specs are `AgentToolSideEffectSafetySpec`, `AgentToolResultContractSpec` (agent), `ToolResultContractSpec` (testkit), and the tool-result check in `Llm4sOpenAIModuleSpec`, `Llm4sAnthropicModuleSpec` and `Llm4sOpenAICompatibleModuleSpec`.
-
-Decisions:
-
-- **An idempotency key per call, recorded with the call.** `IdempotencyKey` (`org.llm4s.agent.graph`, an opaque string) is `IdempotencyKey.derive(threadId, checkpointId, superstep, taskId, toolCallId)`: the SHA-256 of the five, each length-prefixed after a `llm4s-tool-call-v2` tag, as 64 lowercase hex characters - deterministic, of fixed length, and revealing none of its inputs to the external system it is sent to. The position is that of the **model call that issued the tool call**, not of the task that runs it: `recover` claims a thread with a new checkpoint (§4.5), so the running task's `position.checkpointId` differs between a run and its recovery, while the model call's is fixed once its response is committed. The checkpoint alone does not name a model call on a thread: checkpoint ids are `<runId>/<n>` with `n` counted per run, and a `RunConfig` - so a `RunId` - can serve several runs (`withRunId` is public, and a caller may pass one config to `run` and `continueConversation`), so two turns could share a checkpoint id and, with a provider reusing `call_0`, a key. The superstep counts on across a thread's runs, so it separates turns; the task separates model calls running side by side in one superstep; the checkpoint still separates a model request made again after its response was lost. All three come from the model call's `RunContext.position`, so the checkpoint-id format (#1700) is unchanged, and the runtime still accepts a reused `RunId`. `runMultiTurn` gives each follow-up turn a fresh `RunId`, as a `RunId` names one execution attempt. The model step derives the key and records it in `ToolTask`, `ApprovalRequest` and `ToolQuestionRequest`, and the tool reads it as `ToolContext.idempotencyKey`: one value in every run of the call - a retrying `wrapToolCall`, approval, edit, an answered question, `recover` after a cancellation, `Fatal`, deadline or crash - and a new one for a call of another model request, even when the provider reuses its id (§5.3), including a model request made again because its response was never committed. Recording the key, rather than deriving it where the call runs, also keeps it stable if the derivation ever changes.
-- **At least once, documented.** The runtime runs a tool at least once, never exactly once (§4.1, §8). A finished call's result is stored as the call finishes (`Sync`, the agent's mode) and never run again ("completed pending writes are never replayed"); a call cut short - cancelled, failed with `Fatal`, or lost to a crash between its side effect and that store - runs again under `recover` with the same key. Under `Async` or `OnExit`, finished calls after the last durable commit run again with their keys, and a lost model response is asked for again, so its calls get new keys. An approved, edited or answered call keeps the key it was proposed with, so a tool's first run - before approval or an answer - should have no side effect. The guide (`docs/guide/agents/index.md#tool-side-effects`) states the same.
-- **A call cut short gets no synthetic result.** §4.4 stands: an interrupted task records nothing, and `recover` runs it again. The loop already synthesises a result for every outcome that is final - success, tool error, a throw, invalid arguments, an unknown tool, denial, rejection, a refused handoff batch - and the batch barrier keeps the model from running while any call is unresolved (suspended, cancelled, `Fatal`, crashed), so no request can hold a call without its result. Writing a "cancelled" result instead would end the call's at-least-once execution silently and make `recover` skip work the user may want done; continuing a thread past an abandoned batch is a state edit, which #1702's `updateState` owns.
-- **One rule, checked on what is sent.** `ToolResultRule` (`private[llm4s]`) is positional, as both wire formats are: each call of an assistant message has exactly one `ToolMessage` in the run of tool messages straight after it, that run answers only its calls, and no tool message stands elsewhere. `Message.validateConversation` pairs by id across the whole conversation, so a reused `call_0` could hide a call with no result behind an earlier turn's. The model step checks the request **as every `wrapModelCall` left it**, inside the innermost call, and fails the model call (`NodeFailed(ValidationError)`, the thread `Running`) rather than send a dangling call - an Anthropic client would otherwise drop the call silently (`ToolResultPairing`) and OpenAI reject the request. A model message whose call ids repeat or are blank is refused before it is stored, as a blank answer is, so `recover` asks the model again: no result could answer exactly one of two calls sharing an id, and a repeated id fails the results key's uniqueness check, which used to leave the thread unable to advance. Imported `history` must keep the same rule. Core is unchanged: tightening `validateConversation` would change behaviour for every core user.
-- **The contract suite has two halves.** `llm4s-provider-testkit` gains `ToolResultContract` - `violations(format, requestBody)`, `toolCallCount`, `toolResultCount`, and `cases`, conversations of every shape the loop produces - and `ProviderModuleChecks.assertOneToolResultPerCall(format, response, path)(baseUrl => client)`, which sends each case to a `LocalProviderTestServer` and fails on a violation, or when the body carries fewer calls or native results than the conversation (a client hiding a broken conversation by dropping a call or sending a result as text). `ToolMessageFormat` is `OpenAIChat` or `AnthropicMessages`. The OpenAI, Anthropic and every OpenAI-compatible module spec run it. `AgentToolResultContractSpec` then runs the agent itself through the real `OpenAIClient` and `AnthropicClient` against a scripted local server, through every outcome above plus partial resume, handoffs, reused ids, cancellation, `Fatal` and a crash recovered by another runtime, and checks every request with the same contract; for this `llm4s-agent` has test-only dependencies on `llm4s-openai`, `llm4s-anthropic` and the testkit.
-
-Source breaks, with no shims (the CHANGELOG and migration guide list the same): `ToolContext(run, toolCallId, state, approved)` becomes `ToolContext(run, toolCallId, idempotencyKey, state, approved)`; `ToolTask`, `ApprovalRequest` and `ToolQuestionRequest` gain an `idempotencyKey` field (in `ToolQuestionRequest` before the defaulted `approved`); a model message with repeated or blank tool-call ids fails the model call instead of being stored; imported `history` and every model request are held to the positional rule.
-
-Limits:
-
-- No durable store has shipped, so `ToolTask` and the two requests carry no codec migration for the new field: a checkpoint written before it does not restore (it fails to decode, clearly). The first durable backend (#1701) starts from this format.
-- `CompiledGraph.step` outside a runtime gives every task the checkpoint `""`, so keys there tell model requests apart only by thread, superstep, task and call id.
-- Only `AgentTool`s see the key; tools added through `ToolRegistry` / `AgentTool.fromToolFunction` (built-in, MCP, Java and Kotlin tools) do not yet ([#1740](https://github.com/llm4s/llm4s/issues/1740)).
-- The contract suite covers the OpenAI and Anthropic formats; Gemini, Vertex AI, Ollama and Bedrock speak others and do not run it yet.
-
-### 4.18 Stage 2 slice 5: human-review interrupts ([#1704](https://github.com/llm4s/llm4s/issues/1704))
-
-Slice 5 of [#1699](https://github.com/llm4s/llm4s/issues/1699): static breakpoints, and typed questions from
-middleware. Both are interrupts on the persisted pause/resume path of §4.5, keyed by `InterruptId` and answered with
-the other interrupts of a run, any non-empty subset at a time, which is the "incremental approval" of Stage 2's exit
-criteria (§6) for every kind of interrupt. Independent of the store slices. The specs are `BreakpointSpec` (kernel),
-`AgentBreakpointSpec`, `AgentMiddlewareQuestionSpec`, `JAgentHumanReviewSpec` and `AgentKtHumanReviewTest`.
-
-Breakpoint decisions (kernel):
-
-- **Breakpoints belong to the run.** `RunConfig.interruptBefore` and `interruptAfter` (`Set[NodeId]`) name nodes;
-  each `start`, `resume` and `recover` brings its own, as it brings its budgets, and `CompiledGraph.step` honours
-  them. Admission refuses a node the graph does not have with one `ValidationError` naming every one, before the
-  thread is read, so a mistyped id is not a breakpoint that silently never holds. They are not part of the graph's
-  structural fingerprint: they change when a run pauses, not the graph's shape.
-- **A held task is parked like a suspended one.** Its interrupt id is its task id; its continuation inherits its
-  join slot and origin, so a barrier it belongs to stays closed until the continuation completes, and the run pauses
-  at the end of the superstep while its siblings run and commit (§4.5). A task held *before* its node runs has done
-  nothing and records no pending write: `recover` decides again, under its own config. Its continuation runs the
-  node with the same input and is marked `passedBefore`, so the same breakpoint does not hold it again - also after
-  a crash, a cancel or a failure, since the mark is checkpointed. A task held *after* its node ran has its pending
-  write and its update committed, so the state shows what it did; its routes, static edges and join arrivals are
-  held, and its continuation *replays* them without running the node (`replay`), taking one superstep. A reused
-  pending write is held after again on `recover`, so a node is never run twice to be held. Holds apply to resume
-  nodes too, and a node in both lists is held before, then after.
-- **The answer is `Breakpoint.proceed` (JSON `null`), and only that.** A breakpoint has no question and nothing
-  to decide but to continue; any other answer is `InvalidResume`, the thread unchanged, which leaves room for a
-  typed answer later. A held thread is continued, or forgotten; skipping or editing a held task waits for
-  `updateState` (#1702).
-- **One event vocabulary.** A held task commits no event of its own: `RunSuspended` lists its interrupt and
-  `RunResumed` its answer, as for any interrupt. `PendingInterrupt.breakpoint` (`Before` or `After`) tells a held
-  task from a suspension; `question` is the held task's input (before) or `null` (after), and `resumeNode` its node.
-- **Checkpoint format 6**, an identity migration from 5: `PendingTask` gains `passedBefore` and `replay`,
-  `ParkedContinuation` gains `breakpoint` and `heldRoutes`, all defaulted, so a build that predates them refuses a
-  format-6 checkpoint rather than run a held task's continuation as an ordinary task.
-
-Agent decisions:
-
-- **Agent breakpoints are named by `AgentNode`**: `Model` (`<id>/model`), `Tool` (`<id>/call-tool`, one interrupt
-  per call) and `Finish` (`<id>/finish`), set with `AgentBuilder.withInterruptBefore` / `withInterruptAfter` and
-  added to every run's own; a handoff target's apply to its nodes. Like streaming they are not part of the graph
-  version, so a thread held by one agent is continued by one built without them. A step continued after a review
-  runs at another node: a model call after a `wrapModelCall` question at `<id>/asked/<mw>/wrapModelCall`, a tool
-  call after an approval or a question at `<id>/approval`, `<id>/ask/<tool>` or `<id>/asked/<mw>/wrapToolCall`, an
-  answer after an `afterAgent` question at `<id>/asked/<mw>/afterAgent` (the root's, for a root middleware asking
-  about a handoff target's answer). A breakpoint *after* `Model`, `Tool` or `Finish` holds those nodes too
-  (`ToolLoop.breakpointNodes`), so a gated model call's tool calls, or a result recorded after an approval, cannot
-  slip past it; a breakpoint *before* holds only the step's own node, since a continued step was just reviewed.
-  Each release of an after-hold replays in a superstep of its own, which counts against `maxSupersteps`.
-  `AgentStatus.Suspended` gains
-  `breakpoints: Vector[(InterruptId, BreakpointRequest)]` - the node, the phase and, for a call held before it runs,
-  the call - and `AgentResult.proceed(id)`.
-- **A middleware asks as a tool does.** `AgentMiddleware.Asking[Q: ReadWriter, Ans: ReadWriter]` declares the
-  codecs, as `AgentTool.Asking` does; only it can declare one. A hook asks by returning `ask(q)` - a
-  `Left(MiddlewareAsked)` from `beforeAgent`, `afterAgent` or `wrapModelCall` - or `askAbout(q)`, a `ToolOutcome.Ask`
-  from `wrapToolCall`, attributed to the wrapper that raised it as `NeedsApproval` is (§4.8); a wrapper that is not
-  `Asking` and asks fails the run with `ToolFailed`, as an undeclared tool question does. The question is encoded
-  when it is asked and suspends at a resume node of its own per (agent, middleware, hook),
-  `<agent>/asked/<middleware>/<hook>`, whose answer codec is the middleware's: an answer that does not decode is
-  refused at `resume` with the thread unchanged, unlike a tool's, which becomes the call's error result.
-- **Once answered, the asking task runs again, and the hook's whole stack with it.** Nothing about a stack's
-  position is checkpointed, as for approvals (§4.8), so a rebuilt stack resumes cleanly, and a middleware outside the
-  asking one runs twice. `answered(context)` gives the middleware its question and answer. Answers given earlier in
-  the same stack run are carried (`GivenAnswer`, on the question, `ApprovalRequest` and `ToolQuestionRequest`), so
-  two asking middleware of one stack each ask once, and a tool call's answer survives a later approval or tool
-  question. They are keyed by the asking middleware's agent and id, so a root's and a handoff target's middleware of
-  the same id do not see each other's. What runs again is the task: `beforeAgent` re-runs the turn's input, storing
-  nothing while it waits (a new thread's imported history is imported then); `wrapModelCall` re-runs the model step
-  (a wrapper that asked after calling `next` calls the model again, unless it returns a completion of its own; the
-  model calls it made before asking are counted - their usage is committed with the suspension, and each is
-  announced with `ModelCallCompleted` - so usage and tracing agree); `wrapToolCall` re-runs the call, its arguments checked
-  again, with the approval it had; `afterAgent` guards the stored answer again - a root middleware's question about
-  a handoff target's answer finishes as the target. A question from a tool wrapper while the tool continues after its
-  own question is the call's error result, because running the chain again would lose the tool's answer.
-- **Guardrails suspend through a middleware.** `GuardrailReviewMiddleware(input, output)` runs guardrails as
-  `GuardrailMiddleware` does, and a refusal asks a `GuardrailReview(phase, guardrail, reason, text)`, answered with
-  `GuardrailVerdict.Allow`, `Edit(text)` (not re-checked: the reviewer wrote it) or `Block` (the §4.13 Block). A
-  verdict applies to the text and phase it was asked about, whatever the refusal's reason, and once given the
-  guardrails do not run on that text again, so an LLM judge whose wording varies is asked about once and not called
-  again. `GuardrailMiddleware` itself is unchanged.
-- **`AgentStatus.Suspended` gains `middlewareQuestions: Vector[(InterruptId, MiddlewareQuestionRequest)]`**: the
-  agent and middleware that asked, the hook, the question as JSON (`ToolLoop.middlewareQuestion[Q]` reads it), and
-  what the hook runs again with. `AgentResult.reply` answers it.
-
-Java and Kotlin ([#1662](https://github.com/llm4s/llm4s/pull/1662), [#1665](https://github.com/llm4s/llm4s/pull/1665)
-conventions): `InterruptKind` gains `MIDDLEWARE_QUESTION` and `BREAKPOINT`; `PendingInterrupt` lists them after the
-approvals and tool questions, with `middleware()`, `node()` and `phase()` (Java enum `BreakpointPhase`), and
-`toolName()`/`argumentsJson()` become `Optional`s, since a breakpoint on a model call or a question about an answer
-has no tool call; `Answer.proceed(id)` continues a breakpoint. `AgentKt.pending` reuses the list unchanged. An agent
-with breakpoints or asking middleware is built with `Agent.builder` and wrapped (`Llm4s.wrapAgent`).
-
-Source breaks, with no shims (the CHANGELOG and the Stage 2 migration note list the same): `AgentStatus.Suspended`
-has four fields; the kernel's `PendingInterrupt` gains `breakpoint`; `RunConfig` gains two fields; `ApprovalRequest`
-and `ToolQuestionRequest` gain `answered`; a non-asking wrapper's `ToolOutcome.Ask` fails the run; Java's
-`PendingInterrupt.toolName()`/`argumentsJson()` return `Optional<String>`; `Checkpoint.CurrentFormat` is 6.
-
-Limits:
-
-- A breakpoint takes only `proceed`: skipping a held task or editing what it holds needs `updateState` (#1702).
-- A breakpoint before a node does not hold a step continued after a review at another node.
-- A middleware question re-runs the asking task, so a model wrapper that asks after calling the model pays for that
-  call twice unless it returns its own completion; both calls are counted in usage.
-- `AgentNode` is a Scala 3 enum: from Java or Kotlin its cases are read with `AgentNode.valueOf("Tool")`.
-
-### 4.19 Stage 2 slice 3: checkpoint history, fork, `updateState` and retention ([#1702](https://github.com/llm4s/llm4s/issues/1702))
-
-A store keeps a thread's history, not only its latest checkpoint, and the runtime lets callers read it, branch it, correct it and prune it. It builds on the claim and fencing of §4.16. The specs are `CheckpointHistorySpec` and the updated `GraphRuntimeSpec` and `AgentGuardrailSpec` in `llm4s-agent`, and the history, retraction, pruning, fork and `updateState` cases of `CheckpointerContract` in `llm4s-agent-testkit`.
-
-Store decisions (the `Checkpointer` SPI):
-
-- **The history is one linear chain per thread.** A commit's new checkpoint still needs the latest as its `parent` (§4.3, §4.16), so a thread's checkpoints form one chain, newest first. The thread version stays the latest checkpoint's id. There are no branches within a thread: a branch is a new thread (`fork`). `history(threadId, before, limit)` pages it newest first, after checkpoint `before` (`CheckpointNotFound` if the history lacks it); `checkpoint(threadId, id)` reads one. Pending writes stay with the latest checkpoint only, as before: a superseded checkpoint keeps none.
-- **Checkpoint ids are unique within a thread's history.** A commit whose checkpoint id is already there is `InvalidCommit`, so paging and reads by id are unambiguous. The runtime makes that hold however callers reuse a `RunId`: a checkpoint id is `<runId>/<n>`, where `n` is one more than its parent's, so `n` counts along the thread rather than within a run, and the first run on a thread writes the same ids as before.
-- **A blocked turn is retracted in the commit that closes it.** §9 left a choice: never keep or expose a snapshot of a turn a later `Block` removed, or guard the answer before its first commit. Guarding first cannot cover an input Block - the claim checkpoint already holds the input - nor a turn that suspended for review before it was blocked, so this slice takes the first option. `Commit.retractTurn` asks the store to remove, atomically with the commit, every checkpoint after the thread's newest settled one (`Completed` or `Failed`), or all of them if there is none; the runtime sets it on the `Failed` checkpoint that closes a run a node blocked, in every durability mode. A turn is exactly that span, because `start` is admitted only on a thread with no checkpoint or a settled one, so a turn's earlier runs - one that suspended, crashed or was recovered - are retracted with it. This applies to every `NodeResult.Block`, not only the agent's guardrails: the kernel cannot tell a guardrail from any other blocking node. Events carry no message content and stay in the log; a retracted checkpoint's events still name it.
-- **Retention is an explicit call, like compaction.** `prune(threadId, RetentionPolicy)` removes checkpoints older than `maxAge` (by the store's clock, against `createdAt`) or beyond the newest `maxCheckpoints`, and events older than `maxAge` or beyond the newest `maxEvents`. It never removes the latest checkpoint or its pending writes, so it never changes what the thread does next, and it needs no claim. Events follow their checkpoints, as §4 requires: pruning a checkpoint also removes the events before the oldest checkpoint kept. `maxAge` and `maxEvents` may remove more events than that, including those of checkpoints still kept, the latest checkpoint's among them. Removing events raises the replay floor exactly as `compactEvents` does, and it never moves back. No policy is applied automatically; a runtime-level schedule can follow once a durable store shows what its operators need.
-- **`RetentionPolicy` is a growth-prone type**: private constructor, `apply` with defaults (every limit `None`, keep everything), `with*` setters taking a value or an `Option`, `of` returning a `ValidationError`. `maxAge` is a `FiniteDuration`.
-
-Runtime decisions (`GraphRuntime`):
-
-- **`history`, `checkpoint` and `prune` check the tenant and take no claim.** The tenant is checked against the latest checkpoint, as admission does, and again on every checkpoint read, so a thread deleted and re-created for another tenant between the two reads leaks nothing. Reading never waits for a run.
-- **`fork(source, checkpointId, target)` creates a new thread only.** The target's first checkpoint copies the source checkpoint's snapshot and status, with no parent, the caller's run id, tenant and claim token, and a `RunEvent.ThreadForked` as the target's first event. A target that exists is `ThreadExists` (`TenantMismatch` first if it is another tenant's), the source itself a `ValidationError`, and a target held by a run `ThreadBusy`. The target is claimed in the store, and checked again under the claim, while it is created; the source is only read, so a running source can be forked. Pending writes are never copied: a fork of a `Running` checkpoint re-runs that checkpoint's tasks in the new thread when it is recovered. The snapshot is copied as it is, so once #1739 lands, tool calls already issued at the forked checkpoint keep the source thread's idempotency keys, which the snapshot records in their `ToolTask`, `ApprovalRequest` and `ToolQuestionRequest`; only model calls the fork makes afterwards derive new keys, since the key includes the thread. That is intended: a fork that re-runs a call the source already issued - `recover` of a `Running` checkpoint, `resume` of a parked approval or question - is de-duplicated against the source's call by its key, rather than performing the side effect a second time. Rejected: rewinding the same thread to an earlier checkpoint, which the issue does not ask for and which would let a reused `RunId` reproduce earlier idempotency keys for new model calls.
-- **`updateState(threadId, graph, expected, update, asNode, config)` edits state only.** It is optimistic: `expected` must be the latest checkpoint's id (`CheckpointConflict` otherwise). The update is applied to the committed state with each key's update function. With `asNode` it must stay within that node's declared write set (`UndeclaredWrite`, task `updateState`), as if the node had returned it; without it, within the graph's registered keys (`UnknownStateKey`). The new checkpoint keeps the status, frontier, open joins and parked continuations, so `start`, `recover` or `resume` continues the thread exactly as before the update. `asNode` does not schedule the node's successors or skip a held task: that would change the frontier, and a breakpoint skip is left to a follow-up (see #1742).
-- **`updateState` is fenced and held.** It holds the thread in this runtime and claims it in the store, re-reads and re-checks the version under the claim, commits fenced with the claim's token, and releases both, so a live run in any runtime refuses it with `ThreadBusy`.
-- **Completed pending writes are never replayed.** `updateState` carries the latest checkpoint's pending writes over to the new checkpoint, re-keyed, after checking they still rebind, so `recover` reuses them rather than running their tasks again; their updates apply after the edit. History never keeps pending writes, and fork does not copy them (above).
-- **Supersteps keep increasing.** The new checkpoint is one superstep on from `expected`. Tool idempotency keys are derived from the thread, the checkpoint id, the superstep, the task and the call id ([#1703](https://github.com/llm4s/llm4s/issues/1703)); with checkpoint ids counted along the thread and the superstep moving on, no later model call reproduces an earlier key whatever `RunId` is reused. After `deleteThread`, reusing both the thread id and a `RunId` repeats them; the guide says so.
-- **No checkpoint format change.** History, fork and `updateState` add no field to `Checkpoint`; provenance is in the two new durable events, `RunEvent.StateUpdated(fromCheckpoint, asNode, tenantId, principal)` and `RunEvent.ThreadForked(fromThread, fromCheckpoint, tenantId, principal)`. `Checkpoint.CurrentFormat` stays 6.
-
-Source breaks, with no shims: `Checkpointer` gains `history`, `checkpoint` and `prune`; `Commit` gains `retractTurn` (defaulted in `apply`); `GraphError` gains `CheckpointNotFound` and `ThreadExists`; `RunEvent` gains `StateUpdated` and `ThreadForked`; checkpoint ids of a thread's second and later runs change from `<runId>/1...` to counting along the thread.
-
-Limits:
-
-- A fork made before a turn is blocked keeps what it copied: it is another thread, and the Block retracts only its own. Its copy of an open turn is guarded when the fork continues that turn. That includes the pre-guard window: the model step commits the answer one superstep before the guard runs, so `history`, `checkpoint` and `fork` can read the unguarded answer in between, and a fork made then keeps it.
-- The retraction removes the turn's earlier checkpoints only. The closing `Failed` checkpoint holds whatever the blocking node's own `Block` update leaves; `Agent` removes the turn there with `MessageUpdate.RemoveTurn` (§4.13), and a custom blocking node must remove the content in its `Block` update likewise.
-- `maxAge` compares the store's clock with `createdAt` and event timestamps stamped by the committing runtime's clock; on a store shared by several hosts their skew shifts the effective age.
-- `updateState` cannot change what is scheduled. Continuing past an abandoned tool batch (#1739, decision 4) or skipping a held breakpoint (#1742, decision 3) needs a frontier edit, which is a follow-up.
-- `prune` is per thread and explicit; there is no store-wide sweep.
-- The kernel API only: `Agent` exposes no history, fork or `updateState` of its own, and Java and Kotlin have none yet.
 
 ## 5. Harness capabilities
 
@@ -1294,7 +545,7 @@ Tool implementations return content and state effects, never `ToolMessage`s. For
 
 ### 5.6 Middleware, permissions, and operations
 
-- Middleware is ordered and composable, not only a linear event observer. `AgentMiddleware` declares an ID, contributed state keys, contributed tools, and explicit before/after constraints; hooks have pass-through defaults so an implementation overrides only the phases it needs. It may also contribute prompt/context content and model/tool policy. Order registrations topologically by explicit constraints, using registration order to break ties; reject cycles. Hooks run in that order, and a `Command`, suspension, or failure short-circuits the current phase. `wrap*` middleware nests in that same order (first registered is outermost), and unwinds in reverse order; each wrapper controls whether and how often it calls `next`, with failures propagated through the wrapper stack. Lifecycle hooks include `beforeAgent`, `beforeModel`, `afterModel`, `afterToolCall`, and `afterAgent`; value-producing hooks return `HookResult[A]` with a transformed value/state update, `Command`, typed suspension, or failure. Both `wrapModelCall` and `wrapToolCall` can suspend or fail as well as continue, enabling retry, fallback, cache, dynamic model/tool selection, and HITL. Tool wrapping occurs after policy and before execution.
+- Middleware is ordered and composable, not only a linear event observer. `AgentMiddleware` declares an ID, contributed state keys, contributed tools, and explicit before/after constraints; hooks have pass-through defaults so an implementation overrides only the phases it needs. It may also contribute prompt/context content and model/tool policy. Order registrations topologically by explicit constraints, using registration order to break ties; reject cycles. Hooks run in that order, and a `Command`, suspension, or failure short-circuits the current phase. `wrap*` middleware nests in that same order (first registered is outermost), and unwinds in reverse order; each wrapper controls whether and how often it calls `next`, with failures propagated through the wrapper stack. Lifecycle hooks include `beforeAgent`, `beforeModel`, `afterModel`, `afterToolCall`, and `afterAgent`; **amended by #1902:** `beforeModel`/`afterModel` are covered by `wrapModelCall`, which reads thread state through a `ModelContext` and returns a `ModelResponse` carrying a state update, and `promptSections` contributes system-prompt content; `beforeAgent` and `afterAgent` return a `BoundaryResult` (the transformed text and a state update), a typed suspension (`ask`), or a failure (§4.22). Both `wrapModelCall` and `wrapToolCall` can suspend or fail as well as continue, enabling retry, fallback, cache, dynamic model/tool selection, and HITL. Tool wrapping occurs after policy and before execution.
 - Preserve guardrails as first-class middleware behavior. Input guardrails run in `beforeAgent` and at tool-argument validation; output guardrails run in `afterModel`, `afterToolCall`, and `afterAgent` for the corresponding content. Deterministic validators may reject or transform; LLM-as-judge guardrails use model hooks. A guardrail may return a typed failure or interrupt/suspension where configured. Keep explicit graph nodes available for applications that need guardrail outcomes to branch in workflow state.
 - Permission rules are ordered `(operation, path/resource, decision)` rules; first match wins. LLM4S deliberately diverges from Deep Agents' allow-if-unmatched behavior: unmatched file/tool operations are denied unless explicitly allowed. Sandbox `execute` is separately constrained by the sandbox provider and must not be treated as secured by virtual-filesystem path rules alone. Human approval maps to typed `approve`/`edit`/`reject` interrupt answers.
 - Use one agent execution event model that is also projected through the existing core tracing SPI. Start with runtime-owned typed events; add narrowly scoped generic events to core `TraceEvent` only when the runtime demonstrates a reusable tracing need, before MiMa is enabled. Stream consumers receive typed projections of the same events, including nested subagent handles and custom `ctx.emit` events. Align trace/span names with OpenTelemetry GenAI conventions such as `invoke_agent` and `execute_tool`.
@@ -1311,7 +562,7 @@ Tool implementations return content and state effects, never `ToolMessage`s. For
 | **0. Finalise contracts and prove risky semantics** | Settle typed state/update keys and declared writes, node input/route handles, static/dynamic join barriers, typed continuation resume and inherited tool-call/join identity, built-in `ApprovalResumeNode`, pause/partial-resume and incomplete-run recovery behavior, multi-turn thread semantics, runtime-owned tool results, schema argument validation, middleware/guardrail control flow, interruption cancellation, checkpoint/event DTOs and versioning, durable-event delivery after commit in every mode, and `llm4s-agent` API shape. | Prototypes prove update application/order, route and join checks, exactly one runtime-created result per tool call, approval continuation filling the original barrier slot with its `ToolCallId`, middleware- and tool-raised approval through `ApprovalResumeNode`, typed resume without re-execution, recovery from incomplete checkpoints without replaying successful sibling writes, rejection of invalid schema-constrained tool arguments before policy/side effects, run-wide pause and partial resume, Ox interruption propagation, persistence of continuation data without closures, and that Async-mode subscribers never see durable events before commit or sequence reuse after recovery. Finalise designs before enabling MiMa; this is not a release blocker. |
 | **1. Runtime kernel, agent loop first** | Implement the graph kernel in `llm4s-agent` under `org.llm4s.agent.graph`: typed state/update keys, node input types, static/dynamic join barriers, command and additive static routing, dynamic `Send`, superstep scheduler, per-task pending writes, Ox structured concurrency, budgets, retries/cache, and in-memory checkpoints with durable event-log SPI. Implement `Agent.run`, `continueConversation`, `runMultiTurn`, and `recover` directly on this runtime with `AgentTool`, middleware, and guardrails. Rebuild `PlanRunner` with typed graph contracts or remove it. Replace AgentEvent usages in `modules/samples/streaming/*` and update guardrail/tracing samples. | The sole agent loop and parallel update sample demonstrate deterministic application order, barrier release, and step boundaries. Validation covers failed sibling/recover without re-running completed siblings, typed suspension/partial resume, multi-turn input, guardrail behavior, cancellation, cycles/recursion limits, route safety, and error propagation. `Future` APIs remain adapters. |
 | **2. Durable execution and HITL** | Add checkpointer SPI plus SQLite backend, atomic checkpoint/event commits and event retention/compaction, Sync/Async/OnExit modes with synchronous persistence of every suspension, optimistic thread versions and run-claim fencing for snapshots and pending writes, typed concurrent interrupts/partial resume, static breakpoints, update/history/fork, policy checks, approval/edit/reject, idempotency keys, and provider-valid tool-result generation for every call including rejection/failure/interruption. | Restart/resume preserves checkpointed work and event replay within retention, rejects stale versions/claims, supports incremental approval, and does not replay completed pending writes. Provider contract suites verify exactly one tool result per call for OpenAI and Anthropic message formats. |
-| **3. Deep Agents harness profile** | Add state-backed virtual files and composite backend, full filesystem tool suite, workspace-backed sandbox execute, todos, context offload/summarization, Agent Skills-compatible loader, editable instruction memory, long-term store SPI and distinct semantic-memory hooks, prompt/default profile and tool allow/exclusion. Add response-format/multimodal support and typed/custom streams. | Port a deep-research example and a coding/workspace example. Each demonstrates tool policy, context management, streaming, checkpoint/resume, and persisted artifacts. |
+| **3. Deep Agents harness profile** ([#1901](https://github.com/llm4s/llm4s/issues/1901)) | Add state-backed virtual files and composite backend, full filesystem tool suite, workspace-backed sandbox execute, todos, context offload/summarization, Agent Skills-compatible loader, editable instruction memory, long-term store SPI and distinct semantic-memory hooks, prompt/default profile and tool allow/exclusion. Add response-format/multimodal support and typed/custom streams. | Port a deep-research example and a coding/workspace example. Each demonstrates tool policy, context management, streaming, checkpoint/resume, and persisted artifacts. |
 | **4. Subagents and isolation** | Add `task`/typed `TypedAgent[I,O]` delegation, configurable general-purpose subagent, isolated child checkpoint namespaces, parallel bounded children, nested stream handles and inherited policies/budgets. | Port deep research with parallel specialists; child returns typed final report and parent resumes/composes after failure or approval. |
 | **5. Production adapters and parity** | PostgreSQL checkpoint/store modules, migrations/retention, distributed worker claims, full trace/evaluation integrations, profile configuration, deployment examples. | Reference workflows meet documented functional parity matrix. Every extra module has build, `hooks/pre-commit`, docs, coverage, Codecov, migration, and IT-tier wiring. |
 
@@ -1363,7 +614,7 @@ The migration note should give direct replacements for existing state/event/Plan
 | Workspace dependency direction | **Adjusted.** Define `SandboxBackend` in `llm4s-agent`; implement it in `workspaceClient`, which already depends on agent. Do not add an agent-to-workspace dependency. |
 | Thread position, multi-turn, and partial approvals | **Accepted.** Put thread/checkpoint/task/node IDs in `RunContext`; apply new input to an existing completed thread's latest checkpoint; reject `start` with pending interrupts; permit incremental resume answers. |
 | Guardrails and state-update tracing | **Accepted.** Preserve guardrails as lifecycle middleware and migrate `TraceEvent.AgentStateUpdated` consumers to graph state/update events in the single migration note. |
-| Guardrail Block outcome | **Decided: a Block is a terminal failure.** A guardrail `Block` - any `beforeAgent`/`afterAgent` `Left` - still fails the run, so the caller gets the guardrail's error as the legacy `Agent` returns `Left`. The failure is a finished outcome, not an interrupted run: the checkpoint gets a terminal failed status, which `start` accepts like `Completed` (and `recover` refuses, as there is nothing to resume), and an output `Block` removes the blocked turn from history - its input, any tool calls and results, and the answer - so the thread's state keeps no blocked content, as the legacy `Agent`, which kept no thread, left none. The answer is still committed once before it is guarded: the model step's superstep stores it, and `afterAgent` runs in the next one. Until that next commit, a process that dies leaves the answer in the latest checkpoint, and `recover` then blocks and removes it. The store keeps only the latest checkpoint (§4.3), so the next commit overwrites that snapshot, and events carry no message content. Checkpoint history and fork (Stage 2, §4.9) must therefore never keep or expose a snapshot whose turn a later `Block` removed, or the loop must guard the answer before its first commit. The thread stays usable: the next `start` continues from the history before the blocked turn. Rejected: a refusal answer that completes the run (callers would have to inspect a typed result instead of an error; a behaviour change for guardrail users), and guarding output before it is stored (on its own it leaves the thread stuck, and `recover` would ask the model again). Needs a terminal failed checkpoint status and a node able to remove the turn's earlier writes in the same run (`MessageUpdate` has no such operation today: `RemoveThrough` drops the history up to a message, not after it); owned by Stage 1 (§4.9). **Amended by #1328:** the kernel decision stands; `Agent` reports a guardrail Block as `AgentStatus.Blocked` (§4.13). **Amended by #1702:** the store keeps a history now, and of the two options it takes the first: a Block's closing commit retracts every checkpoint of its turn from the history, so none is kept or exposed (§4.19). |
+| Guardrail Block outcome | **Decided: a Block is a terminal failure.** A guardrail `Block` - any `beforeAgent`/`afterAgent` `Left` - still fails the run, so the caller gets the guardrail's error as the legacy `Agent` returns `Left`. The failure is a finished outcome, not an interrupted run: the checkpoint gets a terminal failed status, which `start` accepts like `Completed` (and `recover` refuses, as there is nothing to resume), and an output `Block` removes the blocked turn from history - its input, any tool calls and results, and the answer - so the thread's state keeps no blocked content, as the legacy `Agent`, which kept no thread, left none. The answer is still committed once before it is guarded: the model step's superstep stores it, and `afterAgent` runs in the next one. Until that next commit, a process that dies leaves the answer in the latest checkpoint, and `recover` then blocks and removes it. The store keeps only the latest checkpoint (§4.3), so the next commit overwrites that snapshot, and events carry no message content. Checkpoint history and fork (Stage 2, §4.9) must therefore never keep or expose a snapshot whose turn a later `Block` removed, or the loop must guard the answer before its first commit. The thread stays usable: the next `start` continues from the history before the blocked turn. Rejected: a refusal answer that completes the run (callers would have to inspect a typed result instead of an error; a behaviour change for guardrail users), and guarding output before it is stored (on its own it leaves the thread stuck, and `recover` would ask the model again). Needs a terminal failed checkpoint status and a node able to remove the turn's earlier writes in the same run (`MessageUpdate` has no such operation today: `RemoveThrough` drops the history up to a message, not after it); owned by Stage 1 (§4.9). **Amended by #1328:** the kernel decision stands; `Agent` reports a guardrail Block as `AgentStatus.Blocked` (§4.13). **Amended by #1702:** the store keeps a history now, and of the two options it takes the first: a Block's closing commit retracts every checkpoint of its turn from the history, so none is kept or exposed (§4.19). **Amended by #1902:** an output Block restores every key the turn wrote, middleware and tool keys as well as the history, the active agent and the transfer, keeping only usage; the turn records each key's prior value in its `TurnState` (§4.22). |
 | Checkpoint fencing and stream delivery | **Accepted.** Fence task writes as well as snapshots with the run claim; serialize/version events and deliver them in sequence on an ordered dispatcher. |
 | Explicit joins and partial resume | **Accepted.** Static joins wait for declared arrivals; dynamic joins record expected fan-out task IDs. The tool-call batch feeds a barrier, so an approved branch cannot advance the model while other calls are unresolved. Quiescence with parked continuations reports `Suspended`; an impossible join fails explicitly. |
 | Tool-result ownership | **Accepted.** `AgentTool` returns content/effects/outcomes. The runtime creates the correlated provider-valid result message for success, failure, rejection, denial, and unknown tools, and the join enforces one result per call. Edited approvals replace the originating assistant message before execution. |

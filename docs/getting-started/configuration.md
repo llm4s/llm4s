@@ -73,8 +73,7 @@ libraryDependencies ++= Seq(
 | `bedrock` | `llm4s-bedrock` |
 | `deepseek`, `zai`, `openrouter`, `mistral`, `cohere`, `openai-compatible` | `llm4s-openai-compatible` |
 
-The provider modules are on `main` but not yet published: `0.4.1` ships every provider inside
-`llm4s-core`, so with `0.4.1` the `llm4s-core` dependency alone is enough.
+Before 0.5.0, every provider shipped inside `llm4s-core`, so the `llm4s-core` dependency alone was enough.
 
 **2. Add a section to `src/main/resources/application.conf`:**
 
@@ -271,6 +270,12 @@ loopback host, for tests): for OpenAI `api.openai.com` or a data-residency host 
 `ae.api.openai.com`), for Anthropic `api.anthropic.com`, where the SDK also posts the identity token
 (`<baseUrl>/v1/oauth/token`). A proxy or gateway `baseUrl` needs an `apiKey` instead.
 
+The Anthropic SDK reads `identityTokenFile` itself, so llm4s's own checks on a token file it reads (a regular file
+of at most 64 KiB, read with a bounded read) do not guard the SDK's reads. Building the client applies them once: a
+path that is a directory, a FIFO, a device or a file larger than 64 KiB is refused then, as a `ConfigurationError`
+naming `workloadIdentity.identityTokenFile`. A path that does not exist yet is accepted, because an identity agent
+may write it after the application starts. Point it at the file the agent keeps fresh.
+
 Request each SVID for the audience its relying party expects (`jwt_audience` in `spiffe-helper`).
 Other providers reject an `auth` block. The `prod` config-policy preset's `ownApiKey` rule accepts
 a section that authenticates this way.
@@ -287,7 +292,7 @@ section with an `apiKey`.
 | `provider` | Required. The provider id, e.g. `openai`, `anthropic`, `ollama` (table above) |
 | `model` | Required. The model name as the provider spells it, e.g. `gpt-4o-mini` |
 | `apiKey` | The API key; required by every cloud provider. Optional in the section when the vendor's shared key is set ([API keys](#api-keys)) |
-| `baseUrl` | Overrides the provider's default endpoint; **required** for `ollama` and `openai-compatible` |
+| `baseUrl` | Overrides the provider's default endpoint (`ollama`: `http://localhost:11434`); **required** for `openai-compatible` |
 | `headers` | Extra HTTP headers; sent by generic `openai-compatible` endpoints and by model listing |
 | `timeouts` | How long a request and a stream may take: `timeouts { request = 3m, stream = 15m }`. Every provider that makes HTTP calls reads it; see [Timeouts](#timeouts) |
 | `organization` | OpenAI, Requesty and OpenRouter: the OpenAI organisation id, sent as `OpenAI-Organization` |
@@ -386,8 +391,7 @@ llm4s {
     ollama-local {
       provider = "ollama"
       model    = "llama3.2"
-      baseUrl  = "http://localhost:11434"
-      baseUrl  = ${?OLLAMA_BASE_URL}       # optional override
+      baseUrl  = ${?OLLAMA_BASE_URL}       # optional override; the default is http://localhost:11434
     }
   }
 }

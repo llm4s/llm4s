@@ -153,6 +153,23 @@ class Llm4sBedrockModuleSpec extends AnyWordSpec with Matchers with ProviderModu
       }
     }
 
+    "send the content parts Converse takes and refuse the rest before sending" in {
+      import org.llm4s.testkit.ContentPartCase.*
+      // the contract's URLs are https, which Converse cannot fetch; s3:// is in BedrockContentPartsSpec
+      // a provider's 400 or 413 - a vendor limit llm4s leaves to it - is a typed error with its message
+      assertProviderRejectionIsTyped { (exchange, status, message) =>
+        exchange.getResponseHeaders.add("x-amzn-ErrorType", "ValidationException")
+        sendJsonResponse(exchange, status, ujson.Obj("message" -> message).render())
+      }(clientAt)
+      assertContentParts("bedrock", sendJsonResponse(_, 200, converseResponse("ok")))(
+        UserImageInline,
+        UserPdfInline,
+        UserTextDocumentInline,
+        ToolImageInline,
+        ToolPdfInline
+      )(clientAt)
+    }
+
     "complete a request" in {
       withServer("/")(sendJsonResponse(_, 200, converseResponse("pong"))) { url =>
         clientAt(url)

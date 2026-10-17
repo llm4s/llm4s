@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.auth
 
-import org.llm4s.annotation.Experimental
+import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.error.{ AuthenticationError, ConfigurationError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.ProviderConfig
@@ -23,8 +23,11 @@ import scala.util.Try
  *
  * `toString` shows `tokenUrl` without its userinfo or query, which may carry credentials, and
  * redacts `clientId`.
+ *
+ * Stable since #1818: `OpenAICompatibleConfig.tokenExchange` and `OpenAICompatibleClient.Credential.Exchange`
+ * carry it. The exchange itself ([[TokenExchange]]) is still Experimental.
  */
-@Experimental
+@Stable
 final case class TokenExchangeConfig private (
   identityToken: IdentitySource,
   tokenUrl: String,
@@ -45,7 +48,6 @@ final case class TokenExchangeConfig private (
     s"TokenExchangeConfig($identityToken, tokenUrl=${Redaction.url(tokenUrl)}, " +
       s"clientId=${Redaction.secretOpt(clientId)}, scope=$scope, audience=$audience)"
 
-@Experimental
 object TokenExchangeConfig:
 
   /** Creates a [[TokenExchangeConfig]]. Named arguments are the supported way to construct one. */

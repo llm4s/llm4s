@@ -94,8 +94,7 @@ llm4s {
 ```
 
 `resources/ollama.conf` is the no-key alternative, a local [Ollama](ollama-quickstart) (it needs `ollama serve`
-and `ollama pull llama3`). It is a separate file rather than a second section because the latest release checks
-every section when it loads the default one, so an OpenAI section without a key would stop the Ollama run too:
+and `ollama pull llama3`). It is a separate file so that each run reads only its own provider:
 
 ```hocon
 llm4s {
@@ -160,33 +159,32 @@ The wording depends on the model.
 
 ## If something goes wrong
 
-**`ConfigurationError: OpenAI provider 'openai-main' is missing required fields:`** followed by `apiKey`: the key
-is not set in the shell that runs `scala-cli`. Check `echo $OPENAI_API_KEY`, or use the Ollama command above.
+**`Error: ConfigurationError: Provider 'openai-main' (provider = openai) is missing required fields:`** followed by
+`- apiKey: set OPENAI_API_KEY, or set apiKey under llm4s.providers.openai-main in application.conf`: the key is not set
+in the shell that runs `scala-cli`. Check `echo $OPENAI_API_KEY`, or use the Ollama command above.
+
+**`Error: NetworkError: POST http://localhost:11434/api/chat: connection failed`** (the Ollama run): no Ollama server
+is listening. Start it with `ollama serve`, or point `OLLAMA_BASE_URL` at the one you have.
 
 **A wall of `DEBUG` lines before the answer**: `logback.xml` was not found. Run from the directory that
 contains it, and check the name and the `javaOpt` line.
 
-**The version**: the `//> using dep` lines pin the release. Change the number to move to another one, and read
-the next section if you move across 0.5.0.
+**The version**: the `//> using dep` lines pin the release. Change the number on every `org.llm4s` line together
+to move to another one: the modules are released at the same version.
 
-## With 0.5.0 and later
+## The dependencies
 
-Up to 0.4.x, `llm4s-core` includes the provider clients and a logging backend, so the single `llm4s-core`
-dependency is enough, and that is what the script above shows while 0.4.x is the latest release. From 0.5.0 the
-provider clients are separate modules and `llm4s-core` no longer brings a logging backend (see the
-[migration guide](/reference/migration#llm4s-no-longer-brings-a-logging-backend)). Once 0.5.0 is the latest release,
-this page shows the script with three more lines, which you can also add yourself:
+`llm4s-core` holds no provider client, so the script adds the provider modules it uses, `llm4s-openai` and
+`llm4s-ollama`; keep only the one you use. `llm4s-core` brings no logging backend either, so the script adds
+logback (see the [migration guide](/reference/migration#llm4s-no-longer-brings-a-logging-backend)). The logback
+line is a Java dependency (a single colon, unlike the `::` Scala form); without a backend SLF4J prints a single
+"no SLF4J providers were found" warning and `logback.xml` has no effect.
 
-```scala
-//> using dep org.llm4s::llm4s-openai:<the 0.5.0 release or later>
-//> using dep org.llm4s::llm4s-ollama:<the 0.5.0 release or later>
-//> using dep ch.qos.logback:logback-classic:1.5.34
-```
+The `apiKey = ${?OPENAI_API_KEY}` line in the section is optional: `llm4s-openai` binds `OPENAI_API_KEY` itself,
+and a section's own `apiKey` takes precedence over it.
 
-Keep only the provider module you use. The logback line is a Java dependency (a single colon, unlike the `::`
-Scala form); without a backend SLF4J prints a single "no SLF4J providers were found" warning and `logback.xml`
-has no effect. Keep `apiKey = ${?OPENAI_API_KEY}` in the section: 0.4.x needs it, and with 0.5.0 a section's own
-`apiKey` takes precedence over the one the provider module binds, so it does no harm.
+Up to 0.4.x, `llm4s-core` included the provider clients and a logging backend, so a script for 0.4.x needs only the
+`llm4s-core` line, and the `apiKey` line in the section.
 
 ## Next steps
 

@@ -122,6 +122,8 @@ map_file_to_project() {
     modules/observability/*)              echo "observability" ;;
     modules/agent-tools/*)                echo "agentTools" ;;
     modules/agent-testkit/*)              echo "agentTestkit" ;;
+    modules/agent-checkpoint-sqlite/*)    echo "agentCheckpointSqlite" ;;
+    modules/agent-memory/*)               echo "agentMemory" ;;
     modules/benchmarks/*)                 echo "benchmarks" ;;
     modules/anthropic/*)                  echo "anthropic" ;;
     modules/samples/*)                    echo "samples" ;;
@@ -251,6 +253,8 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE traceOpentelemetry
       set_add DOWNSTREAM_COMPILE agent
       set_add DOWNSTREAM_COMPILE agentTestkit
+      set_add DOWNSTREAM_COMPILE agentCheckpointSqlite
+      set_add DOWNSTREAM_COMPILE agentMemory
       set_add DOWNSTREAM_COMPILE agentTools
       set_add DOWNSTREAM_COMPILE knowledgegraphNeo4j
       set_add DOWNSTREAM_COMPILE gradleDemo
@@ -282,6 +286,7 @@ propagate_downstream() {
       ;;
     memory)
       set_add DOWNSTREAM_COMPILE memoryPostgres
+      set_add DOWNSTREAM_COMPILE agentMemory
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
@@ -422,6 +427,8 @@ propagate_downstream() {
       ;;
     agent)
       set_add DOWNSTREAM_COMPILE agentTestkit
+      set_add DOWNSTREAM_COMPILE agentCheckpointSqlite
+      set_add DOWNSTREAM_COMPILE agentMemory
       set_add DOWNSTREAM_COMPILE rag
       set_add DOWNSTREAM_COMPILE workspaceClient
       set_add DOWNSTREAM_COMPILE samples

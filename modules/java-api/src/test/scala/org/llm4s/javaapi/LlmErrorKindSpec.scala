@@ -57,6 +57,7 @@ class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
     (APIError("openai", "odd reply"), LlmErrorKind.SERVICE, true),
     (ValidationError.required("query"), LlmErrorKind.VALIDATION, false),
     (InvalidInputError("image", "x", "not an image"), LlmErrorKind.VALIDATION, false),
+    (UnsupportedContentPartError("ollama", "image (url, image/png)", "user"), LlmErrorKind.VALIDATION, false),
     (ConfigurationError("no provider"), LlmErrorKind.CONFIGURATION, false),
     (CancelledError("complete"), LlmErrorKind.CANCELLED, false),
     (ContextError.invalidTrimming("empty"), LlmErrorKind.OTHER, false),

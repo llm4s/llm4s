@@ -12,6 +12,17 @@ import scala.util.Try
  * One run's view of its thread's subscription: passes on the run's durable and live events, every
  * `LiveGap` and a `Disconnected`, and nothing of another run.
  *
+ * A run is one incarnation, not one `RunId`: an id may be reused - a recovery under the same id, or
+ * any run given one with `RunConfig.withRunId` - so a thread's log can hold two runs of one id. Every
+ * subscription a scope is attached to starts at its run's claim (the run's observer, or
+ * `RunHandle.subscribe`), so the first durable event of its id it is given is its own claim's; the
+ * scope keeps that event's [[EventRecord.token]], and passes on a durable event only if it has both the
+ * run's id and that token. A lost earlier run's late write, or a later run of the same id - one replayed
+ * to a scope subscribed after its run ended without a terminal event - is never this run's. A live event
+ * is matched the same way, by id and [[StreamEvent.Live.token]]: a node of a lost run that ignores the
+ * interrupt can send progress after this run's claim. A live event before the scope has its run's
+ * claim is never the run's - no node of a run runs before its claim is committed - and is dropped.
+ *
  * The scope ends - once - at the first of:
  *  - the run's terminal durable event (`RunCompleted`, `RunSuspended`, `RunFailed`, `RunCancelled`,
  *    `RunTimedOut`), after passing it on;
@@ -40,22 +51,36 @@ final private[agent] class RunScope(runId: RunId, listener: StreamEvent => Unit,
   private val finished = new CompletableFuture[Unit]()
   // the thread the listener is called on, once it has been: `awaitEnd` from the listener cannot wait for itself
   @volatile private var listenerThread: Option[Thread] = None
+  // the token of the run's claim: that of the first durable event of the run given to the scope
+  @volatile private var incarnation: Option[FencingToken] = None
 
   def apply(event: StreamEvent): Unit =
     if !ending.get then
       event match
-        case StreamEvent.Durable(record) if record.runId == runId.value =>
+        case StreamEvent.Durable(record) if record.runId == runId.value && ownIncarnation(record) =>
           deliver(event)
           if RunScope.terminal(record.event) then end()
-        case StreamEvent.Durable(_)                              => ()
-        case live: StreamEvent.Live if live.runId == runId.value => deliver(event)
-        case _: StreamEvent.Live                                 => ()
-        case disconnected: StreamEvent.Disconnected              =>
+        case StreamEvent.Durable(_) => ()
+        case live: StreamEvent.Live if live.runId == runId.value && incarnation.contains(live.token) =>
+          deliver(event)
+        case _: StreamEvent.Live                    => ()
+        case disconnected: StreamEvent.Disconnected =>
           // the subscription is over whatever the listener does with its last event
           val delivered = Try(deliver(disconnected))
           end()
           delivered.get
         case gap: StreamEvent.LiveGap => deliver(gap)
+
+  /**
+   * Whether `record`, an event of the scope's run id, was committed under the run's own claim; the first
+   * such event fixes which claim that is. Called only on the listener's thread.
+   */
+  private def ownIncarnation(record: EventRecord): Boolean =
+    incarnation match
+      case Some(token) => token == record.token
+      case None =>
+        incarnation = Some(record.token)
+        true
 
   private def deliver(event: StreamEvent): Unit =
     listenerThread = Some(Thread.currentThread())
@@ -145,6 +170,6 @@ private[agent] object RunScope:
 
   /** Whether `event` is the last durable event of its run. */
   def terminal(event: RunEvent): Boolean = event match
-    case _: RunEvent.RunSuspended | _: RunEvent.RunFailed                     => true
-    case RunEvent.RunCompleted | RunEvent.RunCancelled | RunEvent.RunTimedOut => true
-    case _                                                                    => false
+    case _: RunEvent.RunSuspended | _: RunEvent.RunFailed                           => true
+    case RunEvent.RunCompleted | RunEvent.RunCancelled(_) | RunEvent.RunTimedOut(_) => true
+    case _                                                                          => false

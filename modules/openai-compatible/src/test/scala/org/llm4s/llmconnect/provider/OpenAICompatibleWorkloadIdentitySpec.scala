@@ -691,6 +691,52 @@ class OpenAICompatibleWorkloadIdentitySpec
           new OpenAICompatibleClient(settings(credential), OpenAICompatibleDialect.standard(Seq(name -> "Bearer x")))
     }
 
+    "fail a request whose Dynamic provider throws with an AuthenticationError, sending nothing (#1818)" in {
+      val throwing = new AccessTokenProvider:
+        def token(): Result[String]            = throw new IllegalStateException("token store down: secret-detail")
+        def invalidate(rejected: String): Unit = ()
+      val http = MockHttpClient(Seq.empty)
+      val c = new OpenAICompatibleClient(
+        settings(OpenAICompatibleClient.Credential.Dynamic(throwing)),
+        OpenAICompatibleDialect.Standard
+      ) {
+        override protected[provider] val httpClient: Llm4sHttpClient = http
+      }
+      for result <- Seq(
+          c.complete(conversation, CompletionOptions()),
+          c.streamComplete(conversation, CompletionOptions(), _ => ())
+        )
+      do
+        val error = result.left.value
+        error shouldBe an[AuthenticationError]
+        error.message should include("IllegalStateException")
+        (error.message should not).include("secret-detail")
+      http.posts shouldBe empty
+      c.close()
+    }
+
+    "still retry once on a 401 when the Dynamic provider's invalidate throws (#1818)" in {
+      val issued = new AtomicInteger(0)
+      val flaky = new AccessTokenProvider:
+        def token(): Result[String]            = Right(s"t${issued.incrementAndGet()}")
+        def invalidate(rejected: String): Unit = throw new IllegalStateException("cannot drop")
+      val http = MockHttpClient(
+        Seq(
+          HttpResponse(401, """{"error":{"message":"expired"}}"""),
+          HttpResponse(200, """{"id":"x","created":1,"model":"m","choices":[{"message":{"content":"hi"}}]}""")
+        )
+      )
+      val c = new OpenAICompatibleClient(
+        settings(OpenAICompatibleClient.Credential.Dynamic(flaky)),
+        OpenAICompatibleDialect.Standard
+      ) {
+        override protected[provider] val httpClient: Llm4sHttpClient = http
+      }
+      c.complete(conversation, CompletionOptions()).isRight shouldBe true
+      http.posts.map(_._2("Authorization")) shouldBe Seq("Bearer t1", "Bearer t2")
+      c.close()
+    }
+
     "accept a static key beside a dialect Authorization header, as before" in {
       new OpenAICompatibleClient(
         settings(OpenAICompatibleClient.Credential.Static("k")),

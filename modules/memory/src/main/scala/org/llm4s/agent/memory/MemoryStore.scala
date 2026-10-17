@@ -40,6 +40,21 @@ trait MemoryStore {
     }
 
   /**
+   * Store `add`, then delete `remove`: one replacement, such as a consolidation's summary for the memories it
+   * summarises. A memory of `remove` that is not there is skipped.
+   *
+   * This default stores, then deletes one by one, so it is atomic for a store whose writes return a new store and
+   * leave the original untouched (as [[InMemoryStore]] does). [[SQLiteMemoryStore]] and the Postgres store override it
+   * as one transaction; any other store that writes in place should too.
+   *
+   * @return the store after the replacement, or an error
+   */
+  def replace(add: Seq[Memory], remove: Seq[MemoryId]): Result[MemoryStore] =
+    storeAll(add).flatMap(stored =>
+      remove.foldLeft[Result[MemoryStore]](Right(stored))((acc, id) => acc.flatMap(_.delete(id)))
+    )
+
+  /**
    * Retrieve a memory by its ID.
    *
    * @param id The memory identifier

@@ -119,7 +119,8 @@ def streamAnswer(agent: AgentPekko)(using system: ActorSystem) =
    interrupted, and the thread is left for `recover`. Cancelling returns at once, while the turn is still ending; the
    stream's materialized `Future[Done]` completes once it has ended and the thread is free (see below).
  - A slow consumer never holds the run up. It loses live events (text deltas, tool progress) and receives one
-   `StreamEvent.LiveGap` with their count where they were dropped. Durable events are never dropped. `bufferSize` (256
+   `StreamEvent.LiveGap` with their count where they were dropped. Durable events are kept, up to 1024 waiting
+   (`Agent.StreamCapacity`); a consumer that falls further behind fails the stream. `bufferSize` (256
    unless you pass another) is how many live events wait before the rest are counted.
  - A refused start (a blank query, a busy thread), a failed turn and a subscription that disconnects fail the stream
    with an `LLMException`. A turn that commits no terminal event still ends the stream.

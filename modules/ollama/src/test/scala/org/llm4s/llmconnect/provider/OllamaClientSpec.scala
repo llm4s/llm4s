@@ -35,7 +35,7 @@ private[provider] object OllamaRequestBodyTestHelper {
     options: CompletionOptions,
     stream: Boolean
   ): ujson.Obj =
-    client.createRequestBody(conversation, options, stream)
+    client.createRequestBody(conversation, options, stream).fold(e => throw new AssertionError(e.message), identity)
 }
 
 class OllamaClientSpec extends AnyFunSuite {

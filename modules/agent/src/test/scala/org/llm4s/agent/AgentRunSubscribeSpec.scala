@@ -56,8 +56,8 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
       e match
         case StreamEvent.Durable(record) =>
           record.event match
-            case RunEvent.RunCompleted | RunEvent.RunFailed(_) | RunEvent.RunSuspended(_) | RunEvent.RunCancelled |
-                RunEvent.RunTimedOut =>
+            case RunEvent.RunCompleted | RunEvent.RunFailed(_, _) | RunEvent.RunSuspended(_) |
+                RunEvent.RunCancelled(_) | RunEvent.RunTimedOut(_) =>
               terminal.set(true)
             case _ => ()
         case _ => ()
@@ -150,7 +150,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     val appender = new ListAppender[ILoggingEvent]()
     appender.start()
     logger.addAppender(appender)
-    val took = Using.resource(new AutoCloseable { def close(): Unit = logger.detachAppender(appender): Unit }) { _ =>
+    Using.resource(new AutoCloseable { def close(): Unit = logger.detachAppender(appender): Unit }) { _ =>
       val gate  = new CountDownLatch(1)
       val agent = agentOf(Scripted(gate, Right(answer("hi"))))
       val run   = ok(agent.start(ThreadId("s1f"), "hello"))
@@ -158,12 +158,11 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
       val sub   = ok(run.subscribe()(c.listener))
       sub.cancel()
       gate.countDown()
-      val started = System.nanoTime()
       ok(run.await()).answer shouldBe Some("hi")
       c.terminalSeen shouldBe false
-      (System.nanoTime() - started).nanos
     }
-    took should be < 1.second
+    // a drain that waited for the cancelled listener would wait out `AgentRun.Drain` and then warn: the
+    // missing warning is the proof, with no wall-clock bound that a loaded machine could break
     appender.list.asScala.filter(_.getLevel == Level.WARN) shouldBe empty
   }
 
@@ -229,7 +228,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     c.terminalSeen shouldBe true // await drained the listener
     durableRuns(c).distinct shouldBe Vector(recovered.runId.value)
     c.all.collectFirst { case StreamEvent.Durable(r) => r.event } should matchPattern {
-      case Some(RunEvent.RunRecovered(_, _, _)) =>
+      case Some(RunEvent.RunRecovered(_, _, _, _)) =>
     }
     lastIsTerminal(c, RunEvent.RunCompleted)
   }
@@ -258,8 +257,13 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     val cancels                 = new java.util.concurrent.atomic.AtomicInteger(0)
     override def cancel(): Unit = cancels.incrementAndGet(): Unit
 
-  private def record(run: String, seq: Long, event: RunEvent): StreamEvent =
-    StreamEvent.Durable(EventRecord("t", seq, run, None, None, None, java.time.Instant.EPOCH, event))
+  private def record(run: String, seq: Long, event: RunEvent, token: Long = 1L): StreamEvent =
+    StreamEvent.Durable(
+      EventRecord("t", seq, run, FencingToken(token), None, None, None, java.time.Instant.EPOCH, event)
+    )
+
+  private def live(run: String, name: String, token: Long = 1L): StreamEvent =
+    StreamEvent.Live("t", run, FencingToken(token), "x", "n", name, 1, ujson.Null)
 
   "RunScope" should "cancel its subscription on the run's terminal event, once, and then pass on nothing" in {
     val c     = Received()
@@ -269,8 +273,8 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     scope.attach(sub)
     scope(record("r0", 1, RunEvent.RunCompleted))
     scope(record("r1", 2, RunEvent.RunStarted(None, None)))
-    scope(StreamEvent.Live("t", "r0", "x", "n", "other.run", 1, ujson.Null))
-    scope(StreamEvent.Live("t", "r1", "x", "n", "this.run", 1, ujson.Null))
+    scope(live("r0", "other.run"))
+    scope(live("r1", "this.run"))
     scope(StreamEvent.LiveGap(2))
     sub.cancels.get shouldBe 0
     scope(record("r1", 3, RunEvent.RunCompleted))
@@ -279,10 +283,35 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     sub.cancels.get shouldBe 1
     ends.get shouldBe 1
     c.all.map {
-      case StreamEvent.Durable(r)                => r.seq.toString
-      case StreamEvent.Live(_, _, _, _, n, _, _) => n
-      case other                                 => other.toString
+      case StreamEvent.Durable(r)                   => r.seq.toString
+      case StreamEvent.Live(_, _, _, _, _, n, _, _) => n
+      case other                                    => other.toString
     } shouldBe Vector("2", "this.run", "LiveGap(2)", "3")
+  }
+
+  it should "pass on only the incarnation of its run id whose claim it was given first, not a reused id's other run (#1918)" in {
+    val c     = Received()
+    val scope = RunScope(RunId("r1"), c.listener)
+    scope.attach(CountingSubscription())
+    // before the run's claim no node of the run has run: a live event of its id is another incarnation's
+    scope(live("r1", "before.claim", token = 2L))
+    // a subscription made for the run starts at its claim: the run's first event fixes its token
+    scope(record("r1", 2, RunEvent.RunRecovered("c1", None, None, Some("r1")), token = 3L))
+    // a write of the lost run it took over, under the same id: never this run's
+    scope(record("r1", 3, RunEvent.TaskCompleted, token = 2L))
+    // nor progress from a node of that lost run, still running after this run's claim
+    scope(live("r1", "lost.run", token = 2L))
+    scope(live("r1", "this.run", token = 3L))
+    scope(record("r1", 4, RunEvent.TaskCompleted, token = 3L))
+    // a later run under the same id - replayed to a scope whose run ended without a terminal event
+    scope(record("r1", 5, RunEvent.RunStarted(None, None), token = 4L))
+    scope(live("r1", "later.run", token = 4L))
+    scope(record("r1", 6, RunEvent.RunCompleted, token = 4L))
+    scope.isEnded shouldBe false
+    c.all.collect {
+      case StreamEvent.Durable(r)                   => r.seq.toString
+      case StreamEvent.Live(_, _, _, _, _, n, _, _) => n
+    } shouldBe Vector("2", "this.run", "4")
   }
 
   it should "cancel a subscription attached after the run's terminal event" in {
@@ -347,7 +376,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
         listenerDone.await(10, TimeUnit.SECONDS): Unit
     })
     val listening =
-      Thread.ofVirtual().start(() => scope(StreamEvent.Live("t", "r1", "x", "n", "this.run", 1, ujson.Null)))
+      Thread.ofVirtual().start(() => scope(record("r1", 1, RunEvent.RunStarted(None, None))))
     entered.await(5, TimeUnit.SECONDS) shouldBe true // the listener call is in progress
     val cancelling = Thread.ofVirtual().start(() => scope.cancel())
     cancelling.join(java.time.Duration.ofSeconds(2)) shouldBe true

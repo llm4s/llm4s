@@ -43,6 +43,8 @@ import org.slf4j.LoggerFactory
  *
  * == Limitations ==
  * - `streamComplete` requests bypass the cache entirely.
+ * - A conversation with an image or a document part bypasses it too: the prompt is embedded as
+ *   text, so two requests differing only in their media would otherwise share an answer.
  * - Cache is in-memory and lost on restart.
  * - Cache lookup involves a linear scan (O(n)) of all entries to calculate cosine similarity.
  *   Performance may degrade with very large `maxSize`.
@@ -76,7 +78,11 @@ class CachingLLMClient(
   override def complete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions()
-  ): Result[Completion] = {
+  ): Result[Completion] =
+    if (Message.hasMedia(conversation.messages)) baseClient.complete(conversation, options)
+    else completeCached(conversation, options)
+
+  private def completeCached(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
     // SECURITY: Only include User and System messages in the embedding prompt.
     // Exclude Assistant messages (which may contain tool calls) and Tool messages (outputs)
     // to prevent leaking sensitive information found in tool arguments or outputs.

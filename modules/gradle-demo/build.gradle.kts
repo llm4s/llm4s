@@ -15,32 +15,19 @@ repositories {
     mavenCentral()
 }
 
-val llm4sVersion = "0.4.1"
+val llm4sVersion = "0.5.1"
 
 dependencies {
-    // ── Core module ──────────────────────────────────────────────────────────
     // The _3 suffix selects the Scala 3 artifact. Gradle does not resolve Scala
     // cross-version suffixes automatically — you must specify it explicitly.
     implementation("org.llm4s:llm4s-core_3:$llm4sVersion")
 
-    // ── Logback exclusion (Spring Boot / Ktor projects) ──────────────────────
-    // llm4s-core 0.4.x declares logback-classic 1.5.x as a compile dependency (the split
-    // modules on main depend on slf4j-api only, so this is not needed there).
-    // Spring Boot 3.2.x ships 1.4.x; having both on the classpath causes
-    // "multiple SLF4J bindings" warnings or log-format changes.
-    // Uncomment the block below if your project manages logging separately:
-    //
-    // implementation("org.llm4s:llm4s-core_3:$llm4sVersion") {
-    //     exclude(group = "ch.qos.logback", module = "logback-classic")
-    // }
+    // llm4s-core ships no provider client: add the module of each provider you call
+    // (llm4s-openai, llm4s-anthropic, llm4s-gemini, llm4s-ollama, llm4s-openai-compatible, ...).
+    implementation("org.llm4s:llm4s-openai_3:$llm4sVersion")
 
-    // ── Azure exclusion (non-Azure projects) ─────────────────────────────────
-    // llm4s-core 0.4.x depends on azure-ai-openai. If you do not use the Azure
-    // provider you can shed that transitive dependency tree with:
-    //
-    // implementation("org.llm4s:llm4s-core_3:$llm4sVersion") {
-    //     exclude(group = "com.azure", module = "azure-ai-openai")
-    // }
+    // From 0.5.0 llm4s depends on slf4j-api only and brings no logging backend, and core
+    // carries no vendor SDK, so the logback and Azure exclusions 0.4.x needed are gone.
 }
 
 // ── Scala library version pinning ───────────────────────────────────────────

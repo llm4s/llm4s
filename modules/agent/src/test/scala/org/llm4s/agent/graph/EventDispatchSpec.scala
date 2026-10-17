@@ -44,8 +44,8 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   private def isEnd(r: EventRecord): Boolean = r.event match {
-    case RunEvent.RunCompleted | RunEvent.RunFailed(_) => true
-    case _                                             => false
+    case RunEvent.RunCompleted | RunEvent.RunFailed(_, _) => true
+    case _                                                => false
   }
 
   private def durableSeqs(events: Vector[StreamEvent]): Vector[Long] =
@@ -68,13 +68,14 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     ) =
       underlying.renew(threadId, token, ttl)
     def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = underlying.effect(threadId, key)
     def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = {
       if reads.incrementAndGet() == 2 then switching.countDown()
       underlying.eventsAfter(threadId, afterSeq, limit)
     }
     def compactEvents(threadId: ThreadId, beforeSeq: Long)              = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId)                                = underlying.deleteThread(threadId)
+    def deleteThread(threadId: ThreadId, token: FencingToken)           = underlying.deleteThread(threadId, token)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
@@ -173,9 +174,9 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
       .subscribe(thread, capacity = 4) { event =>
         collector.listener(event)
         event match {
-          case StreamEvent.Live(_, _, _, _, _, _, payload) if payload("kind").str == "burst" =>
+          case StreamEvent.Live(_, _, _, _, _, _, _, payload) if payload("kind").str == "burst" =>
             if blocked.compareAndSet(false, true) then burstDone.await(10, TimeUnit.SECONDS): Unit
-          case StreamEvent.Live(_, _, _, _, _, _, payload) =>
+          case StreamEvent.Live(_, _, _, _, _, _, _, payload) =>
             lastTick.set(payload("i").num.toInt)
             tickSignal.put(payload("i").num.toInt)
           case _: StreamEvent.LiveGap => sawGap.set(true)
@@ -216,7 +217,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     (burst.size + ticks + gaps.sum) shouldBe (50 + ticksSent.get)
     // the gap marker precedes the next accepted event
     received.indexWhere(_.isInstanceOf[StreamEvent.LiveGap]) should be > received.indexWhere {
-      case StreamEvent.Live(_, _, _, _, _, _, p) => p("kind").str == "burst"; case _ => false
+      case StreamEvent.Live(_, _, _, _, _, _, _, p) => p("kind").str == "burst"; case _ => false
     }
   }
 
@@ -290,7 +291,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
       case other                  => fail(s"expected RunStarted, got $other")
     }
     received.drop(3) match {
-      case Vector(StreamEvent.Live(_, _, _, _, _, _, payload), gap, disconnected) =>
+      case Vector(StreamEvent.Live(_, _, _, _, _, _, _, payload), gap, disconnected) =>
         payload("i").num.toInt shouldBe 1
         gap shouldBe StreamEvent.LiveGap(2) // 1 delivered + 2 reported = 3 sent
         disconnected shouldBe StreamEvent.Disconnected(3L, DisconnectReason.Lagging)
@@ -369,7 +370,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     release.countDown()
 
     val received = collector.untilRunEnds()
-    received.collect { case StreamEvent.Live(_, _, _, _, _, _, p) => p("i").num.toInt } shouldBe Vector(1, 2, 3)
+    received.collect { case StreamEvent.Live(_, _, _, _, _, _, _, p) => p("i").num.toInt } shouldBe Vector(1, 2, 3)
     received.collect { case StreamEvent.Durable(r) => r.event }.collect { case RunEvent.Custom(_, _, p) =>
       p("i").num.toInt
     } shouldBe Vector(1, 2, 3)
@@ -442,10 +443,11 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
       ) =
         store.renew(threadId, token, ttl)
       def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = store.release(threadId, token)
+      def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = store.effect(threadId, key)
       def latest(threadId: ThreadId)                                             = store.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = Left(error)
       def compactEvents(threadId: ThreadId, beforeSeq: Long)              = store.compactEvents(threadId, beforeSeq)
-      def deleteThread(threadId: ThreadId)                                = store.deleteThread(threadId)
+      def deleteThread(threadId: ThreadId, token: FencingToken)           = store.deleteThread(threadId, token)
       def history(threadId: ThreadId, before: Option[String], limit: Int) = store.history(threadId, before, limit)
       def checkpoint(threadId: ThreadId, checkpointId: String)            = store.checkpoint(threadId, checkpointId)
       def prune(threadId: ThreadId, policy: RetentionPolicy)              = store.prune(threadId, policy)

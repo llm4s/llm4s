@@ -1,9 +1,9 @@
 package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.*
-import org.llm4s.error.ConfigurationError
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.provider.OllamaProvider
+import org.llm4s.llmconnect.spi.ProviderDescriptor
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import pureconfig.ConfigSource
@@ -41,7 +41,7 @@ class OllamaNamedProviderSpec extends AnyWordSpec with Matchers:
           fail(s"Expected Ollama NamedProviderConfig, got error: ${err.message}")
     }
 
-    "fail clearly when Ollama baseUrl is missing" in {
+    "accept a section with no usable baseUrl, which then means the local server (#1991)" in {
       validate(
         "ollama-local",
         RawNamedProviderSection(
@@ -51,30 +51,43 @@ class OllamaNamedProviderSpec extends AnyWordSpec with Matchers:
           apiKey = None,
         )
       ) match
-        case Left(err) =>
-          err.message should include("- baseUrl: set it in application.conf under llm4s.providers.")
-          (err.message should not).include("OLLAMA_BASE_URL")
         case Right(cfg) =>
-          fail(s"Expected missing Ollama baseUrl failure, got config: $cfg")
+          cfg.baseUrl shouldBe None
+          ProviderDescriptor.resolveBaseUrl("ollama-local", cfg, OllamaProvider.configSpec) shouldBe
+            Right("http://localhost:11434")
+        case Left(err) =>
+          fail(s"Expected the section to validate with the default baseUrl, got error: ${err.message}")
+    }
+
+    "keep a section's own baseUrl over the default" in {
+      validate(
+        "ollama-remote",
+        RawNamedProviderSection(
+          provider = Some("ollama"),
+          model = Some("llama3:latest"),
+          baseUrl = Some("http://gpu-box:11434"),
+          apiKey = None,
+        )
+      ).flatMap(ProviderDescriptor.resolveBaseUrl("ollama-remote", _, OllamaProvider.configSpec)) shouldBe
+        Right("http://gpu-box:11434")
     }
   }
 
   "NamedProviderSectionValidator" should {
-    "mention missing Ollama fields by name" in {
+    "report no missing field for an Ollama section without baseUrl" in {
       val name    = ProviderName("my-ollama")
       val section = RawNamedProviderSection(Some("ollama"), Some("llama3"), None, None)
       val result = NamedProviderConfigNormalizer
         .normalize(name, section)
         .flatMap(NamedProviderSectionValidator.validate(name, OllamaProvider, _))
-      val message =
-        result.left.toOption.getOrElse(fail(s"Expected Left, got $result")).asInstanceOf[ConfigurationError].message
 
-      message should include("Provider 'my-ollama' (provider = ollama) is missing required fields")
-      message should include(
-        "- baseUrl: set it in application.conf under llm4s.providers.my-ollama.baseUrl (e.g. http://localhost:11434)"
-      )
-      // No variable is read for a named section, so none is suggested (#1215).
-      (message should not).include("OLLAMA_BASE_URL")
+      result.map(_.model.asString) shouldBe Right("llama3")
+    }
+
+    "declare OLLAMA_BASE_URL as the conventional variable, and default to localhost" in {
+      OllamaProvider.configSpec.defaultBaseUrl shouldBe Some("http://localhost:11434")
+      OllamaProvider.configSpec.baseUrlEnv shouldBe Some(OllamaConfigKeys.OLLAMA_BASE_URL)
+      OllamaProvider.configSpec.requiresBaseUrl shouldBe false
     }
   }
 
@@ -118,5 +131,21 @@ class OllamaNamedProviderSpec extends AnyWordSpec with Matchers:
           httpClient.lastUrl shouldBe Some("http://localhost:11434/api/tags")
         case Left(err) =>
           fail(s"Expected listed models, got error: ${err.message}")
+    }
+
+    "list models from the local server for a section without baseUrl (#1991)" in {
+      val hocon =
+        """
+          |llm4s.providers {
+          |  provider = "ollama-main"
+          |  ollama-main { provider = "ollama", model = "llama3.1" }
+          |}
+          |""".stripMargin
+
+      val httpClient = new MockHttpClient(HttpResponse(200, """{"models": [{"name": "llama3.1:latest"}]}""", Map.empty))
+
+      Llm4sConfig.listModels("ollama-main", ConfigSource.string(hocon), httpClient).map(_.map(_.name.asString)) shouldBe
+        Right(List("llama3.1:latest"))
+      httpClient.lastUrl shouldBe Some("http://localhost:11434/api/tags")
     }
   }

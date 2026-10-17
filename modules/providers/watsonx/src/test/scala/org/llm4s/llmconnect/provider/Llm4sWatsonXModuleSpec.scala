@@ -12,7 +12,7 @@ import org.llm4s.testkit.LocalProviderTestServer.{
   streamThenHold,
   withServer
 }
-import org.llm4s.testkit.{ ProviderModuleChecks, ProviderTestConfig }
+import org.llm4s.testkit.{ ContentPartCase, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -125,6 +125,22 @@ class Llm4sWatsonXModuleSpec extends AnyWordSpec with Matchers with ProviderModu
             completion.usage.map(_.totalTokens) shouldBe Some(8)
           case Left(error) => fail(error.message)
       }
+    }
+
+    "send text and inline images, and refuse every other content part before the IAM exchange" in {
+      val body =
+        """{"id":"gen-1","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"""
+      // a provider's 400 or 413 - a vendor limit llm4s leaves to it - is a typed error with its message
+      assertProviderRejectionIsTyped((exchange, status, message) =>
+        routed(
+          sendJsonResponse(
+            _,
+            status,
+            ujson.Obj("errors" -> ujson.Arr(ujson.Obj("code" -> "bad", "message" -> message))).render()
+          )
+        )(exchange)
+      )(clientAt)
+      assertContentParts("watsonx", routed(sendJsonResponse(_, 200, body)))(ContentPartCase.UserImageInline)(clientAt)
     }
 
     "actually stream, not silently fall back to complete()" in {

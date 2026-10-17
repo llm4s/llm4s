@@ -20,8 +20,9 @@ Binary compatibility is enforced between releases with [MiMa](https://github.com
 
 | Release type | Guarantee |
 |---|---|
-| **Patch** (0.x.y to 0.x.z) | No binary-breaking changes in frozen modules |
-| **Minor** (0.x to 0.y) | Binary-breaking changes allowed, with a `@deprecated` migration path where one exists |
+| **Before the baseline** (0.5.x now) | Still stabilising: any release, patch included, may break, with a CHANGELOG entry and a migration note and no `@deprecated` shim |
+| **Patch, after the baseline** (0.x.y to 0.x.z) | No binary-breaking changes in frozen modules |
+| **Minor, after the baseline** (0.x to 0.y) | Binary-breaking changes allowed, with a CHANGELOG entry and a migration note |
 | **1.0.0 and later** | Full SemVer: a MAJOR version for breaking changes |
 
 ---
@@ -47,7 +48,12 @@ none. A type in a module 1.0 does not freeze (anything Beta or Experimental in t
 `sbt stabilityTierCheck` (a CI quick check) fails the build for a top-level public type of a frozen
 module that has neither annotation or both, and for a Beta dialect that lives inside a frozen module
 and is not `@Experimental`: today the Mistral and Cohere dialects of `llm4s-openai-compatible`, listed in
-`build.sbt`. It reads sources, not classes, because Scala compiles `private[llm4s]` to a public
+`build.sbt`. It also fails for a public member of a `@Stable` type whose signature names an
+`@Experimental` type - a `def`, `val`, enum `case`, nested type or constructor parameter, unless it is `private`,
+`protected` or itself `@Experimental` - because renaming or reshaping the Experimental type would then break the
+Stable signature ([#1818](https://github.com/llm4s/llm4s/issues/1818)). Promote the type, or keep the member out of
+the Stable surface. It runs its own fixtures first (`StabilityTiers.selfTest`), so a change that stops it finding
+such a leak fails the build. It reads sources, not classes, because Scala compiles `private[llm4s]` to a public
 bytecode member. It covers `llm4s-core`, `llm4s-openai`, `llm4s-openai-compatible`,
 `llm4s-anthropic`, `llm4s-gemini` and `llm4s-ollama`. **`llm4s-agent` is in 1.0 Scope's Frozen-at-1.0 tier but is not
 covered yet**: the typed graph runtime ([#1266](https://github.com/llm4s/llm4s/issues/1266)) is
@@ -115,9 +121,10 @@ declares it or reaches it transitively. The list, and where each group belongs i
 
 The last release, 0.4.1, is a single `llm4s-core` of the pre-modularisation code, so it is not a usable
 baseline for the split modules: against `llm4s-core` 0.4.1 MiMa reports thousands of problems, and
-`llm4s-agent` and the provider modules do not exist at 0.4.1, so their artifacts do not resolve. The
-baseline is 0.5.0, the first release with the split coordinates
-([#1281](https://github.com/llm4s/llm4s/issues/1281)).
+`llm4s-agent` and the provider modules do not exist at 0.4.1, so their artifacts do not resolve.
+0.5.0, the first release with the split coordinates, sets no baseline either. The baseline is set at a
+pre-1.0 release, version to be decided, once the designs are final
+([#1281](https://github.com/llm4s/llm4s/issues/1281)); until then nothing is frozen.
 
 ### Setting and bumping the baseline
 
@@ -125,16 +132,16 @@ baseline is 0.5.0, the first release with the split coordinates
 changed with `set`:
 
 1. Publish the release and confirm every frozen artifact is on Maven Central under its `_3` name, for
-   example `https://repo1.maven.org/maven2/org/llm4s/llm4s-agent_3/0.5.0/`. A frozen module whose
+   example `https://repo1.maven.org/maven2/org/llm4s/llm4s-agent_3/X.Y.Z/`. A frozen module whose
    baseline is not published fails `mimaPreviousClassfiles` with a "not found" error, by design.
-2. Change the line to `val mimaBaselineVersion: Option[String] = Some("0.5.0")`.
+2. Change the line to `val mimaBaselineVersion: Option[String] = Some("X.Y.Z")`.
 3. Run `sbt mimaReportBinaryIssues`. Fix real breaks. Add a filter (below) only for an intentional one.
 4. When the baseline later moves to a newer release, **delete every `mimaBinaryIssueFilters` entry**
    first: each one excuses a break against the old baseline, so against the new one it is stale and would
    silently hide a real break in the same class. Then re-run the check and re-add only what the new baseline needs.
 5. Update this page and the CHANGELOG entry if the covered module list changes.
 
-Before the first run against 0.5.0, review the Beta parts that ship inside frozen modules, because
+Before the first run against the baseline, review the Beta parts that ship inside frozen modules, because
 [1.0 Scope](v1-scope) does not freeze them: `org.llm4s.assistant.*` (`llm4s-agent`) and the Mistral and
 Cohere dialect classes (`llm4s-openai-compatible`). Either exclude them with a documented filter or
 decide that they are frozen too. `llm4s-agent` may also wait for the graph runtime
@@ -179,5 +186,5 @@ This reports binary incompatibilities between the current code and the baseline 
 baseline set, each module logs `mimaPreviousArtifacts not set` (or `is empty`) and the task succeeds.
 With a baseline set, success means the frozen API is compatible, and failure lists each problem with
 the `ProblemFilters.exclude` line that would silence it. To check one module, run
-`sbt agent/mimaReportBinaryIssues`. Before 0.5.0 exists, `scripts/mima-dry-run.sh` checks that this wiring
+`sbt agent/mimaReportBinaryIssues`. Until a baseline is set, `scripts/mima-dry-run.sh` checks that this wiring
 works (see [Release readiness](release#release-readiness-a-mima-dry-run)).

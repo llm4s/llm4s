@@ -42,7 +42,8 @@ import scala.util.Try
 final class CompiledGraph[I, O] private[graph] (
   val id: String,
   val version: String,
-  val fingerprint: String,
+  val shape: GraphShape,
+  legacy: LegacyFingerprint,
   owner: GraphOwner,
   entry: NodeRef[I],
   nodes: Map[NodeId, NodeDef[?]],
@@ -56,6 +57,12 @@ final class CompiledGraph[I, O] private[graph] (
   sleeper: FiniteDuration => Unit = CompiledGraph.sleepThread,
   ticker: () => Long = () => System.nanoTime()
 ):
+
+  /**
+   * The structural fingerprint a snapshot records: the hex SHA-256 of the graph's id, version, entry, nodes, edges,
+   * joins, resume nodes and keys. A snapshot written before snapshots recorded a [[shape]] is matched by it.
+   */
+  val fingerprint: String = legacy.value
 
   /** One result cache per node that declared a [[CachePolicy]]; process-local and never checkpointed. */
   private val caches: Map[NodeId, NodeCache] =
@@ -126,10 +133,29 @@ final class CompiledGraph[I, O] private[graph] (
             val taskId = TaskId(s"${execution.superstep}.${execution.frontier.size + i}")
             p.hold match
               case Some(Hold.Before(input)) =>
-                Task(taskId, p.resumeNode, input, p.slot, Some(p.origin), passedBefore = true)
+                Task(
+                  taskId,
+                  p.resumeNode,
+                  input,
+                  p.slot,
+                  Some(p.origin),
+                  passedBefore = true,
+                  resumeDigest = p.resumeDigest
+                )
               case Some(Hold.After(routes)) =>
                 Task(taskId, p.resumeNode, (), p.slot, Some(p.origin), replay = Some(routes))
-              case None => Task(taskId, p.resumeNode, Resumed(p.question, answer), p.slot, Some(p.origin))
+              case None =>
+                // the continuation's identity is taken now, from the question as first encoded and the answer as
+                // given, and kept with the task: never recomputed from what a later run decodes (design §4.24)
+                val digest = CompiledGraph.resumeDigest(p.questionDigest, answers(p.interrupt))
+                Task(
+                  taskId,
+                  p.resumeNode,
+                  Resumed(p.question, answer),
+                  p.slot,
+                  Some(p.origin),
+                  resumeDigest = Some(digest)
+                )
           }
         Right(
           execution.copy(
@@ -160,7 +186,10 @@ final class CompiledGraph[I, O] private[graph] (
               task.origin.map(_.task.value),
               task.origin.map(_.node.value),
               task.passedBefore,
-              task.replay.map(_.toVector.map(encodeRoute))
+              task.replay.map(_.toVector.map(encodeRoute)),
+              task.lineage,
+              task.origin.map(_.lineage),
+              task.resumeDigest
             )
           },
           staticJoins = execution.staticArrivals.toVector
@@ -188,31 +217,93 @@ final class CompiledGraph[I, O] private[graph] (
               p.slot.map(_.join.value),
               p.slot.map(_.fanOutTask.value),
               p.hold.map(_.phase),
-              held
+              held,
+              p.origin.lineage,
+              p.questionDigest,
+              p.resumeDigest
             )
           },
-          paused = execution.paused
+          paused = execution.paused,
+          shape = Some(shape)
         )
       ).toResult
 
   /**
-   * Rebuilds an execution from a snapshot, checking it against this graph first: the graph id,
-   * version and structural fingerprint; that every state value, pending input and parked question
-   * decodes with this graph's codec for it; that every join exists with the right kind and is
-   * partially arrived; that every parked continuation names a resume node; and that every arrival
-   * a dynamic join still expects will be made by a pending task or a parked continuation in its
-   * fan-out. Every problem is reported at once.
+   * Rebuilds an execution from a snapshot, checking it against this graph first: the graph id; that the snapshot's
+   * graph has changed only in ways the restored run cannot observe (below); that every state value, pending input
+   * and parked question decodes with this graph's codec for it; that every join exists with the right kind and is
+   * partially arrived; that every parked continuation names a resume node; and that every arrival a dynamic join
+   * still expects will be made by a pending task or a parked continuation in its fan-out. Every problem is reported
+   * at once.
+   *
+   * A snapshot is in flight when it holds a pending task, a parked continuation or a partially arrived join, and at
+   * rest otherwise. Against the [[GraphShape]] it records (design §4.29):
+   *  - a key added reads its initial value; a key removed is refused if the snapshot holds a value for it;
+   *  - no node is removed;
+   *  - in flight, the version is unchanged, every stored node keeps its out-edges, every static join over a stored
+   *    node is unchanged (none added, none removed), and every stored dynamic join keeps its target. So a node
+   *    added is reachable only from other added nodes, and the restored run cannot reach it.
+   *  - at rest, the version, edges, joins and entry node may change: the next run starts at the entry node.
+   *
+   * A snapshot written before snapshots recorded a shape restores only into its own version, and only if this
+   * graph's fingerprint matches its own once keys the snapshot holds no value for are left out: the graph only
+   * gained keys.
    */
-  def restore(snapshot: GraphSnapshot): Result[Execution] =
-    val header = Vector(
-      Option.when(snapshot.graphId != id)(s"snapshot is of graph '${snapshot.graphId}'"),
-      Option.when(snapshot.graphVersion != version)(
-        s"snapshot is of version '${snapshot.graphVersion}', this graph is version '$version'"
-      ),
-      Option.when(snapshot.fingerprint != fingerprint)("snapshot's graph structure differs from this graph's"),
-      Option.when(snapshot.superstep < 0)(s"superstep ${snapshot.superstep} is negative")
-    ).flatten
-    val (stateProblems, values)      = snapshot.state.toVector.sortBy(_._1).partitionMap(restoreValue)
+  def restore(snapshot: GraphSnapshot): Result[Execution] = restoring(snapshot, GraphEvolution.Judged.ByContent)
+
+  /**
+   * Restores `snapshot` as at rest, whatever it holds, for a run that keeps only its state and superstep and starts
+   * again at the entry node: [[GraphRuntime.start]] on a completed or blocked thread. Only the header and the state
+   * are checked, and the execution has nothing scheduled.
+   */
+  private[graph] def restoreAtRest(snapshot: GraphSnapshot): Result[Execution] =
+    restoring(snapshot, GraphEvolution.Judged.AtRest)
+
+  /**
+   * Restores a stored checkpoint to continue it: `recover`, `resume` and `updateState`. A `Running` or `Suspended`
+   * checkpoint is judged in flight whatever its snapshot holds - a `Running` one whose frontier is already empty is a
+   * run whose closing commit never landed, and `recover` finishes it under its own version. A settled one is judged by
+   * its content, as [[restore]] does.
+   */
+  private[graph] def restoreStored(checkpoint: Checkpoint): Result[Execution] =
+    checkpoint.status match
+      case CheckpointStatus.Running | CheckpointStatus.Suspended =>
+        restoring(checkpoint.snapshot, GraphEvolution.Judged.InFlight)
+      case CheckpointStatus.Completed | CheckpointStatus.Failed =>
+        restoring(checkpoint.snapshot, GraphEvolution.Judged.ByContent)
+
+  private def restoring(snapshot: GraphSnapshot, judged: GraphEvolution.Judged): Result[Execution] =
+    val atRest = judged == GraphEvolution.Judged.AtRest
+    val evolution = snapshot.shape match
+      case Some(stored) => GraphEvolution.problems(stored, shape, snapshot, version, judged)
+      case None         => GraphEvolution.legacyProblems(snapshot, version, legacy)
+    val header = Option.when(snapshot.graphId != id)(s"snapshot is of graph '${snapshot.graphId}'").toVector ++
+      evolution ++ Option.when(snapshot.superstep < 0)(s"superstep ${snapshot.superstep} is negative")
+    val storedKeys              = snapshot.shape.fold(Set.empty[String])(_.keys.toSet)
+    val (stateProblems, values) = snapshot.state.toVector.sortBy(_._1).partitionMap(restoreValue(_, storedKeys))
+    if atRest then
+      val problems = header ++ stateProblems
+      if problems.nonEmpty then Left(GraphError.RestoreRejected(id, problems.toList))
+      else
+        Right(
+          new Execution(
+            owner,
+            snapshot.superstep,
+            new ThreadState(keys, values.toMap),
+            Vector.empty,
+            Map.empty,
+            Vector.empty,
+            Vector.empty,
+            paused = false
+          )
+        )
+    else restoreRun(snapshot, header ++ stateProblems, values)
+
+  private def restoreRun(
+    snapshot: GraphSnapshot,
+    found: Vector[String],
+    values: Vector[(StateKeyId, Any)]
+  ): Result[Execution] =
     val (taskProblems, tasks)        = snapshot.frontier.partitionMap(restoreTask)
     val (parkedProblems, parked)     = snapshot.parked.partitionMap(restoreParked)
     val (staticProblems, arrivals)   = snapshot.staticJoins.partitionMap(restoreStaticArrivals)
@@ -229,16 +320,16 @@ final class CompiledGraph[I, O] private[graph] (
     }
     val savedSlots = snapshot.dynamicJoins.flatMap(a => a.expected.map((a.joinId, a.fanOutTask, _))).toSet
     val orphanTasks = tasks.collect {
-      case task @ Task(_, _, _, Some(slot), _, _, _)
+      case task @ Task(_, _, _, Some(slot), _, _, _, _, _)
           if !savedSlots.contains((slot.join.value, slot.fanOutTask.value, task.arrivalId.value)) =>
         s"pending task ${task.id.value} belongs to no open activation of dynamic join '${slot.join.value}'"
     }
     val orphanParked = parked.collect {
-      case p @ Parked(_, _, _, origin, Some(slot), _)
+      case p @ Parked(_, _, _, origin, Some(slot), _, _, _)
           if !savedSlots.contains((slot.join.value, slot.fanOutTask.value, origin.task.value)) =>
         s"interrupt ${p.interrupt.value} belongs to no open activation of dynamic join '${slot.join.value}'"
     }
-    val problems = header ++ stateProblems ++ taskProblems ++ parkedProblems ++ staticProblems ++
+    val problems = found ++ taskProblems ++ parkedProblems ++ staticProblems ++
       dynamicProblems ++ duplicateTasks.toVector.sorted ++ duplicateInterrupts.toVector.sorted ++
       duplicateActivations.toVector.sorted ++ orphanTasks ++ orphanParked
     if problems.nonEmpty then Left(GraphError.RestoreRejected(id, problems.toList))
@@ -260,7 +351,8 @@ final class CompiledGraph[I, O] private[graph] (
     new CompiledGraph(
       id,
       version,
-      fingerprint,
+      shape,
+      legacy,
       owner,
       entry,
       nodes,
@@ -280,7 +372,8 @@ final class CompiledGraph[I, O] private[graph] (
     new CompiledGraph(
       id,
       version,
-      fingerprint,
+      shape,
+      legacy,
       owner,
       entry,
       nodes,
@@ -300,7 +393,8 @@ final class CompiledGraph[I, O] private[graph] (
     new CompiledGraph(
       id,
       version,
-      fingerprint,
+      shape,
+      legacy,
       owner,
       entry,
       nodes,
@@ -371,10 +465,18 @@ final class CompiledGraph[I, O] private[graph] (
     config: RunConfig
   ): Result[(Execution, Option[LLMError])] =
     val outcomes = executorFor(config.budgets).runAll(execution.frontier.map { task => () =>
-      if holdsBefore(task, config) then Right(task -> TaskResult.Held)
+      if holdsBefore(task, config) then Right(Settled(task, TaskResult.Held, CompiledGraph.HeldDigest))
       else
         val position = RunPosition(threadId, config.runId, "", task.id, task.node, execution.superstep)
-        executeTask(task, execution, new RunContext(config, position, NodeEventSink.none)).map(task -> _)
+        val context = new RunContext(
+          config,
+          position,
+          NodeEventSink.none,
+          journal = execution.journal,
+          owner = Some(task.arrivalId -> task.arrivalLineage),
+          resumeDigest = task.resumeDigest
+        )
+        executeTask(task, execution, context).map(settle(task, _))
     })
     // A cancelled task wins over an earlier task's failure: the run was cancelled, not failed.
     outcomes
@@ -388,8 +490,8 @@ final class CompiledGraph[I, O] private[graph] (
    * The error of the first blocked task in `completed`, in frontier order: the run ends once the superstep is
    * committed, and the caller receives this error.
    */
-  private[graph] def blockedBy(completed: Vector[(Task, TaskResult)]): Option[LLMError] =
-    completed.collectFirst { case (_, TaskResult.Blocked(_, error)) => error }
+  private[graph] def blockedBy(completed: Vector[Settled]): Option[LLMError] =
+    completed.collectFirst { case Settled(_, TaskResult.Blocked(_, error), _) => error }
 
   /**
    * Runs one task against the committed snapshot and checks what it returned. A task whose node
@@ -484,11 +586,13 @@ final class CompiledGraph[I, O] private[graph] (
    */
   private[graph] def commitSuperstep(
     execution: Execution,
-    completed: Vector[(Task, TaskResult)],
+    completed: Vector[Settled],
     config: RunConfig
   ): Result[Execution] =
     completed
-      .foldLeft[Result[ThreadState]](Right(execution.state))((state, tr) => state.flatMap(_.applyUpdate(tr._2.update)))
+      .foldLeft[Result[ThreadState]](Right(execution.state))((state, s) =>
+        state.flatMap(_.applyUpdate(s.result.update))
+      )
       .map(schedule(execution, completed, _, config))
 
   /**
@@ -533,6 +637,9 @@ final class CompiledGraph[I, O] private[graph] (
         case update: StateOperation.Update[?, ?] =>
           EncodedOperation.Update(update.key.id.value, update.key.encodeUpdate(update.value))
         case StateOperation.Remove(key) => EncodedOperation.Remove(key.id.value)
+        // only a Block update restores, and a blocked task has no pending write
+        case StateOperation.Restore(key, _) =>
+          throw new IllegalStateException(s"task ${task.id.value} restores '${key.id.value}' outside a Block")
       }
       result match
         case TaskResult.Done(command) =>
@@ -558,7 +665,7 @@ final class CompiledGraph[I, O] private[graph] (
         // a task a breakpoint holds before it runs did nothing: recovery holds it again, or runs it
         case TaskResult.Held =>
           throw new IllegalStateException(s"task ${task.id.value} is held at a breakpoint and has no pending write")
-    }.toResult
+    }.toResult.map(write => write.copy(resultDigest = Some(CompiledGraph.writeDigest(write))))
 
   /** A route as data, its payloads encoded with the target node's input codec. */
   private def encodeRoute(route: Route): EncodedRoute = route match
@@ -655,11 +762,17 @@ final class CompiledGraph[I, O] private[graph] (
 
   private def schedule(
     execution: Execution,
-    results: Vector[(Task, TaskResult)],
+    settled: Vector[Settled],
     state: ThreadState,
     config: RunConfig
   ): Execution =
     val next = execution.superstep + 1
+    // what scheduled the next tasks, as data: each task of this superstep, in frontier order, with its lineage
+    // and its result's digest. A replan from the same results schedules the same tasks; one from other results,
+    // others. The digest was taken where the result was produced or read, never here (design §4.24)
+    val content               = KeyDigest.of(settled.flatMap(s => Seq(s.task.id.value, s.task.lineage, s.digest)))
+    val results               = settled.map(s => s.task -> s.result)
+    def lineageOf(id: TaskId) = Task.scheduledLineage(content, id)
     // a task an interruptAfter breakpoint holds has committed its update, but makes no route, edge or arrival yet
     val heldAfter = results.collect { case (task, TaskResult.Done(_)) if holdsAfter(task, config) => task.id }.toSet
     val completed = results.collect {
@@ -675,7 +788,8 @@ final class CompiledGraph[I, O] private[graph] (
         }
     }
     val routedTasks = routed.zipWithIndex.map { case ((node, input, slot), i) =>
-      Task(TaskId(s"$next.$i"), node, input, slot)
+      val id = TaskId(s"$next.$i")
+      Task(id, node, input, slot, lineage = lineageOf(id))
     }
 
     val arrivedNodes = completed.map(_._1.arrivalNode).toSet
@@ -700,19 +814,38 @@ final class CompiledGraph[I, O] private[graph] (
     val (released, stillOpen) = (advanced ++ opened).partition(_.isComplete)
 
     val releasedTasks = (staticReleased ++ released.map(a => dynamicJoins(a.join).target.id)).zipWithIndex.map {
-      (node, i) => Task(TaskId(s"$next.${routedTasks.size + i}"), node, (), None)
+      (node, i) =>
+        val id = TaskId(s"$next.${routedTasks.size + i}")
+        Task(id, node, (), None, lineage = lineageOf(id))
     }
-    def origin(task: Task) = task.origin.getOrElse(Origin(task.id, task.node))
+    def origin(task: Task) = task.origin.getOrElse(Origin(task.id, task.node, task.lineage))
     // one interrupt per task, in frontier order, whatever parked it
     val newlyParked = results.collect {
       case (task, TaskResult.Parked(_, question, resume)) =>
-        Parked(InterruptId(task.id.value), resume.node.id, question, origin(task), task.slot)
+        // the question's digest as the task produced it, kept with the continuation (design §4.24)
+        val digest = CompiledGraph.questionDigest(Try(resume.encodeQuestion(question)).toOption)
+        Parked(
+          InterruptId(task.id.value),
+          resume.node.id,
+          question,
+          origin(task),
+          task.slot,
+          questionDigest = Some(digest)
+        )
       case (task, TaskResult.Held) =>
-        Parked(InterruptId(task.id.value), task.node, (), origin(task), task.slot, Some(Hold.Before(task.input)))
+        Parked(
+          InterruptId(task.id.value),
+          task.node,
+          (),
+          origin(task),
+          task.slot,
+          Some(Hold.Before(task.input)),
+          resumeDigest = task.resumeDigest
+        )
       case (task, TaskResult.Done(command)) if heldAfter.contains(task.id) =>
         Parked(InterruptId(task.id.value), task.node, (), origin(task), task.slot, Some(Hold.After(command.routes)))
     }
-    new Execution(
+    val nextExecution = new Execution(
       owner,
       next,
       state,
@@ -720,8 +853,29 @@ final class CompiledGraph[I, O] private[graph] (
       staticArrivals,
       stillOpen,
       execution.parked ++ newlyParked,
-      paused = newlyParked.nonEmpty
+      paused = newlyParked.nonEmpty,
+      journal = execution.journal
     )
+    // the records of tasks that cannot run again go, as a store's commit releases them
+    execution.journal.keepOnly(nextExecution.liveTasks)
+    nextExecution
+
+  /**
+   * A result a task has just produced outside a runtime, with its digest: that of its pending write as encoded
+   * here, once ([[CompiledGraph.writeDigest]]). A runtime takes the digest of the write it records instead.
+   */
+  private def settle(task: Task, result: TaskResult): Settled = result match
+    case TaskResult.Held          => Settled(task, result, CompiledGraph.HeldDigest)
+    case TaskResult.Blocked(_, e) => Settled(task, result, CompiledGraph.blockedDigest(e))
+    case _                        =>
+      // a result that does not encode cannot be compared: it is never the same work as another (no false replay)
+      Settled(
+        task,
+        result,
+        encodeWrite("", task, result).toOption
+          .flatMap(_.resultDigest)
+          .getOrElse(s"unencodable:${java.util.UUID.randomUUID()}")
+      )
 
   private def suspended(execution: Execution): RunResult[O] =
     RunResult.Suspended(execution.state, pendingInterrupts(execution), execution)
@@ -750,9 +904,14 @@ final class CompiledGraph[I, O] private[graph] (
         Try(output(execution.state)).toResult.flatten
           .fold(RunResult.Failed(execution.state, _), RunResult.Completed(execution.state, _, execution.superstep))
 
-  private def restoreValue(entry: (String, VersionedJson)): Either[String, (StateKeyId, Any)] =
+  private def restoreValue(
+    entry: (String, VersionedJson),
+    storedKeys: Set[String]
+  ): Either[String, (StateKeyId, Any)] =
     val (keyId, json) = entry
     keys.get(StateKeyId(keyId)) match
+      case None if storedKeys.contains(keyId) =>
+        Left(s"state key '$keyId' was removed from this graph, and the snapshot holds a value for it")
       case None => Left(s"state key '$keyId' is not registered with this graph")
       case Some(key) =>
         key
@@ -786,10 +945,24 @@ final class CompiledGraph[I, O] private[graph] (
       origin <- (pending.originTask, pending.originNode) match
         case (None, None) => Right(None)
         case (Some(task), Some(originNode)) if nodes.contains(NodeId(originNode)) =>
-          Right(Some(Origin(TaskId(task), NodeId(originNode))))
+          Right(Some(Origin(TaskId(task), NodeId(originNode), pending.originLineage.getOrElse(pending.lineage))))
         case (Some(_), Some(originNode)) => Left(s"$owner continues unknown node '$originNode'")
         case _                           => Left(s"$owner has half an origin")
-    yield Task(TaskId(pending.taskId), node.ref.id, input, slot, origin, pending.passedBefore, replay)
+      // a continuation saved without its digest takes one from its input as stored, never as decoded
+      resumeDigest = pending.resumeDigest.orElse(
+        Option.when(replay.isEmpty && resumes.contains(node.ref.id))(CompiledGraph.storedDigest(pending.input))
+      )
+    yield Task(
+      TaskId(pending.taskId),
+      node.ref.id,
+      input,
+      slot,
+      origin,
+      pending.passedBefore,
+      replay,
+      pending.lineage,
+      resumeDigest
+    )
 
   /** Held or replayed routes, rebound to this graph; `Left` names the first that is not. */
   private def restoreRoutes(owner: String, routes: Vector[EncodedRoute]): Either[String, List[Route]] =
@@ -833,9 +1006,14 @@ final class CompiledGraph[I, O] private[graph] (
       InterruptId(saved.interruptId),
       node.ref.id,
       (),
-      Origin(TaskId(saved.originTask), NodeId(saved.originNode)),
+      Origin(TaskId(saved.originTask), NodeId(saved.originNode), saved.originLineage),
       slot,
-      Some(hold)
+      Some(hold),
+      resumeDigest = saved.resumeDigest.orElse(
+        Option.when(phase == BreakpointPhase.Before && resumes.contains(node.ref.id))(
+          CompiledGraph.storedDigest(saved.question)
+        )
+      )
     )
 
   private def restoreContinuation(saved: GraphSnapshot.ParkedContinuation, owner: String): Either[String, Parked] =
@@ -856,8 +1034,10 @@ final class CompiledGraph[I, O] private[graph] (
       InterruptId(saved.interruptId),
       resume.node.id,
       question,
-      Origin(TaskId(saved.originTask), NodeId(saved.originNode)),
-      slot
+      Origin(TaskId(saved.originTask), NodeId(saved.originNode), saved.originLineage),
+      slot,
+      // a question saved without its digest takes one from the question as stored, never as decoded
+      questionDigest = Some(saved.questionDigest.getOrElse(CompiledGraph.questionDigest(Some(saved.question))))
     )
 
   private def restoreStaticArrivals(saved: GraphSnapshot.StaticArrivals): Either[String, (JoinId, Set[NodeId])] =
@@ -925,5 +1105,48 @@ private[graph] enum TaskResult:
     case Held                 => StateUpdate.empty
 
 private[graph] object CompiledGraph:
+
+  /** The digest of a task a breakpoint holds before it runs: it did nothing. */
+  val HeldDigest: String = "held"
+
+  /** The digest of a blocked task, which has no pending write: its error. */
+  def blockedDigest(error: LLMError): String = s"blocked:${error.message}"
+
+  /** The digest of stored JSON `json`, under `tag`; JSON that does not hash is never the same as other JSON. */
+  private def digestOf(tag: String, json: ujson.Value): String =
+    Try(KeyDigest.of(Seq(tag, KeyDigest.canonical(json))))
+      .getOrElse(s"unencodable:${java.util.UUID.randomUUID()}")
+
+  /** The digest of a parked question as first encoded, or as stored; none encoded is never the same as another. */
+  def questionDigest(encoded: Option[VersionedJson]): String =
+    encoded.fold(s"unencodable:${java.util.UUID.randomUUID()}")(q =>
+      digestOf("llm4s-question-v1", upickle.default.writeJs(q))
+    )
+
+  /**
+   * The identity of a resume (design §4.24): its question's digest, taken when the question was parked, and
+   * the answer as given. Taken once, when the answer is applied, and kept with the continuation.
+   */
+  def resumeDigest(questionDigest: Option[String], answer: ujson.Value): String =
+    digestOf(
+      "llm4s-resume-v1",
+      ujson.Arr(questionDigest.getOrElse(s"unrecorded:${java.util.UUID.randomUUID()}"), answer)
+    )
+
+  /** The resume digest of a continuation saved without one: of its input as stored. */
+  def storedDigest(input: VersionedJson): String = digestOf("llm4s-resumed-v1", upickle.default.writeJs(input))
+
+  /**
+   * The digest of pending write `write` as encoded, its checkpoint id and recorded digest aside: of the bytes a
+   * store holds, never of a result decoded from them, which decoding may have migrated (design §4.24). A write
+   * that does not hash is never the same work as another.
+   */
+  def writeDigest(write: PendingWrite): String =
+    Try(KeyDigest.canonical(upickle.default.writeJs(write.copy(checkpointId = "", resultDigest = None))))
+      .fold(
+        _ => s"unencodable:${java.util.UUID.randomUUID()}",
+        canonical => KeyDigest.of(Seq("llm4s-result-v1", canonical))
+      )
+
   /** Sleeps the calling thread; an interrupt throws `InterruptedException`, as `Thread.sleep` does. */
   def sleepThread(delay: FiniteDuration): Unit = TimeUnit.NANOSECONDS.sleep(delay.toNanos)

@@ -5,7 +5,7 @@ import cats.syntax.flatMap.*
 import cats.syntax.functor.*
 import fs2.Stream
 import org.llm4s.agent.{ Agent, AgentEventBuffer, AgentResult, AgentRun }
-import org.llm4s.agent.graph.{ InterruptId, RunConfig, RunStatus, StreamEvent, ThreadId }
+import org.llm4s.agent.graph.{ EventHandlers, EventType, InterruptId, RunConfig, RunStatus, StreamEvent, ThreadId }
 import org.llm4s.types.Result
 
 /**
@@ -22,7 +22,9 @@ import org.llm4s.types.Result
  * cancels the turn as cancelling `run` does. Stopping early (`take(n)`) also cancels the turn. A
  * consumer too slow for the stream's buffer never holds the run up: it loses live events (text
  * deltas, tool progress) and receives one `StreamEvent.LiveGap` with their count where they were
- * dropped; durable events are never dropped, and the run carries on.
+ * dropped; durable events are kept, and the run carries on. A consumer that stops draining
+ * altogether fails the stream (and so cancels the turn) once more than `Agent.StreamCapacity` durable
+ * events wait, as the runtime disconnects a listener that far behind.
  *
  * A model call that throws instead of returning `Left` ends the turn with a
  * `GraphError.NodeFailed` whose `cause` is the `LLMError` the runtime made of the throwable; it is
@@ -67,6 +69,29 @@ trait AgentIO[F[_]] {
 
   /** [[recover]] as a stream; see [[stream]]. */
   def streamRecover(threadId: ThreadId, config: RunConfig = RunConfig()): Stream[F, AgentStreamItem]
+
+  /**
+   * The events of `run` that `eventType` names - durable and live - decoded: `events` with
+   * `EventHandlers.on(eventType)(identity)`; see the overload taking handlers.
+   */
+  def events[A](run: AgentRun, eventType: EventType[A]): Stream[F, A]
+
+  /**
+   * What `handlers` make of `run`'s events: one element for each event a handler takes, in delivery
+   * order. It observes the run, through [[AgentRun.subscribe]]: it replays the run's durable events
+   * from its start and then follows it live, but misses the live events sent before the stream
+   * started - use [[stream]] to see every one. It ends after the run's terminal event, or once a run
+   * that ends without one has delivered its last event; the run's own outcome is not raised - await
+   * the run for it. Ending the stream early, or interrupting it, cancels its subscription only: the
+   * run carries on.
+   *
+   * Handlers run on the stream, not on the subscription: a slow or throwing handler slows or fails
+   * the stream, never the run. A consumer too slow for the stream's buffer loses live events, as
+   * [[stream]]'s does - a `LiveGap`, which a handler sees through `otherwise`. A subscription that
+   * disconnects, or a consumer that falls more than `Agent.StreamCapacity` durable events behind,
+   * raises [[LLMException]].
+   */
+  def events[R](run: AgentRun, handlers: EventHandlers[R]): Stream[F, R]
 }
 
 object AgentIO {
@@ -146,6 +171,35 @@ object AgentIO {
             .unNoneTerminate
             .map(AgentStreamItem.Event(_))
             .append(Stream.eval(F.interruptible(run.await()).flatMap(raised)).map(AgentStreamItem.Done(_)))
+        }
+    }
+
+    def events[A](run: AgentRun, eventType: EventType[A]): Stream[F, A] =
+      events(run, EventHandlers.on(eventType)(identity))
+
+    /**
+     * Subscribes a buffer's listener to `run`, ending the buffer when the subscription ends; the
+     * release cancels the subscription - never the run - and closes the buffer.
+     */
+    def events[R](run: AgentRun, handlers: EventHandlers[R]): Stream[F, R] = {
+      val acquire = F
+        .blocking {
+          val buffer = AgentEventBuffer(StreamBufferSize)
+          run.subscribeEnding(Agent.StreamCapacity, () => buffer.end())(buffer.listener).map(s => (buffer, s))
+        }
+        .flatMap(raised)
+      Stream
+        .bracket(acquire) { case (buffer, subscription) =>
+          F.blocking {
+            subscription.cancel()
+            buffer.close()
+          }
+        }
+        .flatMap { case (buffer, _) =>
+          Stream
+            .repeatEval(F.interruptible(buffer.take()).flatMap(raised))
+            .unNoneTerminate
+            .evalMapFilter(event => F.delay(handlers.dispatch(event)))
         }
     }
 

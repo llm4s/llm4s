@@ -166,4 +166,18 @@ class LLMCompressorSpec extends AnyFlatSpec with Matchers {
     processed.exists(_.content == "Question") shouldBe true
     processed.exists(_.content == "Answer") shouldBe true
   }
+
+  "squeezeDigest" should "never replace a user message, even one whose text names a summary" in {
+    val chart = ContentPart
+      .image(
+        org.llm4s.media.MediaSource.Url(java.net.URI.create("https://e.com/chart.png")),
+        org.llm4s.media.MediaType.Png
+      )
+      .toOption
+      .get
+    val user      = UserMessage(Vector(ContentPart.Text("[HISTORY_SUMMARY] my notes " * 50), chart))
+    val messages  = Seq(SystemMessage("[HISTORY_SUMMARY]\n" + ("Summary content. " * 100)), user)
+    val processed = LLMCompressor.squeezeDigest(messages, counter, mockLLMClient, capTokens = 10).toOption.get
+    processed should contain(user)
+  }
 }

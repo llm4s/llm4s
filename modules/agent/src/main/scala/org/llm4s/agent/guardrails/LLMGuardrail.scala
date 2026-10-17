@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails
 
+import org.llm4s.agent.graph.middleware.ModelContext
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -144,7 +145,13 @@ trait LLMGuardrail extends OutputGuardrail {
    *         (no judge call is made), on field `output` when the score is too low, on field `llm_response` when the
    *         reply has no readable score, or the client's own error when the call fails
    */
-  override def validate(value: String): Result[String] = {
+  override def validate(value: String): Result[String] = judged(value, llmClient)
+
+  /** As `validate(value)`, the judge called through `context.accounted(llmClient)`, so its call is counted. */
+  override def validate(value: String, context: ModelContext): Result[String] =
+    judged(value, context.accounted(llmClient))
+
+  private def judged(value: String, client: LLMClient): Result[String] = {
     val cutOff = threshold
     if (!LLMGuardrail.isValidThreshold(cutOff)) {
       Left(
@@ -154,7 +161,7 @@ trait LLMGuardrail extends OutputGuardrail {
         )
       )
     } else {
-      evaluateWithLLM(value).flatMap { score =>
+      evaluateWithLLM(value, client).flatMap { score =>
         if (LLMGuardrail.reaches(score, cutOff)) {
           Right(value)
         } else {
@@ -177,7 +184,7 @@ trait LLMGuardrail extends OutputGuardrail {
    *         `llm_response` when the reply is not one plain decimal number from 0 to 1 (see the scoring notes on the
    *         trait); or the error of the failed `llmClient.complete` call
    */
-  protected def evaluateWithLLM(content: String): Result[BigDecimal] = {
+  protected def evaluateWithLLM(content: String, client: LLMClient): Result[BigDecimal] = {
     val systemPrompt =
       """You are an evaluation assistant. Your task is to rate content based on specific criteria.
         |You MUST respond with ONLY a single number between 0 and 1 (e.g., 0.85).
@@ -202,7 +209,7 @@ Score (0-1):"""
     )
 
     for {
-      completion <- llmClient.complete(conversation, completionOptions)
+      completion <- client.complete(conversation, completionOptions)
       score      <- parseScore(completion.message.content)
     } yield score
   }

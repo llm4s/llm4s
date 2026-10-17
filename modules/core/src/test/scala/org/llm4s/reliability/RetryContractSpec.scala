@@ -52,6 +52,12 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
     Row("ContextError", ContextError.tokenBudgetExceeded(200, 100), recoverable = false, retried = false),
     Row("ExecutionError", ExecutionError("failed", "run", Some(2)), recoverable = true, retried = true),
     Row("InvalidInputError", InvalidInputError("field", "value", "reason"), recoverable = false, retried = false),
+    Row(
+      "UnsupportedContentPartError",
+      UnsupportedContentPartError("ollama", "image (url, image/png)", "user"),
+      recoverable = false,
+      retried = false
+    ),
     Row("NetworkError", NetworkError("refused", None, "https://llm.example/v1"), recoverable = true, retried = true),
     Row("NotFoundError", NotFoundError("missing", "key-1"), recoverable = false, retried = false),
     Row("OptimisticLockFailure", OptimisticLockFailure("conflict", "mem-1", 3L), recoverable = true, retried = false),

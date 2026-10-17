@@ -282,6 +282,15 @@ class OpenAICompatibleClient(
         (),
         ValidationError("conversation", s"${settings.displayName} requires at least one message")
       )
+      // a part the dialect cannot send fails here, typed, before anything is built or sent
+      .flatMap(_ =>
+        PartEncoding.check(
+          providerName,
+          sendableMessages(conversation, options),
+          dialect.encodeUserPart,
+          PartEncoding.textOnly
+        )
+      )
       .flatMap { _ =>
         Try {
           val body = createRequestBody(conversation, options)
@@ -327,7 +336,11 @@ class OpenAICompatibleClient(
   private def bearer(): Result[Option[String]] = settings.credential match
     case OpenAICompatibleClient.Credential.Anonymous   => Right(None)
     case OpenAICompatibleClient.Credential.Static(key) => Right(Some(key))
-    case _ => tokenProvider.fold[Result[Option[String]]](Right(None))(_.token().map(Some(_)))
+    // A Dynamic provider is the caller's code: one that throws fails the request instead of escaping it.
+    case _ =>
+      tokenProvider.fold[Result[Option[String]]](Right(None))(p =>
+        CachingAccessTokenProvider.guarded(p.token()).map(Some(_))
+      )
 
   /**
    * The headers every request carries, for bearer value `token`. A header the dialect repeats is
@@ -372,7 +385,7 @@ class OpenAICompatibleClient(
       val result = send(requestHeaders(token))
       (result, token) match
         case (Left(e: AuthenticationError), Some(rejected)) if e.code.contains("401") =>
-          tokenProvider.foreach(_.invalidate(rejected))
+          tokenProvider.foreach(p => Try(p.invalidate(rejected)))
         case _ => ()
       result
     }
@@ -420,8 +433,11 @@ class OpenAICompatibleClient(
    */
   protected[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
     val messages = sendableMessages(conversation, options).map {
-      case UserMessage(content) =>
-        ujson.Obj("role" -> "user", "content" -> dialect.encodeContent(content))
+      case um: UserMessage if !um.parts.exists(ContentPart.isMedia) =>
+        ujson.Obj("role" -> "user", "content" -> dialect.encodeContent(um.content))
+      case um: UserMessage =>
+        // checked by renderRequest: every part is one the dialect encodes
+        ujson.Obj("role" -> "user", "content" -> ujson.Arr.from(um.parts.map(dialect.encodeUserPart)))
       case SystemMessage(content) =>
         ujson.Obj("role" -> dialect.systemRole, "content" -> dialect.encodeContent(content))
       case am: AssistantMessage =>
@@ -445,11 +461,12 @@ class OpenAICompatibleClient(
         }
         if (am.hasThinking) dialect.encodeThinking(message, am.thinking)
         message
-      case ToolMessage(content, toolCallId) =>
+      case tm: ToolMessage =>
+        // text only (checked by renderRequest); several text parts are sent as their text, joined
         ujson.Obj(
           "role"         -> "tool",
-          "tool_call_id" -> dialect.encodeToolCallId(toolCallId),
-          "content"      -> dialect.encodeContent(content)
+          "tool_call_id" -> dialect.encodeToolCallId(tm.toolCallId),
+          "content"      -> dialect.encodeContent(tm.content)
         )
     }
 
@@ -715,7 +732,9 @@ object OpenAICompatibleClient {
 
     /**
      * `Authorization: Bearer <token>`, the token fetched per request from `provider` and refreshed once
-     * on a 401. The caller owns `provider`.
+     * on a 401. The caller owns `provider`. A `token()` that throws fails the request with an
+     * `AuthenticationError` naming the exception's class, and an `invalidate` that throws is ignored: neither
+     * escapes `complete` or `streamComplete`.
      */
     case Dynamic(provider: AccessTokenProvider)
 

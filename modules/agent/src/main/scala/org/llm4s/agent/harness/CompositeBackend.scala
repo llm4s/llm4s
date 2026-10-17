@@ -1,0 +1,265 @@
+package org.llm4s.agent.harness
+
+import org.llm4s.agent.graph.{ StateKey, StateUpdate }
+import org.llm4s.agent.graph.tool.LockKey
+import org.llm4s.annotation.Experimental
+import org.llm4s.error.{ LLMError, ValidationError }
+import org.llm4s.types.Result
+
+import java.util.regex.Pattern
+
+/**
+ * Several backends as one tree: each route mounts a backend at a path, and a path goes to the backend
+ * of the longest mount it is within, segment by segment, or to `default`. The routed backend sees the
+ * path relative to its mount (`/memories/notes.md` is `/notes.md` to the backend mounted at
+ * `/memories`), so a backend means the same at any mount.
+ *
+ * Mutations, their locks and their replay are the routed backend's. `ls` adds each mount beneath the
+ * directory as a directory; `find` and `search` (so `glob` and `grep`) span every backend beneath
+ * `under`, and a path of one backend that a deeper mount shadows is never listed.
+ */
+@Experimental
+final class CompositeBackend private (default: FileBackend, routes: Vector[(VPath, FileBackend)]) extends FileBackend:
+
+  // deepest first, so the first mount a path is within is its longest
+  private val mounts: Vector[(VPath, FileBackend)] =
+    routes.sortBy((mount, _) => -mount.segments.size) :+ (VPath.root -> default)
+
+  val writes: Set[StateKey[?, ?]] = mounts.iterator.flatMap(_._2.writes).toSet
+
+  final private case class Routed(mount: VPath, backend: FileBackend, path: VPath)
+
+  private def route(path: VPath): Routed =
+    val (mount, backend) = mounts.find((m, _) => path.isWithin(m)).get // the root mount takes every path
+    Routed(mount, backend, path.rebase(mount, VPath.root).get)
+
+  /**
+   * Whether `path` is a strict ancestor of a mount: a directory of the composite, whatever the backend it
+   * routes to holds there. It is never read, written or deleted as a file, and never listed as one.
+   */
+  private def holdsMount(path: VPath): Boolean = routes.exists((m, _) => m != path && m.isWithin(path))
+
+  /** `path` (a path of the backend mounted at `mount`) as a composite path, unless a mount shadows it. */
+  private def visible(mount: VPath, path: VPath): Option[VPath] =
+    path.rebase(VPath.root, mount).filter(cp => route(cp).mount == mount && !holdsMount(cp))
+
+  /** `body` on `path` as a file, unless `path` holds a mount. */
+  private def asFile[A](operation: String, path: VPath)(body: Routed => Result[A]): Result[A] =
+    if holdsMount(path) then Left(BackendRefused.at(operation, path, "is a directory"))
+    else
+      val routed = route(path)
+      renamed(routed)(body(routed))
+
+  /**
+   * A routed backend's refusal, naming composite paths rather than routed ones: a refusal that names a
+   * path of the routed backend ([[BackendRefused.path]]) - the routed path itself, or a descendant a walk
+   * refused on - is rebased through the mount, so the model's next call reaches the same backend. A
+   * target that is not a path (a pattern, a key), however it looks, is left as it is.
+   */
+  private def renamed[A](routed: Routed)(result: Result[A]): Result[A] =
+    result.left.map {
+      case r: BackendRefused =>
+        r.path.map(p => p -> p.rebase(VPath.root, routed.mount)) match
+          // the composite path reaches the same backend: the model can act on it, say delete it
+          case Some((_, Some(composite))) if route(composite).mount == routed.mount =>
+            r.copy(target = composite.value, path = Some(composite))
+          // a deeper mount shadows it: no composite path reaches it, so the refusal names no path to act
+          // on, and says where it is
+          case Some((_, Some(composite))) =>
+            r.copy(
+              target = composite.value,
+              path = None,
+              reason = s"${r.reason} (${composite.value} of the backend at ${routed.mount.value} is shadowed by a " +
+                "mount, so no path here reaches it: repair it through that backend)"
+            )
+          // the mount and the path together are longer than a path may be: no composite path names it
+          case Some((own, None)) =>
+            r.copy(
+              target = own.value,
+              path = None,
+              reason =
+                s"${r.reason} (${own.value} of the backend at ${routed.mount.value} has no path here: under its " +
+                  "mount it would be longer than a path may be; repair it through that backend)"
+            )
+          case None => r
+      case other => other
+    }
+
+  def locks(path: VPath): Set[LockKey] =
+    val routed = route(path)
+    routed.backend.locks(routed.path)
+
+  def ls(path: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
+    val routed = route(path)
+    // a mount beneath `path` is a directory of it, even where the routed backend has nothing
+    val mounted = routes.flatMap { (m, _) =>
+      m.relativeTo(path).filter(_.nonEmpty).map(rel => (path / rel.takeWhile(_ != '/')).toOption.get)
+    }.distinct
+    // the fallback covers only the routed backend's refusal of the path itself (absent, or a file it
+    // holds where a mount makes a directory), never an invalid argument, which is checked first
+    val base: Result[Listing[FileInfo]] = Text.checkLimitAt("ls", path, limit).flatMap { _ =>
+      routed.backend.ls(routed.path, limit, ctx) match
+        // only the two path-shape kinds it means: a permission, a quota or a replay refusal is the routed
+        // backend's answer, and propagates unchanged
+        case Left(r: BackendRefused)
+            if mounted.nonEmpty && r.path.contains(routed.path) && CompositeBackend.ShapeKinds(r.kind) =>
+          Right(Listing(Vector.empty, truncated = false))
+        case other => renamed(routed)(other)
+    }
+    base.map { listing =>
+      val own = listing.items.flatMap(i =>
+        visible(routed.mount, i.path).map(cp => FileInfo(cp, i.isDirectory, i.size, i.modified))
+      )
+      val merged = (own.filterNot(i => mounted.contains(i.path)) ++
+        mounted.map(d => FileInfo(d, isDirectory = true, 0L, None))).sortBy(_.path)
+      Listing(merged.take(limit), listing.truncated || merged.size > limit)
+    }
+
+  def read(path: VPath, offset: Int, limit: Int, ctx: FileContext): Result[FileLines] =
+    asFile("read", path)(routed => routed.backend.read(routed.path, offset, limit, ctx))
+
+  def write(path: VPath, content: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
+    asFile("write", path)(routed => routed.backend.write(routed.path, content, ctx))
+
+  def edit(
+    path: VPath,
+    old: String,
+    replacement: String,
+    replaceAll: Boolean,
+    ctx: FileContext
+  ): Result[(FileEdited, StateUpdate)] =
+    asFile("edit", path)(routed => routed.backend.edit(routed.path, old, replacement, replaceAll, ctx))
+
+  def delete(path: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
+    asFile("delete", path)(routed => routed.backend.delete(routed.path, ctx))
+
+  /** Each backend `under` reaches, with the path to ask it under: `under`'s own, then every mount beneath. */
+  private def spanned(under: VPath): Vector[Routed] =
+    val own = route(under)
+    own +: routes.collect {
+      case (m, backend) if m != own.mount && m.isWithin(under) && m != under => Routed(m, backend, VPath.root)
+    }
+
+  /** Each spanned backend's results, rebased onto composite paths and merged in order. */
+  private def spanning[A](under: VPath, limit: Int, pathOf: A => VPath, rebased: (A, VPath) => A)(
+    query: (Routed, VPath => Option[VPath]) => Result[Listing[A]]
+  ): Result[Listing[A]] =
+    val spans = spanned(under)
+    // where a mount lies beneath `under`, the composite makes `under` a directory whatever a backend holds
+    // there: a backend's refusal of its own root of the walk as absent or a file stands for nothing found,
+    // as in `ls`, so the mounts beneath are still searched; every other refusal propagates unchanged
+    def walked(routed: Routed): Result[Listing[A]] =
+      query(routed, p => visible(routed.mount, p)) match
+        case Left(r: BackendRefused)
+            if spans.size > 1 && r.path.contains(routed.path) && CompositeBackend.ShapeKinds(r.kind) =>
+          Right(Listing(Vector.empty, truncated = false))
+        case other => other
+    spans
+      .foldLeft[Result[(Vector[A], Boolean)]](Right((Vector.empty, false))) { (acc, routed) =>
+        for
+          sofar   <- acc
+          listing <- renamed(routed)(walked(routed))
+        yield (
+          sofar._1 ++ listing.items.flatMap(a => visible(routed.mount, pathOf(a)).map(cp => rebased(a, cp))),
+          sofar._2 || listing.truncated
+        )
+      }
+      .map { (items, truncated) =>
+        val sorted = items.sortBy(pathOf)
+        Listing(sorted.take(limit), truncated || sorted.size > limit)
+      }
+
+  def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
+    spanning[VPath](under, limit, identity, (_, cp) => cp) { (routed, toComposite) =>
+      routed.backend.find(routed.path, p => toComposite(p).exists(accept), limit, ctx)
+    }
+
+  def search(
+    under: VPath,
+    regex: Pattern,
+    accept: VPath => Boolean,
+    limit: Int,
+    ctx: FileContext
+  ): Result[Listing[GrepMatch]] =
+    spanning[GrepMatch](under, limit, _.path, (m, cp) => m.copy(path = cp)) { (routed, toComposite) =>
+      routed.backend.search(routed.path, regex, p => toComposite(p).exists(accept), limit, ctx)
+    }
+
+object CompositeBackend:
+
+  /** The refusals the mount fallback of `ls` stands in for: the path is absent, or a file. */
+  private val ShapeKinds: Set[BackendRefused.Kind] =
+    Set(BackendRefused.Kind.NotFound, BackendRefused.Kind.NotADirectory)
+
+  /** `default`, with each route's backend mounted at its path; the root and a repeated mount are refused. */
+  def apply(default: FileBackend, routes: (VPath, FileBackend)*): Result[CompositeBackend] =
+    val mounts = routes.map(_._1)
+    if mounts.contains(VPath.root) then Left(ValidationError("routes", "the root cannot be a mount; it is the default"))
+    else if mounts.distinct.size != mounts.size then
+      Left(ValidationError("routes", s"a mount is repeated: ${mounts.diff(mounts.distinct).mkString(", ")}"))
+    else Right(new CompositeBackend(default, routes.toVector))
+
+/** [[FileBackend.resolved]]: each operation on the backend `resolve` picks for its context. */
+final private[harness] class ResolvedFileBackend(
+  id: String,
+  val writes: Set[StateKey[?, ?]],
+  resolve: FileContext => Result[FileBackend]
+) extends FileBackend:
+
+  // the root of every file backend's locks: the resolved backend is unknown here, and another wrapper or
+  // a direct route may reach the same one, so it conflicts with every file lock, theirs included
+  def locks(path: VPath): Set[LockKey] = Set(FileBackend.LockRoot)
+
+  private def backend(ctx: FileContext, path: VPath): Result[FileBackend] =
+    resolve(ctx).flatMap { b =>
+      val undeclared = b.writes -- writes
+      if !b.locks(path).forall(FileBackend.withinLockRoot) then
+        Left(
+          ValidationError(
+            "locks",
+            s"resolved backend '$id' locks outside ${FileBackend.LockRoot.segments.mkString("/")}, " +
+              "so its mutations would not be ordered with those of other routes to it"
+          ): LLMError
+        )
+      else if undeclared.isEmpty then Right(b)
+      else
+        Left(
+          ValidationError(
+            "writes",
+            s"resolved backend '$id' writes ${undeclared.mkString(", ")}, which FileBackend.resolved does not declare"
+          ): LLMError
+        )
+    }
+
+  def ls(path: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
+    backend(ctx, path).flatMap(_.ls(path, limit, ctx))
+
+  def read(path: VPath, offset: Int, limit: Int, ctx: FileContext): Result[FileLines] =
+    backend(ctx, path).flatMap(_.read(path, offset, limit, ctx))
+
+  def write(path: VPath, content: String, ctx: FileContext): Result[(FileWritten, StateUpdate)] =
+    backend(ctx, path).flatMap(_.write(path, content, ctx))
+
+  def edit(
+    path: VPath,
+    old: String,
+    replacement: String,
+    replaceAll: Boolean,
+    ctx: FileContext
+  ): Result[(FileEdited, StateUpdate)] =
+    backend(ctx, path).flatMap(_.edit(path, old, replacement, replaceAll, ctx))
+
+  def delete(path: VPath, ctx: FileContext): Result[(FileDeleted, StateUpdate)] =
+    backend(ctx, path).flatMap(_.delete(path, ctx))
+
+  def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
+    backend(ctx, under).flatMap(_.find(under, accept, limit, ctx))
+
+  def search(
+    under: VPath,
+    regex: Pattern,
+    accept: VPath => Boolean,
+    limit: Int,
+    ctx: FileContext
+  ): Result[Listing[GrepMatch]] =
+    backend(ctx, under).flatMap(_.search(under, regex, accept, limit, ctx))

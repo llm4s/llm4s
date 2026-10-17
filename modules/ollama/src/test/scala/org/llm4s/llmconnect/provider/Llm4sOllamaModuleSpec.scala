@@ -2,10 +2,16 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.config.EmbeddingProviderConfig
+import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, OllamaConfig }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.testkit.LocalProviderTestServer.{ holdOpen, sendJsonResponse, streamThenHold, withServer }
-import org.llm4s.testkit.{ CredentialsRoundTrip, LocalProviderTestServer, ProviderModuleChecks, ProviderTestConfig }
+import org.llm4s.testkit.{
+  ContentPartCase,
+  CredentialsRoundTrip,
+  LocalProviderTestServer,
+  ProviderModuleChecks,
+  ProviderTestConfig
+}
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -64,6 +70,21 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
         .map(_.getClass.getSimpleName) shouldBe Right("OllamaConfig")
     }
 
+    "default a section's baseUrl to the local server, and let OLLAMA_BASE_URL override it (#1991)" in {
+      given ProviderRegistry = ProviderRegistry.default
+      def baseUrl(section: String, env: Map[String, String] = Map.empty) =
+        ProviderTestConfig
+          .loadProvider("local", s"""llm4s.providers.local { provider = "ollama", model = "llama3.1"$section }""", env)
+          .map(_.asInstanceOf[OllamaConfig].baseUrl)
+
+      baseUrl("") shouldBe Right("http://localhost:11434")
+      baseUrl(""", baseUrl = "http://gpu-box:11434"""") shouldBe Right("http://gpu-box:11434")
+
+      val bound = ", baseUrl = ${?OLLAMA_BASE_URL}"
+      baseUrl(bound) shouldBe Right("http://localhost:11434")
+      baseUrl(bound, Map("OLLAMA_BASE_URL" -> "http://ollama:11434")) shouldBe Right("http://ollama:11434")
+    }
+
     "refuse a config belonging to another provider" in {
       assertRefusesForeignConfig(OllamaProvider)
     }
@@ -79,6 +100,15 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
       withServer("/")(exchange => sendJsonResponse(exchange, 200, ndjsonBody)) { baseUrl =>
         assertStreams(clientAt(baseUrl))
       }
+    }
+
+    "send text and inline images, and refuse every other content part" in {
+      val done = """{"message":{"role":"assistant","content":"ok"},"done":true}"""
+      // a provider's 400 or 413 - a vendor limit llm4s leaves to it - is a typed error with its message
+      assertProviderRejectionIsTyped((exchange, status, message) =>
+        sendJsonResponse(exchange, status, ujson.Obj("error" -> message).render())
+      )(clientAt)
+      assertContentParts("ollama", sendJsonResponse(_, 200, done))(ContentPartCase.UserImageInline)(clientAt)
     }
 
     "return CancelledError when a call is interrupted" in {

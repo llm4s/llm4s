@@ -31,14 +31,16 @@ git push origin v0.3.2
 Pushing the tag is the whole procedure. Everything after it is automated, in this order:
 
 ```
-ci → publish → github-release → docs
-             └───────────────→ docker
+ci → publish → publish-kotlin → github-release → docs
+             │                                 └→ sbom
+             └──────────────────────────────────→ docker
 ```
 
 | Job | Does |
 |-----|------|
 | `ci` | Full CI on the tagged commit |
-| `publish` | Signs and publishes artifacts to Maven Central |
+| `publish` | Signs and publishes the sbt artifacts to Maven Central (`sbt ci-release`) |
+| `publish-kotlin` | Builds, signs, checks and uploads `llm4s-kotlin-api`, the Gradle-built Kotlin artifact, at the same version (see [The Kotlin artifact](#the-kotlin-artifact-llm4s-kotlin-api)) |
 | `github-release` | Creates the GitHub Release for the tag |
 | `docs` | Deploys llm4s.org with the new version in the install snippets: dispatches the docs workflow on `main`, built from the tag, and waits for it |
 | `docker` | Builds and pushes the container image |
@@ -67,6 +69,73 @@ That redeploys the site from that tag's content, so use the **latest** release's
 back. The tag must exist, and `latest_release` in the install snippets always comes from the newest published GitHub
 Release, whichever tag is built.
 
+To check the path **without deploying**, add `dry_run=true`. The run does every build step (tag validation, checkout of
+the tag, version extraction, the aggregate Scaladoc and its package check, Jekyll, the Pages artifact) and skips the
+deploy job, so llm4s.org is untouched. It runs in a concurrency group of its own, so it never displaces a real deploy
+waiting in the `pages` group, and it works on any branch, so a change to `pages.yml` can be tried before it merges:
+
+```bash
+gh workflow run pages.yml --ref main -f ref=v0.5.0 -f dry_run=true          # the release path, build only
+gh workflow run pages.yml --ref my-branch -f dry_run=true                   # a pages.yml change, build only
+```
+
+A run that is not a dry run and is not on `main` fails in its first step, before it builds, because the environment
+would reject its deploy anyway.
+
+Only a tag whose commit has the aggregate `docs` sbt project can be built by today's `pages.yml`: it runs
+`sbt docs/doc`. That project arrived after v0.4.1 (in #1155), so `-f ref=v0.4.1` fails at "Generate Scaladoc"; the first
+tag the release path can build is the next release. Use a dry run on `main` without `ref` to check everything except the
+tag checkout until then.
+
+### The Kotlin artifact: `llm4s-kotlin-api`
+
+`org.llm4s:llm4s-kotlin-api` is built by Gradle (`modules/kotlin-api`), not sbt, so `sbt ci-release` does not publish it.
+The `publish-kotlin` job does, after `publish`, with the same signing key and Central Portal token:
+
+1. It checks that sbt's version (`sbt 'print ThisBuild / version'`, which sbt-dynver derives from the tag) is the tag's
+   version without its `v`, and publishes the library to the runner's local Maven repository (`sbt publishM2`), so
+   the Kotlin build compiles against the very `llm4s-java-api_3` the release published rather than waiting for Central.
+2. `gradle publishMavenPublicationToStagingRepository -Pllm4sVersion=<version>` writes the signed publication - the
+   POM, the jar, the sources jar, a javadoc jar holding the Dokka HTML of the KDoc, the Gradle module file, their
+   `.asc` signatures and checksums - to `modules/kotlin-api/build/staging-deploy`. `llm4sVersion` sets both the
+   artifact's version and the `llm4s-java-api_3` version it depends on; without it the build is `0.1.0-SNAPSHOT`.
+3. `scripts/check-kotlin-publication.sh` (with `REQUIRE_SIGNATURES=1`) checks it: every file signed; the POM's url,
+   licence, organization, scm, developers and version scheme equal to the sbt-published POMs'; a compile-scope
+   dependency on `llm4s-java-api_3` at the same version and on no snapshot; and a throwaway Gradle project that imports
+   `llm4s-bom` and declares `llm4s-kotlin-api` with no version compiles Kotlin code against it.
+4. `scripts/publish-kotlin-api.sh` zips the version directory into a Central Portal bundle, uploads it with
+   `publishingType=AUTOMATIC` (as `sbt ci-release` releases), and waits until the Portal has validated it and is
+   publishing. It refuses a snapshot, an unsigned file or a missing sources or javadoc jar before uploading anything.
+   It is safe to re-run: before uploading it asks Maven Central for the POM, then the Portal
+   (`GET /api/v1/publisher/published` and its deployments of `llm4s-kotlin-api-<version>`), and exits 0 without
+   uploading when the version is already published or publishing; a deployment an earlier run left validating is
+   followed rather than uploaded again. If the Portal cannot answer those questions the script fails **without**
+   uploading (fail closed): a duplicate deployment cannot be withdrawn, while a failed check only costs a re-run. The
+   Portal token reaches `curl` in a `0600` header file, never on its command line.
+
+`github-release` waits for `publish-kotlin`, not only for `publish`. That is deliberate: `llm4s-bom` at the release
+version names `llm4s-kotlin-api`, so a Release announced before the Kotlin artifact is on its way would advertise a
+BOM entry, and an install line, that do not resolve. The price is that a `publish-kotlin` failure also holds back the
+GitHub Release, the docs deploy and the SBOMs; [Re-triggering a failed release](#re-triggering-a-failed-release) says
+how to release them by hand.
+
+The artifact has no `_3` suffix, since it is Kotlin, and `llm4s-bom` manages it with every other artifact, so a Gradle
+build that imports the BOM declares `implementation("org.llm4s:llm4s-kotlin-api")`. `sbt listPublishedArtifacts` lists
+it as a `gradle` line (`project/PublishedArtifacts.scala`, `Gradle`), so `scripts/verify-release.sh` checks it is on
+Central, and `sbt publishedArtifactsCheck` requires it to be documented like any other artifact.
+
+Every pull request runs steps 2 and 3 unsigned in the `Kotlin API` CI job, at `0.1.0-SNAPSHOT`, so a change that breaks
+the publication fails there and not on release day; `scripts/test-publish-kotlin-api.sh` runs step 4 against a fake
+Portal. To try it locally (it writes nothing outside the repository but the local Maven repository you name):
+
+```bash
+sbt -Dmaven.repo.local=/tmp/m2 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
+(cd modules/kotlin-api && gradle -Dmaven.repo.local=/tmp/m2 publishMavenPublicationToStagingRepository)
+scripts/check-kotlin-publication.sh 0.1.0-SNAPSHOT modules/kotlin-api/build/staging-deploy /tmp/m2
+```
+
+The Kotlin build needs JDK 21 to run its tests, and a Kotlin 2.0 compiler does not run on JDK 25: run Gradle on JDK 21.
+
 ### 3. What gets published is whatever the tagged commit aggregates
 
 `sbt ci-release` publishes the root aggregate **as it exists on the tagged commit**. Work that
@@ -92,8 +161,11 @@ and does so silently.
 To see exactly what the tagged commit will publish, ask the build:
 
 ```bash
-sbt -error listPublishedArtifacts   # one `artifact <id>`, `bom <id>` or `stub <id>` per line
+sbt -error listPublishedArtifacts   # one `artifact <id>`, `gradle <id>`, `bom <id>` or `stub <id>` per line
 ```
+
+A `gradle` line is an artifact the release publishes from a Gradle build rather than from the aggregate:
+`llm4s-kotlin-api`, published by the `publish-kotlin` job. It is on the tagged commit when `modules/kotlin-api` is.
 
 `sbt publishedArtifactsCheck` (a CI quick check) fails when a published `llm4s-*` artifact has no tier in
 [1.0 Scope](v1-scope) or no install line in the installation guide.
@@ -128,7 +200,8 @@ it never overwrites. Write whatever the release deserves once it exists.
   ```
 
   It asks the build which artifacts it publishes (the list above) and checks that each resolves at that
-  version: the POM and the jar for a real artifact, a POM that carries a `<dependencyManagement>` for the
+  version: the POM and the jar for a real artifact, and for `llm4s-kotlin-api` also a POM that depends on
+  `llm4s-java-api_3` at that same version, a POM that carries a `<dependencyManagement>` for the
   BOM (it has no jar), and for each relocation stub (the pre-0.4.0 coordinates) a POM that carries a
   `<relocation>`. It exits non-zero and names each miss. Run against
   `0.4.0` with the stub list it reports all five stubs as missing, which is how 0.4.0 shipped
@@ -138,12 +211,57 @@ it never overwrites. Write whatever the release deserves once it exists.
   proof of a miss: re-run before concluding one. A miss that persists cannot be fixed in that version
   ([Re-triggering a failed release](#re-triggering-a-failed-release)); it waits for the next one.
 
+- Check the published POMs' metadata. `sbt pomMetadataCheck` (a CI quick check) already fails a build whose
+  generated POMs lack a description, an https project URL, a licence, a developer or the
+  `https://github.com/llm4s/llm4s` `<scm>` that Scaladex matches on. To check what actually reached Central:
+
+  ```bash
+  curl -sfO https://repo1.maven.org/maven2/org/llm4s/llm4s-core_3/0.5.0/llm4s-core_3-0.5.0.pom
+  sbt "pomMetadataCheckFiles llm4s-core_3-0.5.0.pom"
+  ```
+
+  Run against 0.4.1's POM it reports three problems: the description is the artifact name, the `<scm><url>` has a
+  trailing slash and the connection is the SSH form. All three were fixed after 0.4.1 (#1588).
+- Check Scaladex: `https://index.scala-lang.org/llm4s/llm4s` should list the new version once Scaladex has picked it up.
+  See [Discoverability](#discoverability-scaladex-and-github) when it does not.
+
+### Discoverability: Scaladex and GitHub
+
+Scala developers look for libraries on [Scaladex](https://index.scala-lang.org). It indexes an artifact by the
+POM's `<scm>` (it "associates a new artifact to a project by looking at the `scm` attribute", and supports only
+public GitHub repositories), and it ranks search results by the GitHub repository's name (boost 6), organization (5),
+**description (4)** and **topics (4)**, then the artifact names (2) and the README (0.5)
+([how it works](https://github.com/scalacenter/scaladex#how-it-works),
+[improving visibility](https://github.com/scalacenter/scaladex/blob/main/doc/user/improve-visibility.md)). The POM
+side is in the build and guarded by `pomMetadataCheck`. The rest are repository settings or requests upstream, so they
+need a maintainer:
+
+- **GitHub topics** (Settings, General, the About gear, or
+  `gh repo edit llm4s/llm4s --add-topic scala,scala3,llm,llm-agents,ai-agents,rag,mcp,openai,anthropic,ollama,genai,tool-calling`).
+  These are the words a Scala developer types when looking for this; there are none today.
+- **Repository description:** today "Agentic  and LLM Programming in Scala" (with a double space). One sentence that
+  names what it is helps both Scaladex and GitHub search, for example "Scala 3 toolkit for LLM applications: one client
+  for OpenAI, Anthropic, Gemini, Ollama and more, agents, tool calling, RAG and MCP".
+- **Repository homepage:** empty today; set it to `https://llm4s.org`. Scaladex shows it as the project's website.
+- **If the project is still missing after a release:** several projects published through the Sonatype Central Portal
+  were reported missing in mid-2026, and in each case a Scaladex maintainer added the project by hand on
+  request ([scaladex#1715](https://github.com/scalacenter/scaladex/issues/1715),
+  [#1716](https://github.com/scalacenter/scaladex/issues/1716),
+  [#1717](https://github.com/scalacenter/scaladex/issues/1717); an automatic fallback is proposed in
+  [scaladex#1718](https://github.com/scalacenter/scaladex/pull/1718)). Open an issue there titled "llm4s (org.llm4s) is
+  not indexed", giving the repository, the group id `org.llm4s`, an artifact such as
+  `https://repo1.maven.org/maven2/org/llm4s/llm4s-core_3/` and the POM's `<scm>`. A `claims.json` entry in
+  scaladex-contrib is only for artifacts whose POM has no usable `<scm>`, which ours has. Scaladex reads no
+  repository file such as `.scaladex.json`, so there is nothing to add here.
+- **Once the listing exists:** add the Scaladex badge beside the Maven Central one in `README.md`
+  (`[![llm4s-core Scala version support](https://index.scala-lang.org/llm4s/llm4s/llm4s-core/latest-by-scala-version.svg)](https://index.scala-lang.org/llm4s/llm4s/llm4s-core)`)
+  and a Scaladex link in the installation guide. Until then that badge renders "project not found", so it is not added.
+
 ## Release readiness: a MiMa dry run
 
 `mimaBaselineVersion` in `build.sbt` is `None`, so `sbt mimaReportBinaryIssues` compiles the build and checks
-nothing ([The Baseline](api-stability#the-baseline)). 0.5.0 is the release that sets it
-([#1281](https://github.com/llm4s/llm4s/issues/1281)), and MiMa cannot run before a release exists to compare
-with. `scripts/mima-dry-run.sh` does those steps early, against a throwaway version, to show that they will work:
+nothing ([The Baseline](api-stability#the-baseline)). It is set at a pre-1.0 release, version to be decided, once
+the designs are final ([#1281](https://github.com/llm4s/llm4s/issues/1281)); 0.5.0 sets none. `scripts/mima-dry-run.sh` does those steps early, against a throwaway version, to show that they will work:
 
 ```bash
 scripts/mima-dry-run.sh                 # on JDK 21, from a clean checkout of the commit you want to check
@@ -163,11 +281,11 @@ touched), sets `mimaBaselineVersion` there, publishes every module to a temporar
 
 It took about three minutes on a laptop with warm caches (between 156 s and 184 s over three runs; an independent run took 175 s). It proves the wiring: the coordinates, the
 `_3` suffix, resolution, that the check can fail, and that `@Experimental` types are outside the freeze. It does
-**not** prove that any API is compatible with anything: there is no 0.5.0 baseline yet. It is a manual script,
+**not** prove that any API is compatible with anything: there is no baseline yet. It is a manual script,
 not a CI job, because it publishes the whole build. `scripts/test-mima-dry-run.sh` tests the script itself
 without sbt.
 
-At the cut: publish 0.5.0, confirm the frozen artifacts are on Central
+At the baseline release: publish it, confirm the frozen artifacts are on Central
 ([Verify Release](#5-verify-release)), then follow
 [Setting and bumping the baseline](api-stability#setting-and-bumping-the-baseline).
 
@@ -199,6 +317,39 @@ help.
   behind as a draft. Delete it too before retrying, or the recreated tag's `github-release`
   job will skip creation.
 
+- **`publish-kotlin` failed** — the sbt artifacts are live, so do **not** re-tag. `github-release`, `docs` and
+  `sbom` wait for `publish-kotlin`, so none of them has run (`docker` has: it needs only `publish`).
+  - **If the cause is outside the tagged commit** (a missing or expired secret, a Portal outage, a FAILED
+    validation whose reasons the log shows and a Portal-side fix clears), fix it and use **Re-run failed jobs** on
+    the run. `publish-kotlin` is safe to re-run at any step: the upload exits 0 without uploading when the version
+    is already published or publishing, and follows a deployment an earlier attempt left validating. When it goes
+    green, `github-release`, then `docs` and `sbom`, run as usual.
+  - **If the fix needs a change to the build** (`modules/kotlin-api`, the workflow, the scripts), it cannot be in
+    version X: the workflow builds the tagged commit, and Maven Central is immutable. Land the fix on `main`;
+    `llm4s-kotlin-api` first ships with the next patch version. Version X then stays without it, and its
+    `llm4s-bom` still lists `org.llm4s:llm4s-kotlin-api:X`, which will never resolve: a Gradle build that imports
+    the X BOM and declares the Kotlin artifact fails, so the X Release notes must say to use the next version for
+    Kotlin. `scripts/verify-release.sh X` reports that one miss and nothing else. Release the rest of X by hand,
+    in the order the workflow would:
+
+    ```bash
+    scripts/verify-release.sh 0.5.0      # every sbt artifact resolves; only llm4s-kotlin-api is missing
+    # The GitHub Release (as the github-release job creates it; add --prerelease for a vX.Y.Z-RC1 tag).
+    gh release create v0.5.0 --verify-tag --title v0.5.0 --generate-notes
+    gh release edit v0.5.0 --notes-file notes.md   # say llm4s-kotlin-api is not in 0.5.0
+    # The docs deploy (what the docs job dispatches), once the Release exists.
+    gh workflow run pages.yml --ref main -f ref=v0.5.0
+    # The SBOMs (what the sbom job does), from a clean checkout of the tag, on JDK 21.
+    git checkout v0.5.0
+    sbt -batch publishedSboms
+    sbt -batch -error listPublishedArtifacts | grep -E '^(artifact|stub) ' > target/published-artifacts.txt
+    scripts/check-sbom.sh target/sboms target/published-artifacts.txt
+    gh release upload v0.5.0 target/sboms/*.bom.json --clobber
+    ```
+
+    This is the one case where the Release is created by hand ([section 4](#4-do-not-create-the-github-release-by-hand)):
+    only after `verify-release.sh` shows the sbt artifacts are on Central.
+
 - **Failed after `publish`** (`github-release`, `docs` or `docker`) — the artifacts are live
   and the release is real. Do **not** re-tag. Re-run the failed job from the Actions UI, or
   cut the next patch version if the failure needs a code change. Re-running `docs` dispatches a
@@ -212,4 +363,6 @@ We follow semantic versioning (MAJOR.MINOR.PATCH):
 - MINOR: New features, backwards compatible
 - PATCH: Bug fixes, backwards compatible
 
-Current documented version series: 0.4.x (pre-1.0 development)
+Current documented version series: 0.5.x (pre-1.0 development). Until the MiMa baseline is set, any release,
+patch included, may carry a breaking change, listed in the CHANGELOG with a migration note; see
+[Compatibility Policy](compatibility-policy#versions).

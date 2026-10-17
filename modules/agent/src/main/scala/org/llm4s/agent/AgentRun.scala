@@ -37,7 +37,11 @@ final class AgentRun private[agent] (
   /** Non-blocking: `Running` until the turn ends, then how it ended. */
   def status: RunStatus = handle.status
 
-  /** Cancels the turn; see [[org.llm4s.agent.graph.RunHandle.cancel]]. The thread is left for `recover`. */
+  /**
+   * Cancels the turn; see [[org.llm4s.agent.graph.RunHandle.cancel]]. The thread is left for `recover`, as
+   * it is after a turn that lost its claim (`GraphError.ClaimLost`) once the thread is free: `recover` is
+   * refused with `ThreadBusy` while another runtime holds it.
+   */
   def cancel(): Unit = handle.cancel()
 
   /**
@@ -69,17 +73,34 @@ final class AgentRun private[agent] (
    * Subscribes `listener` to this turn's events: its durable events replayed from the turn's start,
    * then live; its live events from now on (a live event sent before this call is missed - use
    * [[Agent.stream]] to receive every one). Run-scoped: nothing of another run on the thread is
-   * delivered, and the subscription ends itself after the turn's terminal event, or after a
+   * delivered - so the cross-runtime ordering caveat of
+   * [[org.llm4s.agent.graph.GraphRuntime.subscribe]] does not arise here: another runtime's commits
+   * are not part of this turn - and the subscription ends itself after the turn's terminal event, or after a
    * `Disconnected` - which reaches the listener only if it fell behind (`Lagging`), threw
    * (`ListenerFailed`), or the replay could not read the thread's log (`ReplayFailed`). A turn
    * that ends without a terminal event (a crash, or a failed commit) ends the subscription as soon
    * as it has delivered the turn's last event - also when it subscribed after the turn ended - and
    * cancelling the returned subscription ends it at once.
    * [[await]] returns only once `listener` has returned from the turn's last event (or the
-   * subscription was cancelled), waiting at most 5 seconds.
+   * subscription was cancelled), waiting at most 5 seconds. A turn that lost its claim
+   * (`GraphError.ClaimLost`) ends its subscription at its end, which never waits on a hung store: a
+   * `Durability.Async` write it abandoned may land afterwards, and is then not one of the turn's events
+   * - it is never delivered here, even by a replay - but is visible only in the thread's log
+   * ([[org.llm4s.agent.graph.GraphRuntime.subscribe]]).
    */
   def subscribe(capacity: Int = Agent.StreamCapacity)(listener: StreamEvent => Unit): Result[Subscription] =
-    val scope = RunScope(runId, listener)
+    subscribeEnding(capacity, () => ())(listener)
+
+  /**
+   * [[subscribe]], calling `onEnd` once when the subscription ends - after the turn's terminal event or
+   * a `Disconnected` has been passed to `listener`, at the turn's end-of-run barrier, or when the
+   * returned subscription is cancelled. For the bridges (fs2, ZIO, Pekko) that observe a run they do
+   * not own and must end without a terminal event too.
+   */
+  private[llm4s] def subscribeEnding(capacity: Int, onEnd: () => Unit)(
+    listener: StreamEvent => Unit
+  ): Result[Subscription] =
+    val scope = RunScope(runId, listener, onEnd)
     handle.subscribe(capacity)(scope).map { s =>
       scope.attach(s)
       scopes.add(scope)
@@ -102,7 +123,8 @@ final class AgentRun private[agent] (
    * from the turn's last event (its terminal event, a `Disconnected`, or, for a turn that ended
    * without a terminal event, its last delivered one), waiting at most 5 seconds in all;
    * past that it logs a WARN and returns. A call made from a listener does not wait for that
-   * listener.
+   * listener. For a turn that lost its claim, the turn's last event is the last one it delivered
+   * before it ended; a write it abandoned that lands later is not the turn's (see [[subscribe]]).
    */
   def await(): Result[AgentResult] =
     val ended = handle.await()

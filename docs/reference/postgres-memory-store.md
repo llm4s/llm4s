@@ -13,11 +13,6 @@ parent: Reference
 
 ## Dependency
 
-{: .note }
-> Not yet published. `llm4s-memory-postgres` exists in the build as of
-> [#1129](https://github.com/llm4s/llm4s/issues/1129) but ships in the next release;
-> in `0.4.1` and earlier this code is inside `llm4s-core`.
-
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-memory-postgres" % llm4sVersion
 ```
@@ -97,8 +92,11 @@ val storeResult = PostgresMemoryStore(config)
 
 Table names are validated eagerly using the following pattern:
 ```
-^[a-zA-Z_][a-zA-Z0-9_]{0,62}$
+^[a-zA-Z_][a-zA-Z0-9_]{0,54}$
 ```
+
+At most 55 characters, so the names derived from it (`<table>_applied`, `<table>_fences` and the
+`idx_<table>_...` indexes) stay distinct within PostgreSQL's 63-byte identifier limit.
 
 
 This prevents SQL injection via identifier interpolation and ensures failures occur during configuration rather than at query time.

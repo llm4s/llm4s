@@ -4,11 +4,18 @@ import org.llm4s.agent.graph.{ Checkpointer, InMemoryCheckpointer }
 import org.scalatest.flatspec.AnyFlatSpec
 
 import java.time.Clock
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.*
 
 /** The reference store passes the contract every store must pass; it is the first to. */
 class InMemoryCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract {
   protected def newCheckpointer(clock: Clock): Checkpointer = InMemoryCheckpointer(clock)
+
+  /**
+   * The reference store has no storage to hold from outside, so nothing is made busy: its calls take only each
+   * other's brief turn at its lock, and the case checks that they return within a generous second.
+   */
+  override protected def boundedStore(clock: Clock): Option[CheckpointerContract.BoundedStore] =
+    Some(CheckpointerContract.BoundedStore(InMemoryCheckpointer(clock), 1.second, () => () => ()))
 }
 
 /**

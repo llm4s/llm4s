@@ -142,6 +142,32 @@ result.map { r =>
 `AgentResult` also carries `threadId`, `runId`, `activeAgent`, `messages` (the thread's full
 history, never a system prompt) and `usage`.
 
+### A Typed Answer
+
+`withOutput(schema)` gives the agent a response format: a `SchemaDefinition[O]`, with a uPickle
+`ReadWriter[O]` in scope. Write the schema by hand, or derive it with `llm4s-schema-derivation`:
+`withOutput(SchemaOf[Invoice].definition)`. The system prompt states the schema on every model call,
+and a call that offers no tools also carries it as its `responseFormat`. A call that offers tools carries
+no format, because several providers cannot combine one with tool calls. `decodeOutput[O]` reads the answer:
+
+```scala
+case class Invoice(customer: String, total: Double) derives ReadWriter
+val invoiceSchema: ObjectSchema[Invoice] = ??? // or SchemaOf[Invoice].definition
+
+for {
+  agent   <- Agent.builder("extractor", client).withOutput(invoiceSchema).build()
+  result  <- agent.run("Bill Acme 12.50")
+  invoice <- result.decodeOutput[Invoice]
+} yield invoice
+```
+
+A final answer must be JSON that matches the schema and reads as `O`; it is stored as that JSON alone.
+An invalid answer is sent back to the model once, with its problems, in the same step; neither is stored.
+A second invalid answer ends the turn with `Left(GraphError.OutputInvalid(errors))`: the turn is removed
+from the thread, as an output guardrail's block removes it, both calls stay in `usage`, `recover` has
+nothing to continue, and the next turn runs from before it. The format is the agent's own: a handoff
+target answers in its own format, or freely.
+
 ---
 
 ## Safety Defaults
@@ -170,8 +196,8 @@ which belong to the `Agent`. `AgentResult` is a value to read, not something to 
 - A thread stays in the runtime until `agent.forget(threadId)` removes it - one-shot
   `agent.run(query)` threads too, which on the default in-memory runtime means they stay in memory.
   Forget a conversation you will not continue: `agent.run(query).flatMap(r => agent.forget(r.threadId).map(_ => r))`.
-  `forget` refuses a thread whose run is still active (`ThreadBusy`) or that belongs to another
-  tenant (`TenantMismatch`); an unknown thread is `Right(())`.
+  `forget` refuses a thread that a run still holds - in this runtime, or by a live claim in any runtime sharing
+  the store (`ThreadBusy`) - or that belongs to another tenant (`TenantMismatch`); an unknown thread is `Right(())`.
 
 ### Suspended turns from Java and Kotlin
 
@@ -231,7 +257,9 @@ If the turn had already completed when the cancellation arrived, the call still 
 `CancellationException`, but the turn's result is committed to the thread: `recover` then has nothing to
 recover and throws `LLMException` ("no incomplete execution"), and the next turn continues from that result.
 The one-shot `run(query)` is the exception, as in Java and Scala: nothing it throws carries its random thread
-id, so once a failed or cancelled turn has ended it forgets the thread. A cancelled call waits up to 5 seconds
+id, so once a failed or cancelled turn has ended it forgets the thread. A conversation you named for `stream` is
+yours to forget: `agent.forget(threadId)` needs no result, succeeds for an unknown thread and throws
+`LLMException` for one whose turn is still running. A cancelled call waits up to 5 seconds
 for the turn to end; a provider that ignores the interrupt for longer is left to finish on its own, and the
 thread stays busy (`ThreadBusy`) until it does.
 
@@ -299,16 +327,19 @@ until cancelled, or fails with `Fatal` - leaves the thread two choices, `recover
 
 **Tools run at least once, so pass the idempotency key on.** A call can run again: a retrying
 `wrapToolCall` middleware, `recover` after a cancellation, failure or crash, and an approval each
-run it once more, and a call cut short may already have done its work. `ToolContext.idempotencyKey`
+run it once more, and a call cut short may already have done its work. With a store shared between
+processes, a call can even run in two runs at the same time: a worker paused past its claim's lease
+can still be running a tool when another runtime takes the thread over and runs the same call (see
+[Fencing](durable-checkpointers#fencing-a-run-that-lost-its-claim-stops-and-records-nothing)). `ToolContext.idempotencyKey`
 is the same in every run of one call, so a tool with an external side effect passes it to the
 system it calls, which then does the work once:
 
 ```scala
-import org.llm4s.agent.graph.tool.{AgentTool, ToolOutcome}
+import org.llm4s.agent.graph.tool.{AgentTool, ToolContent, ToolOutcome}
 
 val charge = AgentTool(chargeSpec) { (args, context) =>
   payments.charge(args.amount, idempotencyKey = context.idempotencyKey.value) match
-    case Right(receipt) => ToolOutcome.Success(ujson.Str(receipt.id))
+    case Right(receipt) => ToolOutcome.Success(ToolContent.Json(ujson.Str(receipt.id)))
     case Left(error)    => ToolOutcome.Error(error.message)
 }
 ```
@@ -335,6 +366,361 @@ model request made again because the first response was never stored. The bounda
   effect and that store runs the call again on `recover`, with the same key. A graph run under
   `Async` or `OnExit` durability can lose more after its last durable commit: finished calls run
   again with their keys, and a lost model response is asked for again, so its calls get new keys.
+- A stale worker and its successor send the same key for a call both run, so a key-honouring system
+  does the work once. A system that can fence writers can also refuse the stale one outright:
+  `context.run.position.fencingToken` is the run's claim token, which grows with every claim on the
+  thread, so the system keeps the highest token it has seen and refuses a lower one.
+
+**Guarded effects: replay without repeating.** For a target that does not take an idempotency key,
+such as a file, a sandbox or a store, perform the effect through `ReplayGuard`. The guard records an
+intent before the effect and its outcome after, in the thread's own store, under the run's claim. A
+call that runs again then gets its original outcome back instead of repeating the work. The target
+declares one `ReplaySupport`, and each has its own guard:
+
+- `ReplayGuard.transactional` is for a target that records the key with the outcome in the same
+  transaction as the effect, and implements `AppliedKeys`. The effect and `forget` are given the
+  run's claim token, and the target refuses a token older than the newest it has seen for the
+  key's `scope` (its thread). So a run that lost its claim can neither apply, nor read back, nor
+  forget anything once its successor has touched the target.
+- `ReplayGuard.verifiable` is for a target that can read a digest (`StateCheck`) of what the effect
+  touches. If the effect began but its outcome was not recorded, the guard checks the target. It
+  returns the presumed outcome if the effect landed, runs the effect again if it did not, and
+  refuses if another thread changed the target in between. The effect must be a compare-and-set
+  against `before`, so that a stalled run's write cannot land on its successor's.
+- `ReplayGuard.unverifiable` is for everything else. If the effect began but its outcome was not
+  recorded, the guard refuses to run it again ("it may already have run"), unless the tool is
+  idempotent.
+
+```scala
+import org.llm4s.agent.graph.{GraphError, ReplayGuard, StateCheck}
+
+val append = AgentTool(appendSpec) { (args, context) =>
+  val key = context.effectKey("file.append", args.path)
+  ReplayGuard.verifiable[Int](context.run, key)(Right(StateCheck.of(read(args.path)))) {
+    val before = read(args.path)
+    val after  = before + args.text
+    Right(ReplayGuard.Plan(StateCheck.of(before), StateCheck.of(after), after.length) {
+      // under a lock every writer takes: write only if the file is still what the plan read
+      writeIfUnchanged(args.path, StateCheck.of(before), after).map(_ => after.length)
+    })
+  } match
+    case Right(length)                           => ToolOutcome.Success(ToolContent.Json(ujson.Num(length)))
+    case Left(r: GraphError.EffectReplayRefused) => ToolOutcome.Error(r.message)
+    case Left(other)                             => ToolOutcome.Fatal(other) // outcome unknown: recover replays it
+}
+```
+
+What each guard does when the run crashed at each point, and why, is in design record
+[§4.24](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.24-stage-3-slice-c4-replay-of-external-effects.md). The
+rules a caller relies on:
+
+- **Build each key with `effectKey`.** In a tool, `context.effectKey(operation, discriminator*)`
+  derives the key from the call's idempotency key. In a hook or node, `RunContext.effectKey` derives
+  it from the task's `taskKey`. Give each effect of a task its own operation or discriminator.
+- **A fork's re-run of a call is a new effect.** The key includes the thread.
+- **The evidence is kept exactly as long as the task can run again.** That is until the commit that
+  finishes the task, however long the thread waits. `prune` never removes it, and `deleteThread`
+  removes it with the thread.
+- **A Block does not undo an external effect.** A guardrail that blocks a turn restores every state
+  key the turn wrote, its messages included (§4.22), but a file the turn wrote outside thread state, a
+  command it ran or a record it stored stays as it is. The turn's replay evidence goes with its
+  closing commit, so nothing replays it either.
+
+### Harness File Backends
+
+The harness keeps an agent's files in a `FileBackend` (`org.llm4s.agent.harness`): thread state
+(`StateFileBackend`, the default), a long-term store (`StoreFileBackend`, for `/memories/`), several at
+once (`CompositeBackend`), files the application ships, read-only (`StaticFileBackend`: mount it at `/app`
+and point `SkillsConfig.withSources` and `InstructionsConfig.withPaths` there, since on state files only a tool
+call writes a file), or one chosen per run (`FileBackend.resolved`). Each backend declares the locks
+its mutations hold, replays its external effects through `ReplayGuard`, and enforces its own size
+limits. A backend over a host directory is not part of this release; it is tracked in
+[#1964](https://github.com/llm4s/llm4s/issues/1964).
+
+### Harness File Tools
+
+`FileTools(backend)` gives the model seven tools over any `FileBackend`: `ls`, `read_file`,
+`write_file`, `edit_file`, `delete`, `glob` and `grep` ([design §4.32](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.32-stage-3-slice-f1-filesystem-tools.md)).
+
+```scala
+import org.llm4s.agent.graph.tool.ToolSet
+import org.llm4s.agent.harness.{FileToolLimits, FileTools, StateFileBackend}
+
+for {
+  tools <- ToolSet.of(FileTools(StateFileBackend(), FileToolLimits(maxResultChars = 20000))*)
+  agent <- Agent.builder("coder", client).withTools(tools).build()
+} yield agent
+```
+
+- **Paths are absolute** (`/src/main.scala`); `.`, `..` and empty segments are refused.
+- **`read_file`** numbers lines from 1 and pages with `offset` (the line to start at) and `limit`
+  (default and at most `readLimit`, 2000), and says how many lines the file has. **`edit_file`**
+  replaces `old_string` with `new_string`, and refuses when `old_string` is absent, or occurs more
+  than once without `replace_all`.
+- **Bounded results.** Lines are cut at `maxLineChars`; `ls`, `glob` and `grep` stop at `maxResults`
+  and say so; every result a tool returns, an error's included, is at most `maxResultChars` characters (an outcome the loop or a middleware gives instead, such as a denial, is theirs).
+- **Order in one message.** Mutations take the backend's locks, so two edits of one file in one
+  message apply in order, the second against the first's result. Reads take no lock: a read in the
+  same message as a write may not see it (over thread state it sees the file as before the message).
+- **Permissions.** Each tool declares its resources: `Read` of the path for `ls` and `read_file`,
+  `Write` for `write_file` and `edit_file`, `Delete` for `delete`. `glob` and `grep` declare the
+  envelope of what they may read (`/src/**`, `/src/*.md`), which a `PermissionMiddleware` decides as
+  a whole, so a deny rule beneath the searched path denies the search. `ls` shows the names, not the
+  contents, of entries beneath a path it may read.
+- **Block and replay.** An output Block restores state files with the rest of the turn; writes to a
+  store are not undone. A store mutation that runs again after a crash replays its recorded outcome.
+- **Not with the host file tools.** `llm4s-agent-tools`' `ReadFileTool` and `WriteFileTool` have the
+  names `read_file` and `write_file`, and a `ToolSet` refuses duplicate names: use one suite or the
+  other.
+- `FileToolsContract` (`llm4s-agent-testkit`) runs the tools over your own `FileBackend`.
+### Workspace Sandbox
+
+`llm4s-workspace-client` puts a containerised workspace behind both backend SPIs: `WorkspaceFileBackend`
+for its files and `WorkspaceSandboxBackend` for its commands (`org.llm4s.agent.harness.workspace`). The
+`execute` tool (`ExecuteTool`, in `llm4s-agent`) runs a command in any `SandboxBackend`:
+
+```scala
+import org.llm4s.agent.harness.ExecuteTool
+import org.llm4s.agent.harness.workspace.{WorkspaceFileBackend, WorkspaceSandboxBackend}
+
+val workspace = new ContainerisedWorkspace(dir, image, port)   // started with startContainer()
+for
+  files   <- WorkspaceFileBackend("ws1", workspace)             // a FileBackend for the file tools
+  sandbox <- WorkspaceSandboxBackend("ws1", workspace)
+  agent   <- Agent.builder("coder", client)
+               .withTools(ToolSet.of(ExecuteTool(sandbox)).toOption.get)
+               .build()
+yield agent
+```
+
+- **Permissions.** An `execute` call touches `(Execute, <command>)` and is `destructive` and
+  `openWorld`, so `PermissionRule.allow(Operation.Execute, "sbt *")` lets the agent run builds and
+  nothing else. The runner refuses anything its command policy forbids as well
+  ([Workspace sandbox](../../reference/workspace-sandbox.html)), and enforces `allowedPaths`,
+  `readOnlyPaths` and its size limits itself.
+- **Order.** A file mutation and a command both lock the whole workspace (`files/workspace/<id>`), so a
+  batch's edits and commands in one workspace apply one after another, in call order. Two paths that name
+  one file through a link are ordered too.
+- **Replay.** File mutations are `Verifiable`: each is a compare-and-set against the file's hash, which
+  the runner applies atomically, so a replayed edit that landed returns its first result and one whose
+  file changed meanwhile is refused. Commands are `Unverifiable`: a completed command replays its stored
+  result, and one that may have run is refused, never run again.
+- **Effects stay.** What a command or a file write did to the workspace is outside thread state: a Block
+  that retracts the turn does not undo it. The runner never runs a file change beside a command it started,
+  but a process a command leaves running, or a writer outside the container, is outside the compare-and-set.
+- **Tenants.** One workspace is one tenant's. An application serving several builds a pair per tenant
+  and picks it with `FileBackend.resolved` and
+  `SandboxBackend.resolved(_ => Set(WorkspaceLocks.AllWorkspaces))`.
+
+### Tool Permissions, Timeouts and Locks
+
+An `AgentToolSpec` can declare what a call touches, how long one run may take, and which locks it
+holds, each from the call's decoded arguments:
+
+```scala
+import org.llm4s.agent.graph.middleware.{PermissionMiddleware, PermissionRule}
+import org.llm4s.agent.graph.tool.{LockKey, Operation, ToolResource}
+import scala.concurrent.duration.*
+
+val writeSpec = baseSpec
+  .withResources(args => Vector(ToolResource(Operation.Write, args.path)))
+  .withLocks(args => Set(LockKey("workspace", workspaceId, args.path)))
+  .withTimeout(30.seconds)
+
+val agent = Agent.builder("coder", client)
+  .withTools(tools)
+  .withMiddleware(                       // register it first, so it wraps every other middleware
+    new PermissionMiddleware(Seq(
+      PermissionRule.deny(Operation.Write, "/etc/**"),
+      PermissionRule.ask(Operation.Write, "/deploy/**"),
+      PermissionRule.allow(Operation.Write, "/src/**"),
+      PermissionRule.allow(Operation.Invoke, "*")
+    ))
+  )
+  .build()
+```
+
+**Permissions are deny-if-unmatched.** For each resource the first rule with its operation whose
+`Glob` matches the target decides, and a resource no rule matches is denied. A call runs only if
+every resource is allowed: a denial is the error result `Denied: <operation> <target>`, an `Ask`
+suspends the call for approval. A tool that declares no resources touches `(Invoke, <tool name>)`,
+so it needs an `Invoke` rule. Resources are the call's whole envelope: a tool that asks a question and lets
+the answer choose its target declares a resource covering every target it may pick (`/out/**`) and
+refuses an answer outside it, because the check runs on the declaration, not on what the tool does. Such an envelope
+is checked for every target in it: a deny rule reaching any part of it denies the call, and it is
+allowed only when allow rules cover all of it. Approval is one flag per call: once a reviewer approves the call,
+every `Ask` passes. An edited call is checked again on its new arguments, so a deny rule still
+refuses it. Rules see the arguments after the schema check and decoding. In a `Glob`, `*` and `?`
+stay within one `/`-separated segment and `**` crosses them. An `Execute` rule limits which
+commands the agent may ask to run, not what a command does once it runs: rely on the sandbox for
+that.
+
+**A timeout bounds each run of the tool.** A run past it is interrupted and the model sees the
+error `Tool '<name>' timed out after <n> ms`; the run continues. The tool runs on a thread of its
+own, and the call waits for that thread to finish, so **block interruptibly**: a tool that ignores
+its interrupt holds its whole batch past the timeout. A timed-out call may have done part of its
+work: it keeps its idempotency key if it runs again (a retrying middleware, `recover`), but if the
+model calls the tool again, that is a new call with a new key. Cancelling the run still cancels the
+call, which records nothing.
+
+**Locks order conflicting calls of one batch.** Two `LockKey`s conflict when one is a prefix of
+the other, segment by segment: `workspace/w1` conflicts with `workspace/w1/src/a.scala`, and
+`a/b` does not conflict with `a/bc`. When a model message has several calls, a call whose locks
+conflict with an earlier call's waits for it and runs in a later superstep, in call order, seeing
+what the earlier call committed. So a check against thread state (a quota, a file's content) is
+exact, and two calls writing one key no longer lose one of the writes. Calls without conflicting
+locks still run in parallel. Each further round costs two supersteps of `RunBudgets.maxSupersteps`.
+A call that waits for approval holds back the calls queued behind it, so a reviewer can see a
+batch's approvals in more than one round. Locks order calls within one batch only, not across
+threads. An approval edit may narrow a call's locks (`/prod` to `/prod/app`) but not take a lock
+its proposed arguments did not cover: such an edit is refused, the call does not run, and the model
+sees why.
+
+### Todos
+
+`TodoMiddleware` gives an agent a plan: a `write_todos` tool that replaces the thread's todo list,
+and a prompt section that shows the list to the model on every model step.
+
+```scala
+import org.llm4s.agent.harness.{HarnessEvents, TodoMiddleware}
+
+for {
+  agent <- Agent.builder("researcher", client)
+             .withMiddleware(new TodoMiddleware(maxTodos = 20, maxTodoChars = 200))
+             .build()                                  // Result[Agent]
+  run   <- agent.stream(threadId, "Write a report on ...") {
+             case HarnessEvents.TodosProgress(p) =>
+               p.todos.foreach(t => println(s"[${t.status.wire}] ${t.content}"))
+             case _ => ()
+           }
+  result <- run.await()
+} yield result
+```
+
+- **The model sends the whole list** - each item's `content`, `status` (`pending`, `in_progress`,
+  `done`) and, to keep an item, its `id` - and it replaces the plan. The tool assigns ids: an item
+  without one keeps the id of an item with the same content, or gets a new one, and an id is never
+  reused within a thread. An unknown id, an id given twice, a list over `maxTodos` (default 50) or an
+  item over `maxTodoChars` code points (default 200) is refused as an error the model sees.
+- **The plan is thread state**, in `TodoMiddleware.key` (a `TodoList`): it is checkpointed, read
+  by the next turn, and restored by an output Block with the rest of the turn. Two `write_todos`
+  calls in one message run in turn (the tool locks `todos`), the second seeing the first's list.
+- **Events.** Each change emits a durable `HarnessEvents.TodosUpdated` with ids and statuses only,
+  and a live `HarnessEvents.TodosProgress` with the whole list.
+- **The plan guides the model only.** It changes no route and no permission: a
+  `PermissionMiddleware` needs `PermissionRule.allow(Operation.Invoke, "write_todos")` for the tool.
+- **Adding it to an existing agent reshapes its graph** (it registers the `todos` key, and the
+  tool's lock registers `tool-queue`), so threads checkpointed before are refused with
+  `RestoreRejected`: finish or `forget` them first.
+
+### Skills
+
+`SkillsMiddleware` gives an agent [Agent Skills](https://agentskills.io/): folders holding a
+`SKILL.md` whose frontmatter names and describes the skill. It finds them through a `FileBackend`
+and lists each skill's name, description and path in one prompt section; the model reads a skill's
+`SKILL.md`, and its other files, with `read_file` when a task matches it.
+
+```scala
+import org.llm4s.agent.harness.{SkillsMiddleware, VPath}
+
+for {
+  user    <- VPath("/user/skills")
+  project <- VPath("/project/skills")
+  agent <- Agent.builder("coder", client)
+             .withMiddleware(new SkillsMiddleware(Vector(user, project), backend))
+             .build()                                  // Result[Agent]
+} yield agent
+```
+
+- **Give the agent `FileTools(backend)` over the same backend** (or the composite it is mounted in),
+  so the paths in the section are the ones `read_file` takes.
+- **Read once per run**, on its first model call, and cached for the run. A skill added or edited
+  during a run shows from the next run; a recovered or resumed run reads again. A later source's
+  skill replaces an earlier one of the same name, so list the user's skills before the project's.
+- **Bounded.** At most `maxSkills` (default 20) skills, each description cut at
+  `maxDescriptionChars` (256), the section at most `maxSectionTokens` (1500), at most `maxScanned`
+  (100) folders examined, and only each `SKILL.md`'s frontmatter read.
+- **The frontmatter is a restricted YAML subset**, read without a YAML library: `key: value` scalars,
+  quoted strings, flat lists and a one-level `metadata` map. A block scalar (`description: |`), a
+  nested value or a name that does not match its folder makes the skill malformed.
+- **Problems never fail the run.** A malformed, unlisted, shadowed or unreadable skill is skipped and
+  named by path in a durable `HarnessEvents.DocumentsReported`. A missing source is skipped.
+- `allowed-tools` is parsed onto `Skill.allowedTools`, not enforced.
+
+### Instruction Memory
+
+`InstructionMemoryMiddleware` shows standing instructions kept in `AGENTS.md` files to the model, as
+one prompt section: the files at the paths given, read through a `FileBackend` in order (a later
+file refines an earlier one), each under a heading naming its path.
+
+```scala
+import org.llm4s.agent.harness.{InstructionMemoryMiddleware, VPath}
+
+for {
+  user    <- VPath("/user/AGENTS.md")
+  project <- VPath("/project/AGENTS.md")
+  agent <- Agent.builder("coder", client)
+             .withMiddleware(new InstructionMemoryMiddleware(Vector(user, project), backend))
+             .build()                                  // Result[Agent]
+} yield agent
+```
+
+- **Read once per run**, as skills are: an edit during a run shows from the next run, and a recovered
+  or resumed run reads again. A missing file is skipped.
+- **Editable when permitted.** The agent edits a file with `edit_file` (`FileTools(backend)`) over the same backend when the
+  backend accepts the write and the permission rules allow `Write` on its path; deny it to keep a
+  scope read-only.
+- **Bounded.** Each file at most `maxFileTokens` (default 1000), the section at most
+  `maxTotalTokens` (2000); a file over either is cut and marked, files past a full section are left
+  out, and each is named by path in a durable `HarnessEvents.DocumentsReported`.
+- Instruction memory is a few whole files the agent always sees; [semantic memory](memory) is facts
+  recalled per query.
+
+### Harness Profile
+
+`HarnessProfile` assembles the pieces above into one value, installed with `withHarness`:
+
+```scala
+import org.llm4s.agent.graph.middleware.PermissionRule
+import org.llm4s.agent.graph.tool.Operation
+import org.llm4s.agent.harness.{HarnessProfile, PromptMode}
+import org.llm4s.config.HarnessConfigLoader
+
+for {
+  profile <- HarnessConfigLoader.load()            // HarnessProfile.deepAgents, with llm4s.agent.harness applied
+  agent <- Agent.builder("researcher", client)
+             .withHarness(
+               profile
+                 .withSystemPrompt(PromptMode.Suffix("Write the report to /report.md."))
+                 .withPermissions(Vector(
+                   PermissionRule.allow(Operation.Read, "/**"),
+                   PermissionRule.allow(Operation.Write, "/report.md"),
+                   PermissionRule.allow(Operation.Invoke, "write_todos")
+                 ))
+             )
+             .build()                                // Result[Agent]
+} yield agent
+```
+
+- **`HarnessProfile.deepAgents`** turns everything on at its defaults: the file tools over a
+  `StateFileBackend`, todos, summarisation (the model-free digest compressor), offload of large tool
+  results, skills under `/skills` and instructions in `/AGENTS.md`. `HarnessProfile()` is the file
+  tools alone. Change either with the `with*` setters: `withBackend`, `withSandbox` (adds `execute`),
+  `withTools(ToolSelection.Only(...))`, `withTodos(None)`, `withToolTimeout`, `withRetention`, ...
+- **The order is fixed**, outermost first: permissions, summarisation, offload, skills, instructions,
+  todos, then the builder's own middleware. With no permission rules there is no
+  `PermissionMiddleware`; with rules, a call no rule allows is denied.
+- **The prompt** is the profile's (plan, act and verify; context; tool safety), `PromptMode.Replace`
+  or `Suffix`. `withSystemPrompt` beside a harness is refused.
+- **Retention.** As each turn is admitted, the thread is pruned to its latest 20 checkpoints (each is
+  a full snapshot of the files, plan and summary), so a finished turn stays whole until the next one
+  starts, and a refused turn changes nothing; `withRetention(RetentionPolicy.keepAll)` keeps
+  everything. `RunConfig.withRetention` does the same for any run.
+- **Defaults live in `llm4s-agent`'s `reference.conf`**, under `llm4s.agent.harness`; override them in
+  `application.conf`. Backends, a sandbox, permission rules and a model compressor are set in code.
+- **Middleware order is checked.** A middleware that must run outside another says so
+  (`AgentMiddleware.placement`), and `build()` refuses the wrong order: a `SummarizationMiddleware`
+  inside a `ToolOutputOffload`, or a `SemanticMemoryMiddleware` inside guardrail middleware.
 
 ---
 
@@ -376,6 +762,10 @@ val result = for {
 } yield context
 ```
 
+`SemanticMemoryMiddleware`, in `llm4s-agent-memory`, recalls a tenant's memories before each turn
+and records the turn after it, safely across `recover`:
+[Semantic Memory Middleware](memory#semantic-memory-middleware).
+
 [Learn more about memory →](memory)
 
 ### [Handoffs](handoffs)
@@ -416,7 +806,9 @@ give the same events as fs2 and ZIO streams.
 Every run claims its thread in the `Checkpointer` before it starts, renews the claim while it runs, and fences
 every commit with the claim's token. Runtimes sharing one store - in one process or many - are refused a live
 run's thread with `ThreadBusy`, can `recover` a run whose process died once its claim has expired, and a run that
-lost its claim records nothing more. `CheckpointerContract` in `llm4s-agent-testkit` tests a store of your own.
+lost its claim records nothing more. `SqliteCheckpointer` (`llm4s-agent-checkpoint-sqlite`) keeps threads in a
+SQLite file, so a run survives a restart and `recover` continues it in the next process. `CheckpointerContract` in
+`llm4s-agent-testkit` tests a store of your own.
 
 [Learn more about durable checkpointers →](durable-checkpointers)
 
@@ -483,6 +875,59 @@ budget. The system prompt is outside the budget.
 | `RecentTurnsOnly(n)` | Keep only the last N conversation turns |
 | `Custom(fn)` | User-defined pruning function |
 
+### Summarisation
+
+`SummarizationMiddleware` (`org.llm4s.agent.harness`) replaces the older part of each request with a summary
+instead of dropping it. When the outgoing request is over its trigger, every message but the last `keepRecent`
+is folded into the summary, which goes into that request and is kept in the thread for the next ones; when it
+fires again, the summary is extended, not recomputed. The stored history is never edited.
+
+```scala
+import org.llm4s.agent.harness.{SummarizationMiddleware, SummaryCompressor, SummaryTrigger}
+
+val agent = Agent.builder("assistant", client)
+  .withMiddleware(
+    new SummarizationMiddleware(
+      trigger = SummaryTrigger.Tokens(60000),
+      keepRecent = 10,
+      compressor = SummaryCompressor.model(summariserClient),
+      maxSummaryTokens = 2000
+    )
+  )
+  .build()
+```
+
+`SummaryCompressor.model(client)` asks a model for the summary; its calls are counted in the thread's usage.
+`SummaryCompressor.digest(counter)` uses core's `HistoryCompressor`, with no model call. The summary never exceeds
+`maxSummaryTokens`, a tool call is never separated from its results, and an output Block discards a blocked turn's
+summary. Use summarisation or `ContextWindowMiddleware`, not both.
+
+### Large tool results
+
+`ToolOutputOffload` keeps a tool result over `thresholdTokens` out of the conversation: the model sees a header,
+the first lines, and a path such as `/large_tool_results/<key>`. The whole result (up to `maxResultBytes`) is kept
+in the thread, oldest evicted first beyond `maxTotalBytes` (4 MiB by default). Mount `OffloadBackend` so file tools
+can read it:
+
+```scala
+import org.llm4s.agent.graph.tool.ToolSet
+import org.llm4s.agent.harness.{CompositeBackend, FileTools, OffloadBackend, StateFileBackend, ToolOutputOffload}
+
+for {
+  files <- CompositeBackend(StateFileBackend(), ToolOutputOffload.Mount -> OffloadBackend)
+  tools <- ToolSet.of(FileTools(files)*)
+  agent <- Agent.builder("assistant", client)
+             .withTools(tools)
+             .withMiddleware(new ToolOutputOffload(thresholdTokens = 20000))
+             .build()
+} yield agent
+```
+
+The mount is read-only. Only text is offloaded: images and documents in a result are passed on unchanged. With
+summarisation, results the summary covers are dropped; register `SummarizationMiddleware` before
+`ToolOutputOffload`. `ToolOutputOffload` also caps every tool result the model is sent at `thresholdTokens`,
+including errors and denials that no tool produced.
+
 ---
 
 ## Conversation Persistence
@@ -537,6 +982,8 @@ Supported by OpenAI o1/o3 and Anthropic Claude models.
 | [LongConversationExample](/examples/#long-conversation) | Context window pruning |
 | [ConversationPersistenceExample](/examples/#persistence) | Save and resume |
 | [BuiltinToolsAgentExample](/examples/#agent-examples) | Built-in tools |
+| [DeepResearchExample](/examples/#deep-research) | The harness on state files: plan, offload, summary, memory, recover after a stop |
+| [CodingWorkspaceExample](/examples/#coding-workspace) | The harness in a workspace: permissions, approval of `execute`, resume |
 
 [Browse all examples →](/examples/)
 
@@ -551,7 +998,7 @@ For in-depth technical details:
 - [Phase 1.2: Guardrails](/design/phase-1.2-guardrails-framework) - Validation framework
 - [Phase 1.3: Handoffs](/design/phase-1.3-handoff-mechanism) - Agent delegation
 - [Phase 1.4: Memory](/design/phase-1.4-memory-system) - Memory architecture
-- [Typed Agent Runtime §4.13](/design/typed-agent-runtime-design) - How `Agent` runs on the graph runtime
+- [Typed Agent Runtime §4.13](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.13-stage-1-slice-2-the-agent-loop-on-the-graph-runtime.md) - How `Agent` runs on the graph runtime
 - [Phase 2.1: Streaming](/design/phase-2.1-streaming-events) - Event system
 
 ---

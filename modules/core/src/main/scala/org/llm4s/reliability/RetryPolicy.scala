@@ -42,7 +42,9 @@ sealed trait RetryPolicy {
    *
    * So the retried errors are [[org.llm4s.error.RateLimitError]], [[org.llm4s.error.TimeoutError]],
    * [[org.llm4s.error.NetworkError]], [[org.llm4s.error.ExecutionError]], [[org.llm4s.error.SystemError]], an
-   * `APIError` or `ServiceError` with a retryable status, and an `APIError` without one. Every
+   * `APIError` or `ServiceError` with a retryable status, an `APIError` without one, and any other
+   * `RecoverableError` a module defines - such as `llm4s-agent`'s `GraphError.DeadlineExceeded` and
+   * `GraphError.ThreadBusy`. Every
    * [[org.llm4s.error.NonRecoverableError]] is not, including [[org.llm4s.error.CancelledError]].
    */
   def isRetryable(error: LLMError): Boolean = RetryPolicy.isTransient(error)

@@ -11,21 +11,21 @@ This page states which parts of the LLM4S API are safe to build on ahead of a 1.
 
 Until 0.4.1 all of it shipped in one `core` Maven artifact of roughly 84k lines — agent runtime, RAG, MCP, speech, image, knowledge graph, and eleven provider clients together. There was no way to tell from the artifact alone which parts of that surface are meant to be a long-term contract and which are still moving fast.
 
-This page describes the **target state** of the in-progress modularisation programme tracked in [#1126](https://github.com/llm4s/llm4s/issues/1126). Rows marked **carved** below already live in their target module; every other row still ships inside `llm4s-core`, and its target-module column says where it is heading, not where it lives today.
+The modularisation programme tracked in [#1126](https://github.com/llm4s/llm4s/issues/1126) split it up. Rows marked **carved** below live in their target module; any other row still ships inside `llm4s-core`, and its target-module column says where it is heading, not where it lives today.
 
-What has actually moved so far, in the build but not yet in a release:
+The carves, all published from 0.5.0:
 
 | Slice | Modules carved | Status |
 |---|---|---|
-| [1](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` | in the build, unpublished |
-| [2](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` | in the build, unpublished |
-| [3](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` | in the build, unpublished |
-| [4](https://github.com/llm4s/llm4s/issues/1131) | none - the provider registration SPI (`ProviderDescriptor`, discovered through `META-INF/services`) that slice 5's modules register through | in the build, unpublished |
-| [5](https://github.com/llm4s/llm4s/issues/1132) | `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (with Mistral and Cohere), `llm4s-voyage` - `llm4s-core` now holds no provider client | in the build, unpublished |
-| [6](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability` (Langfuse, the trace collector, `CostTracker`); `OpenTelemetryConfig` joins the existing `llm4s-observability-otel`; `llm4s-observability-prometheus` (Prometheus). The tracing and metrics contracts stay in `llm4s-core`, which declares no observability dependency | in the build, unpublished |
-| [7](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (the built-in tools and their config), `llm4s-agent` (`agent`, `assistant`) | in the build, unpublished |
+| [1](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` | published in 0.5.0 |
+| [2](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` | published in 0.5.0 |
+| [3](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` | published in 0.5.0 |
+| [4](https://github.com/llm4s/llm4s/issues/1131) | none - the provider registration SPI (`ProviderDescriptor`, discovered through `META-INF/services`) that slice 5's modules register through | published in 0.5.0 |
+| [5](https://github.com/llm4s/llm4s/issues/1132) | `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (with Mistral and Cohere), `llm4s-voyage` - `llm4s-core` now holds no provider client | published in 0.5.0 |
+| [6](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability` (Langfuse, the trace collector, `CostTracker`); `OpenTelemetryConfig` joins the existing `llm4s-observability-otel`; `llm4s-observability-prometheus` (Prometheus). The tracing and metrics contracts stay in `llm4s-core`, which declares no observability dependency | published in 0.5.0 |
+| [7](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (the built-in tools and their config), `llm4s-agent` (`agent`, `assistant`) | published in 0.5.0 |
 
-The latest release tag is `v0.4.1`, which is still a single `llm4s-core` (0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). The first release to publish separate module artifacts will be **0.5.0**, in slice 8 ([#1281](https://github.com/llm4s/llm4s/issues/1281)); it is also the MiMa baseline. Until it is published nothing is frozen: "Frozen at 1.0" is the tier a module will hold, not a constraint on changing it now.
+**0.5.0** is the first release to publish separate module artifacts (0.4.x was a single `llm4s-core`; 0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). It sets no MiMa baseline: that comes at a pre-1.0 release, version to be decided, once the designs are final ([#1281](https://github.com/llm4s/llm4s/issues/1281)). Until then nothing is frozen: "Frozen at 1.0" is the tier a module will hold, not a constraint on changing it now.
 
 ## Maturity Legend
 
@@ -82,8 +82,10 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `llmconnect/provider` — other community providers | `llm4s-openai-compatible` dialects, or `modules/providers/<name>` | Beta |
 | `jev` — typed client for TypeSafe's Jev decision model (Noul, Choice, Score); not a chat provider — **new** | `llm4s-jev` (`modules/providers/jev`) | Beta |
 | `testkit` — the checks a provider module's `Llm4s<Name>ModuleSpec` makes (`ProviderModuleChecks`, `ProviderTestConfig`, `CredentialsRoundTrip`, `LocalProviderTestServer`), formerly unpublished helpers in core's test sources — **new** | `llm4s-provider-testkit` (`modules/provider-testkit`), a test-scope dependency; requires JDK 21 (virtual threads) | Beta |
+| `agent/graph/sqlite` — `SqliteCheckpointer`, the first durable `Checkpointer`: threads, events and run claims in one SQLite file that survives a restart and that several processes on one host can share — **new** | `llm4s-agent-checkpoint-sqlite` (`modules/agent-checkpoint-sqlite`); carries the SQLite JDBC driver | Beta |
 | `schema` — `SchemaOf`, a JSON schema derived from a case class with `derives`, and `completeStructuredOf`; builds core's `ObjectSchema` and adds no dependency (Map, recursive types and sealed hierarchies with fields are refused at compile time; a recursion through a hand-written given that derives its type fails on first use) — **new** | `llm4s-schema-derivation` (`modules/schema-derivation`) | Experimental |
 | `testkit` — a scriptable fake `LLMClient` for the tests of code that uses llm4s (`ScriptedLLMClient`, `Reply`, `RecordedCall`, `UnscriptedCallError`) — **new** | `llm4s-testkit` (`modules/testkit`), a test-scope dependency | Beta |
+| `agent/harness/memory` — `SemanticMemoryMiddleware`: recall before a turn, recording and consolidation after it, one store per tenant, each write a replayable effect on a `TransactionalMemoryStore` — **new** | `llm4s-agent-memory` (`modules/agent-memory`); depends on `llm4s-agent` and `llm4s-memory` | Experimental |
 | `agent/testkit` — `CheckpointerContract`, the contract every `Checkpointer` must pass (commits, event numbering, compaction, run-claim leases and fencing, two runtimes over one store), and `ManualClock` — **new** | `llm4s-agent-testkit` (`modules/agent-testkit`), a test-scope dependency; requires JDK 21 (virtual threads) | Beta |
 | build — the bill of materials that pins every published artifact to one version (no code) — **new** | `llm4s-bom` (`modules/bom`) | Beta |
 | `rag`, `vectorstore`, `chunking`, `reranker`, `eval` — **carved** | `llm4s-rag` | Beta |
@@ -92,7 +94,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `agent/memory/PostgresMemoryStore` — **carved** | `llm4s-memory-postgres` | Beta |
 | `mcp` - **carved** | `llm4s-mcp` | Beta |
 | `knowledgegraph/neo4j` — the Neo4j graph store (`Neo4jGraphStore`) | `llm4s-knowledgegraph-neo4j` (`modules/knowledgegraph-neo4j`) | Experimental |
-| `workspace`, `shared`, `codegen`, `toolapi/WorkspaceTools` — containerised workspace execution: the client (`ContainerisedWorkspace`, `WorkspaceTools`, the code-generation worker) and the wire protocol it speaks to the runner image (`WorkspaceAgentProtocol`, `WorkspaceAgentInterface`) | `llm4s-workspace-client`, `llm4s-workspace-shared` (`modules/workspace`) | Experimental |
+| `workspace`, `shared`, `codegen`, `agent/harness/workspace` — containerised workspace execution: the client (`ContainerisedWorkspace`, the harness backends `WorkspaceFileBackend` and `WorkspaceSandboxBackend`, the code-generation worker) and the wire protocol it speaks to the runner image (`WorkspaceAgentProtocol`, `WorkspaceAgentInterface`) | `llm4s-workspace-client`, `llm4s-workspace-shared` (`modules/workspace`) | Experimental |
 | `media` - **new** | `llm4s-media` | Beta |
 | `speech` - **carved** | `llm4s-speech` | Experimental |
 | `imagegeneration`, `imageprocessing` - **carved** | `llm4s-image` | Experimental |
@@ -101,7 +103,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `spring` — Spring Boot auto-configuration (`Llm4sAutoConfiguration`, `Llm4sProperties`, `LLM4STemplate`, `LlmHealthIndicator`) — **new** | `llm4s-spring-boot-starter` (`modules/spring-boot-starter`) | Beta |
 | `effect.cats` — `LLMClientIO`, `AgentIO` (cats-effect 3, fs2) — **new** | `llm4s-effect` (`modules/llm4s-effect`) | Beta |
 | `zio` — `LLMClientZ`, `AgentZ` (ZIO 2, ZIO Streams) — **new** | `llm4s-zio` (`modules/llm4s-zio`) | Beta |
-| `kotlin` — coroutine API (`LLMClientKt`, `AgentKt`, `AgentStreamItem`); a separate Gradle build, not part of sbt or the MiMa baseline, not yet published — **new** | `modules/kotlin-api` | Experimental |
+| `kotlin` — coroutine API (`LLMClientKt`, `AgentKt`, `AgentStreamItem`); a separate Gradle build, not part of sbt or the MiMa baseline, published with each release at the release's version (no `_3` suffix; managed by `llm4s-bom`) — **new** <!-- tier-drift: ignore (a Gradle-built artifact, not an sbt project; see PublishedArtifacts.Gradle) --> | `llm4s-kotlin-api` (`modules/kotlin-api`) | Experimental |
 | `pekko` — `LLMClientPekko`, `AgentPekko` (Apache Pekko Streams) — **new** | `llm4s-pekko` (`modules/llm4s-pekko`) | Beta |
 
 Notes:
@@ -118,7 +120,7 @@ Notes:
 
 ## What Frozen means
 
-- **Source and binary compatible within 1.x.** Once `0.5.0` publishes the split modules, `mimaPreviousArtifacts` enforces binary compatibility on every Frozen module for all subsequent 1.x releases.
+- **Source and binary compatible within 1.x.** Once the pre-1.0 baseline is set, `mimaPreviousArtifacts` enforces binary compatibility on every Frozen module for all subsequent 1.x releases.
 - **Deprecate before removing.** A Frozen API is only removed after a deprecation cycle, never dropped outright in a minor release. See the [Compatibility and Deprecation Policy](compatibility-policy).
 - **Beta and Experimental can move faster.** They may change in a minor release, but a migration note ships with the change in the same release's CHANGELOG.
 
@@ -137,7 +139,7 @@ See [#1126](https://github.com/llm4s/llm4s/issues/1126) for the reasoning behind
 | `llm4s-provider-testkit` | 21 | 21 | its interruption checks and `LocalProviderTestServer` run on virtual threads ([#1582](https://github.com/llm4s/llm4s/issues/1582)) |
 | `llm4s-media`, `llm4s-workspace-shared` | 21 (supported) | 21 | neither depends on `llm4s-core`: they use no JDK 21 API, and their newest dependency class files are version 55 (uJson), so they may well load on an older JDK, but only JDK 21 is tested and supported |
 
-No build setting pins a bytecode level (no `-release`, `-java-output-version` or `javacOptions` target), so the bytecode level alone does not tell you which JDK you need: the requirement comes from the APIs and the dependencies above. The Scala compiler emits class-file version 52 for the llm4s Scala sources. The few Java sources (the `@Stable` and `@Experimental` annotations in `llm4s-core`, the enums of `llm4s-java-api`) are compiled by `javac` at the level of the JDK that builds them, which is version 65 for artifacts built on CI's JDK 21. The Gradle-built `llm4s-kotlin-api` targets JVM 17 bytecode (version 61) and still needs JDK 21 to run.
+No build setting pins a bytecode level (no `-release`, `-java-output-version` or `javacOptions` target), so the bytecode level alone does not tell you which JDK you need: the requirement comes from the APIs and the dependencies above. The Scala compiler emits class-file version 52 for the llm4s Scala sources. The few Java sources (the `@Stable` and `@Experimental` annotations in `llm4s-core`, the enums and value types of `llm4s-java-api`) are compiled by `javac` at the level of the JDK that builds them, which is version 65 for artifacts built on CI's JDK 21. The Gradle-built `llm4s-kotlin-api` targets JVM 17 bytecode (version 61) and still needs JDK 21 to run.
 
 ## Programme status
 

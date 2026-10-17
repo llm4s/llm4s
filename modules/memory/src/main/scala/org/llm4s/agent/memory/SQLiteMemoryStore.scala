@@ -27,10 +27,138 @@ final class SQLiteMemoryStore private (
   val dbPath: String,
   val config: MemoryStoreConfig,
   private val connection: Connection
-) extends MemoryStore {
+) extends TransactionalMemoryStore {
 
   import SQLiteMemoryStore._
   import FilterSupport.Sql
+
+  /** Stores `add`, then deletes `remove`, in one transaction. */
+  override def replace(add: Seq[Memory], remove: Seq[MemoryId]): Result[MemoryStore] =
+    Try {
+      inTransaction {
+        writeAll(add)
+        deleteIds(remove.map(_.value))
+      }
+      this
+    }.toEither.left.map(e => ProcessingError("sqlite-replace", s"Failed to replace memories: ${e.getMessage}"))
+
+  override def applyAtomically(
+    key: AppliedWriteKey,
+    token: Long,
+    add: Seq[Memory],
+    remove: Seq[MemoryId],
+    bounds: MemoryBounds
+  ): Result[(TransactionalMemoryStore, AppliedWrite)] =
+    fencedTransaction("sqlite-apply", key, token) {
+      readApplied(key.value).getOrElse {
+        val outcome =
+          if (!remove.forall(present)) TransactionalMemoryStore.Superseded
+          else {
+            val adds    = TransactionalMemoryStore.distinctById(add)
+            val addIds  = adds.map(_.id).toSet
+            val removed = remove.distinct.filterNot(addIds.contains).toVector
+            deleteIds(removed.map(_.value))
+            writeAll(adds)
+            val evicted = bounds.overflow(entries())
+            deleteIds(evicted.map(_.value))
+            AppliedWrite(adds.map(_.id), removed, evicted.size)
+          }
+        bindAndUpdate(
+          "INSERT INTO memory_applied_writes (key, scope, outcome) VALUES (?, ?, ?)",
+          Seq(key.value, key.scope, ujson.write(AppliedWrite.toJson(outcome)))
+        )
+        outcome
+      }
+    }.map(this -> _)
+
+  override def appliedWrite(
+    key: AppliedWriteKey,
+    token: Long
+  ): Result[(TransactionalMemoryStore, Option[AppliedWrite])] =
+    fencedTransaction("sqlite-applied", key, token)(readApplied(key.value)).map(this -> _)
+
+  override def forgetApplied(key: AppliedWriteKey, token: Long): Result[TransactionalMemoryStore] =
+    fencedTransaction("sqlite-forget", key, token) {
+      bindAndUpdate("DELETE FROM memory_applied_writes WHERE key = ?", Seq(key.value)): Unit
+    }.map(_ => this)
+
+  override def appliedWriteCount: Result[Int] =
+    Try {
+      Using.resource(connection.createStatement()) { stmt =>
+        Using.resource(stmt.executeQuery("SELECT COUNT(*) FROM memory_applied_writes"))(rs =>
+          if (rs.next()) rs.getInt(1) else 0
+        )
+      }
+    }.toEither.left.map(e =>
+      ProcessingError("sqlite-applied-count", s"Failed to count applied writes: ${e.getMessage}")
+    )
+
+  /**
+   * `body` in one write transaction, after fencing `token` for `key.scope`: a token older than the scope's newest is
+   * refused, rolling back and changing nothing; otherwise it becomes the newest.
+   */
+  private def fencedTransaction[A](operation: String, key: AppliedWriteKey, token: Long)(body: => A): Result[A] =
+    Try {
+      inTransaction {
+        val newest = Using.resource(connection.prepareStatement("SELECT token FROM memory_fences WHERE scope = ?")) {
+          stmt =>
+            stmt.setString(1, key.scope)
+            Using.resource(stmt.executeQuery())(rs => if (rs.next()) Some(rs.getLong(1)) else None)
+        }
+        newest match {
+          case Some(n) if token < n => Left(TransactionalMemoryStore.stale(key.scope, token, n))
+          case _ =>
+            bindAndUpdate(
+              "INSERT INTO memory_fences (scope, token) VALUES (?, ?) " +
+                "ON CONFLICT(scope) DO UPDATE SET token = excluded.token",
+              Seq(key.scope, token)
+            )
+            Right(body)
+        }
+      }
+    }.toEither.left
+      .map(e => ProcessingError(operation, s"Failed to apply memory write: ${e.getMessage}"))
+      .flatten
+
+  private def readApplied(key: String): Option[AppliedWrite] =
+    Using.resource(connection.prepareStatement("SELECT outcome FROM memory_applied_writes WHERE key = ?")) { stmt =>
+      stmt.setString(1, key)
+      Using.resource(stmt.executeQuery()) { rs =>
+        if (rs.next())
+          Some(
+            AppliedWrite
+              .fromJson(ujson.read(rs.getString(1)))
+              .fold(e => throw new IllegalStateException(e.message), identity)
+          )
+        else None
+      }
+    }
+
+  private def present(id: MemoryId): Boolean =
+    Using.resource(connection.prepareStatement("SELECT 1 FROM memories WHERE id = ?")) { stmt =>
+      stmt.setString(1, id.value)
+      Using.resource(stmt.executeQuery())(_.next())
+    }
+
+  /** Every stored memory as [[MemoryBounds.overflow]] ranks it, without its embedding. */
+  private def entries(): Vector[MemoryBounds.Entry] =
+    Using.resource(connection.createStatement()) { stmt =>
+      Using.resource(stmt.executeQuery("SELECT id, importance, timestamp, content, metadata_json FROM memories")) {
+        rs =>
+          val out = Vector.newBuilder[MemoryBounds.Entry]
+          while (rs.next()) {
+            val importance = rs.getDouble(2)
+            val known      = !rs.wasNull()
+            out += MemoryBounds.Entry(
+              MemoryId(rs.getString(1)),
+              if (known) Some(importance) else None,
+              Instant.ofEpochMilli(rs.getLong(3)),
+              MemoryBounds.sizeOf(rs.getString(4), jsonToMetadata(rs.getString(5)))
+            )
+          }
+          out.result()
+      }
+    }
 
   override def store(memory: Memory): Result[MemoryStore] =
     Try {
@@ -477,7 +605,7 @@ object SQLiteMemoryStore {
   /**
    * Schema version for migrations.
    */
-  val SchemaVersion: Int = 1
+  val SchemaVersion: Int = 2
 
   private def initializeSchema(connection: Connection): Unit = {
     val statements = Seq(
@@ -504,6 +632,16 @@ object SQLiteMemoryStore {
       """CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
         |  id UNINDEXED,
         |  content
+        |)""".stripMargin,
+      // Version 2: the applied writes of `TransactionalMemoryStore`, and the newest fencing token per scope
+      """CREATE TABLE IF NOT EXISTS memory_applied_writes (
+        |  key TEXT PRIMARY KEY,
+        |  scope TEXT NOT NULL,
+        |  outcome TEXT NOT NULL
+        |)""".stripMargin,
+      """CREATE TABLE IF NOT EXISTS memory_fences (
+        |  scope TEXT PRIMARY KEY,
+        |  token INTEGER NOT NULL
         |)""".stripMargin,
       // Schema version tracking
       """CREATE TABLE IF NOT EXISTS schema_version (

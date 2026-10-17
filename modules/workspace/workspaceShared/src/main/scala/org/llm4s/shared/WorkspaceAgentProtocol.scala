@@ -27,7 +27,9 @@ object WorkspaceAgentCommand {
     macroRW[ModifyFileCommand],
     macroRW[SearchFilesCommand],
     macroRW[ExecuteCommandCommand],
-    macroRW[GetWorkspaceInfoCommand]
+    macroRW[GetWorkspaceInfoCommand],
+    macroRW[FileSnapshotCommand],
+    macroRW[DeleteFileCommand]
   )
 }
 
@@ -56,6 +58,8 @@ object WorkspaceAgentResponse {
     macroRW[SearchFilesResponse],
     macroRW[ExecuteCommandResponse],
     macroRW[GetWorkspaceInfoResponse],
+    macroRW[FileSnapshotResponse],
+    macroRW[DeleteFileResponse],
     macroRW[WorkspaceAgentErrorResponse]
   )
 }
@@ -150,7 +154,10 @@ case class WriteFileCommand(
   path: String,
   content: String,
   mode: Option[String] = None, // "create", "overwrite", or "append"
-  createDirectories: Option[Boolean] = None
+  createDirectories: Option[Boolean] = None,
+  // A compare-and-set: written, atomically and only in mode "overwrite", if the path's current
+  // FileSnapshotResponse.hash is this one; refused with HASH_MISMATCH, writing nothing, otherwise.
+  expectedHash: Option[String] = None
 ) extends WorkspaceAgentCommand
 
 object WriteFileCommand {
@@ -286,7 +293,10 @@ case class ExecuteCommandCommand(
   command: String,
   workingDirectory: Option[String] = None,
   timeout: Option[FiniteDuration] = None,
-  environment: Option[Map[String, String]] = None
+  environment: Option[Map[String, String]] = None,
+  // The most bytes of each of stdout and stderr the runner keeps, UTF-8 and JSON-escaped; its own maxOutputSize bounds
+  // it too.
+  maxOutputBytes: Option[Long] = None
 ) extends WorkspaceAgentCommand
 
 object ExecuteCommandCommand {
@@ -337,6 +347,105 @@ case class GetWorkspaceInfoResponse(
 
 object GetWorkspaceInfoResponse {
   implicit val rw: ReadWriter[GetWorkspaceInfoResponse] = macroRW
+}
+
+// 8. FileSnapshot Command and Response
+case class FileSnapshotCommand(
+  commandId: String,
+  path: String,
+  includeContent: Boolean = true,
+  // false: a symbolic link at `path` is described as itself (kind `link`), not as what it names, as a delete needs
+  followLinks: Boolean = true
+) extends WorkspaceAgentCommand
+
+object FileSnapshotCommand {
+  implicit val rw: ReadWriter[FileSnapshotCommand] = macroRW
+}
+
+/**
+ * What is at a path, as a compare-and-set reads it.
+ *
+ * @param kind      `absent`, `file` or `directory` ([[FileSnapshotResponse.Kind]])
+ * @param hash      `absent`, `directory`, `oversized` (a file over `maxFileSize`, never read), or `sha256:` and the 64 lowercase hex digits of the SHA-256 of the
+ *                  file's bytes: what `WriteFileCommand.expectedHash` and `DeleteFileCommand.expectedHash`
+ *                  are compared with
+ * @param size      the file's size in bytes; 0 for a directory or nothing
+ * @param content   the file's exact text, when asked for, if it is at most `maxFileSize` bytes of valid UTF-8
+ * @param textError why a file's `content` is absent although it was asked for
+ */
+case class FileSnapshotResponse(
+  commandId: String,
+  path: String,
+  kind: String,
+  hash: String,
+  size: Long,
+  content: Option[String] = None,
+  textError: Option[String] = None
+) extends WorkspaceAgentResponse
+
+object FileSnapshotResponse {
+  implicit val rw: ReadWriter[FileSnapshotResponse] = macroRW
+
+  /** The values of `kind`, and of `hash` for what is not a file. */
+  object Kind {
+    val Absent: String    = "absent"
+    val File: String      = "file"
+    val Directory: String = "directory"
+
+    /** The `hash` of a file over the workspace's `maxFileSize`: never read, so it has no digest to compare. */
+    val Oversized: String = "oversized"
+
+    /** The `kind` and `hash` of a symbolic link to nothing: an entry a delete removes, which a read cannot. */
+    val Dangling: String = "dangling"
+
+    /** The `kind` of a symbolic link described as itself (`followLinks = false`); its hash is `link:<hex>`. */
+    val Link: String = "link"
+
+    /**
+     * The `hash` of a link to nothing (kind [[Dangling]]): `dangling:` and a digest of where it points, so a link
+     * retargeted at another missing file is a different state.
+     */
+    def danglingHash(target: String): String = Dangling + ":" + linkHash(target).stripPrefix("link:")
+
+    /** Whether `hash` is a [[danglingHash]]. */
+    def isDangling(hash: String): Boolean = hash.startsWith(Dangling + ":")
+
+    /** The `hash` of a link described as itself: what it points to, as written. */
+    def linkHash(target: String): String =
+      "link:" + FileSnapshotResponse
+        .hashOf(target.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+        .stripPrefix("sha256:")
+  }
+
+  /** The `hash` of a file of `bytes`. */
+  def hashOf(bytes: Array[Byte]): String =
+    "sha256:" + java.security.MessageDigest
+      .getInstance("SHA-256")
+      .digest(bytes)
+      .map(b => f"${b & 0xff}%02x")
+      .mkString
+}
+
+// 9. DeleteFile Command and Response
+case class DeleteFileCommand(
+  commandId: String,
+  path: String,
+  // A compare-and-set, as WriteFileCommand.expectedHash.
+  expectedHash: Option[String] = None
+) extends WorkspaceAgentCommand
+
+object DeleteFileCommand {
+  implicit val rw: ReadWriter[DeleteFileCommand] = macroRW
+}
+
+case class DeleteFileResponse(
+  commandId: String,
+  path: String,
+  wasDirectory: Boolean
+) extends WorkspaceAgentResponse
+
+object DeleteFileResponse {
+  implicit val rw: ReadWriter[DeleteFileResponse] = macroRW
 }
 
 // WebSocket Protocol Messages

@@ -20,6 +20,10 @@ object PomDescriptions {
   val byArtifact: Map[String, String] = Map(
     "llm4s-agent" ->
       "Agent runtime for LLM4S: agents, guardrails, handoffs, a typed graph runtime, streaming and an assistant.",
+    "llm4s-agent-checkpoint-sqlite" ->
+      "SQLite checkpoint store for the LLM4S graph runtime: durable threads, restart and recovery, fenced run claims.",
+    "llm4s-agent-memory" ->
+      "Semantic memory for LLM4S agents: recall before a turn, recording and consolidation after it, replay-safe across recovery.",
     "llm4s-agent-testkit" ->
       "Test suite for authors of LLM4S checkpoint stores: the Checkpointer contract, including run-claim leases and fencing.",
     "llm4s-agent-tools" ->

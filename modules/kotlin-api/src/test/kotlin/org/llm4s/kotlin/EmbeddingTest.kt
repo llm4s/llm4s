@@ -53,7 +53,10 @@ internal fun perText(request: EmbeddingRequest): Either<LLMError, EmbeddingRespo
 
 internal fun embedderOver(provider: EmbeddingProvider): JEmbeddingClient {
     val registry = org.llm4s.model.`ModelRegistryService$`.`MODULE$`.fromModels(asScala(listOf<ModelMetadata>()))
-    return JEmbeddingClient(EmbeddingClient(provider, Option.empty(), "embedding", registry), EmbeddingModelConfig("embed-model", 1536))
+    return org.llm4s.javaapi.Llm4s.wrapEmbeddingClient(
+        EmbeddingClient(provider, Option.empty(), "embedding", registry),
+        EmbeddingModelConfig("embed-model", 1536),
+    )
 }
 
 /**

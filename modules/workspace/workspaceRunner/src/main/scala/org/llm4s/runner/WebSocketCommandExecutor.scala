@@ -7,17 +7,9 @@ import org.slf4j.LoggerFactory
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{ ConcurrentHashMap, TimeUnit }
-import scala.concurrent.duration.DurationLong
+import scala.concurrent.duration.{ DurationInt, DurationLong, FiniteDuration }
 import scala.concurrent.{ ExecutionContext, Future, Promise }
 import scala.util.{ Failure, Success, Try }
-
-/** A process started for a WebSocket `ExecuteCommandCommand`, tracked so the client can cancel it. */
-final private[runner] case class RunningCommand(
-  process: Process,
-  cancelled: AtomicBoolean,
-  startTimeMs: Long,
-  completionSent: AtomicBoolean
-)
 
 /**
  * Runs the WebSocket protocol's `ExecuteCommandCommand`, streaming the process's output as it arrives.
@@ -33,7 +25,8 @@ final private[runner] case class RunningCommand(
  * and duration, and cancellation through [[cancel]].
  *
  * @param workspace     checks and builds every command
- * @param maxOutputSize the most of each stream kept for the final `ExecuteCommandResponse`; chunks stream regardless
+ * @param maxOutputSize the most characters of each stream kept for the final `ExecuteCommandResponse`, and the upper
+ *                      bound on a command's `maxOutputBytes`; chunks stream regardless
  */
 final private[runner] class WebSocketCommandExecutor(
   workspace: WorkspaceAgentInterfaceImpl,
@@ -46,13 +39,20 @@ final private[runner] class WebSocketCommandExecutor(
    * Check, start and stream one command.
    *
    * @param cmd       the command from the client
-   * @param processes this client's running commands, so [[cancel]] can find the process
+   * @param owner     the client (its connection): the owner its process is registered under, which [[cancel]] and a
+   *                  disconnect act on
    * @param send      delivers a protocol message to the client
+   * @param connected whether the client's connection is still open: a command whose connection closed while it waited at
+   *                  the gate never starts, as the close handler cancels only what it can find
+   * @param cancelledEarly this client's cancellations of commands not yet registered (waiting at the gate), which
+   *                  therefore never start; one set per connection, shared with [[cancel]]
    */
   def execute(
     cmd: ExecuteCommandCommand,
-    processes: ConcurrentHashMap[String, RunningCommand],
-    send: WebSocketMessage => Unit
+    owner: AnyRef,
+    send: WebSocketMessage => Unit,
+    connected: () => Boolean = () => true,
+    cancelledEarly: EarlyCancellations = new EarlyCancellations()
   ): Unit = {
     val startTime = System.currentTimeMillis()
 
@@ -67,54 +67,81 @@ final private[runner] class WebSocketCommandExecutor(
         fail(refused.error, refused.code, refused.details)
 
       case Right(prepared) =>
-        send(CommandStartedMessage(cmd.commandId, cmd.command))
-        Try(prepared.builder.start()) match {
-          case Failure(ex) =>
-            fail(
-              Option(ex.getMessage).getOrElse("Failed to start process"),
-              "EXECUTION_FAILED",
-              Some(ex.getStackTrace.mkString("\n"))
-            )
-          case Success(process) =>
-            val running = RunningCommand(process, new AtomicBoolean(false), startTime, new AtomicBoolean(false))
-            processes.put(cmd.commandId, running)
-            stream(cmd, prepared, running, processes, send, fail)
-        }
+        // a client that has flooded its cancellations takes no new commands until they age out: the bound holds
+        // without ever forgetting a cancellation a waiting command needs
+        if (cancelledEarly.full)
+          fail("Too many cancellations of commands not yet started; try again shortly", "WORKSPACE_BUSY", None)
+        else if (cancelledEarly.remove(cmd.commandId) || !connected())
+          // cancelled, or its connection closed, before it started: it never starts (exit 143)
+          send(CommandCompletedMessage(cmd.commandId, 143, (System.currentTimeMillis() - startTime).millis))
+        else
+          // the registry waits at the gate (bounded), starts the process and tracks it until it exits, whatever
+          // happens from here: nothing below holds or drops the process itself
+          registry.spawn(
+            owner,
+            cmd.commandId,
+            prepared.builder,
+            () => !cancelledEarly.remove(cmd.commandId) && connected()
+          ) match {
+            case Left(notStarted) if notStarted.code == ProcessRegistry.NotStarted =>
+              // cancelled, or its connection closed, while it waited at the gate: it never started (exit 143)
+              send(CommandCompletedMessage(cmd.commandId, 143, (System.currentTimeMillis() - startTime).millis))
+            case Left(refused)  => fail(refused.error, refused.code, refused.details)
+            case Right(running) =>
+              // tracked: a cancellation from now on finds it. One that came while it waited or started is in
+              // `cancelledEarly`, and a closed connection's handler has already run: either kills it here
+              if (cancelledEarly.remove(cmd.commandId) || !connected()) registry.kill(running): Unit
+              // a client that cannot be told it started gets no output and could not cancel it: it is killed, and
+              // stays tracked until it has exited
+              Try(send(CommandStartedMessage(cmd.commandId, cmd.command))) match {
+                case Success(_) => stream(cmd, prepared, running, send, fail)
+                case Failure(ex) =>
+                  logger.warn(s"Could not announce command ${cmd.commandId}; stopping it: ${ex.getMessage}")
+                  registry.kill(running): Unit
+              }
+          }
     }
   }
+
+  /** The runner's process registry: the workspace's. */
+  private[runner] def registry: ProcessRegistry = workspace.processes
 
   /**
    * Cancel one of this client's running commands. Cancellation is acknowledged as completion, exit code 143.
    *
    * @param commandId the command to cancel
-   * @param processes this client's running commands
+   * @param owner     the client, whose processes alone it can cancel
    * @param send      delivers a protocol message to the client
+   * @param cancelledEarly this client's cancellations of commands not yet registered, as given to [[execute]]
    */
   def cancel(
     commandId: String,
-    processes: Option[ConcurrentHashMap[String, RunningCommand]],
-    send: WebSocketMessage => Unit
+    owner: AnyRef,
+    send: WebSocketMessage => Unit,
+    cancelledEarly: Option[EarlyCancellations] = None,
+    onOverflow: () => Unit = () => ()
   ): Unit =
-    processes.flatMap(running => Option(running.get(commandId))) match {
-      case Some(running) =>
-        running.cancelled.set(true)
-        val terminationAttempt = Try {
-          val destroyedProcess = running.process.destroyForcibly()
-          // Wait briefly for the process to actually terminate
-          if (!destroyedProcess.waitFor(5, TimeUnit.SECONDS)) {
-            logger.warn(s"Process for command $commandId did not terminate within timeout after cancellation")
-          }
-        }
-        terminationAttempt.failed.foreach { ex =>
-          logger.error(s"Error destroying process for command $commandId: ${ex.getMessage}", ex)
-        }
+    // looked up, or recorded as an early cancellation, under the registry's lock: a command waiting at the gate either
+    // is registered and found here, or sees the cancellation as its spawn decides whether to start
+    registry.atomically(
+      registry.find(owner, commandId).toRight(cancelledEarly.forall(_.add(commandId)))
+    ) match {
+      case Right(running) =>
+        // killed through the registry, which keeps it tracked until it has exited
+        val gone = registry.kill(running) // the parent and every descendant found
         logger.info(s"Command $commandId cancelled by client")
-        if (running.completionSent.compareAndSet(false, true)) {
+        // acknowledged only once it is gone, its whole tree; one that survives the kill is reported by its exit watcher
+        // as a failure
+        if (gone && running.completionSent.compareAndSet(false, true)) {
           val durationMs = System.currentTimeMillis() - running.startTimeMs
           send(CommandCompletedMessage(commandId, 143, durationMs.millis))
         }
 
-      case None =>
+      case Left(kept) =>
+        // it may still be waiting at the gate: remembered, so it never starts. Always kept: a cancellation is never
+        // dropped, and each is forgotten only once no command could still be waiting for it (EarlyCancellations)
+        // a client past the bound is disconnected, which stops all its commands, rather than any cancellation dropped
+        if (!kept) onOverflow()
         logger.warn(s"Cancellation requested for unknown or non-running command id $commandId")
         send(ErrorMessage(s"No running command found for id $commandId", "UNKNOWN_COMMAND_ID", Some(commandId)))
     }
@@ -123,7 +150,6 @@ final private[runner] class WebSocketCommandExecutor(
     cmd: ExecuteCommandCommand,
     prepared: PreparedCommand,
     running: RunningCommand,
-    processes: ConcurrentHashMap[String, RunningCommand],
     send: WebSocketMessage => Unit,
     fail: (String, String, Option[String]) => Unit
   ): Unit = {
@@ -136,8 +162,11 @@ final private[runner] class WebSocketCommandExecutor(
     val stdoutTruncated   = new AtomicBoolean(false)
     val stderrTruncated   = new AtomicBoolean(false)
     val commandTimedOut   = new AtomicBoolean(false)
+    val survivedKill      = new AtomicBoolean(false)
     val stdoutAccumulator = new StringBuilder()
     val stderrAccumulator = new StringBuilder()
+    // the client's bound on each stream, never more than the runner's own
+    val limit = WebSocketCommandExecutor.outputLimit(cmd.maxOutputBytes, maxOutputSize)
 
     def streamOutput(
       outputType: String,
@@ -147,28 +176,24 @@ final private[runner] class WebSocketCommandExecutor(
       done: Promise[Unit]
     ): Unit =
       Future {
-        val buffer    = new Array[Byte](8192)
-        var bytesRead = 0
+        // decoded by a reader, so a character split across two reads is decoded whole, and kept by its encoded bytes:
+        // at most `limit` of them (and so of characters), whatever the output's lines, the rest read and discarded
+        val reader    = new java.io.InputStreamReader(stream, StandardCharsets.UTF_8)
+        val buffer    = new Array[Char](8192)
+        var charsRead = 0
         var captured  = 0L
 
         try
           while ({
-            bytesRead = stream.read(buffer)
-            bytesRead != -1
+            charsRead = reader.read(buffer)
+            charsRead != -1
           }) {
-            val chunk = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8)
-            send(StreamingOutputMessage(cmd.commandId, outputType, chunk))
-
-            if (captured < maxOutputSize) {
-              val remaining = (maxOutputSize - captured).toInt
-              val toCopy    = math.min(remaining, bytesRead)
-              if (toCopy > 0) {
-                val toAppend = if (toCopy == bytesRead) chunk else chunk.substring(0, toCopy)
-                accumulator.append(toAppend)
-                captured += toCopy
-              }
-              if (toCopy < bytesRead) truncated.set(true)
-            } else truncated.set(true)
+            val (take, used) = WebSocketCommandExecutor.fitting(buffer, charsRead, math.max(limit - captured, 0L))
+            // streamed within the same bound as it is kept: past it, the output is drained and dropped, never sent
+            if (take > 0) send(StreamingOutputMessage(cmd.commandId, outputType, new String(buffer, 0, take)))
+            accumulator.appendAll(buffer, 0, take)
+            captured += used
+            if (take < charsRead) truncated.set(true)
           }
         catch {
           case ex: Exception =>
@@ -197,11 +222,13 @@ final private[runner] class WebSocketCommandExecutor(
               finished = process.waitFor(500, TimeUnit.MILLISECONDS)
             }
           if (running.cancelled.get()) {
-            process.destroyForcibly()
+            // a cancellation is an outcome only once the process is gone, as a timeout is
+            if (!registry.kill(running)) survivedKill.set(true)
             143
           } else if (timedOut) {
             commandTimedOut.set(true)
-            process.destroyForcibly()
+            // a timeout is an outcome only once the process is gone
+            if (!registry.kill(running, asCancellation = false)) survivedKill.set(true)
             -1
           } else {
             process.exitValue()
@@ -209,16 +236,38 @@ final private[runner] class WebSocketCommandExecutor(
         } catch {
           case _: InterruptedException =>
             Thread.currentThread().interrupt()
-            process.destroyForcibly()
+            if (!registry.kill(running, asCancellation = false)) survivedKill.set(true)
             -1
           case ex: Exception =>
             logger.error(s"Error waiting for process ${cmd.commandId}: ${ex.getMessage}", ex)
-            process.destroyForcibly()
+            if (!registry.kill(running, asCancellation = false)) survivedKill.set(true)
             -1
-        } finally {
-          processes.remove(cmd.commandId)
+        } finally
+          // the registry, not this watcher, drops the process: when it has exited
           exitDone.trySuccess(())
-        }
+      // complete only once the registry has released it: what it left running (a backgrounded process) is killed and
+      // waited for first, so no later command or file change runs beside it. Not released in time is a survivor.
+      if (
+        !survivedKill.get() && Try(
+          running.released.get(WebSocketCommandExecutor.ReleaseWait.toMillis, TimeUnit.MILLISECONDS)
+        ).isFailure
+      )
+        survivedKill.set(true)
+      // timed out and still alive after the kill: it may yet write, so its outcome is unknown - reported now, as a
+      // failure, without waiting for output streams it may hold open
+      if (survivedKill.get() && running.completionSent.compareAndSet(false, true)) {
+        send(
+          ResponseMessage(
+            WorkspaceAgentErrorResponse(
+              cmd.commandId,
+              "Command, or a process it started, did not terminate when killed; it may still be running",
+              "EXECUTION_FAILED",
+              None
+            )
+          )
+        )
+        send(CommandCompletedMessage(cmd.commandId, -1, (System.currentTimeMillis() - startTime).millis))
+      }
       exitCodePromise.trySuccess(exitCode)
     }
 
@@ -227,20 +276,30 @@ final private[runner] class WebSocketCommandExecutor(
       .flatMap(_ => exitDone.future)
       .flatMap(_ => exitCodePromise.future)
       .onComplete {
+        case Success(_) if survivedKill.get() => () // reported when the kill failed
         case Success(rawExitCode) =>
           val durationMs = System.currentTimeMillis() - startTime
           val effectiveExitCode =
             if (running.cancelled.get()) 143
             else if (commandTimedOut.get()) -1
             else rawExitCode
-          val isOutputTruncated = stdoutTruncated.get() || stderrTruncated.get()
+          val marker =
+            if (commandTimedOut.get()) s"[timed out after ${prepared.timeout.toSeconds}s and was killed]\n" else ""
+          val fullStderr = marker + stderrAccumulator.result()
+          // cut by its encoded bytes, as it was captured: the marker counts against the same bound
+          val stderrWithMarker = WebSocketCommandExecutor.cutEncoded(fullStderr, limit)
+          val isOutputTruncated =
+            stdoutTruncated.get() || stderrTruncated.get() || stderrWithMarker.length < fullStderr.length
 
           send(
             ResponseMessage(
               ExecuteCommandResponse(
                 commandId = cmd.commandId,
                 stdout = stdoutAccumulator.result(),
-                stderr = stderrAccumulator.result(),
+                // a command its timeout killed says so, as the direct path's TIMEOUT does: exit -1 alone is ambiguous.
+                // First, so a bound that cuts stderr's end keeps it
+                // Within the stream's bound like any output: a marker that does not fit is cut, and says so.
+                stderr = stderrWithMarker,
                 exitCode = effectiveExitCode,
                 isOutputTruncated = isOutputTruncated,
                 duration = durationMs.millis
@@ -258,4 +317,92 @@ final private[runner] class WebSocketCommandExecutor(
           )
       }
   }
+}
+
+/**
+ * One client's cancellations of commands not yet registered (waiting at the gate, or not yet taken up). Each is kept
+ * for `window`, longer than any command can wait before it starts or is refused (the gate's bounded wait, plus its
+ * preparation), and then forgotten: no cancellation a waiting command needs is ever dropped. Past `capacity` live
+ * entries the client is [[full]], and takes no new command until they age out, so the set is bounded either way.
+ */
+final private[runner] class EarlyCancellations(
+  window: FiniteDuration = EarlyCancellations.Window,
+  capacity: Int = EarlyCancellations.Capacity,
+  clock: () => Long = () => System.nanoTime()
+) {
+  private val at = new ConcurrentHashMap[String, java.lang.Long]()
+
+  private def purge(): Unit = {
+    val cutoff = clock() - window.toNanos
+    at.entrySet().removeIf(e => e.getValue.longValue < cutoff): Unit
+  }
+
+  /** Records `id`; `false`, recording nothing, when the client already has `capacity` live entries. */
+  def add(id: String): Boolean = {
+    purge()
+    if (at.size >= capacity) false else { at.put(id, clock()): Unit; true }
+  }
+
+  /** Whether `id` was cancelled, forgetting it. */
+  def remove(id: String): Boolean = at.remove(id) != null
+
+  def full: Boolean = { purge(); at.size >= capacity }
+}
+
+private[runner] object EarlyCancellations {
+
+  /** Longer than any command waits before it starts or is refused. */
+  val Window: FiniteDuration = WorkspaceSandboxConfig.CommandGateWait + 2.minutes
+
+  /** The most live cancellations of commands not yet started one client may have before its new commands wait. */
+  val Capacity: Int = 1024
+}
+
+private[runner] object WebSocketCommandExecutor {
+
+  /** How long a command's end waits for the registry to release it: kill and wait for what it left running. */
+  val ReleaseWait: FiniteDuration = ProcessRegistry.KillWait * 2
+
+  /** The most characters of each stream a command keeps: what it asked for, within `0..runnerMax`. */
+  /**
+   * The bytes a code point takes in the JSON a command's output is carried and recorded in, UTF-8 and escaped as a
+   * JSON string escapes it: what an output bound is measured in, so a bound of `n` keeps at most `n` such bytes (and
+   * so at most `n` characters).
+   */
+  def encodedWidth(cp: Int): Int =
+    if (cp == '"' || cp == '\\' || cp == '\n' || cp == '\r' || cp == '\t' || cp == '\b' || cp == '\f') 2
+    else if (cp < 0x20 || (cp >= 0xd800 && cp <= 0xdfff)) 6
+    else if (cp < 0x80) 1
+    else if (cp < 0x800) 2
+    else if (cp < 0x10000) 3
+    else 4
+
+  /**
+   * How many of `buffer`'s first `n` characters fit in `budget` encoded bytes, never splitting a surrogate pair, and
+   * the bytes they take.
+   */
+  def fitting(buffer: Array[Char], n: Int, budget: Long): (Int, Long) = {
+    var i    = 0
+    var used = 0L
+    var full = false
+    while (!full && i < n) {
+      val cp    = Character.codePointAt(buffer, i, n)
+      val width = encodedWidth(cp)
+      if (used + width > budget) full = true
+      else {
+        used += width
+        i += Character.charCount(cp)
+      }
+    }
+    (i, used)
+  }
+
+  /** `s` cut to at most `limit` encoded bytes ([[encodedWidth]]), never inside a surrogate pair. */
+  def cutEncoded(s: String, limit: Long): String = {
+    val chars = s.toCharArray
+    s.substring(0, fitting(chars, chars.length, math.max(limit, 0L))._1)
+  }
+
+  def outputLimit(requested: Option[Long], runnerMax: Long): Long =
+    requested.fold(runnerMax)(r => math.min(math.max(r, 0L), runnerMax))
 }

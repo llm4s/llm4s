@@ -8,6 +8,69 @@ import org.scalatest.matchers.should.Matchers
 
 class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
 
+  "ToolOutputCompressor" should "rewrite a tool result's text and keep its image" in {
+    val image = ContentPart
+      .image(
+        org.llm4s.media.MediaSource.Url(java.net.URI.create("https://example.com/plot.png")),
+        org.llm4s.media.MediaType.Png
+      )
+      .toOption
+      .get
+    val message = ToolMessage(Vector(ContentPart.Text("x" * 20000), image), "call_1")
+
+    val result = ToolOutputCompressor.compressToolOutputs(Seq(message), ArtifactStore.inMemory()).toOption.get
+
+    val compressed = result.head.asInstanceOf[ToolMessage]
+    compressed.parts.last shouldBe image
+    compressed.content.length should be < 20000
+  }
+
+  it should "externalize an interleaved result's text together, keeping its images in their order" in {
+    val chart = ContentPart
+      .image(
+        org.llm4s.media.MediaSource.Url(java.net.URI.create("https://example.com/a.png")),
+        org.llm4s.media.MediaType.Png
+      )
+      .toOption
+      .get
+    val message =
+      ToolMessage(Vector(ContentPart.Text("first " * 4000), chart, ContentPart.Text("second caption"), chart), "c")
+    val compressed =
+      ToolOutputCompressor
+        .compressToolOutputs(Seq(message), ArtifactStore.inMemory())
+        .toOption
+        .get
+        .head
+        .asInstanceOf[ToolMessage]
+    // over the threshold in total: one pointer where the first text was, the images kept in place
+    compressed.parts.size shouldBe 3
+    compressed.parts.tail shouldBe Vector(chart, chart)
+    compressed.content.length should be < 2048
+  }
+
+  it should "bring a result split into small parts under the inline bound, keeping its media" in {
+    val chart = ContentPart
+      .image(
+        org.llm4s.media.MediaSource.Url(java.net.URI.create("https://example.com/a.png")),
+        org.llm4s.media.MediaType.Png
+      )
+      .toOption
+      .get
+    val parts   = Vector.fill(5)(ContentPart.Text("z " * 250)) :+ chart
+    val result  = ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(parts, "c")), ArtifactStore.inMemory())
+    val message = result.toOption.get.head.asInstanceOf[ToolMessage]
+    message.parts.last shouldBe chart
+    message.content.getBytes("UTF-8").length should be <= 2048
+  }
+
+  it should "apply its thresholds to the result's text in total, not to each part" in {
+    val parts   = Vector.fill(5)(ContentPart.Text("y" * 2048))
+    val result  = ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(parts, "c")), ArtifactStore.inMemory())
+    val message = result.toOption.get.head.asInstanceOf[ToolMessage]
+    message.parts.size shouldBe 1
+    message.content.length should be < 2048
+  }
+
   // ============ Content Type Detection ============
 
   "ToolOutputCompressor content type detection" should "identify JSON objects" in {
@@ -293,5 +356,28 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
         }
       }
     }
+  }
+
+  it should "bring many short text parts under the inline bound with one artifact, written once" in {
+    val writes = new java.util.concurrent.atomic.AtomicInteger()
+    val inner  = ArtifactStore.inMemory()
+    val store = new ArtifactStore {
+      def store(key: org.llm4s.types.ArtifactKey, content: String) = {
+        writes.incrementAndGet(); inner.store(key, content)
+      }
+      def retrieve(key: org.llm4s.types.ArtifactKey) = inner.retrieve(key)
+      def exists(key: org.llm4s.types.ArtifactKey)   = inner.exists(key)
+    }
+    val chart = ContentPart
+      .image(org.llm4s.media.MediaSource.Url(java.net.URI.create("https://e.com/a.png")), org.llm4s.media.MediaType.Png)
+      .toOption
+      .get
+    val parts   = (1 to 100).toVector.map(i => ContentPart.Text(s"note $i " + ("x" * 90))) :+ chart
+    val message = ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(parts, "c")), store).toOption.get.head
+    val result  = message.asInstanceOf[ToolMessage]
+    result.content.getBytes("UTF-8").length should be <= 2048
+    result.parts.last shouldBe chart
+    result.parts.count(_.isInstanceOf[ContentPart.Text]) shouldBe 1
+    writes.get shouldBe 1
   }
 }

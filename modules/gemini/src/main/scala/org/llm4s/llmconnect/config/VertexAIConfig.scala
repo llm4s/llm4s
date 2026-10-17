@@ -15,10 +15,15 @@ import org.llm4s.types.Result
  * @param model              Model identifier, e.g. `"gemini-2.0-flash"`.
  * @param credentialFilePath Optional path to a Google JSON credential file.
  *                           Falls back to `GOOGLE_APPLICATION_CREDENTIALS` env,
- *                           then `~/.config/gcloud/application_default_credentials.json`,
+ *                           then gcloud's `application_default_credentials.json`
+ *                           (`$CLOUDSDK_CONFIG` if set; else `%APPDATA%\gcloud` on Windows;
+ *                           else `~/.config/gcloud`),
  *                           then the GCE metadata server.
  * @param contextWindow      Maximum token capacity for prompt + completion combined.
  * @param reserveCompletion  Tokens reserved for the completion response.
+ * @param wellKnownCredentialPath where gcloud's well-known `application_default_credentials.json` would be,
+ *                 resolved at the configuration edge by [[org.llm4s.config.VertexAIAdcConfigLoader]] (the descriptor
+ *                 sets it when it builds the client). `None` skips that lookup.
  * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
  *                 value keeps the client's own default ([[ProviderTimeouts]])
  */
@@ -30,11 +35,14 @@ case class VertexAIConfig(
   credentialFilePath: Option[String],
   contextWindow: Int,
   reserveCompletion: Int,
-  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default,
+  wellKnownCredentialPath: Option[String] = None
 ) extends ProviderConfig:
   override val providerId: ProviderId                                   = ProviderId("vertexai")
   override def withModel(model: String): VertexAIConfig                 = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): VertexAIConfig = copy(timeouts = timeouts)
+
+  def withWellKnownCredentialPath(path: String): VertexAIConfig = copy(wellKnownCredentialPath = Some(path))
 
   /** Base URL derived from the location, e.g. `"https://us-central1-aiplatform.googleapis.com/v1"`. */
   def computedBaseUrl: String = s"https://$location-aiplatform.googleapis.com/v1"

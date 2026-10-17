@@ -72,11 +72,13 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
       releases.incrementAndGet()
       onRelease().getOrElse(underlying.release(threadId, token))
     }
-    def commit(threadId: ThreadId, commit: Commit)                  = underlying.commit(threadId, commit)
-    def latest(threadId: ThreadId)                                  = underlying.latest(threadId)
+    def commit(threadId: ThreadId, commit: Commit)                       = underlying.commit(threadId, commit)
+    def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey) = underlying.effect(threadId, key)
+    def latest(threadId: ThreadId)                                       = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId) = onDelete().getOrElse(underlying.deleteThread(threadId))
+    def deleteThread(threadId: ThreadId, token: FencingToken) =
+      onDelete().getOrElse(underlying.deleteThread(threadId, token))
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
@@ -99,15 +101,19 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val handle = GraphRuntime(store, claims = slow).start(thread, held.graph, "x", run("first")).value
     held.awaitEntered()
 
-    store.claim(thread, ClaimRequest(RunId("other"), 1.second)).left.value shouldBe
-      GraphError.ThreadBusy("t", store.latest(thread).value.map(_.checkpoint.id), Some("first"))
+    store.claim(thread, ClaimRequest(RunId("other"), None, 1.second)).left.value shouldBe
+      GraphError.ThreadBusy(
+        "t",
+        store.latest(thread).value.map(_.checkpoint.id),
+        GraphError.BusyHolder.Run(RunId("first"))
+      )
     held.gate.countDown()
     await(handle).completed._2 shouldBe Vector("x")
 
     val token = held.positions.peek().fencingToken.value
     store.latest(thread).value.value.checkpoint.fencingToken shouldBe Some(token)
     // released at the end: a new claim is granted at once, with a greater token
-    store.claim(thread, ClaimRequest(RunId("other"), 1.second)).value.token.value should be > token.value
+    store.claim(thread, ClaimRequest(RunId("other"), None, 1.second)).value.token.value should be > token.value
   }
 
   it should "not carry a token outside a runtime" in {
@@ -128,8 +134,12 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val latest = store.latest(thread).value.map(_.checkpoint.id)
 
     second.recover(thread, held.graph, run("second")).left.value shouldBe
-      GraphError.ThreadBusy("t", latest, Some("first"))
-    second.deleteThread(thread, run("second")).left.value shouldBe GraphError.ThreadBusy("t", latest, Some("first"))
+      GraphError.ThreadBusy("t", latest, GraphError.BusyHolder.Run(RunId("first")))
+    second.deleteThread(thread, run("second")).left.value shouldBe GraphError.ThreadBusy(
+      "t",
+      latest,
+      GraphError.BusyHolder.Run(RunId("first"))
+    )
 
     clock.advance(slow.ttl)
     await(second.recover(thread, held.graph, run("second")).value).completed._2 shouldBe Vector("x")
@@ -137,17 +147,23 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
 
     held.gate.countDown()
     val (_, error) = await(handle).failed
-    error should matchPattern { case GraphError.CheckpointWriteFailed("t", _: GraphError.StaleClaim, None) => }
+    // its commit is refused as stale: it lost its claim (the successor has since released its own)
+    error shouldBe GraphError.ClaimLost("t", held.positions.peek().fencingToken.value, None)
     store.eventsAfter(thread, 0L, 100).value shouldBe after
     held.positions.asScala.toVector.map(_.fencingToken.value.value).distinct should have size 2
   }
 
-  it should "not be told who holds a thread that has no checkpoint yet" in {
-    val store = InMemoryCheckpointer()
-    store.claim(thread, ClaimRequest(RunId("admitting"), 1.minute)).value
-    val held = Held()
+  it should "be told who holds a thread that has no checkpoint yet only when the claim is of its tenant" in {
+    val store   = InMemoryCheckpointer()
+    val foreign = store.claim(thread, ClaimRequest(RunId("admitting"), Some(TenantId("b")), 1.minute)).value
+    val held    = Held()
     GraphRuntime(store).start(thread, held.graph, "x", run("second")).left.value shouldBe
-      GraphError.ThreadBusy("t", None, None)
+      GraphError.ThreadBusy("t", None, GraphError.BusyHolder.Unnamed)
+    store.release(thread, foreign.token).value
+    // the claim records its tenant, so a holder of the caller's own is named before any checkpoint (#1926)
+    store.claim(thread, ClaimRequest(RunId("admitting"), None, 1.minute)).value
+    GraphRuntime(store).start(thread, held.graph, "x", run("second")).left.value shouldBe
+      GraphError.ThreadBusy("t", None, GraphError.BusyHolder.Run(RunId("admitting")))
   }
 
   "Admission" should "give the claim back when its claim commit loses a race" in {
@@ -160,10 +176,13 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val racing = new Hooked(underlying) {
       override def latest(threadId: ThreadId) = Right(None)
     }
+    // the re-read (which this store also answers with no checkpoint) cannot check the tenant of the
+    // checkpoint the conflict named, so that checkpoint is not named: it may be another tenant's
+    stale should not be empty
     GraphRuntime(racing).start(thread, held.graph, "y", run("second")).left.value shouldBe
-      GraphError.ThreadBusy("t", stale.map(_.checkpoint.id))
+      GraphError.ThreadBusy("t", None, GraphError.BusyHolder.Unnamed)
     racing.releases.get shouldBe 1
-    underlying.claim(thread, ClaimRequest(RunId("third"), 1.second)).value.holder shouldBe RunId("third")
+    underlying.claim(thread, ClaimRequest(RunId("third"), None, 1.second)).value.holder shouldBe RunId("third")
   }
 
   it should "report a store that cannot grant a claim as a write failure, and one that throws the same way" in {
@@ -180,7 +199,7 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
 
   it should "fall back to ThreadBusy when the thread cannot be re-read after a refused claim" in {
     val underlying = InMemoryCheckpointer()
-    underlying.claim(thread, ClaimRequest(RunId("other"), 1.minute)).value
+    underlying.claim(thread, ClaimRequest(RunId("other"), None, 1.minute)).value
     val reads = new AtomicInteger()
     val store = new Hooked(underlying) {
       override def latest(threadId: ThreadId) =
@@ -190,16 +209,26 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
   }
 
   "Renewal" should "keep a run's claim alive past its ttl, and stop once the claim is lost" in {
-    val clock  = MovingClock()
-    val store  = Hooked(InMemoryCheckpointer(clock))
-    val held   = Held()
-    val handle = GraphRuntime(store, claims = ClaimPolicy(30.seconds, 10.millis)).start(thread, held.graph, "x").value
+    val clock = MovingClock()
+    val store = Hooked(InMemoryCheckpointer(clock))
+    val held  = Held()
+    val rt    = GraphRuntime(store, claims = ClaimPolicy(30.seconds, 10.millis))
+    // the claim's beat, the only thread that starts a renewal: it reads the ticker on every beat
+    val beat = new AtomicReference[Thread]()
+    rt.ticker = () => {
+      if Thread.currentThread().getName == s"llm4s-claim-${thread.value}" then beat.set(Thread.currentThread())
+      System.nanoTime()
+    }
+    val handle = rt.start(thread, held.graph, "x").value
     held.awaitEntered()
     clock.advance(20.seconds)
     val before = store.renewals.get
     eventually(store.renewals.get > before + 1)
     clock.advance(20.seconds)
-    store.underlying.claim(thread, ClaimRequest(RunId("thief"), 1.second)).left.value shouldBe a[GraphError.ThreadBusy]
+    store.underlying
+      .claim(thread, ClaimRequest(RunId("thief"), None, 1.second))
+      .left
+      .value shouldBe a[GraphError.ThreadBusy]
 
     // a store that fails is tried again; a lost claim ends renewal
     store.onRenew = () => Some(Left(ProcessingError("store", "flaky")))
@@ -208,17 +237,16 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val lost = new AtomicInteger()
     store.onRenew = () => {
       lost.incrementAndGet()
-      Some(Left(GraphError.StaleClaim("t", 1L, Some(2L))))
+      Some(Left(GraphError.StaleClaim("t", FencingToken(1L), Some(FencingToken(2L)))))
     }
     eventually(lost.get == 1)
-    Thread.sleep(100)
+    // the beat ends once the claim is lost, so no renewal starts after the refused one
+    beat.get.join(java.time.Duration.ofSeconds(5)) shouldBe true
     lost.get shouldBe 1
 
-    // and the run stops at its next superstep, as it would have at its next commit
-    held.gate.countDown()
-    await(handle).failed._2 should matchPattern {
-      case GraphError.CheckpointWriteFailed("t", GraphError.StaleClaim("t", 1L, Some(2L)), None) =>
-    }
+    // and the run stops at once: its task is interrupted, and it ends naming the current claim
+    await(handle).failed._2 shouldBe
+      GraphError.ClaimLost("t", held.positions.peek().fencingToken.value, Some(FencingToken(2L)))
   }
 
   it should "survive a renew that throws" in {
@@ -232,7 +260,7 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     await(handle).completed._2 shouldBe Vector("x")
   }
 
-  "A run that lost its claim" should "stop at its next superstep, running nothing more, even with deferred commits" in {
+  "A run that lost its claim" should "stop at once, running nothing more, even with deferred commits" in {
     val clock   = MovingClock()
     val store   = Hooked(InMemoryCheckpointer(clock))
     val gate    = new CountDownLatch(1)
@@ -258,19 +286,16 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     entered.await(5, TimeUnit.SECONDS) shouldBe true
     val claimCheckpoint = store.latest(thread).value.value.checkpoint
     clock.advance(30.seconds)
-    store.underlying.claim(thread, ClaimRequest(RunId("thief"), 1.hour)).value
+    store.underlying.claim(thread, ClaimRequest(RunId("thief"), None, 1.hour)).value
     val renewed = new CountDownLatch(1)
     store.onRenew = () => {
       renewed.countDown()
       None
     }
     renewed.await(5, TimeUnit.SECONDS) shouldBe true
-    Thread.sleep(100) // the renewal's StaleClaim is recorded just after the store answers
 
-    gate.countDown()
-    await(handle).failed._2 should matchPattern {
-      case GraphError.CheckpointWriteFailed("t", _: GraphError.StaleClaim, None) =>
-    }
+    // the refused renewal interrupts `first`, whose gate never opens
+    await(handle).failed._2 should matchPattern { case GraphError.ClaimLost("t", _, Some(_)) => }
     // superstep 2 never ran: under OnExit, nothing would have stopped it before the exit commit
     later.get shouldBe 0
     store.latest(thread).value.value.checkpoint shouldBe claimCheckpoint
@@ -330,9 +355,7 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     calls.get("b").get shouldBe 1
 
     hold.countDown()
-    await(handle).failed._2 should matchPattern {
-      case GraphError.CheckpointWriteFailed("t", _: GraphError.StaleClaim, None) =>
-    }
+    await(handle).failed._2 shouldBe a[GraphError.ClaimLost]
   }
 
   "resume" should "be refused while another runtime is admitting on the thread, naming its run" in {
@@ -365,7 +388,7 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     claimed.await(5, TimeUnit.SECONDS) shouldBe true
 
     GraphRuntime(store).resume(thread, graph, answers, run("second")).left.value shouldBe
-      GraphError.ThreadBusy("t", Some(suspended.checkpoint.id), Some("first"))
+      GraphError.ThreadBusy("t", Some(suspended.checkpoint.id), GraphError.BusyHolder.Run(RunId("first")))
     store.latest(thread).value.value shouldBe suspended
 
     proceed.countDown()
@@ -381,7 +404,7 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val runtime = GraphRuntime(store, claims = slow)
     await(runtime.start(thread, held.graph, "x", run("first")).value).completed
     runtime.start(thread, held.graph, "y", run("second")).left.value should matchPattern {
-      case GraphError.ThreadBusy("t", Some(_), Some("first")) =>
+      case GraphError.ThreadBusy("t", Some(_), GraphError.BusyHolder.Run(holder)) if holder == RunId("first") =>
     }
     store.onRelease = () => throw new IllegalStateException("driver")
     clock.advance(slow.ttl)
@@ -423,7 +446,7 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     underlying.latest(thread).value.value.checkpoint.tenantId shouldBe Some("tenant-b")
     underlying.eventsAfter(thread, 0L, 100).value should not be empty
     // the refused deletion gave its claim back
-    underlying.claim(thread, ClaimRequest(RunId("next"), 1.second)).value.holder shouldBe RunId("next")
+    underlying.claim(thread, ClaimRequest(RunId("next"), None, 1.second)).value.holder shouldBe RunId("next")
   }
 
   "ClaimPolicy" should "default to a 30 second claim renewed every 10 seconds, and refuse an invalid one" in {
@@ -437,21 +460,25 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
   }
 
   "ClaimRequest" should "refuse a non-positive ttl" in {
-    ClaimRequest(RunId("r"), 1.second).withHolder(RunId("s")).withTtl(2.seconds) shouldBe
-      ClaimRequest(RunId("s"), 2.seconds)
-    an[IllegalArgumentException] should be thrownBy ClaimRequest(RunId("r"), 0.seconds)
-    ClaimRequest.of(RunId("r"), -1.second).left.value.message should include("ttl must be positive")
-    ClaimRequest.of(RunId("r"), 1.second).value shouldBe ClaimRequest(RunId("r"), 1.second)
+    ClaimRequest(RunId("r"), None, 1.second).withHolder(RunId("s")).withTtl(2.seconds) shouldBe
+      ClaimRequest(RunId("s"), None, 2.seconds)
+    an[IllegalArgumentException] should be thrownBy ClaimRequest(RunId("r"), None, 0.seconds)
+    ClaimRequest.of(RunId("r"), None, -1.second).left.value.message should include("ttl must be positive")
+    ClaimRequest.of(RunId("r"), None, 1.second).value shouldBe ClaimRequest(RunId("r"), None, 1.second)
+    ClaimRequest(RunId("r"), None, 1.second).withTenantId(TenantId("a")).tenantId shouldBe Some(TenantId("a"))
+    ClaimRequest(RunId("r"), Some(TenantId("a")), 1.second).withTenantId(None).tenantId shouldBe None
   }
 
   "The fenced types" should "change one field per setter, and expose no constructor or copy" in {
-    val claim = RunClaim(thread, RunId("r"), FencingToken(1L), start)
+    val claim = RunClaim(thread, RunId("r"), None, FencingToken(1L), start)
     claim
       .withThreadId(ThreadId("u"))
       .withHolder(RunId("s"))
       .withToken(FencingToken(2L))
       .withExpiresAt(start.plusSeconds(1)) shouldBe
-      RunClaim(ThreadId("u"), RunId("s"), FencingToken(2L), start.plusSeconds(1))
+      RunClaim(ThreadId("u"), RunId("s"), None, FencingToken(2L), start.plusSeconds(1))
+    claim.withTenantId(TenantId("a")).tenantId shouldBe Some(TenantId("a"))
+    claim.withTenantId(TenantId("a")).withTenantId(None) shouldBe claim
     val commit = Commit(FencingToken(1L))
     commit.withToken(FencingToken(2L)).token shouldBe FencingToken(2L)
     commit.withEvents(Vector.empty).withPendingWrites(Vector.empty).withCheckpoint(None) shouldBe commit
@@ -514,9 +541,62 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
   }
 
   it should "describe a stale claim and a busy thread's holder" in {
-    GraphError.StaleClaim("t", 1L, Some(2L)).message shouldBe "Claim token 1 on thread 't' is stale (current: 2)"
-    GraphError.StaleClaim("t", 1L, None).message should include("current: none")
-    GraphError.ThreadBusy("t", Some("c"), Some("r")).message shouldBe "Thread 't' is held by run 'r' (now at c); retry"
+    GraphError.StaleClaim("t", FencingToken(1L), Some(FencingToken(2L))).message shouldBe
+      "Claim token 1 on thread 't' is stale (current: 2)"
+    GraphError.StaleClaim("t", FencingToken(1L), None).message should include("current: none")
+    GraphError.ThreadBusy("t", Some("c"), GraphError.BusyHolder.Run(RunId("r"))).message shouldBe
+      "Thread 't' is held by run 'r' (now at c); retry"
     GraphError.ThreadBusy("t", None).message shouldBe "Thread 't' is held by another run (now at <none>); retry"
+    GraphError.ThreadBusy("t", None).holder shouldBe GraphError.BusyHolder.Unnamed
+    // a change whose own claim lapsed is not told another run holds the thread
+    val lapsed = GraphError.ThreadBusy("t", Some("c"), GraphError.BusyHolder.Lapsed).message
+    (lapsed should not).include("held by")
+    lapsed shouldBe
+      "Thread 't': this call's claim on it lapsed before its write was known to land, and no other run is known to hold it; a write already sent may still land (now at c); retry"
+  }
+
+  "ThreadBusy" should "be recoverable, so generic retry code retries it" in {
+    org.llm4s.error.LLMError.isRecoverable(GraphError.ThreadBusy("t", None)) shouldBe true
+  }
+
+  "GraphRuntime.inMemory" should "judge retention by the clock it was given, which stamps the checkpoints too" in {
+    // the runtime stamps checkpoints by `clock`, days before the system clock's now: a store on the system
+    // clock would find them all older than a day
+    val clock = MovingClock()
+    val rt    = GraphRuntime.inMemory(clock)
+    val held  = Held()
+    held.gate.countDown()
+    await(rt.start(thread, held.graph, "a", run("a")).value).completed
+    await(rt.start(thread, held.graph, "b", run("b")).value).completed
+    val kept = rt.history(thread).value.map(_.id)
+    kept.size should be > 1
+    rt.prune(thread, RetentionPolicy.keepAll.withMaxAge(1.day)).value shouldBe (())
+    rt.history(thread).value.map(_.id) shouldBe kept
+    // a day later by that clock, every checkpoint but the latest is past its age
+    clock.advance(1.day + 1.second)
+    rt.prune(thread, RetentionPolicy.keepAll.withMaxAge(1.day)).value shouldBe (())
+    rt.history(thread).value.map(_.id) shouldBe kept.take(1)
+  }
+
+  it should "let its store expire claims by the clock it was given" in {
+    val clock = MovingClock()
+    val rt    = GraphRuntime.inMemory(clock, ClaimPolicy(1.minute, 10.seconds))
+    val held  = Held()
+    val first = rt.start(thread, held.graph, "a", run("a")).value
+    held.awaitEntered()
+    rt.store.claim(thread, ClaimRequest(RunId("thief"), None, 1.minute)).left.value shouldBe a[GraphError.ThreadBusy]
+    // past the claim's ttl by the given clock, though not by the system's: the store lets it be taken over
+    clock.advance(2.minutes)
+    rt.store.claim(thread, ClaimRequest(RunId("thief"), None, 1.minute)).value.takenOverFrom shouldBe Some(RunId("a"))
+    held.gate.countDown()
+    awaitResult(first).value.failed._2 shouldBe a[GraphError.ClaimLost]
+  }
+
+  it should "take a claim policy" in {
+    val held = Held()
+    held.gate.countDown()
+    await(
+      GraphRuntime.inMemory(MovingClock(), ClaimPolicy(1.minute, 10.seconds)).start(thread, held.graph, "a").value
+    ).completed._2 shouldBe Vector("a")
   }
 }

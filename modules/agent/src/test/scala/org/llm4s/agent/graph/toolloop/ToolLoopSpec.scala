@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.toolloop
 
+import org.llm4s.agent.graph.middleware.{ BoundaryResult, ModelContext, ModelResponse }
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.GraphTestSupport.*
@@ -103,7 +104,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
   private def bare(name: String)(run: ToolContext => ToolOutcome): AgentTool[ujson.Value] =
     tool[ujson.Value](name)((_, context) => run(context))
 
-  private def text(s: String): ToolOutcome = ToolOutcome.Success(ujson.Str(s))
+  private def text(s: String): ToolOutcome = ToolOutcome.Success(ToolContent.Json(ujson.Str(s)))
 
   final private class Tools {
     val deploys = new CopyOnWriteArrayList[String]()
@@ -422,7 +423,8 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
       .suspended
     val afterWinner = store.latest(thread).value.map(_.checkpoint.id)
 
-    // the loser read the thread before the winner claimed it
+    // the loser read the thread before the winner claimed it; its re-read after the conflict sees the winner
+    val staleRead = new java.util.concurrent.atomic.AtomicBoolean(true)
     val racing = new Checkpointer {
       def commit(threadId: ThreadId, commit: Commit)                             = store.commit(threadId, commit)
       def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = store.claim(threadId, request)
@@ -433,10 +435,11 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
       ) =
         store.renew(threadId, token, ttl)
       def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = store.release(threadId, token)
-      def latest(threadId: ThreadId)                                             = Right(stale)
+      def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = store.effect(threadId, key)
+      def latest(threadId: ThreadId) = if staleRead.getAndSet(false) then Right(stale) else store.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int)     = store.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long)              = store.compactEvents(threadId, beforeSeq)
-      def deleteThread(threadId: ThreadId)                                = store.deleteThread(threadId)
+      def deleteThread(threadId: ThreadId, token: FencingToken)           = store.deleteThread(threadId, token)
       def history(threadId: ThreadId, before: Option[String], limit: Int) = store.history(threadId, before, limit)
       def checkpoint(threadId: ThreadId, checkpointId: String)            = store.checkpoint(threadId, checkpointId)
       def prune(threadId: ThreadId, policy: RetentionPolicy)              = store.prune(threadId, policy)
@@ -580,7 +583,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val counter = AgentTool(AgentToolSpec[ujson.Value]("count", "Counts", strings[ujson.Value]("c")), Set(hits)) {
       (_, context) =>
         val seen = context.state.get(hits).getOrElse(0)
-        ToolOutcome.Success(ujson.Obj("hits" -> (seen + 1)), StateUpdate.update(hits, seen + 1))
+        ToolOutcome.Success(ToolContent.Json(ujson.Obj("hits" -> (seen + 1))), StateUpdate.update(hits, seen + 1))
     }
     val model           = ScriptedModel(calls(("h1", "count", ujson.Obj())), summarise)
     val l               = buildSingle(model, set(counter)).value
@@ -590,8 +593,9 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
   }
 
   it should "fail the run when a tool updates a key it does not declare" in {
-    val hits   = StateKey.replace[Int]("hits", 0)
-    val sneaky = bare("sneaky")(_ => ToolOutcome.Success(ujson.Str("ok"), StateUpdate.update(hits, 1)))
+    val hits = StateKey.replace[Int]("hits", 0)
+    val sneaky =
+      bare("sneaky")(_ => ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")), StateUpdate.update(hits, 1)))
     val honest =
       AgentTool(AgentToolSpec[ujson.Value]("honest", "Honest", strings[ujson.Value]("h")), Set(hits))((_, _) =>
         text("ok")
@@ -1003,12 +1007,12 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val writer = AgentTool(AgentToolSpec[ujson.Value]("writer", "Writes", strings[ujson.Value]("w")), Set(attempts)) {
       (_, _) =>
         val n = runs.incrementAndGet()
-        ToolOutcome.Success(ujson.Str(s"attempt $n"), StateUpdate.update(attempts, n))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str(s"attempt $n")), StateUpdate.update(attempts, n))
     }
     val retry = wrapper("retry") { (_, _, next) =>
       next() match {
-        case ToolOutcome.Success(ujson.Str("attempt 1"), _) => next()
-        case other                                          => other
+        case ToolOutcome.Success(ToolContent.Json(ujson.Str("attempt 1")), _) => next()
+        case other                                                            => other
       }
     }
     val model           = ScriptedModel(calls(("r1", "writer", ujson.Obj())), summarise)
@@ -1253,7 +1257,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
       "retrying",
       // retries a Left, and a throw from next, up to three calls in all
       model = (request, next) => {
-        def attempt(n: Int): Result[Completion] = {
+        def attempt(n: Int): Result[ModelResponse] = {
           val result =
             try next(request)
             catch { case _: Throwable => Left(ValidationError("model", "next threw")) }
@@ -1312,20 +1316,22 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     name: String,
     before: String => Result[String] = Right(_),
     after: String => Result[String] = Right(_),
-    model: (ModelRequest, ModelRequest => Result[Completion]) => Result[Completion] = (r, next) => next(r),
+    model: (ModelRequest, ModelRequest => Result[ModelResponse]) => Result[ModelResponse] = (r, next) => next(r),
     contributes: Vector[AgentTool[?]] = Vector.empty,
     declares: Set[StateKey[?, ?]] = Set.empty,
     wrapTool: (ToolCallRequest, ToolContext, () => ToolOutcome) => ToolOutcome = (_, _, next) => next()
   ): AgentMiddleware =
     new AgentMiddleware {
-      val id: MiddlewareId                                                         = MiddlewareId(name)
-      override def writes: Set[StateKey[?, ?]]                                     = declares
-      override def tools: Vector[AgentTool[?]]                                     = contributes
-      override def beforeAgent(input: String, context: RunContext): Result[String] = before(input)
-      override def afterAgent(answer: String, context: RunContext): Result[String] = after(answer)
-      override def wrapModelCall(request: ModelRequest, context: RunContext)(
-        next: ModelRequest => Result[Completion]
-      ): Result[Completion] = model(request, next)
+      val id: MiddlewareId                     = MiddlewareId(name)
+      override def writes: Set[StateKey[?, ?]] = declares
+      override def tools: Vector[AgentTool[?]] = contributes
+      override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
+        before(input).map(BoundaryResult(_))
+      override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
+        after(answer).map(BoundaryResult(_))
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] = model(request, next)
       override def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome =
         wrapTool(request, context, next)
     }
@@ -1734,7 +1740,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val owning = middleware("owning", declares = Set(Messages.key))
     val owned  = buildSingle(ScriptedModel(summarise), set(tools.echo), Seq(owning))
     owned.left.value.message should include(
-      "middleware 'owning' declares a key the loop owns ('tool-results', 'messages', 'usage', 'active-agent', 'turn' or 'transfer')"
+      "middleware 'owning' declares a key the loop owns ('tool-results', 'tool-queue', 'messages', 'usage', 'active-agent', 'turn' or 'transfer')"
     )
   }
 
@@ -1885,8 +1891,12 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
   }
 
   "ToolLoop.results" should "refuse a second result for the same call" in {
-    val result = ToolResult("a", "t1", "ok", isError = false)
-    ToolLoop.results.applyUpdate(Vector(result), result.copy(content = "again")).left.value.message should
+    val result = ToolResult("a", "t1", Vector(ContentPart.Text("ok")), isError = false)
+    ToolLoop.results
+      .applyUpdate(Vector(result), result.copy(parts = Vector(ContentPart.Text("again"))))
+      .left
+      .value
+      .message should
       include("already has a result")
   }
 

@@ -331,6 +331,48 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     }
   }
 
+  "AnthropicClient with workload identity" should {
+    given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+
+    def configFor(file: Path) =
+      AnthropicConfig("", "claude-test").withWorkloadIdentity(AnthropicWorkloadIdentity(file, "fdrl_1", "org_1"))
+
+    "refuse an identity token file the SDK would read unchecked: a directory or a file larger than a token (#1818)" in {
+      val dir = Files.createTempDirectory("svid-dir")
+      dir.toFile.deleteOnExit()
+      val big = Files.createTempFile("svid-big", ".jwt")
+      big.toFile.deleteOnExit()
+      Files.write(big, Array.fill[Byte](64 * 1024 + 1)('a'.toByte))
+      for (path, reason) <- Seq(dir -> "not a regular file", big -> "larger than 65536 bytes") do
+        withClue(path) {
+          val error = AnthropicClient(configFor(path)).left.value
+          error shouldBe a[ConfigurationError]
+          error.message should (include("workloadIdentity.identityTokenFile").and(include(reason)))
+          error.asInstanceOf[ConfigurationError].missingKeys shouldBe List("workloadIdentity.identityTokenFile")
+          AnthropicClient(
+            configFor(path),
+            org.llm4s.metrics.MetricsCollector.noop,
+            org.llm4s.llmconnect.ProviderExchangeLogging.Disabled
+          ).left.value shouldBe a[ConfigurationError]
+          an[IllegalArgumentException] should be thrownBy new AnthropicClient(configFor(path))
+        }
+    }
+
+    "accept a regular token file, and a path not written yet, which an identity agent may create later (#1818)" in {
+      val file = svidFile("eyJ.svid.sig")
+      AnthropicClient(configFor(file)).value.close()
+      val missing = file.resolveSibling(s"not-yet-${System.nanoTime()}.jwt")
+      AnthropicClient(configFor(missing)).value.close()
+      AnthropicClient(AnthropicConfig("sk-ant", "claude-test")).value.close()
+    }
+
+    "carry a Stable AnthropicWorkloadIdentity (#1818)" in {
+      val cls = classOf[AnthropicWorkloadIdentity]
+      cls.isAnnotationPresent(classOf[org.llm4s.annotation.Stable]) shouldBe true
+      cls.isAnnotationPresent(classOf[org.llm4s.annotation.Experimental]) shouldBe false
+    }
+  }
+
   "AnthropicClient.mapError" should {
     val config = AnthropicConfig(
       "",
