@@ -108,8 +108,11 @@ object LLMCompressor {
     } yield finalMessages
   }
 
-  private def isHistoryDigestMessage(message: Message): Boolean =
-    message.content.contains("[HISTORY_SUMMARY]")
+  // a digest is a system message HistoryCompressor wrote; any other message is never replaced, whatever its text
+  private def isHistoryDigestMessage(message: Message): Boolean = message match {
+    case s: SystemMessage => s.content.contains("[HISTORY_SUMMARY]")
+    case _                => false
+  }
 
   private def compressDigestMessages(
     digestMessages: Seq[Message],

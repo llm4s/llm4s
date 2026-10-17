@@ -36,21 +36,26 @@ Perfect for **development**, **testing**, and **production** workloads where pri
 ## Prerequisites
 
 - **JDK 21**
-- **Scala 3.7.1**
-- **SBT 1.10.6+**
+- **Scala 3.7.x** (llm4s {{ site.data.project.latest_release }} is built with 3.7.1)
+- **sbt 1.10.6+**
 - **4-8GB RAM** (depending on model size)
 
 No API keys needed! 🎉
 
-From the release after `0.4.1`, Ollama support ships in its own artifact, alongside
-`llm4s-core`:
+Ollama support ships in its own artifact, alongside `llm4s-core`:
 
 ```scala
-libraryDependencies += "org.llm4s" %% "llm4s-ollama" % llm4sVersion
+val llm4sVersion = "{{ site.data.project.latest_release }}"
+
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core"   % llm4sVersion,
+  "org.llm4s" %% "llm4s-ollama" % llm4sVersion,
+  "org.llm4s" %% "llm4s-agent"  % llm4sVersion  // only for the agent under "Tool Calling"
+)
 ```
 
-Adding it registers the provider; there is nothing else to wire up. In `0.4.1` and earlier,
-Ollama is part of `llm4s-core`. See the
+Adding `llm4s-ollama` registers the provider; there is nothing else to wire up. Before 0.5.0, Ollama was
+part of `llm4s-core`. See the
 [installation guide](installation.md#for-ollama-local-models).
 
 ---
@@ -152,8 +157,7 @@ libraryDependencies ++= Seq(
 )
 ```
 
-`llm4s-ollama` is a module on `main` that has not been published yet: in v0.4.1 and earlier the
-Ollama provider ships inside `llm4s-core`, so `llm4s-core` alone is enough there.
+Before 0.5.0 the Ollama provider shipped inside `llm4s-core`, so `llm4s-core` alone was enough.
 
 ### Add an `ollama-local` section
 
@@ -167,7 +171,7 @@ llm4s {
     ollama-local {
       provider = "ollama"
       model    = "mistral"
-      baseUrl  = "http://localhost:11434"   # required: Ollama has no default base URL
+      # baseUrl defaults to http://localhost:11434, where `ollama serve` listens
     }
   }
 }
@@ -181,8 +185,7 @@ variables yourself - the names are yours to choose:
       provider = "ollama"
       model    = "mistral"
       model    = ${?OLLAMA_MODEL}            # optional override from the environment
-      baseUrl  = "http://localhost:11434"
-      baseUrl  = ${?OLLAMA_BASE_URL}
+      baseUrl  = ${?OLLAMA_BASE_URL}         # unset: the default, http://localhost:11434
     }
 ```
 
@@ -644,7 +647,7 @@ volumes:
 ```
 
 This assumes the app's `ollama-local` section binds the server address, as in Step 4:
-`baseUrl = "http://localhost:11434"` followed by `baseUrl = ${?OLLAMA_BASE_URL}`.
+`baseUrl = ${?OLLAMA_BASE_URL}`. Without the variable the section uses `http://localhost:11434`.
 
 ### Pre-pull Models
 

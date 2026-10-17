@@ -40,7 +40,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       options: CompletionOptions
     ): Result[Completion] = {
       // Extract the prompt to determine what kind of consolidation
-      val prompt = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse("")
+      val prompt = conversation.messages.collectFirst { case u: UserMessage => u.content }.getOrElse("")
 
       val response = if (prompt.contains("Return JSON array only")) {
         """[
@@ -104,7 +104,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       conversation: Conversation,
       options: CompletionOptions
     ): Result[Completion] = {
-      val prompt = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse("")
+      val prompt = conversation.messages.collectFirst { case u: UserMessage => u.content }.getOrElse("")
       val response =
         if (prompt.contains("Return JSON array only")) "{not-valid-json]" else "Consolidated memory content."
 
@@ -140,7 +140,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       conversation: Conversation,
       options: CompletionOptions
     ): Result[Completion] = {
-      val prompt   = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse("")
+      val prompt   = conversation.messages.collectFirst { case u: UserMessage => u.content }.getOrElse("")
       val response = if (prompt.contains("Return JSON array only")) "[]" else "Consolidated memory content."
 
       Right(
@@ -532,6 +532,72 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     // Consolidated memory should contain "Consolidated" in content
     val consolidatedMemory = memories.toOption.get.head
     consolidatedMemory.content should include("Consolidated")
+  }
+
+  it should "replace each group with its summary in one store.replace naming the group's exact ids" in {
+    val replaced = new java.util.concurrent.CopyOnWriteArrayList[(Seq[Memory], Seq[MemoryId])]()
+    val deleted  = new java.util.concurrent.CopyOnWriteArrayList[MemoryId]()
+    // a store that records the writes consolidation makes, over an immutable in-memory store
+    final case class Recording(base: MemoryStore) extends MemoryStore {
+      def store(memory: Memory)                                  = base.store(memory).map(Recording(_))
+      override def storeAll(memories: Seq[Memory])               = base.storeAll(memories).map(Recording(_))
+      def get(id: MemoryId)                                      = base.get(id)
+      def recall(filter: MemoryFilter, limit: Int)               = base.recall(filter, limit)
+      def search(query: String, topK: Int, filter: MemoryFilter) = base.search(query, topK, filter)
+      def delete(id: MemoryId)                      = { deleted.add(id); base.delete(id).map(Recording(_)) }
+      def deleteMatching(filter: MemoryFilter)      = base.deleteMatching(filter).map(Recording(_))
+      def update(id: MemoryId, f: Memory => Memory) = base.update(id, f).map(Recording(_))
+      def count(filter: MemoryFilter)               = base.count(filter)
+      def clear()                                   = base.clear().map(Recording(_))
+      def recent(limit: Int, filter: MemoryFilter)  = base.recent(limit, filter)
+      override def replace(add: Seq[Memory], remove: Seq[MemoryId]) = {
+        replaced.add(add -> remove)
+        base.replace(add, remove).map(Recording(_))
+      }
+    }
+    val manager = LLMMemoryManager(MemoryManagerConfig.default, Recording(InMemoryStore.empty), new MockLLMClient())
+    val result = for {
+      a      <- manager.recordConversation(Seq(UserMessage("a1"), AssistantMessage("a2"), UserMessage("a3")), "conv-a")
+      b      <- a.recordConversation(Seq(UserMessage("b1"), AssistantMessage("b2"), UserMessage("b3")), "conv-b")
+      before <- b.store.recall(MemoryFilter.All, 100)
+      after  <- b.consolidateMemories(Instant.now().plus(1, ChronoUnit.DAYS), minCount = 3)
+      left   <- after.store.recall(MemoryFilter.All, 100)
+    } yield (before, left)
+    val (before, left) = result.fold(e => fail(e.message), identity)
+    import scala.jdk.CollectionConverters._
+    val calls = replaced.asScala.toVector
+    calls should have size 2
+    calls.foreach { case (add, _) => add should have size 1 }
+    // each call removes exactly one conversation's memories
+    calls.map(_._2.toSet).toSet shouldBe before.groupBy(_.conversationId).values.map(_.map(_.id).toSet).toSet
+    deleted.asScala shouldBe empty // nothing is deleted outside a replace
+    left.map(_.content).forall(_.contains("Consolidated")) shouldBe true
+    left should have size 2
+  }
+
+  it should "return a cancellation, not skip it, in best-effort mode and while extracting entities" in {
+    val cancelling = new LLMClient {
+      def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+        Left(org.llm4s.error.CancelledError("model"))
+      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+        complete(c, o)
+      def getContextWindow(): Int     = 128000
+      def getReserveCompletion(): Int = 4096
+    }
+    val manager = LLMMemoryManager(MemoryManagerConfig.default, InMemoryStore.empty, cancelling)
+    val populated = manager
+      .recordConversation(Seq(UserMessage("a"), AssistantMessage("b"), UserMessage("c")), "conv")
+      .fold(e => fail(e.message), identity)
+    populated.consolidateMemories(Instant.now().plus(1, ChronoUnit.DAYS), minCount = 3) match {
+      case Left(_: org.llm4s.error.CancelledError) => succeed
+      case other                                   => fail(s"expected a cancellation, got $other")
+    }
+    val extracting =
+      LLMMemoryManager(MemoryManagerConfig.default.copy(autoExtractEntities = true), InMemoryStore.empty, cancelling)
+    extracting.recordMessage(UserMessage("Ada wrote programs"), "conv") match {
+      case Left(_: org.llm4s.error.CancelledError) => succeed
+      case other                                   => fail(s"expected a cancellation, got $other")
+    }
   }
 
   it should "preserve importance scores during consolidation" in {

@@ -1,15 +1,16 @@
 package org.llm4s.pekko
 
-import org.apache.pekko.NotUsed
+import org.apache.pekko.Done
 import org.apache.pekko.stream.scaladsl.Source
 import org.llm4s.agent.{ Agent, AgentEventBuffer, AgentResult, AgentRun }
-import org.llm4s.agent.graph.{ InterruptId, RunConfig, RunStatus, StreamEvent, ThreadId }
+import org.llm4s.agent.graph.{ EventHandlers, EventType, InterruptId, RunConfig, RunStatus, StreamEvent, ThreadId }
 import org.llm4s.error.LLMError
 import org.llm4s.types.Result
 
-import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.annotation.tailrec
 import scala.concurrent.{ blocking, ExecutionContext, Future }
+import scala.util.control.Exception.ultimately
 
 /**
  * Apache Pekko Streams wrapper for [[Agent]], the Pekko counterpart of `AgentIO` (cats-effect, fs2) and
@@ -19,9 +20,13 @@ import scala.concurrent.{ blocking, ExecutionContext, Future }
  * ([[AgentStreamItem.Event]]), then its result ([[AgentStreamItem.Done]]). The turn is started when the
  * stream is materialized, once per materialization. Cancelling the stream - or stopping it early with
  * `take` - cancels the turn: its model call and tool calls are interrupted and the thread is left for
- * `recover`. A consumer too slow for the stream's buffer never holds the run up: it loses live events (text
+ * `recover`. Each stream materializes a `Future[Done]` that completes once the turn has ended and its
+ * thread is free - after the stream completes, fails or is cancelled - so a `recover` sequenced after it
+ * is never refused as busy by the turn it cancelled. A consumer too slow for the stream's buffer never holds the run up: it loses live events (text
  * deltas, tool progress) and receives one `StreamEvent.LiveGap` with their count where they were dropped;
- * durable events are never dropped, and the run carries on.
+ * durable events are kept, and the run carries on. A consumer that stops draining altogether fails the stream
+ * (and so cancels the turn) once more than `Agent.StreamCapacity` durable events wait, as the runtime disconnects
+ * a listener that far behind.
  *
  * A refused start (a blank query, a busy thread), a failed turn and a subscription that disconnects all
  * fail the stream with an [[LLMException]]. A turn that commits no terminal event still ends the stream.
@@ -55,13 +60,18 @@ trait AgentPekko {
    * One turn on `threadId`, as a stream: every event of the turn ([[Agent.stream]]), then `Done(result)`.
    * `bufferSize` is how many live events wait for a slow consumer before the rest are counted into a
    * `LiveGap`; a value below 1 fails the stream at once.
+   *
+   * The materialized `Future[Done]` completes once the turn has ended and its thread is free for the next
+   * call - `recover` after a cancel, say - however the stream ended; it never fails. Cancelling the stream
+   * returns at once, while the turn is still being cancelled: wait for this `Future` before starting another
+   * turn on `threadId`. A provider that ignores the interrupt keeps it pending until its call returns.
    */
   def stream(
     threadId: ThreadId,
     query: String,
     config: RunConfig = RunConfig(),
     bufferSize: Int = AgentPekko.DefaultBufferSize
-  ): Source[AgentStreamItem, NotUsed]
+  ): Source[AgentStreamItem, Future[Done]]
 
   /** [[resume]] as a stream; see [[stream]]. */
   def streamResume(
@@ -69,14 +79,45 @@ trait AgentPekko {
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig = RunConfig(),
     bufferSize: Int = AgentPekko.DefaultBufferSize
-  ): Source[AgentStreamItem, NotUsed]
+  ): Source[AgentStreamItem, Future[Done]]
 
   /** [[recover]] as a stream; see [[stream]]. */
   def streamRecover(
     threadId: ThreadId,
     config: RunConfig = RunConfig(),
     bufferSize: Int = AgentPekko.DefaultBufferSize
-  ): Source[AgentStreamItem, NotUsed]
+  ): Source[AgentStreamItem, Future[Done]]
+
+  /**
+   * The events of `run` that `eventType` names - durable and live - decoded: `events` with
+   * `EventHandlers.on(eventType)(identity)`; see the overload taking handlers.
+   */
+  def events[A](run: AgentRun, eventType: EventType[A]): Source[A, Future[Done]]
+
+  /** `events` of `eventType` with `bufferSize` live events buffered for a slow consumer. */
+  def events[A](run: AgentRun, eventType: EventType[A], bufferSize: Int): Source[A, Future[Done]]
+
+  /**
+   * What `handlers` make of `run`'s events: one element for each event a handler takes, in delivery
+   * order. It observes the run, through [[AgentRun.subscribe]], once per materialization: it replays
+   * the run's durable events from its start and then follows it live, but misses the live events sent
+   * before the stream started - use [[stream]] to see every one. It ends after the run's terminal
+   * event, or once a run that ends without one has delivered its last event; the run's own outcome is
+   * not failed with - await the run for it. Cancelling the stream, or stopping it early, cancels its
+   * subscription only: the run carries on. The materialized `Future[Done]` completes once the
+   * subscription has been released, however the stream ended.
+   *
+   * Handlers run in the stream, not on the subscription: a slow or throwing handler slows or fails
+   * the stream, never the run. `bufferSize` live events wait for a slow consumer before the rest are
+   * counted into a `LiveGap`, which a handler sees through `otherwise`; a value below 1 fails the
+   * stream at once. A subscription that disconnects, or a consumer that falls more than
+   * `Agent.StreamCapacity` durable events behind, fails the stream with an [[LLMException]].
+   */
+  def events[R](
+    run: AgentRun,
+    handlers: EventHandlers[R],
+    bufferSize: Int = AgentPekko.DefaultBufferSize
+  ): Source[R, Future[Done]]
 }
 
 object AgentPekko {
@@ -113,7 +154,7 @@ object AgentPekko {
       query: String,
       config: RunConfig,
       bufferSize: Int
-    ): Source[AgentStreamItem, NotUsed] =
+    ): Source[AgentStreamItem, Future[Done]] =
       streaming(bufferSize)((onEnd, listener) => agent.streamEnding(threadId, query, config, Nil, onEnd)(listener))
 
     def streamResume(
@@ -121,11 +162,22 @@ object AgentPekko {
       answers: Map[InterruptId, ujson.Value],
       config: RunConfig,
       bufferSize: Int
-    ): Source[AgentStreamItem, NotUsed] =
+    ): Source[AgentStreamItem, Future[Done]] =
       streaming(bufferSize)((onEnd, listener) => agent.streamResumeEnding(threadId, answers, config, onEnd)(listener))
 
-    def streamRecover(threadId: ThreadId, config: RunConfig, bufferSize: Int): Source[AgentStreamItem, NotUsed] =
+    def streamRecover(threadId: ThreadId, config: RunConfig, bufferSize: Int): Source[AgentStreamItem, Future[Done]] =
       streaming(bufferSize)((onEnd, listener) => agent.streamRecoverEnding(threadId, config, onEnd)(listener))
+
+    def events[A](run: AgentRun, eventType: EventType[A]): Source[A, Future[Done]] =
+      events(run, eventType, AgentPekko.DefaultBufferSize)
+
+    def events[A](run: AgentRun, eventType: EventType[A], bufferSize: Int): Source[A, Future[Done]] =
+      events(run, EventHandlers.on(eventType)(identity), bufferSize)
+
+    def events[R](run: AgentRun, handlers: EventHandlers[R], bufferSize: Int): Source[R, Future[Done]] =
+      BlockingSource("llm4s-pekko-events", HandOver)(() => new RunEventsProducer(bufferSize, run))
+        .map(handlers.dispatch)
+        .collect { case Some(r) => r }
 
     /**
      * Starts the turn with a buffer's listener, ending the buffer when the turn's subscription ends - so the
@@ -133,9 +185,8 @@ object AgentPekko {
      */
     private def streaming(bufferSize: Int)(
       start: (() => Unit, StreamEvent => Unit) => Result[AgentRun]
-    ): Source[AgentStreamItem, NotUsed] =
+    ): Source[AgentStreamItem, Future[Done]] =
       BlockingSource("llm4s-pekko-agent", HandOver)(() => new TurnProducer(bufferSize, start))
-        .mapMaterializedValue(_ => NotUsed)
 
     private def awaiting(start: => Result[AgentRun])(using ec: ExecutionContext): Future[AgentResult] =
       Future(blocking(start.flatMap(_.await()))).flatMap {
@@ -145,33 +196,64 @@ object AgentPekko {
   }
 
   /**
+   * Subscribes to a run it does not own and pumps the run's events to the stream from this producer's own
+   * thread. As for [[TurnProducer]], the run's event buffer is the only queue that can fill up, and it never
+   * blocks the subscription. The subscription is cancelled and the buffer closed on this thread before `run`
+   * returns, however it returns; the run itself is left alone.
+   */
+  final private class RunEventsProducer(bufferSize: Int, agentRun: AgentRun) extends Producer[StreamEvent] {
+
+    def run(emitter: Emitter[StreamEvent]): Either[LLMError, Unit] =
+      if (bufferSize < 1)
+        Left(org.llm4s.error.ValidationError("bufferSize", s"must be at least 1, got $bufferSize"))
+      else {
+        val events = AgentEventBuffer(bufferSize)
+        agentRun.subscribeEnding(Agent.StreamCapacity, () => events.end())(events.listener).flatMap { subscription =>
+          ultimately {
+            subscription.cancel()
+            events.close()
+          }(pump(events, emitter))
+        }
+      }
+
+    @tailrec
+    private def pump(events: AgentEventBuffer, emitter: Emitter[StreamEvent]): Either[LLMError, Unit] =
+      events.take() match {
+        case Left(error) => Left(error)
+        case Right(Some(event)) =>
+          emitter.emit(event)
+          pump(events, emitter)
+        case Right(None) => Right(())
+      }
+
+    /** The stream has ended; `run`, if still running, is interrupted and releases the subscription itself. */
+    def abandon(): Unit = ()
+  }
+
+  /**
    * Starts a turn and pumps its events to the stream from this producer's own thread. The turn's event
    * buffer is the only queue that can fill up, and it never blocks the run: it drops live events and
    * counts them into a `LiveGap`.
+   *
+   * The turn is released on this thread too, before `run` returns - however it returns, an interrupt from
+   * a cancelled stream included: a turn still running is cancelled and awaited, and the buffer closed. So
+   * the stream's `Future[Done]`, which completes when `run` has returned, means the thread is free.
    */
   final private class TurnProducer(bufferSize: Int, start: (() => Unit, StreamEvent => Unit) => Result[AgentRun])
       extends Producer[AgentStreamItem] {
 
-    private val buffer    = new AtomicReference[AgentEventBuffer](null)
-    private val running   = new AtomicReference[AgentRun](null)
-    private val cancelled = new AtomicBoolean(false)
-    private val completed = new AtomicBoolean(false)
+    private val abandoned = new AtomicBoolean(false)
 
     def run(emitter: Emitter[AgentStreamItem]): Either[LLMError, Unit] =
       if (bufferSize < 1)
         Left(org.llm4s.error.ValidationError("bufferSize", s"must be at least 1, got $bufferSize"))
       else {
         val events = AgentEventBuffer(bufferSize)
-        buffer.set(events)
         start(() => events.end(), events.listener).flatMap { agentRun =>
-          running.set(agentRun)
-          // the stream was cancelled before the turn began
-          if (cancelled.get()) {
-            agentRun.cancel()
-            agentRun.await(): Unit
-            events.close()
-            Right(())
-          } else pump(events, agentRun, emitter)
+          ultimately(release(agentRun, events)) {
+            // the stream was cancelled before the turn began
+            if (abandoned.get()) Right(()) else pump(events, agentRun, emitter)
+          }
         }
       }
 
@@ -187,34 +269,28 @@ object AgentPekko {
           emitter.emit(AgentStreamItem.Event(event))
           pump(events, agentRun, emitter)
         case Right(None) =>
-          agentRun.await().map { result =>
-            emitter.emit(AgentStreamItem.Done(result))
-            if (agentRun.status != RunStatus.Running) events.close()
-            completed.set(true)
-          }
+          agentRun.await().map(result => emitter.emit(AgentStreamItem.Done(result)))
       }
 
     /**
-     * The stream has ended. If the turn did not finish and hand over its result, cancel it, wait for it to
-     * end, and close its buffer - on a thread of its own, because the wait blocks.
+     * Cancels the turn if it is still running and waits for it to end - through an interrupt of this thread,
+     * whose flag is kept - then closes the buffer.
      */
-    def abandon(): Unit = {
-      cancelled.set(true)
-      if (!completed.get()) {
-        val cleanup = new Thread(
-          null,
-          () => {
-            Option(running.get()).foreach { agentRun =>
-              agentRun.cancel()
-              agentRun.await(): Unit
-            }
-            Option(buffer.get()).foreach(_.close())
-          },
-          "llm4s-pekko-agent-cleanup"
-        )
-        cleanup.setDaemon(true)
-        cleanup.start()
+    private def release(agentRun: AgentRun, events: AgentEventBuffer): Unit = {
+      if (agentRun.status == RunStatus.Running) {
+        agentRun.cancel()
+        awaitEnd(agentRun)
       }
+      events.close()
     }
+
+    @tailrec
+    private def awaitEnd(agentRun: AgentRun): Unit = {
+      agentRun.awaitEnded(): Unit
+      if (agentRun.status == RunStatus.Running) awaitEnd(agentRun)
+    }
+
+    /** The stream has ended; `run`, if still running, is interrupted and releases the turn itself. */
+    def abandon(): Unit = abandoned.set(true)
   }
 }

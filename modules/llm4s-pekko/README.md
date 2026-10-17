@@ -9,8 +9,9 @@ libraryDependencies += "org.llm4s" %% "llm4s-pekko" % llm4sVersion
 
  - `LLMClientPekko(client)`: `streamComplete(conversation)` is a `Source[StreamedChunk, NotUsed]`, `complete` a `Future`,
    `agent(id)(configure)` an `AgentPekko`.
- - `AgentPekko(agent)`: `stream`, `streamResume` and `streamRecover` are `Source[AgentStreamItem, NotUsed]` (each event of the
-   turn, then its result); `run`, `continueConversation`, `recover` and `resume` are `Future`s.
+ - `AgentPekko(agent)`: `stream`, `streamResume` and `streamRecover` are `Source[AgentStreamItem, Future[Done]]` (each event
+   of the turn, then its result; the `Future[Done]` completes once the turn has ended and its thread is free, cancelled
+   or not); `run`, `continueConversation`, `recover` and `resume` are `Future`s.
 
 The provider call blocks, so each stream runs it on a daemon thread of its own and hands items to Pekko through a bounded
 buffer: when the consumer lags, the provider's thread is blocked; when the consumer cancels, it is interrupted. An

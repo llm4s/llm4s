@@ -13,8 +13,6 @@ next to the rest.
 libraryDependencies += "org.llm4s" %% "llm4s-observability-micrometer" % llm4sVersion
 ```
 
-Not yet published: it ships in the next release.
-
 ## Use
 
 ```scala

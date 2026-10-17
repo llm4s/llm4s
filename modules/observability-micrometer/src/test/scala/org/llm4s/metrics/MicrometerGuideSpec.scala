@@ -5,7 +5,9 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.micrometer.prometheusmetrics.{ PrometheusConfig, PrometheusMeterRegistry }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -30,6 +32,22 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
       metrics                    = new MicrometerMetrics(meterRegistry)
       client <- LLMConnect.getClient(providerConfig, metrics)
     } yield client
+
+  // The "Errors and ReliableClient" example, compiled (not run, for the same reason).
+  def reliableWithMetrics(meterRegistry: MeterRegistry, providerConfig: ProviderConfig)(using ModelRegistryService) = {
+    val metrics = new MicrometerMetrics(meterRegistry)
+    val client = LLMConnect
+      .getClient(providerConfig, metrics)
+      .map(c => new ReliableClient(c, "openai", ReliabilityConfig.default, Some(metrics)))
+    client
+  }
+
+  private val ReliableLines = Seq(
+    "val metrics = new MicrometerMetrics(meterRegistry)",
+    "val client = LLMConnect",
+    ".getClient(providerConfig, metrics)",
+    """.map(c => new ReliableClient(c, "openai", ReliabilityConfig.default, Some(metrics)))"""
+  )
 
   /** The lines of the quick start as the page shows them; the page must contain each. */
   private val QuickStartLines = Seq(
@@ -82,6 +100,7 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
       Tokens,
       CostUsd,
       Errors,
+      ReliabilityErrors,
       Retries,
       CircuitBreakerTransitions,
       ImageGenerations,
@@ -99,6 +118,7 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
     metrics.recordCost("openai", "gpt-4o", 0.1)
     metrics.recordRetryAttempt("openai", 1)
     metrics.recordCircuitBreakerTransition("openai", "open")
+    metrics.recordError(ErrorKind.Timeout, "openai")
     metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 1.second, 1)
     metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Error(ErrorKind.Network), 1.second, 1)
     metrics.recordImageGenerationCost("openai", "dall-e-3", 0.1, 1)
@@ -106,6 +126,10 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
 
   "The guide" should "show the quick start that compiles" in {
     QuickStartLines.foreach(line => withClue(s"missing from the guide: $line\n")(guide should include(line)))
+  }
+
+  it should "show the ReliableClient example that compiles" in {
+    ReliableLines.foreach(line => withClue(s"missing from the guide: $line\n")(guide should include(line)))
   }
 
   it should "document every meter the module defines, and no other" in {

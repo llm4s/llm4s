@@ -193,7 +193,7 @@ object HTTPTool {
   /** Whether header `key` (from `headerKey`) can carry a credential, so that no allowlist may forward it. */
   private def isCredentialHeader(key: String): Boolean = {
     val compact = key.filter(_.isLetterOrDigit)
-    NeverForwarded.contains(key) || Redaction.isSensitiveKey(key) || CredentialHeaderSuffixes.exists(compact.endsWith)
+    NeverForwarded.contains(key) || Redaction.isCredentialName(key) || CredentialHeaderSuffixes.exists(compact.endsWith)
   }
 
   /**
@@ -215,7 +215,8 @@ object HTTPTool {
    * On a hop that stays on `initial` (the same scheme, host and port) every header is sent. Once any hop has left it
    * - which includes a downgrade from `https` to `http`, and an upgrade - only the headers named in `safe` (in any
    * case) are sent, and never one that names a credential: `Authorization`, `Proxy-Authorization`, `Cookie`, any
-   * name `Redaction` treats as sensitive, or one ending in `token` or `key`. `Content-Type` is sent only with a body
+   * name `Redaction` treats as a credential (`isCredentialName`, plurals such as `X-Api-Keys` included), or one ending
+   * in `token` or `key`. `Content-Type` is sent only with a body
    * (`sendsBody`). Stripping is sticky: it holds for every later hop, including one that comes back to the original
    * origin.
    */

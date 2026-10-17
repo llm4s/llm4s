@@ -11,12 +11,11 @@ import org.llm4s.agent.graph.{
   IdempotencyKey,
   InMemoryCheckpointer,
   InterruptId,
-  RunContext,
   RunEvent,
   ThreadId
 }
 import org.llm4s.agent.graph.middleware._
-import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome }
+import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.agent.graph.toolloop.{
   AgentInput,
   ApprovalRequest,
@@ -48,7 +47,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
   private val deployed = new CopyOnWriteArrayList[String]()
   private val deploy = SpecTools.tool("deploy") { (a, _) =>
     deployed.add(a.text)
-    ToolOutcome.Success(ujson.Str(s"deployed ${a.text}"))
+    ToolOutcome.Success(ToolContent.Json(ujson.Str(s"deployed ${a.text}")))
   }
 
   /** The durable `ModelCallCompleted` events of `threadId`, in order. */
@@ -57,7 +56,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
       .eventsAfter(threadId, 0L, 1000)
       .fold(e => fail(e.message), identity)
       .collect {
-        case EventRecord(_, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ModelCallCompleted.name, _, payload)) =>
+        case EventRecord(_, _, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ModelCallCompleted.name, _, payload)) =>
           AgentEvents.ModelCallCompleted.decode(payload).getOrElse(fail(s"undecodable payload $payload"))
       }
 
@@ -140,9 +139,9 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val client = ScriptedLLMClient.of(CompletionFixture.simple("answer"))
     val gate = new AgentMiddleware.Asking[Need, Boolean] {
       val id: MiddlewareId = MiddlewareId("spend")
-      override def wrapModelCall(request: ModelRequest, context: RunContext)(
-        next: ModelRequest => Result[Completion]
-      ): Result[Completion] =
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] =
         answered(context) match {
           case Some(resumed) if resumed.answer => next(request)
           case Some(_)                         => Left(ValidationError("spend", "refused"))
@@ -176,10 +175,11 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val done = agent.resume(parked.threadId, Map(parked.reply(askedOf(parked).head._1, Info("reviewed output")))).value
     done.answer shouldBe Some("reviewed output")
     client.callCount shouldBe 1
-    // the reviewed completion carries no usage: the thread's usage is the one real call's, counted once
-    done.usage.requestCount shouldBe 2
+    // the reviewed completion is no provider call: the thread's usage is the one real call's, counted once
+    // and announced once (design §4.22)
+    done.usage.requestCount shouldBe 1
     (done.usage.inputTokens, done.usage.outputTokens) shouldBe ((10L, 20L))
-    modelCallsCompleted(store, parked.threadId).map(_.usage.map(_.promptTokens)) shouldBe Vector(Some(10), None)
+    modelCallsCompleted(store, parked.threadId).map(_.usage.map(_.promptTokens)) shouldBe Vector(Some(10))
   }
 
   it should "count every model call a wrapper made before asking, each announced with its attempt" in {
@@ -187,12 +187,13 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val store  = new InMemoryCheckpointer
     val twice = new AgentMiddleware.Asking[Need, Info] {
       val id: MiddlewareId = MiddlewareId("twice")
-      override def wrapModelCall(request: ModelRequest, context: RunContext)(
-        next: ModelRequest => Result[Completion]
-      ): Result[Completion] =
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] =
         answered(context) match {
-          case Some(resumed) => Right(CompletionFixture.simple(resumed.answer.value).withUsage(None))
-          case None          => next(request).flatMap(_ => next(request)).flatMap(c => ask(Need(c.message.content)))
+          case Some(resumed) => Right(ModelResponse(CompletionFixture.simple(resumed.answer.value).withUsage(None)))
+          case None =>
+            next(request).flatMap(_ => next(request)).flatMap(r => ask(Need(r.completion.message.content)))
         }
     }
     val agent  = built(Agent.builder("assistant", client).withMiddleware(twice).withRuntime(new GraphRuntime(store)))
@@ -252,7 +253,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val confirm = new AgentTool.Asking[Text, Confirm, Boolean](SpecTools.spec("confirm")) {
       def execute(args: Text, context: ToolContext): ToolOutcome = ask(Confirm("sure?"))
       def resume(args: Text, question: Confirm, answer: Boolean, context: ToolContext): ToolOutcome =
-        ToolOutcome.Success(ujson.Str(s"confirmed $answer"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str(s"confirmed $answer")))
     }
     val env    = new Environment(new CopyOnWriteArrayList[String]())
     val client = ScriptedLLMClient.of(calling(call("c1", "confirm")), CompletionFixture.simple("done"))
@@ -274,7 +275,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val confirm = new AgentTool.Asking[Text, Confirm, Boolean](SpecTools.spec("confirm")) {
       def execute(args: Text, context: ToolContext): ToolOutcome = ask(Confirm("sure?"))
       def resume(args: Text, question: Confirm, answer: Boolean, context: ToolContext): ToolOutcome =
-        ToolOutcome.Success(ujson.Str("never"))
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("never")))
     }
     val calls = new AtomicInteger(0)
     // passes the first invocation through, so the tool asks; asks itself on the second, the tool's resume
@@ -329,8 +330,8 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val outer = new Region
     val inner = new AgentMiddleware.Asking[Need, Info] {
       val id: MiddlewareId = MiddlewareId("ticket")
-      override def beforeAgent(input: String, context: RunContext): Result[String] =
-        answered(context).fold(ask(Need("ticket")))(r => Right(s"$input [${r.answer.value}]"))
+      override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
+        answered(context).fold(ask(Need("ticket")))(r => Right(BoundaryResult(s"$input [${r.answer.value}]")))
     }
     val client = ScriptedLLMClient.of(CompletionFixture.simple("ok"))
     val agent  = built(Agent.builder("assistant", client).withMiddleware(outer, inner))
@@ -359,8 +360,8 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     }
     val elsewhere = new Exposed
     val proxy = new AgentMiddleware {
-      val id: MiddlewareId                                                         = MiddlewareId("proxy")
-      override def beforeAgent(input: String, context: RunContext): Result[String] = elsewhere.raise()
+      val id: MiddlewareId                                                                   = MiddlewareId("proxy")
+      override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] = elsewhere.raise()
     }
     val agent = built(Agent.builder("assistant", ScriptedLLMClient.of()).withMiddleware(proxy))
     cause(agent.run("go").error).message should include("has no asking middleware of that id")
@@ -378,7 +379,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
   }
 
   "MiddlewareAsked" should "describe the question as an error, for a caller outside the agent loop" in {
-    new Region().beforeAgent("deploy", org.llm4s.agent.graph.GraphTestSupport.testRunContext()) match {
+    new Region().beforeAgent("deploy", org.llm4s.agent.graph.GraphTestSupport.testModelContext()) match {
       case Left(asked: MiddlewareAsked) =>
         asked.middleware shouldBe MiddlewareId("region")
         asked.message shouldBe "Middleware 'region' asked a question"
@@ -478,16 +479,16 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val review                   = new GuardrailReviewMiddleware(Nil, Seq(tooLong))
     val verdict                  = upickle.default.writeJs[GuardrailVerdict](GuardrailVerdict.Allow)
     val asked = upickle.default.writeJs(GuardrailReview(GuardrailPhase.Output, tooLong.name, "r", "far too long"))
-    val context = org.llm4s.agent.graph.GraphTestSupport
-      .testRunContext()
-      .withAnswers(Map(review.id.value -> (asked, verdict)))
-    review.afterAgent("far too long", context) shouldBe Right("far too long")
+    val context = org.llm4s.agent.graph.GraphTestSupport.testModelContext(
+      org.llm4s.agent.graph.GraphTestSupport.testRunContext().withAnswers(Map(review.id.value -> (asked, verdict)))
+    )
+    review.afterAgent("far too long", context).map(_.text) shouldBe Right("far too long")
     review.afterAgent("also far too long", context) match {
       case Left(again: MiddlewareAsked) =>
         upickle.default.read[GuardrailReview](again.question).text shouldBe "also far too long"
       case other => fail(s"expected a new question, got $other")
     }
-    review.beforeAgent("far too long", context) shouldBe Right("far too long") // no input guardrails
+    review.beforeAgent("far too long", context).map(_.text) shouldBe Right("far too long") // no input guardrails
   }
 
   "The interrupt request types" should "be built with apply and changed with their with* setters" in {
@@ -549,12 +550,12 @@ object AgentMiddlewareQuestionSpec {
   /** Reviews the model's output: asks about it, then returns the reviewer's text as a completion without usage. */
   final class OutputReview extends AgentMiddleware.Asking[Need, Info] {
     val id: MiddlewareId = MiddlewareId("output-review")
-    override def wrapModelCall(request: ModelRequest, context: RunContext)(
-      next: ModelRequest => Result[Completion]
-    ): Result[Completion] =
+    override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+      next: ModelRequest => Result[ModelResponse]
+    ): Result[ModelResponse] =
       answered(context) match {
-        case Some(resumed) => Right(CompletionFixture.simple(resumed.answer.value).withUsage(None))
-        case None          => next(request).flatMap(c => ask(Need(c.message.content)))
+        case Some(resumed) => Right(ModelResponse(CompletionFixture.simple(resumed.answer.value).withUsage(None)))
+        case None          => next(request).flatMap(r => ask(Need(r.completion.message.content)))
       }
   }
   final case class Need(what: String) derives ReadWriter
@@ -563,11 +564,11 @@ object AgentMiddlewareQuestionSpec {
   /** Asks for the region when the query names none, and appends the answer to it. */
   final class Region(val asks: AtomicInteger = new AtomicInteger) extends AgentMiddleware.Asking[Need, Info] {
     val id: MiddlewareId = MiddlewareId("region")
-    override def beforeAgent(input: String, context: RunContext): Result[String] =
-      if input.contains("region") then Right(input)
+    override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
+      if input.contains("region") then Right(BoundaryResult(input))
       else
         answered(context) match {
-          case Some(resumed) => Right(s"$input (region ${resumed.answer.value})")
+          case Some(resumed) => Right(BoundaryResult(s"$input (region ${resumed.answer.value})"))
           case None =>
             asks.incrementAndGet()
             ask(Need("region"))
@@ -577,10 +578,10 @@ object AgentMiddlewareQuestionSpec {
   /** Reviews the final answer: `Info("ok")` keeps it, any other value replaces it. */
   final class Review extends AgentMiddleware.Asking[Need, Info] {
     val id: MiddlewareId = MiddlewareId("review")
-    override def afterAgent(answer: String, context: RunContext): Result[String] =
+    override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
       answered(context) match {
-        case Some(resumed) if resumed.answer.value == "ok" => Right(answer)
-        case Some(resumed)                                 => Right(resumed.answer.value)
+        case Some(resumed) if resumed.answer.value == "ok" => Right(BoundaryResult(answer))
+        case Some(resumed)                                 => Right(BoundaryResult(resumed.answer.value))
         case None                                          => ask(Need(s"review: $answer"))
       }
   }

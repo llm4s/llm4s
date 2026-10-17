@@ -38,6 +38,8 @@ final class ThreadState private[graph] (
             .map(next => new ThreadState(keys, values.updated(update.key.id, next)))
         case StateOperation.Remove(key) =>
           Right(new ThreadState(keys, values - key.id))
+        case StateOperation.Restore(key, value) =>
+          Right(new ThreadState(keys, values.updated(key.id, value)))
 
   private[graph] def applyUpdate(update: StateUpdate): Result[ThreadState] =
     update.operations.foldLeft[Result[ThreadState]](Right(this))((state, op) => state.flatMap(_.applyOperation(op)))
@@ -45,5 +47,5 @@ final class ThreadState private[graph] (
   override def toString: String =
     values.toSeq.sortBy(_._1.value).map((id, v) => s"${id.value}=$v").mkString("ThreadState(", ", ", ")")
 
-private[graph] object ThreadState:
+private[agent] object ThreadState:
   def empty(keys: Map[StateKeyId, StateKey[?, ?]]): ThreadState = new ThreadState(keys, Map.empty)

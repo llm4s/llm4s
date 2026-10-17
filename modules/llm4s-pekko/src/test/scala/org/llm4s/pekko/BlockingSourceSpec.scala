@@ -1,15 +1,17 @@
 package org.llm4s.pekko
 
+import org.apache.pekko.Done
 import org.apache.pekko.actor.ActorSystem
-import org.apache.pekko.stream.scaladsl.{ Sink, Source }
+import org.apache.pekko.stream.scaladsl.{ Keep, Sink, Source }
 import org.apache.pekko.stream.testkit.scaladsl.TestSink
 import org.llm4s.error.{ LLMError, NetworkError, ValidationError }
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReference }
-import scala.concurrent.Await
+import scala.concurrent.{ Await, Future }
 import scala.concurrent.duration.*
 
 /**
@@ -56,7 +58,7 @@ class BlockingSourceSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
     def abandon(): Unit = abandoned.incrementAndGet(): Unit
   }
 
-  private def source[T](capacity: Int, producer: => Producer[T]): Source[T, org.apache.pekko.NotUsed] =
+  private def source[T](capacity: Int, producer: => Producer[T]): Source[T, Future[Done]] =
     BlockingSource("blocking-source-test", capacity)(() => producer)
 
   private def ended(thread: Thread): Boolean = Fixtures.awaitCondition(!thread.isAlive)
@@ -239,5 +241,68 @@ class BlockingSourceSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
       case other           => fail(s"expected an LLMException, got $other")
     }
     created.get shouldBe 0
+  }
+
+  // ---- the materialized Future[Done] ---------------------------------------------------------------------------
+
+  /** Parks until interrupted, then holds `run` - as a producer releasing what it holds would - until `let` opens. */
+  final private class ReleasesSlowly extends Producer[Int] {
+    val interrupted = new CountDownLatch(1)
+    val let         = new CountDownLatch(1)
+    def run(emitter: Emitter[Int]): Either[LLMError, Unit] = {
+      if (Fixtures.parkUntilInterrupted()) interrupted.countDown()
+      Fixtures.awaitUninterruptibly(let): Unit
+      Right(())
+    }
+    def abandon(): Unit = ()
+  }
+
+  it should "materialize a Future[Done] that is complete by the time the stream completes" in {
+    val producer      = new Emits(Seq(1, 2))
+    val (done, items) = source(4, producer).toMat(Sink.seq)(Keep.both).run()
+    Await.result(items, Patience) shouldBe Seq(1, 2)
+    done.isCompleted shouldBe true
+    Await.result(done, Patience) shouldBe Done
+  }
+
+  it should "complete its Future[Done] before the stream can see the producer's end, however it ends" in {
+    // Holds the producer just before the end becomes visible to the stream, and checks `done` there. A drain woken
+    // by an earlier emit or a pull may end the stream as soon as the outcome is set, so `done` must be complete first.
+    def completeAtEnd(end: Either[LLMError, Unit]): Boolean = {
+      val seen = new AtomicReference[java.lang.Boolean](null)
+      val s =
+        BlockingSource("blocking-source-test", 4, done => seen.set(done.isCompleted))(() => new Emits(Seq(1, 2), end))
+      val (done, items) = s.toMat(Sink.seq)(Keep.both).run()
+      Await.ready(items, Patience)
+      Await.result(done, Patience) shouldBe Done
+      seen.get.booleanValue
+    }
+    completeAtEnd(Right(())) shouldBe true
+    completeAtEnd(Left(ValidationError("x", "bad"))) shouldBe true
+  }
+
+  it should "complete its Future[Done], not fail it, when the stream fails" in {
+    val (done, items) = source(4, new Emits(Seq(1), Left(ValidationError("x", "bad")))).toMat(Sink.seq)(Keep.both).run()
+    Await.result(items.failed, Patience) shouldBe a[LLMException]
+    done.isCompleted shouldBe true
+    Await.result(done, Patience) shouldBe Done
+  }
+
+  it should "complete its Future[Done] only once a cancelled producer's run has returned" in {
+    val producer      = new ReleasesSlowly
+    val (done, probe) = source(2, producer).toMat(TestSink[Int]())(Keep.both).run()
+    probe.request(1)
+    probe.cancel()
+    producer.interrupted.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    // the stream has stopped, but the producer is still releasing what it holds
+    done.isCompleted shouldBe false
+    producer.let.countDown()
+    Await.result(done, Patience) shouldBe Done
+  }
+
+  it should "complete its Future[Done] at once for a buffer below 1" in {
+    val (done, items) = source(0, new Emits(Seq(1))).toMat(Sink.seq)(Keep.both).run()
+    Await.result(items.failed, Patience) shouldBe a[LLMException]
+    Await.result(done, Patience) shouldBe Done
   }
 }

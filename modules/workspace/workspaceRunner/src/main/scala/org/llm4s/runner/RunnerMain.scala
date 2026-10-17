@@ -86,9 +86,11 @@ object RunnerMain extends cask.MainRoutes {
 
   // Track active connections and their last heartbeat
   private val connections = new ConcurrentHashMap[cask.WsChannelActor, AtomicLong]()
-  // Per-client process tracking (keyed by WebSocket channel to isolate clients)
-  private val clientProcesses =
-    new ConcurrentHashMap[cask.WsChannelActor, ConcurrentHashMap[String, RunningCommand]]()
+  // Processes are the workspace's ProcessRegistry's alone, each owned by its client's channel (per-client isolation)
+  // Per client, the cancellations of its commands not yet registered (waiting at the command gate): they never start.
+  private val clientEarlyCancels = new ConcurrentHashMap[cask.WsChannelActor, EarlyCancellations]()
+  private def earlyCancels(channel: cask.WsChannelActor): EarlyCancellations =
+    clientEarlyCancels.computeIfAbsent(channel, _ => new EarlyCancellations())
   private val heartbeatExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
 
   // Constants
@@ -123,28 +125,27 @@ object RunnerMain extends cask.MainRoutes {
 
         case cask.Ws.Close(code, reason) =>
           logger.info(s"WebSocket connection closed: code=$code, reason=$reason")
-          // Kill this client's processes only (per-client isolation)
-          Option(clientProcesses.remove(channel)).foreach { processes =>
-            processes.forEach { (_, running) =>
-              running.cancelled.set(true)
-              val terminateAttempt = Try {
-                val destroyedProcess = running.process.destroyForcibly()
-                if (!destroyedProcess.waitFor(5, TimeUnit.SECONDS)) {
-                  logger.warn("Process did not terminate within timeout after disconnect")
-                }
-              }
-              terminateAttempt.failed.foreach { ex =>
-                logger.error(s"Error destroying process on disconnect: ${ex.getMessage}", ex)
-              }
-            }
-          }
-          connections.remove(channel)
+          disconnect(channel, "disconnect")
 
         case cask.Ws.Error(ex) =>
+          // an error may end the socket with no Close after it: the same cleanup, so nothing of this client runs on
           logger.error(s"WebSocket error: ${ex.getMessage}", ex)
-          connections.remove(channel)
+          disconnect(channel, "socket error")
       }
     }
+
+  /**
+   * Ends a client's connection: its commands waiting at the gate never start (it is no longer connected, and its early
+   * cancellations go with it), and its running processes are killed through the registry - this client's only. A
+   * process that survives the kill stays tracked until it exits.
+   */
+  private def disconnect(channel: cask.WsChannelActor, why: String): Unit = {
+    // the connection first: from here on nothing of this client counts as connected
+    connections.remove(channel): Unit
+    clientEarlyCancels.remove(channel): Unit
+    logger.info(s"Killing the processes of a closed connection ($why)")
+    workspaceInterface.processes.killOwner(channel)
+  }
 
   private def handleWebSocketMessage(channel: cask.WsChannelActor, message: String): Unit = {
     logger.debug(s"Received WebSocket message: $message")
@@ -169,8 +170,13 @@ object RunnerMain extends cask.MainRoutes {
         // Only kill THIS client's process. Cancellation is acknowledged as command completion (exit 143).
         commandExecutor.cancel(
           commandId,
-          Option(clientProcesses.get(channel)),
-          message => sendMessage(channel, message)
+          channel,
+          message => sendMessage(channel, message),
+          Some(earlyCancels(channel)),
+          () => {
+            Try(channel.send(cask.Ws.Close(1008, "too many cancellations"))): Unit
+            disconnect(channel, "too many cancellations of commands not yet started")
+          }
         )
 
       case HeartbeatMessage(timestamp) =>
@@ -220,7 +226,7 @@ object RunnerMain extends cask.MainRoutes {
           val result = scala.util
             .Try(
               workspaceInterface
-                .writeFile(cmd.path, cmd.content, cmd.mode, cmd.createDirectories)
+                .writeFile(cmd.path, cmd.content, cmd.mode, cmd.createDirectories, cmd.expectedHash)
                 .copy(commandId = cmd.commandId)
             )
             .toEither
@@ -258,6 +264,25 @@ object RunnerMain extends cask.MainRoutes {
             err => sendMessage(channel, ResponseMessage(err)),
             ok => sendMessage(channel, ResponseMessage(ok))
           )
+        case cmd: FileSnapshotCommand =>
+          val result = Try(
+            workspaceInterface
+              .fileSnapshot(cmd.path, cmd.includeContent, cmd.followLinks)
+              .copy(commandId = cmd.commandId)
+          ).toEither.left
+            .map(toErrorResponse(cmd.commandId))
+          result.fold(
+            err => sendMessage(channel, ResponseMessage(err)),
+            ok => sendMessage(channel, ResponseMessage(ok))
+          )
+        case cmd: DeleteFileCommand =>
+          val result =
+            Try(workspaceInterface.deleteFile(cmd.path, cmd.expectedHash).copy(commandId = cmd.commandId)).toEither.left
+              .map(toErrorResponse(cmd.commandId))
+          result.fold(
+            err => sendMessage(channel, ResponseMessage(err)),
+            ok => sendMessage(channel, ResponseMessage(ok))
+          )
         case cmd: GetWorkspaceInfoCommand =>
           val result = Try(workspaceInterface.getWorkspaceInfo().copy(commandId = cmd.commandId)).toEither.left.map(
             toErrorResponse(cmd.commandId)
@@ -286,11 +311,30 @@ object RunnerMain extends cask.MainRoutes {
    * ExecuteCommandResponse. The command goes through the same checks and argv execution as the direct
    * `executeCommand` (`WorkspaceAgentInterfaceImpl.prepareCommand`), never through a shell (#1756).
    */
-  private def handleExecuteCommand(channel: cask.WsChannelActor, cmd: ExecuteCommandCommand): Unit = {
-    // Ensure client has a process map (per-client isolation)
-    val processes = clientProcesses.computeIfAbsent(channel, _ => new ConcurrentHashMap[String, RunningCommand]())
-    Future(commandExecutor.execute(cmd, processes, message => sendMessage(channel, message)))(ec)
-  }
+  private def handleExecuteCommand(channel: cask.WsChannelActor, cmd: ExecuteCommandCommand): Unit =
+    // a connection that has already gone gets no per-client state, and its command is dropped
+    if (!connections.containsKey(channel))
+      logger.warn(s"Dropped command ${cmd.commandId}: its connection has closed")
+    else {
+      val early = earlyCancels(channel)
+      if (!connections.containsKey(channel)) {
+        // `disconnect` ran between the check above and this state's creation: remove it (only if it is still this
+        // call's), so a closed channel keeps nothing, and drop the command
+        clientEarlyCancels.remove(channel, early): Unit
+        logger.warn(s"Dropped command ${cmd.commandId}: its connection closed")
+      } else
+        // the channel owns its processes in the registry; it counts as connected while its connection is open, which
+        // `disconnect` ends before it kills the channel's processes
+        Future(
+          commandExecutor.execute(
+            cmd,
+            channel,
+            message => sendMessage(channel, message),
+            () => connections.containsKey(channel),
+            early
+          )
+        )(ec)
+    }
 
   private def sendMessage(channel: cask.WsChannelActor, message: WebSocketMessage): Unit = {
     val attempt = Try(write(message)).toEither
@@ -325,21 +369,7 @@ object RunnerMain extends cask.MainRoutes {
               logger.error(s"Error closing timed out connection: ${ex.getMessage}", ex)
             }
             // Also clean up processes for timed out connection
-            Option(clientProcesses.remove(channel)).foreach { processes =>
-              processes.forEach { (_, running) =>
-                running.cancelled.set(true)
-                val terminateAttempt = Try {
-                  val destroyedProcess = running.process.destroyForcibly()
-                  if (!destroyedProcess.waitFor(5, TimeUnit.SECONDS)) {
-                    logger.warn("Process did not terminate within timeout after heartbeat disconnect")
-                  }
-                }
-                terminateAttempt.failed.foreach { ex =>
-                  logger.error(s"Error destroying process on heartbeat timeout: ${ex.getMessage}", ex)
-                }
-              }
-            }
-            connections.remove(channel)
+            disconnect(channel, "heartbeat timeout")
           }
         }
       },
@@ -390,22 +420,9 @@ object RunnerMain extends cask.MainRoutes {
   def shutdown(): Unit = {
     logger.info("Shutting down WebSocket Runner service")
 
-    // Kill all remaining processes
-    clientProcesses.forEach { (_, processes) =>
-      processes.forEach { (_, running) =>
-        running.cancelled.set(true)
-        val terminateAttempt = Try {
-          val destroyedProcess = running.process.destroyForcibly()
-          if (!destroyedProcess.waitFor(5, TimeUnit.SECONDS)) {
-            logger.warn("Process did not terminate within timeout during shutdown")
-          }
-        }
-        terminateAttempt.failed.foreach { ex =>
-          logger.error(s"Error destroying process on shutdown: ${ex.getMessage}", ex)
-        }
-      }
-    }
-    clientProcesses.clear()
+    // Kill all remaining processes, through the registry: each stays tracked until it exits
+    workspaceInterface.processes.killAll()
+    clientEarlyCancels.clear()
 
     Try {
       heartbeatExecutor.shutdown()

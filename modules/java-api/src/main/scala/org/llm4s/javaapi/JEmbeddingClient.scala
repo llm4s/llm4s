@@ -22,7 +22,8 @@ import scala.jdk.CollectionConverters.*
  * }}}
  *
  * Obtain one with [[Llm4s.createDefaultEmbeddingClient]], which reads the model from `llm4s.embeddings.model`
- * (`EMBEDDING_MODEL`), or with [[Llm4s.createEmbeddingClient]] for a model you name.
+ * (`EMBEDDING_MODEL`), with [[Llm4s.createEmbeddingClient]] for a model you name, or wrap a Scala `EmbeddingClient`
+ * you built yourself with [[Llm4s.wrapEmbeddingClient]].
  *
  * Every `embed` sends all its texts to the provider in one request, blocks the calling thread and never throws: a
  * failure - of the provider, the network or an argument - comes back inside the [[LlmResult]], and its
@@ -32,11 +33,14 @@ import scala.jdk.CollectionConverters.*
  * Interrupting the blocked thread returns a failed result whose kind is `CANCELLED`, with the thread's interrupt flag
  * still set; `InterruptedException` is never thrown.
  */
-final class JEmbeddingClient private[javaapi] (client: EmbeddingClient, configured: String, declared: OptionalInt) {
+final class JEmbeddingClient private[javaapi] (
+  token: FacadeToken,
+  client: EmbeddingClient,
+  configured: String,
+  declared: OptionalInt
+) {
 
-  /** A client for a model whose dimensions are declared, as `modelConfig` gives them. */
-  private[javaapi] def this(client: EmbeddingClient, modelConfig: EmbeddingModelConfig) =
-    this(client, modelConfig.name, OptionalInt.of(modelConfig.dimensions))
+  FacadeToken.check(token, "JEmbeddingClient")
 
   /** The model as a request names it; a model whose dimensions are not declared asks for none, as no provider sends them. */
   private val modelConfig = EmbeddingModelConfig(configured, declared.orElse(0))
@@ -72,7 +76,7 @@ final class JEmbeddingClient private[javaapi] (client: EmbeddingClient, configur
       // copied first, so a list changed by another thread cannot make the check and the request disagree
       val input = texts.asScala.toVector
       input.indexOf(null) match {
-        case -1 if input.isEmpty => LlmResult.success(JEmbeddings.of(model, declared.orElse(0), Array.empty))
+        case -1 if input.isEmpty => LlmResult.success(new JEmbeddings(model, declared.orElse(0), Array.empty))
         case -1                  => request(input, purpose)
         case i                   => LlmResult.failure(ValidationError.invalid(s"texts[$i]", "must not be null"))
       }
@@ -80,7 +84,7 @@ final class JEmbeddingClient private[javaapi] (client: EmbeddingClient, configur
 
   private def request(input: Vector[String], purpose: JEmbeddingPurpose): LlmResult[JEmbeddings] = {
     val sent = EmbeddingRequest(input = input, model = modelConfig, purpose = JEmbeddingClient.toCore(purpose))
-    LlmResult.from(
+    FacadeInternals.result(
       CancelledError.attempt("JEmbeddingClient.embed")(
         Safety.safely(client.embed(sent)).flatMap(identity).flatMap(reply => read(reply, input.size))
       )
@@ -98,7 +102,7 @@ final class JEmbeddingClient private[javaapi] (client: EmbeddingClient, configur
       Left(ProcessingError("embed", s"the provider returned ${vectors.length} vectors for $texts texts"))
     else if (lengths.length != 1)
       Left(ProcessingError("embed", s"the provider returned vectors of several lengths: ${lengths.mkString(", ")}"))
-    else Right(JEmbeddings.of(reply.metadata.get("model").filter(_.nonEmpty).getOrElse(model), lengths(0), vectors))
+    else Right(new JEmbeddings(reply.metadata.get("model").filter(_.nonEmpty).getOrElse(model), lengths(0), vectors))
   }
 
   override def toString: String =

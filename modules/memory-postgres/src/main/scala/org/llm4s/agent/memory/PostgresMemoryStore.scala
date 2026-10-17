@@ -17,10 +17,13 @@ final class PostgresMemoryStore private[memory] (
   private val dataSource: HikariDataSource,
   val tableName: String,
   private val embeddingService: Option[EmbeddingService]
-) extends MemoryStore
+) extends TransactionalMemoryStore
     with AutoCloseable {
 
   import PostgresMemoryStore.SqlParam
+
+  private val appliedTable = s"${tableName}_applied"
+  private val fencesTable  = s"${tableName}_fences"
 
   private[memory] def initializeSchema(): Unit =
     withConnection { conn =>
@@ -49,8 +52,176 @@ final class PostgresMemoryStore private[memory] (
         stmt.execute(
           s"CREATE INDEX IF NOT EXISTS idx_${tableName}_conversation ON $tableName ((metadata->>'conversation_id'))"
         )
+
+        // 4. The applied writes of `TransactionalMemoryStore`, and the newest fencing token per scope
+        stmt.execute(
+          s"CREATE TABLE IF NOT EXISTS $appliedTable (key TEXT PRIMARY KEY, scope TEXT NOT NULL, outcome TEXT NOT NULL)"
+        )
+        stmt.execute(s"CREATE TABLE IF NOT EXISTS $fencesTable (scope TEXT PRIMARY KEY, token BIGINT NOT NULL)")
       }
       ()
+    }
+
+  /** Stores `add`, then deletes `remove`, in one transaction. */
+  override def replace(add: Seq[Memory], remove: Seq[MemoryId]): Result[MemoryStore] =
+    Try {
+      withConnection { conn =>
+        inTransaction(conn) {
+          writeAll(conn, add)
+          deleteIds(conn, remove)
+        }
+      }
+      this
+    }.toEither.left.map(e =>
+      ProcessingError("postgres-memory-store", s"Failed to replace memories: ${e.getMessage}", cause = Some(e))
+    )
+
+  override def applyAtomically(
+    key: AppliedWriteKey,
+    token: Long,
+    add: Seq[Memory],
+    remove: Seq[MemoryId],
+    bounds: MemoryBounds
+  ): Result[(TransactionalMemoryStore, AppliedWrite)] =
+    fencedTransaction(key, token) { conn =>
+      readApplied(conn, key.value).getOrElse {
+        val outcome =
+          if (!remove.distinct.forall(id => present(conn, id))) TransactionalMemoryStore.Superseded
+          else {
+            val adds    = TransactionalMemoryStore.distinctById(add)
+            val addIds  = adds.map(_.id).toSet
+            val removed = deleteIds(conn, remove.distinct.filterNot(addIds.contains))
+            writeAll(conn, adds)
+            val evicted = bounds.overflow(entries(conn))
+            deleteIds(conn, evicted): Unit
+            AppliedWrite(adds.map(_.id), removed, evicted.size)
+          }
+        Using.resource(conn.prepareStatement(s"INSERT INTO $appliedTable (key, scope, outcome) VALUES (?, ?, ?)")) {
+          stmt =>
+            stmt.setString(1, key.value)
+            stmt.setString(2, key.scope)
+            stmt.setString(3, write(AppliedWrite.toJson(outcome)))
+            stmt.executeUpdate(): Unit
+        }
+        outcome
+      }
+    }.map(this -> _)
+
+  override def appliedWrite(
+    key: AppliedWriteKey,
+    token: Long
+  ): Result[(TransactionalMemoryStore, Option[AppliedWrite])] =
+    fencedTransaction(key, token)(conn => readApplied(conn, key.value)).map(this -> _)
+
+  override def forgetApplied(key: AppliedWriteKey, token: Long): Result[TransactionalMemoryStore] =
+    fencedTransaction(key, token) { conn =>
+      Using.resource(conn.prepareStatement(s"DELETE FROM $appliedTable WHERE key = ?")) { stmt =>
+        stmt.setString(1, key.value)
+        stmt.executeUpdate(): Unit
+      }
+    }.map(_ => this)
+
+  override def appliedWriteCount: Result[Int] =
+    Try {
+      withConnection { conn =>
+        Using.resource(conn.createStatement()) { stmt =>
+          Using.resource(stmt.executeQuery(s"SELECT COUNT(*) FROM $appliedTable"))(rs =>
+            if (rs.next()) rs.getInt(1) else 0
+          )
+        }
+      }
+    }.toEither.left.map(e =>
+      ProcessingError("postgres-memory-store", s"Failed to count applied writes: ${e.getMessage}", cause = Some(e))
+    )
+
+  /**
+   * `body` in one transaction, after a transaction-scoped advisory lock on this store's table - so writers in every
+   * process sharing the table are serialised, and a bound checked in the transaction holds - and after fencing
+   * `token` for `key.scope`: a token older than the scope's newest is refused, changing nothing; otherwise it becomes
+   * the newest.
+   */
+  private def fencedTransaction[A](key: AppliedWriteKey, token: Long)(body: Connection => A): Result[A] =
+    Try {
+      withConnection { conn =>
+        inTransaction(conn) {
+          Using.resource(conn.prepareStatement("SELECT pg_advisory_xact_lock(hashtext(?))")) { stmt =>
+            // PostgreSQL folds the unquoted name to lower case: `Memories` and `memories` are one table, one lock
+            stmt.setString(1, tableName.toLowerCase(java.util.Locale.ROOT))
+            Using.resource(stmt.executeQuery())(_.next()): Unit
+          }
+          val newest = Using.resource(conn.prepareStatement(s"SELECT token FROM $fencesTable WHERE scope = ?")) {
+            stmt =>
+              stmt.setString(1, key.scope)
+              Using.resource(stmt.executeQuery())(rs => if (rs.next()) Some(rs.getLong(1)) else None)
+          }
+          newest match {
+            case Some(n) if token < n => Left(TransactionalMemoryStore.stale(key.scope, token, n))
+            case _ =>
+              Using.resource(
+                conn.prepareStatement(
+                  s"INSERT INTO $fencesTable (scope, token) VALUES (?, ?) " +
+                    "ON CONFLICT (scope) DO UPDATE SET token = EXCLUDED.token"
+                )
+              ) { stmt =>
+                stmt.setString(1, key.scope)
+                stmt.setLong(2, token)
+                stmt.executeUpdate(): Unit
+              }
+              Right(body(conn))
+          }
+        }
+      }
+    }.toEither.left
+      .map[LLMError](e =>
+        ProcessingError("postgres-memory-store", s"Failed to apply memory write: ${e.getMessage}", cause = Some(e))
+      )
+      .flatten
+
+  private def readApplied(conn: Connection, key: String): Option[AppliedWrite] =
+    Using.resource(conn.prepareStatement(s"SELECT outcome FROM $appliedTable WHERE key = ?")) { stmt =>
+      stmt.setString(1, key)
+      Using.resource(stmt.executeQuery()) { rs =>
+        if (rs.next())
+          Some(
+            AppliedWrite.fromJson(read(rs.getString(1))).fold(e => throw new IllegalStateException(e.message), identity)
+          )
+        else None
+      }
+    }
+
+  private def present(conn: Connection, id: MemoryId): Boolean =
+    Using.resource(conn.prepareStatement(s"SELECT 1 FROM $tableName WHERE id = ?")) { stmt =>
+      stmt.setString(1, id.value)
+      Using.resource(stmt.executeQuery())(_.next())
+    }
+
+  /** Deletes `ids`, returning those that were there. */
+  private def deleteIds(conn: Connection, ids: Seq[MemoryId]): Vector[MemoryId] =
+    Using.resource(conn.prepareStatement(s"DELETE FROM $tableName WHERE id = ?")) { stmt =>
+      ids.filter { id =>
+        stmt.setString(1, id.value)
+        stmt.executeUpdate() > 0
+      }.toVector
+    }
+
+  /** Every stored memory as [[MemoryBounds.overflow]] ranks it, without its embedding. */
+  private def entries(conn: Connection): Vector[MemoryBounds.Entry] =
+    Using.resource(conn.createStatement()) { stmt =>
+      Using.resource(stmt.executeQuery(s"SELECT id, importance, created_at, content, metadata::text FROM $tableName")) {
+        rs =>
+          val out = Vector.newBuilder[MemoryBounds.Entry]
+          while (rs.next()) {
+            val importance = rs.getDouble(2)
+            val known      = !rs.wasNull()
+            out += MemoryBounds.Entry(
+              MemoryId(rs.getString(1)),
+              if (known) Some(importance) else None,
+              rs.getTimestamp(3).toInstant,
+              MemoryBounds.sizeOf(rs.getString(4), PostgresMemoryStore.jsonToMetadata(rs.getString(5)))
+            )
+          }
+          out.result()
+      }
     }
 
   override def store(memory: Memory): Result[MemoryStore] =
@@ -460,7 +631,11 @@ object PostgresMemoryStore {
 
   import SqlParam._
 
-  private val ValidIdentifierPattern  = "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$".r
+  /**
+   * At most 55 characters, so every name the store derives from it - `<table>_applied`, `<table>_fences` and the
+   * `idx_<table>_...` indexes - stays distinct within PostgreSQL's 63-byte identifier limit, which truncates silently.
+   */
+  private val ValidIdentifierPattern  = "^[a-zA-Z_][a-zA-Z0-9_]{0,54}$".r
   private val ValidMetadataKeyPattern = "^[a-zA-Z_][a-zA-Z0-9_]*$".r
 
   /** Helper for binary filter composition (And/Or) */
@@ -486,7 +661,7 @@ object PostgresMemoryStore {
   ) {
     require(
       ValidIdentifierPattern.matches(tableName),
-      s"Invalid table name '$tableName': must match pattern [a-zA-Z_][a-zA-Z0-9_]{0,62}"
+      s"Invalid table name '$tableName': must match pattern [a-zA-Z_][a-zA-Z0-9_]{0,54}"
     )
     def jdbcUrl: String = s"jdbc:postgresql://$host:$port/$database"
   }

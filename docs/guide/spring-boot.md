@@ -39,12 +39,10 @@ Spring Boot 4 is not supported yet; whether it needs its own artifact, as LangCh
 [#1467](https://github.com/llm4s/llm4s/issues/1467).
 
 {: .note }
-> **Not published yet.** `llm4s-spring-boot-starter` is not on Maven Central: the latest release, `0.4.1`, is a single
-> `llm4s-core` artifact, and the starter is planned to ship with `0.5.0`, together with the Java API it is built on.
-> Until then, build both from a checkout of the repository; the
-> [`gradle-java` sample](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java) shows the steps for the
-> Java API. Which JDK is the minimum is not settled yet: follow
-> [#1493](https://github.com/llm4s/llm4s/issues/1493).
+> `llm4s-spring-boot-starter` is on Maven Central from `0.5.0` on, together with the Java API it is built on; the
+> current release is {{ site.data.project.latest_release }}. It needs **JDK 21**, like the Java API (see
+> [Scala and JDK support](/reference/v1-scope#scala-and-jdk-support)); whether some artifacts get a lower floor before
+> 1.0 is tracked in [#1493](https://github.com/llm4s/llm4s/issues/1493).
 
 ## Add the dependency
 
@@ -296,7 +294,10 @@ is never reported.
 With `llm4s.health.probe=true` it sends a one-token completion on the executor, waits at most `llm4s.health.probe-timeout`, and
 reuses the outcome (a failure too) for `llm4s.health.probe-ttl`, so health polling does not call the provider each time. A
 failed or timed-out probe is `DOWN` with `probe=failed` or `probe=timeout` and an `error` message that has the API key and
-token-like strings removed. A health check whose thread is interrupted while it waits (Actuator shutting down, say) is
+token-like strings removed. Every credential of the resolved provider is removed, wherever it was set (a Spring property,
+`application.conf`, a `reference.conf` default or an environment variable) and however deep it sits in the provider's
+config: Bedrock's access key id, secret key and session token, a workload-identity token, and every `headers` value,
+whatever the header is called, along with the token after an auth scheme such as `Bearer`. A health check whose thread is interrupted while it waits (Actuator shutting down, say) is
 `DOWN` with `probe=cancelled` and the interrupt flag left set; `health()` never throws `InterruptedException`. A cancelled
 probe is not cached: it says something about that thread, not the provider, so the next check probes again. A probe is a
 billed call: keep the TTL generous.

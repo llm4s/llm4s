@@ -45,8 +45,8 @@ final class EventType[A] private (val name: String, val version: Int, codec: Rea
       record.event match
         case RunEvent.Custom(n, v, payload) if n == name && v == version => decode(payload)
         case _                                                           => None
-    case StreamEvent.Live(_, _, _, _, n, v, payload) if n == name && v == version => decode(payload)
-    case _                                                                        => None
+    case StreamEvent.Live(_, _, _, _, _, n, v, payload) if n == name && v == version => decode(payload)
+    case _                                                                           => None
 
   override def toString: String = s"EventType($name, v$version)"
 

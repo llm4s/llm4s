@@ -158,7 +158,7 @@ class ConfigurableMockClient(responses: Map[String, String]) extends LLMClient {
     options: CompletionOptions = CompletionOptions()
   ): Result[Completion] = {
     val userMessage = conversation.messages
-      .collectFirst { case UserMessage(content) => content }
+      .collectFirst { case u: UserMessage => u.content }
       .getOrElse("")
     
     responses.get(userMessage) match {
@@ -218,8 +218,7 @@ ollama serve
 ### Test Configuration
 
 Put a named provider section in your test resources and select it as the default, with
-`llm4s-ollama` as a test dependency (in v0.4.1 and earlier the Ollama provider is inside
-`llm4s-core`). See [Named provider sections](configuration#named-provider-sections).
+`llm4s-ollama` as a test dependency. See [Named provider sections](configuration#named-provider-sections).
 
 ```hocon
 # src/test/resources/application.conf
@@ -230,7 +229,7 @@ llm4s {
     ollama-test {
       provider = "ollama"
       model    = "llama3.2"
-      baseUrl  = "http://localhost:11434"   # required for Ollama
+      baseUrl  = "http://localhost:11434"   # optional: this is the default
     }
   }
 }
@@ -539,7 +538,7 @@ class RAGSpec extends AnyFlatSpec with Matchers {
         options: CompletionOptions = CompletionOptions()
       ): Result[Completion] = {
         lastPrompt = conversation.messages
-          .collectFirst { case UserMessage(content) => content }
+          .collectFirst { case u: UserMessage => u.content }
         Right(Completion(
           id = "mock-1",
           created = System.currentTimeMillis(),

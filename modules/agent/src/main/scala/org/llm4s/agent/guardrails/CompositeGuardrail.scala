@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails
 
+import org.llm4s.agent.graph.middleware.ModelContext
 import org.llm4s.error.{ LLMError, ValidationError }
 import org.llm4s.types.Result
 
@@ -22,23 +23,28 @@ class CompositeGuardrail[A](
   mode: ValidationMode = ValidationMode.All
 ) extends Guardrail[A] {
 
-  def validate(value: A): Result[A] = mode match {
+  def validate(value: A): Result[A] = run(value)(_.validate(value))
+
+  /** As `validate(value)`, each guardrail validating with `context`, so a judge's calls are accounted. */
+  override def validate(value: A, context: ModelContext): Result[A] = run(value)(_.validate(value, context))
+
+  private def run(value: A)(check: Guardrail[A] => Result[A]): Result[A] = mode match {
     case ValidationMode.All =>
-      validateAll(value)
+      validateAll(value, check)
 
     case ValidationMode.Any =>
-      validateAny(value)
+      validateAny(check)
 
     case ValidationMode.First =>
-      validateFirst(value)
+      validateFirst(value, check)
   }
 
   /**
    * All guardrails must pass.
    * Runs all guardrails and aggregates all errors.
    */
-  private def validateAll(value: A): Result[A] = {
-    val results = guardrails.map(_.validate(value))
+  private def validateAll(value: A, check: Guardrail[A] => Result[A]): Result[A] = {
+    val results = guardrails.map(check)
     val errors  = results.collect { case Left(err) => err }
 
     if (errors.isEmpty) Right(value) else Left(CompositeGuardrail.multipleFailures(errors))
@@ -50,7 +56,7 @@ class CompositeGuardrail[A](
    * run (an LLM judge costs a call). When none passes, every guardrail has run and their errors are
    * reported together.
    */
-  private def validateAny(value: A): Result[A] = {
+  private def validateAny(check: Guardrail[A] => Result[A]): Result[A] = {
     @tailrec def next(remaining: List[Guardrail[A]], errors: Vector[LLMError]): Result[A] =
       remaining match {
         case Nil =>
@@ -61,7 +67,7 @@ class CompositeGuardrail[A](
             )
           )
         case guardrail :: rest =>
-          guardrail.validate(value) match {
+          check(guardrail) match {
             case passed @ Right(_) => passed
             case Left(err)         => next(rest, errors :+ err)
           }
@@ -74,9 +80,9 @@ class CompositeGuardrail[A](
    * Returns on first result (success or failure).
    * Useful for expensive guardrails where order matters.
    */
-  private def validateFirst(value: A): Result[A] =
+  private def validateFirst(value: A, check: Guardrail[A] => Result[A]): Result[A] =
     guardrails.headOption match {
-      case Some(guardrail) => guardrail.validate(value)
+      case Some(guardrail) => check(guardrail)
       case None            => Right(value)
     }
 
@@ -117,6 +123,9 @@ object CompositeGuardrail {
   def sequential[A](guardrails: Seq[Guardrail[A]]): Guardrail[A] = new Guardrail[A] {
     def validate(value: A): Result[A] =
       guardrails.foldLeft[Result[A]](Right(value))((acc, guardrail) => acc.flatMap(guardrail.validate))
+
+    override def validate(value: A, context: ModelContext): Result[A] =
+      guardrails.foldLeft[Result[A]](Right(value))((acc, guardrail) => acc.flatMap(guardrail.validate(_, context)))
 
     val name: String = s"SequentialGuardrail(${guardrails.map(_.name).mkString(" -> ")})"
 

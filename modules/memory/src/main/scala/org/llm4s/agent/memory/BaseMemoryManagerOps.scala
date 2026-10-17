@@ -32,11 +32,43 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
     }
 
     val memory = Memory
-      .fromConversation(message.content, role, Some(conversationId))
+      // memory is text: a message's media is named in place, never stored (#1913)
+      .fromConversation(Message.textWithMedia(message), role, Some(conversationId))
       .copy(importance = importance.orElse(Some(config.defaultImportance)))
 
-    store.store(memory).map(withStore)
+    store.store(memory).map(withStore).flatMap { recorded =>
+      val analysed = message match {
+        case _: UserMessage | _: AssistantMessage => true
+        case _                                    => false
+      }
+      if (config.autoExtractEntities && analysed) extractAfterRecording(recorded, message.content, conversationId)
+      else Right(recorded)
+    }
   }
+
+  /**
+   * Best-effort entity extraction for `autoExtractEntities`: the message is already recorded,
+   * so a failed extraction is logged and the manager holding the recorded message is returned. A
+   * cancellation is not a failed extraction: it is returned, so the caller stops.
+   */
+  private def extractAfterRecording(
+    recorded: MemoryManager,
+    content: String,
+    conversationId: String
+  ): Result[MemoryManager] =
+    recorded.extractEntities(content, Some(conversationId)) match {
+      case Right(withEntities)                             => Right(withEntities)
+      case Left(cancelled: org.llm4s.error.CancelledError) => Left(cancelled)
+      case Left(error) =>
+        BaseMemoryManagerOps.logger.warn(
+          s"autoExtractEntities: entity extraction failed for conversation $conversationId, " +
+            s"message kept without extracted entities: ${error.message}"
+        )
+        Right(recorded)
+    }
+
+  /** The configured `contextTokenBudget`, used by `getRelevantContext` when no `maxTokens` is passed. */
+  override def contextTokenBudget: Int = config.contextTokenBudget
 
   override def recordConversation(
     messages: Seq[Message],
@@ -253,4 +285,8 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
       s"$topHeader${formatted.toString.trim}"
     } else ""
   }
+}
+
+private[memory] object BaseMemoryManagerOps {
+  private val logger = org.slf4j.LoggerFactory.getLogger(classOf[BaseMemoryManagerOps])
 }

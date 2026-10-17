@@ -27,4 +27,10 @@ class ExperimentalDialectsSpec extends AnyFlatSpec with Matchers {
       }
     }
   }
+
+  "OpenAIWorkloadIdentity, a field of the Stable OpenAIConfig" should "be @Stable (#1818)" in {
+    val cls = classOf[org.llm4s.llmconnect.config.OpenAIWorkloadIdentity]
+    cls.isAnnotationPresent(classOf[Stable]) shouldBe true
+    cls.isAnnotationPresent(classOf[Experimental]) shouldBe false
+  }
 }

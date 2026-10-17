@@ -517,7 +517,7 @@ llm4s.providers {
   ollama-local {
     provider = "ollama"
     model    = "llama3.2"
-    baseUrl  = "http://localhost:11434"   # required for Ollama
+    baseUrl  = "http://localhost:11434"   # the default; set it when Ollama runs elsewhere
   }
 }
 ```

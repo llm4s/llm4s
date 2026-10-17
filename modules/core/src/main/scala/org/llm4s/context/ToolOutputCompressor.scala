@@ -2,7 +2,7 @@ package org.llm4s.context
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.ContextError
-import org.llm4s.llmconnect.model.{ Message, ToolMessage }
+import org.llm4s.llmconnect.model.{ ContentPart, Message, ToolMessage }
 import org.llm4s.types.{ ArtifactKey, ContentSize, ExternalizationThreshold, ExternalizedContent, Result }
 import org.llm4s.util.BoundedJson
 import org.slf4j.LoggerFactory
@@ -86,56 +86,97 @@ object ToolOutputCompressor {
     }
   }
 
+  /**
+   * The thresholds apply to the result's text in total, so text split across parts cannot slip under them.
+   *
+   *  - One text part is compressed as it always was: externalized over `threshold`, compressed inline over
+   *    `MaxInlineToolOutput`.
+   *  - Several text parts over `MaxInlineToolOutput` are compressed each in place, by its own content type, so each
+   *    text stays beside the media it describes. When they are still over the bound - or over `threshold` to begin
+   *    with - their text is externalized together, as one artifact (each part marked by its position), and the
+   *    first text part becomes its one pointer: the result's text is then one pointer, whatever the number of parts.
+   *    Media parts are kept, in place.
+   */
   private def compressToolMessage(
     message: ToolMessage,
     artifactStore: ArtifactStore,
     threshold: ExternalizationThreshold
   ): Result[Message] = {
-    val contentSize = ContentSize.fromString(message.content)
-    val contentType = detectContentType(message.content)
+    val texts                        = message.parts.collect { case ContentPart.Text(t) => t }
+    def bytes(ts: Seq[String]): Long = ts.map(t => ContentSize.fromString(t).bytes).sum
+    val total                        = bytes(texts)
 
-    contentSize.bytes match {
-      case size if size > threshold =>
-        externalizeToolOutput(message, artifactStore, contentType)
-      case size if size > MaxInlineToolOutput =>
-        compressInlineContent(message, contentType)
-      case _ =>
-        Right(message)
+    def rewriteEach(f: String => Result[String]): Result[Vector[ContentPart]] =
+      message.parts.foldLeft[Result[Vector[ContentPart]]](Right(Vector.empty)) { (acc, part) =>
+        acc.flatMap { done =>
+          part match {
+            case ContentPart.Text(text) => f(text).map(t => done :+ ContentPart.Text(t))
+            case media                  => Right(done :+ media)
+          }
+        }
+      }
+
+    // all the text as one artifact; the first text part its pointer, the other text parts gone, the media in place
+    def externalizeTogether: Result[Vector[ContentPart]] = {
+      val joined = texts.zipWithIndex.map { case (t, i) => s"[text part ${i + 1}]\n$t" }.mkString("\n\n")
+      externalizeToolOutput(joined, artifactStore, detectContentType(joined)).map { pointer =>
+        val first = message.parts.indexWhere(_.isInstanceOf[ContentPart.Text])
+        message.parts.zipWithIndex.collect {
+          case (_: ContentPart.Text, `first`)           => ContentPart.Text(pointer)
+          case (media, _) if ContentPart.isMedia(media) => media
+        }
+      }
     }
+
+    val rewritten: Option[Result[Vector[ContentPart]]] =
+      if (texts.size <= 1) total match {
+        case size if size > threshold =>
+          Some(rewriteEach(text => externalizeToolOutput(text, artifactStore, detectContentType(text))))
+        case size if size > MaxInlineToolOutput =>
+          Some(rewriteEach(text => compressInlineContent(text, message.toolCallId, detectContentType(text))))
+        case _ => None
+      }
+      else
+        total match {
+          case size if size > threshold => Some(externalizeTogether)
+          case size if size > MaxInlineToolOutput =>
+            Some(
+              rewriteEach(text => compressInlineContent(text, message.toolCallId, detectContentType(text))).flatMap {
+                parts =>
+                  if (bytes(parts.collect { case ContentPart.Text(t) => t }) > MaxInlineToolOutput) externalizeTogether
+                  else Right(parts)
+              }
+            )
+          case _ => None
+        }
+    rewritten.fold[Result[Message]](Right(message))(_.map(message.withParts))
   }
 
   private def externalizeToolOutput(
-    message: ToolMessage,
+    content: String,
     artifactStore: ArtifactStore,
     contentType: String
-  ): Result[ToolMessage] = {
-    val key         = ArtifactKey.fromContent(message.content)
-    val contentSize = ContentSize.fromString(message.content)
-    val summary     = generateContentSummary(message.content, contentType)
+  ): Result[String] = {
+    val key         = ArtifactKey.fromContent(content)
+    val contentSize = ContentSize.fromString(content)
+    val summary     = generateContentSummary(content, contentType)
 
     for {
-      _ <- artifactStore.store(key, message.content).left.map { error =>
+      _ <- artifactStore.store(key, content).left.map { error =>
         ContextError.artifactStoreFailed("store", key.value, error.message)
       }
       externalizedInfo = ExternalizedContent(key, contentSize.bytes, contentType, summary)
-      pointer          = createContentPointer(externalizedInfo)
-    } yield message.copy(content = pointer)
+    } yield createContentPointer(externalizedInfo)
   }
 
-  private def compressInlineContent(message: ToolMessage, contentType: String): Result[ToolMessage] = {
-    val compressed = contentType match {
-      case "json" | "yaml" => compressStructuredData(message.content)
-      case "log" | "trace" => compressLogContent(message.content)
-      case "error"         => compressErrorContent(message.content)
-      case "binary"        => externalizeBinaryContent(message)
-      case _               => compressGenericText(message.content)
+  private def compressInlineContent(content: String, toolCallId: String, contentType: String): Result[String] =
+    contentType match {
+      case "json" | "yaml" => compressStructuredData(content)
+      case "log" | "trace" => compressLogContent(content)
+      case "error"         => compressErrorContent(content)
+      case "binary"        => externalizeBinaryContent(content, toolCallId)
+      case _               => compressGenericText(content)
     }
-
-    compressed match {
-      case Right(content) => Right(message.copy(content = content))
-      case Left(error)    => Left(error)
-    }
-  }
 
   private def detectContentType(content: String): String = {
     val trimmed = content.trim
@@ -238,9 +279,9 @@ object ToolOutputCompressor {
     }
   }
 
-  private def externalizeBinaryContent(message: ToolMessage): Result[String] =
+  private def externalizeBinaryContent(content: String, toolCallId: String): Result[String] =
     // Binary content should never be inline
-    Right(s"[BINARY CONTENT - ${message.content.length} bytes - externalized: ${message.toolCallId}]")
+    Right(s"[BINARY CONTENT - ${content.length} bytes - externalized: $toolCallId]")
 
   private def compressGenericText(content: String): Result[String] =
     content.length match {

@@ -11,7 +11,7 @@ nav_order: 28
 Write the type once and let `llm4s-schema-derivation` build the JSON schema for structured output from it.
 {: .fs-6 .fw-300 }
 
-> **Experimental.** The module is new and not part of the 1.0 frozen surface. It is not published yet: until a release carries it, build it from a checkout (`sbt schemaDerivation/publishLocal`).
+> **Experimental.** The module is new and not part of the 1.0 frozen surface. It is published from `0.5.0` on.
 
 1. TOC
 {:toc}
@@ -135,6 +135,24 @@ val weatherTool: Result[ToolFunction[WeatherQuery, String]] =
 ```
 
 The tool is sent in strict mode, so every parameter is required and `unit` is a property that may be `null`. The module's tests check that the parameters the tool sends are the derived schema, and that the handler reads a call.
+
+## An agent's answer
+
+An agent's response format is a schema too: pass `SchemaOf[A].definition` to `AgentBuilder.withOutput`, and read the answer with `decodeOutput[A]` (see [the agent guide](agents/#a-typed-answer)). `withOutput` is in `llm4s-agent`, which this module does not depend on.
+
+```scala
+import org.llm4s.agent.Agent
+import org.llm4s.schema.*
+
+def extractWithAgent(client: LLMClient, email: String): Result[Invoice] =
+  for {
+    agent   <- Agent.builder("extractor", client).withOutput(SchemaOf[Invoice].definition).build()
+    result  <- agent.run(s"Extract the invoice from this email: $email")
+    invoice <- result.decodeOutput[Invoice]
+  } yield invoice
+```
+
+As with `completeStructuredOf`, `A` must be a case class: `build` refuses any other type with a `Left`.
 
 ## Descriptions
 

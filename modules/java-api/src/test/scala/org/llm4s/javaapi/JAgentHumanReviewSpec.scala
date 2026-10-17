@@ -1,9 +1,9 @@
 package org.llm4s.javaapi
 
 import org.llm4s.agent.{ AgentNode, AgentStatus }
-import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, IdempotencyKey, InterruptId, NodeId, RunContext }
-import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ToolCallRequest }
-import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome, ToolSet }
+import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, IdempotencyKey, InterruptId, NodeId }
+import org.llm4s.agent.graph.middleware.{ AgentMiddleware, BoundaryResult, MiddlewareId, ModelContext, ToolCallRequest }
+import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome, ToolSet }
 import org.llm4s.agent.graph.toolloop.{
   ApprovalRequest,
   ApprovalSource,
@@ -34,7 +34,7 @@ class JAgentHumanReviewSpec extends AnyFlatSpec with Matchers {
 
   private val deploy = AgentTool(SuspensionFixtures.spec("deploy")) { (args, _) =>
     ran.add(args.text)
-    ToolOutcome.Success(ujson.Str(s"deployed ${args.text}"))
+    ToolOutcome.Success(ToolContent.Json(ujson.Str(s"deployed ${args.text}")))
   }
 
   private def tools: ToolSet = ToolSet.of(deploy).fold(e => throw new AssertionError(e.message), identity)
@@ -116,7 +116,7 @@ class JAgentHumanReviewSpec extends AnyFlatSpec with Matchers {
     ran.asScala.toList shouldBe List("one", "two")
   }
 
-  "PendingInterrupt.of" should "list approvals, then tool questions, middleware questions and breakpoints" in {
+  "FacadeInternals.pending" should "list approvals, then tool questions, middleware questions and breakpoints" in {
     val c = call("c1", "deploy", "x")
     val status = AgentStatus.Suspended(
       Vector(InterruptId("a") -> ApprovalRequest("m", c, "why", ApprovalSource.Tool, IdempotencyKey("k1"))),
@@ -132,7 +132,7 @@ class JAgentHumanReviewSpec extends AnyFlatSpec with Matchers {
       ),
       Vector(InterruptId("b") -> BreakpointRequest(NodeId("assistant/finish"), GraphPhase.Before, None))
     )
-    val pending = PendingInterrupt.of(status).asScala.toList
+    val pending = FacadeInternals.pending(status).asScala.toList
     pending.map(p => p.id -> p.kind) shouldBe List(
       "a" -> InterruptKind.APPROVAL,
       "q" -> InterruptKind.QUESTION,
@@ -143,7 +143,7 @@ class JAgentHumanReviewSpec extends AnyFlatSpec with Matchers {
     pending(2).toolName() shouldBe Optional.of("deploy")
     pending(3).node() shouldBe Optional.of("assistant/finish")
     pending.distinct should have size 4
-    pending(3) should not be PendingInterrupt.of(status).asScala.toList(2)
+    pending(3) should not be FacadeInternals.pending(status).asScala.toList(2)
   }
 
   "BreakpointPhase" should "be a Java enum" in {
@@ -164,8 +164,8 @@ object JAgentHumanReviewSpec {
   /** Asks for the region when the query names none. */
   final class Region extends AgentMiddleware.Asking[Need, Info] {
     val id: MiddlewareId = MiddlewareId("region")
-    override def beforeAgent(input: String, context: RunContext): Result[String] =
-      answered(context).fold(ask(Need("region")))(r => Right(s"$input in ${r.answer.value}"))
+    override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
+      answered(context).fold(ask(Need("region")))(r => Right(BoundaryResult(s"$input in ${r.answer.value}")))
   }
 
   /** Asks which environment each tool call is for. */

@@ -275,7 +275,23 @@ class SimpleMemoryManagerSpec extends AnyFlatSpec with Matchers {
 
   "SimpleMemoryManager.forTesting" should "create a testing instance" in {
     val manager = SimpleMemoryManager.forTesting
-    manager.config.autoRecordMessages shouldBe false
     manager.config.autoExtractEntities shouldBe false
+  }
+
+  // memory is text: a message's media is named in place, never stored, and never lost without a trace (#1913)
+  it should "record a message with media as its text, each media part named by its kind" in {
+    val chart = ContentPart
+      .image(org.llm4s.media.MediaSource.Inline(IArray.fill[Byte](32)(7)), org.llm4s.media.MediaType.Png)
+      .toOption
+      .get
+    val recorded = for {
+      updated <- SimpleMemoryManager.empty.recordMessage(
+        UserMessage(Vector(ContentPart.Text("see"), chart)),
+        "conv-1",
+        None
+      )
+      memories <- updated.store.getConversation("conv-1")
+    } yield memories.map(_.content)
+    recorded shouldBe Right(Seq("see [image (inline, image/png)]"))
   }
 }

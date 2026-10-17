@@ -190,6 +190,13 @@ the keys it reads from a section's `auth` block in `ProviderConfigSpec.authExtra
 `FakeTokenExchangeServer` and `TestJwt` in the testkit test it without a network. An SDK that does
 its own federation takes the identity token's file path instead (see `AnthropicProvider`).
 
+The configuration side is `@Stable` ([#1818](https://github.com/llm4s/llm4s/issues/1818)): `AuthConfig`,
+`IdentitySource`, `TokenExchangeConfig`, `AccessToken` and the `AccessTokenProvider` trait, which a Stable
+`NamedProviderConfig`, `ProviderDescriptor.requireAuthExtra` and `OpenAICompatibleClient.Credential` carry. The
+machinery behind them - `TokenExchange`, `CachingAccessTokenProvider` and `IdentityTokenSource` - is still
+`@Experimental`, so keep it out of your own Stable signatures. An `AccessTokenProvider` should return a failure as a
+`Left`; `OpenAICompatibleClient` and `CachingAccessTokenProvider` turn one that throws into an `AuthenticationError`.
+
 ### `ProviderConfigSpec` and `ProviderConfigKey`
 
 The spec says what a section needs. The fields a provider author uses:
@@ -613,6 +620,16 @@ final class AcmeClient(
 
 `AcmeWire` stands for your own request encoding and response decoding.
 
+### Content parts
+
+A `UserMessage` and a `ToolMessage` carry `parts: Vector[ContentPart]`: `Text`, `Image` and `Document`, each image
+or document from a `MediaSource` (`Url`, `Inline` bytes, or a `ProviderFile` uploaded to a named provider). Your
+encoder sends every part your API takes, in each role it takes it, and fails the request **before sending it** with
+`UnsupportedContentPartError(providerName, part.kind, role.name)` for any other: never drop a part, and never turn
+one into text. Send a `ProviderFile` only when its `provider` is your provider id. A message with exactly one text
+part should encode as your API's plain text form, as before; `message.content` is the text view. The matrix of what
+each llm4s provider sends is in [Multimodal content](multimodal).
+
 ## The embedding descriptor
 
 `org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor` is the embedding half. Its config lives at
@@ -669,7 +686,7 @@ It has these parts, all in `org.llm4s.testkit`:
 
 | | What it gives you |
 |---|---|
-| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertOneToolResultPerCall`, `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`. Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
+| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertOneToolResultPerCall`, `assertContentParts` (each `ContentPartCase` your client declares reaches a local server with its payload; every other fails with `UnsupportedContentPartError` and sends nothing), `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`. Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
 | `ProviderTestConfig` | `loadSection`, `loadProvider` and `loadEmbeddings`: config loaded as an application loads it, from a HOCON string over every `reference.conf` on the classpath, with `${?VAR}` resolved against a `Map` you pass - never the real environment, so an exported `ACME_API_KEY` on your machine cannot make a test pass that fails in CI. |
 | `CredentialsRoundTrip` | `chatSectionKey`, `chatBindings`, `embeddingsKey`, `embeddingBindings`: which key a section or embeddings block with no `apiKey` of its own ends up with, for cases the assertions do not cover - an alias, two variables in precedence order, a variable that must *not* be picked up. |
 | `LocalProviderTestServer` | `withServer(path)(handler)(baseUrl => ...)`, `sendJsonResponse`, `sendSseResponse`, `holdOpen` / `streamThenHold` (requests that never finish, released when `withServer` ends), OpenAI-format bodies and an Anthropic-format `anthropicMessage`: the JDK's HTTP server on an ephemeral port, to point a client at. `ToolResultContract` (with `ToolMessageFormat`) reads a request body for the tool-result contract below. |
@@ -780,7 +797,7 @@ encoding against `ToolResultContract.cases` the same way.
 
 ## Stability
 
-`llm4s-core` reaches a binary-compatibility baseline (MiMa) at 0.5.0 and freezes at 1.0. The
+`llm4s-core` reaches a binary-compatibility baseline (MiMa) at a pre-1.0 release, once the designs are final, and freezes at 1.0. The
 provider-author SPI described on this page is **public and frozen at 1.0**: binary-compatible
 across all 1.x releases, so a provider compiled against 1.0 keeps working. That covers:
 

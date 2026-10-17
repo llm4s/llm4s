@@ -1,9 +1,8 @@
 package org.llm4s.agent.graph.middleware
 
-import org.llm4s.agent.graph.{ GraphError, RunContext, StateKey }
+import org.llm4s.agent.graph.{ GraphError, StateKey, StateUpdate }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome }
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
-import org.llm4s.llmconnect.model.Completion
 import org.llm4s.types.Result
 
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -22,7 +21,7 @@ import scala.util.{ Failure, Success, Try }
  * `next`'s result. The innermost function is not guarded; its caller guards it.
  */
 final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
-  import MiddlewareStack.ToolChainResult
+  import MiddlewareStack.{ Hooked, ToolChainResult, WriteCheck }
 
   /** Every middleware's contributed tools, in stack order. */
   val tools: Vector[AgentTool[?]] = ordered.flatMap(_.tools)
@@ -30,24 +29,50 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
   /** The union of every middleware's `writes`. */
   val writes: Set[StateKey[?, ?]] = ordered.flatMap(_.writes).toSet
 
-  /** Runs each `beforeAgent` in stack order, threading the input; the first `Left` stops. */
-  private[graph] def beforeAgent(input: String, context: RunContext): Result[String] =
-    ordered.foldLeft[Result[String]](Right(input))((acc, m) =>
-      acc.flatMap(value => guarded(m)(m.beforeAgent(value, context)))
+  /**
+   * Runs each `beforeAgent` in stack order, threading the input; the first `Left` stops. Each middleware's
+   * update is kept with its id, in the order the hooks ran, and checked by `check` as its hook returns: an
+   * undeclared write stops the fold too, and is in `check` whatever the caller makes of the `Left`.
+   */
+  private[graph] def beforeAgent(input: String, context: ModelContext, check: WriteCheck): Result[Hooked] =
+    boundary(ordered, input, check)((m, text) => m.beforeAgent(text, context))
+
+  /** Runs each `afterAgent` in reverse stack order, threading the answer, as [[beforeAgent]] does. */
+  private[graph] def afterAgent(answer: String, context: ModelContext, check: WriteCheck): Result[Hooked] =
+    boundary(ordered.reverse, answer, check)((m, text) => m.afterAgent(text, context))
+
+  private def boundary(in: Vector[AgentMiddleware], text: String, check: WriteCheck)(
+    hook: (AgentMiddleware, String) => Result[BoundaryResult]
+  ): Result[Hooked] =
+    in.foldLeft[Result[Hooked]](Right(Hooked(text, Vector.empty)))((acc, m) =>
+      acc.flatMap(done =>
+        guarded(m)(hook(m, done.text)).flatMap { r =>
+          if check(m, r.update) then Right(Hooked(r.text, done.updates :+ (m.id -> r.update)))
+          else Left(check.failure.getOrElse(ValidationError("middleware update", "undeclared write")))
+        }
+      )
     )
 
-  /** Runs each `afterAgent` in reverse stack order, threading the answer; the first `Left` stops. */
-  private[graph] def afterAgent(answer: String, context: RunContext): Result[String] =
-    ordered.reverse.foldLeft[Result[String]](Right(answer))((acc, m) =>
-      acc.flatMap(value => guarded(m)(m.afterAgent(value, context)))
+  /** Every middleware's prompt sections, in stack order, each with the id of the middleware that gave it. */
+  private[graph] def promptSections(context: ModelContext): Result[Vector[(MiddlewareId, PromptSection)]] =
+    ordered.foldLeft[Result[Vector[(MiddlewareId, PromptSection)]]](Right(Vector.empty))((acc, m) =>
+      acc.flatMap(done => guarded(m)(m.promptSections(context)).map(found => done ++ found.map(m.id -> _)))
     )
 
-  /** Runs the model call through every `wrapModelCall`, the first outermost, with `innermost` at the centre. */
-  private[graph] def wrapModelCall(request: ModelRequest, context: RunContext)(
-    innermost: ModelRequest => Result[Completion]
-  ): Result[Completion] =
+  /**
+   * Runs the model call through every `wrapModelCall`, the first outermost, with `innermost` at the centre. The
+   * update parts a wrapper adds are attributed to it as it returns, and `check` checks them against its own
+   * `writes` then - so an undeclared write is found also in a response an outer wrapper discards, or turns into a
+   * `Left` or a question.
+   */
+  private[graph] def wrapModelCall(request: ModelRequest, context: ModelContext, check: WriteCheck)(
+    innermost: ModelRequest => Result[ModelResponse]
+  ): Result[ModelResponse] =
     val chain = ordered.foldRight(innermost) { (m, next) => (req: ModelRequest) =>
-      guarded(m)(m.wrapModelCall(req, context)(next))
+      guarded(m)(m.wrapModelCall(req, context)(next)).map { r =>
+        r.parts.collect { case (None, u) => u }.foreach(check(m, _))
+        r.claimedBy(m.id)
+      }
     }
     chain(request)
 
@@ -107,6 +132,31 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
 
 object MiddlewareStack:
 
+  /** What a boundary hook's stack returned: the threaded text, and each middleware's update in the order the hooks ran. */
+  final private[graph] case class Hooked(text: String, updates: Vector[(MiddlewareId, StateUpdate)]):
+    def update: StateUpdate = updates.foldLeft(StateUpdate.empty)((acc, u) => acc.combine(u._2))
+
+  /**
+   * The undeclared writes a step's hooks returned, recorded as each hook returns - whatever the step's outcome, so
+   * neither a later hook's `Left` or question nor a wrapper that discards a response hides one. Thread-safe.
+   */
+  final private[graph] class WriteCheck:
+    private val problems = new ConcurrentLinkedQueue[String]()
+
+    /** Whether `update` touches only `m`'s `writes`; records each key it does not declare. */
+    def apply(m: AgentMiddleware, update: StateUpdate): Boolean =
+      val undeclared =
+        update.operations.map(_.key.id).filterNot(k => m.writes.exists(_.id == k)).distinct
+      undeclared.foreach(k =>
+        problems.add(s"middleware '${m.id.value}' updated '${k.value}', which it does not declare"): Unit
+      )
+      undeclared.isEmpty
+
+    /** Every undeclared write recorded, as one `ValidationError`; `None` when there was none. */
+    def failure: Option[ValidationError] =
+      val found = problems.asScala.toList.distinct
+      Option.when(found.nonEmpty)(ValidationError("middleware update", found))
+
   /** What a tool call's chain returned; for a `NeedsApproval` or an `Ask`, `raisedBy` says who: `None` = the tool, `Some(id)` = that middleware. */
   final private[graph] case class ToolChainResult(outcome: ToolOutcome, raisedBy: Option[MiddlewareId])
 
@@ -131,7 +181,9 @@ object MiddlewareStack:
    * Orders `middleware` topologically by `runsBefore` / `runsAfter` (`a.runsBefore(b)` and
    * `b.runsAfter(a)` are the same edge, `a` outside `b`), breaking ties by registration order.
    * One `ValidationError` lists every invalid id, duplicate id, constraint naming an id that is not
-   * registered, cycle, and tool name contributed twice by one middleware or by more than one.
+   * registered, cycle, and tool name contributed twice by one middleware or by more than one; when there is none, the
+   * order is checked against every middleware's [[AgentMiddleware.placement]], and one `ValidationError` lists each
+   * middleware that runs inside one it must run outside.
    */
   def of(middleware: AgentMiddleware*): Result[MiddlewareStack] =
     val all   = middleware.toVector
@@ -190,8 +242,23 @@ object MiddlewareStack:
     val problems = (invalid ++ duplicates ++ unknown ++ cycles ++ clashes).toList
     if problems.nonEmpty then Left(ValidationError("middleware stack", problems))
     else
-      val byId = all.map(m => m.id -> m).toMap
-      Right(new MiddlewareStack(order.map(byId)))
+      val byId    = all.map(m => m.id -> m).toMap
+      val ordered = order.map(byId)
+      misplaced(ordered).toList match
+        case Nil       => Right(new MiddlewareStack(ordered))
+        case misplaced => Left(ValidationError("middleware stack", misplaced))
+
+  /**
+   * Every pair of `ordered` (outermost first) where a middleware's [[AgentMiddleware.placement]] requires it to run
+   * outside another that runs outside it, described with the fix.
+   */
+  private def misplaced(ordered: Vector[AgentMiddleware]): Vector[String] =
+    for
+      (inner, at) <- ordered.zipWithIndex
+      outer       <- ordered.take(at)
+      required    <- inner.placement(outer).toVector
+    yield s"middleware '${inner.id.value}' must run outside '${outer.id.value}' (${required.reason}), but runs " +
+      s"inside it: register '${inner.id.value}' before '${outer.id.value}'"
 
   /**
    * One cycle per strongly connected component of `blocked` that has one, starting and ending at

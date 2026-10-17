@@ -41,7 +41,8 @@ object ErrorRecovery {
    *    [[ServiceError.retryDelay]] default is not used.
    *  - [[TimeoutError]]: waits `baseDelay` before every retry.
    *  - Any other retried error ([[NetworkError]], [[ExecutionError]], [[SystemError]], an [[APIError]] with
-   *    no status or a 5xx, 429 or 408 one): waits `baseDelay * n` after the n-th attempt, as an unhinted
+   *    no status or a 5xx, 429 or 408 one, or another module's [[RecoverableError]], such as `llm4s-agent`'s
+   *    `GraphError.ThreadBusy`): waits `baseDelay * n` after the n-th attempt, as an unhinted
    *    `ServiceError` does.
    *
    * Every other error, including a [[CancelledError]], is returned unchanged at once, whatever the

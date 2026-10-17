@@ -13,8 +13,7 @@ It is for people who **use** llm4s. The checks for people who write a provider m
 libraryDependencies += "org.llm4s" %% "llm4s-testkit" % llm4sVersion % Test
 ```
 
-Not yet published; it ships in the next release. It depends on `llm4s-core` only, registers no provider, and has no
-test framework in its API.
+It depends on `llm4s-core` only, registers no provider, and has no test framework in its API.
 
 ## What it provides
 

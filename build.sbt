@@ -104,6 +104,13 @@ addCommandAlias(
   "testFast",
   """;set core / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-l", "org.llm4s.tags.SlowTest"); test"""
 )
+// ---- Performance tier ----
+// Tests tagged `org.llm4s.testutil.PerformanceTest` check that an operation's cost grows linearly with its input
+// (`LinearTime.assertLinear`). `sbt test` excludes the tag (see `commonSettings`); this runs only the tagged tests, in
+// every module. CI runs it in the ubuntu-only `Performance tests` job and nightly (performance-nightly.yml).
+lazy val PerformanceTestTag = "org.llm4s.tags.PerformanceTest"
+addCommandAlias("testPerformance", s"testOnly -- -n $PerformanceTestTag")
+
 // ---- Tiered test aliases ----
 // Every suite in `modules/it` declares its tier by class annotation (see project/ItTiers.scala);
 // `it/itTierCheck` fails the build if one declares none. Each alias selects a tier by tag, so a
@@ -127,11 +134,10 @@ addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 // ---- binary compatibility (MiMa) ----
 // MiMa compares a module with the artifact of the same name in a previous release. It can only
 // run once split artifacts exist: the last release (0.4.1) is a single `llm4s-core`, and the
-// modularisation (#1126) moved every package this check would cover. #1281 sets the baseline at
-// 0.5.0, the first release with the split coordinates, for the frozen modules only. Until then
-// `mimaBaselineVersion` is `None`, `mimaPreviousArtifacts` is empty and
-// `sbt mimaReportBinaryIssues` checks nothing. Set it to `Some("0.5.0")` when 0.5.0 is
-// published; see docs/reference/api-stability.md.
+// modularisation (#1126) moved every package this check would cover. 0.5.0 sets no baseline: #1281
+// sets it at a pre-1.0 release, version to be decided, once the designs are final, for the frozen
+// modules only. Until then `mimaBaselineVersion` is `None`, `mimaPreviousArtifacts` is empty and
+// `sbt mimaReportBinaryIssues` checks nothing; see docs/reference/api-stability.md.
 val mimaBaselineVersion: Option[String] = None
 
 // `module` is the artifact name (the project's `name`). Apply this to frozen modules only.
@@ -163,6 +169,11 @@ lazy val commonSettings = Seq(
   // `-oD`: print each test's duration, so a slow test (or a platform that is slow at one thing,
   // such as Windows refusing a loopback connection) shows up in the log, locally and in CI.
   Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oD"),
+  // The performance tier (`sbt testPerformance`): tests tagged `PerformanceTest` measure how an operation's cost
+  // grows with its input, which is the same on every platform, so `test` - CI's ubuntu and Windows jobs and the
+  // coverage run - leaves them out (#1932). Scoped to `test`, as `it`'s tier filter is, so that `testOnly` of a named
+  // suite still runs all of it, and so that `testPerformance` can select the tag with `testOnly -- -n`.
+  Test / test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-l", PerformanceTestTag),
   // Published modules log through `slf4j-api` only. Choosing a logging backend is the
   // application's decision: `logback-classic` and the `log4j-to-slf4j` bridge used to be compile
   // dependencies here, so every llm4s artifact put them on its users' classpath - a second
@@ -205,16 +216,25 @@ Global / excludeLintKeys += coveragePolicy
 lazy val publishedArtifactsCheck = taskKey[Unit](
   "Fail the build if a published llm4s-* artifact is not named in v1-scope.md and installation.md, or has no POM description of its own"
 )
-// What a release must put on Maven Central, one `artifact <id>`, `bom <id>` or `stub <id>` per line, for
-// scripts/verify-release.sh. Run it with `sbt -error listPublishedArtifacts`.
+// What a release must put on Maven Central, one `artifact <id>`, `gradle <id>`, `bom <id>` or `stub <id>` per line,
+// for scripts/verify-release.sh. Run it with `sbt -error listPublishedArtifacts`. `gradle` lines are the artifacts
+// release.yml publishes from a Gradle build (llm4s-kotlin-api), see PublishedArtifacts.Gradle.
 lazy val listPublishedArtifacts = taskKey[Unit](
-  "Print the Maven coordinates a release must publish: artifact lines, then the BOM, then relocation stub lines"
+  "Print the Maven coordinates a release must publish: artifact lines, then Gradle-built artifacts, the BOM and relocation stub lines"
 )
 // The BOM (`org.llm4s:llm4s-bom`) lists every published artifact. It is generated from the same project list
 // as `listPublishedArtifacts`; this check fails when the generated POM disagrees. See project/Bom.scala.
 lazy val bomCheck = taskKey[Unit](
   "Fail the build if the generated llm4s-bom does not list exactly the artifacts the build publishes"
 )
+// Every published POM carries what Maven Central requires (name, description, URL, licence, developer, SCM) and the
+// `<scm>` URL Scaladex associates artifacts with (#1455). It reads the generated POMs. See project/PomMetadata.scala.
+lazy val pomMetadataCheck = taskKey[Unit](
+  "Fail the build if a published POM lacks a description, https URL, licence, developer or the llm4s/llm4s GitHub scm"
+)
+// The same check on POM files given by path, for example a released POM downloaded from Maven Central:
+// `sbt "pomMetadataCheckFiles llm4s-core_3-0.5.0.pom"`.
+lazy val pomMetadataCheckFiles = inputKey[Unit]("Run pomMetadataCheck's rules on the POM files given as arguments")
 
 // ---- software bill of materials ----
 // One CycloneDX SBOM per published `llm4s-*` module that ships a jar (samples, `it`, benchmarks, the
@@ -287,6 +307,8 @@ lazy val llm4s = (project in file("."))
     schemaDerivation,
     testkit,
     agentTestkit,
+    agentCheckpointSqlite,
+    agentMemory,
     llm4sEffect,
     llm4sZio,
     llm4sPekko,
@@ -327,6 +349,9 @@ lazy val llm4s = (project in file("."))
     // `sbt "dumpBuildModel <file>"`: the build's projects, keys, commands and aliases as JSON, read by
     // scripts/check-doc-support.sh. See project/BuildModel.scala.
     commands += BuildModel.dumpCommand,
+    // `sbt testPlatform`: only the tests that exercise platform-specific behaviour, for CI's Windows job.
+    // See project/PlatformTests.scala.
+    PlatformTests.settings(PerformanceTestTag),
     publish / skip                      := true,
     mimaFailOnNoPrevious                := false,
     publishedArtifactsCheck / aggregate := false,
@@ -342,6 +367,7 @@ lazy val llm4s = (project in file("."))
       val projects      = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
       val (real, stubs) = PublishedArtifacts.coordinates(projects, (ThisBuild / scalaBinaryVersion).value)
       real.foreach(a => println(s"artifact $a"))
+      PublishedArtifacts.Gradle.foreach(a => println(s"gradle $a"))
       PublishedArtifacts.boms(projects).foreach(a => println(s"bom $a"))
       stubs.foreach(a => println(s"stub $a"))
     },
@@ -375,6 +401,18 @@ lazy val llm4s = (project in file("."))
         written.map(_._1).sortBy(_.getName)
       }
     }.value,
+    pomMetadataCheck / aggregate := false,
+    pomMetadataCheck := Def.taskDyn {
+      val projects = Def.task((thisProjectRef.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
+      val refs     = projects.collect { case (ref, false) => ref }
+      Def.task(PomMetadata.check(makePom.all(ScopeFilter(inProjects(refs: _*))).value, streams.value.log))
+    }.value,
+    pomMetadataCheckFiles / aggregate := false,
+    pomMetadataCheckFiles := {
+      val paths = Def.spaceDelimited("<pom files>").parsed
+      if (paths.isEmpty) sys.error("pomMetadataCheckFiles needs at least one POM file")
+      PomMetadata.check(paths.map(file), streams.value.log)
+    },
     bomCheck / aggregate := false,
     bomCheck := {
       val projects = Def
@@ -541,6 +579,9 @@ lazy val llm4sPekko = (project in file("modules/llm4s-pekko"))
   )
 
 lazy val core = (project in file("modules/core"))
+  // `media` for the content parts of a message (#1913): an image or document part names its
+  // `MediaSource` and `ImageMediaType` / `DocumentMediaType`. `llm4s-media` has no dependency.
+  .dependsOn(media)
   .settings(
     name := "llm4s-core",
     commonSettings,
@@ -568,9 +609,9 @@ lazy val core = (project in file("modules/core"))
     Test / javaOptions ++= Seq(
       "-Xmx2g",
       "-Xms512m",
-      "-XX:+UseG1GC",
-      "-XX:+TieredCompilation",
-      "-XX:TieredStopAtLevel=1"
+      // No `-XX:TieredStopAtLevel=1`: C1-only start-up tuning from when this module's tests took a minute (#825).
+      // It made the long CPU-bound runs here - the Redaction suites' megabyte inputs - about 40% slower (#1932).
+      "-XX:+UseG1GC"
     ),
     // Pass API key entries from .env into forked test JVM (for smoke/integration tests).
     // Only forwards *_API_KEY variables to avoid polluting test configuration
@@ -626,8 +667,8 @@ lazy val knowledgegraph = (project in file("modules/knowledgegraph"))
   )
 
 lazy val rag = (project in file("modules/rag"))
-  // `media` is declared explicitly, not inherited through core: core's edge to it is
-  // temporary and goes away with the `llm4s-image` carve, but `MediaExtractor`'s does not.
+  // `media` is declared explicitly, not inherited through core: `MediaExtractor` uses it
+  // directly, whatever core's content parts need.
   // `openai` is test-only: `RAGConfig.default` names the `openai` embedding provider, which
   // left core with `llm4s-openai` (#1132), and the mocked RAG suites build from that default.
   // `llm4s-rag` itself does not depend on it - a user names whichever provider they ship.
@@ -654,9 +695,9 @@ lazy val rag = (project in file("modules/rag"))
     Test / javaOptions ++= Seq(
       "-Xmx2g",
       "-Xms512m",
-      "-XX:+UseG1GC",
-      "-XX:+TieredCompilation",
-      "-XX:TieredStopAtLevel=1"
+      // No `-XX:TieredStopAtLevel=1` (copied from core's in the carve): C1 only made these tests slower, a run of
+      // 9.2 s against 6.4 s with the default tiered JIT.
+      "-XX:+UseG1GC"
     ),
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -694,9 +735,9 @@ lazy val memory = (project in file("modules/memory"))
     name := "llm4s-memory",
     commonSettings,
     // Measured 81.10% statement coverage (`sbt coverage memory/test memory/coverageReport`)
-    // on the code as carved out of core. Floor is the measured value rounded down to the
-    // nearest 5. Never lower it.
-    coverageFloor(80),
+    // on the code as carved out of core; 91.76% with `TransactionalMemoryStore` (#1911), when the
+    // floor was raised. Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(90),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -715,11 +756,12 @@ lazy val memoryPostgres = (project in file("modules/memory-postgres"))
     name := "llm4s-memory-postgres",
     commonSettings,
     // Measured 60.33% statement coverage (`sbt coverage memoryPostgres/test
-    // memoryPostgres/coverageReport`) on the code as carved out of core. Floor is the measured
+    // memoryPostgres/coverageReport`) on the code as carved out of core; 71.01% with the
+    // `TransactionalMemoryStore` unit suite (#1911), when the floor was raised. Floor is the measured
     // value rounded down to the nearest 5. Never lower it. The in-module suite is mock-backed;
     // the real signal is `modules/it`'s `PostgresMemoryStoreSpec`, which runs on every PR
     // against a pgvector service container (#1149) and is not counted here.
-    coverageFloor(60),
+    coverageFloor(70),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -1120,8 +1162,10 @@ lazy val providerTestkit = (project in file("modules/provider-testkit"))
 // `llm4s-schema-derivation` (#1472): a JSON schema derived from a case class with Scala 3 `Mirror`, so
 // `completeStructured` needs no hand-written `ObjectSchema` that repeats the type. It layers on core's
 // public API (it builds an `ObjectSchema` and calls `completeStructured`) and adds no dependency.
+// `llm4s-agent` is test-only (#1912): `DerivedAgentOutputSpec` and the guide check that a derived schema is an
+// agent's response format (`withOutput(SchemaOf[A].definition)`). The module itself never depends on the agent.
 lazy val schemaDerivation = (project in file("modules/schema-derivation"))
-  .dependsOn(core % "compile->compile;test->test")
+  .dependsOn(core % "compile->compile;test->test", agent % Test)
   .settings(
     name := "llm4s-schema-derivation",
     commonSettings,
@@ -1203,7 +1247,8 @@ lazy val workspaceShared = (project in file("modules/workspace/workspaceShared")
 
 lazy val workspaceClient = (project in file("modules/workspace/workspaceClient"))
   // `agent` is for `codegen.CodeWorker` and `CodeGenExample`, which drive an `Agent` (#1242).
-  .dependsOn(workspaceShared, core, agent)
+  // agentTestkit (tests): the workspace backends pass FileBackendContract and ReplayContract (design 4.33).
+  .dependsOn(workspaceShared, core, agent, agentTestkit % Test)
   .settings(
     name := "llm4s-workspace-client",
     commonSettings,
@@ -1324,11 +1369,18 @@ lazy val samples = (project in file("modules//samples"))
     observabilityPrometheus,
     agent,
     agentTools,
+    agentCheckpointSqlite,
+    // The exit examples (design 4.38): semantic memory, and the coding agent's workspace backends. Test scope:
+    // the workspace client's `FakeWorkspace`, and agent-testkit's `ManualClock` for the claims a stopped run leaves.
+    agentMemory,
+    workspaceClient % "compile->compile;test->test",
     llm4sEffect,
     llm4sZio,
     llm4sPekko,
-    // Test scope: the guide `docs/guide/testing-with-the-testkit` is run by a spec in this module.
-    testkit % Test
+    // Test scope: the guide `docs/guide/testing-with-the-testkit` is run by a spec in this module, and the exit
+    // examples' acceptance suites script their model with it.
+    testkit      % Test,
+    agentTestkit % Test
   )
   .settings(
     name := "llm4s-samples",
@@ -1552,10 +1604,11 @@ lazy val agent = (project in file("modules/agent"))
 // `deleteThread`, run-claim leases and fencing, and two `GraphRuntime`s contending over one store -
 // plus the `ManualClock` it drives claim expiry with. It is published so that a store outside this
 // repository proves itself the way the in-repo ones do, as `llm4s-provider-testkit` is for providers.
+// It also has `FileBackendContract` (#1904), whose agent runs are driven by `llm4s-testkit`'s `ScriptedLLMClient`.
 // A test library, so ScalaTest is a compile dependency. `llm4s-agent`'s own tests cannot use it - that
 // would be a project cycle - so `InMemoryCheckpointer` passes it here, in the testkit's own tests.
 lazy val agentTestkit = (project in file("modules/agent-testkit"))
-  .dependsOn(agent)
+  .dependsOn(agent, testkit)
   .settings(
     name := "llm4s-agent-testkit",
     commonSettings,
@@ -1569,6 +1622,55 @@ lazy val agentTestkit = (project in file("modules/agent-testkit"))
     libraryDependencies ++= Seq(
       Deps.scalatest,
       Deps.ujson
+    )
+  )
+
+// `llm4s-agent-checkpoint-sqlite` (#1701) is the first durable `Checkpointer`: `SqliteCheckpointer`, one SQLite file
+// that survives a restart and that runtimes in several processes can share, fenced by run claims. Its own module,
+// as the design (section 3.1) asks of every checkpoint adapter, because `llm4s-agent` is frozen and
+// `frozenDependencyCheck` bans a JDBC driver there; the driver is declared here, never in `commonSettings`, at the
+// version `llm4s-memory` already uses. It needs no service, so no suite needs a `modules/it` tier: its tests,
+// including the one that kills a forked JVM mid-run and recovers in this one, run with `sbt test`.
+lazy val agentCheckpointSqlite = (project in file("modules/agent-checkpoint-sqlite"))
+  // test->test: the ReplayContract reference subjects live in agent-testkit's tests
+  .dependsOn(agent, agentTestkit % "test->compile;test->test")
+  .settings(
+    name := "llm4s-agent-checkpoint-sqlite",
+    commonSettings,
+    // Measured 97.96% statement coverage
+    // (`sbt coverage agentCheckpointSqlite/test agentCheckpointSqlite/coverageReport`) on its first version.
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.sqlite,
+      Deps.ujson,
+      Deps.scalatest % Test
+    )
+  )
+
+// `llm4s-agent-memory` (#1911, design 4.31) is semantic memory for agents: `SemanticMemoryMiddleware` recalls a
+// tenant's memories before a turn and records the turn after it, each write one replayable effect (C4) on a
+// `TransactionalMemoryStore`. Its own module because `llm4s-memory` depends on core only and `llm4s-agent` must not
+// depend on `llm4s-memory`. Test scope: the agent's test fixtures (`ScriptedLLMClient`), the SQLite checkpointer
+// (a thread restored after the middleware is added, C5) and the testkit's `ReplayContract`. SQLite needs no
+// service, so every suite runs here under `sbt test`.
+lazy val agentMemory = (project in file("modules/agent-memory"))
+  .dependsOn(agent % "compile->compile;test->test", memory, agentTestkit % Test, agentCheckpointSqlite % "test->test")
+  .settings(
+    name := "llm4s-agent-memory",
+    commonSettings,
+    // Measured 99.51% statement coverage (`sbt coverage agentMemory/test agentMemory/coverageReport`) on its first
+    // version. Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test
     )
   )
 
@@ -1636,7 +1738,7 @@ lazy val it = (project in file("modules/it"))
     core,
     rag,
     knowledgegraph,
-    memory,
+    memory % "compile->compile;test->test",
     memoryPostgres,
     mcp,
     image,
@@ -1657,7 +1759,11 @@ lazy val it = (project in file("modules/it"))
     observability,
     observabilityPrometheus,
     traceOpentelemetry,
-    agent
+    agent,
+    agentTestkit % Test,
+    // CodingWorkspaceIntegrationSpec (design 4.38): a scripted model, and a run suspended and resumed over SQLite
+    testkit               % Test,
+    agentCheckpointSqlite % Test
   )
   .settings(
     name := "llm4s-it",
@@ -1742,6 +1848,8 @@ lazy val docs = (project in file("modules/docs"))
     traceOpentelemetry,
     agent,
     agentTestkit,
+    agentCheckpointSqlite,
+    agentMemory,
     agentTools,
     knowledgegraphNeo4j,
     llm4sEffect,
@@ -1790,6 +1898,8 @@ lazy val docs = (project in file("modules/docs"))
         (traceOpentelemetry / Compile / sources).value ++
         (agent / Compile / sources).value ++
         (agentTestkit / Compile / sources).value ++
+        (agentCheckpointSqlite / Compile / sources).value ++
+        (agentMemory / Compile / sources).value ++
         (agentTools / Compile / sources).value ++
         (knowledgegraphNeo4j / Compile / sources).value ++
         (llm4sEffect / Compile / sources).value ++
@@ -1830,7 +1940,14 @@ lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
   // `observabilityMicrometer` is provided, like Actuator: `LlmMetricsAutoConfiguration` records into the
   // application's MeterRegistry only when the application adds `llm4s-observability-micrometer` itself, so the
   // starter puts no Micrometer jar on a classpath that did not ask for one (#1466).
-  .dependsOn(javaApi, observabilityMicrometer % "provided", core % "test->test", providerTestkit % Test)
+  // `bedrock` is a test dependency only, for the health indicator's redaction of nested credentials (#1820).
+  .dependsOn(
+    javaApi,
+    observabilityMicrometer % "provided",
+    core                    % "test->test",
+    providerTestkit         % Test,
+    bedrock                 % Test
+  )
   .settings(
     name := "llm4s-spring-boot-starter",
     commonSettings,

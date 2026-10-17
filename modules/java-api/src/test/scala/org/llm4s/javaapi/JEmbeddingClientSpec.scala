@@ -39,7 +39,10 @@ class JEmbeddingClientSpec extends AnyFlatSpec with Matchers {
   private val configured = EmbeddingModelConfig("embed-model", 1536)
 
   private def clientOver(provider: EmbeddingProvider): JEmbeddingClient =
-    new JEmbeddingClient(new EmbeddingClient(provider)(using ModelRegistryService.fromModels(Nil)), configured)
+    Llm4s.wrapEmbeddingClient(
+      new EmbeddingClient(provider)(using ModelRegistryService.fromModels(Nil)),
+      configured
+    )
 
   private def failingWith(error: LLMError): JEmbeddingClient = clientOver(new Recording(_ => Left(error)))
 
@@ -218,7 +221,7 @@ class JEmbeddingClientSpec extends AnyFlatSpec with Matchers {
   private def created(
     loaded: Result[(String, org.llm4s.llmconnect.config.EmbeddingProviderConfig)]
   ): Either[LlmException, JEmbeddingClient] =
-    EmbeddingClients.from(loaded).left.map(new LlmException(_))
+    FacadeInternals.embeddingClient(loaded).left.map(new LlmException(_))
 
   "Llm4s.createEmbeddingClient" should "build the client for the model it names, with its key from configuration" in {
     // llm4s.embeddings.model names fixture-embed-small; the factory asks for another model, its key from the same block
@@ -343,7 +346,7 @@ class JEmbeddingClientSpec extends AnyFlatSpec with Matchers {
   }
 
   "JEmbeddings.vectors" should "hand out copies: changing a returned array or list changes nothing held" in {
-    val embeddings = JEmbeddings.of("m", 2, Array(Array(1f, 2f), Array(3f, 4f)))
+    val embeddings = new JEmbeddings("m", 2, Array(Array(1f, 2f), Array(3f, 4f)))
     val first      = embeddings.vectors
     first.get(0)(0) = 99f
     an[UnsupportedOperationException] should be thrownBy first.add(Array(0f, 0f))
@@ -352,7 +355,7 @@ class JEmbeddingClientSpec extends AnyFlatSpec with Matchers {
   }
 
   "JEmbeddings" should "be a value: equal when model, dimensions and every component are, whatever the arrays" in {
-    def of(model: String, dims: Int, vectors: Array[Float]*) = JEmbeddings.of(model, dims, vectors.toArray)
+    def of(model: String, dims: Int, vectors: Array[Float]*) = new JEmbeddings(model, dims, vectors.toArray)
     val one                                                  = of("m", 2, Array(1f, 2f), Array(3f, 4f))
 
     one shouldBe of("m", 2, Array(1f, 2f), Array(3f, 4f))

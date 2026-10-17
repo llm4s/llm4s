@@ -255,4 +255,34 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
     "redact the token value in AccessToken.toString" in {
       (AccessToken("secret", start).toString should not).include("secret")
     }
+
+    "return a fetch that throws as an AuthenticationError naming the exception, not throw it (#1818)" in {
+      val clock = MutableClock(start)
+      val calls = new AtomicInteger(0)
+      val fetch: () => Result[AccessToken] = () => {
+        calls.incrementAndGet()
+        throw new IllegalStateException("leaked-detail sk-should-not-appear")
+      }
+      val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
+      val error    = provider.token().swap.getOrElse(fail("expected a failure"))
+      error shouldBe an[AuthenticationError]
+      error.message should include("IllegalStateException")
+      (error.message should not).include("sk-should-not-appear")
+      // Shared like any rejection for the failure window, then tried again.
+      provider.token().isLeft shouldBe true
+      calls.get shouldBe 1
+      clock.advance(6.seconds)
+      provider.token().isLeft shouldBe true
+      calls.get shouldBe 2
+    }
+  }
+
+  "AccessToken" should {
+    "be built with apply and changed with the with* setters, its constructor and copy private (#1818)" in {
+      val token = AccessToken("t1", start)
+      token.withValue("t2") shouldBe AccessToken("t2", start)
+      token.withExpiresAt(start.plusSeconds(60)) shouldBe AccessToken("t1", start.plusSeconds(60))
+      assertDoesNotCompile("""new AccessToken("t", java.time.Instant.EPOCH)""")
+      assertDoesNotCompile("""AccessToken("t", java.time.Instant.EPOCH).copy(value = "u")""")
+    }
   }

@@ -1,7 +1,15 @@
 package org.llm4s.agent.graph.middleware
 
 import org.llm4s.agent.graph.*
-import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolFixtures, AgentToolSpec, ToolContext, ToolOutcome, ToolSet }
+import org.llm4s.agent.graph.tool.{
+  AgentTool,
+  AgentToolFixtures,
+  AgentToolSpec,
+  ToolContent,
+  ToolContext,
+  ToolOutcome,
+  ToolSet
+}
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.agent.graph.toolloop.ToolLoopFixtures
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, ToolCall, UserMessage }
@@ -29,15 +37,15 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     override def runsAfter: Set[MiddlewareId]  = after.map(MiddlewareId(_))
     override def runsBefore: Set[MiddlewareId] = before.map(MiddlewareId(_))
     override def tools: Vector[AgentTool[?]]   = contributes
-    override def beforeAgent(input: String, context: RunContext): Result[String] =
+    override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
       log.add(s"$name:beforeAgent")
-      Right(s"$input>$name")
-    override def afterAgent(answer: String, context: RunContext): Result[String] =
+      Right(BoundaryResult(s"$input>$name"))
+    override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
       log.add(s"$name:afterAgent")
-      Right(s"$answer<$name")
-    override def wrapModelCall(request: ModelRequest, context: RunContext)(
-      next: ModelRequest => Result[Completion]
-    ): Result[Completion] =
+      Right(BoundaryResult(s"$answer<$name"))
+    override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+      next: ModelRequest => Result[ModelResponse]
+    ): Result[ModelResponse] =
       log.add(s"$name:before")
       val result = next(request.withMessages(request.messages :+ UserMessage(name)))
       log.add(s"$name:after")
@@ -55,16 +63,19 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
       wrap(next)
 
   private class Throwing(name: String, thrown: () => Throwable) extends AgentMiddleware:
-    val id: MiddlewareId                                                         = MiddlewareId(name)
-    override def beforeAgent(input: String, context: RunContext): Result[String] = throw thrown()
-    override def afterAgent(answer: String, context: RunContext): Result[String] = throw thrown()
-    override def wrapModelCall(request: ModelRequest, context: RunContext)(
-      next: ModelRequest => Result[Completion]
-    ): Result[Completion] = throw thrown()
+    val id: MiddlewareId                                                                   = MiddlewareId(name)
+    override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] = throw thrown()
+    override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] = throw thrown()
+    override def promptSections(context: ModelContext): Result[Vector[PromptSection]]      = throw thrown()
+    override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+      next: ModelRequest => Result[ModelResponse]
+    ): Result[ModelResponse] = throw thrown()
     override def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome =
       throw thrown()
 
-  private val runContext: RunContext = GraphTestSupport.testRunContext()
+  private val runContext: RunContext                    = GraphTestSupport.testRunContext()
+  private val modelContext: ModelContext                = GraphTestSupport.testModelContext(runContext)
+  private val noteKey: StateKey[Vector[String], String] = StateKey.appending[String]("note")
   private val toolContext: ToolContext =
     ToolContext(
       runContext,
@@ -81,7 +92,9 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
   private val modelRequest = ModelRequest(Vector.empty, ToolSet.of().value)
 
   private def tool(name: String): AgentTool[Search] =
-    AgentTool(AgentToolSpec[Search](name, "Searches", searchSchema))((_, _) => ToolOutcome.Success(ujson.Str("ok")))
+    AgentTool(AgentToolSpec[Search](name, "Searches", searchSchema))((_, _) =>
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
+    )
 
   private def stack(middleware: AgentMiddleware*): MiddlewareStack = MiddlewareStack.of(middleware*).value
 
@@ -179,10 +192,10 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     val log = newLog
     val result = stack(Rec("a", log), Rec("b", log), Rec("c", log)).wrapToolCall(request, toolContext) { () =>
       log.add("tool")
-      ToolOutcome.Success(ujson.Str("done"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))
     }
     log.asScala.toList shouldBe List("a:before", "b:before", "c:before", "tool", "c:after", "b:after", "a:after")
-    result shouldBe MiddlewareStack.ToolChainResult(ToolOutcome.Success(ujson.Str("done")), None)
+    result shouldBe MiddlewareStack.ToolChainResult(ToolOutcome.Success(ToolContent.Json(ujson.Str("done"))), None)
   }
 
   it should "call the innermost function directly with no middleware" in {
@@ -201,7 +214,7 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     val b = new Wrap("b")(_ => ToolOutcome.Error("Denied: x"))
     val result = stack(a, b, Rec("c", log)).wrapToolCall(request, toolContext) { () =>
       log.add("tool")
-      ToolOutcome.Success(ujson.Str("done"))
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))
     }
     log.asScala.toList shouldBe Nil
     seen.asScala.toList shouldBe List(ToolOutcome.Error("Denied: x").toString)
@@ -216,10 +229,10 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
       next()
     )
     val result = stack(retry).wrapToolCall(request, toolContext) { () =>
-      ToolOutcome.Success(ujson.Num(calls.incrementAndGet().toDouble))
+      ToolOutcome.Success(ToolContent.Json(ujson.Num(calls.incrementAndGet().toDouble)))
     }
     calls.get shouldBe 2
-    result.outcome shouldBe ToolOutcome.Success(ujson.Num(2))
+    result.outcome shouldBe ToolOutcome.Success(ToolContent.Json(ujson.Num(2)))
   }
 
   "ToolChainResult.raisedBy" should "be None for the tool's own NeedsApproval" in {
@@ -293,11 +306,13 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
   "wrapModelCall" should "nest the first middleware outermost and pass each rewritten request inward" in {
     val log    = newLog
     val answer = ToolLoopFixtures.completion(AssistantMessage("hi"))
-    val result = stack(Rec("a", log), Rec("b", log)).wrapModelCall(modelRequest, runContext) { req =>
-      log.add(s"model:${req.messages.map(_.content).mkString(",")}")
-      Right(answer)
-    }
-    result shouldBe Right(answer)
+    val result =
+      stack(Rec("a", log), Rec("b", log)).wrapModelCall(modelRequest, modelContext, MiddlewareStack.WriteCheck()) {
+        req =>
+          log.add(s"model:${req.messages.map(_.content).mkString(",")}")
+          Right(ModelResponse(answer))
+      }
+    result.map(_.completion) shouldBe Right(answer)
     log.asScala.toList shouldBe List("a:before", "b:before", "model:a,b", "b:after", "a:after")
   }
 
@@ -307,16 +322,18 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     val seen = newLog
     val a = new AgentMiddleware:
       val id: MiddlewareId = MiddlewareId("a")
-      override def wrapModelCall(request: ModelRequest, context: RunContext)(
-        next: ModelRequest => Result[Completion]
-      ): Result[Completion] =
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] =
         val r = next(request)
         seen.add(r.toString)
         r
-    val result = stack(a, new Throwing("b", () => boom)).wrapModelCall(modelRequest, runContext) { _ =>
-      log.add("model")
-      Right(ToolLoopFixtures.completion(AssistantMessage("hi")))
-    }
+    val result =
+      stack(a, new Throwing("b", () => boom)).wrapModelCall(modelRequest, modelContext, MiddlewareStack.WriteCheck()) {
+        _ =>
+          log.add("model")
+          Right(ModelResponse(ToolLoopFixtures.completion(AssistantMessage("hi"))))
+      }
     result shouldBe Left(GraphError.MiddlewareFailed("b", boom))
     seen.asScala.toList shouldBe List(Left(GraphError.MiddlewareFailed("b", boom)).toString)
     log.asScala.toList shouldBe Nil
@@ -326,8 +343,8 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     Seq[() => Throwable](() => new RuntimeException(new InterruptedException()), () => new InterruptedException())
       .foreach { thrown =>
         val result =
-          stack(new Throwing("b", thrown)).wrapModelCall(modelRequest, runContext)(_ =>
-            Right(ToolLoopFixtures.completion(AssistantMessage("hi")))
+          stack(new Throwing("b", thrown)).wrapModelCall(modelRequest, modelContext, MiddlewareStack.WriteCheck())(_ =>
+            Right(ModelResponse(ToolLoopFixtures.completion(AssistantMessage("hi"))))
           )
         Thread.interrupted() shouldBe true
         result.left.value shouldBe a[CancelledError]
@@ -336,7 +353,10 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "beforeAgent" should "run in stack order, threading the transformed input" in {
     val log = newLog
-    stack(Rec("a", log), Rec("b", log), Rec("c", log)).beforeAgent("in", runContext) shouldBe Right("in>a>b>c")
+    stack(Rec("a", log), Rec("b", log), Rec("c", log))
+      .beforeAgent("in", modelContext, MiddlewareStack.WriteCheck())
+      .map(_.text) shouldBe
+      Right("in>a>b>c")
     log.asScala.toList shouldBe List("a:beforeAgent", "b:beforeAgent", "c:beforeAgent")
   }
 
@@ -344,32 +364,137 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     val log           = newLog
     val err: LLMError = ValidationError("input", "blocked")
     val blocking = new Rec("b", log) {
-      override def beforeAgent(input: String, context: RunContext): Result[String] = Left(err)
+      override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] = Left(err)
     }
-    stack(Rec("a", log), blocking, Rec("c", log)).beforeAgent("in", runContext) shouldBe Left(err)
+    stack(Rec("a", log), blocking, Rec("c", log)).beforeAgent(
+      "in",
+      modelContext,
+      MiddlewareStack.WriteCheck()
+    ) shouldBe Left(err)
     log.asScala.toList shouldBe List("a:beforeAgent")
   }
 
   it should "turn a throw into Left(MiddlewareFailed) and a cancellation into Left(CancelledError)" in {
     val boom = new IllegalStateException("boom")
-    stack(new Throwing("b", () => boom)).beforeAgent("in", runContext) shouldBe
+    stack(new Throwing("b", () => boom)).beforeAgent("in", modelContext, MiddlewareStack.WriteCheck()) shouldBe
       Left(GraphError.MiddlewareFailed("b", boom))
     val cancelled = stack(new Throwing("b", () => new RuntimeException(new InterruptedException())))
-      .beforeAgent("in", runContext)
+      .beforeAgent("in", modelContext, MiddlewareStack.WriteCheck())
     Thread.interrupted() shouldBe true
     cancelled.left.value shouldBe a[CancelledError]
   }
 
   "afterAgent" should "run in reverse stack order, threading the transformed answer" in {
     val log = newLog
-    stack(Rec("a", log), Rec("b", log), Rec("c", log)).afterAgent("out", runContext) shouldBe Right("out<c<b<a")
+    stack(Rec("a", log), Rec("b", log), Rec("c", log))
+      .afterAgent("out", modelContext, MiddlewareStack.WriteCheck())
+      .map(_.text) shouldBe
+      Right("out<c<b<a")
     log.asScala.toList shouldBe List("c:afterAgent", "b:afterAgent", "a:afterAgent")
   }
 
   it should "turn a throw into Left(MiddlewareFailed)" in {
     val boom = new IllegalStateException("boom")
-    stack(new Throwing("b", () => boom)).afterAgent("out", runContext) shouldBe
+    stack(new Throwing("b", () => boom)).afterAgent("out", modelContext, MiddlewareStack.WriteCheck()) shouldBe
       Left(GraphError.MiddlewareFailed("b", boom))
+  }
+
+  // ---- C1 (#1902, design §4.22): each hook's update is attributed to its middleware and checked against its writes
+
+  /** A middleware that declares `noteKey` (or nothing) and writes `<name>` to it from every hook. */
+  private class Noting(name: String, declares: Boolean = true) extends AgentMiddleware:
+    val id: MiddlewareId                     = MiddlewareId(name)
+    override def writes: Set[StateKey[?, ?]] = if declares then Set(noteKey) else Set.empty
+    private def note                         = StateUpdate.update(noteKey, name)
+    override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
+      Right(BoundaryResult(input, note))
+    override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
+      Right(BoundaryResult(answer).addUpdate(note))
+    override def promptSections(context: ModelContext): Result[Vector[PromptSection]] =
+      Right(Vector(PromptSection(s"$name-section", name)))
+    override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+      next: ModelRequest => Result[ModelResponse]
+    ): Result[ModelResponse] = next(request).map(_.addUpdate(note))
+
+  private def notesOf(update: StateUpdate): Vector[String] =
+    update.operations.collect { case StateOperation.Update(_, value: String) => value }
+
+  private def hi: Result[ModelResponse] = Right(ModelResponse(ToolLoopFixtures.completion(AssistantMessage("hi"))))
+
+  "A boundary hook's updates" should "be kept per middleware, in the order the hooks ran" in {
+    val s = stack(new Noting("a"), new Noting("b"))
+    s.beforeAgent("in", modelContext, MiddlewareStack.WriteCheck())
+      .value
+      .updates
+      .map((id, u) => id.value -> notesOf(u)) shouldBe
+      Vector("a" -> Vector("a"), "b" -> Vector("b"))
+    s.afterAgent("out", modelContext, MiddlewareStack.WriteCheck())
+      .value
+      .updates
+      .map((id, u) => id.value -> notesOf(u)) shouldBe
+      Vector("b" -> Vector("b"), "a" -> Vector("a"))
+  }
+
+  "A model wrapper's update" should "be attributed to the wrapper that added it, innermost first" in {
+    val s        = stack(new Noting("outer"), new Noting("inner"))
+    val check    = MiddlewareStack.WriteCheck()
+    val response = s.wrapModelCall(modelRequest, modelContext, check)(_ => hi).value
+    response.parts.map((owner, u) => owner.map(_.value) -> notesOf(u)) shouldBe
+      Vector(Some("inner") -> Vector("inner"), Some("outer") -> Vector("outer"))
+    notesOf(response.update) shouldBe Vector("inner", "outer")
+    check.failure shouldBe None
+  }
+
+  it should "be refused when its middleware does not declare the key, naming both" in {
+    val s       = stack(new Noting("declares"), new Noting("sneaky", declares = false))
+    val check   = MiddlewareStack.WriteCheck()
+    val _       = s.wrapModelCall(modelRequest, modelContext, check)(_ => hi)
+    val refused = check.failure.getOrElse(fail("no undeclared write found"))
+    refused.message should (include("middleware 'sneaky'").and(include("'note'")))
+    (refused.message should not).include("'declares'")
+  }
+
+  it should "be found in a response an outer wrapper discards" in {
+    val discarding = new AgentMiddleware:
+      val id: MiddlewareId = MiddlewareId("discarding")
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] = next(request).flatMap(_ => hi)
+    val check = MiddlewareStack.WriteCheck()
+    val _ =
+      stack(discarding, new Noting("sneaky", declares = false)).wrapModelCall(modelRequest, modelContext, check)(_ =>
+        hi
+      )
+    check.failure.map(_.message).getOrElse(fail("hidden")) should include("middleware 'sneaky'")
+  }
+
+  "A boundary hook's undeclared write" should "stop the fold and stay recorded, whatever a later hook would do" in {
+    val check = MiddlewareStack.WriteCheck()
+    val result =
+      stack(new Noting("sneaky", declares = false), new Noting("later")).beforeAgent("in", modelContext, check)
+    result.isLeft shouldBe true
+    check.failure.map(_.message).getOrElse(fail("hidden")) should include("middleware 'sneaky'")
+  }
+
+  "ModelResponse.withCompletion" should "keep the update" in {
+    val r       = hi.value.addUpdate(StateUpdate.update(noteKey, "x"))
+    val changed = r.withCompletion(ToolLoopFixtures.completion(AssistantMessage("b")))
+    changed.completion.content shouldBe "b"
+    notesOf(changed.update) shouldBe Vector("x")
+  }
+
+  "promptSections" should "collect every middleware's sections in stack order, guarding each hook" in {
+    stack(new Noting("a"), new Noting("b")).promptSections(modelContext).value.map((id, s) => id.value -> s.id) shouldBe
+      Vector("a" -> "a-section", "b" -> "b-section")
+    val boom = new IllegalStateException("boom")
+    stack(new Throwing("b", () => boom)).promptSections(modelContext) shouldBe
+      Left(GraphError.MiddlewareFailed("b", boom))
+  }
+
+  "PromptSection" should "default to not cacheable and change with its with* setters" in {
+    val s = PromptSection("id", "text")
+    s.cacheable shouldBe false
+    s.withCacheable(true).withId("i2").withText("t2") shouldBe PromptSection("i2", "t2", cacheable = true)
   }
 
   "MiddlewareFailed.message" should "name the middleware and the cause's message" in {

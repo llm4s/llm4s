@@ -312,4 +312,16 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
       case other                   => fail(s"Expected ServiceError, got: $other")
     }
   }
+
+  "extractErrorDetails" should "read IBM watsonx's errors array, and keep a 413's message" in {
+    val watsonx = ujson.Obj("errors" -> ujson.Arr(ujson.Obj("code" -> "bad", "message" -> "too many images"))).render()
+    HttpErrorMapper.extractErrorDetails(watsonx, 400, "watsonx") shouldBe "too many images"
+    HttpErrorMapper
+      .mapHttpError(413, """{"error":{"message":"request too large"}}""", "gemini")
+      .left
+      .toOption
+      .get
+      .message should
+      include("request too large")
+  }
 }

@@ -15,7 +15,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers:
   private def client = new WatsonXClient(config, httpClient = routed(_ => Right(iamToken()), _ => Right(chatReply)))
 
   private def body(conversation: Conversation, options: CompletionOptions = CompletionOptions()): String =
-    client.createRequestBody(conversation, options).render()
+    client.createRequestBody(conversation, options).toOption.get.render()
 
   private val options = CompletionOptions().withTemperature(0.5).withMaxTokens(64)
 
@@ -132,7 +132,9 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers:
       config.copy(spaceId = Some("space-9")),
       httpClient = routed(_ => Right(iamToken()), _ => Right(chatReply))
     )
-    val json = ujson.read(spaced.createRequestBody(Conversation(Seq(UserMessage("x"))), CompletionOptions()).render())
+    val json = ujson.read(
+      spaced.createRequestBody(Conversation(Seq(UserMessage("x"))), CompletionOptions()).toOption.get.render()
+    )
     json.obj.keySet should contain("space_id")
     json.obj.keySet should not contain "project_id"
   }

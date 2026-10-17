@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.config.{ OllamaModelLister, ProviderModelLister }
+import org.llm4s.config.{ OllamaConfigKeys, OllamaModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OllamaConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -13,17 +13,23 @@ import org.llm4s.types.Result
 /**
  * Registration for a locally-running Ollama instance.
  *
- * Ollama is the one provider with a required `baseUrl` and no default: it runs
- * wherever the user started it. It needs no API key — access is controlled at
+ * A section's `baseUrl` defaults to `http://localhost:11434`, where `ollama serve`
+ * listens and where Ollama's own clients look, so a local section needs only
+ * `provider` and `model` ([[https://github.com/llm4s/llm4s/issues/1991 #1991]]). For
+ * another host, set `baseUrl`, or bind the conventional variable in the section:
+ * `baseUrl = ${?OLLAMA_BASE_URL}`. It needs no API key — access is controlled at
  * the network level.
  */
 @Stable
 object OllamaProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("ollama")
 
+  /** Where `ollama serve` listens by default; used when a section sets no `baseUrl`. */
+  private[llm4s] val DefaultBaseUrl: String = "http://localhost:11434"
+
   val configSpec: ProviderConfigSpec = ProviderConfigSpec(
-    requiresBaseUrl = true,
-    baseUrlExample = "e.g. http://localhost:11434"
+    defaultBaseUrl = Some(DefaultBaseUrl),
+    baseUrlEnv = Some(OllamaConfigKeys.OLLAMA_BASE_URL)
   )
 
   override val modelLister: Option[ProviderModelLister] = Some(OllamaModelLister)
