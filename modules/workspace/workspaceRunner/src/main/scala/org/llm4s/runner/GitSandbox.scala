@@ -261,7 +261,7 @@ private[runner] object GitSandbox {
 
   /**
    * Lists the configuration a `git` command started by `builder` would read: the same working directory and
-   * environment, the fixed overrides, and `config --list --no-includes --show-scope -z`, run by `git`, which on POSIX
+   * environment, the fixed overrides, and `config --list --no-includes --show-scope -z`, run by `git`, which on Linux
    * is the system's (`/usr/bin` or `/bin`), never one found on `PATH`, since this runs unconfined (design §4.39).
    * `Left` with the reason when it cannot be listed, which refuses the command.
    */

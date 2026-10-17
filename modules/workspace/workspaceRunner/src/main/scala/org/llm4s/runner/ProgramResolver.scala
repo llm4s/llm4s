@@ -115,11 +115,18 @@ private[runner] object ProgramResolver {
     resolveIn(program, search, untrustedRoots, search.systemDirectories.map(_.toString))
 
   /**
-   * Where the runner's own helper programs come from on POSIX: git's configuration lister, `getfacl` and `setfacl`.
+   * Where the runner's own helper programs come from on Linux: git's configuration lister, `getfacl` and `setfacl`.
    * They run unconfined (design §4.39), so never from `PATH`, whose entries (the runner user's home, for one) a
    * confined command may be able to write: a program planted there would run with the runner's own rights.
    */
   val RunnerToolDirectories: Seq[Path] = Seq(Paths.get("/usr/bin"), Paths.get("/bin"))
+
+  /**
+   * [[RunnerToolDirectories]] on Linux, where commands are confined; None elsewhere, where the helpers are found as a
+   * command's program is ([[resolve]]): no command is confined there, so none can gain by planting one.
+   */
+  val HostRunnerToolDirectories: Option[Seq[Path]] =
+    Option.when(System.getProperty("os.name", "").startsWith("Linux"))(RunnerToolDirectories)
 
   /**
    * The absolute path of one of the runner's own helper programs, found only in `directories` (never `PATH`, never
