@@ -109,10 +109,19 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
     ).redirectErrorStream(true).start()
     val owner = new String(init.getInputStream.readAllBytes(), StandardCharsets.UTF_8).trim
     if (init.waitFor() != 0) fail(s"making the repository in the image failed: $owner")
-    // On a Linux host the ownership is kept, so the case cannot pass for want of another owner.
-    if (System.getProperty("os.name", "").startsWith("Linux") && owner != RepoOwner.toString)
+    // Only Docker Desktop's file sharing drops a chown on a bind mount; elsewhere the ownership is kept, so the case
+    // cannot pass for want of another owner.
+    if (owner != RepoOwner.toString && !dockerDesktop)
       fail(s"the repository is owned by uid $owner in the container, not $RepoOwner")
     start(dirA, HostPortA, config, extra = Set("curl", "jcmd"))
+  }
+
+  /** Whether the Docker daemon is Docker Desktop's, whose bind mounts do not keep a chown made in a container. */
+  private def dockerDesktop: Boolean = {
+    val info =
+      new ProcessBuilder("docker", "info", "--format", "{{.OperatingSystem}}").redirectErrorStream(true).start()
+    val os = new String(info.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
+    info.waitFor() == 0 && os.contains("Docker Desktop")
   }
 
   private lazy val workspaceB: ContainerisedWorkspace = {
