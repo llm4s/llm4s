@@ -1891,11 +1891,11 @@ class WorkspaceAgentInterfaceImpl(
       if (!GitSandbox.hasSubcommand(args)) Nil
       else
         GitSandbox
-          .listConfiguration(builder, lister, empty)
+          .listConfiguration(builder, lister, empty, realRoot)
           .fold(failed, identity)
           .pipe(GitSandbox.driverOverrides)
           .fold(refused => throw new WorkspaceAgentException(refused.message, refused.code, None), identity)
-    builder.command((git +: GitSandbox.arguments(args, GitSandbox.fixedOverrides(empty) ++ drivers)).asJava)
+    builder.command((git +: GitSandbox.arguments(args, GitSandbox.fixedOverrides(empty, realRoot) ++ drivers)).asJava)
   }
 
   /**

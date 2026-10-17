@@ -34,9 +34,10 @@ import scala.util.{ Try, Using }
  *     `core.fsmonitor=false`, `core.hooksPath` the empty directory, `diff.external` empty, `log.showSignature=false`,
  *     every `gpg.*.program` the empty directory (which cannot be run), `diff.ignoreSubmodules=all` (no `git` started
  *     in a submodule), `safe.bareRepository=explicit` (a bare repository written into the workspace is not used),
- *     `log.diffMerges=separate` (git's default, so `-m` and `--diff-merges=on` never re-merge) and `merge.default`
+ *     `log.diffMerges=separate` (git's default, so `-m` and `--diff-merges=on` never re-merge), `merge.default`
  *     empty (a path with no `merge` attribute uses the built-in merge; a `[merge ""]` the empty name would select is
- *     refused by layer 3), and `--no-pager`; and after the subcommand
+ *     refused by layer 3) and `safe.directory` the workspace (a workspace another user owns is used, #2014,
+ *     [[safeDirectories]]), and `--no-pager`; and after the subcommand
  *     ([[SubcommandOptions]]) `--no-ext-diff`, `--no-textconv` and `--ignore-submodules=all` where it takes them. The
  *     policy refuses the options that would undo them, `--remerge-diff` and `--diff-merges` (which re-merge, running
  *     merge drivers), and `git status -v` / `--verbose`, whose staged diff runs textconv drivers and which takes no
@@ -101,7 +102,7 @@ private[runner] object GitSandbox {
    * file. `gpg.*.program` name `empty`, a directory, so a signature check fails rather than runs a program; textconv,
    * an external diff and filters are switched off with empty values (see [[driverOverrides]]).
    */
-  def fixedOverrides(empty: Path): Seq[(String, String)] = Seq(
+  def fixedOverrides(empty: Path, realRoot: Path): Seq[(String, String)] = Seq(
     "core.fsmonitor"        -> "false",
     "core.hooksPath"        -> empty.toString,
     "diff.external"         -> "",
@@ -118,7 +119,35 @@ private[runner] object GitSandbox {
     // a `[merge "text"]` (or "union", "binary") in .git/config would replace `text`. An empty name selects only a
     // `[merge ""]`, which driverOverrides refuses (isExpressible), and otherwise falls through to the built-in merge.
     "merge.default" -> ""
-  )
+  ) ++ safeDirectories(realRoot).map("safe.directory" -> _)
+
+  /**
+   * The `safe.directory` values that let git use a repository in the workspace whose owner is not the runner's user
+   * (#2014): `realRoot` itself, and `realRoot/` followed by `*`, which git (2.46 and later) reads as a prefix, every
+   * repository whose top level lies below `realRoot`. A bind-mounted workspace on a Linux host keeps the host user's
+   * uid, so without them every `git` command fails with `detected dubious ownership`; the null-device global
+   * configuration and empty `HOME` leave no other place to set them.
+   *
+   * Why this is safe: `safe.directory` exists to stop a repository's `.git/config` from making git run a program as a
+   * user who does not own it, and every such route is already closed for these repositories by the layers above and
+   * by the command confinement (design §4.39). The values are the workspace's real path, never `*`, so a repository
+   * outside the workspace stays refused: git's repository discovery stops at the workspace (`GIT_CEILING_DIRECTORIES`)
+   * and the policy refuses a `.git` leading outside it. The prefix form is needed because the value must match the
+   * repository's top level exactly, which is unknown before git runs, and a repository cloned into a subdirectory of
+   * the workspace is as much the workspace's as one at its root; a prefix ending in `/` matches no sibling such as
+   * `<root>-other`. git older than 2.46 reads the prefix value as one exact path that no repository has, so it only
+   * loses the subdirectory case.
+   *
+   * The configuration lister is given them too (it runs with [[fixedOverrides]]): without them, `git config --list` in
+   * such a repository leaves out its local configuration rather than failing, so the drivers it defines would not be
+   * blanked while the command, accepting the repository, would read them.
+   */
+  private[runner] def safeDirectories(realRoot: Path): Seq[String] = {
+    // git compares with forward slashes on every platform.
+    val root =
+      if (java.io.File.separatorChar == '\\') realRoot.toString.replace('\\', '/') else realRoot.toString
+    Seq(root, root.stripSuffix("/") + "/*")
+  }
 
   /** Options given after the subcommand: `git diff`, `log` and `show` run textconv and external diffs by default. */
   val SubcommandOptions: Map[String, Seq[String]] = Map(
@@ -265,11 +294,16 @@ private[runner] object GitSandbox {
    * is the system's (`/usr/bin` or `/bin`), never one found on `PATH`, since this runs unconfined (design §4.39).
    * `Left` with the reason when it cannot be listed, which refuses the command.
    */
-  def listConfiguration(builder: java.lang.ProcessBuilder, git: String, empty: Path): Either[String, Array[Byte]] = {
+  def listConfiguration(
+    builder: java.lang.ProcessBuilder,
+    git: String,
+    empty: Path,
+    realRoot: Path
+  ): Either[String, Array[Byte]] = {
     val lister = new java.lang.ProcessBuilder(
       (Seq(git) ++ arguments(
         Seq("config", "--list", "--no-includes", "--show-scope", "-z"),
-        fixedOverrides(empty)
+        fixedOverrides(empty, realRoot)
       )).asJava
     )
     lister.directory(builder.directory())

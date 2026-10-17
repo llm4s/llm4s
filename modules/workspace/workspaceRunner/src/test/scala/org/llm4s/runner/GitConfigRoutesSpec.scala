@@ -6,7 +6,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.attribute.FileTime
-import java.nio.file.{ Files, Path }
+import java.nio.file.{ Files, Path, Paths }
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
@@ -702,7 +702,7 @@ class GitSandboxUnitSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "switch off every route that does not depend on a driver name" in {
-    val keys = GitSandbox.fixedOverrides(emptyDir).toMap
+    val keys = GitSandbox.fixedOverrides(emptyDir, emptyDir.getParent).toMap
     keys("core.fsmonitor") shouldBe "false"
     keys("core.hooksPath") shouldBe emptyDir.toString
     keys("diff.external") shouldBe ""
@@ -714,6 +714,23 @@ class GitSandboxUnitSpec extends AnyFlatSpec with Matchers {
     keys("safe.bareRepository") shouldBe "explicit"
     keys("log.diffMerges") shouldBe "separate"
     keys("merge.default") shouldBe ""
+  }
+
+  it should "accept the workspace and the repositories below it, and nothing else, whoever owns them (#2014)" in {
+    val root      = Paths.get("/srv/work/ws")
+    val overrides = GitSandbox.fixedOverrides(emptyDir, root)
+    val values    = overrides.collect { case ("safe.directory", v) => v }
+    values shouldBe GitSandbox.safeDirectories(root)
+    // With forward slashes on Windows too, as git compares them.
+    values shouldBe Seq("/srv/work/ws", "/srv/work/ws/*")
+    // Never every directory: neither `*` nor a prefix without the separator, which would match `/srv/work/ws-other`.
+    values should not contain "*"
+    values.filter(_.endsWith("*")).foreach(_ should endWith("/*"))
+    // Given before the subcommand, where command-line configuration is protected configuration git honours.
+    (GitSandbox.arguments(Seq("status"), overrides).takeWhile(_ != "status") should contain).allOf(
+      s"safe.directory=${values.head}",
+      s"safe.directory=${values(1)}"
+    )
   }
 
   it should "refuse the options that re-merge a merge commit, on every host, and keep -m, -c and --cc" in {

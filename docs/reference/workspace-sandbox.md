@@ -599,14 +599,15 @@ So every `git` the runner starts has:
   refused, `EXECUTION_FAILED`, if it is not empty or lies inside the workspace), `GIT_TERMINAL_PROMPT=0`,
   `GIT_PAGER=cat`, `PAGER=cat`, `GIT_OPTIONAL_LOCKS=0`, `GIT_NO_LAZY_FETCH=1` and `GIT_ALLOW_PROTOCOL` naming no
   transport, which overrides any `protocol.<name>.allow` the repository sets. The system and global configuration of
-  whoever runs the runner no longer apply, so a `safe.directory` set there does not either: run the runner as the
-  workspace's owner.
+  whoever runs the runner no longer apply, so a `safe.directory` set there does not either; the runner passes its
+  own (below).
 - **Before the subcommand**: `--no-pager` and `-c core.fsmonitor=false`, `-c core.hooksPath=<empty dir>`,
   `-c diff.external=`, `-c log.showSignature=false`, `gpg.program`, `gpg.openpgp.program`, `gpg.x509.program` and
   `gpg.ssh.program` set to the empty directory (which cannot be run), `-c diff.ignoreSubmodules=all`,
   `-c safe.bareRepository=explicit`, `-c protocol.allow=never`, `-c log.diffMerges=separate` (git's default, so `-m`
   and `--diff-merges=on` diff a merge against its parents rather than re-merging it) and `-c merge.default=` (a path
-  with no `merge` attribute uses the built-in merge). The empty name is used because no driver name is safe by
+  with no `merge` attribute uses the built-in merge), and `-c safe.directory=<root>` and `-c safe.directory=<root>/*`
+  with the workspace root's real path (see below). The empty name is used because no driver name is safe by
   itself: a repository's `[merge "text"]` replaces git's built-in `text` driver (and `union`, `binary`) just as it
   defines any other, while a `[merge ""]` it could select is refused (below). Command-line configuration wins over
   every file.
@@ -630,6 +631,15 @@ So every `git` the runner starts has:
   (`\xE9vil`) is not decoded into U+FFFD and blanked under a name git does not use, and a non-ASCII name is never
   re-encoded for the command line in the JVM's `sun.jnu.encoding`; only a name that reaches git byte for byte is
   blanked. A listing that fails, takes more than ten seconds or is over 1 MB refuses it too (`EXECUTION_FAILED`).
+
+**Ownership** ([#2014](https://github.com/llm4s/llm4s/issues/2014)). git refuses a repository owned by another user
+than its own (`detected dubious ownership`), and a workspace bind-mounted from a Linux host keeps the host user's uid
+while the runner's container runs as root. git's `safe.directory` check exists to stop a repository's configuration
+running a program as a user who does not own it, which the layers above already prevent, so the runner names the
+workspace root - exactly, and with the `/*` suffix that git 2.46 and later reads as a prefix, for a repository in a
+subdirectory - and never `*`: a repository outside the workspace is still refused (git's repository discovery stops
+at the workspace anyway). The configuration listing gets the same values, since without them `git config --list`
+silently leaves out the local configuration of a repository it refuses.
 
 Writes into `.git` are refused as well, which keeps an agent from planting any of this in a repository that is not
 hostile to begin with: `writeFile` and `modifyFile` refuse (`PATH_NOT_ALLOWED`), and every program but the read-only
