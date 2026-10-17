@@ -663,7 +663,7 @@ What a command is granted:
   `readOnlyPaths` entry.
 
 A home or system grant that contains the workspace, or lies inside it, is dropped, so a workspace under the home
-directory gets no home grant. With `networkAllowed = false`, `socket` fails for every family but `AF_UNIX`.
+directory gets no home grant, and build tools run there cannot write their caches. With `networkAllowed = false`, `socket` fails for every family but `AF_UNIX`.
 
 **Limits.** With a read-only path, a command cannot create, delete or rename entries directly in the directories
 above it (with `readOnlyPaths = ["ro"]`, in the workspace root); the runner's own file operations still can. Landlock
@@ -671,11 +671,14 @@ has no metadata rights, so `chmod`, `chown` and timestamps on a read-only path a
 existing hard link into a read-only file can write it, and a read-only symlink protects its target, not the link.
 `/proc` is readable: another process's `environ` and `mem` are not, but its `cmdline` and `status` are. Abstract Unix
 sockets stay reachable without network, and a command can signal the runner. A daemon a command starts (`setsid`)
-stays confined but outlives the command ([#2008](https://github.com/llm4s/llm4s/issues/2008)).
+stays confined but outlives the command ([#2008](https://github.com/llm4s/llm4s/issues/2008)). The runner's own git
+configuration lister runs unconfined: it is the runner's fixed invocation, not the agent's command.
 
 **When it cannot confine** (no helper, Landlock below ABI v3, or a failing call), the command is refused with
 `SANDBOX_UNAVAILABLE` and never starts. **Off Linux** (macOS, Windows) commands run unconfined, under the command
-policy only, and the runner logs this once.
+policy only, and the runner logs this once. An amd64 image run under emulation (Docker Desktop's Rosetta on Apple
+silicon) refuses every command `SANDBOX_UNAVAILABLE`, since Landlock is unavailable there; a local
+`sbt workspaceRunner/Docker/publishLocal` builds for the host architecture, which confines.
 
 To set these fields in a container, pass the whole config; the runner receives it as `WORKSPACE_SANDBOX_CONFIG`:
 
