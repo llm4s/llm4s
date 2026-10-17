@@ -53,15 +53,18 @@ static void unavailable(const char *fmt, ...) {
 
 #define FS_READ (LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR)
 #define FS_EXEC LANDLOCK_ACCESS_FS_EXECUTE
+/* No grant makes a device node: a command could otherwise mknod one into the host-mounted workspace. Both rights
+ * stay handled (FS_HANDLED), so they are refused everywhere. */
 #define FS_WRITE                                                                                                     \
   (LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_REMOVE_DIR | LANDLOCK_ACCESS_FS_REMOVE_FILE |                 \
-   LANDLOCK_ACCESS_FS_MAKE_CHAR | LANDLOCK_ACCESS_FS_MAKE_DIR | LANDLOCK_ACCESS_FS_MAKE_REG |                       \
-   LANDLOCK_ACCESS_FS_MAKE_SOCK | LANDLOCK_ACCESS_FS_MAKE_FIFO | LANDLOCK_ACCESS_FS_MAKE_BLOCK |                    \
-   LANDLOCK_ACCESS_FS_MAKE_SYM | LANDLOCK_ACCESS_FS_REFER | LANDLOCK_ACCESS_FS_TRUNCATE)
+   LANDLOCK_ACCESS_FS_MAKE_DIR | LANDLOCK_ACCESS_FS_MAKE_REG | LANDLOCK_ACCESS_FS_MAKE_SOCK |                        \
+   LANDLOCK_ACCESS_FS_MAKE_FIFO | LANDLOCK_ACCESS_FS_MAKE_SYM | LANDLOCK_ACCESS_FS_REFER |                          \
+   LANDLOCK_ACCESS_FS_TRUNCATE)
+#define FS_DEVICES (LANDLOCK_ACCESS_FS_MAKE_CHAR | LANDLOCK_ACCESS_FS_MAKE_BLOCK)
 #define FS_FILE_ONLY                                                                                                 \
   (LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_EXECUTE |                      \
    LANDLOCK_ACCESS_FS_TRUNCATE)
-#define FS_HANDLED (FS_READ | FS_EXEC | FS_WRITE)
+#define FS_HANDLED (FS_READ | FS_EXEC | FS_WRITE | FS_DEVICES)
 
 static void add_rule(int ruleset, const char *path, __u64 access) {
   int fd = open(path, O_PATH | O_CLOEXEC | O_NOFOLLOW);

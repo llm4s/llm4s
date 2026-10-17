@@ -80,6 +80,20 @@ class ConfineHelperSpec extends AnyFlatSpec with Matchers {
     run(status, system ++ List("--rw", dir.toString), "/usr/bin/touch", dir.resolve("new").toString).exit shouldBe 0
   }
 
+  it should "refuse a device node under a read-write grant, though a FIFO is made there" in {
+    val (dir, status) = fresh()
+    assume(Files.isExecutable(Paths.get("/usr/bin/mknod")), "mknod is not installed")
+    // the control: unconfined, this user can make the node (root with CAP_MKNOD, as in the container)
+    val control = new ProcessBuilder("/usr/bin/mknod", dir.resolve("control").toString, "c", "1", "3").start()
+    assume(control.waitFor() == 0, "this user cannot make device nodes, so a refusal would not be the sandbox's")
+    val grants = system ++ List("--rw", dir.toString)
+    run(status, grants, "/usr/bin/mknod", dir.resolve("null").toString, "c", "1", "3").exit should not be 0
+    run(status, grants, "/usr/bin/mknod", dir.resolve("disk").toString, "b", "7", "0").exit should not be 0
+    Files.exists(dir.resolve("null"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+    Files.exists(dir.resolve("disk"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+    run(status, grants, "/usr/bin/mknod", dir.resolve("fifo").toString, "p").exit shouldBe 0
+  }
+
   it should "allow writing an existing file under --wfile but not creating a sibling" in {
     val (dir, status) = fresh()
     val f             = dir.resolve("f")
