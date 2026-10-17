@@ -132,7 +132,7 @@ class CommandConfinementSpec extends AnyFlatSpec with Matchers {
 
   "helperArgs" should "list the helper, status file, grants, --no-net and --" in {
     def p(s: String) = Paths.get(s).toString // the host's separators, \h on Windows
-    val rules = List(Rule(Grant.ReadOnly, Paths.get("/a")), Rule(Grant.ReadWrite, Paths.get("/b")))
+    val rules        = List(Rule(Grant.ReadOnly, Paths.get("/a")), Rule(Grant.ReadWrite, Paths.get("/b")))
     CommandConfinement.helperArgs(Paths.get("/h"), Paths.get("/s/status"), rules, noNetwork = true) shouldBe
       List(p("/h"), "--status", p("/s/status"), "--ro", p("/a"), "--rw", p("/b"), "--no-net", "--")
     CommandConfinement.helperArgs(Paths.get("/h"), Paths.get("/s/status"), rules, noNetwork = false) should not contain

@@ -18,7 +18,8 @@ import scala.util.{ Failure, Success, Try }
  *
  * Two containers, since a container's sandbox config is fixed when it starts:
  *   - A: `readOnlyPaths = ["ro"]`, `networkAllowed = false`, with `jcmd` and `java` allowed for the `/tmp` cases, and a
- *     git repository;
+ *     git repository made by the image's own user (one made on the host is another user's in the container, which
+ *     git refuses as dubious ownership);
  *   - B: `allowedPaths = ["src"]`, `networkAllowed = true`.
  *
  * Each command here must be accepted by the runner and fail (or succeed) by itself, so a command refused before it runs,
@@ -87,9 +88,21 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
       readOnlyPaths = List("ro"),
       networkAllowed = false
     )
-    // a repository, for the git case (git's own files are the runner's, written on the host here)
-    if (new ProcessBuilder("git", "init", "-q", dirA.toString).inheritIO().start().waitFor() != 0)
-      fail("git init failed on the host")
+    // a repository for the git case, made by the image's user: the runner refuses `git init`
+    val init = new ProcessBuilder(
+      "docker",
+      "run",
+      "--rm",
+      "-v",
+      s"$dirA:/workspace",
+      "--entrypoint",
+      "git",
+      ContainerisedWorkspaceTest.image,
+      "init",
+      "-q",
+      "/workspace/repo"
+    ).inheritIO().start().waitFor()
+    if (init != 0) fail(s"git init in the image failed ($init)")
     start(dirA, HostPortA, config, extra = Set("curl", "jcmd"))
   }
 
@@ -186,7 +199,7 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
 
   it should "run git with its empty directory (core.hooksPath) in the runner's private java.io.tmpdir, not /tmp" in {
     val ws = live(workspaceA)
-    val r  = runCommand(ws, "git rev-parse --git-path hooks")
+    val r  = runCommand(ws, "git rev-parse --git-path hooks", Some("repo"))
     withClue(s"git: $r") {
       r.exitCode shouldBe 0
       r.stdout should startWith("/var/tmp/llm4s-runner/llm4s-git-")
