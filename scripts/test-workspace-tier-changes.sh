@@ -40,6 +40,14 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
     libraryDependencies ++= Seq(Deps.cask)
   )
 SBT
+mkdir -p "$repo/project"
+cat > "$repo/project/Dependencies.scala" <<'DEPS'
+object Versions {
+  val cask      = "0.10.2"
+  val websocket = "1.6.0"
+  val cats      = "2.13.0"
+}
+DEPS
 echo base > "$repo/README.md"
 g add -A && g commit -qm base
 BASE="$(g rev-parse HEAD)"
@@ -84,6 +92,9 @@ expect 'ci.yml, another job'      false "sed -i.bak 's/name: Quick Checks/name: 
 expect 'ci.yml, the tier job'     true  "sed -i.bak 's/sbt testWorkspace/sbt testWorkspace -v/' .github/workflows/ci.yml && rm .github/workflows/ci.yml.bak"
 expect 'ci.yml, the decision job' true  "sed -i.bak 's/fetch-depth: 2/fetch-depth: 3/' .github/workflows/ci.yml && rm .github/workflows/ci.yml.bak"
 expect 'ci.yml, All Tests Pass'   true  "sed -i.bak 's/echo \"All tests passed!\"/echo \"All tests passed.\"/' .github/workflows/ci.yml && rm .github/workflows/ci.yml.bak"
+expect 'the cask version'        true  "sed -i.bak 's/0.10.2/0.11.0/' project/Dependencies.scala && rm project/Dependencies.scala.bak"
+expect 'the websocket version'   true  "sed -i.bak 's/1.6.0/1.6.1/' project/Dependencies.scala && rm project/Dependencies.scala.bak"
+expect 'another dependency'      false "sed -i.bak 's/2.13.0/2.14.0/' project/Dependencies.scala && rm project/Dependencies.scala.bak"
 expect 'no change'                false ":"
 
 # ci.yml wires the verdict to the tier, and the tier into All Tests Pass

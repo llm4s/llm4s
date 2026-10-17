@@ -9,7 +9,8 @@
 # Tests Pass). A change to ci.yml counts only when it changes one of those jobs (compared as parsed YAML), since
 # ci.yml changes for many other reasons. Likewise build.sbt counts only when a changed line, or the project definition
 # git names in its hunk header, mentions the workspace (the workspace projects, the `testWorkspace` alias, the image
-# tag the suites are given). Renames are not folded: a watched file moved elsewhere counts as a change to its old
+# tag the suites are given), and project/Dependencies.scala only when a changed line names cask or Java-WebSocket,
+# the libraries only the workspace projects use. Renames are not folded: a watched file moved elsewhere counts as a change to its old
 # path.
 #
 # Usage: scripts/workspace-tier-changes.sh BASE HEAD      (CI passes HEAD^1 HEAD on the PR's merge commit)
@@ -48,6 +49,16 @@ if printf '%s\n' "$files" | grep -qxF build.sbt &&
   git diff -U0 --no-renames "$BASE" "$HEAD" -- build.sbt | grep -E '^(@@|[+-])' | grep -vE '^(\+\+\+|---) ' |
   grep -qi workspace; then
   echo "workspace tier: the change edits workspace wiring in build.sbt" >&2
+  echo "changed=true"
+  exit 0
+fi
+
+# project/Dependencies.scala: a changed line naming a library only the workspace projects use (the runner's cask
+# server, the client's Java-WebSocket). Libraries every module shares are left to the other tiers.
+if printf '%s\n' "$files" | grep -qxF project/Dependencies.scala &&
+  git diff -U0 --no-renames "$BASE" "$HEAD" -- project/Dependencies.scala | grep -E '^[+-]' | grep -vE '^(\+\+\+|---) ' |
+  grep -qiE 'cask|websocket'; then
+  echo "workspace tier: the change edits a workspace dependency in project/Dependencies.scala" >&2
   echo "changed=true"
   exit 0
 fi
