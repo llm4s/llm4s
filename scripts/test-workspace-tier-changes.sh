@@ -83,6 +83,7 @@ expect 'docs only'                false "touchp docs/guide/workspace.md"
 expect 'ci.yml, another job'      false "sed -i.bak 's/name: Quick Checks/name: Quick Checks!/' .github/workflows/ci.yml && rm .github/workflows/ci.yml.bak"
 expect 'ci.yml, the tier job'     true  "sed -i.bak 's/sbt testWorkspace/sbt testWorkspace -v/' .github/workflows/ci.yml && rm .github/workflows/ci.yml.bak"
 expect 'ci.yml, the decision job' true  "sed -i.bak 's/fetch-depth: 2/fetch-depth: 3/' .github/workflows/ci.yml && rm .github/workflows/ci.yml.bak"
+expect 'ci.yml, All Tests Pass'   true  "sed -i.bak 's/echo \"All tests passed!\"/echo \"All tests passed.\"/' .github/workflows/ci.yml && rm .github/workflows/ci.yml.bak"
 expect 'no change'                false ":"
 
 # ci.yml wires the verdict to the tier, and the tier into All Tests Pass

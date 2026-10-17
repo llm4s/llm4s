@@ -3,13 +3,14 @@
 #
 # The tier builds the workspace-runner image and runs the live suites against it: too slow for every PR, so it runs on
 # a PR only when the diff touches something those suites exercise. That is the runner and its shared protocol
-# (modules/workspace), the whole agent harness package (the suites import it by wildcard and drive its backends,
-# tools and middleware against the container), the agent-testkit contracts they run, the
-# @Workspace suites and their tag, the sample they drive, the image build, this script, and the CI jobs that decide and
-# run the tier. A change to ci.yml counts only when it changes one of those jobs (compared as parsed YAML), since
+# (modules/workspace), the whole agent harness package (the suites import it by wildcard and drive its backends, tools
+# and middleware against the container), the agent-testkit contracts they run, the @Workspace suites and their tag,
+# the sample they drive, the image build, this script, and the CI jobs that decide and run the tier or require it (All
+# Tests Pass). A change to ci.yml counts only when it changes one of those jobs (compared as parsed YAML), since
 # ci.yml changes for many other reasons. Likewise build.sbt counts only when a changed line, or the project definition
-# git names in its hunk header, mentions the workspace (the workspace projects, the `testWorkspace` alias, the image tag
-# the suites are given). Renames are not folded: a watched file moved elsewhere counts as a change to its old path.
+# git names in its hunk header, mentions the workspace (the workspace projects, the `testWorkspace` alias, the image
+# tag the suites are given). Renames are not folded: a watched file moved elsewhere counts as a change to its old
+# path.
 #
 # Usage: scripts/workspace-tier-changes.sh BASE HEAD      (CI passes HEAD^1 HEAD on the PR's merge commit)
 # Prints `changed=true` or `changed=false` on stdout, for $GITHUB_OUTPUT, and why on stderr. Needs git and ruby.
@@ -31,7 +32,7 @@ PATTERNS=(
   '^scripts/workspace-tier-changes\.sh$'
 )
 CI_FILE='.github/workflows/ci.yml'
-CI_JOBS='workspace-changes workspace-integration'
+CI_JOBS='workspace-changes workspace-integration all-tests-pass'
 
 files="$(git diff --name-only --no-renames "$BASE" "$HEAD")"
 matched="$(printf '%s\n' "$files" | grep -E "$(IFS='|'; echo "${PATTERNS[*]}")" || true)"
