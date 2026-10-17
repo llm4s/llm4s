@@ -107,7 +107,7 @@ class CommandConfinementExecuteSpec extends AnyFlatSpec with Matchers with Befor
     val e  = intercept[WorkspaceAgentException](ws.executeCommand("ls"))
     e.code shouldBe "SANDBOX_UNAVAILABLE"
     e.error should include("Landlock ABI 2")
-    Using.resource(Files.list(ws.scratchParent))(_.iterator().asScala.toList) shouldBe empty
+    Using.resource(Files.list(ws.scratchParent.get))(_.iterator().asScala.toList) shouldBe empty
   }
 
   it should "refuse the command SANDBOX_UNAVAILABLE over the WebSocket too, and leave no scratch directory" in {
@@ -126,7 +126,21 @@ class CommandConfinementExecuteSpec extends AnyFlatSpec with Matchers with Befor
     Await.result(done.future, 10.seconds).exitCode shouldBe 1
     messages.asScala.collect { case ResponseMessage(e: WorkspaceAgentErrorResponse) => e.code }.toList shouldBe
       List("SANDBOX_UNAVAILABLE")
-    Using.resource(Files.list(ws.scratchParent))(_.iterator().asScala.toList) shouldBe empty
+    Using.resource(Files.list(ws.scratchParent.get))(_.iterator().asScala.toList) shouldBe empty
+  }
+
+  it should "refuse SANDBOX_UNAVAILABLE when its scratch directory would lie inside the workspace" in {
+    assume(!isWindowsHost && Files.isDirectory(Confiner.ScratchBase))
+    // the workspace is the scratch base itself: every scratch parent would be inside it
+    val ws = new WorkspaceAgentInterfaceImpl(
+      Confiner.ScratchBase.toString,
+      isWindows = false,
+      None,
+      confiner = Some(Confiner(fake))
+    )
+    val e = intercept[WorkspaceAgentException](ws.executeCommand("ls"))
+    e.code shouldBe "SANDBOX_UNAVAILABLE"
+    e.error should include("inside the workspace")
   }
 
   it should "refuse SANDBOX_UNAVAILABLE when the helper is missing" in {
@@ -146,7 +160,40 @@ class CommandConfinementExecuteSpec extends AnyFlatSpec with Matchers with Befor
     prepared.builder.command().get(0) shouldBe confiner.get.helper.toString
     val scratch = prepared.scratch.getOrElse(fail("a confined command has a scratch directory"))
     prepared.builder.environment().get("TMPDIR") shouldBe scratch.tmp.toString
+    // the runner's own scratch is under /var/tmp, never /tmp, which commands may share
+    scratch.dir.startsWith(Confiner.ScratchBase.toRealPath()) shouldBe true
     prepared.scratch.foreach(_.delete())
+    ws.deleteScratch()
+    Files.exists(ws.scratchParent.get) shouldBe false
+  }
+
+  /** A JVM program, run confined in a workspace outside /tmp, that makes a file in java.io.tmpdir (/tmp). */
+  private def jvmTempFile(sharedTmp: Boolean): Either[String, ExecuteCommandResponse] = {
+    val confiner = linuxConfiner().map(_.copy(sharedTmp = sharedTmp))
+    val dir      = Files.createTempDirectory(Confiner.ScratchBase, "confine-jvm")
+    made = dir :: made
+    Files.writeString(
+      dir.resolve("T.java"),
+      "public class T { public static void main(String[] a) throws Exception { " +
+        "java.io.File f = java.io.File.createTempFile(\"llm4s\", \".tmp\"); System.out.print(f); f.delete(); } }"
+    )
+    // java is never an extra command (it runs any code); the config names it here only to have a JVM to run
+    val config = WorkspaceSandboxConfig.Permissive.copy(
+      allowedCommands = WorkspaceSandboxConfig.Permissive.allowedCommands + "java"
+    )
+    outcome(workspace(dir, config, confiner), "java T.java")
+  }
+
+  it should "let a JVM write its temporary files in /tmp when the runner's attach mechanism is off" in {
+    val result = jvmTempFile(sharedTmp = true)
+    result.map(_.exitCode) shouldBe Right(0)
+    result.map(_.stdout.startsWith("/tmp/")) shouldBe Right(true)
+  }
+
+  it should "not grant /tmp when the runner's attach mechanism could not be verified off" in {
+    val result = jvmTempFile(sharedTmp = false)
+    result.map(_.exitCode).fold(_ => 1, identity) should not be 0
+    result.map(_.stderr).getOrElse("") should include("Permission denied")
   }
 
   it should "not write, delete or rename inside a read-only path" in {
@@ -317,7 +364,7 @@ class CommandConfinementExecuteSpec extends AnyFlatSpec with Matchers with Befor
     val confiner = linuxConfiner()
     val dir      = tree()
     val ws       = workspace(dir, WorkspaceSandboxConfig.Permissive, confiner)
-    def leftOver = Using.resource(Files.list(ws.scratchParent))(_.iterator().asScala.toList)
+    def leftOver = Using.resource(Files.list(ws.scratchParent.get))(_.iterator().asScala.toList)
     ws.executeCommand("ls").exitCode shouldBe 0
     leftOver shouldBe empty
     Files.writeString(dir.resolve("somefile"), "x")

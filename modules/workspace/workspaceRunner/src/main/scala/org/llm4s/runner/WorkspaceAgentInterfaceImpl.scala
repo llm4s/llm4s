@@ -51,9 +51,18 @@ class WorkspaceAgentInterfaceImpl(
 
   /**
    * Where each confined command gets its own scratch directory (its TMPDIR and the helper's status file): made by the
-   * runner, outside the workspace and the home directory. Only each command's own `tmp` is granted to it.
+   * runner under `/var/tmp`, never `/tmp` (which commands may share), the workspace or the home directory. Only each
+   * command's own `tmp` is granted to it. A failure refuses every confined command `SANDBOX_UNAVAILABLE`.
    */
-  private[runner] lazy val scratchParent: Path = Files.createTempDirectory("llm4s-runner-")
+  private[runner] lazy val scratchParent: scala.util.Try[Path] = {
+    scratchParentMade = true
+    Confiner.scratchParent(Confiner.ScratchBase, effective(rootPath))
+  }
+  @volatile private var scratchParentMade = false
+
+  /** Removes the scratch parent, if it was made, with whatever is left in it; at the runner's shutdown. */
+  private[runner] def deleteScratch(): Unit =
+    if (scratchParentMade) scratchParent.foreach(CommandScratch(_).delete())
 
   private val home: Path             = Paths.get(System.getProperty("user.home")).toAbsolutePath
   private val javaHome: Option[Path] = Option(System.getProperty("java.home")).map(Paths.get(_))
@@ -1822,11 +1831,21 @@ class WorkspaceAgentInterfaceImpl(
           "SANDBOX_UNAVAILABLE",
           None
         )
-      val s = CommandScratch(Files.createTempDirectory(scratchParent, "llm4s-cmd-"))
+      val parent = scratchParent.fold(
+        e =>
+          throw new WorkspaceAgentException(
+            s"Commands are confined on Linux and the runner has no scratch directory for them " +
+              s"(${e.getMessage}); the command was not run",
+            "SANDBOX_UNAVAILABLE",
+            None
+          ),
+        identity
+      )
+      val s = CommandScratch(Files.createTempDirectory(parent, "llm4s-cmd-"))
       Try {
         Files.createDirectories(s.tmp)
         val confinedRoot = effective(rootPath) // real: every link resolved, as the grants must be
-        val rules = CommandConfinement.systemRules(home, javaHome, confinedRoot) ++
+        val rules = CommandConfinement.systemRules(home, javaHome, confinedRoot, c.sharedTmp) ++
           CommandConfinement.workspaceRules(config, confinedRoot) :+
           CommandConfinement.Rule(CommandConfinement.Grant.ReadWrite, s.tmp.toRealPath())
         builder.command(

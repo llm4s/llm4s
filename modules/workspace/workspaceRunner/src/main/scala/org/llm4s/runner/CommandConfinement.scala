@@ -21,7 +21,7 @@ private[runner] object CommandConfinement {
   enum Grant(val flag: String) {
     case ReadExec      extends Grant("--rx")    // system and toolchain directories
     case ReadOnly      extends Grant("--ro")
-    case ReadWrite     extends Grant("--rw")    // workspace, scratch tmp, /dev/null
+    case ReadWrite     extends Grant("--rw")    // workspace, scratch tmp, /dev/null, /tmp
     case ReadWriteExec extends Grant("--rwx")   // the runner user's home (sdkman's binaries live there)
     case WriteFile     extends Grant("--wfile") // an existing regular file in a directory above a read-only path
   }
@@ -40,11 +40,14 @@ private[runner] object CommandConfinement {
    *
    * `/opt` is read and execute because the runner itself is installed under `/opt/docker`; a command may read the
    * runner's jars, which is harmless.
+   *
+   * `/tmp` is read-write only with `sharedTmp` ([[Confiner.sharedTmp]]: the runner's JVM attach mechanism is off), and
+   * is then shared by every command.
    */
-  def systemRules(home: Path, javaHome: Option[Path], realRoot: Path): List[Rule] = {
-    val rx  = (SystemDirs.map(Paths.get(_)) ++ javaHome).map(Rule(Grant.ReadExec, _))
-    val ro  = ReadOnlySystem.map(p => Rule(Grant.ReadOnly, Paths.get(p)))
-    val rw  = List(Rule(Grant.ReadWrite, Paths.get("/dev/null")))
+  def systemRules(home: Path, javaHome: Option[Path], realRoot: Path, sharedTmp: Boolean): List[Rule] = {
+    val rx = (SystemDirs.map(Paths.get(_)) ++ javaHome).map(Rule(Grant.ReadExec, _))
+    val ro = ReadOnlySystem.map(p => Rule(Grant.ReadOnly, Paths.get(p)))
+    val rw = (Paths.get("/dev/null") :: (if (sharedTmp) List(Paths.get("/tmp")) else Nil)).map(Rule(Grant.ReadWrite, _))
     val rwx = List(Rule(Grant.ReadWriteExec, home))
     (rx ++ ro ++ rw ++ rwx)
       .flatMap(r => Try(r.path.toRealPath()).toOption.map(Rule(r.grant, _)))

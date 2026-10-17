@@ -141,7 +141,7 @@ class CommandConfinementSpec extends AnyFlatSpec with Matchers {
   "systemRules" should "grant home and /dev/null, and only paths that exist" in {
     val home  = tree()
     val root  = tree()
-    val rules = CommandConfinement.systemRules(home, None, root)
+    val rules = CommandConfinement.systemRules(home, None, root, sharedTmp = false)
     rules should contain(Rule(Grant.ReadWriteExec, home))
     if (Files.exists(Paths.get("/dev/null")))
       rules should contain(Rule(Grant.ReadWrite, Paths.get("/dev/null").toRealPath()))
@@ -150,11 +150,47 @@ class CommandConfinementSpec extends AnyFlatSpec with Matchers {
 
   it should "drop a grant on a directory that contains the workspace" in {
     val root = tree()
-    CommandConfinement.systemRules(root.getParent, None, root).map(_.path) should not contain root.getParent
+    CommandConfinement
+      .systemRules(root.getParent, None, root, sharedTmp = false)
+      .map(_.path) should not contain root.getParent
   }
 
   it should "drop a grant on a directory inside the workspace" in {
     val root = tree("h/")
-    CommandConfinement.systemRules(root.resolve("h"), None, root).map(_.path) should not contain root.resolve("h")
+    CommandConfinement.systemRules(root.resolve("h"), None, root, sharedTmp = false).map(_.path) should not contain root
+      .resolve("h")
+  }
+
+  it should "grant /tmp read-write only when the runner's attach mechanism is off (sharedTmp)" in {
+    assume(Files.isDirectory(Paths.get("/tmp")))
+    assume(Files.isDirectory(Confiner.ScratchBase))
+    val tmp  = Paths.get("/tmp").toRealPath()
+    val root = Files.createTempDirectory(Confiner.ScratchBase, "confine-outside-tmp").toRealPath() // never in /tmp
+    CommandConfinement.systemRules(tree(), None, root, sharedTmp = true) should contain(Rule(Grant.ReadWrite, tmp))
+    CommandConfinement.systemRules(tree(), None, root, sharedTmp = false).map(_.path) should not contain tmp
+    Files.delete(root)
+  }
+
+  it should "drop the /tmp grant when the workspace lies inside /tmp" in {
+    assume(Files.isDirectory(Paths.get("/tmp")))
+    val root = Files.createTempDirectory(Paths.get("/tmp"), "confine-in-tmp").toRealPath()
+    CommandConfinement.systemRules(tree(), None, root, sharedTmp = true).map(_.path) should not contain
+      Paths.get("/tmp").toRealPath()
+    Files.delete(root)
+  }
+
+  "Confiner.scratchParent" should "be made under its base, owner-only" in {
+    val base = tree()
+    val dir  = Confiner.scratchParent(base, tree()).get
+    dir.getParent shouldBe base
+    if (!System.getProperty("os.name", "").startsWith("Windows"))
+      java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(dir)) shouldBe "rwx------"
+  }
+
+  it should "fail, leaving nothing, when it would lie inside the workspace or cannot be made" in {
+    val root = tree()
+    Confiner.scratchParent(root, root).isFailure shouldBe true
+    Files.list(root).count() shouldBe 0
+    Confiner.scratchParent(root.resolve("missing"), tree()).isFailure shouldBe true
   }
 }

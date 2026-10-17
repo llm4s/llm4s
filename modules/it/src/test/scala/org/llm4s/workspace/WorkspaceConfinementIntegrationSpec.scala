@@ -17,7 +17,7 @@ import scala.util.{ Failure, Success, Try }
  * Kernel confinement of `execute` commands (design §4.39, #1983) in the workspace-runner image: the issue's acceptance.
  *
  * Two containers, since a container's sandbox config is fixed when it starts:
- *   - A: `readOnlyPaths = ["ro"]`, `networkAllowed = false`;
+ *   - A: `readOnlyPaths = ["ro"]`, `networkAllowed = false`, with `jcmd` and `java` allowed for the `/tmp` cases;
  *   - B: `allowedPaths = ["src"]`, `networkAllowed = true`.
  *
  * Each command here must be accepted by the runner and fail (or succeed) by itself, so a command refused before it runs,
@@ -52,12 +52,17 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
     Files.write(p, content.getBytes(StandardCharsets.UTF_8)): Unit
   }
 
-  private def start(dir: Path, port: Int, config: WorkspaceSandboxConfig): ContainerisedWorkspace = {
+  private def start(
+    dir: Path,
+    port: Int,
+    config: WorkspaceSandboxConfig,
+    extra: Set[String] = Set("curl")
+  ): ContainerisedWorkspace = {
     val workspace = new ContainerisedWorkspace(
       dir.toString,
       ContainerisedWorkspaceTest.image,
       port,
-      extraAllowedCommands = Set("curl"),
+      extraAllowedCommands = extra,
       sandboxConfig = Some(config)
     )
     if (!workspace.startContainer()) fail(s"Failed to start the workspace container on port $port")
@@ -69,7 +74,19 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
   private lazy val workspaceA: ContainerisedWorkspace = {
     write(dirA, "ro/a", "original")
     write(dirA, "b", "replacement")
-    start(dirA, HostPortA, WorkspaceSandboxConfig.Permissive.copy(readOnlyPaths = List("ro"), networkAllowed = false))
+    write(
+      dirA,
+      "T.java",
+      "public class T { public static void main(String[] a) throws Exception { " +
+        "java.io.File f = java.io.File.createTempFile(\"llm4s\", \".tmp\"); System.out.print(f); f.delete(); } }"
+    )
+    // java is never an extra command (it runs any code): the whole config names it, only to have a JVM to run
+    val config = WorkspaceSandboxConfig.Permissive.copy(
+      allowedCommands = WorkspaceSandboxConfig.Permissive.allowedCommands + "java",
+      readOnlyPaths = List("ro"),
+      networkAllowed = false
+    )
+    start(dirA, HostPortA, config, extra = Set("curl", "jcmd"))
   }
 
   private lazy val workspaceB: ContainerisedWorkspace = {
@@ -151,6 +168,24 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
     withClue(s"curl: $r") {
       r.exitCode shouldBe 0
       r.stdout should include("LLM4S WebSocket Runner")
+    }
+  }
+
+  it should "let a JVM write its temporary files in /tmp, since the image's runner has attach disabled" in {
+    val ws = live(workspaceA)
+    val r  = runCommand(ws, "java T.java")
+    withClue(s"java: $r") {
+      r.exitCode shouldBe 0
+      r.stdout should startWith("/tmp/")
+    }
+  }
+
+  it should "not attach to the runner's JVM, though /tmp is writable" in {
+    val ws = live(workspaceA)
+    val r  = runCommand(ws, "jcmd 1 VM.version")
+    withClue(s"jcmd: $r") {
+      r.exitCode should not be 0
+      (r.stdout should not).include("JDK")
     }
   }
 }

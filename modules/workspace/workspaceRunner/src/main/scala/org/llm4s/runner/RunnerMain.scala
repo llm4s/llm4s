@@ -103,6 +103,11 @@ object RunnerMain extends cask.MainRoutes {
   Confiner.platform() match {
     case Some(c) =>
       logger.info(s"Commands are confined by ${c.helper} (Landlock, and seccomp when networkAllowed=false)")
+      if (!c.sharedTmp)
+        logger.warn(
+          "This JVM does not run with -XX:+DisableAttachMechanism, so commands are not granted /tmp: JVM tools " +
+            "that write there (sbt) fail confined. Start the runner with that flag (the image does) (design §4.39)"
+        )
     case None => logger.warn("Not on Linux: commands run unconfined; only the command policy applies (design §4.39)")
   }
 
@@ -444,6 +449,7 @@ object RunnerMain extends cask.MainRoutes {
 
     // Kill all remaining processes, through the registry: each stays tracked until it exits
     workspaceInterface.processes.killAll()
+    workspaceInterface.deleteScratch()
     clientEarlyCancels.clear()
 
     Try {

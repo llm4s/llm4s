@@ -1,6 +1,7 @@
 import sbt._
 import sbt.Keys._
 import com.typesafe.sbt.packager.docker._
+import com.typesafe.sbt.packager.universal.UniversalPlugin.autoImport.Universal
 import com.typesafe.sbt.packager.docker.DockerPlugin.autoImport._
 import com.typesafe.sbt.packager.Keys.{ packageName, maintainer }
 
@@ -70,6 +71,9 @@ object WorkspaceRunnerDocker {
     Docker / version            := version.value.replace('+', '-'),
     Docker / dockerBuildOptions := Seq("--platform=linux/amd64"),
     Docker / mappings += (baseDirectory.value / "src" / "main" / "c" / "llm4s-confine.c") -> "/opt/docker/confine/llm4s-confine.c",
+    // The runner grants commands /tmp only with its attach mechanism off (design §4.39): its trigger file and socket
+    // are in /tmp, so a command could otherwise attach to the unconfined runner. No shared perf-data file in /tmp.
+    Universal / javaOptions ++= Seq("-J-XX:+DisableAttachMechanism", "-J-XX:+PerfDisableSharedMem"),
     dockerCommands ++= devToolingCommands,
     dockerLabels ++= Map(
       "org.opencontainers.image.title"       -> "llm4s workspace-runner",
