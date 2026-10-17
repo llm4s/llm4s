@@ -2639,6 +2639,10 @@ RAG.builder()
 RAG.builder().withEmbeddings(name)                 // any registered id or alias; no conversion
 ```
 
+`build` on a `RAGConfig` is an extension from `RAG.RAGConfigOps`, so the call site needs
+`import org.llm4s.rag.RAG.RAGConfigOps` and a `ModelRegistryService` given (for example from
+`Llm4sConfig.modelRegistryService()`); it takes only a `using` clause, so it is `.build`, not `.build()`.
+
 `RAGConfig.embeddingProvider` is a `ProviderId`, so `config.embeddingProvider.name` becomes
 `config.embeddingProvider.asString`. `RAG.build` and `RAGConfig#build` take an implicit
 `ProviderRegistry`, resolved to `ProviderRegistry.default` when none is in scope, so existing

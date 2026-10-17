@@ -294,7 +294,14 @@ libraryDependencies ++= Seq(
 ### Basic Usage
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.rag.RAG
+import org.llm4s.rag.RAG.RAGConfigOps // `build` is an extension of RAGConfig; it is not found without this
 import org.llm4s.rag.loader._
+
+// `build` needs a ModelRegistryService in scope (ProviderRegistry.default is a given already)
+given ModelRegistryService = Llm4sConfig.modelRegistryService().toOption.get
 
 // Crawl a documentation site
 val loader = WebCrawlerLoader("https://docs.example.com")
@@ -303,7 +310,7 @@ val loader = WebCrawlerLoader("https://docs.example.com")
 
 val rag = RAG.builder()
   .withDocuments(loader)
-  .build()
+  .build
 ```
 
 ### With Patterns
@@ -318,6 +325,8 @@ val loader = WebCrawlerLoader("https://docs.example.com")
 
 ### Combining with Other Loaders
 
+Same imports and `ModelRegistryService` given as in Basic Usage.
+
 ```scala
 val webDocs = WebCrawlerLoader("https://docs.example.com")
 val localDocs = DirectoryLoader("./docs")
@@ -326,7 +335,7 @@ val combined = webDocs ++ localDocs
 
 val rag = RAG.builder()
   .withDocuments(combined)
-  .build()
+  .build
 ```
 
 ## Testing Strategy
