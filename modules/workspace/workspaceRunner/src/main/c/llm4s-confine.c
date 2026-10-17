@@ -153,11 +153,14 @@ int main(int argc, char **argv) {
   if (i >= argc || i + 1 >= argc) unavailable("no program after --");
   char **program = &argv[i + 1];
 
+  /* Every unavailable() comes before landlock_restrict_self: once the ruleset applies, the status file's directory
+   * (never granted) cannot be written, and a 125 without it would read as the program's own. The network filter
+   * does not block the Landlock calls, so it goes first. */
   if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) unavailable("cannot set no_new_privs: %s", strerror(errno));
+  if (no_net) deny_network();
   if (syscall(SYS_landlock_restrict_self, ruleset, 0) != 0)
     unavailable("cannot enforce the Landlock ruleset: %s", strerror(errno));
   close(ruleset);
-  if (no_net) deny_network();
 
   execv(program[0], program);
   int err = errno; /* fprintf may change errno */

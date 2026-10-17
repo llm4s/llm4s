@@ -120,6 +120,15 @@ class ConfineHelperSpec extends AnyFlatSpec with Matchers {
     Files.exists(status) shouldBe false
   }
 
+  it should "write the status file, in a directory no grant covers, when a grant cannot be opened" in {
+    val (dir, status) = fresh()
+    Files.writeString(dir.resolve("f"), "a")
+    // f is a regular file, so f/x fails to open with ENOTDIR: a failure other than a missing path
+    val r = run(status, system ++ List("--ro", dir.resolve("f").resolve("x").toString), "/bin/true")
+    r.exit shouldBe 125
+    Files.readString(status) should include("cannot open")
+  }
+
   it should "skip a grant whose path does not exist" in {
     val (dir, status) = fresh()
     run(status, system ++ List("--ro", dir.resolve("missing").toString), "/bin/true").exit shouldBe 0
