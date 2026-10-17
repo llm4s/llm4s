@@ -99,6 +99,13 @@ object RunnerMain extends cask.MainRoutes {
   // Initialize workspace interface
   private val workspaceInterface = new WorkspaceAgentInterfaceImpl(workspacePath, isWindows, sandboxConfig)
 
+  // said once, at startup: whether execute commands are kernel-confined here (design §4.39)
+  Confiner.platform() match {
+    case Some(c) =>
+      logger.info(s"Commands are confined by ${c.helper} (Landlock, and seccomp when networkAllowed=false)")
+    case None => logger.warn("Not on Linux: commands run unconfined; only the command policy applies (design §4.39)")
+  }
+
   // Track active connections and their last heartbeat
   private val connections = new ConcurrentHashMap[cask.WsChannelActor, AtomicLong]()
   // Processes are the workspace's ProcessRegistry's alone, each owned by its client's channel (per-client isolation)

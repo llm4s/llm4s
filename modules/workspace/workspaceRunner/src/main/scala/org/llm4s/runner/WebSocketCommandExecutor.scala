@@ -67,14 +67,18 @@ final private[runner] class WebSocketCommandExecutor(
         fail(refused.error, refused.code, refused.details)
 
       case Right(prepared) =>
+        // the command's scratch directory, on every path where it never starts
+        def discard(): Unit = prepared.scratch.foreach(_.delete())
         // a client that has flooded its cancellations takes no new commands until they age out: the bound holds
         // without ever forgetting a cancellation a waiting command needs
-        if (cancelledEarly.full)
+        if (cancelledEarly.full) {
+          discard()
           fail("Too many cancellations of commands not yet started; try again shortly", "WORKSPACE_BUSY", None)
-        else if (cancelledEarly.remove(cmd.commandId) || !connected())
+        } else if (cancelledEarly.remove(cmd.commandId) || !connected()) {
           // cancelled, or its connection closed, before it started: it never starts (exit 143)
+          discard()
           send(CommandCompletedMessage(cmd.commandId, 143, (System.currentTimeMillis() - startTime).millis))
-        else
+        } else
           // the registry waits at the gate (bounded), starts the process and tracks it until it exits, whatever
           // happens from here: nothing below holds or drops the process itself
           registry.spawn(
@@ -85,8 +89,11 @@ final private[runner] class WebSocketCommandExecutor(
           ) match {
             case Left(notStarted) if notStarted.code == ProcessRegistry.NotStarted =>
               // cancelled, or its connection closed, while it waited at the gate: it never started (exit 143)
+              discard()
               send(CommandCompletedMessage(cmd.commandId, 143, (System.currentTimeMillis() - startTime).millis))
-            case Left(refused)  => fail(refused.error, refused.code, refused.details)
+            case Left(refused) =>
+              discard()
+              fail(refused.error, refused.code, refused.details)
             case Right(running) =>
               // tracked: a cancellation from now on finds it. One that came while it waited or started is in
               // `cancelledEarly`, and a closed connection's handler has already run: either kills it here
@@ -98,6 +105,7 @@ final private[runner] class WebSocketCommandExecutor(
                 case Failure(ex) =>
                   logger.warn(s"Could not announce command ${cmd.commandId}; stopping it: ${ex.getMessage}")
                   registry.kill(running): Unit
+                  discard()
               }
           }
     }
@@ -276,40 +284,51 @@ final private[runner] class WebSocketCommandExecutor(
       .flatMap(_ => exitDone.future)
       .flatMap(_ => exitCodePromise.future)
       .onComplete {
-        case Success(_) if survivedKill.get() => () // reported when the kill failed
+        case Success(_) if survivedKill.get() =>
+          prepared.scratch.foreach(_.delete()) // reported when the kill failed
         case Success(rawExitCode) =>
-          val durationMs = System.currentTimeMillis() - startTime
-          val effectiveExitCode =
-            if (running.cancelled.get()) 143
-            else if (commandTimedOut.get()) -1
-            else rawExitCode
-          val marker =
-            if (commandTimedOut.get()) s"[timed out after ${prepared.timeout.toSeconds}s and was killed]\n" else ""
-          val fullStderr = marker + stderrAccumulator.result()
-          // cut by its encoded bytes, as it was captured: the marker counts against the same bound
-          val stderrWithMarker = WebSocketCommandExecutor.cutEncoded(fullStderr, limit)
-          val isOutputTruncated =
-            stdoutTruncated.get() || stderrTruncated.get() || stderrWithMarker.length < fullStderr.length
+          val unconfinable = prepared.scratch.flatMap(_.unavailable(rawExitCode))
+          prepared.scratch.foreach(_.delete())
+          unconfinable match {
+            case Some(reason) =>
+              // the helper could not confine it (status 125 and its status file): the program never ran
+              if (running.completionSent.compareAndSet(false, true))
+                fail(s"The command could not be confined, so it was not run: $reason", "SANDBOX_UNAVAILABLE", None)
+            case None =>
+              val durationMs = System.currentTimeMillis() - startTime
+              val effectiveExitCode =
+                if (running.cancelled.get()) 143
+                else if (commandTimedOut.get()) -1
+                else rawExitCode
+              val marker =
+                if (commandTimedOut.get()) s"[timed out after ${prepared.timeout.toSeconds}s and was killed]\n" else ""
+              val fullStderr = marker + stderrAccumulator.result()
+              // cut by its encoded bytes, as it was captured: the marker counts against the same bound
+              val stderrWithMarker = WebSocketCommandExecutor.cutEncoded(fullStderr, limit)
+              val isOutputTruncated =
+                stdoutTruncated.get() || stderrTruncated.get() || stderrWithMarker.length < fullStderr.length
 
-          send(
-            ResponseMessage(
-              ExecuteCommandResponse(
-                commandId = cmd.commandId,
-                stdout = stdoutAccumulator.result(),
-                // a command its timeout killed says so, as the direct path's TIMEOUT does: exit -1 alone is ambiguous.
-                // First, so a bound that cuts stderr's end keeps it
-                // Within the stream's bound like any output: a marker that does not fit is cut, and says so.
-                stderr = stderrWithMarker,
-                exitCode = effectiveExitCode,
-                isOutputTruncated = isOutputTruncated,
-                duration = durationMs.millis
+              send(
+                ResponseMessage(
+                  ExecuteCommandResponse(
+                    commandId = cmd.commandId,
+                    stdout = stdoutAccumulator.result(),
+                    // a command its timeout killed says so, as the direct path's TIMEOUT does: exit -1 alone is ambiguous.
+                    // First, so a bound that cuts stderr's end keeps it
+                    // Within the stream's bound like any output: a marker that does not fit is cut, and says so.
+                    stderr = stderrWithMarker,
+                    exitCode = effectiveExitCode,
+                    isOutputTruncated = isOutputTruncated,
+                    duration = durationMs.millis
+                  )
+                )
               )
-            )
-          )
-          if (running.completionSent.compareAndSet(false, true)) {
-            send(CommandCompletedMessage(cmd.commandId, effectiveExitCode, durationMs.millis))
+              if (running.completionSent.compareAndSet(false, true)) {
+                send(CommandCompletedMessage(cmd.commandId, effectiveExitCode, durationMs.millis))
+              }
           }
         case Failure(ex) =>
+          prepared.scratch.foreach(_.delete())
           fail(
             Option(ex.getMessage).getOrElse("Command execution failed"),
             "EXECUTION_FAILED",

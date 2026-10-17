@@ -20,6 +20,10 @@ import scala.util.{ Try, Using }
  *
  * The resolver is tested with an injected search over temporary directories, in both platforms' flavours, on any
  * host; the end-to-end checks run the real programs of the host they are on.
+ *
+ * The runners here are unconfined (`confiner = None`) where a test reads the argument vector or runs a program from a
+ * temporary trusted directory: on Linux a confined command starts with `llm4s-confine` and may execute only system and
+ * workspace paths (design §4.39), and these tests are about which program is found, not about confinement.
  */
 class ProgramResolverSpec extends AnyFlatSpec with Matchers {
   import ProgramResolverSpec._
@@ -187,7 +191,7 @@ class ProgramResolverSpec extends AnyFlatSpec with Matchers {
   // Through the runner
 
   "The runner" should "start the program by its absolute path" in inDirs { d =>
-    val ws       = new WorkspaceAgentInterfaceImpl(d.workspace.toString, isWindowsHost, Some(ReadOnly))
+    val ws       = new WorkspaceAgentInterfaceImpl(d.workspace.toString, isWindowsHost, Some(ReadOnly), confiner = None)
     val prepared = ws.prepareCommand("git --version", None, None, None)
     prepared.foreach { p =>
       val argv0 = p.builder.command().get(0)
@@ -257,7 +261,7 @@ class ProgramResolverSpec extends AnyFlatSpec with Matchers {
     inDirs { d =>
       val cmd    = d.program(d.system32, "cmd.exe")
       val search = ProgramSearch(windows = true, Seq(d.system32, d.windowsDir), None, Some(d.runnerCwd), None)
-      val ws     = new WorkspaceAgentInterfaceImpl(d.workspace.toString, true, Some(ReadOnly), search)
+      val ws     = new WorkspaceAgentInterfaceImpl(d.workspace.toString, true, Some(ReadOnly), search, confiner = None)
       val argv   = ws.prepareCommand("ECHO.EXE hello", None, None, None).fold(e => fail(e.error), identity)
       // `/d`: cmd.exe runs no AutoRun command from the registry first (#1792)
       argv.builder.command().asScala.toSeq shouldBe Seq(cmd.toString, "/d", "/c", "echo", "hello")
@@ -356,8 +360,14 @@ class ProgramResolverSpec extends AnyFlatSpec with Matchers {
 
   it should "leave NoDefaultCurrentDirectoryInExePath alone off Windows" in inDirs { d =>
     val cat = d.program(d.trusted1, "cat")
-    val ws  = new WorkspaceAgentInterfaceImpl(d.workspace.toString, false, Some(ReadOnly), posix(Seq(d.trusted1)))
-    val p   = ws.prepareCommand("cat x", None, None, None).fold(e => fail(e.error), identity)
+    val ws = new WorkspaceAgentInterfaceImpl(
+      d.workspace.toString,
+      false,
+      Some(ReadOnly),
+      posix(Seq(d.trusted1)),
+      confiner = None
+    )
+    val p = ws.prepareCommand("cat x", None, None, None).fold(e => fail(e.error), identity)
     p.builder.command().get(0) shouldBe cat.toString
     p.builder.environment().get("PATH") shouldBe d.trusted1.toString
     // left as the runner's own environment has it (unset, bar a host that sets it itself)
@@ -384,8 +394,8 @@ class ProgramResolverSpec extends AnyFlatSpec with Matchers {
         withClue(s"PATH entry '$untrusted'") {
           val path   = Seq(untrusted, d.trusted1, d.trusted2, "/usr/bin", "/bin").mkString(File.pathSeparator)
           val search = ProgramSearch(windows = false, Nil, Some(path), Some(d.runnerCwd), None)
-          val ws     = new WorkspaceAgentInterfaceImpl(d.workspace.toString, false, Some(withProg), search)
-          val out    = ws.executeCommand("prog", None, Some(30.seconds), None)
+          val ws = new WorkspaceAgentInterfaceImpl(d.workspace.toString, false, Some(withProg), search, confiner = None)
+          val out = ws.executeCommand("prog", None, Some(30.seconds), None)
           out.stdout shouldBe "trusted\n"
           Files.exists(marker) shouldBe false
         }

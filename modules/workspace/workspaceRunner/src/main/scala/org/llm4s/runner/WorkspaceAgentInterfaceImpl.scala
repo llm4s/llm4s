@@ -31,6 +31,8 @@ import scala.util.chaining._
  *                      (`WORKSPACE_BUSY`)
  * @param startProcess  starts a process for the [[ProcessRegistry]]; the platform's, bar in tests
  * @param commitAfterGate how long after its gate wait a file change may still commit; past it, it is refused unchanged
+ * @param confiner      the sandbox helper every `execute` command is started through (design §4.39); the platform's:
+ *                      on Linux the helper, elsewhere None, and commands run unconfined
  */
 class WorkspaceAgentInterfaceImpl(
   workspaceRoot: String,
@@ -39,12 +41,22 @@ class WorkspaceAgentInterfaceImpl(
   programSearch: ProgramSearch = ProgramSearch.host(),
   gateWait: FiniteDuration = WorkspaceAgentInterfaceImpl.GateWait,
   startProcess: java.lang.ProcessBuilder => Process = _.start(),
-  commitAfterGate: FiniteDuration = WorkspaceSandboxConfig.CommitAfterGate
+  commitAfterGate: FiniteDuration = WorkspaceSandboxConfig.CommitAfterGate,
+  confiner: Option[Confiner] = Confiner.platform()
 ) extends WorkspaceAgentInterface {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
   private val rootPath = Paths.get(workspaceRoot).toAbsolutePath.normalize()
+
+  /**
+   * Where each confined command gets its own scratch directory (its TMPDIR and the helper's status file): made by the
+   * runner, outside the workspace and the home directory. Only each command's own `tmp` is granted to it.
+   */
+  private[runner] lazy val scratchParent: Path = Files.createTempDirectory("llm4s-runner-")
+
+  private val home: Path             = Paths.get(System.getProperty("user.home")).toAbsolutePath
+  private val javaHome: Option[Path] = Option(System.getProperty("java.home")).map(Paths.get(_))
 
   private val config        = sandboxConfig.getOrElse(WorkspaceSandboxConfig.Permissive)
   private val defaultLimits = config.limits
@@ -1801,7 +1813,31 @@ class WorkspaceAgentInterfaceImpl(
       sandboxGit(builder, finalArgv.head, argv.tail, realRoot)
     }
 
-    PreparedCommand(builder, timeout.getOrElse(config.defaultCommandTimeout))
+    // Layer 12 (#1983): on Linux the command starts through llm4s-confine, which applies Landlock (and, without
+    // networkAllowed, a no-network seccomp filter) to it and everything it starts. Never run unconfined there.
+    val scratch = confiner.map { c =>
+      if (!Files.isExecutable(c.helper))
+        throw new WorkspaceAgentException(
+          s"Commands are confined on Linux and the sandbox helper ${c.helper} is missing; the command was not run",
+          "SANDBOX_UNAVAILABLE",
+          None
+        )
+      val s = CommandScratch(Files.createTempDirectory(scratchParent, "llm4s-cmd-"))
+      Try {
+        Files.createDirectories(s.tmp)
+        val confinedRoot = effective(rootPath) // real: every link resolved, as the grants must be
+        val rules = CommandConfinement.systemRules(home, javaHome, confinedRoot) ++
+          CommandConfinement.workspaceRules(config, confinedRoot) :+
+          CommandConfinement.Rule(CommandConfinement.Grant.ReadWrite, s.tmp.toRealPath())
+        builder.command(
+          (CommandConfinement.helperArgs(c.helper, s.status, rules, noNetwork = !config.networkAllowed) ++
+            builder.command().asScala).asJava
+        ): Unit
+        builder.environment().put("TMPDIR", s.tmp.toString): Unit
+      }.recover { case e => s.delete(); throw e }.get
+      s
+    }
+    PreparedCommand(builder, timeout.getOrElse(config.defaultCommandTimeout), scratch)
   }
 
   /**
@@ -1840,6 +1876,14 @@ class WorkspaceAgentInterfaceImpl(
   ): ExecuteCommandResponse = {
     val prepared =
       prepareCommand(command, workingDirectory, timeout, environment).fold(refused => throw refused, identity)
+    // the command's scratch directory goes however it ends: refused at the gate, failed, timed out or completed
+    val outcome = Try(run(prepared, maxOutputBytes))
+    prepared.scratch.foreach(_.delete())
+    outcome.get
+  }
+
+  /** [[executeCommand]] once prepared: started through the registry, its output collected. */
+  private def run(prepared: PreparedCommand, maxOutputBytes: Option[Long]): ExecuteCommandResponse = {
     val builder   = prepared.builder
     val timeoutMs = org.llm4s.shared.WireDurations.toWholeMillis(prepared.timeout)
     val limit     = WebSocketCommandExecutor.outputLimit(maxOutputBytes, defaultLimits.maxOutputSize)
@@ -1937,6 +1981,15 @@ class WorkspaceAgentInterfaceImpl(
           )
       }.get
 
+    // the helper could not confine it (status 125 and its status file): the program never ran
+    prepared.scratch.flatMap(_.unavailable(exitCode)).foreach { reason =>
+      throw new WorkspaceAgentException(
+        s"The command could not be confined, so it was not run: $reason",
+        "SANDBOX_UNAVAILABLE",
+        None
+      )
+    }
+
     val duration          = System.currentTimeMillis() - startTime
     val isStdoutTruncated = stdoutTruncated.get()
     val isStderrTruncated = stderrTruncated.get()
@@ -1969,8 +2022,14 @@ class WorkspaceAgentInterfaceImpl(
  * @param builder the process to start: the command's argument vector (never a shell over the command string), its
  *                working directory, its checked environment and the null device as standard input
  * @param timeout the caller's timeout, else the sandbox's `defaultCommandTimeout`
+ * @param scratch the command's own scratch directory when it is confined (Linux); the caller deletes it once the
+ *                command has ended or will never start
  */
-final private[runner] case class PreparedCommand(builder: java.lang.ProcessBuilder, timeout: FiniteDuration)
+final private[runner] case class PreparedCommand(
+  builder: java.lang.ProcessBuilder,
+  timeout: FiniteDuration,
+  scratch: Option[CommandScratch] = None
+)
 
 private[runner] object WorkspaceAgentInterfaceImpl {
 
