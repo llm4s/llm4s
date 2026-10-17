@@ -1286,7 +1286,12 @@ jobs:
             echo "Workspace integration tests failed"
             exit 1
           fi
-          # skipped passes only where the tier does not apply: a change that touches the workspace must run it
+          # skipped passes only where the tier does not apply: on a pull request the detector must run, and a change that
+          # touches the workspace must run the tier (a PR that disables either job's condition fails here)
+          if [[ "${{ github.event_name }}" == "pull_request" && "${{ needs.workspace-changes.result }}" != "success" ]]; then
+            echo "Deciding whether the pull request touches the workspace did not run"
+            exit 1
+          fi
           if [[ "${{ needs.workspace-changes.outputs.changed }}" == "true" && "${{ needs.workspace-integration.result }}" != "success" ]]; then
             echo "The change touches the workspace but Workspace Integration did not run and pass"
             exit 1
