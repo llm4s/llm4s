@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** the exit examples, `DeepResearchExample` and `CodingWorkspaceExample` with acceptance suites on a scripted model, and
   `StaticFileBackend` (read-only application files, e.g. skills) [#1916](https://github.com/llm4s/llm4s/issues/1916); [design §4.38](docs/design/typed-agent-runtime/4.38-stage-3-slice-p2-exit-examples.md).
 
+### MCP
+
+- **Fixed** the Streamable HTTP client taking the first SSE event that parsed as a response as the reply: it now
+  returns only the response to its own request id, skipping server-to-client requests and other ids, and bounds a
+  reply at 10 MiB [#1846](https://github.com/llm4s/llm4s/issues/1846).
+
 ### Documentation & samples
 
 - **Added** `ProviderDiscoveryExample` demonstrating dynamic provider discovery via `ProviderRegistry.discover()`,
