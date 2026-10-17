@@ -25,7 +25,20 @@ Let's start with the simplest possible LLM4S program - a "Hello World" that asks
 
 ### Create the File
 
-Create `HelloLLM.scala`:
+The examples use llm4s {{ site.data.project.latest_release }} on Scala 3.7.x and JDK 21. Add `llm4s-core` and the
+provider module you call, here `llm4s-openai` (see [Installation](installation)), to `build.sbt`:
+
+```scala
+val llm4sVersion = "{{ site.data.project.latest_release }}"
+
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core"   % llm4sVersion,
+  "org.llm4s" %% "llm4s-openai" % llm4sVersion,
+  "org.llm4s" %% "llm4s-agent"  % llm4sVersion  // only for the agent examples further down
+)
+```
+
+Then create `HelloLLM.scala`.
 
 It reads the provider from a named section in `src/main/resources/application.conf`:
 

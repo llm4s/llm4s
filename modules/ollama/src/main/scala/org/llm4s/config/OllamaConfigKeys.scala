@@ -14,10 +14,11 @@ import org.llm4s.annotation.Stable
 object OllamaConfigKeys {
 
   /**
-   * Conventional Ollama server URL variable, named in the "missing baseUrl"
-   * error for a named `ollama` provider. Chat config is keyed by the instance
-   * name, so it is bound in your own HOCON, e.g.
-   * `llm4s.providers.ollama-local.baseUrl = ${?OLLAMA_BASE_URL}`.
+   * Conventional Ollama server URL variable, declared as the `ollama` provider's
+   * `baseUrlEnv`. Chat config is keyed by the instance name, so llm4s reads it only
+   * where your own HOCON binds it, e.g.
+   * `llm4s.providers.ollama-local.baseUrl = ${?OLLAMA_BASE_URL}`; unset, the section
+   * keeps the default, `http://localhost:11434`.
    */
   val OLLAMA_BASE_URL = "OLLAMA_BASE_URL"
 

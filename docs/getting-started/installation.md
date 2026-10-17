@@ -24,9 +24,9 @@ Get LLM4S up and running in minutes.
 Before installing LLM4S, ensure you have:
 
 - **Java Development Kit (JDK) 21**
-- **Scala 3.7.1**
-- **SBT 1.10.6** or higher
-- An API key from at least one LLM provider (OpenAI, Anthropic, Azure OpenAI, or Ollama)
+- **Scala 3.7.x** (llm4s {{ site.data.project.latest_release }} is built with 3.7.1)
+- **sbt 1.10.6** or higher
+- An API key from at least one LLM provider (OpenAI, Anthropic, Azure OpenAI, ...), or a local [Ollama](ollama-quickstart) server, which needs none
 
 ### Verify Prerequisites
 
@@ -58,9 +58,18 @@ Add LLM4S to your `build.sbt`:
 
 ```scala
 // Scala 3
-libraryDependencies += "org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"
 ThisBuild / scalaVersion := "3.7.1"
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core"   % "{{ site.data.project.latest_release }}",
+  "org.llm4s" %% "llm4s-openai" % "{{ site.data.project.latest_release }}"  // or the provider module you use
+)
 ```
+
+`llm4s-core` holds no provider client: add the module of each provider you call (`llm4s-openai`,
+`llm4s-anthropic`, `llm4s-gemini`, `llm4s-ollama`, ...; see [Optional Dependencies](#optional-dependencies)).
+Without one, loading a provider section fails because no module registers that provider. The Maven and Gradle
+snippets below show `llm4s-core` only; add the provider module the same way, with the `_3` suffix
+(`llm4s-openai_3`).
 
 ### Maven
 
@@ -146,7 +155,8 @@ lazy val myProject = (project in file("."))
     name := "my-llm-project",
     scalaVersion := "3.7.1",
     libraryDependencies ++= Seq(
-      "org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"
+      "org.llm4s" %% "llm4s-core"   % "{{ site.data.project.latest_release }}",
+      "org.llm4s" %% "llm4s-openai" % "{{ site.data.project.latest_release }}"
     )
   )
 ```
@@ -223,11 +233,11 @@ what is on `main`, build it and publish it to your local repository:
 ```bash
 git clone https://github.com/llm4s/llm4s && cd llm4s
 sbt publishLocal   # for sbt; use `sbt publishM2` for Maven or Gradle (mavenLocal())
-sbt version        # prints the version it published, for example 0.4.1+165-b455b8ea-SNAPSHOT
+sbt version        # prints the version it published, for example 0.5.1+12-abc12345-SNAPSHOT
 ```
 
 Then depend on that version, for example
-`libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.4.1+165-b455b8ea-SNAPSHOT"` (use the one `sbt version`
+`libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.5.1+12-abc12345-SNAPSHOT"` (use the one `sbt version`
 printed). This guide describes the latest release; `main` may have modules and configuration that it does not
 have yet.
 
@@ -235,29 +245,25 @@ have yet.
 
 ## Quick Start with the Starter Kit
 
-The fastest way to get started is using the **llm4s.g8** template:
+The fastest way to a working sbt project is the **llm4s.g8** template:
 
 ```bash
-# Install the template
-sbt new llm4s/llm4s.g8
+sbt new llm4s/llm4s.g8 --llm4s_version={{ site.data.project.latest_release }}
 
-# Follow the prompts
-# name [My LLM Project]: my-awesome-agent
-# organization [com.example]: com.mycompany
-# scala_version [3.7.1]:
-# llm4s_version [0.4.0]:
-
-cd my-awesome-agent
+# Answer the remaining prompts (name, package, scala_version, ...) or accept the defaults
+cd <your project name>
 sbt run
 ```
 
-The starter kit includes:
+Pass `--llm4s_version` (or type the version at its prompt) so the project starts on
+{{ site.data.project.latest_release }}, then check the generated `build.sbt`: it needs `llm4s-core` **and at least one
+provider module** at that version, because since 0.5.0 `llm4s-core` ships no provider. The template is being
+moved to 0.5.x ([llm4s.g8#6](https://github.com/llm4s/llm4s.g8/pull/6)), which adds `llm4s-ollama` and
+`llm4s-openai` itself; a template from before that defaults to llm4s `0.4.0` and lists `llm4s-core` only, so add
+the provider you use, for example `"org.llm4s" %% "llm4s-openai" % "{{ site.data.project.latest_release }}"`.
 
-- ✅ Pre-configured SBT build
-- ✅ Example agent with tool calling
-- ✅ Configuration templates
-- ✅ Multi-provider setup
-- ✅ Docker configuration for workspace
+The generated project has an sbt build, a logging backend, an `application.conf` with
+[named provider sections](configuration#named-provider-sections), a small sample program and its tests.
 
 [View the starter kit →](https://github.com/llm4s/llm4s.g8)
 
@@ -516,6 +522,13 @@ libraryDependencies += "org.llm4s" %% "llm4s-pekko"                % llm4sVersio
 functions, and `Flow`s of an agent turn's events. It is a Kotlin artifact, so it has **no** `_3` suffix, and it is
 released at the same version as every other llm4s module, so the BOM manages it too:
 
+{: .warning }
+> **`llm4s-kotlin-api` {{ site.data.project.latest_release }} is not on Maven Central yet.** A fault in the release
+> workflow left it out of the 0.5.0 and 0.5.1 releases; the fix is pending
+> ([#1976](https://github.com/llm4s/llm4s/pull/1976)). Until a release includes it, the coordinates below do not
+> resolve (the BOM lists it, but every other entry of the BOM resolves). Build it locally instead, as described
+> below the snippet; it then depends on the released `llm4s-java-api_3`.
+
 ```kotlin
 // build.gradle.kts
 dependencies {
@@ -526,8 +539,11 @@ dependencies {
 
 Without the BOM, write the version on it: `implementation("org.llm4s:llm4s-kotlin-api:{{ site.data.project.latest_release }}")`.
 It runs on JDK 21, like the Java facade it wraps. The module is built by Gradle (`modules/kotlin-api`), not sbt, so
-`sbt publishLocal` does not build it: to try it from `main`, run `sbt publishM2` and then `gradle publishToMavenLocal`
-in `modules/kotlin-api` (it builds at `0.1.0-SNAPSHOT` unless you pass `-Pllm4sVersion=<the version sbt published>`).
+`sbt publishLocal` does not build it. To build it, check out the release tag (`git checkout v{{ site.data.project.latest_release }}`)
+and run `gradle publishToMavenLocal -Pllm4sVersion={{ site.data.project.latest_release }}` in `modules/kotlin-api`,
+then add `mavenLocal()` to your repositories; it depends on `llm4s-java-api_3` at that version, which is on Maven
+Central. Without `-Pllm4sVersion` it builds at `0.1.0-SNAPSHOT`; to try it from `main`, run `sbt publishM2` first and
+pass the version sbt published.
 
 ### For image generation and vision
 
@@ -875,11 +891,12 @@ sbt compile
 **Problem**: Can't resolve LLM4S dependency.
 
 **Solution**:
-- For release versions, no additional resolver needed (uses Maven Central)
-- For snapshots, add the resolver:
-```scala
-resolvers += Resolver.sonatypeRepo("snapshots")
-```
+- Releases are on Maven Central, so no additional resolver is needed
+- With Maven or Gradle, write the Scala suffix yourself: `llm4s-core_3`, not `llm4s-core` (the BOM, `llm4s-bom`,
+  has none)
+- No snapshots are published: to use `main`, build it locally (see [Unreleased changes](#unreleased-changes-main))
+- `llm4s-kotlin-api` is not on Maven Central for {{ site.data.project.latest_release }} yet (see
+  [For Kotlin](#for-kotlin-coroutines-and-flow))
 
 ---
 

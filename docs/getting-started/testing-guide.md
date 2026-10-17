@@ -229,7 +229,7 @@ llm4s {
     ollama-test {
       provider = "ollama"
       model    = "llama3.2"
-      baseUrl  = "http://localhost:11434"   # required for Ollama
+      baseUrl  = "http://localhost:11434"   # optional: this is the default
     }
   }
 }

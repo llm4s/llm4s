@@ -310,8 +310,10 @@ Explore **69 working examples** covering all features:
 
 | Scala Version | JDK Version | Status |
 |---------------|-------------|--------|
-| 3.7.x | 21, 17 | ✅ Fully Supported |
-| 2.13.x | 21, 17 | ✅ Fully Supported |
+| 3.7.x | 21 | ✅ Supported (built with 3.7.1) |
+
+Scala 2.13 is not published: 1.0 targets Scala 3 only, and 2.13 support is deferred to after 1.0. JDK 21 is the
+minimum for every artifact; see [Scala and JDK support](/reference/v1-scope#scala-and-jdk-support).
 
 ### LLM Provider Support
 

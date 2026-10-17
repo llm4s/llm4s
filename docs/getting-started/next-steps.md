@@ -174,11 +174,9 @@ val result = agent.flatMap(_.run("Your query"))
 Give LLMs access to external functions and APIs.
 
 ```scala
-val tool = ToolFunction(
-  name = "search",
-  description = "Search the web",
-  function = search _
-)
+val tool = ToolBuilder[Map[String, Any], String]("search", "Search the web", searchSchema)
+  .withHandler(params => params.getString("query").map(search))
+  .buildSafe()   // Result[ToolFunction[Map[String, Any], String]]
 ```
 
 [Learn more →](/guide/builtin-tools)
@@ -214,8 +212,7 @@ val config = ContextWindowConfig(
 Get real-time token-by-token responses.
 
 ```scala
-val stream = client.completeStreaming(messages, None)
-stream.foreach(chunk => print(chunk.content))
+client.streamComplete(conversation, onChunk = chunk => chunk.content.foreach(print))
 ```
 
 [Learn more →](/guide/agents/streaming)
@@ -237,10 +234,8 @@ TRACING_MODE=langfuse
 ### Embeddings
 Create and search vector embeddings.
 
-```scala
-val embeddings = embeddingsClient.embed(documents)
-val results = search(query, embeddings)
-```
+`EmbeddingClient` (in `llm4s-core`) turns text into vectors through an embedding provider module, and
+`llm4s-rag` indexes and searches them in a vector store.
 
 [Learn more →](/guide/vector-store)
 
@@ -250,7 +245,8 @@ val results = search(query, embeddings)
 Connect to external Model Context Protocol servers.
 
 ```scala
-val mcpTools = MCPClient.loadTools("mcp-server-name")
+// llm4s-mcp: an MCPToolRegistry is a ToolRegistry, so an agent takes it like any other
+val tools = new MCPToolRegistry(Seq(MCPServerConfig.stdio("files", Seq("npx", "my-mcp-server"))))
 ```
 
 [Learn more →](/examples/#mcp-examples)
@@ -342,18 +338,17 @@ import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.toolapi.{ ToolFunction, ToolRegistry }
+import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 
 def getCurrentTime(): String =
   java.time.LocalDateTime.now().toString
 
-val timeTool = ToolFunction(
-  name = "get_time",
-  description = "Get current date and time",
-  function = getCurrentTime _
-)
-
 val result = for {
+  timeTool <- ToolBuilder[Map[String, Any], String](
+                "get_time",
+                "Get current date and time",
+                Schema.`object`[Map[String, Any]]("No parameters")
+              ).withHandler(_ => Right(getCurrentTime())).buildSafe()
   providerConfig <- Llm4sConfig.defaultProvider()
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
@@ -368,7 +363,7 @@ val result = for {
 ```scala
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model.UserMessage
+import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
 import org.llm4s.model.ModelRegistryService
 
 def streamChat(message: String): Unit = {
@@ -377,14 +372,11 @@ def streamChat(message: String): Unit = {
     registry <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
-    stream <- client.completeStreaming(
-      List(UserMessage(message)),
-      None
+    _ <- client.streamComplete(
+      Conversation(Seq(UserMessage(message))),
+      onChunk = chunk => chunk.content.foreach(print)
     )
-  } yield {
-    stream.foreach(chunk => print(chunk.content))
-    println()
-  }
+  } yield println()
 
   result.left.foreach(error => println(s"Error: $error"))
 }
