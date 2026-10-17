@@ -55,7 +55,7 @@ and is run in CI:
 | [Streaming Examples](#streaming-examples) | 9 | Real-time responses, agent event streams |
 | [Reasoning Examples](#reasoning-examples) | 1 | Extended thinking modes |
 | [Context Management](#context-management) | 8 | Token windows, compression |
-| [Embeddings](#embeddings) | 5 | Vector search, RAG |
+| [Embeddings](#embeddings) | 6 | Vector search, RAG |
 | [RAG in a Box](#rag-in-a-box) | - | Production RAG server (external project) |
 | [MCP Examples](#mcp-examples) | 3 | Model Context Protocol |
 | [Model Examples](#model-examples) | 1 | Model metadata and capabilities |
@@ -991,6 +991,27 @@ sbt "samples/runMain org.llm4s.samples.embeddingsupport.EmbeddingExample"
 - Chunking and preprocessing
 
 [View all embedding examples →](embeddings)
+
+---
+
+### HybridSearchExample {#hybrid-search}
+
+**File:** [`HybridSearchExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/rag/HybridSearchExample.scala)
+
+Runs one query through `HybridSearcher` with each fusion strategy (`VectorOnly`, `KeywordOnly`, `RRF`,
+`WeightedScore`) and prints the rank, id and scores of each result. Fully offline: the embeddings are
+hand-written 3-dimensional vectors, so no API key or network is needed.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.rag.HybridSearchExample"
+```
+
+**What it demonstrates:**
+- `HybridSearcher.inMemory()` and indexing a document into both the vector store and the keyword index
+- A query where vector and keyword search disagree about the best document
+- How RRF and weighted-score fusion reconcile the two lists, and how the weights move the winner
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/rag/HybridSearchExample.scala)
 
 ---
 
