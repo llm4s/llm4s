@@ -1,0 +1,128 @@
+package org.llm4s.runner
+
+import org.llm4s.shared.WorkspaceSandboxConfig
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+
+import java.nio.file.{ Files, Path, Paths }
+
+class CommandConfinementSpec extends AnyFlatSpec with Matchers {
+  import CommandConfinement.{ Grant, Rule }
+
+  private def tree(paths: String*): Path = {
+    val root = Files.createTempDirectory("confine").toRealPath()
+    paths.foreach { p =>
+      val target = root.resolve(p)
+      if (p.endsWith("/")) Files.createDirectories(target)
+      else { Files.createDirectories(target.getParent); Files.writeString(target, "x") }
+    }
+    root
+  }
+
+  private def cfg(allowed: List[String] = Nil, ro: List[String] = Nil) =
+    WorkspaceSandboxConfig.Permissive.copy(allowedPaths = allowed, readOnlyPaths = ro)
+
+  "workspaceRules" should "grant the whole root when nothing is restricted" in {
+    val root = tree()
+    CommandConfinement.workspaceRules(cfg(), root) shouldBe List(Rule(Grant.ReadWrite, root))
+  }
+
+  it should "carve a read-only directory out of the root" in {
+    val root = tree("ro/", "src/", "a.txt", ".git/")
+    CommandConfinement.workspaceRules(cfg(ro = List("ro")), root).toSet shouldBe Set(
+      Rule(Grant.ReadOnly, root),
+      Rule(Grant.ReadOnly, root.resolve("ro")),
+      Rule(Grant.ReadWrite, root.resolve("src")),
+      Rule(Grant.ReadWrite, root.resolve(".git")),
+      Rule(Grant.WriteFile, root.resolve("a.txt"))
+    )
+  }
+
+  it should "carve a nested read-only path" in {
+    val root = tree("a/b/", "a/c/", "a/f.txt", "d/")
+    CommandConfinement.workspaceRules(cfg(ro = List("a/b")), root).toSet shouldBe Set(
+      Rule(Grant.ReadOnly, root),
+      Rule(Grant.ReadWrite, root.resolve("d")),
+      Rule(Grant.ReadOnly, root.resolve("a")),
+      Rule(Grant.ReadOnly, root.resolve("a/b")),
+      Rule(Grant.ReadWrite, root.resolve("a/c")),
+      Rule(Grant.WriteFile, root.resolve("a/f.txt"))
+    )
+  }
+
+  it should "grant only allowedPaths when given" in {
+    val root = tree("src/", "docs/", "secret/")
+    CommandConfinement.workspaceRules(cfg(allowed = List("src", "docs")), root).toSet shouldBe Set(
+      Rule(Grant.ReadWrite, root.resolve("src")),
+      Rule(Grant.ReadWrite, root.resolve("docs"))
+    )
+  }
+
+  it should "make a path both allowed and read-only read-only" in {
+    val root = tree("src/")
+    CommandConfinement.workspaceRules(cfg(allowed = List("src"), ro = List("src")), root) shouldBe
+      List(Rule(Grant.ReadOnly, root.resolve("src")))
+  }
+
+  it should "make an allowed path inside a read-only root read-only" in {
+    val root = tree("src/")
+    CommandConfinement.workspaceRules(cfg(allowed = List("src"), ro = List(".")), root) shouldBe
+      List(Rule(Grant.ReadOnly, root.resolve("src")))
+  }
+
+  it should "treat a missing allowed path as no grant and a missing read-only path as none" in {
+    val root = tree()
+    CommandConfinement.workspaceRules(cfg(allowed = List("nope")), root) shouldBe Nil
+    CommandConfinement.workspaceRules(cfg(ro = List("nope")), root) shouldBe List(Rule(Grant.ReadWrite, root))
+  }
+
+  it should "give a symlink child of a walked directory no rule" in {
+    val root = tree("ro/")
+    Files.createSymbolicLink(root.resolve("l"), root.resolve("ro"))
+    val rules = CommandConfinement.workspaceRules(cfg(ro = List("ro")), root)
+    rules.map(_.path) should not contain root.resolve("l")
+  }
+
+  it should "bind the target of a read-only symlink" in {
+    val root = tree("ro/")
+    Files.createSymbolicLink(root.resolve("ro-link"), root.resolve("ro"))
+    CommandConfinement.workspaceRules(cfg(ro = List("ro-link")), root) should contain(
+      Rule(Grant.ReadOnly, root.resolve("ro"))
+    )
+  }
+
+  it should "give no rule outside the root" in {
+    val root = tree("src/")
+    Files.createDirectories(root.getParent.resolve("x"))
+    CommandConfinement.workspaceRules(cfg(allowed = List("../x")), root).forall(_.path.startsWith(root)) shouldBe true
+    CommandConfinement.workspaceRules(cfg(ro = List("../x")), root).forall(_.path.startsWith(root)) shouldBe true
+  }
+
+  "helperArgs" should "list the helper, status file, grants, --no-net and --" in {
+    val rules = List(Rule(Grant.ReadOnly, Paths.get("/a")), Rule(Grant.ReadWrite, Paths.get("/b")))
+    CommandConfinement.helperArgs(Paths.get("/h"), Paths.get("/s/status"), rules, noNetwork = true) shouldBe
+      List("/h", "--status", "/s/status", "--ro", "/a", "--rw", "/b", "--no-net", "--")
+    CommandConfinement.helperArgs(Paths.get("/h"), Paths.get("/s/status"), rules, noNetwork = false) should not contain
+      "--no-net"
+  }
+
+  "systemRules" should "grant home and /dev/null, and only paths that exist" in {
+    val home  = tree()
+    val root  = tree()
+    val rules = CommandConfinement.systemRules(home, None, root)
+    rules should contain(Rule(Grant.ReadWriteExec, home))
+    if (Files.exists(Paths.get("/dev/null")))
+      rules should contain(Rule(Grant.ReadWrite, Paths.get("/dev/null").toRealPath()))
+    rules.forall(r => Files.exists(r.path)) shouldBe true
+  }
+
+  it should "drop a grant on a directory that contains the workspace" in {
+    val root = tree()
+    CommandConfinement.systemRules(root.getParent, None, root).map(_.path) should not contain root.getParent
+  }
+
+  it should "drop a grant on a directory inside the workspace" in {
+    val root = tree("h/")
+    CommandConfinement.systemRules(root.resolve("h"), None, root).map(_.path) should not contain root.resolve("h")
+  }
+}
