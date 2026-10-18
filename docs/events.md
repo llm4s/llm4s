@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Events
-nav_order: 8
+nav_order: 8.5
 permalink: /events/
 description: "LLM4S talks, workshops and the weekly Dev Hour: where to meet the LLM4S community, and recordings and slides of past talks."
 ---
