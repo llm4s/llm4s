@@ -434,6 +434,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.37 | [Stage 3 slice P1: the harness profile](typed-agent-runtime/4.37-stage-3-slice-p1-harness-profile.md) ([#1915](https://github.com/llm4s/llm4s/issues/1915)) |
 | 4.38 | [Stage 3 slice P2: the exit examples](typed-agent-runtime/4.38-stage-3-slice-p2-exit-examples.md) ([#1916](https://github.com/llm4s/llm4s/issues/1916)) |
 | 4.39 | [Workspace command confinement](typed-agent-runtime/4.39-workspace-command-confinement.md) ([#1983](https://github.com/llm4s/llm4s/issues/1983)) |
+| 4.40 | [`HostFileBackend`: a file backend over a host directory](typed-agent-runtime/4.40-host-file-backend.md) ([#1964](https://github.com/llm4s/llm4s/issues/1964)) |
 
 ### 4.9 Stage 0 carry-forward
 
