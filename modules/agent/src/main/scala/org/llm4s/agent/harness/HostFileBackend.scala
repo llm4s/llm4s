@@ -754,20 +754,27 @@ object HostFileBackend:
         )
         // the lock first, so nothing below - the probe file included - touches a root another backend holds
         held <- RootLocks.acquire(real, locks, rootChain)
-        backend <- checked(real, allowUncheckedIdentity, probe, countsLinks, fileSystemId, mountsBeneath).map {
-          (stamp, mounts, links) =>
-            new HostFileBackend(
-              real,
-              maxFileBytes,
-              maxScanEntries,
-              held,
-              stamp,
-              stampOf(_, fileSystemId),
-              fileSystemId,
-              mounts,
-              links,
-              openDirectory
-            )
+        backend <- checked(
+          real,
+          rootChain.head,
+          allowUncheckedIdentity,
+          probe,
+          countsLinks,
+          fileSystemId,
+          mountsBeneath
+        ).map { (stamp, mounts, links) =>
+          new HostFileBackend(
+            real,
+            maxFileBytes,
+            maxScanEntries,
+            held,
+            stamp,
+            stampOf(_, fileSystemId),
+            fileSystemId,
+            mounts,
+            links,
+            openDirectory
+          )
         } match
           case Left(error) =>
             held.release()
@@ -778,6 +785,7 @@ object HostFileBackend:
   /** The identity checks of `open`, run while the root's lock is held. */
   private def checked(
     real: Path,
+    lockedIdentity: String,
     allowUncheckedIdentity: Boolean,
     probe: Path => Result[Vector[String]],
     countsLinks: Path => Boolean,
@@ -818,6 +826,13 @@ object HostFileBackend:
       )
       stamp <- Try(stampOf(real, fileSystemId)).toResult.left
         .map(e => ValidationError("root", s"$real cannot be identified: ${e.message}"): LLMError)
+      // the stamp every operation compares must be of the directory the lock was taken on: one swapped in at
+      // the same path since would pass `rootIntact` while another backend locked it as a different root
+      _ <- Either.cond(
+        stamp.identity == lockedIdentity,
+        (),
+        ValidationError("root", s"$real was replaced while it was being opened; open it again")
+      )
     yield (stamp, mounts, links)
 
   // ---- identity
