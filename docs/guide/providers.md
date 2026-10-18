@@ -39,7 +39,7 @@ LLM4S supports these LLM providers, plus any endpoint that speaks the OpenAI cha
 | **Ollama** | Local | Private, no API key, offline | Easy |
 | **IBM watsonx.ai** | Cloud Enterprise | Granite, Llama and Mistral models under IBM governance | Medium |
 
-Missing a vendor? See [Writing a Provider](writing-a-provider.md) to publish your own provider module.
+Missing a vendor? See [Writing a Provider](writing-a-provider) to publish your own provider module.
 
 ---
 
@@ -54,7 +54,7 @@ A section's API key comes from its own `apiKey` when it sets one, and otherwise 
 vendor's shared key, `llm4s.credentials.<provider>.apiKey`, which each provider module binds to
 the vendor's conventional variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...). So with the
 variable exported, a section needs only `provider` and `model`. The library reads no `LLM_MODEL`.
-See [API keys](../getting-started/configuration.md#api-keys) for the full table and for a
+See [API keys](../getting-started/configuration#api-keys) for the full table and for a
 second account.
 
 ```hocon
@@ -87,8 +87,8 @@ Only the section being loaded is validated, so a section with no key available -
 provider module is not on the classpath - fails only when it is loaded: with the file above and
 just `OPENAI_API_KEY` set, `defaultProvider()` succeeds and `provider("claude")` fails with an
 error naming `ANTHROPIC_API_KEY` and `claude`'s `apiKey`. See
-[Named provider sections](../getting-started/configuration.md#named-provider-sections) and
-[Switching providers](../getting-started/configuration.md#switching-providers) for the full story.
+[Named provider sections](../getting-started/configuration#named-provider-sections) and
+[Switching providers](../getting-started/configuration#switching-providers) for the full story.
 
 ### Available Models
 
@@ -121,7 +121,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-openai" % llm4sVersion
 ```
 
 In `0.4.1` and earlier it is part of `llm4s-core`. See the
-[installation guide](../getting-started/installation.md#for-openai-azure-openai-and-requesty).
+[installation guide](../getting-started/installation#for-openai-azure-openai-and-requesty).
 
 ### Setup
 
@@ -229,7 +229,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-anthropic" % llm4sVersion
 ```
 
 In `0.4.1` and earlier it is part of `llm4s-core`. See the
-[installation guide](../getting-started/installation.md#for-anthropic).
+[installation guide](../getting-started/installation#for-anthropic).
 
 ### Setup
 
@@ -293,7 +293,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-gemini" % llm4sVersion
 ```
 
 In `0.4.1` and earlier they are part of `llm4s-core`. See the
-[installation guide](../getting-started/installation.md#for-gemini-and-vertex-ai).
+[installation guide](../getting-started/installation#for-gemini-and-vertex-ai).
 
 ### Setup
 
@@ -589,7 +589,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % llm4sVersion
 ```
 
 In `0.4.1` and earlier it is part of `llm4s-core`. See the
-[installation guide](../getting-started/installation.md#for-deepseek-zai-openrouter-mistral-cohere-and-any-openai-compatible-endpoint).
+[installation guide](../getting-started/installation#for-deepseek-zai-openrouter-mistral-cohere-and-any-openai-compatible-endpoint).
 
 ### Setup
 
@@ -700,7 +700,7 @@ Any server that speaks the OpenAI `/chat/completions` API works with
 `provider = "openai-compatible"` - hosted APIs such as Groq, Together, Fireworks, xAI or NVIDIA
 NIM, local servers such as vLLM, LM Studio or llama.cpp, or an internal gateway. It needs no code
 and no module of its own, only `llm4s-openai-compatible`, which ships in the release after `0.4.1`
-(see the [installation guide](../getting-started/installation.md#for-deepseek-zai-openrouter-mistral-cohere-and-any-openai-compatible-endpoint)):
+(see the [installation guide](../getting-started/installation#for-deepseek-zai-openrouter-mistral-cohere-and-any-openai-compatible-endpoint)):
 
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % llm4sVersion
@@ -1448,7 +1448,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-ollama" % llm4sVersion
 ```
 
 In `0.4.1` and earlier it is part of `llm4s-core`. See the
-[installation guide](../getting-started/installation.md#for-ollama-local-models).
+[installation guide](../getting-started/installation#for-ollama-local-models).
 
 ### Setup
 
@@ -1870,7 +1870,7 @@ for {
 
 Each section is validated when it is loaded, so here both must have a key available;
 a problem in either surfaces as the `Left` of this `for`. See
-[Switching providers](../getting-started/configuration.md#switching-providers).
+[Switching providers](../getting-started/configuration#switching-providers).
 
 This enables:
 - **Fallback logic** - Use OpenAI, fall back to Anthropic

@@ -1125,7 +1125,7 @@ sbt "samples/runMain org.llm4s.samples.streaming.StreamingWithProgressExample"
 ### Agent event streams
 
 `agent.stream` with `withStreaming()`: text deltas live, model and tool events as they commit. See the
-[streaming guide](../guide/agents/streaming.md).
+[streaming guide](../guide/agents/streaming).
 
 | Example | Shows |
 |---------|-------|
@@ -1297,7 +1297,7 @@ sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
 Only the section being loaded is validated, so a section whose key you have not set does no
-harm until you select it. See [Configuration](../getting-started/configuration.md#running-the-samples) for more.
+harm until you select it. See [Configuration](../getting-started/configuration#running-the-samples) for more.
 
 The chat-tui sample is the exception: `ChatTuiConfig` reads `LLM_MODEL=<provider>/<model>` and
 the matching API-key variable itself, and falls back to `Llm4sConfig.defaultProvider()` when

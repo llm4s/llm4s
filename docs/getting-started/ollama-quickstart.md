@@ -56,7 +56,7 @@ libraryDependencies ++= Seq(
 
 Adding `llm4s-ollama` registers the provider; there is nothing else to wire up. Before 0.5.0, Ollama was
 part of `llm4s-core`. See the
-[installation guide](installation.md#for-ollama-local-models).
+[installation guide](installation#for-ollama-local-models).
 
 ---
 

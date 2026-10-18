@@ -45,7 +45,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-memory" % llm4sVersion
 ```
 
 The Postgres backend is a separate artifact - see
-[Postgres Memory Store](../../reference/postgres-memory-store.md). Package names are unchanged
+[Postgres Memory Store](../../reference/postgres-memory-store). Package names are unchanged
 either way, so `org.llm4s.agent.memory.*` imports keep working.
 
 ---

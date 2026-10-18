@@ -499,9 +499,9 @@ object InferenceOptimization {
 
 ## See Also
 
-- [Production Monitoring](./production-monitoring.md) - Monitor scaled systems
-- [Error Recovery](./error-recovery.md) - Handle failures at scale
-- [Security Best Practices](./security-best-practices.md) - Secure at scale
+- [Production Monitoring](./production-monitoring) - Monitor scaled systems
+- [Error Recovery](./error-recovery) - Handle failures at scale
+- [Security Best Practices](./security-best-practices) - Secure at scale
 
 ---
 

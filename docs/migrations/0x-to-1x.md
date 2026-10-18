@@ -83,7 +83,7 @@ config.provider match {
 In 0.2.x the following methods returned values directly but threw `IllegalStateException` on failure. They were deprecated in 0.2.x and **removed in 0.3.0**.
 
 For the full before/after table and code examples see the dedicated guide:
-[Migrating from v0.2.9 to v0.3.0](v0.2.9-to-v0.3.0.md)
+[Migrating from v0.2.9 to v0.3.0](v0.2.9-to-v0.3.0)
 
 Quick reference — replace every occurrence of the left-hand form with the right:
 
@@ -179,7 +179,7 @@ is complete. `AgentRunEnded.usage` is the run's own usage, not the thread's: a d
 the old cumulative figure per run double counted. A slow `AgentIO.stream`/`AgentZ.stream` consumer
 loses live events and gets a `StreamEvent.LiveGap` with their count; it no longer cancels the run.
 
-See the [streaming guide](../guide/agents/streaming.md).
+See the [streaming guide](../guide/agents/streaming).
 
 ---
 

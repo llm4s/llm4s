@@ -423,8 +423,8 @@ sbt scalafmtAll       # Format code
   checked the way llm4s.org serves them: write `[x](../guide/foo)` or `[x](/guide/foo)`, not `foo.md` (the site
   404s a `.md` link to a rendered page), and give every page front matter or it is served as raw text. Known
   breakage is listed in `scripts/docs-link-baseline.txt`; when you fix a listed link the check asks you to delete
-  its line, and a new broken link is never added to that file. `scripts/check-docs-site-links.sh --print` shows what
-  is broken now.
+  its line, and a new broken link is never added to that file (a `.md` link fails even if it is listed there).
+  `scripts/check-docs-site-links.sh --print` shows what is broken now.
 
 ## Commit Messages
 

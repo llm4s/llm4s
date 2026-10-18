@@ -90,7 +90,7 @@ def chained(): Result[String] =
 Loading the configuration, building the client, building the conversation (which validates it) and
 making the call are four steps that can each fail, and you handle them once, at the end.
 `Llm4sConfig.defaultProvider()` reads the section `llm4s.providers.provider` names; see
-[Configuration](../getting-started/configuration.md#named-provider-sections).
+[Configuration](../getting-started/configuration#named-provider-sections).
 
 ## 4. Error types and when each is raised
 
@@ -361,7 +361,7 @@ After `failureThreshold` consecutive failures (a success resets the count) it op
 without reaching the service, until `recoveryTimeout` has passed and a single probe call is allowed.
 
 For production use, `ReliableClient` wraps a client with retry (its own `RetryPolicy`, with
-configurable backoff), a circuit breaker, and an optional deadline and rate limit, in one place. See [Error Recovery](patterns/error-recovery.md) for retry strategies, fallbacks and
+configurable backoff), a circuit breaker, and an optional deadline and rate limit, in one place. See [Error Recovery](patterns/error-recovery) for retry strategies, fallbacks and
 graceful degradation.
 
 ## 10. Testing code that returns Result
@@ -393,7 +393,7 @@ class ResultSpec extends AnyWordSpec with Matchers with EitherValues {
 ```
 
 To test code that calls an LLM without a network, give it a client that returns what you choose.
-See the [Testing Guide](../getting-started/testing-guide.md).
+See the [Testing Guide](../getting-started/testing-guide).
 
 ## Rules of thumb
 
@@ -408,7 +408,7 @@ See the [Testing Guide](../getting-started/testing-guide.md).
 
 ## See also
 
-- [Basic Usage](basic-usage.md): your first calls and the `Result` type
-- [Error Recovery](patterns/error-recovery.md): retries, circuit breakers and fallbacks
-- [Configuration](../getting-started/configuration.md): named provider sections and API keys
-- [Testing Guide](../getting-started/testing-guide.md): testing with mock clients
+- [Basic Usage](basic-usage): your first calls and the `Result` type
+- [Error Recovery](patterns/error-recovery): retries, circuit breakers and fallbacks
+- [Configuration](../getting-started/configuration): named provider sections and API keys
+- [Testing Guide](../getting-started/testing-guide): testing with mock clients

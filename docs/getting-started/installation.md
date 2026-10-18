@@ -412,7 +412,7 @@ DeepSeek (`provider = "deepseek"`), Z.ai (`"zai"`), OpenRouter (`"openrouter"`),
 `"openai-compatible"` provider for any other endpoint that speaks the API - Groq, Together,
 Fireworks, xAI, NVIDIA NIM, OrcaRouter, a vLLM, LM Studio or llama.cpp server, an internal
 gateway - configured with a `baseUrl` and a `model`, and no code. See
-[OpenAI-compatible endpoints](../guide/providers.md#openai-compatible-endpoints) for a
+[OpenAI-compatible endpoints](../guide/providers#openai-compatible-endpoints) for a
 configuration recipe per provider. The module
 brings no dependency beyond `llm4s-core`, and adding it registers the providers. Package names
 are unchanged; see the
@@ -498,7 +498,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-watsonx" % llm4sVersion
 ```
 
 The IBM watsonx.ai chat provider (`provider = "watsonx"`), brings no dependency beyond
-`llm4s-core`. See [IBM watsonx.ai](../guide/providers.md#ibm-watsonxai).
+`llm4s-core`. See [IBM watsonx.ai](../guide/providers#ibm-watsonxai).
 
 ### For Java, Spring Boot, cats-effect and ZIO
 

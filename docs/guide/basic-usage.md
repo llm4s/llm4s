@@ -96,8 +96,8 @@ export OPENAI_API_KEY=sk-proj-...
 
 For Anthropic, use a section with `provider = "anthropic"`, export `ANTHROPIC_API_KEY`, and name
 the section in `provider`. llm4s reads no `LLM_MODEL`. See
-[Named provider sections](../getting-started/configuration.md#named-provider-sections) and
-[API keys](../getting-started/configuration.md#api-keys).
+[Named provider sections](../getting-started/configuration#named-provider-sections) and
+[API keys](../getting-started/configuration#api-keys).
 
 ### Multi-Provider Pattern
 
@@ -114,7 +114,7 @@ val startup = for {
 
 The same code works with any configured named provider without modifications: change
 `llm4s.providers.provider`, or load another section with `Llm4sConfig.provider("<name>")`. See
-[Switching providers](../getting-started/configuration.md#switching-providers).
+[Switching providers](../getting-started/configuration#switching-providers).
 
 ### With Explicit Model Selection
 
@@ -199,7 +199,7 @@ val retryable = LLMError.isRecoverable(error)
 `isRecoverable` answers for every error. One that carries neither marker (`EmbeddingError`, `RerankError`,
 a custom `LLMError` that does not say) is not recoverable.
 
-See the [Error Handling guide](error-handling.md) for every error type, when it is raised, and how
+See the [Error Handling guide](error-handling) for every error type, when it is raised, and how
 to handle, convert and test them.
 
 ### Using For-Comprehensions
@@ -320,7 +320,7 @@ export EMBEDDING_MODEL=openai/text-embedding-3-small    # llm4s.embeddings.model
 ```
 
 `LLM_MODEL` is **not** among them. See
-[Environment variables llm4s reads](../getting-started/configuration.md#environment-variables-llm4s-reads).
+[Environment variables llm4s reads](../getting-started/configuration#environment-variables-llm4s-reads).
 
 ### System Properties
 

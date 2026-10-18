@@ -1174,7 +1174,7 @@ sbt "samples/runMain org.llm4s.samples.rag.BenchmarkExample --suite fusion"
 sbt "samples/runMain org.llm4s.samples.rag.BenchmarkExample --suite chunking"
 ```
 
-**See the full [RAG Evaluation Guide](rag-evaluation.md) for:**
+**See the full [RAG Evaluation Guide](rag-evaluation) for:**
 - RAGAS metrics explained (faithfulness, relevancy, precision, recall)
 - Running benchmarks programmatically
 - Optimization workflow and best practices
@@ -1184,7 +1184,7 @@ sbt "samples/runMain org.llm4s.samples.rag.BenchmarkExample --suite chunking"
 
 ## Next Steps
 
-- **[RAG Evaluation Guide](rag-evaluation.md)** - Measure and improve RAG quality
+- **[RAG Evaluation Guide](rag-evaluation)** - Measure and improve RAG quality
 - **[Embeddings Configuration](../getting-started/configuration#embeddings-configuration)** - Configure embedding providers
 - **[Examples Gallery](/examples/#embeddings-examples)** - See RAG examples in action
 - **[RAG in a Box](https://github.com/llm4s/rag_in_a_box)** - Production-ready RAG server with REST API, admin UI, and deployment options

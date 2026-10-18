@@ -883,7 +883,7 @@ Add the 'org.llm4s' %% 'llm4s-observability-otel' dependency. Available modes: c
 
 That hint is only a message: dispatch never consults it, and a third-party mode needs no entry in
 it. See the
-[observability guide](../guide/observability/index.md#adding-a-tracing-backend) to write one.
+[observability guide](../guide/observability/#adding-a-tracing-backend) to write one.
 
 ### Disable Tracing
 

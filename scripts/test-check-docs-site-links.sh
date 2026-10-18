@@ -199,6 +199,31 @@ if [ "$RC" -eq 2 ]; then pass "a missing docs directory is a usage error (exit 2
 run_check --frobnicate
 if [ "$RC" -eq 2 ]; then pass "an unknown flag is a usage error (exit 2)"; else fail "unknown flag" "expected exit 2, got $RC"; fi
 
+# ---- md-extension links can never be baselined (#1575)
+new_case; page t '[x](../guide/a.md#intro) [y](sub/c.md) [z](index.md)'
+run_check
+if [ "$RC" -eq 1 ] && printf '%s' "$OUT" | grep -qF -- "-> ../guide/a.md#intro (md-extension)" \
+   && printf '%s' "$OUT" | grep -qF -- "-> sub/c.md (md-extension)" \
+   && printf '%s' "$OUT" | grep -qF -- "-> index.md (md-extension)"; then
+  pass "a .md link fails with or without an anchor, into a subdirectory and to an index page"
+else fail "md-extension forms" "expected all three links reported as md-extension"; fi
+
+new_case; page t '[x](a.md#intro)'; printf 'docs/guide/t.md -> a.md#intro\n' > "$C/baseline.txt"
+expect_fail "a .md link fails even when it is listed in the baseline" "MD-EXTENSION LINK IN BASELINE docs/guide/t.md:4 -> a.md#intro (md-extension)"
+
+new_case; page t '[x](a.md) [gone](nothing-here)'
+run_check --update-baseline
+if [ "$RC" -eq 0 ] && grep -qxF 'docs/guide/t.md -> nothing-here' "$C/baseline.txt" \
+   && ! grep -qF 'a.md' "$C/baseline.txt" && printf '%s' "$OUT" | grep -qF "left out 1 md-extension link(s)"; then
+  run_check
+  if [ "$RC" -eq 1 ] && printf '%s' "$OUT" | grep -qF "NEW BROKEN LINK docs/guide/t.md:4 -> a.md (md-extension)"; then
+    pass "--update-baseline leaves .md links out, so the check still fails on them"
+  else fail "--update-baseline md-extension" "the check must still fail on the .md link"; fi
+else fail "--update-baseline md-extension" "the baseline must keep the other link and leave the .md link out"; fi
+
+new_case; page t '[x](a#intro) [y](sub/c) [z](./)'
+expect_pass "the same links without .md pass"
+
 # ---- files the site does not serve
 new_case; printf -- '---\ntitle: S\n---\n# S\n' > "$C/docs/_hidden.md"; page t '[h](_hidden) [g](/Gemfile)'
 expect_fail "files under an underscore name and the _config.yml exclude list are not served" "(page-missing)"

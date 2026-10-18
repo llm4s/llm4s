@@ -500,9 +500,9 @@ object OutageHandling {
 
 ## See Also
 
-- [Production Monitoring](./production-monitoring.md) - Monitor error rates
-- [Scaling Strategies](./scaling-strategies.md) - Handle failures under load
-- [Multi-Agent Orchestration](./multi-agent-orchestration.md) - Fallback agents
+- [Production Monitoring](./production-monitoring) - Monitor error rates
+- [Scaling Strategies](./scaling-strategies) - Handle failures under load
+- [Multi-Agent Orchestration](./multi-agent-orchestration) - Fallback agents
 
 ---
 
