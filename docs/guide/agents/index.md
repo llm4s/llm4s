@@ -447,17 +447,28 @@ the root and volumes that make 8.3 short names; on Windows, which reports no har
 never give it a root an untrusted process can write, and run untrusted commands in the workspace
 sandbox.
 
+The backend holds the root's lock until `close()`, so give it a managed lifetime: one that closes it
+however the work ends. Until it is closed, every other open of the root is refused.
+
 ```scala
 import org.llm4s.agent.graph.tool.ToolSet
 import org.llm4s.agent.harness.{FileTools, HostFileBackend}
 import java.nio.file.Path
+import scala.util.Using
 
-for {
-  project <- HostFileBackend.open(Path.of("/srv/project"), Path.of("/var/lib/myapp/llm4s-locks"))
-  tools   <- ToolSet.of(FileTools(project)*)
-  agent   <- Agent.builder("coder", client).withTools(tools).build()
-} yield agent // close `project` when the application is done with the directory
+HostFileBackend.open(Path.of("/srv/project"), Path.of("/var/lib/myapp/llm4s-locks")).flatMap { opened =>
+  Using.resource(opened) { project => // closed when the block ends, whether it succeeds or fails
+    for {
+      tools  <- ToolSet.of(FileTools(project)*)
+      agent  <- Agent.builder("coder", client).withTools(tools).build()
+      result <- agent.run("Summarise README.md")
+    } yield result
+  }
+}
 ```
+
+An application that keeps an agent for longer keeps the backend beside it, and closes it when it shuts
+the agent down.
 
 ### Harness File Tools
 
