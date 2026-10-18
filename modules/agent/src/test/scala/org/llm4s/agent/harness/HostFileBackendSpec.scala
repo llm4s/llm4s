@@ -23,33 +23,33 @@ class HostFileBackendSpec
     with org.scalatest.OptionValues
     with BeforeAndAfterEach {
 
-  private var dir: Path                   = _
-  private var locks: Path                 = _
-  private var backend: HostFileBackend    = _
-  private var unsupported: Option[String] = None
+  private var dir: Path                = _
+  private var locks: Path              = _
+  private var backend: HostFileBackend = _
 
   /** Links and POSIX permissions need a POSIX file system: Windows reports no link count. */
   private val posix = java.nio.file.FileSystems.getDefault.supportedFileAttributeViews.contains("unix")
 
-  // (beforeEach has run when this does, as BeforeAndAfterEach wraps it)
-  override def withFixture(test: NoArgTest) =
-    unsupported match
-      // only the cases with an injected probe need no supported file system
-      case Some(why) if !test.name.contains("probe") =>
-        org.scalatest.Canceled(s"unsupported file system: $why")
-      case _ => super.withFixture(test)
+  /**
+   * Whether this machine's temporary volume makes 8.3 short names (a Windows runner may), which `open`
+   * refuses whatever is vouched for. The cases then open with the probe stubbed, so everything else still
+   * runs on that platform; the refusal itself is the injected-probe cases'.
+   */
+  private lazy val shortNames: Boolean = {
+    val probed = Files.createTempDirectory("llm4s-host-probe")
+    val found  = HostFileBackend.probeAliases(probed).exists(_.nonEmpty)
+    Files.deleteIfExists(probed)
+    found
+  }
+
+  private def defaultProbe: Path => Result[Vector[String]] =
+    if (shortNames) _ => Right(Vector.empty) else HostFileBackend.probeAliases
 
   override def beforeEach(): Unit = {
     dir = Files.createTempDirectory("llm4s-host-backend")
     locks = Files.createTempDirectory("llm4s-host-locks")
     backend = null
-    unsupported = None
-    // a volume that makes 8.3 short names is refused whatever the caller vouches for: there is nothing of
-    // the backend to test on one, so its cases are cancelled (withFixture), not failed
-    reopen() match
-      case Right(_)                                         => ()
-      case Left(e) if e.message.contains("8.3 short names") => unsupported = Some(e.message)
-      case Left(e)                                          => fail(e.message)
+    reopen().left.foreach(e => fail(e.message))
   }
 
   /** Children and threads a case started, stopped after it whether it passed or not. */
@@ -60,7 +60,7 @@ class HostFileBackendSpec
     cleanups.foreach(c => scala.util.Try(c()))
     cleanups.clear()
     Seq(dir, locks).foreach(d =>
-      Files.walk(d).iterator().asScala.toVector.reverse.foreach(q => Files.deleteIfExists(q))
+      Files.walk(d).iterator().asScala.toVector.reverse.foreach(q => scala.util.Try(Files.deleteIfExists(q)))
     )
 
   /**
@@ -72,7 +72,7 @@ class HostFileBackendSpec
     maxFileBytes: Long = HostFileBackend.DefaultMaxFileBytes,
     maxScanEntries: Int = HostFileBackend.DefaultMaxScanEntries,
     allowUncheckedIdentity: Boolean = !posix,
-    probe: Path => Result[Vector[String]] = HostFileBackend.probeAliases,
+    probe: Path => Result[Vector[String]] = defaultProbe,
     countsLinks: Path => Boolean = HostFileBackend.reportsLinkCounts,
     fileSystemId: Path => String = HostFileBackend.fileSystemIdOf,
     mountsBeneath: Path => Result[Vector[Path]] = HostFileBackend.mountPointsBeneath
@@ -95,7 +95,7 @@ class HostFileBackendSpec
 
   /** Opens `root` over the case's lock directory, as another backend of this JVM would. */
   private def another(root: Path): Result[HostFileBackend] =
-    HostFileBackend.open(root, locks, allowUncheckedIdentity = !posix)
+    HostFileBackend.openWith(root, locks, allowUncheckedIdentity = !posix, probe = defaultProbe)
 
   /** A child JVM opening `root` over the case's lock directory; destroyed after the case. */
   private def child(root: Path): (Process, String) = {
@@ -106,7 +106,8 @@ class HostFileBackendSpec
       System.getProperty("java.class.path"),
       "org.llm4s.agent.harness.HoldRoot",
       root.toString,
-      locks.toString
+      locks.toString,
+      if (shortNames) "unprobed" else "probed"
     )
       .redirectErrorStream(true)
       .start()
@@ -684,7 +685,7 @@ class HostFileBackendSpec
   }
 
   it should "probe a local file system and find nothing, leaving no probe file" in {
-    assume(posix)
+    assume(!shortNames)
     HostFileBackend.probeAliases(dir).value shouldBe empty
     Files.list(dir).iterator().asScala.toVector shouldBe empty
   }
