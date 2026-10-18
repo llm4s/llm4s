@@ -220,7 +220,7 @@ class HostFileBackendSpec
     HostFileBackend.open(dir, dir.resolve(".locks")).left.value.message should include("inside the root")
     HostFileBackend.open(dir, dir).left.value.message should include("inside the root")
     val ws    = Files.createDirectories(dir.resolve("ws"))
-    val below = HostFileBackend.open(ws, dir, allowUncheckedIdentity = !posix).value
+    val below = HostFileBackend.openWith(ws, dir, allowUncheckedIdentity = !posix, probe = defaultProbe).value
     // the lock files are in the lock directory itself, not in the root beneath it
     below.ls(VPath.root, 10, call()).value.items shouldBe empty
     below.close()

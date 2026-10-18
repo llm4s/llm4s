@@ -1221,11 +1221,14 @@ object HostFileBackend:
 
   /**
    * Which file system `p` is on, without following a final link: its `unix:dev` where the JDK reports
-   * it, else its `FileStore`. The backend never enters a path whose file system differs from the root's.
+   * it, else (Windows) its volume's serial number, or the store's name where the volume has none. Never the
+   * store's rendering, which on Windows carries the path's form (a path past `MAX_PATH` is reached as
+   * `\\?\C:\...`), so one volume would read as two. The backend never enters a path whose file system
+   * differs from the root's.
    */
   def fileSystemIdOf(p: Path): String =
     if p.getFileSystem.supportedFileAttributeViews.contains("unix") then
       s"dev:${Files.getAttribute(p, "unix:dev", LinkOption.NOFOLLOW_LINKS)}"
     else
       val store = Files.getFileStore(p)
-      s"store:${store.name}:$store"
+      Try(store.getAttribute("volume:vsn")).fold(_ => s"store:${store.name}", vsn => s"vsn:$vsn")
