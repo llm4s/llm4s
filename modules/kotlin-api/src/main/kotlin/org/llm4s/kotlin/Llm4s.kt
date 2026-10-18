@@ -25,22 +25,37 @@ internal object DefaultClientFactory : ClientFactory {
  * Entry-point factory for Kotlin callers.
  *
  * ```kotlin
- * val client = Llm4s.createDefaultClient()   // reads LLM_MODEL + API key env vars
+ * val client = Llm4s.createDefaultClient()   // the default provider section of application.conf
  * val agent  = Llm4s.createAgent(client)
+ *
+ * // or a client configured in code, with one of the Java facade's builders
+ * // (import org.llm4s.javaapi.Llm4s as JLlm4s)
+ * val local = Llm4s.wrapClient(JLlm4s.ollama().model("llama3.2").build().get())
  * ```
  */
 object Llm4s {
     internal var factory: ClientFactory = DefaultClientFactory
 
     /**
-     * Creates an [LLMClientKt] from the default provider configured via
-     * environment variables (e.g. `LLM_MODEL`, `OPENAI_API_KEY`).
+     * Creates an [LLMClientKt] from the default provider section of `application.conf`
+     * (the one `llm4s.providers.provider` names).
      * Throws [LLMException] if the provider cannot be configured.
      */
     fun createDefaultClient(): LLMClientKt {
         val jClient = factory.createDefault().unwrap("Failed to create client", cancellation = false)
         return LLMClientKt(jClient)
     }
+
+    /**
+     * Wraps a [JLlmClient] in an [LLMClientKt], for a client the default configuration does not give: one built in
+     * code with the Java facade's builders (`JLlm4s.openAi()`, `anthropic()`, `gemini()`, `ollama()`,
+     * `openAiCompatible()`, `azureOpenAi()`), or with `JLlm4s.createClient(ProviderConfig)` or `JLlm4s.wrapClient`.
+     *
+     * Closing the returned client closes [client]. A builder's `build()` does not throw: a missing or invalid field is
+     * a failed `LlmResult` of kind `VALIDATION`, whose `get()` throws the facade's `LlmException`, so check it before
+     * wrapping the client.
+     */
+    fun wrapClient(client: JLlmClient): LLMClientKt = LLMClientKt(client)
 
     /**
      * Wraps an [LLMClientKt] in an [AgentKt] ready for natural-language queries.

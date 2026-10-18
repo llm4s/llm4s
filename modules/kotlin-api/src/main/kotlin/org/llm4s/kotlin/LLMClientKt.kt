@@ -14,7 +14,7 @@ import org.llm4s.javaapi.JLlmClient
  * surface as [LLMException] rather than Scala [Either], so callers never need
  * to import any Scala types.
  *
- * Obtain instances via [Llm4s.createDefaultClient].
+ * Obtain instances via [Llm4s.createDefaultClient], or wrap a client built in code with [Llm4s.wrapClient].
  *
  * ```kotlin
  * val client = Llm4s.createDefaultClient()

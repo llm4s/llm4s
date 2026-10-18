@@ -174,8 +174,23 @@ immutable, so one can be kept and forked: `base.model("gpt-4o")` returns a new b
 Its `toString` prints the API key as `***`, an OpenAI-compatible server's headers by name only, and a base URL or
 endpoint without its userinfo, query or fragment, so a builder can be logged.
 
-The builders are for Java callers: `llm4s-kotlin-api`'s `LLMClientKt` cannot wrap a client they build yet
-([#1850](https://github.com/llm4s/llm4s/issues/1850)).
+From Kotlin, build the client the same way and hand it to `llm4s-kotlin-api`'s `Llm4s.wrapClient`, which returns
+an `LLMClientKt` with suspend functions, `Flow` streaming and `LLMException`
+([#1850](https://github.com/llm4s/llm4s/issues/1850)). `wrapClient` takes any `JLlmClient`, so a client from
+`createClient(ProviderConfig)` works the same way:
+
+```kotlin
+import org.llm4s.kotlin.Llm4s
+import org.llm4s.javaapi.Llm4s as JLlm4s
+
+val client = Llm4s.wrapClient(
+    JLlm4s.ollama()
+        .model("llama3.2")
+        .build()
+        .get(),   // throws the facade's LlmException on a VALIDATION failure; check isSuccess to handle it
+)
+client.use { println(it.complete("What is 2 + 2?")) }   // complete is a suspend function: call it in a coroutine
+```
 
 For any other provider - one from its own module, such as `llm4s-bedrock` - `Llm4s.createClient(ProviderConfig)` takes
 the provider's config object. OpenAI, Anthropic and Ollama have one with a Java entry point too, which takes the

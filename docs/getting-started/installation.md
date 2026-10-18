@@ -545,6 +545,10 @@ then add `mavenLocal()` to your repositories; it depends on `llm4s-java-api_3` a
 Central. Without `-Pllm4sVersion` it builds at `0.1.0-SNAPSHOT`; to try it from `main`, run `sbt publishM2` first and
 pass the version sbt published.
 
+Its entry point is `org.llm4s.kotlin.Llm4s`: `createDefaultClient()` builds an `LLMClientKt` from `application.conf`,
+and `wrapClient(JLlmClient)` wraps one configured in code with the Java facade's builders (see the Java guide's
+[Configure in code](../guide/java#configure-in-code)); `createAgent` and `wrapAgent` give an `AgentKt`.
+
 ### For image generation and vision
 
 ```scala
