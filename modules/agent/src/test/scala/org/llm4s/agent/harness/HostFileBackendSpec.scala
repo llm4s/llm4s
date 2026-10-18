@@ -876,6 +876,23 @@ class HostFileBackendSpec
     backend.read(p(s"/$left"), 0, 1, call()).left.value.message should include("temporary files")
   }
 
+  it should "refuse a name the host cannot hold, for the model to correct, never as a failure" in {
+    // only Windows refuses these characters in a name; POSIX takes them
+    assume(!posix)
+    for (name <- Seq("a:b", "a*b", "a?b", "a\"b", "a<b", "a>b", "a|b")) {
+      def invalid[A](r: Result[A]) =
+        r.left.value match {
+          case refused: BackendRefused => refused.message should include("not a valid file name")
+          case other                   => fail(s"expected a refusal for $name, got $other")
+        }
+      invalid(backend.write(p(s"/$name"), "x", call()))
+      invalid(backend.read(p(s"/$name"), 0, 1, call()))
+      invalid(backend.ls(p(s"/$name"), 10, call()))
+      invalid(backend.delete(p(s"/d/$name"), call()))
+    }
+    Files.list(dir).iterator().asScala.toVector shouldBe empty
+  }
+
   it should "refuse a name ending in a dot or a space, which Windows reads as another" in {
     backend.write(p("/a."), "x", call()).left.value.message should include("ending in a dot or a space")
     backend.write(p("/d /a.txt"), "x", call()).left.value.message should include("ending in a dot or a space")

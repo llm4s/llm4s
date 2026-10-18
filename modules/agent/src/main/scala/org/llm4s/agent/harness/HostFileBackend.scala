@@ -235,6 +235,9 @@ final class HostFileBackend private (
       case Failure(e) if HostFileBackend.isInterrupt(e) =>
         Thread.currentThread().interrupt()
         Left(CancelledError(s"$operation ${path.value}"))
+      // a name the host cannot hold (on Windows `:`, `*`, `?`, `"`, `<`, `>`, `|`): the model's to correct
+      case Failure(e: java.nio.file.InvalidPathException) =>
+        refused(operation, path, s"is not a valid file name on this host: ${e.getReason}")
       case Failure(_: NoSuchFileException)   => Left(BackendRefused.notFound(operation, path))
       case Failure(_: AccessDeniedException) => refused(operation, path, "permission denied")
       case Failure(e: FileSystemException)   => refused(operation, path, Option(e.getReason).getOrElse(e.toString))
