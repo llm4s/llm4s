@@ -9,7 +9,8 @@ nav_order: 2
 
 Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
 by what you use. The notes below are the per-change detail it links to. From 0.5.0 to 0.5.1 the one source break is
-[Multimodal content parts](#multimodal-content-parts-1913).
+[Multimodal content parts](#multimodal-content-parts-1913). After 0.5.1, [`MemoryManagerConfig` is
+growth-safe](#memorymanagerconfig-is-growth-safe-1847).
 
 ## Multimodal content parts (#1913)
 
@@ -98,6 +99,19 @@ yield (files, ExecuteTool(sandbox))
 ## Smaller breaks since 0.4.1
 
 Changes too small for a section of their own. Each is listed under Breaking changes in the CHANGELOG.
+
+### `MemoryManagerConfig` is growth-safe (#1847)
+
+`MemoryManagerConfig` follows the growth-prone pattern ([#1847](https://github.com/llm4s/llm4s/issues/1847)): build
+it with `MemoryManagerConfig(...)` (every option keeps its default) or a preset, and change it with
+`withAutoExtractEntities`, `withDefaultImportance`, `withContextTokenBudget` and `withConsolidationConfig`. `new` and
+`.copy` are private:
+
+```scala
+val config = MemoryManagerConfig.default.withContextTokenBudget(500) // was .copy(contextTokenBudget = 500)
+```
+
+`toString` is now the case-class form, `MemoryManagerConfig(false,0.5,2000,ConsolidationConfig(50,false))`.
 
 ### `AssistantMessage` and `Completion.thinking` (#1381)
 

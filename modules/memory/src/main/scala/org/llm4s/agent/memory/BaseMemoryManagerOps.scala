@@ -1,5 +1,6 @@
 package org.llm4s.agent.memory
 
+import org.llm4s.error.CancelledError
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 
@@ -48,17 +49,21 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
 
   /**
    * Best-effort entity extraction for `autoExtractEntities`: the message is already recorded,
-   * so a failed extraction is logged and the manager holding the recorded message is returned. A
-   * cancellation is not a failed extraction: it is returned, so the caller stops.
+   * so a failed extraction is logged and the manager holding the recorded message is returned.
+   *
+   * A cancellation is not a failed extraction: it is returned, so the caller stops. That covers a
+   * `CancelledError` from the extraction, a failure that ends while the thread is interrupted,
+   * and an `InterruptedException` thrown by it. The interrupt flag is left set (restored after an
+   * `InterruptedException`), so the code that interrupted the thread can still see it.
    */
   private def extractAfterRecording(
     recorded: MemoryManager,
     content: String,
     conversationId: String
   ): Result[MemoryManager] =
-    recorded.extractEntities(content, Some(conversationId)) match {
-      case Right(withEntities)                             => Right(withEntities)
-      case Left(cancelled: org.llm4s.error.CancelledError) => Left(cancelled)
+    CancelledError.attempt("entity extraction")(recorded.extractEntities(content, Some(conversationId))) match {
+      case Right(withEntities)             => Right(withEntities)
+      case Left(cancelled: CancelledError) => Left(cancelled)
       case Left(error) =>
         BaseMemoryManagerOps.logger.warn(
           s"autoExtractEntities: entity extraction failed for conversation $conversationId, " +

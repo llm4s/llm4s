@@ -212,4 +212,140 @@ class MemoryManagerConfigBehaviourSpec extends AnyFlatSpec with Matchers with Ei
     entityMemories(recorded) shouldBe empty
     recorded.store.recall(MemoryFilter.All).value should have size 1
   }
+
+  // ---------------------------------------------------------------- autoExtractEntities: cancellation (#1847)
+
+  /** Runs `answer` for every completion request, and counts the calls. */
+  final private class ScriptedClient(answer: () => Result[Completion]) extends LLMClient {
+    var calls: Int = 0
+
+    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
+      calls += 1
+      answer()
+    }
+
+    override def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] = complete(conversation, options)
+
+    override def getContextWindow(): Int     = 4096
+    override def getReserveCompletion(): Int = 1024
+  }
+
+  /** Runs `body` with the warnings of the shared record operations captured. */
+  private def capturingWarnings[A](body: => A): (A, Seq[String]) = {
+    val logger   = LoggerFactory.getLogger(classOf[BaseMemoryManagerOps]).asInstanceOf[LBLogger]
+    val appender = new ch.qos.logback.core.read.ListAppender[ch.qos.logback.classic.spi.ILoggingEvent]()
+    appender.start()
+    val previousLevel    = logger.getLevel
+    val previousAdditive = logger.isAdditive
+    logger.addAppender(appender)
+    logger.setLevel(Level.WARN)
+    logger.setAdditive(false)
+    val result =
+      try body
+      finally {
+        logger.detachAppender(appender)
+        logger.setLevel(previousLevel)
+        logger.setAdditive(previousAdditive)
+        appender.stop()
+      }
+    import scala.jdk.CollectionConverters._
+    val warnings = appender.list.asScala.toList.filter(_.getLevel == Level.WARN).map(_.getFormattedMessage)
+    (result, warnings)
+  }
+
+  /** Runs `body` and reports whether it left the interrupt flag set, clearing it afterwards. */
+  private def withInterruptFlagReport[A](body: => A): (A, Boolean) = {
+    var interrupted = false
+    val result =
+      try body
+      finally interrupted = Thread.interrupted()
+    (result, interrupted)
+  }
+
+  "autoExtractEntities" should "return a cancelled extraction as a CancelledError, logging no warning" in {
+    val client = new ScriptedClient(() => Left(org.llm4s.error.CancelledError("model")))
+    val (result, warnings) =
+      capturingWarnings(llmManager(autoExtract = true, client).recordMessage(UserMessage("Ada wrote programs"), "c"))
+
+    result.left.value shouldBe a[org.llm4s.error.CancelledError]
+    warnings shouldBe empty
+    client.calls shouldBe 1
+  }
+
+  it should "keep the interrupt flag when the extraction returns a cancellation" in {
+    val client = new ScriptedClient(() => {
+      Thread.currentThread().interrupt()
+      Left(org.llm4s.error.CancelledError("model"))
+    })
+    val (result, interrupted) =
+      withInterruptFlagReport(llmManager(autoExtract = true, client).recordMessage(UserMessage("Ada"), "c"))
+
+    result.left.value shouldBe a[org.llm4s.error.CancelledError]
+    interrupted shouldBe true
+  }
+
+  it should "treat a failure that ends while the thread is interrupted as a cancellation, keeping the flag" in {
+    val client = new ScriptedClient(() => {
+      Thread.currentThread().interrupt()
+      Left(org.llm4s.error.NetworkError("connection closed", None, "https://example.invalid"))
+    })
+    val ((result, warnings), interrupted) = withInterruptFlagReport(
+      capturingWarnings(llmManager(autoExtract = true, client).recordMessage(UserMessage("Ada"), "c"))
+    )
+
+    result.left.value shouldBe a[org.llm4s.error.CancelledError]
+    warnings shouldBe empty
+    interrupted shouldBe true
+  }
+
+  it should "return an InterruptedException thrown by the extraction as a CancelledError and restore the flag" in {
+    val client = new ScriptedClient(() => throw new InterruptedException("stopped"))
+    val (result, interrupted) =
+      withInterruptFlagReport(llmManager(autoExtract = true, client).recordMessage(UserMessage("Ada"), "c"))
+
+    result.left.value shouldBe a[org.llm4s.error.CancelledError]
+    interrupted shouldBe true
+  }
+
+  it should "stop recording a conversation at a cancelled extraction" in {
+    val client = new ScriptedClient(() => Left(org.llm4s.error.CancelledError("model")))
+    val result = llmManager(autoExtract = true, client)
+      .recordConversation(Seq(UserMessage("one"), AssistantMessage("two"), UserMessage("three")), "c")
+
+    result.left.value shouldBe a[org.llm4s.error.CancelledError]
+    client.calls shouldBe 1
+  }
+
+  it should "log an ordinary extraction failure as a warning and keep the recorded message" in {
+    val client =
+      new ScriptedClient(() => Left(org.llm4s.error.NetworkError("connection refused", None, "https://x.invalid")))
+    val ((result, warnings), interrupted) = withInterruptFlagReport(
+      capturingWarnings(llmManager(autoExtract = true, client).recordMessage(UserMessage("Hello"), "conv-5"))
+    )
+
+    val recorded = result.value
+    recorded.store.recall(MemoryFilter.All).value.map(_.content) shouldBe Seq("Hello")
+    entityMemories(recorded) shouldBe empty
+    warnings should have size 1
+    warnings.head should include("entity extraction failed for conversation conv-5")
+    warnings.head should include("connection refused")
+    interrupted shouldBe false
+  }
+
+  it should "keep recording a conversation after an ordinary extraction failure" in {
+    val client =
+      new ScriptedClient(() => Left(org.llm4s.error.NetworkError("connection refused", None, "https://x.invalid")))
+    val (result, warnings) = capturingWarnings(
+      llmManager(autoExtract = true, client)
+        .recordConversation(Seq(UserMessage("one"), AssistantMessage("two")), "c")
+    )
+
+    result.value.store.recall(MemoryFilter.All).value should have size 2
+    client.calls shouldBe 2
+    warnings should have size 2
+  }
 }

@@ -351,9 +351,17 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
     }
 
     "build the configuration of the Configuration Options block" in {
-      val config = MemoryManagerConfig(contextTokenBudget = 500, autoExtractEntities = true)
+      val config  = MemoryManagerConfig(contextTokenBudget = 500, autoExtractEntities = true)
+      val tighter = config.withContextTokenBudget(250)
       SimpleMemoryManager(config).contextTokenBudget shouldBe 500
       config.autoExtractEntities shouldBe true
+      SimpleMemoryManager(tighter).contextTokenBudget shouldBe 250
+      tighter.autoExtractEntities shouldBe true
+    }
+
+    "turn on automatic entity extraction with the fullFeatured preset the warning names" in {
+      MemoryManagerConfig.fullFeatured.autoExtractEntities shouldBe true
+      MemoryManagerConfig.fullFeatured shouldBe MemoryManagerConfig.default.withAutoExtractEntities(true)
     }
 
     "keep the context within contextTokenBudget when the call passes no maxTokens" in {

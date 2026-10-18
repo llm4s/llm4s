@@ -175,8 +175,8 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
   it should "count every call the memory manager makes in the run's usage (rule 11)" in {
     val extraction =
       new FunctionClient(_ => """[{"entity_name": "Ada", "entity_type": "person", "fact": "Ada wrote programs"}]""")
-    val extracting = (store: MemoryStore, client: LLMClient) =>
-      LLMMemoryManager(MemoryManagerConfig.default.copy(autoExtractEntities = true), store, client)
+    val extracting =
+      (store: MemoryStore, client: LLMClient) => LLMMemoryManager(MemoryManagerConfig.fullFeatured, store, client)
     val m      = new SemanticMemoryMiddleware(_ => Right(InMemoryStore.empty), extracting, extraction)
     val result = agentWith(answering("Ada wrote programs."), m).run(ThreadId("usage"), "Who was Ada?").value
     extraction.calls.get should be > 0

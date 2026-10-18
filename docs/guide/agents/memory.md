@@ -149,7 +149,10 @@ val configured = SimpleMemoryManager.withStore(
 ### Configuration Options
 
 `MemoryManagerConfig` is built in code (this module reads no configuration file or environment
-variable):
+variable): `MemoryManagerConfig(...)` with any of the options below, or a preset
+(`MemoryManagerConfig.default`, `.testing`, `.fullFeatured`), changed with its `with*` setters
+(`withAutoExtractEntities`, `withDefaultImportance`, `withContextTokenBudget`,
+`withConsolidationConfig`). It has no public constructor or `copy`:
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -160,12 +163,22 @@ variable):
 
 Both `SimpleMemoryManager` and `LLMMemoryManager` read every option. An explicit `maxTokens` always
 wins over `contextTokenBudget`. `autoExtractEntities` only changes what `LLMMemoryManager` stores,
-because `SimpleMemoryManager.extractEntities` extracts nothing; with it on, every recorded user and
-assistant message costs one extra LLM call (system and tool messages are not analysed). Extraction is
-best-effort: if the call fails, the message stays recorded and a warning is logged.
+because `SimpleMemoryManager.extractEntities` extracts nothing. Extraction is best-effort: if the
+call fails, the message stays recorded and a warning is logged. A cancelled call is not a failure:
+`recordMessage` returns the `CancelledError` (and `recordConversation` stops there), and an
+interrupted thread keeps its interrupt flag.
+
+{: .warning }
+> **`autoExtractEntities` costs one extra LLM call per recorded message.** With
+> `MemoryManagerConfig.fullFeatured`, or `autoExtractEntities = true`, an `LLMMemoryManager` sends one
+> entity-extraction request for every user and assistant message it records (system and tool
+> messages are not analysed), on top of your own calls. Recording a 20-turn conversation with
+> `recordConversation` is up to 20 more requests, paid for and waited on before it returns. Leave it
+> off (the default) and call `extractEntities` yourself where you want entities.
 
 ```scala
 val config = MemoryManagerConfig(contextTokenBudget = 500, autoExtractEntities = true)
+val tighter = config.withContextTokenBudget(250)
 ```
 
 Managers record only what you pass to the `record*` methods, and nothing consolidates unless you
