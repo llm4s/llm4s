@@ -228,6 +228,20 @@ class HostFileBackendSpec
     below.close()
   }
 
+  it should "refuse a lock directory inside the root before creating it, leaving the held root untouched" in {
+    // the case's backend holds `dir`; an open naming a lock directory inside it creates nothing there
+    HostFileBackend.open(dir, dir.resolve(".locks/deeper")).left.value.message should include("inside the root")
+    Files.list(dir).iterator().asScala.toVector shouldBe empty
+    if (posix) {
+      // through a link whose target is the root: the nearest existing ancestor is the root itself
+      val outside = Files.createTempDirectory("llm4s-host-link")
+      cleanups += (() => { Files.deleteIfExists(outside.resolve("to-root")); Files.deleteIfExists(outside): Unit })
+      Files.createSymbolicLink(outside.resolve("to-root"), dir)
+      HostFileBackend.open(dir, outside.resolve("to-root/locks")).left.value.message should include("inside the root")
+      Files.list(dir).iterator().asScala.toVector shouldBe empty
+    }
+  }
+
   it should "never write its lock files into the root" in {
     written(backend.write(p("/a.txt"), "x", call()))
     Files.list(dir).iterator().asScala.map(_.getFileName.toString).toVector shouldBe Vector("a.txt")

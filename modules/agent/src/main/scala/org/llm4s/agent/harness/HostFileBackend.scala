@@ -727,13 +727,26 @@ object HostFileBackend:
       for
         real <- Try(root.toRealPath()).toResult.left.map(e => ValidationError("root", s"$root: ${e.message}"): LLMError)
         _    <- Either.cond(Files.isDirectory(real), (), ValidationError("root", s"$root is not a directory"))
+        rootChain <- chainOf(real, "root")
+        // checked before anything is created: the nearest existing ancestor of the lock directory, by its
+        // identity chain, so a refused lock directory inside the root (by path, or through a link) is never
+        // created there, in a tree another backend may hold
+        existing      <- nearestExisting(lockDirectory)
+        existingChain <- chainOf(existing, "lockDirectory")
+        _ <- Either.cond(
+          !existingChain.contains(rootChain.head),
+          (),
+          ValidationError(
+            "lockDirectory",
+            s"$lockDirectory is inside the root $real; give the backend one outside it"
+          )
+        )
         locks <- Try {
           Files.createDirectories(lockDirectory)
           lockDirectory.toRealPath()
         }.toResult.left.map(e => ValidationError("lockDirectory", s"$lockDirectory: ${e.message}"): LLMError)
-        rootChain  <- chainOf(real, "root")
         locksChain <- chainOf(locks, "lockDirectory")
-        // inside the root by its path, or through a bind mount: either way a path could reach a lock file
+        // checked again once it exists, in case another process put a link in its place meanwhile
         _ <- Either.cond(
           !locksChain.contains(rootChain.head),
           (),
@@ -833,6 +846,18 @@ object HostFileBackend:
       .fold(pathIdentity(p.toRealPath()))(key => s"key:$key")
 
   private def pathIdentity(p: Path): String = s"path:${fold(p.toString.replace('\\', '/'))}"
+
+  /** The real path of `p`'s nearest ancestor that exists (`p` itself if it does). */
+  private def nearestExisting(p: Path): Result[Path] =
+    Try(
+      Iterator
+        .iterate(p.toAbsolutePath)(_.getParent)
+        .takeWhile(_ != null)
+        .find(q => Files.exists(q))
+        .map(_.toRealPath())
+    ).toResult.left
+      .map(e => ValidationError("lockDirectory", s"$p: ${e.message}"): LLMError)
+      .flatMap(_.toRight(ValidationError("lockDirectory", s"$p has no existing ancestor")))
 
   /** The identities of the real directory `real` and of each of its ancestors, the root's first. */
   private def chainOf(real: Path, field: String): Result[Vector[String]] =
