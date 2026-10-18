@@ -43,6 +43,17 @@ Recordings and slides are linked where they are available.
 
 {% include events-list.html which="past" images=true %}
 
+## Photo gallery
+
+Snapshots from LLM4S talks around the world. Select a picture to open it full size.
+
+<ul class="event-gallery">
+{%- assign photos = site.data.event_photos | sort: "date" | reverse -%}
+{%- for photo in photos -%}
+<li><a href="{{ photo.src | relative_url }}"><img src="{{ photo.src | relative_url }}" alt="{{ photo.caption | escape }}" loading="lazy"></a><span>{{ photo.caption }}</span></li>
+{%- endfor -%}
+</ul>
+
 ## Invite us to speak
 
 Want an LLM4S talk or workshop at your meetup, conference or company? Get in touch on

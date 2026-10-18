@@ -150,3 +150,48 @@
   font-size: 0.85rem;
   font-weight: 600;
 }
+
+// Events page photo gallery
+
+.main-content ul.event-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 1rem;
+  padding-left: 0;
+  margin: 1rem 0 1.5rem;
+  list-style: none;
+
+  > li {
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    color: $grey-dk-000;
+
+    &::before {
+      content: none;
+    }
+  }
+
+  a {
+    display: block;
+    margin-bottom: 0.4rem;
+    overflow: hidden;
+    border-radius: $border-radius;
+  }
+
+  img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: contain; // banners carry text; show them whole
+    background-color: $grey-lt-100;
+    transition: transform 0.2s ease;
+  }
+
+  a:hover img,
+  a:focus img {
+    transform: scale(1.04);
+  }
+}
