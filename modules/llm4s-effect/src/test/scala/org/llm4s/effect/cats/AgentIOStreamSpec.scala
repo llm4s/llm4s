@@ -15,18 +15,20 @@ import org.llm4s.agent.graph.{
   StreamEvent,
   ThreadId
 }
+import org.llm4s.agent.{ Agent, AgentRun }
 import org.llm4s.agent.testkit.Fixtures
 import org.llm4s.error.{ CancelledError, NetworkError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion }
 import org.llm4s.types.Result
 import org.scalatest.concurrent.Eventually
+import org.scalatest.exceptions.TestFailedException
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{ Millis, Seconds, Span }
 
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
 import scala.concurrent.duration.*
 
 class AgentIOStreamSpec extends AnyFlatSpec with Matchers with Eventually {
@@ -142,28 +144,59 @@ class AgentIOStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     }
   }
 
-  it should "fail at once, leaving the holder alone, when another run holds the thread" in {
-    // a turn started directly on the agent holds the thread, parked in its model call until interrupted
+  /** An agent whose model call parks until interrupted, and a latch opened once a turn is parked there. */
+  private def parkingAgent(): (Agent, CountDownLatch) = {
     val parked = new CountDownLatch(1)
     val client = new Fixtures.Scripted(
       _ => Right(completion("x")),
       () => { parked.countDown(); Fixtures.parkUntilInterrupted(); Left(CancelledError("test")) }
     )
-    val agent    = Fixtures.agentOf(client)()
-    val threadId = ThreadId("f3b")
-    val holder   = agent.start(threadId, "hold").fold(e => fail(s"could not start the holder: $e"), identity)
-    parked.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
-    val agentIO   = AgentIO[IO](agent)
-    val streamed  = agentIO.stream(threadId, "again").compile.toVector.attempt.unsafeRunSync()
-    val recovered = agentIO.streamRecover(threadId).compile.toVector.attempt.unsafeRunSync()
-    val holding   = holder.status
-    holder.cancel()
-    holder.await(): Unit
+    (Fixtures.agentOf(client)(), parked)
+  }
+
+  /**
+   * Starts a turn on `threadId` that holds it, runs `use` with it, then cancels the holder and waits for it to end
+   * however `use` ends - as the ZIO spec does with `acquireReleaseWith` - so a failed assertion does not leave it
+   * parked until the fixture's deadline.
+   */
+  private def withHolder[A](agent: Agent, threadId: ThreadId)(use: AgentRun => IO[A]): IO[A] =
+    IO(agent.start(threadId, "hold").fold(e => fail(s"could not start the holder: $e"), identity))
+      .bracket(use)(holder => IO.blocking { holder.cancel(); holder.await(): Unit })
+
+  it should "fail at once, leaving the holder alone, when another run holds the thread" in {
+    // a turn started directly on the agent holds the thread, parked in its model call until interrupted
+    val (agent, parked) = parkingAgent()
+    val threadId        = ThreadId("f3b")
+    val agentIO         = AgentIO[IO](agent)
+    val (streamed, recovered, holding) = withHolder(agent, threadId) { holder =>
+      for {
+        _         <- IO.blocking(parked.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS) shouldBe true)
+        streamed  <- agentIO.stream(threadId, "again").compile.toVector.attempt
+        recovered <- agentIO.streamRecover(threadId).compile.toVector.attempt
+        // read now: the assertion is evaluated after the release has cancelled the holder
+        holding <- IO(holder.status)
+      } yield (streamed, recovered, holding)
+    }.unsafeRunSync()
     holding shouldBe RunStatus.Running
     Seq(streamed, recovered).foreach {
       case Left(e: LLMException) => e.error shouldBe a[GraphError.ThreadBusy]
       case other                 => fail(s"expected an LLMException, got $other")
     }
+  }
+
+  it should "cancel the holder, and wait for it to end, when an assertion with it fails" in {
+    val (agent, parked) = parkingAgent()
+    val held            = new AtomicReference[AgentRun](null)
+    val result = withHolder(agent, ThreadId("f3c")) { holder =>
+      IO.blocking {
+        held.set(holder)
+        parked.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+        fail("an assertion failed")
+      }
+    }.attempt.unsafeRunSync()
+    result.left.toOption.get shouldBe a[TestFailedException]
+    // the release has run: the holder was cancelled and has ended, rather than parking until the deadline
+    held.get.status should not be RunStatus.Running
   }
 
   it should "end, rather than hang, when the run ends without a terminal event" in {

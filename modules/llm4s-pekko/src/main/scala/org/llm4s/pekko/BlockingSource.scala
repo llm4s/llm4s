@@ -61,7 +61,9 @@ private[pekko] trait Producer[T] {
  *    [[Producer.abandon]] is called.
  *  - '''Ending''': the stream completes, or fails, exactly once, after every item emitted before. A
  *    producer that dies of any `Throwable` fails the stream instead of leaving it hanging.
- *  - Each materialization starts its own producer; the thread starts when the stream does.
+ *  - Each materialization starts its own producer; the thread starts when the stream does. If the thread cannot
+ *    be started, the stream fails with the cause and the `Future[Done]` completes at once: no `run` ever held
+ *    anything.
  */
 private[pekko] object BlockingSource {
 
@@ -71,9 +73,16 @@ private[pekko] object BlockingSource {
    * A source of the items `newProducer()` produces. `newProducer` is called once per materialization.
    * A `capacity` below 1 gives a stream that fails at once with a [[ValidationError]]. `beforeEnd` is a test hook,
    * called on the producer's thread with the materialized `Future[Done]` just before the stream can see how the
-   * producer ended; it lets a spec hold the producer there and check the ordering deterministically.
+   * producer ended; it lets a spec hold the producer there and check the ordering deterministically. `startThread`
+   * is a test hook too: it starts the producer's thread, and lets a spec make that start fail as the JVM can (an
+   * `OutOfMemoryError` when no native thread can be created).
    */
-  def apply[T](name: String, capacity: Int, beforeEnd: Future[Done] => Unit = _ => ())(
+  def apply[T](
+    name: String,
+    capacity: Int,
+    beforeEnd: Future[Done] => Unit = _ => (),
+    startThread: Thread => Unit = _.start()
+  )(
     newProducer: () => Producer[T]
   ): Source[T, Future[Done]] =
     if (capacity < 1)
@@ -81,7 +90,7 @@ private[pekko] object BlockingSource {
         .failed[T](new LLMException(ValidationError("bufferSize", s"must be at least 1, got $capacity")))
         .mapMaterializedValue(_ => Future.successful(Done))
     else
-      Source.fromGraph(new Stage[T](name, capacity, beforeEnd, newProducer)).named(name)
+      Source.fromGraph(new Stage[T](name, capacity, beforeEnd, startThread, newProducer)).named(name)
 
   /** How a producer ended. */
   sealed private trait Outcome
@@ -92,6 +101,7 @@ private[pekko] object BlockingSource {
     name: String,
     capacity: Int,
     beforeEnd: Future[Done] => Unit,
+    startThread: Thread => Unit,
     newProducer: () => Producer[T]
   ) extends GraphStageWithMaterializedValue[SourceShape[T], Future[Done]] {
 
@@ -124,9 +134,25 @@ private[pekko] object BlockingSource {
           val emitter  = new Emitter[T](queue, () => callback.invoke(()), stopped)
           val t        = new Thread(null, () => produce(emitter, callback), s"$name-${threadIds.incrementAndGet()}")
           t.setDaemon(true)
-          thread = t
-          t.start()
+          // `thread` is set only once the thread has started: `postStop` reads a null `thread` as "no producer ever
+          // ran" and completes the materialized `Future[Done]` itself, which nothing else would do if `start` failed
+          start(t) match {
+            case None        => thread = t
+            case Some(cause) => failStage(cause)
+          }
         }
+
+        // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
+        // `Thread.start` can fail with a fatal error (`OutOfMemoryError: unable to create native thread`), which `Try`
+        // would miss and Pekko would not turn into a failed stage: the stream must still fail rather than hang.
+        private def start(t: Thread): Option[Throwable] =
+          try {
+            startThread(t)
+            None
+          } catch {
+            case cause: Throwable => Some(cause)
+          }
+        // scalafix:on DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 
         /**
          * Runs on the producer thread; always records how it ended, so the stream cannot hang. `released` is

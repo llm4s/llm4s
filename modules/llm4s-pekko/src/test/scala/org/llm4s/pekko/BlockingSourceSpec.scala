@@ -341,4 +341,63 @@ class BlockingSourceSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
     Await.result(items.failed, Patience) shouldBe a[LLMException]
     Await.result(done, Patience) shouldBe Done
   }
+
+  // ---- a producer thread that cannot be started ----------------------------------------------------------------
+
+  /** A source whose producer thread fails to start with `cause`, recording the thread it was asked to start. */
+  private def failingToStart[T](
+    cause: Throwable,
+    producer: Producer[T],
+    asked: AtomicReference[Thread]
+  ): Source[T, Future[Done]] =
+    BlockingSource(
+      "blocking-source-test",
+      4,
+      startThread = t => {
+        asked.set(t)
+        throw cause
+      }
+    )(() => producer)
+
+  it should "fail the stream and complete its Future[Done] when the producer thread cannot be started" in {
+    // the JVM's own failure when it cannot create a native thread: fatal, so neither `Try` nor Pekko would catch it
+    val cause         = new OutOfMemoryError("unable to create native thread")
+    val producer      = new Emits(Seq(1, 2))
+    val asked         = new AtomicReference[Thread](null)
+    val (done, probe) = failingToStart(cause, producer, asked).toMat(TestSink[Int]())(Keep.both).run()
+    probe.within(Patience) {
+      probe.request(1)
+      probe.expectError() shouldBe theSameInstanceAs(cause)
+    }
+    Await.result(done, Patience) shouldBe Done
+    // the producer was never run, but is abandoned once like any other, and its thread never started
+    producer.started.get shouldBe 0
+    producer.thread.get shouldBe null
+    Fixtures.awaitCondition(producer.abandoned.get == 1) shouldBe true
+    asked.get should not be null
+    asked.get.getState shouldBe Thread.State.NEW
+  }
+
+  it should "fail the stream with a non-fatal start failure, and complete its Future[Done]" in {
+    val cause    = new IllegalStateException("thread start refused")
+    val producer = new Emits(Seq(1))
+    val (done, items) =
+      failingToStart(cause, producer, new AtomicReference[Thread](null)).toMat(Sink.seq)(Keep.both).run()
+    Await.result(items.failed, Patience) shouldBe theSameInstanceAs(cause)
+    Await.result(done, Patience) shouldBe Done
+    Fixtures.awaitCondition(producer.abandoned.get == 1) shouldBe true
+    producer.abandoned.get shouldBe 1
+  }
+
+  it should "start the producer's thread through the start hook, and run the stream as usual" in {
+    val started  = new AtomicInteger(0)
+    val producer = new Emits(Seq(1, 2))
+    val s = BlockingSource("blocking-source-test", 4, startThread = t => { started.incrementAndGet(); t.start() })(() =>
+      producer
+    )
+    val (done, items) = s.toMat(Sink.seq)(Keep.both).run()
+    Await.result(items, Patience) shouldBe Seq(1, 2)
+    Await.result(done, Patience) shouldBe Done
+    started.get shouldBe 1
+  }
 }

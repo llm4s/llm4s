@@ -4,7 +4,7 @@ import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.Done
 import org.apache.pekko.stream.scaladsl.{ Keep, Sink }
 import org.apache.pekko.stream.testkit.scaladsl.TestSink
-import org.llm4s.agent.{ AgentBuilder, AgentStatus }
+import org.llm4s.agent.{ AgentBuilder, AgentRun, AgentStatus }
 import org.llm4s.agent.graph.{
   Checkpointer,
   ClaimRequest,
@@ -28,6 +28,7 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.types.Result
 import org.scalatest.BeforeAndAfterAll
+import org.scalatest.exceptions.TestFailedException
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.*
@@ -36,6 +37,8 @@ import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.{ Await, ExecutionContext }
 import scala.concurrent.duration.*
+import scala.util.Using
+import scala.util.Using.Releasable
 
 class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
@@ -235,28 +238,53 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
     failureOf(pekko(answering("x"))().stream(ThreadId("p3"), "  ")).error shouldBe a[ValidationError]
   }
 
-  it should "fail at once, leaving the holder alone, when another run holds the thread" in {
-    // a turn started directly on the agent holds the thread, parked in its model call until interrupted
+  /** An agent whose model call parks until interrupted, and a latch opened once a turn is parked there. */
+  private def parkingAgent(): (org.llm4s.agent.Agent, CountDownLatch) = {
     val parked = new CountDownLatch(1)
     val client = new Fixtures.Scripted(
       _ => Right(completion("x")),
       () => { parked.countDown(); Fixtures.parkUntilInterrupted(); Left(CancelledError("test")) }
     )
-    val agent    = Fixtures.agentOf(client)()
-    val threadId = ThreadId("p3b")
-    val holder   = agent.start(threadId, "hold").fold(e => fail(s"could not start the holder: $e"), identity)
-    parked.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
-    val agentPekko = AgentPekko(agent)
-    val streamed   = Await.result(agentPekko.stream(threadId, "again").runWith(Sink.seq).failed, Patience)
-    val recovered  = Await.result(agentPekko.streamRecover(threadId).runWith(Sink.seq).failed, Patience)
-    val holding    = holder.status
-    holder.cancel()
-    holder.await(): Unit
+    (Fixtures.agentOf(client)(), parked)
+  }
+
+  /**
+   * Runs `body` with `holder`, then cancels the holder however `body` ends - as the ZIO spec does with
+   * `acquireReleaseWith` - so a failed assertion does not leave it parked until the fixture's deadline.
+   */
+  private def withHolder[A](holder: AgentRun)(body: AgentRun => A): A = {
+    // cancels the holder and waits for it to end
+    val release: Releasable[AgentRun] = run => { run.cancel(); run.await(): Unit }
+    Using.resource(holder)(body)(using release)
+  }
+
+  it should "fail at once, leaving the holder alone, when another run holds the thread" in {
+    // a turn started directly on the agent holds the thread, parked in its model call until interrupted
+    val (agent, parked) = parkingAgent()
+    val threadId        = ThreadId("p3b")
+    val holder          = agent.start(threadId, "hold").fold(e => fail(s"could not start the holder: $e"), identity)
+    val (streamed, recovered, holding) = withHolder(holder) { holder =>
+      parked.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+      val agentPekko = AgentPekko(agent)
+      val streamed   = Await.result(agentPekko.stream(threadId, "again").runWith(Sink.seq).failed, Patience)
+      val recovered  = Await.result(agentPekko.streamRecover(threadId).runWith(Sink.seq).failed, Patience)
+      // read now: the assertion is evaluated after the holder has been cancelled
+      (streamed, recovered, holder.status)
+    }
     holding shouldBe RunStatus.Running
     Seq(streamed, recovered).foreach {
       case e: LLMException => e.error shouldBe a[GraphError.ThreadBusy]
       case other           => fail(s"expected an LLMException, got $other")
     }
+  }
+
+  it should "cancel the holder, and wait for it to end, when an assertion with it fails" in {
+    val (agent, parked) = parkingAgent()
+    val holder = agent.start(ThreadId("p3c"), "hold").fold(e => fail(s"could not start the holder: $e"), identity)
+    parked.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    a[TestFailedException] should be thrownBy withHolder(holder)(_ => fail("an assertion failed"))
+    // the release has run: the holder was cancelled and has ended, rather than parking until the deadline
+    holder.status should not be RunStatus.Running
   }
 
   it should "end, rather than hang, when the run ends without a terminal event" in {
