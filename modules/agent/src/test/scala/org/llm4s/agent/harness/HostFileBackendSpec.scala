@@ -378,6 +378,21 @@ class HostFileBackendSpec
     onDisk(long) shouldBe "y"
   }
 
+  it should "hide and refuse a file named as a lock file, as a lock directory bind-mounted inside the root would show" in {
+    // a lock directory mounted from inside the root passes open's identity check (§4.40); its files never
+    // reach a tool, so none can be deleted while held
+    val lockDir = Files.createDirectories(dir.resolve("locks"))
+    val name    = HostFileBackend.digestOf("key:some-directory") + ".lock"
+    Files.writeString(lockDir.resolve(name), "")
+    backend.ls(p("/locks"), 10, call()).value.items shouldBe empty
+    backend.glob(Glob("**"), VPath.root, 10, call()).value.items shouldBe empty
+    backend.read(p(s"/locks/$name"), 0, 1, call()).left.value.message should include("lock files")
+    backend.delete(p(s"/locks/${name.toUpperCase}"), call()).left.value.message should include("lock files")
+    backend.write(p(s"/locks/$name"), "x", call()).left.value.message should include("lock files")
+    backend.delete(p("/locks"), call()).left.value.message should include("not empty")
+    Files.exists(lockDir.resolve(name)) shouldBe true
+  }
+
   it should "refuse a path named as its temporary files, which no listing would show" in {
     val tmp = s".llm4s-${UUID.randomUUID()}.tmp"
     backend.write(p(s"/$tmp"), "x", call()).left.value.message should include("temporary files")

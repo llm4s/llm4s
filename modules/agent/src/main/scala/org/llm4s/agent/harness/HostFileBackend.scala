@@ -187,7 +187,7 @@ final class HostFileBackend private (
     if path.segments.exists(HostFileBackend.trailing) then
       refused(operation, path, "has a segment ending in a dot or a space, which Windows reads as another name")
     else if path.segments.exists(HostFileBackend.isReserved) then
-      refused(operation, path, "has a segment named as the backend's temporary files, which is refused")
+      refused(operation, path, "has a segment named as the backend's temporary files or lock files, which is refused")
     else
       io(operation, path) {
         path.segments
@@ -1004,12 +1004,19 @@ object HostFileBackend:
   private val Probe =
     """[0-9a-z]{6}-llm4s-probe-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.probe""".r
 
+  /** A root lock file's name: the SHA-256 of a directory identity, in hex. */
+  private val LockFileName = """[0-9a-f]{64}\.lock""".r
+
   /**
-   * A name the backend keeps for itself: its temporary files, and probe files a failed cleanup left. Compared
+   * A name the backend keeps for itself: its temporary files, probe files a failed cleanup left, and lock
+   * files. A lock directory is never inside the root by its identity chain, but one reached through a bind
+   * mount of a directory inside it is not seen (§4.40); its lock files are still never listed, read, written
+   * or deleted, so no tool call can delete a held lock file and let a second writer lock a new one. Compared
    * folded, so a case alias of one is one too.
    */
   private def isReserved(name: String): Boolean =
-    Temporary.matches(fold(name)) || Probe.matches(fold(name))
+    val folded = fold(name)
+    Temporary.matches(folded) || Probe.matches(folded) || LockFileName.matches(folded)
 
   /** Decoded content that the text rule calls binary (NUL); a read refuses it and a search skips it. */
   final private class BinaryContent extends CharacterCodingException
