@@ -1,0 +1,16 @@
+{%- comment -%}
+The home page's events panel: a countdown to the next event, the next talks and the next Dev
+Hour. events-script.html fills in the countdown and the Dev Hour time.
+{%- endcomment -%}
+<div class="events-home">
+<div class="events-home__countdown" id="event-countdown" hidden>
+<p class="events-home__label">Until next event</p>
+<p class="events-home__clock"><span><b data-unit="days">0</b> days</span><span><b data-unit="hours">0</b> hours</span><span><b data-unit="minutes">0</b> minutes</span></p>
+<p class="events-home__next" data-countdown-name></p>
+</div>
+<div class="events-home__lists">
+{%- include events-list.html which="upcoming" limit=3 -%}
+<p id="events-upcoming-empty" class="events-home__empty" hidden>No talks are scheduled right now.</p>
+<p class="events-home__dev-hour"><strong>LLM4S Dev Hour</strong>: every Sunday at 09:00 London time on Discord. Next: <span data-dev-hour-next>Sunday, 09:00 London time</span>.</p>
+</div>
+</div>

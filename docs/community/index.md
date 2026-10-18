@@ -142,6 +142,8 @@ Using LLM4S in production? We'd love to hear about it! Share your story in Disco
 
 ## 📅 Events
 
+The [Events page](/events/) lists upcoming talks, the next Dev Hour, and recordings and slides of past talks.
+
 ### LLM4S Dev Hours
 
 Regular virtual meetups for the community:

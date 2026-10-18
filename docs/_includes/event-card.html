@@ -1,0 +1,27 @@
+{%- comment -%}
+One entry of _data/events.yml as a card. Parameters: event, images (show the banner).
+data-end is the last day (the card is upcoming until it ends); data-start is when it begins,
+for the home page countdown.
+{%- endcomment -%}
+{%- assign e = include.event -%}
+{%- assign start = e.start | date: "%Y-%m-%d" -%}
+{%- if e.end -%}{%- assign last = e.end | date: "%Y-%m-%d" -%}{%- else -%}{%- assign last = start -%}{%- endif -%}
+{%- if e.starts_at -%}{%- assign starts_at = e.starts_at -%}{%- else -%}{%- assign starts_at = start | append: "T00:00:00Z" -%}{%- endif -%}
+<li class="event-card" data-end="{{ last }}" data-start="{{ starts_at }}" data-name="{{ e.event | escape }}">
+{%- if include.images and e.image -%}
+<img class="event-card__image" src="{{ e.image | relative_url }}" alt="{{ e.event | escape }}: {{ e.title | escape }}" loading="lazy">
+{%- endif -%}
+<div class="event-card__body">
+<p class="event-card__date"><time datetime="{{ start }}">{{ e.start | date: "%-d %b %Y" }}</time>{% if e.end %} – <time datetime="{{ last }}">{{ e.end | date: "%-d %b %Y" }}</time>{% endif %}{% if e.time %} · {{ e.time }}{% endif %}</p>
+<p class="event-card__event">{{ e.event }}</p>
+<p class="event-card__title">{{ e.title }}</p>
+<p class="event-card__meta">{{ e.location }}<br>{{ e.speakers | join: ", " }}</p>
+{%- if e.url or e.recording or e.slides -%}
+<p class="event-card__links">
+{%- if e.url -%}<a href="{{ e.url }}">Event page</a>{%- endif -%}
+{%- if e.recording -%}<a href="{{ e.recording }}">Watch recording</a>{%- endif -%}
+{%- for s in e.slides -%}<a href="{{ s.url | relative_url }}">{{ s.label }}</a>{%- endfor -%}
+</p>
+{%- endif -%}
+</div>
+</li>

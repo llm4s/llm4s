@@ -22,6 +22,19 @@ A comprehensive, type-safe framework for building LLM-powered applications in Sc
 
 ---
 
+## Upcoming Events
+
+Meet the LLM4S community at a talk near you, or join the weekly Dev Hour online.
+
+{% include upcoming-events.html %}
+
+[Explore events](/events/){: .btn .btn-primary .mr-2 }
+[Follow the Luma calendar](https://luma.com/calendar/cal-Zd9BLb5jbZewxLA){: .btn }
+
+{% include events-script.html %}
+
+---
+
 ## Why LLM4S?
 
 LLM4S brings the power of large language models to the Scala ecosystem with a focus on **type safety**, **functional programming**, and **production-oriented design**.
@@ -331,6 +344,7 @@ minimum for every artifact; see [Scala and JDK support](/reference/v1-scope#scal
 ## Community
 
 - **Discord**: [Join our community](https://discord.gg/4uvTPn6qww)
+- **Events**: [Talks and the weekly Dev Hour](/events/)
 - **GitHub**: [llm4s/llm4s](https://github.com/llm4s/llm4s)
 - **Starter Kit**: [llm4s.g8](https://github.com/llm4s/llm4s.g8)
 - **License**: MIT

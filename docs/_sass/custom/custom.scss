@@ -1,0 +1,152 @@
+// Site-specific styles, imported by the just-the-docs theme after its own.
+
+// Events: _includes/event-card.html, events-list.html and upcoming-events.html
+
+.main-content ul.event-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 1rem;
+  padding-left: 0;
+  margin: 1rem 0 1.5rem;
+  list-style: none;
+
+  > li::before {
+    content: none;
+  }
+}
+
+.main-content .event-card {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  overflow: hidden;
+  background-color: $body-background-color;
+  border: $border $border-color;
+  border-radius: $border-radius;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+
+  &[hidden] {
+    display: none;
+  }
+
+  p {
+    margin: 0 0 0.35rem;
+  }
+}
+
+.event-card__image {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background-color: $grey-lt-100;
+}
+
+.event-card__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  padding: 0.85rem 1rem 1rem;
+}
+
+.main-content .event-card__date {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: $link-color;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.main-content .event-card__event {
+  font-size: 0.85rem;
+  color: $grey-dk-000;
+}
+
+.main-content .event-card__title {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: $grey-dk-300;
+}
+
+.main-content .event-card__meta {
+  font-size: 0.85rem;
+  color: $grey-dk-000;
+}
+
+.main-content .event-card__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.85rem;
+  margin-top: auto;
+  padding-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.events-banner {
+  display: block;
+  max-width: 100%;
+  margin: 0.5rem 0 1rem;
+  border-radius: $border-radius;
+}
+
+.events-home {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  margin: 1rem 0;
+
+  @media (min-width: 50rem) {
+    grid-template-columns: 13rem minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .event-list {
+    margin-top: 0;
+  }
+}
+
+.events-home__countdown {
+  padding: 1rem;
+  color: $white;
+  text-align: center;
+  background-color: $purple-200;
+  border-radius: $border-radius;
+
+  &[hidden] {
+    display: none;
+  }
+
+  p {
+    margin: 0;
+  }
+}
+
+.events-home__label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.85;
+}
+
+.events-home__clock {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  margin: 0.5rem 0 !important;
+  font-size: 0.75rem;
+
+  span {
+    display: flex;
+    flex-direction: column;
+  }
+
+  b {
+    font-size: 1.75rem;
+    line-height: 1.1;
+  }
+}
+
+.events-home__next {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
