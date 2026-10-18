@@ -208,11 +208,14 @@ private[sqlite] object SqliteSchema:
         }
       }
 
-  /** A stored checkpoint's JSON text decoded, or why it cannot be: never a throw. */
+  /**
+   * A stored checkpoint's JSON text decoded, or why it cannot be: never a throw. The reason is a fixed category and an
+   * error class, never a decoder's message, which can quote the stored text into the log.
+   */
   private def decoded(json: String): Either[String, Checkpoint] =
     Try(ujson.read(json)).toEither.left
       .map(e => s"not JSON (${e.getClass.getSimpleName})")
-      .flatMap(value => Checkpoint.fromJson(value).left.map(_.message))
+      .flatMap(value => Checkpoint.fromJson(value).left.map(e => s"not a checkpoint (${e.getClass.getSimpleName})"))
 
   /** The version the file is at; 0 for a file without the schema table. Call inside a transaction. */
   def version(connection: Connection): Int =
