@@ -68,8 +68,8 @@ object FileContext:
     new FileContext(run, ThreadState.empty(Map.empty), None)
 
 /**
- * Where an agent's files live: thread state ([[StateFileBackend]]), a [[LongTermStore]]
- * ([[StoreFileBackend]]), several at once
+ * Where an agent's files live: thread state ([[StateFileBackend]]), a host directory
+ * ([[HostFileBackend]]), a [[LongTermStore]] ([[StoreFileBackend]]), several at once
  * ([[CompositeBackend]]), or one chosen per run ([[FileBackend.resolved]]).
  *
  * A backend owns the four obligations of every mutation, so the tools that call it need not know them:

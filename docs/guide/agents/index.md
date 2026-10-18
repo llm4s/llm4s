@@ -432,10 +432,32 @@ The harness keeps an agent's files in a `FileBackend` (`org.llm4s.agent.harness`
 (`StateFileBackend`, the default), a long-term store (`StoreFileBackend`, for `/memories/`), several at
 once (`CompositeBackend`), files the application ships, read-only (`StaticFileBackend`: mount it at `/app`
 and point `SkillsConfig.withSources` and `InstructionsConfig.withPaths` there, since on state files only a tool
-call writes a file), or one chosen per run (`FileBackend.resolved`). Each backend declares the locks
-its mutations hold, replays its external effects through `ReplayGuard`, and enforces its own size
-limits. A backend over a host directory is not part of this release; it is tracked in
-[#1964](https://github.com/llm4s/llm4s/issues/1964).
+call writes a file), a directory of the host (`HostFileBackend`), or one chosen per run
+(`FileBackend.resolved`). Each backend declares the locks its mutations hold, replays its external
+effects through `ReplayGuard`, and enforces its own size limits.
+
+`HostFileBackend.open(root, lockDirectory)` exposes a trusted directory as `/`
+([design §4.40](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.40-host-file-backend.md)).
+It is the root's only writer: it holds an OS lock on the root until `close()`, and any other open of
+the same root, or of one inside or around it, in this process or another, is refused with
+`HostRootInUse`. Give every process on the host one `lockDirectory`, outside every root, on a local
+file system that nothing prunes. It refuses symbolic links, files with other hard links, mounts beneath
+the root and volumes that make 8.3 short names; on Windows, which reports no hard-link counts, pass
+`allowUncheckedIdentity = true` only for a root with no hard links. It is not a security boundary:
+never give it a root an untrusted process can write, and run untrusted commands in the workspace
+sandbox.
+
+```scala
+import org.llm4s.agent.graph.tool.ToolSet
+import org.llm4s.agent.harness.{FileTools, HostFileBackend}
+import java.nio.file.Path
+
+for {
+  project <- HostFileBackend.open(Path.of("/srv/project"), Path.of("/var/lib/myapp/llm4s-locks"))
+  tools   <- ToolSet.of(FileTools(project)*)
+  agent   <- Agent.builder("coder", client).withTools(tools).build()
+} yield agent // close `project` when the application is done with the directory
+```
 
 ### Harness File Tools
 

@@ -52,7 +52,11 @@ object PlatformTests {
       "org.llm4s.model.ModelRegistryServiceSpec",
       "org.llm4s.http.Llm4sHttpClientSpec"
     ),
-    "agent" -> Seq("org.llm4s.assistant.*"),
+    "agent" -> Seq("org.llm4s.assistant.*", "org.llm4s.agent.harness.HostFileBackendSpec"),
+    "agentTestkit" -> Seq(
+      "org.llm4s.agent.testkit.HostFileBackendContractSpec",
+      "org.llm4s.agent.testkit.HostFileBackendReplaySpec"
+    ),
     "knowledgegraph" -> Seq(
       "org.llm4s.knowledgegraph.storage.JsonGraphStoreSpec",
       "org.llm4s.knowledgegraph.storage.JsonGraphStoreTest",

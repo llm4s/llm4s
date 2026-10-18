@@ -13,6 +13,7 @@
 #   none: <reason>      nothing runs it on Windows, and why that is acceptable.
 
 modules/agent/src/main/scala/org/llm4s/agent/graph/Checkpointer.scala                              none: matches only a Scaladoc mention of FileChannel; the SQLite checkpointer's file I/O is agentCheckpointSqlite's
+modules/agent/src/main/scala/org/llm4s/agent/harness/HostFileBackend.scala                         agent:org.llm4s.agent.harness.HostFileBackendSpec
 modules/agent/src/main/scala/org/llm4s/assistant/SessionManager.scala                              agent:org.llm4s.assistant.*
 modules/anthropic/src/main/scala/org/llm4s/llmconnect/config/AnthropicWorkloadIdentity.scala       anthropic:org.llm4s.llmconnect.provider.AnthropicWorkloadIdentitySpec
 modules/config-policy/src/main/scala/org/llm4s/configpolicy/Doctor.scala                           configPolicy:org.llm4s.configpolicy.DoctorSpec
