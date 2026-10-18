@@ -877,13 +877,15 @@ class HostFileBackendSpec
   }
 
   it should "refuse a name the host cannot hold, for the model to correct, never as a failure" in {
-    // only Windows refuses these characters in a name; POSIX takes them
+    // only Windows refuses these characters in a name; POSIX takes them. Windows reads `a:b` as a path on
+    // drive A, which the resolution refuses as outside the root; the others are not paths at all
     assume(!posix)
     for (name <- Seq("a:b", "a*b", "a?b", "a\"b", "a<b", "a>b", "a|b")) {
       def invalid[A](r: Result[A]) =
         r.left.value match {
-          case refused: BackendRefused => refused.message should include("not a valid file name")
-          case other                   => fail(s"expected a refusal for $name, got $other")
+          case refused: BackendRefused =>
+            refused.message should (include("not a valid file name").or(include("outside the root")))
+          case other => fail(s"expected a refusal for $name, got $other")
         }
       invalid(backend.write(p(s"/$name"), "x", call()))
       invalid(backend.read(p(s"/$name"), 0, 1, call()))
