@@ -371,6 +371,37 @@ class HostFileBackendSpec
     written(backend.delete(p("/src"), call())) shouldBe FileDeleted(wasDirectory = true)
   }
 
+  it should "leave no parent directory behind when the write that created it is refused" in {
+    assume(posix)
+    // Parents that fit the platform's path limit, a target name that fits it too, and the effect's
+    // temporary file (48 characters) that does not: the parents are created, then the write is refused.
+    // The limit is found by growing a chain of directories until mkdir refuses.
+    val seg     = "n" * 200
+    val real    = dir.toRealPath()
+    var deepest = real
+    while (scala.util.Try(Files.createDirectory(deepest.resolve(seg))).isSuccess) deepest = deepest.resolve(seg)
+    val fits = (1 to 255)
+      .takeWhile { k =>
+        val probe = deepest.resolve("m" * k)
+        scala.util.Try(Files.createDirectory(probe)).isSuccess && { Files.delete(probe); true }
+      }
+      .lastOption
+      .getOrElse(0)
+    assume(fits >= 3 && real.relativize(deepest).getNameCount >= 2)
+    // root/a is as long as deepest; root/a/b leaves room for "/f" and not for the temporary file
+    val root = deepest.getParent
+    backend.close()
+    val near = HostFileBackend.openWith(root, locks, allowUncheckedIdentity = !posix, probe = defaultProbe).value
+    cleanups += (() => near.close())
+    val (upper, lower) = ("a" * 200, "b" * (fits - 2))
+    near.write(p(s"/$upper/$lower/f"), "x", call()).left.value shouldBe a[BackendRefused]
+    Files.exists(root.resolve(upper)) shouldBe false
+    // a parent that was already there stays
+    Files.createDirectory(root.resolve(upper))
+    near.write(p(s"/$upper/$lower/f"), "x", call()).left.value shouldBe a[BackendRefused]
+    Files.list(root.resolve(upper)).iterator().asScala.toVector shouldBe empty
+  }
+
   it should "write a file whose name is near the file system's limit" in {
     val long = "n" * 250
     written(backend.write(p(s"/$long"), "x", call())).created shouldBe true

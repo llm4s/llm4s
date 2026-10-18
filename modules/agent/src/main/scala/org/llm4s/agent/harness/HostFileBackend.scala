@@ -319,8 +319,15 @@ final class HostFileBackend private (
   private def atomicWrite(operation: String, path: VPath, target: Path, bytes: Array[Byte]): Result[Unit] =
     HostFileBackend.Kept.of(target) match
       case Left(reason) => refused(operation, path, reason)
-      case Right(kept) =>
-        classified(operation, path)(Try(Files.createDirectories(target.getParent))).flatMap { _ =>
+      case Right(kept)  =>
+        // the parents this write creates, deepest first: a write that does not land removes them again, so
+        // a refused effect leaves the tree as it found it (each removal only of a directory still empty)
+        val created = Iterator
+          .iterate(target.getParent)(_.getParent)
+          .takeWhile(d => d != null && d.startsWith(root) && d != root && !exists(d))
+          .toVector
+        def undo(): Unit = created.foreach(d => Try(Files.deleteIfExists(d)): Unit)
+        val written = classified(operation, path)(Try(Files.createDirectories(target.getParent))).flatMap { _ =>
           // a short name of its own, so a target near the file system's name limit still has room for it
           val temp    = target.resolveSibling(s".llm4s-${UUID.randomUUID()}.tmp")
           val options = java.util.Set.of[StandardOpenOption](StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
@@ -345,6 +352,8 @@ final class HostFileBackend private (
             case Success(Some(reason)) => refused(operation, path, reason)
             case Failure(e)            => classified(operation, path)(Failure[Unit](e))
         }
+        if written.isLeft then undo()
+        written
 
   // ---- mutations
 
