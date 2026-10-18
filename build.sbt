@@ -158,6 +158,9 @@ lazy val commonSettings = Seq(
   mimaFailOnNoPrevious    := false,
   Compile / scalacOptions := scalacOptionsForVersion(scalaVersion.value),
   Test / scalacOptions    := scalacOptionsForVersion(scalaVersion.value),
+  // The Java sources (core's annotations, java-api's value types and enums) at the same JDK 21 bytecode level as the
+  // Scala ones (`Common.javaRelease`, #1493), whichever JDK runs the build.
+  javacOptions ++= Seq("--release", javaRelease),
   // Suppress ScalaDoc warnings from third-party libraries (e.g., ScalaTest)
   Compile / doc / scalacOptions ++= Seq("-Wconf:cat=scaladoc:silent"),
   semanticdbEnabled                      := true,
@@ -1136,8 +1139,8 @@ lazy val watsonx = (project in file("modules/providers/watsonx"))
 // ScalaTest is a compile dependency. Every in-repo provider module dogfoods it (`% Test`).
 //
 // It needs JDK 21: the interruption checks run on `Thread.ofVirtual` and the local server on
-// `Executors.newVirtualThreadPerTaskExecutor` (#1582). The docs say so; no module sets a
-// `-release` or `javacOptions` target, and where the floor is enforced is for #1493 to decide.
+// `Executors.newVirtualThreadPerTaskExecutor` (#1582), as every llm4s artifact does: the whole build
+// emits JDK 21 bytecode (`Common.javaRelease`, #1493).
 //
 // Core's own tests cannot use it - that would be a project cycle - so anything core's tests
 // share with it lives in core's main sources, `private[llm4s]` (`config.ReferenceConfig`).

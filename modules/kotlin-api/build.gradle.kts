@@ -21,17 +21,18 @@ repositories {
     mavenCentral()
 }
 
-// Pin the JVM target (the bytecode level of the Kotlin classes) to 17, whatever JDK is installed
-// (Kotlin 2.x doesn't yet support JDK 25+ as a target). It does not make the module run on JDK 17:
-// running it needs JDK 21, because AgentKt starts a virtual thread (Thread.ofVirtual, #1678) and
-// llm4s-java-api needs JDK 21 too (#1493).
+// Pin the JVM target (the bytecode level of the Kotlin and Java classes) to 21, the minimum JDK of every llm4s
+// artifact (#1493), whatever JDK runs Gradle (Kotlin 2.0 cannot target JDK 25). The module needs JDK 21 to run:
+// AgentKt starts a virtual thread (Thread.ofVirtual, #1678), and llm4s-java-api is JDK 21 bytecode and depends on Ox,
+// which is too. It used to target 17, which let a JDK 17 build compile against it and fail only at run time.
+// scripts/check-doc-support.sh fails when this differs from the documented minimum.
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile>().configureEach {
     compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
     }
 }
 tasks.withType<JavaCompile>().configureEach {
-    options.release.set(17)
+    options.release.set(21)
 }
 
 dependencies {

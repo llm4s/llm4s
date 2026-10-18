@@ -16,6 +16,8 @@ import sbt.Keys._
  *  - per project, the keys whose `aggregate` is `false` there;
  *  - the commands sbt and the loaded plugins define, and each command alias with its body;
  *  - each project's `scalaVersion` and `crossScalaVersions`;
+ *  - each project's `Compile / scalacOptions` and `Compile / javacOptions`, for the check that every project emits
+ *    the bytecode level of the documented minimum JDK (`-java-output-version` and `--release`, #1493);
  *  - each project's coverage floor (`coverageFloor(n)` in build.sbt), or null when it has none, for
  *    scripts/check-coverage-legs.sh to check that every floor is enforced by a leg of CI's coverage job;
  *  - the modules and suites `sbt testPlatform` runs (project/PlatformTests.scala), for
@@ -64,6 +66,10 @@ object BuildModel {
       extracted.getOpt(ref / ivyConfigurations).getOrElse(Nil).map(c => c.name -> c.id)
     }).toMap
 
+    // Compiler options are tasks: run each (it compiles nothing); a project where it cannot run reports none.
+    def options(key: TaskKey[Seq[String]]): Seq[String] =
+      scala.util.Try(extracted.runTask(key, state)._2).getOrElse(Nil)
+
     val projects = structure.allProjectRefs.sortBy(_.project).map { ref =>
       val resolved = Project.getProject(ref, structure).get
       val base     = rootDir.toPath.relativize(resolved.base.getCanonicalFile.toPath).toString.replace('\\', '/')
@@ -102,6 +108,8 @@ object BuildModel {
         "noAggregate"        -> strs(noAggregate),
         "scalaVersion"       -> str(extracted.getOpt(ref / scalaVersion).getOrElse("")),
         "crossScalaVersions" -> strs(extracted.getOpt(ref / crossScalaVersions).getOrElse(Nil)),
+        "scalacOptions"      -> strs(options(ref / Compile / scalacOptions)),
+        "javacOptions"       -> strs(options(ref / Compile / javacOptions)),
         "coverageFloor" -> (extracted.getOpt(ref / Coverage.coveragePolicy) match {
           case Some(Coverage.Policy.Floor(pct)) => pct.toString
           case _                                => "null"

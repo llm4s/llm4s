@@ -51,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Changed** CI runs the `@Workspace` tier on PRs that change the workspace, and All Tests Pass requires it there; a manual
   run picks its tiers with `-f tier=workspace|mcp-reference|cloud-smoke|all|none` [#1982](https://github.com/llm4s/llm4s/issues/1982).
+- **Changed** every artifact to JDK 21 bytecode (class-file version 65; Scala `-java-output-version 21`, `javac --release 21`,
+  Kotlin and the Gradle sample `21`, from 52/17), so JDK 21, already the minimum, is enforced at load time; `scripts/check-doc-support.sh`
+  checks the targets and docs agree [#1493](https://github.com/llm4s/llm4s/issues/1493); [supported JDKs](docs/reference/v1-scope.md#scala-and-jdk-support).
 
 ## [0.5.1] - 2026-10-15
 

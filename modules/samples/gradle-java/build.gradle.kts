@@ -24,10 +24,11 @@ dependencies {
     runtimeOnly("ch.qos.logback:logback-classic:1.5.34")
 }
 
-// The sample's own code is compiled for Java 17 whatever JDK runs Gradle. Running it needs JDK 21,
-// because llm4s-java-api depends on Ox (see https://github.com/llm4s/llm4s/issues/1493).
+// The sample's own code is compiled for Java 21, the minimum JDK of llm4s, whatever JDK runs Gradle: llm4s-java-api
+// is JDK 21 bytecode and depends on Ox, which is too (https://github.com/llm4s/llm4s/issues/1493), so a lower target
+// would only move the failure from compile time to run time.
 tasks.withType<JavaCompile>().configureEach {
-    options.release.set(17)
+    options.release.set(21)
 }
 
 application {

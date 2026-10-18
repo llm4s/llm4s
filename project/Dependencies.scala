@@ -173,7 +173,23 @@ object Deps {
 object Common {
   val scala3 = "3.7.1"
 
+  /**
+   * The minimum JDK of every llm4s artifact, and the bytecode level the build emits for it (#1493).
+   *
+   * llm4s needs JDK 21: `llm4s-core` starts virtual threads (`ToolRegistry`, `Thread.ofVirtual`) and `llm4s-agent`
+   * depends on Ox, whose own classes are JDK 21 bytecode (class-file version 65). Without a pinned level the Scala
+   * compiler emitted version 52 (Java 8) and `javac` the version of whichever JDK ran the build, so the bytecode said
+   * nothing about the floor, and a release built on a newer JDK would have shipped Java classes that JDK 21 cannot
+   * load. Pinning it makes a JDK older than 21 fail at once with `UnsupportedClassVersionError`, and keeps the build
+   * from using an API newer than 21 when it runs on a newer JDK. scripts/check-doc-support.sh fails when a project
+   * or a Gradle build targets anything else, or a doc names another floor; `JavaReleaseSpec` (core, java-api) reads
+   * the compiled classes' version.
+   */
+  val javaRelease = "21"
+
   private val scala3CompilerOptions = Seq(
+    "-java-output-version",
+    javaRelease,
     "-explain",
     "-explain-types",
     "-Wunused:nowarn",
