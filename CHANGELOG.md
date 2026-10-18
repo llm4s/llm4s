@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** a `llm4s-pekko` stream leaking its producer thread when provider code swallows the interrupt: once the
   stream stops, every later chunk is refused at once; `ThreadBusy` refusals are tested in pekko, effect and zio [#1815](https://github.com/llm4s/llm4s/issues/1815).
 
+### Agent runtime
+
+- **Fixed** `SqliteCheckpointer.open` failing on a pre-release version-1 file whose latest checkpoint is not valid JSON: that
+  thread is left out of the seeded history, with a warning, and seeding streams the rows [#1849](https://github.com/llm4s/llm4s/issues/1849).
+
 ### Providers
 
 - **Changed** an `ollama` section's `baseUrl` to default to `http://localhost:11434`, so a local section needs only

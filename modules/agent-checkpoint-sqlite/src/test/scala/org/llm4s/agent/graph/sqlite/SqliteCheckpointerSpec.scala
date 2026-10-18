@@ -785,6 +785,34 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_history")(_.getInt(1)) shouldBe 2
   }
 
+  it should "seed no row for a latest checkpoint it cannot read, and still open the file (#1849)" in {
+    val db       = SqliteFiles.fresh()
+    val kept     = ThreadId("readable")
+    val garbled  = ThreadId("not-json")
+    val stranger = ThreadId("not-a-checkpoint")
+    val first    = SqliteCheckpointer.open(db).value
+    Vector(kept, garbled, stranger).foreach(chain(first, _, 2))
+    first.close()
+    asVersionOne(db)
+    exec(
+      db,
+      "DROP TABLE llm4s_checkpoint_history",
+      "UPDATE llm4s_checkpoint_threads SET checkpoint_json = '{\"id\": \"c2\", ' WHERE thread_id = 'not-json'",
+      "UPDATE llm4s_checkpoint_threads SET checkpoint_json = '[1, 2]' WHERE thread_id = 'not-a-checkpoint'"
+    )
+
+    val reopened = SqliteCheckpointer.open(db).value
+    reopened.history(kept, None, 10).value.map(_.id) shouldBe Vector("c2")
+    reopened.history(garbled, None, 10).value shouldBe empty
+    reopened.history(stranger, None, 10).value shouldBe empty
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_history")(_.getInt(1)) shouldBe 1
+    // `latest` reports the unreadable checkpoints as it did before the history table existed
+    reopened.latest(garbled).isLeft shouldBe true
+    reopened.latest(stranger).isLeft shouldBe true
+    reopened.latest(kept).value.map(_.checkpoint.id) shouldBe Some("c2")
+    reopened.close()
+  }
+
   it should "be pruned in one transaction while another store writes the same file" in {
     val db      = SqliteFiles.fresh()
     val thread  = ThreadId("busy")

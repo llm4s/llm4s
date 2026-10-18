@@ -63,7 +63,7 @@ class SqliteCrossRuntimeSubscriptionSpec extends AnyFlatSpec with Matchers with 
     records.map(r => (r.seq, r.runId, r.event))
 
   /** A store that counts its reads of the event log. */
-  final private class Counted(underlying: Checkpointer) extends Checkpointer {
+  private class Counted(underlying: Checkpointer) extends Checkpointer {
     val reads                                            = new AtomicInteger()
     def claim(threadId: ThreadId, request: ClaimRequest) = underlying.claim(threadId, request)
     def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) =
@@ -79,8 +79,27 @@ class SqliteCrossRuntimeSubscriptionSpec extends AnyFlatSpec with Matchers with 
     def prune(threadId: ThreadId, policy: RetentionPolicy)               = underlying.prune(threadId, policy)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = {
       reads.incrementAndGet()
+      beforeRead()
       underlying.eventsAfter(threadId, afterSeq, limit)
     }
+    protected def beforeRead(): Unit = ()
+  }
+
+  /**
+   * A store whose reads of the event log wait, once `hold` is called, until `let` is: so a subscription's watch is
+   * known to read nothing while the other runtime commits and prunes. `held` is how many reads are waiting.
+   */
+  final private class Gated(underlying: Checkpointer) extends Counted(underlying) {
+    @volatile private var closed = false
+    private val opened           = new CountDownLatch(1)
+    val held                     = new AtomicInteger()
+    def hold(): Unit             = closed = true
+    def let(): Unit              = opened.countDown()
+    override protected def beforeRead(): Unit =
+      if (closed) {
+        held.incrementAndGet()
+        opened.await(patience.toMillis, TimeUnit.MILLISECONDS): Unit
+      }
   }
 
   Seq(Durability.Sync, Durability.Async, Durability.OnExit).foreach { durability =>
@@ -142,6 +161,58 @@ class SqliteCrossRuntimeSubscriptionSpec extends AnyFlatSpec with Matchers with 
       shape(first.records ++ after.records) shouldBe committed
       resumed.cancel()
       storeA.close()
+    }
+
+  "A subscription in another runtime" should
+    "end with ReplayFailed at its last sequence number once a prune moves the floor past it (#1849)" in {
+      val db      = SqliteFiles.fresh()
+      val thread  = ThreadId("pruned-under")
+      val workers = Workers()
+      val storeA  = opened(db)
+      val storeB  = opened(db)
+      val gated   = new Gated(storeB)
+      val seen    = Seen()
+      val b       = runtime(gated)
+      b.subscribe(thread)(seen).value
+      eventually("the watch to start")(b.storeWatches(thread) == 1)
+      val a = runtime(storeA)
+      completed(a.start(thread, workers.graph, Vector("a", "b")))
+      val first = logOf(storeA, thread)
+      eventually("the first run")(seen.seqs.size == first.size)
+      val lastSeq = seen.seqs.last
+
+      // the watch reads nothing more until the other runtime has committed and pruned
+      gated.hold()
+      eventually("the watch to wait")(gated.held.get >= 1)
+      completed(a.start(thread, workers.graph, Vector("c", "d")))
+      completed(a.start(thread, workers.graph, Vector("e")))
+      storeA.prune(thread, RetentionPolicy().withMaxCheckpoints(1)).value
+      val floor = storeA.eventsAfter(thread, 0L, 10).left.value match {
+        case GraphError.ReplayUnavailable(_, earliest) => earliest
+        case other                                     => fail(s"expected the pruned log's floor, got $other")
+      }
+      floor should be > lastSeq + 1
+
+      gated.let()
+      eventually("the subscription to end")(seen.disconnected.isDefined)
+      seen.disconnected.value shouldBe StreamEvent.Disconnected(
+        lastSeq,
+        DisconnectReason.ReplayFailed(GraphError.ReplayUnavailable(thread.value, floor))
+      )
+      // nothing past the floor slipped through before the end, and the watch is gone
+      seen.seqs shouldBe first.map(_._1)
+      eventually("the watch to stop")(b.storeWatches(thread) == 0)
+      b.liveSubscriptions(thread) shouldBe 0
+
+      // a subscriber resuming from the floor reads the rest of the log
+      val after   = Seen()
+      val resumed = runtime(storeA).subscribe(thread, afterSeq = floor - 1)(after).value
+      val rest    = storeA.eventsAfter(thread, floor - 1, 10000).value
+      eventually("the resumed subscriber to catch up")(after.seqs.size >= rest.size)
+      after.seqs shouldBe rest.map(_.seq)
+      resumed.cancel()
+      storeA.close()
+      storeB.close()
     }
 
   "A slow subscriber with a small queue" should "receive another runtime's commits without lagging" in {

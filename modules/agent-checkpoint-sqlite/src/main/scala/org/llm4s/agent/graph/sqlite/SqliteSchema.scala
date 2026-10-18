@@ -2,8 +2,10 @@ package org.llm4s.agent.graph.sqlite
 
 import org.llm4s.agent.graph.Checkpoint
 
+import org.slf4j.LoggerFactory
+
 import java.sql.Connection
-import scala.util.Using
+import scala.util.{ Try, Using }
 
 /**
  * The tables a [[SqliteCheckpointer]] keeps, and their migrations. Every table is prefixed `llm4s_checkpoint_`, so
@@ -35,6 +37,8 @@ import scala.util.Using
  * refuses a file whose version is newer than this build knows. Version 0 is a file with none of these tables.
  */
 private[sqlite] object SqliteSchema:
+
+  private val logger = LoggerFactory.getLogger(getClass)
 
   /** The schema version this build writes. */
   val Current: Int = 5
@@ -162,37 +166,53 @@ private[sqlite] object SqliteSchema:
    * Creates the history table on a version-1 file that lacks it - one written by a pre-release build - and seeds it
    * with each thread's latest checkpoint, so `history` and `checkpoint` see what `latest` sees. Call inside the
    * opening transaction; a file that has the table is left as it is.
+   *
+   * The latest checkpoints are read a row at a time, each inserted as it is read, so seeding holds one checkpoint in
+   * memory, never the whole file's. A checkpoint this build cannot read - text that is not JSON, or JSON it cannot
+   * decode - keeps no history row and is logged; it never fails the open, and `latest` reports it as before (#1849).
    */
   private[sqlite] def ensureHistory(connection: Connection): Unit =
     if tableExists(connection, "llm4s_checkpoint_threads") && !tableExists(connection, "llm4s_checkpoint_history") then
       statements(connection, historyTable)
-      val latest = Using.resource(connection.createStatement()) { statement =>
-        Using.resource(
-          statement.executeQuery(
-            "SELECT thread_id, checkpoint_json FROM llm4s_checkpoint_threads WHERE checkpoint_json IS NOT NULL"
-          )
-        )(rows => Iterator.continually(rows).takeWhile(_.next()).map(r => r.getString(1) -> r.getString(2)).toVector)
-      }
-      Using.resource(
+      Using.resources(
+        connection.createStatement(),
         connection.prepareStatement(
           """INSERT INTO llm4s_checkpoint_history
             |(thread_id, position, checkpoint_id, status, created_second, created_nano, checkpoint_json)
             |VALUES (?, 0, ?, ?, ?, ?, ?)""".stripMargin
         )
-      ) { insert =>
-        latest.foreach { (thread, json) =>
-          // a checkpoint this build cannot decode keeps no history row; `latest` reports it as before
-          Checkpoint.fromJson(ujson.read(json)).foreach { checkpoint =>
-            insert.setString(1, thread)
-            insert.setString(2, checkpoint.id)
-            insert.setString(3, checkpoint.status.toString)
-            insert.setLong(4, checkpoint.createdAt.getEpochSecond)
-            insert.setLong(5, checkpoint.createdAt.getNano.toLong)
-            insert.setString(6, json)
-            insert.executeUpdate(): Unit
-          }
+      ) { (select, insert) =>
+        Using.resource(
+          select.executeQuery(
+            "SELECT thread_id, checkpoint_json FROM llm4s_checkpoint_threads WHERE checkpoint_json IS NOT NULL"
+          )
+        ) { rows =>
+          while rows.next() do
+            val thread = rows.getString(1)
+            val json   = rows.getString(2)
+            decoded(json) match
+              case Left(problem) =>
+                logger.warn(
+                  "Thread {}'s latest checkpoint cannot be read, so it is not seeded into the history: {}",
+                  thread,
+                  problem
+                )
+              case Right(checkpoint) =>
+                insert.setString(1, thread)
+                insert.setString(2, checkpoint.id)
+                insert.setString(3, checkpoint.status.toString)
+                insert.setLong(4, checkpoint.createdAt.getEpochSecond)
+                insert.setLong(5, checkpoint.createdAt.getNano.toLong)
+                insert.setString(6, json)
+                insert.executeUpdate(): Unit
         }
       }
+
+  /** A stored checkpoint's JSON text decoded, or why it cannot be: never a throw. */
+  private def decoded(json: String): Either[String, Checkpoint] =
+    Try(ujson.read(json)).toEither.left
+      .map(e => s"not JSON (${e.getClass.getSimpleName})")
+      .flatMap(value => Checkpoint.fromJson(value).left.map(_.message))
 
   /** The version the file is at; 0 for a file without the schema table. Call inside a transaction. */
   def version(connection: Connection): Int =
