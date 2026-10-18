@@ -311,6 +311,38 @@ class HostFileBackendSpec
     reopen().isRight shouldBe true
   }
 
+  it should "touch nothing in a root swapped at any step before its lock is held and revalidated" in {
+    assume(posix)
+    backend.close()
+    val aside = Files.createTempDirectory("llm4s-host-aside").resolve("old")
+    cleanups += (() =>
+      Files.walk(aside.getParent).iterator().asScala.toVector.reverse.foreach(q => Files.deleteIfExists(q)): Unit
+    )
+    for (point <- Seq("identified", "lockDirectory", "locked")) {
+      // the directory at the root's path is swapped for a new one at `point`
+      val opened = HostFileBackend.openWith(
+        dir,
+        locks,
+        allowUncheckedIdentity = !posix,
+        // a probe that leaves its mark, so a probe of the replacement would show
+        probe = root => { Files.writeString(root.resolve("probed"), ""); Right(Vector.empty) },
+        pause = at =>
+          if (at == point) {
+            Files.move(dir, aside)
+            Files.createDirectory(dir)
+          }
+      )
+      withClue(s"swapped at $point: ") {
+        opened.left.value.message should include("replaced")
+        Files.list(dir).iterator().asScala.toVector shouldBe empty
+      }
+      // put the original back; nothing of the refused open holds either directory
+      Files.delete(dir)
+      Files.move(aside, dir)
+      another(dir).value.close()
+    }
+  }
+
   it should "release its lock if a check after it refuses the open" in {
     backend.close()
     reopen(probe = _ => Right(Vector("8.3 short names"))).isLeft shouldBe true

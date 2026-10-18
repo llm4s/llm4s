@@ -712,7 +712,9 @@ object HostFileBackend:
     countsLinks: Path => Boolean = reportsLinkCounts,
     fileSystemId: Path => String = fileSystemIdOf,
     mountsBeneath: Path => Result[Vector[Path]] = mountPointsBeneath,
-    openDirectory: Path => java.nio.file.DirectoryStream[Path] = Files.newDirectoryStream(_)
+    openDirectory: Path => java.nio.file.DirectoryStream[Path] = Files.newDirectoryStream(_),
+    // called at each named step before the lock is held and the root revalidated, for tests that race it
+    pause: String => Unit = _ => ()
   ): Result[HostFileBackend] =
     if maxFileBytes <= 0 then Left(ValidationError("maxFileBytes", s"must be positive, was $maxFileBytes"))
     else if maxFileBytes > MaxFileBytes then
@@ -724,68 +726,99 @@ object HostFileBackend:
       )
     else if maxScanEntries <= 0 then Left(ValidationError("maxScanEntries", s"must be positive, was $maxScanEntries"))
     else
+      // Nothing touches the root's contents until its lock is held and the directory at its path is shown to
+      // be the one locked. Before that point: reads only, and writes only in the lock directory, which is
+      // refused if it is inside the root by path or by identity, so a root swapped meanwhile is never written.
       for
+        // 1. read only: the root's real path, that it is a directory, and the identities of it and its ancestors
         real <- Try(root.toRealPath()).toResult.left.map(e => ValidationError("root", s"$root: ${e.message}"): LLMError)
         _    <- Either.cond(Files.isDirectory(real), (), ValidationError("root", s"$root is not a directory"))
         rootChain <- chainOf(real, "root")
-        // checked before anything is created: the nearest existing ancestor of the lock directory, by its
-        // identity chain, so a refused lock directory inside the root (by path, or through a link) is never
-        // created there, in a tree another backend may hold
+        // its stamp as locked: identity, file system and, where there is no file key (Windows), creation time
+        before <- Try(stampOf(real, fileSystemId)).toResult.left
+          .map(e => ValidationError("root", s"$real cannot be identified: ${e.message}"): LLMError)
+        // 2. read only: the lock directory's nearest existing ancestor is outside the root, by path and by
+        // identity, so creating the lock directory cannot write inside the root, or inside whatever replaces it
+        _             <- Right(pause("identified"))
         existing      <- nearestExisting(lockDirectory)
         existingChain <- chainOf(existing, "lockDirectory")
-        _ <- Either.cond(
-          !existingChain.contains(rootChain.head),
-          (),
-          ValidationError(
-            "lockDirectory",
-            s"$lockDirectory is inside the root $real; give the backend one outside it"
-          )
-        )
+        _             <- outsideRoot(lockDirectory, existing, existingChain, root, real, rootChain.head)
+        // 3. writes outside the root only: the lock directory, then its lock files
         locks <- Try {
           Files.createDirectories(lockDirectory)
           lockDirectory.toRealPath()
         }.toResult.left.map(e => ValidationError("lockDirectory", s"$lockDirectory: ${e.message}"): LLMError)
         locksChain <- chainOf(locks, "lockDirectory")
-        // checked again once it exists, in case another process put a link in its place meanwhile
-        _ <- Either.cond(
-          !locksChain.contains(rootChain.head),
-          (),
-          ValidationError("lockDirectory", s"$locks is inside the root $real; give the backend one outside it")
-        )
-        // the lock first, so nothing below - the probe file included - touches a root another backend holds
-        held <- RootLocks.acquire(real, locks, rootChain)
-        backend <- checked(
-          real,
-          rootChain.head,
-          allowUncheckedIdentity,
-          probe,
-          countsLinks,
-          fileSystemId,
-          mountsBeneath
-        ).map { (stamp, mounts, links) =>
-          new HostFileBackend(
-            real,
-            maxFileBytes,
-            maxScanEntries,
-            held,
-            stamp,
-            stampOf(_, fileSystemId),
-            fileSystemId,
-            mounts,
-            links,
-            openDirectory
-          )
-        } match
-          case Left(error) =>
-            held.release()
-            Left(error)
-          case right => right
+        _          <- outsideRoot(lockDirectory, locks, locksChain, root, real, rootChain.head)
+        _          <- Right(pause("lockDirectory"))
+        held       <- RootLocks.acquire(real, locks, rootChain)
+        // 4. the lock is held: the directory at the root's path must be the one locked before anything else
+        backend <- {
+          pause("locked")
+          locked(real, before, fileSystemId)
+            .flatMap(stamp =>
+              // 5. only now is the root written: the 8.3 probe; and read: link counts, the mount table, and
+              // its stamp again, which must not have changed during them
+              checked(real, stamp, allowUncheckedIdentity, probe, countsLinks, fileSystemId, mountsBeneath)
+            )
+            .map { (stamp, mounts, links) =>
+              new HostFileBackend(
+                real,
+                maxFileBytes,
+                maxScanEntries,
+                held,
+                stamp,
+                stampOf(_, fileSystemId),
+                fileSystemId,
+                mounts,
+                links,
+                openDirectory
+              )
+            } match
+            case Left(error) =>
+              held.release()
+              Left(error)
+            case right => right
+        }
       yield backend
 
-  /** The identity checks of `open`, run while the root's lock is held. */
+  /** That `dir` (resolved as `resolved`, with its identity chain) is outside the root, by path and identity. */
+  private def outsideRoot(
+    dir: Path,
+    resolved: Path,
+    chain: Vector[String],
+    root: Path,
+    real: Path,
+    rootIdentity: String
+  ): Result[Unit] =
+    val named = dir.toAbsolutePath.normalize
+    val inside = chain.contains(rootIdentity) || resolved.startsWith(real) || named.startsWith(real) ||
+      named.startsWith(root.toAbsolutePath.normalize)
+    Either.cond(
+      !inside,
+      (),
+      ValidationError("lockDirectory", s"$dir is inside the root $real; give the backend one outside it")
+    )
+
+  /**
+   * The root's stamp, once its lock is held, if the directory at its path is still the one locked: its
+   * real path unchanged and its stamp the one read before locking. Read only.
+   */
+  private def locked(real: Path, before: Stamp, fileSystemId: Path => String): Result[Stamp] =
+    Try((real.toRealPath(), stampOf(real, fileSystemId))).toResult.left
+      .map(e => ValidationError("root", s"$real cannot be identified: ${e.message}"): LLMError)
+      .flatMap((again, stamp) =>
+        Either.cond(
+          again == real && stamp == before,
+          stamp,
+          ValidationError("root", s"$real was replaced while it was being opened; open it again")
+        )
+      )
+
+  /** The identity checks of `open`, run while the root's lock is held and once it is shown to be the root. */
   private def checked(
     real: Path,
-    lockedIdentity: String,
+    stamp: Stamp,
     allowUncheckedIdentity: Boolean,
     probe: Path => Result[Vector[String]],
     countsLinks: Path => Boolean,
@@ -824,12 +857,12 @@ object HostFileBackend:
       _ <- mounts(real).flatMap(found =>
         Either.cond(found.isEmpty, (), ValidationError("root", mountedReason(real, found)))
       )
-      stamp <- Try(stampOf(real, fileSystemId)).toResult.left
+      // the stamp every operation compares is the locked directory's: one swapped in while the checks ran
+      // would pass `rootIntact` while another backend locked it as a different root
+      after <- Try(stampOf(real, fileSystemId)).toResult.left
         .map(e => ValidationError("root", s"$real cannot be identified: ${e.message}"): LLMError)
-      // the stamp every operation compares must be of the directory the lock was taken on: one swapped in at
-      // the same path since would pass `rootIntact` while another backend locked it as a different root
       _ <- Either.cond(
-        stamp.identity == lockedIdentity,
+        after == stamp,
         (),
         ValidationError("root", s"$real was replaced while it was being opened; open it again")
       )
