@@ -75,7 +75,8 @@ class HostFileBackendSpec
     probe: Path => Result[Vector[String]] = defaultProbe,
     countsLinks: Path => Boolean = HostFileBackend.reportsLinkCounts,
     fileSystemId: Path => String = HostFileBackend.fileSystemIdOf,
-    mountsBeneath: Path => Result[Vector[Path]] = HostFileBackend.mountPointsBeneath
+    mountsBeneath: Path => Result[Vector[Path]] = HostFileBackend.mountPointsBeneath,
+    openDirectory: Path => java.nio.file.DirectoryStream[Path] = Files.newDirectoryStream(_)
   ): Result[HostFileBackend] = {
     Option(backend).foreach(_.close())
     val opened = HostFileBackend.openWith(
@@ -87,7 +88,8 @@ class HostFileBackendSpec
       probe,
       countsLinks,
       fileSystemId,
-      mountsBeneath
+      mountsBeneath,
+      openDirectory
     )
     opened.foreach(b => backend = b)
     opened
@@ -463,20 +465,86 @@ class HostFileBackendSpec
     reopen().value.glob(Glob("*"), VPath.root, 100, call()).value.truncated shouldBe false
   }
 
-  it should "list the first names in order however large the directory, unlisted entries not counting" in {
-    assume(posix)
-    val capped = reopen(maxScanEntries = 3).value
+  it should "list a directory over the scan bound as empty and truncated, and one within it in order" in {
     Seq("f", "e", "d", "c", "b").foreach(n => Files.writeString(dir.resolve(n), n))
-    Seq("a1", "a2", "a3", "a4").foreach(n => Files.createSymbolicLink(dir.resolve(n), dir.resolve("b")))
-    Files.writeString(dir.resolve(s".llm4s-${UUID.randomUUID()}.tmp"), "torn")
-    val listed = capped.ls(VPath.root, 10, call()).value
-    listed.items.map(_.path.value) shouldBe Vector("/b", "/c", "/d")
-    listed.truncated shouldBe true
-    capped.glob(Glob("*"), VPath.root, 10, call()).value shouldBe Listing(
-      Vector(p("/b"), p("/c"), p("/d")),
+    // five entries: over a bound of 4, so no part of the directory, which would depend on the stream's order
+    val capped = reopen(maxScanEntries = 4).value
+    capped.ls(VPath.root, 10, call()).value shouldBe Listing(Vector.empty[FileInfo], truncated = true)
+    capped.glob(Glob("*"), VPath.root, 10, call()).value shouldBe Listing(Vector.empty[VPath], truncated = true)
+    // within the bound: the whole directory in name order, cut at the limit
+    val whole = reopen(maxScanEntries = 5).value
+    whole.ls(VPath.root, 2, call()).value shouldBe Listing(
+      Vector("/b", "/c").map(n => whole.ls(VPath.root, 10, call()).value.items.find(_.path.value == n).get),
       truncated = true
     )
-    backend.ls(VPath.root, 2, call()).value.items.map(_.path.value) shouldBe Vector("/b", "/c")
+    whole.glob(Glob("*"), VPath.root, 10, call()).value shouldBe Listing(
+      Vector("/b", "/c", "/d", "/e", "/f").map(p),
+      truncated = false
+    )
+  }
+
+  it should "count every entry it reads against the scan bound, listed or not" in {
+    assume(posix)
+    Seq("c", "b").foreach(n => Files.writeString(dir.resolve(n), n))
+    Seq("a1", "a2").foreach(n => Files.createSymbolicLink(dir.resolve(n), dir.resolve("b")))
+    Files.writeString(dir.resolve(s".llm4s-${UUID.randomUUID()}.tmp"), "torn")
+    // five entries, two listable: a link or a temporary file costs a read like any other entry
+    reopen(maxScanEntries = 4).value.ls(VPath.root, 10, call()).value.truncated shouldBe true
+    reopen(maxScanEntries = 5).value.ls(VPath.root, 10, call()).value shouldBe Listing(
+      backend.ls(VPath.root, 10, call()).value.items,
+      truncated = false
+    )
+    backend.ls(VPath.root, 10, call()).value.items.map(_.path) shouldBe Vector(p("/b"), p("/c"))
+  }
+
+  /** `Files.newDirectoryStream`, counting the entries every stream it opens hands out. */
+  private def countingDirectories(
+    pulled: java.util.concurrent.atomic.AtomicLong
+  ): Path => java.nio.file.DirectoryStream[Path] =
+    d =>
+      new java.nio.file.DirectoryStream[Path] {
+        private val inner = Files.newDirectoryStream(d)
+        def iterator(): java.util.Iterator[Path] = {
+          val it = inner.iterator()
+          new java.util.Iterator[Path] {
+            def hasNext: Boolean = it.hasNext
+            def next(): Path     = { pulled.incrementAndGet(); it.next() }
+          }
+        }
+        def close(): Unit = inner.close()
+      }
+
+  it should "stop reading a directory at the scan bound, however large it is" in {
+    (1 to 200).foreach(i => Files.writeString(dir.resolve(f"f$i%03d"), "x\n"))
+    val pulled = new java.util.concurrent.atomic.AtomicLong()
+    val capped = reopen(maxScanEntries = 10, openDirectory = countingDirectories(pulled)).value
+    pulled.set(0)
+    capped.ls(VPath.root, 5, call()).value.truncated shouldBe true
+    pulled.get should be <= 11L
+    pulled.set(0)
+    capped.glob(Glob("**"), VPath.root, 1000, call()).value.truncated shouldBe true
+    pulled.get should be <= 11L
+    pulled.set(0)
+    capped.grep("x", VPath.root, None, 1000, call()).value.truncated shouldBe true
+    pulled.get should be <= 11L
+  }
+
+  it should "cut a walk at the first directory its budget cannot read whole: a prefix, the same every time" in {
+    Seq("a/1", "a/2", "b/1", "b/2", "b/3", "c").foreach(rel => written(backend.write(p(s"/$rel"), "x", call())))
+    val pulled = new java.util.concurrent.atomic.AtomicLong()
+    // the root's 3 entries and a's 2 fit a budget of 6; b's 3 do not, so the walk stops before b and c
+    val capped = reopen(maxScanEntries = 6, openDirectory = countingDirectories(pulled)).value
+    pulled.set(0)
+    val first = capped.glob(Glob("**"), VPath.root, 100, call()).value
+    first shouldBe Listing(Vector(p("/a/1"), p("/a/2")), truncated = true)
+    pulled.get should be <= 7L
+    capped.glob(Glob("**"), VPath.root, 100, call()).value shouldBe first
+    capped.grep("x", VPath.root, None, 100, call()).value.items.map(_.path) shouldBe Vector(p("/a/1"), p("/a/2"))
+    // a budget that reads everything is not truncated
+    reopen(maxScanEntries = 9).value.glob(Glob("**"), VPath.root, 100, call()).value shouldBe Listing(
+      Vector("/a/1", "/a/2", "/b/1", "/b/2", "/b/3", "/c").map(p),
+      truncated = false
+    )
   }
 
   "HostFileBackend.readAtMost" should "read at most one byte past the cap, however large the file" in {
@@ -547,7 +615,8 @@ class HostFileBackendSpec
     val fifo = dir.resolve("a-fifo")
     assume(new ProcessBuilder("mkfifo", fifo.toString).start().waitFor() == 0)
     Files.writeString(dir.resolve("b.txt"), "b")
-    val capped = reopen(maxScanEntries = 1).value
+    // the FIFO is read, and charged, but never listed
+    val capped = reopen(maxScanEntries = 2).value
     capped.ls(VPath.root, 10, call()).value.items.map(_.path) shouldBe Vector(p("/b.txt"))
     capped.glob(Glob("*"), VPath.root, 10, call()).value.items shouldBe Vector(p("/b.txt"))
   }

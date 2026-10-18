@@ -67,7 +67,9 @@ import scala.util.{ Failure, Success, Try, Using }
  *  - '''Order.''' Every mutation locks `files/host/<root>`: a batch's mutations through one backend apply
  *    one at a time, in call order.
  *  - '''Bounds.''' A file over `maxFileBytes` cannot be read, written or edited, and `search` skips it.
- *    `ls`, `find` and `search` visit at most `maxScanEntries` entries and report a cut walk as `truncated`.
+ *    `ls`, `find` and `search` read at most `maxScanEntries` directory entries, never a stream past it, and
+ *    report a cut scan as `truncated`: a directory over the bound lists as empty, and a walk stops at the
+ *    first directory it cannot read whole, so a cut result is a prefix of the full one.
  *  - '''Tenant.''' Not scoped: one root is one tenant's. Build one per tenant with `FileBackend.resolved`.
  *  - '''Snapshot.''' Reads see the file as it is now, not as the batch's thread state.
  */
@@ -81,7 +83,8 @@ final class HostFileBackend private (
   stampOf: Path => HostFileBackend.Stamp,
   fileSystemId: Path => String,
   mountsBeneath: Path => Result[Vector[Path]],
-  countsLinks: Boolean
+  countsLinks: Boolean,
+  openDirectory: Path => java.nio.file.DirectoryStream[Path]
 ) extends FileBackend
     with AutoCloseable:
 
@@ -484,37 +487,40 @@ final class HostFileBackend private (
       case Failure(e) => throw e
 
   /**
-   * The first `max` listable children of `dir` in name order, and whether there were more. A directory
-   * stream has no order, so the whole directory is read, keeping only the `max + 1` least names; entries
-   * that are not listed (links, temporary files, other file systems, anything but a regular file or a
-   * directory) are dropped before they count. Memory is bounded by `max`; the time a huge directory takes,
-   * by the tool's timeout, as the read stops when its thread is interrupted.
+   * The listable children of `dir` in order, read only while the scan budget lasts: `None` if `dir` has more
+   * than `budget` entries, and with it how many entries were read. Every entry read is charged, listed or
+   * not (links, temporary files, other file systems, anything but a regular file or a directory), since
+   * each costs the same I/O, and the stream is never read past `budget + 1`. A directory stream has no
+   * order, so a directory is used only when it was read whole: a partial read would depend on the file
+   * system's order, so a directory over the budget yields nothing, never an arbitrary part of itself.
    */
-  private def children(dir: Path, max: Int, walk: Boolean = false): (Vector[(String, Path)], Boolean) =
+  private def children(dir: Path, budget: Long, walk: Boolean = false): (Option[Vector[(String, Path)]], Long) =
     // a walk orders a directory by its name and `/`, as its descendants' paths start, so `a-foo` comes
     // before `a/x`, as `VPath` orders them; a listing orders the entries themselves, by name
     def key(name: String, p: Path) = if walk && isDir(p) then name + "/" else name
-    val least = new java.util.PriorityQueue[(String, String, Path)](
-      math.min(max, 1024) + 1,
-      Ordering.by[(String, String, Path), String](_._1).reverse
-    )
-    var eligible = 0
-    Using.resource(Files.newDirectoryStream(dir)) { stream =>
+    val kept                       = Vector.newBuilder[(String, String, Path)]
+    var read                       = 0L
+    Using.resource(openDirectory(dir)) { stream =>
       val entries = stream.iterator()
-      while entries.hasNext do
+      while read <= budget && entries.hasNext do
         if Thread.currentThread().isInterrupted then throw new java.util.concurrent.CancellationException("interrupted")
-        val p    = entries.next()
-        val name = p.getFileName.toString
-        val hidden =
-          VPath(s"/$name").isLeft || HostFileBackend.trailing(name) || HostFileBackend.isReserved(name) ||
-            aliased(p) || !(isFile(p) || isDir(p))
-        if !hidden then
-          eligible += 1
-          least.add((key(name, p), name, p))
-          if least.size > max then least.poll(): Unit
+        val p = entries.next()
+        read += 1
+        if read <= budget then
+          val name = p.getFileName.toString
+          val hidden =
+            VPath(s"/$name").isLeft || HostFileBackend.trailing(name) || HostFileBackend.isReserved(name) ||
+              aliased(p) || !(isFile(p) || isDir(p))
+          if !hidden then kept += ((key(name, p), name, p))
     }
-    (least.asScala.toVector.sortBy(_._1).map((_, name, p) => name -> p), eligible > max)
+    if read > budget then (None, read)
+    else (Some(kept.result().sortBy(_._1).map((_, name, p) => name -> p)), read)
 
+  /**
+   * The entries of the directory `path`, in name order, at most `limit`. A directory with more than
+   * `maxScanEntries` entries lists as empty and `truncated`: the backend never reads past its bound, and
+   * any part of such a directory would depend on the file system's order.
+   */
   def ls(path: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
     whileOpen("ls", path)(
       Text
@@ -525,20 +531,22 @@ final class HostFileBackend private (
             if !exists(dir) then Left(BackendRefused.notFound("ls", path))
             else if !isDir(dir) then Left(BackendRefused.notADirectory("ls", path))
             else
-              val (entries, capped) = children(dir, math.min(limit, maxScanEntries))
-              val infos = entries.flatMap { (name, p) =>
-                (path / name).toOption.map { child =>
-                  val directory = isDir(p)
-                  FileInfo(
-                    child,
-                    directory,
-                    if directory then 0L else Files.size(p),
-                    Some(Files.getLastModifiedTime(p).toInstant)
-                  )
-                }
-              }
-              val listing = Listing.of(infos.iterator, limit)
-              Right(listing.copy(truncated = listing.truncated || capped))
+              children(dir, maxScanEntries.toLong)._1 match
+                case None          => Right(Listing(Vector.empty[FileInfo], truncated = true))
+                case Some(entries) =>
+                  // the listing takes `limit + 1` entries to tell if there are more, so only those are stat'ed
+                  val infos = entries.iterator.flatMap { (name, p) =>
+                    (path / name).toOption.map { child =>
+                      val directory = isDir(p)
+                      FileInfo(
+                        child,
+                        directory,
+                        if directory then 0L else Files.size(p),
+                        Some(Files.getLastModifiedTime(p).toInstant)
+                      )
+                    }
+                  }
+                  Right(Listing.of(infos, limit))
           })
         }
     )
@@ -553,32 +561,38 @@ final class HostFileBackend private (
       yield FileLines(Text.page(lines, offset, limit), offset, lines.size)
     )
 
-  /** The files within `under`, depth first in name order, stopping after `maxScanEntries` entries. */
+  /**
+   * The files within `under`, depth first in path order, reading at most `maxScanEntries` directory entries
+   * in all. The walk stops at the first directory the remaining budget cannot read whole, so a cut walk's
+   * files are a prefix of the full walk's, the same each time for the same tree, and it is `capped`.
+   */
   final private class Walk(start: Path, from: VPath):
-    private var visited = 0L
-    private var cut     = false
-    private def full    = visited > maxScanEntries
+    private var read    = 0L
+    private var stopped = false
 
     /** Whether the walk stopped before seeing every entry. */
-    def capped: Boolean = full || cut
+    def capped: Boolean = stopped
     def files: Iterator[(VPath, Path)] =
       if isFile(start) then Iterator(from -> start) else if isDir(start) then within(start, from) else Iterator.empty
     private def within(dir: Path, at: VPath): Iterator[(VPath, Path)] =
-      if full then Iterator.empty
+      if stopped then Iterator.empty
       else
-        val (entries, more) =
-          children(dir, math.min(maxScanEntries.toLong - visited + 1, Int.MaxValue.toLong).toInt, walk = true)
-        if more then cut = true
-        entries.iterator.flatMap { (name, p) =>
-          visited += 1
-          if full then Iterator.empty
-          else
-            (at / name).toOption match
-              case None                 => Iterator.empty
-              case Some(v) if isDir(p)  => within(p, v)
-              case Some(v) if isFile(p) => Iterator(v -> p)
-              case _                    => Iterator.empty
-        }
+        val (entries, cost) = children(dir, maxScanEntries.toLong - read, walk = true)
+        read += cost
+        entries match
+          case None =>
+            stopped = true
+            Iterator.empty
+          case Some(found) =>
+            found.iterator.flatMap { (name, p) =>
+              if stopped then Iterator.empty
+              else
+                (at / name).toOption match
+                  case None                 => Iterator.empty
+                  case Some(v) if isDir(p)  => within(p, v)
+                  case Some(v) if isFile(p) => Iterator(v -> p)
+                  case _                    => Iterator.empty
+            }
 
   private def walked[A](operation: String, under: VPath, limit: Int)(
     select: Iterator[(VPath, Path)] => Iterator[A]
@@ -688,7 +702,8 @@ object HostFileBackend:
     probe: Path => Result[Vector[String]] = probeAliases,
     countsLinks: Path => Boolean = reportsLinkCounts,
     fileSystemId: Path => String = fileSystemIdOf,
-    mountsBeneath: Path => Result[Vector[Path]] = mountPointsBeneath
+    mountsBeneath: Path => Result[Vector[Path]] = mountPointsBeneath,
+    openDirectory: Path => java.nio.file.DirectoryStream[Path] = Files.newDirectoryStream(_)
   ): Result[HostFileBackend] =
     if maxFileBytes <= 0 then Left(ValidationError("maxFileBytes", s"must be positive, was $maxFileBytes"))
     else if maxFileBytes > MaxFileBytes then
@@ -728,7 +743,8 @@ object HostFileBackend:
               stampOf(_, fileSystemId),
               fileSystemId,
               mounts,
-              links
+              links,
+              openDirectory
             )
         } match
           case Left(error) =>
