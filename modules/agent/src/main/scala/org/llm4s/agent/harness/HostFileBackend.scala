@@ -240,6 +240,13 @@ final class HostFileBackend private (
       case Failure(_: CharacterCodingException) => refused(operation, path, "is not UTF-8 text")
       case failure                              => failure.toResult.flatten
 
+  /**
+   * A file-system step's outcome through the same classifier as [[io]], so a refusal the host makes - a
+   * permission, a full disk, a name too long - is the model's to see, never a failed task.
+   */
+  private def classified[A](operation: String, path: VPath)(step: Try[A]): Result[A] =
+    io(operation, path)(Right(step.get))
+
   // ---- content
 
   private def fileBytes(operation: String, path: VPath, p: Path): Result[Array[Byte]] =
@@ -310,7 +317,7 @@ final class HostFileBackend private (
     HostFileBackend.Kept.of(target) match
       case Left(reason) => refused(operation, path, reason)
       case Right(kept) =>
-        Try(Files.createDirectories(target.getParent)).toResult.flatMap { _ =>
+        classified(operation, path)(Try(Files.createDirectories(target.getParent))).flatMap { _ =>
           // a short name of its own, so a target near the file system's name limit still has room for it
           val temp    = target.resolveSibling(s".llm4s-${UUID.randomUUID()}.tmp")
           val options = java.util.Set.of[StandardOpenOption](StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
@@ -333,7 +340,7 @@ final class HostFileBackend private (
           attempt match
             case Success(None)         => Right(())
             case Success(Some(reason)) => refused(operation, path, reason)
-            case Failure(e)            => Failure[Unit](e).toResult
+            case Failure(e)            => classified(operation, path)(Failure[Unit](e))
         }
 
   // ---- mutations
@@ -448,13 +455,13 @@ final class HostFileBackend private (
                       s"${path.value} is no longer empty: an entry was created in it after the delete was planned"
                     )
                   )
-                case Failure(e) => Failure[FileDeleted](e).toResult
+                case Failure(e) => classified("delete", path)(Failure[FileDeleted](e))
             )
           )
       else
         digest("delete", path, target).map(before =>
           casPlan("delete", path)(before, StateCheck.absent, FileDeleted(wasDirectory = false))(t =>
-            Try(Files.delete(t)).toResult.map(_ => FileDeleted(wasDirectory = false))
+            classified("delete", path)(Try(Files.delete(t))).map(_ => FileDeleted(wasDirectory = false))
           )
         )
     }

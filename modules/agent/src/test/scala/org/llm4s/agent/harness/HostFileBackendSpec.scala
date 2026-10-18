@@ -781,6 +781,27 @@ class HostFileBackendSpec
     onDisk("big.txt") shouldBe "a" * 100000
   }
 
+  it should "refuse a mutation the host file system denies, for the model to see, never as a failure" in {
+    assume(posix)
+    val locked = Files.createDirectories(dir.resolve("locked"))
+    Files.writeString(locked.resolve("a.txt"), "x")
+    Files.setPosixFilePermissions(locked, java.nio.file.attribute.PosixFilePermissions.fromString("r-xr-xr-x"))
+    cleanups += (() =>
+      Files.setPosixFilePermissions(locked, java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x")): Unit
+    )
+    assume(!Files.isWritable(locked)) // a superuser writes it anyway
+    def deniedRefusal[A](r: Result[A]) =
+      r.left.value match {
+        case refused: BackendRefused => refused.message should include("permission denied")
+        case other                   => fail(s"expected a refusal, got $other")
+      }
+    deniedRefusal(backend.write(p("/locked/new.txt"), "y", call()))
+    deniedRefusal(backend.write(p("/locked/deeper/new.txt"), "y", call()))
+    deniedRefusal(backend.edit(p("/locked/a.txt"), "x", "y", replaceAll = false, call()))
+    deniedRefusal(backend.delete(p("/locked/a.txt"), call()))
+    onDisk("locked/a.txt") shouldBe "x"
+  }
+
   it should "refuse a search over a file it cannot read, rather than skip it, while still skipping binary" in {
     assume(posix)
     Files.writeString(dir.resolve("open.txt"), "needle\n")
