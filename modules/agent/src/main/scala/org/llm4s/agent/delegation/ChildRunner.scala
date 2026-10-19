@@ -293,7 +293,9 @@ private[agent] object ChildRunner:
             case _: AgentStatus.Completed => true
             case _                        => settleOnFailure
         case ChildEnd.Failed(_, _) => settleOnFailure
-      if commits then ctx.run.usage.merge(childEnd.usage)
+      // an interrupted task commits nothing - its accumulator becomes the run's lost usage - and its call runs again,
+      // which adds the child's roll-up then: added now as well, it would be counted twice
+      if commits && !Thread.currentThread().isInterrupted then ctx.run.usage.merge(childEnd.usage)
       childEnd
 
     private def rebuilt(checkpoint: Checkpoint, exec: Execution, status: AgentStatus): Result[AgentResult] =
