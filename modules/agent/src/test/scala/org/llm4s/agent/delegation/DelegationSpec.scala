@@ -1,7 +1,16 @@
 package org.llm4s.agent.delegation
 
 import org.llm4s.agent.{ Agent, AgentBuilder, CompletionFixture }
-import org.llm4s.agent.graph.{ GraphError, GraphRuntime, InMemoryCheckpointer, RunConfig, ThreadId, ToolCallId }
+import org.llm4s.agent.graph.{
+  GraphError,
+  GraphRuntime,
+  InMemoryCheckpointer,
+  InterruptId,
+  RunConfig,
+  ThreadId,
+  ToolCallId
+}
+import org.llm4s.agent.graph.toolloop.ApprovalDecision
 import org.llm4s.agent.graph.middleware.{ PermissionMiddleware, PermissionRule }
 import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, Operation, ToolContent, ToolOutcome, ToolSet }
 import org.llm4s.error.ValidationError
@@ -446,22 +455,121 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
       case other => fail(s"expected a refusal, got $other")
   }
 
-  it should "forget the thread of a run that fails, which its Left cannot name" in {
-    val seen = new java.util.concurrent.atomic.AtomicReference[Option[ThreadId]](None)
-    val spy = new org.llm4s.agent.graph.middleware.AgentMiddleware {
-      val id = org.llm4s.agent.graph.middleware.MiddlewareId("spy")
-      override def beforeAgent(input: String, context: org.llm4s.agent.graph.middleware.ModelContext) = {
-        seen.set(Some(context.run.position.threadId))
-        Right(org.llm4s.agent.graph.middleware.BoundaryResult(input))
-      }
+  it should "keep the thread of a run that fails, refused Failed with its ref, for recover to continue (#2069)" in {
+    val failures = new AtomicInteger(0)
+    val client = RoutingClient {
+      case Child("researcher", _) if failures.getAndIncrement() == 0 => Left(ValidationError("provider", "down"))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"recovered","sources":1}"""))
     }
-    val client  = RoutingClient { case Child("researcher", _) => Left(ValidationError("provider", "down")) }
     val runtime = GraphRuntime.inMemory()
-    researcher.withMiddleware(spy).bind(client, runtime).value.run(Question("x")).left.value.message should include(
-      "down"
-    )
+    val bound   = researcher.bind(client, runtime).value
+    val ref = bound.run(Question("x")).value match
+      case TaskOutcome.Refused(child, TaskRefusal.Failed(message), _) =>
+        message should include("down")
+        child.depth shouldBe 0
+        child
+      case other => fail(s"expected a Failed refusal, got $other")
+    runtime.history(ref.threadId).value should not be empty
+
+    bound.recover(ref).value match
+      case TaskOutcome.Reported(report, child, usage) =>
+        report shouldBe Findings("recovered", 1)
+        child.threadId shouldBe ref.threadId
+        usage.requestCount shouldBe 1
+      case other => fail(s"expected a report, got $other")
+    client.calls should have size 2
+  }
+
+  it should "refuse recovering a run that did not fail, the thread unchanged" in {
+    val client = RoutingClient { case Child("researcher", _) =>
+      Right(CompletionFixture.simple("""{"summary":"s","sources":1}"""))
+    }
+    val bound = researcher.bind(client, GraphRuntime.inMemory()).value
+    val ref   = bound.run(Question("x")).value.asInstanceOf[TaskOutcome.Reported[Findings]].child
+    bound.recover(ref).isLeft shouldBe true
     client.calls should have size 1
-    runtime.history(seen.get.value).value shouldBe empty
+  }
+
+  "BoundAgent.resume" should "continue a standalone run that suspended, and map its answer as run does (#2069)" in {
+    val runs   = new AtomicInteger(0)
+    val client = DelegatedSuspensionSpec.approvingClient()
+    val bound =
+      DelegatedSuspensionSpec.asking(DelegatedSuspensionSpec.probe(runs)).bind(client, GraphRuntime.inMemory()).value
+    val (ref, status) = bound.run(Question("tides")).value match
+      case TaskOutcome.Suspended(child, status) => child -> status
+      case other                                => fail(s"expected a suspension, got $other")
+    ref.depth shouldBe 0
+    runs.get shouldBe 0
+
+    val id = status.approvals.loneElement._1
+    bound.resume(ref, Map(approve(id))).value match
+      case TaskOutcome.Reported(report, child, usage) =>
+        report shouldBe Findings("probed once", 1)
+        child.threadId shouldBe ref.threadId
+        usage.requestCount shouldBe 2
+      case other => fail(s"expected a report, got $other")
+    runs.get shouldBe 1
+  }
+
+  it should "refuse a continuation's typed answer that fails its schema, naming the continuation's run" in {
+    val runs = new AtomicInteger(0)
+    val client = RoutingClient {
+      case Child("researcher", messages) if toolResults(messages).isEmpty =>
+        Right(calling(ToolCall("k1", "probe", ujson.Obj("text" -> "x"))))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":1}"""))
+    }
+    val bound =
+      DelegatedSuspensionSpec.asking(DelegatedSuspensionSpec.probe(runs)).bind(client, GraphRuntime.inMemory()).value
+    val (ref, status) = bound.run(Question("tides")).value match
+      case TaskOutcome.Suspended(child, status) => child -> status
+      case other                                => fail(s"expected a suspension, got $other")
+
+    val resumed = RunConfig().withRunId(org.llm4s.agent.graph.RunId("resume-1"))
+    bound.resume(ref, Map(approve(status.approvals.loneElement._1)), resumed).value match
+      case TaskOutcome.Refused(child, TaskRefusal.OutputInvalid(errors), _) =>
+        errors should not be empty
+        child.threadId shouldBe ref.threadId
+        child.runId shouldBe org.llm4s.agent.graph.RunId("resume-1")
+        child.runId should not be ref.runId
+      case other => fail(s"expected an OutputInvalid refusal, got $other")
+  }
+
+  it should "refuse answers to interrupts that are not pending, the run staying suspended" in {
+    val runs   = new AtomicInteger(0)
+    val client = DelegatedSuspensionSpec.approvingClient()
+    val bound =
+      DelegatedSuspensionSpec.asking(DelegatedSuspensionSpec.probe(runs)).bind(client, GraphRuntime.inMemory()).value
+    val (ref, status) = bound.run(Question("tides")).value match
+      case TaskOutcome.Suspended(child, status) => child -> status
+      case other                                => fail(s"expected a suspension, got $other")
+
+    bound.resume(ref, Map(approve(InterruptId("not-pending")))).left.value shouldBe a[GraphError.InvalidResume]
+    runs.get shouldBe 0
+    bound.resume(ref, Map(approve(status.approvals.loneElement._1))).value shouldBe a[TaskOutcome.Reported[?]]
+  }
+
+  "BoundAgent.resume and recover" should "refuse a delegated child's ref, which only its parent continues (rule 19)" in {
+    val runs   = new AtomicInteger(0)
+    val client = DelegatedSuspensionSpec.approvingClient()
+    val bound =
+      DelegatedSuspensionSpec.asking(DelegatedSuspensionSpec.probe(runs)).bind(client, GraphRuntime.inMemory()).value
+    val ref = bound.run(Question("tides")).value match
+      case TaskOutcome.Suspended(child, _) => child
+      case other                           => fail(s"expected a suspension, got $other")
+    val sent = client.calls.size
+
+    val delegated = Vector(
+      ref.copy(toolCallId = Some(ToolCallId("c1")), depth = 1),
+      ref.copy(toolCallId = Some(ToolCallId("c1"))),
+      ref.copy(depth = 1),
+      ref.copy(agent = org.llm4s.agent.AgentId.unsafe("other"))
+    )
+    delegated.foreach { child =>
+      bound.resume(child, Map(approve(InterruptId("any")))).left.value shouldBe a[ValidationError]
+      bound.recover(child).left.value shouldBe a[ValidationError]
+    }
+    client.calls should have size sent
+    runs.get shouldBe 0
   }
 
   "ChildFailure.Fail" should "fail the parent with a typed child's OutputInvalid, every error kept" in {
@@ -811,6 +919,10 @@ object DelegationSpec {
     TypedAgent.text("general", "A general-purpose subagent").withSystemPrompt("CHILD:general")
 
   def lead(client: LLMClient): AgentBuilder = Agent.builder("lead", client).withSystemPrompt(LeadPrompt)
+
+  /** An approval of the pending tool call `id`, as `AgentResult.approve` gives it. */
+  def approve(id: InterruptId): (InterruptId, ujson.Value) =
+    id -> upickle.default.writeJs[ApprovalDecision](ApprovalDecision.Approve)
 
   final case class SpecText(text: String) derives ReadWriter
   object SpecText {

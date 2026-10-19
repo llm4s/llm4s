@@ -2,7 +2,16 @@ package org.llm4s.agent.delegation
 
 import org.llm4s.agent.{ Agent, AgentId, AgentResult, AgentRun, AgentStatus }
 import org.llm4s.agent.events.TaskEnded
-import org.llm4s.agent.graph.{ GraphError, GraphRuntime, RunConfig, RunId, RunOrigin, ThreadId }
+import org.llm4s.agent.graph.{
+  CheckpointStatus,
+  GraphError,
+  GraphRuntime,
+  InterruptId,
+  RunConfig,
+  RunId,
+  RunOrigin,
+  ThreadId
+}
 import org.llm4s.agent.graph.middleware.AgentMiddleware
 import org.llm4s.agent.graph.tool.{ ToolContext, ToolSet }
 import org.llm4s.agent.graph.toolloop.{ AgentInput, LoopKeys }
@@ -214,8 +223,10 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
   /**
    * Runs the subagent once, on a new top-level thread of its runtime, with `config`, and returns its outcome: its
    * report, the refusal its status or its typed answer's failure gives, or its suspension. The thread, named by the
-   * outcome's `child.threadId` (depth 0, no tool call), stays in the runtime until deleted. Any other failure is `Left`,
-   * which names no thread, so that thread is forgotten once its run has ended (as for `Agent.run(query)`).
+   * outcome's `child.threadId` (depth 0, no tool call), stays in the runtime until deleted; [[resume]] continues a
+   * suspended one. A run that fails with work left to recover is `Refused(Failed)`, its `child` naming the failed run,
+   * for [[recover]]. Any other failure - a cancellation included - is `Left`, which names no thread, so that thread is
+   * forgotten once its run has ended (as for `Agent.run(query)`).
    */
   def run(input: I, config: RunConfig = RunConfig()): Result[TaskOutcome[O]] =
     val threadId = ThreadId(java.util.UUID.randomUUID().toString)
@@ -230,11 +241,7 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
           .left
           .map(thrown => ValidationError("input", s"subagent '${agent.id.value}': rendering the input failed: $thrown"))
       )
-      .flatMap(query => agent.run(threadId, query, config)) match
-      case Right(result)                       => Right(outcome(result, ref.copy(runId = result.runId)))
-      case Left(GraphError.OutputInvalid(all)) =>
-        // the turn is removed, its model calls are kept: the thread's usage counts them
-        Right(TaskOutcome.Refused(ref, TaskRefusal.OutputInvalid(all), BoundAgent.storedUsage(agent, threadId, config)))
+      .flatMap(query => continued(ref, config)(agent.start(threadId, query, config))) match
       case Left(error) =>
         // a Left names no thread, so nothing could recover or forget it: forget it here, as Agent.run(query) does
         AgentRun.uninterrupted(agent.forget(threadId, config)).left.foreach { e =>
@@ -242,6 +249,86 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
             .warn(s"The thread ${threadId.value} of a failed standalone subagent run was not forgotten: ${e.message}")
         }
         Left(error)
+      case done => done
+
+  /**
+   * Answers some of the pending interrupts of the suspended standalone run `ref` names - a `TaskOutcome.Suspended`'s
+   * `child` - as `Agent.resume` takes them, and continues it with `config`; its outcome maps as [[run]]'s does. A
+   * delegated child's ref is refused (`ValidationError`): its parent continues it (rule 19). The runtime's refusals -
+   * an answer to an interrupt that is not pending (`GraphError.InvalidResume`), a thread not suspended - come back
+   * unchanged, as does a cancellation; either way the thread stays, for another call.
+   */
+  def resume(
+    ref: ChildRef,
+    answers: Map[InterruptId, ujson.Value],
+    config: RunConfig = RunConfig()
+  ): Result[TaskOutcome[O]] =
+    standalone(ref).flatMap(_ => continued(ref, config)(agent.startResume(ref.threadId, answers, config)))
+
+  /**
+   * Continues the failed or interrupted standalone run `ref` names - a `Refused(Failed)`'s `child` - with `config`,
+   * re-running only failed or unstarted work, as `Agent.recover` does; its outcome maps as [[run]]'s does. A delegated
+   * child's ref is refused, as for [[resume]]; so is a thread with nothing to recover (`GraphError.NothingToRecover`).
+   */
+  def recover(ref: ChildRef, config: RunConfig = RunConfig()): Result[TaskOutcome[O]] =
+    standalone(ref).flatMap(_ => continued(ref, config)(agent.startRecover(ref.threadId, config)))
+
+  /**
+   * `ref` itself when it names a standalone run of this subagent: no parent tool call and depth 0. A delegated child
+   * is continued only through its parent (rule 19), and the runtime would refuse its thread too.
+   */
+  private def standalone(ref: ChildRef): Result[Unit] =
+    if ref.agent != agent.id then
+      Left(
+        ValidationError(
+          "child",
+          s"subagent '${agent.id.value}': ${ref.threadId.value} is a run of '${ref.agent.value}'"
+        )
+      )
+    else if ref.toolCallId.nonEmpty || ref.depth != 0 then
+      Left(
+        ValidationError(
+          "child",
+          s"subagent '${agent.id.value}': ${ref.threadId.value} is a delegated child; continue it through its parent"
+        )
+      )
+    else Right(())
+
+  /**
+   * The outcome of the standalone run `begin` starts on `ref`'s thread: a refused start, or a cancellation, is `Left`;
+   * a typed answer that fails its schema is `Refused(OutputInvalid)`; a run that failed with work to recover (its
+   * latest checkpoint `Running`) is `Refused(Failed)`, naming that run; any other failure is `Left`.
+   */
+  private def continued(ref: ChildRef, config: RunConfig)(begin: => Result[AgentRun]): Result[TaskOutcome[O]] =
+    val awaited =
+      if Thread.currentThread().isInterrupted then Left(CancelledError(s"subagent ${agent.id.value}"))
+      else begin.map(Agent.awaitBlocking)
+    awaited.flatMap {
+      case Right(result)                       => Right(outcome(result, ref.copy(runId = result.runId)))
+      case Left(GraphError.OutputInvalid(all)) =>
+        // the turn is removed, its model calls are kept: the thread's usage counts them
+        // the ref names the run that failed its schema - this one - not the run the caller's ref came from
+        Right(
+          TaskOutcome.Refused(
+            ref.copy(runId = config.runId),
+            TaskRefusal.OutputInvalid(all),
+            BoundAgent.storedUsage(agent, ref.threadId, config)
+          )
+        )
+      case Left(cancelled: CancelledError) => Left(cancelled)
+      case Left(error) =>
+        agent.runtime.childAtRest(ref.threadId, agent.loop.graph, config) match
+          case Right(Some((checkpoint, _))) if checkpoint.status == CheckpointStatus.Running =>
+            val failed = ref.copy(runId = RunId(checkpoint.runId))
+            Right(
+              TaskOutcome.Refused(
+                failed,
+                TaskRefusal.Failed(error.message),
+                BoundAgent.storedUsage(agent, ref.threadId, config)
+              )
+            )
+          case _ => Left(error)
+    }
 
   /**
    * Runs the subagent as the child of the parent call `ctx` (design 4.44), through the child runner - or, with

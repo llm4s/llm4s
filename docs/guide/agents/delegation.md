@@ -171,7 +171,10 @@ trace metadata.
 ## Running a subagent alone
 
 `typedAgent.bind(client, runtime)` compiles a definition; `BoundAgent.run(input)` runs it once on a new top-level
-thread and returns its `TaskOutcome`. It is for graph nodes and tests.
+thread and returns its `TaskOutcome`. It is for graph nodes and tests. `bound.resume(outcome.child, answers)` continues
+a run that came back `Suspended`, taking the same answers as `Agent.resume`, and `bound.recover(outcome.child)` one that
+came back `Refused(TaskRefusal.Failed(_))`; both return a `TaskOutcome` too. Only a standalone run's ref is accepted: a
+delegated child is continued through its parent.
 
 ## Delegation or handoffs
 
