@@ -13,7 +13,7 @@ import org.llm4s.agent.graph.tool.{
   ToolOutcome,
   ToolResource
 }
-import org.llm4s.agent.graph.toolloop.{ Messages, StoredMessage }
+import org.llm4s.agent.graph.toolloop.{ HandoffTools, Messages, StoredMessage }
 import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.model.{ AssistantMessage, UserMessage }
 import org.llm4s.toolapi.{ Schema, SchemaDefinition, StringSchema }
@@ -277,14 +277,22 @@ private[agent] object TaskTools:
 
   /**
    * The call's position among the task calls of the current turn's assistant messages, from 1, counting every call
-   * of `names` from the turn's user message up to and including this one (the last call with its id); one more than
+   * of `names` from the turn's user message - or, after a handoff in the turn, from the handoff, since the calls before
+   * it were another agent's - up to and including this one (the last call with its id); one more than
    * the turn's count when the call is not found.
    */
   def positionInTurn(ctx: ToolContext, names: Set[String]): Int =
     val history = ctx.state.get(Messages.key).getOrElse(Vector.empty)
-    val turn = history.lastIndexWhere { case StoredMessage(_, _: UserMessage) => true; case _ => false } match
+    val sinceUser = history.lastIndexWhere { case StoredMessage(_, _: UserMessage) => true; case _ => false } match
       case -1 => history
       case at => history.drop(at)
+    // the active agent's part of the turn: after the last handoff, whose calls were another agent's
+    val turn = sinceUser.lastIndexWhere {
+      case StoredMessage(_, a: AssistantMessage) => a.toolCalls.exists(_.name.startsWith(HandoffTools.Prefix))
+      case _                                     => false
+    } match
+      case -1 => sinceUser
+      case at => sinceUser.drop(at + 1)
     val calls = turn.flatMap {
       case StoredMessage(_, assistant: AssistantMessage) => assistant.toolCalls.filter(c => names(c.name))
       case _                                             => Vector.empty

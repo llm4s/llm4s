@@ -213,6 +213,30 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     again.take(2).foreach(_ should include("summary"))
   }
 
+  it should "count only the active agent's calls after a handoff in the turn" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))))
+      case Lead(_) => Right(calling(call("h1", "handoff_to_specialist", ujson.Obj())))
+      case messages if messages.headOption.exists(_.content.startsWith("SPECIALIST")) =>
+        if messages.exists { case t: ToolMessage => t.toolCallId == "c2"; case _ => false } then
+          Right(CompletionFixture.simple(toolResults(messages).last))
+        else Right(calling(call("c2", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))))
+      case Child("general", _) => Right(CompletionFixture.simple("report"))
+    }
+    val specialist = Agent
+      .builder("specialist", client)
+      .withSystemPrompt("SPECIALIST")
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withMaxTasksPerTurn(1))
+    val agent = lead(client)
+      .withSubagents(general)
+      .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
+      .build()
+      .value
+    agent.run(ThreadId("t1"), "go").value.answer.value shouldBe "report"
+  }
+
   "maxDepth" should "refuse a task that would nest deeper than the bound" in {
     val client = RoutingClient { case Child("researcher", _) => Right(CompletionFixture.simple("{}")) }
     val bound  = researcher.bind(client, GraphRuntime.inMemory()).value
