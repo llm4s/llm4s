@@ -5,6 +5,7 @@ import org.llm4s.agent.events.TaskEnded
 import org.llm4s.agent.graph.{
   Checkpoint,
   CheckpointStatus,
+  Execution,
   GraphError,
   GraphRuntime,
   InterruptId,
@@ -313,20 +314,14 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
    * suspended one. A run that fails with work left to recover is `Refused(Failed)`, its `child` naming the failed run,
    * for [[recover]]. Any other failure - a cancellation included - is `Left`, which names no thread, so that thread is
    * forgotten once its run has ended (as for `Agent.run(query)`).
+   *
+   * For tests and one-off calls: a recoverable graph node calls the thread-id overload instead, since this one, run
+   * again after a crash, starts another thread and runs the subagent - its model calls and effects - twice.
    */
   def run(input: I, config: RunConfig = RunConfig()): Result[TaskOutcome[O]] =
     val threadId = ThreadId(java.util.UUID.randomUUID().toString)
     val ref      = ChildRef(threadId, config.runId, agent.id, None, 0)
-    // a renderer or input codec is caller code: what it throws is a refused input, not an escaped exception
-    // an interrupt while it renders is a cancellation, the flag kept, as for the run itself
-    CancelledError
-      .attempt(s"subagent ${agent.id.value} input")(
-        scala.util
-          .Try(definition.rendered(input))
-          .toEither
-          .left
-          .map(thrown => ValidationError("input", s"subagent '${agent.id.value}': rendering the input failed: $thrown"))
-      )
+    rendered(input)
       .flatMap(query => continued(ref, config)(agent.start(threadId, query, config))) match
       case Left(error) =>
         // a Left names no thread, so nothing could recover or forget it: forget it here, as Agent.run(query) does
@@ -336,6 +331,126 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
         }
         Left(error)
       case done => done
+
+  /**
+   * Runs the subagent on the caller-chosen top-level thread `threadId`, starting or reattaching to it as the `task`
+   * tools do for a child (design 4.44, #2077), so running it again with the same id never runs the subagent twice. A
+   * graph node derives `threadId` from its own replay-stable key, and calls this overload, not the fresh-thread one:
+   * after a crash its replay finds the first run's thread. The thread's latest checkpoint decides:
+   *
+   *  - none: the subagent is started with `input` and `config`, its outcome mapped as the fresh-thread `run`'s is.
+   *  - `Running` (a run that failed, or crashed, with work left): it is recovered, as [[recover]] does, re-running only
+   *    failed or unstarted work. A thread whose run is live - in this runtime, or holding its claim in another - is
+   *    waited on, with backoff, for up to twice the runtime's claim lifetime, then `GraphError.ThreadBusy` is `Left`.
+   *  - `Suspended`: its `Suspended` outcome, nothing run; answer it with [[resume]].
+   *  - `Completed` or `Failed`: the outcome its terminal checkpoint records, rebuilt as a run's is, nothing run.
+   *
+   * The thread is the call: one found at `threadId` is taken as this call's whatever input it was started with, so the
+   * key `threadId` comes from must identify the input too. A delegated child's thread is refused (`ValidationError`):
+   * its parent continues it (rule 19). Unlike the fresh-thread overload, a `Left` forgets nothing: the caller can name
+   * the thread, and its next call reattaches to it.
+   */
+  def run(threadId: ThreadId, input: I, config: RunConfig): Result[TaskOutcome[O]] =
+    val ref = ChildRef(threadId, config.runId, agent.id, None, 0)
+    @scala.annotation.tailrec
+    def loop(cutoff: Option[Long], waits: Int): Result[TaskOutcome[O]] =
+      if Thread.currentThread().isInterrupted then Left(CancelledError(s"subagent ${agent.id.value}"))
+      else
+        attach(ref, input, config) match
+          case BoundAgent.Step.Done(result) => result
+          case BoundAgent.Step.Again        => loop(cutoff, waits)
+          case BoundAgent.Step.Busy(busy) =>
+            val until = cutoff.getOrElse(System.nanoTime() + (agent.runtime.claimTtl * 2).toNanos)
+            ChildRunner.pause(until, waits, busy) match
+              case Left(stop) => Left(stop)
+              case Right(_)   => loop(Some(until), waits + 1)
+    loop(None, 0)
+
+  /** [[run]] on the caller-chosen thread `threadId`, with the default config. */
+  def run(threadId: ThreadId, input: I): Result[TaskOutcome[O]] = run(threadId, input, RunConfig())
+
+  /** The child's first user message for `input`: what a renderer or input codec throws is a refused input. */
+  private def rendered(input: I): Result[String] =
+    // an interrupt while it renders is a cancellation, the flag kept, as for the run itself
+    CancelledError.attempt(s"subagent ${agent.id.value} input")(
+      scala.util
+        .Try(definition.rendered(input))
+        .toEither
+        .left
+        .map(thrown => ValidationError("input", s"subagent '${agent.id.value}': rendering the input failed: $thrown"))
+    )
+
+  /** One read of the caller-chosen thread `ref` names, and what it calls for (see the thread-id [[run]]). */
+  private def attach(ref: ChildRef, input: I, config: RunConfig): BoundAgent.Step[O] =
+    val graph = agent.loop.graph
+    agent.runtime.childAtRest(ref.threadId, graph, agent.configured(config)) match
+      case Left(error) => BoundAgent.Step.Done(Left(error))
+      case Right(None) =>
+        rendered(input).fold(
+          refused => BoundAgent.Step.Done(Left(refused)),
+          query => admitted(ref, config)(agent.start(ref.threadId, query, config))
+        )
+      case Right(Some((checkpoint, _))) if checkpoint.origin.isDefined =>
+        BoundAgent.Step.Done(
+          Left(
+            ValidationError(
+              "threadId",
+              s"subagent '${agent.id.value}': ${ref.threadId.value} is a delegated child; continue it through its parent"
+            )
+          )
+        )
+      case Right(Some((checkpoint, exec))) =>
+        val at = ref.copy(runId = RunId(checkpoint.runId))
+        checkpoint.status match
+          case CheckpointStatus.Running => admitted(ref, config)(agent.startRecover(ref.threadId, config))
+          case CheckpointStatus.Suspended =>
+            BoundAgent.Step.Done(
+              AgentRun
+                .status(agent.runtime.suspendedResult(graph, exec), isBlock = false, agent.loop)
+                .flatMap(status => AgentRun.result(ref.threadId, at.runId, agent.id, exec.state, None, status))
+                .map(outcome(_, at))
+            )
+          case CheckpointStatus.Completed | CheckpointStatus.Failed =>
+            BoundAgent.Step.Done(settled(at, checkpoint, exec))
+
+  /**
+   * What an admission on the caller-chosen thread calls for: its run's outcome, mapped as [[continued]] maps it; a read
+   * again when another caller started, settled or moved the thread on since the read; a wait when a run holds it.
+   */
+  private def admitted(ref: ChildRef, config: RunConfig)(begin: => Result[AgentRun]): BoundAgent.Step[O] =
+    begin match
+      // awaited even if the interrupt came after the admission: awaiting an admitted run cancels it
+      case Right(run) => BoundAgent.Step.Done(awaited(ref, config, run))
+      case Left(
+            _: GraphError.ThreadExists | _: GraphError.NothingToRecover | _: GraphError.IncompleteRun |
+            _: GraphError.PendingInterrupts | _: GraphError.NotSuspended
+          ) =>
+        BoundAgent.Step.Again
+      case Left(busy: GraphError.ThreadBusy) => BoundAgent.Step.Busy(busy)
+      case Left(error)                       => BoundAgent.Step.Done(Left(error))
+
+  /**
+   * The outcome a settled thread's terminal checkpoint records, rebuilt as the run that settled it returned it, with
+   * no run (rule 14): a report or refusal as [[outcome]] maps it, a typed answer that failed its schema
+   * `Refused(OutputInvalid)`; any other recorded failure is `Left`, as it was live.
+   */
+  private def settled(ref: ChildRef, checkpoint: Checkpoint, exec: Execution): Result[TaskOutcome[O]] =
+    checkpoint.outcome match
+      case None =>
+        Left(
+          GraphError.RestoreRejected(
+            agent.loop.graph.id,
+            List(s"thread '${ref.threadId.value}' is ${checkpoint.status} with no recorded outcome")
+          )
+        )
+      case Some(recorded) =>
+        AgentRun.settledStatus(recorded, exec.state) match
+          case Right(status) =>
+            AgentRun.result(ref.threadId, ref.runId, agent.id, exec.state, None, status).map(outcome(_, ref))
+          case Left(GraphError.OutputInvalid(all)) =>
+            val usage = exec.state.get(LoopKeys.usage).toOption.getOrElse(UsageSummary())
+            Right(TaskOutcome.Refused(ref, TaskRefusal.OutputInvalid(all), usage))
+          case Left(error) => Left(error)
 
   /**
    * Answers some of the pending interrupts of the suspended standalone run `ref` names - a `TaskOutcome.Suspended`'s
@@ -387,32 +502,33 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
    * one whose checkpoint a concurrent continuation has since superseded included - is `Left`.
    */
   private def continued(ref: ChildRef, config: RunConfig)(begin: => Result[AgentRun]): Result[TaskOutcome[O]] =
-    val awaited =
-      if Thread.currentThread().isInterrupted then Left(CancelledError(s"subagent ${agent.id.value}"))
-      else begin.map(run => run.runId -> Agent.awaitBlocking(run))
-    awaited.flatMap { (runId, ended) =>
-      ended match
-        case Right(result)                       => Right(outcome(result, ref.copy(runId = result.runId)))
-        case Left(GraphError.OutputInvalid(all)) =>
-          // the turn is removed, its model calls are kept: the thread's usage counts them
-          // the ref names the run that failed its schema - this one - not the run the caller's ref came from
-          Right(
-            TaskOutcome.Refused(
-              ref.copy(runId = runId),
-              TaskRefusal.OutputInvalid(all),
-              BoundAgent.storedUsage(agent, ref.threadId, runId, config)
-            )
+    if Thread.currentThread().isInterrupted then Left(CancelledError(s"subagent ${agent.id.value}"))
+    else begin.flatMap(awaited(ref, config, _))
+
+  /** The outcome of the admitted standalone run `run` on `ref`'s thread, awaited: as [[continued]] maps it. */
+  private def awaited(ref: ChildRef, config: RunConfig, run: AgentRun): Result[TaskOutcome[O]] =
+    val runId = run.runId
+    Agent.awaitBlocking(run) match
+      case Right(result)                       => Right(outcome(result, ref.copy(runId = result.runId)))
+      case Left(GraphError.OutputInvalid(all)) =>
+        // the turn is removed, its model calls are kept: the thread's usage counts them
+        // the ref names the run that failed its schema - this one - not the run the caller's ref came from
+        Right(
+          TaskOutcome.Refused(
+            ref.copy(runId = runId),
+            TaskRefusal.OutputInvalid(all),
+            BoundAgent.storedUsage(agent, ref.threadId, runId, config)
           )
-        case Left(cancelled: CancelledError) => Left(cancelled)
-        case Left(error)                     =>
-          // classified by this run's own checkpoint: a concurrent continuation may have admitted a successor since
-          agent.runtime.childAtRest(ref.threadId, agent.loop.graph, config) match
-            case Right(Some((checkpoint, exec)))
-                if checkpoint.runId == runId.value && checkpoint.status == CheckpointStatus.Running =>
-              val usage = exec.state.get(LoopKeys.usage).toOption.getOrElse(UsageSummary())
-              Right(TaskOutcome.Refused(ref.copy(runId = runId), TaskRefusal.Failed(error.message), usage))
-            case _ => Left(error)
-    }
+        )
+      case Left(cancelled: CancelledError) => Left(cancelled)
+      case Left(error)                     =>
+        // classified by this run's own checkpoint: a concurrent continuation may have admitted a successor since
+        agent.runtime.childAtRest(ref.threadId, agent.loop.graph, config) match
+          case Right(Some((checkpoint, exec)))
+              if checkpoint.runId == runId.value && checkpoint.status == CheckpointStatus.Running =>
+            val usage = exec.state.get(LoopKeys.usage).toOption.getOrElse(UsageSummary())
+            Right(TaskOutcome.Refused(ref.copy(runId = runId), TaskRefusal.Failed(error.message), usage))
+          case _ => Left(error)
 
   /**
    * Runs the subagent as the child of the parent call `ctx` (design 4.44), through the child runner - or, with
@@ -512,6 +628,13 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
     definition.output.fold(text => Right(text(answer)), _ => result.decodeOutput[O](using definition.outputCodec))
 
 object BoundAgent:
+
+  /** What one read of a caller-chosen thread calls for: done, read it again, or wait for its run and read it again. */
+  private enum Step[+O]:
+    case Done(result: Result[TaskOutcome[O]])
+    case Again
+    case Busy(error: GraphError.ThreadBusy)
+
   private val logger = org.slf4j.LoggerFactory.getLogger(classOf[BoundAgent[?, ?]])
 
   /**

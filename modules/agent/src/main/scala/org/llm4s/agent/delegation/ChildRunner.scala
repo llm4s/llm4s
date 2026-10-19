@@ -162,6 +162,22 @@ private[agent] object ChildRunner:
       case Some(left) if granted.forall(left.lt) || granted.contains(left) => (Some(left), true)
       case Some(_)                                                         => (granted, false)
 
+  /**
+   * Waits before the next read of a busy thread, the `waits`th wait backing off from [[InitialBackoff]] to
+   * [[MaxBackoff]]: `busy` once `until` (a `System.nanoTime` value) has passed, a `CancelledError` with the interrupt
+   * flag kept when interrupted. `BoundAgent.run` on a caller-chosen thread waits the same way.
+   */
+  private[delegation] def pause(until: Long, waits: Int, busy: GraphError.ThreadBusy): Result[Unit] =
+    val left = until - System.nanoTime()
+    if left <= 0 then Left(busy)
+    else
+      val backoff = (InitialBackoff.toNanos << waits.min(16)).min(MaxBackoff.toNanos)
+      CancelledError.catchInterrupt(TimeUnit.NANOSECONDS.sleep(backoff.min(left))) match
+        case Left(_) =>
+          Thread.currentThread().interrupt()
+          Left(CancelledError("child run"))
+        case Right(_) => Right(())
+
   /** The step of an attempt: done, read the child again, or wait for a busy child and read it again. */
   private enum Step:
     case Done(result: Result[ChildEnd])
@@ -313,18 +329,6 @@ private[agent] object ChildRunner:
                 case Left(stop) => Left(stop)
                 case Right(_)   => loop(Some(until), waits + 1)
       loop(None, 0)
-
-    /** Waits before the next read of a busy child; `Left` once `until` has passed, or when interrupted. */
-    private def pause(until: Long, waits: Int, busy: GraphError.ThreadBusy): Result[Unit] =
-      val left = until - System.nanoTime()
-      if left <= 0 then Left(busy)
-      else
-        val backoff = (InitialBackoff.toNanos << waits.min(16)).min(MaxBackoff.toNanos)
-        CancelledError.catchInterrupt(TimeUnit.NANOSECONDS.sleep(backoff.min(left))) match
-          case Left(_) =>
-            Thread.currentThread().interrupt()
-            Left(CancelledError("child run"))
-          case Right(_) => Right(())
 
     /** One read of the child and what it calls for. */
     private def step(): Step =

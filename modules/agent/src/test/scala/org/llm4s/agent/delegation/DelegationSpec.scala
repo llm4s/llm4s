@@ -527,6 +527,123 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     client.calls should have size 1
   }
 
+  "BoundAgent.run on a caller-chosen thread" should "return the stored report on a second run, with no model call (#2077)" in {
+    val client = RoutingClient { case Child("researcher", _) =>
+      Right(CompletionFixture.simple("""{"summary":"once","sources":1}"""))
+    }
+    val runtime = GraphRuntime.inMemory()
+    val bound   = researcher.bind(client, runtime).value
+    val node    = ThreadId("node-7")
+    val first = bound.run(node, Question("tides")).value match
+      case reported @ TaskOutcome.Reported(report, child, usage) =>
+        report shouldBe Findings("once", 1)
+        child.threadId shouldBe node
+        child.depth shouldBe 0
+        child.toolCallId shouldBe None
+        usage.requestCount shouldBe 1
+        reported
+      case other => fail(s"expected a report, got $other")
+
+    val again = RunConfig().withRunId(org.llm4s.agent.graph.RunId("replay-1"))
+    bound.run(node, Question("tides"), again).value shouldBe first
+    client.calls should have size 1
+    runtime.history(node).value.map(_.runId).distinct shouldBe Vector(first.child.runId.value)
+  }
+
+  it should "reattach after a crash mid-run, never repeating a completed tool effect (#2077)" in {
+    val runs     = new AtomicInteger(0)
+    val failures = new AtomicInteger(0)
+    val client = RoutingClient {
+      case Child("researcher", messages) if toolResults(messages).isEmpty =>
+        Right(calling(ToolCall("k1", "probe", ujson.Obj("text" -> "x"))))
+      // the process dies after the probe's effect committed, before the answer
+      case Child("researcher", _) if failures.getAndIncrement() == 0 => Left(ValidationError("provider", "crashed"))
+      case Child("researcher", messages) =>
+        val seen = toolResults(messages).mkString.replace("\"", "")
+        Right(CompletionFixture.simple(s"""{"summary":"$seen","sources":1}"""))
+    }
+    val store   = new InMemoryCheckpointer()
+    val node    = ThreadId("node-crash")
+    val probing = researcher.withTools(ToolSet.of(DelegatedSuspensionSpec.probe(runs)).value)
+    probing.bind(client, new GraphRuntime(store)).value.run(node, Question("tides"))
+    runs.get shouldBe 1
+
+    // the node replays on a new runtime over the same store, and calls run with the same id
+    probing.bind(client, new GraphRuntime(store)).value.run(node, Question("tides")).value match
+      case TaskOutcome.Reported(report, child, _) =>
+        report shouldBe Findings("probed once", 1)
+        child.threadId shouldBe node
+      case other => fail(s"expected a report, got $other")
+    runs.get shouldBe 1
+  }
+
+  it should "return a suspended thread's Suspended again, running nothing, until it is resumed (#2077)" in {
+    val runs   = new AtomicInteger(0)
+    val client = DelegatedSuspensionSpec.approvingClient()
+    val bound =
+      DelegatedSuspensionSpec.asking(DelegatedSuspensionSpec.probe(runs)).bind(client, GraphRuntime.inMemory()).value
+    val node = ThreadId("node-ask")
+    val (ref, status) = bound.run(node, Question("tides")).value match
+      case TaskOutcome.Suspended(child, status) => child -> status
+      case other                                => fail(s"expected a suspension, got $other")
+    val sent = client.calls.size
+
+    bound.run(node, Question("tides")).value match
+      case TaskOutcome.Suspended(child, again) =>
+        child shouldBe ref
+        again.approvals.map(_._1) shouldBe status.approvals.map(_._1)
+      case other => fail(s"expected a suspension, got $other")
+    client.calls should have size sent
+    runs.get shouldBe 0
+
+    val resumed = bound.resume(ref, Map(approve(status.approvals.loneElement._1))).value
+    resumed shouldBe a[TaskOutcome.Reported[?]]
+    bound.run(node, Question("tides")).value shouldBe resumed
+    runs.get shouldBe 1
+  }
+
+  it should "wait for a run another caller holds on the thread, and return its outcome (#2077)" in {
+    val entered = new CountDownLatch(1)
+    val release = new CountDownLatch(1)
+    val client = RoutingClient { case Child("researcher", _) =>
+      entered.countDown()
+      release.await(10, TimeUnit.SECONDS)
+      Right(CompletionFixture.simple("""{"summary":"shared","sources":2}"""))
+    }
+    val bound = researcher.bind(client, GraphRuntime.inMemory()).value
+    val node  = ThreadId("node-busy")
+    val pool  = java.util.concurrent.Executors.newFixedThreadPool(2)
+    try {
+      val first = pool.submit(() => bound.run(node, Question("tides")))
+      entered.await(10, TimeUnit.SECONDS) shouldBe true
+      val second = pool.submit(() => bound.run(node, Question("tides")))
+      Thread.sleep(50)
+      release.countDown()
+      val held   = first.get(10, TimeUnit.SECONDS).value
+      val waited = second.get(10, TimeUnit.SECONDS).value
+      held shouldBe a[TaskOutcome.Reported[?]]
+      waited shouldBe held
+      client.calls should have size 1
+    } finally pool.shutdownNow()
+  }
+
+  it should "refuse a delegated child's thread, which only its parent continues (rule 19)" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
+      case Lead(_)                => Right(CompletionFixture.simple("done"))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
+    }
+    val runtime = GraphRuntime.inMemory()
+    val agent   = lead(client).withRuntime(runtime).withSubagents(researcher).build().value
+    agent.run(ThreadId("t1"), "go").value
+    val child = agent.children(ThreadId("t1")).value.loneElement.threadId
+    val sent  = client.calls.size
+
+    researcher.bind(client, runtime).value.run(child, Question("a")).left.value shouldBe a[ValidationError]
+    client.calls should have size sent
+  }
+
   "BoundAgent.resume" should "continue a standalone run that suspended, and map its answer as run does (#2069)" in {
     val runs   = new AtomicInteger(0)
     val client = DelegatedSuspensionSpec.approvingClient()
