@@ -630,15 +630,18 @@ Tests:
     continuation deducts from those stored values, never from a grant recomputed against a recovered parent's
     fresh or larger budget. A recovered or resumed child's limits are its stored grant less what its earlier attempts
     used: its `usage` key plus `priorUsage.total` (K2) for tokens; for steps its committed model steps **plus the
-    model calls of failed attempts** (`priorUsage.total`'s request count, folded from their terminal events), so a
-    call that completed but never committed its step still counts; and for time the **effective deadline fixed at
+    agent model steps of failed attempts**: a dedicated count of the agent's own model calls (what
+    `TurnState.steps` counts, never middleware model calls such as a summarizer's), carried on each terminal event
+    and folded with `priorUsage` (`PriorUsage.failedSteps`), so a call that completed but never committed its step
+    still counts and middleware calls never use up the step grant; and for time the **effective deadline fixed at
     first admission**, `min(RunOrigin.startedAt + granted timeout, the parent's deadline then)`, stored on the
     child thread (a runtime-owned `DelegationKeys` key) and reused by every continuation, never recomputed from a
     recovered parent's fresh deadline and never a fresh timeout, so
     repeated recoveries never exceed the grant or the parent's remainder. `recoverChild` passes these to the child
     run. A grant already spent settles the child with `RunOutcome.TokenLimitReached` or `StepLimitReached`
     (`settleChild`) and returns that refusal without running it. Likewise a child whose own deadline has passed by
-    recovery (`startedAt + granted timeout <= now`) is settled `RunOutcome.Failed(kind = "deadline-exceeded", ...)`
+    recovery or resume (its **stored effective deadline** `<= now`, whichever of the grant or the original
+    parent cap it came from, whatever a recovered parent's own deadline now is) is settled `RunOutcome.Failed(kind = "deadline-exceeded", ...)`
     and returns `TaskRefusal.Failed`, the outcome a child timing out mid-run gets, and never builds a non-positive
     `RunBudgets.timeout`. When the *parent's* deadline has passed instead, the rule below applies. Each check reads
     the clock once at recovery; the settled outcome is what any later replay reads (rule 14).
