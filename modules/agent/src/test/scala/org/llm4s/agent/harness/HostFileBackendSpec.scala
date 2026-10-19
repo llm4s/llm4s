@@ -466,6 +466,20 @@ class HostFileBackendSpec
     Files.list(root.resolve(upper)).iterator().asScala.toVector shouldBe empty
   }
 
+  it should "count as its own only the parents it created, never one another writer made meanwhile" in {
+    val (a, b, c) = (dir.resolve("a"), dir.resolve("a/b"), dir.resolve("a/b/c"))
+    // `b` appears between the snapshot and its creation, as another writer's; `c` then fails
+    val (made, outcome) = HostFileBackend.createParents(
+      Vector(a, b, c),
+      d =>
+        if (d == b) { Files.createDirectory(b); throw new java.nio.file.FileAlreadyExistsException(b.toString) }
+        else if (d == c) throw new java.nio.file.AccessDeniedException(c.toString)
+        else Files.createDirectory(d): Unit
+    )
+    made shouldBe Vector(a)
+    outcome.isFailure shouldBe true
+  }
+
   it should "write a file whose name is near the file system's limit" in {
     val long = "n" * 250
     written(backend.write(p(s"/$long"), "x", call())).created shouldBe true

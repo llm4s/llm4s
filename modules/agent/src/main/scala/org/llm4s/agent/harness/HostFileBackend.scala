@@ -323,14 +323,16 @@ final class HostFileBackend private (
     HostFileBackend.Kept.of(target) match
       case Left(reason) => refused(operation, path, reason)
       case Right(kept)  =>
-        // the parents this write creates, deepest first: a write that does not land removes them again, so
-        // a refused effect leaves the tree as it found it (each removal only of a directory still empty)
-        val created = Iterator
+        // the missing parents, top first, each created by its own call: only those this write created are
+        // removed if it does not land (deepest first, each only while empty), never one another writer made
+        val missing = Iterator
           .iterate(target.getParent)(_.getParent)
           .takeWhile(d => d != null && d.startsWith(root) && d != root && !exists(d))
           .toVector
-        def undo(): Unit = created.foreach(d => Try(Files.deleteIfExists(d)): Unit)
-        val written = classified(operation, path)(Try(Files.createDirectories(target.getParent))).flatMap { _ =>
+          .reverse
+        val (made, parents) = HostFileBackend.createParents(missing, d => Files.createDirectory(d): Unit)
+        def undo(): Unit    = made.reverseIterator.foreach(d => Try(Files.deleteIfExists(d)): Unit)
+        val written = classified(operation, path)(parents).flatMap { _ =>
           // a short name of its own, so a target near the file system's name limit still has room for it
           val temp    = target.resolveSibling(s".llm4s-${UUID.randomUUID()}.tmp")
           val options = java.util.Set.of[StandardOpenOption](StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
@@ -1235,6 +1237,22 @@ object HostFileBackend:
         total += n
         if total <= max then out.write(buffer.array(), 0, n)
     Option.when(total <= max)(out.toByteArray)
+
+  /**
+   * Creates `dirs` (top first) one by one with `mkdir`, and returns the ones this call created, and whether
+   * all now exist. One that appears meanwhile (another writer's) is used but never counted as created, so
+   * a rollback cannot remove it.
+   */
+  private[harness] def createParents(dirs: Vector[Path], mkdir: Path => Unit): (Vector[Path], Try[Unit]) =
+    dirs.foldLeft((Vector.empty[Path], Try(()))) { case ((made, so), d) =>
+      if so.isFailure then (made, so)
+      else
+        Try(mkdir(d)) match
+          case Success(_) => (made :+ d, so)
+          case Failure(_: FileAlreadyExistsException) if Files.isDirectory(d, LinkOption.NOFOLLOW_LINKS) =>
+            (made, so)
+          case Failure(e) => (made, Failure(e))
+    }
 
   /** A name Windows reads as another (a trailing dot or space is dropped); the backend never uses one. */
   private[harness] def trailing(name: String): Boolean = name.endsWith(".") || name.endsWith(" ")
