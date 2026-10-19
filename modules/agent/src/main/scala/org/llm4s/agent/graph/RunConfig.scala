@@ -101,8 +101,10 @@ final case class RunConfig private (
   /**
    * How many settled (`Completed` or `Failed`) child threads of the run's thread to keep (design 4.41, default
    * [[RunConfig.DefaultChildRetention]]): once the run's terminal checkpoint commits, and at a later `start` on the
-   * settled thread, older settled children are deleted, each with everything below it. A `Running` or `Suspended`
-   * child is never deleted, and nothing is at `recover` or `resume`. Throws `IllegalArgumentException` below 0.
+   * settled thread, older settled children are deleted, each with everything below it. At that `start` a child an
+   * earlier run left `Running` or `Suspended` can never be reattached, so it is first settled
+   * `RunOutcome.Failed("abandoned", ...)` and then counts; otherwise one is never deleted, and nothing is at
+   * `recover` or `resume`. Throws `IllegalArgumentException` below 0.
    */
   def withChildRetention(n: Int): RunConfig =
     require(n >= 0, s"childRetention must not be negative, was $n")

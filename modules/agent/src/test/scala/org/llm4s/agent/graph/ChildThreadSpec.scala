@@ -234,6 +234,21 @@ class ChildThreadSpec extends AnyFlatSpec with Matchers with EitherValues with O
     runtime.children(parent).value.map(_.threadId) shouldBe Vector(child, sibling)
   }
 
+  it should "stop a cascade at the next delete when the thread's claim is lost part-way" in {
+    val store   = InMemoryCheckpointer()
+    val parent  = ThreadId("cascade-lost")
+    val taking  = TakingOver(store, parent)
+    val runtime = GraphRuntime(taking, clock)
+    runtime.start(parent, graph, "go").awaited.value.completed
+    val children = Vector(1, 2).map(n => startChild(runtime, parent, n))
+    taking.armed = _ == "delete"
+
+    runtime.deleteThread(parent).left.value shouldBe a[GraphError.ThreadBusy]
+
+    children.map(store.latest(_).value.isDefined) shouldBe Vector(false, true)
+    store.latest(parent).value shouldBe defined
+  }
+
   it should "finish a cascade a failure interrupted when run again" in {
     val store   = InMemoryCheckpointer()
     val failing = new AtomicBoolean(true)
@@ -258,13 +273,106 @@ class ChildThreadSpec extends AnyFlatSpec with Matchers with EitherValues with O
     Vector(parent, first, second).map(store.latest(_).value) shouldBe Vector(None, None, None)
   }
 
-  "Child retention" should "keep the newest settled children at a settled parent's start, never a suspended one" in {
+  "Child retention" should "keep the newest settled children at a settled parent's start, an abandoned one counting" in {
     val (store, runtime, parent) = fresh()
     val children = Vector(1, 2, 3, 4).map(n => startChild(runtime, parent, n, if n == 1 then "ask" else "go"))
     runtime.start(parent, graph, "next", RunConfig().withChildRetention(1)).awaited.value.completed
-    // the suspended child stays, and of the settled ones only the newest
-    runtime.children(parent).value.map(_.threadId) shouldBe Vector(children(0), children(3))
-    store.latest(children(1)).value shouldBe None
+    // the suspended child of the earlier run is settled as abandoned, then pruned as the oldest; of the rest the newest
+    runtime.children(parent).value.map(_.threadId) shouldBe Vector(children(3))
+    Vector(0, 1, 2).map(i => store.latest(children(i)).value) shouldBe Vector(None, None, None)
+  }
+
+  it should "settle an earlier run's suspended or running child as abandoned at start, and keep it when newest" in {
+    val (store, runtime, parent) = fresh()
+    val settled                  = startChild(runtime, parent, 1)
+    val asking                   = startChild(runtime, parent, 2, "ask")
+    failing.set(true)
+    val running =
+      try startChild(runtime, parent, 3, "fail")
+      finally failing.set(false)
+    store.latest(running).value.value.checkpoint.status shouldBe CheckpointStatus.Running
+
+    runtime.start(parent, graph, "next", RunConfig().withChildRetention(2)).awaited.value.completed
+
+    runtime.children(parent).value.map(_.threadId) shouldBe Vector(asking, running)
+    store.latest(settled).value shouldBe None
+    Vector(asking, running).foreach { child =>
+      val latest = store.latest(child).value.value.checkpoint
+      latest.status shouldBe CheckpointStatus.Failed
+      latest.outcome.value shouldBe a[RunOutcome.Failed]
+      latest.outcome.value.asInstanceOf[RunOutcome.Failed].kind shouldBe "abandoned"
+    }
+  }
+
+  it should "skip an abandoned child that is busy, leave it uncounted, and settle it at the next start" in {
+    val (store, runtime, parent) = fresh()
+    val asking                   = startChild(runtime, parent, 1, "ask")
+    val later                    = startChild(runtime, parent, 2)
+    val held                     = store.claim(asking, ClaimRequest(RunId("elsewhere"), None, 1.minute)).value
+
+    runtime.start(parent, graph, "next", RunConfig().withChildRetention(1)).awaited.value.completed
+    runtime.children(parent).value.map(_.threadId) shouldBe Vector(asking, later)
+    store.latest(asking).value.value.checkpoint.status shouldBe CheckpointStatus.Suspended
+
+    store.release(asking, held.token).value
+    runtime.start(parent, graph, "again", RunConfig().withChildRetention(1)).awaited.value.completed
+    runtime.children(parent).value.map(_.threadId) shouldBe Vector(later)
+  }
+
+  /**
+   * A store over `store` that hands the claim on `parent` to another run once `trigger` returns true for an operation:
+   * the claim this runtime holds is released and a successor's granted, as a takeover after a stall would.
+   */
+  private class TakingOver(store: InMemoryCheckpointer, parent: ThreadId) extends ForwardingCheckpointer(store) {
+    @volatile var token: Option[FencingToken] = None
+    @volatile var armed: String => Boolean    = _ => false
+    @volatile var takenOver                   = false
+    def takeOver(): Unit =
+      if !takenOver then
+        takenOver = true
+        token.foreach(store.release(parent, _).value)
+        store.claim(parent, ClaimRequest(RunId("successor"), None, 1.minute)).value: Unit
+    override def claim(threadId: ThreadId, request: ClaimRequest) =
+      val granted = store.claim(threadId, request)
+      if threadId == parent then granted.foreach(c => token = Some(c.token))
+      granted
+    override def children(of: ThreadId, after: Option[ThreadId], limit: Int) =
+      val listed = store.children(of, after, limit)
+      if of == parent && armed("children") then takeOver()
+      listed
+    override def deleteThread(threadId: ThreadId, token: FencingToken) =
+      val deleted = store.deleteThread(threadId, token)
+      if threadId != parent && armed("delete") then takeOver()
+      deleted
+  }
+
+  it should "stop the pass before any delete when the parent's claim is lost while the children are listed" in {
+    val store   = InMemoryCheckpointer()
+    val parent  = ThreadId("stalled-listing")
+    val taking  = TakingOver(store, parent)
+    val runtime = GraphRuntime(taking, clock)
+    runtime.start(parent, graph, "go").awaited.value.completed
+    val children = Vector(1, 2, 3).map(n => startChild(runtime, parent, n))
+    taking.armed = _ == "children"
+
+    runtime.start(parent, graph, "next", RunConfig().withChildRetention(0)).isLeft shouldBe true
+
+    taking.takenOver shouldBe true
+    children.map(store.latest(_).value.isDefined) shouldBe Vector(true, true, true)
+  }
+
+  it should "stop the pass at the next delete when the parent's claim is lost part-way" in {
+    val store   = InMemoryCheckpointer()
+    val parent  = ThreadId("stalled-deletes")
+    val taking  = TakingOver(store, parent)
+    val runtime = GraphRuntime(taking, clock)
+    runtime.start(parent, graph, "go").awaited.value.completed
+    val children = Vector(1, 2, 3).map(n => startChild(runtime, parent, n))
+    taking.armed = _ == "delete"
+
+    runtime.start(parent, graph, "next", RunConfig().withChildRetention(0)).isLeft shouldBe true
+
+    children.map(store.latest(_).value.isDefined) shouldBe Vector(false, true, true)
   }
 
   /** A parent graph whose single node starts children `1 to n` of `parent`, as `n` task calls would, then completes. */
@@ -326,15 +434,18 @@ class ChildThreadSpec extends AnyFlatSpec with Matchers with EitherValues with O
     runtime.children(parent).value.map(_.threadId) shouldBe Vector(childOf(parent, 3))
   }
 
-  it should "not prune at a Block, and prune the blocked turn's children once a later turn completes" in {
-    val (_, runtime, parent) = fresh()
+  it should "prune at a blocked parent's next start, though not at the Block itself" in {
+    val (store, runtime, parent) = fresh()
     runtime.start(parent, graph, "block").awaited.value.failed
     val children = Vector(1, 2).map(n => startChild(runtime, parent, n))
-    // a Failed parent's start admission prunes nothing, nor does the Block that ends the run
+    // the Block that ends a run prunes nothing ...
+    runtime.start(parent, graph, "block", RunConfig().withChildRetention(1)).awaited.value.failed
+    runtime.children(parent).value.map(_.threadId) shouldBe Vector(children(1))
+    val third = startChild(runtime, parent, 3)
+    // ... but a blocked parent's start admission does: every settled child is prunable there
     runtime.start(parent, graph, "block", RunConfig().withChildRetention(0)).awaited.value.failed
-    runtime.children(parent).value.map(_.threadId) shouldBe children
-    runtime.start(parent, graph, "go", RunConfig().withChildRetention(0)).awaited.value.completed
     runtime.children(parent).value shouldBe empty
+    store.latest(third).value shouldBe None
   }
 
   it should "never run at recover or resume admission" in {
