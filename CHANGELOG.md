@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Agent.children`, cascade delete, child retention and a durable `Checkpoint.outcome` [#2045](https://github.com/llm4s/llm4s/issues/2045); [design §4.41](docs/design/typed-agent-runtime/4.41-stage-4-slice-k1-child-threads.md).
 - **Added** a per-run token budget, `RunBudgets.maxTokens`, ending the turn `AgentStatus.TokenLimitReached`, and the run's
   deadline as `RunContext.deadline` [#2047](https://github.com/llm4s/llm4s/issues/2047); [design §4.43](docs/design/typed-agent-runtime/4.43-stage-4-slice-k3-token-budgets.md).
+- **Added** child-run supervision: a child started at most once and reattached on replay, cancelled with its parent,
+  held to its deadline (`RunContext.deadline`), usage rolled up once; a tool's own model calls now count in the thread's usage [#2046](https://github.com/llm4s/llm4s/issues/2046); [design §4.42](docs/design/typed-agent-runtime/4.42-stage-4-slice-k2-child-run-supervision.md).
 
 ### Agent harness (Phase 3)
 

@@ -348,6 +348,9 @@ final private[agent] class TaskUsage:
   def add(model: String, usage: TokenUsage, cost: Option[Double]): Unit =
     recorded.updateAndGet(_.add(model, usage, cost)): Unit
 
+  /** Adds `other`, every model's usage in it: a child run's roll-up, added by the call that started it (design 4.42). */
+  def merge(other: UsageSummary): Unit = recorded.updateAndGet(_.merge(other)): Unit
+
   def summary: UsageSummary = recorded.get
 
   def isEmpty: Boolean = recorded.get.requestCount == 0

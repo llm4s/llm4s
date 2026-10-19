@@ -436,6 +436,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.39 | [Workspace command confinement](typed-agent-runtime/4.39-workspace-command-confinement.md) ([#1983](https://github.com/llm4s/llm4s/issues/1983)) |
 | 4.40 | [`HostFileBackend`: a file backend over a host directory](typed-agent-runtime/4.40-host-file-backend.md) ([#1964](https://github.com/llm4s/llm4s/issues/1964)) |
 | 4.41 | [Stage 4 slice K1: child threads](typed-agent-runtime/4.41-stage-4-slice-k1-child-threads.md) ([#2045](https://github.com/llm4s/llm4s/issues/2045)) |
+| 4.42 | [Stage 4 slice K2: child-run supervision](typed-agent-runtime/4.42-stage-4-slice-k2-child-run-supervision.md) ([#2046](https://github.com/llm4s/llm4s/issues/2046)) |
 | 4.43 | [Stage 4 slice K3: token budgets and the run's deadline](typed-agent-runtime/4.43-stage-4-slice-k3-token-budgets.md) ([#2047](https://github.com/llm4s/llm4s/issues/2047)) |
 
 ### 4.9 Stage 0 carry-forward
@@ -452,7 +453,7 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 | Prompt cancellation of SDK client calls on platform threads (today: prompt on virtual threads, where the runtime runs tasks) | #1270 | - |
 | ~~Durable checkpointer backends (SQLite first)~~ **SQLite closed by #1701** (§4.20: `llm4s-agent-checkpoint-sqlite`; PostgreSQL is Stage 5); a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`); **the contract suite and idempotency keys closed by #1703** (§4.17) | #1268, #1269 | Stage 2 |
 | ~~Run-claim leases, so `recover` in another process refuses a live run, and fencing tokens on every commit and in `RunPosition`~~ **closed by #1700** (§4.16: `RunClaim`, `FencingToken`, `StaleClaim`, `llm4s-agent-testkit`) | #1268, #1269, #1277 | Stage 2 |
-| Cancelling a run cancels the child runs it started | #1277 | Stage 4 (moved by #1901: there are no child runs before delegation) |
+| ~~Cancelling a run cancels the child runs it started~~ **closed by #2046** (§4.42: `ChildRunner` cancels its child when the calling task is interrupted) | #1277 | Stage 4 (moved by #1901: there are no child runs before delegation) |
 | ~~Store-level change notification (or polling), so a subscription sees live commits made by another `GraphRuntime` or process sharing the checkpointer~~ **closed by #1705** (§4.21: `Checkpointer.awaitEventsAfter`, `WatchPolicy`) | #1277 | Stage 2 |
 | ~~Checkpoint history, fork, `updateState`, retention by age or size (today: latest checkpoint only, explicit event compaction). History and fork must never keep or expose a snapshot whose turn a later guardrail `Block` removed (§9, "Guardrail Block outcome"), or the tool loop must guard the answer before its first commit~~ **closed by #1702** (§4.19: `history`, `checkpoint`, `fork`, `updateState`, `prune` and `RetentionPolicy`; a Block's closing commit retracts its turn) | #1268 | Stage 2 |
 | ~~Static `interruptBefore`/`interruptAfter` breakpoints~~ **closed by #1704** (§4.18) | #1269 | Stage 2 |

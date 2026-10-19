@@ -1653,8 +1653,9 @@ lazy val agentTestkit = (project in file("modules/agent-testkit"))
 // version `llm4s-memory` already uses. It needs no service, so no suite needs a `modules/it` tier: its tests,
 // including the one that kills a forked JVM mid-run and recovers in this one, run with `sbt test`.
 lazy val agentCheckpointSqlite = (project in file("modules/agent-checkpoint-sqlite"))
-  // test->test: the ReplayContract reference subjects live in agent-testkit's tests
-  .dependsOn(agent, agentTestkit % "test->compile;test->test")
+  // test->test: the ReplayContract reference subjects live in agent-testkit's tests, and the child-supervision
+  // behaviours (design 4.42), which run on every store, in agent's
+  .dependsOn(agent % "compile->compile;test->test", agentTestkit % "test->compile;test->test")
   .settings(
     name := "llm4s-agent-checkpoint-sqlite",
     commonSettings,

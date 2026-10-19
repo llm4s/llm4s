@@ -38,7 +38,7 @@ import org.slf4j.LoggerFactory
 final class Agent private[agent] (
   val id: AgentId,
   val loop: ToolLoop,
-  runtime: GraphRuntime,
+  private[agent] val runtime: GraphRuntime,
   tracing: Option[Tracing],
   interruptBefore: Set[NodeId] = Set.empty,
   interruptAfter: Set[NodeId] = Set.empty,
@@ -49,7 +49,7 @@ final class Agent private[agent] (
    * `config` with the agent's static breakpoints ([[AgentBuilder.withInterruptBefore]],
    * [[AgentBuilder.withInterruptAfter]]) added to its own.
    */
-  private def configured(config: RunConfig): RunConfig =
+  private[agent] def configured(config: RunConfig): RunConfig =
     config
       .withInterruptBefore(config.interruptBefore ++ interruptBefore)
       .withInterruptAfter(config.interruptAfter ++ interruptAfter)
@@ -302,7 +302,7 @@ final class Agent private[agent] (
    * ([[AgentRun.awaitEnded]]), which detaches its tracing; a cancel the turn's commit beat leaves it
    * `Right` - its real outcome - and that is returned. Either way the interrupt flag stays set.
    */
-  private def blocking(begin: => Result[AgentRun]): Result[AgentResult] =
+  private[agent] def blocking(begin: => Result[AgentRun]): Result[AgentResult] =
     if Thread.currentThread().isInterrupted then Left(CancelledError("agent turn"))
     else
       begin.flatMap { run =>
@@ -360,7 +360,7 @@ final class Agent private[agent] (
       Left(ValidationError("history", "system messages are not imported; prompts belong to agents"))
     else Message.validateConversation(history.toList)
 
-  private def agentRun(handle: RunHandle[TurnOutput], scope: Option[RunScope], drain: Boolean): AgentRun =
+  private[agent] def agentRun(handle: RunHandle[TurnOutput], scope: Option[RunScope], drain: Boolean): AgentRun =
     AgentRun(handle, loop, id, runtime, tracing, scope, drain)
 
 object Agent:

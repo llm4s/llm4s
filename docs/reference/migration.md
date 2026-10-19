@@ -68,6 +68,13 @@ A thread can now be a child thread: its checkpoints record a `RunOrigin` naming 
   `RunBudgets.default.withMaxTokens(n)`; a run can overshoot it by the one model call in flight
   ([design 4.43](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.43-stage-4-slice-k3-token-budgets.md)).
 
+### Child-run supervision (#2046)
+
+The runner that delegated calls use to run a child is internal ([design 4.42](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.42-stage-4-slice-k2-child-run-supervision.md)); two things change for everyone:
+
+- **A tool call's own model usage is counted.** The usage a tool call's task records (a tool that calls a model through its context, or a delegated child's roll-up) now commits to the thread's `usage` with the call's result, so `AgentResult.usage` can be higher than before for agents with such tools.
+- **The state key id `delegation-prior-usage` is reserved.** Every agent graph registers it for child threads; a tool or middleware declaring a key with that id is refused at `build()`.
+
 ## Workspace command confinement (#1983)
 
 Not in a release yet. On Linux, the workspace runner now starts every `execute` command under Landlock and, unless the network is allowed, a seccomp filter ([#1983](https://github.com/llm4s/llm4s/issues/1983), [design 4.39](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md)). Behaviour breaks, with no opt-out; off Linux (macOS, Windows) nothing changes:

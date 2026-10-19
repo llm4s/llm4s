@@ -166,14 +166,29 @@ final class AgentRun private[agent] (
 
   /** The turn's result: `state`'s messages and usage, with `active` or else the thread's active agent. */
   private def summary(state: ThreadState, active: Option[AgentId], status: AgentStatus): Result[AgentResult] =
+    AgentRun.result(threadId, runId, root, state, active, status)
+
+private[agent] object AgentRun:
+  private val logger = LoggerFactory.getLogger(classOf[AgentRun])
+
+  /**
+   * The result of run `runId` on `threadId`, which ended with `status`: `state`'s messages and usage, with `active` or
+   * else the thread's active agent, else `root`. What [[AgentRun.await]] returns, and what the child runner rebuilds
+   * from a child thread's latest checkpoint (design 4.42).
+   */
+  def result(
+    threadId: ThreadId,
+    runId: RunId,
+    root: AgentId,
+    state: ThreadState,
+    active: Option[AgentId],
+    status: AgentStatus
+  ): Result[AgentResult] =
     for
       messages <- state.get(Messages.key).map(_.map(_.message))
       usage    <- state.get(LoopKeys.usage)
       stored   <- state.get(LoopKeys.activeAgent)
     yield AgentResult(threadId, runId, active.orElse(stored).getOrElse(root), status, messages, usage)
-
-private[agent] object AgentRun:
-  private val logger = LoggerFactory.getLogger(classOf[AgentRun])
 
   /**
    * `body`, run with the calling thread's interrupt flag cleared; a flag that was set is set again
