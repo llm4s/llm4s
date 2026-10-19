@@ -731,6 +731,27 @@ class HostFileBackendSpec
     capped.glob(Glob("*"), VPath.root, 10, call()).value.items shouldBe Vector(p("/b.txt"))
   }
 
+  it should "hide a name that does not round-trip, and count it against the scan bound like any entry" in {
+    assume(posix)
+    // two raw names that are not UTF-8 and render alike (U+FFFD then `a`), beside a real file of that rendering
+    val made = new ProcessBuilder("sh", "-c", "touch \"$(printf '\\377a')\" \"$(printf '\\376a')\"")
+      .directory(dir.toFile)
+      .start()
+      .waitFor()
+    // a file system that refuses names that are not UTF-8 (APFS) has nothing of this to test
+    assume(made == 0 && Files.list(dir).count() == 2L)
+    val rendered = "\uFFFDa"
+    Files.writeString(dir.resolve(rendered), "needle\n")
+    val listed = backend.ls(VPath.root, 10, call()).value
+    listed shouldBe Listing(Vector(listed.items.head), truncated = false)
+    listed.items.head.path shouldBe p(s"/$rendered")
+    backend.glob(Glob("**"), VPath.root, 10, call()).value.items shouldBe Vector(p(s"/$rendered"))
+    backend.grep("needle", VPath.root, None, 10, call()).value.items.map(_.path) shouldBe Vector(p(s"/$rendered"))
+    backend.read(p(s"/$rendered"), 0, 1, call()).value.lines shouldBe Vector("needle")
+    // three entries read, one listable: a bound of 2 cannot read the directory whole
+    reopen(maxScanEntries = 2).value.ls(VPath.root, 10, call()).value.truncated shouldBe true
+  }
+
   it should "drop a name it cannot list before it counts against the limit" in {
     assume(posix)
     Files.writeString(dir.resolve("a\nbad"), "x")

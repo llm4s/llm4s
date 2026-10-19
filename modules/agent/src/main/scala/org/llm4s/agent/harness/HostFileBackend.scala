@@ -506,6 +506,16 @@ final class HostFileBackend private (
    * order, so a directory is used only when it was read whole: a partial read would depend on the file
    * system's order, so a directory over the budget yields nothing, never an arbitrary part of itself.
    */
+  /**
+   * Whether the entry `p` of `dir`, whose name renders as `name`, is the entry its path names: the name is
+   * a valid `VPath` segment that renders unchanged, and resolving it in `dir` gives back `p`, byte for byte.
+   * A POSIX name that is not UTF-8 renders with U+FFFD, so it names another file or none, and several such
+   * names can render alike; it is never exposed. This is the one place a directory entry becomes a path the
+   * model sees: listings, walks and their matches all come through it.
+   */
+  private def roundTrips(dir: Path, name: String, p: Path): Boolean =
+    VPath(s"/$name").exists(_.name == name) && Try(dir.resolve(name) == p).getOrElse(false)
+
   private def children(dir: Path, budget: Long, walk: Boolean = false): (Option[Vector[(String, Path)]], Long) =
     // a walk orders a directory by its name and `/`, as its descendants' paths start, so `a-foo` comes
     // before `a/x`, as `VPath` orders them; a listing orders the entries themselves, by name
@@ -521,7 +531,7 @@ final class HostFileBackend private (
         if read <= budget then
           val name = p.getFileName.toString
           val hidden =
-            VPath(s"/$name").isLeft || HostFileBackend.trailing(name) || HostFileBackend.isReserved(name) ||
+            !roundTrips(dir, name, p) || HostFileBackend.trailing(name) || HostFileBackend.isReserved(name) ||
               aliased(p) || !(isFile(p) || isDir(p))
           if !hidden then kept += ((key(name, p), name, p))
     }
