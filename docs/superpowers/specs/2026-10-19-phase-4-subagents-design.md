@@ -262,9 +262,11 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
 - **Admission (rule 19).** `start`, `recover`, `resume`, `fork` and `updateState` on a thread whose latest
   checkpoint has an `origin` are refused with **`GraphError.ChildThread(threadId, parent)`**, before any claim.
   - The only way in is `private[agent] GraphRuntime.startChild` / `recoverChild` / `resumeChild`, used by K2.
-- **Cascade delete.** `GraphRuntime.deleteThread` (and `Agent.forget`) deletes the thread's children first,
-  depth-first, each under its own claim, then the thread.
-  - A child with a live claim refuses the whole delete with `ThreadBusy`, before anything is removed.
+- **Cascade delete.** `GraphRuntime.deleteThread` (and `Agent.forget`) holds the thread and **every** descendant,
+  each by its own claim, before the first deletion; then deletes depth-first, then the thread.
+  - A descendant with a live claim, anywhere in the tree, refuses the whole delete with `ThreadBusy` before anything
+    is removed. Once all are held the descendants are listed again; a tree that grew in between refuses too.
+  - Each deletion is fenced by the root's claim.
   - A crash part-way leaves fewer children and the parent. Running the delete again finishes it.
   - `deleteThread` on a child thread directly is refused (rule 19).
 - **Child retention (rule 12).** The runtime keeps the newest `childRetention` *prunable* children of a parent
@@ -299,7 +301,8 @@ Tests:
 - the format-7 fixture and a SQLite schema-5 file, each restored and continued
 - a child id stable for one key, different for another key, thread or agent
 - every refused operation on a child thread, with the allowed reads
-- cascade delete through two levels; a child with a live claim refuses the delete
+- cascade delete through two levels; a busy descendant after a deletable sibling refuses the delete with nothing
+  removed
 - retention: `childRetention = 1`, two calls, one child left when the parent completes; a crash during the pass is
   finished by `recover`; at `start`, a Block's children are pruned and an earlier run's unsettled child is
   settled `abandoned`; a lost parent claim stops the pass before any deletion; never a child of the current run
@@ -457,6 +460,7 @@ object TypedAgent:
   case Reported(report: O, child: ChildRef, usage: UsageSummary)
   case Refused(child: ChildRef, reason: TaskRefusal, usage: UsageSummary)
   case Suspended(child: ChildRef, status: AgentStatus.Suspended)        // D3 surfaces it
+  case NotStarted(agent: AgentId, reason: TaskRefusal)                  // refused before any child existed
 @Experimental enum TaskRefusal:
   case Blocked(guardrail: String, reason: String)
   case StepLimitReached
@@ -553,8 +557,8 @@ Tests:
   - concurrency: the parent's `maxConcurrency`
 
   - **An exhausted budget starts no child.** When the remaining steps or tokens are zero or less at call time
-    (K3 lets the model call that emitted the task overshoot), the call returns `TaskOutcome.Refused` with
-    `TaskRefusal.StepLimitReached` or `TokenLimitReached`, creates no child thread, and never builds a
+    (K3 lets the model call that emitted the task overshoot), the call returns `TaskOutcome.NotStarted` with
+    `TaskRefusal.StepLimitReached` or `TokenLimitReached`, which carries no `ChildRef`, creates no child thread, and never builds a
     non-positive `RunBudgets`. A replay decides the same from the same snapshot.
   - **An expired deadline starts no child either.** When the parent's deadline has passed at call time, the call
     fails with the parent's own `DeadlineExceeded`, as any step past the deadline does, and never builds a
@@ -642,6 +646,10 @@ Tests:
     `TaskStarted`. The runner installs the nested forwarder on the child's run during child admission, before the
     child's first task runs. Events it forwards are queued behind `TaskStarted` in the parent's subscription, so
     order holds: `TaskStarted`, then every child event, then the child's terminal event.
+  - **Except a child held by another runtime.** When the call reattaches to a child whose claim another runtime
+    holds (K2's wait), that runtime's live events cannot reach this one, so the parent subscription gets one
+    `LiveGap` for the child and then its events from the next run this runtime drives. Durable child events are
+    never lost: `subscribeChild` replays them.
 - **Tracing.**
   - A child's `AgentTracing` is the parent's `Tracing` (rule 16).
   - Core's **`TraceEvent.AgentRunEnded`** gains `parentThreadId: Option[String] = None` and
