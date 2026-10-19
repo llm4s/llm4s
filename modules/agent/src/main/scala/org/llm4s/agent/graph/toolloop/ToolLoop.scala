@@ -1,7 +1,7 @@
 package org.llm4s.agent.graph.toolloop
 
 import org.llm4s.agent.{ AgentId, AgentNode }
-import org.llm4s.agent.delegation.DelegationKeys
+import org.llm4s.agent.delegation.{ CountedUpdate, DelegationKeys }
 import org.llm4s.agent.events
 import org.llm4s.agent.events.{ AgentEvents, GuardrailBlock, GuardrailPhase, ToolExecutionOutcome }
 import org.llm4s.agent.graph.*
@@ -701,7 +701,8 @@ object ToolLoop:
         LoopKeys.activeAgent.id,
         LoopKeys.turn.id,
         LoopKeys.transfer.id,
-        DelegationKeys.priorUsage.id
+        DelegationKeys.priorUsage.id,
+        DelegationKeys.counted.id
       )
     def touches(keys: Set[StateKey[?, ?]]) = keys.exists(k => owned.contains(k.id))
     val clause =
@@ -754,7 +755,12 @@ object ToolLoop:
 
     /** What the call-tool, approval and ask nodes may write: any tool's keys; each call is checked against its own tool's. */
     def callWrites: Set[StateKey[?, ?]] =
-      tools.tools.flatMap(_.writes).toSet ++ stack.writes ++ Set(results, Messages.key, LoopKeys.usage)
+      tools.tools.flatMap(_.writes).toSet ++ stack.writes ++ Set(
+        results,
+        Messages.key,
+        LoopKeys.usage,
+        DelegationKeys.counted
+      )
 
     /** The keys this agent's tools and middleware may write: what an output Block may have to restore. */
     def harnessWrites: Set[StateKey[?, ?]] = tools.tools.flatMap(_.writes).toSet ++ stack.writes
@@ -779,7 +785,8 @@ object ToolLoop:
     Set(Messages.key, LoopKeys.usage, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer)
   private val finishWrites: Set[StateKey[?, ?]] =
     Set(Messages.key, LoopKeys.usage, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer)
-  private val inputWrites: Set[StateKey[?, ?]] = Set(Messages.key, LoopKeys.usage, LoopKeys.activeAgent, LoopKeys.turn)
+  private val inputWrites: Set[StateKey[?, ?]] =
+    Set(Messages.key, LoopKeys.usage, LoopKeys.activeAgent, LoopKeys.turn, DelegationKeys.counted)
 
   private def declare(b: GraphBuilder, prepared: Prepared, familyLocks: Boolean): AgentNodes =
     val prefix  = s"${prepared.agent.id.value}/"
@@ -872,14 +879,17 @@ object ToolLoop:
    */
   private def withUsage(context: RunContext)(result: NodeResult): NodeResult = result match
     case NodeResult.Continue(command) =>
-      NodeResult.Continue(command.copy(update = command.update.combine(usageOf(context))))
-    // a suspended call runs again when answered, and a child it ran is reattached then and its roll-up added with the
-    // final result: only the task's own model calls commit with the suspension
+      NodeResult.Continue(command.copy(update = command.update.combine(usageOf(context)).combine(countedOf(context))))
+    // a suspended call may run again when answered, reattaching a child it ran: the children counted here are recorded,
+    // so the child runner does not count them again
     case NodeResult.Suspend(update, question, resumeAt) =>
-      val own =
-        if context.usage.lostIsEmpty then StateUpdate.empty else StateUpdate.update(LoopKeys.usage, context.usage.lost)
-      NodeResult.Suspend(update.combine(own), question, resumeAt)
+      NodeResult.Suspend(update.combine(usageOf(context)).combine(countedOf(context)), question, resumeAt)
     case other => other
+
+  /** The child threads whose roll-ups the task counted, as its update to `DelegationKeys.counted`; nothing if none. */
+  private def countedOf(context: RunContext): StateUpdate =
+    val ids = context.usage.countedChildren
+    if ids.isEmpty then StateUpdate.empty else StateUpdate.update(DelegationKeys.counted, CountedUpdate.Add(ids))
 
   /** The usage the task recorded, as its update to [[LoopKeys.usage]]; nothing when it recorded none. */
   private def usageOf(context: RunContext): StateUpdate =
@@ -1109,6 +1119,8 @@ object ToolLoop:
                 val prior = written(remembered(Map.empty, keys, state), keys, after)
                 NodeResult.Continue(
                   Command(seeded.update.combine(hooks).combine(usageOf(context)), seeded.routes)
+                    // a new turn: no child of it has been counted yet
+                    .update(DelegationKeys.counted, CountedUpdate.Reset)
                     .update(messages, MessageUpdate.Append(StoredMessage(s"$taskId/user", UserMessage(transformed))))
                     .update(LoopKeys.turn, TurnState(0, None, Some(agentId), transfer, prior))
                     .goto(nodes.model)

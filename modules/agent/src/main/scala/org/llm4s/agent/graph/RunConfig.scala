@@ -356,7 +356,15 @@ final private[agent] class TaskUsage:
    * drops it rather than reporting it as the run's lost usage, because the child thread keeps that usage itself and the
    * call's replay, which reattaches the child, adds it then.
    */
-  def merge(other: UsageSummary): Unit = delegated.updateAndGet(_.merge(other)): Unit
+  def merge(other: UsageSummary, child: ThreadId): Unit =
+    delegated.updateAndGet(_.merge(other)): Unit
+    children.updateAndGet(_ + child.value): Unit
+
+  /** The child threads whose roll-ups [[merge]] added. */
+  private val children = new AtomicReference(Set.empty[String])
+
+  /** The child threads whose roll-ups this task's result commits. */
+  def countedChildren: Set[String] = children.get
 
   /** Everything the task's result commits: its own model calls and its children's roll-ups. */
   def summary: UsageSummary = recorded.get.merge(delegated.get)

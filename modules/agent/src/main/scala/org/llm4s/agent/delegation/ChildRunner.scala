@@ -214,6 +214,14 @@ private[agent] object ChildRunner:
               )
             case CheckpointStatus.Completed | CheckpointStatus.Failed => Step.Done(settled(checkpoint, exec))
 
+    /**
+     * Adds the child's roll-up to the calling task's accumulator, unless the thread's committed state shows it counted
+     * already: by this call's suspension, before the call ran again (`DelegationKeys.counted`).
+     */
+    private def add(rollUp: UsageSummary): Unit =
+      val already = ctx.state.get(DelegationKeys.counted).toOption.exists(_.contains(childId.value))
+      if !already then ctx.run.usage.merge(rollUp, childId)
+
     /** Whether the parent's deadline has passed, by the runtime's clock: a child timing out then timed out with it. */
     private def parentDeadlinePassed: Boolean = ctx.run.deadline.exists(d => !runtime.now().isBefore(d))
 
@@ -242,7 +250,7 @@ private[agent] object ChildRunner:
       // nothing, and the replay that reattaches counts the child once (its fold covers this RunCancelled); a timeout on
       // the call commits its error with the accumulator, once, and that call never runs again
       case Left(cancelled: CancelledError) =>
-        usage().foreach(ctx.run.usage.merge)
+        usage().foreach(add)
         Step.Done(Left(cancelled))
       // the parent's own deadline stopped the child: the parent is stopping too, and its recover reattaches
       // (decided after the run as well as before it: a slow admission can make the parent's the sooner one)
@@ -304,7 +312,7 @@ private[agent] object ChildRunner:
         case ChildEnd.Failed(_, _) => settleOnFailure
       // also when the calling task was interrupted as the child committed: a task that then fails drops a roll-up (it is
       // never the run's lost usage, TaskUsage.merge), and a timed-out call commits its error with it
-      if commits then ctx.run.usage.merge(childEnd.usage)
+      if commits then add(childEnd.usage)
       childEnd
 
     private def rebuilt(checkpoint: Checkpoint, exec: Execution, status: AgentStatus): Result[AgentResult] =

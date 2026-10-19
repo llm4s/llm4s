@@ -596,31 +596,37 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     tokens(rollUp) shouldBe ((2L, 20L, 40L))
   }
 
-  it should "be counted once when a wrapper asks for approval after the child ran, and the call runs again" in {
-    val open = storage()
-    val review = new AgentMiddleware {
-      val id: MiddlewareId = MiddlewareId("review")
-      override def wrapToolCall(request: org.llm4s.agent.graph.middleware.ToolCallRequest, context: ToolContext)(
-        next: () => ToolOutcome
-      ): ToolOutcome = {
-        val out = next()
-        if (context.approved) out else ToolOutcome.NeedsApproval("check the report")
+  /** A wrapper that runs the call, then asks for approval; approved, it runs the call again or answers itself. */
+  private def reviewing(rerun: Boolean): AgentMiddleware = new AgentMiddleware {
+    val id: MiddlewareId = MiddlewareId("review")
+    override def wrapToolCall(request: org.llm4s.agent.graph.middleware.ToolCallRequest, context: ToolContext)(
+      next: () => ToolOutcome
+    ): ToolOutcome =
+      if (!context.approved) {
+        next(): Unit
+        ToolOutcome.NeedsApproval("check the report")
+      } else if (rerun) next()
+      else ToolOutcome.Success(ToolContent.Json(ujson.Str("approved as it was")))
+  }
+
+  Seq(true -> "runs the call again", false -> "answers without running it").foreach { case (rerun, how) =>
+    it should s"be counted once when a wrapper asks for approval after the child ran, and approved $how" in {
+      val open    = storage()
+      val setup   = new Setup(delegating(), answers("report"), parentMiddleware = Seq(reviewing(rerun)))
+      val runtime = new GraphRuntime(open())
+      val parent  = family(runtime, setup)._1
+      val thread  = ThreadId(s"approved-after-child-$rerun")
+      val parked  = parent.run(thread, "go").ok
+      val id = parked.status match {
+        case AgentStatus.Suspended(approvals, _, _, _) => approvals.head._1
+        case other                                     => fail(s"unexpected $other")
       }
+      val done = parent.resume(thread, Map(parked.approve(id))).ok
+      done.answer shouldBe Some("composed")
+      setup.childClient.callCount shouldBe 1
+      // the parent's two calls and the child's one, once
+      tokens(done.usage) shouldBe ((3L, 30L, 60L))
     }
-    val setup   = new Setup(delegating(), answers("report"), parentMiddleware = Seq(review))
-    val runtime = new GraphRuntime(open())
-    val parent  = family(runtime, setup)._1
-    val thread  = ThreadId("approved-after-child")
-    val parked  = parent.run(thread, "go").ok
-    val id = parked.status match {
-      case AgentStatus.Suspended(approvals, _, _, _) => approvals.head._1
-      case other                                     => fail(s"unexpected $other")
-    }
-    val done = parent.resume(thread, Map(parked.approve(id))).ok
-    done.answer shouldBe Some("composed")
-    setup.childClient.callCount shouldBe 1
-    // the parent's two calls and the child's one, once, though the call ran twice
-    tokens(done.usage) shouldBe ((3L, 30L, 60L))
   }
 
   behavior.of("A child thread")

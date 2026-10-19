@@ -73,7 +73,7 @@ A thread can now be a child thread: its checkpoints record a `RunOrigin` naming 
 The runner that delegated calls use to run a child is internal ([design 4.42](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.42-stage-4-slice-k2-child-run-supervision.md)); two things change for everyone:
 
 - **A tool call's own model usage is counted.** The usage a tool call's task records (a tool that calls a model through its context, or a delegated child's roll-up) now commits to the thread's `usage` with the call's result, so `AgentResult.usage` can be higher than before for agents with such tools.
-- **The state key id `delegation-prior-usage` is reserved.** Every agent graph registers it for child threads; a tool or middleware declaring a key with that id is refused at `build()`.
+- **The state key ids `delegation-prior-usage` and `delegation-counted` are reserved.** Every agent graph registers them; a tool or middleware declaring a key with either id is refused at `build()`.
 
 ## Workspace command confinement (#1983)
 
