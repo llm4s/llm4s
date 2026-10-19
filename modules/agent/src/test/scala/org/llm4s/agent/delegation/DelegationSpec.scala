@@ -413,6 +413,15 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     agent.children(ThreadId("t1")).value should have size 1
   }
 
+  "a task refused before any child existed" should "be a tool error under Report and Fatal under Fail, naming no child" in {
+    val notStarted: TaskOutcome[Findings] = TaskOutcome.NotStarted(researcher.id, TaskRefusal.TokenLimitReached)
+    DelegationMiddleware.toolOutcome("researcher", ChildFailure.Report, 1024, notStarted, None) shouldBe
+      ToolOutcome.Error("subagent 'researcher' was not started: reached its token budget without an answer")
+    DelegationMiddleware.toolOutcome("researcher", ChildFailure.Fail, 1024, notStarted, None) match
+      case ToolOutcome.Fatal(error) => error.message should include("was not started")
+      case other                    => fail(s"expected Fatal, got $other")
+  }
+
   "build()" should "refuse two subagents with one id, a clash with another tool, bad bounds and a bad subagent" in {
     val client = RoutingClient(PartialFunction.empty)
     lead(client).withSubagents(general, general).build().left.value.message should include("defined twice")

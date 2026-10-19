@@ -65,6 +65,12 @@ enum TaskOutcome[+O]:
    */
   case Suspended(child: ChildRef, status: AgentStatus.Suspended)
 
+  /**
+   * The task was refused before any child existed, so there is no child thread and no `ChildRef`: `reason` says why
+   * (an exhausted step or token budget, design 4.45). A replay decides the same from the same snapshot.
+   */
+  case NotStarted(agent: AgentId, reason: TaskRefusal)
+
 /** Why a child gave no report (design 4.44). Each case is rebuilt from one `RunOutcome` on replay. */
 @Experimental
 enum TaskRefusal derives ReadWriter:

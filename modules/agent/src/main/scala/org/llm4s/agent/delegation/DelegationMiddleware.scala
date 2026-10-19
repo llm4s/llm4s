@@ -12,7 +12,7 @@ import org.llm4s.agent.graph.tool.{
   ToolResource
 }
 import org.llm4s.agent.graph.toolloop.{ Messages, StoredMessage }
-import org.llm4s.error.{ CancelledError, ProcessingError }
+import org.llm4s.error.{ CancelledError, LLMError, ProcessingError }
 import org.llm4s.llmconnect.model.{ AssistantMessage, UserMessage }
 import org.llm4s.toolapi.{ Schema, SchemaDefinition, StringSchema }
 import org.llm4s.types.Result
@@ -96,23 +96,9 @@ final private[agent] class DelegationMiddleware(
     val origin = RunOrigin(ctx.run.position.threadId, ctx.idempotencyKey, bound.id, Instant.now(), depth + 1)
     bound.delegated(input, origin, childConfig(ctx.run.config), ctx) match
       case Left(error) => ToolOutcome.Fatal(error)
-      case Right((TaskOutcome.Reported(report, child, _), _)) =>
-        val json  = upickle.default.writeJs(report)(using bound.definition.outputCodec)
-        val bytes = json.render().getBytes(StandardCharsets.UTF_8).length
-        if bytes > config.maxReportBytes then
-          ToolOutcome.Error(
-            s"subagent '$name' report over ${config.maxReportBytes} bytes ($bytes); child thread ${child.threadId.value}"
-          )
-        else ToolOutcome.Success(ToolContent.Json(json))
-      case Right((TaskOutcome.Refused(child, reason, _), cause)) =>
-        val message = s"subagent '$name' (child thread ${child.threadId.value}) ${reason.describe}"
-        bound.definition.failure match
-          case ChildFailure.Report => ToolOutcome.Error(message)
-          case ChildFailure.Fail   => ToolOutcome.Fatal(cause.getOrElse(ProcessingError("task", message)))
-      case Right((TaskOutcome.Suspended(child, _), _)) =>
-        ToolOutcome.Error(
-          s"subagent '$name' suspended (child thread ${child.threadId.value}): it waits for approvals or answers, " +
-            "which cannot be given through the parent yet"
+      case Right((outcome, cause)) =>
+        DelegationMiddleware.toolOutcome(name, bound.definition.failure, config.maxReportBytes, outcome, cause)(using
+          bound.definition.outputCodec
         )
 
   /**
@@ -129,6 +115,40 @@ final private[agent] class DelegationMiddleware(
 
 private[agent] object DelegationMiddleware:
   val Id: MiddlewareId = MiddlewareId("delegation")
+
+  /**
+   * What the parent model sees for subagent `name`'s `outcome`: its report as JSON, or past `maxReportBytes` a tool
+   * error; a refusal (made with or without a child) as a tool error under `ChildFailure.Report`, or `Fatal` with the
+   * child's error `cause` - else a `ProcessingError` with the same text - under `Fail`; a suspension as a tool error.
+   */
+  def toolOutcome[O: ReadWriter](
+    name: String,
+    failure: ChildFailure,
+    maxReportBytes: Int,
+    outcome: TaskOutcome[O],
+    cause: Option[LLMError]
+  ): ToolOutcome =
+    def refused(message: String): ToolOutcome = failure match
+      case ChildFailure.Report => ToolOutcome.Error(message)
+      case ChildFailure.Fail   => ToolOutcome.Fatal(cause.getOrElse(ProcessingError("task", message)))
+    outcome match
+      case TaskOutcome.Reported(report, child, _) =>
+        val json  = upickle.default.writeJs(report)
+        val bytes = json.render().getBytes(StandardCharsets.UTF_8).length
+        if bytes > maxReportBytes then
+          ToolOutcome.Error(
+            s"subagent '$name' report over $maxReportBytes bytes ($bytes); child thread ${child.threadId.value}"
+          )
+        else ToolOutcome.Success(ToolContent.Json(json))
+      case TaskOutcome.Refused(child, reason, _) =>
+        refused(s"subagent '$name' (child thread ${child.threadId.value}) ${reason.describe}")
+      case TaskOutcome.NotStarted(_, reason) =>
+        refused(s"subagent '$name' was not started: ${reason.describe}")
+      case TaskOutcome.Suspended(child, _) =>
+        ToolOutcome.Error(
+          s"subagent '$name' suspended (child thread ${child.threadId.value}): it waits for approvals or answers, " +
+            "which cannot be given through the parent yet"
+        )
 
 /** The `task` tools' specs, shared by the middleware and by the parent's graph version, which covers them. */
 private[agent] object TaskTools:
