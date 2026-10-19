@@ -5,9 +5,11 @@ import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelCo
 import org.llm4s.agent.graph.tool.{
   AgentTool,
   AgentToolSpec,
+  BoundedErrors,
   Operation,
   ToolContent,
   ToolContext,
+  ToolErrors,
   ToolOutcome,
   ToolResource
 }
@@ -57,9 +59,9 @@ final private[agent] class DelegationMiddleware(
   override val tools: Vector[AgentTool[?]] =
     val shared =
       Option.when(taskShaped.nonEmpty)(
-        AgentTool(TaskTools.taskSpec(taskShaped.map(_.definition))) { (args, ctx) =>
+        TaskTool(TaskTools.taskSpec(taskShaped.map(_.definition)), config.maxReportBytes) { (args, ctx) =>
           taskShaped.find(_.id.value == args.subagent_type) match
-            case None        => ToolOutcome.Error(s"no subagent '${args.subagent_type}' takes a task description")
+            case None        => error(s"no subagent '${args.subagent_type}' takes a task description")
             case Some(bound) => viaRequest(bound, args.description, ctx)
         }
       )
@@ -68,23 +70,27 @@ final private[agent] class DelegationMiddleware(
   override def promptSections(context: ModelContext): Result[Vector[PromptSection]] =
     Right(Vector(PromptSection(id.value, TaskTools.section(subagents.map(_.definition)), cacheable = true)))
 
+  /** A tool error, cut to `maxReportBytes` (the loop cuts it too: the task tools are `BoundedErrors`). */
+  private def error(message: String): ToolOutcome =
+    ToolOutcome.Error(ToolErrors.bounded(message, config.maxReportBytes))
+
   private def viaRequest[I, O](bound: BoundAgent[I, O], description: String, ctx: ToolContext): ToolOutcome =
     TaskTools.fromRequest(TaskRequest(description))(using bound.definition.inputCodec) match
-      case Left(problem) => ToolOutcome.Error(problem)
+      case Left(problem) => error(problem)
       case Right(input)  => delegate(bound, input, ctx)
 
   private def typedTool[I, O](bound: BoundAgent[I, O]): AgentTool[I] =
-    AgentTool(TaskTools.typedSpec(bound.definition))((input, ctx) => delegate(bound, input, ctx))
+    TaskTool(TaskTools.typedSpec(bound.definition), config.maxReportBytes)((input, ctx) => delegate(bound, input, ctx))
 
   private def delegate[I, O](bound: BoundAgent[I, O], input: I, ctx: ToolContext): ToolOutcome =
     val name     = bound.id.value
     val position = TaskTools.positionInTurn(ctx, toolNames)
     if position > config.maxTasksPerTurn then
-      ToolOutcome.Error(
+      error(
         s"task for subagent '$name' refused: this turn's task calls are over maxTasksPerTurn = ${config.maxTasksPerTurn}"
       )
     else if depth + 1 > config.maxDepth then
-      ToolOutcome.Error(s"task for subagent '$name' refused: it would nest deeper than maxDepth = ${config.maxDepth}")
+      error(s"task for subagent '$name' refused: it would nest deeper than maxDepth = ${config.maxDepth}")
     else
       val slot = slots.computeIfAbsent(ctx.run.incarnation, _ => new Semaphore(config.maxConcurrentChildren, true))
       CancelledError.attempt(s"task $name")(Right(slot.acquire())) match
@@ -113,6 +119,13 @@ final private[agent] class DelegationMiddleware(
       childRetention = config.childRetention
     )
 
+/** A `task` tool: its errors, whoever raises them, are cut by the loop to `maxErrorBytes` (`maxReportBytes`). */
+final private class TaskTool[A](val spec: AgentToolSpec[A], val maxErrorBytes: Int)(
+  run: (A, ToolContext) => ToolOutcome
+) extends AgentTool[A]
+    with BoundedErrors:
+  def execute(args: A, context: ToolContext): ToolOutcome = run(args, context)
+
 private[agent] object DelegationMiddleware:
   val Id: MiddlewareId = MiddlewareId("delegation")
 
@@ -137,7 +150,7 @@ private[agent] object DelegationMiddleware:
     outcome match
       case TaskOutcome.Reported(report, child, _) =>
         val json  = upickle.default.writeJs(report)
-        val bytes = utf8(json.render())
+        val bytes = json.render().getBytes(StandardCharsets.UTF_8).length
         if bytes > maxReportBytes then
           ToolOutcome.Error(
             cut(
@@ -171,18 +184,13 @@ private[agent] object DelegationMiddleware:
       ToolOutcome.Error(cut(s"subagent '$name' was not run: ${refused.message}", maxReportBytes))
     case other => ToolOutcome.Fatal(other)
 
-  private def utf8(text: String): Int = text.getBytes(StandardCharsets.UTF_8).length
-
-  /** The bytes of `text` as the tool message the loop stores for an error: `{"error": text}`. */
-  private def wrapped(text: String): Int = utf8(ujson.Obj("error" -> ujson.Str(text)).render())
-
   /**
    * `prefix` and `reason`'s description, its tool message at most `max` bytes: whole when it fits; an `OutputInvalid`
    * with as many of its first errors as fit and the count of those dropped; anything else cut.
    */
   private[delegation] def within(prefix: String, reason: TaskRefusal, max: Int): String =
     val full = prefix + reason.describe
-    if wrapped(full) <= max then full
+    if ToolErrors.wrapped(full) <= max then full
     else
       reason match
         case TaskRefusal.OutputInvalid(errors) =>
@@ -193,27 +201,12 @@ private[agent] object DelegationMiddleware:
               s"${prefix}its answer did not match its output schema: ${errors.take(kept).mkString("; ")} " +
                 s"(and $dropped more $noun dropped)"
             }
-            .find(wrapped(_) <= max)
+            .find(ToolErrors.wrapped(_) <= max)
             .getOrElse(cut(full, max))
         case _ => cut(full, max)
 
-  private val Cut = " ... (truncated)"
-
-  /** `text`, cut on a code point and marked, so its tool message is at most `max` bytes; empty if no cut fits. */
-  private[delegation] def cut(text: String, max: Int): String =
-    if wrapped(text) <= max then text
-    else
-      val points            = text.codePoints().toArray
-      def candidate(n: Int) = new String(points, 0, n) + Cut
-      def fits(n: Int)      = wrapped(candidate(n)) <= max
-      @scala.annotation.tailrec
-      def largest(lo: Int, hi: Int): Int =
-        if lo >= hi then lo
-        else
-          val mid = (lo + hi + 1) / 2
-          if fits(mid) then largest(mid, hi) else largest(lo, mid - 1)
-      val n = largest(0, points.length)
-      if fits(n) then candidate(n) else ""
+  /** `text`, cut on a code point and marked, so its stored error message is at most `max` bytes. */
+  private[delegation] def cut(text: String, max: Int): String = ToolErrors.bounded(text, max)
 
 /** The `task` tools' specs, shared by the middleware and by the parent's graph version, which covers them. */
 private[agent] object TaskTools:

@@ -458,6 +458,31 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     message should endWith("(truncated)\"}")
   }
 
+  it should "fit maxReportBytes when the loop refuses the call's arguments, and for every limit refusal" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(
+          calling(
+            call("c1", "task", ujson.Obj("subagent_type" -> ("x" * 5000), "description" -> "d")),
+            call("c2", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d")),
+            call("c3", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))
+          )
+        )
+      case Lead(messages)      => Right(CompletionFixture.simple(toolResults(messages).mkString("|")))
+      case Child("general", _) => Right(CompletionFixture.simple("r"))
+    }
+    val agent = lead(client)
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withMaxReportBytes(64).withMaxTasksPerTurn(2))
+      .build()
+      .value
+    val messages = agent.run(ThreadId("t1"), "go").value.answer.value.split('|').toVector
+    messages should have size 3
+    messages.foreach(_.getBytes(java.nio.charset.StandardCharsets.UTF_8).length should be <= 64)
+    messages.head should include("Invalid arguments")
+    messages(2) should include("(truncated)")
+  }
+
   it should "keep an oversized OutputInvalid's first errors and say how many it dropped" in {
     val errors  = (1 to 50).map(i => s"error number $i is wrong").toVector
     val message = DelegationMiddleware.within("subagent 'x' ", TaskRefusal.OutputInvalid(errors), 200)

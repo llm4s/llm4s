@@ -24,6 +24,7 @@ import org.llm4s.agent.graph.tool.{
   ToolArgumentValidator,
   ToolContent,
   ToolContext,
+  ToolErrors,
   ToolOutcome,
   ToolQuestion,
   ToolResource,
@@ -1736,12 +1737,14 @@ object ToolLoop:
       outcome: ToolExecutionOutcome,
       duration: FiniteDuration
     ): NodeResult =
-      announce(task.call, content, isError, context, outcome, duration)
+      // a tool that bounds its errors (the task tools, design 4.44) has every error recorded for it cut to fit
+      val stored = ToolErrors.recorded(tools.get(task.call.name), content, isError)
+      announce(task.call, stored, isError, context, outcome, duration)
       NodeResult.Continue(
         Command.empty
           .update(
             results,
-            ToolResult(task.assistantMessageId, task.call.id, Vector(ContentPart.Text(content)), isError)
+            ToolResult(task.assistantMessageId, task.call.id, Vector(ContentPart.Text(stored)), isError)
           )
       )
 
