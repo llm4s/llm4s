@@ -415,6 +415,40 @@ class NestedStreamSpec extends AnyFlatSpec with Matchers with EitherValues with 
     events.flatMap(SubagentEvents.TaskStarted.unapply) should have size 1
   }
 
+  "a nested subscription attached after the child settled, before the call commits" should "get TaskStarted, one gap, then TaskEnded (#2074)" in {
+    val settled = new CountDownLatch(1)
+    val release = new CountDownLatch(1)
+    // holds the call's task after the child ran to its end, before its result (and TaskEnded) commits
+    val holding = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("hold")
+      override def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome =
+        val outcome = next()
+        if request.call.name == "task" then
+          settled.countDown()
+          release.await(30, TimeUnit.SECONDS): Unit
+        outcome
+    }
+    val agent =
+      lead(delegatingClient("hello world")).withMiddleware(holding).withSubagents(general.withStreaming()).build().value
+    val run = agent.start(ThreadId("t1"), "go").value
+    settled.await(10, TimeUnit.SECONDS) shouldBe true
+    val seen = new CopyOnWriteArrayList[StreamEvent]()
+    run.subscribe(nested = true)(seen.add(_): Unit).value
+    release.countDown()
+    run.await().value
+    eventually(seen.asScala.exists(SubagentEvents.TaskEnded.unapply(_).isDefined))
+    val events = seen.asScala.toVector
+
+    val started = events.indexWhere(SubagentEvents.TaskStarted.unapply(_).isDefined)
+    val ended   = events.indexWhere(SubagentEvents.TaskEnded.unapply(_).isDefined)
+    started should be >= 0
+    val ref = SubagentEvents.TaskStarted.unapply(events(started)).value.child
+    events(started + 1) shouldBe StreamEvent.Nested(ref, StreamEvent.LiveGap(0))
+    started + 1 should be < ended
+    SubagentEvents.TaskEnded.unapply(events(ended)).value.child.threadId shouldBe ref.threadId
+    events.collect { case n: StreamEvent.Nested => n }.loneElement.event shouldBe StreamEvent.LiveGap(0)
+  }
+
   it should "get no gap when it attaches before the child starts" in {
     val agent = lead(delegatingClient("hello world")).withSubagents(general.withStreaming()).build().value
     val seen  = streamed(agent)

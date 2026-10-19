@@ -3591,7 +3591,6 @@ final class GraphRuntime(
           liveEvent(name, version, payload),
           () => !claimWasLost && !claimReleased.get
         )
-      override def childEnded(child: ThreadId): Unit = hub.childEnded(threadId, child, token)
       private def liveEvent(name: String, version: Int, payload: ujson.Value): StreamEvent.Live =
         StreamEvent.Live(
           threadId.value,

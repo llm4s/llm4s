@@ -338,13 +338,11 @@ final class RunContext private[graph] (
 
   /**
    * Sends `child`'s live `TaskStarted` (`name`, `version`, `payload`), as [[progress]] does, and remembers the child as
-   * running until [[childEnded]]: a nested subscriber attaching meanwhile gets it and a gap (design 4.47, #2074).
+   * running until its call's `TaskEnded` is handed over or the run releases the thread: a nested subscriber attaching
+   * meanwhile gets it and a gap (design 4.47, #2074).
    */
   private[agent] def childStarted(child: ChildRef, name: String, version: Int, payload: ujson.Value): Unit =
     sink.childStarted(child, name, version, payload)
-
-  /** The call that ran the child thread `child` has ended; see [[childStarted]]. */
-  private[agent] def childEnded(child: ThreadId): Unit = sink.childEnded(child)
 
   /** The task thread's interrupt flag, read without clearing it. */
   def isCancelled: Boolean = Thread.currentThread().isInterrupted
