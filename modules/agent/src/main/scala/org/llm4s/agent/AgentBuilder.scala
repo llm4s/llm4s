@@ -217,7 +217,8 @@ final class AgentBuilder private (
    * Compiles this agent and every agent reachable through handoffs into one graph. Refuses an
    * invalid id, a `maxSteps` below 1, a handoff whose id is invalid or differs from its target's,
    * an id-only handoff ([[Handoff.toId]]) to an id no builder of the family defines, one id
-   * defined by two builders with different settings - their handoff targets and subagents compared too - and whatever
+   * defined by two builders with different settings - their handoff targets and subagents compared too - a tool named
+   * like a task tool of any agent of the family (task calls are counted by name across handoffs), and whatever
    * [[org.llm4s.agent.graph.toolloop.ToolLoop.build]] refuses: tool name clashes, invalid tool
    * schemas, keys the loop owns, handoffs to self or twice to one target.
    */
@@ -228,6 +229,7 @@ final class AgentBuilder private (
       _      <- AgentBuilder.idTargetsDefined(family)
       // a handoff stays in the turn, so each agent counts the whole family's task calls in it (#2067)
       taskNames = family.flatMap(b => TaskTools.names(b.subagents)).toSet
+      _ <- AgentBuilder.taskNamesUnshared(family, taskNames)
       agents <- family.foldLeft[Result[Vector[LoopAgent]]](Right(Vector.empty)) { (acc, builder) =>
         // every member's subagents trace to the root's tracing, which traces the whole family's runs (design 4.47)
         acc.flatMap(done => builder.loopAgent(graphRuntime, tracing, taskNames).map(done :+ _))
@@ -456,6 +458,32 @@ object AgentBuilder:
     walk(Vector(root), Vector.empty, Vector.empty)
 
   /** Every id-only handoff names an agent some builder of the family defines. */
+  /**
+   * No agent of the family has an ordinary tool named like a task tool of any agent of it (#2067): the per-turn count
+   * counts the family's task calls by name across handoffs, so such a tool's calls would count as tasks.
+   */
+  private def taskNamesUnshared(family: Vector[AgentBuilder], taskNames: Set[String]): Result[Unit] =
+    family
+      .foldLeft[Result[Vector[(String, String)]]](Right(Vector.empty)) { (acc, b) =>
+        acc.flatMap(found =>
+          b.effective.map(e => found ++ e.tools.map(_.spec.name).filter(taskNames).distinct.map(b.id -> _))
+        )
+      }
+      .flatMap {
+        case clashes if clashes.isEmpty => Right(())
+        case clashes =>
+          Left(
+            ValidationError(
+              "tools",
+              clashes
+                .map((agent, name) =>
+                  s"agent '$agent' has a tool named '$name', the name of a task tool in its handoff family; rename it"
+                )
+                .toList
+            )
+          )
+      }
+
   private def idTargetsDefined(family: Vector[AgentBuilder]): Result[Unit] =
     val ids = family.map(_.id).toSet
     family.flatMap(b => b.handoffs.collect { case h if h.target.isEmpty && !ids(h.id) => b.id -> h.id }).toList match

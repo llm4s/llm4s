@@ -241,6 +241,22 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     agent.children(ThreadId("t1")).value.loneElement.origin.agent.value shouldBe "general"
   }
 
+  it should "refuse a family where an agent's ordinary tool is named like a family task tool (#2067)" in {
+    val client = RoutingClient { case _ => Right(CompletionFixture.simple("done")) }
+    val specialist = Agent
+      .builder("specialist", client)
+      .withSystemPrompt("SPECIALIST")
+      .withTools(ToolSet.of(echo("task_researcher")).value)
+    val refused = lead(client)
+      .withSubagents(researcher)
+      .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
+      .build()
+      .left
+      .value
+    refused shouldBe a[ValidationError]
+    refused.message should include("agent 'specialist' has a tool named 'task_researcher'")
+  }
+
   it should "not reset its count at a mixed batch the loop refused" in {
     val client = RoutingClient {
       case Lead(messages) if toolResults(messages).isEmpty =>
