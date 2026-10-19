@@ -376,6 +376,12 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
     its effective `RetentionPolicy.maxEvents` is `max(inherited, 1)` (`Some(0)` is accepted for top-level threads),
     so the previous attempt's terminal event survives until the next `recoverChild` folds it. Otherwise event
     retention applies to child threads unchanged.
+  - **The fold commits before anything is pruned.** `maxEvents >= 1` does not protect the terminal event from
+    `maxAge`, and a crash between an admission prune and the claim commit would lose a fold computed but not yet
+    stored. So on a child thread the admission's retention pass runs only **after** the claim checkpoint carrying
+    the folded `priorUsage` has committed; until then no limit, age included, removes a terminal event above
+    `foldedThrough`. Tested with a `maxAge` shorter than the gap between attempts, and with a crash between fold
+    and commit.
   - The roll-up is added once, by the attempt that commits the call's **terminal** result, and covers
   the child's whole life. A call that suspends because its child did (D3) adds nothing: the child's usage so far
   stays in the child thread until the resumed call settles. A failed attempt commits nothing, so a replay adds it
@@ -583,7 +589,9 @@ Tests:
     (K3 lets the model call that emitted the task overshoot), the call returns `TaskOutcome.NotStarted` with
     `TaskRefusal.StepLimitReached` or `TokenLimitReached`, which carries no `ChildRef`, creates no child thread, and never builds a
     non-positive `RunBudgets`. A replay decides the same from the same snapshot.
-  - **A child's grant is whole-life.** A recovered child's limits are its grant less what its earlier attempts
+  - **A child's grant is whole-life.** This applies to **every** continuation of a child, `recoverChild` and D3's
+    `resumeChild` alike: a child suspended past its deadline, or near its token or step grant, is resumed with the
+    same deductions, and settled the same way when nothing is left. A recovered or resumed child's limits are its grant less what its earlier attempts
     used: its `usage` key plus `priorUsage.total` (K2) for tokens, its committed model steps for steps, and for
     time a deadline of `RunOrigin.startedAt + granted timeout` (capped by the parent's), never a fresh timeout, so
     repeated recoveries never exceed the grant or the parent's remainder. `recoverChild` passes these to the child
@@ -686,6 +694,11 @@ Tests:
   - **Nor a child already settled.** A call that reattaches to a `Completed` or `Failed` child (a replay after a
     crash) starts no child run, so its live events are gone: the parent subscription gets `TaskStarted`, one
     `LiveGap` for the child, then `TaskEnded`.
+  - **Nor a child an earlier attempt ran.** A call that reattaches to a pre-existing `Running` (or `Suspended`)
+    child checkpoint, even one whose claim this runtime then takes at once (both parent and child crashed and
+    their claims lapsed), cannot replay that earlier attempt's live events: the parent subscription gets one
+    `LiveGap` for the child before the events of the run it now drives. Only a child this call admits fresh is
+    gap-free.
 - **Tracing.**
   - A child's `AgentTracing` is the parent's `Tracing` (rule 16).
   - Core's **`TraceEvent.AgentRunEnded`** gains `parentThreadId: Option[String] = None` and
