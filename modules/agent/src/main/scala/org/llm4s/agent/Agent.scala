@@ -57,11 +57,9 @@ final class Agent private[agent] (
       // a harness's retention, applied as each turn is admitted (design 4.37), unless the run sets its own;
       // keepAll removes nothing, so it is not applied at all
       .withRetention(config.retention.orElse(retention).filter(_ != RetentionPolicy.keepAll))
-      // a delegating agent's DelegationConfig.childRetention, unless the run sets another (design 4.44)
+      // a delegating agent's DelegationConfig.childRetention and the run's own: both bound it, the tighter wins (4.44)
       .withChildRetention(
-        childRetention
-          .filter(_ => config.childRetention == RunConfig.DefaultChildRetention)
-          .getOrElse(config.childRetention)
+        childRetention.fold(config.childRetention)(math.min(_, config.childRetention))
       )
 
   /**

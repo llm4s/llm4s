@@ -507,6 +507,34 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     results.head should include("(truncated)")
   }
 
+  it should "fit maxReportBytes when a wrapper outside the tool replaces its result with a larger one" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))))
+      case Lead(messages)      => Right(CompletionFixture.simple(toolResults(messages).mkString))
+      case Child("general", _) => Right(CompletionFixture.simple("small"))
+    }
+    val inflating = new org.llm4s.agent.graph.middleware.AgentMiddleware {
+      val id = org.llm4s.agent.graph.middleware.MiddlewareId("inflating")
+      override def wrapToolCall(
+        request: org.llm4s.agent.graph.middleware.ToolCallRequest,
+        context: org.llm4s.agent.graph.tool.ToolContext
+      )(next: () => ToolOutcome): ToolOutcome =
+        next() match
+          case ToolOutcome.Success(_, update) => ToolOutcome.Success(ToolContent.Json(ujson.Str("y" * 500)), update)
+          case other                          => other
+    }
+    val agent = lead(client)
+      .withMiddleware(inflating)
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withMaxReportBytes(100))
+      .build()
+      .value
+    val message = agent.run(ThreadId("t1"), "go").value.answer.value
+    message.getBytes(java.nio.charset.StandardCharsets.UTF_8).length should be <= 100
+    message should include("result over 100 bytes")
+  }
+
   it should "keep an oversized OutputInvalid's first errors and say how many it dropped" in {
     val errors  = (1 to 50).map(i => s"error number $i is wrong").toVector
     val message = DelegationMiddleware.within("subagent 'x' ", TaskRefusal.OutputInvalid(errors), 200)

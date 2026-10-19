@@ -3,9 +3,10 @@ package org.llm4s.agent.graph.tool
 import java.nio.charset.StandardCharsets
 
 /**
- * A tool whose error results the loop bounds: every error the loop records for one of its calls - its own, a wrapper's,
- * an admission refusal (invalid arguments, a lock change), a reviewer's rejection - is cut so that the stored tool
- * message, `{"error": ...}`, is at most `maxErrorBytes` in UTF-8. The `task` tools are (design 4.44): rule 12 bounds
+ * A tool whose messages the loop bounds: every error the loop records for one of its calls - its own, a wrapper's, an
+ * admission refusal (invalid arguments, a lock change), a reviewer's rejection - is cut so that the stored tool message,
+ * `{"error": ...}`, is at most `maxErrorBytes` in UTF-8, and a successful result a wrapper left larger than that is
+ * recorded as an error instead. The `task` tools are (design 4.44): rule 12 bounds
  * what a call puts in the parent's checkpoint without relying on the model's arguments.
  */
 private[agent] trait BoundedErrors:
@@ -36,6 +37,13 @@ private[agent] object ToolErrors:
           if fits(mid) then largest(mid, hi) else largest(lo, mid - 1)
       val n = largest(0, points.length)
       if fits(n) then candidate(n) else ""
+
+  /** Why `tool`'s successful result `text` is not stored: a [[BoundedErrors]] tool's result over its bound. */
+  def overBound(tool: AgentTool[?], text: String): Option[String] =
+    tool match
+      case b: BoundedErrors if utf8(text) > b.maxErrorBytes =>
+        Some(s"Tool '${tool.spec.name}' result over ${b.maxErrorBytes} bytes (${utf8(text)})")
+      case _ => None
 
   /** `content` as the loop records it for a call of `tool`: an error of a [[BoundedErrors]] tool cut to its bound. */
   def recorded(tool: Option[AgentTool[?]], content: String, isError: Boolean): String =

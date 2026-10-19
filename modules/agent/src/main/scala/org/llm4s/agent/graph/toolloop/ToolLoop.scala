@@ -2199,7 +2199,11 @@ object ToolLoop:
           val undeclared =
             update.operations.map(_.key.id).filterNot(k => allowed.exists(_.id == k)).map(_.value).distinct
           if undeclared.isEmpty then
-            resultParts(name, content) match
+            // a tool that bounds its messages (the task tools, design 4.44) has its final result checked too: a wrapper
+            // outside it may have replaced the result it checked
+            resultParts(name, content).flatMap(parts =>
+              ToolErrors.overBound(tool, ContentPart.text(parts)).toLeft(parts)
+            ) match
               case Left(problem) => record(task, problem, isError = true, context, ToolExecutionOutcome.Errored, took)
               case Right(parts)  =>
                 // live only, and the text view only: media is not put on the event bus

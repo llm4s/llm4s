@@ -16,8 +16,8 @@ import org.llm4s.types.Result
  *  - `maxReportBytes`: the most any `task` tool message may be, in UTF-8: a child's report, as the JSON the parent
  *    model reads (a larger one is a tool error), and every tool error, its reason cut to fit, so the parent's
  *    checkpoint never holds more. At least [[DelegationConfig.MinReportBytes]], so a cut error still fits.
- *  - `childRetention`: settled child threads each parent thread keeps (`RunConfig.withChildRetention`), applied to
- *    every run of the agent whose config leaves it at `RunConfig.DefaultChildRetention`.
+ *  - `childRetention`: settled child threads each parent thread keeps. A run's `RunConfig.childRetention` bounds it too:
+ *    the smaller of the two applies.
  *
  * Every bound must be positive, and `maxReportBytes` at least `MinReportBytes`: `AgentBuilder.build()` refuses one
  * that is not.
